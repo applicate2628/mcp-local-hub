@@ -296,3 +296,93 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     expect(screen.queryByTestId("init-client-claude-code")).toBeNull();
   });
 });
+
+// 2026-05-19 message-accuracy fix
+// (work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md):
+// a symlinked client config reports "error-symlink" in default/strict
+// mode. The matrix cell must render a symlink-specific tooltip instead
+// of the misleading generic "stat error — check permissions and disk
+// health" message, and the cell stays disabled.
+// 2026-06-02 opt-in-accuracy fix: the tooltip leads with the supported
+// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in (under which scan would
+// instead report "ok") rather than claiming an unconditional refusal.
+describe("ServersScreen — symlinked-config tooltip (2026-05-19)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders the symlink-specific tooltip and disables the cell for error-symlink presence", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(200, scanWith({ "codex-cli": "error-symlink" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+
+    // The codex-cli cell carries the symlink tooltip; find it by its
+    // load-bearing phrasing rather than column index.
+    const cell = await screen.findByTitle(/config file is a symlink/);
+    expect(cell).toBeTruthy();
+    expect(cell.getAttribute("title")).toContain("confused-deputy");
+    expect(cell.getAttribute("title")).toContain("PR #209");
+    // The tooltip must surface the supported opt-in so dotfile-symlink
+    // operators are pointed at the remediation, not away from it.
+    expect(cell.getAttribute("title")).toContain(
+      "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK",
+    );
+    // 2026-06-03 opt-in-qualification fix (Codex PR #258 P3): the opt-in
+    // flips a symlink to "ok" ONLY when its target is a regular file
+    // (probeClientConfigPresence rst.Mode().IsRegular()). A dangling /
+    // directory-target symlink stays error-symlink even with the env var
+    // set, so the tooltip must qualify the opt-in on a regular-file
+    // target rather than presenting it as an unconditional remedy.
+    expect(cell.getAttribute("title")).toContain(
+      "if the symlink points at a regular file",
+    );
+    // 2026-06-03 opt-in-restart fix (Codex PR #258 P3):
+    // OperatorAllowsClientConfigSymlink() reads os.Getenv per-process at
+    // runtime, so a running mcphub never observes an env var exported
+    // after startup — a browser refresh keeps returning error-symlink.
+    // The remediation must say to RESTART mcphub, not merely refresh.
+    expect(cell.getAttribute("title")).toContain("restart mcphub");
+    expect(cell.getAttribute("title")).not.toContain(
+      "and refresh",
+    );
+    // Disabled because in default/strict mode the symlinked config
+    // can't be written through.
+    expect((cell as HTMLInputElement).disabled).toBe(true);
+    // The misleading generic stat-error wording must NOT be used here.
+    expect(cell.getAttribute("title")).not.toContain("stat error");
+  });
+
+  it("keeps the generic stat-error tooltip for plain 'error' presence", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(200, scanWith({ "codex-cli": "error" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+
+    const cell = await screen.findByTitle(/stat error/);
+    expect(cell).toBeTruthy();
+    // The generic error must NOT borrow the symlink wording.
+    expect(cell.getAttribute("title")).not.toContain("symlink");
+    expect((cell as HTMLInputElement).disabled).toBe(true);
+  });
+});

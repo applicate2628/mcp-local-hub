@@ -790,7 +790,8 @@ function CellView(props: {
     applying ||
     routing === "unsupported" ||
     routing === "not-installed" ||
-    routing === "config-error";
+    routing === "config-error" ||
+    routing === "config-error-symlink";
   let title: string | undefined;
   if (routing === "via-hub") {
     title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
@@ -809,6 +810,35 @@ function CellView(props: {
     // tooltip. Typical causes: parent-directory permissions blocked,
     // antivirus quarantine, or I/O fault on the underlying volume.
     title = `${client}'s MCP config file could not be read (stat error). Check file permissions and disk health, then refresh.`;
+  } else if (routing === "config-error-symlink") {
+    // 2026-05-19 message-accuracy fix: the config path is a symlink.
+    // The prior generic "stat error" tooltip sent operators to inspect
+    // disk/permissions instead of their dotfile-symlink setup.
+    // 2026-06-02 opt-in-accuracy fix: this status fires ONLY in default
+    // mode (env unset) or strict mode. With the
+    // MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in set on a non-strict
+    // host, scan reports "ok" and writes resolve the symlink, so the
+    // tooltip leads with that supported remediation rather than
+    // claiming an unconditional refusal. Strict mode
+    // (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides the opt-in and still
+    // refuses — the "single-user host" phrasing covers that.
+    // 2026-06-03 opt-in-qualification fix: the opt-in flips a symlink to
+    // "ok" in probeClientConfigPresence ONLY when os.Stat resolves to a
+    // REGULAR file (scan.go ~L154: rst.Mode().IsRegular()). A DANGLING
+    // symlink, or one pointing at a directory / special file, stays
+    // "error-symlink" even with the env var set, so the opt-in clause is
+    // qualified "if the symlink points at a regular file"; the
+    // replace/edit fallbacks remain the path for dangling/non-regular
+    // targets.
+    // 2026-06-03 opt-in-restart fix (Codex PR #258 P3): the opt-in is read
+    // per-process at runtime — OperatorAllowsClientConfigSymlink()
+    // (client_write_init.go ~L419) calls os.Getenv on every check. A
+    // running GUI/server process does NOT observe an env var the operator
+    // exports into their shell AFTER startup, so a browser refresh keeps
+    // returning error-symlink. The remediation therefore says to RESTART
+    // mcphub with the env var set, not merely refresh.
+    // work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md.
+    title = `${client}'s MCP config file is a symlink. By default mcphub refuses symlinked client configs (confused-deputy protection, PR #209). On a single-user host, if the symlink points at a regular file, you can opt in: set MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 and restart mcphub (a running process won't pick up a newly-set env var). Otherwise (e.g. a dangling symlink or one pointing at a directory) replace the symlink with a real file, or edit the symlink target's config directly.`;
   }
   // PR #22 retry-queue fix: cell with a retained failure from the
   // last applyChanges renders a red outline so the user sees the

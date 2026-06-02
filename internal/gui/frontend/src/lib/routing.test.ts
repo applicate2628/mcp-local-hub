@@ -133,6 +133,16 @@ describe("perClientRouting with client_config_presence", () => {
     expect(r["claude-code"]).toBe("config-error");
   });
 
+  it("tags missing-from-presence + config 'error-symlink' as config-error-symlink (2026-05-19 message-accuracy fix)", () => {
+    // A symlinked client config is refused by the secure-write pipeline
+    // in all modes (PR #209). It must map to its OWN routing tag so the
+    // matrix renders the symlink-specific tooltip, NOT the generic
+    // stat-error one.
+    const r = perClientRouting({}, { "codex-cli": "error-symlink" });
+    expect(r["codex-cli"]).toBe("config-error-symlink");
+    expect(r["codex-cli"]).not.toBe("config-error");
+  });
+
   it("does NOT override an existing per-entry signal with config presence", () => {
     const r = perClientRouting(
       { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" } },

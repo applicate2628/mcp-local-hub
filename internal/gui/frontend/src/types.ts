@@ -68,7 +68,15 @@ export type ClientConfigState =
   | "missing-init-possible"
   | "missing-init-blocked-symlink"
   | "missing"
-  | "error";
+  | "error"
+  // 2026-05-19 message-accuracy fix: the config path is a symlink
+  // (resolvable or dangling) that the secure-write pipeline refuses in
+  // all modes (post-PR #209 confused-deputy closure). Split from
+  // "error" (generic stat / wrong-shape failure) so the Servers matrix
+  // renders a symlink-specific diagnostic instead of the misleading
+  // "stat error — check permissions and disk health" tooltip.
+  // work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md.
+  | "error-symlink";
 
 export interface ScanEntry {
   name: string;
@@ -120,17 +128,29 @@ export type ClientEntry = ClientPresence;
 //   "unsupported"   — client cannot route this server via the hub.
 //   "config-error"  — `os.Stat` on the client config returned an error
 //                     OTHER than IsNotExist (typically a permissions /
-//                     ACL / I/O anomaly). Distinct from "not-installed"
-//                     so the matrix can render an actionable diagnostic
-//                     instead of silently dropping the cell. Surfaced
-//                     by the v0.4.5 PR #208 deep-sec Lane B follow-up.
+//                     ACL / I/O anomaly), OR the path is a non-regular
+//                     non-symlink shape (directory, pipe, device).
+//                     Distinct from "not-installed" so the matrix can
+//                     render an actionable diagnostic instead of
+//                     silently dropping the cell. Surfaced by the
+//                     v0.4.5 PR #208 deep-sec Lane B follow-up.
+//   "config-error-symlink" — the client config path is a symlink that
+//                     the secure-write pipeline refuses in all modes
+//                     (post-PR #209 confused-deputy closure). Split
+//                     from "config-error" so the matrix tells the
+//                     operator their dotfile-symlink setup is refused
+//                     by design (replace the symlink / edit the target)
+//                     instead of the misleading generic stat-error
+//                     tooltip. Maps from client_config_presence
+//                     value "error-symlink". 2026-05-19 fix.
 export type Routing =
   | "via-hub"
   | "direct"
   | "available"
   | "not-installed"
   | "unsupported"
-  | "config-error";
+  | "config-error"
+  | "config-error-symlink";
 
 export interface ServerRow {
   name: string;
