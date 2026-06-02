@@ -830,8 +830,15 @@ function CellView(props: {
     // qualified "if the symlink points at a regular file"; the
     // replace/edit fallbacks remain the path for dangling/non-regular
     // targets.
+    // 2026-06-03 opt-in-restart fix (Codex PR #258 P3): the opt-in is read
+    // per-process at runtime — OperatorAllowsClientConfigSymlink()
+    // (client_write_init.go ~L419) calls os.Getenv on every check. A
+    // running GUI/server process does NOT observe an env var the operator
+    // exports into their shell AFTER startup, so a browser refresh keeps
+    // returning error-symlink. The remediation therefore says to RESTART
+    // mcphub with the env var set, not merely refresh.
     // work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md.
-    title = `${client}'s MCP config file is a symlink. By default mcphub refuses symlinked client configs (confused-deputy protection, PR #209). On a single-user host, if the symlink points at a regular file, you can opt in: set MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 and refresh. Otherwise (e.g. a dangling symlink or one pointing at a directory) replace the symlink with a real file, or edit the symlink target's config directly.`;
+    title = `${client}'s MCP config file is a symlink. By default mcphub refuses symlinked client configs (confused-deputy protection, PR #209). On a single-user host, if the symlink points at a regular file, you can opt in: set MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 and restart mcphub (a running process won't pick up a newly-set env var). Otherwise (e.g. a dangling symlink or one pointing at a directory) replace the symlink with a real file, or edit the symlink target's config directly.`;
   }
   // PR #22 retry-queue fix: cell with a retained failure from the
   // last applyChanges renders a red outline so the user sees the

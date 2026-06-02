@@ -349,6 +349,15 @@ describe("ServersScreen — symlinked-config tooltip (2026-05-19)", () => {
     expect(cell.getAttribute("title")).toContain(
       "if the symlink points at a regular file",
     );
+    // 2026-06-03 opt-in-restart fix (Codex PR #258 P3):
+    // OperatorAllowsClientConfigSymlink() reads os.Getenv per-process at
+    // runtime, so a running mcphub never observes an env var exported
+    // after startup — a browser refresh keeps returning error-symlink.
+    // The remediation must say to RESTART mcphub, not merely refresh.
+    expect(cell.getAttribute("title")).toContain("restart mcphub");
+    expect(cell.getAttribute("title")).not.toContain(
+      "and refresh",
+    );
     // Disabled because in default/strict mode the symlinked config
     // can't be written through.
     expect((cell as HTMLInputElement).disabled).toBe(true);
