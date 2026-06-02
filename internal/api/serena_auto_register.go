@@ -161,6 +161,16 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return &e, nil
 	}
 
+	// 5b. Abort BEFORE any registration mutation if the auto-register context is
+	//     already done (bot PR #253 P2). The router runs auto-register on a
+	//     detached, up-to-45s context and CANCELS it when the client session is
+	//     terminated (DELETE / idle-sweep) during the window; a terminated session
+	//     must not allocate a pool port or write a registry row. ctx.Err() also
+	//     covers the deadline. Nothing is saved yet, so this is a clean return.
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, fmt.Errorf("serena auto-register: aborted before registering %s: %w (the client session was terminated or the deadline expired)", root, cerr)
+	}
+
 	catalog, err := loadSerenaCatalogManifest()
 	if err != nil {
 		return nil, fmt.Errorf("serena auto-register: load serena catalog manifest: %w", err)
@@ -198,37 +208,42 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		// registry intact, so there is nothing to roll back.
 		return nil, fmt.Errorf("serena auto-register: save registry: %w", err)
 	}
-	releaseReg()
+	// NOTE (bot PR #253 P2): the flock is intentionally NOT released here. It is
+	// held continuously through the install commit (or rollback) below so the
+	// not-yet-committed registry row is invisible to OTHER mcphub processes — a
+	// concurrent migrate/install must not read this uncommitted row, commit a
+	// supervisor intent for it, and then be left with a daemon whose registry row
+	// our pre-commit rollback removed (split-state). The deferred releaseReg frees
+	// the flock on any error path; the commit path frees it explicitly below.
 
-	// The row is committed on disk + visible. From here every PRE-COMMIT error
-	// path must remove it. rollback() runs SYNCHRONOUSLY while the install mutex is
-	// still held (called inline, not deferred) so no concurrent root ever observes
-	// the row in the intent after we have decided to drop it. It re-acquires the
-	// registry flock itself (removeSerenaRowRelocking) and is idempotent via rowSaved.
+	// The row is on disk under our held flock. Every PRE-COMMIT error path must
+	// remove it. rollback() runs while the flock is STILL HELD (so no other process
+	// ever observes the row we are about to drop) and operates on the held reg
+	// directly — no re-lock. Idempotent via rowSaved.
 	rowSaved := true
 	rollback := func(cause error) (*WorkspaceEntry, error) {
 		if rowSaved {
 			rowSaved = false
-			if rbErr := removeSerenaRowRelocking(regPath, key); rbErr != nil {
+			reg.RemoveSerena(key)
+			if rbErr := reg.Save(); rbErr != nil {
 				return nil, fmt.Errorf("%w; AND the registry rollback also failed: %v", cause, rbErr)
 			}
 		}
 		return nil, cause
 	}
 
-	// 6. Build the in-memory dynamic-pool manifest + take the FRESH install
-	//    snapshot. reReadSerenaEntriesForInstall reloads the registry under a
-	//    re-acquired flock so the install fans out from the current on-disk set —
-	//    capturing any row a concurrent external `mcphub workspace register`
-	//    committed after our Load (other auto-registers are blocked on the install
-	//    mutex, so only an external writer can have raced).
+	// 6. Build the in-memory dynamic-pool manifest + take the install snapshot.
+	//    Because we hold the registry flock CONTINUOUSLY through the install (bot
+	//    PR #253 P2), reg.SerenaEntries() is the authoritative current on-disk set —
+	//    no concurrent in-process OR cross-process writer can have raced since our
+	//    Load, so no separate re-read under a fresh lock is needed.
 	dyn, bErr := BuildInMemorySerenaDynamicPoolManifest(catalog)
 	if bErr != nil {
 		return rollback(fmt.Errorf("serena auto-register: build dynamic-pool manifest: %w", bErr))
 	}
-	installWorkspaces, rrErr := reReadSerenaEntriesForInstall(regPath)
-	if rrErr != nil {
-		return rollback(fmt.Errorf("serena auto-register: re-read registry before install: %w", rrErr))
+	installWorkspaces := reg.SerenaEntries()
+	if installWorkspaces == nil {
+		installWorkspaces = []WorkspaceEntry{}
 	}
 
 	// 7. Cutover decision — INSIDE the install mutex so a concurrent first-call for
@@ -242,7 +257,15 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		supRunning = running
 	}
 	needReap := !priorHasSpec && supRunning
-	needStart := !priorHasSpec
+	// needStart fires whenever the daemon must be brought live by a supervisor
+	// start: either we are INTRODUCING runtime_spec (!priorHasSpec), OR the prior
+	// intent already has runtime_spec but NO supervisor is currently running
+	// (bot PR #253 P2 — e.g. the supervisor crashed after migration while the GUI
+	// stayed up). In the latter live-add-to-a-stopped-pool case a best-effort IPC
+	// reconcile would hit nothing, so readiness would time out and leave a
+	// registered-but-never-spawned workspace; START (without a reap — the prior
+	// intent is already this binary's shape) brings it live.
+	needStart := !priorHasSpec || !supRunning
 	// PRE-COMMIT cutover-support gate (bot PR #253 P2). The CLI wires NON-nil
 	// reap/start functions on EVERY platform, but off-Windows they are unsupported
 	// stubs (defaultMigrateSerenaStart returns errSupervisorRestartUnsupported). A
@@ -260,6 +283,30 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		}
 	}
 
+	// failPreCommit rolls back the registry row and — if we reaped a supervisor —
+	// restarts it so the prior (still-on-disk) intent is reconciled (never leave
+	// no-supervisor-running). Shared by the reap-fail, install-fail, and
+	// fan-out-verify-fail paths AFTER a reap may have run. (The session-abort gate
+	// 7c below uses plain rollback() because it runs BEFORE the reap, so the old
+	// supervisor is still up and must NOT be restarted.)
+	failPreCommit := func(cause error) (*WorkspaceEntry, error) {
+		if needReap {
+			if startErr := autoRegisterStartFn(ctx); startErr != nil {
+				cause = fmt.Errorf("%w; AND the recovery supervisor restart after the reap also failed: %v — NO supervisor is running, run `mcphub supervise`", cause, startErr)
+			}
+		}
+		return rollback(cause)
+	}
+
+	// 7c. Last session-liveness gate BEFORE the irreversible install commit (bot
+	//     PR #253 P2). A session DELETE/sweep during the registry/cutover phase
+	//     cancels ctx; abort here — before any reap or intent write — so a
+	//     terminated session never lands a supervisor-intent daemon. No reap has
+	//     run yet (the old supervisor is still up), so plain rollback() suffices.
+	if cerr := ctx.Err(); cerr != nil {
+		return rollback(fmt.Errorf("serena auto-register: the client session was terminated before %s reached the supervisor-intent commit: %w", root, cerr))
+	}
+
 	// 8. REAP first (introduce-while-running only) so the spec-bearing write hits
 	//    the §7.1 gate with no supervisor running. A reap failure lands BEFORE the
 	//    install commit → fail loud; nothing was killed (the reap failed) so the
@@ -273,24 +320,37 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	// 9. Install (live-add OR post-reap introduce). The §7.1 gate passes: either
 	//    the prior intent already has runtime_spec (live-add), or we just reaped so
 	//    no supervisor is running (introduce).
-	if _, iErr := autoRegisterInstallParsedManifestFn(ctx, a, dyn, InstallParsedManifestOpts{
+	intentPath, iErr := autoRegisterInstallParsedManifestFn(ctx, a, dyn, InstallParsedManifestOpts{
 		Writer:     io.Discard,
 		Workspaces: installWorkspaces,
-	}); iErr != nil {
-		cause := fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, iErr)
-		// If we reaped, restart the supervisor so it restores the prior (still-on-
-		// disk) intent — never leave no-supervisor-running. Then rollback our row.
-		if needReap {
-			if startErr := autoRegisterStartFn(ctx); startErr != nil {
-				cause = fmt.Errorf("%w; AND the recovery supervisor restart after the reap also failed: %v — NO supervisor is running, run `mcphub supervise`", cause, startErr)
-			}
-		}
-		return rollback(cause)
+	})
+	if iErr != nil {
+		return failPreCommit(fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, iErr))
 	}
 
-	// 10. COMMIT POINT (mirror migrate step 9). Disarm the rollback — the intent
-	//     now owns the row; rolling the registry back here would split-state.
+	// 9b. Verify the new workspace's daemon actually landed in the COMMITTED intent
+	//     (bot PR #253 P2). If the project directory was removed/unmounted between
+	//     the registry Save and the fan-out, InstallParsedManifest's stale-row
+	//     filter (filterExistingWorkspaceRows) silently drops it and returns success
+	//     with an intent that MISSES our daemon — leaving an auto-detect registry row
+	//     no supervisor intent owns (subsequent calls resolve it but nothing spawns).
+	//     Treat a stale skip as a PRE-COMMIT failure: rollback our row (the install
+	//     committed only the OTHER workspaces, which the recovery/running supervisor
+	//     reconciles correctly without ours).
+	present, vErr := autoRegisterVerifyFanOutFn(intentPath, key)
+	if vErr != nil {
+		return failPreCommit(fmt.Errorf("serena auto-register: verify %s landed in the committed intent: %w", root, vErr))
+	}
+	if !present {
+		return failPreCommit(fmt.Errorf("serena auto-register: workspace %s was not included in the committed supervisor intent (its directory may have been removed mid-install) — not registering", root))
+	}
+
+	// 10. COMMIT POINT (mirror migrate step 9). Disarm the rollback + release the
+	//     flock — the intent now owns the row AND our daemon is in it; rolling the
+	//     registry back here would split-state. Releasing the flock publishes the
+	//     committed row to other processes.
 	rowSaved = false
+	releaseReg()
 
 	// 11. Bring the new daemon live. INTRODUCE → START the supervisor (it cold-
 	//     reconciles the committed intent and spawns). LIVE-ADD → the supervisor is
@@ -437,53 +497,6 @@ func readSerenaProjectYMLLanguages(root string) ([]string, error) {
 	return cleaned, nil
 }
 
-// reReadSerenaEntriesForInstall reloads the registry under a freshly-acquired
-// flock and returns the current serena rows — the authoritative snapshot the
-// install fans out from (bot PR #253 finding 2). Always returns a NON-nil slice
-// (a nil Workspaces would make InstallParsedManifest silently drop the server's
-// existing daemon rows). The lock is always released before returning.
-func reReadSerenaEntriesForInstall(regPath string) ([]WorkspaceEntry, error) {
-	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
-	if err != nil {
-		return nil, fmt.Errorf("re-acquire registry lock: %w", err)
-	}
-	defer unlock()
-	if err := reg.Load(); err != nil {
-		return nil, fmt.Errorf("reload registry: %w", err)
-	}
-	entries := reg.SerenaEntries()
-	if entries == nil {
-		entries = []WorkspaceEntry{}
-	}
-	return entries, nil
-}
-
-// removeSerenaRowRelocking is the PRE-COMMIT registry rollback compensator. The
-// flock was released after the auto-register Save (so the multi-second install
-// did not hold it), so this re-acquires the flock itself, reloads the current
-// on-disk registry, drops the serena row for key, and saves. It is SURGICAL: it
-// removes ONLY the one workspace key we added (RemoveSerena is a no-op if a
-// concurrent unregister already dropped it), leaving every other row — including
-// any concurrent serena registration for a different key — untouched. The lock
-// is always released before returning (no leaked lock).
-func removeSerenaRowRelocking(regPath, key string) error {
-	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
-	if err != nil {
-		return fmt.Errorf("auto-register rollback: re-acquire registry lock: %w", err)
-	}
-	defer unlock()
-	if err := reg.Load(); err != nil {
-		return fmt.Errorf("auto-register rollback: reload registry: %w", err)
-	}
-	reg.RemoveSerena(key)
-	if err := reg.Save(); err != nil {
-		return fmt.Errorf("auto-register rollback: save registry: %w", err)
-	}
-	return nil
-}
-
 // emitWorkspaceAutoRegisteredEvent writes a best-effort `workspace-auto-registered`
 // audit event to supervisor-events.log. Mirrors the api-package emit idiom used
 // by emitStaleWorkspaceSkippedEvent / emitSpecBearingInstallRefusedEvent
@@ -564,6 +577,41 @@ var autoRegisterReconcileFn = func(ctx context.Context, apply bool) (ReconcileRe
 // (post-commit timeout, which must NOT roll back).
 var autoRegisterReadinessFn = func(port int, timeout time.Duration) error {
 	return verifyProxyReady(port, timeout)
+}
+
+// autoRegisterVerifyFanOutFn is the seam over the post-install fan-out check
+// (bot PR #253 P2): does the just-committed supervisor intent at intentPath
+// actually carry a serena daemon for the workspace key we registered? Default:
+// intentHasSerenaDaemonForKey. Tests override it because the install seam returns
+// a non-existent temp intent path (so the real reader would always say absent).
+var autoRegisterVerifyFanOutFn = intentHasSerenaDaemonForKey
+
+// intentHasSerenaDaemonForKey reads the committed supervisor intent and reports
+// whether it carries a serena daemon for key (the WorkspaceKey we registered).
+// InstallParsedManifest's stale-row filter can drop a workspace whose directory
+// vanished between Save and fan-out and still return success, so the caller uses
+// this to detect a stale skip and roll back. A missing intent file or an absent
+// key → (false, nil); a real read/parse error propagates. The intent's daemon
+// task names are the canonical leading-backslash form, so the leading `\` is
+// trimmed before comparing to the bare "mcp-local-hub-serena-<key>" we write.
+func intentHasSerenaDaemonForKey(intentPath, key string) (bool, error) {
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if intent == nil {
+		return false, nil
+	}
+	want := "mcp-local-hub-serena-" + key
+	for i := range intent.Daemons {
+		if strings.TrimPrefix(intent.Daemons[i].TaskName, `\`) == want {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // autoRegisterPriorIntentHasSpecFn reports whether the on-disk supervisor intent

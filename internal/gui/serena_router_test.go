@@ -1514,6 +1514,27 @@ func TestSerenaRouter_AutoRegister_ResolvedNilForwards(t *testing.T) {
 	}
 }
 
+// TestSerenaRouter_CancelAutoRegisterOnSessionDeath_CancelsWhenNotLive: bot PR
+// #253 r4 P2 — the watcher cancels the detached auto-register context as soon as
+// the router session is no longer live (a DELETE makes it absent, the idle-sweep
+// makes it expired), so a terminated session cannot finish a registration. Driven
+// here with a never-minted (absent) id so peekVersionState is deterministically
+// non-live on the first tick.
+func TestSerenaRouter_CancelAutoRegisterOnSessionDeath_CancelsWhenNotLive(t *testing.T) {
+	s := newSerenaTestServer(t, &serenaRouterDeps{Resolver: &stubResolver{entries: nil}, Sessions: NewInMemorySessionRouter()})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := make(chan struct{})
+	defer close(stop)
+	go s.cancelAutoRegisterOnSessionDeath(ctx, cancel, stop, "never-minted-session")
+	select {
+	case <-ctx.Done():
+		// good — the watcher cancelled because the session is not live
+	case <-time.After(3 * time.Second):
+		t.Fatal("watcher did not cancel the register context for a non-live session")
+	}
+}
+
 // TestSerenaRouter_AutoRegister_InvalidSession_RejectsBeforeRegister: bot PR #253
 // P2 — a path-bearing first call carrying a router session whose negotiated
 // version conflicts with the request header must be rejected BEFORE auto-register

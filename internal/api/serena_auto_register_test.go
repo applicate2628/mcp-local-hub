@@ -90,6 +90,13 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	autoRegisterStartSupportedFn = func() bool { return true } // platform supports the cutover by default
 	t.Cleanup(func() { autoRegisterStartSupportedFn = prevStartSupported })
 
+	// Default: the install fan-out includes our daemon (the install seam returns a
+	// non-existent temp intent path, so the real reader would always say absent).
+	// The stale-skip test overrides this to return (false, nil).
+	prevVerifyFanOut := autoRegisterVerifyFanOutFn
+	autoRegisterVerifyFanOutFn = func(string, string) (bool, error) { return true, nil }
+	t.Cleanup(func() { autoRegisterVerifyFanOutFn = prevVerifyFanOut })
+
 	// Reset the per-key concurrency guard so a key registered in a prior test
 	// (package-level map persists across tests) cannot leak a held/known lock.
 	serenaAutoRegisterKeyMu.Lock()
@@ -969,6 +976,121 @@ func TestAutoRegisterSerena_ReadinessHonorsContextDeadline(t *testing.T) {
 	}
 	if gotTimeout <= 0 || gotTimeout > 2*time.Second {
 		t.Errorf("readiness timeout = %v, want bounded by the ~2s ctx deadline (NOT the %v default)", gotTimeout, serenaAutoRegisterReadinessTimeout)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 19. Live-add to a STOPPED pool (bot PR #253 r4 P2) — prior intent has
+//     runtime_spec but no supervisor runs → START (no reap), not a bare reconcile.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_LiveAddToStoppedPool_StartsWithoutReap(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return true, nil })  // prior HAS runtime_spec
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })  // but supervisor is DOWN
+
+	var startCalled int32
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not run for a live-add (prior has runtime_spec)"); return nil },
+		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
+	)
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatalf("a bare IPC reconcile must NOT be used when the supervisor is down — START must bring it live")
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if startCalled != 1 {
+		t.Errorf("start called %d times, want 1 (a live-add to a STOPPED pool must START the supervisor)", startCalled)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d rows, want 1", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 20. Stale-skip fan-out (bot PR #253 r4 P2) — the install succeeds but the
+//     committed intent does NOT carry our daemon (dir vanished mid-install) →
+//     PRE-COMMIT rollback, no readiness, registry row removed.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_StaleSkip_NotInIntent_RollsBack(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil // install "succeeds"
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error {
+		t.Fatalf("readiness must not run when the fan-out verify fails pre-commit")
+		return nil
+	})
+	// The committed intent does NOT carry our daemon.
+	prevVerify := autoRegisterVerifyFanOutFn
+	autoRegisterVerifyFanOutFn = func(string, string) (bool, error) { return false, nil }
+	t.Cleanup(func() { autoRegisterVerifyFanOutFn = prevVerify })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil || !strings.Contains(err.Error(), "not included in the committed supervisor intent") {
+		t.Fatalf("error = %v, want the stale-skip message", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d rows after a stale skip, want 0 (pre-commit rollback)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 21. Context cancelled BEFORE registration (bot PR #253 r4 P2) — a terminated
+//     session (router cancels the detached ctx) aborts before any pool-port
+//     allocation or registry write.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_ContextCancelledBeforeRegister_Aborts(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not run when ctx is cancelled before registration")
+		return "", nil
+	})
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // terminated before the call
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(ctx, root)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled (pre-register abort)", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d rows after a pre-register cancel, want 0 (nothing saved)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 22. Context cancelled AFTER Save, BEFORE the install commit (bot PR #253 r4 P2)
+//     — the 7c gate rolls back the registry row before any supervisor-intent write.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_ContextCancelledBeforeInstall_RollsBack(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel during the cutover decision (after the registry Save, before the
+	// install) via the supervisor-running seam.
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { cancel(); return true, nil })
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not run when ctx is cancelled before the commit")
+		return "", nil
+	})
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(ctx, root)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled (pre-install abort)", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d rows after a pre-install cancel, want 0 (rollback)", len(rows))
 	}
 }
 

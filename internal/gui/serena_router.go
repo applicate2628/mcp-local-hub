@@ -578,17 +578,13 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// (name + arguments) here. A malformed/non-object params yields an empty
 	// name and the existing "missing required field: params.name" path-arg
 	// error — the pre-Finding-1 tool-call behavior is preserved.
-	toolName, toolArguments := toolCallParams(tb.Params)
-	if toolName == "" {
-		writeRequiredFieldError(w, "params.name")
-		return
-	}
-
-	// bot PR #253 P2: an id-less tools/call is a JSON-RPC NOTIFICATION → 202 with
-	// NO execution (mirroring the hub's tools/call gate at internal/api/
-	// hub_mcp_handler.go and the tools/list / ping branches above). This MUST
-	// precede the resolve / auto-register branch so a fire-and-forget or malformed
-	// (non-string/number id) call cannot mutate workspaces.yaml + the supervisor
+	// bot PR #253 P2/P3: an id-less tools/call is a JSON-RPC NOTIFICATION → 202
+	// with NO execution. This MUST precede BOTH the params parse AND the
+	// resolve/auto-register branch (mirroring the hub's tools/call gate at
+	// internal/api/hub_mcp_handler.go and the tools/list / ping branches above):
+	// a fire-and-forget notification — even one with missing/malformed params —
+	// must be classified as a notification (202), NOT receive a "missing
+	// params.name" error, and must never mutate workspaces.yaml + the supervisor
 	// intent or consume a pool port via auto-register.
 	if isJSONRPCNotificationID(tb.ID) {
 		w.WriteHeader(http.StatusAccepted)
@@ -597,6 +593,12 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	if !isValidJSONRPCRequestID(tb.ID) {
 		writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
 			"invalid request: id must be a non-null string or number")
+		return
+	}
+
+	toolName, toolArguments := toolCallParams(tb.Params)
+	if toolName == "" {
+		writeRequiredFieldError(w, "params.name")
 		return
 	}
 
@@ -1066,6 +1068,7 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 	// touches normally after the forward. An EXPIRED session is terminated here
 	// (expire-on-read) and rejected; a fresh path-only call (sessionID == "") has no
 	// router session to validate and proceeds (the legitimate first-call case).
+	watchSession := false
 	if sessionID != "" {
 		sessionVersion, state := s.serenaRouterSessions.peekVersionState(sessionID)
 		if state == routerSessionExpired {
@@ -1078,11 +1081,29 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 				writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "protocol-version mismatch", nil)
 				return nil
 			}
+			// A live, minted router session: watch it for the duration of the
+			// (detached) register and abort if it is terminated mid-flight. A
+			// routerSessionAbsent id (a legacy / path-only caller that never minted
+			// a router session) is NOT watched — it has no session to terminate.
+			watchSession = true
 		}
 	}
 
 	regCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)
 	defer cancel()
+
+	// bot PR #253 P2: the register is DETACHED from r.Context() so a client
+	// disconnect does not abort it — but a logical session TERMINATION (client
+	// DELETE or idle-sweep) DURING the up-to-45s register MUST still abort it, so a
+	// terminated session cannot finish allocating a pool port + committing a
+	// supervisor-intent daemon. Watch the live session and cancel regCtx on death;
+	// the helper re-checks ctx.Err() at its registry-Save and install-commit
+	// mutation boundaries. The watcher stops when the register returns.
+	if watchSession {
+		stop := make(chan struct{})
+		defer close(stop)
+		go s.cancelAutoRegisterOnSessionDeath(regCtx, cancel, stop, sessionID)
+	}
 
 	entry, err := deps.AutoRegisterFn(regCtx, pathArg)
 	if err == nil {
@@ -1114,6 +1135,32 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 		writeJSONRPCErrorStatus(w, id, http.StatusServiceUnavailable, jsonrpcInternalError,
 			"serena auto-register failed: "+err.Error(), nil)
 		return nil
+	}
+}
+
+// cancelAutoRegisterOnSessionDeath polls the router session for sessionID and
+// cancels the detached auto-register context the instant the session stops being
+// live — a client DELETE makes it routerSessionAbsent, the idle-sweep makes it
+// routerSessionExpired; either terminates the in-flight register (bot PR #253
+// P2). It returns when the register completes (stop is closed) or the context is
+// already done. peekVersionState does NOT refresh lastSeen, so polling here never
+// keeps a session artificially alive. The 500 ms cadence bounds the post-death
+// window without busy-spinning over the up-to-45 s register.
+func (s *Server) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel context.CancelFunc, stop <-chan struct{}, sessionID string) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, state := s.serenaRouterSessions.peekVersionState(sessionID); state != routerSessionLive {
+				cancel()
+				return
+			}
+		}
 	}
 }
 
