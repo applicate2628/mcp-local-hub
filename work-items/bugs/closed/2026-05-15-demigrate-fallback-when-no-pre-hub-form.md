@@ -266,3 +266,52 @@ successfully (no pre-hub form ever existed → RemoveEntry path
 fires under marker confirmation). User-direct entries would
 restore from the appropriate older backup instead of being
 deleted.
+
+## Status
+
+**CLOSED — fixed in PR #257** (commit `f144dea`, "fix(demigrate):
+legacy-codename backup fallback — cross-rename entries restore, never
+delete"). The "должно работать всегда" always-succeed mandate is
+satisfied; the legacy-codename fallback this doc demanded is wired and
+ordered so the PR #218 anti-deletion lesson is preserved.
+
+What landed, in `internal/api/demigrate.go`:
+
+1. Current-codename backup iteration (`demigrate.go:172-188`) walks
+   every `bak-mcp-local-hub-*` backup, skipping `ErrBackupEntryAlready
+   Migrated` / `errBackupMissingEntry` candidates.
+2. `tryLegacyPrefixRestore` (`demigrate.go:202`, defined
+   `demigrate.go:369` — the new #257 piece) consults the legacy
+   pre-rename `mcp-sync` / phase2 / plain-date backups when no
+   current-codename backup holds a pre-hub form. This restores the
+   originally-reported gemini case (`time` pre-hub state lived only in
+   `settings.json.bak-2026-04-15-mcp-sync`) instead of deleting.
+3. `tryMarkerOrBackfillRemove` last-resort (`demigrate.go:219`,
+   defined `demigrate.go:282`) fires ONLY when neither current- nor
+   legacy-codename backups hold a pre-hub form AND positive ownership
+   evidence (marker, or URL-backfill corroborated by ≥1 backup of any
+   codename) proves mcphub installed the entry. The
+   `restoredFrom == ""` ordering guard at lines 201/218 makes the
+   restore paths strictly precede deletion, preserving the PR #218
+   anti-deletion invariant (the reverted-by-#219 regression that
+   deleted user-direct entries).
+
+Supporting client-layer additions: per-adapter
+`BackupEntryIsHubManaged(backupPath, name)` (declared on the `Client`
+interface at `internal/clients/clients.go:212`, implemented per adapter
+e.g. `claude_code.go:284`, `codex_cli.go:271`) distinguishes hub-managed
+from pre-hub backup shape; `LegacyBackupsNewestFirst` at
+`internal/clients/clients.go:968` enumerates the legacy-prefix backups
+newest-first.
+
+Verified 2026-06-03 (`f144dea` is an ancestor of HEAD; the three-tier
+fallback ordering with the `restoredFrom == ""` guard, plus
+`tryLegacyPrefixRestore`, `BackupEntryIsHubManaged`, and
+`LegacyBackupsNewestFirst`, are all present at HEAD).
+`TRIAGE-2026-05-28.md` row 13 flagged this "still-relevant-P2" from a
+pr-review pass that read this doc's open state, not the current source.
+
+The earlier "Failed attempt: PR #218 (reverted by PR #219)" and
+"Proper-fix design (deferred)" sections above are retained as execution
+history — they record why the marker-only deletion was unsafe and the
+ordering constraints the #257 fix had to honor.
