@@ -25,6 +25,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -65,7 +66,19 @@ type InstallParsedManifestOpts struct {
 	// introduce would also replace the legacy serena rows with nothing. Empty = no
 	// requirement (legacy/migrate callers that legitimately install a filtered set).
 	RequireWorkspaceKey string
+	// NonBlockingIntentLock makes the supervisor-intent.json.lock acquire NON-blocking:
+	// on contention the install returns ErrSupervisorIntentLockContended instead of
+	// waiting on a held lock. Best-effort callers that must not stall (the GUI-startup
+	// crash repair) set this and skip on contention; the default (false) keeps the
+	// blocking acquire for migrate/install callers that must complete (bot PR #254 P2).
+	NonBlockingIntentLock bool
 }
+
+// ErrSupervisorIntentLockContended is returned by InstallParsedManifest when
+// NonBlockingIntentLock is set and supervisor-intent.json.lock is held by another
+// writer. Best-effort callers (the GUI-startup crash repair) treat it as "skip, retry
+// on the next startup" rather than a failure.
+var ErrSupervisorIntentLockContended = errors.New("supervisor-intent lock contended")
 
 // InstallParsedManifest installs a pre-parsed manifest in-process and
 // returns the absolute path of the supervisor-intent.json it wrote.
@@ -245,7 +258,19 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// WriteSupervisorIntent (which re-acquires the same flock) would deadlock,
 	// exactly the readIntentLocked/writeIntentLocked split daemon_intent.go uses.
 	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
+	if opts.NonBlockingIntentLock {
+		// Best-effort callers (the GUI-startup crash repair) must NOT stall on a held
+		// intent lock — a blocking acquire here would stall GUI startup behind a hung
+		// migrate/install holder. TryLock and bail with the sentinel so the caller skips
+		// and retries on the next startup (bot PR #254 P2).
+		locked, lockErr := lock.TryLock()
+		if lockErr != nil {
+			return "", fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, lockErr)
+		}
+		if !locked {
+			return "", ErrSupervisorIntentLockContended
+		}
+	} else if err := lock.Lock(); err != nil {
 		return "", fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
 	}
 	defer func() { _ = lock.Unlock() }()

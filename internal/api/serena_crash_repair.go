@@ -16,7 +16,7 @@ type SerenaRepairResult struct {
 	// supervisor intent.
 	Repaired int
 	// Unresolved are orphan workspace keys that could NOT be auto-repaired: an
-	// introduce-crash (intent has no runtime_spec → `mcphub migrate`) or a stale row
+	// introduce-crash (intent has no runtime_spec → `mcphub migrate serena legacy-to-dynamic-pool`) or a stale row
 	// whose workspace directory was removed (`mcphub workspace unregister`). Each is
 	// logged to the supervisor event log with per-category remediation.
 	Unresolved []string
@@ -65,7 +65,7 @@ type SerenaRepairResult struct {
 // intent carries NO runtime_spec (the very first introduce died mid-cutover) — cannot
 // be repaired by a live-add (the §7.1 gate refuses a spec-bearing write while a
 // supervisor runs); those keys are returned in Unresolved and logged for the operator
-// to resolve with `mcphub migrate`.
+// to resolve with `mcphub migrate serena legacy-to-dynamic-pool`.
 //
 // Returns a real error only on an I/O / install failure; a healthy registry, a
 // contended lock, or no serena rows return a zero result + nil error.
@@ -141,7 +141,7 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (SerenaRepairRes
 	if intent == nil || !intent.HasRuntimeSpecRow() {
 		emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-deferred", orphanKeys, map[string]any{
 			"reason":           "intent-has-no-runtime_spec (first-introduce crash)",
-			"operator_action":  "run `mcphub migrate` to re-introduce the serena dynamic pool",
+			"operator_action":  "run `mcphub migrate serena legacy-to-dynamic-pool` to re-introduce the serena dynamic pool",
 			"orphan_workspace": orphanKeys,
 		})
 		result.Unresolved = orphanKeys
@@ -161,8 +161,18 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (SerenaRepairRes
 	committedIntentPath, iErr := autoRegisterInstallParsedManifestFn(ctx, a, dyn, InstallParsedManifestOpts{
 		Writer:     io.Discard,
 		Workspaces: rows,
+		// Best-effort: TryLock the supervisor-intent lock too, so a hung intent writer
+		// cannot stall GUI startup here either (the registry TryLock above is not the
+		// only blocking lock — the install takes the intent lock; bot PR #254 P2).
+		NonBlockingIntentLock: true,
 	})
 	if iErr != nil {
+		if errors.Is(iErr, ErrSupervisorIntentLockContended) {
+			// Another intent writer (install / migrate / auto-register) holds the
+			// supervisor-intent lock. Skip this best-effort scan rather than stall GUI
+			// startup; the next startup re-scans (the holder commits its own intent).
+			return result, nil
+		}
 		return result, fmt.Errorf("serena repair: re-install fan-out for %d orphan(s) %v: %w", len(orphanKeys), orphanKeys, iErr)
 	}
 

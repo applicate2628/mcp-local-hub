@@ -243,3 +243,28 @@ func TestRepairOrphanSerenaWorkspaces_LockContended_Skips(t *testing.T) {
 		t.Errorf("got %+v, want zero result (skipped on lock contention)", res)
 	}
 }
+
+// 8. Intent-lock contended — the install reports the supervisor-intent lock is held
+//    (NonBlockingIntentLock) → the repair skips, does NOT block GUI startup (bot PR
+//    #254 P2). Also asserts the repair passes NonBlockingIntentLock.
+func TestRepairOrphanSerenaWorkspaces_IntentLockContended_Skips(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	seedSerenaRegistryRow(t, regPath, "k1", "/proj/k1", 9150)
+	seedSerenaRegistryRow(t, regPath, "k2", "/proj/k2", 9151)
+	seedSerenaIntent(t, []string{"k1"}, true) // k2 orphaned; intent HAS runtime_spec
+
+	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
+		if !opts.NonBlockingIntentLock {
+			t.Fatalf("repair must pass NonBlockingIntentLock so a held intent lock does not stall GUI startup")
+		}
+		return "", ErrSupervisorIntentLockContended
+	})
+
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
+	}
+	if res.Repaired != 0 || len(res.Unresolved) != 0 || res.SupervisorGone {
+		t.Errorf("got %+v, want zero result (skipped on intent-lock contention)", res)
+	}
+}
