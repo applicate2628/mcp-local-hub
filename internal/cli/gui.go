@@ -506,37 +506,44 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// Crash-repair (snapshot-to-action convergence): reconcile any serena registry
 	// rows orphaned by a crash between an auto-register registry Save and its install
 	// commit (the held flock is released on process death, leaving a registry row with
-	// no matching supervisor-intent daemon). Runs ONCE here, after the supervisor is up
-	// so the reconcile spawns the repaired daemons. Non-fatal + bounded: a repair
-	// failure must never block GUI startup.
+	// no matching supervisor-intent daemon).
+	//
+	// Run OFF the startup critical path, in a background goroutine (bot PR #254). The
+	// repair re-uses InstallParsedManifest, whose deep call tree acquires SEVERAL
+	// blocking flocks (registry, supervisor-intent, the preflight dry-write, the intent
+	// audit log, the event log). Running it synchronously here could stall browser/tray
+	// launch behind ANY hung lock holder — and making each lock non-blocking one-by-one
+	// does not converge. A goroutine never blocks startup regardless of the lock tree;
+	// the repair is best-effort + idempotent (the next startup re-runs it), so a
+	// goroutine abandoned at process exit is safe. Writers are captured up front so the
+	// goroutine never touches the cobra command concurrently.
 	if supervisor != nil {
-		repairCtx, repairCancel := context.WithTimeout(ctx, 60*time.Second)
-		res, rErr := api.NewAPI().RepairOrphanSerenaWorkspaces(repairCtx)
-		repairCancel()
-		switch {
-		case rErr != nil:
-			fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %v\n", rErr)
-		default:
-			if res.Repaired > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "serena crash-repair: re-installed %d orphaned workspace daemon(s) from a prior crash\n", res.Repaired)
-			}
-			if len(res.Unresolved) > 0 {
-				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v could not be auto-repaired — see supervisor-events.log for remediation (`mcphub migrate serena legacy-to-dynamic-pool` for a first-introduce crash, `mcphub workspace unregister <path> --backend serena` for a removed workspace dir)\n", len(res.Unresolved), res.Unresolved)
-			}
-			if res.SupervisorGone {
-				// The supervisor sampled up at startup exited during the repair; the
-				// orphan daemons are committed but need a running supervisor to spawn.
-				// Re-ensure it under GUI OWNERSHIP (replaces the dead owner so the
-				// shutdown defer stops the right process — bot PR #254 r3), and surface
-				// a failure to the operator rather than silently claiming success.
-				fmt.Fprintln(cmd.OutOrStderr(), "warning: serena crash-repair: supervisor exited during repair — re-ensuring under GUI ownership")
-				if newSup, reErr := ensureSupervisorRunning(ctx, supervisorBin, strictMode, 15*time.Second); reErr != nil {
-					fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: supervisor re-ensure failed: %v — run `mcphub supervise` so the committed serena daemons spawn\n", reErr)
-				} else {
-					supervisor = newSup
+		outW, errW := cmd.OutOrStdout(), cmd.OutOrStderr()
+		go func() {
+			res, rErr := api.NewAPI().RepairOrphanSerenaWorkspaces(ctx)
+			switch {
+			case rErr != nil:
+				// Suppress the warning when the GUI is shutting down (the repair ctx was
+				// cancelled mid-install) — that is not a repair failure worth surfacing.
+				if ctx.Err() == nil {
+					fmt.Fprintf(errW, "warning: serena crash-repair: %v\n", rErr)
+				}
+			default:
+				if res.Repaired > 0 {
+					fmt.Fprintf(outW, "serena crash-repair: re-installed %d orphaned workspace daemon(s) from a prior crash\n", res.Repaired)
+				}
+				if len(res.Unresolved) > 0 {
+					fmt.Fprintf(errW, "warning: serena crash-repair: %d orphaned workspace(s) %v could not be auto-repaired — see supervisor-events.log for remediation (`mcphub migrate serena legacy-to-dynamic-pool` for a first-introduce crash, `mcphub workspace unregister <path> --backend serena` for a removed workspace dir)\n", len(res.Unresolved), res.Unresolved)
+				}
+				if res.SupervisorGone {
+					// Off the startup path this is near-unreachable (the supervisor was
+					// just ensured up). If it ever fires, the committed intent self-heals
+					// on the next supervisor start; we do NOT re-ensure from this
+					// goroutine, which would race the GUI's supervisor owner + shutdown.
+					fmt.Fprintln(errW, "warning: serena crash-repair: supervisor exited during repair; run `mcphub supervise` or restart the GUI to spawn the committed serena daemon(s)")
 				}
 			}
-		}
+		}()
 	}
 
 	if !noBrowser {
