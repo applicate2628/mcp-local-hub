@@ -1234,5 +1234,44 @@ func TestSupervisorIntentFile_HasSerenaDaemonForWorkspaceKey(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// 27. Live-add reconcile UNAVAILABLE = supervisor exited post-probe (bot PR #253
+//     r7 P2) — the liveness probe sampled the supervisor running (needStart=false),
+//     but it exited before the reconcile, which returns ErrSupervisorIPCUnavailable.
+//     The committed intent then has no running supervisor, so auto-register must
+//     START one instead of discarding the error and relying on a dead supervisor.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_LiveAddReconcileUnavailable_StartsSupervisor(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return true, nil }) // LIVE-ADD
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })  // sampled running → needStart=false
+
+	var startCalled int32
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not run on the live-add path"); return nil },
+		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	// The reconcile finds the supervisor GONE (it exited between the probe and now).
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if atomic.LoadInt32(&startCalled) != 1 {
+		t.Errorf("start called %d times, want 1 (an unavailable reconcile = supervisor gone → must start)", startCalled)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d rows, want 1 (committed despite the post-probe exit)", len(rows))
+	}
+}
+
 // NOTE: mustCanonical(t, ws) is defined in register_test.go (same package) and
 // reused here.

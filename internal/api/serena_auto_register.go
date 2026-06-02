@@ -368,10 +368,36 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	rowSaved = false
 	releaseReg()
 
-	// 11. Bring the new daemon live. INTRODUCE → START the supervisor (it cold-
-	//     reconciles the committed intent and spawns). LIVE-ADD → the supervisor is
-	//     already up; nudge it to reconcile NOW (best-effort; the 60s poll backstops).
-	if needStart {
+	// 11. Bring the new daemon live.
+	//   - INTRODUCE or stopped/undetermined pool (needStart) → START the supervisor
+	//     (it cold-reconciles the committed intent and spawns). The cutover-support
+	//     gate above already verified the start primitive for this path.
+	//   - LIVE-ADD (supervisor sampled running) → nudge it to reconcile NOW
+	//     (best-effort; the 60s IntentWatcher poll backstops). BUT the liveness probe
+	//     is a SNAPSHOT: the supervisor can EXIT between that probe and this reconcile
+	//     (bot PR #253 r7 P2). An UNAVAILABLE reconcile means the committed intent has
+	//     no running supervisor to spawn the daemon, so fall through to START one —
+	//     the needStart outcome. (A reconcile error while the supervisor is still UP
+	//     is a transient nudge failure; keep it non-fatal — the 60s poll backstops.)
+	needPostCommitStart := needStart
+	if !needStart {
+		if _, recErr := autoRegisterReconcileFn(commitCtx, true); recErr != nil {
+			if errors.Is(recErr, ErrSupervisorIPCUnavailable) {
+				// Supervisor exited post-probe → it must be started. The live-add
+				// decision skipped the cutover-support gate (it fires only for
+				// needReap||needStart), so verify the start primitive HERE; an
+				// unwired/unsupported platform cannot self-heal → fail loud.
+				if autoRegisterStartFn == nil || autoRegisterStartSupportedFn == nil || !autoRegisterStartSupportedFn() {
+					emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
+					return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the supervisor exited after the liveness probe and the start primitive is unavailable on this build/platform — run `mcphub supervise` so the current binary reconciles the committed intent", root)
+				}
+				needPostCommitStart = true
+			}
+			// else: the supervisor is up; the reconcile nudge failed transiently; the
+			// 60s IntentWatcher reconcile is the backstop (non-fatal).
+		}
+	}
+	if needPostCommitStart {
 		if startErr := autoRegisterStartFn(commitCtx); startErr != nil {
 			// POST-COMMIT start failure: fail loud, NO registry rollback (the intent
 			// is the commit point). Audit, then return; the operator restarts the
@@ -379,8 +405,6 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 			emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
 			return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed but the supervisor start failed: %w — run `mcphub supervise` so the current binary reconciles the committed intent (the registry is intentionally NOT rolled back: the intent is the commit point)", root, startErr)
 		}
-	} else if _, recErr := autoRegisterReconcileFn(commitCtx, true); recErr != nil {
-		_ = recErr // non-fatal: the 60s IntentWatcher reconcile is the backstop
 	}
 
 	// Release the install mutex before the readiness probe — readiness touches
