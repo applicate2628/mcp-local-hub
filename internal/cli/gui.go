@@ -510,8 +510,8 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// so the reconcile spawns the repaired daemons. Non-fatal + bounded: a repair
 	// failure must never block GUI startup.
 	if supervisor != nil {
-		repairCtx, repairCancel := context.WithTimeout(ctx, 30*time.Second)
-		repaired, deferredKeys, rErr := api.NewAPI().RepairOrphanSerenaWorkspaces(repairCtx)
+		repairCtx, repairCancel := context.WithTimeout(ctx, 60*time.Second)
+		repaired, unresolved, rErr := api.NewAPI().RepairOrphanSerenaWorkspaces(repairCtx)
 		repairCancel()
 		switch {
 		case rErr != nil:
@@ -520,8 +520,8 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			if repaired > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "serena crash-repair: re-installed %d orphaned workspace daemon(s) from a prior crash\n", repaired)
 			}
-			if len(deferredKeys) > 0 {
-				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v need `mcphub migrate` (first-introduce crash; intent carries no runtime_spec)\n", len(deferredKeys), deferredKeys)
+			if len(unresolved) > 0 {
+				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v could not be auto-repaired — see supervisor-events.log for remediation (`mcphub migrate` for a first-introduce crash, `mcphub workspace remove` for a removed workspace dir)\n", len(unresolved), unresolved)
 			}
 		}
 	}
