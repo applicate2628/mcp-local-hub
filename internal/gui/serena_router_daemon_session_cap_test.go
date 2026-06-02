@@ -68,15 +68,16 @@ func TestDaemonSessionStore_CapAndReservationLifecycle(t *testing.T) {
 	if got := len(st.bindings); got != maxRouterSessions {
 		t.Fatalf("store size after overflow store = %d, want capped at %d", got, maxRouterSessions)
 	}
-	if st.reserveSlot("overflow-reserve") {
+	if proceed, _ := st.reserveSlot("overflow-reserve"); proceed {
 		t.Fatalf("reserveSlot on a fresh id succeeded at cap; want rejection")
 	}
-	if !st.reserveSlot("client-000001") {
-		t.Fatalf("reserveSlot on an existing id failed at cap; existing ids must remain reusable")
+	// client-000001 is still a COMPLETED binding (unbound below) → reusable.
+	if proceed, inFlight := st.reserveSlot("client-000001"); !proceed || inFlight {
+		t.Fatalf("reserveSlot on an existing completed id = (proceed=%v, inFlight=%v); want (true, false) — completed ids stay reusable", proceed, inFlight)
 	}
 
 	st.unbind("client-000001")
-	if !st.reserveSlot("reserved-new") {
+	if proceed, _ := st.reserveSlot("reserved-new"); !proceed {
 		t.Fatalf("reserveSlot after freeing one slot failed")
 	}
 	if got := len(st.bindings); got != maxRouterSessions {
@@ -88,84 +89,101 @@ func TestDaemonSessionStore_CapAndReservationLifecycle(t *testing.T) {
 	}
 }
 
-// TestDaemonSessionStore_SharedReservationRefcount covers Codex PR #251 finding
-// 1: two concurrent first requests for the SAME fresh Mcp-Session-Id each
-// reserveSlot the one shared placeholder. If the first caller's handshake fails
-// and it releaseReservation()s while the second caller's handshake is still in
-// flight, the shared placeholder must NOT be dropped (the second caller still
-// owns a reservation on it); a subsequent store() by the second caller must then
-// succeed instead of being spuriously rejected at cap.
-func TestDaemonSessionStore_SharedReservationRefcount(t *testing.T) {
+// TestDaemonSessionStore_InFlightPlaceholderRejectsDuplicate covers bot PR #251 r2
+// P1 (cap-bypass via same-id burst): a SECOND concurrent first request for the SAME
+// fresh id, while the first's handshake is still in flight (placeholder,
+// daemonSessionID==""), is REJECTED with inFlight=true — it must NOT proceed to
+// mint a second upstream daemon session for the one local slot. After the first
+// completes (store), the id is reusable via lookup.
+func TestDaemonSessionStore_InFlightPlaceholderRejectsDuplicate(t *testing.T) {
 	st := &daemonSessionStore{}
-
-	const id = "shared-fresh-id"
-	// Request A and request B both take a reservation on the same fresh id.
-	if !st.reserveSlot(id) {
-		t.Fatalf("reserveSlot A on fresh id returned false; want true")
+	const id = "burst-fresh-id"
+	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
+		t.Fatalf("first reserveSlot = (proceed=%v, inFlight=%v); want (true, false)", proceed, inFlight)
 	}
-	if !st.reserveSlot(id) {
-		t.Fatalf("reserveSlot B on the same fresh id returned false; want true (shared placeholder)")
+	if proceed, inFlight := st.reserveSlot(id); proceed || !inFlight {
+		t.Fatalf("second reserveSlot on an in-flight placeholder = (proceed=%v, inFlight=%v); want (false, true)", proceed, inFlight)
 	}
+	// Still exactly one placeholder; the rejected duplicate did NOT refcount it.
 	if got := len(st.bindings); got != 1 {
-		t.Fatalf("two reservations on the same id created %d bindings; want exactly 1 shared placeholder", got)
+		t.Fatalf("bindings = %d, want 1 (the rejected duplicate must not create/refcount a slot)", got)
 	}
-
-	// Request A's handshake fails -> it releases. The placeholder must survive
-	// because B still holds a reservation on it.
-	st.releaseReservation(id)
-	if got := len(st.bindings); got != 1 {
-		t.Fatalf("placeholder dropped after one of two reservations released; size=%d, want 1 (B still owns it)", got)
+	if b := st.bindings[id]; b == nil || b.reservations != 1 {
+		t.Fatalf("placeholder reservations = %v, want 1 (only the first caller holds it)", b)
 	}
-
-	// Request B's handshake succeeds -> it stores. Must NOT be rejected: the slot
-	// was reserved, so store sees the id as existing and completes the binding.
-	if !st.store(id, "alpha", "daemon-shared", defaultProtocolVersion) {
-		t.Fatalf("store for the surviving reserved id returned false; want true (no spurious cap rejection)")
+	// First caller completes its handshake → the id is now reusable.
+	if !st.store(id, "alpha", "daemon-burst", defaultProtocolVersion) {
+		t.Fatalf("store for the first caller returned false; want true")
 	}
-	gotDS, _, ok := st.lookup(id, "alpha")
-	if !ok || gotDS != "daemon-shared" {
-		t.Fatalf("lookup after store = (%q, ok=%v); want (\"daemon-shared\", ok=true)", gotDS, ok)
+	if dsid, _, ok := st.lookup(id, "alpha"); !ok || dsid != "daemon-burst" {
+		t.Fatalf("lookup after store = (%q, %v); want (daemon-burst, true)", dsid, ok)
 	}
 }
 
-// TestDaemonSessionStore_SharedReservationRefcount_Concurrent drives the same
-// shared-placeholder race from two goroutines under -race so the data-race
-// detector exercises the refcounted reserve/release/store path concurrently.
-func TestDaemonSessionStore_SharedReservationRefcount_Concurrent(t *testing.T) {
+// TestDaemonSessionStore_CompletedBindingRefcount: the reservation refcount still
+// protects a COMPLETED binding during a concurrent workspace-switch re-handshake
+// (Finding 1, round 1, retained for completed bindings). Two reserveSlot calls on
+// a completed binding both proceed and bump the refcount; one release (a failed
+// switch) does NOT drop the live binding.
+func TestDaemonSessionStore_CompletedBindingRefcount(t *testing.T) {
 	st := &daemonSessionStore{}
-	const id = "race-fresh-id"
-
-	// Pre-reserve so BOTH goroutines observe the placeholder as already present
-	// (the contended path: reserveSlot increments instead of creating). Both then
-	// race release (A's failed handshake) vs store (B's success). Whichever order
-	// the scheduler picks, the binding must end live (B's store wins) and the
-	// store must never be rejected.
-	if !st.reserveSlot(id) { // A
-		t.Fatalf("pre-reserve A returned false")
+	const id = "completed-id"
+	if !st.store(id, "alpha", "daemon-alpha", defaultProtocolVersion) {
+		t.Fatalf("initial store returned false")
 	}
-	if !st.reserveSlot(id) { // B
-		t.Fatalf("pre-reserve B returned false")
+	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
+		t.Fatalf("reserveSlot on a completed binding = (proceed=%v, inFlight=%v); want (true, false)", proceed, inFlight)
 	}
+	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
+		t.Fatalf("second reserveSlot on a completed binding = (proceed=%v, inFlight=%v); want (true, false)", proceed, inFlight)
+	}
+	st.releaseReservation(id) // one switch handshake failed
+	if dsid, _, ok := st.lookup(id, "alpha"); !ok || dsid != "daemon-alpha" {
+		t.Fatalf("completed binding dropped after a partial release; lookup=(%q,%v)", dsid, ok)
+	}
+}
 
+// TestDaemonSessionStore_SameIdBurst_OnlyOneProceeds drives the bot PR #251 r2 P1
+// cap-bypass scenario under -race: N concurrent first requests for ONE fresh id —
+// exactly ONE proceeds (creates the placeholder + would mint an upstream session);
+// the rest are rejected with inFlight (no duplicate upstream sessions).
+func TestDaemonSessionStore_SameIdBurst_OnlyOneProceeds(t *testing.T) {
+	st := &daemonSessionStore{}
+	const id = "burst-id"
+	const N = 16
+	var (
+		mu        sync.Mutex
+		proceedN  int
+		inFlightN int
+		otherN    int
+	)
 	var wg sync.WaitGroup
-	wg.Add(2)
-	var storeOK bool
-	go func() {
-		defer wg.Done()
-		st.releaseReservation(id) // A's handshake failed
-	}()
-	go func() {
-		defer wg.Done()
-		storeOK = st.store(id, "alpha", "daemon-race", defaultProtocolVersion) // B's handshake succeeded
-	}()
-	wg.Wait()
-
-	if !storeOK {
-		t.Fatalf("concurrent store lost the race and was rejected; want it to succeed (reservation held the slot)")
+	wg.Add(N)
+	for range [N]struct{}{} {
+		go func() {
+			defer wg.Done()
+			proceed, inFlight := st.reserveSlot(id)
+			mu.Lock()
+			switch {
+			case proceed:
+				proceedN++
+			case inFlight:
+				inFlightN++
+			default:
+				otherN++
+			}
+			mu.Unlock()
+		}()
 	}
-	gotDS, _, ok := st.lookup(id, "alpha")
-	if !ok || gotDS != "daemon-race" {
-		t.Fatalf("post-race lookup = (%q, ok=%v); want (\"daemon-race\", ok=true)", gotDS, ok)
+	wg.Wait()
+	if proceedN != 1 {
+		t.Errorf("proceed count = %d, want exactly 1 (only one handshake may mint an upstream session)", proceedN)
+	}
+	if inFlightN != N-1 {
+		t.Errorf("inFlight count = %d, want %d (all duplicates rejected)", inFlightN, N-1)
+	}
+	if otherN != 0 {
+		t.Errorf("other (cap-full) count = %d, want 0 (well below cap)", otherN)
 	}
 }
 
@@ -192,14 +210,14 @@ func TestDaemonSessionStore_ReclaimExpiredBeforeCap(t *testing.T) {
 
 	// Sanity: at the SAME clock, a fresh reserveSlot is rejected (nothing expired
 	// yet, store is full).
-	if st.reserveSlot("fresh-before-expiry") {
+	if proceed, _ := st.reserveSlot("fresh-before-expiry"); proceed {
 		t.Fatalf("reserveSlot succeeded at cap with no expired entries; want rejection")
 	}
 
 	// Advance the clock just past the idle TTL so every filled binding is now
 	// idle-expired. A fresh reserveSlot must reclaim them and succeed.
 	clk = base.Add(daemonSessionTTL + time.Second)
-	if !st.reserveSlot("fresh-after-expiry") {
+	if proceed, _ := st.reserveSlot("fresh-after-expiry"); !proceed {
 		t.Fatalf("reserveSlot rejected after all entries idle-expired; want success via reclaim-before-cap")
 	}
 	// After reclaim of all maxRouterSessions expired entries + inserting the one
@@ -225,7 +243,7 @@ func TestDaemonSessionStore_ReclaimSkipsInFlightPlaceholder(t *testing.T) {
 	st := &daemonSessionStore{clock: func() time.Time { return clk }}
 
 	// One in-flight reservation stamped at base (a slow handshake placeholder).
-	if !st.reserveSlot("in-flight") {
+	if proceed, _ := st.reserveSlot("in-flight"); !proceed {
 		t.Fatalf("reserveSlot for in-flight placeholder returned false")
 	}
 	// Fill the remaining cap-1 slots with COMPLETED bindings, also stamped base.
@@ -242,7 +260,7 @@ func TestDaemonSessionStore_ReclaimSkipsInFlightPlaceholder(t *testing.T) {
 	// placeholder (never idle) is not eligible for reclaim. A fresh reserveSlot at
 	// cap must reclaim the completed entries and succeed.
 	clk = base.Add(daemonSessionTTL * 10)
-	if !st.reserveSlot("fresh-at-cap") {
+	if proceed, _ := st.reserveSlot("fresh-at-cap"); !proceed {
 		t.Fatalf("reserveSlot rejected at cap despite cap-1 reclaimable completed entries; want success")
 	}
 	// The in-flight placeholder must survive the reclaim.

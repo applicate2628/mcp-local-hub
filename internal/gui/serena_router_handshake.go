@@ -57,6 +57,13 @@ var errRouterSessionTerminated = errors.New("router session terminated during ha
 // minted for arbitrary legacy Mcp-Session-Id values.
 var errDaemonSessionStoreFull = errors.New("daemon session store full")
 
+// errDaemonSessionHandshakeInFlight is returned when a concurrent FIRST request
+// for the SAME fresh Mcp-Session-Id is already mid-handshake (an in-flight
+// placeholder exists). The second caller rejects instead of minting a duplicate
+// upstream daemon session — the cap is otherwise bypassable by reusing one id
+// (bot PR #251 r2 P1). The client retries; the retry hits the completed binding.
+var errDaemonSessionHandshakeInFlight = errors.New("daemon session handshake already in progress")
+
 // daemonSessionTTL bounds how long an idle client→daemon session
 // mapping survives before it is swept. It mirrors
 // serena_routing.DefaultSessionTTL (24h) so the router-owned daemon
@@ -205,9 +212,13 @@ func (st *daemonSessionStore) reclaimExpiredLocked() {
 			expired = append(expired, id)
 			continue
 		}
-		// Only reclaim a COMPLETED, idle-expired binding. A placeholder
-		// (daemonSessionID == "") is an in-flight handshake and is never idle.
-		if b.daemonSessionID != "" && now.Sub(b.lastSeen) > daemonSessionTTL {
+		// Only reclaim a COMPLETED, idle-expired binding with NO active reservation.
+		// A placeholder (daemonSessionID == "") is an in-flight handshake; a
+		// COMPLETED binding with reservations>0 is a workspace-switch re-handshake in
+		// flight (bot PR #251 r2 P2). Reclaiming EITHER would let a fresh session evict
+		// a slot whose handshake has not yet stored, so the original request's store
+		// finds no reserved entry and 429s after minting+deleting an upstream session.
+		if b.daemonSessionID != "" && b.reservations == 0 && now.Sub(b.lastSeen) > daemonSessionTTL {
 			expired = append(expired, id)
 		}
 	}
@@ -340,38 +351,48 @@ func (st *daemonSessionStore) store(clientSessionID string, wsKey string, daemon
 // daemon mints another upstream session. Existing client ids do not consume a
 // new slot (workspace switches overwrite in place), and an empty id is the
 // existing one-shot/sessionless path.
-func (st *daemonSessionStore) reserveSlot(clientSessionID string) bool {
+func (st *daemonSessionStore) reserveSlot(clientSessionID string) (proceed bool, inFlight bool) {
 	if clientSessionID == "" {
-		return true
+		return true, false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.ensureInitLocked()
-	// Finding 1 (Codex PR #251): a second concurrent first request for the SAME
-	// fresh id reuses the placeholder but MUST record its ownership by bumping the
-	// refcount, so the first caller's releaseReservation (on a failed handshake)
-	// cannot drop the shared placeholder while this caller's handshake is still in
-	// flight. The matching releaseReservation decrements it.
 	if b, ok := st.bindings[clientSessionID]; ok && b != nil {
+		// bot PR #251 r2 P1 (cap-bypass via same-id burst): an existing IN-FLIGHT
+		// placeholder (daemonSessionID == "") means a concurrent FIRST handshake for
+		// this same fresh id is already running. A second caller must NOT proceed to
+		// establishDaemonSession — that would mint a SECOND upstream daemon session
+		// for one local slot, letting a single reused id bypass the cap entirely.
+		// Signal in-flight so the caller rejects with a retry; the retry hits the
+		// now-COMPLETED binding via lookup and reuses its daemon session.
+		if b.daemonSessionID == "" {
+			return false, true
+		}
+		// A COMPLETED binding (daemonSessionID != "", e.g. a workspace-switch
+		// re-handshake whose lookup missed on wsKey) IS reusable. Bump the refcount
+		// (Finding 1, round 1) so a concurrent holder's releaseReservation cannot
+		// drop the binding mid-flight, and proceed. The matching releaseReservation
+		// decrements it after this handshake stores.
 		b.reservations++
 		st.promoteLocked(clientSessionID)
-		return true
+		return true, false
 	}
-	// Finding 2 (Codex PR #251): a fresh id at cap first reclaims COMPLETED
-	// idle-expired bindings before returning the store-full rejection, so an
+	// A fresh id at cap first reclaims COMPLETED idle-expired bindings before
+	// returning the store-full rejection (Finding 2, round 1), so an
 	// idle-expired-but-uncollected store does not 429 a valid new session before
-	// the periodic sweep runs. Reclaim is gated on cap pressure so it does not
-	// scan the map on the common below-cap path. In-flight placeholders are
-	// retained.
+	// the periodic sweep runs. Reclaim is gated on cap pressure so it does not scan
+	// the map on the common below-cap path. In-flight placeholders + reserved
+	// bindings are retained (see reclaimExpiredLocked).
 	if len(st.bindings) >= maxRouterSessions {
 		st.reclaimExpiredLocked()
 		if len(st.bindings) >= maxRouterSessions {
-			return false
+			return false, false
 		}
 	}
 	st.bindings[clientSessionID] = &daemonSessionBinding{lastSeen: st.now(), reservations: 1}
 	st.promoteLocked(clientSessionID)
-	return true
+	return true, false
 }
 
 func (st *daemonSessionStore) releaseReservation(clientSessionID string) {
@@ -811,7 +832,15 @@ func (st *daemonSessionStore) resolveDaemonSession(
 		if dsid, dpv, ok := st.lookup(clientSessionID, ws.WorkspaceKey); ok {
 			return dsid, dpv, nil
 		}
-		if !st.reserveSlot(clientSessionID) {
+		proceed, inFlight := st.reserveSlot(clientSessionID)
+		if !proceed {
+			if inFlight {
+				// bot PR #251 r2 P1: a concurrent first handshake for this same fresh
+				// id is already in flight — reject this duplicate so it does not mint a
+				// second upstream session. The client retries; the retry hits the
+				// completed binding via lookup.
+				return "", "", errDaemonSessionHandshakeInFlight
+			}
 			return "", "", errDaemonSessionStoreFull
 		}
 	}
@@ -864,7 +893,16 @@ func (st *daemonSessionStore) resolveDaemonSession(
 			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
 			return "", "", errDaemonSessionStoreFull
 		}
-	} else if reserved {
+	}
+	// bot PR #251 r2 P2: release the reservation on EVERY success / sessionless
+	// path — the handshake is complete (or there was no session to bind), so the
+	// in-flight reservation must drop. For a STORED binding this decrements to 0
+	// WITHOUT removing it (daemonSessionID != ""), so the reclaim guard (which now
+	// protects reserved bindings from eviction) can idle-reclaim it later; without
+	// this release the reservation would pin the completed binding forever and it
+	// would never be reclaimed. (The store-fail path above already released before
+	// its early return.)
+	if reserved {
 		st.releaseReservation(clientSessionID)
 	}
 	return dsid, dpv, nil
