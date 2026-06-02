@@ -1447,6 +1447,11 @@ func TestSerenaRouter_AutoRegister_SuccessForwards(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 
+	// Realistic first-call flow: the client initialized at the router first, so its
+	// session is LIVE (a tool-call carries a minted session id per MCP). bot PR #253
+	// r6 #4: the auto-register MUTATION path requires a live (or empty) session — an
+	// absent id is a revoked/unknown session and is rejected before register.
+	s.serenaRouterSessions.store("sess-autoreg", "2025-03-26")
 	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/autoreg/src/main.go"})
 	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sess-autoreg"})
 
@@ -1570,6 +1575,44 @@ func TestSerenaRouter_AutoRegister_InvalidSession_RejectsBeforeRegister(t *testi
 	}
 	if got := atomic.LoadInt32(&registerCalls); got != 0 {
 		t.Errorf("AutoRegisterFn called %d times, want 0 (an invalid session must not trigger auto-register)", got)
+	}
+}
+
+// TestSerenaRouter_AutoRegister_AbsentSession_RejectsBeforeRegister: bot PR #253
+// r6 #4 — a NON-EMPTY Mcp-Session-Id the router does not hold live (minted here
+// then DELETEd/swept, or one it never minted) is routerSessionAbsent. On the
+// registration-MUTATION path it must be REJECTED (400 "session terminated")
+// BEFORE auto-register, so a revoked/unknown session cannot allocate a pool port
+// or mutate registry+intent. (The main ROUTING handler still treats absent as a
+// legacy caller for EXISTING workspaces; this stricter gate is registration-only.)
+func TestSerenaRouter_AutoRegister_AbsentSession_RejectsBeforeRegister(t *testing.T) {
+	var registerCalls int32
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil}, // not-found → would auto-register
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://127.0.0.1:0" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			atomic.AddInt32(&registerCalls, 1)
+			return &api.WorkspaceEntry{WorkspaceKey: "x", WorkspacePath: "/proj/x", Port: 9305}, nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	// Do NOT mint "sess-gone" at the router: a non-empty id with no live entry →
+	// peekVersionState reports routerSessionAbsent.
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/x/main.go"})
+	rr := postSerena(t, s, body, map[string]string{
+		"Mcp-Session-Id": "sess-gone",
+	})
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (absent session rejected before register); body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "session terminated") {
+		t.Errorf("body = %s, want session terminated", rr.Body.String())
+	}
+	if got := atomic.LoadInt32(&registerCalls); got != 0 {
+		t.Errorf("AutoRegisterFn called %d times, want 0 (an absent session must not trigger auto-register)", got)
 	}
 }
 

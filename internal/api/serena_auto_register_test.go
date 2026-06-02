@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,13 +90,6 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	prevStartSupported := autoRegisterStartSupportedFn
 	autoRegisterStartSupportedFn = func() bool { return true } // platform supports the cutover by default
 	t.Cleanup(func() { autoRegisterStartSupportedFn = prevStartSupported })
-
-	// Default: the install fan-out includes our daemon (the install seam returns a
-	// non-existent temp intent path, so the real reader would always say absent).
-	// The stale-skip test overrides this to return (false, nil).
-	prevVerifyFanOut := autoRegisterVerifyFanOutFn
-	autoRegisterVerifyFanOutFn = func(string, string) (bool, error) { return true, nil }
-	t.Cleanup(func() { autoRegisterVerifyFanOutFn = prevVerifyFanOut })
 
 	// Reset the per-key concurrency guard so a key registered in a prior test
 	// (package-level map persists across tests) cannot leak a held/known lock.
@@ -1016,29 +1010,36 @@ func TestAutoRegisterSerena_LiveAddToStoppedPool_StartsWithoutReap(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
-// 20. Stale-skip fan-out (bot PR #253 r4 P2) — the install succeeds but the
-//     committed intent does NOT carry our daemon (dir vanished mid-install) →
-//     PRE-COMMIT rollback, no readiness, registry row removed.
+// 20. Stale-skip via RequireWorkspaceKey (bot PR #253 r6 P2) — the install now
+//     FAILS PRE-COMMIT when its stale-row filter drops our triggering workspace
+//     (dir vanished mid-install), instead of committing an intent missing it and
+//     verifying after. The helper must pass RequireWorkspaceKey, and a pre-commit
+//     install error rolls the registry row back (live-add path: no reap/restart).
 // ---------------------------------------------------------------------------
 
-func TestAutoRegisterSerena_StaleSkip_NotInIntent_RollsBack(t *testing.T) {
+func TestAutoRegisterSerena_StaleSkip_RequireWorkspaceKeyDrop_RollsBack(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
-	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
-		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil // install "succeeds"
+	// The real InstallParsedManifest refuses to write an intent missing the required
+	// workspace; the mock asserts the helper passes the key and simulates that
+	// pre-commit error. The helper treats it like any install failure → failPreCommit
+	// rolls our row back. On the live-add path (default env) there is no reap, so no
+	// recovery-restart (the introduce-path recovery is covered by
+	// TestAutoRegisterSerena_Introduce_InstallFailsAfterReap_RecoversAndRollsBack).
+	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
+		if opts.RequireWorkspaceKey == "" {
+			t.Fatalf("auto-register must pass a non-empty RequireWorkspaceKey so a stale drop fails pre-commit")
+		}
+		return "", fmt.Errorf("InstallParsedManifest: required workspace key %q is not present in the merged supervisor intent (its directory may have been removed mid-install); refusing to commit an intent that drops it", opts.RequireWorkspaceKey)
 	})
 	stubAutoRegisterReadiness(t, func(int, time.Duration) error {
-		t.Fatalf("readiness must not run when the fan-out verify fails pre-commit")
+		t.Fatalf("readiness must not run when the install fails pre-commit")
 		return nil
 	})
-	// The committed intent does NOT carry our daemon.
-	prevVerify := autoRegisterVerifyFanOutFn
-	autoRegisterVerifyFanOutFn = func(string, string) (bool, error) { return false, nil }
-	t.Cleanup(func() { autoRegisterVerifyFanOutFn = prevVerify })
 
 	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
 	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
-	if err == nil || !strings.Contains(err.Error(), "not included in the committed supervisor intent") {
-		t.Fatalf("error = %v, want the stale-skip message", err)
+	if err == nil || !strings.Contains(err.Error(), "removed mid-install") {
+		t.Fatalf("error = %v, want the pre-commit stale-drop message", err)
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
 		t.Errorf("registry has %d rows after a stale skip, want 0 (pre-commit rollback)", len(rows))
@@ -1129,32 +1130,107 @@ func TestAutoRegisterSerena_LiveAddUndeterminedLiveness_Starts(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 24. Fan-out verify READ ERROR (bot PR #253 r5 P2) — the install committed; a
-//     transient verifier error must NOT roll back (the intent may own the daemon;
-//     rolling back would orphan it). The row is kept.
+// 24. Committed install keeps the row (bot PR #253 r6) — with the post-commit
+//     fan-out verify removed (RequireWorkspaceKey now guarantees presence
+//     PRE-commit), a successful install IS the commit point: the row is kept and
+//     the entry returned, no post-commit re-read. Replaces the old
+//     transient-verify-error-keeps-row test, whose branch no longer exists.
 // ---------------------------------------------------------------------------
 
-func TestAutoRegisterSerena_FanOutVerifyError_KeepsRow(t *testing.T) {
+func TestAutoRegisterSerena_CommittedInstall_KeepsRow(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
 		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil // install committed
 	})
 	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
 	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
-	prevVerify := autoRegisterVerifyFanOutFn
-	autoRegisterVerifyFanOutFn = func(string, string) (bool, error) { return false, errors.New("transient intent read error") }
-	t.Cleanup(func() { autoRegisterVerifyFanOutFn = prevVerify })
 
 	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
 	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
 	if err != nil {
-		t.Fatalf("a transient verify error must be treated as committed (no rollback): %v", err)
+		t.Fatalf("a committed install must succeed (no post-commit verify): %v", err)
 	}
 	if entry == nil {
 		t.Fatal("entry = nil, want the committed registration kept")
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
-		t.Errorf("registry has %d rows after a transient verify error, want 1 (row kept; the intent may own the daemon)", len(rows))
+		t.Errorf("registry has %d rows after a committed install, want 1 (row kept at the commit point)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 25. commitCtx survives a mid-cutover session cancel (bot PR #253 r6 #2) — the
+//     request ctx is cancelled DURING the install (a session DELETE/sweep after
+//     the 7c gate), but the post-commit START runs on commitCtx
+//     (context.WithoutCancel), so the recovery-critical start is NOT aborted and
+//     its ctx is not cancelled. A reaped-but-not-restarted half cutover would
+//     leave NO supervisor running.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_CommitCtxSurvivesSessionCancel_StartStillRuns(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })  // no reap; needStart only
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var startCalled int32
+	var startCtxCancelled bool
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not run (no supervisor)"); return nil },
+		func(sctx context.Context) error {
+			atomic.AddInt32(&startCalled, 1)
+			startCtxCancelled = sctx.Err() != nil
+			return nil
+		},
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		// A session DELETE/sweep cancels the REQUEST ctx mid-install, AFTER the 7c
+		// gate passed. The real install honors this at its commit hook (fix #1); here
+		// the mock simulates a committed install so we can assert the post-commit
+		// start still runs on commitCtx despite the cancel.
+		cancel()
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(ctx, root); err != nil {
+		t.Fatalf("post-commit start must run despite the request-ctx cancel: %v", err)
+	}
+	if atomic.LoadInt32(&startCalled) != 1 {
+		t.Fatalf("start called %d times, want 1 (commitCtx severs the request-ctx cancel)", startCalled)
+	}
+	if startCtxCancelled {
+		t.Error("post-commit start ran on a CANCELLED ctx — commitCtx (WithoutCancel) must not propagate the request cancel")
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d rows, want 1 (committed)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 26. HasSerenaDaemonForWorkspaceKey (bot PR #253 r6 #3) — the in-memory presence
+//     check InstallParsedManifest uses for RequireWorkspaceKey. Matches the
+//     canonical leading-backslash task name against "mcp-local-hub-serena-<key>".
+// ---------------------------------------------------------------------------
+
+func TestSupervisorIntentFile_HasSerenaDaemonForWorkspaceKey(t *testing.T) {
+	intent := &SupervisorIntentFile{Daemons: []SupervisorDaemon{
+		{TaskName: `\mcp-local-hub-serena-abc123`},
+		{TaskName: `\mcp-local-hub-memory-default`},
+	}}
+	if !intent.HasSerenaDaemonForWorkspaceKey("abc123") {
+		t.Error("want present for registered key abc123 (leading backslash trimmed)")
+	}
+	if intent.HasSerenaDaemonForWorkspaceKey("nope") {
+		t.Error("want absent for unregistered key nope")
+	}
+	if intent.HasSerenaDaemonForWorkspaceKey("memory-default") {
+		t.Error("memory-default is NOT a serena key — must not match a non-serena daemon")
+	}
+	var nilIntent *SupervisorIntentFile
+	if nilIntent.HasSerenaDaemonForWorkspaceKey("abc123") {
+		t.Error("nil intent must report absent")
 	}
 }
 

@@ -1060,31 +1060,41 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 		return nil
 	}
 
-	// bot PR #253 P2: validate the router session/version BEFORE auto-registering,
-	// so an expired/terminated or protocol-version-mismatched client cannot trigger
-	// registration (pool-port allocation + workspaces.yaml / supervisor-intent
+	// bot PR #253 P2/r6: validate the router session/version BEFORE auto-registering,
+	// so an expired/terminated/unknown or protocol-version-mismatched client cannot
+	// trigger registration (pool-port allocation + workspaces.yaml / supervisor-intent
 	// mutation). This mirrors the authoritative post-branch version gate; for a LIVE
 	// session peekVersionState is non-mutating, so that gate still re-validates and
-	// touches normally after the forward. An EXPIRED session is terminated here
-	// (expire-on-read) and rejected; a fresh path-only call (sessionID == "") has no
-	// router session to validate and proceeds (the legitimate first-call case).
+	// touches normally after the forward. A NON-EMPTY id that is EXPIRED (idle-swept on
+	// this read) OR ABSENT (minted here then DELETEd/swept — the entry is removed, so a
+	// re-read reads absent — or one this router never minted) is rejected here: a
+	// revoked/unknown session must not durably mutate the registry/intent. A genuine
+	// first-call uses an EMPTY id (skips this block) or a live minted session.
 	watchSession := false
 	if sessionID != "" {
 		sessionVersion, state := s.serenaRouterSessions.peekVersionState(sessionID)
-		if state == routerSessionExpired {
+		switch state {
+		case routerSessionExpired:
+			// Minted here, idle-swept on THIS read (expire-on-read): coordinate the
+			// cross-store unbind, then reject.
 			s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
 			writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "session terminated", nil)
 			return nil
-		}
-		if state == routerSessionLive {
+		case routerSessionAbsent:
+			// Minted-then-DELETEd (entry removed → re-read absent) OR never minted at
+			// this router. On the registration-MUTATION path, refuse — do NOT allocate a
+			// pool port / mutate registry+intent for a revoked/unknown session. (The main
+			// ROUTING handler still treats absent as a legacy/path-only caller for
+			// EXISTING workspaces; that leniency is for routing, NOT for registration.)
+			writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "session terminated", nil)
+			return nil
+		case routerSessionLive:
 			if cv := r.Header.Get("MCP-Protocol-Version"); cv != "" && cv != sessionVersion {
 				writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "protocol-version mismatch", nil)
 				return nil
 			}
 			// A live, minted router session: watch it for the duration of the
-			// (detached) register and abort if it is terminated mid-flight. A
-			// routerSessionAbsent id (a legacy / path-only caller that never minted
-			// a router session) is NOT watched — it has no session to terminate.
+			// (detached) register and abort if it is terminated mid-flight.
 			watchSession = true
 		}
 	}

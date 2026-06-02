@@ -54,6 +54,17 @@ type InstallParsedManifestOpts struct {
 	// / E.2 auto-register).
 	Workspaces []WorkspaceEntry
 	DryRun     bool
+	// RequireWorkspaceKey, when non-empty, makes the install FAIL PRE-COMMIT
+	// (before the supervisor-intent write) if the merged intent does not carry a
+	// serena per-workspace daemon row for this key — i.e. buildMergedSupervisorIntent's
+	// stale-row filter dropped it (its dir vanished between the caller's registry
+	// Save and this build). serena auto-register-on-miss passes its triggering
+	// workspace key here so a dropped workspace fails BEFORE the write, leaving the
+	// prior intent intact on disk for the caller's recovery-restart (bot PR #253 r6
+	// P2) — instead of committing an intent that drops it, which on the FIRST
+	// introduce would also replace the legacy serena rows with nothing. Empty = no
+	// requirement (legacy/migrate callers that legitimately install a filtered set).
+	RequireWorkspaceKey string
 }
 
 // InstallParsedManifest installs a pre-parsed manifest in-process and
@@ -248,6 +259,20 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", err
 	}
 
+	// Required-workspace pre-commit guard (bot PR #253 r6 P2). A caller that
+	// auto-registers a SPECIFIC triggering workspace passes opts.RequireWorkspaceKey.
+	// If buildMergedSupervisorIntent's stale-row filter dropped that workspace (its
+	// dir vanished between the caller's registry Save and this build), committing
+	// would write an intent MISSING the triggering daemon — and on the FIRST introduce
+	// also REPLACE the legacy serena rows with nothing, so the caller's recovery-restart
+	// would reconcile an emptied intent. Fail HERE, before the §7.1 gate and the intent
+	// write, so the prior intent stays intact on disk and the recovery-restart restores
+	// it. This is the pre-commit form the bot asked for (vs a post-commit restore). Empty
+	// key = no requirement.
+	if opts.RequireWorkspaceKey != "" && !desiredIntent.HasSerenaDaemonForWorkspaceKey(opts.RequireWorkspaceKey) {
+		return "", fmt.Errorf("InstallParsedManifest: required workspace key %q is not present in the merged supervisor intent for %q (its directory may have been removed mid-install); refusing to commit an intent that drops it", opts.RequireWorkspaceKey, m.Name)
+	}
+
 	// §7.1 spec-bearing supervisor-intent write gate (bot PR #246 r2 P2).
 	// desiredIntent may carry runtime_spec rows (materializeSerenaRuntimeSpec).
 	// An ALREADY-RUNNING supervisor MAY be an OLD binary whose
@@ -329,6 +354,17 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// write + rollback restore run LOCK-FREE because the supervisor-intent
 	// flock is already held by this function (see FIX 1 above).
 	var intermediate intentWriteStep = func() (func(), error) {
+		// The supervisor-intent write below is the irreversible commit point. Honor a
+		// caller cancellation HERE — the last instant before the write — so serena
+		// auto-register's session watcher (which cancels ctx on a mid-register session
+		// DELETE/idle-sweep) prevents a terminated session from landing a committed
+		// daemon row (bot PR #253 r6 P2). For a DaemonTemplate plan executeInstallTo has
+		// run no other mutation (zero scheduler tasks), so this IS the true pre-commit
+		// gate; the caller's failPreCommit then rolls the registry row back (and, if it
+		// reaped, recovery-restarts on the still-intact prior intent).
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
+		}
 		if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
 			return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
 		}
