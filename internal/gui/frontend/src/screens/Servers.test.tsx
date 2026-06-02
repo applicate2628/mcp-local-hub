@@ -340,6 +340,15 @@ describe("ServersScreen — symlinked-config tooltip (2026-05-19)", () => {
     expect(cell.getAttribute("title")).toContain(
       "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK",
     );
+    // 2026-06-03 opt-in-qualification fix (Codex PR #258 P3): the opt-in
+    // flips a symlink to "ok" ONLY when its target is a regular file
+    // (probeClientConfigPresence rst.Mode().IsRegular()). A dangling /
+    // directory-target symlink stays error-symlink even with the env var
+    // set, so the tooltip must qualify the opt-in on a regular-file
+    // target rather than presenting it as an unconditional remedy.
+    expect(cell.getAttribute("title")).toContain(
+      "if the symlink points at a regular file",
+    );
     // Disabled because in default/strict mode the symlinked config
     // can't be written through.
     expect((cell as HTMLInputElement).disabled).toBe(true);

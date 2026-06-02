@@ -822,8 +822,16 @@ function CellView(props: {
     // claiming an unconditional refusal. Strict mode
     // (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides the opt-in and still
     // refuses — the "single-user host" phrasing covers that.
+    // 2026-06-03 opt-in-qualification fix: the opt-in flips a symlink to
+    // "ok" in probeClientConfigPresence ONLY when os.Stat resolves to a
+    // REGULAR file (scan.go ~L154: rst.Mode().IsRegular()). A DANGLING
+    // symlink, or one pointing at a directory / special file, stays
+    // "error-symlink" even with the env var set, so the opt-in clause is
+    // qualified "if the symlink points at a regular file"; the
+    // replace/edit fallbacks remain the path for dangling/non-regular
+    // targets.
     // work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md.
-    title = `${client}'s MCP config file is a symlink. By default mcphub refuses symlinked client configs (confused-deputy protection, PR #209). On a single-user host you can opt in: set MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 and refresh. Otherwise replace the symlink with a real file, or edit the symlink target's config directly.`;
+    title = `${client}'s MCP config file is a symlink. By default mcphub refuses symlinked client configs (confused-deputy protection, PR #209). On a single-user host, if the symlink points at a regular file, you can opt in: set MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 and refresh. Otherwise (e.g. a dangling symlink or one pointing at a directory) replace the symlink with a real file, or edit the symlink target's config directly.`;
   }
   // PR #22 retry-queue fix: cell with a retained failure from the
   // last applyChanges renders a red outline so the user sees the
