@@ -120,26 +120,58 @@ func TestDaemonSessionStore_InFlightPlaceholderRejectsDuplicate(t *testing.T) {
 	}
 }
 
-// TestDaemonSessionStore_CompletedBindingRefcount: the reservation refcount still
-// protects a COMPLETED binding during a concurrent workspace-switch re-handshake
-// (Finding 1, round 1, retained for completed bindings). Two reserveSlot calls on
-// a completed binding both proceed and bump the refcount; one release (a failed
-// switch) does NOT drop the live binding.
-func TestDaemonSessionStore_CompletedBindingRefcount(t *testing.T) {
+// TestDaemonSessionStore_WorkspaceSwitchSerialized covers bot PR #251 r3 P1: a
+// workspace-switch re-handshake on a COMPLETED binding reserves it (the FIRST
+// switch proceeds); a CONCURRENT second switch for the same id finds reservations>0
+// and is rejected as in-flight — it must NOT mint a second upstream session. After
+// the first switch releases, the next switch may proceed.
+func TestDaemonSessionStore_WorkspaceSwitchSerialized(t *testing.T) {
 	st := &daemonSessionStore{}
-	const id = "completed-id"
+	const id = "switch-id"
 	if !st.store(id, "alpha", "daemon-alpha", defaultProtocolVersion) {
 		t.Fatalf("initial store returned false")
 	}
+	// First switch (lookup missed on a different wsKey) reserves the completed binding.
 	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
-		t.Fatalf("reserveSlot on a completed binding = (proceed=%v, inFlight=%v); want (true, false)", proceed, inFlight)
+		t.Fatalf("first switch reserveSlot = (proceed=%v, inFlight=%v); want (true, false)", proceed, inFlight)
 	}
-	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
-		t.Fatalf("second reserveSlot on a completed binding = (proceed=%v, inFlight=%v); want (true, false)", proceed, inFlight)
+	// A CONCURRENT second switch for the same id is in-flight-suppressed.
+	if proceed, inFlight := st.reserveSlot(id); proceed || !inFlight {
+		t.Fatalf("concurrent second switch = (proceed=%v, inFlight=%v); want (false, true) — one switch handshake at a time", proceed, inFlight)
 	}
-	st.releaseReservation(id) // one switch handshake failed
+	// The first switch fails and releases; the completed binding survives and a
+	// fresh switch may now proceed.
+	st.releaseReservation(id)
 	if dsid, _, ok := st.lookup(id, "alpha"); !ok || dsid != "daemon-alpha" {
-		t.Fatalf("completed binding dropped after a partial release; lookup=(%q,%v)", dsid, ok)
+		t.Fatalf("completed binding dropped after the in-flight switch released; lookup=(%q,%v)", dsid, ok)
+	}
+	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
+		t.Fatalf("switch after release = (proceed=%v, inFlight=%v); want (true, false) — serialization frees up", proceed, inFlight)
+	}
+}
+
+// TestDaemonSessionStore_SweepSkipsReservedBinding covers bot PR #251 r3 P2: the
+// periodic cleanup sweep must NOT drop a binding with an active reservation (an
+// in-flight workspace switch on a near-expired completed binding) even when its
+// lastSeen is past the TTL — mirroring reclaimExpiredLocked.
+func TestDaemonSessionStore_SweepSkipsReservedBinding(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	clk := base
+	st := &daemonSessionStore{clock: func() time.Time { return clk }}
+	const id = "near-expired-switch"
+	if !st.store(id, "alpha", "daemon-alpha", defaultProtocolVersion) {
+		t.Fatalf("store returned false")
+	}
+	if proceed, _ := st.reserveSlot(id); !proceed { // a workspace-switch handshake reserves it
+		t.Fatalf("switch reserveSlot returned false")
+	}
+	// The hourly sweep runs with the clock past the TTL (the binding's lastSeen is
+	// stale because the wsKey miss did not refresh it).
+	if swept := st.cleanup(base.Add(daemonSessionTTL+time.Hour), daemonSessionTTL); swept != 0 {
+		t.Errorf("sweep dropped %d bindings; want 0 (the reserved in-flight switch must survive)", swept)
+	}
+	if _, ok := st.bindings[id]; !ok {
+		t.Fatalf("the reserved binding was swept; it must survive while a reservation is held")
 	}
 }
 

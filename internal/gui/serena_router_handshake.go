@@ -359,21 +359,26 @@ func (st *daemonSessionStore) reserveSlot(clientSessionID string) (proceed bool,
 	defer st.mu.Unlock()
 	st.ensureInitLocked()
 	if b, ok := st.bindings[clientSessionID]; ok && b != nil {
-		// bot PR #251 r2 P1 (cap-bypass via same-id burst): an existing IN-FLIGHT
-		// placeholder (daemonSessionID == "") means a concurrent FIRST handshake for
-		// this same fresh id is already running. A second caller must NOT proceed to
-		// establishDaemonSession — that would mint a SECOND upstream daemon session
-		// for one local slot, letting a single reused id bypass the cap entirely.
-		// Signal in-flight so the caller rejects with a retry; the retry hits the
-		// now-COMPLETED binding via lookup and reuses its daemon session.
-		if b.daemonSessionID == "" {
+		// An in-flight handshake for this id is already running — reject the duplicate
+		// so it does not mint a SECOND upstream daemon session for the one local slot,
+		// which is how a single reused id bypasses the cap. Two cases count as
+		// in-flight:
+		//   - a PLACEHOLDER (daemonSessionID == "") — a concurrent FIRST handshake for
+		//     this fresh id (bot PR #251 r2 P1); OR
+		//   - a COMPLETED binding with an active reservation (reservations > 0) — a
+		//     workspace-switch re-handshake for this id is ALREADY running (bot PR #251
+		//     r3 P1): concurrent same-id/different-wsKey requests all miss lookup and
+		//     would otherwise each mint an upstream session, overwriting locally and
+		//     orphaning all but the last. Serialize them — the second waits/retries.
+		// The caller rejects with errDaemonSessionHandshakeInFlight; the client's retry
+		// hits the now-COMPLETED, unreserved binding via lookup (or this reserve path).
+		if b.daemonSessionID == "" || b.reservations > 0 {
 			return false, true
 		}
-		// A COMPLETED binding (daemonSessionID != "", e.g. a workspace-switch
-		// re-handshake whose lookup missed on wsKey) IS reusable. Bump the refcount
-		// (Finding 1, round 1) so a concurrent holder's releaseReservation cannot
-		// drop the binding mid-flight, and proceed. The matching releaseReservation
-		// decrements it after this handshake stores.
+		// A COMPLETED binding at rest (reservations == 0 — a workspace switch whose
+		// lookup missed on wsKey): the FIRST switch proceeds. Reserve it so a concurrent
+		// switch is suppressed above and the binding survives reclaim/sweep until this
+		// handshake stores; the matching releaseReservation decrements it back to 0.
 		b.reservations++
 		st.promoteLocked(clientSessionID)
 		return true, false
@@ -461,7 +466,22 @@ func (st *daemonSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 	cutoff := now.Add(-ttl)
 	n := 0
 	for id, b := range st.bindings {
-		if b == nil || !b.lastSeen.After(cutoff) {
+		if b == nil {
+			st.removeLocked(id)
+			n++
+			continue
+		}
+		// bot PR #251 r3 P2: never sweep an IN-FLIGHT handshake. A placeholder
+		// (daemonSessionID == "") or a binding with an active reservation
+		// (reservations > 0 — e.g. a workspace-switch re-handshake on a near-expired
+		// completed binding whose lastSeen was not refreshed on the wsKey miss) is NOT
+		// idle; sweeping it would free the slot for another fresh session and 429 the
+		// in-flight handshake's store, defeating the reservation protection. Mirror
+		// reclaimExpiredLocked's guard.
+		if b.daemonSessionID == "" || b.reservations > 0 {
+			continue
+		}
+		if !b.lastSeen.After(cutoff) {
 			st.removeLocked(id)
 			n++
 		}
