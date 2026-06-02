@@ -129,14 +129,19 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				})
 				continue
 			}
-			if len(backups) == 0 {
-				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client,
-					Err: "no backup found (migration may never have run on this machine)",
-				})
-				continue
+			// Do NOT early-fail on an empty current-codename backup set: the
+			// legacy-prefix and RemoveEntry fallbacks below MUST still run.
+			// A cross-rename host may have ONLY a legacy mcp-sync/phase2
+			// backup (no `bak-mcp-local-hub-*` was ever written on this
+			// machine), or the entry was mcphub-installed-from-scratch with
+			// the managed-entries marker as the only ownership evidence. An
+			// empty set simply makes the restoreIfEligible loop a no-op
+			// (restoredFrom stays ""); tryLegacyPrefixRestore then
+			// tryMarkerOrBackfillRemove decide the outcome. (bot PR #257 P2)
+			latestBackupPath := ""
+			if len(backups) > 0 {
+				latestBackupPath = backups[0]
 			}
-			latestBackupPath := backups[0]
 			// restoreIfEligible returns nil on success, or one of
 			// three error classes the iteration treats as "skip this
 			// backup, try older":
@@ -181,24 +186,41 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				err = rerr
 				break
 			}
-			// If iteration exhausted every backup without a restore
-			// (all skipped via ErrBackupEntryAlreadyMigrated or
-			// errBackupMissingEntry), there is no pre-hub form to
-			// recover. Fall back to marker+backfill+RemoveEntry —
-			// the ONLY case where this is safe is when positive
-			// ownership evidence proves mcphub installed the entry
-			// AND no backup captures a pre-hub shape (the entry
-			// genuinely never existed in pre-hub form). The
-			// iteration above guarantees the "no pre-hub form
-			// available" precondition; the marker check guarantees
-			// the "mcphub installed it" precondition. Together they
-			// produce the strict subset of cases where RemoveEntry
-			// is the correct rollback target.
+			// If iteration over every mcp-local-hub backup exhausted
+			// without a restore (all skipped via
+			// ErrBackupEntryAlreadyMigrated or errBackupMissingEntry),
+			// there is no pre-hub form among the current-codename
+			// backups. Before falling back to deletion, consult the
+			// LEGACY-codename backups (pre-rename mcp-sync, phase2,
+			// plain/underscore-date install artifacts). A user who
+			// upgraded across the April-2026 mcp-sync→mcp-local-hub
+			// rename may have their only pre-hub snapshot there — the
+			// originally-reported bug case. Restoring it is strictly
+			// better than deleting the entry.
+			sawLegacy := false
+			if restoredFrom == "" && err == nil {
+				sawLegacy, err = tryLegacyPrefixRestore(adapter, server, &restoredFrom)
+			}
+			// If neither current-codename nor legacy-codename backups
+			// hold a pre-hub form, fall back to marker+backfill+
+			// RemoveEntry — the ONLY case where deletion is safe is
+			// when positive ownership evidence proves mcphub installed
+			// the entry AND no backup (current OR legacy) captures a
+			// pre-hub shape (the entry genuinely never existed in
+			// pre-hub form). The two iterations above guarantee the
+			// "no pre-hub form available" precondition; the marker
+			// check guarantees the "mcphub installed it" precondition.
+			// allowURLBackfill = len(backups) > 0 || sawLegacy: a URL-backfill
+			// RemoveEntry is corroborated only when mcphub demonstrably ran on
+			// this host (a current OR legacy backup file exists). With ZERO
+			// backups of ANY codename the URL match is uncorroborated and must
+			// fail closed (bot PR #257 r2/r3).
 			if restoredFrom == "" && err == nil {
 				err = tryMarkerOrBackfillRemove(
 					adapter, binding, m, server,
 					fmt.Sprintf("no backup (of %d candidates, newest %s) contains %q in pre-hub form — last skip: %v",
 						len(backups), latestBackupPath, server, lastSkipReason),
+					len(backups) > 0 || sawLegacy,
 					&restoredFrom,
 				)
 			}
@@ -222,33 +244,33 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 // candidate with the entry in pre-hub form. Two precondition
 // guarantees from the caller's iteration:
 //
-//   1. Every backup (timestamped + sentinel) either lacks the entry
-//      entirely OR holds it in hub-managed form.
-//   2. The live config still has the entry in hub-managed form
-//      (otherwise demigrate would have nothing to roll back).
+//  1. Every backup (timestamped + sentinel) either lacks the entry
+//     entirely OR holds it in hub-managed form.
+//  2. The live config still has the entry in hub-managed form
+//     (otherwise demigrate would have nothing to roll back).
 //
 // Under both preconditions there is no recoverable pre-hub state,
 // so the rollback target is one of:
 //
-//   a. RemoveEntry — when positive ownership evidence shows mcphub
-//      installed the entry (marker file says so, or backfill helper
-//      confirms the live URL exactly matches the manifest binding).
-//   b. Fail-closed — otherwise, the entry MIGHT be user-owned and
-//      indistinguishable from a mcphub install via these signals;
-//      refuse to delete it. Operator workaround: edit the config
-//      manually.
+//	a. RemoveEntry — when positive ownership evidence shows mcphub
+//	   installed the entry (marker file says so, or backfill helper
+//	   confirms the live URL exactly matches the manifest binding).
+//	b. Fail-closed — otherwise, the entry MIGHT be user-owned and
+//	   indistinguishable from a mcphub install via these signals;
+//	   refuse to delete it. Operator workaround: edit the config
+//	   manually.
 //
 // Evidence sources, in order:
 //
-//   1. Managed-entries marker (PR #187). Populated by migrate.go
-//      AFTER successful adapter.AddEntry. A row for (client, server)
-//      means mcphub installed this entry.
-//   2. Backfill (PR #186 r2 / #192 r6). For v0.4.x users whose
-//      entries predate the marker subsystem: when the live entry's
-//      URL exactly equals what mcphub would have written
-//      (http://localhost:<daemon.port><url_path> or 127.0.0.1 / [::1]
-//      / Antigravity relay shape), record the marker inline and
-//      treat as mcphub-owned.
+//  1. Managed-entries marker (PR #187). Populated by migrate.go
+//     AFTER successful adapter.AddEntry. A row for (client, server)
+//     means mcphub installed this entry.
+//  2. Backfill (PR #186 r2 / #192 r6). For v0.4.x users whose
+//     entries predate the marker subsystem: when the live entry's
+//     URL exactly equals what mcphub would have written
+//     (http://localhost:<daemon.port><url_path> or 127.0.0.1 / [::1]
+//     / Antigravity relay shape), record the marker inline and
+//     treat as mcphub-owned.
 //
 // On RemoveEntry success the marker row is forgotten (best-effort;
 // stale rows self-heal on next migrate).
@@ -263,13 +285,21 @@ func tryMarkerOrBackfillRemove(
 	m *config.ServerManifest,
 	server string,
 	reasonPrefix string,
+	allowURLBackfill bool,
 	restoredFrom *string,
 ) error {
 	managed, mErr := IsManagedEntry(binding.Client, server)
-	if !managed && mErr == nil {
-		// v0.4.x upgrade backfill: existing users have hub-form
-		// entries that were never marked (B4 marker introduced in
-		// PR #187 only marks fresh migrates).
+	if !managed && mErr == nil && allowURLBackfill {
+		// v0.4.x upgrade backfill: existing users have hub-form entries
+		// that were never marked (B4 marker introduced in PR #187 only
+		// marks fresh migrates). GATED on allowURLBackfill: when NO backup
+		// exists at all (current-codename set empty), the URL match is
+		// UNCORROBORATED — it could be a user's own localhost MCP server
+		// that coincidentally matches the manifest port/path, and deleting
+		// it would be data loss. With zero backups we require an ACTUAL
+		// marker (IsManagedEntry) and refuse URL-backfill alone. (bot PR
+		// #257 r2 P1/P2 — restores the fail-closed no-backup contract that
+		// removing the len(backups)==0 early-return reopened.)
 		if backfilled := backfillMarkerIfEntryMatchesManifest(adapter, server, binding, m); backfilled {
 			managed = true
 		}
@@ -309,4 +339,75 @@ func tryMarkerOrBackfillRemove(
 		*restoredFrom = "(no pre-hub form in any backup; marker confirmed mcphub-managed; removed entry from client config)"
 		return nil
 	}
+}
+
+// tryLegacyPrefixRestore iterates this client's LEGACY-codename backups
+// (pre-rename mcp-sync, phase2, plain/underscore-date install artifacts,
+// in clients.LegacyBackupsNewestFirst bucket+recency order) looking for
+// the first backup that holds `server` in its true PRE-HUB (direct/stdio)
+// form, and restores from THAT backup. It is the bridge for operators who
+// upgraded across the April-2026 mcp-sync→mcp-local-hub rename, whose only
+// pre-hub snapshot may live under a legacy prefix.
+//
+// Destructive-safety (the load-bearing PR #218 invariant): a legacy
+// backup is used ONLY when BackupContainsEntry is true AND
+// BackupEntryIsHubManaged is false — i.e. it positively contains the
+// entry in pre-hub form. Backups that LACK the entry are SKIPPED (never
+// allowed to trigger RestoreEntryFromBackup's delete-on-absent branch),
+// and backups that hold the entry in hub-managed form are SKIPPED (no
+// pre-hub state). So this path can only ever RESTORE a pre-hub form; it
+// can never delete an entry. Deletion stays exclusively in
+// tryMarkerOrBackfillRemove, which runs only after this returns without
+// a restore.
+//
+// On success, *restoredFrom is set to the chosen backup path and nil is
+// returned. When no legacy backup holds a pre-hub form, *restoredFrom is
+// left untouched and nil is returned (caller proceeds to the RemoveEntry
+// fallback). A non-nil error is returned only for a hard filesystem
+// failure enumerating legacy backups or an unreadable backup that
+// positively matched the contains+pre-hub gate.
+func tryLegacyPrefixRestore(adapter clients.Client, server string, restoredFrom *string) (sawLegacy bool, err error) {
+	legacy, lerr := clients.LegacyBackupsNewestFirst(adapter.ConfigPath(), adapter.Name())
+	if lerr != nil {
+		return false, fmt.Errorf("enumerate legacy-codename backups: %w", lerr)
+	}
+	// sawLegacy records that legacy backup FILES exist on this host, which
+	// proves mcphub (under the old mcp-sync codename) ran here. The caller
+	// uses it to corroborate a URL-backfill RemoveEntry: a host with NO backup
+	// of ANY codename has never run mcphub, so an uncorroborated URL match
+	// there must fail closed; a legacy-only host HAS run mcphub and may
+	// RemoveEntry once no pre-hub form is found. (bot PR #257 r3)
+	sawLegacy = len(legacy) > 0
+	for _, candidate := range legacy {
+		has, hErr := adapter.BackupContainsEntry(candidate, server)
+		if hErr != nil {
+			// Unreadable/malformed legacy backup: we CANNOT prove it lacks a
+			// pre-hub form of the entry, so we must NOT silently skip it and
+			// let the caller fall through to a marker/backfill RemoveEntry
+			// (that would delete an entry whose only pre-hub snapshot might
+			// live in THIS very backup). Fail closed. (bot PR #257 r2)
+			return sawLegacy, fmt.Errorf("legacy-codename backup %s unreadable (cannot prove it lacks %q in pre-hub form): %w", candidate, server, hErr)
+		}
+		if !has {
+			continue // legacy backup predates the entry — never delete from here
+		}
+		hubManaged, mErr := adapter.BackupEntryIsHubManaged(candidate, server)
+		if mErr != nil {
+			// Entry IS present but its shape is undeterminable — it MIGHT be
+			// a pre-hub form. Fail closed rather than skip-then-delete.
+			return sawLegacy, fmt.Errorf("legacy-codename backup %s: cannot determine whether %q is hub-managed: %w", candidate, server, mErr)
+		}
+		if hubManaged {
+			continue // legacy backup already hub-managed — no pre-hub state here
+		}
+		// Positively a pre-hub form. RestoreEntryFromBackup takes its
+		// restore branch (entry present) and cannot hit
+		// ErrBackupEntryAlreadyMigrated (entry is not hub-managed).
+		if rErr := adapter.RestoreEntryFromBackup(candidate, server); rErr != nil {
+			return sawLegacy, fmt.Errorf("restore %q from legacy-codename backup %s: %w", server, candidate, rErr)
+		}
+		*restoredFrom = candidate
+		return sawLegacy, nil
+	}
+	return sawLegacy, nil
 }

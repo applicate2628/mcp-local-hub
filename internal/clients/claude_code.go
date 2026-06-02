@@ -214,10 +214,8 @@ func (c *claudeCode) restoreEntryFromBackup(backupPath, name string, allowHubEnt
 			// pre-reconcile legacy hub entry verbatim.
 			if !allowHubEntry {
 				if rawMap, ok := backupEntry.(map[string]any); ok {
-					if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
-						if _, hasCmd := rawMap["command"]; !hasCmd {
-							return ErrBackupEntryAlreadyMigrated
-						}
+					if isHubURLShapeEntry(rawMap, "url") {
+						return ErrBackupEntryAlreadyMigrated
 					}
 				}
 			}
@@ -277,4 +275,31 @@ func (c *claudeCode) BackupContainsEntry(backupPath, name string) (bool, error) 
 	// refuses rather than silently writes malformed data.
 	entry, ok := servers[name].(map[string]any)
 	return ok && entry != nil, nil
+}
+
+// BackupEntryIsHubManaged reports whether mcpServers[name] in the
+// .claude.json backup at backupPath is in claude-code's hub-HTTP shape
+// (loopback `url` present, `command` absent). See
+// Client.BackupEntryIsHubManaged.
+func (c *claudeCode) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	entry, ok := servers[name].(map[string]any)
+	if !ok || entry == nil {
+		return false, nil
+	}
+	return isHubURLShapeEntry(entry, "url"), nil
 }

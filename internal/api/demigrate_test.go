@@ -493,7 +493,6 @@ client_bindings:
 	}
 }
 
-
 func TestDemigrate_MarkerPreseededButLiveURLMismatch_FailsClosed(t *testing.T) {
 	// Regression guard: a stale marker must NOT be sufficient to
 	// delete an entry when the current live shape no longer matches
@@ -1020,6 +1019,13 @@ func TestDemigrate_NoBackupReportsFailure(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
+	// Initialize the managed-entries store so IsManagedEntry returns
+	// (false, nil) rather than erroring — this exercises the URL-backfill
+	// path that the no-backup fail-closed gate must block (bot PR #257 r2).
+	// The live URL below exactly matches the manifest (localhost:9200/mcp),
+	// so without the gate the backfill would confirm ownership and DELETE
+	// this potentially-user-owned entry on a machine that has no backup.
+	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
