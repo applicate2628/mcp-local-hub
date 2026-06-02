@@ -216,6 +216,7 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 					adapter, binding, m, server,
 					fmt.Sprintf("no backup (of %d candidates, newest %s) contains %q in pre-hub form — last skip: %v",
 						len(backups), latestBackupPath, server, lastSkipReason),
+					len(backups) > 0,
 					&restoredFrom,
 				)
 			}
@@ -280,13 +281,21 @@ func tryMarkerOrBackfillRemove(
 	m *config.ServerManifest,
 	server string,
 	reasonPrefix string,
+	allowURLBackfill bool,
 	restoredFrom *string,
 ) error {
 	managed, mErr := IsManagedEntry(binding.Client, server)
-	if !managed && mErr == nil {
-		// v0.4.x upgrade backfill: existing users have hub-form
-		// entries that were never marked (B4 marker introduced in
-		// PR #187 only marks fresh migrates).
+	if !managed && mErr == nil && allowURLBackfill {
+		// v0.4.x upgrade backfill: existing users have hub-form entries
+		// that were never marked (B4 marker introduced in PR #187 only
+		// marks fresh migrates). GATED on allowURLBackfill: when NO backup
+		// exists at all (current-codename set empty), the URL match is
+		// UNCORROBORATED — it could be a user's own localhost MCP server
+		// that coincidentally matches the manifest port/path, and deleting
+		// it would be data loss. With zero backups we require an ACTUAL
+		// marker (IsManagedEntry) and refuse URL-backfill alone. (bot PR
+		// #257 r2 P1/P2 — restores the fail-closed no-backup contract that
+		// removing the len(backups)==0 early-return reopened.)
 		if backfilled := backfillMarkerIfEntryMatchesManifest(adapter, server, binding, m); backfilled {
 			managed = true
 		}
@@ -361,17 +370,21 @@ func tryLegacyPrefixRestore(adapter clients.Client, server string, restoredFrom 
 	for _, candidate := range legacy {
 		has, hErr := adapter.BackupContainsEntry(candidate, server)
 		if hErr != nil {
-			// Unreadable/malformed legacy backup — skip it rather than
-			// failing the whole demigrate; a later legacy candidate or
-			// the RemoveEntry fallback may still resolve it.
-			continue
+			// Unreadable/malformed legacy backup: we CANNOT prove it lacks a
+			// pre-hub form of the entry, so we must NOT silently skip it and
+			// let the caller fall through to a marker/backfill RemoveEntry
+			// (that would delete an entry whose only pre-hub snapshot might
+			// live in THIS very backup). Fail closed. (bot PR #257 r2)
+			return fmt.Errorf("legacy-codename backup %s unreadable (cannot prove it lacks %q in pre-hub form): %w", candidate, server, hErr)
 		}
 		if !has {
 			continue // legacy backup predates the entry — never delete from here
 		}
 		hubManaged, mErr := adapter.BackupEntryIsHubManaged(candidate, server)
 		if mErr != nil {
-			continue
+			// Entry IS present but its shape is undeterminable — it MIGHT be
+			// a pre-hub form. Fail closed rather than skip-then-delete.
+			return fmt.Errorf("legacy-codename backup %s: cannot determine whether %q is hub-managed: %w", candidate, server, mErr)
 		}
 		if hubManaged {
 			continue // legacy backup already hub-managed — no pre-hub state here

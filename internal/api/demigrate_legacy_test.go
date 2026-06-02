@@ -447,3 +447,59 @@ func TestDemigrate_LegacyPrefixFallback_NoCurrentBackup(t *testing.T) {
 		t.Errorf("memory not restored from legacy backup; got %+v", mem)
 	}
 }
+
+// TestDemigrate_UnreadableLegacyBackup_FailsClosed is the bot PR #257 r2 guard:
+// an unreadable/malformed legacy backup must NOT be silently skipped (which
+// would let the flow fall through to marker/backfill RemoveEntry and delete an
+// entry whose only pre-hub snapshot might be in THAT very backup). It must fail
+// closed — report Failed, leave the live entry intact.
+func TestDemigrate_UnreadableLegacyBackup_FailsClosed(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+
+	claudePath := filepath.Join(tmp, ".claude.json")
+	// Live: hub-managed.
+	if err := os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Current-codename backup: hub-managed (no pre-hub form) → the current
+	// iteration restores nothing and the legacy iteration is reached.
+	if err := os.WriteFile(claudePath+".bak-mcp-local-hub-20260520-130000", []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy backup: MALFORMED JSON → BackupContainsEntry errors → must fail
+	// closed, NOT skip-then-delete.
+	if err := os.WriteFile(claudePath+".bak-2026-04-15-mcp-sync", []byte(`{not valid json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Marker confirms ownership — so WITHOUT the fail-closed guard the
+	// malformed legacy backup would be skipped and the entry deleted.
+	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	manifestDir := t.TempDir()
+	writeMemoryManifest(t, manifestDir)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 Failed (unreadable legacy backup must fail closed); got failed=%+v restored=%+v", report.Failed, report.Restored)
+	}
+	live, _ := os.ReadFile(claudePath)
+	if !strings.Contains(string(live), `"memory"`) {
+		t.Errorf("DESTRUCTIVE: memory deleted despite an unreadable legacy backup that might hold its pre-hub form; live=%s", live)
+	}
+}
