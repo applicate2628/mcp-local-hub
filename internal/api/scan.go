@@ -90,30 +90,34 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		//     when readJSON sees a non-regular target)
 		//   - dangling symlink → "error-symlink" (round 4; init button +
 		//     secure-create refusal lose otherwise)
-		//   - any symlink, default OR strict mode → "error-symlink"
-		//     (post-PR #209: the secure-write pipeline now refuses
-		//     pre-existing symlinks in ALL modes —
-		//     `resolveSymlinkForSecureWrite` was removed from
-		//     `secureWriteWithOperatorOpt`. Reporting "ok" while writes
-		//     deterministically fail with symlink-refuse errors is the
-		//     exact UX trap bot codex-r7 flagged: user sees a green
-		//     matrix column, clicks Apply, every write fails. Aligning
-		//     presence with the active write contract restores invariant
-		//     "ok = write will succeed". Dotfile-symlink setups that used
-		//     to rely on default-mode resolve-to-target are now
-		//     unsupported by design — the security boundary closure in
-		//     PR #209 traded that path for confused-deputy integrity
-		//     protection).
+		//   - symlink-to-regular-file in DEFAULT or STRICT mode →
+		//     "error-symlink". Post-PR #209 the secure-write pipeline
+		//     refuses pre-existing symlinks by default
+		//     (`resolveSymlinkForSecureWrite` was removed from
+		//     `secureWriteWithOperatorOpt`), so reporting "ok" while a
+		//     write would fail with a symlink-refuse error is the UX trap
+		//     bot codex-r7 flagged: green column, click Apply, write
+		//     fails. NOT unconditional, though — the
+		//     OperatorAllowsClientConfigSymlink() branch BELOW reports
+		//     "ok" for a symlink-to-regular-file when the operator has
+		//     opted in via MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK on a
+		//     non-strict host (under that env, secureWriteWithOperatorOpt
+		//     resolves the symlink before writing, so "ok = write will
+		//     succeed" still holds). Strict mode
+		//     (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides the opt-in and
+		//     keeps the refusal — corp-managed hosts stay hardened.
 		//
-		// The symlink-refusal branch returns a DISTINCT status
-		// ("error-symlink") from the generic stat/wrong-shape failure
-		// ("error") so the Servers matrix can tell the operator their
-		// dotfile-symlink setup is refused by design (replace the
-		// symlink / edit the target) instead of the misleading "stat
-		// error — check permissions and disk health" diagnostic
+		// The "error-symlink" status is therefore the DEFAULT/STRICT-mode
+		// classification, returned DISTINCT from the generic
+		// stat/wrong-shape failure ("error") so the Servers matrix can
+		// drive an opt-in-aware tooltip (set
+		// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK on a single-user host, or
+		// replace the symlink / edit the target) instead of the
+		// misleading "stat error — check permissions and disk health"
+		// diagnostic — NOT a claim of unconditional refusal
 		// (work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md).
-		// The refusal itself is unchanged; only the reported category
-		// is split.
+		// Only the reported category is split here; the write contract
+		// (including the opt-in) is unchanged.
 		if lst, lerr := os.Lstat(p.path); lerr == nil {
 			isSymlink := lst.Mode()&os.ModeSymlink != 0
 			if !lst.Mode().IsRegular() && !isSymlink {

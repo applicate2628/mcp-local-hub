@@ -811,14 +811,19 @@ function CellView(props: {
     // antivirus quarantine, or I/O fault on the underlying volume.
     title = `${client}'s MCP config file could not be read (stat error). Check file permissions and disk health, then refresh.`;
   } else if (routing === "config-error-symlink") {
-    // 2026-05-19 message-accuracy fix: the config path is a symlink,
-    // which the secure-write pipeline refuses in all modes (PR #209
-    // confused-deputy closure). The prior generic "stat error" tooltip
-    // sent operators to inspect disk/permissions instead of their
-    // dotfile-symlink setup. Spell out the by-design refusal and the
-    // two workarounds.
+    // 2026-05-19 message-accuracy fix: the config path is a symlink.
+    // The prior generic "stat error" tooltip sent operators to inspect
+    // disk/permissions instead of their dotfile-symlink setup.
+    // 2026-06-02 opt-in-accuracy fix: this status fires ONLY in default
+    // mode (env unset) or strict mode. With the
+    // MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in set on a non-strict
+    // host, scan reports "ok" and writes resolve the symlink, so the
+    // tooltip leads with that supported remediation rather than
+    // claiming an unconditional refusal. Strict mode
+    // (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides the opt-in and still
+    // refuses — the "single-user host" phrasing covers that.
     // work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md.
-    title = `${client}'s MCP config file is a symlink. mcphub's secure-write contract refuses symlinked client configs to prevent confused-deputy attacks (PR #209). Replace the symlink with a real file, or edit the symlink target's config directly (mcphub Apply won't write through the symlink).`;
+    title = `${client}'s MCP config file is a symlink. By default mcphub refuses symlinked client configs (confused-deputy protection, PR #209). On a single-user host you can opt in: set MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 and refresh. Otherwise replace the symlink with a real file, or edit the symlink target's config directly.`;
   }
   // PR #22 retry-queue fix: cell with a retained failure from the
   // last applyChanges renders a red outline so the user sees the

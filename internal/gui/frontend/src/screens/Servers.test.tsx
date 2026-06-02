@@ -299,11 +299,13 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
 
 // 2026-05-19 message-accuracy fix
 // (work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md):
-// a symlinked client config is refused by the secure-write pipeline in
-// all modes (PR #209). The matrix cell must render a symlink-specific
-// tooltip (replace the symlink / edit the target) instead of the
-// misleading generic "stat error — check permissions and disk health"
-// message, and the cell stays disabled either way.
+// a symlinked client config reports "error-symlink" in default/strict
+// mode. The matrix cell must render a symlink-specific tooltip instead
+// of the misleading generic "stat error — check permissions and disk
+// health" message, and the cell stays disabled.
+// 2026-06-02 opt-in-accuracy fix: the tooltip leads with the supported
+// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in (under which scan would
+// instead report "ok") rather than claiming an unconditional refusal.
 describe("ServersScreen — symlinked-config tooltip (2026-05-19)", () => {
   beforeEach(() => {
     cleanup();
@@ -333,7 +335,13 @@ describe("ServersScreen — symlinked-config tooltip (2026-05-19)", () => {
     expect(cell).toBeTruthy();
     expect(cell.getAttribute("title")).toContain("confused-deputy");
     expect(cell.getAttribute("title")).toContain("PR #209");
-    // Disabled because a symlinked config can't be written through.
+    // The tooltip must surface the supported opt-in so dotfile-symlink
+    // operators are pointed at the remediation, not away from it.
+    expect(cell.getAttribute("title")).toContain(
+      "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK",
+    );
+    // Disabled because in default/strict mode the symlinked config
+    // can't be written through.
     expect((cell as HTMLInputElement).disabled).toBe(true);
     // The misleading generic stat-error wording must NOT be used here.
     expect(cell.getAttribute("title")).not.toContain("stat error");
