@@ -121,7 +121,10 @@ func (f *reconcileFakeClient) RestoreEntryFromBackupForRollback(backupPath, _ st
 	return f.restoreErr
 }
 func (f *reconcileFakeClient) BackupContainsEntry(string, string) (bool, error) { return false, nil }
-func (f *reconcileFakeClient) AllStdioEntries() ([]clients.StdioEntry, error)   { return nil, nil }
+func (f *reconcileFakeClient) BackupEntryIsHubManaged(string, string) (bool, error) {
+	return false, nil
+}
+func (f *reconcileFakeClient) AllStdioEntries() ([]clients.StdioEntry, error) { return nil, nil }
 func (f *reconcileFakeClient) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
 	return nil, nil
 }

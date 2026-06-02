@@ -203,25 +203,8 @@ func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHub
 			// pre-reconcile legacy hub entry verbatim).
 			if !allowHubEntry {
 				if rawMap, ok := backupEntry.(map[string]any); ok {
-					if j.urlField == "url" || j.urlField == "httpUrl" {
-						// Hub-HTTP shape: loopback URL present,
-						// `command` absent. User-configured remote HTTP
-						// entries pass through.
-						if urlStr, _ := rawMap[j.urlField].(string); IsHubHTTPURL(urlStr) {
-							if _, hasCmd := rawMap["command"]; !hasCmd {
-								return ErrBackupEntryAlreadyMigrated
-							}
-						}
-					} else {
-						// Antigravity hub-relay shape: command is mcphub,
-						// args[0] == "relay".
-						if cmd, _ := rawMap["command"].(string); IsMcphubBinary(cmd) {
-							if args, ok := rawMap["args"].([]any); ok && len(args) > 0 {
-								if first, _ := args[0].(string); first == "relay" {
-									return ErrBackupEntryAlreadyMigrated
-								}
-							}
-						}
+					if j.backupEntryMapIsHubManaged(rawMap) {
+						return ErrBackupEntryAlreadyMigrated
 					}
 				}
 			}
@@ -288,4 +271,45 @@ func (j *jsonMCPClient) BackupContainsEntry(backupPath, name string) (bool, erro
 	// absent so the sentinel fallback refuses with a clear error.
 	entry, ok := servers[name].(map[string]any)
 	return ok && entry != nil, nil
+}
+
+// backupEntryMapIsHubManaged classifies one parsed entry map by this
+// adapter's hub shape. URL-native variants (urlField "url"/"httpUrl",
+// inherited by geminiCLI, qwenCLI, cursorClient) use the hub-HTTP shape;
+// the Antigravity variant (urlField "command") uses the hub-relay shape.
+// Single owner of the per-adapter shape decision shared by
+// restoreEntryFromBackup and BackupEntryIsHubManaged.
+func (j *jsonMCPClient) backupEntryMapIsHubManaged(rawMap map[string]any) bool {
+	if j.urlField == "url" || j.urlField == "httpUrl" {
+		return isHubURLShapeEntry(rawMap, j.urlField)
+	}
+	return isHubRelayShapeEntry(rawMap)
+}
+
+// BackupEntryIsHubManaged reports whether mcpServers[name] in the backup
+// at backupPath is in this adapter's hub-managed shape. Inherited by
+// geminiCLI, qwenCLI, cursorClient, and antigravityClient via struct
+// embedding (the antigravity variant routes to the relay-shape branch
+// because its urlField is "command"). See Client.BackupEntryIsHubManaged.
+func (j *jsonMCPClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	entry, ok := servers[name].(map[string]any)
+	if !ok || entry == nil {
+		return false, nil
+	}
+	return j.backupEntryMapIsHubManaged(entry), nil
 }

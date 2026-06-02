@@ -185,6 +185,32 @@ type Client interface {
 	// (_, err) only for I/O or parse errors.
 	BackupContainsEntry(backupPath, name string) (bool, error)
 
+	// BackupEntryIsHubManaged reports whether the backup file at
+	// backupPath holds the entry named `name` in this adapter's
+	// hub-managed shape — the same shape detection RestoreEntryFromBackup
+	// uses to refuse a hub entry with ErrBackupEntryAlreadyMigrated, but
+	// surfaced as a side-effect-free predicate:
+	//
+	//   - URL-native JSON / TOML clients: entry has a hub loopback URL
+	//     (IsHubHTTPURL) AND no `command` field.
+	//   - Antigravity: entry's `command` is the mcphub binary AND
+	//     args[0] == "relay".
+	//
+	// Returns (true, nil) only when the entry is present AND in
+	// hub-managed shape; (false, nil) when the entry is present in a
+	// pre-hub (direct/stdio) form, absent, or present-but-malformed;
+	// (_, err) only for I/O or parse errors.
+	//
+	// Demigrate uses this in the legacy-codename backup fallback to
+	// distinguish "this legacy backup holds the entry in hub-managed
+	// form" (skip — no pre-hub state) from "this legacy backup holds the
+	// entry in its true pre-hub form" (restore from THIS backup) WITHOUT
+	// the delete-on-entry-absent side effect that RestoreEntryFromBackup
+	// carries. Mirrors the always-restore-over-delete invariant in
+	// work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md
+	// §"Failed attempt: PR #218".
+	BackupEntryIsHubManaged(backupPath, name string) (bool, error)
+
 	// AllStdioEntries returns every stdio MCP server entry currently
 	// present in this client's config — that is, every entry where the
 	// adapter's format-specific shape contains a non-empty `command`
@@ -480,6 +506,40 @@ func IsHubHTTPURL(urlStr string) bool {
 		strings.HasPrefix(urlStr, "http://[::1]:")
 }
 
+// isHubURLShapeEntry reports whether a parsed client-config entry map
+// is in mcphub's hub-HTTP shape for URL-native clients: the entry's
+// urlField value is a hub loopback URL (IsHubHTTPURL) AND the entry has
+// no `command` key. User-configured remote HTTP MCP servers (non-loopback
+// url) and stdio entries (have `command`) are NOT hub-managed. This is
+// the single owner of the URL-shape detection rule shared by every
+// URL-native adapter's RestoreEntryFromBackup guard and by
+// BackupEntryIsHubManaged. urlField is the adapter's URL key ("url" or
+// "httpUrl").
+func isHubURLShapeEntry(rawMap map[string]any, urlField string) bool {
+	if urlStr, _ := rawMap[urlField].(string); IsHubHTTPURL(urlStr) {
+		if _, hasCmd := rawMap["command"]; !hasCmd {
+			return true
+		}
+	}
+	return false
+}
+
+// isHubRelayShapeEntry reports whether a parsed client-config entry map
+// is in mcphub's hub-relay shape for Antigravity: `command` is the
+// mcphub binary AND args[0] == "relay". This is the single owner of the
+// relay-shape detection rule shared by the Antigravity
+// RestoreEntryFromBackup guard and BackupEntryIsHubManaged.
+func isHubRelayShapeEntry(rawMap map[string]any) bool {
+	if cmd, _ := rawMap["command"].(string); IsMcphubBinary(cmd) {
+		if args, ok := rawMap["args"].([]any); ok && len(args) > 0 {
+			if first, _ := args[0].(string); first == "relay" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // IsMcphubBinary reports whether cmd's basename matches our CLI
 // binary name. Accepts the current names (mcphub / mcphub.exe) AND
 // the legacy names (mcp / mcp.exe) that early installations may
@@ -764,6 +824,182 @@ func BackupsNewestFirst(livePath, clientName string) ([]string, error) {
 	out = append(out, timestamped...)
 	if sentinel != "" {
 		out = append(out, sentinel)
+	}
+	return out, nil
+}
+
+// legacyBackupTimeLayouts are the best-effort time layouts used to order
+// legacy-codename backups newest-first. A filename that matches none of
+// these still participates (with zero time, sorting last within its
+// bucket) — ordering is a heuristic, presence is not.
+var legacyBackupTimeLayouts = []string{
+	"20060102-150405",     // plain bak-YYYYMMDD-HHMMSS
+	"2006-01-02_15-04-05", // older underscore-date format
+	"2006-01-02",          // date-only (e.g. bak-2026-04-15-mcp-sync)
+}
+
+// legacyBackupPrefixOrder lists the legacy-codename backup buckets in the
+// priority order Demigrate consults them, per
+// work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md
+// §"Quality: Legacy-codename prefix fallback". Lower index = consulted
+// first. Each entry is a bucket classifier over the filename suffix that
+// follows "<base>.bak-".
+//
+//	mcp-sync : pre-rename codename. The real on-disk artifact observed in
+//	           the bug (e.g. settings.json.bak-2026-04-15-mcp-sync) carries
+//	           "mcp-sync" as a SUFFIX after a date, not the idealized
+//	           "mcp-sync-<ts>" prefix — so the classifier matches any
+//	           non-mcp-local-hub backup whose suffix contains "mcp-sync".
+//	plain    : bak-YYYYMMDD-HHMMSS with no codename token at all.
+//	phase2   : bak-phase2-* install artifact.
+//	dashdate : bak-YYYY-MM-DD_HH-MM-SS older underscore-date format.
+const (
+	legacyBucketMcpSync = iota
+	legacyBucketPlain
+	legacyBucketPhase2
+	legacyBucketDashDate
+	legacyBucketCount
+)
+
+// classifyLegacyBackupSuffix maps a backup filename suffix (the part
+// after "<base>.bak-") to one of the legacy buckets, or returns ok=false
+// when the suffix does not look like any known legacy-codename backup.
+// The mcp-local-hub-prefixed suffixes are filtered out by the caller
+// before this is reached, so they never classify here.
+func classifyLegacyBackupSuffix(suffix string) (bucket int, ok bool) {
+	switch {
+	case strings.Contains(suffix, "mcp-sync"):
+		return legacyBucketMcpSync, true
+	case strings.HasPrefix(suffix, "phase2"):
+		return legacyBucketPhase2, true
+	case matchesPlainTimestampSuffix(suffix):
+		return legacyBucketPlain, true
+	case matchesUnderscoreDateSuffix(suffix):
+		return legacyBucketDashDate, true
+	default:
+		return 0, false
+	}
+}
+
+// matchesPlainTimestampSuffix reports whether suffix is exactly the
+// bak-YYYYMMDD-HHMMSS shape (8 digits, dash, 6 digits) with no trailing
+// codename token.
+func matchesPlainTimestampSuffix(suffix string) bool {
+	_, err := time.Parse("20060102-150405", suffix)
+	return err == nil
+}
+
+// matchesUnderscoreDateSuffix reports whether suffix is exactly the
+// older bak-YYYY-MM-DD_HH-MM-SS shape.
+func matchesUnderscoreDateSuffix(suffix string) bool {
+	_, err := time.Parse("2006-01-02_15-04-05", suffix)
+	return err == nil
+}
+
+// parseLegacyBackupTime extracts a best-effort time from a legacy backup
+// filename suffix for newest-first ordering. It tries the whole suffix
+// against each known layout, then falls back to scanning for an embedded
+// date/timestamp token (covers suffixes like "2026-04-15-mcp-sync" where
+// the codename trails the date). Returns the zero time when nothing
+// parses — such files still sort, just last within their bucket.
+func parseLegacyBackupTime(suffix string) time.Time {
+	for _, layout := range legacyBackupTimeLayouts {
+		if ts, err := time.Parse(layout, suffix); err == nil {
+			return ts
+		}
+	}
+	// Embedded-token fallback: try a leading YYYYMMDD-HHMMSS or
+	// YYYY-MM-DD prefix of the suffix (the common "date then codename"
+	// real-world shape).
+	for _, n := range []int{len("20060102-150405"), len("2006-01-02_15-04-05"), len("2006-01-02")} {
+		if len(suffix) < n {
+			continue
+		}
+		head := suffix[:n]
+		for _, layout := range legacyBackupTimeLayouts {
+			if ts, err := time.Parse(layout, head); err == nil {
+				return ts
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// LegacyBackupsNewestFirst returns every legacy-codename backup of
+// livePath — backups written under prefixes that predate the current
+// ".bak-mcp-local-hub-<ts>" naming (the April-2026 mcp-sync→mcp-local-hub
+// codename rename and earlier install artifacts). Results are grouped by
+// bucket priority (mcp-sync, plain-timestamp, phase2, underscore-date)
+// and ordered newest-first within each bucket by a best-effort timestamp
+// parsed from the filename.
+//
+// The current "-mcp-local-hub-" backups and the "-original" sentinel are
+// NEVER included — those are handled by BackupsNewestFirst. Returns an
+// empty slice (not nil) when no legacy backups exist; an error only on a
+// filesystem read failure. The clientName parameter is reserved for
+// future per-client diagnostic context (unused today, mirroring
+// BackupsNewestFirst).
+//
+// Demigrate consults this AFTER exhausting every mcp-local-hub backup
+// without finding a pre-hub form, and BEFORE the RemoveEntry last resort,
+// so a user who upgraded across the codename rename recovers their true
+// pre-hub state instead of having the entry deleted — see
+// work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md.
+func LegacyBackupsNewestFirst(livePath, _ string) ([]string, error) {
+	dir := filepath.Dir(livePath)
+	base := filepath.Base(livePath)
+	bakPrefix := base + ".bak-"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	type legacyBak struct {
+		path   string
+		bucket int
+		ts     time.Time
+	}
+	var found []legacyBak
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, bakPrefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(name, bakPrefix)
+		// Exclude every current-codename backup (timestamped + sentinel).
+		// "mcp-local-hub-..." suffixes belong to BackupsNewestFirst.
+		if strings.HasPrefix(suffix, "mcp-local-hub-") {
+			continue
+		}
+		bucket, ok := classifyLegacyBackupSuffix(suffix)
+		if !ok {
+			continue
+		}
+		found = append(found, legacyBak{
+			path:   filepath.Join(dir, name),
+			bucket: bucket,
+			ts:     parseLegacyBackupTime(suffix),
+		})
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		if found[i].bucket != found[j].bucket {
+			return found[i].bucket < found[j].bucket
+		}
+		// Newest first within a bucket. Equal/zero timestamps fall back
+		// to reverse-lexicographic path for deterministic ordering.
+		if !found[i].ts.Equal(found[j].ts) {
+			return found[i].ts.After(found[j].ts)
+		}
+		return found[i].path > found[j].path
+	})
+	out := make([]string, 0, len(found))
+	for _, b := range found {
+		out = append(out, b.path)
 	}
 	return out, nil
 }

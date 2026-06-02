@@ -201,10 +201,8 @@ func (v *vscodeClient) restoreEntryFromBackup(backupPath, name string, allowHubE
 			// legacy hub entry verbatim).
 			if !allowHubEntry {
 				if rawMap, ok := backupEntry.(map[string]any); ok {
-					if urlStr, _ := rawMap["url"].(string); IsHubHTTPURL(urlStr) {
-						if _, hasCmd := rawMap["command"]; !hasCmd {
-							return ErrBackupEntryAlreadyMigrated
-						}
+					if isHubURLShapeEntry(rawMap, "url") {
+						return ErrBackupEntryAlreadyMigrated
 					}
 				}
 			}
@@ -261,4 +259,31 @@ func (v *vscodeClient) BackupContainsEntry(backupPath, name string) (bool, error
 	}
 	entry, ok := servers[name].(map[string]any)
 	return ok && entry != nil, nil
+}
+
+// BackupEntryIsHubManaged reports whether servers[name] in VS Code's
+// mcp.json backup at backupPath is in the hub-HTTP shape (loopback
+// `url` present, `command` absent). VS Code uses the top-level `servers`
+// key (NOT `mcpServers`). See Client.BackupEntryIsHubManaged.
+func (v *vscodeClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
+	}
+	servers, _ := m["servers"].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	entry, ok := servers[name].(map[string]any)
+	if !ok || entry == nil {
+		return false, nil
+	}
+	return isHubURLShapeEntry(entry, "url"), nil
 }
