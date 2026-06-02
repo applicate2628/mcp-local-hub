@@ -252,20 +252,25 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	if phErr != nil {
 		return rollback(fmt.Errorf("serena auto-register: inspect prior supervisor intent for runtime_spec: %w", phErr))
 	}
-	supRunning := true // an undeterminable liveness probe → treat as running (never skip a needed reap)
+	supRunning := true // undeterminable liveness → treat as running for the REAP decision (never skip a needed reap)
+	livenessKnown := true
 	if running, srErr := autoRegisterSupervisorRunningFn(); srErr == nil {
 		supRunning = running
+	} else {
+		livenessKnown = false
 	}
 	needReap := !priorHasSpec && supRunning
 	// needStart fires whenever the daemon must be brought live by a supervisor
-	// start: either we are INTRODUCING runtime_spec (!priorHasSpec), OR the prior
-	// intent already has runtime_spec but NO supervisor is currently running
-	// (bot PR #253 P2 — e.g. the supervisor crashed after migration while the GUI
-	// stayed up). In the latter live-add-to-a-stopped-pool case a best-effort IPC
-	// reconcile would hit nothing, so readiness would time out and leave a
-	// registered-but-never-spawned workspace; START (without a reap — the prior
-	// intent is already this binary's shape) brings it live.
-	needStart := !priorHasSpec || !supRunning
+	// start: INTRODUCING runtime_spec (!priorHasSpec); a live-add whose supervisor is
+	// NOT running (!supRunning — e.g. it crashed after migration while the GUI stayed
+	// up); OR a live-add whose liveness is UNDETERMINED (the probe errored — bot PR
+	// #253 r5 P2). In the live-add-to-a-stopped/unknown-pool cases a best-effort IPC
+	// reconcile would silently hit nothing, so readiness would time out and leave a
+	// registered-but-never-spawned workspace; START brings it live (no reap — the
+	// prior intent is already this binary's shape; a redundant start no-ops via the
+	// supervisor.lock singleton when one is in fact running). The cutover-support gate
+	// below then fails loud PRE-commit on a platform that cannot start.
+	needStart := !priorHasSpec || !supRunning || !livenessKnown
 	// PRE-COMMIT cutover-support gate (bot PR #253 P2). The CLI wires NON-nil
 	// reap/start functions on EVERY platform, but off-Windows they are unsupported
 	// stubs (defaultMigrateSerenaStart returns errSupervisorRestartUnsupported). A
@@ -328,20 +333,22 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return failPreCommit(fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, iErr))
 	}
 
-	// 9b. Verify the new workspace's daemon actually landed in the COMMITTED intent
-	//     (bot PR #253 P2). If the project directory was removed/unmounted between
-	//     the registry Save and the fan-out, InstallParsedManifest's stale-row
-	//     filter (filterExistingWorkspaceRows) silently drops it and returns success
-	//     with an intent that MISSES our daemon — leaving an auto-detect registry row
-	//     no supervisor intent owns (subsequent calls resolve it but nothing spawns).
-	//     Treat a stale skip as a PRE-COMMIT failure: rollback our row (the install
-	//     committed only the OTHER workspaces, which the recovery/running supervisor
-	//     reconciles correctly without ours).
+	// 9b. Verify the new workspace's daemon landed in the COMMITTED intent (bot PR
+	//     #253 P2). A CONFIRMED absence (present==false, no error) means the install's
+	//     stale-row filter (filterExistingWorkspaceRows) dropped our workspace — its
+	//     dir vanished between Save and fan-out — and returned success with an intent
+	//     MISSING our daemon, leaving an auto-detect registry row no intent owns. That
+	//     is a PRE-COMMIT failure: roll the row back (the install committed only the
+	//     OTHER workspaces, reconciled correctly without ours).
+	//
+	//     A transient VERIFY read/parse error (vErr) does NOT prove a stale skip (bot
+	//     PR #253 r5 P2): the install ALREADY committed and the intent may own + spawn
+	//     the daemon, so rolling back here would ORPHAN it (intent has the daemon,
+	//     workspaces.yaml does not — the inverse split-state). Treat vErr as a
+	//     post-commit outcome: keep the row, do NOT roll back; readiness (or the next
+	//     call) confirms liveness and the supervisor reconciles the committed intent.
 	present, vErr := autoRegisterVerifyFanOutFn(intentPath, key)
-	if vErr != nil {
-		return failPreCommit(fmt.Errorf("serena auto-register: verify %s landed in the committed intent: %w", root, vErr))
-	}
-	if !present {
+	if vErr == nil && !present {
 		return failPreCommit(fmt.Errorf("serena auto-register: workspace %s was not included in the committed supervisor intent (its directory may have been removed mid-install) — not registering", root))
 	}
 

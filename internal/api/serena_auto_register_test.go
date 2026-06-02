@@ -1094,5 +1094,69 @@ func TestAutoRegisterSerena_ContextCancelledBeforeInstall_RollsBack(t *testing.T
 	}
 }
 
+// ---------------------------------------------------------------------------
+// 23. Live-add with UNDETERMINED liveness (bot PR #253 r5 P2) — the supervisor
+//     liveness probe errors → START (not a bare reconcile that would no-op if the
+//     supervisor is in fact down).
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_LiveAddUndeterminedLiveness_Starts(t *testing.T) {
+	autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return true, nil }) // live-add
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, errors.New("probe failed") })
+
+	var startCalled int32
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not run for a live-add"); return nil },
+		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
+	)
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatalf("a bare reconcile must NOT be used when liveness is undetermined — START must run")
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if startCalled != 1 {
+		t.Errorf("start called %d times, want 1 (undetermined liveness on a live-add must START, not bare-reconcile)", startCalled)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 24. Fan-out verify READ ERROR (bot PR #253 r5 P2) — the install committed; a
+//     transient verifier error must NOT roll back (the intent may own the daemon;
+//     rolling back would orphan it). The row is kept.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_FanOutVerifyError_KeepsRow(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil // install committed
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+	prevVerify := autoRegisterVerifyFanOutFn
+	autoRegisterVerifyFanOutFn = func(string, string) (bool, error) { return false, errors.New("transient intent read error") }
+	t.Cleanup(func() { autoRegisterVerifyFanOutFn = prevVerify })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err != nil {
+		t.Fatalf("a transient verify error must be treated as committed (no rollback): %v", err)
+	}
+	if entry == nil {
+		t.Fatal("entry = nil, want the committed registration kept")
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d rows after a transient verify error, want 1 (row kept; the intent may own the daemon)", len(rows))
+	}
+}
+
 // NOTE: mustCanonical(t, ws) is defined in register_test.go (same package) and
 // reused here.

@@ -1102,7 +1102,7 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 	if watchSession {
 		stop := make(chan struct{})
 		defer close(stop)
-		go s.cancelAutoRegisterOnSessionDeath(regCtx, cancel, stop, sessionID)
+		go s.cancelAutoRegisterOnSessionDeath(regCtx, cancel, stop, sessionID, deps.Sessions)
 	}
 
 	entry, err := deps.AutoRegisterFn(regCtx, pathArg)
@@ -1146,7 +1146,7 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 // already done. peekVersionState does NOT refresh lastSeen, so polling here never
 // keeps a session artificially alive. The 500 ms cadence bounds the post-death
 // window without busy-spinning over the up-to-45 s register.
-func (s *Server) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel context.CancelFunc, stop <-chan struct{}, sessionID string) {
+func (s *Server) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel context.CancelFunc, stop <-chan struct{}, sessionID string, sessions sessionRouter) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -1156,10 +1156,22 @@ func (s *Server) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel co
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, state := s.serenaRouterSessions.peekVersionState(sessionID); state != routerSessionLive {
-				cancel()
-				return
+			_, state := s.serenaRouterSessions.peekVersionState(sessionID)
+			if state == routerSessionLive {
+				continue
 			}
+			// bot PR #253 r5 P2: peekVersionState above is expire-on-read — for an
+			// idle-expired session it just DELETED the router-session entry. Mirror the
+			// request paths and coordinate the sticky + daemon unbind so a later
+			// pathless call with this id is not routed through a stale sticky binding
+			// (it would otherwise see routerSessionAbsent and be treated as a legacy
+			// caller). For a client DELETE (routerSessionAbsent) handleSerenaDelete
+			// already coordinated the unbind, so this is a harmless no-op there.
+			if state == routerSessionExpired {
+				s.coordinateExpiredRouterSessionUnbind(sessionID, sessions)
+			}
+			cancel()
+			return
 		}
 	}
 }

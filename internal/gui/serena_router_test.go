@@ -1526,7 +1526,7 @@ func TestSerenaRouter_CancelAutoRegisterOnSessionDeath_CancelsWhenNotLive(t *tes
 	defer cancel()
 	stop := make(chan struct{})
 	defer close(stop)
-	go s.cancelAutoRegisterOnSessionDeath(ctx, cancel, stop, "never-minted-session")
+	go s.cancelAutoRegisterOnSessionDeath(ctx, cancel, stop, "never-minted-session", NewInMemorySessionRouter())
 	select {
 	case <-ctx.Done():
 		// good — the watcher cancelled because the session is not live
