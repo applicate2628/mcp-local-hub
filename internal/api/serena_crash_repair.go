@@ -86,7 +86,15 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (SerenaRepairRes
 	// flock without blocking: a hung cross-process migrate/auto-register holding the
 	// lock must NOT stall GUI startup. Mirrors the lock order install-mutex →
 	// registry-flock.
-	serenaAutoRegisterInstallMu.Lock()
+	// TryLock the in-process cutover mutex too — a blocking acquire is the LAST way
+	// this best-effort startup repair could stall GUI startup: a concurrent
+	// auto-register that hit the just-published server may hold this mutex while it is
+	// itself blocked on a cross-process lock, so waiting here would stall transitively
+	// despite the non-blocking registry/intent lock paths (bot PR #254 P2). Skip on
+	// contention; the next startup re-scans.
+	if !serenaAutoRegisterInstallMu.TryLock() {
+		return result, nil
+	}
 	defer serenaAutoRegisterInstallMu.Unlock()
 
 	reg := NewRegistry(regPath)

@@ -268,3 +268,27 @@ func TestRepairOrphanSerenaWorkspaces_IntentLockContended_Skips(t *testing.T) {
 		t.Errorf("got %+v, want zero result (skipped on intent-lock contention)", res)
 	}
 }
+
+// 9. Cutover mutex busy — a concurrent in-process auto-register holds
+//    serenaAutoRegisterInstallMu (and may itself be blocked on a cross-process lock)
+//    → the repair TryLocks it, fails, and skips rather than blocking GUI startup
+//    transitively (bot PR #254 P2).
+func TestRepairOrphanSerenaWorkspaces_InstallMutexBusy_Skips(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	seedSerenaRegistryRow(t, regPath, "k1", "/proj/k1", 9150)
+	// Hold the in-process cutover mutex (simulating a concurrent auto-register cutover).
+	serenaAutoRegisterInstallMu.Lock()
+	defer serenaAutoRegisterInstallMu.Unlock()
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not run when the cutover mutex is busy")
+		return "", nil
+	})
+
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
+	}
+	if res.Repaired != 0 || len(res.Unresolved) != 0 || res.SupervisorGone {
+		t.Errorf("got %+v, want zero result (skipped on cutover-mutex contention)", res)
+	}
+}
