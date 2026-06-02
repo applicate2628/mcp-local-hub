@@ -129,14 +129,19 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				})
 				continue
 			}
-			if len(backups) == 0 {
-				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client,
-					Err: "no backup found (migration may never have run on this machine)",
-				})
-				continue
+			// Do NOT early-fail on an empty current-codename backup set: the
+			// legacy-prefix and RemoveEntry fallbacks below MUST still run.
+			// A cross-rename host may have ONLY a legacy mcp-sync/phase2
+			// backup (no `bak-mcp-local-hub-*` was ever written on this
+			// machine), or the entry was mcphub-installed-from-scratch with
+			// the managed-entries marker as the only ownership evidence. An
+			// empty set simply makes the restoreIfEligible loop a no-op
+			// (restoredFrom stays ""); tryLegacyPrefixRestore then
+			// tryMarkerOrBackfillRemove decide the outcome. (bot PR #257 P2)
+			latestBackupPath := ""
+			if len(backups) > 0 {
+				latestBackupPath = backups[0]
 			}
-			latestBackupPath := backups[0]
 			// restoreIfEligible returns nil on success, or one of
 			// three error classes the iteration treats as "skip this
 			// backup, try older":

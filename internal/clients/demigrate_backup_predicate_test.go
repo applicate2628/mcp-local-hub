@@ -17,6 +17,32 @@ func writeBak(t *testing.T, livePath, suffix, content string) string {
 	return p
 }
 
+// TestIsMcphubBinary_NormalizesWindowsSeparators is the bot PR #257 P1 guard:
+// a Windows-separator command path must be recognized as the mcphub binary on
+// ANY OS. filepath.Base does not split backslashes on POSIX, so IsMcphubBinary
+// normalizes separators first — without it, a backup written on Windows
+// (command `C:\bin\mcphub.exe`) is mis-classified as NOT-hub-managed on Linux
+// CI, making the demigrate legacy fallback restore a hub-managed Antigravity
+// relay backup instead of skipping it.
+func TestIsMcphubBinary_NormalizesWindowsSeparators(t *testing.T) {
+	cases := map[string]bool{
+		`C:\bin\mcphub.exe`:      true,
+		`C:\Users\x\bin\mcp.exe`: true,
+		`\\server\share\mcphub`:  true,
+		"/usr/local/bin/mcphub":  true,
+		"mcphub.exe":             true,
+		"mcphub":                 true,
+		`C:\bin\node.exe`:        false,
+		"/usr/bin/python3":       false,
+		"":                       false,
+	}
+	for cmd, want := range cases {
+		if got := IsMcphubBinary(cmd); got != want {
+			t.Errorf("IsMcphubBinary(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
+
 // TestBackupEntryIsHubManaged_PerAdapterShape locks each adapter's
 // hub-shape detection: hub-managed form → true, pre-hub/direct form →
 // false, absent → false. Mirrors the §"Quality: Iterate timestamped

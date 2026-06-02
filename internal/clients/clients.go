@@ -559,7 +559,15 @@ func IsMcphubBinary(cmd string) bool {
 	if cmd == "" {
 		return false
 	}
-	base := strings.ToLower(filepath.Base(cmd))
+	// Normalize Windows separators FIRST so a command written on Windows
+	// (e.g. "C:\bin\mcphub.exe") is basenamed correctly when this check
+	// runs on Linux/macOS — filepath.Base does NOT split backslashes on
+	// POSIX, so a backup created on Windows but inspected on Linux CI (or a
+	// migrated home) would otherwise mis-classify the relay binary. On
+	// Windows filepath.Base already handles both separators, so the
+	// replace is a harmless no-op there. (bot PR #257 P1)
+	normalized := strings.ReplaceAll(cmd, `\`, "/")
+	base := strings.ToLower(filepath.Base(normalized))
 	return base == "mcphub" || base == "mcphub.exe" ||
 		base == "mcp" || base == "mcp.exe"
 }

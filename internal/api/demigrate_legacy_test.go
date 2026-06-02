@@ -385,3 +385,65 @@ func TestDemigrate_LegacyPrefixSkipsHubManagedAndAbsentLegacyBackups(t *testing.
 		t.Errorf("memory not restored from the older pre-hub legacy backup; got %+v", mem)
 	}
 }
+
+// TestDemigrate_LegacyPrefixFallback_NoCurrentBackup is the bot PR #257 P2
+// guard: when there are ZERO current-codename (`bak-mcp-local-hub-*`) backups
+// at all — only a legacy mcp-sync backup holding the pre-hub form — demigrate
+// must STILL reach the legacy fallback and restore, NOT early-fail with "no
+// backup found". Before the fix, the `len(backups)==0` branch reported failure
+// and `continue`d, leaving the legacy fallback unreachable in exactly the
+// cross-rename upgrade case it was added for.
+func TestDemigrate_LegacyPrefixFallback_NoCurrentBackup(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+
+	claudePath := filepath.Join(tmp, ".claude.json")
+	// Live: hub-managed.
+	if err := os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// NO bak-mcp-local-hub-* backups at all. ONLY a legacy mcp-sync backup
+	// with the true pre-hub stdio form.
+	if err := os.WriteFile(claudePath+".bak-2026-04-15-mcp-sync", []byte(
+		`{"mcpServers":{"memory":{"type":"stdio","command":"uvx","args":["mcp-server-memory"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordManagedEntry("claude-code", "memory"); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	manifestDir := t.TempDir()
+	writeMemoryManifest(t, manifestDir)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (legacy backup has pre-hub form; no current backup must NOT early-fail); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored (legacy restore reached with empty current-backup set); got %+v", report.Restored)
+	}
+	live, _ := os.ReadFile(claudePath)
+	var lm map[string]any
+	if err := json.Unmarshal(live, &lm); err != nil {
+		t.Fatal(err)
+	}
+	mem, present := lm["mcpServers"].(map[string]any)["memory"]
+	if !present {
+		t.Fatalf("memory missing — legacy fallback was not reached on an empty current-backup set (P2 dead-code). Live = %s", live)
+	}
+	if mm, _ := mem.(map[string]any); mm["command"] != "uvx" {
+		t.Errorf("memory not restored from legacy backup; got %+v", mem)
+	}
+}
