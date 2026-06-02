@@ -503,3 +503,57 @@ func TestDemigrate_UnreadableLegacyBackup_FailsClosed(t *testing.T) {
 		t.Errorf("DESTRUCTIVE: memory deleted despite an unreadable legacy backup that might hold its pre-hub form; live=%s", live)
 	}
 }
+
+// TestDemigrate_LegacyOnlyHost_AllowsURLBackfillRemove is the bot PR #257 r3 P2
+// guard: a cross-rename host with NO current-codename backup but a legacy
+// mcp-sync backup (hub-managed, no pre-hub form) + a live URL matching the
+// manifest + no marker must STILL reach the URL-backfill RemoveEntry (the
+// always-succeed fallback). The legacy backup's existence corroborates that
+// mcphub ran here, so this is NOT the uncorroborated no-backup case. Round 3's
+// len(backups)>0-only gate wrongly failed this closed; the gate now also counts
+// legacy backups (sawLegacy).
+func TestDemigrate_LegacyOnlyHost_AllowsURLBackfillRemove(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+
+	claudePath := filepath.Join(tmp, ".claude.json")
+	// Live: hub-managed; URL exactly matches the manifest (port 9200, /mcp).
+	if err := os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// NO current-codename backup. ONLY a legacy mcp-sync backup, itself
+	// hub-managed (no pre-hub form) → legacy restore finds nothing, but
+	// sawLegacy is true (a legacy backup FILE exists → mcphub ran here).
+	if err := os.WriteFile(claudePath+".bak-2026-04-15-mcp-sync", []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// NO marker — ownership comes from URL-backfill, corroborated by sawLegacy.
+
+	manifestDir := t.TempDir()
+	writeMemoryManifest(t, manifestDir)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (legacy backup corroborates URL-backfill RemoveEntry); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored (URL-backfill RemoveEntry, legacy-corroborated); got %+v", report.Restored)
+	}
+	live, _ := os.ReadFile(claudePath)
+	if strings.Contains(string(live), `"memory"`) {
+		t.Errorf("expected memory removed via URL-backfill; live=%s", live)
+	}
+}

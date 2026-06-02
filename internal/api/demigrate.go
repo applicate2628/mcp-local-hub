@@ -197,8 +197,9 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			// rename may have their only pre-hub snapshot there — the
 			// originally-reported bug case. Restoring it is strictly
 			// better than deleting the entry.
+			sawLegacy := false
 			if restoredFrom == "" && err == nil {
-				err = tryLegacyPrefixRestore(adapter, server, &restoredFrom)
+				sawLegacy, err = tryLegacyPrefixRestore(adapter, server, &restoredFrom)
 			}
 			// If neither current-codename nor legacy-codename backups
 			// hold a pre-hub form, fall back to marker+backfill+
@@ -209,14 +210,17 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			// pre-hub form). The two iterations above guarantee the
 			// "no pre-hub form available" precondition; the marker
 			// check guarantees the "mcphub installed it" precondition.
-			// Together they produce the strict subset of cases where
-			// RemoveEntry is the correct rollback target.
+			// allowURLBackfill = len(backups) > 0 || sawLegacy: a URL-backfill
+			// RemoveEntry is corroborated only when mcphub demonstrably ran on
+			// this host (a current OR legacy backup file exists). With ZERO
+			// backups of ANY codename the URL match is uncorroborated and must
+			// fail closed (bot PR #257 r2/r3).
 			if restoredFrom == "" && err == nil {
 				err = tryMarkerOrBackfillRemove(
 					adapter, binding, m, server,
 					fmt.Sprintf("no backup (of %d candidates, newest %s) contains %q in pre-hub form — last skip: %v",
 						len(backups), latestBackupPath, server, lastSkipReason),
-					len(backups) > 0,
+					len(backups) > 0 || sawLegacy,
 					&restoredFrom,
 				)
 			}
@@ -362,11 +366,18 @@ func tryMarkerOrBackfillRemove(
 // fallback). A non-nil error is returned only for a hard filesystem
 // failure enumerating legacy backups or an unreadable backup that
 // positively matched the contains+pre-hub gate.
-func tryLegacyPrefixRestore(adapter clients.Client, server string, restoredFrom *string) error {
-	legacy, err := clients.LegacyBackupsNewestFirst(adapter.ConfigPath(), adapter.Name())
-	if err != nil {
-		return fmt.Errorf("enumerate legacy-codename backups: %w", err)
+func tryLegacyPrefixRestore(adapter clients.Client, server string, restoredFrom *string) (sawLegacy bool, err error) {
+	legacy, lerr := clients.LegacyBackupsNewestFirst(adapter.ConfigPath(), adapter.Name())
+	if lerr != nil {
+		return false, fmt.Errorf("enumerate legacy-codename backups: %w", lerr)
 	}
+	// sawLegacy records that legacy backup FILES exist on this host, which
+	// proves mcphub (under the old mcp-sync codename) ran here. The caller
+	// uses it to corroborate a URL-backfill RemoveEntry: a host with NO backup
+	// of ANY codename has never run mcphub, so an uncorroborated URL match
+	// there must fail closed; a legacy-only host HAS run mcphub and may
+	// RemoveEntry once no pre-hub form is found. (bot PR #257 r3)
+	sawLegacy = len(legacy) > 0
 	for _, candidate := range legacy {
 		has, hErr := adapter.BackupContainsEntry(candidate, server)
 		if hErr != nil {
@@ -375,7 +386,7 @@ func tryLegacyPrefixRestore(adapter clients.Client, server string, restoredFrom 
 			// let the caller fall through to a marker/backfill RemoveEntry
 			// (that would delete an entry whose only pre-hub snapshot might
 			// live in THIS very backup). Fail closed. (bot PR #257 r2)
-			return fmt.Errorf("legacy-codename backup %s unreadable (cannot prove it lacks %q in pre-hub form): %w", candidate, server, hErr)
+			return sawLegacy, fmt.Errorf("legacy-codename backup %s unreadable (cannot prove it lacks %q in pre-hub form): %w", candidate, server, hErr)
 		}
 		if !has {
 			continue // legacy backup predates the entry — never delete from here
@@ -384,7 +395,7 @@ func tryLegacyPrefixRestore(adapter clients.Client, server string, restoredFrom 
 		if mErr != nil {
 			// Entry IS present but its shape is undeterminable — it MIGHT be
 			// a pre-hub form. Fail closed rather than skip-then-delete.
-			return fmt.Errorf("legacy-codename backup %s: cannot determine whether %q is hub-managed: %w", candidate, server, mErr)
+			return sawLegacy, fmt.Errorf("legacy-codename backup %s: cannot determine whether %q is hub-managed: %w", candidate, server, mErr)
 		}
 		if hubManaged {
 			continue // legacy backup already hub-managed — no pre-hub state here
@@ -393,10 +404,10 @@ func tryLegacyPrefixRestore(adapter clients.Client, server string, restoredFrom 
 		// restore branch (entry present) and cannot hit
 		// ErrBackupEntryAlreadyMigrated (entry is not hub-managed).
 		if rErr := adapter.RestoreEntryFromBackup(candidate, server); rErr != nil {
-			return fmt.Errorf("restore %q from legacy-codename backup %s: %w", server, candidate, rErr)
+			return sawLegacy, fmt.Errorf("restore %q from legacy-codename backup %s: %w", server, candidate, rErr)
 		}
 		*restoredFrom = candidate
-		return nil
+		return sawLegacy, nil
 	}
-	return nil
+	return sawLegacy, nil
 }

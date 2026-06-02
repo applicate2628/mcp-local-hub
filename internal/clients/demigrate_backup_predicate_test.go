@@ -43,6 +43,32 @@ func TestIsMcphubBinary_NormalizesWindowsSeparators(t *testing.T) {
 	}
 }
 
+// TestIsHubURLShapeEntry_RecognizesLegacyHttpUrl is the bot PR #257 r3 guard:
+// Gemini migrated its url key httpUrl -> url, so a legacy mcp-sync backup may
+// store the hub loopback URL under "httpUrl" even though Gemini's current
+// urlField is "url". Both keys must be recognized as the hub shape — otherwise
+// a hub-managed legacy backup is mis-classified pre-hub and wrongly restored.
+func TestIsHubURLShapeEntry_RecognizesLegacyHttpUrl(t *testing.T) {
+	cases := []struct {
+		name     string
+		rawMap   map[string]any
+		urlField string
+		want     bool
+	}{
+		{"url-key hub loopback", map[string]any{"url": "http://localhost:9200/mcp"}, "url", true},
+		{"httpUrl-key hub loopback, current urlField=url (legacy gemini)", map[string]any{"httpUrl": "http://localhost:9200/mcp"}, "url", true},
+		{"httpUrl-key hub loopback, current urlField=httpUrl (qwen)", map[string]any{"httpUrl": "http://localhost:9200/mcp"}, "httpUrl", true},
+		{"stdio has command", map[string]any{"command": "npx", "url": "http://localhost:9200/mcp"}, "url", false},
+		{"non-loopback url is user-owned", map[string]any{"url": "https://api.example.com/mcp"}, "url", false},
+		{"non-loopback httpUrl is user-owned", map[string]any{"httpUrl": "https://api.example.com/mcp"}, "url", false},
+	}
+	for _, tc := range cases {
+		if got := isHubURLShapeEntry(tc.rawMap, tc.urlField); got != tc.want {
+			t.Errorf("%s: isHubURLShapeEntry = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestBackupEntryIsHubManaged_PerAdapterShape locks each adapter's
 // hub-shape detection: hub-managed form → true, pre-hub/direct form →
 // false, absent → false. Mirrors the §"Quality: Iterate timestamped

@@ -516,9 +516,21 @@ func IsHubHTTPURL(urlStr string) bool {
 // BackupEntryIsHubManaged. urlField is the adapter's URL key ("url" or
 // "httpUrl").
 func isHubURLShapeEntry(rawMap map[string]any, urlField string) bool {
-	if urlStr, _ := rawMap[urlField].(string); IsHubHTTPURL(urlStr) {
-		if _, hasCmd := rawMap["command"]; !hasCmd {
-			return true
+	// Recognize the hub-HTTP shape under the adapter's CURRENT url key AND the
+	// legacy "httpUrl" key. Gemini migrated its schema httpUrl -> url, so a
+	// legacy mcp-sync backup may store the hub loopback URL under "httpUrl"
+	// even though Gemini's current urlField is "url" — without this, that
+	// legacy hub backup is mis-classified as pre-hub and wrongly RESTORED,
+	// leaving the client still hub-routed while reporting success. (bot PR #257 r3)
+	keys := []string{urlField}
+	if urlField != "httpUrl" {
+		keys = append(keys, "httpUrl")
+	}
+	for _, key := range keys {
+		if urlStr, _ := rawMap[key].(string); IsHubHTTPURL(urlStr) {
+			if _, hasCmd := rawMap["command"]; !hasCmd {
+				return true
+			}
 		}
 	}
 	return false
