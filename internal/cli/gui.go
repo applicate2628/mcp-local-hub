@@ -521,7 +521,7 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 				fmt.Fprintf(cmd.OutOrStdout(), "serena crash-repair: re-installed %d orphaned workspace daemon(s) from a prior crash\n", repaired)
 			}
 			if len(unresolved) > 0 {
-				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v could not be auto-repaired — see supervisor-events.log for remediation (`mcphub migrate` for a first-introduce crash, `mcphub workspace remove` for a removed workspace dir)\n", len(unresolved), unresolved)
+				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v could not be auto-repaired — see supervisor-events.log for remediation (`mcphub migrate` for a first-introduce crash, `mcphub workspace unregister <path> --backend serena` for a removed workspace dir)\n", len(unresolved), unresolved)
 			}
 		}
 	}

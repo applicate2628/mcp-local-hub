@@ -161,7 +161,7 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (repaired int, u
 	if len(unresolved) > 0 {
 		emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-stale-skip", unresolved, map[string]any{
 			"reason":           "workspace directory removed — the install stale-filter dropped the row",
-			"operator_action":  "run `mcphub workspace remove <path>` to drop the stale serena row",
+			"operator_action":  "run `mcphub workspace unregister <path> --backend serena` to drop the stale serena row",
 			"orphan_workspace": unresolved,
 		})
 	}
