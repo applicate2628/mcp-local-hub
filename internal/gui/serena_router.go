@@ -50,6 +50,15 @@ type serenaRouterDeps struct {
 	UpstreamURLFn   func(ws *api.WorkspaceEntry) string
 	AuditFn         func(level, event string, fields map[string]any) error
 	UpstreamTimeout time.Duration
+	// AutoRegisterFn is the Phase-5 auto-register-on-miss seam. When a
+	// /serena/mcp tool call resolves to no registered workspace
+	// (ErrWorkspaceNotFound / resolved==nil) the handler calls this to
+	// register+spawn the workspace at runtime, then forwards the call to
+	// the freshly-spawned daemon. Production wires it to
+	// api.(*API).AutoRegisterSerenaWorkspace (SetSerenaRouterProduction).
+	// A nil AutoRegisterFn preserves the pre-Phase-5 immediate-503
+	// behavior (back-compat for partially-wired routing).
+	AutoRegisterFn func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error)
 }
 
 // serenaRouterTestSeam lets tests inject a fully-mocked deps bundle.
@@ -195,6 +204,13 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: resolver,
 		Sessions: sessions,
+		// Phase 5: auto-register-on-miss. api.NewAPI() per call is the
+		// established pattern (migrate_serena.go does the same) — the API
+		// struct is a thin façade over the live registry/state dir, so a
+		// fresh instance shares the same on-disk truth.
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			return api.NewAPI().AutoRegisterSerenaWorkspace(ctx, absPath)
+		},
 	})
 }
 
@@ -562,6 +578,24 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// (name + arguments) here. A malformed/non-object params yields an empty
 	// name and the existing "missing required field: params.name" path-arg
 	// error — the pre-Finding-1 tool-call behavior is preserved.
+	// bot PR #253 P2/P3: an id-less tools/call is a JSON-RPC NOTIFICATION → 202
+	// with NO execution. This MUST precede BOTH the params parse AND the
+	// resolve/auto-register branch (mirroring the hub's tools/call gate at
+	// internal/api/hub_mcp_handler.go and the tools/list / ping branches above):
+	// a fire-and-forget notification — even one with missing/malformed params —
+	// must be classified as a notification (202), NOT receive a "missing
+	// params.name" error, and must never mutate workspaces.yaml + the supervisor
+	// intent or consume a pool port via auto-register.
+	if isJSONRPCNotificationID(tb.ID) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	if !isValidJSONRPCRequestID(tb.ID) {
+		writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
+			"invalid request: id must be a non-null string or number")
+		return
+	}
+
 	toolName, toolArguments := toolCallParams(tb.Params)
 	if toolName == "" {
 		writeRequiredFieldError(w, "params.name")
@@ -575,18 +609,34 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	if hasPath {
 		resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
 		if resolveErr != nil {
+			// Phase 5: on workspace-not-found, attempt auto-register-on-miss
+			// (register+spawn the serena workspace at this path, then forward)
+			// instead of the immediate 503. attemptSerenaAutoRegister returns a
+			// non-nil entry to forward to, or nil AFTER writing the HTTP
+			// response (so the caller MUST return on nil). A nil AutoRegisterFn
+			// preserves today's writeWorkspaceNotFound 503.
 			if errors.Is(resolveErr, ErrWorkspaceNotFound) {
-				writeWorkspaceNotFound(w, pathArg, false)
+				ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
+				if ws == nil {
+					return
+				}
+			} else {
+				http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
 				return
 			}
-			http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
-			return
+		} else if resolved == nil {
+			// resolved==nil is the other not-found shape (resolver returned a
+			// nil entry with a nil error). Same auto-register-on-miss path.
+			ws = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
+			if ws == nil {
+				return
+			}
+		} else {
+			ws = resolved
 		}
-		if resolved == nil {
-			writeWorkspaceNotFound(w, pathArg, false)
-			return
-		}
-		ws = resolved
+		// A resolved OR freshly auto-registered workspace binds the sticky
+		// session after the upstream forward, exactly as before — auto-register
+		// yields a real workspace indistinguishable from a pre-registered one.
 		if sessionID != "" && deps.Sessions != nil {
 			bindSessionAfterUpstream = true
 		}
@@ -972,6 +1022,168 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = io.Copy(w, upstreamResp.Body)
+}
+
+// attemptSerenaAutoRegister runs the Phase-5 auto-register-on-miss path.
+// It is called from the tool-call handler's not-found branch (the resolver
+// returned ErrWorkspaceNotFound or a nil entry). It returns the registered
+// *api.WorkspaceEntry to forward to, OR nil AFTER it has already written the
+// HTTP response — so the caller MUST return when this returns nil.
+//
+// Outcome mapping (mirrors the api.AutoRegisterSerenaWorkspace contract):
+//   - AutoRegisterFn unwired (nil) → writeWorkspaceNotFound 503 (back-compat:
+//     identical to the pre-Phase-5 immediate-not-found when routing is only
+//     partially wired); return nil.
+//   - success → return the entry (caller falls through to the upstream
+//     forward exactly as if the workspace had been registered all along).
+//   - api.ErrNotASerenaProject → writeWorkspaceNotFound 503 (no `.serena`
+//     marker → NOT auto-registrable; this is the load-bearing DoS bound, so
+//     behave exactly like today's not-found); return nil.
+//   - api.ErrNoLanguages → JSON-RPC -32602 invalid-params at HTTP 422 (the
+//     marker exists but declares no languages → unprocessable); return nil.
+//   - any other error → JSON-RPC -32603 internal-error at HTTP 503 (install /
+//     spawn / readiness failure; the helper rolls back its registry row so no
+//     half-registered workspace is left behind); return nil.
+//
+// The register call runs under a DETACHED + BOUNDED context: detached from
+// r.Context() via context.WithoutCancel so a client that disconnects
+// mid-register does NOT abort the spawn / leave a half-registered workspace
+// (the D-invariant the router's cleanupContext applies to best-effort upstream
+// ops), and bounded at 45s to cover install + reconcile + readiness. Unlike
+// cleanupContext (which detaches via context.Background() and drops
+// request-scoped values), WithoutCancel preserves request values while
+// severing only cancellation — the exact posture an important best-effort
+// register needs.
+func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Request, deps *serenaRouterDeps, id json.RawMessage, sessionID, pathArg string) *api.WorkspaceEntry {
+	if deps.AutoRegisterFn == nil {
+		writeWorkspaceNotFound(w, pathArg, false)
+		return nil
+	}
+
+	// bot PR #253 P2/r6: validate the router session/version BEFORE auto-registering,
+	// so an expired/terminated/unknown or protocol-version-mismatched client cannot
+	// trigger registration (pool-port allocation + workspaces.yaml / supervisor-intent
+	// mutation). This mirrors the authoritative post-branch version gate; for a LIVE
+	// session peekVersionState is non-mutating, so that gate still re-validates and
+	// touches normally after the forward. A NON-EMPTY id that is EXPIRED (idle-swept on
+	// this read) OR ABSENT (minted here then DELETEd/swept — the entry is removed, so a
+	// re-read reads absent — or one this router never minted) is rejected here: a
+	// revoked/unknown session must not durably mutate the registry/intent. A genuine
+	// first-call uses an EMPTY id (skips this block) or a live minted session.
+	watchSession := false
+	if sessionID != "" {
+		sessionVersion, state := s.serenaRouterSessions.peekVersionState(sessionID)
+		switch state {
+		case routerSessionExpired:
+			// Minted here, idle-swept on THIS read (expire-on-read): coordinate the
+			// cross-store unbind, then reject.
+			s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
+			writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "session terminated", nil)
+			return nil
+		case routerSessionAbsent:
+			// Minted-then-DELETEd (entry removed → re-read absent) OR never minted at
+			// this router. On the registration-MUTATION path, refuse — do NOT allocate a
+			// pool port / mutate registry+intent for a revoked/unknown session. (The main
+			// ROUTING handler still treats absent as a legacy/path-only caller for
+			// EXISTING workspaces; that leniency is for routing, NOT for registration.)
+			writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "session terminated", nil)
+			return nil
+		case routerSessionLive:
+			if cv := r.Header.Get("MCP-Protocol-Version"); cv != "" && cv != sessionVersion {
+				writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "protocol-version mismatch", nil)
+				return nil
+			}
+			// A live, minted router session: watch it for the duration of the
+			// (detached) register and abort if it is terminated mid-flight.
+			watchSession = true
+		}
+	}
+
+	regCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)
+	defer cancel()
+
+	// bot PR #253 P2: the register is DETACHED from r.Context() so a client
+	// disconnect does not abort it — but a logical session TERMINATION (client
+	// DELETE or idle-sweep) DURING the up-to-45s register MUST still abort it, so a
+	// terminated session cannot finish allocating a pool port + committing a
+	// supervisor-intent daemon. Watch the live session and cancel regCtx on death;
+	// the helper re-checks ctx.Err() at its registry-Save and install-commit
+	// mutation boundaries. The watcher stops when the register returns.
+	if watchSession {
+		stop := make(chan struct{})
+		defer close(stop)
+		go s.cancelAutoRegisterOnSessionDeath(regCtx, cancel, stop, sessionID, deps.Sessions)
+	}
+
+	entry, err := deps.AutoRegisterFn(regCtx, pathArg)
+	if err == nil {
+		if deps.AuditFn != nil {
+			port := 0
+			if entry != nil {
+				port = entry.Port
+			}
+			_ = deps.AuditFn("info", "serena-workspace-auto-registered", map[string]any{
+				"path": pathArg,
+				"port": port,
+			})
+		}
+		return entry
+	}
+
+	switch {
+	case errors.Is(err, api.ErrNotASerenaProject):
+		// No `.serena/project.yml` marker → not auto-registrable. This is the
+		// DoS bound: behave exactly like today's workspace-not-found 503 so an
+		// attacker cannot register an arbitrary path they do not own.
+		writeWorkspaceNotFound(w, pathArg, false)
+		return nil
+	case errors.Is(err, api.ErrNoLanguages):
+		writeJSONRPCErrorStatus(w, id, http.StatusUnprocessableEntity, jsonrpcInvalidParams,
+			"serena project at "+pathArg+" declares no languages", nil)
+		return nil
+	default:
+		writeJSONRPCErrorStatus(w, id, http.StatusServiceUnavailable, jsonrpcInternalError,
+			"serena auto-register failed: "+err.Error(), nil)
+		return nil
+	}
+}
+
+// cancelAutoRegisterOnSessionDeath polls the router session for sessionID and
+// cancels the detached auto-register context the instant the session stops being
+// live — a client DELETE makes it routerSessionAbsent, the idle-sweep makes it
+// routerSessionExpired; either terminates the in-flight register (bot PR #253
+// P2). It returns when the register completes (stop is closed) or the context is
+// already done. peekVersionState does NOT refresh lastSeen, so polling here never
+// keeps a session artificially alive. The 500 ms cadence bounds the post-death
+// window without busy-spinning over the up-to-45 s register.
+func (s *Server) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel context.CancelFunc, stop <-chan struct{}, sessionID string, sessions sessionRouter) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, state := s.serenaRouterSessions.peekVersionState(sessionID)
+			if state == routerSessionLive {
+				continue
+			}
+			// bot PR #253 r5 P2: peekVersionState above is expire-on-read — for an
+			// idle-expired session it just DELETED the router-session entry. Mirror the
+			// request paths and coordinate the sticky + daemon unbind so a later
+			// pathless call with this id is not routed through a stale sticky binding
+			// (it would otherwise see routerSessionAbsent and be treated as a legacy
+			// caller). For a client DELETE (routerSessionAbsent) handleSerenaDelete
+			// already coordinated the unbind, so this is a harmless no-op there.
+			if state == routerSessionExpired {
+				s.coordinateExpiredRouterSessionUnbind(sessionID, sessions)
+			}
+			cancel()
+			return
+		}
+	}
 }
 
 // handleSerenaDelete tears down the router-owned session state for a

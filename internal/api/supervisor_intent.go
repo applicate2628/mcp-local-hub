@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SupervisorIntentFile is the on-disk schema for <state-dir>/supervisor-intent.json.
@@ -305,6 +306,27 @@ func (f *SupervisorIntentFile) HasRuntimeSpecRow() bool {
 	}
 	for i := range f.Daemons {
 		if f.Daemons[i].RuntimeSpec != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSerenaDaemonForWorkspaceKey reports whether this intent carries a serena
+// per-workspace daemon row for the given workspace key. Daemon task names are
+// the canonical leading-backslash form, so the leading `\` is trimmed before
+// comparing to the bare "mcp-local-hub-serena-<key>" the fan-out writes (the
+// same match intentHasSerenaDaemonForKey uses against an on-disk intent, but
+// over the IN-MEMORY desiredIntent). InstallParsedManifest uses this (via
+// opts.RequireWorkspaceKey) to fail the commit BEFORE the write if the merged
+// intent dropped a caller's required triggering workspace (bot PR #253 r6 P2).
+func (f *SupervisorIntentFile) HasSerenaDaemonForWorkspaceKey(key string) bool {
+	if f == nil {
+		return false
+	}
+	want := "mcp-local-hub-serena-" + key
+	for i := range f.Daemons {
+		if strings.TrimPrefix(f.Daemons[i].TaskName, `\`) == want {
 			return true
 		}
 	}

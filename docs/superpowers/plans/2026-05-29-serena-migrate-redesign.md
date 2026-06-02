@@ -405,6 +405,43 @@ runtime (Phase 1), the cycle-break (Phase 2), and the client-reconcile (Phase 3)
 
 ## Phase 5 — E.2 auto-register builds on Phases 1+2 (Phase 1 is a HARD dependency)
 
+> **STATUS — IMPLEMENTED** (branch `feat/serena-auto-register-on-miss`, three commits A/B/C):
+> - **Part A — §7.1 live-add gate refinement** ([internal/api/install_parsed_manifest.go](../../../internal/api/install_parsed_manifest.go)):
+>   the supervisor-running gate now fires only when a write *introduces* `runtime_spec`
+>   (`desiredIntent.HasRuntimeSpecRow() && !priorIntent.HasRuntimeSpecRow()`). A live-add to an intent that
+>   **already** carries `runtime_spec` is permitted while a supervisor runs, because that supervisor is
+>   provably the new binary (the only path to a `runtime_spec` on-disk intent is the Phase-4 cutover, which
+>   reaps the old supervisor before the first `runtime_spec` write). This enabler lets auto-register write a
+>   spec-bearing intent without a reap — it was NOT in the original spec ("`InstallParsedManifest` consumed
+>   as-is") but is required for the live path.
+> - **Part B — `(*api.API).AutoRegisterSerenaWorkspace`** ([internal/api/serena_auto_register.go](../../../internal/api/serena_auto_register.go)):
+>   ancestor-walk marker → read languages → per-key guard + idempotent register → port alloc →
+>   `BuildInMemorySerenaDynamicPoolManifest` + `InstallParsedManifest` live-add → immediate IPC reconcile
+>   (`DialSupervisorIPCReconcile(ctx, true)`, not the 60s watcher) → bounded readiness probe → audit, with
+>   rollback armed pre-commit and disarmed at the install commit point (post-commit readiness timeout returns
+>   an error WITHOUT rollback — the next call resolves the now-registered workspace). **Refinement vs spec**:
+>   it **reads the existing `.serena/project.yml` marker's languages** rather than re-surveying the
+>   filesystem — the marker is the DoS gate (no marker → `ErrNotASerenaProject`, never register; the parent
+>   §E.2 "survey" is satisfied by the marker the project already carries).
+> - **Part C — router branch** ([internal/gui/serena_router.go](../../../internal/gui/serena_router.go)):
+>   `ErrWorkspaceNotFound` (and `resolved==nil`) now call `AutoRegisterSerenaWorkspace` via a
+>   detached+bounded (45s) context, mapping `ErrNotASerenaProject`→503 not-found, `ErrNoLanguages`→422,
+>   other→503, success→fall through to the existing upstream forward. Unwired (`AutoRegisterFn==nil`)
+>   preserves today's 503 (back-compat).
+> - **bot PR #253 hardening (2 P1s)**: (1) *introduce-cutover* — the FIRST serena workspace (prior intent has
+>   no `runtime_spec`, e.g. right after a zero-workspace migrate) cannot be a live-add: the §7.1 gate refuses
+>   introducing `runtime_spec` while a supervisor runs, and the running supervisor cannot be proven
+>   runtime_spec-capable (it exposes no probeable version), so auto-register runs the one-time cutover (REAP the
+>   running supervisor → INSTALL → START the current binary), mirroring migrate's reap-first ordering +
+>   recovery-restart; every subsequent workspace is a live-add. The reap/start primitives are Windows-only,
+>   injected by the CLI via `SetSerenaAutoRegisterCutoverPrimitives` (off-Windows the introduce path 503s).
+>   (2) *concurrent-install serialization* — a process-global install mutex + a fresh registry re-read before
+>   each install stop two concurrent auto-registers for DIFFERENT roots from clobbering each other's intent
+>   rows (`buildMergedSupervisorIntent` replaces all serena rows with the passed snapshot).
+> - **Verified** (integrated tree): `go build ./...`, `go vet ./...`, `go test -race ./internal/api/ -run
+>   AutoRegister` (16 tests incl. introduce/reap/recovery/concurrency), `go test -race ./internal/gui/ -run
+>   Serena` (128 subtests) all green.
+
 **Scope**: wire auto-register-on-miss (parent plan §E.2) onto the descriptor + builder foundation: when
 the `/serena/mcp` router's `ResolveByPath` returns `ErrWorkspaceNotFound`, survey languages, register the
 workspace, synthesize the per-workspace descriptor in-memory via the builder + `InstallParsedManifest`, and
