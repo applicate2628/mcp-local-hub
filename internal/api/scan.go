@@ -88,21 +88,32 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		//     → "error" (round 5; matrix shows config-error diagnostic
 		//     instead of an "ok" cell that migrate/backup will choke on
 		//     when readJSON sees a non-regular target)
-		//   - dangling symlink → "error" (round 4; init button +
+		//   - dangling symlink → "error-symlink" (round 4; init button +
 		//     secure-create refusal lose otherwise)
-		//   - any symlink, default OR strict mode → "error" (post-PR
-		//     #209: the secure-write pipeline now refuses pre-existing
-		//     symlinks in ALL modes — `resolveSymlinkForSecureWrite`
-		//     was removed from `secureWriteWithOperatorOpt`. Reporting
-		//     "ok" while writes deterministically fail with symlink-
-		//     refuse errors is the exact UX trap bot codex-r7 flagged:
-		//     user sees a green matrix column, clicks Apply, every
-		//     write fails. Aligning presence with the active write
-		//     contract restores invariant "ok = write will succeed".
-		//     Dotfile-symlink setups that used to rely on default-mode
-		//     resolve-to-target are now unsupported by design — the
-		//     security boundary closure in PR #209 traded that path
-		//     for confused-deputy integrity protection).
+		//   - any symlink, default OR strict mode → "error-symlink"
+		//     (post-PR #209: the secure-write pipeline now refuses
+		//     pre-existing symlinks in ALL modes —
+		//     `resolveSymlinkForSecureWrite` was removed from
+		//     `secureWriteWithOperatorOpt`. Reporting "ok" while writes
+		//     deterministically fail with symlink-refuse errors is the
+		//     exact UX trap bot codex-r7 flagged: user sees a green
+		//     matrix column, clicks Apply, every write fails. Aligning
+		//     presence with the active write contract restores invariant
+		//     "ok = write will succeed". Dotfile-symlink setups that used
+		//     to rely on default-mode resolve-to-target are now
+		//     unsupported by design — the security boundary closure in
+		//     PR #209 traded that path for confused-deputy integrity
+		//     protection).
+		//
+		// The symlink-refusal branch returns a DISTINCT status
+		// ("error-symlink") from the generic stat/wrong-shape failure
+		// ("error") so the Servers matrix can tell the operator their
+		// dotfile-symlink setup is refused by design (replace the
+		// symlink / edit the target) instead of the misleading "stat
+		// error — check permissions and disk health" diagnostic
+		// (work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md).
+		// The refusal itself is unchanged; only the reported category
+		// is split.
 		if lst, lerr := os.Lstat(p.path); lerr == nil {
 			isSymlink := lst.Mode()&os.ModeSymlink != 0
 			if !lst.Mode().IsRegular() && !isSymlink {
@@ -141,7 +152,9 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 						continue
 					}
 				}
-				out[p.name] = "error"
+				// Distinct from the generic "error" so the matrix renders
+				// a symlink-specific diagnostic (see header comment).
+				out[p.name] = "error-symlink"
 				continue
 			}
 		}
@@ -244,10 +257,11 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	scanIfReadable := func(name string) bool {
 		// "ok" is the only state for which an adapter read is
 		// guaranteed to find a regular file. "missing" /
-		// "missing-init-possible" / "error" all imply that the
-		// adapter's `os.ReadFile` would either return IsNotExist
-		// (which adapters already absorb to "no entries") or
-		// hit the wrong-shape failure we want to avoid.
+		// "missing-init-possible" / "error" / "error-symlink" all
+		// imply that the adapter's `os.ReadFile` would either return
+		// IsNotExist (which adapters already absorb to "no entries")
+		// or hit the wrong-shape / symlink-refusal failure we want
+		// to avoid.
 		return presence[name] == "ok"
 	}
 

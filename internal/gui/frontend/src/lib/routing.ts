@@ -93,12 +93,23 @@ export function perClientRouting(
       routing[client] = "available";
     } else if (state === "error") {
       // v0.4.5 PR #208 deep-sec Lane B follow-up: a non-IsNotExist
-      // stat failure (permissions, ACL anomaly, I/O error) was
-      // previously collapsed into "not-installed" and rendered with
-      // the misleading "config file is not present" tooltip. Surface
-      // the error state distinctly so the matrix can render a
+      // stat failure (permissions, ACL anomaly, I/O error) — or a
+      // non-regular non-symlink shape (directory, pipe, device) —
+      // was previously collapsed into "not-installed" and rendered
+      // with the misleading "config file is not present" tooltip.
+      // Surface the error state distinctly so the matrix can render a
       // diagnostic tooltip and the operator can take action.
       routing[client] = "config-error";
+    } else if (state === "error-symlink") {
+      // 2026-05-19 message-accuracy fix: the config path is a symlink
+      // the secure-write pipeline refuses in all modes (post-PR #209).
+      // Distinct from "config-error" so the matrix renders a
+      // symlink-specific tooltip (replace the symlink / edit the
+      // target) instead of the misleading generic stat-error message.
+      // The cell stays disabled either way (symlinked configs can't be
+      // written through), but the diagnostic is now accurate.
+      // work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md.
+      routing[client] = "config-error-symlink";
     } else {
       // v0.4.5 init-button: "missing-init-possible" still maps to
       // "not-installed" at the per-cell routing level — the matrix

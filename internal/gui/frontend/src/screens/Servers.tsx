@@ -790,7 +790,8 @@ function CellView(props: {
     applying ||
     routing === "unsupported" ||
     routing === "not-installed" ||
-    routing === "config-error";
+    routing === "config-error" ||
+    routing === "config-error-symlink";
   let title: string | undefined;
   if (routing === "via-hub") {
     title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
@@ -809,6 +810,15 @@ function CellView(props: {
     // tooltip. Typical causes: parent-directory permissions blocked,
     // antivirus quarantine, or I/O fault on the underlying volume.
     title = `${client}'s MCP config file could not be read (stat error). Check file permissions and disk health, then refresh.`;
+  } else if (routing === "config-error-symlink") {
+    // 2026-05-19 message-accuracy fix: the config path is a symlink,
+    // which the secure-write pipeline refuses in all modes (PR #209
+    // confused-deputy closure). The prior generic "stat error" tooltip
+    // sent operators to inspect disk/permissions instead of their
+    // dotfile-symlink setup. Spell out the by-design refusal and the
+    // two workarounds.
+    // work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md.
+    title = `${client}'s MCP config file is a symlink. mcphub's secure-write contract refuses symlinked client configs to prevent confused-deputy attacks (PR #209). Replace the symlink with a real file, or edit the symlink target's config directly (mcphub Apply won't write through the symlink).`;
   }
   // PR #22 retry-queue fix: cell with a retained failure from the
   // last applyChanges renders a red outline so the user sees the

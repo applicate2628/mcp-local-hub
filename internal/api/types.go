@@ -185,7 +185,26 @@ type ScanResult struct {
 	//                                     directory exists (client
 	//                                     genuinely not installed).
 	//   "error"                           stat returned an unexpected
-	//                                     error (permissions, etc.).
+	//                                     error (permissions, ACL/I-O
+	//                                     anomaly) OR the path is a
+	//                                     non-regular non-symlink shape
+	//                                     (directory, pipe, device).
+	//   "error-symlink"                   the config path is a symlink
+	//                                     (resolvable or dangling) and
+	//                                     the secure-write pipeline
+	//                                     refuses it in all modes
+	//                                     (post-PR #209 confused-deputy
+	//                                     closure; opt-in via
+	//                                     MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK
+	//                                     re-enables resolvable-target
+	//                                     symlinks). Split from "error"
+	//                                     so the matrix renders a
+	//                                     symlink-specific diagnostic
+	//                                     ("replace the symlink / edit
+	//                                     the target") instead of the
+	//                                     misleading generic stat-error
+	//                                     tooltip. work-items/bugs/
+	//                                     2026-05-19-codex-config-symlink-blocked-by-pr209.md.
 	//
 	// Frontend uses "ok" to render an "available (enabled, unchecked)"
 	// matrix cell for a manifested server when the cell's client is "ok"

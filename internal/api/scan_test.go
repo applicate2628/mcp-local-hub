@@ -411,13 +411,18 @@ func TestProbeClientConfigPresence_StateMachine(t *testing.T) {
 
 // TestProbeClientConfigPresence_DanglingSymlink pins the v0.4.5
 // deep-sec PR #208 Lane B round 4 P2 closure: a dangling symlink at
-// the config path must surface as "error", not "missing-init-possible".
-// Previously os.Stat followed the symlink, returned IsNotExist
-// (target absent), and classifyMissingClientConfig saw the parent
-// dir exists → "missing-init-possible" → GUI offered Initialize →
-// secure-create refused → 500 INIT_FAILED. The Lstat-first probe
-// now classifies symlinks (dangling or not) as "error" so the
-// matrix renders the config-error diagnostic instead.
+// the config path must surface as a symlink-refusal state, not
+// "missing-init-possible". Previously os.Stat followed the symlink,
+// returned IsNotExist (target absent), and classifyMissingClientConfig
+// saw the parent dir exists → "missing-init-possible" → GUI offered
+// Initialize → secure-create refused → 500 INIT_FAILED. The Lstat-first
+// probe now classifies symlinks (dangling or not) as "error-symlink"
+// so the matrix renders the symlink-specific diagnostic instead.
+//
+// 2026-05-19 message-accuracy fix: the symlink-refusal branch reports
+// "error-symlink" (distinct from the generic "error" stat-failure /
+// wrong-shape state) so the Servers tooltip tells the operator their
+// dotfile-symlink setup is refused by design.
 func TestProbeClientConfigPresence_DanglingSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
@@ -430,8 +435,8 @@ func TestProbeClientConfigPresence_DanglingSymlink(t *testing.T) {
 	}
 
 	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
-	if got := out["vscode"]; got != "error" {
-		t.Errorf("dangling symlink at config path classified as %q, want \"error\"", got)
+	if got := out["vscode"]; got != "error-symlink" {
+		t.Errorf("dangling symlink at config path classified as %q, want \"error-symlink\"", got)
 	}
 }
 
@@ -442,6 +447,11 @@ func TestProbeClientConfigPresence_DanglingSymlink(t *testing.T) {
 // os.Stat which succeeded and the cell was classified as "ok" —
 // migrate/backup would then fail later when adapter.readJSON tried
 // to read a directory.
+//
+// 2026-05-19 message-accuracy fix: a directory is a non-regular
+// non-symlink shape, so it stays in the GENERIC "error" category
+// (NOT "error-symlink") — the symlink-specific tooltip would be
+// wrong for a directory.
 func TestProbeClientConfigPresence_DirectoryAtConfigPath(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "mcp.json")
@@ -451,7 +461,7 @@ func TestProbeClientConfigPresence_DirectoryAtConfigPath(t *testing.T) {
 
 	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: path})
 	if got := out["vscode"]; got != "error" {
-		t.Errorf("directory at config path classified as %q, want \"error\"", got)
+		t.Errorf("directory at config path classified as %q, want \"error\" (generic, not symlink)", got)
 	}
 }
 
@@ -490,8 +500,8 @@ func TestProbeClientConfigPresence_SymlinkToRegularDefaultMode(t *testing.T) {
 	}
 
 	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
-	if got := out["vscode"]; got != "error" {
-		t.Errorf("symlink-to-regular in default mode classified as %q, want \"error\" (write pipeline refuses symlinks post-PR-#209)", got)
+	if got := out["vscode"]; got != "error-symlink" {
+		t.Errorf("symlink-to-regular in default mode classified as %q, want \"error-symlink\" (write pipeline refuses symlinks post-PR-#209)", got)
 	}
 }
 
@@ -552,8 +562,8 @@ func TestProbeClientConfigPresence_SymlinkOptInStrictModeOverride(t *testing.T) 
 	}
 
 	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
-	if got := out["vscode"]; got != "error" {
-		t.Errorf("symlink with opt-in env BUT strict mode set classified as %q, want \"error\" (strict overrides opt-in)", got)
+	if got := out["vscode"]; got != "error-symlink" {
+		t.Errorf("symlink with opt-in env BUT strict mode set classified as %q, want \"error-symlink\" (strict overrides opt-in)", got)
 	}
 }
 
@@ -575,8 +585,8 @@ func TestProbeClientConfigPresence_DanglingSymlinkOptInStillError(t *testing.T) 
 	}
 
 	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
-	if got := out["vscode"]; got != "error" {
-		t.Errorf("dangling symlink with opt-in env classified as %q, want \"error\" (target must be regular file)", got)
+	if got := out["vscode"]; got != "error-symlink" {
+		t.Errorf("dangling symlink with opt-in env classified as %q, want \"error-symlink\" (target must be regular file)", got)
 	}
 }
 
@@ -601,8 +611,65 @@ func TestProbeClientConfigPresence_SymlinkToRegularStrictMode(t *testing.T) {
 	}
 
 	out := probeClientConfigPresence(ScanOpts{VSCodeConfigPath: link})
+	if got := out["vscode"]; got != "error-symlink" {
+		t.Errorf("symlink-to-regular in strict mode classified as %q, want \"error-symlink\"", got)
+	}
+}
+
+// TestProbeClientConfigPresence_SymlinkVsStatErrorDistinct is the
+// canonical regression for the 2026-05-19 message-accuracy fix
+// (work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md):
+// the symlink-refusal category MUST be reported distinctly from the
+// generic stat/wrong-shape error so the Servers matrix can tell the
+// operator their dotfile-symlink setup is unsupported by design
+// (replace the symlink / edit the target) rather than rendering the
+// misleading "stat error — check permissions and disk health" tooltip.
+//
+// One scan, two refused clients: a symlinked config (codex-cli, the
+// exact reported case) → "error-symlink"; a directory at the config
+// path (vscode, a genuine wrong-shape) → generic "error". The two
+// categories must NOT collapse to the same value.
+func TestProbeClientConfigPresence_SymlinkVsStatErrorDistinct(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the cross-platform Lstat probe is exercised by the POSIX path")
+	}
+	// Ensure neither strict mode nor symlink opt-in is active so the
+	// symlink hits the plain default-mode refusal branch.
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowClientConfigSymlinkEnv, "")
+	tmp := t.TempDir()
+
+	// codex-cli: symlink to a real regular file → refused by PR #209
+	// secure-write contract → "error-symlink" (the reported bug).
+	target := filepath.Join(tmp, "real-config.toml")
+	if err := os.WriteFile(target, []byte("[mcp_servers]\n"), 0o600); err != nil {
+		t.Fatalf("seed symlink target: %v", err)
+	}
+	codexLink := filepath.Join(tmp, "config.toml")
+	if err := os.Symlink(target, codexLink); err != nil {
+		t.Fatalf("create codex symlink: %v", err)
+	}
+
+	// vscode: a directory at the config path → genuine wrong-shape
+	// → generic "error".
+	vscodeDir := filepath.Join(tmp, "mcp.json")
+	if err := os.MkdirAll(vscodeDir, 0o755); err != nil {
+		t.Fatalf("seed vscode directory: %v", err)
+	}
+
+	out := probeClientConfigPresence(ScanOpts{
+		CodexConfigPath:  codexLink,
+		VSCodeConfigPath: vscodeDir,
+	})
+
+	if got := out["codex-cli"]; got != "error-symlink" {
+		t.Errorf("symlinked codex config classified as %q, want \"error-symlink\"", got)
+	}
 	if got := out["vscode"]; got != "error" {
-		t.Errorf("symlink-to-regular in strict mode classified as %q, want \"error\"", got)
+		t.Errorf("directory at vscode config classified as %q, want generic \"error\"", got)
+	}
+	if out["codex-cli"] == out["vscode"] {
+		t.Errorf("symlink-refusal and stat-error collapsed to the same category %q; they must be distinct so the matrix renders the right diagnostic", out["codex-cli"])
 	}
 }
 

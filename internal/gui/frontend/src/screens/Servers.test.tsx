@@ -296,3 +296,67 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     expect(screen.queryByTestId("init-client-claude-code")).toBeNull();
   });
 });
+
+// 2026-05-19 message-accuracy fix
+// (work-items/bugs/2026-05-19-codex-config-symlink-blocked-by-pr209.md):
+// a symlinked client config is refused by the secure-write pipeline in
+// all modes (PR #209). The matrix cell must render a symlink-specific
+// tooltip (replace the symlink / edit the target) instead of the
+// misleading generic "stat error — check permissions and disk health"
+// message, and the cell stays disabled either way.
+describe("ServersScreen — symlinked-config tooltip (2026-05-19)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders the symlink-specific tooltip and disables the cell for error-symlink presence", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(200, scanWith({ "codex-cli": "error-symlink" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+
+    // The codex-cli cell carries the symlink tooltip; find it by its
+    // load-bearing phrasing rather than column index.
+    const cell = await screen.findByTitle(/config file is a symlink/);
+    expect(cell).toBeTruthy();
+    expect(cell.getAttribute("title")).toContain("confused-deputy");
+    expect(cell.getAttribute("title")).toContain("PR #209");
+    // Disabled because a symlinked config can't be written through.
+    expect((cell as HTMLInputElement).disabled).toBe(true);
+    // The misleading generic stat-error wording must NOT be used here.
+    expect(cell.getAttribute("title")).not.toContain("stat error");
+  });
+
+  it("keeps the generic stat-error tooltip for plain 'error' presence", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(200, scanWith({ "codex-cli": "error" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+
+    const cell = await screen.findByTitle(/stat error/);
+    expect(cell).toBeTruthy();
+    // The generic error must NOT borrow the symlink wording.
+    expect(cell.getAttribute("title")).not.toContain("symlink");
+    expect((cell as HTMLInputElement).disabled).toBe(true);
+  });
+});
