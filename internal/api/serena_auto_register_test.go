@@ -270,6 +270,125 @@ func TestAutoRegisterSerena_BlankOnlyLanguages_ReturnsErrNoLanguages(t *testing.
 	}
 }
 
+func TestAutoRegisterSerena_NonRegularMarkerRejectedBeforeInstall(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must not be called for a non-regular marker")
+		return "", nil
+	})
+
+	root := t.TempDir()
+	markerDir := filepath.Join(root, ".serena")
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		t.Fatalf("mkdir .serena: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(markerDir, "project.yml"), 0o755); err != nil {
+		t.Fatalf("mkdir marker directory: %v", err)
+	}
+
+	a := NewAPI()
+	entry, err := a.AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatalf("expected non-regular marker error, got entry %+v", entry)
+	}
+	if entry != nil {
+		t.Errorf("entry = %+v, want nil", entry)
+	}
+	if !strings.Contains(err.Error(), "must be a regular file") {
+		t.Fatalf("error = %v, want regular-file rejection", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows, want 0", len(rows))
+	}
+}
+
+func TestAutoRegisterSerena_SymlinkMarkerRejectedBeforeInstall(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must not be called for a symlink marker")
+		return "", nil
+	})
+
+	root := t.TempDir()
+	markerDir := filepath.Join(root, ".serena")
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		t.Fatalf("mkdir .serena: %v", err)
+	}
+	target := filepath.Join(root, "target.yml")
+	if err := os.WriteFile(target, []byte(validSerenaMarkerYAML), 0o644); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(markerDir, "project.yml")); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+
+	a := NewAPI()
+	entry, err := a.AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatalf("expected symlink marker error, got entry %+v", entry)
+	}
+	if entry != nil {
+		t.Errorf("entry = %+v, want nil", entry)
+	}
+	if !strings.Contains(err.Error(), "must be a regular file") {
+		t.Fatalf("error = %v, want regular-file rejection", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows, want 0", len(rows))
+	}
+}
+
+func TestAutoRegisterSerena_OversizedMarkerRejectedBeforeInstall(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must not be called for an oversized marker")
+		return "", nil
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), "languages:\n  - python\n"+strings.Repeat("#", maxSerenaProjectYMLBytes))
+	a := NewAPI()
+	entry, err := a.AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatalf("expected oversized marker error, got entry %+v", entry)
+	}
+	if entry != nil {
+		t.Errorf("entry = %+v, want nil", entry)
+	}
+	if !strings.Contains(err.Error(), "maximum is") {
+		t.Fatalf("error = %v, want size-limit rejection", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows, want 0", len(rows))
+	}
+}
+
+func TestAutoRegisterSerena_CanceledContextStopsBeforeMarkerRead(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must not be called when context is canceled before marker read")
+		return "", nil
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := NewAPI()
+	entry, err := a.AutoRegisterSerenaWorkspace(ctx, root)
+	if err == nil {
+		t.Fatalf("expected canceled context error, got entry %+v", entry)
+	}
+	if entry != nil {
+		t.Errorf("entry = %+v, want nil", entry)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows, want 0", len(rows))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 3. Happy path — seams faked to succeed.
 // ---------------------------------------------------------------------------
@@ -278,12 +397,12 @@ func TestAutoRegisterSerena_HappyPath_RegistersInstallsReconcilesAndProbes(t *te
 	regPath := autoRegisterTestEnv(t)
 
 	var (
-		installCalled    int32
-		installWS        []WorkspaceEntry
-		reconcileCalled  int32
-		reconcileApply   bool
-		readinessCalled  int32
-		readinessPort    int
+		installCalled   int32
+		installWS       []WorkspaceEntry
+		reconcileCalled int32
+		reconcileApply  bool
+		readinessCalled int32
+		readinessPort   int
 	)
 	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, m *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
 		atomic.AddInt32(&installCalled, 1)
@@ -661,7 +780,10 @@ func TestAutoRegisterSerena_Introduce_NoSupervisor_StartsWithoutReap(t *testing.
 
 	var startCalled int32
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not be called when no supervisor is running"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not be called when no supervisor is running")
+			return nil
+		},
 		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
 	)
 	var installCalled int32
@@ -699,7 +821,10 @@ func TestAutoRegisterSerena_Introduce_ReapFails_RollsBack(t *testing.T) {
 	reapErr := errors.New("synthetic reap failure")
 	stubAutoRegisterCutover(t,
 		func(context.Context) error { return reapErr },
-		func(context.Context) error { t.Fatalf("start must not be called when reap fails before any install"); return nil },
+		func(context.Context) error {
+			t.Fatalf("start must not be called when reap fails before any install")
+			return nil
+		},
 	)
 	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
 		t.Fatalf("install must not be called when the reap fails")
@@ -901,7 +1026,10 @@ func TestAutoRegisterSerena_Introduce_StartUnsupported_FailsLoudPreCommit(t *tes
 	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
 	// reap/start are WIRED (non-nil) but the platform does NOT support the start.
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not run when start is unsupported (pre-commit gate)"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not run when start is unsupported (pre-commit gate)")
+			return nil
+		},
 		func(context.Context) error { t.Fatalf("start must not run when start is unsupported"); return nil },
 	)
 	prevSupported := autoRegisterStartSupportedFn
@@ -980,12 +1108,15 @@ func TestAutoRegisterSerena_ReadinessHonorsContextDeadline(t *testing.T) {
 
 func TestAutoRegisterSerena_LiveAddToStoppedPool_StartsWithoutReap(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
-	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return true, nil })  // prior HAS runtime_spec
-	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })  // but supervisor is DOWN
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return true, nil }) // prior HAS runtime_spec
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil }) // but supervisor is DOWN
 
 	var startCalled int32
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not run for a live-add (prior has runtime_spec)"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not run for a live-add (prior has runtime_spec)")
+			return nil
+		},
 		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
 	)
 	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {

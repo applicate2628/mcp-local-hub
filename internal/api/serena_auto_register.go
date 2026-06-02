@@ -82,6 +82,9 @@ import (
 // reap/start/liveness/prior-intent steps are seamed so the decision + rollback +
 // concurrency logic is unit-testable without a live supervisor.
 func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (entry *WorkspaceEntry, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// 1. Resolve the workspace root: clean/abs absPath, then walk up ancestors
 	//    for `.serena/project.yml`. The found directory IS the WorkspacePath.
 	//    No marker found → ErrNotASerenaProject (the DoS bound — NEVER register
@@ -92,7 +95,10 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	}
 
 	// 2. Read <root>/.serena/project.yml languages. Empty/missing → ErrNoLanguages.
-	languages, err := readSerenaProjectYMLLanguages(root)
+	//    The marker is deliberately treated as untrusted input because the GUI
+	//    router can reach this path from an MCP tool-call path miss. Keep the
+	//    read small, regular-file-only, and cancellation-aware before parsing.
+	languages, err := readSerenaProjectYMLLanguages(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -492,8 +498,13 @@ func resolveSerenaProjectRoot(p string) (string, error) {
 	dir := abs
 	for {
 		marker := filepath.Join(dir, ".serena", "project.yml")
-		if fi, statErr := os.Stat(marker); statErr == nil && !fi.IsDir() {
+		if fi, statErr := os.Lstat(marker); statErr == nil {
+			if !fi.Mode().IsRegular() {
+				return "", fmt.Errorf("serena auto-register: marker %s must be a regular file (mode %s)", marker, fi.Mode())
+			}
 			return dir, nil
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return "", fmt.Errorf("serena auto-register: inspect marker %s: %w", marker, statErr)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -515,27 +526,82 @@ type serenaProjectYMLForAutoRegister struct {
 	Language  string   `yaml:"language"` // legacy singular form (`language: python`)
 }
 
+const (
+	maxSerenaProjectYMLBytes         = 64 * 1024
+	maxSerenaProjectYMLLanguages     = 32
+	maxSerenaProjectYMLLanguageBytes = 128
+)
+
 // readSerenaProjectYMLLanguages reads <root>/.serena/project.yml and returns its
 // declared languages. A missing/empty languages list → ErrNoLanguages (the
-// marker exists but no serena descriptor can be synthesized). A read or
-// YAML-parse failure propagates verbatim. Empty-string entries are dropped so a
-// `languages: [""]` list does not masquerade as a valid declaration.
-func readSerenaProjectYMLLanguages(root string) ([]string, error) {
+// marker exists but no serena descriptor can be synthesized). The marker is
+// untrusted MCP-reachable input, so it must be a small regular file (not a
+// symlink/FIFO/device), and context cancellation is honored before and after the
+// filesystem read. Empty-string entries are dropped so a `languages: [""]` list
+// does not masquerade as a valid declaration.
+func readSerenaProjectYMLLanguages(ctx context.Context, root string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	path := filepath.Join(root, ".serena", "project.yml")
-	data, err := os.ReadFile(path)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("serena auto-register: aborted before reading %s: %w", path, err)
+	}
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("serena auto-register: inspect %s: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("serena auto-register: marker %s must be a regular file (mode %s)", path, fi.Mode())
+	}
+	if fi.Size() > maxSerenaProjectYMLBytes {
+		return nil, fmt.Errorf("serena auto-register: marker %s is %d bytes, maximum is %d", path, fi.Size(), maxSerenaProjectYMLBytes)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("serena auto-register: open %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	openedFi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("serena auto-register: inspect opened marker %s: %w", path, err)
+	}
+	if !openedFi.Mode().IsRegular() {
+		return nil, fmt.Errorf("serena auto-register: marker %s must be a regular file (mode %s)", path, openedFi.Mode())
+	}
+	if !os.SameFile(fi, openedFi) {
+		return nil, fmt.Errorf("serena auto-register: marker %s changed while opening", path)
+	}
+	if openedFi.Size() > maxSerenaProjectYMLBytes {
+		return nil, fmt.Errorf("serena auto-register: marker %s is %d bytes, maximum is %d", path, openedFi.Size(), maxSerenaProjectYMLBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxSerenaProjectYMLBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("serena auto-register: read %s: %w", path, err)
+	}
+	if len(data) > maxSerenaProjectYMLBytes {
+		return nil, fmt.Errorf("serena auto-register: marker %s is %d bytes, maximum is %d", path, len(data), maxSerenaProjectYMLBytes)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("serena auto-register: aborted after reading %s: %w", path, err)
 	}
 	var doc serenaProjectYMLForAutoRegister
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("serena auto-register: parse %s: %w", path, err)
 	}
+	if len(doc.Languages) > maxSerenaProjectYMLLanguages {
+		return nil, fmt.Errorf("serena auto-register: marker %s declares %d languages, maximum is %d", path, len(doc.Languages), maxSerenaProjectYMLLanguages)
+	}
 	cleaned := make([]string, 0, len(doc.Languages))
 	for _, l := range doc.Languages {
-		if strings.TrimSpace(l) == "" {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
 			continue
 		}
-		cleaned = append(cleaned, strings.TrimSpace(l))
+		if len(trimmed) > maxSerenaProjectYMLLanguageBytes {
+			return nil, fmt.Errorf("serena auto-register: marker %s declares a language longer than %d bytes", path, maxSerenaProjectYMLLanguageBytes)
+		}
+		cleaned = append(cleaned, trimmed)
 	}
 	// Legacy singular fallback (bot PR #253 P2): an older Serena project.yml uses
 	// `language: python` instead of the plural list. Auto-register exists to pick
@@ -543,7 +609,11 @@ func readSerenaProjectYMLLanguages(root string) ([]string, error) {
 	// must register, not 422. Only consult the scalar when the plural list yielded
 	// nothing (a project carrying both is governed by its plural list).
 	if len(cleaned) == 0 && strings.TrimSpace(doc.Language) != "" {
-		cleaned = append(cleaned, strings.TrimSpace(doc.Language))
+		trimmed := strings.TrimSpace(doc.Language)
+		if len(trimmed) > maxSerenaProjectYMLLanguageBytes {
+			return nil, fmt.Errorf("serena auto-register: marker %s declares a language longer than %d bytes", path, maxSerenaProjectYMLLanguageBytes)
+		}
+		cleaned = append(cleaned, trimmed)
 	}
 	if len(cleaned) == 0 {
 		return nil, fmt.Errorf("%w (%s)", ErrNoLanguages, path)
