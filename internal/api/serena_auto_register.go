@@ -296,6 +296,10 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	// running. The request ctx still gates the PRE-commit phase (7c + the install's
 	// own commit-point ctx check, fix #1); commitCtx severs cancel ONLY for the
 	// must-complete steps, bounded by serenaAutoRegisterCommitTimeout (bot PR #253 r6).
+	// Invariant (docs/serena-lifecycle-invariants.md §2): a step that must complete
+	// AFTER the reap goes on commitCtx; a step that must honor a session termination
+	// goes on the request ctx. Placing a step on the wrong side reintroduces either a
+	// half-cutover (no supervisor) or a terminated-session-still-mutates bug.
 	commitCtx, commitCancel := context.WithTimeout(context.WithoutCancel(ctx), serenaAutoRegisterCommitTimeout)
 	defer commitCancel()
 
