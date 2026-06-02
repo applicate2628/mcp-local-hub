@@ -267,10 +267,20 @@ func (st *daemonSessionStore) lookup(clientSessionID string, wsKey string) (daem
 	if !present || b == nil {
 		return "", "", false
 	}
-	// Expire-on-read: a binding past its idle TTL is stale (the daemon
-	// likely expired its side already). Drop it so the caller
-	// re-handshakes.
+	// Expire-on-read: a binding past its idle TTL is stale (the daemon likely
+	// expired its side already). Drop it so the caller re-handshakes — UNLESS a
+	// reservation is active (reservations > 0): a concurrent workspace-switch
+	// handshake owns this slot (bot PR #251 r4 P2). Removing it here (e.g. a
+	// concurrent request for the OLD workspace racing the switch) would free the
+	// reserved capacity for another fresh id AND delete the serialization state, so
+	// the switch's store() would 429 after it already minted an upstream session.
+	// Treat as a miss WITHOUT removing; the reservation owner's store/release
+	// manages the lifecycle (matching reclaimExpiredLocked + cleanup, which also
+	// skip reservations > 0).
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
+		if b.reservations > 0 {
+			return "", "", false
+		}
 		st.removeLocked(clientSessionID)
 		return "", "", false
 	}

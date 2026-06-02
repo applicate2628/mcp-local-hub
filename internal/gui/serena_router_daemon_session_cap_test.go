@@ -175,6 +175,35 @@ func TestDaemonSessionStore_SweepSkipsReservedBinding(t *testing.T) {
 	}
 }
 
+// TestDaemonSessionStore_LookupSkipsReservedExpired covers bot PR #251 r4 P2: a
+// concurrent lookup (for the OLD workspace) that hits an idle-expired binding which
+// is RESERVED by an in-flight workspace switch must NOT remove it via expire-on-read
+// — that would free the reserved slot and delete the serialization state, 429ing the
+// switch's store after it already minted an upstream session.
+func TestDaemonSessionStore_LookupSkipsReservedExpired(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	clk := base
+	st := &daemonSessionStore{clock: func() time.Time { return clk }}
+	const id = "switch-near-expiry"
+	if !st.store(id, "alpha", "daemon-alpha", defaultProtocolVersion) {
+		t.Fatalf("store returned false")
+	}
+	if proceed, _ := st.reserveSlot(id); !proceed { // a workspace-switch handshake reserves it
+		t.Fatalf("switch reserveSlot returned false")
+	}
+	st.bindings[id].lastSeen = base // pin the binding to the OLD timestamp (near-expiry)
+
+	// Advance past the TTL, then a concurrent request for the OLD workspace looks it
+	// up (expire-on-read). The reserved binding must survive as a miss, not be removed.
+	clk = base.Add(daemonSessionTTL + time.Hour)
+	if _, _, ok := st.lookup(id, "alpha"); ok {
+		t.Errorf("lookup returned a hit for an idle-expired binding; want a miss")
+	}
+	if _, ok := st.bindings[id]; !ok {
+		t.Fatalf("lookup removed a RESERVED idle-expired binding; the in-flight switch must keep its slot")
+	}
+}
+
 // TestDaemonSessionStore_SameIdBurst_OnlyOneProceeds drives the bot PR #251 r2 P1
 // cap-bypass scenario under -race: N concurrent first requests for ONE fresh id —
 // exactly ONE proceeds (creates the placeholder + would mint an upstream session);
