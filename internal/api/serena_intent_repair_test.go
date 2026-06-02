@@ -346,3 +346,224 @@ func TestRepairSerenaIntentFromRegistry_IntentLockContended_Skips(t *testing.T) 
 		t.Errorf("intent file modified despite contended lock:\nbefore=%s\nafter=%s", before, after)
 	}
 }
+
+// seedSerenaRegistryRowWithKey is seedSerenaRegistryRow but with an EXPLICIT
+// WorkspaceKey that may diverge from WorkspaceKey(path) — used only to construct
+// the corrupt/legacy-row case the divergence guard must fail closed on.
+func seedSerenaRegistryRowWithKey(t *testing.T, regPath, key, path string, port int) {
+	t.Helper()
+	reg := NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("lock registry: %v", err)
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if err := reg.PutSerena(WorkspaceEntry{
+		WorkspaceKey:  key,
+		WorkspacePath: path,
+		Language:      SerenaLanguageSentinel,
+		Backend:       SerenaServerName,
+		Port:          port,
+		TaskName:      "mcp-local-hub-serena-" + key,
+		Languages:     []string{"python"},
+	}); err != nil {
+		t.Fatalf("put serena row: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 6. Idempotency / no-re-append — a SECOND repair after a successful append is a
+//    strict no-op (0, nil, nil) with a byte-identical intent. Locks in the
+//    load-bearing invariant that a repaired daemon is seen as present on the
+//    next startup (TaskName == "\mcp-local-hub-serena-"+WorkspaceKey(path) and
+//    detection keys off ws.WorkspaceKey == WorkspaceKey(path)).
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_SecondCallIsNoOp(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
+	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+
+	// First repair appends the orphan.
+	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("first repair: unexpected error: %v", err)
+	}
+	if repaired != 1 {
+		t.Fatalf("first repair: repaired = %d, want 1", repaired)
+	}
+	afterFirst, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after first repair: %v", err)
+	}
+	if !readIntent(t, intentPath).HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Fatalf("orphan %q not present after first repair", orphanKey)
+	}
+
+	// Second repair must be a strict no-op — NOT re-append the same daemon.
+	repaired2, deferred2, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("second repair: unexpected error: %v", err)
+	}
+	if repaired2 != 0 {
+		t.Errorf("second repair: repaired = %d, want 0 (no re-append)", repaired2)
+	}
+	if len(deferred2) != 0 {
+		t.Errorf("second repair: deferred = %v, want none", deferred2)
+	}
+	afterSecond, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after second repair: %v", err)
+	}
+	if string(afterFirst) != string(afterSecond) {
+		t.Errorf("intent changed on the second (no-op) repair — infinite re-append risk:\nafter1=%s\nafter2=%s", afterFirst, afterSecond)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 7. Registry-lock contention — the REGISTRY flock is held before the call (the
+//    distinct early-return at the registry TryLock, separate from the intent
+//    contention of test #5, and the more likely production contention since
+//    auto-register holds the registry lock across its whole flow).
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_RegistryLockContended_Skips(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
+	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before: %v", err)
+	}
+
+	// Hold the registry flock from the test goroutine BEFORE the call.
+	reg := NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("test acquire registry lock: %v", err)
+	}
+	defer unlock()
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("unexpected error on contended registry lock: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (registry lock contended → skip)", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none (contended skip)", deferred)
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("intent modified despite contended registry lock:\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. Missing intent file — a genuinely fresh host (no supervisor-intent.json)
+//    has no runtime_spec, so EVERY serena row defers (the pool must be
+//    introduced via migrate); the repair must NOT panic and must NOT create the
+//    intent file.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_MissingIntentFile_Defers(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+
+	// Do NOT seed an intent — the file is absent.
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("resolve state dir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if _, statErr := os.Stat(intentPath); !os.IsNotExist(statErr) {
+		t.Fatalf("precondition: intent file should be absent, stat err = %v", statErr)
+	}
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("unexpected error on missing intent file: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (no runtime_spec → defer)", repaired)
+	}
+	if len(deferred) != 1 || deferred[0] != orphanKey {
+		t.Errorf("deferred = %v, want [%q]", deferred, orphanKey)
+	}
+	if _, statErr := os.Stat(intentPath); !os.IsNotExist(statErr) {
+		t.Errorf("intent file created on a defer (must not write); stat err = %v", statErr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 9. Divergence guard — a registry row whose WorkspaceKey != WorkspaceKey(path)
+//    (hand-edited / legacy) is SKIPPED, not appended, so a later startup does
+//    not re-append it forever. The intent is unchanged.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_DivergentRow_SkippedNotReappended(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
+	const divergentPath, divergentPort = `C:\ws\delta`, 9153
+	const divergentKey = "hand-edited-bogus-key"
+
+	if divergentKey == WorkspaceKey(divergentPath) {
+		t.Fatalf("test setup invalid: divergentKey must NOT equal WorkspaceKey(%q)", divergentPath)
+	}
+
+	// A spec-bearing intent (healthy daemon for a DIFFERENT workspace) so the
+	// live-add path WOULD be reached if the guard did not skip the divergent row.
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	seedSerenaRegistryRowWithKey(t, regPath, divergentKey, divergentPath, divergentPort)
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	beforeCount := len(readIntent(t, intentPath).Daemons)
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (divergent row skipped, healthy row already present)", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none (skip is not a defer)", deferred)
+	}
+	got := readIntent(t, intentPath)
+	if len(got.Daemons) != beforeCount {
+		t.Errorf("daemon count = %d, want %d (divergent row must NOT be appended)", len(got.Daemons), beforeCount)
+	}
+	if got.HasSerenaDaemonForWorkspaceKey(divergentKey) {
+		t.Errorf("divergent key %q was appended (must be skipped to avoid infinite re-append)", divergentKey)
+	}
+}

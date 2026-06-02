@@ -53,11 +53,25 @@ import (
 //
 // Lock order: registry flock BEFORE intent flock — matching auto-register's own
 // discipline (it holds the registry flock across its install, which acquires the
-// intent lock INSIDE it). Holding registry-across-intent is deadlock-free: the
-// intent lock is only ever acquired by a registry holder, so once we hold the
-// registry, no other writer can be holding the intent. Both locks are held
-// across the WHOLE repair so the missing-set computation and the append commit
-// see a consistent, race-free view.
+// intent lock INSIDE it).
+//
+// Deadlock-freedom comes from TryLock on BOTH locks (skip-on-contention), NOT
+// from exclusive ownership. Other writers DO take the supervisor-intent.json.lock
+// leaf WITHOUT holding the registry lock — migration (internal/migration/journal.go
+// writeDerivedIntent -> WriteStateFileAtomic), strict-mode, and autostart all
+// write the intent under that leaf alone. So the repair must never BLOCK while
+// holding a lock; because both acquisitions are non-blocking, it can never wait
+// on a lock that another (possibly stuck) holder is behind. Do NOT "optimize"
+// either TryLock into a blocking Lock — that reintroduces a real deadlock against
+// a concurrent migration.
+//
+// Clobber-safety has two independent layers: (a) vs a concurrent auto-register —
+// registry-lock mutual exclusion (auto-register holds the registry lock across its
+// whole install, so while we hold it no auto-register can be mid-commit); (b) vs
+// any other intent writer — the shared supervisor-intent.json.lock leaf serializes
+// the read-modify-write. We hold that leaf across the WHOLE repair, so the
+// missing-set computation and the append commit see one consistent, race-free
+// snapshot and no concurrent write can interleave between our read and our write.
 func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string, err error) {
 	// 1. Resolve the registry + intent paths.
 	regPath, err := DefaultRegistryPath()
@@ -127,14 +141,44 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 	//    its per-workspace daemon is absent from the intent (a nil/missing
 	//    intent makes EVERY row missing).
 	var missing []WorkspaceEntry
+	var skippedDivergent []string
 	for i := range rows {
 		ws := rows[i]
 		if ws.Language != SerenaLanguageSentinel || ws.WorkspacePath == "" {
 			continue
 		}
+		// Guard the load-bearing registry invariant WorkspaceKey ==
+		// WorkspaceKey(WorkspacePath). Detection keys off ws.WorkspaceKey, but the
+		// materialized daemon's TaskName derives from WorkspaceKey(ws.WorkspacePath)
+		// (BuildSupervisorDaemonsForSerena -> SerenaTaskNameForWorkspace). For
+		// auto-register and manual registration both are derived from the same
+		// canonical path, so they agree. But a hand-edited workspaces.yaml — or a
+		// legacy row written under the pre-symlink-resolution
+		// CanonicalWorkspacePathLegacyCompat rule — could diverge. Appending such a
+		// row would materialize a daemon under WorkspaceKey(path) that the NEXT
+		// startup's HasSerenaDaemonForWorkspaceKey(ws.WorkspaceKey) lookup still sees
+		// as missing → re-appended forever, growing supervisor-intent.json without
+		// bound. Skip + warn (fail closed) so the operator re-registers, rather than
+		// silently re-appending on every boot.
+		if ws.WorkspaceKey != WorkspaceKey(ws.WorkspacePath) {
+			skippedDivergent = append(skippedDivergent, ws.WorkspaceKey)
+			continue
+		}
 		if intent == nil || !intent.HasSerenaDaemonForWorkspaceKey(ws.WorkspaceKey) {
 			missing = append(missing, ws)
 		}
+	}
+	if len(skippedDivergent) > 0 {
+		emitSerenaIntentRepairEvent(
+			SupervisorEventSeverityWarn,
+			"serena-intent-repair-divergent-row-skipped",
+			map[string]any{
+				"skipped_count":     len(skippedDivergent),
+				"skipped_workspace": skippedDivergent,
+				"reason":            "registry row WorkspaceKey != WorkspaceKey(WorkspacePath) (hand-edited workspaces.yaml or a legacy pre-symlink-resolution row); appending would re-append on every boot",
+				"operator_action":   "re-register the workspace so its registry key matches its canonical path",
+			},
+		)
 	}
 	if len(missing) == 0 {
 		return 0, nil, nil // healthy — every registry row owns its intent daemon (the common case; no write)
