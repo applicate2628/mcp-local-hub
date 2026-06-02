@@ -1085,7 +1085,9 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 			// this router. On the registration-MUTATION path, refuse — do NOT allocate a
 			// pool port / mutate registry+intent for a revoked/unknown session. (The main
 			// ROUTING handler still treats absent as a legacy/path-only caller for
-			// EXISTING workspaces; that leniency is for routing, NOT for registration.)
+			// EXISTING workspaces; that leniency is for routing, NOT for registration.
+			// The asymmetry is intentional — do NOT harmonize the two gates; see
+			// docs/serena-lifecycle-invariants.md §3.)
 			writeJSONRPCErrorStatus(w, id, http.StatusBadRequest, jsonrpcInvalidRequest, "session terminated", nil)
 			return nil
 		case routerSessionLive:
