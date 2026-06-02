@@ -527,6 +527,40 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// all three uniformly.
 	ipcExitCh := make(chan struct{}, 1)
 
+	// Serena crash-repair self-heal: BEFORE loading the intent for the first
+	// reconcile pass, re-converge any registry serena row left orphaned by a
+	// crash between an auto-register registry Save and its install commit (it
+	// APPENDS the missing daemon rows to supervisor-intent.json; it never
+	// replace-alls). Running it here means the loadIntentFiles read below picks
+	// up the now-complete intent and the first reconcile spawns the recovered
+	// daemons. NON-FATAL: a repair error (or a deferred introduce-crash) never
+	// blocks supervisor startup — the supervisor must come up regardless.
+	if repaired, deferredKeys, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(); rErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "reconcile",
+			Event:    "serena-intent-repair-failed",
+			Body: map[string]any{
+				"err": rErr.Error(),
+			},
+		})
+	} else if repaired > 0 || len(deferredKeys) > 0 {
+		severity := "info"
+		if len(deferredKeys) > 0 {
+			severity = "warn"
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: severity,
+			Source:   "reconcile",
+			Event:    "serena-intent-repair-result",
+			Body: map[string]any{
+				"repaired_count":     repaired,
+				"deferred_count":     len(deferredKeys),
+				"deferred_workspace": deferredKeys,
+			},
+		})
+	}
+
 	// Read the two intent files before exposing IPC. daemon-intent.json
 	// parse/schema failures are fail-closed: a corrupt stop/quarantine
 	// file must not collapse to daemonIntent==nil, because Reconcile

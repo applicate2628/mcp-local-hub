@@ -1,0 +1,348 @@
+package api
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/gofrs/flock"
+)
+
+// ---------------------------------------------------------------------------
+// RepairSerenaIntentFromRegistry unit tests.
+//
+// Reuses autoRegisterTestEnv (serena_auto_register_test.go) which isolates all
+// state into a per-test temp tree: a temp workspaces.yaml (via
+// defaultRegistryPathFn), a temp state dir (via SetDaemonStateRootForTest,
+// where supervisor-intent.json + supervisor-events.log live), and a stubbed
+// serena catalog (loadSerenaCatalogManifest -> autoRegisterCatalogManifest).
+// The repair reads registry + intent under fresh locks and APPENDS missing
+// serena daemon rows — these tests assert the append-not-replace contract, the
+// introduce-crash deferral, and the lock-contention skip.
+// ---------------------------------------------------------------------------
+
+// seedSerenaRegistryRow loads regPath under the registry lock and writes one
+// serena sentinel row for (path, port), then saves. It honors the production
+// invariant WorkspaceKey == WorkspaceKey(WorkspacePath) (auto-register derives
+// the key from the canonical path — serena_auto_register.go:110+187), which is
+// also what HasSerenaDaemonForWorkspaceKey + BuildSupervisorDaemonsForSerena
+// rely on. Returns the derived key so the test can assert on it.
+func seedSerenaRegistryRow(t *testing.T, regPath, path string, port int) string {
+	t.Helper()
+	key := WorkspaceKey(path)
+	reg := NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("lock registry: %v", err)
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if err := reg.PutSerena(WorkspaceEntry{
+		WorkspaceKey:  key,
+		WorkspacePath: path,
+		Language:      SerenaLanguageSentinel,
+		Backend:       SerenaServerName,
+		Port:          port,
+		TaskName:      "mcp-local-hub-serena-" + key,
+		Languages:     []string{"python"},
+	}); err != nil {
+		t.Fatalf("put serena row: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry: %v", err)
+	}
+	return key
+}
+
+// healthySerenaDaemon materializes the production-shape per-workspace serena
+// daemon (carrying a RuntimeSpec) for one workspace, using the same
+// BuildSupervisorDaemonsForSerena the install fan-out and the repair use. This
+// keeps the seeded "healthy" intent row byte-consistent with what the repair
+// would append. The WorkspaceKey is derived from path (production invariant).
+func healthySerenaDaemon(t *testing.T, path string, port int) SupervisorDaemon {
+	t.Helper()
+	dyn, err := BuildInMemorySerenaDynamicPoolManifest(autoRegisterCatalogManifest())
+	if err != nil {
+		t.Fatalf("build dynamic-pool manifest: %v", err)
+	}
+	ws := WorkspaceEntry{
+		WorkspaceKey:  WorkspaceKey(path),
+		WorkspacePath: path,
+		Language:      SerenaLanguageSentinel,
+		Port:          port,
+	}
+	daemons := BuildSupervisorDaemonsForSerena(dyn, []WorkspaceEntry{ws}, "", "mcphub.exe")
+	if len(daemons) != 1 {
+		t.Fatalf("BuildSupervisorDaemonsForSerena produced %d daemons, want 1", len(daemons))
+	}
+	return daemons[0]
+}
+
+// seedIntent writes a supervisor-intent.json under the redirected state dir.
+func seedIntent(t *testing.T, f *SupervisorIntentFile) string {
+	t.Helper()
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("resolve state dir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteSupervisorIntent(intentPath, f); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	return intentPath
+}
+
+// readIntent re-reads the on-disk intent.
+func readIntent(t *testing.T, intentPath string) *SupervisorIntentFile {
+	t.Helper()
+	got, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	return got
+}
+
+// ---------------------------------------------------------------------------
+// 1. Healthy — every serena registry row has its intent daemon → (0, nil, nil)
+//    and the intent file is unchanged.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_Healthy_NoOp(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const path, port = `C:\ws\alpha`, 9150
+	seedSerenaRegistryRow(t, regPath, path, port)
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, path, port)},
+	})
+
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent bytes before: %v", err)
+	}
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (healthy intent)", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none", deferred)
+	}
+
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent bytes after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("intent file changed on a healthy no-op repair:\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 2. Missing row appended — 1 healthy + 1 orphan registry row + a spec-bearing
+//    intent → repaired==1; the orphan's daemon is NOW present AND the
+//    pre-existing daemons are STILL present (count up by exactly 1).
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_MissingRowAppended(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
+	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+
+	healthyKey := seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+
+	// Intent carries ONLY the healthy daemon (spec-bearing) — the orphan's
+	// daemon is missing (the crash window).
+	healthy := healthySerenaDaemon(t, healthyPath, healthyPort)
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthy},
+	})
+	beforeCount := len(readIntent(t, intentPath).Daemons)
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
+	}
+	if repaired != 1 {
+		t.Fatalf("repaired = %d, want 1", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none", deferred)
+	}
+
+	got := readIntent(t, intentPath)
+	// Append, not replace: count up by exactly 1.
+	if len(got.Daemons) != beforeCount+1 {
+		t.Errorf("daemon count = %d, want %d (append exactly one, not replace-all)", len(got.Daemons), beforeCount+1)
+	}
+	// The orphan's daemon is now present.
+	if !got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Errorf("orphan key %q daemon missing after repair; daemons: %+v", orphanKey, got.Daemons)
+	}
+	// The pre-existing healthy daemon is still present.
+	if !got.HasSerenaDaemonForWorkspaceKey(healthyKey) {
+		t.Errorf("pre-existing healthy key %q daemon dropped by repair; daemons: %+v", healthyKey, got.Daemons)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 3. Clobber-safety vs concurrent row — the intent ALREADY contains a serena
+//    daemon for a key NOT in the registry rows driving `missing` (simulating an
+//    auto-register row committed concurrently); the repair APPENDS the missing
+//    one and does NOT remove the extra daemon (final set ⊇ both).
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_DoesNotClobberConcurrentRow(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	// A daemon for a workspace that is NOT in the registry — e.g. a concurrent
+	// auto-register committed it to the intent after our registry snapshot, or
+	// its registry row lives in a region we did not read. The repair must NOT
+	// remove it.
+	const concurrentPath, concurrentPort = `C:\ws\gamma`, 9152
+
+	// Registry has ONLY the orphan row (drives `missing`).
+	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+	concurrentKey := WorkspaceKey(concurrentPath)
+
+	// Intent carries ONLY the concurrent (spec-bearing) daemon — NOT the orphan.
+	concurrent := healthySerenaDaemon(t, concurrentPath, concurrentPort)
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{concurrent},
+	})
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
+	}
+	if repaired != 1 {
+		t.Fatalf("repaired = %d, want 1 (the orphan)", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none", deferred)
+	}
+
+	got := readIntent(t, intentPath)
+	// Final set ⊇ both: the appended orphan AND the untouched concurrent row.
+	if !got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Errorf("orphan key %q daemon missing after repair; daemons: %+v", orphanKey, got.Daemons)
+	}
+	if !got.HasSerenaDaemonForWorkspaceKey(concurrentKey) {
+		t.Errorf("concurrent key %q daemon CLOBBERED by repair (must be preserved); daemons: %+v", concurrentKey, got.Daemons)
+	}
+	if len(got.Daemons) != 2 {
+		t.Errorf("daemon count = %d, want 2 (concurrent preserved + orphan appended)", len(got.Daemons))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4. Introduce-crash defer — orphan row(s) + an intent with NO runtime_spec
+//    daemon → (0, <keys>, nil), intent NOT written (no daemon added).
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_IntroduceCrashDefers(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+
+	// Intent has a daemon WITHOUT a runtime_spec (a legacy/global row) — so
+	// HasRuntimeSpecRow() is false: this is the first-introduce-crash shape.
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Command: "mcphub.exe"},
+		},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent bytes before: %v", err)
+	}
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (introduce-crash must defer, not append)", repaired)
+	}
+	if len(deferred) != 1 || deferred[0] != orphanKey {
+		t.Errorf("deferred = %v, want [%q]", deferred, orphanKey)
+	}
+
+	// Intent NOT written: no daemon added, bytes unchanged.
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent bytes after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("intent file changed on an introduce-crash defer (must not write):\nbefore=%s\nafter=%s", before, after)
+	}
+	if got := readIntent(t, intentPath); got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Errorf("orphan key %q daemon must NOT be added on an introduce-crash defer; daemons: %+v", orphanKey, got.Daemons)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 5. Lock contended — the intent flock is held by the test goroutine BEFORE the
+//    call → the repair returns a zero result and does NOT block or modify.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_IntentLockContended_Skips(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
+	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent bytes before: %v", err)
+	}
+
+	// Hold the supervisor-intent flock from the test goroutine BEFORE the call.
+	held := flock.New(intentPath + supervisorIntentLockSuffix)
+	locked, err := held.TryLock()
+	if err != nil {
+		t.Fatalf("test acquire intent flock: %v", err)
+	}
+	if !locked {
+		t.Fatal("test could not acquire the intent flock to simulate contention")
+	}
+	defer func() { _ = held.Unlock() }()
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error on contended lock: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (intent lock contended → skip)", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none (contended skip, not a deferral)", deferred)
+	}
+
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent bytes after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("intent file modified despite contended lock:\nbefore=%s\nafter=%s", before, after)
+	}
+}
