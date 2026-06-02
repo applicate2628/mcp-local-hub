@@ -21,6 +21,15 @@ import (
 // introduce-crash deferral, and the lock-contention skip.
 // ---------------------------------------------------------------------------
 
+// liveWorkspace returns a real (existing) directory to stand in for a workspace
+// path so the repair's stale-path filter (workspacePathStale -> os.Stat) treats
+// the row as live, not deleted. t.TempDir handles cleanup. Tests that want a
+// STALE row use a non-existent path explicitly instead.
+func liveWorkspace(t *testing.T) string {
+	t.Helper()
+	return t.TempDir()
+}
+
 // seedSerenaRegistryRow loads regPath under the registry lock and writes one
 // serena sentinel row for (path, port), then saves. It honors the production
 // invariant WorkspaceKey == WorkspaceKey(WorkspacePath) (auto-register derives
@@ -112,7 +121,7 @@ func readIntent(t *testing.T, intentPath string) *SupervisorIntentFile {
 func TestRepairSerenaIntentFromRegistry_Healthy_NoOp(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
-	const path, port = `C:\ws\alpha`, 9150
+	path, port := liveWorkspace(t), 9150
 	seedSerenaRegistryRow(t, regPath, path, port)
 	intentPath := seedIntent(t, &SupervisorIntentFile{
 		Version: 1,
@@ -153,8 +162,8 @@ func TestRepairSerenaIntentFromRegistry_Healthy_NoOp(t *testing.T) {
 func TestRepairSerenaIntentFromRegistry_MissingRowAppended(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
-	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
-	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	orphanPath, orphanPort := liveWorkspace(t), 9151
 
 	healthyKey := seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
 	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
@@ -204,11 +213,11 @@ func TestRepairSerenaIntentFromRegistry_MissingRowAppended(t *testing.T) {
 func TestRepairSerenaIntentFromRegistry_DoesNotClobberConcurrentRow(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
-	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	orphanPath, orphanPort := liveWorkspace(t), 9151
 	// A daemon for a workspace that is NOT in the registry — e.g. a concurrent
 	// auto-register committed it to the intent after our registry snapshot, or
 	// its registry row lives in a region we did not read. The repair must NOT
-	// remove it.
+	// remove it. (Intent-only — never stale-checked — so a fake path is fine.)
 	const concurrentPath, concurrentPort = `C:\ws\gamma`, 9152
 
 	// Registry has ONLY the orphan row (drives `missing`).
@@ -254,7 +263,7 @@ func TestRepairSerenaIntentFromRegistry_DoesNotClobberConcurrentRow(t *testing.T
 func TestRepairSerenaIntentFromRegistry_IntroduceCrashDefers(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
-	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	orphanPath, orphanPort := liveWorkspace(t), 9151
 	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
 
 	// Intent has a daemon WITHOUT a runtime_spec (a legacy/global row) — so
@@ -388,8 +397,8 @@ func seedSerenaRegistryRowWithKey(t *testing.T, regPath, key, path string, port 
 func TestRepairSerenaIntentFromRegistry_SecondCallIsNoOp(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
-	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
-	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	orphanPath, orphanPort := liveWorkspace(t), 9151
 	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
 	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
 
@@ -494,7 +503,7 @@ func TestRepairSerenaIntentFromRegistry_RegistryLockContended_Skips(t *testing.T
 func TestRepairSerenaIntentFromRegistry_MissingIntentFile_Defers(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
-	const orphanPath, orphanPort = `C:\ws\beta`, 9151
+	orphanPath, orphanPort := liveWorkspace(t), 9151
 	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
 
 	// Do NOT seed an intent — the file is absent.
@@ -531,7 +540,7 @@ func TestRepairSerenaIntentFromRegistry_MissingIntentFile_Defers(t *testing.T) {
 func TestRepairSerenaIntentFromRegistry_DivergentRow_SkippedNotReappended(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
-	const healthyPath, healthyPort = `C:\ws\alpha`, 9150
+	healthyPath, healthyPort := liveWorkspace(t), 9150
 	const divergentPath, divergentPort = `C:\ws\delta`, 9153
 	const divergentKey = "hand-edited-bogus-key"
 
@@ -565,5 +574,98 @@ func TestRepairSerenaIntentFromRegistry_DivergentRow_SkippedNotReappended(t *tes
 	}
 	if got.HasSerenaDaemonForWorkspaceKey(divergentKey) {
 		t.Errorf("divergent key %q was appended (must be skipped to avoid infinite re-append)", divergentKey)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 10. Stale-path filter (bot PR #256 F1) — a registry row whose workspace dir no
+//     longer exists is SKIPPED, not appended: BuildSupervisorDaemonsForSerena
+//     emits the descriptor verbatim and the supervisor sets cmd.Dir = d.Workspace,
+//     so a gone dir would spawn-loop. The install fan-out filters these and so
+//     must the repair.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_StaleWorkspacePath_Skipped(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	// A registered workspace whose directory has been deleted/moved: the temp dir
+	// exists but this child does not, so workspacePathStale -> os.Stat IsNotExist.
+	stalePath, stalePort := filepath.Join(t.TempDir(), "deleted-workspace"), 9151
+
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	staleKey := seedSerenaRegistryRow(t, regPath, stalePath, stalePort)
+
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	beforeCount := len(readIntent(t, intentPath).Daemons)
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (stale-path row filtered, not appended)", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none (stale is a skip, not a defer)", deferred)
+	}
+	got := readIntent(t, intentPath)
+	if len(got.Daemons) != beforeCount {
+		t.Errorf("daemon count = %d, want %d (stale row must NOT be appended — would spawn-loop on a gone cmd.Dir)", len(got.Daemons), beforeCount)
+	}
+	if got.HasSerenaDaemonForWorkspaceKey(staleKey) {
+		t.Errorf("stale key %q was appended (must be skipped)", staleKey)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 11. Legacy nil-spec row (bot PR #256 F2) — a workspace whose intent row carries
+//     the matching task name but RuntimeSpec == nil (a pre-redesign descriptor
+//     the reconciler excludes from the spawn set) is DEFERRED, not treated as
+//     healthy and not appended as a duplicate task name.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_LegacyNilSpecRow_Deferred(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	legacyPath, legacyPort := liveWorkspace(t), 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	legacyKey := seedSerenaRegistryRow(t, regPath, legacyPath, legacyPort)
+
+	// Intent: a spec-bearing healthy daemon (so HasRuntimeSpecRow() is true and the
+	// live-add path is reachable) PLUS a legacy PRE-REDESIGN serena row for the
+	// legacy workspace — matching task name, but RuntimeSpec == nil.
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			healthySerenaDaemon(t, healthyPath, healthyPort),
+			{TaskName: `\mcp-local-hub-serena-` + legacyKey, Server: SerenaServerName, Command: "mcphub.exe"},
+		},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before: %v", err)
+	}
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (a nil-spec legacy row must defer, not append a duplicate task name)", repaired)
+	}
+	if len(deferred) != 1 || deferred[0] != legacyKey {
+		t.Errorf("deferred = %v, want [%q] (legacy nil-spec workspace deferred to migrate)", deferred, legacyKey)
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("intent written on a legacy-defer (must not append a duplicate):\nbefore=%s\nafter=%s", before, after)
 	}
 }

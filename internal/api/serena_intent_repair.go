@@ -32,9 +32,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
+)
+
+// registryLockRetry bounds the brief retry on the registry flock. A non-mutating
+// registry READER (the serena routing cache refresh, serena_routing/resolver.go)
+// holds the SAME exclusive flock only momentarily; retrying briefly avoids
+// forfeiting the supervisor's single startup repair pass to such a transient
+// holder. A genuinely long-held MUTATING lock (auto-register / migrate mid-install)
+// still exhausts the budget and the caller skips (that holder self-heals). Total
+// worst-case wait ~250ms — acceptable for a once-per-startup self-heal.
+const (
+	registryLockRetryAttempts = 10
+	registryLockRetryDelay    = 25 * time.Millisecond
 )
 
 // RepairSerenaIntentFromRegistry re-reads the workspace registry and the
@@ -84,19 +97,24 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 
-	// 2. Registry flock (non-blocking). A concurrent auto-register / migrate /
-	//    repair holding it self-heals the orphan anyway, so SKIP on contention
-	//    rather than stall supervisor startup; the next startup re-scans. HOLD
-	//    the registry flock across the WHOLE repair (released by the deferred
-	//    unlock below), so the intent we read+write cannot be raced by another
-	//    registry-holder (the only writers that take the intent lock).
+	// 2. Registry flock with a BRIEF BOUNDED RETRY, HELD across the WHOLE repair.
+	//    A single TryLock-then-skip is too eager: a non-mutating registry READER —
+	//    the serena routing cache refresh (serena_routing/resolver.go:123) or a
+	//    workspace proxy bind — briefly takes the SAME exclusive flock just to read
+	//    SerenaEntries and does NOT write supervisor-intent.json, so skipping on its
+	//    momentary hold would forfeit the only startup repair pass and leave the
+	//    orphan for this whole supervisor lifetime. Retry briefly so a transient
+	//    reader clears; a genuinely long-held MUTATING lock (auto-register / migrate
+	//    mid-install) still exhausts the budget and we skip (that holder self-heals
+	//    the orphan via its own replace-all install). Holding the registry across
+	//    the intent read+write keeps another registry-holder from racing it.
 	reg := NewRegistry(regPath)
-	regUnlock, ok, err := reg.TryLock()
+	regUnlock, ok, err := tryLockRegistryBrief(reg)
 	if err != nil {
 		return 0, nil, fmt.Errorf("serena intent repair: lock registry: %w", err)
 	}
 	if !ok {
-		return 0, nil, nil // contended — the holder self-heals; next startup re-scans
+		return 0, nil, nil // long-held mutating lock — that holder self-heals; next startup re-scans
 	}
 	defer regUnlock()
 
@@ -136,35 +154,58 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 		}
 	}
 
-	// 4. Compute the MISSING serena rows from THIS fresh read. A row qualifies
-	//    when it is a valid serena row (sentinel language + non-empty path) AND
-	//    its per-workspace daemon is absent from the intent (a nil/missing
-	//    intent makes EVERY row missing).
+	// 4. Classify each serena registry row from THIS fresh read into: SKIP
+	//    (divergent key or stale path), DEFER (legacy nil-spec row), or APPEND
+	//    (orphan). A nil/missing intent makes every row an orphan.
 	var missing []WorkspaceEntry
 	var skippedDivergent []string
+	var deferredLegacy []string
 	for i := range rows {
 		ws := rows[i]
 		if ws.Language != SerenaLanguageSentinel || ws.WorkspacePath == "" {
 			continue
 		}
-		// Guard the load-bearing registry invariant WorkspaceKey ==
-		// WorkspaceKey(WorkspacePath). Detection keys off ws.WorkspaceKey, but the
-		// materialized daemon's TaskName derives from WorkspaceKey(ws.WorkspacePath)
-		// (BuildSupervisorDaemonsForSerena -> SerenaTaskNameForWorkspace). For
-		// auto-register and manual registration both are derived from the same
-		// canonical path, so they agree. But a hand-edited workspaces.yaml — or a
-		// legacy row written under the pre-symlink-resolution
-		// CanonicalWorkspacePathLegacyCompat rule — could diverge. Appending such a
-		// row would materialize a daemon under WorkspaceKey(path) that the NEXT
-		// startup's HasSerenaDaemonForWorkspaceKey(ws.WorkspaceKey) lookup still sees
-		// as missing → re-appended forever, growing supervisor-intent.json without
-		// bound. Skip + warn (fail closed) so the operator re-registers, rather than
-		// silently re-appending on every boot.
+		// Divergence guard: WorkspaceKey must equal WorkspaceKey(WorkspacePath).
+		// Detection keys off ws.WorkspaceKey, but the materialized daemon's TaskName
+		// derives from WorkspaceKey(ws.WorkspacePath) (BuildSupervisorDaemonsForSerena
+		// -> SerenaTaskNameForWorkspace). Auto-register/manual rows agree (same
+		// canonical path); a hand-edited workspaces.yaml or a legacy
+		// pre-symlink-resolution row (CanonicalWorkspacePathLegacyCompat) could
+		// diverge → an appended daemon would be seen as still-missing next startup
+		// and re-appended forever. Skip + warn (fail closed).
 		if ws.WorkspaceKey != WorkspaceKey(ws.WorkspacePath) {
 			skippedDivergent = append(skippedDivergent, ws.WorkspaceKey)
 			continue
 		}
-		if intent == nil || !intent.HasSerenaDaemonForWorkspaceKey(ws.WorkspaceKey) {
+		// Stale-path filter (bot PR #256 F1). A deleted/moved workspace dir makes the
+		// materialized daemon spawn-loop: BuildSupervisorDaemonsForSerena emits the
+		// descriptor verbatim and the supervisor sets cmd.Dir = d.Workspace
+		// unconditionally before cmd.Start. The install fan-out drops these rows via
+		// filterExistingWorkspaceRows before materializing
+		// (install_parsed_manifest.go:526); the repair applies the same liveness
+		// predicate + the same emitStaleWorkspaceSkippedEvent so the prune is never
+		// silent.
+		if workspacePathStale(ws.WorkspacePath) {
+			emitStaleWorkspaceSkippedEvent(SerenaServerName, ws.WorkspacePath)
+			continue
+		}
+		// Presence classification (bot PR #256 F2). HasSerenaDaemonForWorkspaceKey is
+		// TASK-NAME-only; a legacy pre-redesign serena row (RuntimeSpec == nil) carries
+		// the task name but the reconciler EXCLUDES it from the spawn-desired set
+		// (supervise_reconcile.go:177), so it is not a live daemon.
+		switch {
+		case intentHasSpecBearingSerenaDaemonForWorkspaceKey(intent, ws.WorkspaceKey):
+			// Healthy — a spec-bearing daemon already owns this workspace.
+			continue
+		case intent != nil && intent.HasSerenaDaemonForWorkspaceKey(ws.WorkspaceKey):
+			// A nil-spec legacy row occupies the task name. Appending a spec-bearing
+			// row would DUPLICATE the TaskName; replacing it would violate the
+			// append-only contract. Defer to the re-install/migrate that
+			// re-materializes the runtime_spec (the reconciler's own guidance at
+			// supervise_reconcile.go:187).
+			deferredLegacy = append(deferredLegacy, ws.WorkspaceKey)
+		default:
+			// Orphan — no serena daemon at all for this workspace (the core repair).
 			missing = append(missing, ws)
 		}
 	}
@@ -180,8 +221,22 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 			},
 		)
 	}
+	if len(deferredLegacy) > 0 {
+		emitSerenaIntentRepairEvent(
+			SupervisorEventSeverityWarn,
+			"serena-intent-repair-legacy-nil-spec-deferred",
+			map[string]any{
+				"deferred_count":     len(deferredLegacy),
+				"deferred_workspace": deferredLegacy,
+				"reason":            "supervisor-intent.json has a pre-redesign serena row (no runtime_spec) for this workspace; the reconciler excludes it from the spawn set and the append-only repair cannot replace it",
+				"operator_action":   "run `mcphub migrate serena legacy-to-dynamic-pool` (or re-install) to re-materialize the descriptor with a runtime_spec",
+			},
+		)
+	}
 	if len(missing) == 0 {
-		return 0, nil, nil // healthy — every registry row owns its intent daemon (the common case; no write)
+		// No orphan to append. Still report any legacy nil-spec deferrals so the
+		// caller (and the operator) sees a workspace that needs a migrate.
+		return 0, deferredLegacy, nil
 	}
 
 	// 5. Introduce-crash guard. A live APPEND cannot safely introduce the FIRST
@@ -192,18 +247,21 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 	//    here would re-introduce the same hazard. Defer to the migrate command —
 	//    an explicit deferral policy, not an implicit skip.
 	if intent == nil || !intent.HasRuntimeSpecRow() {
-		deferredKeys := missingWorkspaceKeys(missing)
+		introduceKeys := missingWorkspaceKeys(missing)
 		emitSerenaIntentRepairEvent(
 			SupervisorEventSeverityWarn,
 			"serena-intent-repair-deferred",
 			map[string]any{
-				"deferred_count":     len(deferredKeys),
-				"deferred_workspace": deferredKeys,
+				"deferred_count":     len(introduceKeys),
+				"deferred_workspace": introduceKeys,
 				"reason":             "supervisor intent carries no runtime_spec (first-introduce crash); a live append cannot introduce the dynamic pool while a supervisor runs (design §7.1)",
 				"operator_action":    "run `mcphub migrate serena legacy-to-dynamic-pool` to re-introduce the serena dynamic pool",
 			},
 		)
-		return 0, deferredKeys, nil
+		// Both the introduce-crash orphans and any legacy nil-spec rows defer to
+		// the same migrate; return their union (deferredLegacy is empty when the
+		// intent is absent — there are no daemons to be nil-spec).
+		return 0, append(introduceKeys, deferredLegacy...), nil
 	}
 
 	// 6. Live-add APPEND. The §7.1 gate is satisfied (the prior intent already
@@ -260,7 +318,9 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 			"mode":               "live-add append (no replace-all)",
 		},
 	)
-	return len(newDaemons), nil, nil
+	// deferredLegacy (nil-spec rows that coexisted with the spec-bearing pool) is
+	// returned alongside the append count so the caller still surfaces them.
+	return len(newDaemons), deferredLegacy, nil
 }
 
 // missingWorkspaceKeys projects the WorkspaceKey of each entry.
@@ -270,6 +330,50 @@ func missingWorkspaceKeys(entries []WorkspaceEntry) []string {
 		keys = append(keys, entries[i].WorkspaceKey)
 	}
 	return keys
+}
+
+// tryLockRegistryBrief acquires the registry flock with a brief bounded retry
+// (registryLockRetryAttempts attempts, registryLockRetryDelay apart). Returns
+// (unlock, true, nil) on success, (nil, false, nil) if every attempt found the
+// lock contended, or (nil, false, err) on a real filesystem error. See the
+// registryLockRetry constants for why a single TryLock-then-skip is too eager.
+func tryLockRegistryBrief(reg *Registry) (func(), bool, error) {
+	for attempt := range registryLockRetryAttempts {
+		unlock, ok, err := reg.TryLock()
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return unlock, true, nil
+		}
+		if attempt < registryLockRetryAttempts-1 {
+			time.Sleep(registryLockRetryDelay)
+		}
+	}
+	return nil, false, nil
+}
+
+// intentHasSpecBearingSerenaDaemonForWorkspaceKey reports whether the intent has
+// a serena per-workspace daemon for key WITH a non-nil RuntimeSpec — i.e. a row
+// the reconciler will actually spawn. A task-name match alone (the cheaper
+// HasSerenaDaemonForWorkspaceKey) is NOT sufficient: a legacy pre-redesign
+// nil-RuntimeSpec serena row carries the task name but the reconciler EXCLUDES it
+// from the spawn-desired set (internal/cli/supervise_reconcile.go:177), so it is
+// not a live daemon. The match mirrors HasSerenaDaemonForWorkspaceKey
+// (supervisor_intent.go) — bare-or-leading-backslash task name — plus the spec
+// requirement.
+func intentHasSpecBearingSerenaDaemonForWorkspaceKey(intent *SupervisorIntentFile, key string) bool {
+	if intent == nil {
+		return false
+	}
+	want := "mcp-local-hub-serena-" + key
+	for i := range intent.Daemons {
+		d := intent.Daemons[i]
+		if strings.TrimPrefix(d.TaskName, `\`) == want && d.RuntimeSpec != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // firstRuntimeSpecCommand returns the Command of the first daemon in the intent
