@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+// SerenaRepairResult is the outcome of a RepairOrphanSerenaWorkspaces scan.
+type SerenaRepairResult struct {
+	// Repaired is the count of orphan rows confirmed re-installed into the committed
+	// supervisor intent.
+	Repaired int
+	// Unresolved are orphan workspace keys that could NOT be auto-repaired: an
+	// introduce-crash (intent has no runtime_spec → `mcphub migrate`) or a stale row
+	// whose workspace directory was removed (`mcphub workspace unregister`). Each is
+	// logged to the supervisor event log with per-category remediation.
+	Unresolved []string
+	// SupervisorGone is set when the post-install reconcile found the supervisor —
+	// sampled up at GUI startup — has since exited. The repair does NOT start a
+	// replacement itself (a detached start would escape the caller's supervisor
+	// ownership, bot PR #254 r3); the CALLER, which owns the supervisor lifecycle,
+	// must re-ensure it under ownership. The orphan daemons are already committed to
+	// the intent, so a re-ensured supervisor cold-reconciles and spawns them.
+	SupervisorGone bool
+}
+
 // RepairOrphanSerenaWorkspaces reconciles a registry/intent split left by a crash
 // between an auto-register registry Save and its install commit.
 //
@@ -30,49 +49,56 @@ import (
 // (the GUI must start regardless).
 //
 // The repair is itself a lifecycle step, so it obeys the same §1 invariant it mitigates:
-//   - it VERIFIES the action (re-reads the committed intent to confirm each orphan
-//     actually landed — the install's stale-workspace filter silently drops a row whose
+//   - it does NOT block GUI startup on a contended lock — it TryLocks the registry and
+//     skips (the next startup re-scans) rather than waiting on a hung holder;
+//   - it VERIFIES the action — re-reads the committed intent to confirm each orphan
+//     actually landed (the install's stale-workspace filter silently drops a row whose
 //     directory vanished, which must NOT be reported as repaired or it re-runs forever);
-//   - it handles STALE LIVENESS (the post-install reconcile can find the supervisor gone
-//     — ErrSupervisorIPCUnavailable — and falls through to START it, exactly as the
-//     auto-register r7 fix does, rather than relying on an IntentWatcher that isn't
-//     running).
+//   - it handles STALE LIVENESS — the post-install reconcile can find the supervisor
+//     gone (ErrSupervisorIPCUnavailable) and SIGNALS the caller (SupervisorGone) to
+//     re-ensure the supervisor under ownership, rather than starting a detached
+//     replacement that would escape the GUI lifecycle.
 //
 // For orphan rows where the intent ALREADY carries runtime_spec (the healthy rows
 // introduced the dynamic pool), the repair is a LIVE-ADD re-install of the full serena
 // fan-out. The rare introduce-crash double-fault — ALL serena rows orphaned AND the
 // intent carries NO runtime_spec (the very first introduce died mid-cutover) — cannot
 // be repaired by a live-add (the §7.1 gate refuses a spec-bearing write while a
-// supervisor runs); those keys are returned in `unresolved` and logged for the operator
-// to resolve with `mcphub migrate`, which owns the host-wide cutover.
+// supervisor runs); those keys are returned in Unresolved and logged for the operator
+// to resolve with `mcphub migrate`.
 //
-// Returns the number of orphans confirmed re-installed (`repaired`), the orphan keys
-// that could NOT be auto-repaired (`unresolved` — introduce-crash deferred to migrate,
-// or stale rows whose workspace directory was removed), and a real error only on an
-// I/O / install failure. A healthy registry returns (0, nil, nil). Per-category
-// operator remediation is written to the supervisor event log.
-func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (repaired int, unresolved []string, err error) {
+// Returns a real error only on an I/O / install failure; a healthy registry, a
+// contended lock, or no serena rows return a zero result + nil error.
+func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (SerenaRepairResult, error) {
+	var result SerenaRepairResult
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
-		return 0, nil, fmt.Errorf("serena repair: resolve registry path: %w", err)
+		return result, fmt.Errorf("serena repair: resolve registry path: %w", err)
 	}
 	stateDir, err := DaemonStateDir()
 	if err != nil {
-		return 0, nil, fmt.Errorf("serena repair: resolve state dir: %w", err)
+		return result, fmt.Errorf("serena repair: resolve state dir: %w", err)
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 
-	// Serialize against a concurrent auto-register cutover (the same process-global
-	// mutex it uses), then hold the registry flock across the read + the repair
-	// install so no other mcphub process observes a partial state. Mirrors
-	// AutoRegisterSerenaWorkspace's lock order: install-mutex → registry-flock.
+	// Serialize against a concurrent in-process auto-register cutover (the same
+	// process-global mutex it uses — a bounded in-process wait), then TRY the registry
+	// flock without blocking: a hung cross-process migrate/auto-register holding the
+	// lock must NOT stall GUI startup. Mirrors the lock order install-mutex →
+	// registry-flock.
 	serenaAutoRegisterInstallMu.Lock()
 	defer serenaAutoRegisterInstallMu.Unlock()
 
 	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
+	unlock, locked, err := reg.TryLock()
 	if err != nil {
-		return 0, nil, fmt.Errorf("serena repair: lock registry: %w", err)
+		return result, fmt.Errorf("serena repair: lock registry: %w", err)
+	}
+	if !locked {
+		// Another mcphub process holds the registry lock (a concurrent migrate /
+		// auto-register / repair). Skip this best-effort scan rather than stall GUI
+		// startup; the holder commits its own intent, and the next GUI startup re-scans.
+		return result, nil
 	}
 	regReleased := false
 	releaseReg := func() {
@@ -84,17 +110,17 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (repaired int, u
 	}
 	defer releaseReg()
 	if err := reg.Load(); err != nil {
-		return 0, nil, fmt.Errorf("serena repair: load registry: %w", err)
+		return result, fmt.Errorf("serena repair: load registry: %w", err)
 	}
 
 	rows := reg.SerenaEntries()
 	if len(rows) == 0 {
-		return 0, nil, nil // no serena workspaces registered — nothing to repair
+		return result, nil // no serena workspaces registered — nothing to repair
 	}
 
 	intent, ierr := ReadSupervisorIntent(intentPath)
 	if ierr != nil && !errors.Is(ierr, os.ErrNotExist) {
-		return 0, nil, fmt.Errorf("serena repair: read supervisor intent %s: %w", intentPath, ierr)
+		return result, fmt.Errorf("serena repair: read supervisor intent %s: %w", intentPath, ierr)
 	}
 
 	// Orphans: a registry serena row whose per-workspace daemon is absent from the
@@ -106,63 +132,62 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (repaired int, u
 		}
 	}
 	if len(orphanKeys) == 0 {
-		return 0, nil, nil // healthy — every registry row owns its intent daemon
+		return result, nil // healthy — every registry row owns its intent daemon
 	}
 
 	// Introduce-crash double-fault: the intent carries NO runtime_spec, so a first
 	// introduce died mid-cutover. A live-add re-install cannot introduce runtime_spec
-	// while the supervisor runs (§7.1 gate, design), so log + defer to migrate. This
-	// is non-fatal: the GUI startup continues; the operator re-introduces the pool.
+	// while the supervisor runs (§7.1 gate, design), so log + defer to migrate.
 	if intent == nil || !intent.HasRuntimeSpecRow() {
 		emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-deferred", orphanKeys, map[string]any{
 			"reason":           "intent-has-no-runtime_spec (first-introduce crash)",
 			"operator_action":  "run `mcphub migrate` to re-introduce the serena dynamic pool",
 			"orphan_workspace": orphanKeys,
 		})
-		return 0, orphanKeys, nil
+		result.Unresolved = orphanKeys
+		return result, nil
 	}
 
 	// Live-add repair: re-install the FULL serena fan-out so the orphan daemons land
 	// in the intent (the §7.1 gate passes — the prior intent already has runtime_spec).
 	catalog, cerr := loadSerenaCatalogManifest()
 	if cerr != nil {
-		return 0, nil, fmt.Errorf("serena repair: load serena catalog manifest: %w", cerr)
+		return result, fmt.Errorf("serena repair: load serena catalog manifest: %w", cerr)
 	}
 	dyn, derr := BuildInMemorySerenaDynamicPoolManifest(catalog)
 	if derr != nil {
-		return 0, nil, fmt.Errorf("serena repair: build dynamic-pool manifest: %w", derr)
+		return result, fmt.Errorf("serena repair: build dynamic-pool manifest: %w", derr)
 	}
 	committedIntentPath, iErr := autoRegisterInstallParsedManifestFn(ctx, a, dyn, InstallParsedManifestOpts{
 		Writer:     io.Discard,
 		Workspaces: rows,
 	})
 	if iErr != nil {
-		return 0, nil, fmt.Errorf("serena repair: re-install fan-out for %d orphan(s) %v: %w", len(orphanKeys), orphanKeys, iErr)
+		return result, fmt.Errorf("serena repair: re-install fan-out for %d orphan(s) %v: %w", len(orphanKeys), orphanKeys, iErr)
 	}
 
-	// Verify convergence (bot PR #254 P2; §1 — verify the action, do not assume it).
-	// InstallParsedManifest's stale-workspace filter DROPS a row whose directory has
-	// since been removed, committing an intent that still lacks it. Re-read the
-	// committed intent and report only the orphans that ACTUALLY landed; a row that
-	// stayed missing is a stale row (its workspace dir is gone) — surface it for
-	// operator cleanup rather than re-claiming "repaired" on every startup.
+	// Verify convergence (§1 — verify the action, do not assume it). The install's
+	// stale-workspace filter DROPS a row whose directory has since been removed,
+	// committing an intent that still lacks it. Re-read the committed intent and
+	// count only the orphans that ACTUALLY landed; a row that stayed missing is a
+	// stale row (its dir is gone) — surface it for operator cleanup.
 	postIntent, pErr := ReadSupervisorIntent(committedIntentPath)
 	if pErr != nil && !errors.Is(pErr, os.ErrNotExist) {
-		return 0, nil, fmt.Errorf("serena repair: re-read committed intent %s: %w", committedIntentPath, pErr)
+		return result, fmt.Errorf("serena repair: re-read committed intent %s: %w", committedIntentPath, pErr)
 	}
 	var converged []string
 	for _, k := range orphanKeys {
 		if postIntent != nil && postIntent.HasSerenaDaemonForWorkspaceKey(k) {
 			converged = append(converged, k)
 		} else {
-			unresolved = append(unresolved, k)
+			result.Unresolved = append(result.Unresolved, k)
 		}
 	}
-	if len(unresolved) > 0 {
-		emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-stale-skip", unresolved, map[string]any{
+	if len(result.Unresolved) > 0 {
+		emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-stale-skip", result.Unresolved, map[string]any{
 			"reason":           "workspace directory removed — the install stale-filter dropped the row",
 			"operator_action":  "run `mcphub workspace unregister <path> --backend serena` to drop the stale serena row",
-			"orphan_workspace": unresolved,
+			"orphan_workspace": result.Unresolved,
 		})
 	}
 
@@ -172,29 +197,17 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (repaired int, u
 	releaseReg()
 	if _, recErr := autoRegisterReconcileFn(ctx, true); recErr != nil {
 		if errors.Is(recErr, ErrSupervisorIPCUnavailable) {
-			// Stale liveness (bot PR #254 P2; §1): the supervisor sampled up at GUI
-			// startup has exited, so there is no IntentWatcher to spawn the just-
-			// committed orphan daemons. START it — mirror auto-register's r7 fix — on
-			// a non-cancellable bounded context (the must-complete posture). The repair
-			// never went through the cutover-support gate, so re-verify the start
-			// primitive here; if unavailable, fail loud to the operator.
-			switch {
-			case autoRegisterStartFn != nil && autoRegisterStartSupportedFn != nil && autoRegisterStartSupportedFn():
-				startCtx, startCancel := context.WithTimeout(context.WithoutCancel(ctx), serenaAutoRegisterCommitTimeout)
-				startErr := autoRegisterStartFn(startCtx)
-				startCancel()
-				if startErr != nil {
-					emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-start-failed", converged, map[string]any{
-						"reason":          fmt.Sprintf("supervisor exited post-startup AND the recovery start failed: %v", startErr),
-						"operator_action": "run `mcphub supervise` so the current binary reconciles the committed intent",
-					})
-				}
-			default:
-				emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-start-unavailable", converged, map[string]any{
-					"reason":          "supervisor exited post-startup and the start primitive is unavailable on this build/platform",
-					"operator_action": "run `mcphub supervise` so the current binary reconciles the committed intent",
-				})
-			}
+			// Stale liveness (§1): the supervisor sampled up at GUI startup has exited,
+			// so there is no IntentWatcher to spawn the just-committed orphan daemons.
+			// Do NOT start a detached replacement here — it would escape the caller's
+			// supervisor ownership (bot PR #254 r3). SIGNAL the caller, which owns the
+			// lifecycle, to re-ensure the supervisor under ownership; the orphans are
+			// committed, so the re-ensured supervisor cold-reconciles + spawns them.
+			result.SupervisorGone = true
+			emitSerenaOrphanRepairEvent(SupervisorEventSeverityWarn, "serena-orphan-repair-supervisor-gone", converged, map[string]any{
+				"reason":          "supervisor exited post-startup; no IntentWatcher to spawn the committed daemons",
+				"operator_action": "the GUI re-ensures the supervisor under ownership; if it cannot, run `mcphub supervise`",
+			})
 		}
 		// else: the supervisor is up; the reconcile nudge failed transiently; its own
 		// IntentWatcher (60s) backstops the spawn.
@@ -206,7 +219,8 @@ func (a *API) RepairOrphanSerenaWorkspaces(ctx context.Context) (repaired int, u
 			"mode":               "live-add re-install",
 		})
 	}
-	return len(converged), unresolved, nil
+	result.Repaired = len(converged)
+	return result, nil
 }
 
 // emitSerenaOrphanRepairEvent records a structured crash-repair event to the supervisor

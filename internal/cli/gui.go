@@ -511,17 +511,30 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// failure must never block GUI startup.
 	if supervisor != nil {
 		repairCtx, repairCancel := context.WithTimeout(ctx, 60*time.Second)
-		repaired, unresolved, rErr := api.NewAPI().RepairOrphanSerenaWorkspaces(repairCtx)
+		res, rErr := api.NewAPI().RepairOrphanSerenaWorkspaces(repairCtx)
 		repairCancel()
 		switch {
 		case rErr != nil:
 			fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %v\n", rErr)
 		default:
-			if repaired > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "serena crash-repair: re-installed %d orphaned workspace daemon(s) from a prior crash\n", repaired)
+			if res.Repaired > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "serena crash-repair: re-installed %d orphaned workspace daemon(s) from a prior crash\n", res.Repaired)
 			}
-			if len(unresolved) > 0 {
-				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v could not be auto-repaired — see supervisor-events.log for remediation (`mcphub migrate` for a first-introduce crash, `mcphub workspace unregister <path> --backend serena` for a removed workspace dir)\n", len(unresolved), unresolved)
+			if len(res.Unresolved) > 0 {
+				fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: %d orphaned workspace(s) %v could not be auto-repaired — see supervisor-events.log for remediation (`mcphub migrate` for a first-introduce crash, `mcphub workspace unregister <path> --backend serena` for a removed workspace dir)\n", len(res.Unresolved), res.Unresolved)
+			}
+			if res.SupervisorGone {
+				// The supervisor sampled up at startup exited during the repair; the
+				// orphan daemons are committed but need a running supervisor to spawn.
+				// Re-ensure it under GUI OWNERSHIP (replaces the dead owner so the
+				// shutdown defer stops the right process — bot PR #254 r3), and surface
+				// a failure to the operator rather than silently claiming success.
+				fmt.Fprintln(cmd.OutOrStderr(), "warning: serena crash-repair: supervisor exited during repair — re-ensuring under GUI ownership")
+				if newSup, reErr := ensureSupervisorRunning(ctx, supervisorBin, strictMode, 15*time.Second); reErr != nil {
+					fmt.Fprintf(cmd.OutOrStderr(), "warning: serena crash-repair: supervisor re-ensure failed: %v — run `mcphub supervise` so the committed serena daemons spawn\n", reErr)
+				} else {
+					supervisor = newSup
+				}
 			}
 		}
 	}

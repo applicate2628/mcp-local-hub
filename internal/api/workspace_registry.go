@@ -202,6 +202,27 @@ func (r *Registry) Lock() (func(), error) {
 	return func() { _ = fl.Unlock() }, nil
 }
 
+// TryLock acquires the registry flock WITHOUT blocking. It returns (unlock, true, nil)
+// on success, (nil, false, nil) when the lock is currently held by another holder
+// (in- or cross-process), or (nil, false, err) on a real flock error. Best-effort
+// callers that must not stall on a contended lock — e.g. the GUI-startup crash repair,
+// which would otherwise block startup indefinitely behind a hung migrate/auto-register
+// holding <registry>.lock — use this and skip their work when the lock is unavailable.
+func (r *Registry) TryLock() (func(), bool, error) {
+	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
+		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
+	}
+	fl := flock.New(r.path + ".lock")
+	ok, err := fl.TryLock()
+	if err != nil {
+		return nil, false, fmt.Errorf("trylock %s: %w", r.path+".lock", err)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return func() { _ = fl.Unlock() }, true, nil
+}
+
 // Put upserts an entry (primary key = workspace_key + language).
 func (r *Registry) Put(e WorkspaceEntry) {
 	for i := range r.Workspaces {

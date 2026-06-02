@@ -40,9 +40,7 @@ func seedSerenaRegistryRow(t *testing.T, regPath, key, wsPath string, port int) 
 }
 
 // writeTestIntentAt writes a supervisor intent at path carrying a serena daemon for
-// each key; withSpec controls whether those daemons carry a runtime_spec (so
-// HasRuntimeSpecRow reports true). An empty keys writes an intent with no serena
-// daemons (no runtime_spec).
+// each key; withSpec controls whether those daemons carry a runtime_spec.
 func writeTestIntentAt(t *testing.T, path string, keys []string, withSpec bool) {
 	t.Helper()
 	intent := &SupervisorIntentFile{Version: 1}
@@ -58,8 +56,7 @@ func writeTestIntentAt(t *testing.T, path string, keys []string, withSpec bool) 
 	}
 }
 
-// seedSerenaIntent writes the PRE-install state-dir intent (the one the repair reads
-// at orphan detection).
+// seedSerenaIntent writes the PRE-install state-dir intent (read at orphan detection).
 func seedSerenaIntent(t *testing.T, withDaemon []string, withSpec bool) {
 	t.Helper()
 	sd, err := DaemonStateDir()
@@ -69,9 +66,9 @@ func seedSerenaIntent(t *testing.T, withDaemon []string, withSpec bool) {
 	writeTestIntentAt(t, joinStateFilePath(sd, supervisorIntentFileLeaf), withDaemon, withSpec)
 }
 
-// installMockWriting returns an install seam that records the call, captures the
-// Workspaces count, and writes a POST-install committed intent carrying committed (so
-// the repair's convergence verify reads it via the returned path).
+// installMockWriting returns an install seam that records the call + workspace count and
+// writes the POST-install committed intent carrying committed (the repair's convergence
+// verify re-reads it via the returned path).
 func installMockWriting(t *testing.T, calls *int32, gotWorkspaces *int, committed []string) func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
 	return func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
 		atomic.AddInt32(calls, 1)
@@ -95,12 +92,12 @@ func TestRepairOrphanSerenaWorkspaces_Healthy_NoInstall(t *testing.T) {
 		return "", nil
 	})
 
-	repaired, unresolved, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
 	if err != nil {
 		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
 	}
-	if repaired != 0 || len(unresolved) != 0 {
-		t.Errorf("repaired=%d unresolved=%v, want 0 and none (healthy)", repaired, unresolved)
+	if res.Repaired != 0 || len(res.Unresolved) != 0 || res.SupervisorGone {
+		t.Errorf("got %+v, want zero result (healthy)", res)
 	}
 }
 
@@ -117,12 +114,12 @@ func TestRepairOrphanSerenaWorkspaces_LiveAddOrphan_ReInstalls(t *testing.T) {
 	stubAutoRegisterInstall(t, installMockWriting(t, &installCalled, &gotWorkspaces, []string{"k1", "k2"}))
 	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
 
-	repaired, unresolved, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
 	if err != nil {
 		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
 	}
-	if repaired != 1 || len(unresolved) != 0 {
-		t.Errorf("repaired=%d unresolved=%v, want 1 and none (k2 confirmed re-installed)", repaired, unresolved)
+	if res.Repaired != 1 || len(res.Unresolved) != 0 || res.SupervisorGone {
+		t.Errorf("got %+v, want Repaired=1, none unresolved, supervisor up (k2 confirmed re-installed)", res)
 	}
 	if atomic.LoadInt32(&installCalled) != 1 {
 		t.Errorf("install called %d times, want 1", installCalled)
@@ -133,8 +130,8 @@ func TestRepairOrphanSerenaWorkspaces_LiveAddOrphan_ReInstalls(t *testing.T) {
 }
 
 // 3. Stale orphan — the install's stale-workspace filter DROPS a row whose dir was
-//    removed; the committed intent still lacks it → it must NOT be counted as repaired,
-//    it must be surfaced as unresolved (bot PR #254 P2).
+//    removed; the committed intent still lacks it → NOT counted repaired, surfaced as
+//    unresolved (bot PR #254 P2).
 func TestRepairOrphanSerenaWorkspaces_StaleOrphan_NotReportedRepaired(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 	seedSerenaRegistryRow(t, regPath, "k1", "/proj/k1", 9150)
@@ -142,26 +139,25 @@ func TestRepairOrphanSerenaWorkspaces_StaleOrphan_NotReportedRepaired(t *testing
 	seedSerenaIntent(t, []string{"k1"}, true) // k2 orphaned
 
 	var installCalled int32
-	// The install drops k2 (its dir vanished) — the committed intent carries only k1.
-	stubAutoRegisterInstall(t, installMockWriting(t, &installCalled, nil, []string{"k1"}))
+	stubAutoRegisterInstall(t, installMockWriting(t, &installCalled, nil, []string{"k1"})) // install drops k2
 	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
 
-	repaired, unresolved, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
 	if err != nil {
 		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
 	}
-	if repaired != 0 {
-		t.Errorf("repaired=%d, want 0 (k2 was stale-dropped, must not be claimed repaired)", repaired)
+	if res.Repaired != 0 {
+		t.Errorf("Repaired=%d, want 0 (k2 was stale-dropped, must not be claimed repaired)", res.Repaired)
 	}
-	if len(unresolved) != 1 || unresolved[0] != "k2" {
-		t.Errorf("unresolved=%v, want [k2] (stale row surfaced for operator cleanup)", unresolved)
+	if len(res.Unresolved) != 1 || res.Unresolved[0] != "k2" {
+		t.Errorf("Unresolved=%v, want [k2] (stale row surfaced for operator cleanup)", res.Unresolved)
 	}
 }
 
-// 4. Reconcile UNAVAILABLE post-install — the supervisor exited after GUI startup, so
-//    the repair must START it (mirror auto-register r7), not leave the committed orphan
-//    daemons unspawned (bot PR #254 P2).
-func TestRepairOrphanSerenaWorkspaces_ReconcileUnavailable_StartsSupervisor(t *testing.T) {
+// 4. Reconcile UNAVAILABLE post-install — the supervisor exited after GUI startup. The
+//    repair must SIGNAL SupervisorGone (so the GUI re-ensures under ownership) and must
+//    NOT start a detached replacement itself (bot PR #254 r2/r3).
+func TestRepairOrphanSerenaWorkspaces_ReconcileUnavailable_SignalsSupervisorGone(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 	seedSerenaRegistryRow(t, regPath, "k1", "/proj/k1", 9150)
 	seedSerenaRegistryRow(t, regPath, "k2", "/proj/k2", 9151)
@@ -172,21 +168,18 @@ func TestRepairOrphanSerenaWorkspaces_ReconcileUnavailable_StartsSupervisor(t *t
 	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, ErrSupervisorIPCUnavailable // supervisor gone post-startup
 	})
-	var startCalled int32
-	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("repair must not reap"); return nil },
-		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
-	)
+	// autoRegisterTestEnv defaults the start seam to fail-if-called, which asserts the
+	// repair does NOT start a detached supervisor itself — the GUI owns that.
 
-	repaired, unresolved, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
 	if err != nil {
 		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
 	}
-	if repaired != 1 || len(unresolved) != 0 {
-		t.Errorf("repaired=%d unresolved=%v, want 1 and none", repaired, unresolved)
+	if res.Repaired != 1 || len(res.Unresolved) != 0 {
+		t.Errorf("got Repaired=%d Unresolved=%v, want 1 and none (k2 committed)", res.Repaired, res.Unresolved)
 	}
-	if atomic.LoadInt32(&startCalled) != 1 {
-		t.Errorf("start called %d times, want 1 (unavailable reconcile = supervisor gone → must start)", startCalled)
+	if !res.SupervisorGone {
+		t.Error("SupervisorGone=false, want true (unavailable reconcile must signal the caller to re-ensure)")
 	}
 }
 
@@ -200,15 +193,15 @@ func TestRepairOrphanSerenaWorkspaces_IntroduceCrash_Defers(t *testing.T) {
 		return "", nil
 	})
 
-	repaired, unresolved, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
 	if err != nil {
 		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
 	}
-	if repaired != 0 {
-		t.Errorf("repaired=%d, want 0 (deferred, not repaired)", repaired)
+	if res.Repaired != 0 {
+		t.Errorf("Repaired=%d, want 0 (deferred, not repaired)", res.Repaired)
 	}
-	if len(unresolved) != 1 || unresolved[0] != "k1" {
-		t.Errorf("unresolved=%v, want [k1] (introduce-crash deferred to migrate)", unresolved)
+	if len(res.Unresolved) != 1 || res.Unresolved[0] != "k1" {
+		t.Errorf("Unresolved=%v, want [k1] (introduce-crash deferred to migrate)", res.Unresolved)
 	}
 }
 
@@ -219,8 +212,34 @@ func TestRepairOrphanSerenaWorkspaces_NoRows_NoOp(t *testing.T) {
 		t.Fatalf("install must not run with no registered serena rows")
 		return "", nil
 	})
-	repaired, unresolved, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
-	if err != nil || repaired != 0 || len(unresolved) != 0 {
-		t.Errorf("got (%d, %v, %v), want (0, none, nil)", repaired, unresolved, err)
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	if err != nil || res.Repaired != 0 || len(res.Unresolved) != 0 || res.SupervisorGone {
+		t.Errorf("got (%+v, %v), want zero result, nil err", res, err)
+	}
+}
+
+// 7. Lock contended — another holder has the registry lock → TryLock skips, the repair
+//    does NOT block GUI startup (bot PR #254 P2).
+func TestRepairOrphanSerenaWorkspaces_LockContended_Skips(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	seedSerenaRegistryRow(t, regPath, "k1", "/proj/k1", 9150)
+	// Hold the registry lock from a SEPARATE flock handle (a concurrent holder).
+	held := NewRegistry(regPath)
+	unlock, err := held.Lock()
+	if err != nil {
+		t.Fatalf("hold registry lock: %v", err)
+	}
+	defer unlock()
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not run when the registry lock is contended")
+		return "", nil
+	})
+
+	res, err := NewAPI().RepairOrphanSerenaWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("RepairOrphanSerenaWorkspaces: %v", err)
+	}
+	if res.Repaired != 0 || len(res.Unresolved) != 0 || res.SupervisorGone {
+		t.Errorf("got %+v, want zero result (skipped on lock contention)", res)
 	}
 }
