@@ -535,7 +535,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// up the now-complete intent and the first reconcile spawns the recovered
 	// daemons. NON-FATAL: a repair error (or a deferred introduce-crash) never
 	// blocks supervisor startup — the supervisor must come up regardless.
-	if repaired, deferredKeys, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(); rErr != nil {
+	if repaired, deferredKeys, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir); rErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "reconcile",

@@ -30,6 +30,18 @@ func liveWorkspace(t *testing.T) string {
 	return t.TempDir()
 }
 
+// mustStateDir resolves the (test-redirected) daemon state dir to thread into
+// RepairSerenaIntentFromRegistry — matching the root seedIntent writes to, so the
+// repair targets the same supervisor-intent.json the test seeded.
+func mustStateDir(t *testing.T) string {
+	t.Helper()
+	d, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("resolve state dir: %v", err)
+	}
+	return d
+}
+
 // seedSerenaRegistryRow loads regPath under the registry lock and writes one
 // serena sentinel row for (path, port), then saves. It honors the production
 // invariant WorkspaceKey == WorkspaceKey(WorkspacePath) (auto-register derives
@@ -133,7 +145,7 @@ func TestRepairSerenaIntentFromRegistry_Healthy_NoOp(t *testing.T) {
 		t.Fatalf("read intent bytes before: %v", err)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
@@ -177,7 +189,7 @@ func TestRepairSerenaIntentFromRegistry_MissingRowAppended(t *testing.T) {
 	})
 	beforeCount := len(readIntent(t, intentPath).Daemons)
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
@@ -231,7 +243,7 @@ func TestRepairSerenaIntentFromRegistry_DoesNotClobberConcurrentRow(t *testing.T
 		Daemons: []SupervisorDaemon{concurrent},
 	})
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
@@ -279,7 +291,7 @@ func TestRepairSerenaIntentFromRegistry_IntroduceCrashDefers(t *testing.T) {
 		t.Fatalf("read intent bytes before: %v", err)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
@@ -336,7 +348,7 @@ func TestRepairSerenaIntentFromRegistry_IntentLockContended_Skips(t *testing.T) 
 	}
 	defer func() { _ = held.Unlock() }()
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error on contended lock: %v", err)
 	}
@@ -408,7 +420,7 @@ func TestRepairSerenaIntentFromRegistry_SecondCallIsNoOp(t *testing.T) {
 	})
 
 	// First repair appends the orphan.
-	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("first repair: unexpected error: %v", err)
 	}
@@ -424,7 +436,7 @@ func TestRepairSerenaIntentFromRegistry_SecondCallIsNoOp(t *testing.T) {
 	}
 
 	// Second repair must be a strict no-op — NOT re-append the same daemon.
-	repaired2, deferred2, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired2, deferred2, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("second repair: unexpected error: %v", err)
 	}
@@ -474,7 +486,7 @@ func TestRepairSerenaIntentFromRegistry_RegistryLockContended_Skips(t *testing.T
 	}
 	defer unlock()
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error on contended registry lock: %v", err)
 	}
@@ -516,7 +528,7 @@ func TestRepairSerenaIntentFromRegistry_MissingIntentFile_Defers(t *testing.T) {
 		t.Fatalf("precondition: intent file should be absent, stat err = %v", statErr)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error on missing intent file: %v", err)
 	}
@@ -558,7 +570,7 @@ func TestRepairSerenaIntentFromRegistry_DivergentRow_SkippedNotReappended(t *tes
 	})
 	beforeCount := len(readIntent(t, intentPath).Daemons)
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -602,7 +614,7 @@ func TestRepairSerenaIntentFromRegistry_StaleWorkspacePath_Skipped(t *testing.T)
 	})
 	beforeCount := len(readIntent(t, intentPath).Daemons)
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -651,7 +663,7 @@ func TestRepairSerenaIntentFromRegistry_LegacyNilSpecRow_Deferred(t *testing.T) 
 		t.Fatalf("read intent before: %v", err)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry()
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

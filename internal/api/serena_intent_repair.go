@@ -85,15 +85,24 @@ const (
 // the read-modify-write. We hold that leaf across the WHOLE repair, so the
 // missing-set computation and the append commit see one consistent, race-free
 // snapshot and no concurrent write can interleave between our read and our write.
-func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string, err error) {
-	// 1. Resolve the registry + intent paths.
+func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, deferred []string, err error) {
+	// 1. Resolve the registry + intent paths. stateDir is the SUPERVISOR's already-
+	//    resolved state root, threaded in by the caller — NOT re-resolved via
+	//    DaemonStateDir() here. The cli stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE
+	//    (env) while api.DaemonStateDir() honors a separate package-var override
+	//    (daemonStateRootOverride); under such a seam the two diverge, and an
+	//    internally-resolved repair would write a DIFFERENT supervisor-intent.json
+	//    than the loadIntentFiles(stateDir, ...) the caller runs immediately after —
+	//    leaving the orphan unrepaired for the first reconcile, and possibly mutating
+	//    the default user's state file. Threading stateDir keeps both on one root.
+	//    The registry stays on DefaultRegistryPath() — the canonical resolver
+	//    auto-register also uses, so repair reads exactly the rows auto-register wrote.
+	if stateDir == "" {
+		return 0, nil, fmt.Errorf("serena intent repair: empty state dir (caller must thread the supervisor's resolved state root)")
+	}
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
 		return 0, nil, fmt.Errorf("serena intent repair: resolve registry path: %w", err)
-	}
-	stateDir, err := DaemonStateDir()
-	if err != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: resolve state dir: %w", err)
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 
@@ -211,6 +220,7 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 	}
 	if len(skippedDivergent) > 0 {
 		emitSerenaIntentRepairEvent(
+			stateDir,
 			SupervisorEventSeverityWarn,
 			"serena-intent-repair-divergent-row-skipped",
 			map[string]any{
@@ -223,6 +233,7 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 	}
 	if len(deferredLegacy) > 0 {
 		emitSerenaIntentRepairEvent(
+			stateDir,
 			SupervisorEventSeverityWarn,
 			"serena-intent-repair-legacy-nil-spec-deferred",
 			map[string]any{
@@ -249,6 +260,7 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 	if intent == nil || !intent.HasRuntimeSpecRow() {
 		introduceKeys := missingWorkspaceKeys(missing)
 		emitSerenaIntentRepairEvent(
+			stateDir,
 			SupervisorEventSeverityWarn,
 			"serena-intent-repair-deferred",
 			map[string]any{
@@ -310,6 +322,7 @@ func (a *API) RepairSerenaIntentFromRegistry() (repaired int, deferred []string,
 
 	appliedKeys := missingWorkspaceKeys(missing)
 	emitSerenaIntentRepairEvent(
+		stateDir,
 		SupervisorEventSeverityInfo,
 		"serena-intent-repair-applied",
 		map[string]any{
@@ -399,11 +412,7 @@ func firstRuntimeSpecCommand(intent *SupervisorIntentFile) string {
 // the state dir, open the canonical supervisor event log, emit, close. A
 // failure to resolve/open/emit is silently non-fatal — the audit is
 // observability, not a gate.
-func emitSerenaIntentRepairEvent(severity, event string, body map[string]any) {
-	stateDir, sdErr := DaemonStateDir()
-	if sdErr != nil {
-		return
-	}
+func emitSerenaIntentRepairEvent(stateDir, severity, event string, body map[string]any) {
 	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
 	if openErr != nil {
 		return

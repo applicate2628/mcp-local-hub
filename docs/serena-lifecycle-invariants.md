@@ -22,12 +22,12 @@ ephemeral state at T and acting at T+δ as if the sample still held:
 |---|---|---|---|
 | supervisor liveness probe (`autoRegisterSupervisorRunningFn` / `SupervisorRunningUnderStateDir`) | reap / install / IPC reconcile | supervisor exits between probe and reconcile | **#253 r7:** an UNAVAILABLE reconcile (`ErrSupervisorIPCUnavailable`) is treated as "supervisor gone → START it", not ignored (`serena_auto_register.go`, post-commit block) |
 | router session peek (`peekVersionState`) | forward / detached register | session DELETE/idle-sweep between peek and act | **#253 rounds 2/4/5:** the session watcher cancels the detached register ctx on mid-flight termination; the helper re-checks `ctx.Err()` at its mutation boundaries |
-| registry row Save (a durable claim) | install commit (the convergence the supervisor acts on) | a process crash between Save and commit releases the held flock, leaving a registry row with no intent daemon | **crash-repair (PLANNED follow-up):** a supervisor-side registry→intent self-heal that re-reads registry + intent under locks, materializes only the MISSING serena rows, writes via a lock-held helper, then reconciles — deliberately NOT a full `InstallParsedManifest` re-install (which replaces all rows and would clobber a concurrent auto-register). See "Planned: crash-repair" below |
+| registry row Save (a durable claim) | install commit (the convergence the supervisor acts on) | a process crash between Save and commit releases the held flock, leaving a registry row with no intent daemon | **crash-repair (implemented — `RepairSerenaIntentFromRegistry`, PR #256):** a supervisor-side registry→intent self-heal that re-reads registry + intent under locks, APPENDS only the MISSING serena rows, writes via a lock-held helper, then the startup reconcile spawns them — deliberately NOT a full `InstallParsedManifest` re-install (which replaces all rows and would clobber a concurrent auto-register). Runs at supervisor startup only; an orphan created mid-lifetime heals at the next restart or the next new-workspace auto-register. See "Implemented: crash-repair" below |
 
 When adding a new lifecycle step that reads ephemeral state, classify it against this
 table. If you sample-then-act across a window, you owe one of: an immediate re-check,
 a lease/singleton that fails closed (e.g. `supervisor.lock`), or non-fatal convergence
-that reconciles the divergence later (the IntentWatcher 60s poll, the planned
+that reconciles the divergence later (the IntentWatcher 60s poll, the startup
 crash-repair).
 
 ## 2. The pre/post-commit ctx boundary (auto-register)
@@ -70,13 +70,15 @@ pinned by `TestSerenaRouter_AutoRegister_AbsentSession_RejectsBeforeRegister` (t
 register path) alongside the routing-path legacy tests; changing either gate must keep
 both passing.
 
-## Planned: crash-repair (registry↔intent self-heal)
+## Implemented: crash-repair (registry↔intent self-heal)
 
 The §1 row-3 split (a registry serena row with no matching supervisor-intent daemon,
-left by a crash between the auto-register registry `Save` and its install commit) needs
-a convergence step. A first implementation that ran at GUI startup and re-used
-`InstallParsedManifest` was abandoned (PR #254, after a Codex architecture review)
-because that path is the **wrong seam**:
+left by a crash between the auto-register registry `Save` and its install commit) is
+healed by `RepairSerenaIntentFromRegistry` (`internal/api/serena_intent_repair.go`,
+PR #256), called by the supervisor at startup BEFORE `loadIntentFiles`
+(`internal/cli/supervise.go`). A first implementation that ran at GUI startup and
+re-used `InstallParsedManifest` was abandoned (PR #254, after a Codex architecture
+review) because that path is the **wrong seam**:
 
 - `buildMergedSupervisorIntent` REMOVES every existing serena daemon row and re-appends
   from the caller's `Workspaces` snapshot, so a stale snapshot clobbers a concurrent
@@ -85,26 +87,51 @@ because that path is the **wrong seam**:
   deep blocking-flock tree (registry, intent, preflight, audit, event-log) and stalls
   all `/serena/mcp` auto-registration (and GUI startup) behind any hung lock holder.
 
-The correct design (a follow-up) is a **narrow supervisor-side primitive**, because the
-supervisor already owns the intent→daemon lifecycle (startup reconcile, IPC `reconcile`,
-the 60s `IntentWatcher`):
+The shipped design is a **narrow supervisor-side primitive**, because the supervisor
+already owns the intent→daemon lifecycle (startup reconcile, IPC `reconcile`, the 60s
+`IntentWatcher`):
 
-1. Try/acquire the registry flock; read the serena rows.
-2. Acquire the supervisor-intent lock; re-read the intent under that lock (fresh, not a
-   stale snapshot — this is the clobber-safety point).
-3. Compute the MISSING serena rows from the two locked snapshots.
-4. Live-add: APPEND only the missing rows (never replace-all).
-5. First-introduce (intent carries no `runtime_spec`): explicitly support replacing the
-   legacy serena rows (the running supervisor is provably this binary) OR keep a
-   defer-to-migrate policy — make it explicit, not implicit.
-6. Write the intent via a lock-held helper, refresh the controller cache, then reconcile.
+1. Try/acquire the registry flock with a **brief bounded retry** (a non-mutating registry
+   reader — the routing cache refresh, `serena_routing/resolver.go` — takes the same
+   exclusive flock only momentarily, so a single TryLock-then-skip would forfeit the only
+   startup repair pass); HOLD it across the whole repair. Read the serena rows.
+2. Acquire the supervisor-intent lock (TryLock, skip-on-contention) while holding the
+   registry; re-read the intent under that lock (fresh, not a stale snapshot — the
+   clobber-safety point). Deadlock-freedom comes from TryLock on BOTH locks, NOT from
+   exclusive ownership (migration / strict-mode / autostart also take the intent lock
+   without the registry lock).
+3. Classify each serena registry row from the two locked snapshots:
+   - **SKIP** a row whose `WorkspaceKey != WorkspaceKey(WorkspacePath)` (hand-edited or
+     legacy pre-symlink-resolution row — appending would re-append forever) or whose
+     workspace dir is gone (`workspacePathStale`; the install fan-out filters these too,
+     since a removed `cmd.Dir` spawn-loops).
+   - **DEFER** a row whose intent already has a daemon with the matching task name but
+     `RuntimeSpec == nil` (a legacy pre-redesign descriptor the reconciler excludes from
+     the spawn set) — appending a duplicate task name or replacing it would break the
+     append-only contract; the operator runs migrate to re-materialize it.
+   - **APPEND** the MISSING rows (a spawnable spec-bearing daemon truly absent) — never
+     replace-all.
+4. First-introduce (intent carries no `runtime_spec` at all): defer-to-migrate, because a
+   live append cannot introduce the first dynamic-pool row while a possibly-old supervisor
+   runs (the §7.1 split-brain hazard). Explicit, emitted as a warn event.
+5. Materialize the missing rows via `BuildSupervisorDaemonsForSerena` (copying the mcphub
+   binary path from an existing serena daemon's `Command` for consistency), APPEND, and
+   write via `writeSupervisorIntentLockHeld`. The caller threads its already-resolved
+   `stateDir` in so the repair writes the SAME `supervisor-intent.json` that
+   `loadIntentFiles` reads (the registry stays on `DefaultRegistryPath()`, the canonical
+   resolver auto-register also uses).
 
-Sharp nuance for the implementer: the `IntentWatcher` refreshes the intent cache but
-only posts delta events for daemon-intent changes, not newly-added supervisor-intent
-rows — so hang the repair before startup reconcile and/or before the IPC `reconcile`
-apply, and extend the watcher only if periodic repair is wanted. This new helper becomes
-the named **registry→intent materialization owner** and must be tested against a
-concurrent auto-register.
+**Scope: startup-only.** The repair runs once at supervisor startup; the first reconcile
+then spawns the recovered daemons. An orphan created WHILE the supervisor is already
+running is NOT healed until the next supervisor restart OR the next new-workspace
+auto-register (whose replace-all install re-materializes every registry row, the orphan
+included). The `IntentWatcher` does NOT close this gap — it refreshes the intent cache
+but only posts delta events for daemon-intent changes, not newly-added supervisor-intent
+rows. Tightening the mid-lifetime window by wiring the repair into
+`AutoRegisterSerenaWorkspace`'s existing-row handling, the IPC `reconcile` apply, or a
+periodic tick is a tracked follow-up (consultant advisory, PR #256). Deferred and
+divergent outcomes are surfaced as warn events to `supervisor-events.log`; GUI/status
+surfacing of those states is a follow-up.
 
 ## Terms and Abbreviations
 
@@ -116,6 +143,7 @@ concurrent auto-register.
   left by a crash between the registry Save and the install commit; see §1 row 3.
 - **introduce-crash** — a crash during the very first serena introduce, before the
   intent gained any `runtime_spec`.
-- **PR #249 / #253 / #254** — the serena routing (#249), auto-register-on-miss (#253),
-  and lifecycle-invariants/crash-repair (#254) pull requests these invariants emerged
-  from.
+- **PR #249 / #253 / #254 / #255 / #256** — the serena routing (#249),
+  auto-register-on-miss (#253), abandoned GUI-startup crash-repair (#254, closed),
+  lifecycle-invariants doc (#255), and the implemented supervisor-side crash-repair
+  (#256) pull requests these invariants emerged from.
