@@ -27,6 +27,11 @@ import (
 func TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "") // no legacy opt-in
 	t.Setenv(RequireSingleUserHomeEnv, "")      // no strict opt-in
+	// The relax lane emits a client-write-unhardened-fallback audit
+	// event via DaemonStateDir()-resolved hub-mcp.log. Redirect the
+	// state dir so that row lands in a temp dir, not the operator's
+	// real %LOCALAPPDATA%\mcp-local-hub\hub-mcp.log.
+	isolateStateDir(t)
 
 	dst := filepath.Join(t.TempDir(), "client.json")
 	want := []byte(`{"servers":{"x":1}}`)
@@ -117,6 +122,10 @@ func TestSecureWriteWithOperatorOpt_StrictBeatsLegacyAllow(t *testing.T) {
 func TestSecureWriteWithOperatorOpt_GateRejectionFallsBackWhenOpted(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
 	t.Setenv(RequireSingleUserHomeEnv, "") // legacy opt-in path
+	// Relax lane emits a client-write-unhardened-fallback audit row;
+	// redirect the state dir so it never touches the operator's real
+	// hub-mcp.log.
+	isolateStateDir(t)
 
 	dst := filepath.Join(t.TempDir(), "client.json")
 	want := []byte(`{"servers":{"x":1}}`)
@@ -268,6 +277,24 @@ func TestSecureWriteWithOperatorOpt_StrictRefusesPreexistingSymlink(t *testing.T
 func TestSecureWriteWithOperatorOpt_DefaultRefusesPreexistingSymlink(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
 	t.Setenv(RequireSingleUserHomeEnv, "") // default mode
+	// Pin the symlink opt-in OFF. This test asserts the DEFAULT
+	// refuse-a-pre-existing-symlink behavior. If the operator's shell
+	// has MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 set (the solo-dev
+	// dotfile pattern), secureWriteWithOperatorOpt would RESOLVE the
+	// symlink and write through to its target (client_write_init.go
+	// resolveSymlinkForSecureWrite path) instead of refusing —
+	// returning nil and failing this assertion. t.Setenv isolates the
+	// test from that leaked opt-in so the refusal path is exercised
+	// regardless of the host environment.
+	t.Setenv(AllowClientConfigSymlinkEnv, "")
+	// On a host whose %TEMP% parent DACL is broadened, the parent-dir
+	// gate trips FIRST inside SecureWriteClientConfig, the relax lane
+	// fires (emitting a client-write-unhardened-fallback audit row),
+	// and only the skip-gate re-run refuses the pre-existing symlink.
+	// So this test still emits an audit event before its refusal —
+	// redirect the state dir so that row does not leak to the real
+	// hub-mcp.log.
+	isolateStateDir(t)
 
 	root := t.TempDir()
 	realTarget := filepath.Join(root, "real-target")
@@ -309,6 +336,7 @@ func TestSecureWriteWithOperatorOpt_DefaultRefusesPreexistingSymlink(t *testing.
 func TestSecureWriteWithOperatorOpt_RelaxWritesWhenAbsent(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
 	t.Setenv(RequireSingleUserHomeEnv, "")
+	isolateStateDir(t) // relax-lane fallback audit row → temp, not real hub-mcp.log
 	dst := filepath.Join(t.TempDir(), "client.json")
 	want := []byte(`{"hello":"world"}`)
 	if err := secureWriteWithOperatorOpt(dst, want); err != nil {
@@ -330,6 +358,7 @@ func TestSecureWriteWithOperatorOpt_RelaxWritesWhenAbsent(t *testing.T) {
 func TestSecureWriteWithOperatorOpt_RelaxOverwritesRegularFile(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
 	t.Setenv(RequireSingleUserHomeEnv, "")
+	isolateStateDir(t) // relax-lane fallback audit row → temp, not real hub-mcp.log
 	dst := filepath.Join(t.TempDir(), "client.json")
 	if err := os.WriteFile(dst, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed regular file: %v", err)
@@ -360,6 +389,7 @@ func TestSecureWriteWithOperatorOpt_RelaxTightensModeOnExistingFile(t *testing.T
 	}
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1")
 	t.Setenv(RequireSingleUserHomeEnv, "")
+	isolateStateDir(t) // relax-lane fallback audit row → temp, not real hub-mcp.log
 	dst := filepath.Join(t.TempDir(), "client.json")
 	if err := os.WriteFile(dst, []byte("pre-existing"), 0o644); err != nil {
 		t.Fatalf("seed loose file: %v", err)

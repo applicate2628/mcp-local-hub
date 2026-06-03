@@ -68,6 +68,12 @@ import (
 func TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_WindowsDACLHardened(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "") // no legacy opt-in
 	t.Setenv(RequireSingleUserHomeEnv, "")      // no strict opt-in
+	// synthesizeDirWithAuthUsersReadACE guarantees the parent-dir gate
+	// rejects → the relax lane fires → a client-write-unhardened-fallback
+	// audit row is emitted to DaemonStateDir()-resolved hub-mcp.log.
+	// Redirect the state dir so that row lands in a temp dir, not the
+	// operator's real %LOCALAPPDATA%\mcp-local-hub\hub-mcp.log.
+	isolateStateDir(t)
 
 	parent := filepath.Join(t.TempDir(), "leaky-parent")
 	if err := os.Mkdir(parent, 0o700); err != nil {
@@ -132,6 +138,12 @@ func TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_WindowsDACLHardened(t *te
 func TestSecureWriteWithOperatorOpt_RelaxOnGateFailure_NoTempLeak(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "")
 	t.Setenv(RequireSingleUserHomeEnv, "")
+	// Relax lane fires (synthesized non-allowlisted parent) and emits a
+	// client-write-unhardened-fallback audit row. Redirect the state
+	// dir so it never touches the operator's real hub-mcp.log. Note:
+	// this redirects the STATE dir, a separate temp dir — the parent
+	// dir under test (the no-temp-leak assertion below) is unaffected.
+	isolateStateDir(t)
 
 	parent := filepath.Join(t.TempDir(), "leaky-parent")
 	if err := os.Mkdir(parent, 0o700); err != nil {
