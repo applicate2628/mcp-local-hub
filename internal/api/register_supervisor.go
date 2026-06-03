@@ -296,6 +296,47 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	}, nil
 }
 
+func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error) {
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return nil, false, fmt.Errorf("resolve supervisor-intent path: %w", err)
+	}
+	lock := flock.New(intentPath + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return nil, false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	prior, existed, err := readSupervisorIntentForMerge(intentPath)
+	if err != nil {
+		return nil, false, err
+	}
+	desired := cloneSupervisorIntentFile(prior)
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang)
+	kept := desired.Daemons[:0]
+	removed := false
+	for _, daemon := range desired.Daemons {
+		if daemon.TaskName == taskName {
+			removed = true
+			continue
+		}
+		kept = append(kept, daemon)
+	}
+	if !removed {
+		return func() {}, false, nil
+	}
+	desired.Daemons = kept
+	desired.Version = 1
+	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
+		return nil, false, fmt.Errorf("write supervisor-intent without LSP row %s: %w", taskName, err)
+	}
+
+	return func() {
+		restoreSupervisorIntentSnapshot(intentPath, prior, existed)
+	}, true, nil
+}
+
 func restoreSupervisorIntentSnapshot(path string, prior *SupervisorIntentFile, existed bool) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {

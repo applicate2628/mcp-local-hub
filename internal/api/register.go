@@ -19,6 +19,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -827,6 +828,20 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 			report.Warnings = append(report.Warnings,
 				fmt.Sprintf("language %s not registered for workspace %s", lang, canonical))
 			continue
+		}
+		intentTaskName := LSPIntentTaskNameForWorkspaceLanguage(activeWSKey, lang)
+		if _, supervisorManaged, err := a.removeLSPSupervisorIntent(activeWSKey, lang); err != nil {
+			report.Warnings = append(report.Warnings,
+				fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
+		} else if supervisorManaged {
+			ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
+			if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
+				report.Warnings = append(report.Warnings,
+					fmt.Sprintf("supervisor reconcile after removing %s: %v", intentTaskName, err))
+			} else {
+				fmt.Fprintf(w, "✓ removed supervisor intent %s\n", intentTaskName)
+			}
+			cancel()
 		}
 		// 1. Kill any live proxy bound to this language's port BEFORE we
 		// Delete the scheduler task. sch.Delete removes the task record

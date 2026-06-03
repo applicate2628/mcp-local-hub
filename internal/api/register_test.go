@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -1404,6 +1405,157 @@ func TestUnregister_KillProxyFailureIsWarning(t *testing.T) {
 	}
 }
 
+func TestUnregister_SupervisedRemovesIntentAndReconciles(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		if !apply {
+			t.Fatalf("supervised unregister called reconcile with apply=false")
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	a := mustNewAPI(t)
+	report, err := a.registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err != nil {
+		t.Fatalf("Register supervised: %v", err)
+	}
+	if reconcileCalls != 1 {
+		t.Fatalf("supervised register reconcile calls = %d, want 1", reconcileCalls)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("register entries = %d, want 1", len(report.Entries))
+	}
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent before unregister: %v", err)
+	}
+	intentTask := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")
+	if row := intent.FindSupervisorDaemonByTaskName(intentTask); row == nil {
+		t.Fatalf("test setup missing supervisor-intent row %s; rows=%+v", intentTask, intent.Daemons)
+	}
+
+	if _, err := a.unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Unregister supervised: %v", err)
+	}
+	if reconcileCalls != 2 {
+		t.Fatalf("reconcile calls after unregister = %d, want 2", reconcileCalls)
+	}
+	intent, err = ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after unregister: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(intentTask); row != nil {
+		t.Fatalf("supervisor-intent row %s survived unregister: %+v", intentTask, row)
+	}
+	if !slices.Contains(h.fakeSch.deleteNames, report.Entries[0].TaskName) {
+		t.Fatalf("unregister did not also delete legacy scheduler task %s; deleteNames=%v", report.Entries[0].TaskName, h.fakeSch.deleteNames)
+	}
+}
+
+func TestUnregister_LegacyOnlyDeletesSchedulerTaskWithoutReconcile(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	a := mustNewAPI(t)
+	report, err := a.registerWithManifest(nineLanguageManifest(), ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("Register legacy: %v", err)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("register entries = %d, want 1", len(report.Entries))
+	}
+	taskName := report.Entries[0].TaskName
+
+	if _, err := a.unregisterWithManifest(nineLanguageManifest(), ws, []string{"python"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Unregister legacy: %v", err)
+	}
+	if reconcileCalls != 0 {
+		t.Fatalf("legacy-only unregister reconcile calls = %d, want 0", reconcileCalls)
+	}
+	if !slices.Contains(h.fakeSch.deleteNames, taskName) {
+		t.Fatalf("legacy-only unregister did not delete scheduler task %s; deleteNames=%v", taskName, h.fakeSch.deleteNames)
+	}
+}
+
+func TestUnregister_NoSupervisorIntentRowIsNoOpSuccess(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	a := mustNewAPI(t)
+	if _, err := a.registerWithManifest(nineLanguageManifest(), ws, []string{"rust"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Register legacy: %v", err)
+	}
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	sibling := SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Command: "mcphub.exe"}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: "2026-06-03T00:00:00Z",
+		Daemons:   []SupervisorDaemon{sibling},
+	})
+
+	if _, err := a.unregisterWithManifest(nineLanguageManifest(), ws, []string{"rust"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Unregister with absent supervisor intent row: %v", err)
+	}
+	if reconcileCalls != 0 {
+		t.Fatalf("absent-intent unregister reconcile calls = %d, want 0", reconcileCalls)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after unregister: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(sibling.TaskName); row == nil {
+		t.Fatalf("sibling supervisor-intent row was not preserved; rows=%+v", intent.Daemons)
+	}
+}
+
 // --- Install refusal for workspace-scoped manifests ---------------------
 
 // --- KnobDefault tests (D1: knob-driven weekly_refresh_default) ----------
@@ -1535,6 +1687,20 @@ type fakeScheduler struct {
 	runNames          []string               // ordered list of task names passed to Run
 	listSeed          []scheduler.TaskStatus // pre-seeded tasks returned (prefix-filtered) by List; empty by default
 	deleteNames       []string               // ordered list of task names passed to Delete (prune observability)
+}
+
+func writeSupervisorIntentForRegisterTest(t *testing.T, path string, f *SupervisorIntentFile) {
+	t.Helper()
+	raw, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal supervisor intent seed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir supervisor intent dir: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write supervisor intent seed: %v", err)
+	}
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
