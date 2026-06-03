@@ -229,6 +229,29 @@ languages:
 	}
 }
 
+func TestParseManifest_LanguageProjectMarkers(t *testing.T) {
+	yaml := `
+name: mcp-language-server
+kind: workspace-scoped
+transport: stdio-bridge
+command: mcp-language-server
+port_pool: {start: 9200, end: 9299}
+languages:
+  - name: rust
+    backend: mcp-language-server
+    transport: stdio
+    lsp_command: rust-analyzer
+    project_markers: [Cargo.toml]
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if got := m.Languages[0].ProjectMarkers; len(got) != 1 || got[0] != "Cargo.toml" {
+		t.Fatalf("ProjectMarkers = %v, want [Cargo.toml]", got)
+	}
+}
+
 func TestParseManifest_LanguageTransportEnum(t *testing.T) {
 	yaml := `
 name: mcp-language-server

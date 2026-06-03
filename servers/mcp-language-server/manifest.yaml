@@ -24,12 +24,14 @@ languages:
     backend: mcp-language-server
     transport: stdio
     lsp_command: clangd
+    project_markers: [compile_commands.json, .clangd]
     required_binaries: [clangd]
 
   - name: fortran
     backend: mcp-language-server
     transport: stdio
     lsp_command: fortls
+    project_markers: [fpm.toml]
     required_binaries: [fortls]
 
   - name: go
@@ -37,6 +39,7 @@ languages:
     transport: stdio
     lsp_command: gopls
     extra_flags: [mcp]
+    project_markers: [go.mod]
     required_binaries: [gopls]
 
   - name: javascript
@@ -44,6 +47,7 @@ languages:
     transport: stdio
     lsp_command: typescript-language-server
     extra_flags: ["--stdio"]
+    project_markers: [package.json, tsconfig.json, jsconfig.json]
     required_binaries: [typescript-language-server]
 
   - name: python
@@ -51,12 +55,14 @@ languages:
     transport: stdio
     lsp_command: pyright-langserver
     extra_flags: ["--stdio"]
+    project_markers: [pyproject.toml, setup.py, setup.cfg]
     required_binaries: [pyright-langserver]
 
   - name: rust
     backend: mcp-language-server
     transport: stdio
     lsp_command: rust-analyzer
+    project_markers: [Cargo.toml]
     required_binaries: [rust-analyzer]
 
   - name: typescript
@@ -64,6 +70,7 @@ languages:
     transport: stdio
     lsp_command: typescript-language-server
     extra_flags: ["--stdio"]
+    project_markers: [package.json, tsconfig.json, jsconfig.json]
     required_binaries: [typescript-language-server]
 
   - name: vscode-css
@@ -71,6 +78,7 @@ languages:
     transport: stdio
     lsp_command: vscode-css-language-server
     extra_flags: ["--stdio"]
+    project_markers: [package.json]
     required_binaries: [vscode-css-language-server]
 
   - name: vscode-html
@@ -78,4 +86,5 @@ languages:
     transport: stdio
     lsp_command: vscode-html-language-server
     extra_flags: ["--stdio"]
+    project_markers: [package.json]
     required_binaries: [vscode-html-language-server]
