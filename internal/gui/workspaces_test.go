@@ -1,7 +1,9 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
@@ -108,4 +110,85 @@ func TestWorkspaces_NonGET_405(t *testing.T) {
 	if rr.Code != 405 {
 		t.Errorf("expected 405, got %d: %s", rr.Code, rr.Body.String())
 	}
+}
+
+func TestLSPRegister_POST_OK(t *testing.T) {
+	var gotWorkspace string
+	var gotLanguages []string
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.lspRegistrar = fakeLSPRegistrar{
+		RegisterFn: func(workspacePath string, languages []string) (*api.RegisterReport, error) {
+			gotWorkspace = workspacePath
+			gotLanguages = append([]string(nil), languages...)
+			return &api.RegisterReport{
+				Workspace:    workspacePath,
+				WorkspaceKey: "project",
+				Entries: []api.WorkspaceEntry{
+					{
+						WorkspaceKey:  "project",
+						WorkspacePath: workspacePath,
+						Language:      "go",
+						Backend:       "gopls-mcp",
+						Port:          9201,
+						TaskName:      `\mcp-local-hub-lsp-project-go`,
+					},
+				},
+			}, nil
+		},
+	}
+
+	body := bytes.NewBufferString(`{"workspace_path":"D:/dev/project","language":"go"}`)
+	req := httptest.NewRequest("POST", "/api/lsp/register", body)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	if gotWorkspace != "D:/dev/project" {
+		t.Errorf("workspace_path = %q, want D:/dev/project", gotWorkspace)
+	}
+	if len(gotLanguages) != 1 || gotLanguages[0] != "go" {
+		t.Errorf("languages = %+v, want [go]", gotLanguages)
+	}
+	var resp api.RegisterReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Entries) != 1 || resp.Entries[0].TaskName != `\mcp-local-hub-lsp-project-go` {
+		t.Errorf("response entries = %+v", resp.Entries)
+	}
+}
+
+func TestLSPRegister_POST_RejectsCrossOrigin(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.lspRegistrar = fakeLSPRegistrar{
+		RegisterFn: func(string, []string) (*api.RegisterReport, error) {
+			t.Fatal("registrar must not be called for cross-origin requests")
+			return nil, nil
+		},
+	}
+
+	req := httptest.NewRequest("POST", "/api/lsp/register", bytes.NewBufferString(`{"workspace_path":"D:/dev/project","language":"go"}`))
+	req.Header.Set("Origin", "https://example.test")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != 403 {
+		t.Errorf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+type fakeLSPRegistrar struct {
+	RegisterFn func(workspacePath string, languages []string) (*api.RegisterReport, error)
+}
+
+func (f fakeLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*api.RegisterReport, error) {
+	if f.RegisterFn == nil {
+		return nil, fmt.Errorf("RegisterFn not configured")
+	}
+	return f.RegisterFn(workspacePath, languages)
 }

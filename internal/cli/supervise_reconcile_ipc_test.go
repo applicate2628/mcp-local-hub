@@ -585,6 +585,59 @@ func TestReconcileIPC_MissingTaskInSchedulerFlaggedAsMissing(t *testing.T) {
 	}
 }
 
+func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
+	taskName := `\mcp-local-hub-lsp-b133f336-go`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName:  taskName,
+				Server:    "mcp-language-server",
+				Daemon:    "lsp-b133f336-go",
+				Command:   "mcphub",
+				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", `D:\dev\mcp-local-hub`, "--language", "go"},
+				Workspace: `D:\dev\mcp-local-hub`,
+				Port:      9200,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	installSchedulerListFake(t, []scheduler.TaskStatus{})
+
+	req := api.IPCRequest{
+		ID:   44,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 1 {
+		t.Fatalf("expected 1 drift entry; got %d (%+v)", body.DriftCount, body.Drift)
+	}
+	if body.Drift[0].SchedulerState != api.ReconcileSchedulerStateMissing {
+		t.Errorf("SchedulerState = %q, want %q",
+			body.Drift[0].SchedulerState, api.ReconcileSchedulerStateMissing)
+	}
+	if body.Drift[0].Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("Action = %q, want %q for supervisor-owned missing scheduler entry",
+			body.Drift[0].Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if body.AppliedCount != 1 {
+		t.Errorf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for EvIntentUpdate")
+	}
+}
+
 // TestReconcileIPC_OrphanSchedulerTaskFlaggedNeedsManualReview —
 // scheduler has a row that the intent does NOT declare → orphan;
 // IntentDesired="?" and Action="needs_manual_review".

@@ -368,6 +368,12 @@ func (realLogs) Logs(server, daemon string, tail int) (string, error) {
 	return api.NewAPI().LogsGet(server, daemon, tail)
 }
 
+type lspRegistrar interface {
+	RegisterLSP(workspacePath string, languages []string) (*api.RegisterReport, error)
+}
+
+type realLSPRegistrar struct{}
+
 // RealStatusProvider is the production-default statusProvider. Tests inject
 // their own; callers outside the package construct this one.
 type RealStatusProvider = realStatusProvider
@@ -409,6 +415,7 @@ type Server struct {
 	backups           backupsAPI
 	cleanup           cleanupAPI
 	clientInit        clientInitializer
+	lspRegistrar      lspRegistrar
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
@@ -517,6 +524,7 @@ func NewServer(cfg Config) *Server {
 	s.backups = realBackupsAPI{}
 	s.cleanup = realCleanupAPI{}
 	s.clientInit = realClientInitializer{}
+	s.lspRegistrar = realLSPRegistrar{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -542,6 +550,7 @@ func NewServer(cfg Config) *Server {
 	registerInitClientConfigRoutes(s)
 	registerDaemonEnvRoutes(s)
 	registerWorkspacesRoutes(s)
+	registerLSPRegisterRoutes(s)
 	registerSupervisorRestartRoutes(s)
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)

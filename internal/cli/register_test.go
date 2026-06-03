@@ -50,6 +50,17 @@ func TestRegisterCmd_HasNoWeeklyRefreshFlag(t *testing.T) {
 	}
 }
 
+func TestRegisterCmd_HasSupervisedFlag(t *testing.T) {
+	c := newRegisterCmdReal()
+	flag := c.Flags().Lookup("supervised")
+	if flag == nil {
+		t.Fatal("--supervised flag missing")
+	}
+	if flag.DefValue != "false" {
+		t.Errorf("--supervised default = %q, want false", flag.DefValue)
+	}
+}
+
 func TestUnregisterCmd_RequiresAtLeastOneArg(t *testing.T) {
 	c := newUnregisterCmdReal()
 	if err := c.Args(c, []string{}); err == nil {

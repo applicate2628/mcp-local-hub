@@ -214,7 +214,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		intentDesired := computeIntentDesired(taskName, daemonIntentTasks)
 		schedState, hasSched := lookupSchedulerState(schedByTask, taskName)
 		smState := lookupControllerSMState(deps, taskName)
-		action := classifyDriftAction(schedState, hasSched, intentDesired)
+		action := classifyDriftAction(schedState, hasSched, intentDesired, isSupervisorOwnedDescriptorForReconcile(d))
 
 		drift = append(drift, api.DriftEntry{
 			TaskName:       taskName,
@@ -437,7 +437,7 @@ func normalizeSchedulerState(raw string) string {
 // classifyDriftAction computes the Action field per (scheduler-state,
 // intent-desired) pair. The matrix:
 //
-//	sched=missing   intent=running  → post_ev_intent_update (intent says run but no scheduler task — operator must re-install; we surface this as drift but EvIntentUpdate can't bring a missing task back)
+//	sched=missing   intent=running  → post_ev_intent_update for supervisor-owned descriptors; needs_manual_review for legacy scheduler-owned descriptors
 //	sched=missing   intent=stopped  → no_op (intent says stop and there's no task; nothing to do)
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
@@ -445,18 +445,18 @@ func normalizeSchedulerState(raw string) string {
 //	sched=stopped   intent=stopped  → no_op (steady state)
 //	sched=<other>   *               → needs_manual_review (unknown scheduler state)
 //
-// For sched=missing + intent=running we mark `needs_manual_review`
-// rather than `post_ev_intent_update` because the EvIntentUpdate event
-// cannot bring a missing scheduler task back — the operator needs
-// `mcphub install --upgrade` to re-register the scheduler entry. The
-// drift report surfaces the gap; --apply does not paper over it.
-func classifyDriftAction(schedState string, hasSched bool, intentDesired string) string {
+// For legacy scheduler-owned sched=missing + intent=running we mark
+// `needs_manual_review` rather than `post_ev_intent_update` because the
+// EvIntentUpdate event cannot bring a missing scheduler task back. For
+// supervisor-owned descriptors, there is deliberately no scheduler row:
+// the supervisor has the full command in supervisor-intent.json and can
+// spawn directly from EvIntentUpdate.
+func classifyDriftAction(schedState string, hasSched bool, intentDesired string, supervisorOwned bool) string {
 	if !hasSched {
-		// Intent says running but scheduler has no row → needs install,
-		// not an EvIntentUpdate. We surface the drift but refuse to
-		// "apply" anything because the SM has no scheduler-side anchor
-		// to drive.
 		if intentDesired == api.ReconcileIntentDesiredRunning {
+			if supervisorOwned {
+				return api.ReconcileActionPostEvIntentUpdate
+			}
 			return api.ReconcileActionNeedsManualReview
 		}
 		return api.ReconcileActionNoOp
@@ -477,6 +477,10 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string)
 		// the SM has no defined transition for it. Operator review.
 		return api.ReconcileActionNeedsManualReview
 	}
+}
+
+func isSupervisorOwnedDescriptorForReconcile(d api.SupervisorDaemon) bool {
+	return len(d.Args) > 0 && d.Args[0] == "daemon"
 }
 
 // lookupControllerSMState reads the per-task SM state from the live

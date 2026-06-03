@@ -2,15 +2,18 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
@@ -62,10 +65,18 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	// to exercise the readiness-failure path override this again.
 	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
 
-	fc := &fakeClientsMap{entries: map[string]map[string]string{}, exists: map[string]bool{}}
+	fc := &fakeClientsMap{
+		entries:         map[string]map[string]string{},
+		stdioEntries:    map[string]map[string]clients.LanguageServerStdioEntry{},
+		allStdioEntries: map[string]map[string]clients.StdioEntry{},
+		backupKeepCalls: map[string]int{},
+		exists:          map[string]bool{},
+	}
 	// Pre-populate the default HTTP clients so Exists() returns true in tests.
 	for _, n := range []string{"claude-code", "codex-cli", "cursor"} {
 		fc.entries[n] = map[string]string{}
+		fc.stdioEntries[n] = map[string]clients.LanguageServerStdioEntry{}
+		fc.allStdioEntries[n] = map[string]clients.StdioEntry{}
 		fc.exists[n] = true
 	}
 	testClientFactory = func() map[string]registerClient {
@@ -300,6 +311,57 @@ func TestRegister_NoLspBinaryPreflightAtRegister(t *testing.T) {
 	if reg.Workspaces[0].Lifecycle != LifecycleConfigured {
 		t.Errorf("lifecycle = %q, want %q (proxy is configured; missing-binary surfaces at tools/call)",
 			reg.Workspaces[0].Lifecycle, LifecycleConfigured)
+	}
+}
+
+func TestRegister_RemovesMatchingDirectLanguageServerEntries(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	h.fakeClients.stdioEntries["codex-cli"] = map[string]clients.LanguageServerStdioEntry{
+		"legacy-go": {
+			Name:     "legacy-go",
+			Command:  "mcp-language-server",
+			Language: "gopls",
+		},
+		"legacy-python": {
+			Name:     "legacy-python",
+			Command:  "mcp-language-server",
+			Language: "pyright-langserver",
+		},
+	}
+	h.fakeClients.allStdioEntries["codex-cli"] = map[string]clients.StdioEntry{
+		"go": {
+			Name:    "go",
+			Command: "gopls",
+			Args:    []string{"mcp"},
+		},
+		"custom-gopls": {
+			Name:    "custom-gopls",
+			Command: "gopls",
+			Args:    []string{"serve"},
+		},
+	}
+
+	_, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), t.TempDir(), []string{"go"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["legacy-go"]; ok {
+		t.Fatal("legacy --lsp gopls entry was not removed")
+	}
+	if _, ok := h.fakeClients.allStdioEntries["codex-cli"]["go"]; ok {
+		t.Fatal("direct gopls mcp entry was not removed")
+	}
+	if _, ok := h.fakeClients.allStdioEntries["codex-cli"]["custom-gopls"]; !ok {
+		t.Fatal("unrelated direct gopls non-mcp entry was removed")
+	}
+	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["legacy-python"]; !ok {
+		t.Fatal("unrelated legacy python entry was removed")
+	}
+	if h.fakeClients.backupKeepCalls["codex-cli"] != 1 {
+		t.Errorf("BackupKeep calls for codex-cli = %d, want 1", h.fakeClients.backupKeepCalls["codex-cli"])
 	}
 }
 
@@ -1022,6 +1084,85 @@ func TestRegister_SurvivesSharedWeeklyRefreshFailure(t *testing.T) {
 	}
 }
 
+func TestRegister_SupervisedWritesIntentAndDeletesLegacyLSPTask(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	reconcileCalled := false
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalled = true
+		if !apply {
+			t.Fatalf("supervised register called reconcile with apply=false")
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, "go")
+	h.fakeSch.tasks[taskName] = true
+	h.fakeSch.xml[taskName] = []byte(`<Task name="` + taskName + `"/>`)
+
+	report, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err != nil {
+		t.Fatalf("Register supervised: %v", err)
+	}
+	if !reconcileCalled {
+		t.Fatal("supervised register did not call supervisor reconcile")
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(report.Entries))
+	}
+	if report.Entries[0].TaskName != taskName {
+		t.Fatalf("entry task = %q, want %q", report.Entries[0].TaskName, taskName)
+	}
+	for _, spec := range h.fakeSch.createdSpecs {
+		if spec.Name == taskName {
+			t.Fatalf("supervised register must not create legacy LSP scheduler task; created %+v", spec)
+		}
+	}
+	if !slices.Contains(h.fakeSch.deleteNames, taskName) {
+		t.Fatalf("supervised register did not delete legacy task %s; deleteNames=%v", taskName, h.fakeSch.deleteNames)
+	}
+	if slices.Contains(h.fakeSch.runNames, taskName) {
+		t.Fatalf("supervised register must not run legacy scheduler task %s; runNames=%v", taskName, h.fakeSch.runNames)
+	}
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go"))
+	if row == nil {
+		t.Fatalf("supervisor-intent missing LSP row for %s; rows=%+v", taskName, intent.Daemons)
+	}
+	if row.Server != "mcp-language-server" || row.Workspace != canonical || row.Port != report.Entries[0].Port {
+		t.Fatalf("intent row mismatch: %+v, entry=%+v", row, report.Entries[0])
+	}
+	wantArgs := []string{"daemon", "workspace-proxy", "--port", fmt.Sprintf("%d", report.Entries[0].Port), "--workspace", canonical, "--language", "go"}
+	if strings.Join(row.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("intent args = %v, want %v", row.Args, wantArgs)
+	}
+	if got := h.fakeClients.entries["codex-cli"][report.Entries[0].ClientEntries["codex-cli"]]; got != fmt.Sprintf("http://localhost:%d/mcp", report.Entries[0].Port) {
+		t.Fatalf("codex URL = %q, want hub URL on registered port", got)
+	}
+}
+
 func TestRegister_EntryNameCollision(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
@@ -1387,11 +1528,11 @@ type fakeScheduler struct {
 	failCreateForName string // if non-empty, Create with Name==this value returns an induced error
 	createCount       int
 	createdSpecs      []scheduler.TaskSpec
-	failExportXMLErr  error             // if non-nil, ExportXML returns this error (instead of ErrTaskNotFound)
-	failRunForTask    string            // if non-empty, Run(name) returns an induced error for this task name
-	runCount          int               // total Run invocations
-	runHook           func(name string) // optional hook called at the top of Run before the induced-failure check
-	runNames          []string          // ordered list of task names passed to Run
+	failExportXMLErr  error                  // if non-nil, ExportXML returns this error (instead of ErrTaskNotFound)
+	failRunForTask    string                 // if non-empty, Run(name) returns an induced error for this task name
+	runCount          int                    // total Run invocations
+	runHook           func(name string)      // optional hook called at the top of Run before the induced-failure check
+	runNames          []string               // ordered list of task names passed to Run
 	listSeed          []scheduler.TaskStatus // pre-seeded tasks returned (prefix-filtered) by List; empty by default
 	deleteNames       []string               // ordered list of task names passed to Delete (prune observability)
 }
@@ -1464,6 +1605,9 @@ func (f *fakeScheduler) ImportXML(name string, xml []byte) error {
 
 type fakeClientsMap struct {
 	entries           map[string]map[string]string // client-name -> entry-name -> URL
+	stdioEntries      map[string]map[string]clients.LanguageServerStdioEntry
+	allStdioEntries   map[string]map[string]clients.StdioEntry
+	backupKeepCalls   map[string]int
 	exists            map[string]bool
 	addEntryCount     int
 	failAddEntryCalls int // the Nth AddEntry (1-based) fails
@@ -1477,6 +1621,10 @@ type fakeClient struct {
 func (c *fakeClient) Exists() bool {
 	return c.parent.exists[c.name]
 }
+func (c *fakeClient) BackupKeep(keepN int) (string, error) {
+	c.parent.backupKeepCalls[c.name]++
+	return fmt.Sprintf("/backup/%s/%d", c.name, keepN), nil
+}
 func (c *fakeClient) AddEntry(e clients.MCPEntry) error {
 	c.parent.addEntryCount++
 	if c.parent.failAddEntryCalls > 0 && c.parent.addEntryCount == c.parent.failAddEntryCalls {
@@ -1487,6 +1635,8 @@ func (c *fakeClient) AddEntry(e clients.MCPEntry) error {
 }
 func (c *fakeClient) RemoveEntry(name string) error {
 	delete(c.parent.entries[c.name], name)
+	delete(c.parent.stdioEntries[c.name], name)
+	delete(c.parent.allStdioEntries[c.name], name)
 	return nil
 }
 func (c *fakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
@@ -1495,6 +1645,24 @@ func (c *fakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 		return nil, nil
 	}
 	return &clients.MCPEntry{Name: name, URL: url}, nil
+}
+func (c *fakeClient) AllStdioEntries() ([]clients.StdioEntry, error) {
+	raw := c.parent.allStdioEntries[c.name]
+	out := make([]clients.StdioEntry, 0, len(raw))
+	for _, entry := range raw {
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+func (c *fakeClient) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
+	raw := c.parent.stdioEntries[c.name]
+	out := make([]clients.LanguageServerStdioEntry, 0, len(raw))
+	for _, entry := range raw {
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 func countEntries(fc *fakeClientsMap) int {

@@ -454,4 +454,62 @@ describe("ServersScreen — LSP matrix rows", () => {
     );
     expect(screen.getByTestId("lsp-edit-env-python")).toBeTruthy();
   });
+
+  it("enables an unregistered language-server row through the selected workspace", async () => {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const registerBodies: unknown[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [],
+          }),
+        "/api/lsp/register": (init?: RequestInit) => {
+          registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            workspace: "D:/dev/project",
+            workspace_key: "default",
+            entries: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+                language: "go",
+                backend: "gopls-mcp",
+                port: 9201,
+                task_name: "\\mcp-local-hub-lsp-default-go",
+              },
+            ],
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const enable = await screen.findByTestId("lsp-enable-go");
+    expect(enable.textContent).toBe("Enable");
+
+    fireEvent.click(enable);
+
+    await waitFor(() => {
+      expect(registerBodies).toHaveLength(1);
+    });
+    expect(registerBodies[0]).toEqual({
+      workspace_path: "D:/dev/project",
+      language: "go",
+    });
+  });
 });
