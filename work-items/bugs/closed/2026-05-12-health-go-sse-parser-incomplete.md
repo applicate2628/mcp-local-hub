@@ -5,11 +5,23 @@ found-by: codex bot r10 inline review of PR #157
 found-on: 2026-05-12
 project: mcp-local-hub
 context: adjacent-finding
-status: open
-related-pr: pending Phase 3 (fixed in hub_mcp_aggregator.go but health.go left in narrow scope)
+status: closed
+related-pr: PR #263 (b6b90dcc)
 ---
 
 # health.go SSE parser misclassifies compliant SSE daemon responses
+
+## Status
+
+CLOSED — fixed by PR #263 (`b6b90dcc`, merged 2026-06-03). The G3 health
+probes now route through the shared `internal/api/sse.go` `extractSSEPayload`
+helper, which delegates to the package's event-aware `readSSEResponse` (selects
+the JSON-RPC response event, respects SSE event boundaries, handles CRLF and
+`data:`-without-space). That is exactly the "Ideal" this doc proposed — a
+shared `internal/api/sse.go` helper collapsing the inline copies — plus
+event-boundary awareness added for codex bot #263 P2. Verified 2026-06-03:
+`TestExtractSSEPayload` pins the 10+ cases (no-space, multi-line-joined, CRLF,
+plain-JSON fallback, response-vs-notification selection in both orders).
 
 ## Symptom
 

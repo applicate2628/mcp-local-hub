@@ -5,11 +5,30 @@ found-by: diagnostic dig during "после перезагрузки слома�
 found-on: 2026-05-20
 project: mcp-local-hub
 context: pre-existing test-hygiene gap, not caused by feat/v0.5.x-servers-matrix-revamp
-status: open
-related-pr: (none — separate from #222)
+status: closed
+related-pr: PR #264 (914d0cf)
 ---
 
 # Pre-existing test pollution: `go test ./internal/api/` writes into the production state-dir
+
+## Status
+
+CLOSED — fixed by PR #264 (`914d0cf`, merged 2026-06-03). Two root causes, both
+addressed: (1) the state-file-helper tests inherited the operator's ambient
+`MCPHUB_ALLOW_*` env (the `unhardened-fallback` warn written into the real
+`supervisor-events.log`) — #264 clears them per-test via `t.Setenv`; (2) the
+tests wrote state into the real `%LOCALAPPDATA%\mcp-local-hub\` — #264 adds the
+`isolateStateDir(t)` helper redirecting `daemonStateRootOverride` to
+`t.TempDir()`. Both named test families (`TestWriteStateFileAtomic_StrictModeWith*`,
+`TestRealClientInitializer_HappyPath`) are now covered. Verified 2026-06-03 via
+the merged #264 diff (state_file_helper_test.go, state_paths_test.go,
+client_write_init_test.go, client_write_init_windows_test.go).
+
+NOTE: this closes the state-file-helper leak only. The sibling
+`2026-05-08-api-tests-flock-contention-with-user-binary` bug
+(legacy_migrate_test.go / register_test.go hanging on the real
+daemon-intent.json.lock) is a DIFFERENT defect #264 did NOT touch — it
+remains open.
 
 ## Symptom
 

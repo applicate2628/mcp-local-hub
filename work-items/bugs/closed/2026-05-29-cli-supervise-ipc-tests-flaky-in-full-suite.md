@@ -5,8 +5,23 @@ found-by: backend-engineer
 found-in-phase: D.3b-2 (migrate serena legacy-to-dynamic-pool)
 affected-surface: internal/cli/supervise_test.go, internal/cli/relay_test.go (TestResolveRelayURL_ResolvesFromEmbeddedManifest)
 context: adjacent-finding
-status: open
+status: closed
+related-pr: PR #264 (914d0cf)
 ---
+
+## Status
+
+CLOSED — fixed by PR #264 (`914d0cf`, merged 2026-06-03). The full-suite
+contention was the in-process supervisors all binding the same per-user-SID
+Windows pipe `\\.\pipe\mcphub-supervisor-<SID>`. PR #264 adds a runtime
+per-test pipe discriminator (`EnableSupervisorIPCTestPipeIsolation`, installed
+by the internal/cli TestMain) deriving a unique pipe leaf from each test's
+`MCPHUB_STATE_DIR_OVERRIDE`, so the six named IPC tests no longer collide. The
+hook is active in both tagged and untagged test builds yet absent from release
+binaries — structurally test-only, since no production path assigns the var
+(codex bot #264 P2 r1+r2). Verified 2026-06-03:
+`TestSupervise_IPC_VersionPinning` + `TestSuperviseCommand_StatusIPC_ReconcileReady`
+pass in both build modes.
 
 ## Reproduction
 
