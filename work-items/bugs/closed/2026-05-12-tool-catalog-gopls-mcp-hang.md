@@ -83,7 +83,7 @@ A `defer` at `internal/api/tool_catalog_test.go:210-213` calls
 background goroutine drains stderr (`:214`) so the child never blocks
 on a full pipe. The exact wall-clock-cap remedy this doc requested.
 
-Verified 2026-06-03 (`d27c10e` is an ancestor of HEAD; the
+Verified 2026-06-02 (`d27c10e` is an ancestor of HEAD; the
 `context.WithTimeout(..., 20*time.Second)` + `Process.Kill()`/`Wait()`
 defer + stderr drain are all present at HEAD in `captureToolsList`).
 The old "the hang point" line refs in the Related-code section above

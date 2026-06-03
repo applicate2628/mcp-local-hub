@@ -29,7 +29,7 @@ memory/demigrate/gemini-cli: latest backup
 The demigrate path has three fallback sources for the pre-hub-managed
 form: latest backup, `-original` sentinel, `managed-entries.json` marker.
 Sources 1+2 are in hub-managed form (separate concern, see [2026-05-15
-demigrate-fallback bug](2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)),
+demigrate-fallback bug](../2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)),
 so the third source is load-bearing. It used to fail on the parent-DACL
 gate; that gate now relaxes under default-relax (see Status — fixed in
 PR #217).
@@ -196,7 +196,7 @@ The legacy reject path at `hub_mcp_state_dacl_windows.go:143-145`
 only from tests. Demigrate Apply on broadened-parent solo-dev hosts is
 unblocked.
 
-Verified 2026-06-03 (4 checks: `9e89abe` is an ancestor of HEAD; the new
+Verified 2026-06-02 (4 checks: `9e89abe` is an ancestor of HEAD; the new
 read-inode files are present; `grep VerifyHubMcpStateDACL(` finds no
 non-test caller; the in-code comment at `hub_mcp_state.go:183-195` names
 this very doc as the fix target). The "OPEN" status was never reconciled
@@ -210,7 +210,7 @@ remains open: its failing tests exercise the WRITE-side refusal +
 symlink-create privilege (host-environment-dependent harness defects),
 which the read-side inode fix did not touch.
 
-Related: [2026-05-15 demigrate-fallback bug](2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)
+Related: [2026-05-15 demigrate-fallback bug](../2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)
 (separate concern that the latest backup + sentinel both held
 hub-managed form — that's a different defect class about backup
 generation, independent of the DACL gate).

@@ -144,7 +144,7 @@ What landed:
   a symlink-specific diagnostic/tooltip instead of the misleading "stat
   error" wording.
 
-Verified 2026-06-03 (`9e89abe` and `44512e2` are both ancestors of
+Verified 2026-06-02 (`9e89abe` and `44512e2` are both ancestors of
 HEAD; `AllowClientConfigSymlinkEnv`, `OperatorAllowsClientConfigSymlink`,
 the opt-in-gated `resolveSymlinkForSecureWrite`, and the
 `"error-symlink"` scan category are all present at HEAD). The doc's

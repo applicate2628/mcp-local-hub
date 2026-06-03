@@ -13,7 +13,7 @@ status: open
 1. `go test -count=1 -timeout 5m ./internal/api/` from this dev tree (Windows 11,
    non-elevated shell, `%LOCALAPPDATA%\mcp-local-hub` parent DACL broadened to
    non-allowlisted SIDs — the same host condition as
-   [2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md](2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md)).
+   [2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md](closed/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md)).
 2. Observe two FAILs:
    - `TestSecureWriteWithOperatorOpt_DefaultRefusesPreexistingSymlink`
      (`client_write_init_test.go:284`: "expected refusal for pre-existing
@@ -49,7 +49,7 @@ Both tests assert a *refusal* that depends on host-specific Windows state:
   precondition does not reproduce the refusal branch.
 
 This is the test-side mirror of the operator-facing DACL gate concern already
-tracked in 2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md.
+tracked in closed/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md.
 
 ## Risk
 
