@@ -31,7 +31,7 @@ on #265 r1 (the same #264 "env" fix as the sibling
 1. `go test -count=1 -timeout 5m ./internal/api/` from this dev tree (Windows 11,
    non-elevated shell, `%LOCALAPPDATA%\mcp-local-hub` parent DACL broadened to
    non-allowlisted SIDs — the same host condition as
-   [2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md](closed/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md)).
+   [2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md](2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md)).
 2. Observe two FAILs:
    - `TestSecureWriteWithOperatorOpt_DefaultRefusesPreexistingSymlink`
      (`client_write_init_test.go:284`: "expected refusal for pre-existing

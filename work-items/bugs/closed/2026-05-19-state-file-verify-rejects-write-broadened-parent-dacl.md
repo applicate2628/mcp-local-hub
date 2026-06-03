@@ -204,9 +204,9 @@ after the fix landed; `TRIAGE-2026-05-28.md` row 15 re-flagged it
 "still-relevant-P2" from a pr-review pass that read this stale doc, not the
 current source.
 
-**NOT closed by this fix** — the sibling test bug
-[2026-05-29-api-symlink-dacl-tests-fail-on-broadened-parent-host.md](../2026-05-29-api-symlink-dacl-tests-fail-on-broadened-parent-host.md)
-remains open: its failing tests exercise the WRITE-side refusal +
+**NOT closed by this fix (#217)** — the sibling test bug
+[2026-05-29-api-symlink-dacl-tests-fail-on-broadened-parent-host.md](2026-05-29-api-symlink-dacl-tests-fail-on-broadened-parent-host.md)
+was a separate defect (since closed by #264, 2026-06-03): its failing tests exercise the WRITE-side refusal +
 symlink-create privilege (host-environment-dependent harness defects),
 which the read-side inode fix did not touch.
 
