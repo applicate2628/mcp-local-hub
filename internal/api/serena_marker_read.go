@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // serena_marker_read.go — the SINGLE hardened entry point for reading a
@@ -70,6 +71,27 @@ func ReadUntrustedSerenaProjectYML(ctx context.Context, path string) ([]byte, er
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("serena marker: aborted before reading %s: %w", path, err)
+	}
+
+	// The `.serena` directory that contains the marker must itself be a real
+	// directory, not a symlink. The workspace root ABOVE it may be a legitimate
+	// user-provided symlink alias (resolveSerenaProjectRoot follows that for a
+	// directory target), but a symlinked `.serena` INSIDE the untrusted cloned
+	// tree would redirect this read outside the project tree to an
+	// attacker-chosen `<target>/project.yml`. os.Lstat follows the trusted root
+	// above `.serena` to reach it, then reports `.serena`'s own type without
+	// following it. A missing `.serena` is left to the file Lstat below so the
+	// not-found error stays detectable.
+	//
+	// This is a check (the reviewer's stated option), not a no-follow handle:
+	// it fully catches the realistic supply-chain threat — a `.serena` symlink
+	// baked into cloned repo content. A concurrent active swap of `.serena`
+	// between this check and the open below is a narrow residual TOCTOU; the
+	// fully race-proof fix (open `.serena` via a no-follow directory handle and
+	// openat the marker relative to it) is tracked as a follow-up.
+	serenaDir := filepath.Dir(path)
+	if dfi, derr := os.Lstat(serenaDir); derr == nil && dfi.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("serena marker: container directory %s is a symlink; refusing (untrusted clone marker — a symlinked .serena could redirect the read outside the project tree)", serenaDir)
 	}
 
 	// Lstat (NOT Stat) so a symlink at the leaf is observed as a symlink

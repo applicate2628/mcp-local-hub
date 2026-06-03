@@ -511,12 +511,28 @@ func resolveSerenaProjectRoot(p string) (string, error) {
 	}
 	abs := filepath.Clean(p)
 	dir := abs
-	// Mirror AncestorWalk: if abs is not a directory (a file, or absent), start
-	// the walk at its parent so we never probe `<file>/.serena/project.yml`
-	// (which would ENOTDIR on POSIX and abort the walk before it reaches the
-	// real marker in an ancestor directory).
+	// Mirror AncestorWalk: if abs is not a directory, start the walk at its
+	// parent so we never probe `<file>/.serena/project.yml` (which would
+	// ENOTDIR on POSIX and abort the walk before it reaches the real marker in
+	// an ancestor directory).
+	//
+	// EXCEPTION — symlink-to-directory: a symlink whose target IS a directory
+	// is a legitimate user-provided workspace-root alias (e.g.
+	// `/work/link -> /real/project`). os.Lstat reports the link (not a dir), so
+	// a naive `!IsDir()` would wrongly fall back to the parent and miss the
+	// alias's marker. os.Stat follows the link; if it resolves to a directory,
+	// start the walk AT the symlink so `<abs>/.serena/project.yml` resolves
+	// through it to the target's marker — the pre-redesign os.Stat-based walk
+	// registered these aliases, and downstream registration canonicalizes the
+	// symlink for de-dup. Following the USER's own root symlink is fine; the
+	// untrusted-marker hardening (refusing a symlinked `.serena` INSIDE the
+	// resolved tree) is the reader's job, not the walk's.
 	if fi, statErr := os.Lstat(abs); statErr != nil || !fi.IsDir() {
-		dir = filepath.Dir(abs)
+		if sfi, serr := os.Stat(abs); serr == nil && sfi.IsDir() {
+			dir = abs // symlink-to-directory workspace-root alias
+		} else {
+			dir = filepath.Dir(abs)
+		}
 	}
 	for {
 		marker := filepath.Join(dir, ".serena", "project.yml")

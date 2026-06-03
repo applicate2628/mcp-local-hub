@@ -1585,3 +1585,74 @@ func TestReadSerenaProjectYMLLanguages_HonorsCancelledContext(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// R7. Symlink-to-DIRECTORY workspace root (bot PR #262 P2 finding 1). A symlink
+//     whose target is a directory is a legitimate user-provided workspace-root
+//     alias and must resolve: the walk must start AT the symlink (os.Stat
+//     follows it to a dir) and find the target's `.serena/project.yml`, not
+//     wrongly fall back to the parent. Regression guard for the Lstat-based
+//     walk start. Symlink-capability skip (Windows non-admin).
+// ---------------------------------------------------------------------------
+
+func TestResolveSerenaProjectRoot_SymlinkDirRoot_Resolves(t *testing.T) {
+	base := t.TempDir()
+	realProject := filepath.Join(base, "real-project")
+	if err := os.MkdirAll(filepath.Join(realProject, ".serena"), 0o755); err != nil {
+		t.Fatalf("mkdir target project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(realProject, ".serena", "project.yml"), []byte(validSerenaMarkerYAML), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(realProject, link); err != nil {
+		t.Skipf("symlink unsupported (likely Windows non-admin / no SeCreateSymbolicLinkPrivilege): %v", err)
+	}
+
+	root, err := resolveSerenaProjectRoot(link)
+	if err != nil {
+		t.Fatalf("a symlink-to-directory workspace root must resolve, got error: %v", err)
+	}
+	// The walk starts AT the symlink, so it returns the symlink path itself
+	// (downstream registration canonicalizes it for de-dup).
+	if root != link {
+		t.Fatalf("resolved root = %q, want the symlink path %q (the walk starts at the symlink-to-dir)", root, link)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R8. Symlinked `.serena` container directory (bot PR #262 P2 finding 2). A
+//     cloned repo that makes `.serena` itself a symlink to another directory
+//     would redirect the marker read outside the project tree, even though the
+//     leaf `project.yml` is a regular file. The reader must refuse the
+//     symlinked container (it no-follows the `.serena` parent, not just the
+//     leaf). Symlink-capability skip (Windows non-admin).
+// ---------------------------------------------------------------------------
+
+func TestReadUntrustedSerenaProjectYML_SymlinkedSerenaDir_Rejected(t *testing.T) {
+	base := t.TempDir()
+	// Attacker-controlled real dir OUTSIDE the project tree, with a valid marker.
+	evilDir := filepath.Join(base, "evil")
+	if err := os.MkdirAll(evilDir, 0o755); err != nil {
+		t.Fatalf("mkdir evil: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(evilDir, "project.yml"), []byte(validSerenaMarkerYAML), 0o644); err != nil {
+		t.Fatalf("write evil marker: %v", err)
+	}
+	// Project root whose `.serena` is a SYMLINK to evilDir (supply-chain redirect).
+	root := filepath.Join(base, "project")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	if err := os.Symlink(evilDir, filepath.Join(root, ".serena")); err != nil {
+		t.Skipf("symlink unsupported (likely Windows non-admin): %v", err)
+	}
+
+	_, err := ReadUntrustedSerenaProjectYML(context.Background(), filepath.Join(root, ".serena", "project.yml"))
+	if err == nil {
+		t.Fatal("expected refusal for a symlinked .serena container, got nil (a symlinked marker dir must not redirect the read outside the project tree)")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error = %v, want it to name the symlink-container refusal", err)
+	}
+}
+
