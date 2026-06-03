@@ -1,33 +1,24 @@
-// sse.go — single spec-compliant owner for extracting a JSON payload from
-// a fully-buffered Server-Sent Events response body.
+// sse.go — the G3 health/capability probes' single adapter for pulling a
+// JSON-RPC response out of a fully-buffered Streamable-HTTP body that may be
+// plain application/json or a text/event-stream frame.
 //
-// MCP daemons answer over Streamable HTTP either as plain application/json
-// or as a text/event-stream. The G3 health/capability probes
+// MCP daemons answer either as plain application/json or as SSE. The probes
 // (singleHealthProbe, sendForceMaterializeTools, liveCapabilitySubSection)
-// each io.ReadAll the WHOLE body before parsing, so they need a byte-slice
-// helper that turns the buffered SSE frame back into the embedded JSON
-// envelope. Before this helper they carried three independent, incomplete
-// inline copies of the same logic that:
-//   - required a mandatory space after `data:` (compliant SSE may emit
-//     `data:foo` with no space), and
-//   - captured only the FIRST `data:` line (multi-line `data:` events are
-//     legitimate per the HTML5 EventSource spec), and
-//   - left a trailing `\r` on each line after splitting on `\n` (CRLF
-//     framing then broke json.Unmarshal).
+// io.ReadAll the WHOLE body (under their own size cap) before parsing, so they
+// need a []byte adapter. Before this they each carried an independent,
+// incomplete inline SSE parser (mandatory space after `data:`, first-`data:`-
+// line-only, no CRLF strip). This collapses all three onto ONE owner.
 //
-// extractSSEPayload fixes all three and is the ONE owner the three health-
-// path probes call, per the AGENTS.md "no logic duplication" rule and the
-// bug doc work-items/bugs/2026-05-12-health-go-sse-parser-incomplete.md.
-//
-// Scope note: the hub MCP aggregator (hub_mcp_aggregator.go::readSSEResponse)
-// and the remote-manifest smoke check (manifest_test_remote.go::consumeSSE)
-// are deliberately NOT collapsed onto this helper. Those parse the stream
-// INCREMENTALLY off an io.Reader so they can early-exit at the JSON-RPC
-// response event, skip pre-response progress notifications, and respect SSE
-// event boundaries — semantics a whole-buffer []byte helper cannot provide.
-// Folding them onto extractSSEPayload would re-introduce the
-// "concatenate every data: line across the whole stream into one blob" bug
-// that codex bot r12 fixed (see TestReadSSEResponseSkipsNotifications).
+// The owner is the package's existing event-aware readSSEResponse — NOT a new
+// whole-buffer parser. A previous whole-buffer extractSSEPayload joined every
+// `data:` line across event boundaries into one blob, so a multi-event reply
+// (a JSON-RPC response event interleaved with a progress/notification event)
+// produced two concatenated JSON objects and broke json.Unmarshal (codex bot
+// P2 on PR #263). readSSEResponse respects SSE event boundaries and selects
+// the JSON-RPC *response* event (jsonrpc 2.0 + id, no method), skipping
+// notifications — the exact semantics the streaming hub aggregator already
+// relies on (TestReadSSEResponseSkipsNotifications). manifest_test_remote.go's
+// consumeSSE stays separate (it owns the G6 remote-manifest streaming path).
 //
 // Reference: HTML5 EventSource spec
 // https://html.spec.whatwg.org/multipage/server-sent-events.html
@@ -35,33 +26,18 @@ package api
 
 import "bytes"
 
-// extractSSEPayload pulls the JSON payload out of a fully-buffered SSE
-// response body. It concatenates the values of every `data:` line (in
-// order, joined with `\n`, matching the EventSource "data buffer" rule),
-// trimming an optional single leading space after the colon and a trailing
-// `\r` from CRLF framing on each line.
-//
-// When the body contains no `data:` line at all it is returned unchanged —
-// the plain application/json fallback path. An empty input therefore also
-// returns empty (no `data:` line present), and the caller's json.Unmarshal
-// surfaces the parse error exactly as it did before.
+// extractSSEPayload returns the JSON-RPC response body from a fully-buffered
+// HTTP response that may be plain application/json or a text/event-stream
+// frame. SSE bodies route through the event-aware readSSEResponse, which
+// respects event boundaries and selects the JSON-RPC response event (skipping
+// interleaved notifications). A body with no JSON-RPC response event — a plain
+// application/json reply, or a stream carrying only notifications — is returned
+// unchanged for the caller's json.Unmarshal to handle exactly as before.
 func extractSSEPayload(raw []byte) []byte {
-	var parts [][]byte
-	seenData := false
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		line = bytes.TrimSuffix(line, []byte("\r"))
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
-		value := line[len("data:"):]
-		if len(value) > 0 && value[0] == ' ' {
-			value = value[1:]
-		}
-		parts = append(parts, value)
-		seenData = true
+	// len(raw)+1 as the bound: the callers already size-cap the body when they
+	// buffer it, so readSSEResponse's own size guard must not re-trip here.
+	if payload, err := readSSEResponse(bytes.NewReader(raw), len(raw)+1); err == nil {
+		return payload
 	}
-	if !seenData {
-		return raw
-	}
-	return bytes.Join(parts, []byte("\n"))
+	return raw
 }
