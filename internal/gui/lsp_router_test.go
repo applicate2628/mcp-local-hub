@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/lsp_routing"
@@ -132,6 +133,74 @@ func TestLSPRouter_RegisteredWorkspaceForwardsSessionless(t *testing.T) {
 	}
 	if rr.Header().Get("Mcp-Session-Id") == "upstream-session-must-not-leak" {
 		t.Fatal("router leaked upstream Mcp-Session-Id back to client")
+	}
+}
+
+func TestLSPRouter_RegisteredWorkspaceWaitsForEnsureBeforeForward(t *testing.T) {
+	upstreamHit := make(chan struct{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit <- struct{}{}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ready":true}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	entry := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201}
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/alpha/main.py": {
+			WorkspaceRoot: "/repo/alpha",
+			WorkspaceKey:  "alpha",
+			Registered:    true,
+			Entry:         entry,
+			ProjectMarker: true,
+		},
+	}}
+	ensureEntered := make(chan struct{})
+	releaseEnsure := make(chan struct{})
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			if wsKey != "alpha" || workspacePath != "/repo/alpha" || language != "python" {
+				t.Fatalf("ensure args = (%q, %q, %q)", wsKey, workspacePath, language)
+			}
+			close(ensureEntered)
+			<-releaseEnsure
+			return entry, nil
+		},
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return upstream.URL },
+	})
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/alpha/main.py"}}`)
+	go func() {
+		done <- postLSP(t, s, "python", body, nil)
+	}()
+
+	select {
+	case <-ensureEntered:
+	case rr := <-done:
+		t.Fatalf("router forwarded registered row before EnsureLSPRegistered joined readiness: status=%d body=%s", rr.Code, rr.Body.String())
+	case <-time.After(2 * time.Second):
+		t.Fatal("router neither entered EnsureLSPRegistered nor completed request")
+	}
+	select {
+	case <-upstreamHit:
+		t.Fatal("router forwarded upstream before EnsureLSPRegistered was released")
+	case <-done:
+		t.Fatal("router completed request before EnsureLSPRegistered was released")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseEnsure)
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusOK {
+			t.Fatalf("tools/call status = %d body=%s", rr.Code, rr.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("router did not complete after EnsureLSPRegistered was released")
 	}
 }
 

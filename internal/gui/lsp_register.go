@@ -1,15 +1,19 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
 
 	"mcp-local-hub/internal/api"
 )
+
+var ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspacePath, language string) (api.WorkspaceEntry, error) {
+	return api.NewAPI().EnsureLSPRegistered(ctx, workspaceKey, workspacePath, language)
+}
 
 type lspRegisterRequest struct {
 	WorkspacePath string   `json:"workspace_path"`
@@ -18,7 +22,21 @@ type lspRegisterRequest struct {
 }
 
 func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*api.RegisterReport, error) {
-	return api.NewAPI().Register(workspacePath, languages, api.RegisterOpts{Writer: io.Discard, SupervisedProxy: true})
+	report := &api.RegisterReport{Workspace: workspacePath}
+	for _, language := range languages {
+		entry, err := ensureLSPRegisteredForGUI(context.Background(), "", workspacePath, language)
+		if err != nil {
+			return report, err
+		}
+		report.Entries = append(report.Entries, entry)
+		if report.Workspace == "" || report.Workspace == workspacePath {
+			report.Workspace = entry.WorkspacePath
+		}
+		if report.WorkspaceKey == "" {
+			report.WorkspaceKey = entry.WorkspaceKey
+		}
+	}
+	return report, nil
 }
 
 func registerLSPRegisterRoutes(s *Server) {

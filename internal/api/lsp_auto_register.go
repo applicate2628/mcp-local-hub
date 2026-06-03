@@ -105,9 +105,9 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	}
 	unlock()
 
-	registered := true
+	supervisorSpawnRequested := false
 	rollback := func() {
-		if registered && entry.Port > 0 {
+		if supervisorSpawnRequested && entry.Port > 0 {
 			_ = killByPortFn(entry.Port, 5*time.Second)
 		}
 		removeLSPRegistryRow(regPath, workspaceKey, language)
@@ -138,6 +138,7 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
 	}
 	cancel()
+	supervisorSpawnRequested = true
 
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
 		rollbackIntent()
@@ -145,7 +146,6 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
 	}
 
-	registered = false
 	return entry, nil
 }
 

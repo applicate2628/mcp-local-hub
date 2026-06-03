@@ -292,7 +292,7 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	}
 
 	return func() {
-		restoreSupervisorIntentSnapshot(intentPath, prior, existed)
+		removeSupervisorIntentDescriptor(intentPath, descriptor.TaskName, !existed)
 	}, nil
 }
 
@@ -307,7 +307,7 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 	}
 	defer func() { _ = lock.Unlock() }()
 
-	prior, existed, err := readSupervisorIntentForMerge(intentPath)
+	prior, _, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return nil, false, err
 	}
@@ -315,9 +315,11 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang)
 	kept := desired.Daemons[:0]
 	removed := false
+	var removedDescriptor SupervisorDaemon
 	for _, daemon := range desired.Daemons {
 		if daemon.TaskName == taskName {
 			removed = true
+			removedDescriptor = daemon
 			continue
 		}
 		kept = append(kept, daemon)
@@ -333,21 +335,64 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 	}
 
 	return func() {
-		restoreSupervisorIntentSnapshot(intentPath, prior, existed)
+		upsertSupervisorIntentDescriptor(intentPath, removedDescriptor)
 	}, true, nil
 }
 
-func restoreSupervisorIntentSnapshot(path string, prior *SupervisorIntentFile, existed bool) {
+func removeSupervisorIntentDescriptor(path, taskName string, removeFileIfEmpty bool) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
 		return
 	}
 	defer func() { _ = lock.Unlock() }()
-	if !existed {
+	current, existed, err := readSupervisorIntentForMerge(path)
+	if err != nil || !existed {
+		return
+	}
+	desired := cloneSupervisorIntentFile(current)
+	kept := desired.Daemons[:0]
+	removed := false
+	for _, daemon := range desired.Daemons {
+		if daemon.TaskName == taskName {
+			removed = true
+			continue
+		}
+		kept = append(kept, daemon)
+	}
+	if !removed {
+		return
+	}
+	desired.Daemons = kept
+	if removeFileIfEmpty && len(desired.Daemons) == 0 && len(desired.MaintenanceTimers) == 0 && !desired.StrictMode {
 		_ = os.Remove(path)
 		return
 	}
-	_ = writeSupervisorIntentLockHeld(path, prior)
+	desired.Version = 1
+	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	_ = writeSupervisorIntentLockHeld(path, desired)
+}
+
+func upsertSupervisorIntentDescriptor(path string, descriptor SupervisorDaemon) {
+	lock := flock.New(path + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return
+	}
+	defer func() { _ = lock.Unlock() }()
+	current, _, err := readSupervisorIntentForMerge(path)
+	if err != nil {
+		return
+	}
+	desired := cloneSupervisorIntentFile(current)
+	kept := desired.Daemons[:0]
+	for _, daemon := range desired.Daemons {
+		if daemon.TaskName != descriptor.TaskName {
+			kept = append(kept, daemon)
+		}
+	}
+	desired.Daemons = append(kept, descriptor)
+	desired.Version = 1
+	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	_ = writeSupervisorIntentLockHeld(path, desired)
 }
 
 func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {

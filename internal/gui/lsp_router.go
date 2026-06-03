@@ -311,6 +311,10 @@ func (s *Server) resolveLSPToolWorkspace(
 		return nil, false, false
 	}
 	if resolved.Registered {
+		if deps.AutoRegisterFn != nil {
+			entry, ok := s.ensureResolvedLSPWorkspace(w, r, deps, tb, resolved, language)
+			return entry, sessionID != "", ok
+		}
 		if resolved.Entry == nil {
 			writeJSONRPCError(w, tb.ID, jsonrpcInternalError, "registered LSP workspace has no registry entry")
 			return nil, false, false
@@ -327,20 +331,46 @@ func (s *Server) resolveLSPToolWorkspace(
 			"LSP auto-register is not configured", nil)
 		return nil, false, false
 	}
+	entry, ok := s.ensureResolvedLSPWorkspace(w, r, deps, tb, resolved, language)
+	return entry, sessionID != "", ok
+}
+
+func (s *Server) ensureResolvedLSPWorkspace(
+	w http.ResponseWriter,
+	r *http.Request,
+	deps *lspRouterDeps,
+	tb *toolBody,
+	resolved *lsp_routing.ResolveResult,
+	language string,
+) (*api.WorkspaceEntry, bool) {
+	wsKey := resolved.WorkspaceKey
+	workspaceRoot := resolved.WorkspaceRoot
+	if resolved.Entry != nil {
+		if wsKey == "" {
+			wsKey = resolved.Entry.WorkspaceKey
+		}
+		if workspaceRoot == "" {
+			workspaceRoot = resolved.Entry.WorkspacePath
+		}
+	}
+	if wsKey == "" || workspaceRoot == "" {
+		writeJSONRPCError(w, tb.ID, jsonrpcInternalError, "resolved LSP workspace has no workspace identity")
+		return nil, false
+	}
 	regCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)
 	defer cancel()
-	entry, err := deps.AutoRegisterFn(regCtx, resolved.WorkspaceKey, resolved.WorkspaceRoot, language)
+	entry, err := deps.AutoRegisterFn(regCtx, wsKey, workspaceRoot, language)
 	if err != nil {
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
 			"LSP auto-register failed: "+err.Error(), nil)
-		return nil, false, false
+		return nil, false
 	}
 	if entry == nil {
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
 			"LSP auto-register returned no entry", nil)
-		return nil, false, false
+		return nil, false
 	}
-	return entry, sessionID != "", true
+	return entry, true
 }
 
 func lspPathlessWorkspace(w http.ResponseWriter, id json.RawMessage, deps *lspRouterDeps, sessionID string) (*api.WorkspaceEntry, bool) {

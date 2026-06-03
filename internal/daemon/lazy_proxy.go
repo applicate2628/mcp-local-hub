@@ -351,9 +351,8 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		writeRPCError(w, req.ID, code, err.Error())
 		return
 	}
-	p.beginBackendRequest()
+	defer p.endBackendRequest()
 	resp, err := ep.SendRequest(r.Context(), req)
-	p.endBackendRequest()
 	if err != nil {
 		// Differentiate client-cancel from backend failure. SendRequest
 		// is driven by r.Context(); a client disconnect or timeout
@@ -392,9 +391,8 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		writeRPCError(w, req.ID, code, err.Error())
 		return
 	}
-	p.beginBackendRequest()
+	defer p.endBackendRequest()
 	resp, err := ep.SendRequest(r.Context(), req)
-	p.endBackendRequest()
 	if err != nil {
 		// Client-cancel is not a backend failure — see handleToolsCall.
 		if isClientCancelErr(r.Context(), err) {
@@ -459,6 +457,7 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 	p.mu.Lock()
 	if p.endpoint != nil {
 		ep := p.endpoint
+		p.beginBackendRequestLocked(time.Now().UTC())
 		p.mu.Unlock()
 		return ep, nil
 	}
@@ -496,7 +495,7 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 	now := time.Now().UTC()
 	p.mu.Lock()
 	p.endpoint = ep
-	p.lastBackendActivity = now
+	p.beginBackendRequestLocked(now)
 	p.mu.Unlock()
 	_ = reg.PutLifecycleWithTimestamps(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
@@ -548,9 +547,13 @@ func (p *LazyProxy) reserveMaterializedSlot() error {
 func (p *LazyProxy) beginBackendRequest() {
 	now := time.Now().UTC()
 	p.mu.Lock()
+	p.beginBackendRequestLocked(now)
+	p.mu.Unlock()
+}
+
+func (p *LazyProxy) beginBackendRequestLocked(now time.Time) {
 	p.inflightBackendRequests++
 	p.lastBackendActivity = now
-	p.mu.Unlock()
 }
 
 func (p *LazyProxy) endBackendRequest() {

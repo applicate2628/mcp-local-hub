@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -159,6 +160,50 @@ func TestLSPRegister_POST_OK(t *testing.T) {
 	}
 	if len(resp.Entries) != 1 || resp.Entries[0].TaskName != `\mcp-local-hub-lsp-project-go` {
 		t.Errorf("response entries = %+v", resp.Entries)
+	}
+}
+
+func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
+	prev := ensureLSPRegisteredForGUI
+	t.Cleanup(func() { ensureLSPRegisteredForGUI = prev })
+
+	var calls []string
+	ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspacePath, language string) (api.WorkspaceEntry, error) {
+		if ctx == nil {
+			t.Fatal("EnsureLSPRegistered context is nil")
+		}
+		if workspaceKey != "" {
+			t.Fatalf("workspaceKey = %q, want empty so API computes the canonical key", workspaceKey)
+		}
+		calls = append(calls, language)
+		return api.WorkspaceEntry{
+			WorkspaceKey:  "project",
+			WorkspacePath: workspacePath,
+			Language:      language,
+			Backend:       "mcp-language-server",
+			Port:          9200 + len(calls),
+			TaskName:      api.LSPTaskNameForWorkspaceLanguage("project", language),
+			ClientEntries: map[string]string{},
+		}, nil
+	}
+
+	report, err := (realLSPRegistrar{}).RegisterLSP("D:/dev/project", []string{"go", "python"})
+	if err != nil {
+		t.Fatalf("RegisterLSP: %v", err)
+	}
+	if len(calls) != 2 || calls[0] != "go" || calls[1] != "python" {
+		t.Fatalf("EnsureLSPRegistered calls = %v, want [go python]", calls)
+	}
+	if report.Workspace != "D:/dev/project" || report.WorkspaceKey != "project" {
+		t.Fatalf("report workspace = (%q, %q), want (D:/dev/project, project)", report.Workspace, report.WorkspaceKey)
+	}
+	if len(report.Entries) != 2 {
+		t.Fatalf("report entries = %d, want 2", len(report.Entries))
+	}
+	for _, entry := range report.Entries {
+		if len(entry.ClientEntries) != 0 {
+			t.Fatalf("GUI LSP enable must not write client entries; got %+v", entry.ClientEntries)
+		}
 	}
 }
 

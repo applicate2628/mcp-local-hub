@@ -505,6 +505,35 @@ func TestLazyProxy_ToolsCallMaterializesOnce(t *testing.T) {
 	}
 }
 
+func TestLazyProxy_EnsureMaterializedReservesCachedEndpointAgainstIdleReaper(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.IdleBackendTTL = 10 * time.Millisecond
+	endpoint := &fakeEndpoint{parent: f}
+	p.mu.Lock()
+	p.endpoint = endpoint
+	p.lastBackendActivity = time.Now().Add(-time.Minute)
+	p.mu.Unlock()
+
+	ep, err := p.ensureMaterialized(context.Background())
+	if err != nil {
+		t.Fatalf("ensureMaterialized: %v", err)
+	}
+	p.reapIdleBackend(time.Now().UTC())
+	_, err = ep.SendRequest(context.Background(), &JSONRPCRequest{
+		Jsonrpc: "2.0",
+		ID:      json.RawMessage("1"),
+		Method:  "tools/call",
+	})
+	p.endBackendRequest()
+	if err != nil {
+		t.Fatalf("idle reaper closed cached endpoint before request was reserved: %v", err)
+	}
+	if got := f.stopCount.Load(); got != 0 {
+		t.Fatalf("idle reaper stopped backend while cached endpoint was in use; stopCount=%d", got)
+	}
+}
+
 func TestLazyProxy_ConcurrentFirstCall(t *testing.T) {
 	// 200ms delay (not 30ms) gives enough headroom for all 10 goroutines to
 	// enter gate.Do before the first materialize completes, even under

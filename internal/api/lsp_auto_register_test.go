@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -123,5 +124,102 @@ func TestEnsureLSPRegistered_ConcurrentFirstTouchWaitsForReadyPort(t *testing.T)
 	}
 	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 1 {
 		t.Fatalf("registry rows for %s = %d, want 1: %+v", wsKey, len(rows), rows)
+	}
+}
+
+func TestEnsureLSPRegistered_ExistingRowReturnsWithoutReconcileOrReadiness(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		t.Fatal("existing LSP row must return before supervisor reconcile")
+		return ReconcileResponse{}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		t.Fatal("existing LSP row must return before proxy readiness")
+		return nil
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	want := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(want); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+	if err != nil {
+		t.Fatalf("EnsureLSPRegistered existing row: %v", err)
+	}
+	if got.Port != want.Port || got.Lifecycle != want.Lifecycle {
+		t.Fatalf("existing row mismatch: got %+v want %+v", got, want)
+	}
+}
+
+func TestEnsureLSPRegistered_RollbackDoesNotKillPortBeforeSupervisorSpawn(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Fatalf("EnsureLSPRegistered called reconcile with apply=false")
+		}
+		return ReconcileResponse{}, errors.New("induced reconcile failure before spawn")
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origKill := killByPortFn
+	var killed atomic.Int32
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killed.Add(1)
+		return nil
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "pyproject.toml"), []byte("[project]\n"), 0o600); err != nil {
+		t.Fatalf("touch marker: %v", err)
+	}
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	_, err = NewAPI().EnsureLSPRegistered(context.Background(), WorkspaceKey(canonical), canonical, "python")
+	if err == nil {
+		t.Fatal("expected reconcile failure")
+	}
+	if got := killed.Load(); got != 0 {
+		t.Fatalf("rollback killed port before supervisor spawn was requested; kill calls=%d", got)
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(WorkspaceKey(canonical)); len(rows) != 0 {
+		t.Fatalf("registry rows leaked after rollback: %+v", rows)
 	}
 }
