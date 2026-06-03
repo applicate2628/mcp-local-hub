@@ -50,6 +50,13 @@ const (
 	registryLockRetryDelay    = 25 * time.Millisecond
 )
 
+type serenaIntentRepairEvent struct {
+	severity string
+	event    string
+	taskName string
+	body     map[string]any
+}
+
 // RepairSerenaIntentFromRegistry re-reads the workspace registry and the
 // supervisor intent under FRESH locks and APPENDS the daemon rows for any
 // serena registry row whose per-workspace daemon is missing from the intent.
@@ -100,6 +107,19 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	if stateDir == "" {
 		return 0, nil, fmt.Errorf("serena intent repair: empty state dir (caller must thread the supervisor's resolved state root)")
 	}
+
+	// Event emission touches supervisor-events.log. Keep it out of the
+	// registry/intent critical section: collect best-effort events while the locks
+	// are held, then let the lock defers below run before this earlier defer emits
+	// them with TryEmit. This preserves startup's non-fatal repair contract even if
+	// the event-log lock is wedged.
+	var repairEvents []serenaIntentRepairEvent
+	defer func() {
+		for _, evt := range repairEvents {
+			emitSerenaIntentRepairEvent(stateDir, evt)
+		}
+	}()
+
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
 		return 0, nil, fmt.Errorf("serena intent repair: resolve registry path: %w", err)
@@ -195,7 +215,7 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 		// predicate + the same emitStaleWorkspaceSkippedEvent so the prune is never
 		// silent.
 		if workspacePathStale(ws.WorkspacePath) {
-			emitStaleWorkspaceSkippedEvent(SerenaServerName, ws.WorkspacePath)
+			repairEvents = append(repairEvents, staleWorkspaceSkippedRepairEvent(SerenaServerName, ws.WorkspacePath))
 			continue
 		}
 		// Presence classification (bot PR #256 F2). HasSerenaDaemonForWorkspaceKey is
@@ -219,30 +239,28 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 		}
 	}
 	if len(skippedDivergent) > 0 {
-		emitSerenaIntentRepairEvent(
-			stateDir,
-			SupervisorEventSeverityWarn,
-			"serena-intent-repair-divergent-row-skipped",
-			map[string]any{
+		repairEvents = append(repairEvents, serenaIntentRepairEvent{
+			severity: SupervisorEventSeverityWarn,
+			event:    "serena-intent-repair-divergent-row-skipped",
+			body: map[string]any{
 				"skipped_count":     len(skippedDivergent),
 				"skipped_workspace": skippedDivergent,
 				"reason":            "registry row WorkspaceKey != WorkspaceKey(WorkspacePath) (hand-edited workspaces.yaml or a legacy pre-symlink-resolution row); appending would re-append on every boot",
 				"operator_action":   "re-register the workspace so its registry key matches its canonical path",
 			},
-		)
+		})
 	}
 	if len(deferredLegacy) > 0 {
-		emitSerenaIntentRepairEvent(
-			stateDir,
-			SupervisorEventSeverityWarn,
-			"serena-intent-repair-legacy-nil-spec-deferred",
-			map[string]any{
+		repairEvents = append(repairEvents, serenaIntentRepairEvent{
+			severity: SupervisorEventSeverityWarn,
+			event:    "serena-intent-repair-legacy-nil-spec-deferred",
+			body: map[string]any{
 				"deferred_count":     len(deferredLegacy),
 				"deferred_workspace": deferredLegacy,
-				"reason":            "supervisor-intent.json has a pre-redesign serena row (no runtime_spec) for this workspace; the reconciler excludes it from the spawn set and the append-only repair cannot replace it",
-				"operator_action":   "run `mcphub migrate serena legacy-to-dynamic-pool` (or re-install) to re-materialize the descriptor with a runtime_spec",
+				"reason":             "supervisor-intent.json has a pre-redesign serena row (no runtime_spec) for this workspace; the reconciler excludes it from the spawn set and the append-only repair cannot replace it",
+				"operator_action":    "run `mcphub migrate serena legacy-to-dynamic-pool` (or re-install) to re-materialize the descriptor with a runtime_spec",
 			},
-		)
+		})
 	}
 	if len(missing) == 0 {
 		// No orphan to append. Still report any legacy nil-spec deferrals so the
@@ -259,17 +277,16 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	//    an explicit deferral policy, not an implicit skip.
 	if intent == nil || !intent.HasRuntimeSpecRow() {
 		introduceKeys := missingWorkspaceKeys(missing)
-		emitSerenaIntentRepairEvent(
-			stateDir,
-			SupervisorEventSeverityWarn,
-			"serena-intent-repair-deferred",
-			map[string]any{
+		repairEvents = append(repairEvents, serenaIntentRepairEvent{
+			severity: SupervisorEventSeverityWarn,
+			event:    "serena-intent-repair-deferred",
+			body: map[string]any{
 				"deferred_count":     len(introduceKeys),
 				"deferred_workspace": introduceKeys,
 				"reason":             "supervisor intent carries no runtime_spec (first-introduce crash); a live append cannot introduce the dynamic pool while a supervisor runs (design §7.1)",
 				"operator_action":    "run `mcphub migrate serena legacy-to-dynamic-pool` to re-introduce the serena dynamic pool",
 			},
-		)
+		})
 		// Both the introduce-crash orphans and any legacy nil-spec rows defer to
 		// the same migrate; return their union (deferredLegacy is empty when the
 		// intent is absent — there are no daemons to be nil-spec).
@@ -321,16 +338,15 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	}
 
 	appliedKeys := missingWorkspaceKeys(missing)
-	emitSerenaIntentRepairEvent(
-		stateDir,
-		SupervisorEventSeverityInfo,
-		"serena-intent-repair-applied",
-		map[string]any{
+	repairEvents = append(repairEvents, serenaIntentRepairEvent{
+		severity: SupervisorEventSeverityInfo,
+		event:    "serena-intent-repair-applied",
+		body: map[string]any{
 			"repaired_count":     len(newDaemons),
 			"repaired_workspace": appliedKeys,
 			"mode":               "live-add append (no replace-all)",
 		},
-	)
+	})
 	// deferredLegacy (nil-spec rows that coexisted with the spec-bearing pool) is
 	// returned alongside the append count so the caller still surfaces them.
 	return len(newDaemons), deferredLegacy, nil
@@ -410,20 +426,34 @@ func firstRuntimeSpecCommand(intent *SupervisorIntentFile) string {
 // supervisor-events.log. Mirrors the api-package emit idiom used by
 // emitWorkspaceAutoRegisteredEvent / emitStaleWorkspaceSkippedEvent: resolve
 // the state dir, open the canonical supervisor event log, emit, close. A
-// failure to resolve/open/emit is silently non-fatal — the audit is
-// observability, not a gate.
-func emitSerenaIntentRepairEvent(stateDir, severity, event string, body map[string]any) {
+// failure to resolve/open/emit (including event-log lock contention) is silently
+// non-fatal — the audit is observability, not a gate.
+func emitSerenaIntentRepairEvent(stateDir string, evt serenaIntentRepairEvent) {
 	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
 	if openErr != nil {
 		return
 	}
 	defer func() { _ = logger.Close() }()
-	_ = logger.Emit(SupervisorEvent{
+	_ = logger.TryEmit(SupervisorEvent{
 		SchemaVersion: SupervisorEventSchemaVersion,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Severity:      severity,
+		Severity:      evt.severity,
 		Source:        SupervisorEventSourceReconcile,
-		Event:         event,
-		Body:          body,
+		Event:         evt.event,
+		TaskName:      evt.taskName,
+		Body:          evt.body,
 	})
+}
+
+func staleWorkspaceSkippedRepairEvent(server, workspacePath string) serenaIntentRepairEvent {
+	return serenaIntentRepairEvent{
+		severity: SupervisorEventSeverityWarn,
+		event:    "stale-workspace-skipped",
+		taskName: SerenaTaskNameForWorkspace(workspacePath),
+		body: map[string]any{
+			"server":         server,
+			"workspace_path": workspacePath,
+			"reason":         "workspace path no longer exists on disk; daemon row dropped before supervisor-intent write to avoid cmd.Dir spawn-loop",
+		},
+	}
 }

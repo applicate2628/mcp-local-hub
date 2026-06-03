@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -680,4 +681,68 @@ func TestRepairSerenaIntentFromRegistry_LegacyNilSpecRow_Deferred(t *testing.T) 
 	if string(before) != string(after) {
 		t.Errorf("intent written on a legacy-defer (must not append a duplicate):\nbefore=%s\nafter=%s", before, after)
 	}
+}
+
+func TestRepairSerenaIntentFromRegistry_EventLogLockContentionDoesNotBlockOrHoldStateLocks(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	orphanPath, orphanPort := liveWorkspace(t), 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+
+	stateDir := mustStateDir(t)
+	eventLock := flock.New(filepath.Join(stateDir, SupervisorEventLogFileLeaf) + supervisorEventLogLockSuffix)
+	if err := eventLock.Lock(); err != nil {
+		t.Fatalf("lock supervisor event log: %v", err)
+	}
+	defer func() { _ = eventLock.Unlock() }()
+
+	done := make(chan struct{})
+	var repaired int
+	var deferred []string
+	var repairErr error
+	go func() {
+		defer close(done)
+		repaired, deferred, repairErr = NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(750 * time.Millisecond):
+		t.Fatal("RepairSerenaIntentFromRegistry blocked on a contended supervisor event log lock")
+	}
+	if repairErr != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", repairErr)
+	}
+	if repaired != 1 {
+		t.Fatalf("repaired = %d, want 1", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Fatalf("deferred = %v, want none", deferred)
+	}
+
+	reg := NewRegistry(regPath)
+	regUnlock, ok, err := reg.TryLock()
+	if err != nil {
+		t.Fatalf("try-lock registry after repair: %v", err)
+	}
+	if !ok {
+		t.Fatal("registry lock remained held after repair returned")
+	}
+	regUnlock()
+
+	intentLock := flock.New(intentPath + supervisorIntentLockSuffix)
+	intentLocked, err := intentLock.TryLock()
+	if err != nil {
+		t.Fatalf("try-lock intent after repair: %v", err)
+	}
+	if !intentLocked {
+		t.Fatal("intent lock remained held after repair returned")
+	}
+	_ = intentLock.Unlock()
 }

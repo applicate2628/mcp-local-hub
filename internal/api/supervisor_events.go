@@ -236,6 +236,30 @@ func (l *SupervisorEventLog) Close() error { return nil }
 // `{"_truncated_note": "..."}` map and `_truncated:true` is set.
 // Identity fields (Event, Source, TaskName) are NEVER touched.
 func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
+	return l.emit(evt, true)
+}
+
+// TryEmit serializes the entry as a JSON Line and appends it only if the
+// in-process mutex and OS flock are immediately available. Lock contention is
+// treated as a best-effort skip and returns nil; validation and I/O failures are
+// reported like Emit. Use this only on non-critical observability paths where a
+// blocking event-log lock must not stall the caller.
+//
+// NOTE — deliberate divergence: this is the ONLY best-effort (lossy-on-
+// contention) emit path among the JSONL log families. intent_audit.go and
+// watchdog_log.go both use a blocking Lock(); TryEmit is the sole exception.
+// The tradeoff is scoped on purpose: a TryEmit caller may silently drop its
+// audit row under event-log lock contention, so it must be used only where the
+// underlying state change is independently durable. The serena intent repair is
+// the motivating caller — its WRITE to supervisor-intent.json commits under the
+// held intent flock BEFORE these events emit (serena_intent_repair.go), so
+// losing the observability row never loses the repair itself. Do not adopt
+// TryEmit for an event that is the only record of a state mutation.
+func (l *SupervisorEventLog) TryEmit(evt SupervisorEvent) error {
+	return l.emit(evt, false)
+}
+
+func (l *SupervisorEventLog) emit(evt SupervisorEvent, blocking bool) error {
 	if evt.Event == "" {
 		return ErrSupervisorEventMissingEvent
 	}
@@ -302,13 +326,27 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 
 	// In-process serialization first — guards against two goroutines
 	// in the same supervisor binary racing past the flock acquire.
-	l.mu.Lock()
+	if blocking {
+		l.mu.Lock()
+	} else if !l.mu.TryLock() {
+		return nil
+	}
 	defer l.mu.Unlock()
 
 	// OS-level serialization across processes (e.g. supervisor +
 	// install CLI emitting migration events concurrently).
-	if err := l.lock.Lock(); err != nil {
-		return fmt.Errorf("supervisor event log flock: %w", err)
+	var lockErr error
+	if blocking {
+		lockErr = l.lock.Lock()
+	} else {
+		var locked bool
+		locked, lockErr = l.lock.TryLock()
+		if lockErr == nil && !locked {
+			return nil
+		}
+	}
+	if lockErr != nil {
+		return fmt.Errorf("supervisor event log flock: %w", lockErr)
 	}
 	defer func() { _ = l.lock.Unlock() }()
 

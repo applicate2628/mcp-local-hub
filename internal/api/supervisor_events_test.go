@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/gofrs/flock"
 )
 
 // TestSupervisorEvent_EnvelopeShape verifies the wire shape of one
@@ -266,5 +268,32 @@ func TestSupervisorEvent_IdentityOversize(t *testing.T) {
 	})
 	if !errors.Is(err, ErrSupervisorEventIdentityOversize) {
 		t.Fatalf("expected ErrSupervisorEventIdentityOversize, got %v", err)
+	}
+}
+
+func TestSupervisorEventLog_TryEmitSkipsContendedLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	lock := flock.New(path + supervisorEventLogLockSuffix)
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock supervisor event log: %v", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	if err := logger.TryEmit(SupervisorEvent{
+		Severity: "info",
+		Source:   "reconcile",
+		Event:    "try-emit-contended",
+	}); err != nil {
+		t.Fatalf("try emit: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("TryEmit under contention wrote log or returned unexpected stat error: %v", err)
 	}
 }
