@@ -43,7 +43,7 @@ drive the Codex bot to PASS, deep-security review, merge.
   ([internal/api/manifest_source.go:18-20](../../../internal/api/manifest_source.go)) to inject a hermetic
   workspace-scoped manifest and `t.TempDir()` workspaces with `WorkspaceKey`/`SerenaLanguageSentinel`
   rows (precedent: `internal/api/install_parsed_manifest_test.go`). New tests follow that pattern.
-- **The known flaky `cli supervise IPC` full-suite tests** (`work-items/bugs/2026-05-29-cli-supervise-ipc-tests-flaky-in-full-suite.md`)
+- **The known flaky `cli supervise IPC` full-suite tests** (`work-items/bugs/closed/2026-05-29-cli-supervise-ipc-tests-flaky-in-full-suite.md`, fixed by #264)
   are pre-existing and unrelated; do not let them mask a real regression — run the affected new tests in
   isolation to confirm green.
 

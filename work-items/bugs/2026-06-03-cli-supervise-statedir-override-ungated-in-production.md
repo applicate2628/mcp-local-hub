@@ -75,14 +75,21 @@ build — one of:
    as a supported operator override, and keep `MCPHUB_STATE_DIR_OVERRIDE` for
    the test-only seam.
 
-Option 1 matches current intent (the env is documented test-only everywhere
-else). Option 2 is a deliberate scope expansion requiring an operator-docs
-update.
+Option 1 matches current intent (the supervise.go comment already frames the
+env as a test seam, not an operator feature — there is no user-facing doc
+contract for it). Option 2 is a deliberate scope expansion requiring an
+operator-docs update.
 
 ## Related code
 
 - `internal/cli/supervise.go:148-164` — the ungated seam plus its rationale comment
-- `internal/api` `DaemonStateDir` + the `test_state_path_env` build-tag gating
-- CLAUDE.md "Supervisor (v0.5.0) → State path" — documents the env as test-only
+- `internal/api` `DaemonStateDir` + `state_paths_envfallback.go` — the
+  `test_state_path_env`-gated api-layer fallback (LOCALAPPDATA → USERPROFILE),
+  which never reads `MCPHUB_STATE_DIR_OVERRIDE`
+- CLAUDE.md "Supervisor (v0.5.0) → State path" — documents the
+  `test_state_path_env` build-tag gating of the api-layer state path, but does
+  NOT mention `MCPHUB_STATE_DIR_OVERRIDE`; that env has no doc-level contract
+  (its only in-tree definition is the supervise.go comment in the first
+  bullet) — the documentation gap is itself part of this bug
 - `work-items/bugs/closed/2026-05-20-tests-leak-state-into-production-logs.md` —
   sibling leaked-env hazard (closed by #264)
