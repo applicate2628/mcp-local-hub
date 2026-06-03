@@ -5,24 +5,38 @@ found-by: diagnostic dig during "после перезагрузки слома�
 found-on: 2026-05-20
 project: mcp-local-hub
 context: pre-existing test-hygiene gap, not caused by feat/v0.5.x-servers-matrix-revamp
-status: closed
-related-pr: PR #264 (914d0cf)
+status: open
+related-pr: PR #264 (914d0cf) — api-side fixed; gui-side leak still open
 ---
 
 # Pre-existing test pollution: `go test ./internal/api/` writes into the production state-dir
 
 ## Status
 
-CLOSED — fixed by PR #264 (`914d0cf`, merged 2026-06-03). Two root causes, both
-addressed: (1) the state-file-helper tests inherited the operator's ambient
-`MCPHUB_ALLOW_*` env (the `unhardened-fallback` warn written into the real
-`supervisor-events.log`) — #264 clears them per-test via `t.Setenv`; (2) the
-tests wrote state into the real `%LOCALAPPDATA%\mcp-local-hub\` — #264 adds the
-`isolateStateDir(t)` helper redirecting `daemonStateRootOverride` to
-`t.TempDir()`. Both named test families (`TestWriteStateFileAtomic_StrictModeWith*`,
-`TestRealClientInitializer_HappyPath`) are now covered. Verified 2026-06-03 via
-the merged #264 diff (state_file_helper_test.go, state_paths_test.go,
-client_write_init_test.go, client_write_init_windows_test.go).
+PARTIALLY FIXED by PR #264 (`914d0cf`, merged 2026-06-03) — the api-side leak is
+fixed; the gui-side initializer leak REMAINS OPEN.
+
+FIXED (api-side): the `internal/api` state-file-helper tests
+(`TestWriteStateFileAtomic_StrictModeWith*`) wrote audit events into the real
+`%LOCALAPPDATA%\mcp-local-hub\`. #264 adds the `isolateStateDir(t)` helper
+redirecting `daemonStateRootOverride` to `t.TempDir()` (state_file_helper_test.go,
+state_paths_test.go) and clears the ambient `MCPHUB_ALLOW_*` env per-test
+(client_write_init_test.go). Verified via the merged #264 diff.
+
+STILL OPEN (gui-side): `TestRealClientInitializer_HappyPath` lives in
+`internal/gui/init_client_config_test.go` (NOT internal/api — this doc's
+`./internal/api/` repro path predates a move) and was NOT touched by #264. It
+sets `LOCALAPPDATA`=`t.TempDir()`, so the vscode client config lands in the temp
+dir — but the `client-write-unhardened-fallback` AUDIT event that write emits
+goes to `DaemonStateDir()`, which in the default untagged build resolves via
+`SHGetKnownFolderPath` and IGNORES the `LOCALAPPDATA` env, so the audit event
+still leaks into the real `%LOCALAPPDATA%\mcp-local-hub\hub-mcp.log` (see this
+doc's own captured evidence at the
+`r:\Temp\TestRealClientInitializer_HappyPath...` path). The gui test needs the
+same `daemonStateRootOverride`→temp isolation #264 gave the api tests.
+
+Re-opened 2026-06-03 after the codex bot flagged the over-claim on PR #265 r6: I
+had closed this as fully fixed when only the api-side was.
 
 NOTE: this closes the state-file-helper leak only. The sibling
 `2026-05-08-api-tests-flock-contention-with-user-binary` bug

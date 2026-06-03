@@ -56,6 +56,14 @@ on #265 r1 (the same #264 "env" fix as the sibling
 
 ## Likely root cause (environment, not code)
 
+> **SUPERSEDED HYPOTHESIS (2026-06-03).** This was the original guess at filing.
+> The VERIFIED root cause (see `## Status`) is different: the operator's ambient
+> `AllowClientConfigSymlinkEnv` / `AllowUnhardenedStateWriteEnv` (the relax /
+> symlink opt-in a broadened-host operator sets) leaked into the tests and made
+> the writer take the ALLOW path, so the refusal assertions never fired — NOT a
+> precondition-synthesis problem. PR #264 fixed it by clearing those envs
+> per-test. Kept for history; do NOT drive privilege/DACL work from this section.
+
 Both tests assert a *refusal* that depends on host-specific Windows state:
 - the symlink test needs symlink-create privilege to synthesize the
   pre-existing symlink it expects the writer to refuse — a non-elevated shell

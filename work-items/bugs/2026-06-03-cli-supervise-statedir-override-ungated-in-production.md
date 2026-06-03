@@ -56,8 +56,9 @@ release `mcphub supervise` honors a test-only env at runtime even though the
 binary was built without `test_state_path_env`.
 
 This is the same hazard class as
-`2026-05-20-tests-leak-state-into-production-logs` (closed by #264): an operator
-who has a stray `MCPHUB_STATE_DIR_OVERRIDE` in their shell/profile (e.g. left
+`2026-05-20-tests-leak-state-into-production-logs` (api-side fixed by #264,
+gui-side leak still open): an operator who has a stray `MCPHUB_STATE_DIR_OVERRIDE`
+in their shell/profile (e.g. left
 over from a test session) would silently send the production supervisor's
 `supervisor-intent.json` / `supervisor-state.json` / events log to the override
 path instead of `%LOCALAPPDATA%\mcp-local-hub\` — a plausible cause of
@@ -104,5 +105,5 @@ operator-docs update.
   NOT mention `MCPHUB_STATE_DIR_OVERRIDE`; that env has no doc-level contract
   (its only in-tree definition is the supervise.go comment in the first
   bullet) — the documentation gap is itself part of this bug
-- `work-items/bugs/closed/2026-05-20-tests-leak-state-into-production-logs.md` —
-  sibling leaked-env hazard (closed by #264)
+- `work-items/bugs/2026-05-20-tests-leak-state-into-production-logs.md` —
+  sibling leaked-env hazard (api-side fixed by #264; gui-side leak still open)
