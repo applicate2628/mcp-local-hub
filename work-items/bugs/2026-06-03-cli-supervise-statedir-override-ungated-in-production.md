@@ -32,12 +32,15 @@ env resolution — but the CLI layer ships in release binaries, so a production
 
 ## Why this matters
 
-The api-layer env fallback (`api.DaemonStateDir`'s `MCPHUB_STATE_DIR_OVERRIDE`
-path) IS gated out of release binaries by the `test_state_path_env` build tag
-(CLAUDE.md "State path"; the watchdog plan §16/§50 even asserts the symbol's
-absence via `go tool nm`). The CLI-layer copy here defeats that intent: the
-same env var that is supposed to be test-only still redirects the *production*
-supervisor's state dir.
+`MCPHUB_STATE_DIR_OVERRIDE` is purely a CLI/test seam — it is read by the cli
+`stateDirFunc` (supervise.go) and by the supervisor IPC test pipe-discriminator,
+and nowhere in the `api` package's own state-path resolution. (The api-layer's
+`test_state_path_env`-gated fallback in `internal/api/state_paths_envfallback.go`
+is a DIFFERENT mechanism: a `LOCALAPPDATA` → `USERPROFILE` chain consulted only
+when the Known-Folder stub fails — it never reads `MCPHUB_STATE_DIR_OVERRIDE`.)
+The hazard is that this test-seam env is read UNGATED at the CLI layer, so a
+release `mcphub supervise` honors a test-only env at runtime even though the
+binary was built without `test_state_path_env`.
 
 This is the same hazard class as
 `2026-05-20-tests-leak-state-into-production-logs` (closed by #264): an operator
@@ -54,16 +57,23 @@ privilege boundary.
 
 ## Suggested fix (not yet implemented)
 
-Make the CLI-layer seam consistent with the api-layer one — one of:
+Make the seam production-inert while keeping it active for the DEFAULT test
+build — one of:
 
-1. Gate the `MCPHUB_STATE_DIR_OVERRIDE` branch behind the `test_state_path_env`
-   build tag (split `stateDirFunc` into a tagged test variant plus an untagged
-   production variant that calls `api.DaemonStateDir()` directly), mirroring the
-   api-layer treatment. Release `go build` (no tag) then ignores the env.
+1. Drop the env read from production and install it as a test-only hook. The
+   build-tag route is a TRAP: the cli IPC + supervise tests set
+   `MCPHUB_STATE_DIR_OVERRIDE` under the default untagged `go test ./...` that CI
+   runs, so gating it behind `test_state_path_env` would send them back to the
+   real state dir — exactly the regression #264 fixed for the IPC pipe.
+   Concretely: the production `stateDirFunc` calls `api.DaemonStateDir()`
+   directly (no env read), and test setup reassigns the package `var
+   stateDirFunc` to the env-reading variant from a TestMain, mirroring #264's
+   `EnableSupervisorIPCTestPipeIsolation`. The env stays honored under `go test`
+   (tagged or not); a release binary never reads it.
 2. OR, if a production state-dir override is genuinely wanted as an operator
    feature, rename it to a non-"test" env (e.g. `MCPHUB_STATE_DIR`), document it
    as a supported operator override, and keep `MCPHUB_STATE_DIR_OVERRIDE` for
-   the gated test path only.
+   the test-only seam.
 
 Option 1 matches current intent (the env is documented test-only everywhere
 else). Option 2 is a deliberate scope expansion requiring an operator-docs

@@ -5,8 +5,26 @@ found-by: backend-engineer
 found-in-phase: serena Phase 3 (client-reconcile to /serena/mcp)
 affected-surface: internal/api/client_write_init_test.go, internal/api/state_file_helper_test.go
 context: adjacent-finding
-status: open
+status: closed
+related-pr: PR #264 (914d0cf)
 ---
+
+## Status
+
+CLOSED — fixed by PR #264 (`914d0cf`, merged 2026-06-03), the same merge whose
+commit body explicitly names this bug's two failing tests. The host condition
+(broadened `%LOCALAPPDATA%` parent DACL) let the operator's ambient
+`AllowClientConfigSymlinkEnv` / `AllowUnhardenedStateWriteEnv` leak into the
+tests, so the symlink-refusal and write-capable-parent-refusal paths went
+unexercised and the assertions saw `nil`. PR #264 clears both envs per-test via
+`t.Setenv`: `TestSecureWriteWithOperatorOpt_DefaultRefusesPreexistingSymlink`
+gets `t.Setenv(AllowClientConfigSymlinkEnv, "")` in `client_write_init_test.go`,
+and `TestWriteStateFileAtomic_StrictModeWithWriteCapableParent` gets
+`t.Setenv(AllowUnhardenedStateWriteEnv, "")` in `state_file_helper_test.go`, so
+both exercise the refusal paths regardless of the operator shell. Verified
+2026-06-03 against the merged #264 diff. Surfaced for closure by codex bot
+on #265 r1 (the same #264 "env" fix as the sibling
+`2026-05-20-tests-leak-state-into-production-logs`).
 
 ## Reproduction
 

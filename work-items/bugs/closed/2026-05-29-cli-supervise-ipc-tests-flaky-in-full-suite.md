@@ -17,9 +17,13 @@ Windows pipe `\\.\pipe\mcphub-supervisor-<SID>`. PR #264 adds a runtime
 per-test pipe discriminator (`EnableSupervisorIPCTestPipeIsolation`, installed
 by the internal/cli TestMain) deriving a unique pipe leaf from each test's
 `MCPHUB_STATE_DIR_OVERRIDE`, so the six named IPC tests no longer collide. The
-hook is active in both tagged and untagged test builds yet absent from release
-binaries — structurally test-only, since no production path assigns the var
-(codex bot #264 P2 r1+r2). Verified 2026-06-03:
+hook is active in both tagged and untagged test builds. The
+`EnableSupervisorIPCTestPipeIsolation` symbol IS compiled into release binaries
+(it is an untagged exported function with a POSIX counterpart), but no
+production path calls it, so the discriminator var stays nil and
+`SupervisorIPCAddress` always returns the per-SID pipe in release. The fixed
+condition is "no production caller/assignment," NOT symbol absence (codex
+bot #264 P2 r1+r2; wording corrected per #265 r1). Verified 2026-06-03:
 `TestSupervise_IPC_VersionPinning` + `TestSuperviseCommand_StatusIPC_ReconcileReady`
 pass in both build modes.
 
