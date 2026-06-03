@@ -386,3 +386,72 @@ describe("ServersScreen — symlinked-config tooltip (2026-05-19)", () => {
     expect((cell as HTMLInputElement).disabled).toBe(true);
   });
 });
+
+describe("ServersScreen — LSP matrix rows", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders language-server rows as badge-only cells without ineffective checkboxes", async () => {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            "codex-cli": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/lsp/python",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9200,
+                task_name: "\\mcp-local-hub-lsp-default-python",
+                client_entries: {
+                  "codex-cli": "mcp-language-server-python",
+                },
+              },
+            ],
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const row = await screen.findByTestId("lsp-row-python");
+    expect(row.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(screen.getByTestId("lsp-chip-primary-python-codex-cli").textContent).toBe(
+      "via-hub",
+    );
+    expect(screen.getByTestId("lsp-edit-env-python")).toBeTruthy();
+  });
+});

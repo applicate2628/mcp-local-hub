@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 )
@@ -70,5 +71,25 @@ func TestSupervisorState_QueuedActionRoundTrip(t *testing.T) {
 	qa := got.Daemons[`\mcp-local-hub-memory-default`].QueuedAction
 	if qa == nil || qa.Kind != "respawn" {
 		t.Fatalf("queued_action lost: %+v", qa)
+	}
+}
+
+func TestSupervisorState_IgnoresUnknownFields(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-state.json")
+	body := `{"version":1,"daemons":{"\\mcp-local-hub-memory-default":{"state":"running","current_pid":12345,"job_protection":false,"future_daemon_field":"x"}},"transient_pids":[],"future_top_level":"x"}`
+	if err := WriteStateFileAtomic(path, json.RawMessage(body)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadSupervisorState(path)
+	if err != nil {
+		t.Fatalf("read with unknown fields: %v", err)
+	}
+	daemon := got.Daemons[`\mcp-local-hub-memory-default`]
+	if daemon.State != "running" || daemon.CurrentPID != 12345 {
+		t.Fatalf("known daemon fields lost: %+v", daemon)
+	}
+	if daemon.JobProtection == nil || *daemon.JobProtection {
+		t.Fatalf("known job_protection field lost: %+v", daemon.JobProtection)
 	}
 }

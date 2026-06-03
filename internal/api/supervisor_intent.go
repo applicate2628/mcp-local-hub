@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -45,9 +44,9 @@ type SupervisorDaemon struct {
 	// nil for legacy/global daemons that the supervisor spawns via the
 	// generic `mcphub daemon --server --daemon` path. Additive + omitempty:
 	// existing pre-RuntimeSpec supervisor-intent.json files round-trip
-	// unchanged through ReadSupervisorIntent's DisallowUnknownFields decoder
-	// (nil spec); a new supervisor reading them re-materializes on next
-	// install. Mirrors the additive-field discipline Lifecycle /
+	// unchanged through ReadSupervisorIntent (nil spec); a new supervisor
+	// reading them re-materializes on next install. Mirrors the additive-field
+	// discipline Lifecycle /
 	// LastMaterializedAt use on WorkspaceEntry.
 	//
 	// Design ref: docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md §3.
@@ -135,8 +134,11 @@ type MaintenanceTimer struct {
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
-// ReadSupervisorIntent reads + parses with DisallowUnknownFields per
-// the daemon-intent.json precedent at internal/api/daemon_intent.go:570-580.
+// ReadSupervisorIntent reads + parses the supervisor's desired daemon set.
+// Unknown fields are ignored deliberately: this file is rewritten by newer
+// binaries, and a rollback must not brick supervisor startup just because it
+// sees a future additive field. JSON type/shape errors still fail through
+// Unmarshal.
 //
 // As a defensive post-parse step, legacy one-shot command entries
 // (e.g. `mcphub watchdog --once`) are stripped from the Daemons slice.
@@ -163,10 +165,8 @@ func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 		// prefix themselves. PR #212 r5 finding 5A.
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 	var f SupervisorIntentFile
-	if err := dec.Decode(&f); err != nil {
+	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	filterSupervisorIntentOneshotDaemons(&f)

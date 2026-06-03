@@ -157,30 +157,38 @@ func TestSupervisorIntent_FilterStrictWatchdogOnceOnly(t *testing.T) {
 	}
 }
 
-func TestSupervisorIntent_RejectsUnknownFields(t *testing.T) {
+func TestSupervisorIntent_IgnoresUnknownFields(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-intent.json")
-	body := `{"version":1,"updated_at":"2026-05-16T18:00:00.000000000Z","daemons":[],"strict_mode":false,"unknown_field":"x"}`
+	body := `{"version":1,"updated_at":"2026-05-16T18:00:00.000000000Z","daemons":[{"task_name":"\\mcp-local-hub-serena-default","server":"serena","daemon":"default","command":"mcphub","args":["daemon","serena-proxy"],"port":9121,"runtime_spec":{"spec_version":1,"child_command":"uvx","child_args":["serena"],"future_runtime_field":"x"},"future_daemon_field":"x"}],"strict_mode":false,"future_top_level":"x"}`
 	if err := WriteStateFileAtomic(path, json.RawMessage(body)); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ReadSupervisorIntent(path)
-	if err == nil {
-		t.Fatalf("expected unknown-fields rejection, got nil")
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("read with unknown fields: %v", err)
+	}
+	if len(got.Daemons) != 1 {
+		t.Fatalf("got %d daemons; want 1", len(got.Daemons))
+	}
+	if got.Daemons[0].TaskName != `\mcp-local-hub-serena-default` {
+		t.Fatalf("known daemon fields lost: %+v", got.Daemons[0])
+	}
+	if got.Daemons[0].RuntimeSpec == nil || got.Daemons[0].RuntimeSpec.ChildCommand != "uvx" {
+		t.Fatalf("known runtime_spec fields lost: %+v", got.Daemons[0].RuntimeSpec)
 	}
 }
 
 // TestSupervisorIntent_RoundTrip_NilRuntimeSpecLegacyFile is the additive-
 // field regression guard (design claim #2): an existing pre-RuntimeSpec
-// supervisor-intent.json must decode through the NEW-binary
-// ReadSupervisorIntent (which calls DisallowUnknownFields) with a nil
+// supervisor-intent.json must decode through ReadSupervisorIntent with a nil
 // RuntimeSpec and NO error, and re-marshal must OMIT the runtime_spec key
 // (omitempty) so the on-disk shape is byte-identical for legacy daemons.
 func TestSupervisorIntent_RoundTrip_NilRuntimeSpecLegacyFile(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-intent.json")
 	// A legacy intent body written before RuntimeSpec existed: no
-	// runtime_spec key anywhere. DisallowUnknownFields must still accept it.
+	// runtime_spec key anywhere. The lenient supervisor reader must accept it.
 	body := `{"version":1,"updated_at":"2026-05-16T18:00:00.000000000Z","daemons":[` +
 		`{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","command":"node","args":["./mcp-memory-server.js"],"port":9128,"manifest_hash":"sha256:abc123"}` +
 		`],"strict_mode":false}`
@@ -189,7 +197,7 @@ func TestSupervisorIntent_RoundTrip_NilRuntimeSpecLegacyFile(t *testing.T) {
 	}
 	got, err := ReadSupervisorIntent(path)
 	if err != nil {
-		t.Fatalf("legacy file must decode through DisallowUnknownFields with nil RuntimeSpec; got error: %v", err)
+		t.Fatalf("legacy file must decode with nil RuntimeSpec; got error: %v", err)
 	}
 	if len(got.Daemons) != 1 {
 		t.Fatalf("got %d daemons; want 1", len(got.Daemons))
@@ -209,9 +217,9 @@ func TestSupervisorIntent_RoundTrip_NilRuntimeSpecLegacyFile(t *testing.T) {
 }
 
 // TestSupervisorIntent_RoundTrip_WithRuntimeSpec asserts a daemon carrying a
-// fully-populated RuntimeSpec marshals, decodes through the
-// DisallowUnknownFields reader, and equals the original — every RuntimeSpec
-// field is preserved (design §3 schema).
+// fully-populated RuntimeSpec marshals, decodes through the supervisor intent
+// reader, and equals the original — every RuntimeSpec field is preserved
+// (design §3 schema).
 func TestSupervisorIntent_RoundTrip_WithRuntimeSpec(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-intent.json")

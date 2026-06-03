@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -104,8 +103,10 @@ type TransientPID struct {
 	StartedAt string `json:"started_at"`
 }
 
-// ReadSupervisorState reads + parses with DisallowUnknownFields per
-// the daemon-intent.json precedent at internal/api/daemon_intent.go:570-580.
+// ReadSupervisorState reads + parses the supervisor's runtime state. Unknown
+// fields are ignored deliberately: this file is rewritten by newer binaries,
+// and a rollback must not brick supervisor startup just because it sees a
+// future additive field. JSON type/shape errors still fail through Unmarshal.
 func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
 	if !operatorAllowsUnhardenedStateRead() {
 		if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
@@ -117,10 +118,8 @@ func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 	var f SupervisorStateFile
-	if err := dec.Decode(&f); err != nil {
+	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	return &f, nil
