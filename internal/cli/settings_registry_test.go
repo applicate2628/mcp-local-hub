@@ -220,6 +220,16 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // TestMain ensures any leftover env state from prior tests doesn't leak.
 // The withTempHome helper sets envs per-test via t.Setenv, which is
 // auto-restored. No extra setup needed.
+//
+// It also installs the supervisor IPC test-pipe discriminator so the many
+// in-process supervisors a single `go test ./internal/cli/` run spins up under
+// one user SID each bind a unique Windows pipe (derived from the per-test
+// MCPHUB_STATE_DIR_OVERRIDE) instead of contending on the shared per-SID pipe
+// (bug 2026-05-29-cli-supervise-ipc-tests-flaky-in-full-suite.md). This is a
+// runtime hook, not a build tag, so it takes effect in the DEFAULT untagged
+// `go test ./...` build that CI runs — and is absent from release binaries,
+// which never call it (codex bot PR #264 P2). POSIX is a no-op.
 func TestMain(m *testing.M) {
+	api.EnableSupervisorIPCTestPipeIsolation()
 	os.Exit(m.Run())
 }
