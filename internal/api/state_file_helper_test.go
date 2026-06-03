@@ -366,6 +366,15 @@ func findSupervisorEventByName(t *testing.T, path, name string) (map[string]any,
 func TestWriteStateFileAtomic_StrictModeWithWriteCapableParent(t *testing.T) {
 	t.Setenv(RequireSingleUserHomeEnv, "") // default relax
 	t.Setenv(AllowUnhardenedClientWriteEnv, "")
+	// Pin the state-write TOCTOU bypass OFF. This test asserts that
+	// even in the default-relax lane a write/delete-capable parent is
+	// refused with "TOCTOU swap risk" (the checkStateDirParentWriteSafe
+	// gate in secureWriteStateFileWithOperatorOpt). If the operator's
+	// shell has MCPHUB_ALLOW_UNHARDENED_STATE_WRITE=1 set,
+	// operatorAllowsUnhardenedStateWrite() returns true and that gate
+	// is skipped — the write succeeds and returns nil, failing this
+	// assertion. t.Setenv isolates the test from that leaked opt-in.
+	t.Setenv(AllowUnhardenedStateWriteEnv, "")
 
 	parent := filepath.Join(t.TempDir(), "writable-parent")
 	if err := os.Mkdir(parent, 0o700); err != nil {

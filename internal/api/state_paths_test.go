@@ -35,6 +35,31 @@ func installKnownFolderStub(t *testing.T, fn func() (string, error)) {
 	knownFolderResolverFn = fn
 }
 
+// isolateStateDir redirects every state-dir-resolving write for the
+// duration of t into a fresh per-test temp dir and returns its path.
+// Use it in any test that triggers an audit/state write whose target
+// resolves through DaemonStateDir() — chiefly the secure-write
+// relax-lane fallbacks (client-write-unhardened-fallback,
+// state-file-write-unhardened-fallback). Without this, those audit
+// events land in the operator's REAL %LOCALAPPDATA%\mcp-local-hub\
+// hub-mcp.log / supervisor-events.log (test-hygiene bug
+// 2026-05-20-tests-leak-state-into-production-logs.md): the SUBJECT of
+// the write goes to t.TempDir(), but the AUDIT ROW reporting it leaks
+// to the production log because the log path is resolved separately
+// via DaemonStateDir().
+//
+// It composes statePathsHelper(t) so the prior daemonStateRootOverride
+// is saved and restored on cleanup (panic-safe), then points the
+// override at t.TempDir(). Tests that need to inspect the redirected
+// log (e.g. assert a fallback event landed) can use the returned path.
+func isolateStateDir(t *testing.T) string {
+	t.Helper()
+	statePathsHelper(t)
+	dir := t.TempDir()
+	daemonStateRootOverride = dir
+	return dir
+}
+
 // TestDaemonStateDir_Windows_KnownFolderFails_NoFallbackInProduction
 // exercises the production fail-closed path defined by plan §16: when
 // SHGetKnownFolderPath fails, daemonStateDir MUST NOT consult the
