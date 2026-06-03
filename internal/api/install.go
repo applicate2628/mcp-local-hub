@@ -724,19 +724,12 @@ func sendForceMaterializeTools(port int, backend string) string {
 		return ""
 	}
 	// Streamable HTTP can deliver the response as JSON directly or as a
-	// single SSE event. Extract the data: line when SSE; otherwise parse
-	// the whole body.
-	jsonBytes := payload
-	if strings.HasPrefix(strings.TrimLeft(string(payload), " \t\r\n"), "event:") ||
-		strings.HasPrefix(strings.TrimLeft(string(payload), " \t\r\n"), "data:") {
-		for _, line := range strings.Split(string(payload), "\n") {
-			line = strings.TrimSpace(line)
-			if after, ok := strings.CutPrefix(line, "data:"); ok {
-				jsonBytes = []byte(strings.TrimSpace(after))
-				break
-			}
-		}
-	}
+	// text/event-stream frame. extractSSEPayload (sse.go) pulls the JSON
+	// envelope out of an SSE frame (multi-line data:, CRLF, optional space
+	// after the colon all handled) and returns the body unchanged when it
+	// is plain application/json. One shared owner with singleHealthProbe +
+	// liveCapabilitySubSection.
+	jsonBytes := extractSSEPayload(payload)
 	var env struct {
 		Error *struct {
 			Code    int    `json:"code"`
@@ -846,14 +839,11 @@ func singleHealthProbe(port int) *HealthProbe {
 	if len(raw) > maxHealthProbeResponseBytes {
 		return &HealthProbe{Err: fmt.Sprintf("tools/list: response too large (> %d bytes)", maxHealthProbeResponseBytes)}
 	}
-	payload := raw
-	// SSE-wrapped response: pull JSON out of the first data: line.
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.HasPrefix(line, "data: ") {
-			payload = []byte(strings.TrimPrefix(line, "data: "))
-			break
-		}
-	}
+	// SSE-or-JSON: extractSSEPayload (sse.go) pulls the JSON envelope out
+	// of a text/event-stream frame and returns the body unchanged when it
+	// is plain application/json. One shared owner with
+	// liveCapabilitySubSection + sendForceMaterializeTools.
+	payload := extractSSEPayload(raw)
 	var parsed struct {
 		Error  json.RawMessage `json:"error"`
 		Result struct {

@@ -786,15 +786,12 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 	if len(raw) > maxHealthProbeResponseBytes {
 		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: response too large (> %d bytes)", method, maxHealthProbeResponseBytes)}
 	}
-	payload := raw
-	// SSE-wrapped response: pull JSON out of the first data: line. Same
-	// shape as singleHealthProbe — keep them in sync.
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.HasPrefix(line, "data: ") {
-			payload = []byte(strings.TrimPrefix(line, "data: "))
-			break
-		}
-	}
+	// SSE-or-JSON: extractSSEPayload pulls the JSON envelope out of a
+	// text/event-stream frame (multi-line data:, CRLF, optional space
+	// after the colon all handled) and returns the body unchanged when
+	// it is plain application/json. Single owner in sse.go — shared with
+	// singleHealthProbe + sendForceMaterializeTools.
+	payload := extractSSEPayload(raw)
 
 	// Parse: error first (preserve method-not-found code so the spec's
 	// "unsupported" state is distinguishable from generic "error").
