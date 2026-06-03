@@ -50,7 +50,24 @@ type LazyProxyConfig struct {
 	// LastToolsCallAt registry writes are debounced; lifecycle transitions
 	// and LastError are written immediately.
 	ToolsCallDebounce time.Duration
+	// MaterializedHardCap is the maximum number of LSP backend rows that may
+	// be concurrently lifecycle=starting|active across the registry. Zero
+	// disables the cap.
+	MaterializedHardCap int
+	// IdleBackendTTL stops a materialized backend after this much idle time.
+	// The proxy process stays up and the next tools/call rematerializes.
+	// Zero disables idle reaping.
+	IdleBackendTTL time.Duration
+	// IdleBackendCheckEvery defaults to DefaultLSPIdleBackendCheckEvery when
+	// IdleBackendTTL is enabled and this value is zero.
+	IdleBackendCheckEvery time.Duration
 }
+
+const (
+	DefaultLSPMaterializedHardCap   = 8
+	DefaultLSPIdleBackendTTL        = 30 * time.Minute
+	DefaultLSPIdleBackendCheckEvery = time.Minute
+)
 
 // LazyProxy is the per-port HTTP proxy that answers synthetic handshake
 // traffic (initialize, tools/list, notifications/*) from the embedded tool
@@ -77,6 +94,12 @@ type LazyProxy struct {
 	endpoint MCPEndpoint
 	closed   atomic.Bool
 
+	inflightBackendRequests int
+	lastBackendActivity     time.Time
+	idleStartOnce           sync.Once
+	idleStopOnce            sync.Once
+	idleStop                chan struct{}
+
 	debounceMu         sync.Mutex
 	lastToolsCallWrite time.Time
 }
@@ -91,10 +114,16 @@ func NewLazyProxy(cfg LazyProxyConfig) *LazyProxy {
 	if cfg.ToolsCallDebounce == 0 {
 		cfg.ToolsCallDebounce = 5 * time.Second
 	}
-	return &LazyProxy{
-		cfg:  cfg,
-		gate: NewInflightGate(cfg.InflightMinRetryGap),
+	if cfg.IdleBackendTTL > 0 && cfg.IdleBackendCheckEvery == 0 {
+		cfg.IdleBackendCheckEvery = DefaultLSPIdleBackendCheckEvery
 	}
+	p := &LazyProxy{
+		cfg:      cfg,
+		gate:     NewInflightGate(cfg.InflightMinRetryGap),
+		idleStop: make(chan struct{}),
+	}
+	p.startIdleReaper()
+	return p
 }
 
 // Handler returns the http.Handler for the proxy. Exposed for tests so they
@@ -169,11 +198,13 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 	if !p.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	p.stopIdleReaper()
 	p.mu.Lock()
 	if p.endpoint != nil {
 		_ = p.endpoint.Close()
 		p.endpoint = nil
 	}
+	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 	stopErr := p.cfg.Lifecycle.Stop()
 	if stopErr != nil {
@@ -320,7 +351,9 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		writeRPCError(w, req.ID, code, err.Error())
 		return
 	}
+	p.beginBackendRequest()
 	resp, err := ep.SendRequest(r.Context(), req)
+	p.endBackendRequest()
 	if err != nil {
 		// Differentiate client-cancel from backend failure. SendRequest
 		// is driven by r.Context(); a client disconnect or timeout
@@ -359,7 +392,9 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		writeRPCError(w, req.ID, code, err.Error())
 		return
 	}
+	p.beginBackendRequest()
 	resp, err := ep.SendRequest(r.Context(), req)
+	p.endBackendRequest()
 	if err != nil {
 		// Client-cancel is not a backend failure — see handleToolsCall.
 		if isClientCancelErr(r.Context(), err) {
@@ -432,7 +467,9 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 	// Slow path: go through the gate. Mark Starting BEFORE entering the gate
 	// so `status` shows "starting" while the singleflight is in-flight.
 	reg := api.NewRegistry(p.cfg.RegistryPath)
-	_ = reg.PutLifecycle(p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleStarting, "")
+	if err := p.reserveMaterializedSlot(); err != nil {
+		return nil, err
+	}
 
 	key := p.inflightKey()
 	v, err := p.gate.Do(ctx, key, func(ctx context.Context) (any, error) {
@@ -456,14 +493,137 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 	// gate's singleflight simultaneously (one winner + N losers) and each
 	// observes the same ep. Storing ep twice is harmless since both point
 	// at the same underlying object.
+	now := time.Now().UTC()
 	p.mu.Lock()
 	p.endpoint = ep
+	p.lastBackendActivity = now
 	p.mu.Unlock()
 	_ = reg.PutLifecycleWithTimestamps(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
-		time.Now().UTC(), time.Time{},
+		now, time.Time{},
 	)
 	return ep, nil
+}
+
+func (p *LazyProxy) reserveMaterializedSlot() error {
+	reg := api.NewRegistry(p.cfg.RegistryPath)
+	if p.cfg.MaterializedHardCap <= 0 {
+		return reg.PutLifecycle(p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleStarting, "")
+	}
+	unlock, err := reg.Lock()
+	if err != nil {
+		return fmt.Errorf("reserve materialized LSP backend slot: %w", err)
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		return fmt.Errorf("reserve materialized LSP backend slot: %w", err)
+	}
+	entry, ok := reg.Get(p.cfg.WorkspaceKey, p.cfg.Language)
+	if !ok {
+		return fmt.Errorf("reserve materialized LSP backend slot: registry entry missing for %s/%s",
+			p.cfg.WorkspaceKey, p.cfg.Language)
+	}
+	active := 0
+	for _, e := range reg.LSPEntries() {
+		if e.WorkspaceKey == p.cfg.WorkspaceKey && e.Language == p.cfg.Language {
+			continue
+		}
+		if e.Lifecycle == api.LifecycleStarting || e.Lifecycle == api.LifecycleActive {
+			active++
+		}
+	}
+	if active >= p.cfg.MaterializedHardCap {
+		return fmt.Errorf("materialized LSP backend cap reached: %d active/starting backends, cap %d",
+			active, p.cfg.MaterializedHardCap)
+	}
+	entry.Lifecycle = api.LifecycleStarting
+	entry.LastError = ""
+	reg.Put(entry)
+	if err := reg.Save(); err != nil {
+		return fmt.Errorf("reserve materialized LSP backend slot: %w", err)
+	}
+	return nil
+}
+
+func (p *LazyProxy) beginBackendRequest() {
+	now := time.Now().UTC()
+	p.mu.Lock()
+	p.inflightBackendRequests++
+	p.lastBackendActivity = now
+	p.mu.Unlock()
+}
+
+func (p *LazyProxy) endBackendRequest() {
+	now := time.Now().UTC()
+	p.mu.Lock()
+	if p.inflightBackendRequests > 0 {
+		p.inflightBackendRequests--
+	}
+	p.lastBackendActivity = now
+	p.mu.Unlock()
+}
+
+func (p *LazyProxy) startIdleReaper() {
+	if p.cfg.IdleBackendTTL <= 0 {
+		return
+	}
+	interval := p.cfg.IdleBackendCheckEvery
+	if interval <= 0 {
+		interval = DefaultLSPIdleBackendCheckEvery
+	}
+	p.idleStartOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					p.reapIdleBackend(time.Now().UTC())
+				case <-p.idleStop:
+					return
+				}
+			}
+		}()
+	})
+}
+
+func (p *LazyProxy) stopIdleReaper() {
+	p.idleStopOnce.Do(func() {
+		if p.idleStop != nil {
+			close(p.idleStop)
+		}
+	})
+}
+
+func (p *LazyProxy) reapIdleBackend(now time.Time) {
+	if p.closed.Load() || p.cfg.IdleBackendTTL <= 0 {
+		return
+	}
+	var ep MCPEndpoint
+	p.mu.Lock()
+	if p.endpoint == nil ||
+		p.inflightBackendRequests > 0 ||
+		p.lastBackendActivity.IsZero() ||
+		now.Sub(p.lastBackendActivity) < p.cfg.IdleBackendTTL {
+		p.mu.Unlock()
+		return
+	}
+	ep = p.endpoint
+	p.endpoint = nil
+	p.lastBackendActivity = time.Time{}
+	p.mu.Unlock()
+
+	_ = ep.Close()
+	if err := p.cfg.Lifecycle.Stop(); err != nil {
+		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: idle lifecycle stop: %v\n", err)
+		_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+			p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed,
+			fmt.Sprintf("idle reaper lifecycle stop: %v", err))
+		return
+	}
+	p.gate.Forget(p.inflightKey())
+	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
 }
 
 // onSendFailure handles mid-stream backend death: evict the cached endpoint,
@@ -487,6 +647,7 @@ func (p *LazyProxy) onSendFailure(err error) {
 		_ = p.endpoint.Close()
 		p.endpoint = nil
 	}
+	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 	// Tell the lifecycle impl to tear its subprocess down first — safe even
 	// if the child already exited on its own. This invalidates the impl's

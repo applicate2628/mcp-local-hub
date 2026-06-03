@@ -488,6 +488,11 @@ type Server struct {
 	// and serenaDaemonSessions (session -> upstream daemon session).
 	// Thread-safe.
 	serenaRouterSessions routerSessionStore
+
+	// LSP router dependencies for /lsp/<language>/mcp. This route is
+	// intentionally separate from the Serena router because LSP workspace
+	// proxies are sessionless upstreams and need no daemon-session handshake.
+	lspRouterDeps atomic.Pointer[lspRouterDeps]
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -554,6 +559,7 @@ func NewServer(cfg Config) *Server {
 	registerSupervisorRestartRoutes(s)
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)
+	registerLSPRouterRoutes(s)
 	return s
 }
 

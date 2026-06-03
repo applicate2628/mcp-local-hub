@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/lsp_routing"
 	"mcp-local-hub/internal/api/serena_routing"
+	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/tray"
 
@@ -317,6 +319,18 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
 		sessions := serena_routing.NewSessionRouter()
 		s.SetSerenaRouterProduction(resolver, sessions)
+		if rawManifest, err := api.NewAPI().ManifestGet("mcp-language-server"); err != nil {
+			fmt.Fprintf(cmd.OutOrStderr(),
+				"lsp-router: manifest load failed; /lsp/<language>/mcp will return errors until next restart: %v\n", err)
+		} else if m, err := config.ParseManifest(strings.NewReader(rawManifest)); err != nil {
+			fmt.Fprintf(cmd.OutOrStderr(),
+				"lsp-router: manifest parse failed; /lsp/<language>/mcp will return errors until next restart: %v\n", err)
+		} else {
+			lspResolver := lsp_routing.NewWorkspaceResolver(reg, registryPath, m.Languages)
+			lspSessions := lsp_routing.NewSessionRouter()
+			s.SetLSPRouterProduction(lspResolver, lspSessions, m.Languages)
+			go runLSPSessionCleanupTicker(ctx, lspSessions, time.Hour, lsp_routing.DefaultSessionTTL)
+		}
 		// Phase 5 (bot PR #253 finding 1): wire the one-time supervisor
 		// cutover the auto-register-on-miss path runs when introducing the
 		// FIRST serena runtime_spec while a supervisor is running (reap the
@@ -681,6 +695,19 @@ func runSessionCleanupTicker(ctx context.Context, s *gui.Server, sessions *seren
 			if s != nil {
 				_ = s.SweepSerenaSessions(now, ttl)
 			}
+		}
+	}
+}
+
+func runLSPSessionCleanupTicker(ctx context.Context, sessions *lsp_routing.SessionRouter, interval, ttl time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			_ = sessions.CleanupWithTTL(now, ttl)
 		}
 	}
 }

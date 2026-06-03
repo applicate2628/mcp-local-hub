@@ -43,6 +43,8 @@ func newDaemonWorkspaceProxyCmd() *cobra.Command {
 		languageFlag     string
 		serverFlag       string
 		registryOverride string
+		hardCapFlag      int
+		idleTTLFlag      time.Duration
 	)
 	c := &cobra.Command{
 		Use:   "workspace-proxy",
@@ -223,13 +225,16 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			}
 
 			proxy := daemon.NewLazyProxy(daemon.LazyProxyConfig{
-				WorkspaceKey:  activeWSKey,
-				WorkspacePath: canonical,
-				Language:      languageFlag,
-				BackendKind:   spec.Backend,
-				Port:          portFlag,
-				Lifecycle:     lc,
-				RegistryPath:  regPath,
+				WorkspaceKey:          activeWSKey,
+				WorkspacePath:         canonical,
+				Language:              languageFlag,
+				BackendKind:           spec.Backend,
+				Port:                  portFlag,
+				Lifecycle:             lc,
+				RegistryPath:          regPath,
+				MaterializedHardCap:   hardCapFlag,
+				IdleBackendTTL:        idleTTLFlag,
+				IdleBackendCheckEvery: 0,
 			})
 
 			// SIGINT / SIGTERM triggers graceful shutdown. Bound to a fresh
@@ -295,9 +300,13 @@ construct the backend lifecycle. Human invocation is not supported.`,
 	c.Flags().StringVar(&workspaceFlag, "workspace", "", "absolute workspace path (required)")
 	c.Flags().StringVar(&languageFlag, "language", "", "language name matching a manifest entry (required)")
 	c.Flags().StringVar(&serverFlag, "server", "mcp-language-server", "embedded manifest to read LanguageSpec from")
+	c.Flags().IntVar(&hardCapFlag, "materialized-hard-cap", daemon.DefaultLSPMaterializedHardCap, "maximum concurrently materialized LSP backends; 0 disables the cap")
+	c.Flags().DurationVar(&idleTTLFlag, "idle-backend-ttl", daemon.DefaultLSPIdleBackendTTL, "stop materialized LSP backend after this idle duration; 0 disables reaping")
 	// Hidden override for tests and for operators repointing at a non-default
 	// registry layout. Users should never touch this.
 	c.Flags().StringVar(&registryOverride, "registry", "", "override registry YAML path (test/ops)")
+	_ = c.Flags().MarkHidden("materialized-hard-cap")
+	_ = c.Flags().MarkHidden("idle-backend-ttl")
 	_ = c.Flags().MarkHidden("registry")
 	return c
 }

@@ -721,6 +721,83 @@ func TestLazyProxy_LastToolsCallAtDebounced(t *testing.T) {
 	}
 }
 
+func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/test/ws",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Port:          9200,
+		Lifecycle:     api.LifecycleConfigured,
+	})
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "efgh5678",
+		WorkspacePath: "D:/test/other",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		TaskName:      "mcp-local-hub-lsp-efgh5678-python",
+		Port:          9201,
+		Lifecycle:     api.LifecycleActive,
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey:          "abcd1234",
+		WorkspacePath:         "D:/test/ws",
+		Language:              "python",
+		BackendKind:           "mcp-language-server",
+		Port:                  9200,
+		Lifecycle:             f,
+		RegistryPath:          regPath,
+		InflightMinRetryGap:   20 * time.Millisecond,
+		ToolsCallDebounce:     100 * time.Millisecond,
+		MaterializedHardCap:   1,
+		IdleBackendTTL:        0,
+		IdleBackendCheckEvery: 0,
+	})
+
+	rr := postRPC(t, p.Handler(), "tools/call", 1)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "materialized LSP backend cap reached") {
+		t.Fatalf("cap error mismatch: %s", rr.Body.String())
+	}
+	if got := f.materializeCount.Load(); got != 0 {
+		t.Fatalf("materializeCount = %d, want 0 when cap is reached", got)
+	}
+}
+
+func TestLazyProxy_IdleTTLStopsMaterializedBackend(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, regPath := newTestProxyWithCfg(t, "mcp-language-server", f, 10*time.Millisecond, 100*time.Millisecond)
+	p.cfg.IdleBackendTTL = 30 * time.Millisecond
+	p.cfg.IdleBackendCheckEvery = 10 * time.Millisecond
+	p.startIdleReaper()
+
+	if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if f.stopCount.Load() >= 1 {
+			e := readEntry(t, regPath)
+			if e.Lifecycle != api.LifecycleConfigured {
+				t.Fatalf("lifecycle after idle reap = %q, want %q", e.Lifecycle, api.LifecycleConfigured)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("idle reaper did not stop backend; stopCount=%d", f.stopCount.Load())
+}
+
 func TestLazyProxy_ShutdownStopsEndpoint(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
 	p, _ := newTestProxy(t, "mcp-language-server", f)

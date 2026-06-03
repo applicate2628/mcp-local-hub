@@ -24,6 +24,11 @@ type ResolveResult struct {
 	WorkspaceKey  string
 	Registered    bool
 	Entry         *api.WorkspaceEntry
+	// ProjectMarker is true only when WorkspaceRoot was selected by one of
+	// the language-specific project_markers from the manifest. A .git fallback
+	// can resolve an already-registered row, but first-touch auto-register must
+	// require this stronger marker.
+	ProjectMarker bool
 }
 
 // WorkspaceResolver maps an absolute LSP tool-argument path plus language to a
@@ -112,12 +117,22 @@ func (r *WorkspaceResolver) ResolveByPath(path, language string) (*ResolveResult
 	result := &ResolveResult{
 		WorkspaceRoot: canon,
 		WorkspaceKey:  wsKey,
+		ProjectMarker: r.hasProjectMarker(wsDir, language),
 	}
 	if entry, ok := r.matchRegistration(wsKey, language); ok {
 		result.Registered = true
 		result.Entry = &entry
 	}
 	return result, nil
+}
+
+func (r *WorkspaceResolver) hasProjectMarker(dir, language string) bool {
+	for _, marker := range r.markersFor(language) {
+		if markerExists(filepath.Join(dir, marker)) {
+			return true
+		}
+	}
+	return false
 }
 
 // AncestorWalk walks upward from absPath and returns the directory containing
