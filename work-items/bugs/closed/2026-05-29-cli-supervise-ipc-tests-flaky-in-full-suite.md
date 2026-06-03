@@ -27,6 +27,18 @@ bot #264 P2 r1+r2; wording corrected per #265 r1). Verified 2026-06-03:
 `TestSupervise_IPC_VersionPinning` + `TestSuperviseCommand_StatusIPC_ReconcileReady`
 pass in both build modes.
 
+The frontmatter `affected-surface` also lists
+`relay_test.go (TestResolveRelayURL_ResolvesFromEmbeddedManifest)`. That was a
+SEPARATE baseline observation, not the IPC-contention defect, and #264 does not
+touch it. It is NOT a code bug: the test resolves the `unified` daemon from the
+embedded serena manifest, which the committed manifest provides, so it PASSES
+on a clean HEAD. It fails ONLY when the working-tree
+`servers/serena/manifest.yaml` is dirtied to drop the `unified` daemon (e.g. a
+mid-edit revert to the claude+codex 2-daemon layout). Closing this record
+therefore hides no code defect — there is nothing separate to track; the relay
+line was a dirty-tree artifact, explicitly dropped here (verified 2026-06-03:
+passes against committed HEAD, fails only under a local manifest WIP).
+
 ## Reproduction
 
 1. `go test -count=1 -timeout 8m ./internal/cli/` from a clean dev tree.

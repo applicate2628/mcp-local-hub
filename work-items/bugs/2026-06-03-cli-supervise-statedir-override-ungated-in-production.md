@@ -30,6 +30,19 @@ placed at the CLI layer so the production `api` surface stays free of test-only
 env resolution — but the CLI layer ships in release binaries, so a production
 `mcphub supervise` honors `MCPHUB_STATE_DIR_OVERRIDE` at runtime.
 
+`stateDirFunc` is not called only by `mcphub supervise`. Every production
+caller inherits the ungated override, so the blast radius spans several
+commands:
+
+- `internal/cli/supervise.go:362` — `mcphub supervise`
+- `internal/cli/migrate_serena.go:287,976,1059,1108` — `mcphub migrate serena`
+- `internal/cli/overlay_prune_orphans.go:48` — overlay orphan-prune
+- `internal/cli/overlay_quarantine.go:66` — overlay quarantine
+
+Fixing the seam at the `stateDirFunc` var definition covers all of them at
+once, but the fix's validation must exercise each caller (not just supervise)
+to confirm none separately re-reads the env.
+
 ## Why this matters
 
 `MCPHUB_STATE_DIR_OVERRIDE` is purely a CLI/test seam — it is read by the cli
