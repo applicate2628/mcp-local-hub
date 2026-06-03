@@ -39,6 +39,21 @@ export const LSP_LANGUAGES = [
 
 export type LspLanguage = (typeof LSP_LANGUAGES)[number];
 
+// LSP_MANIFEST_SERVER is the bare manifest server name for the
+// workspace-scoped LSP family. Its per-(workspace, language) proxies
+// (`mcp-language-server-<lang>`) are surfaced + enabled through the
+// dedicated "LSP daemons" table (collectLspRows), NOT the top
+// single-daemon matrix. The matrix's checkbox model is "one server =
+// one hub port = one client URL" — it cannot express (project ×
+// language), so the bare `mcp-language-server` row rendered a
+// non-functional checkbox (Port "—", State "—") that looked like an
+// enablement control but could register nothing. Servers.tsx excludes
+// this name from the top matrix so the only LSP enablement surface is
+// the LSP-daemons table below. (serena is also workspace-scoped but has
+// a single path-router endpoint, so its matrix checkbox DOES work and it
+// is NOT excluded — the exclusion is by this specific name, not by kind.)
+export const LSP_MANIFEST_SERVER = "mcp-language-server";
+
 // LSP_KNOWN_CLIENTS mirrors the per-client-routing CLIENTS list used by
 // Servers.tsx — keeping a local constant lets the row helper produce
 // placeholder presence maps without importing from the screen module

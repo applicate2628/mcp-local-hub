@@ -10,7 +10,7 @@ import {
 } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
-import { collectLspRows, type LspRow, LSP_KNOWN_CLIENTS } from "../lib/lsp-rows";
+import { collectLspRows, type LspRow, LSP_KNOWN_CLIENTS, LSP_MANIFEST_SERVER } from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
 import { EnvDrawer } from "../components/EnvDrawer";
@@ -558,7 +558,14 @@ export function ServersScreen() {
   // filtering by `s.manifested` alone could hide a row that still has
   // queued migrate/demigrate work — Apply would fire on an invisible
   // row and the operator couldn't inspect or undo from the UI.
-  const manifestedServers = servers.filter((s) => s.manifested || dirty.has(s.name));
+  // Exclude the workspace-scoped LSP server from the top single-daemon
+  // matrix: its per-(workspace, language) form is enabled through the
+  // "LSP daemons" table below, and its bare matrix checkbox (Port "—")
+  // could register nothing — a non-functional trap. See LSP_MANIFEST_SERVER
+  // doc in lsp-rows.ts. (serena stays: it has a single router endpoint.)
+  const manifestedServers = servers.filter(
+    (s) => (s.manifested || dirty.has(s.name)) && s.name !== LSP_MANIFEST_SERVER,
+  );
   const otherServers = servers.filter((s) => !s.manifested && !dirty.has(s.name));
 
   // v0.5.x Task 4.3 — LSP rows are always 9 (one per language). When
