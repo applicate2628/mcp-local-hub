@@ -9,7 +9,7 @@ status: open
 related-pr: PR #264 (914d0cf) — api-side fixed; gui-side leak still open
 ---
 
-# Pre-existing test pollution: `go test ./internal/api/` writes into the production state-dir
+# Pre-existing test pollution: state-file-helper + gui-initializer tests write into the production state-dir
 
 ## Status
 
@@ -46,12 +46,18 @@ remains open.
 
 ## Symptom
 
-Running `go test ./internal/api/...` (or any subset that triggers
-state-file-helper tests, including the
-`TestWriteStateFileAtomic_StrictModeWith*` and
-`TestRealClientInitializer_HappyPath` families) writes audit events
-into the operator's REAL hub-mcp.log and supervisor-events.log at
-`%LOCALAPPDATA%\mcp-local-hub\`, not into a per-test temp dir.
+Two test families wrote audit events into the operator's REAL hub-mcp.log
+and supervisor-events.log at `%LOCALAPPDATA%\mcp-local-hub\`, not into a
+per-test temp dir:
+
+- **FIXED (api-side):** `go test ./internal/api/...` triggering the
+  `TestWriteStateFileAtomic_StrictModeWith*` state-file-helper tests — #264's
+  `isolateStateDir` resolved this, so `./internal/api/` no longer leaks.
+- **STILL OPEN (gui-side):** `go test ./internal/gui/...` triggering
+  `TestRealClientInitializer_HappyPath` (which lives in
+  `internal/gui/init_client_config_test.go`, NOT internal/api — this doc's
+  original `./internal/api/` framing predates a move). This is the remaining
+  leak; see Reproduction below.
 
 Examples captured during 2026-05-20 dig:
 
@@ -90,7 +96,8 @@ operator's real `%LOCALAPPDATA%\mcp-local-hub\` log.
 - **Log noise** — production audit logs now interleave real operator
   events with test events that have no meaning outside the test process.
 - **Capacity** — `hub-mcp.log` and `supervisor-events.log` rotate at
-  10 MB. Every `go test ./internal/api/...` run inflates these logs and
+  10 MB. Every `go test ./internal/gui/...` run (and `./internal/api/`
+  historically, before #264 fixed the api-side) inflates these logs and
   shortens the operator's effective retention window.
 - **Forensic confusion** — when investigating a real incident (as in
   this very session), the test paths in audit rows are a misleading
@@ -99,7 +106,12 @@ operator's real `%LOCALAPPDATA%\mcp-local-hub\` log.
   hermetic (they go to the test's TempDir). Only the AUDIT EVENT stream
   leaks. So this is hygiene, not a confidentiality issue.
 
-## Root cause hypothesis (UNVERIFIED — needs grep + Read)
+## Root cause hypothesis (CONFIRMED 2026-06-03 — see ## Status)
+
+> The mechanism below was originally an UNVERIFIED hypothesis; it is now
+> confirmed. #264 applied the `isolateStateDir` (`daemonStateRootOverride`→temp)
+> redirect to the api-side tests, proving the cause; the gui-side
+> `TestRealClientInitializer_HappyPath` still lacks it and still leaks.
 
 The state-file-helper logging path (`api.LogHubMcpEvent` + the
 supervisor-events appender) resolves the log file's location via
@@ -118,8 +130,9 @@ helper tests don't set it.
 # Note current size of production log.
 wc -c "%LOCALAPPDATA%\mcp-local-hub\hub-mcp.log"
 
-# Run a known-leaking test.
-go test -count=1 -run TestRealClientInitializer_HappyPath ./internal/api/
+# Run the still-leaking gui test (it lives in internal/gui, NOT internal/api;
+# the api-side TestWriteStateFileAtomic_* family was fixed by #264).
+go test -count=1 -run TestRealClientInitializer_HappyPath ./internal/gui/
 
 # Re-check size — should be larger.
 wc -c "%LOCALAPPDATA%\mcp-local-hub\hub-mcp.log"
