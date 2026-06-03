@@ -3,7 +3,7 @@ title: cli supervise IPC tests fail in full-package `go test ./internal/cli/` ru
 severity: low
 found-by: backend-engineer
 found-in-phase: D.3b-2 (migrate serena legacy-to-dynamic-pool)
-affected-surface: internal/cli/supervise_test.go, internal/cli/relay_test.go (TestResolveRelayURL_ResolvesFromEmbeddedManifest)
+affected-surface: internal/cli/supervise_test.go
 context: adjacent-finding
 status: closed
 related-pr: PR #264 (914d0cf)
@@ -98,9 +98,11 @@ itself).
 
 - internal/cli/supervise_test.go:241,383,903,979,1050,1226 — the
   `supervisor.lock.owner.json` / sidecar poll-wait assertions.
-- internal/cli/relay_test.go — `TestResolveRelayURL_ResolvesFromEmbeddedManifest`
+- ~~internal/cli/relay_test.go — `TestResolveRelayURL_ResolvesFromEmbeddedManifest`~~
   (embedded-manifest read; baseline-only failure tied to the dirty serena
-  manifest WIP).
+  manifest WIP) — **DROPPED at closure**: not part of this IPC-contention bug
+  and not a code defect (passes on clean HEAD); see `## Status`. Removed from
+  the frontmatter `affected-surface` too.
 
 ## Suggested fix
 

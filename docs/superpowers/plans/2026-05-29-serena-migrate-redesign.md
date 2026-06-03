@@ -43,9 +43,9 @@ drive the Codex bot to PASS, deep-security review, merge.
   ([internal/api/manifest_source.go:18-20](../../../internal/api/manifest_source.go)) to inject a hermetic
   workspace-scoped manifest and `t.TempDir()` workspaces with `WorkspaceKey`/`SerenaLanguageSentinel`
   rows (precedent: `internal/api/install_parsed_manifest_test.go`). New tests follow that pattern.
-- **The known flaky `cli supervise IPC` full-suite tests** (`work-items/bugs/closed/2026-05-29-cli-supervise-ipc-tests-flaky-in-full-suite.md`, fixed by #264)
-  are pre-existing and unrelated; do not let them mask a real regression — run the affected new tests in
-  isolation to confirm green.
+- **The `cli supervise IPC` full-suite tests** were a known pre-existing flake (`work-items/bugs/closed/2026-05-29-cli-supervise-ipc-tests-flaky-in-full-suite.md`)
+  — now FIXED by #264 (per-test pipe isolation). They are expected green in `go test ./internal/cli/`; if they
+  recur, treat it as a REGRESSION to investigate, not a known flake to work around.
 
 ---
 
@@ -395,7 +395,8 @@ all hard. Order: 1, 2, 3 → 4.
 **Quality gates**: build+vet+test clean (Windows + Linux). Bot PASS. Deep-sec on (a) the rollback
 composition (no double-undo, no half-migrated state on partial failure); (b) the upgrade-gate fail-loud
 path (no committed intent left for a stuck old supervisor). The migrate-serena IPC-adjacent full-suite
-flake (`work-items/bugs/2026-05-29-...`) is pre-existing — confirm new tests green in isolation.
+flake (`work-items/bugs/closed/2026-05-29-cli-supervise-ipc-tests-flaky-in-full-suite.md`) was fixed
+by #264; the tests should be green in the full suite — a recurrence is a regression, not a known flake.
 
 **Shippable**: **Must land after 1+2+3.** As the operator-facing entry point, it ships only once the
 runtime (Phase 1), the cycle-break (Phase 2), and the client-reconcile (Phase 3) are merged. Medium risk
@@ -638,7 +639,7 @@ fail-loud guard's airtightness AND the native-http gate's completeness at both b
   with corrected blocking scope (Phase 0/2/4), O2 GUI-port live-pidport discovery (Phase 3). The medium
   (descriptor/flag consistency) is in Phase 1.
 - Cross-platform constraints (POSIX scheduler "not implemented"; POSIX-tagged tests via `GOOS=linux`/WSL;
-  `MCPHUB_MANIFEST_DIR_OVERRIDE`/`test_state_path_env` seams; the pre-existing IPC full-suite flake) are
+  `MCPHUB_MANIFEST_DIR_OVERRIDE`/`test_state_path_env` seams; the IPC full-suite flake, since fixed by #264) are
   named: PASS.
 - Shippable-vs-must-land-together is marked; highest-risk phase flagged with mitigations: PASS.
 - No implementation code (phases describe scope + acceptance, not code): PASS.
