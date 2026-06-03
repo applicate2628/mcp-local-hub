@@ -244,6 +244,17 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 // treated as a best-effort skip and returns nil; validation and I/O failures are
 // reported like Emit. Use this only on non-critical observability paths where a
 // blocking event-log lock must not stall the caller.
+//
+// NOTE — deliberate divergence: this is the ONLY best-effort (lossy-on-
+// contention) emit path among the JSONL log families. intent_audit.go and
+// watchdog_log.go both use a blocking Lock(); TryEmit is the sole exception.
+// The tradeoff is scoped on purpose: a TryEmit caller may silently drop its
+// audit row under event-log lock contention, so it must be used only where the
+// underlying state change is independently durable. The serena intent repair is
+// the motivating caller — its WRITE to supervisor-intent.json commits under the
+// held intent flock BEFORE these events emit (serena_intent_repair.go), so
+// losing the observability row never loses the repair itself. Do not adopt
+// TryEmit for an event that is the only record of a state mutation.
 func (l *SupervisorEventLog) TryEmit(evt SupervisorEvent) error {
 	return l.emit(evt, false)
 }
