@@ -3,10 +3,41 @@ title: cli supervise IPC tests fail in full-package `go test ./internal/cli/` ru
 severity: low
 found-by: backend-engineer
 found-in-phase: D.3b-2 (migrate serena legacy-to-dynamic-pool)
-affected-surface: internal/cli/supervise_test.go, internal/cli/relay_test.go (TestResolveRelayURL_ResolvesFromEmbeddedManifest)
+affected-surface: internal/cli/supervise_test.go
 context: adjacent-finding
-status: open
+status: closed
+related-pr: PR #264 (914d0cf)
 ---
+
+## Status
+
+CLOSED — fixed by PR #264 (`914d0cf`, merged 2026-06-03). The full-suite
+contention was the in-process supervisors all binding the same per-user-SID
+Windows pipe `\\.\pipe\mcphub-supervisor-<SID>`. PR #264 adds a runtime
+per-test pipe discriminator (`EnableSupervisorIPCTestPipeIsolation`, installed
+by the internal/cli TestMain) deriving a unique pipe leaf from each test's
+`MCPHUB_STATE_DIR_OVERRIDE`, so the six named IPC tests no longer collide. The
+hook is active in both tagged and untagged test builds. The
+`EnableSupervisorIPCTestPipeIsolation` symbol IS compiled into release binaries
+(it is an untagged exported function with a POSIX counterpart), but no
+production path calls it, so the discriminator var stays nil and
+`SupervisorIPCAddress` always returns the per-SID pipe in release. The fixed
+condition is "no production caller/assignment," NOT symbol absence (codex
+bot #264 P2 r1+r2; wording corrected per #265 r1). Verified 2026-06-03:
+`TestSupervise_IPC_VersionPinning` + `TestSuperviseCommand_StatusIPC_ReconcileReady`
+pass in both build modes.
+
+The original report's frontmatter `affected-surface` listed
+`relay_test.go (TestResolveRelayURL_ResolvesFromEmbeddedManifest)` — now removed
+from the metadata. That was a SEPARATE baseline observation, not the
+IPC-contention defect, and #264 does not touch it. It is NOT a code bug: the test resolves the `unified` daemon from the
+embedded serena manifest, which the committed manifest provides, so it PASSES
+on a clean HEAD. It fails ONLY when the working-tree
+`servers/serena/manifest.yaml` is dirtied to drop the `unified` daemon (e.g. a
+mid-edit revert to the claude+codex 2-daemon layout). Closing this record
+therefore hides no code defect — there is nothing separate to track; the relay
+line was a dirty-tree artifact, explicitly dropped here (verified 2026-06-03:
+passes against committed HEAD, fails only under a local manifest WIP).
 
 ## Reproduction
 
@@ -67,9 +98,11 @@ itself).
 
 - internal/cli/supervise_test.go:241,383,903,979,1050,1226 — the
   `supervisor.lock.owner.json` / sidecar poll-wait assertions.
-- internal/cli/relay_test.go — `TestResolveRelayURL_ResolvesFromEmbeddedManifest`
+- ~~internal/cli/relay_test.go — `TestResolveRelayURL_ResolvesFromEmbeddedManifest`~~
   (embedded-manifest read; baseline-only failure tied to the dirty serena
-  manifest WIP).
+  manifest WIP) — **DROPPED at closure**: not part of this IPC-contention bug
+  and not a code defect (passes on clean HEAD); see `## Status`. Removed from
+  the frontmatter `affected-surface` too.
 
 ## Suggested fix
 

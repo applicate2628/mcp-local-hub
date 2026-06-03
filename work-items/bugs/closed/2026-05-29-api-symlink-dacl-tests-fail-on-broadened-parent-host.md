@@ -5,15 +5,33 @@ found-by: backend-engineer
 found-in-phase: serena Phase 3 (client-reconcile to /serena/mcp)
 affected-surface: internal/api/client_write_init_test.go, internal/api/state_file_helper_test.go
 context: adjacent-finding
-status: open
+status: closed
+related-pr: PR #264 (914d0cf)
 ---
+
+## Status
+
+CLOSED — fixed by PR #264 (`914d0cf`, merged 2026-06-03), the same merge whose
+commit body explicitly names this bug's two failing tests. The host condition
+(broadened `%LOCALAPPDATA%` parent DACL) let the operator's ambient
+`AllowClientConfigSymlinkEnv` / `AllowUnhardenedStateWriteEnv` leak into the
+tests, so the symlink-refusal and write-capable-parent-refusal paths went
+unexercised and the assertions saw `nil`. PR #264 clears both envs per-test via
+`t.Setenv`: `TestSecureWriteWithOperatorOpt_DefaultRefusesPreexistingSymlink`
+gets `t.Setenv(AllowClientConfigSymlinkEnv, "")` in `client_write_init_test.go`,
+and `TestWriteStateFileAtomic_StrictModeWithWriteCapableParent` gets
+`t.Setenv(AllowUnhardenedStateWriteEnv, "")` in `state_file_helper_test.go`, so
+both exercise the refusal paths regardless of the operator shell. Verified
+2026-06-03 against the merged #264 diff. Surfaced for closure by codex bot
+on #265 r1 (the same #264 "env" fix as the sibling
+`2026-05-20-tests-leak-state-into-production-logs`).
 
 ## Reproduction
 
 1. `go test -count=1 -timeout 5m ./internal/api/` from this dev tree (Windows 11,
    non-elevated shell, `%LOCALAPPDATA%\mcp-local-hub` parent DACL broadened to
    non-allowlisted SIDs — the same host condition as
-   [2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md](closed/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md)).
+   [2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md](2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md)).
 2. Observe two FAILs:
    - `TestSecureWriteWithOperatorOpt_DefaultRefusesPreexistingSymlink`
      (`client_write_init_test.go:284`: "expected refusal for pre-existing
@@ -37,6 +55,14 @@ status: open
   is in the Phase-3 diff.
 
 ## Likely root cause (environment, not code)
+
+> **SUPERSEDED HYPOTHESIS (2026-06-03).** This was the original guess at filing.
+> The VERIFIED root cause (see `## Status`) is different: the operator's ambient
+> `AllowClientConfigSymlinkEnv` / `AllowUnhardenedStateWriteEnv` (the relax /
+> symlink opt-in a broadened-host operator sets) leaked into the tests and made
+> the writer take the ALLOW path, so the refusal assertions never fired — NOT a
+> precondition-synthesis problem. PR #264 fixed it by clearing those envs
+> per-test. Kept for history; do NOT drive privilege/DACL work from this section.
 
 Both tests assert a *refusal* that depends on host-specific Windows state:
 - the symlink test needs symlink-create privilege to synthesize the
