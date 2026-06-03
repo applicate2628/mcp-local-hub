@@ -19,6 +19,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -751,7 +752,13 @@ type serenaProjectYml struct {
 
 func readSerenaProjectLanguages(canonical string) ([]string, error) {
 	path := filepath.Join(canonical, ".serena", "project.yml")
-	data, err := os.ReadFile(path)
+	// The marker is untrusted clone input — read it through the SAME single
+	// hardened reader the auto-register path uses (api.ReadUntrustedSerenaProjectYML:
+	// regular-file-only, 64 KiB size cap, TOCTOU-safe open). This call is a
+	// synchronous CLI command with no cancellation source, so a background ctx
+	// is correct. The reader returns the bare not-found error (unwrapped), so the
+	// caller's os.IsNotExist(err) "run bootstrap first" branch keeps working.
+	data, err := api.ReadUntrustedSerenaProjectYML(context.Background(), path)
 	if err != nil {
 		return nil, err
 	}

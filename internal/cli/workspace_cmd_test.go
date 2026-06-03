@@ -252,6 +252,37 @@ func TestWorkspaceRegister_MissingProjectYmlNoLanguages_ErrorsWithBootstrapHint(
 	}
 }
 
+// readSerenaProjectLanguages now routes through the SAME hardened reader the
+// auto-register path uses (api.ReadUntrustedSerenaProjectYML). This pins the
+// sibling-call-site swap: an oversized `.serena/project.yml` (untrusted clone
+// marker) is rejected by `workspace register` instead of being read unbounded
+// via the old bare os.ReadFile. Guards against the sibling silently drifting
+// back to an unhardened read.
+func TestWorkspaceRegister_OversizedProjectYml_RejectedByHardenedReader(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+	tmp := t.TempDir()
+	// Seed a marker so the .serena dir exists, then overwrite it with an
+	// oversized body (past the 64 KiB cap the shared reader enforces).
+	ws := makeWorkspaceDir(t, tmp, []string{"go"})
+	marker := filepath.Join(ws, ".serena", "project.yml")
+	oversized := []byte("languages:\n  - go\n# " + strings.Repeat("A", 64*1024) + "\n")
+	if err := os.WriteFile(marker, oversized, 0o600); err != nil {
+		t.Fatalf("write oversized marker: %v", err)
+	}
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("expected an oversized-marker rejection from the hardened reader; output: %s", out)
+	}
+	// The hardened reader names the byte cap; the register wrapper prepends
+	// "read .serena/project.yml:". Either substring proves the hardened path ran.
+	msg := err.Error()
+	if !strings.Contains(msg, "cap") {
+		t.Errorf("error should name the byte cap (hardened reader); got %q", msg)
+	}
+}
+
 func TestWorkspaceRegister_LanguagesFlagOverridesProjectYml(t *testing.T) {
 	withSerenaManifest(t, 9121, 9123)
 	withStateDir(t)

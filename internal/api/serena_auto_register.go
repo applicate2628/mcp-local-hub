@@ -82,6 +82,9 @@ import (
 // reap/start/liveness/prior-intent steps are seamed so the decision + rollback +
 // concurrency logic is unit-testable without a live supervisor.
 func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (entry *WorkspaceEntry, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// 1. Resolve the workspace root: clean/abs absPath, then walk up ancestors
 	//    for `.serena/project.yml`. The found directory IS the WorkspacePath.
 	//    No marker found → ErrNotASerenaProject (the DoS bound — NEVER register
@@ -92,7 +95,10 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	}
 
 	// 2. Read <root>/.serena/project.yml languages. Empty/missing → ErrNoLanguages.
-	languages, err := readSerenaProjectYMLLanguages(root)
+	//    The marker is untrusted clone input (the GUI router reaches this from an
+	//    MCP tool-call path miss), so it flows through the single hardened reader
+	//    (regular-file-only, size-capped, TOCTOU-safe, ctx-cancellation-aware).
+	languages, err := readSerenaProjectYMLLanguages(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -470,9 +476,24 @@ const serenaAutoRegisterCommitTimeout = 60 * time.Second
 // auto-registered).
 //
 // We cannot import serena_routing's resolver.go ancestor walker (it imports
-// api → cycle), so this is the api-package-local walk. It mirrors that walker's
-// shape: start at the cleaned absolute path, test `<dir>/.serena/project.yml`
-// at each level, stop at the filesystem root.
+// api → cycle), so this is the api-package-local walk. It MIRRORS that walker
+// (WorkspaceResolver.AncestorWalk, internal/api/serena_routing/resolver.go):
+//   - When absPath is itself a FILE (or any non-directory), the walk starts at
+//     filepath.Dir(absPath) — it must NEVER probe `<file>/.serena/project.yml`,
+//     because joining a marker onto a regular-file path and stat-ing it returns
+//     ENOTDIR on POSIX. A walk that treated that ENOTDIR as fatal (or that
+//     stat-probed the bogus `<file>/.serena/...` path at all) would break
+//     auto-register for a file-target call. Starting at the parent eliminates
+//     the bogus probe entirely.
+//   - The marker probe uses os.Lstat and treats ANY successful Lstat as a hit
+//     (parity with AncestorWalk, which returns the dir on any non-error Lstat).
+//     This walk's only job is to locate the workspace ROOT; it deliberately does
+//     NOT reject a non-regular marker here. The untrusted-marker hardening
+//     (regular-file-only refusal, size cap, TOCTOU-safe open) lives in the
+//     single shared reader ReadUntrustedSerenaProjectYML, applied when the
+//     marker is actually read in readSerenaProjectYMLLanguages. Keeping the walk
+//     a pure routing step and the hardening a pure read step is the correct
+//     layering and the documented mirror target.
 func resolveSerenaProjectRoot(p string) (string, error) {
 	if strings.TrimSpace(p) == "" {
 		return "", fmt.Errorf("%w: empty path", ErrNotASerenaProject)
@@ -490,9 +511,16 @@ func resolveSerenaProjectRoot(p string) (string, error) {
 	}
 	abs := filepath.Clean(p)
 	dir := abs
+	// Mirror AncestorWalk: if abs is not a directory (a file, or absent), start
+	// the walk at its parent so we never probe `<file>/.serena/project.yml`
+	// (which would ENOTDIR on POSIX and abort the walk before it reaches the
+	// real marker in an ancestor directory).
+	if fi, statErr := os.Lstat(abs); statErr != nil || !fi.IsDir() {
+		dir = filepath.Dir(abs)
+	}
 	for {
 		marker := filepath.Join(dir, ".serena", "project.yml")
-		if fi, statErr := os.Stat(marker); statErr == nil && !fi.IsDir() {
+		if _, statErr := os.Lstat(marker); statErr == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
@@ -520,9 +548,14 @@ type serenaProjectYMLForAutoRegister struct {
 // marker exists but no serena descriptor can be synthesized). A read or
 // YAML-parse failure propagates verbatim. Empty-string entries are dropped so a
 // `languages: [""]` list does not masquerade as a valid declaration.
-func readSerenaProjectYMLLanguages(root string) ([]string, error) {
+//
+// The marker is UNTRUSTED clone input (the GUI router reaches this from an MCP
+// tool-call path miss), so the read goes through the single hardened reader
+// ReadUntrustedSerenaProjectYML: regular-file-only, 64 KiB size cap, TOCTOU-safe
+// open, ctx-cancellation honored before and after the read.
+func readSerenaProjectYMLLanguages(ctx context.Context, root string) ([]string, error) {
 	path := filepath.Join(root, ".serena", "project.yml")
-	data, err := os.ReadFile(path)
+	data, err := ReadUntrustedSerenaProjectYML(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("serena auto-register: read %s: %w", path, err)
 	}

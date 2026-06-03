@@ -1275,3 +1275,313 @@ func TestAutoRegisterSerena_LiveAddReconcileUnavailable_StartsSupervisor(t *test
 
 // NOTE: mustCanonical(t, ws) is defined in register_test.go (same package) and
 // reused here.
+
+// ===========================================================================
+// Untrusted-marker hardening + resolver-walk-parity tests
+// (fix/serena-untrusted-marker-reader — the "do it right" follow-up to the
+// closed PR #260, whose own tests MISSED the file-target walk regression).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// R1. THE critical regression. absPath is a real FILE inside a .serena-marked
+//     project. resolveSerenaProjectRoot must walk to the PARENT directory that
+//     owns the marker (mirroring AncestorWalk), NOT probe
+//     `<file>/.serena/project.yml` (which ENOTDIRs on POSIX and aborted the walk
+//     in the closed PR). This regression only manifests on POSIX (Windows Lstat
+//     on `<file>\.serena\...` returns a different, non-ENOTDIR error), so the
+//     assertion is meaningful under GOOS=linux. We assert the END-TO-END
+//     auto-register registers (walks file → parent root) so a future
+//     resolver-walk regression is caught at the contract level, not just a unit.
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_FileTargetInsideProject_WalksToParent(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	// A real FILE nested inside the project (the path an MCP tool-call commonly
+	// names — e.g. the file the agent is editing), NOT the project dir itself.
+	srcDir := filepath.Join(root, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	fileTarget := filepath.Join(srcDir, "main.go")
+	if err := os.WriteFile(fileTarget, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write file target: %v", err)
+	}
+
+	// Pre-check the unit directly so a failure points at the walk, not the whole
+	// pipeline. This is the exact assertion the closed PR's tests omitted.
+	gotRoot, err := resolveSerenaProjectRoot(fileTarget)
+	if err != nil {
+		t.Fatalf("resolveSerenaProjectRoot(%q) = error %v; want it to walk to the parent project root (file-target walk parity with AncestorWalk)", fileTarget, err)
+	}
+	if gotRoot != root {
+		t.Fatalf("resolveSerenaProjectRoot(%q) = %q, want the marker-owning parent %q", fileTarget, gotRoot, root)
+	}
+
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), fileTarget)
+	if err != nil {
+		t.Fatalf("auto-register from a file target inside the project must succeed (walk to parent): %v", err)
+	}
+	if entry == nil {
+		t.Fatal("entry = nil, want the registered parent-root entry")
+	}
+	if entry.WorkspacePath != mustCanonical(t, root) {
+		t.Errorf("entry.WorkspacePath = %q, want the canonical project root %q (walked from the file target)", entry.WorkspacePath, mustCanonical(t, root))
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1 (file-target call registers the parent root)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R2. Oversized marker (>64 KiB) → rejected by the shared reader, BEFORE any
+//     install/registry mutation. Exercises the call-site path
+//     (AutoRegisterSerenaWorkspace → readSerenaProjectYMLLanguages →
+//     ReadUntrustedSerenaProjectYML).
+// ---------------------------------------------------------------------------
+
+func TestAutoRegisterSerena_OversizedMarker_Rejected(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not run for an oversized (rejected) marker")
+		return "", nil
+	})
+
+	// A valid languages line plus padding that pushes the file past the 64 KiB
+	// cap. A comment line keeps the YAML parseable IF it were ever parsed — but
+	// the size gate must reject it before the parse.
+	body := validSerenaMarkerYAML + "# " + strings.Repeat("A", maxSerenaProjectYMLBytes) + "\n"
+	root := writeSerenaMarker(t, t.TempDir(), body)
+
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected an oversized-marker rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "cap") {
+		t.Fatalf("error = %v, want it to name the byte cap", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after an oversized-marker reject, want 0 (rejected before any mutation)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R3. Symlink at the marker path → refused (never followed). Guarded by a
+//     symlink-capability skip (this repo has known symlink-test-host
+//     sensitivity: Windows non-admin lacks SeCreateSymbolicLinkPrivilege).
+//     Exercises the shared reader directly so the regular-file refusal is
+//     asserted independent of the walk (the walk treats a symlinked marker as a
+//     hit — parity with AncestorWalk — and the READER is what refuses it).
+// ---------------------------------------------------------------------------
+
+func TestReadUntrustedSerenaProjectYML_SymlinkRejected(t *testing.T) {
+	dir := t.TempDir()
+	realTarget := filepath.Join(dir, "real-project.yml")
+	if err := os.WriteFile(realTarget, []byte(validSerenaMarkerYAML), 0o644); err != nil {
+		t.Fatalf("write real target: %v", err)
+	}
+	link := filepath.Join(dir, "project.yml")
+	if err := os.Symlink(realTarget, link); err != nil {
+		t.Skipf("symlink unsupported (likely Windows non-admin / no SeCreateSymbolicLinkPrivilege): %v", err)
+	}
+
+	_, err := ReadUntrustedSerenaProjectYML(context.Background(), link)
+	if err == nil {
+		t.Fatal("expected a symlink-marker refusal, got nil (the reader must NEVER follow a symlinked marker)")
+	}
+	if !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("error = %v, want it to name the regular-file requirement", err)
+	}
+}
+
+// R3b. Symlinked marker rejected end-to-end through auto-register too (the walk
+//      finds it as a hit, the reader refuses it). Same symlink-capability skip.
+func TestAutoRegisterSerena_SymlinkMarker_Rejected(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not run for a symlinked (refused) marker")
+		return "", nil
+	})
+
+	root := t.TempDir()
+	serenaDir := filepath.Join(root, ".serena")
+	if err := os.MkdirAll(serenaDir, 0o755); err != nil {
+		t.Fatalf("mkdir .serena: %v", err)
+	}
+	realTarget := filepath.Join(root, "real-project.yml")
+	if err := os.WriteFile(realTarget, []byte(validSerenaMarkerYAML), 0o644); err != nil {
+		t.Fatalf("write real target: %v", err)
+	}
+	marker := filepath.Join(serenaDir, "project.yml")
+	if err := os.Symlink(realTarget, marker); err != nil {
+		t.Skipf("symlink unsupported (likely Windows non-admin): %v", err)
+	}
+
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected a symlinked-marker refusal end-to-end, got nil")
+	}
+	if !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("error = %v, want it to name the regular-file requirement", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after a symlink-marker refusal, want 0", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R4. Non-regular marker — a DIRECTORY named `project.yml`. Two assertions:
+//       (a) the WALK treats it as a hit (parity with AncestorWalk: any
+//           successful Lstat of the marker stops the walk and returns the dir);
+//       (b) the READER refuses it (not a regular file), so the end-to-end
+//           auto-register fails cleanly with no registry mutation.
+//     This documents the chosen mirror-AncestorWalk behavior: the walk is a
+//     pure routing step; the hardening lives in the shared reader.
+// ---------------------------------------------------------------------------
+
+func TestResolveSerenaProjectRoot_MarkerDir_WalkHitsButReaderRefuses(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must not run when the marker is a directory (reader refuses it)")
+		return "", nil
+	})
+
+	root := t.TempDir()
+	// Create `<root>/.serena/project.yml` AS A DIRECTORY (non-regular marker).
+	markerDir := filepath.Join(root, ".serena", "project.yml")
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		t.Fatalf("mkdir marker dir: %v", err)
+	}
+
+	// (a) The walk hits it (mirror AncestorWalk — any successful Lstat is a hit).
+	gotRoot, err := resolveSerenaProjectRoot(root)
+	if err != nil {
+		t.Fatalf("resolveSerenaProjectRoot(%q) = error %v; want the walk to HIT the non-regular marker dir (mirror AncestorWalk)", root, err)
+	}
+	if gotRoot != root {
+		t.Fatalf("resolveSerenaProjectRoot(%q) = %q, want %q (walk stops at the marker-bearing dir)", root, gotRoot, root)
+	}
+
+	// (b) The reader refuses the directory marker; end-to-end fails, no mutation.
+	_, err = NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected the reader to refuse a directory marker, got nil")
+	}
+	if !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("error = %v, want it to name the regular-file requirement", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after a directory-marker refusal, want 0", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R5. ctx cancellation propagates as context.Canceled (wrapped with %w) from the
+//     shared reader, both before and after the read.
+// ---------------------------------------------------------------------------
+
+func TestReadUntrustedSerenaProjectYML_ContextCancelled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "project.yml")
+	if err := os.WriteFile(path, []byte(validSerenaMarkerYAML), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled before the read
+
+	_, err := ReadUntrustedSerenaProjectYML(ctx, path)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled to propagate (wrapped with %%w)", err)
+	}
+}
+
+// R5b. A nil ctx is normalized to context.Background() (no panic) and reads OK.
+func TestReadUntrustedSerenaProjectYML_NilContextNormalized(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "project.yml")
+	if err := os.WriteFile(path, []byte(validSerenaMarkerYAML), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	//nolint:staticcheck // SA1012: deliberately passing nil to assert normalization.
+	data, err := ReadUntrustedSerenaProjectYML(nil, path)
+	if err != nil {
+		t.Fatalf("nil ctx must be normalized and read cleanly, got: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("want the marker bytes back, got empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R6. The shared reader's size cap directly (unit), independent of the call
+//     sites: exactly-at-cap is accepted, one-over-cap is rejected.
+// ---------------------------------------------------------------------------
+
+func TestReadUntrustedSerenaProjectYML_SizeCapBoundary(t *testing.T) {
+	dir := t.TempDir()
+
+	atCap := filepath.Join(dir, "at-cap.yml")
+	if err := os.WriteFile(atCap, make([]byte, maxSerenaProjectYMLBytes), 0o644); err != nil {
+		t.Fatalf("write at-cap file: %v", err)
+	}
+	if data, err := ReadUntrustedSerenaProjectYML(context.Background(), atCap); err != nil {
+		t.Fatalf("a file exactly at the cap must be accepted, got: %v", err)
+	} else if len(data) != maxSerenaProjectYMLBytes {
+		t.Fatalf("read %d bytes, want exactly the cap %d", len(data), maxSerenaProjectYMLBytes)
+	}
+
+	overCap := filepath.Join(dir, "over-cap.yml")
+	if err := os.WriteFile(overCap, make([]byte, maxSerenaProjectYMLBytes+1), 0o644); err != nil {
+		t.Fatalf("write over-cap file: %v", err)
+	}
+	if _, err := ReadUntrustedSerenaProjectYML(context.Background(), overCap); err == nil {
+		t.Fatal("a file one byte over the cap must be rejected, got nil")
+	} else if !strings.Contains(err.Error(), "cap") {
+		t.Fatalf("error = %v, want it to name the byte cap", err)
+	}
+}
+
+// R6b. Missing marker → bare not-exist error (NOT %w-wrapped) so BOTH
+//      os.IsNotExist(err) and errors.Is(err, os.ErrNotExist) detect it. The
+//      `mcphub workspace register` caller relies on os.IsNotExist, which does
+//      not unwrap %w chains.
+func TestReadUntrustedSerenaProjectYML_MissingMarker_IsNotExistDetectable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.yml")
+	_, err := ReadUntrustedSerenaProjectYML(context.Background(), path)
+	if err == nil {
+		t.Fatal("expected a not-found error for a missing marker, got nil")
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("os.IsNotExist(err) = false for a missing marker; the `workspace register` not-found branch relies on it (err = %v)", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("errors.Is(err, os.ErrNotExist) = false for a missing marker (err = %v)", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// R7. Both call-sites exercise the shared reader. The api side is covered above
+//     (R2/R3b/R4 all flow AutoRegisterSerenaWorkspace →
+//     readSerenaProjectYMLLanguages → ReadUntrustedSerenaProjectYML). This
+//     guards the second call-site signature directly: readSerenaProjectYMLLanguages
+//     now takes a context and honors a cancelled one (proving it routes through
+//     the ctx-aware shared reader, not a bare os.ReadFile).
+// ---------------------------------------------------------------------------
+
+func TestReadSerenaProjectYMLLanguages_HonorsCancelledContext(t *testing.T) {
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := readSerenaProjectYMLLanguages(ctx, root)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled (proves the helper routes through the ctx-aware shared reader)", err)
+	}
+}
+
