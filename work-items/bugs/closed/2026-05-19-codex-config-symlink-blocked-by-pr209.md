@@ -114,4 +114,38 @@ Operators can either:
 
 ## Status
 
-OPEN. Not blocking. Filed to track operator-facing improvement.
+**CLOSED — fixed in PR #217** (commit `9e89abe`, "fix(api): unblock
+Servers matrix on dotfile-symlinked clients + write-broadened state-dir
+parent" — "Fix 1", filed and fixed the same day) and **refined in
+PR #258** (commit `44512e2`, "fix(gui): distinct 'error-symlink'
+status — Servers matrix stops mislabeling symlink-refusal as 'stat
+error'"). Both of this doc's Suggested fixes — #1 (frontend message
+accuracy) and #2 (operator escape hatch) — are implemented.
+
+What landed:
+
+- **Operator escape hatch (Suggested fix #2):** the
+  `MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK` opt-in const
+  (`internal/api/client_write_init.go:180`) plus
+  `OperatorAllowsClientConfigSymlink()`
+  (`internal/api/client_write_init.go:415`) gate the re-introduced
+  `resolveSymlinkForSecureWrite` path (`client_write_init.go:356`, used
+  under the opt-in at `:280-281`). Strict mode
+  (`MCPHUB_REQUIRE_SINGLE_USER_HOME=1`) overrides the opt-in and refuses
+  symlinks unconditionally, so corp-managed hosts keep the PR #209
+  confused-deputy hardening. The "What is NOT a fix" constraints above
+  are respected — the refusal stays default-on; only an explicit
+  operator opt-in resolves it.
+- **Frontend message accuracy (Suggested fix #1):** PR #258 split the
+  generic scan `"error"` into a distinct `"error-symlink"` category.
+  `internal/api/scan.go:161` emits `"error-symlink"` for a refused
+  symlink (and `:153-157` returns `"ok"` when the operator opt-in is
+  set and the target resolves to a regular file), so the matrix renders
+  a symlink-specific diagnostic/tooltip instead of the misleading "stat
+  error" wording.
+
+Verified 2026-06-02 (`9e89abe` and `44512e2` are both ancestors of
+HEAD; `AllowClientConfigSymlinkEnv`, `OperatorAllowsClientConfigSymlink`,
+the opt-in-gated `resolveSymlinkForSecureWrite`, and the
+`"error-symlink"` scan category are all present at HEAD). The doc's
+original "stat error" symptom no longer reproduces with the opt-in set.

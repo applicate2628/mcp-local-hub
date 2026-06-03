@@ -29,8 +29,10 @@ memory/demigrate/gemini-cli: latest backup
 The demigrate path has three fallback sources for the pre-hub-managed
 form: latest backup, `-original` sentinel, `managed-entries.json` marker.
 Sources 1+2 are in hub-managed form (separate concern, see [2026-05-15
-demigrate-fallback bug](2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)),
-so the third source is load-bearing. It fails on the parent-DACL gate.
+demigrate-fallback bug](../2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)),
+so the third source is load-bearing. It used to fail on the parent-DACL
+gate; that gate now relaxes under default-relax (see Status — fixed in
+PR #217).
 
 ## Affected parent DACL on user's machine
 
@@ -176,8 +178,39 @@ needing any env-var bypass.
 
 ## Status
 
-OPEN. Not blocking. Filed to track operator-facing improvement.
-Related: [2026-05-15 demigrate-fallback bug](2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)
+**CLOSED — fixed in PR #217** (commit `9e89abe`, 2026-05-19 06:07:50 +0300,
+"unblock Servers matrix on dotfile-symlinked clients + write-broadened
+state-dir parent"). The preferred fix (Suggested fix #1, inode-anchored
+re-read) shipped that same hour — **61 minutes after this doc was filed.**
+
+What landed: `readHubMcpStateFile` now reads via `readStateFileInodeAnchored`
+(`hub_mcp_state.go:205` → new `hub_mcp_state_read_inode_{windows,posix}.go`),
+binding the read to the verified parent-handle inode (`ntOpenRelative` /
+`openat` + handle-bound `ReadFile` / `unix.Read`) and closing the
+fd-verify → path-read TOCTOU window at the kernel level. With the swap
+window closed, both the read path and `writeHubMcpStateFile`
+(`hub_mcp_state.go:90-163`) safely relax write-broadened parents under
+default-relax (strict mode `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` unchanged).
+The legacy reject path at `hub_mcp_state_dacl_windows.go:143-145`
+(`VerifyHubMcpStateDACL`) now has **zero production callers** — reachable
+only from tests. Demigrate Apply on broadened-parent solo-dev hosts is
+unblocked.
+
+Verified 2026-06-02 (4 checks: `9e89abe` is an ancestor of HEAD; the new
+read-inode files are present; `grep VerifyHubMcpStateDACL(` finds no
+non-test caller; the in-code comment at `hub_mcp_state.go:183-195` names
+this very doc as the fix target). The "OPEN" status was never reconciled
+after the fix landed; `TRIAGE-2026-05-28.md` row 15 re-flagged it
+"still-relevant-P2" from a pr-review pass that read this stale doc, not the
+current source.
+
+**NOT closed by this fix** — the sibling test bug
+[2026-05-29-api-symlink-dacl-tests-fail-on-broadened-parent-host.md](../2026-05-29-api-symlink-dacl-tests-fail-on-broadened-parent-host.md)
+remains open: its failing tests exercise the WRITE-side refusal +
+symlink-create privilege (host-environment-dependent harness defects),
+which the read-side inode fix did not touch.
+
+Related: [2026-05-15 demigrate-fallback bug](../2026-05-15-demigrate-fallback-when-no-pre-hub-form.md)
 (separate concern that the latest backup + sentinel both held
 hub-managed form — that's a different defect class about backup
 generation, independent of the DACL gate).

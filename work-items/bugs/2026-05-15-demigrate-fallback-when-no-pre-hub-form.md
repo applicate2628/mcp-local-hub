@@ -266,3 +266,62 @@ successfully (no pre-hub form ever existed → RemoveEntry path
 fires under marker confirmation). User-direct entries would
 restore from the appropriate older backup instead of being
 deleted.
+
+## Status
+
+**OPEN (partially fixed)** — the originally-reported case is fixed, but the
+broad "должно работать всегда" mandate is NOT fully met.
+
+PR #257 (`f144dea`, "fix(demigrate): legacy-codename backup fallback —
+cross-rename entries restore, never delete") fixed the **originally-reported
+failure**: the April-2026 codename-rename case where the only pre-hub form
+lived in a legacy `bak-mcp-sync-*` backup. What landed in
+`internal/api/demigrate.go`:
+
+1. Current-codename backup iteration (`demigrate.go:172-188`) walks every
+   `bak-mcp-local-hub-*` backup, skipping `ErrBackupEntryAlreadyMigrated` /
+   `errBackupMissingEntry` candidates.
+2. `tryLegacyPrefixRestore` (`demigrate.go:202`, defined `demigrate.go:369`
+   — the new #257 piece) consults the legacy pre-rename `mcp-sync` / phase2
+   / plain-date backups when no current-codename backup holds a pre-hub
+   form. Restores the originally-reported gemini case (`time` pre-hub state
+   lived only in `settings.json.bak-2026-04-15-mcp-sync`) instead of deleting.
+3. `tryMarkerOrBackfillRemove` last-resort (`demigrate.go:219`, defined
+   `demigrate.go:282`) fires ONLY when neither current- nor legacy-codename
+   backups hold a pre-hub form AND positive ownership evidence (marker, or
+   URL-backfill corroborated by ≥1 backup) proves mcphub installed the
+   entry. The `restoredFrom == ""` ordering guard (lines 201/218) makes
+   restore strictly precede deletion, preserving the PR #218 anti-deletion
+   invariant. Supporting: per-adapter `BackupEntryIsHubManaged`
+   (`internal/clients/clients.go:212`) + `LegacyBackupsNewestFirst`
+   (`clients.go:968`).
+
+**Residual (why this stays OPEN — codex bot flagged it on PR #259):** the
+broad "должно работать всегда" mandate (§Design "Mandatory: Always-succeed
+fallback") is NOT fully satisfied. `tryMarkerOrBackfillRemove` deliberately
+**fails closed** for a *pre-marker hub-managed entry whose backups were all
+pruned*: no marker (pre-marker), no backup to corroborate the URL-backfill
+(`allowURLBackfill = len(backups)>0 || sawLegacy` — the safety gate added in
+PR #257 r3 to stop the data-loss the bot caught there), and no pre-hub backup
+to restore → demigrate Apply fails for that entry. This is the **safe**
+choice (deleting without ownership proof is exactly the reverted-by-#219
+PR #218 regression that deleted 7 user-direct entries), but it IS an
+operator-visible failure case the original mandate wanted eliminated.
+
+**Decision needed** (the mandate was the user's "должно работать всегда"):
+either **(a)** ACCEPT the residual as a safe tradeoff and close — demigrate
+succeeds whenever a pre-hub form exists or ownership is provable, failing
+closed only for the vanishingly-rare pre-marker + all-backups-pruned case;
+or **(b)** add an operator-confirmed force-remove path (an explicit "yes,
+delete this entry" UI affordance) for that case so demigrate can always
+succeed without silently risking user-direct deletion.
+
+Verified 2026-06-02: `f144dea` ancestor of HEAD; the three-tier ordering +
+`restoredFrom == ""` guard + `tryLegacyPrefixRestore` +
+`BackupEntryIsHubManaged` + `LegacyBackupsNewestFirst` all present; the
+residual fail-closed confirmed at the `allowURLBackfill` gate. An earlier
+"CLOSED — mandate satisfied" status on this doc was inaccurate and is
+corrected here.
+
+The "Failed attempt: PR #218 (reverted by PR #219)" and "Proper-fix design
+(deferred)" sections above are retained as execution history.

@@ -5,7 +5,7 @@ found-by: g4-phase3 r6 verification on PR #157
 found-on: 2026-05-12
 project: mcp-local-hub
 context: pre-existing master flake
-status: open
+status: closed
 related-pr: pending Phase 3 (feat/g4-phase3-resolver-sessions-aggregator)
 ---
 
@@ -68,3 +68,24 @@ Skip this test on local pre-push verification with
 `-skip 'TestToolCatalog_GoldenAgainstUpstream'`. CI runs on a runner
 without `gopls` installed, so the test self-skips via the existing
 `exec.LookPath` check and the suite passes cleanly there.
+
+## Status
+
+**CLOSED — fixed in commit `d27c10e`** ("feat(api): embedded tool
+catalog + synthetic initialize/tools-list"). The suggested fix (a
+wall-clock cap inside `captureToolsList`) is implemented: HEAD
+`internal/api/tool_catalog_test.go:188` wraps the helper in
+`context.WithTimeout(context.Background(), 20*time.Second)` and drives
+the subprocess via `exec.CommandContext`, so a wedged `gopls mcp`
+child is killed at 20 s instead of hanging the full 5-minute deadline.
+A `defer` at `internal/api/tool_catalog_test.go:210-213` calls
+`cmd.Process.Kill()` + `cmd.Wait()` on every exit path, and a
+background goroutine drains stderr (`:214`) so the child never blocks
+on a full pipe. The exact wall-clock-cap remedy this doc requested.
+
+Verified 2026-06-02 (`d27c10e` is an ancestor of HEAD; the
+`context.WithTimeout(..., 20*time.Second)` + `Process.Kill()`/`Wait()`
+defer + stderr drain are all present at HEAD in `captureToolsList`).
+The old "the hang point" line refs in the Related-code section above
+(`:97-160`, `:128`) predate the rewrite and no longer line up; the
+current cap lives at `tool_catalog_test.go:186-214`.
