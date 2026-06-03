@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"runtime"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/api"
 )
 
 // TestDirOnPath exercises the PATH-env-var parser used by the install
@@ -89,6 +92,74 @@ func TestDirOnPath(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: dirOnPath(%q, %q) = %v, want %v",
 				tc.name, tc.dir, tc.pathEnv, got, tc.want)
+		}
+	}
+}
+
+func TestRunSetupLSPClientRouterWiring_ReportsEnsureResult(t *testing.T) {
+	prior := setupLSPClientRouterFn
+	defer func() { setupLSPClientRouterFn = prior }()
+
+	var gotRollback bool
+	setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, error) {
+		gotRollback = rollback
+		return &api.LSPClientRouterReport{
+			Backups: []api.LSPClientRouterBackup{{Client: "codex-cli", Path: "config.toml.bak-mcp-local-hub-test"}},
+			Applied: []api.LSPClientRouterChange{{
+				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go", URL: "http://localhost:9125/lsp/go/mcp",
+			}},
+		}, nil
+	}
+
+	var out bytes.Buffer
+	if err := runSetupLSPClientRouter(&out, false); err != nil {
+		t.Fatalf("runSetupLSPClientRouter: %v", err)
+	}
+	if gotRollback {
+		t.Fatal("setup wiring called rollback path")
+	}
+	text := out.String()
+	for _, want := range []string{
+		"backup before LSP router wiring",
+		"codex-cli",
+		"mcp-language-server-go",
+		"http://localhost:9125/lsp/go/mcp",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestRunSetupLSPClientRouterRollback_ReportsRestoreResult(t *testing.T) {
+	prior := setupLSPClientRouterFn
+	defer func() { setupLSPClientRouterFn = prior }()
+
+	var gotRollback bool
+	setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, error) {
+		gotRollback = rollback
+		return &api.LSPClientRouterReport{
+			Backups: []api.LSPClientRouterBackup{{Client: "codex-cli", Path: "config.toml.bak-mcp-local-hub-rollback"}},
+			Restored: []api.LSPClientRouterChange{{
+				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go",
+			}},
+		}, nil
+	}
+
+	var out bytes.Buffer
+	if err := runSetupLSPClientRouter(&out, true); err != nil {
+		t.Fatalf("runSetupLSPClientRouter rollback: %v", err)
+	}
+	if !gotRollback {
+		t.Fatal("setup rollback did not call rollback path")
+	}
+	text := out.String()
+	for _, want := range []string{
+		"backup before LSP router rollback",
+		"restored codex-cli entry mcp-language-server-go",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
 		}
 	}
 }
