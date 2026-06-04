@@ -61,7 +61,7 @@ Moving or rebuilding the binary later: run `setup` again from the new location. 
 
 ## First install
 
-Ten servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`, `gdb`, `lldb`, `perftools`. Each is installed independently. Start with Serena (Phase 1 flagship):
+Eleven servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`, `gdb`, `lldb`, `perftools`, `repomix`. Each is installed independently. Start with Serena (Phase 1 flagship):
 
 ```bash
 # Preview what would happen (no side effects)
@@ -275,7 +275,7 @@ The relay binary path is the canonical `~/.local/bin/mcphub.exe` that `mcphub se
 
 ## Manifest resolution model
 
-Shipped manifests live under `servers/<name>/manifest.yaml` in the source tree and are embedded into `mcphub.exe` at build time via `//go:embed`. The canonical installed binary at `~/.local/bin/mcphub.exe` resolves manifests from its embedded FS first; CLI commands (`manifest list`, `install`, `scan`, `migrate`, `status`, `relay`) all see the same 10 shipped servers regardless of the invocation's cwd. Dev flow: a newly-added `servers/<name>/manifest.yaml` that has not yet been compiled into the binary is still picked up from disk via a secondary lookup under `defaultManifestDir()` — useful for editing a manifest and immediately testing with `./bin/mcphub.exe manifest get <name>` without a full build cycle.
+Shipped manifests live under `servers/<name>/manifest.yaml` in the source tree and are embedded into `mcphub.exe` at build time via `//go:embed`. The canonical installed binary at `~/.local/bin/mcphub.exe` resolves manifests from its embedded FS first; CLI commands (`manifest list`, `install`, `scan`, `migrate`, `status`, `relay`) all see the same 11 shipped servers regardless of the invocation's cwd. Dev flow: a newly-added `servers/<name>/manifest.yaml` that has not yet been compiled into the binary is still picked up from disk via a secondary lookup under `defaultManifestDir()` — useful for editing a manifest and immediately testing with `./bin/mcphub.exe manifest get <name>` without a full build cycle.
 
 Write operations (`manifest create` / `edit` / `delete`) still write to disk only — the embedded FS is immutable at runtime.
 

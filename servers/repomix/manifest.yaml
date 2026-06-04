@@ -4,7 +4,7 @@ transport: stdio-bridge
 command: npx
 base_args:
   - "-y"
-  - "repomix@latest"
+  - "repomix@1.14.1"
   - "--mcp"
 
 daemons:

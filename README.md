@@ -61,7 +61,7 @@ pwsh ./build.ps1
 
 # 3. Install the MCP servers you want shared
 ./mcphub.exe install --server serena       # default clients: Claude/Codex/Cursor
-./mcphub.exe install --all                 # all 10 servers, default clients
+./mcphub.exe install --all                 # all 11 servers, default clients
 
 # Optional client targeting
 ./mcphub.exe install --server serena --clients qwen-cli,vscode
@@ -74,7 +74,7 @@ claude mcp get serena    # shows: Status: ✓ Connected, Type: http
 
 Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTALL.md).
 
-## Ten shipped servers
+## Eleven shipped servers
 
 | Server | Port | Transport | Notes |
 |---|---:|---|---|
@@ -88,6 +88,7 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 | **gdb** | 9129 | stdio-bridge (uv run) | Multi-debugger with session management |
 | **lldb** | 9130 | **embedded Go bridge** | Auto-spawns `lldb.exe`, HTTP-multiplexes concurrent clients onto single TCP connection |
 | **perftools** | 9131 | **embedded Go** | clang-tidy + llvm-objdump + include-what-you-use over real projects; `hyperfine` is **opt-in only** (RCE surface — set `MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`, see INSTALL) |
+| **repomix** | 9133 | stdio-bridge (npx) | Packs a repo into one AI-friendly file; tools `pack_codebase` / `pack_remote_repository` (version-pinned per SECURITY.md) |
 
 Plus **context7** as a direct HTTPS entry (no daemon, no scheduler task).
 
