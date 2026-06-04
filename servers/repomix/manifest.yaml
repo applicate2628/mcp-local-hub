@@ -1,0 +1,37 @@
+name: repomix
+kind: global
+transport: stdio-bridge
+command: npx
+base_args:
+  - "-y"
+  - "repomix@latest"
+  - "--mcp"
+
+daemons:
+  - name: default
+    port: 9133
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
