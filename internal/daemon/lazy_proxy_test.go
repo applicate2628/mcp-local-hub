@@ -85,6 +85,81 @@ func (e *fakeEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest) (*J
 
 func (e *fakeEndpoint) Close() error { e.closed.Store(true); return nil }
 
+type reapingRaceLifecycle struct {
+	mu sync.Mutex
+
+	host   *reapingRaceEndpoint
+	nextID int
+
+	stopStarted           chan struct{}
+	allowStop             chan struct{}
+	materializeDuringStop chan struct{}
+	stopStartedOnce       sync.Once
+	stopReleased          atomic.Bool
+
+	materializeCount atomic.Int32
+	stopCount        atomic.Int32
+}
+
+func newReapingRaceLifecycle() *reapingRaceLifecycle {
+	return &reapingRaceLifecycle{
+		stopStarted:           make(chan struct{}),
+		allowStop:             make(chan struct{}),
+		materializeDuringStop: make(chan struct{}, 1),
+	}
+}
+
+func (f *reapingRaceLifecycle) Kind() string { return "mcp-language-server" }
+
+func (f *reapingRaceLifecycle) Materialize(ctx context.Context) (MCPEndpoint, error) {
+	f.materializeCount.Add(1)
+	select {
+	case <-f.stopStarted:
+		if !f.stopReleased.Load() {
+			select {
+			case f.materializeDuringStop <- struct{}{}:
+			default:
+			}
+		}
+	default:
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.host == nil {
+		f.nextID++
+		f.host = &reapingRaceEndpoint{id: f.nextID}
+	}
+	return f.host, nil
+}
+
+func (f *reapingRaceLifecycle) Stop() error {
+	f.stopCount.Add(1)
+	f.stopStartedOnce.Do(func() { close(f.stopStarted) })
+	<-f.allowStop
+	f.stopReleased.Store(true)
+	f.mu.Lock()
+	f.host = nil
+	f.mu.Unlock()
+	return nil
+}
+
+type reapingRaceEndpoint struct {
+	id     int
+	closed atomic.Bool
+}
+
+func (e *reapingRaceEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
+	if e.closed.Load() {
+		return nil, errors.New("endpoint closed")
+	}
+	return &JSONRPCResponse{Jsonrpc: "2.0", ID: req.ID, Result: json.RawMessage(`{"ok":true}`)}, nil
+}
+
+func (e *reapingRaceEndpoint) Close() error {
+	e.closed.Store(true)
+	return nil
+}
+
 // --- helpers ---------------------------------------------------------------
 
 func newTestProxy(t *testing.T, kind string, f *fakeLifecycle) (*LazyProxy, string) {
@@ -534,6 +609,65 @@ func TestLazyProxy_EnsureMaterializedReservesCachedEndpointAgainstIdleReaper(t *
 	}
 }
 
+func TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse(t *testing.T) {
+	f := newReapingRaceLifecycle()
+	p, _ := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+	p.cfg.IdleBackendTTL = 10 * time.Millisecond
+
+	first, err := p.ensureMaterialized(context.Background())
+	if err != nil {
+		t.Fatalf("initial ensureMaterialized: %v", err)
+	}
+	p.endBackendRequest()
+	p.mu.Lock()
+	p.lastBackendActivity = time.Now().Add(-time.Minute)
+	p.mu.Unlock()
+
+	reapDone := make(chan struct{})
+	go func() {
+		p.reapIdleBackend(time.Now().UTC())
+		close(reapDone)
+	}()
+	<-f.stopStarted
+
+	type materializedResult struct {
+		ep  MCPEndpoint
+		err error
+	}
+	result := make(chan materializedResult, 1)
+	go func() {
+		ep, err := p.ensureMaterialized(context.Background())
+		result <- materializedResult{ep: ep, err: err}
+	}()
+
+	select {
+	case <-f.materializeDuringStop:
+		t.Fatal("Materialize ran while the idle reaper was still stopping the cached lifecycle")
+	case got := <-result:
+		t.Fatalf("ensureMaterialized returned before lifecycle Stop completed: ep=%T err=%v", got.ep, got.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(f.allowStop)
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("ensureMaterialized after reaping: %v", got.err)
+		}
+		if got.ep == first {
+			t.Fatal("ensureMaterialized reused the endpoint being reaped; want a fresh endpoint after Stop")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensureMaterialized did not finish after lifecycle Stop completed")
+	}
+	select {
+	case <-reapDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle reaper did not finish after lifecycle Stop was released")
+	}
+}
+
 func TestLazyProxy_ConcurrentFirstCall(t *testing.T) {
 	// 200ms delay (not 30ms) gives enough headroom for all 10 goroutines to
 	// enter gate.Do before the first materialize completes, even under
@@ -799,6 +933,73 @@ func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T
 	}
 	if got := f.materializeCount.Load(); got != 0 {
 		t.Fatalf("materializeCount = %d, want 0 when cap is reached", got)
+	}
+}
+
+func TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes(t *testing.T) {
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	languages := []string{
+		"python",
+		"go",
+		"rust",
+		"typescript",
+		"javascript",
+		"csharp",
+		"java",
+		"kotlin",
+		"fortran",
+	}
+	for i, lang := range languages {
+		key := fmt.Sprintf("ws%06d", i)
+		seed.Put(api.WorkspaceEntry{
+			WorkspaceKey:  key,
+			WorkspacePath: "D:/test/ws",
+			Language:      lang,
+			Backend:       "mcp-language-server",
+			TaskName:      "mcp-local-hub-lsp-" + key + "-" + lang,
+			Port:          9200 + i,
+			Lifecycle:     api.LifecycleConfigured,
+		})
+	}
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+
+	proxies := make([]*LazyProxy, 0, len(languages))
+	for i, lang := range languages {
+		key := fmt.Sprintf("ws%06d", i)
+		proxies = append(proxies, NewLazyProxy(LazyProxyConfig{
+			WorkspaceKey:        key,
+			WorkspacePath:       "D:/test/ws",
+			Language:            lang,
+			BackendKind:         "mcp-language-server",
+			Port:                9200 + i,
+			Lifecycle:           &fakeLifecycle{kind: "mcp-language-server"},
+			RegistryPath:        regPath,
+			InflightMinRetryGap: 20 * time.Millisecond,
+			ToolsCallDebounce:   100 * time.Millisecond,
+			MaterializedHardCap: DefaultLSPMaterializedHardCap,
+			IdleBackendTTL:      0,
+		}))
+	}
+
+	errs := make(chan error, len(proxies))
+	var wg sync.WaitGroup
+	for _, proxy := range proxies {
+		wg.Add(1)
+		go func(p *LazyProxy) {
+			defer wg.Done()
+			_, err := p.ensureMaterialized(context.Background())
+			errs <- err
+		}(proxy)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("nine default-cap materializations should all succeed; got %v", err)
+		}
 	}
 }
 

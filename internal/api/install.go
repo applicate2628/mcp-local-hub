@@ -553,11 +553,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	if opts.ForceMaterialize && !opts.ProbeHealth {
 		return nil, ErrForceMaterializeRequiresHealth
 	}
-	sch, err := scheduler.New()
-	if err != nil {
-		return nil, err
-	}
-	tasks, err := sch.List("mcp-local-hub-")
+	tasks, err := statusSchedulerTasks()
 	if err != nil {
 		return nil, err
 	}
@@ -629,6 +625,34 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 // JSON-RPC response (either success or JSON-RPC error — classification
 // happens inside the hook).
 var forceMaterializeProbe = sendForceMaterializeTools
+
+var statusSchedulerFactory = scheduler.New
+
+func statusSchedulerTasks() ([]scheduler.TaskStatus, error) {
+	sch, err := statusSchedulerFactory()
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	tasks, err := sch.List("mcp-local-hub-")
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func schedulerUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not implemented") || strings.Contains(msg, "not yet implemented")
+}
 
 // forceMaterializeWorkspaceScoped walks rows and for every workspace-scoped
 // entry (non-empty Language), sends a real no-op tools/call via the

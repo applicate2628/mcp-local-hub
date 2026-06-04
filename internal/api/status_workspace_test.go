@@ -1,9 +1,12 @@
 package api
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/scheduler"
 )
 
 // TestPortForTask_WorkspaceScopedBeatsManifest guards the port-lookup
@@ -217,6 +220,53 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 		if row.TaskName == "mcp-local-hub-serena-default" || row.Language == SerenaLanguageSentinel {
 			t.Fatalf("StatusWithOpts merged non-LSP registry row: %+v", row)
 		}
+	}
+}
+
+func TestStatusWithOpts_MergesRegistryRowsWhenSchedulerUnavailable(t *testing.T) {
+	origScheduler := statusSchedulerFactory
+	statusSchedulerFactory = func() (scheduler.Scheduler, error) {
+		return nil, errors.New("linux scheduler not yet implemented (Phase 0-1 is Windows-first)")
+	}
+	t.Cleanup(func() { statusSchedulerFactory = origScheduler })
+
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	origRegPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
+
+	origBatch := lookupProcessBatch
+	origLookup := lookupProcess
+	lookupProcessBatch = nil
+	lookupProcess = nil
+	t.Cleanup(func() {
+		lookupProcessBatch = origBatch
+		lookupProcess = origLookup
+	})
+
+	reg := NewRegistry(regPath)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "/home/u/project",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9217,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle:     LifecycleActive,
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewAPI().StatusWithOpts(StatusOpts{})
+	if err != nil {
+		t.Fatalf("StatusWithOpts with unavailable scheduler: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1 registry-only workspace row: %+v", len(rows), rows)
+	}
+	if rows[0].TaskName != "mcp-local-hub-lsp-abcd1234-python" || rows[0].Language != "python" {
+		t.Fatalf("row = %+v, want registry-backed python LSP row", rows[0])
 	}
 }
 

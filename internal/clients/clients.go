@@ -342,11 +342,14 @@ func extractStringSlice(raw any) []string {
 // JSON object key for claude/gemini/cursor/vscode/qwen); Command is the
 // raw `command` value from the entry (for diagnostic display);
 // Language is the value extracted from "--lsp <X>" or "--lsp=<X>" in
-// the args list, or "" when the args list does not declare one.
+// the args list, or "" when the args list does not declare one. Args is
+// retained so cleanup callers can scope destructive direct-entry removal
+// to the workspace the entry was originally configured for.
 type LanguageServerStdioEntry struct {
 	Name     string
 	Command  string
 	Language string
+	Args     []string
 }
 
 // matchLanguageServerStdio classifies one parsed entry map as a stdio
@@ -459,6 +462,7 @@ func findLanguageServerStdioInMap(servers map[string]any) []LanguageServerStdioE
 			Name:     name,
 			Command:  cmd,
 			Language: lang,
+			Args:     extractStringSlice(entryMap["args"]),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

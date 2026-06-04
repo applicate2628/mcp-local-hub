@@ -64,7 +64,7 @@ type LazyProxyConfig struct {
 }
 
 const (
-	DefaultLSPMaterializedHardCap   = 8
+	DefaultLSPMaterializedHardCap   = 16
 	DefaultLSPIdleBackendTTL        = 30 * time.Minute
 	DefaultLSPIdleBackendCheckEvery = time.Minute
 )
@@ -92,6 +92,7 @@ type LazyProxy struct {
 
 	mu       sync.Mutex
 	endpoint MCPEndpoint
+	reaping  bool
 	closed   atomic.Bool
 
 	inflightBackendRequests int
@@ -454,14 +455,26 @@ func (p *LazyProxy) handleSSE(w http.ResponseWriter, r *http.Request) {
 // the registry.
 func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error) {
 	// Fast path: cache hit.
-	p.mu.Lock()
-	if p.endpoint != nil {
-		ep := p.endpoint
-		p.beginBackendRequestLocked(time.Now().UTC())
+	for {
+		p.mu.Lock()
+		if p.endpoint != nil {
+			ep := p.endpoint
+			p.beginBackendRequestLocked(time.Now().UTC())
+			p.mu.Unlock()
+			return ep, nil
+		}
+		if !p.reaping {
+			p.mu.Unlock()
+			break
+		}
 		p.mu.Unlock()
-		return ep, nil
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
-	p.mu.Unlock()
 
 	// Slow path: go through the gate. Mark Starting BEFORE entering the gate
 	// so `status` shows "starting" while the singleflight is in-flight.
@@ -605,6 +618,7 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	var ep MCPEndpoint
 	p.mu.Lock()
 	if p.endpoint == nil ||
+		p.reaping ||
 		p.inflightBackendRequests > 0 ||
 		p.lastBackendActivity.IsZero() ||
 		now.Sub(p.lastBackendActivity) < p.cfg.IdleBackendTTL {
@@ -612,6 +626,7 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 		return
 	}
 	ep = p.endpoint
+	p.reaping = true
 	p.endpoint = nil
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
@@ -622,11 +637,17 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 		_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 			p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed,
 			fmt.Sprintf("idle reaper lifecycle stop: %v", err))
+		p.mu.Lock()
+		p.reaping = false
+		p.mu.Unlock()
 		return
 	}
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
+	p.mu.Lock()
+	p.reaping = false
+	p.mu.Unlock()
 }
 
 // onSendFailure handles mid-stream backend death: evict the cached endpoint,

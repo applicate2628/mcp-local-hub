@@ -320,23 +320,47 @@ func TestRegister_RemovesMatchingDirectLanguageServerEntries(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
+	ws := t.TempDir()
+	canonical := mustCanonical(t, ws)
+	other := t.TempDir()
+	otherCanonical := mustCanonical(t, other)
+
 	h.fakeClients.stdioEntries["codex-cli"] = map[string]clients.LanguageServerStdioEntry{
 		"legacy-go": {
 			Name:     "legacy-go",
 			Command:  "mcp-language-server",
 			Language: "gopls",
+			Args:     []string{"--lsp", "gopls", "--workspace", canonical},
 		},
 		"legacy-python": {
 			Name:     "legacy-python",
 			Command:  "mcp-language-server",
 			Language: "pyright-langserver",
+			Args:     []string{"--lsp", "pyright-langserver", "--workspace", canonical},
+		},
+		"other-workspace-go": {
+			Name:     "other-workspace-go",
+			Command:  "mcp-language-server",
+			Language: "gopls",
+			Args:     []string{"--lsp", "gopls", "--workspace", otherCanonical},
+		},
+		"ambiguous-go": {
+			Name:     "ambiguous-go",
+			Command:  "mcp-language-server",
+			Language: "gopls",
+			Args:     []string{"--lsp", "gopls"},
 		},
 	}
 	h.fakeClients.allStdioEntries["codex-cli"] = map[string]clients.StdioEntry{
 		"go": {
 			Name:    "go",
 			Command: "gopls",
-			Args:    []string{"mcp"},
+			Args:    []string{"mcp", "--workspace", canonical},
+		},
+		"other-gopls": {
+			Name:    "other-gopls",
+			Command: "gopls",
+			Args:    []string{"mcp", "--workspace", otherCanonical},
 		},
 		"custom-gopls": {
 			Name:    "custom-gopls",
@@ -345,7 +369,7 @@ func TestRegister_RemovesMatchingDirectLanguageServerEntries(t *testing.T) {
 		},
 	}
 
-	_, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), t.TempDir(), []string{"go"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	_, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{Writer: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -355,6 +379,15 @@ func TestRegister_RemovesMatchingDirectLanguageServerEntries(t *testing.T) {
 	}
 	if _, ok := h.fakeClients.allStdioEntries["codex-cli"]["go"]; ok {
 		t.Fatal("direct gopls mcp entry was not removed")
+	}
+	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["other-workspace-go"]; !ok {
+		t.Fatal("direct --lsp entry for another workspace was removed")
+	}
+	if _, ok := h.fakeClients.allStdioEntries["codex-cli"]["other-gopls"]; !ok {
+		t.Fatal("direct gopls mcp entry for another workspace was removed")
+	}
+	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["ambiguous-go"]; !ok {
+		t.Fatal("direct --lsp entry without --workspace was removed")
 	}
 	if _, ok := h.fakeClients.allStdioEntries["codex-cli"]["custom-gopls"]; !ok {
 		t.Fatal("unrelated direct gopls non-mcp entry was removed")
@@ -1495,6 +1528,45 @@ func TestUnregister_FullRemovesAllLanguages(t *testing.T) {
 	// Client entries removed too.
 	if n := countEntries(h.fakeClients); n != 0 {
 		t.Errorf("client entries remain after unregister: %d", n)
+	}
+}
+
+func TestUnregister_PreservesSharedLSPRouterEntry(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	ws := t.TempDir()
+	canonical := mustCanonical(t, ws)
+	wsKey := WorkspaceKey(canonical)
+	routerName := LSPRouterEntryName("go")
+	reg := NewRegistry(h.regPath)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": routerName},
+		Lifecycle:     LifecycleConfigured,
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"][routerName] = LSPRouterURL(7777, "go")
+
+	var out bytes.Buffer
+	rpt, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &out)
+	if err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+	if !slices.Contains(rpt.Removed, "go") {
+		t.Fatalf("Removed = %v, want go", rpt.Removed)
+	}
+	if got := h.fakeClients.entries["codex-cli"][routerName]; got != LSPRouterURL(7777, "go") {
+		t.Fatalf("shared router entry after unregister = %q, want preserved router URL", got)
+	}
+	if !strings.Contains(out.String(), "preserved shared LSP router entry") {
+		t.Fatalf("output = %q, want preserved shared LSP router entry message", out.String())
 	}
 }
 

@@ -239,13 +239,14 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 		report.Entries = append(report.Entries, entry)
 	}
-	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, allClients, w)...)
+	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, allClients, w)...)
 	return report, nil
 }
 
 func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	bySpec map[string]config.LanguageSpec,
 	languages []string,
+	canonicalWorkspace string,
 	allClients map[string]registerClient,
 	w io.Writer,
 ) []string {
@@ -273,13 +274,13 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 			warnings = append(warnings, fmt.Sprintf("%s direct LSP scan failed: %v", clientName, err))
 			continue
 		}
-		matches := matchingDirectLanguageServerEntries(entries, aliases)
+		matches := matchingDirectLanguageServerEntries(entries, aliases, canonicalWorkspace)
 		if aliases["go"] || aliases["gopls"] {
 			stdioEntries, err := client.AllStdioEntries()
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf("%s direct stdio scan failed: %v", clientName, err))
 			} else {
-				matches = append(matches, matchingDirectGoplsMCPEntries(stdioEntries)...)
+				matches = append(matches, matchingDirectGoplsMCPEntries(stdioEntries, canonicalWorkspace)...)
 			}
 		}
 		matches = dedupeDirectLanguageServerEntries(matches)
@@ -310,29 +311,59 @@ func addLSPCleanupAlias(aliases map[string]bool, value string) {
 	}
 }
 
-func matchingDirectLanguageServerEntries(entries []clients.LanguageServerStdioEntry, aliases map[string]bool) []clients.LanguageServerStdioEntry {
+func matchingDirectLanguageServerEntries(entries []clients.LanguageServerStdioEntry, aliases map[string]bool, canonicalWorkspace string) []clients.LanguageServerStdioEntry {
 	var out []clients.LanguageServerStdioEntry
 	for _, entry := range entries {
-		if lspCleanupAliasMatches(entry.Language, aliases) {
+		if lspCleanupAliasMatches(entry.Language, aliases) && directEntryWorkspaceMatches(entry.Args, canonicalWorkspace) {
 			out = append(out, entry)
 		}
 	}
 	return out
 }
 
-func matchingDirectGoplsMCPEntries(entries []clients.StdioEntry) []clients.LanguageServerStdioEntry {
+func matchingDirectGoplsMCPEntries(entries []clients.StdioEntry, canonicalWorkspace string) []clients.LanguageServerStdioEntry {
 	var out []clients.LanguageServerStdioEntry
 	for _, entry := range entries {
 		if !isCommandBasename(entry.Command, "gopls") || !stringSliceContainsFold(entry.Args, "mcp") {
+			continue
+		}
+		if !directEntryWorkspaceMatches(entry.Args, canonicalWorkspace) {
 			continue
 		}
 		out = append(out, clients.LanguageServerStdioEntry{
 			Name:     entry.Name,
 			Command:  entry.Command,
 			Language: "gopls",
+			Args:     entry.Args,
 		})
 	}
 	return out
+}
+
+func directEntryWorkspaceMatches(args []string, canonicalWorkspace string) bool {
+	raw := directEntryWorkspaceArg(args)
+	if raw == "" {
+		return false
+	}
+	canonical, err := CanonicalWorkspacePathForCleanup(raw)
+	if err != nil {
+		return false
+	}
+	return canonical == canonicalWorkspace
+}
+
+func directEntryWorkspaceArg(args []string) string {
+	for i, arg := range args {
+		for _, flag := range []string{"--workspace", "-workspace", "--dir", "-dir", "--directory", "-directory"} {
+			if arg == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+			if value, ok := strings.CutPrefix(arg, flag+"="); ok {
+				return value
+			}
+		}
+	}
+	return ""
 }
 
 func dedupeDirectLanguageServerEntries(entries []clients.LanguageServerStdioEntry) []clients.LanguageServerStdioEntry {
@@ -889,6 +920,10 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 			if !ok || !client.Exists() {
 				continue
 			}
+			if shouldPreserveSharedLSPRouterEntry(client, entryName, lang) {
+				fmt.Fprintf(w, "✓ preserved shared LSP router entry %s in %s\n", entryName, clientName)
+				continue
+			}
 			if err := client.RemoveEntry(entryName); err != nil {
 				report.Warnings = append(report.Warnings,
 					fmt.Sprintf("remove entry %s from %s: %v", entryName, clientName, err))
@@ -904,6 +939,17 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		return report, fmt.Errorf("persist registry: %w", err)
 	}
 	return report, nil
+}
+
+func shouldPreserveSharedLSPRouterEntry(client registerClient, entryName, language string) bool {
+	if entryName != LSPRouterEntryName(language) {
+		return false
+	}
+	live, err := client.GetEntry(entryName)
+	if err != nil {
+		return false
+	}
+	return entryIsLSPRouterForLanguage(live, language)
 }
 
 // ResolveEntryName returns the client-config entry name to use for a given
