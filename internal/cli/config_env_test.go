@@ -165,13 +165,15 @@ func TestConfigEnvUnsetRemovesOnlyRequestedKey(t *testing.T) {
 	}
 }
 
-func TestDaemonEnvRefsWithOverlayWinsBeforeSecretResolve(t *testing.T) {
+func TestDaemonOverlayEnvLoadsExpandedOperatorRow(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	t.Setenv("Path", `C:\parent\bin`)
 	if err := daemon_env_overlay.WriteOverlay(filepath.Join(stateDir, overlayBaseName), func(ov *daemon_env_overlay.Overlay) error {
 		ov.Daemons[`\mcp-local-hub-memory-default`] = daemon_env_overlay.DaemonRow{
 			Source: "operator",
 			Env: map[string]string{
+				"Path":             `D:\memory\bin;${parent_path}`,
 				"MEMORY_FILE_PATH": `D:\memory\memory.jsonl`,
 			},
 		}
@@ -180,18 +182,15 @@ func TestDaemonEnvRefsWithOverlayWinsBeforeSecretResolve(t *testing.T) {
 		t.Fatalf("seed overlay: %v", err)
 	}
 
-	got, err := daemonEnvRefsWithOverlay("memory", "default", map[string]string{
-		"MEMORY_FILE_PATH": "secret:OLD_MEMORY_PATH",
-		"API_TOKEN":        "secret:UNCHANGED",
-	})
+	got, err := daemonOverlayEnv("memory", "default")
 	if err != nil {
-		t.Fatalf("daemonEnvRefsWithOverlay: %v", err)
+		t.Fatalf("daemonOverlayEnv: %v", err)
 	}
 	if got["MEMORY_FILE_PATH"] != `D:\memory\memory.jsonl` {
 		t.Fatalf("MEMORY_FILE_PATH = %q, want override", got["MEMORY_FILE_PATH"])
 	}
-	if got["API_TOKEN"] != "secret:UNCHANGED" {
-		t.Fatalf("API_TOKEN = %q, want untouched secret ref", got["API_TOKEN"])
+	if got["Path"] != `D:\memory\bin;C:\parent\bin` {
+		t.Fatalf("Path = %q, want parent path expanded", got["Path"])
 	}
 }
 

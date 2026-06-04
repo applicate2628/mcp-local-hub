@@ -28,16 +28,19 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 	rows := make([]map[string]any, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
 		taskName := canonicalSupervisorTaskName(d.TaskName)
-		server, daemon := api.ParseManagedTaskName(taskName)
-		if server == "" && d.Server != "" {
-			server = d.Server
+		server := strings.TrimSpace(d.Server)
+		daemon := strings.TrimSpace(d.Daemon)
+		if server == "" || daemon == "" {
+			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
+			if server == "" {
+				server = parsedServer
+			}
+			if daemon == "" {
+				daemon = parsedDaemon
+			}
 		}
 		if daemon == "" {
-			if d.Daemon != "" {
-				daemon = d.Daemon
-			} else {
-				daemon = "default"
-			}
+			daemon = "default"
 		}
 		runtimeState, ok := daemonStates[taskName]
 		if !ok {

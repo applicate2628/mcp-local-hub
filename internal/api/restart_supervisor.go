@@ -38,15 +38,19 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 		if isSupervisorRestartMaintenanceTask(d.TaskName) {
 			continue
 		}
-		rowServer, rowDaemon := ParseManagedTaskName(d.TaskName)
-		if rowServer == "" {
-			rowServer = d.Server
+		rowServer := strings.TrimSpace(d.Server)
+		rowDaemon := strings.TrimSpace(d.Daemon)
+		if rowServer == "" || rowDaemon == "" {
+			parsedServer, parsedDaemon := ParseManagedTaskName(d.TaskName)
+			if rowServer == "" {
+				rowServer = parsedServer
+			}
+			if rowDaemon == "" {
+				rowDaemon = parsedDaemon
+			}
 		}
 		if rowDaemon == "" {
-			rowDaemon = d.Daemon
-			if rowDaemon == "" {
-				rowDaemon = "default"
-			}
+			rowDaemon = "default"
 		}
 		if server != "" && rowServer != server {
 			continue

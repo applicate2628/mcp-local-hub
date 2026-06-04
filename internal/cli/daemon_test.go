@@ -11,6 +11,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/api/daemon_env_overlay"
+	"mcp-local-hub/internal/secrets"
 )
 
 // TestWriteLaunchFailure_AppendsTimestampedLine asserts the DM-3 helper
@@ -259,6 +263,86 @@ func TestDaemonCmd_RunFailure_AppendsToLog(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Errorf("log missing %q; got:\n%s", want, content)
 		}
+	}
+}
+
+func TestDaemonEnvWithOverlayResolvesManifestBeforeLiteralOverlay(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	t.Setenv("MANIFEST_FROM_PARENT", "resolved-from-parent")
+	t.Setenv("BAR", "parent-value-that-must-not-replace-overlay")
+
+	if err := daemon_env_overlay.WriteOverlay(filepath.Join(stateDir, overlayBaseName), func(ov *daemon_env_overlay.Overlay) error {
+		ov.Daemons[`\mcp-local-hub-memory-default`] = daemon_env_overlay.DaemonRow{
+			Source: "operator",
+			Env: map[string]string{
+				"FOO":   "$BAR",
+				"TOKEN": "secret:BAR",
+			},
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed overlay: %v", err)
+	}
+
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+	if err := secrets.InitVault(keyPath, vaultPath); err != nil {
+		t.Fatalf("InitVault: %v", err)
+	}
+	vault, err := secrets.OpenVault(keyPath, vaultPath)
+	if err != nil {
+		t.Fatalf("OpenVault: %v", err)
+	}
+	if err := vault.Set("MANIFEST_SECRET", "resolved-secret"); err != nil {
+		t.Fatalf("vault.Set: %v", err)
+	}
+
+	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+		"FROM_ENV":    "$MANIFEST_FROM_PARENT",
+		"FROM_SECRET": "secret:MANIFEST_SECRET",
+		"FOO":         "manifest-value",
+	}, secrets.NewResolver(vault, nil))
+	if err != nil {
+		t.Fatalf("daemonEnvWithOverlay: %v", err)
+	}
+	if env["FROM_ENV"] != "resolved-from-parent" {
+		t.Fatalf("FROM_ENV = %q, want manifest env reference resolved", env["FROM_ENV"])
+	}
+	if env["FROM_SECRET"] != "resolved-secret" {
+		t.Fatalf("FROM_SECRET = %q, want manifest secret resolved", env["FROM_SECRET"])
+	}
+	if env["FOO"] != "$BAR" {
+		t.Fatalf("FOO = %q, want literal overlay value", env["FOO"])
+	}
+	if env["TOKEN"] != "secret:BAR" {
+		t.Fatalf("TOKEN = %q, want literal overlay value", env["TOKEN"])
+	}
+}
+
+func TestDaemonOverlayEnvKeepsLiteralValuesWhenParentPathExpansionFails(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+
+	if err := daemon_env_overlay.WriteOverlay(filepath.Join(stateDir, overlayBaseName), func(ov *daemon_env_overlay.Overlay) error {
+		ov.Daemons[`\mcp-local-hub-memory-default`] = daemon_env_overlay.DaemonRow{
+			Source: "operator",
+			Env: map[string]string{
+				"FOO": "${not_parent_path}",
+			},
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed overlay: %v", err)
+	}
+
+	env, err := daemonOverlayEnv("memory", "default")
+	if err != nil {
+		t.Fatalf("daemonOverlayEnv: %v", err)
+	}
+	if env["FOO"] != "${not_parent_path}" {
+		t.Fatalf("FOO = %q, want literal overlay value after expansion failure", env["FOO"])
 	}
 }
 

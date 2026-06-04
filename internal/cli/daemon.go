@@ -104,11 +104,7 @@ See also: install, logs, restart, status.`,
 			// Resolve env.
 			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
-			envRefs, err := daemonEnvRefsWithOverlay(server, daemonName, m.Env)
-			if err != nil {
-				return err
-			}
-			env, err := resolver.ResolveMap(envRefs)
+			env, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
 			if err != nil {
 				return err
 			}
@@ -302,11 +298,25 @@ See also: install, logs, restart, status.`,
 	return c
 }
 
-func daemonEnvRefsWithOverlay(server, daemonName string, manifestEnv map[string]string) (map[string]string, error) {
-	merged := make(map[string]string, len(manifestEnv))
-	for k, v := range manifestEnv {
-		merged[k] = v
+func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver) (map[string]string, error) {
+	if resolver == nil {
+		return nil, fmt.Errorf("resolve manifest env for %s/%s: resolver is nil", server, daemonName)
 	}
+	env, err := resolver.ResolveMap(manifestEnv)
+	if err != nil {
+		return nil, err
+	}
+	overlayEnv, err := daemonOverlayEnv(server, daemonName)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range overlayEnv {
+		env[k] = v
+	}
+	return env, nil
+}
+
+func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
 	stateDir, err := stateDirFunc()
 	if err != nil {
 		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
@@ -318,16 +328,17 @@ func daemonEnvRefsWithOverlay(server, daemonName string, manifestEnv map[string]
 	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
 	overlayEnv := daemon_env_overlay.LookupOverlay(ov, taskName)
 	if len(overlayEnv) == 0 {
-		return merged, nil
+		return nil, nil
 	}
 	expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ())
 	if err != nil {
-		return nil, fmt.Errorf("expand env overlay for %s: %w", taskName, err)
+		_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-parent-path-resolve-failed", map[string]any{
+			"task_name": taskName,
+			"err":       err.Error(),
+		})
+		return overlayEnv, nil
 	}
-	for k, v := range expanded {
-		merged[k] = v
-	}
-	return merged, nil
+	return expanded, nil
 }
 
 // logBaseDir returns the per-OS directory for daemon logs.

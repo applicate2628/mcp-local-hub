@@ -630,6 +630,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 var forceMaterializeProbe = sendForceMaterializeTools
 
 var statusSchedulerFactory = scheduler.New
+var restartSchedulerFactory = scheduler.New
 
 func statusSchedulerTasks() ([]scheduler.TaskStatus, error) {
 	sch, err := statusSchedulerFactory()
@@ -2264,7 +2265,7 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 	} else if handled {
 		return results, nil
 	}
-	sch, err := scheduler.New()
+	sch, err := restartSchedulerFactory()
 	if err != nil {
 		return nil, err
 	}
@@ -2424,28 +2425,41 @@ type RestartResult struct {
 // stale daemon they wanted to replace. We have to kill the daemon
 // process by port first.
 func (a *API) RestartAll() ([]RestartResult, error) {
-	if results, handled, err := restartSupervisorOwnedDaemons(context.Background(), "", ""); err != nil {
-		return nil, err
-	} else if handled {
-		return results, nil
-	}
-	sch, err := scheduler.New()
+	results, supervisorHandled, err := restartSupervisorOwnedDaemons(context.Background(), "", "")
 	if err != nil {
+		return nil, err
+	}
+	handledTasks := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		handledTasks[strings.TrimPrefix(result.TaskName, "\\")] = struct{}{}
+	}
+
+	sch, err := restartSchedulerFactory()
+	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
-	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — scheduled, not restarted.
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		port := portForTask(strings.TrimPrefix(t.Name, "\\"), ports, wsByTask)
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		if _, alreadyHandled := handledTasks[normalized]; alreadyHandled {
+			continue
+		}
+		port := portForTask(normalized, ports, wsByTask)
 		if err := killDaemonByPort(port, 5*time.Second); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue

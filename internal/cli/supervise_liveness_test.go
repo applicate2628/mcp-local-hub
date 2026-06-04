@@ -53,6 +53,37 @@ func TestSupervisorStatusDoesNotReportRunningForDeadRecordedPID(t *testing.T) {
 	}
 }
 
+func TestSupervisorStatusDaemonsUsesDescriptorIdentityForWorkspaceLSP(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	const taskName = `\mcp-local-hub-lsp-deadbeef-go`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "mcp-language-server",
+			Daemon:   "lsp-deadbeef-go",
+			Port:     9123,
+		}},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	rows, err := supervisorStatusDaemons(stateDir, NewDaemonRuntimeTracker())
+	if err != nil {
+		t.Fatalf("supervisorStatusDaemons: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0]["server"] != "mcp-language-server" {
+		t.Fatalf("server = %q, want descriptor Server", rows[0]["server"])
+	}
+	if rows[0]["daemon"] != "lsp-deadbeef-go" {
+		t.Fatalf("daemon = %q, want descriptor Daemon", rows[0]["daemon"])
+	}
+}
+
 func TestHydrateControllerRunningStatesFromWarmStartSnapshot(t *testing.T) {
 	taskName := `\mcp-local-hub-memory-default`
 	ctrl := &supervisorController{}
