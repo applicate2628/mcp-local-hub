@@ -132,6 +132,61 @@ func TestResolveByPath_RustCargoTomlMatchesExistingRegistration(t *testing.T) {
 	}
 }
 
+func TestResolveByPath_MatchesLegacySymlinkWorkspaceKey(t *testing.T) {
+	root := t.TempDir()
+	realProject := filepath.Join(root, "real-project")
+	writeFile(t, filepath.Join(realProject, "go.mod"))
+	file := filepath.Join(realProject, "cmd", "app", "main.go")
+	writeFile(t, file)
+	aliasProject := filepath.Join(root, "alias-project")
+	if err := os.Symlink(realProject, aliasProject); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	aliasFile := filepath.Join(aliasProject, "cmd", "app", "main.go")
+	legacyPath, err := api.CanonicalWorkspacePathLegacyCompat(aliasProject)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePathLegacyCompat: %v", err)
+	}
+	legacyKey := api.WorkspaceKey(legacyPath)
+	canon := mustCanonical(t, aliasProject)
+	if legacyKey == api.WorkspaceKey(canon) {
+		t.Skip("legacy and symlink-resolved workspace keys are identical")
+	}
+
+	regPath := makeRegistryWithLSP(t, root, []api.WorkspaceEntry{
+		{
+			WorkspaceKey:  legacyKey,
+			WorkspacePath: legacyPath,
+			Language:      "go",
+			Backend:       "gopls-mcp",
+			Port:          9221,
+			TaskName:      "mcp-local-hub-lsp-" + legacyKey + "-go",
+		},
+	})
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath, testLanguages())
+
+	got, err := resolver.ResolveByPath(aliasFile, "go")
+	if err != nil {
+		t.Fatalf("ResolveByPath: %v", err)
+	}
+	if !got.Registered {
+		t.Fatal("Registered = false, want true via legacy symlink key")
+	}
+	if got.Entry == nil {
+		t.Fatal("Entry = nil, want legacy registry row")
+	}
+	if got.Entry.WorkspaceKey != legacyKey || got.Entry.Port != 9221 {
+		t.Fatalf("Entry = %+v, want legacy key %s port 9221", got.Entry, legacyKey)
+	}
+	if got.WorkspaceKey != legacyKey {
+		t.Fatalf("WorkspaceKey = %q, want matched legacy key %q", got.WorkspaceKey, legacyKey)
+	}
+}
+
 func TestResolveByPath_RegisteredMatchIsLanguageSpecific(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "mixed-project")

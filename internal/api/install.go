@@ -675,18 +675,35 @@ func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
 	// showed "active" while the tool actually errored, misleading
 	// operators during incidents.
 	toolErr := make([]string, len(rows))
-	var wg sync.WaitGroup
+	var probeRows []int
 	for i := range rows {
 		if rows[i].Language == "" || rows[i].Port == 0 {
 			continue
 		}
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			toolErr[idx] = forceMaterializeProbe(rows[idx].Port, rows[idx].Backend)
-		}(i)
+		probeRows = append(probeRows, i)
 	}
-	wg.Wait()
+	if len(probeRows) > 0 {
+		workerCount := DefaultLSPMaterializedHardCap
+		if workerCount <= 0 || workerCount > len(probeRows) {
+			workerCount = len(probeRows)
+		}
+		jobs := make(chan int)
+		var wg sync.WaitGroup
+		wg.Add(workerCount)
+		for range workerCount {
+			go func() {
+				defer wg.Done()
+				for idx := range jobs {
+					toolErr[idx] = forceMaterializeProbe(rows[idx].Port, rows[idx].Backend)
+				}
+			}()
+		}
+		for _, idx := range probeRows {
+			jobs <- idx
+		}
+		close(jobs)
+		wg.Wait()
+	}
 	// Always propagate tool-level errors to rows first — this must
 	// happen even when the registry reload path below is skipped
 	// (empty regPath / unreadable registry). Without this, callers

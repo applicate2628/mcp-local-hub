@@ -1779,6 +1779,48 @@ func TestRegister_SupervisedReservesRouterEntryNameForFirstWorkspace(t *testing.
 	}
 }
 
+func TestRegister_LegacyReservesRouterEntryNameForFirstWorkspace(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	routerName := LSPRouterEntryName("go")
+	routerURL := LSPRouterURL(7777, "go")
+	h.fakeClients.entries["codex-cli"][routerName] = routerURL
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	report, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("Register legacy: %v", err)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(report.Entries))
+	}
+	entryName := report.Entries[0].ClientEntries["codex-cli"]
+	if entryName == routerName {
+		t.Fatalf("legacy first workspace used router entry name %q", entryName)
+	}
+	short := wsKey
+	if len(short) > 4 {
+		short = short[:4]
+	}
+	if entryName != routerName+"-"+short {
+		t.Fatalf("entry name = %q, want %q", entryName, routerName+"-"+short)
+	}
+	if got := h.fakeClients.entries["codex-cli"][routerName]; got != routerURL {
+		t.Fatalf("router entry %q overwritten: got %q want %q", routerName, got, routerURL)
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"][entryName]; !ok {
+		t.Fatalf("client-write pass did not use composed entry name %q; entries=%v", entryName, h.fakeClients.entries["codex-cli"])
+	}
+}
+
 func TestResolveEntryName_NoCollisionReturnsBase(t *testing.T) {
 	reg := NewRegistry(t.TempDir() + "/reg.yaml")
 	got := ResolveEntryName(reg, "mcp-language-server", "python", "workspa1")

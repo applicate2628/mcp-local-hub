@@ -197,6 +197,80 @@ func TestEnsureLSPRegistered_ExistingReadySupervisorOwnedRowReturnsWithoutReconc
 	}
 }
 
+func TestEnsureLSPRegistered_ExistingLegacySymlinkKeyReturnsPriorRow(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReadiness := proxyReadinessFn
+	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	root := t.TempDir()
+	realProject := filepath.Join(root, "real-project")
+	if err := os.MkdirAll(realProject, 0o755); err != nil {
+		t.Fatalf("mkdir real project: %v", err)
+	}
+	aliasProject := filepath.Join(root, "alias-project")
+	if err := os.Symlink(realProject, aliasProject); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	legacyPath, err := CanonicalWorkspacePathLegacyCompat(aliasProject)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePathLegacyCompat: %v", err)
+	}
+	legacyKey := WorkspaceKey(legacyPath)
+	canonical, err := CanonicalWorkspacePath(aliasProject)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	if legacyKey == WorkspaceKey(canonical) {
+		t.Skip("legacy and symlink-resolved workspace keys are identical")
+	}
+
+	prior := WorkspaceEntry{
+		WorkspaceKey:  legacyKey,
+		WorkspacePath: legacyPath,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9243,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(legacyKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(prior); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(prior, testCanonicalMcphubPathOverride),
+		},
+	})
+
+	got, err := NewAPI().EnsureLSPRegistered(context.Background(), legacyKey, aliasProject, "python")
+	if err != nil {
+		t.Fatalf("EnsureLSPRegistered legacy row: %v", err)
+	}
+	if got.WorkspaceKey != legacyKey || got.Port != prior.Port {
+		t.Fatalf("got %+v, want legacy key %s port %d", got, legacyKey, prior.Port)
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+	if rows := reg.LSPEntries(); len(rows) != 1 {
+		t.Fatalf("registry rows = %d, want 1 existing legacy row only: %+v", len(rows), rows)
+	}
+}
+
 func TestEnsureLSPRegistered_ExistingDeadSupervisorOwnedRowSkipsScheduler(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()

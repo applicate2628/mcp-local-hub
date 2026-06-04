@@ -1,7 +1,7 @@
 package api
 
 import (
-	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -391,7 +391,7 @@ func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) 
 func TestStatusWithOpts_MergesRegistryRowsWhenSchedulerUnavailable(t *testing.T) {
 	origScheduler := statusSchedulerFactory
 	statusSchedulerFactory = func() (scheduler.Scheduler, error) {
-		return nil, errors.New("linux scheduler not yet implemented (Phase 0-1 is Windows-first)")
+		return nil, fmt.Errorf("linux scheduler not yet implemented (Phase 0-1 is Windows-first): %w", scheduler.ErrNotImplemented)
 	}
 	t.Cleanup(func() { statusSchedulerFactory = origScheduler })
 

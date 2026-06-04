@@ -35,8 +35,10 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	computedKey := WorkspaceKey(canonical)
 	if workspaceKey == "" {
 		workspaceKey = computedKey
-	} else if workspaceKey != computedKey {
-		return WorkspaceEntry{}, fmt.Errorf("workspace key %q does not match canonical workspace %q key %q", workspaceKey, canonical, computedKey)
+	}
+	keyMismatchErr := error(nil)
+	if workspaceKey != computedKey {
+		keyMismatchErr = fmt.Errorf("workspace key %q does not match canonical workspace %q key %q", workspaceKey, canonical, computedKey)
 	}
 
 	mu := lspEnsureMutex(workspaceKey, language)
@@ -159,6 +161,10 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 			return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", prior.Port, err)
 		}
 		return prior, nil
+	}
+	if keyMismatchErr != nil {
+		unlock()
+		return WorkspaceEntry{}, keyMismatchErr
 	}
 
 	port, err := AllocatePort(reg, *m.PortPool)

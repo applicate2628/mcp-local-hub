@@ -156,7 +156,7 @@ func (a *API) registerOneLanguageSupervised(
 			continue
 		}
 		if _, already := entryNameByClient[b.Client]; !already {
-			entryNameByClient[b.Client] = resolveSupervisedLSPEntryName(reg, m.Name, lang, wsKey)
+			entryNameByClient[b.Client] = resolveWorkspaceScopedLSPEntryName(reg, m.Name, lang, wsKey)
 		}
 	}
 
@@ -279,7 +279,7 @@ func (a *API) registerOneLanguageSupervised(
 	return composedEntry, nil
 }
 
-func resolveSupervisedLSPEntryName(reg *Registry, serverName, language, workspaceKey string) string {
+func resolveWorkspaceScopedLSPEntryName(reg *Registry, serverName, language, workspaceKey string) string {
 	name := ResolveEntryName(reg, serverName, language, workspaceKey)
 	if name != LSPRouterEntryName(language) {
 		return name

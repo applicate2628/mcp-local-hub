@@ -624,7 +624,7 @@ func (a *API) registerOneLanguage(
 			continue
 		}
 		if _, already := entryNameByClient[b.Client]; !already {
-			entryNameByClient[b.Client] = ResolveEntryName(reg, m.Name, lang, wsKey)
+			entryNameByClient[b.Client] = resolveWorkspaceScopedLSPEntryName(reg, m.Name, lang, wsKey)
 		}
 	}
 	// On re-register (idempotent path, had == true), preserve the prior

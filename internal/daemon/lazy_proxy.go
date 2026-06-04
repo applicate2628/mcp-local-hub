@@ -64,7 +64,7 @@ type LazyProxyConfig struct {
 }
 
 const (
-	DefaultLSPMaterializedHardCap   = 16
+	DefaultLSPMaterializedHardCap   = api.DefaultLSPMaterializedHardCap
 	DefaultLSPIdleBackendTTL        = 30 * time.Minute
 	DefaultLSPIdleBackendCheckEvery = time.Minute
 )

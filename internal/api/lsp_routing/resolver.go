@@ -119,9 +119,10 @@ func (r *WorkspaceResolver) ResolveByPath(path, language string) (*ResolveResult
 		WorkspaceKey:  wsKey,
 		ProjectMarker: r.hasProjectMarker(wsDir, language),
 	}
-	if entry, ok := r.matchRegistration(wsKey, language); ok {
+	if entry, ok := r.matchRegistrationForResolvedWorkspace(wsKey, language, canon, wsDir); ok {
 		result.Registered = true
 		result.Entry = &entry
+		result.WorkspaceKey = entry.WorkspaceKey
 	}
 	return result, nil
 }
@@ -208,12 +209,74 @@ func markerExists(path string) bool {
 
 func (r *WorkspaceResolver) matchRegistration(workspaceKey, language string) (api.WorkspaceEntry, bool) {
 	snapshot := r.snapshotRegistry()
+	return matchRegistrationInSnapshot(snapshot, workspaceKey, language)
+}
+
+func (r *WorkspaceResolver) matchRegistrationForResolvedWorkspace(workspaceKey, language, canonicalRoot, discoveredRoot string) (api.WorkspaceEntry, bool) {
+	snapshot := r.snapshotRegistry()
+	if entry, ok := matchRegistrationInSnapshot(snapshot, workspaceKey, language); ok {
+		return entry, true
+	}
+	legacyRoot, err := api.CanonicalWorkspacePathLegacyCompat(discoveredRoot)
+	if err == nil {
+		legacyKey := api.WorkspaceKey(legacyRoot)
+		if legacyKey != workspaceKey {
+			if entry, ok := matchRegistrationInSnapshot(snapshot, legacyKey, language); ok {
+				return entry, true
+			}
+		}
+	}
+	return matchRegistrationByWorkspacePathInSnapshot(snapshot, language, canonicalRoot, legacyRoot)
+}
+
+func matchRegistrationInSnapshot(snapshot *api.Registry, workspaceKey, language string) (api.WorkspaceEntry, bool) {
 	for _, e := range snapshot.ListByWorkspaceLSP(workspaceKey) {
 		if e.Language == language {
 			return e, true
 		}
 	}
 	return api.WorkspaceEntry{}, false
+}
+
+func matchRegistrationByWorkspacePathInSnapshot(snapshot *api.Registry, language string, workspacePaths ...string) (api.WorkspaceEntry, bool) {
+	pathSet := make(map[string]bool, len(workspacePaths))
+	for _, p := range workspacePaths {
+		if key := workspacePathMatchKey(p); key != "" {
+			pathSet[key] = true
+		}
+	}
+	if len(pathSet) == 0 {
+		return api.WorkspaceEntry{}, false
+	}
+
+	var found api.WorkspaceEntry
+	matched := false
+	for _, e := range snapshot.LSPEntries() {
+		if e.Language != language || e.WorkspacePath == "" {
+			continue
+		}
+		if !pathSet[workspacePathMatchKey(e.WorkspacePath)] {
+			continue
+		}
+		if matched {
+			return api.WorkspaceEntry{}, false
+		}
+		found = e
+		matched = true
+	}
+	return found, matched
+}
+
+func workspacePathMatchKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" && len(path) >= 2 && path[1] == ':' {
+		path = strings.ToLower(string(path[0])) + path[1:]
+	}
+	return path
 }
 
 func (r *WorkspaceResolver) snapshotRegistry() *api.Registry {

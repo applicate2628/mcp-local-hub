@@ -1,8 +1,10 @@
 package api
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeForceMaterializeProbe captures probe invocations so tests can assert
@@ -97,6 +99,81 @@ func TestForceMaterialize_TriggersProbe(t *testing.T) {
 
 	if got := fake.calls.Load(); got != 2 {
 		t.Errorf("probe calls = %d, want 2 (two workspace-scoped rows with ports)", got)
+	}
+}
+
+func TestForceMaterialize_DefaultCapThrottlesButProbesAllWorkspaceRows(t *testing.T) {
+	const totalRows = DefaultLSPMaterializedHardCap + 2
+	var calls atomic.Int32
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	startedCap := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseProbes := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	defer releaseProbes()
+
+	orig := forceMaterializeProbe
+	forceMaterializeProbe = func(port int, backend string) string {
+		callNo := calls.Add(1)
+		current := inFlight.Add(1)
+		for {
+			old := maxInFlight.Load()
+			if current <= old || maxInFlight.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		if callNo == int32(DefaultLSPMaterializedHardCap) {
+			close(startedCap)
+		}
+		<-release
+		inFlight.Add(-1)
+		return ""
+	}
+	defer func() { forceMaterializeProbe = orig }()
+
+	rows := make([]DaemonStatus, totalRows)
+	for i := range rows {
+		rows[i] = DaemonStatus{
+			TaskName: "mcp-local-hub-lsp-test-python",
+			Port:     9200 + i,
+			Language: "python",
+			Backend:  "mcp-language-server",
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		forceMaterializeWorkspaceScoped(rows, "")
+		close(done)
+	}()
+
+	select {
+	case <-startedCap:
+	case <-time.After(2 * time.Second):
+		releaseProbes()
+		t.Fatalf("only %d probes started; want the default cap batch of %d", calls.Load(), DefaultLSPMaterializedHardCap)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := calls.Load(); got != int32(DefaultLSPMaterializedHardCap) {
+		releaseProbes()
+		<-done
+		t.Fatalf("probes started while the first cap-sized batch was blocked = %d, want %d", got, DefaultLSPMaterializedHardCap)
+	}
+
+	releaseProbes()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forceMaterializeWorkspaceScoped did not finish after releasing probes")
+	}
+	if got := calls.Load(); got != int32(totalRows) {
+		t.Fatalf("probe calls = %d, want all %d workspace rows", got, totalRows)
+	}
+	if got := maxInFlight.Load(); got > int32(DefaultLSPMaterializedHardCap) {
+		t.Fatalf("max concurrent probes = %d, want <= default cap %d", got, DefaultLSPMaterializedHardCap)
 	}
 }
 

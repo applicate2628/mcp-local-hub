@@ -33,7 +33,11 @@ func TestPlatformSchedulerMethodsReturnTypedNotImplemented(t *testing.T) {
 	check("Status", err)
 	_, err = s.List("mcp-local-hub-")
 	check("List", err)
-	_, err = s.ListContext(context.Background(), "mcp-local-hub-")
+	lister, ok := s.(ContextLister)
+	if !ok {
+		t.Fatalf("%T does not implement ContextLister", s)
+	}
+	_, err = lister.ListContext(context.Background(), "mcp-local-hub-")
 	check("ListContext", err)
 	_, err = s.ExportXML(spec.Name)
 	check("ExportXML", err)
