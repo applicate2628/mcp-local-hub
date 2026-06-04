@@ -99,28 +99,33 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 				}
 				if len(legacyXML) > 0 {
 					capturedXML := legacyXML
+					legacyTaskDeleted := false
 					restoreLegacyTask = func() {
+						if !legacyTaskDeleted {
+							return
+						}
 						if prior.Port > 0 {
 							_ = killByPortFn(prior.Port, 5*time.Second)
 						}
 						_ = sch.ImportXML(prior.TaskName, capturedXML)
 						_ = sch.Run(prior.TaskName)
 					}
-				}
-				if portReady {
-					_ = killByPortFn(prior.Port, 5*time.Second)
-				}
-				if len(legacyXML) > 0 {
+					if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {
+						return WorkspaceEntry{}, err
+					}
 					if derr := sch.Delete(prior.TaskName); derr != nil && !errors.Is(derr, scheduler.ErrTaskNotFound) {
 						restoreLegacyTask()
 						return WorkspaceEntry{}, fmt.Errorf("delete legacy LSP task %s before promote: %w", prior.TaskName, derr)
 					}
+					legacyTaskDeleted = true
+				} else if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {
+					return WorkspaceEntry{}, err
 				}
 			} else if schedulerUnavailableError(schErr) {
-				if portReady {
-					// No scheduler (Linux/macOS): no legacy task exists; still free a
-					// stale unowned proxy on the port so reconcile can bind cleanly.
-					_ = killByPortFn(prior.Port, 5*time.Second)
+				// No scheduler (Linux/macOS): no legacy task exists; still free a
+				// stale unowned proxy on the port so reconcile can bind cleanly.
+				if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {
+					return WorkspaceEntry{}, err
 				}
 			} else {
 				return WorkspaceEntry{}, schErr

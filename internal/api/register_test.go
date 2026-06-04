@@ -338,6 +338,12 @@ func TestRegister_RemovesMatchingDirectLanguageServerEntries(t *testing.T) {
 			Language: "pyright-langserver",
 			Args:     []string{"--lsp", "pyright-langserver", "--workspace", canonical},
 		},
+		"python-experimental": {
+			Name:     "python-experimental",
+			Command:  "mcp-language-server",
+			Language: "python-experimental",
+			Args:     []string{"--lsp", "python-experimental", "--workspace", canonical},
+		},
 		"other-workspace-go": {
 			Name:     "other-workspace-go",
 			Command:  "mcp-language-server",
@@ -394,6 +400,9 @@ func TestRegister_RemovesMatchingDirectLanguageServerEntries(t *testing.T) {
 	}
 	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["legacy-python"]; !ok {
 		t.Fatal("unrelated legacy python entry was removed")
+	}
+	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["python-experimental"]; !ok {
+		t.Fatal("same-workspace substring language entry was removed")
 	}
 	if h.fakeClients.backupKeepCalls["codex-cli"] != 1 {
 		t.Errorf("BackupKeep calls for codex-cli = %d, want 1", h.fakeClients.backupKeepCalls["codex-cli"])
@@ -1143,6 +1152,21 @@ func TestRegister_SupervisedWritesIntentAndDeletesLegacyLSPTask(t *testing.T) {
 	}
 	wsKey := WorkspaceKey(canonical)
 	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, "go")
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9200,
+		TaskName:      taskName,
+		Lifecycle:     LifecycleActive,
+	}); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
 	h.fakeSch.tasks[taskName] = true
 	h.fakeSch.xml[taskName] = []byte(`<Task name="` + taskName + `"/>`)
 
@@ -1206,16 +1230,18 @@ func TestRegister_SupervisedContinuesWhenSchedulerNotImplemented(t *testing.T) {
 
 	origFactory := testSchedulerFactory
 	testSchedulerFactory = func() (testScheduler, error) {
-		return nil, errors.New("scheduler not implemented on this platform")
+		return nil, fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)
 	}
 	defer func() { testSchedulerFactory = origFactory }()
 
 	reconcileCalls := 0
+	dryRunCalls := 0
 	origReconcile := registerSupervisorReconcileFn
 	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		reconcileCalls++
 		if !apply {
-			t.Fatalf("supervised register called reconcile with apply=false")
+			dryRunCalls++
+			return ReconcileResponse{DryRun: true}, nil
 		}
 		return ReconcileResponse{DryRun: false}, nil
 	}
@@ -1238,8 +1264,8 @@ func TestRegister_SupervisedContinuesWhenSchedulerNotImplemented(t *testing.T) {
 	if len(report.Entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(report.Entries))
 	}
-	if reconcileCalls != 1 {
-		t.Fatalf("reconcile calls = %d, want 1", reconcileCalls)
+	if reconcileCalls != 2 || dryRunCalls != 1 {
+		t.Fatalf("reconcile calls = %d dry-run = %d, want 2 total with 1 dry-run preflight", reconcileCalls, dryRunCalls)
 	}
 	if !strings.Contains(strings.Join(report.Warnings, "\n"), "scheduler unavailable") {
 		t.Fatalf("warnings = %v, want scheduler unavailable warning", report.Warnings)
@@ -1254,6 +1280,131 @@ func TestRegister_SupervisedContinuesWhenSchedulerNotImplemented(t *testing.T) {
 	}
 	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row == nil {
 		t.Fatalf("supervisor-intent missing LSP row for %s/go; rows=%+v", wsKey, intent.Daemons)
+	}
+}
+
+func TestRegister_DefaultsToSupervisedWhenSchedulerNotImplemented(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origFactory := testSchedulerFactory
+	testSchedulerFactory = func() (testScheduler, error) {
+		return nil, fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)
+	}
+	defer func() { testSchedulerFactory = origFactory }()
+
+	reconcileCalls := 0
+	dryRunCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		if !apply {
+			dryRunCalls++
+			return ReconcileResponse{DryRun: true}, nil
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+
+	report, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("plain Register with not-implemented scheduler: %v", err)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(report.Entries))
+	}
+	if reconcileCalls != 2 || dryRunCalls != 1 {
+		t.Fatalf("reconcile calls = %d dry-run = %d, want 2 total with 1 dry-run preflight", reconcileCalls, dryRunCalls)
+	}
+	if !strings.Contains(strings.Join(report.Warnings, "\n"), "scheduler unavailable") {
+		t.Fatalf("warnings = %v, want scheduler unavailable warning", report.Warnings)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row == nil {
+		t.Fatalf("plain schedulerless register did not write supervised LSP row for %s/go; rows=%+v", wsKey, intent.Daemons)
+	}
+}
+
+func TestRegister_SchedulerlessSupervisorUnavailableFailsBeforeMutation(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origFactory := testSchedulerFactory
+	testSchedulerFactory = func() (testScheduler, error) {
+		return nil, fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)
+	}
+	defer func() { testSchedulerFactory = origFactory }()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		if apply {
+			t.Fatal("schedulerless preflight failure must abort before apply reconcile")
+		}
+		return ReconcileResponse{}, fmt.Errorf("no supervisor: %w", ErrSupervisorIPCUnavailable)
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+
+	report, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer: &bytes.Buffer{},
+	})
+	if err == nil {
+		t.Fatal("expected schedulerless register to fail when supervisor is unavailable")
+	}
+	if report == nil || !strings.Contains(strings.Join(report.Warnings, "\n"), "scheduler unavailable") {
+		t.Fatalf("report warnings = %+v, want scheduler unavailable warning", report)
+	}
+	if !strings.Contains(err.Error(), "requires a running supervisor") ||
+		!strings.Contains(err.Error(), "mcphub supervise") {
+		t.Fatalf("error lacks supervisor guidance: %v", err)
+	}
+	if reconcileCalls != 1 {
+		t.Fatalf("reconcile calls = %d, want one dry-run preflight", reconcileCalls)
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 0 {
+		t.Fatalf("schedulerless preflight failure wrote registry rows: %+v", rows)
+	}
+	if n := countEntries(h.fakeClients); n != 0 {
+		t.Fatalf("schedulerless preflight failure wrote client entries: %d", n)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	if _, err := ReadSupervisorIntent(intentPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("supervisor intent exists after preflight failure: %v", err)
 	}
 }
 
@@ -1351,6 +1502,156 @@ func TestRegister_SupervisedDeleteLegacyTaskFailureAbortsBeforeIntent(t *testing
 		if row := intent.FindSupervisorDaemonByTaskName(intentTask); row != nil {
 			t.Fatalf("supervisor-intent row %s was written despite delete failure: %+v", intentTask, row)
 		}
+	}
+}
+
+func TestRegister_SupervisedLiveLegacyKillFailureAbortsBeforeDeleteAndIntent(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	reconcileCalled := false
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalled = true
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origKill := killByPortFn
+	killCalls := 0
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killCalls++
+		return fmt.Errorf("access denied killing port %d", port)
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, "go")
+	h.fakeSch.tasks[taskName] = true
+	h.fakeSch.xml[taskName] = []byte(`<Task name="` + taskName + `"/>`)
+
+	_, err = mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err == nil {
+		t.Fatal("expected supervised register to fail when live legacy port kill fails")
+	}
+	if !strings.Contains(err.Error(), "kill legacy LSP proxy") {
+		t.Fatalf("error = %v, want kill legacy LSP proxy context", err)
+	}
+	if killCalls != 1 {
+		t.Fatalf("kill calls = %d, want 1", killCalls)
+	}
+	if len(h.fakeSch.deleteNames) != 0 {
+		t.Fatalf("legacy task was deleted after kill failure: %v", h.fakeSch.deleteNames)
+	}
+	if len(h.fakeSch.importNames) != 0 || len(h.fakeSch.runNames) != 0 {
+		t.Fatalf("legacy task was restored after pre-delete kill failure: import=%v run=%v",
+			h.fakeSch.importNames, h.fakeSch.runNames)
+	}
+	if reconcileCalled {
+		t.Fatal("supervised register reconciled after live legacy kill failed")
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if intent != nil {
+		intentTask := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")
+		if row := intent.FindSupervisorDaemonByTaskName(intentTask); row != nil {
+			t.Fatalf("supervisor-intent row %s was written despite kill failure: %+v", intentTask, row)
+		}
+	}
+}
+
+func TestRegister_SupervisedLiveNoXMLKillFailureAbortsBeforeMutation(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	reconcileCalled := false
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalled = true
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origKill := killByPortFn
+	killCalls := 0
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killCalls++
+		return fmt.Errorf("access denied killing port %d", port)
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, "go")
+	reg := NewRegistry(h.regPath)
+	prior := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9200,
+		TaskName:      taskName,
+		ClientEntries: map[string]string{"codex-cli": "custom-go"},
+		Lifecycle:     LifecycleActive,
+	}
+	if err := reg.PutLSP(prior); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err = mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err == nil {
+		t.Fatal("expected supervised register to fail when live no-XML port kill fails")
+	}
+	if !strings.Contains(err.Error(), "kill legacy LSP proxy") {
+		t.Fatalf("error = %v, want kill legacy LSP proxy context", err)
+	}
+	if killCalls != 1 {
+		t.Fatalf("kill calls = %d, want 1", killCalls)
+	}
+	if len(h.fakeSch.deleteNames) != 0 || len(h.fakeSch.importNames) != 0 || len(h.fakeSch.runNames) != 0 {
+		t.Fatalf("scheduler mutated after no-XML kill failure: delete=%v import=%v run=%v",
+			h.fakeSch.deleteNames, h.fakeSch.importNames, h.fakeSch.runNames)
+	}
+	if reconcileCalled {
+		t.Fatal("supervised register reconciled after no-XML kill failure")
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+	got, ok := reg.Get(wsKey, "go")
+	if !ok {
+		t.Fatal("prior registry row was removed after no-XML kill failure")
+	}
+	if got.Port != prior.Port || got.ClientEntries["codex-cli"] != "custom-go" {
+		t.Fatalf("prior registry row changed after no-XML kill failure: %+v", got)
 	}
 }
 
@@ -1729,7 +2030,7 @@ func TestUnregister_SchedulerNotImplementedRemovesIntentAndRegistryWithWarning(t
 
 	origFactory := testSchedulerFactory
 	testSchedulerFactory = func() (testScheduler, error) {
-		return nil, errors.New("scheduler not implemented on this platform")
+		return nil, fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)
 	}
 	defer func() { testSchedulerFactory = origFactory }()
 

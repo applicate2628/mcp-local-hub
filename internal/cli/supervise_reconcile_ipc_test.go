@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,7 +266,7 @@ func TestReconcileIPC_SchedulerUnavailableTreatsSupervisorOwnedRowsAsMissing(t *
 	}
 	fx := newReconcileTestFixture(t, intent)
 	uninstall := setReconcileSchedulerNewFnForTest(func() (scheduler.Scheduler, error) {
-		return nil, errors.New("scheduler not implemented on this platform")
+		return nil, fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)
 	})
 	defer uninstall()
 

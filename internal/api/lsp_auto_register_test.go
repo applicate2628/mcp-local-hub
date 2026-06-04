@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -398,7 +399,7 @@ func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesWhenSchedulerNotImpl
 	var schedulerCalls atomic.Int32
 	schedulerFactoryFn = func() (scheduler.Scheduler, error) {
 		schedulerCalls.Add(1)
-		return nil, errors.New("scheduler not implemented on this platform")
+		return nil, fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)
 	}
 	defer func() { schedulerFactoryFn = origScheduler }()
 
@@ -488,6 +489,101 @@ func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesWhenSchedulerNotImpl
 	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "python")
 	if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil {
 		t.Fatalf("ready unowned row did not write supervisor intent %s; rows=%+v", taskName, intent.Daemons)
+	}
+}
+
+func TestEnsureLSPRegistered_ExistingReadyUnownedRowKillFailureAbortsPromotion(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origScheduler := schedulerFactoryFn
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) { return h.fakeSch, nil }
+	defer func() { schedulerFactoryFn = origScheduler }()
+
+	var reconcileCalls atomic.Int32
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls.Add(1)
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	var readinessCalls atomic.Int32
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		readinessCalls.Add(1)
+		if port != 9242 {
+			t.Fatalf("readiness port = %d, want 9242", port)
+		}
+		return nil
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	origKill := killByPortFn
+	var killCalls atomic.Int32
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killCalls.Add(1)
+		if port != 9242 {
+			t.Fatalf("kill port = %d, want 9242", port)
+		}
+		return fmt.Errorf("access denied killing port %d", port)
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	prior := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(prior); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err = NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+	if err == nil {
+		t.Fatal("EnsureLSPRegistered returned nil error after live unowned port kill failed")
+	}
+	if !strings.Contains(err.Error(), "kill legacy LSP proxy") {
+		t.Fatalf("error = %v, want kill legacy LSP proxy context", err)
+	}
+	if calls := killCalls.Load(); calls != 1 {
+		t.Fatalf("kill calls = %d, want 1", calls)
+	}
+	if calls := readinessCalls.Load(); calls != 1 {
+		t.Fatalf("readiness calls = %d, want only ownership probe before abort", calls)
+	}
+	if calls := reconcileCalls.Load(); calls != 0 {
+		t.Fatalf("reconcile calls = %d, want 0 after kill failure", calls)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if intent != nil {
+		taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "python")
+		if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+			t.Fatalf("supervisor intent row %s written despite kill failure: %+v", taskName, row)
+		}
 	}
 }
 
@@ -697,6 +793,71 @@ func TestEnsureLSPRegistered_RestoresLegacyTaskWhenPromoteReconcileFails(t *test
 	}
 	if !slices.Contains(h.fakeSch.runNames, prior.TaskName) {
 		t.Fatalf("legacy task %s was not restarted after restore; runNames=%v", prior.TaskName, h.fakeSch.runNames)
+	}
+}
+
+func TestEnsureLSPRegistered_KillFailureDoesNotRestoreUntouchedLegacyTask(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origScheduler := schedulerFactoryFn
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) { return h.fakeSch, nil }
+	defer func() { schedulerFactoryFn = origScheduler }()
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		t.Fatal("EnsureLSPRegistered must fail before supervisor reconcile")
+		return ReconcileResponse{}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	origKill := killByPortFn
+	killByPortFn = func(port int, timeout time.Duration) error {
+		return fmt.Errorf("access denied killing port %d", port)
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	prior := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(prior); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeSch.tasks[prior.TaskName] = true
+	h.fakeSch.xml[prior.TaskName] = []byte(`<Task name="` + prior.TaskName + `"/>`)
+
+	_, err = NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+	if err == nil {
+		t.Fatal("expected kill failure")
+	}
+	if !strings.Contains(err.Error(), "kill legacy LSP proxy") {
+		t.Fatalf("error = %v, want kill legacy LSP proxy context", err)
+	}
+	if len(h.fakeSch.deleteNames) != 0 || len(h.fakeSch.importNames) != 0 || len(h.fakeSch.runNames) != 0 {
+		t.Fatalf("scheduler mutated after kill failure: delete=%v import=%v run=%v",
+			h.fakeSch.deleteNames, h.fakeSch.importNames, h.fakeSch.runNames)
 	}
 }
 

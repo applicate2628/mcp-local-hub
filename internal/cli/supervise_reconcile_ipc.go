@@ -527,7 +527,7 @@ func applyReconcileDrift(
 	if ctrl == nil {
 		return 0
 	}
-	ctrl.intentCache.Refresh(updatedIntent)
+	ctrl.refreshSupervisorIntent(updatedIntent)
 	if updatedDaemonIntent != nil {
 		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
 	}

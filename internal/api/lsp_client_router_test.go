@@ -11,15 +11,17 @@ import (
 )
 
 type lspRouterFakeClient struct {
-	name        string
-	path        string
-	exists      bool
-	entries     map[string]clients.MCPEntry
-	snapshots   map[string]map[string]clients.MCPEntry
-	backupPaths []string
-	addErr      error
-	addCalls    int
-	removeCalls int
+	name            string
+	path            string
+	exists          bool
+	entries         map[string]clients.MCPEntry
+	snapshots       map[string]map[string]clients.MCPEntry
+	backupPaths     []string
+	addErr          error
+	addCalls        int
+	removeCalls     int
+	restoreCalls    int
+	latestBackupErr error
 }
 
 func newLSPRouterFakeClient(t *testing.T, name string, exists bool) *lspRouterFakeClient {
@@ -79,15 +81,20 @@ func (f *lspRouterFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 	return &cp, nil
 }
 func (f *lspRouterFakeClient) LatestBackupPath() (string, bool, error) {
+	if f.latestBackupErr != nil {
+		return "", false, f.latestBackupErr
+	}
 	if len(f.backupPaths) == 0 {
 		return "", false, nil
 	}
 	return f.backupPaths[len(f.backupPaths)-1], true, nil
 }
 func (f *lspRouterFakeClient) RestoreEntryFromBackup(backupPath, name string) error {
+	f.restoreCalls++
 	return f.restoreEntryFromSnapshot(backupPath, name)
 }
 func (f *lspRouterFakeClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	f.restoreCalls++
 	return f.restoreEntryFromSnapshot(backupPath, name)
 }
 func (f *lspRouterFakeClient) restoreEntryFromSnapshot(backupPath, name string) error {
@@ -111,7 +118,20 @@ func (f *lspRouterFakeClient) BackupContainsEntry(backupPath, name string) (bool
 	_, present := snapshot[name]
 	return present, nil
 }
-func (f *lspRouterFakeClient) BackupEntryIsHubManaged(string, string) (bool, error) {
+func (f *lspRouterFakeClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	snapshot, ok := f.snapshots[backupPath]
+	if !ok {
+		return false, fmt.Errorf("unknown backup %s", backupPath)
+	}
+	entry, present := snapshot[name]
+	if !present {
+		return false, nil
+	}
+	for _, raw := range []string{entry.URL, entry.RelayURL} {
+		if _, ok := lspRouterURLLanguage(raw); ok {
+			return true, nil
+		}
+	}
 	return false, nil
 }
 func (f *lspRouterFakeClient) AllStdioEntries() ([]clients.StdioEntry, error) {
@@ -244,6 +264,51 @@ func TestEnsureLSPRouterClientEntries_MigratesPerPairEntryToRouterAndKeepsRegist
 	}
 }
 
+func TestEnsureLSPRouterClientEntries_SkipsNonHubOwnedLiveEntry(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
+	reg := NewRegistry(testRegistryPathOverride)
+	if err := reg.PutLSP(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/dev/project",
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9200,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-go",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-go-abcd"},
+	}); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	codex := newLSPRouterFakeClient(t, "codex-cli", true)
+	codex.entries["mcp-language-server-go"] = clients.MCPEntry{
+		Name: "mcp-language-server-go",
+		URL:  "https://example.invalid/custom-mcp",
+	}
+
+	report, err := NewAPI().EnsureLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9126,
+		Clients: map[string]clients.Client{"codex-cli": codex},
+	})
+	if err == nil {
+		t.Fatal("expected non-hub-owned live entry to produce a failure")
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Op != "ownership" || report.Failed[0].EntryName != "mcp-language-server-go" {
+		t.Fatalf("Failed = %+v, want one ownership failure for router entry", report.Failed)
+	}
+	if got := codex.entries["mcp-language-server-go"].URL; got != "https://example.invalid/custom-mcp" {
+		t.Fatalf("custom live entry was overwritten: %q", got)
+	}
+	if len(report.Backups) != 0 || codex.addCalls != 0 {
+		t.Fatalf("non-hub-owned skip should not backup or add; report=%+v addCalls=%d", report, codex.addCalls)
+	}
+}
+
 func TestRollbackLSPRouterClientEntries_RestoresPerPairEntryFromBackup(t *testing.T) {
 	seedLSPRouterManifest(t, []string{"go"})
 	restoreRegistry := overrideLSPRouterRegistry(t)
@@ -288,8 +353,11 @@ func TestRollbackLSPRouterClientEntries_RestoresPerPairEntryFromBackup(t *testin
 	if len(report.Backups) != 1 {
 		t.Fatalf("rollback backups len = %d, want 1 current-state backup", len(report.Backups))
 	}
-	if got := codex.entries["mcp-language-server-go"].URL; got != "http://127.0.0.1:9200/mcp" {
-		t.Fatalf("rollback URL = %q, want restored per-pair URL", got)
+	if got := codex.entries["mcp-language-server-go"].URL; got != "http://localhost:9200/mcp" {
+		t.Fatalf("rollback URL = %q, want exact backed-up per-pair URL", got)
+	}
+	if codex.restoreCalls != 1 {
+		t.Fatalf("rollback restore calls = %d, want 1 backup restore", codex.restoreCalls)
 	}
 	if len(codex.backupPaths) != 2 {
 		t.Fatalf("total backups = %d, want setup backup + rollback backup", len(codex.backupPaths))
@@ -346,8 +414,104 @@ func TestRollbackLSPRouterClientEntries_ReconstructsPerPairEntryInsteadOfLatestR
 	if got := codex.entries["mcp-language-server-go"].URL; got != "http://127.0.0.1:9200/mcp" {
 		t.Fatalf("rollback restored latest router-containing backup; URL = %q, want reconstructed per-pair URL", got)
 	}
+	if codex.restoreCalls != 1 {
+		t.Fatalf("rollback restore calls = %d, want 1 router-backup probe before reconstruction", codex.restoreCalls)
+	}
 	if len(codex.backupPaths) != 3 {
 		t.Fatalf("total backups = %d, want setup + newer + rollback backup", len(codex.backupPaths))
+	}
+}
+
+func TestRollbackLSPRouterClientEntries_BackupReadFailureSkipsReconstruct(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
+	reg := NewRegistry(testRegistryPathOverride)
+	if err := reg.PutLSP(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/dev/project",
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9200,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-go",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-go"},
+	}); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	codex := newLSPRouterFakeClient(t, "codex-cli", true)
+	routerURL := "http://127.0.0.1:9126/lsp/go/mcp"
+	codex.entries["mcp-language-server-go"] = clients.MCPEntry{
+		Name: "mcp-language-server-go",
+		URL:  routerURL,
+	}
+	codex.latestBackupErr = errors.New("backup index unreadable")
+
+	report, err := NewAPI().RollbackLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9126,
+		Clients: map[string]clients.Client{"codex-cli": codex},
+	})
+	if err == nil {
+		t.Fatal("expected backup-read failure to make rollback fail")
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Op != "backup-read" {
+		t.Fatalf("Failed = %+v, want one backup-read failure", report.Failed)
+	}
+	if got := codex.entries["mcp-language-server-go"].URL; got != routerURL {
+		t.Fatalf("rollback mutated entry after backup-read failure: %q", got)
+	}
+	if codex.addCalls != 0 || codex.restoreCalls != 0 || len(report.Backups) != 0 {
+		t.Fatalf("backup-read failure should not mutate; add=%d restore=%d backups=%+v", codex.addCalls, codex.restoreCalls, report.Backups)
+	}
+}
+
+func TestRollbackLSPRouterClientEntries_SkipsNonHubOwnedLiveEntry(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
+	reg := NewRegistry(testRegistryPathOverride)
+	if err := reg.PutLSP(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/dev/project",
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9200,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-go",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-go"},
+	}); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	codex := newLSPRouterFakeClient(t, "codex-cli", true)
+	codex.entries["mcp-language-server-go"] = clients.MCPEntry{
+		Name: "mcp-language-server-go",
+		URL:  "https://example.invalid/custom-mcp",
+	}
+
+	report, err := NewAPI().RollbackLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9126,
+		Clients: map[string]clients.Client{"codex-cli": codex},
+	})
+	if err == nil {
+		t.Fatal("expected non-hub-owned rollback target to produce a failure")
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Op != "ownership" || report.Failed[0].EntryName != "mcp-language-server-go" {
+		t.Fatalf("Failed = %+v, want one ownership failure for legacy entry", report.Failed)
+	}
+	if got := codex.entries["mcp-language-server-go"].URL; got != "https://example.invalid/custom-mcp" {
+		t.Fatalf("custom live entry was overwritten during rollback: %q", got)
+	}
+	if len(report.Backups) != 0 || codex.addCalls != 0 || codex.restoreCalls != 0 {
+		t.Fatalf("non-hub-owned rollback skip should not mutate; report=%+v add=%d restore=%d",
+			report, codex.addCalls, codex.restoreCalls)
 	}
 }
 

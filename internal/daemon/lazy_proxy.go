@@ -288,6 +288,20 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, resp)
+	case "resources/list":
+		resp, err := api.SyntheticResourcesListResponse(req.ID, p.cfg.BackendKind)
+		if err != nil {
+			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
+			return
+		}
+		writeJSON(w, resp)
+	case "prompts/list":
+		resp, err := api.SyntheticPromptsListResponse(req.ID, p.cfg.BackendKind)
+		if err != nil {
+			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
+			return
+		}
+		writeJSON(w, resp)
 	case "notifications/initialized", "notifications/cancelled":
 		// True JSON-RPC 2.0 notifications: no response expected. Answer
 		// with 202 Accepted and empty body — emitting a response with
@@ -316,10 +330,10 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		// Resources, prompts, and any other non-initialize/list method
-		// requires a materialized backend. Treat it like tools/call for
-		// materialization semantics but do NOT debounce-write the
-		// LastToolsCallAt timestamp.
+		// Other non-initialize/list methods require a materialized
+		// backend. Treat them like tools/call for materialization
+		// semantics but do NOT debounce-write the LastToolsCallAt
+		// timestamp.
 		p.handleForward(w, r, &req)
 	}
 }
@@ -458,6 +472,9 @@ func (p *LazyProxy) handleSSE(w http.ResponseWriter, r *http.Request) {
 func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error) {
 	// Fast path: cache hit.
 	for {
+		if p.closed.Load() {
+			return nil, errors.New("lazy proxy is closed")
+		}
 		p.mu.Lock()
 		if p.endpoint != nil {
 			ep := p.endpoint
@@ -476,6 +493,9 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 			return nil, ctx.Err()
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+	if p.closed.Load() {
+		return nil, errors.New("lazy proxy is closed")
 	}
 
 	// Slow path: go through the gate. Mark Starting BEFORE entering the gate
@@ -509,6 +529,15 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 	// at the same underlying object.
 	now := time.Now().UTC()
 	p.mu.Lock()
+	if p.closed.Load() {
+		p.mu.Unlock()
+		_ = ep.Close()
+		if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
+			fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop after closed materialize: %v\n", stopErr)
+		}
+		p.gate.Forget(p.inflightKey())
+		return nil, errors.New("lazy proxy is closed")
+	}
 	p.endpoint = ep
 	p.beginBackendRequestLocked(now)
 	p.mu.Unlock()
@@ -679,6 +708,11 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 // signal that new callers may enter.
 func (p *LazyProxy) onSendFailure(err error) {
 	p.mu.Lock()
+	if p.reaping {
+		p.mu.Unlock()
+		return
+	}
+	p.reaping = true
 	if p.endpoint != nil {
 		_ = p.endpoint.Close()
 		p.endpoint = nil
@@ -701,6 +735,9 @@ func (p *LazyProxy) onSendFailure(err error) {
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed, err.Error())
+	p.mu.Lock()
+	p.reaping = false
+	p.mu.Unlock()
 }
 
 // debounceWriteToolsCallTimestamp coalesces LastToolsCallAt writes to the

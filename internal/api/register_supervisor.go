@@ -50,6 +50,16 @@ func BuildSupervisorDaemonForLSP(entry WorkspaceEntry, mcphubBinaryPath string) 
 	}
 }
 
+func killObservedLiveLSPProxy(port int, taskName string, observedLive bool) error {
+	if !observedLive || port <= 0 || killByPortFn == nil {
+		return nil
+	}
+	if err := killByPortFn(port, 5*time.Second); err != nil {
+		return fmt.Errorf("kill legacy LSP proxy on port %d (task %s): %w", port, taskName, err)
+	}
+	return nil
+}
+
 func (a *API) registerOneLanguageSupervised(
 	m *config.ServerManifest,
 	spec config.LanguageSpec,
@@ -107,7 +117,10 @@ func (a *API) registerOneLanguageSupervised(
 	capturedPort := port
 	legacyTaskDeleted := false
 	*rollback = append(*rollback, func() {
-		if legacyTaskDeleted && capturedPort > 0 {
+		if !legacyTaskDeleted {
+			return
+		}
+		if capturedPort > 0 {
 			_ = killByPortFn(capturedPort, 5*time.Second)
 		}
 		if len(capturedPriorXML) > 0 {
@@ -116,8 +129,11 @@ func (a *API) registerOneLanguageSupervised(
 			fmt.Fprintf(w, "  rollback: restored + restarted scheduler task %s\n", capturedTaskName)
 		}
 	})
-	if len(priorXML) > 0 && port > 0 {
-		_ = killByPortFn(port, 5*time.Second)
+	if (had || len(priorXML) > 0) && port > 0 {
+		legacyPortReady := proxyReadinessFn(port, lspExistingProxyProbeTimeout) == nil
+		if err := killObservedLiveLSPProxy(port, taskName, legacyPortReady); err != nil {
+			return WorkspaceEntry{}, err
+		}
 	}
 	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
 		return WorkspaceEntry{}, fmt.Errorf("delete legacy task %s before supervised promote: %w", taskName, err)

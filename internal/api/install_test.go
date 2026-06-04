@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // serenaLikeManifest returns a manifest resembling the Serena manifest:
@@ -38,6 +40,16 @@ func serenaLikeManifest() *config.ServerManifest {
 			{Client: "qwen-cli", Daemon: "claude", URLPath: "/mcp"},
 		},
 		WeeklyRefresh: true,
+	}
+}
+
+func TestSchedulerUnavailableErrorRequiresTypedSentinel(t *testing.T) {
+	stringOnly := errors.New("scheduler operation failed after hook said not implemented by policy")
+	if SchedulerUnavailableError(stringOnly) {
+		t.Fatalf("string-only scheduler error was treated as unavailable: %v", stringOnly)
+	}
+	if !SchedulerUnavailableError(fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)) {
+		t.Fatal("wrapped scheduler.ErrNotImplemented was not treated as unavailable")
 	}
 }
 

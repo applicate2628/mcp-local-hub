@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +60,90 @@ func TestRegisterCmd_HasSupervisedFlag(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("--supervised default = %q, want false", flag.DefValue)
+	}
+}
+
+func TestRegisterCmd_SchedulerlessRegisterEnsuresSupervisor(t *testing.T) {
+	origScheduler := registerSchedulerUnavailableForHost
+	origResolve := registerResolveMCPHubBinary
+	origEnsure := registerEnsureSupervisorRunning
+	t.Cleanup(func() {
+		registerSchedulerUnavailableForHost = origScheduler
+		registerResolveMCPHubBinary = origResolve
+		registerEnsureSupervisorRunning = origEnsure
+	})
+
+	registerSchedulerUnavailableForHost = func() (bool, error) { return true, nil }
+	registerResolveMCPHubBinary = func() (string, error) { return "D:/dev/mcphub.exe", nil }
+	var gotBin string
+	var gotStrict bool
+	var gotWait time.Duration
+	registerEnsureSupervisorRunning = func(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
+		gotBin = mcphubBin
+		gotStrict = strictMode
+		gotWait = waitFor
+		return &supervisorOwner{spawned: false}, nil
+	}
+
+	c := newRegisterCmdReal()
+	var stdout bytes.Buffer
+	c.SetOut(&stdout)
+	if err := ensureSupervisorForSchedulerlessRegister(c); err != nil {
+		t.Fatalf("ensureSupervisorForSchedulerlessRegister: %v", err)
+	}
+	if gotBin != "D:/dev/mcphub.exe" || gotStrict {
+		t.Fatalf("ensure args = bin %q strict %v, want resolved binary strict=false", gotBin, gotStrict)
+	}
+	if gotWait != 15*time.Second {
+		t.Fatalf("wait = %s, want 15s", gotWait)
+	}
+	if !strings.Contains(stdout.String(), "supervisor: adopted for schedulerless LSP register") {
+		t.Fatalf("stdout missing adopted message: %q", stdout.String())
+	}
+}
+
+func TestRegisterCmd_SchedulerlessSupervisorFailureStopsBeforeRegister(t *testing.T) {
+	origScheduler := registerSchedulerUnavailableForHost
+	origResolve := registerResolveMCPHubBinary
+	origEnsure := registerEnsureSupervisorRunning
+	t.Cleanup(func() {
+		registerSchedulerUnavailableForHost = origScheduler
+		registerResolveMCPHubBinary = origResolve
+		registerEnsureSupervisorRunning = origEnsure
+	})
+
+	registerSchedulerUnavailableForHost = func() (bool, error) { return true, nil }
+	registerResolveMCPHubBinary = func() (string, error) { return "D:/dev/mcphub.exe", nil }
+	registerEnsureSupervisorRunning = func(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
+		return nil, errors.New("IPC unavailable")
+	}
+
+	err := ensureSupervisorForSchedulerlessRegister(newRegisterCmdReal())
+	if err == nil {
+		t.Fatal("expected schedulerless supervisor failure")
+	}
+	if !strings.Contains(err.Error(), "schedulerless LSP register requires a running supervisor") ||
+		!strings.Contains(err.Error(), "mcphub supervise") {
+		t.Fatalf("error lacks schedulerless guidance: %v", err)
+	}
+}
+
+func TestRegisterCmd_SchedulerCapableRegisterSkipsSupervisorEnsure(t *testing.T) {
+	origScheduler := registerSchedulerUnavailableForHost
+	origEnsure := registerEnsureSupervisorRunning
+	t.Cleanup(func() {
+		registerSchedulerUnavailableForHost = origScheduler
+		registerEnsureSupervisorRunning = origEnsure
+	})
+
+	registerSchedulerUnavailableForHost = func() (bool, error) { return false, nil }
+	registerEnsureSupervisorRunning = func(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
+		t.Fatal("scheduler-capable register must not ensure supervisor")
+		return nil, nil
+	}
+
+	if err := ensureSupervisorForSchedulerlessRegister(newRegisterCmdReal()); err != nil {
+		t.Fatalf("ensureSupervisorForSchedulerlessRegister: %v", err)
 	}
 }
 

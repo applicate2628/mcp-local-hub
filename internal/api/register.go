@@ -186,16 +186,6 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	if _, err := os.Stat(canonicalExeForPreflight); err != nil {
 		return nil, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExeForPreflight, err)
 	}
-	// 2.5 Ensure the shared weekly-refresh task exists. Idempotent (Delete
-	// + Create under the hood) so it is safe to invoke on every Register.
-	// Failure here is non-fatal — per-workspace registration must not be
-	// blocked by a shared-task problem; surface a warning and carry on.
-	// Placed AFTER argument validation AND the canonical-mcphub preflight
-	// so neither invalid-language calls nor setup-skipped installs
-	// produce scheduler side effects at all.
-	if err := a.EnsureWeeklyRefreshTask(); err != nil {
-		fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
-	}
 	// 3. Per-language register with rollback stack.
 	//
 	// Registry flock lifetime is scoped to `registerOneLanguage`'s Phase 1
@@ -213,11 +203,24 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	}
 	reg := NewRegistry(regPath)
 	sch, err := schedulerNewForRegister()
+	var schedulerUnavailableErr error
 	if err != nil {
-		if opts.SupervisedProxy && schedulerUnavailableError(err) {
+		if schedulerUnavailableError(err) {
+			opts.SupervisedProxy = true
+			schedulerUnavailableErr = err
 			sch = legacyTaskUnavailableScheduler{}
 		} else {
 			return nil, err
+		}
+	}
+	// 3.1 Ensure the shared weekly-refresh task exists only for the legacy
+	// scheduler-backed path. Supervised registration owns its lifecycle
+	// through the supervisor intent file; touching the shared scheduler task
+	// there would mutate durable state before per-language preconditions
+	// such as legacy-port kill/adoption have been proven.
+	if !opts.SupervisedProxy {
+		if err := a.EnsureWeeklyRefreshTask(); err != nil {
+			fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
 		}
 	}
 	allClients := clientsAllForRegister()
@@ -228,9 +231,12 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 	}
 	report := &RegisterReport{Workspace: canonical, WorkspaceKey: wsKey}
-	if err != nil {
+	if schedulerUnavailableErr != nil {
 		report.Warnings = append(report.Warnings,
-			fmt.Sprintf("scheduler unavailable (%v); skipping legacy task handling (supervised rows have none)", err))
+			fmt.Sprintf("scheduler unavailable (%v); using supervised LSP proxy path and skipping legacy task handling", schedulerUnavailableErr))
+		if err := preflightSchedulerlessRegisterSupervisor(); err != nil {
+			return report, err
+		}
 	}
 	for _, lang := range languages {
 		entry, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, w, &rollback)
@@ -242,6 +248,15 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	}
 	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, allClients, w)...)
 	return report, nil
+}
+
+func preflightSchedulerlessRegisterSupervisor() error {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
+	defer cancel()
+	if _, err := registerSupervisorReconcileFn(ctx, false); err != nil {
+		return fmt.Errorf("schedulerless LSP register requires a running supervisor before writing intent: %w; run `mcphub supervise` from another shell and retry", err)
+	}
+	return nil
 }
 
 func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
@@ -385,15 +400,7 @@ func lspCleanupAliasMatches(value string, aliases map[string]bool) bool {
 	if value == "" {
 		return false
 	}
-	if aliases[value] {
-		return true
-	}
-	for alias := range aliases {
-		if len(alias) >= 4 && strings.Contains(value, alias) {
-			return true
-		}
-	}
-	return false
+	return aliases[value]
 }
 
 func isCommandBasename(command, want string) bool {

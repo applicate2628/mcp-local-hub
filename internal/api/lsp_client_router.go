@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -119,6 +120,11 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 				continue
 			}
 			if !entryMatchesLSPRouter(current, targetURL) {
+				if current != nil && !entryIsHubOwnedLSPClientEntry(current, language, portsByLanguage[language]) {
+					report.Failed = append(report.Failed, lspFailure(clientName, language, targetName, "ownership",
+						errors.New("live entry is not hub-owned; refusing to overwrite")))
+					continue
+				}
 				entry, err := lspRouterMCPEntryForClient(opts, adapter, targetName, targetURL)
 				if err != nil {
 					report.Failed = append(report.Failed, lspFailure(clientName, language, targetName, "prepare", err))
@@ -154,7 +160,7 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 				})
 			}
 		}
-		applyLSPRouterOps(adapter, clientName, keepN, ops, report)
+		applyLSPRouterOps(opts, adapter, clientName, keepN, ops, report)
 	}
 	return report, lspRouterReportError(report, "lsp client router wiring")
 }
@@ -215,6 +221,17 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 				if entryMatchesURL(live, targetURL) {
 					continue
 				}
+				if live != nil && !entryIsHubOwnedLSPClientEntry(live, language, map[int]bool{regEntry.Port: true}) {
+					report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "ownership",
+						errors.New("live entry is not hub-owned; refusing to overwrite")))
+					continue
+				}
+				if op, ok, blocked := lspRollbackRestoreOpFromBackup(adapter, clientName, language, entryName, targetURL, report); blocked {
+					continue
+				} else if ok {
+					ops = append(ops, op)
+					continue
+				}
 				entry, prepErr := lspLegacyMCPEntryForClient(opts, adapter, entryName, targetURL)
 				if prepErr != nil {
 					report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "prepare", prepErr))
@@ -240,7 +257,7 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 				})
 			}
 		}
-		applyLSPRouterOps(adapter, clientName, keepN, ops, report)
+		applyLSPRouterOps(opts, adapter, clientName, keepN, ops, report)
 	}
 	return report, lspRouterReportError(report, "lsp client router rollback")
 }
@@ -413,6 +430,10 @@ func entryMatchesURL(entry *clients.MCPEntry, targetURL string) bool {
 	return entry.URL == targetURL || entry.RelayURL == targetURL
 }
 
+func entryIsHubOwnedLSPClientEntry(entry *clients.MCPEntry, language string, ports map[int]bool) bool {
+	return entryIsLSPRouterForLanguage(entry, language) || entryPointsAtLegacyLSPPort(entry, ports)
+}
+
 func entryIsLSPRouterForLanguage(entry *clients.MCPEntry, language string) bool {
 	if entry == nil {
 		return false
@@ -481,7 +502,37 @@ func lspLegacyURLPort(raw string) (int, bool) {
 	return port, true
 }
 
-func applyLSPRouterOps(adapter clients.Client, clientName string, keepN int, ops []lspClientRouterOp, report *LSPClientRouterReport) {
+func lspRollbackRestoreOpFromBackup(
+	adapter clients.Client,
+	clientName, language, entryName, targetURL string,
+	report *LSPClientRouterReport,
+) (lspClientRouterOp, bool, bool) {
+	backupPath, ok, err := adapter.LatestBackupPath()
+	if err != nil {
+		report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "backup-read", err))
+		return lspClientRouterOp{}, false, true
+	}
+	if !ok {
+		return lspClientRouterOp{}, false, false
+	}
+	has, err := adapter.BackupContainsEntry(backupPath, entryName)
+	if err != nil {
+		report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "backup-read", err))
+		return lspClientRouterOp{}, false, true
+	}
+	if !has {
+		return lspClientRouterOp{}, false, false
+	}
+	return lspClientRouterOp{
+		kind:      "restore",
+		language:  language,
+		entryName: entryName,
+		backup:    backupPath,
+		entry:     clients.MCPEntry{Name: entryName, URL: targetURL},
+	}, true, false
+}
+
+func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientName string, keepN int, ops []lspClientRouterOp, report *LSPClientRouterReport) {
 	if len(ops) == 0 {
 		return
 	}
@@ -517,6 +568,26 @@ func applyLSPRouterOps(adapter clients.Client, clientName string, keepN int, ops
 		case "restore":
 			if err := adapter.RestoreEntryFromBackupForRollback(op.backup, op.entryName); err != nil {
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "restore", err))
+				continue
+			}
+			restored, err := adapter.GetEntry(op.entryName)
+			if err != nil {
+				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "read", err))
+				continue
+			}
+			if entryIsLSPRouterForLanguage(restored, op.language) {
+				fallback, prepErr := lspLegacyMCPEntryForClient(opts, adapter, op.entryName, op.entry.URL)
+				if prepErr != nil {
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "prepare", prepErr))
+					continue
+				}
+				if err := adapter.AddEntry(fallback); err != nil {
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
+					continue
+				}
+				report.Applied = append(report.Applied, LSPClientRouterChange{
+					Client: clientName, Language: op.language, EntryName: op.entryName, URL: fallback.URL,
+				})
 				continue
 			}
 			report.Restored = append(report.Restored, LSPClientRouterChange{

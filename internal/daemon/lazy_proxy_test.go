@@ -160,6 +160,40 @@ func (e *reapingRaceEndpoint) Close() error {
 	return nil
 }
 
+type stopAfterMaterializeLifecycle struct {
+	materializeStarted chan struct{}
+	releaseMaterialize chan struct{}
+	ep                 *fakeEndpoint
+	stopCount          atomic.Int32
+	startedOnce        sync.Once
+}
+
+func newStopAfterMaterializeLifecycle() *stopAfterMaterializeLifecycle {
+	return &stopAfterMaterializeLifecycle{
+		materializeStarted: make(chan struct{}),
+		releaseMaterialize: make(chan struct{}),
+	}
+}
+
+func (f *stopAfterMaterializeLifecycle) Kind() string { return "mcp-language-server" }
+
+func (f *stopAfterMaterializeLifecycle) Materialize(ctx context.Context) (MCPEndpoint, error) {
+	f.startedOnce.Do(func() { close(f.materializeStarted) })
+	select {
+	case <-f.releaseMaterialize:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	parent := &fakeLifecycle{kind: "mcp-language-server"}
+	f.ep = &fakeEndpoint{parent: parent}
+	return f.ep, nil
+}
+
+func (f *stopAfterMaterializeLifecycle) Stop() error {
+	f.stopCount.Add(1)
+	return nil
+}
+
 // --- helpers ---------------------------------------------------------------
 
 func newTestProxy(t *testing.T, kind string, f *fakeLifecycle) (*LazyProxy, string) {
@@ -490,6 +524,41 @@ func TestLazyProxy_ToolsListSyntheticNoMaterialize(t *testing.T) {
 	}
 }
 
+func TestLazyProxy_ResourcesAndPromptsListSyntheticNoMaterialize(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+
+	cases := []struct {
+		method string
+		field  string
+	}{
+		{method: "resources/list", field: "resources"},
+		{method: "prompts/list", field: "prompts"},
+	}
+	for _, tc := range cases {
+		rr := postRPC(t, h, tc.method, 2)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s code = %d, want 200; body=%s", tc.method, rr.Code, rr.Body.String())
+		}
+		got := parseRPC(t, rr.Body.Bytes())
+		result, ok := got["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s result missing or wrong type: %+v", tc.method, got)
+		}
+		items, ok := result[tc.field].([]any)
+		if !ok {
+			t.Fatalf("%s field %q missing or wrong type: %+v", tc.method, tc.field, result)
+		}
+		if len(items) != 0 {
+			t.Fatalf("%s returned %d %s, want empty synthetic list", tc.method, len(items), tc.field)
+		}
+	}
+	if f.materializeCount.Load() != 0 {
+		t.Errorf("resources/prompts list triggered materialize: count=%d", f.materializeCount.Load())
+	}
+}
+
 // TestLazyProxy_BackendKindSelectsCatalog verifies the proxy passes its
 // configured BackendKind to the synthetic-catalog factory. Using "gopls-mcp"
 // must surface gopls tool names (not mcp-language-server's).
@@ -665,6 +734,110 @@ func TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse(t 
 	case <-reapDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("idle reaper did not finish after lifecycle Stop was released")
+	}
+}
+
+func TestLazyProxy_OnSendFailureWaitsForStopBeforeLifecycleReuse(t *testing.T) {
+	f := newReapingRaceLifecycle()
+	p, _ := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+
+	first, err := p.ensureMaterialized(context.Background())
+	if err != nil {
+		t.Fatalf("initial ensureMaterialized: %v", err)
+	}
+	p.endBackendRequest()
+
+	failureDone := make(chan struct{})
+	go func() {
+		p.onSendFailure(errors.New("backend subprocess exited"))
+		close(failureDone)
+	}()
+	<-f.stopStarted
+
+	type materializedResult struct {
+		ep  MCPEndpoint
+		err error
+	}
+	result := make(chan materializedResult, 1)
+	go func() {
+		ep, err := p.ensureMaterialized(context.Background())
+		result <- materializedResult{ep: ep, err: err}
+	}()
+
+	select {
+	case <-f.materializeDuringStop:
+		t.Fatal("Materialize ran while onSendFailure was still stopping the cached lifecycle")
+	case got := <-result:
+		t.Fatalf("ensureMaterialized returned before onSendFailure Stop completed: ep=%T err=%v", got.ep, got.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(f.allowStop)
+	select {
+	case <-failureDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onSendFailure did not finish after lifecycle Stop was released")
+	}
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("ensureMaterialized after onSendFailure: %v", got.err)
+		}
+		if got.ep == first {
+			t.Fatal("ensureMaterialized reused the endpoint being reaped after send failure")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensureMaterialized did not finish after onSendFailure completed")
+	}
+}
+
+func TestLazyProxy_StopDuringMaterializeFailsClosed(t *testing.T) {
+	f := newStopAfterMaterializeLifecycle()
+	p, _ := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+
+	type materializedResult struct {
+		ep  MCPEndpoint
+		err error
+	}
+	result := make(chan materializedResult, 1)
+	go func() {
+		ep, err := p.ensureMaterialized(context.Background())
+		result <- materializedResult{ep: ep, err: err}
+	}()
+	<-f.materializeStarted
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := p.Stop(ctx); err != nil {
+		t.Fatalf("Stop during materialize: %v", err)
+	}
+	close(f.releaseMaterialize)
+
+	var got materializedResult
+	select {
+	case got = <-result:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensureMaterialized did not finish after materialize was released")
+	}
+	if got.err == nil {
+		t.Fatalf("ensureMaterialized returned nil error after Stop won; ep=%T", got.ep)
+	}
+	if f.ep == nil {
+		t.Fatal("test lifecycle did not return an endpoint")
+	}
+	if !f.ep.closed.Load() {
+		t.Fatal("endpoint returned after Stop was not closed")
+	}
+	if got := f.stopCount.Load(); got < 2 {
+		t.Fatalf("Lifecycle.Stop count = %d, want at least 2 (Stop plus closed-won materialize cleanup)", got)
+	}
+	p.mu.Lock()
+	cached := p.endpoint
+	p.mu.Unlock()
+	if cached != nil {
+		t.Fatalf("endpoint cached after Stop won materialization race: %T", cached)
 	}
 }
 

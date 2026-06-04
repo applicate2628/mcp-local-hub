@@ -887,20 +887,18 @@ func (a *API) syntheticToolsSubSection(d DaemonStatus) CapabilitySubSection {
 	return CapabilitySubSection{State: "ok", Items: items}
 }
 
-// syntheticPromptsSubSection: the embedded catalog only models tools.
-// Reporting "unsupported" here is more honest than "empty" because we
-// know up front that no synthetic-prompt path exists for any current
-// backend kind — the lazy proxy never declares "prompts" capability in
-// its synthetic initialize response unless and until someone wires one.
+// syntheticPromptsSubSection reports the lazy proxy's synthetic
+// prompts/list response. Current backend catalogs expose no embedded prompts,
+// so the synthetic response is intentionally an empty list.
 func (a *API) syntheticPromptsSubSection(d DaemonStatus) CapabilitySubSection {
-	return CapabilitySubSection{State: "unsupported"}
+	return CapabilitySubSection{State: "empty", Items: []CapabilityItem{}}
 }
 
-// syntheticResourcesSubSection: same rationale as syntheticPromptsSubSection.
-// The synthetic catalog has no resource entries; "unsupported" tells the
-// operator that this is a deliberate gap rather than a transient failure.
+// syntheticResourcesSubSection reports the lazy proxy's synthetic
+// resources/list response. Current backend catalogs expose no embedded
+// resources, so the synthetic response is intentionally an empty list.
 func (a *API) syntheticResourcesSubSection(d DaemonStatus) CapabilitySubSection {
-	return CapabilitySubSection{State: "unsupported"}
+	return CapabilitySubSection{State: "empty", Items: []CapabilityItem{}}
 }
 
 // ensureCanonicalIDs backfills ID/Kind/Namespace on every CapabilityItem

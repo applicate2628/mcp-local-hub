@@ -591,6 +591,87 @@ func TestSupervisorController_HappyPath_SpawnHealthRunningStopExiting(t *testing
 	}
 }
 
+func TestSupervisorController_RemovedIntentClearsStateSoReregisterSpawns(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	statePath := filepath.Join(tmpHome, "supervisor-state.json")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return nil
+	}
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-lsp-abcd1234-go`,
+		Server:   "mcp-language-server",
+		Daemon:   "lsp-abcd1234-go",
+		Args:     []string{"daemon", "workspace-proxy"},
+	}
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{descriptor}}
+	emptyIntent := &api.SupervisorIntentFile{Version: 1}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	loop := api.NewEventLoop(16)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               fakeSpawn,
+		statePath:           statePath,
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+	ctrl.queuedActions.Store(descriptor.TaskName, "respawn")
+	tracker.MarkSpawned(descriptor.TaskName, 1234, time.Now().UTC())
+	_ = tracker.RecordCrashAndCountInWindow(descriptor.TaskName, time.Now().UTC(), respawnFailureWindow)
+	if err := tracker.PersistTo(statePath); err != nil {
+		t.Fatalf("seed tracker persist: %v", err)
+	}
+
+	deps := ipcDispatchDeps{controllerProvider: func() *supervisorController { return ctrl }}
+	applyReconcileDrift(deps, nil, emptyIntent, nil)
+
+	if _, ok := ctrl.GetSMState(descriptor.TaskName); ok {
+		t.Fatalf("removed descriptor left stale SM state tracked")
+	}
+	if v, ok := ctrl.queuedActions.Load(descriptor.TaskName); ok && v != "" {
+		t.Fatalf("removed descriptor left queued action %q", v)
+	}
+	if entry, ok := tracker.Get(descriptor.TaskName); ok {
+		t.Fatalf("removed descriptor left tracker entry: %+v", entry)
+	}
+	state, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read supervisor state after removal: %v", err)
+	}
+	if _, ok := state.Daemons[descriptor.TaskName]; ok {
+		t.Fatalf("removed descriptor persisted stale supervisor-state row: %+v", state.Daemons[descriptor.TaskName])
+	}
+
+	ctrl.intentCache.Refresh(intent)
+	ctrl.handleLoopEvent(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: descriptor.TaskName})
+	if got := spawnCalls.Load(); got != 1 {
+		t.Fatalf("re-register EvIntentUpdate spawn calls = %d, want 1", got)
+	}
+	st, _ := ctrl.GetSMState(descriptor.TaskName)
+	if st != api.StSpawning {
+		t.Fatalf("state after re-register EvIntentUpdate = %s, want %s", st, api.StSpawning)
+	}
+}
+
 // TestSupervisorController_HandleEvStart_StopIntentSuppressesSpawn
 // closes the IntentDesired=stopped branch of StIdle+EvStart: SM
 // returns (StIdle, "intent suppresses spawn") and the spawn closure

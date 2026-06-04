@@ -808,7 +808,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				},
 			})
 		} else {
-			ctrl.intentCache.Refresh(updatedSupervisor)
+			ctrl.refreshSupervisorIntent(updatedSupervisor)
 		}
 
 		// Re-read daemon-intent.json via the free-function form

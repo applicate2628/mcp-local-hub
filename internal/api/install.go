@@ -653,8 +653,7 @@ func schedulerUnavailableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "not implemented") || strings.Contains(msg, "not yet implemented")
+	return errors.Is(err, scheduler.ErrNotImplemented)
 }
 
 func SchedulerUnavailableError(err error) bool {
