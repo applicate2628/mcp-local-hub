@@ -186,14 +186,18 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		return writeReconcileTimeoutFrame(conn, req, schedErr)
 	}
 	if schedErr != nil {
-		return writeIPCFrame(conn, api.IPCResponse{
-			ID: req.ID,
-			Error: &api.IPCErr{
-				Code:    "RECONCILE_SCHEDULER_LIST_FAILED",
-				Message: schedErr.Error(),
-			},
-			Final: true,
-		})
+		if api.SchedulerUnavailableError(schedErr) {
+			schedTasks = nil
+		} else {
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    "RECONCILE_SCHEDULER_LIST_FAILED",
+					Message: schedErr.Error(),
+				},
+				Final: true,
+			})
+		}
 	}
 
 	// (4) Build a normalized scheduler lookup keyed on canonical

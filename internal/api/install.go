@@ -657,6 +657,10 @@ func schedulerUnavailableError(err error) bool {
 	return strings.Contains(msg, "not implemented") || strings.Contains(msg, "not yet implemented")
 }
 
+func SchedulerUnavailableError(err error) bool {
+	return schedulerUnavailableError(err)
+}
+
 // forceMaterializeWorkspaceScoped walks rows and for every workspace-scoped
 // entry (non-empty Language), sends a real no-op tools/call via the
 // forceMaterializeProbe hook. The proxy will drive the backend through

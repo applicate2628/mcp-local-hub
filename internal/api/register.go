@@ -881,6 +881,7 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		if _, supervisorManaged, err := a.removeLSPSupervisorIntent(activeWSKey, lang); err != nil {
 			report.Warnings = append(report.Warnings,
 				fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
+			continue
 		} else if supervisorManaged {
 			ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
 			if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {

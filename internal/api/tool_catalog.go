@@ -84,6 +84,26 @@ func SyntheticToolsListResponse(reqID json.RawMessage, kind string) ([]byte, err
 	return json.Marshal(payload)
 }
 
+func SyntheticResourcesListResponse(reqID json.RawMessage, kind string) ([]byte, error) {
+	return syntheticEmptyListResponse(reqID, kind, "resources")
+}
+
+func SyntheticPromptsListResponse(reqID json.RawMessage, kind string) ([]byte, error) {
+	return syntheticEmptyListResponse(reqID, kind, "prompts")
+}
+
+func syntheticEmptyListResponse(reqID json.RawMessage, kind, field string) ([]byte, error) {
+	if _, ok := ToolCatalogForBackend(kind); !ok {
+		return nil, fmt.Errorf("unknown backend kind %q", kind)
+	}
+	payload := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"result":  map[string]any{field: []any{}},
+	}
+	return json.Marshal(payload)
+}
+
 // --- Embedded catalogs. Update via the maintainer workflow documented at
 // the top of the golden test (TestToolCatalog_GoldenAgainstUpstream): run
 // upstream, capture tools/list, diff, bump CatalogVersion, paste tools.

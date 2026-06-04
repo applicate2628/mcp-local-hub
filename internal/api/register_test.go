@@ -2044,6 +2044,93 @@ func TestUnregister_NoSupervisorIntentRowIsNoOpSuccess(t *testing.T) {
 	}
 }
 
+func TestUnregister_IntentRemovalFailureLeavesRegistryAndClients(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatal("reconcile must not run when supervisor intent removal fails")
+		return ReconcileResponse{}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origKill := killByPortFn
+	var killed []int
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killed = append(killed, port)
+		return nil
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	entryName := "mcp-language-server-go-abcd"
+	entry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": entryName},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(entry); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"][entryName] = "http://localhost:9242/mcp"
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(intentPath), 0o700); err != nil {
+		t.Fatalf("mkdir supervisor intent dir: %v", err)
+	}
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"daemons":[`), 0o600); err != nil {
+		t.Fatalf("write corrupt supervisor intent: %v", err)
+	}
+
+	rpt, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Unregister with failed intent removal should return warnings, got error: %v", err)
+	}
+	if !strings.Contains(strings.Join(rpt.Warnings, "\n"), "remove supervisor intent") {
+		t.Fatalf("warnings = %v, want remove supervisor intent warning", rpt.Warnings)
+	}
+	if slices.Contains(rpt.Removed, "go") {
+		t.Fatalf("Removed = %v, want go omitted after failed intent removal", rpt.Removed)
+	}
+	if len(killed) != 0 {
+		t.Fatalf("kill-by-port ran after failed intent removal: %v", killed)
+	}
+	if slices.Contains(h.fakeSch.deleteNames, entry.TaskName) {
+		t.Fatalf("scheduler task %s deleted after failed intent removal; deleteNames=%v",
+			entry.TaskName, h.fakeSch.deleteNames)
+	}
+	if got := h.fakeClients.entries["codex-cli"][entryName]; got == "" {
+		t.Fatalf("client entry %s removed after failed intent removal", entryName)
+	}
+	reg = NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 1 || rows[0].Language != "go" {
+		t.Fatalf("registry rows after failed intent removal = %+v, want original go row preserved", rows)
+	}
+}
+
 // --- Install refusal for workspace-scoped manifests ---------------------
 
 // --- KnobDefault tests (D1: knob-driven weekly_refresh_default) ----------

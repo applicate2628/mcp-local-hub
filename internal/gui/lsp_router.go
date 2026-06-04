@@ -162,6 +162,12 @@ func (s *Server) lspRouterHandler(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		s.handleLSPToolsList(w, &tb, backendKind)
 		return
+	case "resources/list":
+		s.handleLSPResourcesList(w, &tb, backendKind)
+		return
+	case "prompts/list":
+		s.handleLSPPromptsList(w, &tb, backendKind)
+		return
 	case "ping":
 		if isJSONRPCNotificationID(tb.ID) {
 			w.WriteHeader(http.StatusAccepted)
@@ -271,6 +277,37 @@ func (s *Server) handleLSPToolsList(w http.ResponseWriter, tb *toolBody, backend
 		return
 	}
 	resp, err := api.SyntheticToolsListResponse(tb.ID, backendKind)
+	if err != nil {
+		writeJSONRPCError(w, tb.ID, jsonrpcInternalError, err.Error())
+		return
+	}
+	writeLSPRawJSON(w, resp)
+}
+
+func (s *Server) handleLSPResourcesList(w http.ResponseWriter, tb *toolBody, backendKind string) {
+	s.handleLSPEmptyList(w, tb, backendKind, api.SyntheticResourcesListResponse)
+}
+
+func (s *Server) handleLSPPromptsList(w http.ResponseWriter, tb *toolBody, backendKind string) {
+	s.handleLSPEmptyList(w, tb, backendKind, api.SyntheticPromptsListResponse)
+}
+
+func (s *Server) handleLSPEmptyList(
+	w http.ResponseWriter,
+	tb *toolBody,
+	backendKind string,
+	build func(json.RawMessage, string) ([]byte, error),
+) {
+	if isJSONRPCNotificationID(tb.ID) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	if !isValidJSONRPCRequestID(tb.ID) {
+		writeJSONRPCError(w, nil, jsonrpcInvalidRequest,
+			"invalid request: id must be a non-null string or number")
+		return
+	}
+	resp, err := build(tb.ID, backendKind)
 	if err != nil {
 		writeJSONRPCError(w, tb.ID, jsonrpcInternalError, err.Error())
 		return

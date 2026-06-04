@@ -248,6 +248,68 @@ func TestReconcileIPC_ApplyPostsEvIntentUpdate(t *testing.T) {
 	}
 }
 
+func TestReconcileIPC_SchedulerUnavailableTreatsSupervisorOwnedRowsAsMissing(t *testing.T) {
+	taskName := `\mcp-local-hub-lsp-deadbeef-go`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName: taskName,
+				Server:   "lsp",
+				Daemon:   "go",
+				Command:  "mcphub",
+				Args:     []string{"daemon", "workspace-proxy", "--language", "go"},
+				Port:     9242,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	uninstall := setReconcileSchedulerNewFnForTest(func() (scheduler.Scheduler, error) {
+		return nil, errors.New("scheduler not implemented on this platform")
+	})
+	defer uninstall()
+
+	req := api.IPCRequest{
+		ID:   24,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	resp, body := decodeReconcileResponse(t, conn)
+	if resp.Error != nil {
+		t.Fatalf("scheduler not-implemented must be an empty snapshot, got error %+v", resp.Error)
+	}
+	if body.DriftCount != 1 || len(body.Drift) != 1 {
+		t.Fatalf("DriftCount=%d drift=%+v, want one supervisor-owned missing row", body.DriftCount, body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.TaskName != taskName {
+		t.Errorf("TaskName = %q, want %q", entry.TaskName, taskName)
+	}
+	if entry.SchedulerState != api.ReconcileSchedulerStateMissing {
+		t.Errorf("SchedulerState = %q, want %q", entry.SchedulerState, api.ReconcileSchedulerStateMissing)
+	}
+	if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("Action = %q, want %q for schedulerless supervisor-owned descriptor",
+			entry.Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("expected EvIntentUpdate for schedulerless supervisor-owned row")
+	}
+}
+
 // TestReconcileIPC_ApplyRefreshesCacheBeforePosting verifies that apply mode
 // refreshes the controller's cached supervisor intent and daemon intent from
 // the same files used for drift classification before EvIntentUpdate is

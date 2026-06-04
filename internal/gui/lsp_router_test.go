@@ -130,6 +130,83 @@ func TestLSPRouter_InitializeAndToolsListUseCatalogWithoutProxy(t *testing.T) {
 	}
 }
 
+func TestLSPRouter_ResourcesAndPromptsListAreSyntheticEmpty(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{},
+		Sessions: lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) {
+			if lang == "go" {
+				return "gopls-mcp", true
+			}
+			return "", false
+		},
+	})
+
+	initRR := postLSP(t, s, "go", rpcBody("initialize", "1", `{}`), nil)
+	if initRR.Code != http.StatusOK {
+		t.Fatalf("initialize status = %d body=%s", initRR.Code, initRR.Body.String())
+	}
+	if !strings.Contains(initRR.Body.String(), `"resources"`) ||
+		!strings.Contains(initRR.Body.String(), `"prompts"`) {
+		t.Fatalf("initialize did not advertise resources/prompts capabilities: %s", initRR.Body.String())
+	}
+
+	for _, tc := range []struct {
+		method string
+		field  string
+		id     string
+	}{
+		{method: "resources/list", field: "resources", id: "2"},
+		{method: "prompts/list", field: "prompts", id: "3"},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			rr := postLSP(t, s, "go", rpcBody(tc.method, tc.id, `{}`), nil)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s status = %d body=%s", tc.method, rr.Code, rr.Body.String())
+			}
+			var resp struct {
+				JSONRPC string                       `json:"jsonrpc"`
+				ID      int                          `json:"id"`
+				Result  map[string][]json.RawMessage `json:"result"`
+				Error   json.RawMessage              `json:"error"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode %s response: %v; raw=%s", tc.method, err, rr.Body.String())
+			}
+			if len(resp.Error) != 0 {
+				t.Fatalf("%s returned error: %s", tc.method, string(resp.Error))
+			}
+			if resp.JSONRPC != "2.0" {
+				t.Fatalf("%s jsonrpc = %q, want 2.0", tc.method, resp.JSONRPC)
+			}
+			if got := resp.ID; got != mustAtoiForLSPTest(t, tc.id) {
+				t.Fatalf("%s id = %d, want %s", tc.method, got, tc.id)
+			}
+			if items, ok := resp.Result[tc.field]; !ok {
+				t.Fatalf("%s result missing %q: %+v", tc.method, tc.field, resp.Result)
+			} else if len(items) != 0 {
+				t.Fatalf("%s result.%s length = %d, want 0; items=%+v", tc.method, tc.field, len(items), items)
+			}
+		})
+	}
+}
+
+func mustAtoiForLSPTest(t *testing.T, raw string) int {
+	t.Helper()
+	switch raw {
+	case "1":
+		return 1
+	case "2":
+		return 2
+	case "3":
+		return 3
+	default:
+		t.Fatalf("test helper only supports small literal ids, got %q", raw)
+		return 0
+	}
+}
+
 func TestLSPRouter_RegisteredWorkspaceForwardsSessionless(t *testing.T) {
 	var upstreamSession string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
