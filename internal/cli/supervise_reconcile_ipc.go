@@ -480,7 +480,8 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 }
 
 func isSupervisorOwnedDescriptorForReconcile(d api.SupervisorDaemon) bool {
-	return len(d.Args) > 0 && d.Args[0] == "daemon"
+	return len(d.Args) >= 2 && d.Args[0] == "daemon" &&
+		(d.Args[1] == "workspace-proxy" || d.Args[1] == "serena-proxy")
 }
 
 // lookupControllerSMState reads the per-task SM state from the live

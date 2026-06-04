@@ -292,7 +292,7 @@ func (s *Server) resolveLSPToolWorkspace(
 ) (*api.WorkspaceEntry, bool, bool) {
 	pathArg, hasPath := lsp_routing.ExtractPathArg(toolArguments)
 	if !hasPath {
-		ws, ok := lspPathlessWorkspace(w, tb.ID, deps, sessionID)
+		ws, ok := lspPathlessWorkspace(w, r, deps, tb, language, sessionID)
 		return ws, false, ok
 	}
 
@@ -373,21 +373,37 @@ func (s *Server) ensureResolvedLSPWorkspace(
 	return entry, true
 }
 
-func lspPathlessWorkspace(w http.ResponseWriter, id json.RawMessage, deps *lspRouterDeps, sessionID string) (*api.WorkspaceEntry, bool) {
+func lspPathlessWorkspace(w http.ResponseWriter, r *http.Request, deps *lspRouterDeps, tb *toolBody, language, sessionID string) (*api.WorkspaceEntry, bool) {
 	if sessionID == "" || deps == nil || deps.Sessions == nil {
-		writeJSONRPCError(w, id, jsonrpcInvalidParams, "make a file-scoped call first")
+		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams, "make a file-scoped call first")
 		return nil, false
 	}
 	candidates := deps.Sessions.Candidates(sessionID)
 	switch len(candidates) {
 	case 0:
-		writeJSONRPCError(w, id, jsonrpcInvalidParams, "make a file-scoped call first")
+		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams, "make a file-scoped call first")
 		return nil, false
 	case 1:
 		ws := candidates[0]
-		return &ws, true
+		if deps.AutoRegisterFn == nil {
+			return &ws, true
+		}
+		regCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)
+		defer cancel()
+		entry, err := deps.AutoRegisterFn(regCtx, ws.WorkspaceKey, ws.WorkspacePath, language)
+		if err != nil {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+				"LSP re-ensure failed for pathless call: "+err.Error(), nil)
+			return nil, false
+		}
+		if entry == nil {
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+				"LSP re-ensure returned no entry", nil)
+			return nil, false
+		}
+		return entry, true
 	default:
-		writeJSONRPCError(w, id, jsonrpcInvalidParams,
+		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
 			"ambiguous LSP workspace for pathless call; candidates: "+lspCandidateList(candidates))
 		return nil, false
 	}

@@ -1219,6 +1219,45 @@ func TestRegister_SupervisedDeleteLegacyTaskFailureAbortsBeforeIntent(t *testing
 	}
 }
 
+func TestRegister_SupervisedNoLegacyRollbackDoesNotKillUnspawnedPort(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		t.Fatal("supervised register must fail before supervisor reconcile")
+		return ReconcileResponse{}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origKill := killByPortFn
+	var killed []int
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killed = append(killed, port)
+		return nil
+	}
+	defer func() { killByPortFn = origKill }()
+
+	h.fakeSch.failDeleteErr = scheduler.ErrTaskNotFound
+	h.fakeClients.failAddEntryCalls = 1
+
+	_, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), t.TempDir(), []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err == nil {
+		t.Fatal("expected supervised register to fail on induced client write")
+	}
+	if !strings.Contains(err.Error(), "write claude-code entry") {
+		t.Fatalf("error = %v, want induced client write failure", err)
+	}
+	if len(killed) != 0 {
+		t.Fatalf("rollback killed unspawned no-legacy port(s): %v", killed)
+	}
+}
+
 func TestRegister_EntryNameCollision(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()

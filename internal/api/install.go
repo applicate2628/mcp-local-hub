@@ -604,7 +604,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 					continue
 				}
 				seen[bare] = true
-				result = append(result, DaemonStatus{TaskName: e.TaskName})
+				result = append(result, DaemonStatus{TaskName: e.TaskName, State: "Stopped"})
 			}
 		}
 	}

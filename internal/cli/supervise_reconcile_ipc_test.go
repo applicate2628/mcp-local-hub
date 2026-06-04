@@ -638,6 +638,27 @@ func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
 	}
 }
 
+func TestIsSupervisorOwnedDescriptorForReconcile(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "workspace proxy", args: []string{"daemon", "workspace-proxy", "--port", "9200"}, want: true},
+		{name: "serena proxy", args: []string{"daemon", "serena-proxy", "--server", "serena"}, want: true},
+		{name: "scheduler backed global daemon", args: []string{"daemon", "--server", "memory", "--daemon", "default"}, want: false},
+		{name: "bare daemon", args: []string{"daemon"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSupervisorOwnedDescriptorForReconcile(api.SupervisorDaemon{Args: tt.args})
+			if got != tt.want {
+				t.Fatalf("isSupervisorOwnedDescriptorForReconcile(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestReconcileIPC_OrphanSchedulerTaskFlaggedNeedsManualReview —
 // scheduler has a row that the intent does NOT declare → orphan;
 // IntentDesired="?" and Action="needs_manual_review".

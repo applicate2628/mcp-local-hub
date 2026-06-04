@@ -210,6 +210,9 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	if row.Lifecycle != LifecycleActive {
 		t.Fatalf("Lifecycle = %q, want %q", row.Lifecycle, LifecycleActive)
 	}
+	if row.State != "Stopped" {
+		t.Fatalf("State = %q, want Stopped for registry-only LSP row with no live port", row.State)
+	}
 	for _, row := range rows {
 		if row.TaskName == "mcp-local-hub-serena-default" || row.Language == SerenaLanguageSentinel {
 			t.Fatalf("StatusWithOpts merged non-LSP registry row: %+v", row)

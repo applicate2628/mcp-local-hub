@@ -122,7 +122,7 @@ func (a *API) registerOneLanguageSupervised(
 	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
 		return WorkspaceEntry{}, fmt.Errorf("delete legacy task %s before supervised promote: %w", taskName, err)
 	}
-	legacyTaskDeleted = true
+	legacyTaskDeleted = len(priorXML) > 0
 
 	bindingsPre := m.ClientBindings
 	if len(bindingsPre) == 0 {

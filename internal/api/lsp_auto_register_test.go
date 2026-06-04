@@ -195,6 +195,96 @@ func TestEnsureLSPRegistered_ExistingReadySupervisorOwnedRowReturnsWithoutReconc
 	}
 }
 
+func TestEnsureLSPRegistered_ExistingDeadSupervisorOwnedRowSkipsScheduler(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origScheduler := schedulerFactoryFn
+	var schedulerCalls atomic.Int32
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) {
+		schedulerCalls.Add(1)
+		return nil, errors.New("scheduler unavailable on this platform")
+	}
+	defer func() { schedulerFactoryFn = origScheduler }()
+
+	var reconcileCalls atomic.Int32
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Fatalf("EnsureLSPRegistered called reconcile with apply=false")
+		}
+		reconcileCalls.Add(1)
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	var readinessCalls atomic.Int32
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		call := readinessCalls.Add(1)
+		if port != 9242 {
+			t.Fatalf("readiness port = %d, want 9242", port)
+		}
+		if call == 1 {
+			return errors.New("existing proxy is dead")
+		}
+		return nil
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	want := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(want); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(want, testCanonicalMcphubPathOverride),
+		},
+	})
+
+	got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+	if err != nil {
+		t.Fatalf("EnsureLSPRegistered existing dead owned row: %v", err)
+	}
+	if got.Port != want.Port || got.Lifecycle != want.Lifecycle {
+		t.Fatalf("existing row mismatch: got %+v want %+v", got, want)
+	}
+	if calls := readinessCalls.Load(); calls != 2 {
+		t.Fatalf("readiness calls = %d, want dead probe + post-reconcile wait", calls)
+	}
+	if calls := reconcileCalls.Load(); calls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", calls)
+	}
+	if calls := schedulerCalls.Load(); calls != 0 {
+		t.Fatalf("scheduler constructor calls = %d, want 0 for already supervisor-owned row", calls)
+	}
+}
+
 func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesThroughSupervisor(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
