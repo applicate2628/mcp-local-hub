@@ -12,6 +12,8 @@ import (
 
 var lspEnsureLocks sync.Map // map[string]*sync.Mutex, keyed by workspaceKey + "\x00" + language
 
+const lspExistingProxyProbeTimeout = 500 * time.Millisecond
+
 // EnsureLSPRegistered idempotently creates the supervised workspace-proxy row
 // for one (workspaceKey, language) tuple without writing any client configs.
 // The per-tuple lock spans registry write, supervisor intent write, reconcile,
@@ -66,6 +68,43 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	}
 	if prior, ok := reg.Get(workspaceKey, language); ok {
 		unlock()
+		if err := proxyReadinessFn(prior.Port, lspExistingProxyProbeTimeout); err == nil {
+			return prior, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return WorkspaceEntry{}, err
+		}
+		canonicalExe, err := canonicalMcphubPath()
+		if err != nil {
+			return WorkspaceEntry{}, err
+		}
+		if _, err := os.Stat(canonicalExe); err != nil {
+			return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		}
+		restoreIntent, err := a.upsertLSPSupervisorIntent(prior, canonicalExe)
+		if err != nil {
+			return WorkspaceEntry{}, err
+		}
+		intentWritten := true
+		rollbackIntent := func() {
+			if intentWritten {
+				restoreIntent()
+				intentWritten = false
+			}
+		}
+
+		reconcileCtx, cancel := context.WithTimeout(ctx, DefaultReconcileTimeout)
+		if _, err := registerSupervisorReconcileFn(reconcileCtx, true); err != nil {
+			cancel()
+			rollbackIntent()
+			return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+		}
+		cancel()
+
+		if err := proxyReadinessFn(prior.Port, 10*time.Second); err != nil {
+			rollbackIntent()
+			return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", prior.Port, err)
+		}
 		return prior, nil
 	}
 

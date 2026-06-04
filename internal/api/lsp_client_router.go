@@ -156,10 +156,13 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 	return report, lspRouterReportError(report, "lsp client router wiring")
 }
 
-// RollbackLSPRouterClientEntries restores the latest pre-router backup for
-// each present client when available. If no backup exists, it removes current
-// router entries. The current router state is backed up before any restore or
-// removal, so rollback itself is reversible through the normal backup files.
+// RollbackLSPRouterClientEntries reconstructs the pre-router per-workspace
+// LSP entries from preserved registry rows, then removes router entries that
+// are no longer needed. It deliberately does not select "latest backup": later
+// setup or GUI-port operations may have created newer router-containing
+// backups, so backup ordering is not a deterministic pre-router marker.
+// The current router state is still backed up before any mutation so rollback
+// itself remains reversible through the normal backup files.
 func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	report := &LSPClientRouterReport{}
 	languages, err := loadLSPRouterLanguages(opts.Languages)
@@ -184,54 +187,53 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 		if adapter == nil || !adapter.Exists() {
 			continue
 		}
-		restoreBackup, hasBackup, err := adapter.LatestBackupPath()
-		if err != nil {
-			report.Failed = append(report.Failed, lspFailure(clientName, "", "", "latest-backup", err))
-			continue
-		}
-
 		var ops []lspClientRouterOp
-		if hasBackup {
-			for _, language := range languages {
-				names := append([]string{LSPRouterEntryName(language)},
-					lspLegacyCandidateEntryNames(regEntries, language, clientName)...)
-				for _, entryName := range uniqueSortedStrings(names) {
-					live, readErr := adapter.GetEntry(entryName)
-					if readErr != nil {
-						report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "read", readErr))
-						continue
-					}
-					inBackup, containsErr := adapter.BackupContainsEntry(restoreBackup, entryName)
-					if containsErr != nil {
-						report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "backup-read", containsErr))
-						continue
-					}
-					if live == nil && !inBackup {
-						continue
-					}
-					ops = append(ops, lspClientRouterOp{
-						kind:      "restore",
-						language:  language,
-						entryName: entryName,
-						backup:    restoreBackup,
-					})
+		for _, language := range languages {
+			routerName := LSPRouterEntryName(language)
+			legacyNames := map[string]bool{}
+			for _, regEntry := range regEntries {
+				if regEntry.Language != language || regEntry.Port <= 0 {
+					continue
 				}
-			}
-		} else {
-			for _, language := range languages {
-				entryName := LSPRouterEntryName(language)
+				entryName := ""
+				if regEntry.ClientEntries != nil {
+					entryName = strings.TrimSpace(regEntry.ClientEntries[clientName])
+				}
+				if entryName == "" {
+					continue
+				}
+				legacyNames[entryName] = true
+				targetURL := fmt.Sprintf("http://localhost:%d/mcp", regEntry.Port)
 				live, readErr := adapter.GetEntry(entryName)
 				if readErr != nil {
 					report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "read", readErr))
 					continue
 				}
-				if !entryIsLSPRouterForLanguage(live, language) {
+				if entryMatchesURL(live, targetURL) {
+					continue
+				}
+				entry, prepErr := lspLegacyMCPEntryForClient(opts, adapter, entryName, targetURL)
+				if prepErr != nil {
+					report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "prepare", prepErr))
 					continue
 				}
 				ops = append(ops, lspClientRouterOp{
-					kind:      "remove",
+					kind:      "add",
 					language:  language,
 					entryName: entryName,
+					entry:     entry,
+				})
+			}
+			live, readErr := adapter.GetEntry(routerName)
+			if readErr != nil {
+				report.Failed = append(report.Failed, lspFailure(clientName, language, routerName, "read", readErr))
+				continue
+			}
+			if entryIsLSPRouterForLanguage(live, language) && !legacyNames[routerName] {
+				ops = append(ops, lspClientRouterOp{
+					kind:      "remove",
+					language:  language,
+					entryName: routerName,
 				})
 			}
 		}
@@ -376,7 +378,32 @@ func lspRouterMCPEntryForClient(opts LSPClientRouterOpts, adapter clients.Client
 	return entry, nil
 }
 
+func lspLegacyMCPEntryForClient(opts LSPClientRouterOpts, adapter clients.Client, name, targetURL string) (clients.MCPEntry, error) {
+	entry := clients.MCPEntry{
+		Name: name,
+		URL:  targetURL,
+	}
+	if adapter.Name() != "antigravity" {
+		return entry, nil
+	}
+	relayExe := opts.McphubExePath
+	if relayExe == "" {
+		var err error
+		relayExe, err = canonicalMcphubPath()
+		if err != nil {
+			return clients.MCPEntry{}, err
+		}
+	}
+	entry.RelayURL = targetURL
+	entry.RelayExePath = relayExe
+	return entry, nil
+}
+
 func entryMatchesLSPRouter(entry *clients.MCPEntry, targetURL string) bool {
+	return entryMatchesURL(entry, targetURL)
+}
+
+func entryMatchesURL(entry *clients.MCPEntry, targetURL string) bool {
 	if entry == nil {
 		return false
 	}
@@ -461,10 +488,12 @@ func applyLSPRouterOps(adapter clients.Client, clientName string, keepN int, ops
 		return
 	}
 	report.Backups = append(report.Backups, LSPClientRouterBackup{Client: clientName, Path: backupPath})
+	addFailedByLanguage := map[string]bool{}
 	for _, op := range ops {
 		switch op.kind {
 		case "add":
 			if err := adapter.AddEntry(op.entry); err != nil {
+				addFailedByLanguage[op.language] = true
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
 				continue
 			}
@@ -472,6 +501,9 @@ func applyLSPRouterOps(adapter clients.Client, clientName string, keepN int, ops
 				Client: clientName, Language: op.language, EntryName: op.entryName, URL: op.entry.URL,
 			})
 		case "remove":
+			if addFailedByLanguage[op.language] {
+				continue
+			}
 			if err := adapter.RemoveEntry(op.entryName); err != nil {
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "remove", err))
 				continue

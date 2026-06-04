@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ type lspRouterFakeClient struct {
 	entries     map[string]clients.MCPEntry
 	snapshots   map[string]map[string]clients.MCPEntry
 	backupPaths []string
+	addErr      error
 	addCalls    int
 	removeCalls int
 }
@@ -57,6 +59,9 @@ func (f *lspRouterFakeClient) BackupKeep(int) (string, error) {
 func (f *lspRouterFakeClient) Restore(string) error { return nil }
 func (f *lspRouterFakeClient) AddEntry(e clients.MCPEntry) error {
 	f.addCalls++
+	if f.addErr != nil {
+		return f.addErr
+	}
 	f.entries[e.Name] = e
 	return nil
 }
@@ -281,6 +286,107 @@ func TestRollbackLSPRouterClientEntries_RestoresPerPairEntryFromBackup(t *testin
 	}
 	if len(codex.backupPaths) != 2 {
 		t.Fatalf("total backups = %d, want setup backup + rollback backup", len(codex.backupPaths))
+	}
+}
+
+func TestRollbackLSPRouterClientEntries_ReconstructsPerPairEntryInsteadOfLatestRouterBackup(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
+	reg := NewRegistry(testRegistryPathOverride)
+	if err := reg.PutLSP(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/dev/project",
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9200,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-go",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-go"},
+	}); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	codex := newLSPRouterFakeClient(t, "codex-cli", true)
+	codex.entries["mcp-language-server-go"] = clients.MCPEntry{
+		Name: "mcp-language-server-go",
+		URL:  "http://localhost:9200/mcp",
+	}
+	opts := LSPClientRouterOpts{
+		GUIPort: 9126,
+		Clients: map[string]clients.Client{"codex-cli": codex},
+	}
+	if _, err := NewAPI().EnsureLSPRouterClientEntries(opts); err != nil {
+		t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+	}
+	if got := codex.entries["mcp-language-server-go"].URL; got != "http://localhost:9126/lsp/go/mcp" {
+		t.Fatalf("setup precondition URL = %q", got)
+	}
+	if _, err := codex.BackupKeep(0); err != nil {
+		t.Fatalf("newer router-containing backup: %v", err)
+	}
+
+	report, err := NewAPI().RollbackLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("RollbackLSPRouterClientEntries: %v", err)
+	}
+	if len(report.Backups) != 1 {
+		t.Fatalf("rollback backups len = %d, want 1 current-state backup", len(report.Backups))
+	}
+	if got := codex.entries["mcp-language-server-go"].URL; got != "http://localhost:9200/mcp" {
+		t.Fatalf("rollback restored latest router-containing backup; URL = %q, want reconstructed per-pair URL", got)
+	}
+	if len(codex.backupPaths) != 3 {
+		t.Fatalf("total backups = %d, want setup + newer + rollback backup", len(codex.backupPaths))
+	}
+}
+
+func TestEnsureLSPRouterClientEntries_AddFailureSkipsLegacyRemove(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
+	reg := NewRegistry(testRegistryPathOverride)
+	if err := reg.PutLSP(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/dev/project",
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9200,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-go",
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-go-abcd"},
+	}); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	codex := newLSPRouterFakeClient(t, "codex-cli", true)
+	codex.entries["mcp-language-server-go-abcd"] = clients.MCPEntry{
+		Name: "mcp-language-server-go-abcd",
+		URL:  "http://localhost:9200/mcp",
+	}
+	codex.addErr = errors.New("induced add failure")
+
+	report, err := NewAPI().EnsureLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9126,
+		Clients: map[string]clients.Client{"codex-cli": codex},
+	})
+	if err == nil {
+		t.Fatal("expected router add failure")
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Op != "add" || report.Failed[0].EntryName != "mcp-language-server-go" {
+		t.Fatalf("Failed = %+v, want one router add failure", report.Failed)
+	}
+	if _, ok := codex.entries["mcp-language-server-go-abcd"]; !ok {
+		t.Fatalf("legacy entry was removed after router add failed; entries=%+v", codex.entries)
+	}
+	if got := codex.removeCalls; got != 0 {
+		t.Fatalf("RemoveEntry calls = %d, want 0 after add failure", got)
 	}
 }
 

@@ -39,6 +39,50 @@ func TestLSPSupervisorIntentUpsertRollbackRemovesOnlyItsDescriptor(t *testing.T)
 	}
 }
 
+func TestLSPSupervisorIntentUpsertRollbackRestoresPriorDescriptorOnReplace(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	prior := WorkspaceEntry{WorkspaceKey: "aaa11111", WorkspacePath: "D:/repo/a", Language: "python", Port: 9201}
+	replacement := prior
+	replacement.Port = 9301
+
+	if _, err := NewAPI().upsertLSPSupervisorIntent(prior, "old-mcphub.exe"); err != nil {
+		t.Fatalf("upsert prior: %v", err)
+	}
+	restoreReplacement, err := NewAPI().upsertLSPSupervisorIntent(replacement, "new-mcphub.exe")
+	if err != nil {
+		t.Fatalf("upsert replacement: %v", err)
+	}
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(prior.WorkspaceKey, prior.Language)
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent before rollback: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil || row.Port != replacement.Port {
+		t.Fatalf("replacement precondition row = %+v, want port %d", row, replacement.Port)
+	}
+
+	restoreReplacement()
+
+	intent, err = ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after rollback: %v", err)
+	}
+	row := intent.FindSupervisorDaemonByTaskName(taskName)
+	if row == nil {
+		t.Fatalf("replace rollback deleted prior descriptor %s", taskName)
+	}
+	if row.Port != prior.Port || row.Command != "old-mcphub.exe" {
+		t.Fatalf("replace rollback row = %+v, want prior port %d and old command", row, prior.Port)
+	}
+}
+
 func TestLSPSupervisorIntentRemoveRollbackPreservesConcurrentDescriptors(t *testing.T) {
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
 	defer restoreState()

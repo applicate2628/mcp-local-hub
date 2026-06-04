@@ -279,10 +279,15 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	desired := cloneSupervisorIntentFile(prior)
 	descriptor := BuildSupervisorDaemonForLSP(entry, mcphubBinaryPath)
 	kept := desired.Daemons[:0]
+	replaced := false
+	var priorDescriptor SupervisorDaemon
 	for _, daemon := range desired.Daemons {
 		if daemon.TaskName != descriptor.TaskName {
 			kept = append(kept, daemon)
+			continue
 		}
+		replaced = true
+		priorDescriptor = daemon
 	}
 	desired.Daemons = append(kept, descriptor)
 	desired.Version = 1
@@ -292,6 +297,10 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	}
 
 	return func() {
+		if replaced {
+			upsertSupervisorIntentDescriptor(intentPath, priorDescriptor)
+			return
+		}
 		removeSupervisorIntentDescriptor(intentPath, descriptor.TaskName, !existed)
 	}, nil
 }

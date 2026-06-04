@@ -111,8 +111,8 @@ func TestEnsureLSPRegistered_ConcurrentFirstTouchWaitsForReadyPort(t *testing.T)
 	if calls := reconcileCalls.Load(); calls != 1 {
 		t.Fatalf("reconcile calls = %d, want 1", calls)
 	}
-	if calls := readinessCalls.Load(); calls != 1 {
-		t.Fatalf("readiness calls = %d, want 1", calls)
+	if calls := readinessCalls.Load(); calls != 2 {
+		t.Fatalf("readiness calls = %d, want 2 (first spawn wait + existing-row probe)", calls)
 	}
 	if n := countEntries(h.fakeClients); n != 0 {
 		t.Fatalf("EnsureLSPRegistered must not write client configs; fake client entries = %d", n)
@@ -127,20 +127,21 @@ func TestEnsureLSPRegistered_ConcurrentFirstTouchWaitsForReadyPort(t *testing.T)
 	}
 }
 
-func TestEnsureLSPRegistered_ExistingRowReturnsWithoutReconcileOrReadiness(t *testing.T) {
+func TestEnsureLSPRegistered_ExistingReadyRowReturnsWithoutReconcile(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
 	origReconcile := registerSupervisorReconcileFn
 	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		t.Fatal("existing LSP row must return before supervisor reconcile")
+		t.Fatal("existing ready LSP row must return before supervisor reconcile")
 		return ReconcileResponse{}, nil
 	}
 	defer func() { registerSupervisorReconcileFn = origReconcile }()
 
 	origReadiness := proxyReadinessFn
+	var readinessCalls atomic.Int32
 	proxyReadinessFn = func(port int, timeout time.Duration) error {
-		t.Fatal("existing LSP row must return before proxy readiness")
+		readinessCalls.Add(1)
 		return nil
 	}
 	defer func() { proxyReadinessFn = origReadiness }()
@@ -174,6 +175,91 @@ func TestEnsureLSPRegistered_ExistingRowReturnsWithoutReconcileOrReadiness(t *te
 	}
 	if got.Port != want.Port || got.Lifecycle != want.Lifecycle {
 		t.Fatalf("existing row mismatch: got %+v want %+v", got, want)
+	}
+	if calls := readinessCalls.Load(); calls != 1 {
+		t.Fatalf("existing ready row readiness probes = %d, want 1", calls)
+	}
+}
+
+func TestEnsureLSPRegistered_ExistingDeadRowReconcilesAndWaitsForReady(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	var reconcileCalls atomic.Int32
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Fatalf("EnsureLSPRegistered called reconcile with apply=false")
+		}
+		reconcileCalls.Add(1)
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	var readinessCalls atomic.Int32
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		call := readinessCalls.Add(1)
+		if port != 9242 {
+			t.Fatalf("readiness port = %d, want 9242", port)
+		}
+		if call == 1 {
+			return errors.New("existing proxy is dead")
+		}
+		return nil
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	want := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(want); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+	if err != nil {
+		t.Fatalf("EnsureLSPRegistered existing dead row: %v", err)
+	}
+	if got.Port != want.Port || got.Lifecycle != want.Lifecycle {
+		t.Fatalf("existing row mismatch: got %+v want %+v", got, want)
+	}
+	if calls := readinessCalls.Load(); calls != 2 {
+		t.Fatalf("readiness calls = %d, want dead probe + post-reconcile wait", calls)
+	}
+	if calls := reconcileCalls.Load(); calls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", calls)
+	}
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "python")
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil {
+		t.Fatalf("existing dead row did not write supervisor intent %s; rows=%+v", taskName, intent.Daemons)
 	}
 }
 
