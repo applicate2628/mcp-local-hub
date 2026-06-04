@@ -88,7 +88,7 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 | **gdb** | 9129 | stdio-bridge (uv run) | Multi-debugger with session management |
 | **lldb** | 9130 | **embedded Go bridge** | Auto-spawns `lldb.exe`, HTTP-multiplexes concurrent clients onto single TCP connection |
 | **perftools** | 9131 | **embedded Go** | clang-tidy + llvm-objdump + include-what-you-use over real projects; `hyperfine` is **opt-in only** (RCE surface — set `MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`, see INSTALL) |
-| **repomix** | 9133 | stdio-bridge (npx) | Packs a repo into one AI-friendly file; tools `pack_codebase` / `pack_remote_repository` (version-pinned per SECURITY.md) |
+| **repomix** | 9133 | stdio-bridge (npx) | Packs a repo into one AI-friendly file; tools `pack_codebase` / `pack_remote_repository` / `read_repomix_output`. **Also exposes `file_system_read_file` / `file_system_read_directory` (absolute-path local file read/list)** — installing it grants every configured client that capability; review before `install --all`. Version-pinned per SECURITY.md. |
 
 Plus **context7** as a direct HTTPS entry (no daemon, no scheduler task).
 

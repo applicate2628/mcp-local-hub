@@ -98,6 +98,15 @@ type StdioHost struct {
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
 
+// maxStdioLineBytes caps a single newline-delimited JSON-RPC line read from
+// a daemon's stdout/stderr. The old 1 MiB cap silently wedged the bridge when
+// a server returned a larger response line (the scanner stops, leaving the
+// HTTP request hanging). Servers like repomix routinely emit multi-MiB
+// responses (e.g. read_repomix_output returns a whole packed repo), so the
+// cap is raised to 64 MiB. bufio.Scanner grows its buffer only as needed, so
+// ordinary small responses are unaffected.
+const maxStdioLineBytes = 64 * 1024 * 1024 // 64 MiB
+
 // maxPendingRequests caps the number of concurrent in-flight JSON-RPC
 // requests routed through one StdioHost subprocess. Beyond this the
 // handler returns 429; legitimate MCP usage rarely exceeds a handful of
@@ -231,14 +240,14 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		defer h.wg.Done()
 		defer pipesDrained.Done()
 		s := bufio.NewScanner(stderr)
-		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		s.Buffer(make([]byte, 0, 64*1024), maxStdioLineBytes)
 		for s.Scan() {
 			fmt.Fprintf(stderrSink, "[subproc stderr] %s\n", s.Bytes())
 		}
 	}()
 
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // up to 1 MB lines
+	scanner.Buffer(make([]byte, 0, 64*1024), maxStdioLineBytes)
 
 	h.cmd = cmd
 	h.stdin = stdin
