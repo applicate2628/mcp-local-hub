@@ -31,8 +31,10 @@ func TestParseManifest_McpLanguageServerShipped(t *testing.T) {
 		"vscode-css": "mcp-language-server", "vscode-html": "mcp-language-server",
 	}
 	got := map[string]string{}
+	markers := map[string][]string{}
 	for _, l := range m.Languages {
 		got[l.Name] = l.Backend
+		markers[l.Name] = l.ProjectMarkers
 		if l.Transport != LanguageTransportStdio {
 			t.Errorf("language %s: Transport = %q, want stdio in v1", l.Name, l.Transport)
 		}
@@ -43,6 +45,28 @@ func TestParseManifest_McpLanguageServerShipped(t *testing.T) {
 	for name, backend := range want {
 		if got[name] != backend {
 			t.Errorf("languages[%s].backend = %q, want %q", name, got[name], backend)
+		}
+	}
+	wantMarkers := map[string][]string{
+		"clangd":      {"compile_commands.json", ".clangd"},
+		"fortran":     {"fpm.toml"},
+		"go":          {"go.mod"},
+		"javascript":  {"package.json", "tsconfig.json", "jsconfig.json"},
+		"python":      {"pyproject.toml", "setup.py", "setup.cfg"},
+		"rust":        {"Cargo.toml"},
+		"typescript":  {"package.json", "tsconfig.json", "jsconfig.json"},
+		"vscode-css":  {"package.json"},
+		"vscode-html": {"package.json"},
+	}
+	for name, want := range wantMarkers {
+		gotMarkers := markers[name]
+		if len(gotMarkers) != len(want) {
+			t.Fatalf("languages[%s].project_markers = %v, want %v", name, gotMarkers, want)
+		}
+		for i := range want {
+			if gotMarkers[i] != want[i] {
+				t.Fatalf("languages[%s].project_markers = %v, want %v", name, gotMarkers, want)
+			}
 		}
 	}
 	if m.PortPool.Start != 9200 || m.PortPool.End != 9299 {

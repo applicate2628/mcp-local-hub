@@ -7,13 +7,16 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 )
@@ -25,18 +28,25 @@ import (
 func newRegisterCmdReal() *cobra.Command {
 	var weekly bool
 	var noWeekly bool
+	var supervised bool
 	c := &cobra.Command{
 		Use:   "register <workspace> [language...]",
 		Short: "Register workspace-scoped mcp-language-server daemons (lazy-mode)",
-		Long: `Allocate one lazy proxy per (workspace, language), create the scheduler
-task that launches it, and write managed entries into every default MCP client
-config (claude-code, codex-cli, cursor).
+		Long: `Allocate one lazy proxy per (workspace, language), create the launch
+surface, and write managed entries into every default MCP client config
+(claude-code, codex-cli, cursor).
 
 Lazy mode:
   - No LSP binary preflight at register time. A missing binary surfaces
     later at first tools/call via the LifecycleMissing state shown in
     ` + "`mcphub workspaces`" + `.
-  - Scheduler task args: ` + "`daemon workspace-proxy --port <p> --workspace <ws> --language <lang>`" + `.
+  - On scheduler-capable hosts, the default launch surface is the legacy
+    per-language scheduled task.
+  - On schedulerless Linux/macOS builds, plain register automatically uses
+    the supervised proxy path so no Task Scheduler backend is required.
+  - --supervised writes a supervisor-intent daemon row and asks the running
+    supervisor to start the proxy as a Job-protected child process.
+  - Proxy args: ` + "`daemon workspace-proxy --port <p> --workspace <ws> --language <lang>`" + `.
   - Entry names are ` + "`mcp-language-server-<lang>`" + `; a cross-workspace
     collision appends ` + "`-<4hex>`" + ` from the workspace key.
 
@@ -49,7 +59,7 @@ Weekly refresh enrollment:
 Examples:
   mcphub register D:\projects\foo
   mcphub register D:\projects\foo python typescript rust --weekly-refresh
-  mcphub register /home/u/web typescript --no-weekly-refresh
+  mcphub register /home/u/web typescript --no-weekly-refresh # supervised on schedulerless hosts
 
 See also: unregister, workspaces, status.`,
 		Args: cobra.MinimumNArgs(1),
@@ -62,23 +72,21 @@ See also: unregister, workspaces, status.`,
 			if weekly && noWeekly {
 				return fmt.Errorf("cannot use both --weekly-refresh and --no-weekly-refresh")
 			}
+			if err := ensureSupervisorForSchedulerlessRegister(cmd); err != nil {
+				return err
+			}
 			explicit := weekly || noWeekly
 			a := api.NewAPI()
 			report, err := a.Register(workspace, languages, api.RegisterOpts{
 				WeeklyRefreshExplicit: explicit,
 				WeeklyRefresh:         weekly,
+				SupervisedProxy:       supervised,
 				Writer:                cmd.OutOrStdout(),
 			})
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(),
-				"\nRegistered %d language(s) for workspace %s (key %s):\n",
-				len(report.Entries), report.Workspace, report.WorkspaceKey)
-			for _, e := range report.Entries {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-12s port=%-5d task=%s\n",
-					e.Language, e.Port, e.TaskName)
-			}
+			printRegisterReport(cmd, report)
 			return nil
 		},
 	}
@@ -86,7 +94,69 @@ See also: unregister, workspaces, status.`,
 		"force-enroll new entries in weekly refresh (override daemons.weekly_refresh_default)")
 	c.Flags().BoolVar(&noWeekly, "no-weekly-refresh", false,
 		"force-skip new entries from weekly refresh (override daemons.weekly_refresh_default)")
+	c.Flags().BoolVar(&supervised, "supervised", false,
+		"start LSP proxies through supervisor-intent as Job-protected supervisor children")
 	return c
+}
+
+var registerSchedulerUnavailableForHost = func() (bool, error) {
+	if _, err := scheduler.New(); err != nil {
+		if api.SchedulerUnavailableError(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+var registerResolveMCPHubBinary = resolveMCPHubBinary
+var registerEnsureSupervisorRunning = ensureSupervisorRunning
+
+func ensureSupervisorForSchedulerlessRegister(cmd *cobra.Command) error {
+	schedulerless, err := registerSchedulerUnavailableForHost()
+	if err != nil {
+		return fmt.Errorf("check scheduler availability before LSP register: %w", err)
+	}
+	if !schedulerless {
+		return nil
+	}
+	supervisorBin, err := registerResolveMCPHubBinary()
+	if err != nil {
+		return fmt.Errorf("schedulerless LSP register requires a running supervisor, but mcphub binary resolution failed: %w; run `mcphub supervise` from another shell and retry", err)
+	}
+	ctx := context.Background()
+	if cmd != nil && cmd.Context() != nil {
+		ctx = cmd.Context()
+	}
+	owner, err := registerEnsureSupervisorRunning(ctx, supervisorBin, false, 15*time.Second)
+	if err != nil {
+		return fmt.Errorf("schedulerless LSP register requires a running supervisor: %w; run `mcphub supervise` from another shell and retry", err)
+	}
+	if owner != nil {
+		var out io.Writer = os.Stdout
+		if cmd != nil {
+			out = cmd.OutOrStdout()
+		}
+		if owner.Spawned() {
+			fmt.Fprintf(out, "supervisor: spawned PID %d for schedulerless LSP register\n", owner.Pid())
+		} else {
+			fmt.Fprintln(out, "supervisor: adopted for schedulerless LSP register")
+		}
+	}
+	return nil
+}
+
+func printRegisterReport(cmd *cobra.Command, report *api.RegisterReport) {
+	fmt.Fprintf(cmd.OutOrStdout(),
+		"\nRegistered %d language(s) for workspace %s (key %s):\n",
+		len(report.Entries), report.Workspace, report.WorkspaceKey)
+	for _, e := range report.Entries {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %-12s port=%-5d task=%s\n",
+			e.Language, e.Port, e.TaskName)
+	}
+	for _, warn := range report.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warn)
+	}
 }
 
 // newUnregisterCmdReal: `mcphub unregister <workspace> [language...]`.

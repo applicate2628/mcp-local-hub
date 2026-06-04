@@ -110,7 +110,7 @@ describe("collectLspRows", () => {
           name: "mcp-language-server-rust",
           manifest_exists: false,
           can_migrate: false,
-          client_presence: { "codex-cli": { transport: "http", endpoint: "http://127.0.0.1:9201" } },
+          client_presence: { "codex-cli": { transport: "http", endpoint: "http://127.0.0.1:9000/lsp/rust/mcp" } },
         },
         {
           name: "mcp-language-server-rust-b2cd",
@@ -125,14 +125,46 @@ describe("collectLspRows", () => {
     const rustAlpha = rowsForAlpha.find((r) => r.language === "rust")!;
     expect(rustAlpha.taskName).toBe("\\mcp-local-hub-lsp-alpha-rust");
     expect(rustAlpha.workspaceKey).toBe("alpha");
-    // ALPHA scope means BETA's entry must NOT bleed in.
-    expect(rustAlpha.clientPresence["codex-cli"]?.endpoint).toBe("http://127.0.0.1:9201");
+    // ALPHA scope sees the shared router entry; BETA's suffixed legacy entry must NOT bleed in.
+    expect(rustAlpha.clientPresence["codex-cli"]?.endpoint).toBe("http://127.0.0.1:9000/lsp/rust/mcp");
     expect(Object.keys(rustAlpha.legacyConflict)).toEqual([]);
 
     const rowsForBeta = collectLspRows(scan, wsEntries, "beta");
     const rustBeta = rowsForBeta.find((r) => r.language === "rust")!;
     expect(rustBeta.taskName).toBe("\\mcp-local-hub-lsp-beta-rust-b2cd");
-    expect(rustBeta.clientPresence["codex-cli"]?.endpoint).toBe("http://127.0.0.1:9202");
+    expect(rustBeta.clientPresence["codex-cli"]?.endpoint).toBe("http://127.0.0.1:9000/lsp/rust/mcp");
+  });
+
+  it("recognizes the shared router entry for a migrated workspace whose registry still names a suffixed legacy entry", () => {
+    const wsEntries: WorkspaceEntryDTO[] = [
+      {
+        workspace_key: "beta",
+        workspace_path: "/proj/beta",
+        language: "rust",
+        backend: "mcp-language-server",
+        port: 9202,
+        task_name: "\\mcp-local-hub-lsp-beta-rust",
+        client_entries: { "codex-cli": "mcp-language-server-rust-b2cd" },
+      },
+    ];
+    const scan: ScanResult = {
+      at: "2026-05-20T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-rust",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: { "codex-cli": { transport: "http", endpoint: "http://127.0.0.1:9000/lsp/rust/mcp" } },
+        },
+      ],
+    };
+
+    const rows = collectLspRows(scan, wsEntries, "beta");
+    const rust = rows.find((r) => r.language === "rust")!;
+    expect(rust.taskName).toBe("\\mcp-local-hub-lsp-beta-rust");
+    expect(rust.clientPresence["codex-cli"]?.transport).toBe("http");
+    expect(rust.clientPresence["codex-cli"]?.endpoint).toBe("http://127.0.0.1:9000/lsp/rust/mcp");
   });
 
   it("in ALL-mode with multiple workspaces for one language, taskName is null + ambiguousOwners lists all candidates (bot P2.7)", () => {

@@ -71,7 +71,11 @@ Prerequisites:
   - First-time users: run 'mcphub setup' once to canonicalize the binary
     at ~/.local/bin and register it on user PATH
   - Secrets (wolfram, paper-search-mcp): 'mcphub secrets set <key>' first
-  - Windows: Task Scheduler backend only. Linux/macOS ship compile-only stubs.
+  - Windows: Task Scheduler backend only. Linux/macOS manifest installs ship
+    compile-only scheduler stubs.
+  - Workspace LSP registration uses 'mcphub register <workspace> [language...]';
+    on schedulerless Linux/macOS builds, that path automatically uses the
+    supervised proxy instead of legacy scheduled tasks.
 
 See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {

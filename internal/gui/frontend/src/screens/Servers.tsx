@@ -4,12 +4,13 @@ import {
   postInitClientConfig,
   InitClientConfigError,
   listWorkspaces,
+  postLspRegister,
   type WorkspaceEntryDTO,
   type WorkspacePair,
 } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
-import { collectLspRows, type LspRow, LSP_KNOWN_CLIENTS } from "../lib/lsp-rows";
+import { collectLspRows, type LspRow, LSP_KNOWN_CLIENTS, LSP_MANIFEST_SERVER } from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
 import { EnvDrawer } from "../components/EnvDrawer";
@@ -144,6 +145,8 @@ export function ServersScreen() {
   const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntryDTO[]>([]);
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<string>(ALL_WORKSPACES_KEY);
   const [openDrawerFor, setOpenDrawerFor] = useState<LspRow | null>(null);
+  const [lspRegisterBusy, setLspRegisterBusy] = useState<Record<string, boolean>>({});
+  const [lspRegisterMsg, setLspRegisterMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   // Keeps the latest /api/scan result around so the LSP-row helper has
   // a fresh source after a respawn or apply. Independent of `servers`
   // because the legacy main-matrix flow already mutates `servers` via
@@ -203,6 +206,7 @@ export function ServersScreen() {
         // until they retry — refreshing should NOT mask a recent
         // PARENT_MISSING / INIT_FAILED report.
         setInitMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
+        setLspRegisterMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
         const agg = aggregateStatus(status);
         const flat: Record<string, { state: string; port: number | null }> = {};
         for (const [name, a] of Object.entries(agg)) {
@@ -554,7 +558,14 @@ export function ServersScreen() {
   // filtering by `s.manifested` alone could hide a row that still has
   // queued migrate/demigrate work — Apply would fire on an invisible
   // row and the operator couldn't inspect or undo from the UI.
-  const manifestedServers = servers.filter((s) => s.manifested || dirty.has(s.name));
+  // Exclude the workspace-scoped LSP server from the top single-daemon
+  // matrix: its per-(workspace, language) form is enabled through the
+  // "LSP daemons" table below, and its bare matrix checkbox (Port "—")
+  // could register nothing — a non-functional trap. See LSP_MANIFEST_SERVER
+  // doc in lsp-rows.ts. (serena stays: it has a single router endpoint.)
+  const manifestedServers = servers.filter(
+    (s) => (s.manifested || dirty.has(s.name)) && s.name !== LSP_MANIFEST_SERVER,
+  );
   const otherServers = servers.filter((s) => !s.manifested && !dirty.has(s.name));
 
   // v0.5.x Task 4.3 — LSP rows are always 9 (one per language). When
@@ -563,6 +574,50 @@ export function ServersScreen() {
   // entries fold into the same row and the matrix surfaces the union
   // (with coexistence rendering as dual badges per cell).
   const lspRows = collectLspRows(scanForLsp, workspaceEntries, selectedWorkspaceKey);
+  const selectedWorkspace =
+    selectedWorkspaceKey !== ALL_WORKSPACES_KEY
+      ? workspaces.find((w) => w.workspace_key === selectedWorkspaceKey)
+      : workspaces.length === 1
+        ? workspaces[0]
+        : null;
+  const lspRegisterWorkspacePath = selectedWorkspace?.workspace_path ?? "";
+
+  const registerLspRow = async (row: LspRow) => {
+    if (!lspRegisterWorkspacePath) {
+      setLspRegisterMsg({
+        kind: "error",
+        text: "Pick one workspace before enabling an LSP daemon.",
+      });
+      return;
+    }
+    const key = row.language;
+    setLspRegisterBusy((prev) => ({ ...prev, [key]: true }));
+    setLspRegisterMsg(null);
+    try {
+      const response = await postLspRegister(lspRegisterWorkspacePath, row.language);
+      if (!mountedRef.current) return;
+      const failed = response.results?.find((result) => result.status === "error");
+      if (failed) {
+        setLspRegisterMsg({
+          kind: "error",
+          text: `Enable ${row.language} failed: ${failed.error ?? "unknown error"}`,
+        });
+        return;
+      }
+      setLspRegisterMsg({ kind: "ok", text: `Enabled ${row.language}. Refreshing…` });
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setLspRegisterMsg({
+        kind: "error",
+        text: `Enable ${row.language} failed: ${(err as Error).message}`,
+      });
+    } finally {
+      if (mountedRef.current) {
+        setLspRegisterBusy((prev) => ({ ...prev, [key]: false }));
+      }
+    }
+  };
 
   return (
     <div>
@@ -655,6 +710,10 @@ export function ServersScreen() {
         rows={lspRows}
         openDrawerFor={openDrawerFor}
         onOpenDrawer={(row) => setOpenDrawerFor(row)}
+        targetWorkspacePath={lspRegisterWorkspacePath}
+        registerBusy={lspRegisterBusy}
+        registerMsg={lspRegisterMsg}
+        onRegister={registerLspRow}
       />
       {openDrawerFor && openDrawerFor.taskName && (
         <EnvDrawer
@@ -882,9 +941,9 @@ function CellView(props: {
 }
 
 // LspMatrix renders the 9-row LSP daemons table below the main matrix.
-// Unlike the main matrix, LSP rows have NO checkbox interactivity
-// (migrate/demigrate isn't supported for workspace-scoped LSP daemons
-// in v0.5.x — the operator manages them through `mcphub register`).
+// Workspace-scoped LSP rows do not use migrate/demigrate checkboxes,
+// but unregistered rows can be enabled from the row action when the
+// current workspace filter resolves to exactly one workspace.
 // Cells surface presence as badges: `[via-hub]`, `[direct]`, `[legacy]`,
 // or `—` for absent.
 //
@@ -895,16 +954,35 @@ function LspMatrix(props: {
   rows: LspRow[];
   openDrawerFor: LspRow | null;
   onOpenDrawer: (row: LspRow) => void;
+  targetWorkspacePath: string;
+  registerBusy: Record<string, boolean>;
+  registerMsg: { text: string; kind: "ok" | "error" } | null;
+  onRegister: (row: LspRow) => void;
 }) {
-  const { rows, openDrawerFor, onOpenDrawer } = props;
+  const {
+    rows,
+    openDrawerFor,
+    onOpenDrawer,
+    targetWorkspacePath,
+    registerBusy,
+    registerMsg,
+    onRegister,
+  } = props;
   return (
     <section class="lsp-matrix-section" data-testid="lsp-matrix-section" style="margin-top:24px">
       <h2>LSP daemons</h2>
       <p class="lsp-matrix-intro" style="color:#555; margin-bottom:8px">
-        Workspace-scoped language servers spawned by{" "}
-        <code>mcphub register</code>. Click a registered row to edit its
-        env overlay (e.g. PATH) and respawn the daemon.
+        Workspace-scoped language servers route through shared hub proxies.
       </p>
+      {registerMsg && (
+        <div
+          class={registerMsg.kind === "error" ? "error" : ""}
+          data-testid="lsp-register-msg"
+          style="margin:8px 0"
+        >
+          {registerMsg.text}
+        </div>
+      )}
       <table class="servers-matrix lsp-matrix" data-testid="lsp-matrix">
         <thead>
           <tr>
@@ -979,9 +1057,20 @@ function LspMatrix(props: {
                       pick a workspace above to edit env
                     </span>
                   ) : (
-                    <span class="lsp-row-unregistered" style="color:#888; font-size:0.9em">
-                      (run <code>mcphub register</code> to register)
-                    </span>
+                    <button
+                      type="button"
+                      class="lsp-row-enable"
+                      data-testid={`lsp-enable-${row.language}`}
+                      disabled={!targetWorkspacePath || registerBusy[row.language] === true}
+                      title={
+                        targetWorkspacePath
+                          ? `Register ${row.language} for ${targetWorkspacePath}`
+                          : "Pick one workspace above before enabling this LSP daemon."
+                      }
+                      onClick={() => onRegister(row)}
+                    >
+                      {registerBusy[row.language] === true ? "Enabling…" : "Enable"}
+                    </button>
                   )}
                 </td>
               </tr>

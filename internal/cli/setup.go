@@ -60,6 +60,25 @@ var setupRemoveEventLogFn func() error
 // environment (KnownFolderUnavailable / posixDirSanityCheck).
 var setupStateDirSanityFn func() (string, error)
 
+// setupLSPClientRouterFn is the test seam for the Phase 3 client-config
+// reconcile. Production routes through api.NewAPI(); tests replace it so
+// setup coverage does not copy binaries, install watchdogs, or touch real
+// client configs.
+var setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, error) {
+	if rollback {
+		return api.NewAPI().RollbackLSPRouterClientEntries(api.LSPClientRouterOpts{})
+	}
+	return api.NewAPI().EnsureLSPRouterClientEntries(api.LSPClientRouterOpts{})
+}
+
+// setupBootstrapFn and setupWatchdogFn let command-level setup tests assert
+// orchestration without copying the current binary or mutating Task Scheduler.
+// Production leaves them nil and routes through Bootstrap/runSetupWatchdog.
+var (
+	setupBootstrapFn func(io.Writer) error
+	setupWatchdogFn  func(io.Writer, bool) error
+)
+
 // mcphubShortName is the bare executable name that scheduler tasks and relay
 // entries reference. PATH resolution picks the correct binary from whatever
 // directory the user has on PATH (usually ~/.local/bin after `mcphub setup`).
@@ -243,6 +262,7 @@ func bootstrapCopyOnly(w io.Writer) error {
 // newSetupCmdReal returns the `mcphub setup` command.
 func newSetupCmdReal() *cobra.Command {
 	var allowElevated bool
+	var rollbackLSPRouter bool
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Install mcphub to ~/.local/bin, register PATH, install watchdog task",
@@ -260,15 +280,27 @@ What setup does:
      (does NOT modify rc files automatically)
   4. Verifies the watchdog state directory is reachable (plan §16);
      fails with exit 8 if not.
-  5. Installs \mcp-local-hub-watchdog scheduled task (cadence 5 min).
+  5. Attempts to ensure every present MCP client has mcp-language-server-<lang>
+     entries pointing at the GUI LSP router URL
+     http://localhost:<gui_server.port>/lsp/<lang>/mcp, migrating old
+     per-project LSP proxy URLs after timestamped backups. Failures are
+     warned and do not block watchdog setup.
+  6. Installs \mcp-local-hub-watchdog scheduled task (cadence 5 min).
      Refuses if the current process is elevated (plan §42) unless
      --allow-elevated is passed; with --allow-elevated, a high-priority
      audit entry is written first and audit-write failure is fail-
      closed at exit 11 (plan §61).
-  6. Registers the Windows EventLog source 'mcp-local-hub' so the
+  7. Registers the Windows EventLog source 'mcp-local-hub' so the
      audit-degraded cascade can use eventlog.Notify (plan §60).
      Failure here is non-fatal — the cascade still has stderr/syslog
      fallbacks.
+
+Rollback:
+  mcphub setup --rollback-lsp-router restores the latest pre-router
+  client-config backup for each LSP entry when available. If a client has
+  no backup, it removes the router entries. It does not touch workspace
+  registry rows; existing per-(workspace, language) rows are warm
+  preregistrations for the router's auto-register path.
 
 Why this exists:
   Scheduler tasks reference ~/.local/bin/mcphub.exe by absolute path
@@ -281,6 +313,7 @@ Why this exists:
 Examples:
   mcphub setup                    # after 'go build', before first 'install'
   mcphub setup                    # after pulling + rebuilding — replaces the canonical copy
+  mcphub setup --rollback-lsp-router
   mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
 
 Caveats:
@@ -302,15 +335,65 @@ Exit codes:
 
 See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := Bootstrap(cmd.OutOrStdout()); err != nil {
+			if rollbackLSPRouter {
+				return runSetupLSPClientRouter(cmd.OutOrStdout(), true)
+			}
+			if err := runSetupBootstrap(cmd.OutOrStdout()); err != nil {
 				return err
 			}
-			return runSetupWatchdog(cmd.OutOrStdout(), allowElevated)
+			if err := runSetupLSPClientRouter(cmd.OutOrStdout(), false); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: LSP router wiring failed (continuing to watchdog): %v\n", err)
+			}
+			return runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated)
 		},
 	}
 	c.Flags().BoolVar(&allowElevated, "allow-elevated", false,
 		"override plan §42 elevation refusal (records a high-priority audit entry; fail-closed if audit fails per §61)")
+	c.Flags().BoolVar(&rollbackLSPRouter, "rollback-lsp-router", false,
+		"restore/remove Phase 3 LSP router client entries from latest backups; skips bootstrap/watchdog setup")
 	return c
+}
+
+func runSetupBootstrap(out io.Writer) error {
+	if setupBootstrapFn != nil {
+		return setupBootstrapFn(out)
+	}
+	return Bootstrap(out)
+}
+
+func runSetupWatchdogForSetup(out io.Writer, allowElevated bool) error {
+	if setupWatchdogFn != nil {
+		return setupWatchdogFn(out, allowElevated)
+	}
+	return runSetupWatchdog(out, allowElevated)
+}
+
+func runSetupLSPClientRouter(out io.Writer, rollback bool) error {
+	report, err := setupLSPClientRouterFn(rollback)
+	if report == nil {
+		report = &api.LSPClientRouterReport{}
+	}
+	action := "wiring"
+	if rollback {
+		action = "rollback"
+	}
+	for _, backup := range report.Backups {
+		fmt.Fprintf(out, "✓ %s backup before LSP router %s: %s\n", backup.Client, action, backup.Path)
+	}
+	for _, applied := range report.Applied {
+		fmt.Fprintf(out, "✓ %s → %s (entry %s)\n", applied.Client, applied.URL, applied.EntryName)
+	}
+	for _, removed := range report.Removed {
+		fmt.Fprintf(out, "✓ removed %s entry %s\n", removed.Client, removed.EntryName)
+	}
+	for _, restored := range report.Restored {
+		fmt.Fprintf(out, "✓ restored %s entry %s\n", restored.Client, restored.EntryName)
+	}
+	for _, failed := range report.Failed {
+		fmt.Fprintf(out, "✗ %s %s entry %s failed during %s: %s\n",
+			failed.Client, failed.Language, failed.EntryName, failed.Op, failed.Err)
+	}
+	return err
 }
 
 // ---------------------------------------------------------------------------

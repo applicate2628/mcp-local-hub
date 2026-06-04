@@ -71,6 +71,9 @@ type fakeClient struct {
 }
 
 func (c *fakeClient) Exists() bool { return c.parent.exists[c.name] }
+func (c *fakeClient) BackupKeep(keepN int) (string, error) {
+	return fmt.Sprintf("/backup/%s/%d", c.name, keepN), nil
+}
 func (c *fakeClient) AddEntry(e clients.MCPEntry) error {
 	c.parent.entries[c.name][e.Name] = e.URL
 	return nil
@@ -85,6 +88,12 @@ func (c *fakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 		return nil, nil
 	}
 	return &clients.MCPEntry{Name: name, URL: url}, nil
+}
+func (c *fakeClient) AllStdioEntries() ([]clients.StdioEntry, error) {
+	return nil, nil
+}
+func (c *fakeClient) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
+	return nil, nil
 }
 
 func countEntries(fc *fakeClientsMap) int {

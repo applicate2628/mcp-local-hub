@@ -112,11 +112,12 @@ type DaemonTemplate struct {
 }
 
 type LanguageSpec struct {
-	Name       string   `yaml:"name"`
-	Backend    string   `yaml:"backend"`   // "mcp-language-server" or "gopls-mcp"
-	Transport  string   `yaml:"transport"` // "stdio" (default) | "http_listen" | "native_http"
-	LspCommand string   `yaml:"lsp_command"`
-	ExtraFlags []string `yaml:"extra_flags"`
+	Name           string   `yaml:"name"`
+	Backend        string   `yaml:"backend"`   // "mcp-language-server" or "gopls-mcp"
+	Transport      string   `yaml:"transport"` // "stdio" (default) | "http_listen" | "native_http"
+	LspCommand     string   `yaml:"lsp_command"`
+	ExtraFlags     []string `yaml:"extra_flags"`
+	ProjectMarkers []string `yaml:"project_markers,omitempty"`
 
 	// RequiredBinaries is free-form metadata listing the external
 	// binaries this language backend expects to find on PATH (e.g.

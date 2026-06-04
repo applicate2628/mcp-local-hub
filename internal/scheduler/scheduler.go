@@ -62,6 +62,12 @@ type TaskStatus struct {
 // failures.
 var ErrTaskNotFound = errors.New("scheduler: task not found")
 
+// ErrNotImplemented is returned by platform backends that compile but do not
+// yet provide a scheduler implementation. Callers that intentionally support
+// schedulerless supervised flows may tolerate this sentinel with errors.Is;
+// ordinary scheduler operation errors must remain fail-loud.
+var ErrNotImplemented = errors.New("scheduler: not implemented")
+
 // Scheduler is the OS-abstracted interface for managing mcp-local-hub daemon tasks.
 // Implementations live in scheduler_<os>.go files selected by build tags.
 type Scheduler interface {

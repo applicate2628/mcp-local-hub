@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"runtime"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/api"
 )
 
 // TestDirOnPath exercises the PATH-env-var parser used by the install
@@ -90,5 +95,131 @@ func TestDirOnPath(t *testing.T) {
 			t.Errorf("%s: dirOnPath(%q, %q) = %v, want %v",
 				tc.name, tc.dir, tc.pathEnv, got, tc.want)
 		}
+	}
+}
+
+func TestRunSetupLSPClientRouterWiring_ReportsEnsureResult(t *testing.T) {
+	prior := setupLSPClientRouterFn
+	defer func() { setupLSPClientRouterFn = prior }()
+
+	var gotRollback bool
+	setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, error) {
+		gotRollback = rollback
+		return &api.LSPClientRouterReport{
+			Backups: []api.LSPClientRouterBackup{{Client: "codex-cli", Path: "config.toml.bak-mcp-local-hub-test"}},
+			Applied: []api.LSPClientRouterChange{{
+				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go", URL: "http://127.0.0.1:9125/lsp/go/mcp",
+			}},
+		}, nil
+	}
+
+	var out bytes.Buffer
+	if err := runSetupLSPClientRouter(&out, false); err != nil {
+		t.Fatalf("runSetupLSPClientRouter: %v", err)
+	}
+	if gotRollback {
+		t.Fatal("setup wiring called rollback path")
+	}
+	text := out.String()
+	for _, want := range []string{
+		"backup before LSP router wiring",
+		"codex-cli",
+		"mcp-language-server-go",
+		"http://127.0.0.1:9125/lsp/go/mcp",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestRunSetupLSPClientRouterRollback_ReportsRestoreResult(t *testing.T) {
+	prior := setupLSPClientRouterFn
+	defer func() { setupLSPClientRouterFn = prior }()
+
+	var gotRollback bool
+	setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, error) {
+		gotRollback = rollback
+		return &api.LSPClientRouterReport{
+			Backups: []api.LSPClientRouterBackup{{Client: "codex-cli", Path: "config.toml.bak-mcp-local-hub-rollback"}},
+			Restored: []api.LSPClientRouterChange{{
+				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go",
+			}},
+		}, nil
+	}
+
+	var out bytes.Buffer
+	if err := runSetupLSPClientRouter(&out, true); err != nil {
+		t.Fatalf("runSetupLSPClientRouter rollback: %v", err)
+	}
+	if !gotRollback {
+		t.Fatal("setup rollback did not call rollback path")
+	}
+	text := out.String()
+	for _, want := range []string{
+		"backup before LSP router rollback",
+		"restored codex-cli entry mcp-language-server-go",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestSetupCommand_ContinuesToWatchdogWhenLSPRouterWiringFails(t *testing.T) {
+	origBootstrap := setupBootstrapFn
+	origRouter := setupLSPClientRouterFn
+	origWatchdog := setupWatchdogFn
+	t.Cleanup(func() {
+		setupBootstrapFn = origBootstrap
+		setupLSPClientRouterFn = origRouter
+		setupWatchdogFn = origWatchdog
+	})
+
+	var bootstrapCalls int
+	setupBootstrapFn = func(w io.Writer) error {
+		bootstrapCalls++
+		_, _ = io.WriteString(w, "bootstrap ok\n")
+		return nil
+	}
+	setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, error) {
+		if rollback {
+			t.Fatal("setup must not take rollback path")
+		}
+		return &api.LSPClientRouterReport{
+			Failed: []api.LSPClientRouterFailure{{
+				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go", Op: "write", Err: "malformed config",
+			}},
+		}, errors.New("LSP router client config failed")
+	}
+	var watchdogCalls int
+	setupWatchdogFn = func(w io.Writer, allowElevated bool) error {
+		watchdogCalls++
+		if allowElevated {
+			t.Fatal("allowElevated = true, want false")
+		}
+		_, _ = io.WriteString(w, "watchdog ok\n")
+		return nil
+	}
+
+	cmd := newSetupCmdReal()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup command returned error: %v", err)
+	}
+	if bootstrapCalls != 1 {
+		t.Fatalf("bootstrap calls = %d, want 1", bootstrapCalls)
+	}
+	if watchdogCalls != 1 {
+		t.Fatalf("watchdog calls = %d, want 1 despite LSP router warning", watchdogCalls)
+	}
+	if !strings.Contains(stderr.String(), "warning: LSP router wiring failed") {
+		t.Fatalf("stderr missing LSP router warning; got %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "watchdog ok") {
+		t.Fatalf("stdout missing watchdog output; got %q", stdout.String())
 	}
 }

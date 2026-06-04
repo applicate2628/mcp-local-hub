@@ -553,11 +553,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	if opts.ForceMaterialize && !opts.ProbeHealth {
 		return nil, ErrForceMaterializeRequiresHealth
 	}
-	sch, err := scheduler.New()
-	if err != nil {
-		return nil, err
-	}
-	tasks, err := sch.List("mcp-local-hub-")
+	tasks, err := statusSchedulerTasks()
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +575,39 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	if regErr != nil {
 		regPath = ""
 	}
+	// Merge supervised/registry-backed LSP proxies that have NO scheduler task.
+	// The v0.5.x supervised path (register_supervisor.go) writes these as
+	// supervisor-intent children only, so sch.List never surfaces them — without
+	// this merge they vanish from --workspace-scoped / --health / --force-materialize
+	// even though they are registered and running. enrichStatusWithRegistry then
+	// overlays Port/Language/Lifecycle and the alive-probe derives their State.
+	registryOnlyLive := map[string]bool{}
+	if regPath != "" {
+		seen := make(map[string]bool, len(result))
+		for i := range result {
+			seen[strings.TrimPrefix(result[i].TaskName, "\\")] = true
+		}
+		reg := NewRegistry(regPath)
+		if err := reg.Load(); err == nil {
+			for _, e := range reg.LSPEntries() {
+				if e.TaskName == "" {
+					continue
+				}
+				if !IsLazyProxyTaskName(e.TaskName) {
+					continue
+				}
+				bare := strings.TrimPrefix(e.TaskName, "\\")
+				if seen[bare] {
+					continue
+				}
+				seen[bare] = true
+				registryOnlyLive[bare] = e.Port != 0 && registryOnlyStatusPortLiveFn != nil && registryOnlyStatusPortLiveFn(e.Port)
+				result = append(result, DaemonStatus{TaskName: e.TaskName, State: "Stopped"})
+			}
+		}
+	}
 	enrichStatusWithRegistry(result, "", regPath)
+	finalizeRegistryOnlyWorkspaceStates(result, registryOnlyLive)
 	if opts.ProbeHealth {
 		probeDaemonHealth(result)
 	}
@@ -601,6 +629,37 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 // happens inside the hook).
 var forceMaterializeProbe = sendForceMaterializeTools
 
+var statusSchedulerFactory = scheduler.New
+
+func statusSchedulerTasks() ([]scheduler.TaskStatus, error) {
+	sch, err := statusSchedulerFactory()
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	tasks, err := sch.List("mcp-local-hub-")
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func schedulerUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, scheduler.ErrNotImplemented)
+}
+
+func SchedulerUnavailableError(err error) bool {
+	return schedulerUnavailableError(err)
+}
+
 // forceMaterializeWorkspaceScoped walks rows and for every workspace-scoped
 // entry (non-empty Language), sends a real no-op tools/call via the
 // forceMaterializeProbe hook. The proxy will drive the backend through
@@ -616,18 +675,35 @@ func forceMaterializeWorkspaceScoped(rows []DaemonStatus, regPath string) {
 	// showed "active" while the tool actually errored, misleading
 	// operators during incidents.
 	toolErr := make([]string, len(rows))
-	var wg sync.WaitGroup
+	var probeRows []int
 	for i := range rows {
 		if rows[i].Language == "" || rows[i].Port == 0 {
 			continue
 		}
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			toolErr[idx] = forceMaterializeProbe(rows[idx].Port, rows[idx].Backend)
-		}(i)
+		probeRows = append(probeRows, i)
 	}
-	wg.Wait()
+	if len(probeRows) > 0 {
+		workerCount := DefaultLSPMaterializedHardCap
+		if workerCount <= 0 || workerCount > len(probeRows) {
+			workerCount = len(probeRows)
+		}
+		jobs := make(chan int)
+		var wg sync.WaitGroup
+		wg.Add(workerCount)
+		for range workerCount {
+			go func() {
+				defer wg.Done()
+				for idx := range jobs {
+					toolErr[idx] = forceMaterializeProbe(rows[idx].Port, rows[idx].Backend)
+				}
+			}()
+		}
+		for _, idx := range probeRows {
+			jobs <- idx
+		}
+		close(jobs)
+		wg.Wait()
+	}
 	// Always propagate tool-level errors to rows first — this must
 	// happen even when the registry reload path below is skipped
 	// (empty regPath / unreadable registry). Without this, callers
@@ -750,8 +826,28 @@ func sendForceMaterializeTools(port int, backend string) string {
 	return ""
 }
 
+var healthProbeLivePortFn = portInUse
+var registryOnlyStatusPortLiveFn = portInUse
+
+func finalizeRegistryOnlyWorkspaceStates(rows []DaemonStatus, liveByTask map[string]bool) {
+	for i := range rows {
+		live, ok := liveByTask[strings.TrimPrefix(rows[i].TaskName, "\\")]
+		if !ok {
+			continue
+		}
+		if live {
+			rows[i].State = "Running"
+		} else {
+			rows[i].State = "Stopped"
+		}
+	}
+}
+
 // probeDaemonHealth fills DaemonStatus.Health for every Running row
-// with a Port. The protocol: POST initialize (stream OR json Accept),
+// with a Port. Registry-only workspace-scoped rows may be seeded as
+// Stopped before process lookup can prove liveness; for those rows, a
+// live TCP port is enough to probe and promote the row to Running.
+// The protocol: POST initialize (stream OR json Accept),
 // capture Mcp-Session-Id, POST tools/list, count tools in the
 // response. Any transport or JSON-RPC error is captured as Err with
 // OK=false. Runs concurrently across rows to keep total time bounded.
@@ -766,7 +862,16 @@ func sendForceMaterializeTools(port int, backend string) string {
 func probeDaemonHealth(rows []DaemonStatus) {
 	var wg sync.WaitGroup
 	for i := range rows {
-		if rows[i].State != "Running" || rows[i].Port == 0 {
+		if rows[i].Port == 0 {
+			continue
+		}
+		if rows[i].State != "Running" {
+			if !rows[i].IsWorkspaceScoped || healthProbeLivePortFn == nil || !healthProbeLivePortFn(rows[i].Port) {
+				continue
+			}
+			rows[i].State = "Running"
+		}
+		if rows[i].State != "Running" {
 			continue
 		}
 		wg.Add(1)

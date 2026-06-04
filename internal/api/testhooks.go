@@ -33,9 +33,12 @@ type TestSchedulerIface interface {
 // path consumes. Cross-package fakes implement it.
 type TestClientIface interface {
 	Exists() bool
+	BackupKeep(keepN int) (string, error)
 	AddEntry(clients.MCPEntry) error
 	RemoveEntry(name string) error
 	GetEntry(name string) (*clients.MCPEntry, error)
+	AllStdioEntries() ([]clients.StdioEntry, error)
+	FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error)
 }
 
 // InstallTestHooks replaces the Register/Unregister factories with fakes
@@ -278,6 +281,11 @@ func (a testSchedulerShim) ImportXML(name string, xml []byte) error { return a.s
 type testClientShim struct{ c TestClientIface }
 
 func (a testClientShim) Exists() bool                                    { return a.c.Exists() }
+func (a testClientShim) BackupKeep(keepN int) (string, error)            { return a.c.BackupKeep(keepN) }
 func (a testClientShim) AddEntry(e clients.MCPEntry) error               { return a.c.AddEntry(e) }
 func (a testClientShim) RemoveEntry(name string) error                   { return a.c.RemoveEntry(name) }
 func (a testClientShim) GetEntry(name string) (*clients.MCPEntry, error) { return a.c.GetEntry(name) }
+func (a testClientShim) AllStdioEntries() ([]clients.StdioEntry, error)  { return a.c.AllStdioEntries() }
+func (a testClientShim) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
+	return a.c.FindStdioLanguageServerEntries()
+}

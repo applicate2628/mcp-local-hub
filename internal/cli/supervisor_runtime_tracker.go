@@ -359,6 +359,19 @@ func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
 	t.entries[taskName] = entry
 }
 
+func (t *DaemonRuntimeTracker) Remove(taskName string) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.entries, taskName)
+	if t.failures != nil {
+		delete(t.failures, taskName)
+	}
+}
+
 func (t *DaemonRuntimeTracker) Get(taskName string) (DaemonRuntimeEntry, bool) {
 	if t == nil {
 		return DaemonRuntimeEntry{}, false

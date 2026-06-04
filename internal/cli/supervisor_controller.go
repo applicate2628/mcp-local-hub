@@ -209,6 +209,56 @@ func (c *IntentCache) Refresh(intent *api.SupervisorIntentFile) {
 	c.snap.Store(snap)
 }
 
+func (c *IntentCache) TaskNames() map[string]struct{} {
+	out := map[string]struct{}{}
+	if c == nil {
+		return out
+	}
+	s, ok := c.snap.Load().(*intentSnapshot)
+	if !ok || s == nil {
+		return out
+	}
+	for taskName := range s.daemonByTask {
+		out[canonicalSupervisorTaskName(taskName)] = struct{}{}
+	}
+	return out
+}
+
+func (c *supervisorController) refreshSupervisorIntent(updated *api.SupervisorIntentFile) {
+	if c == nil || c.intentCache == nil {
+		return
+	}
+	previous := c.intentCache.TaskNames()
+	c.intentCache.Refresh(updated)
+	next := c.intentCache.TaskNames()
+	for taskName := range previous {
+		if _, stillPresent := next[taskName]; stillPresent {
+			continue
+		}
+		c.clearRemovedTaskRuntime(taskName)
+	}
+}
+
+func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
+	taskName = canonicalSupervisorTaskName(taskName)
+	c.smStates.Delete(taskName)
+	c.queuedActions.Delete(taskName)
+	if c.tracker != nil {
+		c.tracker.Remove(taskName)
+		if c.statePath != "" {
+			_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, taskName)
+		}
+	}
+	if c.events != nil {
+		_ = c.events.Emit(api.SupervisorEvent{
+			Severity: "debug",
+			Source:   "reconcile",
+			Event:    "controller-removed-intent-state-cleared",
+			TaskName: taskName,
+		})
+	}
+}
+
 // diffIntentSnapshots returns the slice of task names whose intent
 // state CHANGED between previous and updated. "Changed" is defined as
 // one of:

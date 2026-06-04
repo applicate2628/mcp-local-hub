@@ -19,12 +19,14 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/clients"
@@ -57,6 +59,12 @@ type RegisterOpts struct {
 	// WeeklyRefreshExplicit==true. Ignored otherwise.
 	WeeklyRefresh bool
 
+	// SupervisedProxy routes workspace LSP proxies through supervisor-intent
+	// instead of the legacy per-language Windows Scheduled Task path. The
+	// supervisor path makes the proxy process a Job-protected child of the
+	// hub supervisor, matching Serena's daemon ownership model.
+	SupervisedProxy bool
+
 	Writer io.Writer // progress output; nil = os.Stderr
 }
 
@@ -86,6 +94,7 @@ type RegisterReport struct {
 	Workspace    string           `json:"workspace"`
 	WorkspaceKey string           `json:"workspace_key"`
 	Entries      []WorkspaceEntry `json:"entries"`
+	Warnings     []string         `json:"warnings,omitempty"`
 }
 
 // UnregisterReport summarizes what Unregister actually removed.
@@ -177,16 +186,6 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	if _, err := os.Stat(canonicalExeForPreflight); err != nil {
 		return nil, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExeForPreflight, err)
 	}
-	// 2.5 Ensure the shared weekly-refresh task exists. Idempotent (Delete
-	// + Create under the hood) so it is safe to invoke on every Register.
-	// Failure here is non-fatal — per-workspace registration must not be
-	// blocked by a shared-task problem; surface a warning and carry on.
-	// Placed AFTER argument validation AND the canonical-mcphub preflight
-	// so neither invalid-language calls nor setup-skipped installs
-	// produce scheduler side effects at all.
-	if err := a.EnsureWeeklyRefreshTask(); err != nil {
-		fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
-	}
 	// 3. Per-language register with rollback stack.
 	//
 	// Registry flock lifetime is scoped to `registerOneLanguage`'s Phase 1
@@ -204,8 +203,25 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	}
 	reg := NewRegistry(regPath)
 	sch, err := schedulerNewForRegister()
+	var schedulerUnavailableErr error
 	if err != nil {
-		return nil, err
+		if schedulerUnavailableError(err) {
+			opts.SupervisedProxy = true
+			schedulerUnavailableErr = err
+			sch = legacyTaskUnavailableScheduler{}
+		} else {
+			return nil, err
+		}
+	}
+	// 3.1 Ensure the shared weekly-refresh task exists only for the legacy
+	// scheduler-backed path. Supervised registration owns its lifecycle
+	// through the supervisor intent file; touching the shared scheduler task
+	// there would mutate durable state before per-language preconditions
+	// such as legacy-port kill/adoption have been proven.
+	if !opts.SupervisedProxy {
+		if err := a.EnsureWeeklyRefreshTask(); err != nil {
+			fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
+		}
 	}
 	allClients := clientsAllForRegister()
 	var rollback []func()
@@ -215,6 +231,13 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 	}
 	report := &RegisterReport{Workspace: canonical, WorkspaceKey: wsKey}
+	if schedulerUnavailableErr != nil {
+		report.Warnings = append(report.Warnings,
+			fmt.Sprintf("scheduler unavailable (%v); using supervised LSP proxy path and skipping legacy task handling", schedulerUnavailableErr))
+		if err := preflightSchedulerlessRegisterSupervisor(); err != nil {
+			return report, err
+		}
+	}
 	for _, lang := range languages {
 		entry, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, w, &rollback)
 		if err != nil {
@@ -223,7 +246,179 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 		report.Entries = append(report.Entries, entry)
 	}
+	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, allClients, w)...)
 	return report, nil
+}
+
+func preflightSchedulerlessRegisterSupervisor() error {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
+	defer cancel()
+	if _, err := registerSupervisorReconcileFn(ctx, false); err != nil {
+		return fmt.Errorf("schedulerless LSP register requires a running supervisor before writing intent: %w; run `mcphub supervise` from another shell and retry", err)
+	}
+	return nil
+}
+
+func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	w io.Writer,
+) []string {
+	aliases := map[string]bool{}
+	for _, lang := range languages {
+		spec, ok := bySpec[lang]
+		if !ok {
+			continue
+		}
+		addLSPCleanupAlias(aliases, lang)
+		addLSPCleanupAlias(aliases, spec.LspCommand)
+	}
+	if len(aliases) == 0 {
+		return nil
+	}
+
+	keepN := a.EffectiveBackupKeepN()
+	var warnings []string
+	for clientName, client := range allClients {
+		if client == nil || !client.Exists() {
+			continue
+		}
+		entries, err := client.FindStdioLanguageServerEntries()
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s direct LSP scan failed: %v", clientName, err))
+			continue
+		}
+		matches := matchingDirectLanguageServerEntries(entries, aliases, canonicalWorkspace)
+		if aliases["go"] || aliases["gopls"] {
+			stdioEntries, err := client.AllStdioEntries()
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s direct stdio scan failed: %v", clientName, err))
+			} else {
+				matches = append(matches, matchingDirectGoplsMCPEntries(stdioEntries, canonicalWorkspace)...)
+			}
+		}
+		matches = dedupeDirectLanguageServerEntries(matches)
+		if len(matches) == 0 {
+			continue
+		}
+		backupPath, err := client.BackupKeep(keepN)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s direct LSP backup failed: %v", clientName, err))
+			continue
+		}
+		fmt.Fprintf(w, "✓ %s backup before direct LSP cleanup: %s\n", clientName, backupPath)
+		for _, entry := range matches {
+			if err := client.RemoveEntry(entry.Name); err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s remove direct LSP entry %s failed: %v", clientName, entry.Name, err))
+				continue
+			}
+			fmt.Fprintf(w, "✓ %s removed direct LSP entry %s (--lsp %s)\n", clientName, entry.Name, entry.Language)
+		}
+	}
+	return warnings
+}
+
+func addLSPCleanupAlias(aliases map[string]bool, value string) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value != "" {
+		aliases[value] = true
+	}
+}
+
+func matchingDirectLanguageServerEntries(entries []clients.LanguageServerStdioEntry, aliases map[string]bool, canonicalWorkspace string) []clients.LanguageServerStdioEntry {
+	var out []clients.LanguageServerStdioEntry
+	for _, entry := range entries {
+		if lspCleanupAliasMatches(entry.Language, aliases) && directEntryWorkspaceMatches(entry.Args, canonicalWorkspace) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func matchingDirectGoplsMCPEntries(entries []clients.StdioEntry, canonicalWorkspace string) []clients.LanguageServerStdioEntry {
+	var out []clients.LanguageServerStdioEntry
+	for _, entry := range entries {
+		if !isCommandBasename(entry.Command, "gopls") || !stringSliceContainsFold(entry.Args, "mcp") {
+			continue
+		}
+		if !directEntryWorkspaceMatches(entry.Args, canonicalWorkspace) {
+			continue
+		}
+		out = append(out, clients.LanguageServerStdioEntry{
+			Name:     entry.Name,
+			Command:  entry.Command,
+			Language: "gopls",
+			Args:     entry.Args,
+		})
+	}
+	return out
+}
+
+func directEntryWorkspaceMatches(args []string, canonicalWorkspace string) bool {
+	raw := directEntryWorkspaceArg(args)
+	if raw == "" {
+		return false
+	}
+	canonical, err := CanonicalWorkspacePathForCleanup(raw)
+	if err != nil {
+		return false
+	}
+	return canonical == canonicalWorkspace
+}
+
+func directEntryWorkspaceArg(args []string) string {
+	for i, arg := range args {
+		for _, flag := range []string{"--workspace", "-workspace", "--dir", "-dir", "--directory", "-directory"} {
+			if arg == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+			if value, ok := strings.CutPrefix(arg, flag+"="); ok {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func dedupeDirectLanguageServerEntries(entries []clients.LanguageServerStdioEntry) []clients.LanguageServerStdioEntry {
+	seen := map[string]bool{}
+	var out []clients.LanguageServerStdioEntry
+	for _, entry := range entries {
+		if entry.Name == "" || seen[entry.Name] {
+			continue
+		}
+		seen[entry.Name] = true
+		out = append(out, entry)
+	}
+	return out
+}
+
+func lspCleanupAliasMatches(value string, aliases map[string]bool) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return false
+	}
+	return aliases[value]
+}
+
+func isCommandBasename(command, want string) bool {
+	base := strings.ReplaceAll(command, "\\", "/")
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.TrimSuffix(strings.ToLower(base), ".exe")
+	return base == want
+}
+
+func stringSliceContainsFold(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // registerOneLanguage is the per-language unit of work. It (a) allocates a
@@ -247,6 +442,9 @@ func (a *API) registerOneLanguage(
 			spec = l
 			break
 		}
+	}
+	if opts.SupervisedProxy {
+		return a.registerOneLanguageSupervised(m, spec, canonical, wsKey, lang, opts, reg, sch, allClients, w, rollback)
 	}
 	// Phase 1: registry write window — acquire flock, load current state,
 	// do all port/task/registry work, release flock BEFORE sch.Run so the
@@ -293,7 +491,7 @@ func (a *API) registerOneLanguage(
 			reg.Remove(capturedKey, capturedLang)
 		})
 	}
-	taskName := fmt.Sprintf("mcp-local-hub-lsp-%s-%s", wsKey, lang)
+	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, lang)
 	// 1. Create scheduler task (or replace — snapshot the prior XML so
 	// rollback can restore it).
 	canonicalExe, err := canonicalMcphubPath()
@@ -426,7 +624,7 @@ func (a *API) registerOneLanguage(
 			continue
 		}
 		if _, already := entryNameByClient[b.Client]; !already {
-			entryNameByClient[b.Client] = ResolveEntryName(reg, m.Name, lang, wsKey)
+			entryNameByClient[b.Client] = resolveWorkspaceScopedLSPEntryName(reg, m.Name, lang, wsKey)
 		}
 	}
 	// On re-register (idempotent path, had == true), preserve the prior
@@ -564,7 +762,7 @@ func (a *API) registerOneLanguage(
 		}
 		entry := clients.MCPEntry{
 			Name: entryName,
-			URL:  fmt.Sprintf("http://localhost:%d%s", port, urlPath),
+			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
 		}
 		if err := client.AddEntry(entry); err != nil {
 			return WorkspaceEntry{}, fmt.Errorf("write %s entry: %w", b.Client, err)
@@ -664,18 +862,42 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 			targets = append(targets, e.Language)
 		}
 	}
-	sch, err := schedulerNewForRegister()
-	if err != nil {
-		return nil, err
-	}
 	allClients := clientsAllForRegister()
 	report := &UnregisterReport{Workspace: canonical, WorkspaceKey: activeWSKey}
+	sch, schErr := schedulerNewForRegister()
+	// Non-Windows backends return not-implemented; supervised LSP rows have no
+	// scheduled task to delete there, so tolerate absence and skip only the
+	// legacy-task Delete below.
+	if schErr != nil {
+		if schedulerUnavailableError(schErr) {
+			sch = nil
+			report.Warnings = append(report.Warnings,
+				fmt.Sprintf("scheduler unavailable (%v); skipping legacy task deletion (supervised rows have none)", schErr))
+		} else {
+			return nil, schErr
+		}
+	}
 	for _, lang := range targets {
 		entry, ok := reg.Get(activeWSKey, lang)
 		if !ok {
 			report.Warnings = append(report.Warnings,
 				fmt.Sprintf("language %s not registered for workspace %s", lang, canonical))
 			continue
+		}
+		intentTaskName := LSPIntentTaskNameForWorkspaceLanguage(activeWSKey, lang)
+		if _, supervisorManaged, err := a.removeLSPSupervisorIntent(activeWSKey, lang); err != nil {
+			report.Warnings = append(report.Warnings,
+				fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
+			continue
+		} else if supervisorManaged {
+			ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
+			if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
+				report.Warnings = append(report.Warnings,
+					fmt.Sprintf("supervisor reconcile after removing %s: %v", intentTaskName, err))
+			} else {
+				fmt.Fprintf(w, "✓ removed supervisor intent %s\n", intentTaskName)
+			}
+			cancel()
 		}
 		// 1. Kill any live proxy bound to this language's port BEFORE we
 		// Delete the scheduler task. sch.Delete removes the task record
@@ -697,16 +919,22 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		// supported way to stop a logon-triggered task from respawning.
 		// The kill-by-port above already terminated any live proxy; this
 		// Delete prevents it from being re-launched at next logon.
-		if err := sch.Delete(entry.TaskName); err != nil {
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
-		} else {
-			fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
+		if sch != nil {
+			if err := sch.Delete(entry.TaskName); err != nil {
+				report.Warnings = append(report.Warnings,
+					fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
+			} else {
+				fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
+			}
 		}
 		// 2. Remove client entries.
 		for clientName, entryName := range entry.ClientEntries {
 			client, ok := allClients[clientName]
 			if !ok || !client.Exists() {
+				continue
+			}
+			if shouldPreserveSharedLSPRouterEntry(client, entryName, lang) {
+				fmt.Fprintf(w, "✓ preserved shared LSP router entry %s in %s\n", entryName, clientName)
 				continue
 			}
 			if err := client.RemoveEntry(entryName); err != nil {
@@ -724,6 +952,17 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		return report, fmt.Errorf("persist registry: %w", err)
 	}
 	return report, nil
+}
+
+func shouldPreserveSharedLSPRouterEntry(client registerClient, entryName, language string) bool {
+	if entryName != LSPRouterEntryName(language) {
+		return false
+	}
+	live, err := client.GetEntry(entryName)
+	if err != nil {
+		return false
+	}
+	return entryIsLSPRouterForLanguage(live, language)
 }
 
 // ResolveEntryName returns the client-config entry name to use for a given
@@ -850,13 +1089,30 @@ type testScheduler interface {
 	ImportXML(name string, xml []byte) error
 }
 
+type legacyTaskUnavailableScheduler struct{}
+
+func (legacyTaskUnavailableScheduler) Create(scheduler.TaskSpec) error {
+	return errors.New("scheduler unavailable for legacy task creation")
+}
+func (legacyTaskUnavailableScheduler) Delete(string) error { return scheduler.ErrTaskNotFound }
+func (legacyTaskUnavailableScheduler) Run(string) error    { return scheduler.ErrTaskNotFound }
+func (legacyTaskUnavailableScheduler) ExportXML(string) ([]byte, error) {
+	return nil, scheduler.ErrTaskNotFound
+}
+func (legacyTaskUnavailableScheduler) ImportXML(string, []byte) error {
+	return errors.New("scheduler unavailable for legacy task restore")
+}
+
 // registerClient is the subset of clients.Client the register path
 // consumes. Lets tests substitute an in-memory map.
 type registerClient interface {
 	Exists() bool
+	BackupKeep(keepN int) (string, error)
 	AddEntry(clients.MCPEntry) error
 	RemoveEntry(name string) error
 	GetEntry(name string) (*clients.MCPEntry, error)
+	AllStdioEntries() ([]clients.StdioEntry, error)
+	FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error)
 }
 
 // Package-level hooks — nil in production (fall back to real schedulers /
@@ -909,9 +1165,18 @@ func (a realSchedulerAdapter) ImportXML(name string, xml []byte) error {
 
 type realClientAdapter struct{ c clients.Client }
 
-func (a realClientAdapter) Exists() bool                      { return a.c.Exists() }
+func (a realClientAdapter) Exists() bool { return a.c.Exists() }
+func (a realClientAdapter) BackupKeep(keepN int) (string, error) {
+	return a.c.BackupKeep(keepN)
+}
 func (a realClientAdapter) AddEntry(e clients.MCPEntry) error { return a.c.AddEntry(e) }
 func (a realClientAdapter) RemoveEntry(name string) error     { return a.c.RemoveEntry(name) }
 func (a realClientAdapter) GetEntry(name string) (*clients.MCPEntry, error) {
 	return a.c.GetEntry(name)
+}
+func (a realClientAdapter) AllStdioEntries() ([]clients.StdioEntry, error) {
+	return a.c.AllStdioEntries()
+}
+func (a realClientAdapter) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
+	return a.c.FindStdioLanguageServerEntries()
 }

@@ -1,8 +1,13 @@
 package api
 
 import (
+	"fmt"
+	"net"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/scheduler"
 )
 
 // TestPortForTask_WorkspaceScopedBeatsManifest guards the port-lookup
@@ -141,6 +146,296 @@ func TestEnrichStatusWithRegistry_WorkspaceScoped(t *testing.T) {
 	}
 	if !r.IsWorkspaceScoped {
 		t.Errorf("IsWorkspaceScoped = false, want true for lazy-proxy task name")
+	}
+}
+
+func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	origRegPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
+
+	origBatch := lookupProcessBatch
+	origLookup := lookupProcess
+	lookupProcessBatch = nil
+	lookupProcess = nil
+	t.Cleanup(func() {
+		lookupProcessBatch = origBatch
+		lookupProcess = origLookup
+	})
+
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = func(port int) bool { return false }
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
+
+	reg := NewRegistry(regPath)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "/home/u/project",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9217,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle:     LifecycleActive,
+	})
+	if err := reg.PutSerena(WorkspaceEntry{
+		WorkspaceKey:  "serena1234",
+		WorkspacePath: "/home/u/serena",
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+		TaskName:      "mcp-local-hub-serena-default",
+		Lifecycle:     LifecycleActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewAPI().StatusWithOpts(StatusOpts{})
+	if err != nil {
+		t.Fatalf("StatusWithOpts: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1 registry-only workspace row: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.TaskName != "mcp-local-hub-lsp-abcd1234-python" {
+		t.Fatalf("TaskName = %q, want registry task", row.TaskName)
+	}
+	if !row.IsWorkspaceScoped {
+		t.Fatalf("IsWorkspaceScoped = false, want true")
+	}
+	if row.Port != 9217 {
+		t.Fatalf("Port = %d, want 9217", row.Port)
+	}
+	if row.Language != "python" {
+		t.Fatalf("Language = %q, want python", row.Language)
+	}
+	if row.Lifecycle != LifecycleActive {
+		t.Fatalf("Lifecycle = %q, want %q", row.Lifecycle, LifecycleActive)
+	}
+	if row.State != "Stopped" {
+		t.Fatalf("State = %q, want Stopped for registry-only LSP row with no live port", row.State)
+	}
+	for _, row := range rows {
+		if row.TaskName == "mcp-local-hub-serena-default" || row.Language == SerenaLanguageSentinel {
+			t.Fatalf("StatusWithOpts merged non-LSP registry row: %+v", row)
+		}
+	}
+}
+
+func TestStatusWithOpts_RegistryOnlyWorkspaceRowsUsePortLivenessWithoutHealth(t *testing.T) {
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	origRegPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
+
+	origBatch := lookupProcessBatch
+	origLookup := lookupProcess
+	lookupProcessBatch = nil
+	lookupProcess = nil
+	t.Cleanup(func() {
+		lookupProcessBatch = origBatch
+		lookupProcess = origLookup
+	})
+
+	const livePort = 39217
+	const deadPort = 39218
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = func(port int) bool { return port == livePort }
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
+
+	reg := NewRegistry(regPath)
+	for _, e := range []WorkspaceEntry{
+		{
+			WorkspaceKey:  "abcd1234",
+			WorkspacePath: "/home/u/live",
+			Language:      "python",
+			Backend:       "mcp-language-server",
+			Port:          livePort,
+			TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+			Lifecycle:     LifecycleActive,
+		},
+		{
+			WorkspaceKey:  "deadbeef",
+			WorkspacePath: "/home/u/dead",
+			Language:      "go",
+			Backend:       "gopls-mcp",
+			Port:          deadPort,
+			TaskName:      "mcp-local-hub-lsp-deadbeef-go",
+			Lifecycle:     LifecycleActive,
+		},
+	} {
+		reg.Put(e)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewAPI().StatusWithOpts(StatusOpts{})
+	if err != nil {
+		t.Fatalf("StatusWithOpts: %v", err)
+	}
+	byTask := map[string]DaemonStatus{}
+	for _, row := range rows {
+		byTask[row.TaskName] = row
+	}
+	if got := byTask["mcp-local-hub-lsp-abcd1234-python"].State; got != "Running" {
+		t.Fatalf("live registry-only row State = %q, want Running", got)
+	}
+	if got := byTask["mcp-local-hub-lsp-deadbeef-go"].State; got != "Stopped" {
+		t.Fatalf("dead registry-only row State = %q, want Stopped", got)
+	}
+	if byTask["mcp-local-hub-lsp-abcd1234-python"].Health != nil {
+		t.Fatalf("non-health status unexpectedly probed health: %+v", byTask["mcp-local-hub-lsp-abcd1234-python"].Health)
+	}
+}
+
+func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) {
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+
+	live, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen live proxy port: %v", err)
+	}
+	t.Cleanup(func() { _ = live.Close() })
+	livePort := live.Addr().(*net.TCPAddr).Port
+
+	dead, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve dead proxy port: %v", err)
+	}
+	deadPort := dead.Addr().(*net.TCPAddr).Port
+	_ = dead.Close()
+
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	origRegPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
+
+	origBatch := lookupProcessBatch
+	origLookup := lookupProcess
+	lookupProcessBatch = nil
+	lookupProcess = nil
+	t.Cleanup(func() {
+		lookupProcessBatch = origBatch
+		lookupProcess = origLookup
+	})
+
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = portInUse
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
+
+	var probed []int
+	origProbe := singleHealthProbeFn
+	singleHealthProbeFn = func(port int) *HealthProbe {
+		probed = append(probed, port)
+		return &HealthProbe{OK: true, ToolCount: 6}
+	}
+	t.Cleanup(func() { singleHealthProbeFn = origProbe })
+
+	reg := NewRegistry(regPath)
+	for _, e := range []WorkspaceEntry{
+		{
+			WorkspaceKey:  "abcd1234",
+			WorkspacePath: "/home/u/live",
+			Language:      "python",
+			Backend:       "mcp-language-server",
+			Port:          livePort,
+			TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+			Lifecycle:     LifecycleActive,
+		},
+		{
+			WorkspaceKey:  "deadbeef",
+			WorkspacePath: "/home/u/dead",
+			Language:      "go",
+			Backend:       "gopls-mcp",
+			Port:          deadPort,
+			TaskName:      "mcp-local-hub-lsp-deadbeef-go",
+			Lifecycle:     LifecycleActive,
+		},
+	} {
+		reg.Put(e)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewAPI().StatusWithOpts(StatusOpts{ProbeHealth: true})
+	if err != nil {
+		t.Fatalf("StatusWithOpts: %v", err)
+	}
+	if len(probed) != 1 || probed[0] != livePort {
+		t.Fatalf("health probed ports = %v, want only live port %d", probed, livePort)
+	}
+	byTask := map[string]DaemonStatus{}
+	for _, row := range rows {
+		byTask[row.TaskName] = row
+	}
+	liveRow := byTask["mcp-local-hub-lsp-abcd1234-python"]
+	if liveRow.Health == nil || !liveRow.Health.OK {
+		t.Fatalf("live registry-only row health = %+v, want OK probe", liveRow.Health)
+	}
+	deadRow := byTask["mcp-local-hub-lsp-deadbeef-go"]
+	if deadRow.Health != nil {
+		t.Fatalf("dead registry-only row health = %+v, want nil", deadRow.Health)
+	}
+}
+
+func TestStatusWithOpts_MergesRegistryRowsWhenSchedulerUnavailable(t *testing.T) {
+	origScheduler := statusSchedulerFactory
+	statusSchedulerFactory = func() (scheduler.Scheduler, error) {
+		return nil, fmt.Errorf("linux scheduler not yet implemented (Phase 0-1 is Windows-first): %w", scheduler.ErrNotImplemented)
+	}
+	t.Cleanup(func() { statusSchedulerFactory = origScheduler })
+
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	origRegPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
+
+	origBatch := lookupProcessBatch
+	origLookup := lookupProcess
+	lookupProcessBatch = nil
+	lookupProcess = nil
+	t.Cleanup(func() {
+		lookupProcessBatch = origBatch
+		lookupProcess = origLookup
+	})
+
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = func(port int) bool { return false }
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
+
+	reg := NewRegistry(regPath)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "/home/u/project",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9217,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle:     LifecycleActive,
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewAPI().StatusWithOpts(StatusOpts{})
+	if err != nil {
+		t.Fatalf("StatusWithOpts with unavailable scheduler: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1 registry-only workspace row: %+v", len(rows), rows)
+	}
+	if rows[0].TaskName != "mcp-local-hub-lsp-abcd1234-python" || rows[0].Language != "python" {
+		t.Fatalf("row = %+v, want registry-backed python LSP row", rows[0])
 	}
 }
 

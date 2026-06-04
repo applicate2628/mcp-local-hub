@@ -24,6 +24,12 @@ const (
 	LifecycleFailed     = "failed"     // materialization attempted; failed for any non-missing-binary reason
 )
 
+// DefaultLSPMaterializedHardCap is the shared process-wide cap for
+// materialized LSP backends. The daemon enforces it for organic tools/call
+// materialization; status force-materialize uses it as a probe concurrency
+// limit so explicit all-row probes do not self-deny against the same cap.
+const DefaultLSPMaterializedHardCap = 16
+
 // MaxLastErrorBytes caps LastError to keep the YAML file compact and
 // readable in `workspaces` output. Truncated mid-UTF8 is OK because the
 // field is diagnostic-only.

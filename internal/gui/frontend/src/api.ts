@@ -355,6 +355,31 @@ export async function listWorkspaces(): Promise<WorkspacesResponse> {
   return fetchOrThrow<WorkspacesResponse>("/api/workspaces", "object");
 }
 
+export interface LspRegisterResponse {
+  workspace: string;
+  workspace_key: string;
+  entries: WorkspaceEntryDTO[];
+  warnings?: string[];
+  results?: Array<{
+    language: string;
+    status: "ok" | "error";
+    error?: string;
+  }>;
+  error?: string;
+  code?: string;
+}
+
+export async function postLspRegister(
+  workspacePath: string,
+  language: string,
+): Promise<LspRegisterResponse> {
+  return fetchOrThrow<LspRegisterResponse>("/api/lsp/register", "object", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_path: workspacePath, language }),
+  });
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Dashboard recovery actions (PR #222 ops UX gap)
 // ───────────────────────────────────────────────────────────────────

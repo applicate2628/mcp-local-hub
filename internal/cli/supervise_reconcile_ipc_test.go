@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -245,6 +246,68 @@ func TestReconcileIPC_ApplyPostsEvIntentUpdate(t *testing.T) {
 	}
 	if observed[0].TaskName != tasks[0] {
 		t.Errorf("posted event task_name = %q, want %q", observed[0].TaskName, tasks[0])
+	}
+}
+
+func TestReconcileIPC_SchedulerUnavailableTreatsSupervisorOwnedRowsAsMissing(t *testing.T) {
+	taskName := `\mcp-local-hub-lsp-deadbeef-go`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName: taskName,
+				Server:   "lsp",
+				Daemon:   "go",
+				Command:  "mcphub",
+				Args:     []string{"daemon", "workspace-proxy", "--language", "go"},
+				Port:     9242,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	uninstall := setReconcileSchedulerNewFnForTest(func() (scheduler.Scheduler, error) {
+		return nil, fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)
+	})
+	defer uninstall()
+
+	req := api.IPCRequest{
+		ID:   24,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	resp, body := decodeReconcileResponse(t, conn)
+	if resp.Error != nil {
+		t.Fatalf("scheduler not-implemented must be an empty snapshot, got error %+v", resp.Error)
+	}
+	if body.DriftCount != 1 || len(body.Drift) != 1 {
+		t.Fatalf("DriftCount=%d drift=%+v, want one supervisor-owned missing row", body.DriftCount, body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.TaskName != taskName {
+		t.Errorf("TaskName = %q, want %q", entry.TaskName, taskName)
+	}
+	if entry.SchedulerState != api.ReconcileSchedulerStateMissing {
+		t.Errorf("SchedulerState = %q, want %q", entry.SchedulerState, api.ReconcileSchedulerStateMissing)
+	}
+	if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("Action = %q, want %q for schedulerless supervisor-owned descriptor",
+			entry.Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("expected EvIntentUpdate for schedulerless supervisor-owned row")
 	}
 }
 
@@ -582,6 +645,80 @@ func TestReconcileIPC_MissingTaskInSchedulerFlaggedAsMissing(t *testing.T) {
 	if body.Drift[0].Action != api.ReconcileActionNeedsManualReview {
 		t.Errorf("Action = %q, want %q for missing scheduler entry",
 			body.Drift[0].Action, api.ReconcileActionNeedsManualReview)
+	}
+}
+
+func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
+	taskName := `\mcp-local-hub-lsp-b133f336-go`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName:  taskName,
+				Server:    "mcp-language-server",
+				Daemon:    "lsp-b133f336-go",
+				Command:   "mcphub",
+				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", `D:\dev\mcp-local-hub`, "--language", "go"},
+				Workspace: `D:\dev\mcp-local-hub`,
+				Port:      9200,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	installSchedulerListFake(t, []scheduler.TaskStatus{})
+
+	req := api.IPCRequest{
+		ID:   44,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 1 {
+		t.Fatalf("expected 1 drift entry; got %d (%+v)", body.DriftCount, body.Drift)
+	}
+	if body.Drift[0].SchedulerState != api.ReconcileSchedulerStateMissing {
+		t.Errorf("SchedulerState = %q, want %q",
+			body.Drift[0].SchedulerState, api.ReconcileSchedulerStateMissing)
+	}
+	if body.Drift[0].Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("Action = %q, want %q for supervisor-owned missing scheduler entry",
+			body.Drift[0].Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if body.AppliedCount != 1 {
+		t.Errorf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for EvIntentUpdate")
+	}
+}
+
+func TestIsSupervisorOwnedDescriptorForReconcile(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "workspace proxy", args: []string{"daemon", "workspace-proxy", "--port", "9200"}, want: true},
+		{name: "serena proxy", args: []string{"daemon", "serena-proxy", "--server", "serena"}, want: true},
+		{name: "scheduler backed global daemon", args: []string{"daemon", "--server", "memory", "--daemon", "default"}, want: false},
+		{name: "bare daemon", args: []string{"daemon"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSupervisorOwnedDescriptorForReconcile(api.SupervisorDaemon{Args: tt.args})
+			if got != tt.want {
+				t.Fatalf("isSupervisorOwnedDescriptorForReconcile(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
 	}
 }
 
