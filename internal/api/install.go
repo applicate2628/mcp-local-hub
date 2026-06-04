@@ -2260,24 +2260,40 @@ func (a *API) stopKillCore(server, daemonFilter string) ([]RestartResult, error)
 // to opts.Writer (or os.Stderr by default) and never propagate — the
 // restart already happened.
 func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
-	if results, handled, err := restartSupervisorOwnedDaemons(context.Background(), server, daemonFilter); err != nil {
+	results, supervisorHandled, err := restartSupervisorOwnedDaemons(context.Background(), server, daemonFilter)
+	if err != nil {
 		return nil, err
-	} else if handled {
-		return results, nil
+	}
+	// Mixed install: a server can have supervisor-owned rows AND legacy
+	// scheduler tasks. Don't short-circuit after the supervisor pass —
+	// fall through to restart the remaining scheduler tasks for this
+	// server, skipping any task name already respawned via the supervisor
+	// (same combine-and-skip behavior as RestartAll). Bot PR #268 r3.
+	handledTasks := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		handledTasks[strings.TrimPrefix(r.TaskName, "\\")] = struct{}{}
 	}
 	sch, err := restartSchedulerFactory()
 	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	tasks, err := listTasksForServer(sch, server)
 	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
-	var results []RestartResult
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
+		if _, already := handledTasks[normalized]; already {
+			continue
+		}
 		if daemonFilter != "" {
 			wantSuffix := "-" + daemonFilter
 			if !strings.HasSuffix(normalized, wantSuffix) {

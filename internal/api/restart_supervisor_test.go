@@ -38,6 +38,14 @@ func TestRestartUsesSupervisorRespawnForIntentDaemon(t *testing.T) {
 	})
 	defer restoreRespawn()
 
+	// Restart now falls through to the legacy scheduler after the supervisor
+	// pass (bot PR #268 r3), so mock an empty scheduler: this server has no
+	// legacy task, so results stay the single supervisor row.
+	fake := &restartAllFakeScheduler{}
+	origFactory := restartSchedulerFactory
+	restartSchedulerFactory = func() (scheduler.Scheduler, error) { return fake, nil }
+	defer func() { restartSchedulerFactory = origFactory }()
+
 	results, err := NewAPI().Restart("memory", "")
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
