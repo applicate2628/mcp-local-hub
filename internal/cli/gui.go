@@ -326,7 +326,15 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			fmt.Fprintf(cmd.OutOrStderr(),
 				"lsp-router: manifest parse failed; /lsp/<language>/mcp will return errors until next restart: %v\n", err)
 		} else {
-			lspResolver := lsp_routing.NewWorkspaceResolver(reg, registryPath, m.Languages)
+			// Separate registry handle for the LSP resolver: it refreshes
+			// (reg.Load() + LSPEntries()) under its own RWMutex, independently
+			// of the serena resolver above. *api.Registry has no in-process
+			// mutex, so sharing one object would let the two resolvers' caches
+			// race on the Workspaces slice after a registry mtime change — a
+			// data race under concurrent /serena/mcp + /lsp/<lang>/mcp traffic
+			// (bot PR #266 r5).
+			lspReg := api.NewRegistry(registryPath)
+			lspResolver := lsp_routing.NewWorkspaceResolver(lspReg, registryPath, m.Languages)
 			lspSessions := lsp_routing.NewSessionRouter()
 			s.SetLSPRouterProduction(lspResolver, lspSessions, m.Languages)
 			go runLSPSessionCleanupTicker(ctx, lspSessions, time.Hour, lsp_routing.DefaultSessionTTL)
