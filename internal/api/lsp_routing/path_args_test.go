@@ -2,6 +2,7 @@ package lsp_routing
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -78,5 +79,19 @@ func TestToolCallParamsRejectsNonObject(t *testing.T) {
 	name, args := ToolCallParams(json.RawMessage(`[]`))
 	if name != "" || args != nil {
 		t.Fatalf("ToolCallParams(non-object) = (%q, %s), want empty", name, string(args))
+	}
+}
+
+func TestExtractPathArgsReturnsAllFiles(t *testing.T) {
+	_, args := ToolCallParams(json.RawMessage(`{"name":"go_diagnostics","arguments":{"files":["","C:/work/app/a.go","C:/work/app/b.go"]}}`))
+	got, ok := ExtractPathArgs(args)
+	want := []string{"C:/work/app/a.go", "C:/work/app/b.go"}
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExtractPathArgs = (%v, %v), want (%v, true)", got, ok, want)
+	}
+
+	first, ok := ExtractPathArg(args)
+	if first != want[0] || !ok {
+		t.Fatalf("ExtractPathArg compatibility = (%q, %v), want (%q, true)", first, ok, want[0])
 	}
 }

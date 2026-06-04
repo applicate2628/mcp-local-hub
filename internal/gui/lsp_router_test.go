@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -82,6 +83,18 @@ func rpcBody(method string, id string, params string) []byte {
 		params = "{}"
 	}
 	return []byte(`{"jsonrpc":"2.0","id":` + id + `,"method":"` + method + `","params":` + params + `}`)
+}
+
+func lspToolCallParamsJSON(t *testing.T, name string, arguments map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"name":      name,
+		"arguments": arguments,
+	})
+	if err != nil {
+		t.Fatalf("marshal tools/call params: %v", err)
+	}
+	return string(body)
 }
 
 func TestLSPRouter_InitializeAndToolsListUseCatalogWithoutProxy(t *testing.T) {
@@ -596,6 +609,171 @@ func TestLSPRouter_PathlessSingleCandidateReEnsuresWhenRequestedLanguageMarkerPr
 	}
 	if calls := autoCalls.Load(); calls != 1 {
 		t.Fatalf("AutoRegisterFn calls = %d, want 1 for marker-backed pathless candidate", calls)
+	}
+}
+
+func TestLSPRouter_RelativeFilePathUsesSingleBoundSessionWorkspace(t *testing.T) {
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit.Store(true)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"workspace":"alpha"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	workspaceRoot := t.TempDir()
+	relPath := "src/main.py"
+	joinedPath := filepath.Clean(filepath.Join(workspaceRoot, relPath))
+	entry := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: workspaceRoot, Language: "python", Backend: "mcp-language-server", Port: 9201}
+
+	sessions := lsp_routing.NewSessionRouter()
+	sessions.TouchWorkspace("client-session", entry)
+
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{
+			errs: map[string]error{
+				"python|" + relPath: lsp_routing.ErrInvalidPath,
+			},
+			results: map[string]*lsp_routing.ResolveResult{
+				"python|" + joinedPath: {WorkspaceRoot: workspaceRoot, WorkspaceKey: "alpha", Registered: true, Entry: entry, ProjectMarker: true},
+			},
+		},
+		Sessions:               sessions,
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		UpstreamURLFn:          func(ws *api.WorkspaceEntry) string { return upstream.URL },
+	})
+
+	body := rpcBody("tools/call", "1", lspToolCallParamsJSON(t, "diagnostics", map[string]any{"filePath": relPath}))
+	rr := postLSP(t, s, "python", body, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("relative filePath status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !upstreamHit.Load() {
+		t.Fatal("relative filePath did not route to the bound session workspace")
+	}
+}
+
+func TestLSPRouter_RelativeFilePathWithoutSessionStillErrors(t *testing.T) {
+	relPath := "src/main.py"
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{errs: map[string]error{
+			"python|" + relPath: lsp_routing.ErrInvalidPath,
+		}},
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+	})
+
+	body := rpcBody("tools/call", "1", lspToolCallParamsJSON(t, "diagnostics", map[string]any{"filePath": relPath}))
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("relative filePath error status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "no LSP workspace for path "+relPath) {
+		t.Fatalf("relative filePath error mismatch: %s", rr.Body.String())
+	}
+}
+
+func TestLSPRouter_RelativeFilePathWithMultipleCandidatesIsAmbiguous(t *testing.T) {
+	relPath := "src/main.py"
+	sessions := lsp_routing.NewSessionRouter()
+	sessions.TouchWorkspace("client-session", &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201})
+	sessions.TouchWorkspace("client-session", &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/repo/beta", Language: "python", Backend: "mcp-language-server", Port: 9202})
+
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{errs: map[string]error{
+			"python|" + relPath: lsp_routing.ErrInvalidPath,
+		}},
+		Sessions:               sessions,
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+	})
+
+	body := rpcBody("tools/call", "1", lspToolCallParamsJSON(t, "diagnostics", map[string]any{"filePath": relPath}))
+	rr := postLSP(t, s, "python", body, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("relative filePath ambiguous status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "ambiguous LSP workspace") ||
+		!strings.Contains(rr.Body.String(), "/repo/alpha") ||
+		!strings.Contains(rr.Body.String(), "/repo/beta") {
+		t.Fatalf("relative filePath ambiguous error mismatch: %s", rr.Body.String())
+	}
+}
+
+func TestLSPRouter_FilesBatchAcrossWorkspacesRejected(t *testing.T) {
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit.Store(true)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	alphaRoot := t.TempDir()
+	betaRoot := t.TempDir()
+	alphaFile := filepath.Join(alphaRoot, "main.go")
+	betaFile := filepath.Join(betaRoot, "main.go")
+	alphaEntry := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: alphaRoot, Language: "go", Backend: "gopls-mcp", Port: 9201}
+	betaEntry := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: betaRoot, Language: "go", Backend: "gopls-mcp", Port: 9202}
+
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+			"go|" + alphaFile: {WorkspaceRoot: alphaRoot, WorkspaceKey: "alpha", Registered: true, Entry: alphaEntry, ProjectMarker: true},
+			"go|" + betaFile:  {WorkspaceRoot: betaRoot, WorkspaceKey: "beta", Registered: true, Entry: betaEntry, ProjectMarker: true},
+		}},
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "gopls-mcp", true },
+		UpstreamURLFn:          func(ws *api.WorkspaceEntry) string { return upstream.URL },
+	})
+
+	body := rpcBody("tools/call", "1", lspToolCallParamsJSON(t, "go_diagnostics", map[string]any{"files": []string{alphaFile, betaFile}}))
+	rr := postLSP(t, s, "go", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("cross-workspace files batch status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if upstreamHit.Load() {
+		t.Fatal("cross-workspace files batch was forwarded upstream")
+	}
+	if !strings.Contains(rr.Body.String(), "files span multiple LSP workspaces") ||
+		!strings.Contains(rr.Body.String(), "alpha") ||
+		!strings.Contains(rr.Body.String(), "beta") ||
+		!strings.Contains(rr.Body.String(), "split the call per workspace") {
+		t.Fatalf("cross-workspace files batch error mismatch: %s", rr.Body.String())
+	}
+}
+
+func TestLSPRouter_FilesBatchSameWorkspaceRoutes(t *testing.T) {
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit.Store(true)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	workspaceRoot := t.TempDir()
+	fileA := filepath.Join(workspaceRoot, "a.go")
+	fileB := filepath.Join(workspaceRoot, "b.go")
+	entry := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: workspaceRoot, Language: "go", Backend: "gopls-mcp", Port: 9201}
+
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+			"go|" + fileA: {WorkspaceRoot: workspaceRoot, WorkspaceKey: "alpha", Registered: true, Entry: entry, ProjectMarker: true},
+			"go|" + fileB: {WorkspaceRoot: workspaceRoot, WorkspaceKey: "alpha", Registered: true, Entry: entry, ProjectMarker: true},
+		}},
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "gopls-mcp", true },
+		UpstreamURLFn:          func(ws *api.WorkspaceEntry) string { return upstream.URL },
+	})
+
+	body := rpcBody("tools/call", "1", lspToolCallParamsJSON(t, "go_diagnostics", map[string]any{"files": []string{fileA, fileB}}))
+	rr := postLSP(t, s, "go", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("same-workspace files batch status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !upstreamHit.Load() {
+		t.Fatal("same-workspace files batch was not forwarded upstream")
 	}
 }
 

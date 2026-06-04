@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -292,49 +293,161 @@ func (s *Server) resolveLSPToolWorkspace(
 	toolArguments json.RawMessage,
 	sessionID string,
 ) (*api.WorkspaceEntry, bool, bool) {
-	pathArg, hasPath := lsp_routing.ExtractPathArg(toolArguments)
+	pathArgs, hasPath := lsp_routing.ExtractPathArgs(toolArguments)
 	if !hasPath {
 		ws, ok := lspPathlessWorkspace(w, r, deps, tb, language, sessionID)
 		return ws, false, ok
 	}
 
+	resolved, ok := s.resolveLSPToolPathArg(w, deps, tb, language, pathArgs[0], sessionID)
+	if !ok {
+		return nil, false, false
+	}
+	for _, pathArg := range pathArgs[1:] {
+		next, ok := s.resolveLSPToolPathArg(w, deps, tb, language, pathArg, sessionID)
+		if !ok {
+			return nil, false, false
+		}
+		if !sameLSPResolvedWorkspace(resolved, next) {
+			writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
+				"files span multiple LSP workspaces ("+lspResolvedWorkspaceLabel(resolved)+", "+lspResolvedWorkspaceLabel(next)+"); split the call per workspace")
+			return nil, false, false
+		}
+	}
+	entry, ok := s.workspaceFromResolvedLSPPath(w, r, deps, tb, resolved, language, pathArgs[0])
+	return entry, sessionID != "", ok
+}
+
+func (s *Server) resolveLSPToolPathArg(
+	w http.ResponseWriter,
+	deps *lspRouterDeps,
+	tb *toolBody,
+	language string,
+	pathArg string,
+	sessionID string,
+) (*lsp_routing.ResolveResult, bool) {
 	resolved, err := deps.Resolver.ResolveByPath(pathArg, language)
+	if err != nil && errors.Is(err, lsp_routing.ErrInvalidPath) && isRelativeLSPPathArg(pathArg) {
+		if deps.Sessions != nil && sessionID != "" {
+			candidates := deps.Sessions.Candidates(sessionID)
+			switch len(candidates) {
+			case 1:
+				if joined, ok := relativeLSPPathUnderWorkspace(candidates[0].WorkspacePath, pathArg); ok {
+					resolved, err = deps.Resolver.ResolveByPath(joined, language)
+				}
+			case 0:
+			default:
+				writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
+					"ambiguous LSP workspace for relative path "+pathArg+"; candidates: "+lspCandidateList(candidates))
+				return nil, false
+			}
+		}
+	}
 	if err != nil {
 		if errors.Is(err, lsp_routing.ErrWorkspaceNotFound) || errors.Is(err, lsp_routing.ErrInvalidPath) {
 			writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams, "no LSP workspace for path "+pathArg)
-			return nil, false, false
+			return nil, false
 		}
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
 			"resolve LSP workspace: "+err.Error(), nil)
-		return nil, false, false
+		return nil, false
 	}
 	if resolved == nil {
 		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams, "no LSP workspace for path "+pathArg)
-		return nil, false, false
+		return nil, false
 	}
+	return resolved, true
+}
+
+func (s *Server) workspaceFromResolvedLSPPath(
+	w http.ResponseWriter,
+	r *http.Request,
+	deps *lspRouterDeps,
+	tb *toolBody,
+	resolved *lsp_routing.ResolveResult,
+	language string,
+	pathArg string,
+) (*api.WorkspaceEntry, bool) {
 	if resolved.Registered {
 		if deps.AutoRegisterFn != nil {
 			entry, ok := s.ensureResolvedLSPWorkspace(w, r, deps, tb, resolved, language)
-			return entry, sessionID != "", ok
+			return entry, ok
 		}
 		if resolved.Entry == nil {
 			writeJSONRPCError(w, tb.ID, jsonrpcInternalError, "registered LSP workspace has no registry entry")
-			return nil, false, false
+			return nil, false
 		}
-		return resolved.Entry, sessionID != "", true
+		return resolved.Entry, true
 	}
 	if !resolved.ProjectMarker {
 		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
 			"no language project marker for "+language+" under "+pathArg+"; refusing .git-only LSP auto-register")
-		return nil, false, false
+		return nil, false
 	}
 	if deps.AutoRegisterFn == nil {
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
 			"LSP auto-register is not configured", nil)
-		return nil, false, false
+		return nil, false
 	}
 	entry, ok := s.ensureResolvedLSPWorkspace(w, r, deps, tb, resolved, language)
-	return entry, sessionID != "", ok
+	return entry, ok
+}
+
+func isRelativeLSPPathArg(pathArg string) bool {
+	return pathArg != "" && filepath.VolumeName(pathArg) == "" && !filepath.IsAbs(pathArg)
+}
+
+func relativeLSPPathUnderWorkspace(workspaceRoot, pathArg string) (string, bool) {
+	if workspaceRoot == "" || !isRelativeLSPPathArg(pathArg) {
+		return "", false
+	}
+	root := filepath.Clean(workspaceRoot)
+	joined := filepath.Clean(filepath.Join(root, pathArg))
+	rel, err := filepath.Rel(root, joined)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return joined, true
+}
+
+func sameLSPResolvedWorkspace(a, b *lsp_routing.ResolveResult) bool {
+	aKey, aRoot := lspResolvedWorkspaceIdentity(a)
+	bKey, bRoot := lspResolvedWorkspaceIdentity(b)
+	if aKey != "" && bKey != "" {
+		return aKey == bKey
+	}
+	return aRoot != "" && aRoot == bRoot
+}
+
+func lspResolvedWorkspaceIdentity(res *lsp_routing.ResolveResult) (workspaceKey, workspaceRoot string) {
+	if res == nil {
+		return "", ""
+	}
+	workspaceKey = res.WorkspaceKey
+	workspaceRoot = res.WorkspaceRoot
+	if res.Entry != nil {
+		if workspaceKey == "" {
+			workspaceKey = res.Entry.WorkspaceKey
+		}
+		if workspaceRoot == "" {
+			workspaceRoot = res.Entry.WorkspacePath
+		}
+	}
+	return workspaceKey, workspaceRoot
+}
+
+func lspResolvedWorkspaceLabel(res *lsp_routing.ResolveResult) string {
+	workspaceKey, workspaceRoot := lspResolvedWorkspaceIdentity(res)
+	if workspaceRoot != "" && workspaceKey != "" {
+		return fmt.Sprintf("%s (%s)", workspaceRoot, workspaceKey)
+	}
+	if workspaceRoot != "" {
+		return workspaceRoot
+	}
+	if workspaceKey != "" {
+		return workspaceKey
+	}
+	return "unknown"
 }
 
 func (s *Server) ensureResolvedLSPWorkspace(

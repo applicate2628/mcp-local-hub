@@ -166,6 +166,10 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 		lookupProcess = origLookup
 	})
 
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = func(port int) bool { return false }
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
+
 	reg := NewRegistry(regPath)
 	reg.Put(WorkspaceEntry{
 		WorkspaceKey:  "abcd1234",
@@ -224,6 +228,75 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	}
 }
 
+func TestStatusWithOpts_RegistryOnlyWorkspaceRowsUsePortLivenessWithoutHealth(t *testing.T) {
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	origRegPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
+
+	origBatch := lookupProcessBatch
+	origLookup := lookupProcess
+	lookupProcessBatch = nil
+	lookupProcess = nil
+	t.Cleanup(func() {
+		lookupProcessBatch = origBatch
+		lookupProcess = origLookup
+	})
+
+	const livePort = 39217
+	const deadPort = 39218
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = func(port int) bool { return port == livePort }
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
+
+	reg := NewRegistry(regPath)
+	for _, e := range []WorkspaceEntry{
+		{
+			WorkspaceKey:  "abcd1234",
+			WorkspacePath: "/home/u/live",
+			Language:      "python",
+			Backend:       "mcp-language-server",
+			Port:          livePort,
+			TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+			Lifecycle:     LifecycleActive,
+		},
+		{
+			WorkspaceKey:  "deadbeef",
+			WorkspacePath: "/home/u/dead",
+			Language:      "go",
+			Backend:       "gopls-mcp",
+			Port:          deadPort,
+			TaskName:      "mcp-local-hub-lsp-deadbeef-go",
+			Lifecycle:     LifecycleActive,
+		},
+	} {
+		reg.Put(e)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewAPI().StatusWithOpts(StatusOpts{})
+	if err != nil {
+		t.Fatalf("StatusWithOpts: %v", err)
+	}
+	byTask := map[string]DaemonStatus{}
+	for _, row := range rows {
+		byTask[row.TaskName] = row
+	}
+	if got := byTask["mcp-local-hub-lsp-abcd1234-python"].State; got != "Running" {
+		t.Fatalf("live registry-only row State = %q, want Running", got)
+	}
+	if got := byTask["mcp-local-hub-lsp-deadbeef-go"].State; got != "Stopped" {
+		t.Fatalf("dead registry-only row State = %q, want Stopped", got)
+	}
+	if byTask["mcp-local-hub-lsp-abcd1234-python"].Health != nil {
+		t.Fatalf("non-health status unexpectedly probed health: %+v", byTask["mcp-local-hub-lsp-abcd1234-python"].Health)
+	}
+}
+
 func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) {
 	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
 
@@ -254,6 +327,10 @@ func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) 
 		lookupProcessBatch = origBatch
 		lookupProcess = origLookup
 	})
+
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = portInUse
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
 
 	var probed []int
 	origProbe := singleHealthProbeFn
@@ -331,6 +408,10 @@ func TestStatusWithOpts_MergesRegistryRowsWhenSchedulerUnavailable(t *testing.T)
 		lookupProcessBatch = origBatch
 		lookupProcess = origLookup
 	})
+
+	origPortLive := registryOnlyStatusPortLiveFn
+	registryOnlyStatusPortLiveFn = func(port int) bool { return false }
+	t.Cleanup(func() { registryOnlyStatusPortLiveFn = origPortLive })
 
 	reg := NewRegistry(regPath)
 	reg.Put(WorkspaceEntry{

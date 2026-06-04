@@ -581,6 +581,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	// this merge they vanish from --workspace-scoped / --health / --force-materialize
 	// even though they are registered and running. enrichStatusWithRegistry then
 	// overlays Port/Language/Lifecycle and the alive-probe derives their State.
+	registryOnlyLive := map[string]bool{}
 	if regPath != "" {
 		seen := make(map[string]bool, len(result))
 		for i := range result {
@@ -600,11 +601,13 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 					continue
 				}
 				seen[bare] = true
+				registryOnlyLive[bare] = e.Port != 0 && registryOnlyStatusPortLiveFn != nil && registryOnlyStatusPortLiveFn(e.Port)
 				result = append(result, DaemonStatus{TaskName: e.TaskName, State: "Stopped"})
 			}
 		}
 	}
 	enrichStatusWithRegistry(result, "", regPath)
+	finalizeRegistryOnlyWorkspaceStates(result, registryOnlyLive)
 	if opts.ProbeHealth {
 		probeDaemonHealth(result)
 	}
@@ -804,6 +807,21 @@ func sendForceMaterializeTools(port int, backend string) string {
 }
 
 var healthProbeLivePortFn = portInUse
+var registryOnlyStatusPortLiveFn = portInUse
+
+func finalizeRegistryOnlyWorkspaceStates(rows []DaemonStatus, liveByTask map[string]bool) {
+	for i := range rows {
+		live, ok := liveByTask[strings.TrimPrefix(rows[i].TaskName, "\\")]
+		if !ok {
+			continue
+		}
+		if live {
+			rows[i].State = "Running"
+		} else {
+			rows[i].State = "Stopped"
+		}
+	}
+}
 
 // probeDaemonHealth fills DaemonStatus.Health for every Running row
 // with a Port. Registry-only workspace-scoped rows may be seeded as
