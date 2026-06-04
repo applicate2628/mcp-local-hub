@@ -21,6 +21,7 @@ type stubLSPResolver struct {
 	mu      sync.Mutex
 	results map[string]*lsp_routing.ResolveResult
 	errs    map[string]error
+	markers map[string]bool
 }
 
 func (s *stubLSPResolver) ResolveByPath(path, language string) (*lsp_routing.ResolveResult, error) {
@@ -39,6 +40,12 @@ func (s *stubLSPResolver) ResolveByPath(path, language string) (*lsp_routing.Res
 		return &cp, nil
 	}
 	return nil, lsp_routing.ErrWorkspaceNotFound
+}
+
+func (s *stubLSPResolver) HasProjectMarker(root, language string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.markers[language+"|"+root]
 }
 
 func postLSP(t *testing.T, s *Server, language string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
@@ -380,7 +387,9 @@ func TestLSPRouter_PathlessSingleCandidateReEnsuresWorkspace(t *testing.T) {
 	var autoCalls atomic.Int32
 	s := NewServer(Config{Port: 9125})
 	s.SetLSPRouterDeps(&lspRouterDeps{
-		Resolver:               &stubLSPResolver{},
+		Resolver: &stubLSPResolver{markers: map[string]bool{
+			"go|/repo/alpha": true,
+		}},
 		Sessions:               sessions,
 		BackendKindForLanguage: func(lang string) (string, bool) { return "gopls-mcp", true },
 		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
@@ -405,6 +414,85 @@ func TestLSPRouter_PathlessSingleCandidateReEnsuresWorkspace(t *testing.T) {
 	}
 	if calls := autoCalls.Load(); calls != 1 {
 		t.Fatalf("AutoRegisterFn calls = %d, want 1 for pathless single candidate", calls)
+	}
+}
+
+func TestLSPRouter_PathlessSingleCandidateRefusesWhenRequestedLanguageMarkerAbsent(t *testing.T) {
+	sessions := lsp_routing.NewSessionRouter()
+	cached := api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201}
+	sessions.TouchWorkspace("client-session", &cached)
+
+	var autoCalls atomic.Int32
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{markers: map[string]bool{
+			"go|/repo/alpha": false,
+		}},
+		Sessions:               sessions,
+		BackendKindForLanguage: func(lang string) (string, bool) { return "gopls-mcp", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			autoCalls.Add(1)
+			return nil, errors.New("unexpected auto-register")
+		},
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"go_workspace","arguments":{}}`)
+	rr := postLSP(t, s, "go", body, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("pathless marker-refusal status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if calls := autoCalls.Load(); calls != 0 {
+		t.Fatalf("AutoRegisterFn calls = %d, want 0 when marker is absent", calls)
+	}
+	if !strings.Contains(rr.Body.String(), "no language project marker for go under /repo/alpha; refusing .git-only LSP auto-register") {
+		t.Fatalf("pathless marker-refusal error mismatch: %s", rr.Body.String())
+	}
+}
+
+func TestLSPRouter_PathlessSingleCandidateReEnsuresWhenRequestedLanguageMarkerPresent(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"workspace":"alpha"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	sessions := lsp_routing.NewSessionRouter()
+	stale := api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201}
+	refreshed := stale
+	refreshed.Language = "go"
+	refreshed.Backend = "gopls-mcp"
+	refreshed.Port = 9209
+	sessions.TouchWorkspace("client-session", &stale)
+
+	var autoCalls atomic.Int32
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{markers: map[string]bool{
+			"go|/repo/alpha": true,
+		}},
+		Sessions:               sessions,
+		BackendKindForLanguage: func(lang string) (string, bool) { return "gopls-mcp", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			autoCalls.Add(1)
+			if wsKey != "alpha" || workspacePath != "/repo/alpha" || language != "go" {
+				t.Fatalf("pathless re-ensure args = (%q, %q, %q)", wsKey, workspacePath, language)
+			}
+			return &refreshed, nil
+		},
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.Port != refreshed.Port {
+				t.Fatalf("pathless forwarded stale port %d, want refreshed port %d", ws.Port, refreshed.Port)
+			}
+			return upstream.URL
+		},
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"go_workspace","arguments":{}}`)
+	rr := postLSP(t, s, "go", body, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("pathless call status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if calls := autoCalls.Load(); calls != 1 {
+		t.Fatalf("AutoRegisterFn calls = %d, want 1 for marker-backed pathless candidate", calls)
 	}
 }
 

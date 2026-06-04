@@ -106,7 +106,7 @@ func TestRunSetupLSPClientRouterWiring_ReportsEnsureResult(t *testing.T) {
 		return &api.LSPClientRouterReport{
 			Backups: []api.LSPClientRouterBackup{{Client: "codex-cli", Path: "config.toml.bak-mcp-local-hub-test"}},
 			Applied: []api.LSPClientRouterChange{{
-				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go", URL: "http://localhost:9125/lsp/go/mcp",
+				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go", URL: "http://127.0.0.1:9125/lsp/go/mcp",
 			}},
 		}, nil
 	}
@@ -123,7 +123,7 @@ func TestRunSetupLSPClientRouterWiring_ReportsEnsureResult(t *testing.T) {
 		"backup before LSP router wiring",
 		"codex-cli",
 		"mcp-language-server-go",
-		"http://localhost:9125/lsp/go/mcp",
+		"http://127.0.0.1:9125/lsp/go/mcp",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("output missing %q:\n%s", want, text)

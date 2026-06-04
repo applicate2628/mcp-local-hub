@@ -140,7 +140,7 @@ func (a *API) registerOneLanguageSupervised(
 			continue
 		}
 		if _, already := entryNameByClient[b.Client]; !already {
-			entryNameByClient[b.Client] = ResolveEntryName(reg, m.Name, lang, wsKey)
+			entryNameByClient[b.Client] = resolveSupervisedLSPEntryName(reg, m.Name, lang, wsKey)
 		}
 	}
 
@@ -216,7 +216,7 @@ func (a *API) registerOneLanguageSupervised(
 		}
 		entry := clients.MCPEntry{
 			Name: entryName,
-			URL:  fmt.Sprintf("http://localhost:%d%s", port, urlPath),
+			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
 		}
 		if err := client.AddEntry(entry); err != nil {
 			return WorkspaceEntry{}, fmt.Errorf("write %s entry: %w", b.Client, err)
@@ -261,6 +261,22 @@ func (a *API) registerOneLanguageSupervised(
 	fmt.Fprintf(w, "✓ Supervisor-managed LSP proxy started: %s\n", LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang))
 	a.recordRegisterIntentForTask(taskName, w)
 	return composedEntry, nil
+}
+
+func resolveSupervisedLSPEntryName(reg *Registry, serverName, language, workspaceKey string) string {
+	name := ResolveEntryName(reg, serverName, language, workspaceKey)
+	if name != LSPRouterEntryName(language) {
+		return name
+	}
+	short := workspaceKey
+	if len(short) > 4 {
+		short = short[:4]
+	}
+	candidate := name + "-" + short
+	if entryNameTakenByOtherWorkspace(reg, candidate, workspaceKey) {
+		return name + "-" + workspaceKey
+	}
+	return candidate
 }
 
 func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath string) (func(), error) {

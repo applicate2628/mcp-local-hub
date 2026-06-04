@@ -1160,8 +1160,67 @@ func TestRegister_SupervisedWritesIntentAndDeletesLegacyLSPTask(t *testing.T) {
 	if strings.Join(row.Args, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("intent args = %v, want %v", row.Args, wantArgs)
 	}
-	if got := h.fakeClients.entries["codex-cli"][report.Entries[0].ClientEntries["codex-cli"]]; got != fmt.Sprintf("http://localhost:%d/mcp", report.Entries[0].Port) {
+	if got := h.fakeClients.entries["codex-cli"][report.Entries[0].ClientEntries["codex-cli"]]; got != fmt.Sprintf("http://127.0.0.1:%d/mcp", report.Entries[0].Port) {
 		t.Fatalf("codex URL = %q, want hub URL on registered port", got)
+	}
+}
+
+func TestRegister_SupervisedContinuesWhenSchedulerUnavailable(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origFactory := testSchedulerFactory
+	testSchedulerFactory = func() (testScheduler, error) {
+		return nil, errors.New("scheduler unavailable on this platform")
+	}
+	defer func() { testSchedulerFactory = origFactory }()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		if !apply {
+			t.Fatalf("supervised register called reconcile with apply=false")
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+
+	report, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err != nil {
+		t.Fatalf("Register supervised with unavailable scheduler: %v", err)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(report.Entries))
+	}
+	if reconcileCalls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", reconcileCalls)
+	}
+	if !strings.Contains(strings.Join(report.Warnings, "\n"), "scheduler unavailable") {
+		t.Fatalf("warnings = %v, want scheduler unavailable warning", report.Warnings)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row == nil {
+		t.Fatalf("supervisor-intent missing LSP row for %s/go; rows=%+v", wsKey, intent.Daemons)
 	}
 }
 
@@ -1292,6 +1351,54 @@ func TestRegister_EntryNameCollision(t *testing.T) {
 		if !strings.HasPrefix(name, "mcp-language-server-python-") {
 			t.Errorf("entry name %q: want prefix mcp-language-server-python-<hex>", name)
 		}
+	}
+}
+
+func TestRegister_SupervisedReservesRouterEntryNameForFirstWorkspace(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Fatalf("supervised register called reconcile with apply=false")
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	report, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err != nil {
+		t.Fatalf("Register supervised: %v", err)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(report.Entries))
+	}
+	entryName := report.Entries[0].ClientEntries["codex-cli"]
+	routerName := LSPRouterEntryName("go")
+	if entryName == routerName {
+		t.Fatalf("supervised first workspace used router entry name %q", entryName)
+	}
+	short := wsKey
+	if len(short) > 4 {
+		short = short[:4]
+	}
+	if entryName != routerName+"-"+short {
+		t.Fatalf("entry name = %q, want %q", entryName, routerName+"-"+short)
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"][entryName]; !ok {
+		t.Fatalf("client-write pass did not use composed entry name %q; entries=%v", entryName, h.fakeClients.entries["codex-cli"])
 	}
 }
 
@@ -1496,6 +1603,98 @@ func TestUnregister_KillProxyFailureIsWarning(t *testing.T) {
 	_ = reg.Load()
 	if len(reg.Workspaces) != 0 {
 		t.Errorf("registry rows remain after Unregister: %+v", reg.Workspaces)
+	}
+}
+
+func TestUnregister_SchedulerUnavailableRemovesIntentAndRegistryWithWarning(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origFactory := testSchedulerFactory
+	testSchedulerFactory = func() (testScheduler, error) {
+		return nil, errors.New("scheduler unavailable on this platform")
+	}
+	defer func() { testSchedulerFactory = origFactory }()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		if !apply {
+			t.Fatalf("supervised unregister called reconcile with apply=false")
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origKill := killByPortFn
+	killByPortFn = func(port int, timeout time.Duration) error { return nil }
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	entryName := "mcp-language-server-go-abcd"
+	entry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": entryName},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(entry); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"][entryName] = "http://localhost:9242/mcp"
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(entry, testCanonicalMcphubPathOverride),
+		},
+	})
+
+	rpt, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Unregister with unavailable scheduler: %v", err)
+	}
+	if !strings.Contains(strings.Join(rpt.Warnings, "\n"), "scheduler unavailable") {
+		t.Fatalf("warnings = %v, want scheduler unavailable warning", rpt.Warnings)
+	}
+	if reconcileCalls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", reconcileCalls)
+	}
+	reg = NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 0 {
+		t.Fatalf("registry rows remain after unregister: %+v", rows)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after unregister: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row != nil {
+		t.Fatalf("supervisor-intent row survived unregister: %+v", row)
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"][entryName]; ok {
+		t.Fatalf("client entry %s survived unregister", entryName)
 	}
 }
 

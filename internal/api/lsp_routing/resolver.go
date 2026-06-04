@@ -135,6 +135,15 @@ func (r *WorkspaceResolver) hasProjectMarker(dir, language string) bool {
 	return false
 }
 
+// HasProjectMarker reports whether root contains one of language's configured
+// project markers. It intentionally does not fall back to .git.
+func (r *WorkspaceResolver) HasProjectMarker(root, language string) bool {
+	if root == "" || strings.TrimSpace(language) == "" {
+		return false
+	}
+	return r.hasProjectMarker(root, language)
+}
+
 // AncestorWalk walks upward from absPath and returns the directory containing
 // the nearest marker for language. If no language marker exists, it returns the
 // nearest .git ancestor. Relative input returns ErrInvalidPath.

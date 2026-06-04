@@ -77,13 +77,7 @@ See also: unregister, workspaces, status.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(),
-				"\nRegistered %d language(s) for workspace %s (key %s):\n",
-				len(report.Entries), report.Workspace, report.WorkspaceKey)
-			for _, e := range report.Entries {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %-12s port=%-5d task=%s\n",
-					e.Language, e.Port, e.TaskName)
-			}
+			printRegisterReport(cmd, report)
 			return nil
 		},
 	}
@@ -94,6 +88,19 @@ See also: unregister, workspaces, status.`,
 	c.Flags().BoolVar(&supervised, "supervised", false,
 		"start LSP proxies through supervisor-intent as Job-protected supervisor children")
 	return c
+}
+
+func printRegisterReport(cmd *cobra.Command, report *api.RegisterReport) {
+	fmt.Fprintf(cmd.OutOrStdout(),
+		"\nRegistered %d language(s) for workspace %s (key %s):\n",
+		len(report.Entries), report.Workspace, report.WorkspaceKey)
+	for _, e := range report.Entries {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %-12s port=%-5d task=%s\n",
+			e.Language, e.Port, e.TaskName)
+	}
+	for _, warn := range report.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warn)
+	}
 }
 
 // newUnregisterCmdReal: `mcphub unregister <workspace> [language...]`.

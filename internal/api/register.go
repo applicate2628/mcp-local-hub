@@ -214,7 +214,10 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	reg := NewRegistry(regPath)
 	sch, err := schedulerNewForRegister()
 	if err != nil {
-		return nil, err
+		if !opts.SupervisedProxy {
+			return nil, err
+		}
+		sch = legacyTaskUnavailableScheduler{}
 	}
 	allClients := clientsAllForRegister()
 	var rollback []func()
@@ -224,6 +227,10 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 	}
 	report := &RegisterReport{Workspace: canonical, WorkspaceKey: wsKey}
+	if err != nil {
+		report.Warnings = append(report.Warnings,
+			fmt.Sprintf("scheduler unavailable (%v); skipping legacy task handling (supervised rows have none)", err))
+	}
 	for _, lang := range languages {
 		entry, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, w, &rollback)
 		if err != nil {
@@ -716,7 +723,7 @@ func (a *API) registerOneLanguage(
 		}
 		entry := clients.MCPEntry{
 			Name: entryName,
-			URL:  fmt.Sprintf("http://localhost:%d%s", port, urlPath),
+			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
 		}
 		if err := client.AddEntry(entry); err != nil {
 			return WorkspaceEntry{}, fmt.Errorf("write %s entry: %w", b.Client, err)
@@ -816,12 +823,17 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 			targets = append(targets, e.Language)
 		}
 	}
-	sch, err := schedulerNewForRegister()
-	if err != nil {
-		return nil, err
-	}
 	allClients := clientsAllForRegister()
 	report := &UnregisterReport{Workspace: canonical, WorkspaceKey: activeWSKey}
+	sch, schErr := schedulerNewForRegister()
+	// Non-Windows backends return not-implemented; supervised LSP rows have no
+	// scheduled task to delete there, so tolerate absence and skip only the
+	// legacy-task Delete below.
+	if schErr != nil {
+		sch = nil
+		report.Warnings = append(report.Warnings,
+			fmt.Sprintf("scheduler unavailable (%v); skipping legacy task deletion (supervised rows have none)", schErr))
+	}
 	for _, lang := range targets {
 		entry, ok := reg.Get(activeWSKey, lang)
 		if !ok {
@@ -863,11 +875,13 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		// supported way to stop a logon-triggered task from respawning.
 		// The kill-by-port above already terminated any live proxy; this
 		// Delete prevents it from being re-launched at next logon.
-		if err := sch.Delete(entry.TaskName); err != nil {
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
-		} else {
-			fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
+		if sch != nil {
+			if err := sch.Delete(entry.TaskName); err != nil {
+				report.Warnings = append(report.Warnings,
+					fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
+			} else {
+				fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
+			}
 		}
 		// 2. Remove client entries.
 		for clientName, entryName := range entry.ClientEntries {
@@ -1014,6 +1028,20 @@ type testScheduler interface {
 	Run(name string) error
 	ExportXML(name string) ([]byte, error)
 	ImportXML(name string, xml []byte) error
+}
+
+type legacyTaskUnavailableScheduler struct{}
+
+func (legacyTaskUnavailableScheduler) Create(scheduler.TaskSpec) error {
+	return errors.New("scheduler unavailable for legacy task creation")
+}
+func (legacyTaskUnavailableScheduler) Delete(string) error { return scheduler.ErrTaskNotFound }
+func (legacyTaskUnavailableScheduler) Run(string) error    { return scheduler.ErrTaskNotFound }
+func (legacyTaskUnavailableScheduler) ExportXML(string) ([]byte, error) {
+	return nil, scheduler.ErrTaskNotFound
+}
+func (legacyTaskUnavailableScheduler) ImportXML(string, []byte) error {
+	return errors.New("scheduler unavailable for legacy task restore")
 }
 
 // registerClient is the subset of clients.Client the register path

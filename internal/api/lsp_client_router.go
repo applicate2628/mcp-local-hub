@@ -12,7 +12,7 @@ import (
 
 const (
 	lspManifestServerName = "mcp-language-server"
-	lspRouterURLTemplate  = "http://localhost:%d/lsp/%s/mcp"
+	lspRouterURLTemplate  = "http://127.0.0.1:%d/lsp/%s/mcp"
 )
 
 // LSPClientRouterOpts controls the client-config reconcile that points
@@ -206,7 +206,7 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 					continue
 				}
 				legacyNames[entryName] = true
-				targetURL := fmt.Sprintf("http://localhost:%d/mcp", regEntry.Port)
+				targetURL := fmt.Sprintf("http://127.0.0.1:%d/mcp", regEntry.Port)
 				live, readErr := adapter.GetEntry(entryName)
 				if readErr != nil {
 					report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "read", readErr))

@@ -123,6 +123,13 @@ func (f *lspRouterFakeClient) FindStdioLanguageServerEntries() ([]clients.Langua
 
 var _ clients.Client = (*lspRouterFakeClient)(nil)
 
+func TestLSPRouterURLUsesIPv4Loopback(t *testing.T) {
+	got := LSPRouterURL(7777, "go")
+	if got != "http://127.0.0.1:7777/lsp/go/mcp" {
+		t.Fatalf("LSPRouterURL = %q, want IPv4 loopback URL", got)
+	}
+}
+
 func TestEnsureLSPRouterClientEntries_WiresManifestLanguagesToPresentClientsAndIsIdempotent(t *testing.T) {
 	seedLSPRouterManifest(t, []string{"go", "python"})
 
@@ -153,7 +160,7 @@ func TestEnsureLSPRouterClientEntries_WiresManifestLanguagesToPresentClientsAndI
 			if err != nil {
 				t.Fatalf("%s GetEntry(%s): %v", client.name, name, err)
 			}
-			wantURL := "http://localhost:7777/lsp/" + lang + "/mcp"
+			wantURL := "http://127.0.0.1:7777/lsp/" + lang + "/mcp"
 			if got == nil || got.URL != wantURL {
 				t.Fatalf("%s %s URL = %+v, want %s", client.name, name, got, wantURL)
 			}
@@ -223,7 +230,7 @@ func TestEnsureLSPRouterClientEntries_MigratesPerPairEntryToRouterAndKeepsRegist
 		t.Fatalf("backup file was not created at %s: %v", report.Backups[0].Path, err)
 	}
 	got := codex.entries["mcp-language-server-go"]
-	if got.URL != "http://localhost:9126/lsp/go/mcp" {
+	if got.URL != "http://127.0.0.1:9126/lsp/go/mcp" {
 		t.Fatalf("migrated URL = %q, want router URL", got.URL)
 	}
 
@@ -270,7 +277,7 @@ func TestRollbackLSPRouterClientEntries_RestoresPerPairEntryFromBackup(t *testin
 	if _, err := NewAPI().EnsureLSPRouterClientEntries(opts); err != nil {
 		t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
 	}
-	if got := codex.entries["mcp-language-server-go"].URL; got != "http://localhost:9126/lsp/go/mcp" {
+	if got := codex.entries["mcp-language-server-go"].URL; got != "http://127.0.0.1:9126/lsp/go/mcp" {
 		t.Fatalf("setup precondition URL = %q", got)
 	}
 
@@ -281,7 +288,7 @@ func TestRollbackLSPRouterClientEntries_RestoresPerPairEntryFromBackup(t *testin
 	if len(report.Backups) != 1 {
 		t.Fatalf("rollback backups len = %d, want 1 current-state backup", len(report.Backups))
 	}
-	if got := codex.entries["mcp-language-server-go"].URL; got != "http://localhost:9200/mcp" {
+	if got := codex.entries["mcp-language-server-go"].URL; got != "http://127.0.0.1:9200/mcp" {
 		t.Fatalf("rollback URL = %q, want restored per-pair URL", got)
 	}
 	if len(codex.backupPaths) != 2 {
@@ -322,7 +329,7 @@ func TestRollbackLSPRouterClientEntries_ReconstructsPerPairEntryInsteadOfLatestR
 	if _, err := NewAPI().EnsureLSPRouterClientEntries(opts); err != nil {
 		t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
 	}
-	if got := codex.entries["mcp-language-server-go"].URL; got != "http://localhost:9126/lsp/go/mcp" {
+	if got := codex.entries["mcp-language-server-go"].URL; got != "http://127.0.0.1:9126/lsp/go/mcp" {
 		t.Fatalf("setup precondition URL = %q", got)
 	}
 	if _, err := codex.BackupKeep(0); err != nil {
@@ -336,7 +343,7 @@ func TestRollbackLSPRouterClientEntries_ReconstructsPerPairEntryInsteadOfLatestR
 	if len(report.Backups) != 1 {
 		t.Fatalf("rollback backups len = %d, want 1 current-state backup", len(report.Backups))
 	}
-	if got := codex.entries["mcp-language-server-go"].URL; got != "http://localhost:9200/mcp" {
+	if got := codex.entries["mcp-language-server-go"].URL; got != "http://127.0.0.1:9200/mcp" {
 		t.Fatalf("rollback restored latest router-containing backup; URL = %q, want reconstructed per-pair URL", got)
 	}
 	if len(codex.backupPaths) != 3 {

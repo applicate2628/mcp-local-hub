@@ -61,6 +61,31 @@ func TestRegisterCmd_HasSupervisedFlag(t *testing.T) {
 	}
 }
 
+func TestRegisterCmd_PrintsWarningsOnSuccess(t *testing.T) {
+	c := newRegisterCmdReal()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+
+	report := &api.RegisterReport{
+		Workspace:    "/repo/alpha",
+		WorkspaceKey: "abcd1234",
+		Entries: []api.WorkspaceEntry{
+			{Language: "go", Port: 9200, TaskName: "mcp-local-hub-lsp-abcd1234-go"},
+		},
+		Warnings: []string{"codex-cli remove direct LSP entry mcp-language-server-go failed: induced failure"},
+	}
+	printRegisterReport(c, report)
+
+	if !strings.Contains(stdout.String(), "Registered 1 language(s) for workspace /repo/alpha (key abcd1234):") {
+		t.Fatalf("stdout missing register summary:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: codex-cli remove direct LSP entry mcp-language-server-go failed: induced failure") {
+		t.Fatalf("stderr missing warning:\n%s", stderr.String())
+	}
+}
+
 func TestUnregisterCmd_RequiresAtLeastOneArg(t *testing.T) {
 	c := newUnregisterCmdReal()
 	if err := c.Args(c, []string{}); err == nil {
