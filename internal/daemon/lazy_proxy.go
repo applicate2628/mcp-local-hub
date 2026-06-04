@@ -69,6 +69,8 @@ const (
 	DefaultLSPIdleBackendCheckEvery = time.Minute
 )
 
+var materializedSlotPortLiveFn = lazyProxyPortLive
+
 // LazyProxy is the per-port HTTP proxy that answers synthetic handshake
 // traffic (initialize, tools/list, notifications/*) from the embedded tool
 // catalog and lazily materializes the heavy backend on first tools/call.
@@ -540,7 +542,8 @@ func (p *LazyProxy) reserveMaterializedSlot() error {
 		if e.WorkspaceKey == p.cfg.WorkspaceKey && e.Language == p.cfg.Language {
 			continue
 		}
-		if e.Lifecycle == api.LifecycleStarting || e.Lifecycle == api.LifecycleActive {
+		if (e.Lifecycle == api.LifecycleStarting || e.Lifecycle == api.LifecycleActive) &&
+			e.Port > 0 && materializedSlotPortLiveFn != nil && materializedSlotPortLiveFn(e.Port) {
 			active++
 		}
 	}
@@ -577,6 +580,15 @@ func (p *LazyProxy) endBackendRequest() {
 	}
 	p.lastBackendActivity = now
 	p.mu.Unlock()
+}
+
+func lazyProxyPortLive(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func (p *LazyProxy) startIdleReaper() {

@@ -887,6 +887,12 @@ func TestLazyProxy_LastToolsCallAtDebounced(t *testing.T) {
 func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
 	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	otherProxy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen other proxy: %v", err)
+	}
+	t.Cleanup(func() { _ = otherProxy.Close() })
+	otherPort := otherProxy.Addr().(*net.TCPAddr).Port
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{
 		WorkspaceKey:  "abcd1234",
@@ -903,7 +909,7 @@ func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T
 		Language:      "python",
 		Backend:       "mcp-language-server",
 		TaskName:      "mcp-local-hub-lsp-efgh5678-python",
-		Port:          9201,
+		Port:          otherPort,
 		Lifecycle:     api.LifecycleActive,
 	})
 	if err := seed.Save(); err != nil {
@@ -933,6 +939,67 @@ func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T
 	}
 	if got := f.materializeCount.Load(); got != 0 {
 		t.Fatalf("materializeCount = %d, want 0 when cap is reached", got)
+	}
+}
+
+func TestLazyProxy_MaterializedHardCapIgnoresStaleDeadRows(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/test/ws",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Port:          9200,
+		Lifecycle:     api.LifecycleConfigured,
+	})
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "dead0001",
+		WorkspacePath: "D:/test/dead-active",
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		TaskName:      "mcp-local-hub-lsp-dead0001-go",
+		Port:          1,
+		Lifecycle:     api.LifecycleActive,
+	})
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "dead0002",
+		WorkspacePath: "D:/test/dead-starting",
+		Language:      "rust",
+		Backend:       "mcp-language-server",
+		TaskName:      "mcp-local-hub-lsp-dead0002-rust",
+		Port:          2,
+		Lifecycle:     api.LifecycleStarting,
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey:          "abcd1234",
+		WorkspacePath:         "D:/test/ws",
+		Language:              "python",
+		BackendKind:           "mcp-language-server",
+		Port:                  9200,
+		Lifecycle:             f,
+		RegistryPath:          regPath,
+		InflightMinRetryGap:   20 * time.Millisecond,
+		ToolsCallDebounce:     100 * time.Millisecond,
+		MaterializedHardCap:   1,
+		IdleBackendTTL:        0,
+		IdleBackendCheckEvery: 0,
+	})
+
+	rr := postRPC(t, p.Handler(), "tools/call", 1)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "materialized LSP backend cap reached") {
+		t.Fatalf("stale dead lifecycle rows exhausted cap: %s", rr.Body.String())
+	}
+	if got := f.materializeCount.Load(); got != 1 {
+		t.Fatalf("materializeCount = %d, want 1 when only stale dead rows exist", got)
 	}
 }
 

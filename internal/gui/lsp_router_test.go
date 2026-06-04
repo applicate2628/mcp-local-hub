@@ -18,10 +18,11 @@ import (
 )
 
 type stubLSPResolver struct {
-	mu      sync.Mutex
-	results map[string]*lsp_routing.ResolveResult
-	errs    map[string]error
-	markers map[string]bool
+	mu            sync.Mutex
+	results       map[string]*lsp_routing.ResolveResult
+	errs          map[string]error
+	markers       map[string]bool
+	registrations map[string]*api.WorkspaceEntry
 }
 
 func (s *stubLSPResolver) ResolveByPath(path, language string) (*lsp_routing.ResolveResult, error) {
@@ -46,6 +47,20 @@ func (s *stubLSPResolver) HasProjectMarker(root, language string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.markers[language+"|"+root]
+}
+
+func (s *stubLSPResolver) RegisteredWorkspace(workspaceKey, language string) (*api.WorkspaceEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.registrations == nil {
+		return nil, false
+	}
+	entry := s.registrations[language+"|"+workspaceKey]
+	if entry == nil {
+		return nil, false
+	}
+	cp := *entry
+	return &cp, true
 }
 
 func postLSP(t *testing.T, s *Server, language string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
@@ -443,6 +458,94 @@ func TestLSPRouter_PathlessSingleCandidateRefusesWhenRequestedLanguageMarkerAbse
 	}
 	if calls := autoCalls.Load(); calls != 0 {
 		t.Fatalf("AutoRegisterFn calls = %d, want 0 when marker is absent", calls)
+	}
+	if !strings.Contains(rr.Body.String(), "no language project marker for go under /repo/alpha; refusing .git-only LSP auto-register") {
+		t.Fatalf("pathless marker-refusal error mismatch: %s", rr.Body.String())
+	}
+}
+
+func TestLSPRouter_PathlessRegisteredGitFallbackWorkspaceSkipsMarkerGate(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"workspace":"alpha"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	sessions := lsp_routing.NewSessionRouter()
+	registered := api.WorkspaceEntry{
+		WorkspaceKey:  "alpha",
+		WorkspacePath: "/repo/alpha",
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9201,
+	}
+	refreshed := registered
+	refreshed.Port = 9209
+	sessions.TouchWorkspace("client-session", &registered)
+
+	var autoCalls atomic.Int32
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{
+			markers: map[string]bool{
+				"go|/repo/alpha": false,
+			},
+			registrations: map[string]*api.WorkspaceEntry{
+				"go|alpha": &registered,
+			},
+		},
+		Sessions:               sessions,
+		BackendKindForLanguage: func(lang string) (string, bool) { return "gopls-mcp", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			autoCalls.Add(1)
+			if wsKey != "alpha" || workspacePath != "/repo/alpha" || language != "go" {
+				t.Fatalf("pathless re-ensure args = (%q, %q, %q)", wsKey, workspacePath, language)
+			}
+			return &refreshed, nil
+		},
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.Port != refreshed.Port {
+				t.Fatalf("pathless forwarded stale port %d, want refreshed port %d", ws.Port, refreshed.Port)
+			}
+			return upstream.URL
+		},
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"go_workspace","arguments":{}}`)
+	rr := postLSP(t, s, "go", body, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("registered .git-fallback pathless call status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if calls := autoCalls.Load(); calls != 1 {
+		t.Fatalf("AutoRegisterFn calls = %d, want 1 registered re-ensure", calls)
+	}
+}
+
+func TestLSPRouter_PathlessUnregisteredGitFallbackWorkspaceStillRequiresMarker(t *testing.T) {
+	sessions := lsp_routing.NewSessionRouter()
+	cached := api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "go", Backend: "gopls-mcp", Port: 9201}
+	sessions.TouchWorkspace("client-session", &cached)
+
+	var autoCalls atomic.Int32
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{markers: map[string]bool{
+			"go|/repo/alpha": false,
+		}},
+		Sessions:               sessions,
+		BackendKindForLanguage: func(lang string) (string, bool) { return "gopls-mcp", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			autoCalls.Add(1)
+			return nil, errors.New("unexpected auto-register")
+		},
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"go_workspace","arguments":{}}`)
+	rr := postLSP(t, s, "go", body, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("pathless marker-refusal status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if calls := autoCalls.Load(); calls != 0 {
+		t.Fatalf("AutoRegisterFn calls = %d, want 0 for unregistered .git fallback", calls)
 	}
 	if !strings.Contains(rr.Body.String(), "no language project marker for go under /repo/alpha; refusing .git-only LSP auto-register") {
 		t.Fatalf("pathless marker-refusal error mismatch: %s", rr.Body.String())

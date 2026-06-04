@@ -594,8 +594,16 @@ export function ServersScreen() {
     setLspRegisterBusy((prev) => ({ ...prev, [key]: true }));
     setLspRegisterMsg(null);
     try {
-      await postLspRegister(lspRegisterWorkspacePath, row.language);
+      const response = await postLspRegister(lspRegisterWorkspacePath, row.language);
       if (!mountedRef.current) return;
+      const failed = response.results?.find((result) => result.status === "error");
+      if (failed) {
+        setLspRegisterMsg({
+          kind: "error",
+          text: `Enable ${row.language} failed: ${failed.error ?? "unknown error"}`,
+        });
+        return;
+      }
       setLspRegisterMsg({ kind: "ok", text: `Enabled ${row.language}. Refreshing…` });
       setReloadToken((n) => n + 1);
     } catch (err) {

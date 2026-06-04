@@ -50,6 +50,20 @@ type workspaceEntryDTO struct {
 	LastError     string            `json:"last_error,omitempty"`
 }
 
+func workspaceEntryDTOFromAPI(ws api.WorkspaceEntry) workspaceEntryDTO {
+	return workspaceEntryDTO{
+		WorkspaceKey:  ws.WorkspaceKey,
+		WorkspacePath: ws.WorkspacePath,
+		Language:      ws.Language,
+		Backend:       ws.Backend,
+		Port:          ws.Port,
+		TaskName:      ws.TaskName,
+		ClientEntries: ws.ClientEntries,
+		Lifecycle:     ws.Lifecycle,
+		LastError:     ws.LastError,
+	}
+}
+
 type workspacesResponse struct {
 	Workspaces []workspacePair     `json:"workspaces"`
 	Entries    []workspaceEntryDTO `json:"entries"`
@@ -105,17 +119,7 @@ func (s *Server) workspacesHandler(w http.ResponseWriter, r *http.Request) {
 				WorkspacePath: ws.WorkspacePath,
 			}
 		}
-		entries = append(entries, workspaceEntryDTO{
-			WorkspaceKey:  ws.WorkspaceKey,
-			WorkspacePath: ws.WorkspacePath,
-			Language:      ws.Language,
-			Backend:       ws.Backend,
-			Port:          ws.Port,
-			TaskName:      ws.TaskName,
-			ClientEntries: ws.ClientEntries,
-			Lifecycle:     ws.Lifecycle,
-			LastError:     ws.LastError,
-		})
+		entries = append(entries, workspaceEntryDTOFromAPI(ws))
 	}
 
 	pairs := make([]workspacePair, 0, len(seen))

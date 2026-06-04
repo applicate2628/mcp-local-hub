@@ -15,20 +15,53 @@ var ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspac
 	return api.NewAPI().EnsureLSPRegistered(ctx, workspaceKey, workspacePath, language)
 }
 
+type lspRegisterLanguageResult struct {
+	Language string `json:"language"`
+	Status   string `json:"status"`
+	Error    string `json:"error,omitempty"`
+}
+
+type lspRegisterReport struct {
+	Workspace    string
+	WorkspaceKey string
+	Entries      []api.WorkspaceEntry
+	Warnings     []string
+	Results      []lspRegisterLanguageResult
+}
+
+type lspRegisterResponse struct {
+	Workspace    string                      `json:"workspace"`
+	WorkspaceKey string                      `json:"workspace_key"`
+	Entries      []workspaceEntryDTO         `json:"entries"`
+	Warnings     []string                    `json:"warnings,omitempty"`
+	Results      []lspRegisterLanguageResult `json:"results,omitempty"`
+	Error        string                      `json:"error,omitempty"`
+	Code         string                      `json:"code,omitempty"`
+}
+
 type lspRegisterRequest struct {
 	WorkspacePath string   `json:"workspace_path"`
 	Language      string   `json:"language,omitempty"`
 	Languages     []string `json:"languages,omitempty"`
 }
 
-func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*api.RegisterReport, error) {
-	report := &api.RegisterReport{Workspace: workspacePath}
+func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*lspRegisterReport, error) {
+	report := &lspRegisterReport{Workspace: workspacePath}
 	for _, language := range languages {
 		entry, err := ensureLSPRegisteredForGUI(context.Background(), "", workspacePath, language)
 		if err != nil {
-			return report, err
+			report.Results = append(report.Results, lspRegisterLanguageResult{
+				Language: language,
+				Status:   "error",
+				Error:    err.Error(),
+			})
+			continue
 		}
 		report.Entries = append(report.Entries, entry)
+		report.Results = append(report.Results, lspRegisterLanguageResult{
+			Language: language,
+			Status:   "ok",
+		})
 		if report.Workspace == "" || report.Workspace == workspacePath {
 			report.Workspace = entry.WorkspacePath
 		}
@@ -73,9 +106,59 @@ func (s *Server) lspRegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if report == nil {
-		report = &api.RegisterReport{}
+		report = &lspRegisterReport{}
 	}
-	writeJSON(w, http.StatusOK, report)
+	resp := lspRegisterResponseFromReport(report)
+	status := http.StatusOK
+	if lspRegisterResponseHasFailures(resp) {
+		if len(resp.Entries) > 0 {
+			status = http.StatusMultiStatus
+		} else {
+			status = http.StatusInternalServerError
+			resp.Code = "LSP_REGISTER_FAILED"
+			resp.Error = firstLSPRegisterError(resp.Results)
+			if resp.Error == "" {
+				resp.Error = "LSP register failed"
+			}
+		}
+	}
+	writeJSON(w, status, resp)
+}
+
+func lspRegisterResponseFromReport(report *lspRegisterReport) lspRegisterResponse {
+	if report == nil {
+		report = &lspRegisterReport{}
+	}
+	entries := make([]workspaceEntryDTO, 0, len(report.Entries))
+	for _, entry := range report.Entries {
+		entries = append(entries, workspaceEntryDTOFromAPI(entry))
+	}
+	results := append([]lspRegisterLanguageResult(nil), report.Results...)
+	return lspRegisterResponse{
+		Workspace:    report.Workspace,
+		WorkspaceKey: report.WorkspaceKey,
+		Entries:      entries,
+		Warnings:     append([]string(nil), report.Warnings...),
+		Results:      results,
+	}
+}
+
+func lspRegisterResponseHasFailures(resp lspRegisterResponse) bool {
+	for _, result := range resp.Results {
+		if result.Status == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+func firstLSPRegisterError(results []lspRegisterLanguageResult) string {
+	for _, result := range results {
+		if result.Status == "error" && result.Error != "" {
+			return result.Error
+		}
+	}
+	return ""
 }
 
 func normalizeLSPRegisterLanguages(req lspRegisterRequest) []string {

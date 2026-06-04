@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -161,5 +163,63 @@ func TestRunSetupLSPClientRouterRollback_ReportsRestoreResult(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestSetupCommand_ContinuesToWatchdogWhenLSPRouterWiringFails(t *testing.T) {
+	origBootstrap := setupBootstrapFn
+	origRouter := setupLSPClientRouterFn
+	origWatchdog := setupWatchdogFn
+	t.Cleanup(func() {
+		setupBootstrapFn = origBootstrap
+		setupLSPClientRouterFn = origRouter
+		setupWatchdogFn = origWatchdog
+	})
+
+	var bootstrapCalls int
+	setupBootstrapFn = func(w io.Writer) error {
+		bootstrapCalls++
+		_, _ = io.WriteString(w, "bootstrap ok\n")
+		return nil
+	}
+	setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, error) {
+		if rollback {
+			t.Fatal("setup must not take rollback path")
+		}
+		return &api.LSPClientRouterReport{
+			Failed: []api.LSPClientRouterFailure{{
+				Client: "codex-cli", Language: "go", EntryName: "mcp-language-server-go", Op: "write", Err: "malformed config",
+			}},
+		}, errors.New("LSP router client config failed")
+	}
+	var watchdogCalls int
+	setupWatchdogFn = func(w io.Writer, allowElevated bool) error {
+		watchdogCalls++
+		if allowElevated {
+			t.Fatal("allowElevated = true, want false")
+		}
+		_, _ = io.WriteString(w, "watchdog ok\n")
+		return nil
+	}
+
+	cmd := newSetupCmdReal()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup command returned error: %v", err)
+	}
+	if bootstrapCalls != 1 {
+		t.Fatalf("bootstrap calls = %d, want 1", bootstrapCalls)
+	}
+	if watchdogCalls != 1 {
+		t.Fatalf("watchdog calls = %d, want 1 despite LSP router warning", watchdogCalls)
+	}
+	if !strings.Contains(stderr.String(), "warning: LSP router wiring failed") {
+		t.Fatalf("stderr missing LSP router warning; got %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "watchdog ok") {
+		t.Fatalf("stdout missing watchdog output; got %q", stdout.String())
 	}
 }

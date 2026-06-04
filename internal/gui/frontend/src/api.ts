@@ -359,6 +359,14 @@ export interface LspRegisterResponse {
   workspace: string;
   workspace_key: string;
   entries: WorkspaceEntryDTO[];
+  warnings?: string[];
+  results?: Array<{
+    language: string;
+    status: "ok" | "error";
+    error?: string;
+  }>;
+  error?: string;
+  code?: string;
 }
 
 export async function postLspRegister(

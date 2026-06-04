@@ -116,10 +116,14 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 						return WorkspaceEntry{}, fmt.Errorf("delete legacy LSP task %s before promote: %w", prior.TaskName, derr)
 					}
 				}
-			} else if portReady {
-				// No scheduler (Linux/macOS): no legacy task exists; still free a
-				// stale unowned proxy on the port so reconcile can bind cleanly.
-				_ = killByPortFn(prior.Port, 5*time.Second)
+			} else if schedulerUnavailableError(schErr) {
+				if portReady {
+					// No scheduler (Linux/macOS): no legacy task exists; still free a
+					// stale unowned proxy on the port so reconcile can bind cleanly.
+					_ = killByPortFn(prior.Port, 5*time.Second)
+				}
+			} else {
+				return WorkspaceEntry{}, schErr
 			}
 		}
 		restoreIntent, err := a.upsertLSPSupervisorIntent(prior, canonicalExe)

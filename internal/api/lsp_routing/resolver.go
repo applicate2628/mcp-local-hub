@@ -144,6 +144,16 @@ func (r *WorkspaceResolver) HasProjectMarker(root, language string) bool {
 	return r.hasProjectMarker(root, language)
 }
 
+// RegisteredWorkspace reports whether the registry currently contains a row
+// for the exact (workspaceKey, language) tuple.
+func (r *WorkspaceResolver) RegisteredWorkspace(workspaceKey, language string) (*api.WorkspaceEntry, bool) {
+	entry, ok := r.matchRegistration(workspaceKey, language)
+	if !ok {
+		return nil, false
+	}
+	return &entry, true
+}
+
 // AncestorWalk walks upward from absPath and returns the directory containing
 // the nearest marker for language. If no language marker exists, it returns the
 // nearest .git ancestor. Relative input returns ErrInvalidPath.

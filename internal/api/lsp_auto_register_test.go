@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -387,7 +388,7 @@ func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesThroughSupervisor(t 
 	}
 }
 
-func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesWhenSchedulerUnavailable(t *testing.T) {
+func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesWhenSchedulerNotImplemented(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -397,7 +398,7 @@ func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesWhenSchedulerUnavail
 	var schedulerCalls atomic.Int32
 	schedulerFactoryFn = func() (scheduler.Scheduler, error) {
 		schedulerCalls.Add(1)
-		return nil, errors.New("scheduler unavailable on this platform")
+		return nil, errors.New("scheduler not implemented on this platform")
 	}
 	defer func() { schedulerFactoryFn = origScheduler }()
 
@@ -459,7 +460,7 @@ func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesWhenSchedulerUnavail
 
 	got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
 	if err != nil {
-		t.Fatalf("EnsureLSPRegistered existing ready unowned row with unavailable scheduler: %v", err)
+		t.Fatalf("EnsureLSPRegistered existing ready unowned row with not-implemented scheduler: %v", err)
 	}
 	if got.Port != want.Port || got.Lifecycle != want.Lifecycle {
 		t.Fatalf("existing row mismatch: got %+v want %+v", got, want)
@@ -487,6 +488,88 @@ func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesWhenSchedulerUnavail
 	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "python")
 	if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil {
 		t.Fatalf("ready unowned row did not write supervisor intent %s; rows=%+v", taskName, intent.Daemons)
+	}
+}
+
+func TestEnsureLSPRegistered_ExistingReadyUnownedRowSchedulerRealFailureFailsLoud(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origScheduler := schedulerFactoryFn
+	var schedulerCalls atomic.Int32
+	schedulerFactoryFn = func() (scheduler.Scheduler, error) {
+		schedulerCalls.Add(1)
+		return nil, errors.New("Task Scheduler user lookup failed")
+	}
+	defer func() { schedulerFactoryFn = origScheduler }()
+
+	var reconcileCalls atomic.Int32
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls.Add(1)
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	var readinessCalls atomic.Int32
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		readinessCalls.Add(1)
+		return nil
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	origKill := killByPortFn
+	var killCalls atomic.Int32
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killCalls.Add(1)
+		return nil
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	want := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(want); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err = NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+	if err == nil {
+		t.Fatal("EnsureLSPRegistered returned nil error for real scheduler constructor failure")
+	}
+	if !strings.Contains(err.Error(), "Task Scheduler user lookup failed") {
+		t.Fatalf("error = %v, want scheduler constructor failure surfaced", err)
+	}
+	if calls := schedulerCalls.Load(); calls != 1 {
+		t.Fatalf("scheduler constructor calls = %d, want 1", calls)
+	}
+	if calls := killCalls.Load(); calls != 0 {
+		t.Fatalf("kill calls = %d, want 0 when legacy task ownership cannot be checked", calls)
+	}
+	if calls := readinessCalls.Load(); calls != 1 {
+		t.Fatalf("readiness calls = %d, want 1 ownership probe only", calls)
+	}
+	if calls := reconcileCalls.Load(); calls != 0 {
+		t.Fatalf("reconcile calls = %d, want 0 after scheduler constructor failure", calls)
 	}
 }
 

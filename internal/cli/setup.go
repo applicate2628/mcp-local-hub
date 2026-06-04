@@ -71,6 +71,14 @@ var setupLSPClientRouterFn = func(rollback bool) (*api.LSPClientRouterReport, er
 	return api.NewAPI().EnsureLSPRouterClientEntries(api.LSPClientRouterOpts{})
 }
 
+// setupBootstrapFn and setupWatchdogFn let command-level setup tests assert
+// orchestration without copying the current binary or mutating Task Scheduler.
+// Production leaves them nil and routes through Bootstrap/runSetupWatchdog.
+var (
+	setupBootstrapFn func(io.Writer) error
+	setupWatchdogFn  func(io.Writer, bool) error
+)
+
 // mcphubShortName is the bare executable name that scheduler tasks and relay
 // entries reference. PATH resolution picks the correct binary from whatever
 // directory the user has on PATH (usually ~/.local/bin after `mcphub setup`).
@@ -272,10 +280,11 @@ What setup does:
      (does NOT modify rc files automatically)
   4. Verifies the watchdog state directory is reachable (plan §16);
      fails with exit 8 if not.
-  5. Ensures every present MCP client has mcp-language-server-<lang>
+  5. Attempts to ensure every present MCP client has mcp-language-server-<lang>
      entries pointing at the GUI LSP router URL
      http://localhost:<gui_server.port>/lsp/<lang>/mcp, migrating old
-     per-project LSP proxy URLs after timestamped backups.
+     per-project LSP proxy URLs after timestamped backups. Failures are
+     warned and do not block watchdog setup.
   6. Installs \mcp-local-hub-watchdog scheduled task (cadence 5 min).
      Refuses if the current process is elevated (plan §42) unless
      --allow-elevated is passed; with --allow-elevated, a high-priority
@@ -329,13 +338,13 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 			if rollbackLSPRouter {
 				return runSetupLSPClientRouter(cmd.OutOrStdout(), true)
 			}
-			if err := Bootstrap(cmd.OutOrStdout()); err != nil {
+			if err := runSetupBootstrap(cmd.OutOrStdout()); err != nil {
 				return err
 			}
 			if err := runSetupLSPClientRouter(cmd.OutOrStdout(), false); err != nil {
-				return err
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: LSP router wiring failed (continuing to watchdog): %v\n", err)
 			}
-			return runSetupWatchdog(cmd.OutOrStdout(), allowElevated)
+			return runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated)
 		},
 	}
 	c.Flags().BoolVar(&allowElevated, "allow-elevated", false,
@@ -343,6 +352,20 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 	c.Flags().BoolVar(&rollbackLSPRouter, "rollback-lsp-router", false,
 		"restore/remove Phase 3 LSP router client entries from latest backups; skips bootstrap/watchdog setup")
 	return c
+}
+
+func runSetupBootstrap(out io.Writer) error {
+	if setupBootstrapFn != nil {
+		return setupBootstrapFn(out)
+	}
+	return Bootstrap(out)
+}
+
+func runSetupWatchdogForSetup(out io.Writer, allowElevated bool) error {
+	if setupWatchdogFn != nil {
+		return setupWatchdogFn(out, allowElevated)
+	}
+	return runSetupWatchdog(out, allowElevated)
 }
 
 func runSetupLSPClientRouter(out io.Writer, rollback bool) error {

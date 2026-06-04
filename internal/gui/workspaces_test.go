@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
@@ -118,10 +121,10 @@ func TestLSPRegister_POST_OK(t *testing.T) {
 	var gotLanguages []string
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.lspRegistrar = fakeLSPRegistrar{
-		RegisterFn: func(workspacePath string, languages []string) (*api.RegisterReport, error) {
+		RegisterFn: func(workspacePath string, languages []string) (*lspRegisterReport, error) {
 			gotWorkspace = workspacePath
 			gotLanguages = append([]string(nil), languages...)
-			return &api.RegisterReport{
+			return &lspRegisterReport{
 				Workspace:    workspacePath,
 				WorkspaceKey: "project",
 				Entries: []api.WorkspaceEntry{
@@ -134,6 +137,7 @@ func TestLSPRegister_POST_OK(t *testing.T) {
 						TaskName:      `\mcp-local-hub-lsp-project-go`,
 					},
 				},
+				Results: []lspRegisterLanguageResult{{Language: "go", Status: "ok"}},
 			}, nil
 		},
 	}
@@ -154,12 +158,23 @@ func TestLSPRegister_POST_OK(t *testing.T) {
 	if len(gotLanguages) != 1 || gotLanguages[0] != "go" {
 		t.Errorf("languages = %+v, want [go]", gotLanguages)
 	}
-	var resp api.RegisterReport
+	var resp map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Entries) != 1 || resp.Entries[0].TaskName != `\mcp-local-hub-lsp-project-go` {
-		t.Errorf("response entries = %+v", resp.Entries)
+	entries, ok := resp["entries"].([]any)
+	if !ok || len(entries) != 1 {
+		t.Fatalf("response entries = %#v, want one entry array", resp["entries"])
+	}
+	entry, ok := entries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("response entry type = %T", entries[0])
+	}
+	if entry["task_name"] != `\mcp-local-hub-lsp-project-go` {
+		t.Errorf("task_name = %#v, want snake_case task_name", entry["task_name"])
+	}
+	if _, exists := entry["TaskName"]; exists {
+		t.Fatalf("response entry leaked PascalCase TaskName key: %#v", entry)
 	}
 }
 
@@ -200,6 +215,9 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 	if len(report.Entries) != 2 {
 		t.Fatalf("report entries = %d, want 2", len(report.Entries))
 	}
+	if len(report.Results) != 2 || report.Results[0].Status != "ok" || report.Results[1].Status != "ok" {
+		t.Fatalf("report results = %+v, want two ok language results", report.Results)
+	}
 	for _, entry := range report.Entries {
 		if len(entry.ClientEntries) != 0 {
 			t.Fatalf("GUI LSP enable must not write client entries; got %+v", entry.ClientEntries)
@@ -207,10 +225,98 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 	}
 }
 
+func TestRealLSPRegistrar_ReportsPartialBatchFailures(t *testing.T) {
+	prev := ensureLSPRegisteredForGUI
+	t.Cleanup(func() { ensureLSPRegisteredForGUI = prev })
+
+	ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspacePath, language string) (api.WorkspaceEntry, error) {
+		if language == "not-a-language" {
+			return api.WorkspaceEntry{}, errors.New("unknown LSP language not-a-language")
+		}
+		return api.WorkspaceEntry{
+			WorkspaceKey:  "project",
+			WorkspacePath: workspacePath,
+			Language:      language,
+			Backend:       "gopls-mcp",
+			Port:          9201,
+			TaskName:      api.LSPTaskNameForWorkspaceLanguage("project", language),
+		}, nil
+	}
+
+	report, err := (realLSPRegistrar{}).RegisterLSP("D:/dev/project", []string{"go", "not-a-language"})
+	if err != nil {
+		t.Fatalf("RegisterLSP partial batch returned error: %v", err)
+	}
+	if len(report.Entries) != 1 || report.Entries[0].Language != "go" {
+		t.Fatalf("entries = %+v, want only successful go entry", report.Entries)
+	}
+	if len(report.Results) != 2 {
+		t.Fatalf("results = %+v, want per-language result for both inputs", report.Results)
+	}
+	if report.Results[0].Language != "go" || report.Results[0].Status != "ok" || report.Results[0].Error != "" {
+		t.Fatalf("result[0] = %+v, want go ok", report.Results[0])
+	}
+	if report.Results[1].Language != "not-a-language" || report.Results[1].Status != "error" ||
+		!strings.Contains(report.Results[1].Error, "unknown LSP language") {
+		t.Fatalf("result[1] = %+v, want not-a-language error", report.Results[1])
+	}
+}
+
+func TestLSPRegister_POSTLanguagesReturnsPartialSuccessReport(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.lspRegistrar = fakeLSPRegistrar{
+		RegisterFn: func(workspacePath string, languages []string) (*lspRegisterReport, error) {
+			if len(languages) != 2 || languages[0] != "go" || languages[1] != "not-a-language" {
+				t.Fatalf("languages = %+v, want [go not-a-language]", languages)
+			}
+			return &lspRegisterReport{
+				Workspace:    workspacePath,
+				WorkspaceKey: "project",
+				Entries: []api.WorkspaceEntry{{
+					WorkspaceKey:  "project",
+					WorkspacePath: workspacePath,
+					Language:      "go",
+					Backend:       "gopls-mcp",
+					Port:          9201,
+					TaskName:      `\mcp-local-hub-lsp-project-go`,
+				}},
+				Results: []lspRegisterLanguageResult{
+					{Language: "go", Status: "ok"},
+					{Language: "not-a-language", Status: "error", Error: "unknown LSP language not-a-language"},
+				},
+			}, nil
+		},
+	}
+
+	body := bytes.NewBufferString(`{"workspace_path":"D:/dev/project","languages":["go","not-a-language"]}`)
+	req := httptest.NewRequest("POST", "/api/lsp/register", body)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207 partial success; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Entries []workspaceEntryDTO         `json:"entries"`
+		Results []lspRegisterLanguageResult `json:"results"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Entries) != 1 || resp.Entries[0].TaskName != `\mcp-local-hub-lsp-project-go` {
+		t.Fatalf("entries = %+v, want successful go DTO", resp.Entries)
+	}
+	if len(resp.Results) != 2 || resp.Results[1].Status != "error" {
+		t.Fatalf("results = %+v, want per-language error", resp.Results)
+	}
+}
+
 func TestLSPRegister_POST_RejectsCrossOrigin(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.lspRegistrar = fakeLSPRegistrar{
-		RegisterFn: func(string, []string) (*api.RegisterReport, error) {
+		RegisterFn: func(string, []string) (*lspRegisterReport, error) {
 			t.Fatal("registrar must not be called for cross-origin requests")
 			return nil, nil
 		},
@@ -228,10 +334,10 @@ func TestLSPRegister_POST_RejectsCrossOrigin(t *testing.T) {
 }
 
 type fakeLSPRegistrar struct {
-	RegisterFn func(workspacePath string, languages []string) (*api.RegisterReport, error)
+	RegisterFn func(workspacePath string, languages []string) (*lspRegisterReport, error)
 }
 
-func (f fakeLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*api.RegisterReport, error) {
+func (f fakeLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*lspRegisterReport, error) {
 	if f.RegisterFn == nil {
 		return nil, fmt.Errorf("RegisterFn not configured")
 	}

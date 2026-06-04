@@ -369,7 +369,7 @@ func (realLogs) Logs(server, daemon string, tail int) (string, error) {
 }
 
 type lspRegistrar interface {
-	RegisterLSP(workspacePath string, languages []string) (*api.RegisterReport, error)
+	RegisterLSP(workspacePath string, languages []string) (*lspRegisterReport, error)
 }
 
 type realLSPRegistrar struct{}

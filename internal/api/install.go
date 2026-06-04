@@ -803,8 +803,13 @@ func sendForceMaterializeTools(port int, backend string) string {
 	return ""
 }
 
+var healthProbeLivePortFn = portInUse
+
 // probeDaemonHealth fills DaemonStatus.Health for every Running row
-// with a Port. The protocol: POST initialize (stream OR json Accept),
+// with a Port. Registry-only workspace-scoped rows may be seeded as
+// Stopped before process lookup can prove liveness; for those rows, a
+// live TCP port is enough to probe and promote the row to Running.
+// The protocol: POST initialize (stream OR json Accept),
 // capture Mcp-Session-Id, POST tools/list, count tools in the
 // response. Any transport or JSON-RPC error is captured as Err with
 // OK=false. Runs concurrently across rows to keep total time bounded.
@@ -819,7 +824,16 @@ func sendForceMaterializeTools(port int, backend string) string {
 func probeDaemonHealth(rows []DaemonStatus) {
 	var wg sync.WaitGroup
 	for i := range rows {
-		if rows[i].State != "Running" || rows[i].Port == 0 {
+		if rows[i].Port == 0 {
+			continue
+		}
+		if rows[i].State != "Running" {
+			if !rows[i].IsWorkspaceScoped || healthProbeLivePortFn == nil || !healthProbeLivePortFn(rows[i].Port) {
+				continue
+			}
+			rows[i].State = "Running"
+		}
+		if rows[i].State != "Running" {
 			continue
 		}
 		wg.Add(1)

@@ -19,6 +19,7 @@ import (
 type lspWorkspaceResolver interface {
 	ResolveByPath(path, language string) (*lsp_routing.ResolveResult, error)
 	HasProjectMarker(root, language string) bool
+	RegisteredWorkspace(workspaceKey, language string) (*api.WorkspaceEntry, bool)
 }
 
 type lspSessionRouter interface {
@@ -393,7 +394,9 @@ func lspPathlessWorkspace(w http.ResponseWriter, r *http.Request, deps *lspRoute
 		if markerRoot == "" {
 			markerRoot = ws.WorkspaceKey
 		}
-		if !deps.Resolver.HasProjectMarker(ws.WorkspacePath, language) {
+		if registered, ok := deps.Resolver.RegisteredWorkspace(ws.WorkspaceKey, language); ok && registered != nil {
+			ws = *registered
+		} else if !deps.Resolver.HasProjectMarker(ws.WorkspacePath, language) {
 			writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
 				"no language project marker for "+language+" under "+markerRoot+"; refusing .git-only LSP auto-register")
 			return nil, false

@@ -214,10 +214,11 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	reg := NewRegistry(regPath)
 	sch, err := schedulerNewForRegister()
 	if err != nil {
-		if !opts.SupervisedProxy {
+		if opts.SupervisedProxy && schedulerUnavailableError(err) {
+			sch = legacyTaskUnavailableScheduler{}
+		} else {
 			return nil, err
 		}
-		sch = legacyTaskUnavailableScheduler{}
 	}
 	allClients := clientsAllForRegister()
 	var rollback []func()
@@ -861,9 +862,13 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 	// scheduled task to delete there, so tolerate absence and skip only the
 	// legacy-task Delete below.
 	if schErr != nil {
-		sch = nil
-		report.Warnings = append(report.Warnings,
-			fmt.Sprintf("scheduler unavailable (%v); skipping legacy task deletion (supervised rows have none)", schErr))
+		if schedulerUnavailableError(schErr) {
+			sch = nil
+			report.Warnings = append(report.Warnings,
+				fmt.Sprintf("scheduler unavailable (%v); skipping legacy task deletion (supervised rows have none)", schErr))
+		} else {
+			return nil, schErr
+		}
 	}
 	for _, lang := range targets {
 		entry, ok := reg.Get(activeWSKey, lang)

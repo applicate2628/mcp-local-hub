@@ -1198,7 +1198,7 @@ func TestRegister_SupervisedWritesIntentAndDeletesLegacyLSPTask(t *testing.T) {
 	}
 }
 
-func TestRegister_SupervisedContinuesWhenSchedulerUnavailable(t *testing.T) {
+func TestRegister_SupervisedContinuesWhenSchedulerNotImplemented(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -1206,7 +1206,7 @@ func TestRegister_SupervisedContinuesWhenSchedulerUnavailable(t *testing.T) {
 
 	origFactory := testSchedulerFactory
 	testSchedulerFactory = func() (testScheduler, error) {
-		return nil, errors.New("scheduler unavailable on this platform")
+		return nil, errors.New("scheduler not implemented on this platform")
 	}
 	defer func() { testSchedulerFactory = origFactory }()
 
@@ -1233,7 +1233,7 @@ func TestRegister_SupervisedContinuesWhenSchedulerUnavailable(t *testing.T) {
 		SupervisedProxy: true,
 	})
 	if err != nil {
-		t.Fatalf("Register supervised with unavailable scheduler: %v", err)
+		t.Fatalf("Register supervised with not-implemented scheduler: %v", err)
 	}
 	if len(report.Entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(report.Entries))
@@ -1254,6 +1254,49 @@ func TestRegister_SupervisedContinuesWhenSchedulerUnavailable(t *testing.T) {
 	}
 	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row == nil {
 		t.Fatalf("supervisor-intent missing LSP row for %s/go; rows=%+v", wsKey, intent.Daemons)
+	}
+}
+
+func TestRegister_SupervisedSchedulerRealFailureFailsLoud(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origFactory := testSchedulerFactory
+	testSchedulerFactory = func() (testScheduler, error) {
+		return nil, errors.New("schtasks.exe resolution failed")
+	}
+	defer func() { testSchedulerFactory = origFactory }()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		return ReconcileResponse{}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	_, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err == nil {
+		t.Fatal("Register supervised with real scheduler failure returned nil error")
+	}
+	if !strings.Contains(err.Error(), "schtasks.exe resolution failed") {
+		t.Fatalf("error = %v, want scheduler failure surfaced", err)
+	}
+	if reconcileCalls != 0 {
+		t.Fatalf("reconcile calls = %d, want 0 when scheduler constructor has a real failure", reconcileCalls)
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if len(reg.Workspaces) != 0 {
+		t.Fatalf("registry rows written despite scheduler failure: %+v", reg.Workspaces)
 	}
 }
 
@@ -1678,7 +1721,7 @@ func TestUnregister_KillProxyFailureIsWarning(t *testing.T) {
 	}
 }
 
-func TestUnregister_SchedulerUnavailableRemovesIntentAndRegistryWithWarning(t *testing.T) {
+func TestUnregister_SchedulerNotImplementedRemovesIntentAndRegistryWithWarning(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -1686,7 +1729,7 @@ func TestUnregister_SchedulerUnavailableRemovesIntentAndRegistryWithWarning(t *t
 
 	origFactory := testSchedulerFactory
 	testSchedulerFactory = func() (testScheduler, error) {
-		return nil, errors.New("scheduler unavailable on this platform")
+		return nil, errors.New("scheduler not implemented on this platform")
 	}
 	defer func() { testSchedulerFactory = origFactory }()
 
@@ -1743,7 +1786,7 @@ func TestUnregister_SchedulerUnavailableRemovesIntentAndRegistryWithWarning(t *t
 
 	rpt, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{})
 	if err != nil {
-		t.Fatalf("Unregister with unavailable scheduler: %v", err)
+		t.Fatalf("Unregister with not-implemented scheduler: %v", err)
 	}
 	if !strings.Contains(strings.Join(rpt.Warnings, "\n"), "scheduler unavailable") {
 		t.Fatalf("warnings = %v, want scheduler unavailable warning", rpt.Warnings)
@@ -1767,6 +1810,86 @@ func TestUnregister_SchedulerUnavailableRemovesIntentAndRegistryWithWarning(t *t
 	}
 	if _, ok := h.fakeClients.entries["codex-cli"][entryName]; ok {
 		t.Fatalf("client entry %s survived unregister", entryName)
+	}
+}
+
+func TestUnregister_SchedulerRealFailureLeavesRowsAndIntent(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origFactory := testSchedulerFactory
+	testSchedulerFactory = func() (testScheduler, error) {
+		return nil, errors.New("current user lookup failed")
+	}
+	defer func() { testSchedulerFactory = origFactory }()
+
+	reconcileCalls := 0
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		return ReconcileResponse{}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	entry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": "mcp-language-server-go-abcd"},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(entry); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(entry, testCanonicalMcphubPathOverride),
+		},
+	})
+
+	_, err = mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("Unregister with real scheduler failure returned nil error")
+	}
+	if !strings.Contains(err.Error(), "current user lookup failed") {
+		t.Fatalf("error = %v, want scheduler constructor failure surfaced", err)
+	}
+	if reconcileCalls != 0 {
+		t.Fatalf("reconcile calls = %d, want 0 before unregister side effects", reconcileCalls)
+	}
+	reg = NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 1 {
+		t.Fatalf("registry rows = %+v, want original row preserved", rows)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row == nil {
+		t.Fatalf("supervisor intent row removed despite scheduler failure; rows=%+v", intent.Daemons)
 	}
 }
 
