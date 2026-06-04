@@ -127,9 +127,11 @@ func TestEnsureLSPRegistered_ConcurrentFirstTouchWaitsForReadyPort(t *testing.T)
 	}
 }
 
-func TestEnsureLSPRegistered_ExistingReadyRowReturnsWithoutReconcile(t *testing.T) {
+func TestEnsureLSPRegistered_ExistingReadySupervisorOwnedRowReturnsWithoutReconcile(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
 
 	origReconcile := registerSupervisorReconcileFn
 	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
@@ -168,6 +170,16 @@ func TestEnsureLSPRegistered_ExistingReadyRowReturnsWithoutReconcile(t *testing.
 	if err := reg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(want, testCanonicalMcphubPathOverride),
+		},
+	})
 
 	got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
 	if err != nil {
@@ -178,6 +190,101 @@ func TestEnsureLSPRegistered_ExistingReadyRowReturnsWithoutReconcile(t *testing.
 	}
 	if calls := readinessCalls.Load(); calls != 1 {
 		t.Fatalf("existing ready row readiness probes = %d, want 1", calls)
+	}
+}
+
+func TestEnsureLSPRegistered_ExistingReadyUnownedRowPromotesThroughSupervisor(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	var reconcileCalls atomic.Int32
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Fatalf("EnsureLSPRegistered called reconcile with apply=false")
+		}
+		reconcileCalls.Add(1)
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	var readinessCalls atomic.Int32
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		readinessCalls.Add(1)
+		if port != 9242 {
+			t.Fatalf("readiness port = %d, want 9242", port)
+		}
+		return nil
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	origKill := killByPortFn
+	var killCalls atomic.Int32
+	killByPortFn = func(port int, timeout time.Duration) error {
+		killCalls.Add(1)
+		if port != 9242 {
+			t.Fatalf("kill port = %d, want 9242", port)
+		}
+		if timeout != 5*time.Second {
+			t.Fatalf("kill timeout = %v, want 5s", timeout)
+		}
+		return nil
+	}
+	defer func() { killByPortFn = origKill }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	want := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9242,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		Lifecycle:     LifecycleActive,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(want); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+	if err != nil {
+		t.Fatalf("EnsureLSPRegistered existing ready unowned row: %v", err)
+	}
+	if got.Port != want.Port || got.Lifecycle != want.Lifecycle {
+		t.Fatalf("existing row mismatch: got %+v want %+v", got, want)
+	}
+	if calls := readinessCalls.Load(); calls != 2 {
+		t.Fatalf("readiness calls = %d, want ownership probe + post-reconcile wait", calls)
+	}
+	if calls := killCalls.Load(); calls != 1 {
+		t.Fatalf("kill calls = %d, want 1 to free the unowned ready port before reconcile", calls)
+	}
+	if calls := reconcileCalls.Load(); calls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", calls)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "python")
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil {
+		t.Fatalf("ready unowned row did not write supervisor intent %s; rows=%+v", taskName, intent.Daemons)
 	}
 }
 

@@ -305,6 +305,37 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	}, nil
 }
 
+// lspSupervisorIntentDescriptorExists reports whether supervisor-intent.json
+// currently carries a descriptor for the given (workspaceKey, language) LSP
+// proxy. Used by the auto-register fast path to distinguish "port responds AND
+// the supervisor owns the proxy" (true fast-return) from "port responds but no
+// supervisor ownership" (legacy/orphan proxy that needs promotion).
+func lspSupervisorIntentDescriptorExists(wsKey, lang string) (bool, error) {
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return false, fmt.Errorf("resolve supervisor-intent path: %w", err)
+	}
+	lock := flock.New(intentPath + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+	current, existed, err := readSupervisorIntentForMerge(intentPath)
+	if err != nil {
+		return false, err
+	}
+	if !existed || current == nil {
+		return false, nil
+	}
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang)
+	for _, d := range current.Daemons {
+		if d.TaskName == taskName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error) {
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {

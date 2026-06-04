@@ -1,6 +1,7 @@
 package api
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -141,6 +142,62 @@ func TestEnrichStatusWithRegistry_WorkspaceScoped(t *testing.T) {
 	}
 	if !r.IsWorkspaceScoped {
 		t.Errorf("IsWorkspaceScoped = false, want true for lazy-proxy task name")
+	}
+}
+
+func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	origRegPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
+
+	origBatch := lookupProcessBatch
+	origLookup := lookupProcess
+	lookupProcessBatch = nil
+	lookupProcess = nil
+	t.Cleanup(func() {
+		lookupProcessBatch = origBatch
+		lookupProcess = origLookup
+	})
+
+	reg := NewRegistry(regPath)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "/home/u/project",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9217,
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle:     LifecycleActive,
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewAPI().StatusWithOpts(StatusOpts{})
+	if err != nil {
+		t.Fatalf("StatusWithOpts: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1 registry-only workspace row: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.TaskName != "mcp-local-hub-lsp-abcd1234-python" {
+		t.Fatalf("TaskName = %q, want registry task", row.TaskName)
+	}
+	if !row.IsWorkspaceScoped {
+		t.Fatalf("IsWorkspaceScoped = false, want true")
+	}
+	if row.Port != 9217 {
+		t.Fatalf("Port = %d, want 9217", row.Port)
+	}
+	if row.Language != "python" {
+		t.Fatalf("Language = %q, want python", row.Language)
+	}
+	if row.Lifecycle != LifecycleActive {
+		t.Fatalf("Lifecycle = %q, want %q", row.Lifecycle, LifecycleActive)
 	}
 }
 

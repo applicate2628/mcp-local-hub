@@ -68,7 +68,12 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	}
 	if prior, ok := reg.Get(workspaceKey, language); ok {
 		unlock()
-		if err := proxyReadinessFn(prior.Port, lspExistingProxyProbeTimeout); err == nil {
+		portReady := proxyReadinessFn(prior.Port, lspExistingProxyProbeTimeout) == nil
+		owned, err := lspSupervisorIntentDescriptorExists(prior.WorkspaceKey, prior.Language)
+		if err != nil {
+			return WorkspaceEntry{}, err
+		}
+		if portReady && owned {
 			return prior, nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -80,6 +85,9 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		}
 		if _, err := os.Stat(canonicalExe); err != nil {
 			return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		}
+		if portReady && !owned {
+			_ = killByPortFn(prior.Port, 5*time.Second)
 		}
 		restoreIntent, err := a.upsertLSPSupervisorIntent(prior, canonicalExe)
 		if err != nil {

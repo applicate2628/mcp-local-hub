@@ -579,6 +579,32 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	if regErr != nil {
 		regPath = ""
 	}
+	// Merge supervised/registry-backed LSP proxies that have NO scheduler task.
+	// The v0.5.x supervised path (register_supervisor.go) writes these as
+	// supervisor-intent children only, so sch.List never surfaces them — without
+	// this merge they vanish from --workspace-scoped / --health / --force-materialize
+	// even though they are registered and running. enrichStatusWithRegistry then
+	// overlays Port/Language/Lifecycle and the alive-probe derives their State.
+	if regPath != "" {
+		seen := make(map[string]bool, len(result))
+		for i := range result {
+			seen[strings.TrimPrefix(result[i].TaskName, "\\")] = true
+		}
+		reg := NewRegistry(regPath)
+		if err := reg.Load(); err == nil {
+			for _, e := range reg.Workspaces {
+				if e.TaskName == "" {
+					continue
+				}
+				bare := strings.TrimPrefix(e.TaskName, "\\")
+				if seen[bare] {
+					continue
+				}
+				seen[bare] = true
+				result = append(result, DaemonStatus{TaskName: e.TaskName})
+			}
+		}
+	}
 	enrichStatusWithRegistry(result, "", regPath)
 	if opts.ProbeHealth {
 		probeDaemonHealth(result)
