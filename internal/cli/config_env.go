@@ -128,6 +128,9 @@ func runConfigEnvUnset(stateDir, selector, key string, out io.Writer) error {
 		if !ok || row.Env == nil {
 			return nil
 		}
+		if _, present := row.Env[key]; !present {
+			return nil
+		}
 		delete(row.Env, key)
 		if len(row.Env) == 0 {
 			delete(ov.Daemons, target.TaskName)

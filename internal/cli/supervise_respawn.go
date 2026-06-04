@@ -175,9 +175,13 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	// (leading-backslash). NormalizeOverlayKey already produces that
 	// form so the lookup is symmetric.
 	state := daemonRuntimeStateIdle
+	shouldTerminate := true
 	if deps.runtimeTracker != nil {
 		if entry, ok := deps.runtimeTracker.Get(taskName); ok {
 			state = entry.State
+			shouldTerminate = entry.CurrentPID > 0
+		} else {
+			shouldTerminate = false
 		}
 	}
 	if state == daemonRuntimeStateQuarantine && !force {
@@ -219,36 +223,38 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	// next spawnFn call will observe the new state.
 	termStart := time.Now()
 	const gracefulTimeoutMs = 5000
-	if err := terminateFn(*desc); err != nil {
-		// Terminate failure ABORTS the respawn (closes bot PR#222 P2-4:
-		// previously we logged warn + continued to spawn unconditionally,
-		// which could leave the old process alive while starting another
-		// instance — duplicate-process / port-collision risk under
-		// production wiring where terminate can fail for active daemons
-		// when no PID is available in the startup snapshot).
-		//
-		// The handler returns the terminate error to the IPC caller so
-		// the operator sees the precise failure mode instead of a
-		// silent "respawn succeeded" + a port-conflict crash on the
-		// next health check.
-		_ = deps.events.Emit(api.SupervisorEvent{
-			Severity: "error",
-			Source:   "ipc",
-			Event:    "supervisor-respawn-terminate-failed",
-			Body: map[string]any{
-				"task_name": taskName,
-				"err":       err.Error(),
-				"action":    "respawn aborted",
-			},
-		})
-		return writeIPCFrame(conn, api.IPCResponse{
-			ID: req.ID,
-			Error: &api.IPCErr{
-				Code:    ipcErrorRespawnTerminateFailed,
-				Message: "terminate failed; respawn aborted to prevent duplicate process: " + err.Error(),
-			},
-			Final: true,
-		})
+	if shouldTerminate {
+		if err := terminateFn(*desc); err != nil {
+			// Terminate failure ABORTS the respawn (closes bot PR#222 P2-4:
+			// previously we logged warn + continued to spawn unconditionally,
+			// which could leave the old process alive while starting another
+			// instance — duplicate-process / port-collision risk under
+			// production wiring where terminate can fail for active daemons
+			// when no PID is available in the startup snapshot).
+			//
+			// The handler returns the terminate error to the IPC caller so
+			// the operator sees the precise failure mode instead of a
+			// silent "respawn succeeded" + a port-conflict crash on the
+			// next health check.
+			_ = deps.events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "ipc",
+				Event:    "supervisor-respawn-terminate-failed",
+				Body: map[string]any{
+					"task_name": taskName,
+					"err":       err.Error(),
+					"action":    "respawn aborted",
+				},
+			})
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    ipcErrorRespawnTerminateFailed,
+					Message: "terminate failed; respawn aborted to prevent duplicate process: " + err.Error(),
+				},
+				Final: true,
+			})
+		}
 	}
 	if time.Since(termStart) > gracefulTimeoutMs*time.Millisecond {
 		_ = deps.events.Emit(api.SupervisorEvent{

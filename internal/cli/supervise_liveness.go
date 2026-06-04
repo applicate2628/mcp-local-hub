@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -17,14 +20,27 @@ const (
 )
 
 type supervisorLivenessProbe struct {
-	PIDAlive func(pid int) bool
-	PortLive func(port int) bool
+	PIDAlive     func(pid int) bool
+	PIDIdentity  func(proof process.PIDIdentityProof) error
+	PortLive     func(port int) bool
+	PortOwnerPID func(port int) (pid int, ok bool, err error)
 }
 
-var supervisorLivenessProbeFns = supervisorLivenessProbe{
-	PIDAlive: process.IsPidAlive,
-	PortLive: supervisorPortLive,
+var supervisorLivenessProbeFns = defaultSupervisorLivenessProbe()
+
+func defaultSupervisorLivenessProbe() supervisorLivenessProbe {
+	probe := supervisorLivenessProbe{
+		PIDAlive:    process.IsPidAlive,
+		PIDIdentity: process.VerifyPIDIdentity,
+		PortLive:    supervisorPortLive,
+	}
+	if runtime.GOOS == "windows" {
+		probe.PortOwnerPID = supervisorPortOwnerPID
+	}
+	return probe
 }
+
+var supervisorSelfPIDFn = os.Getpid
 
 func setSupervisorLivenessProbeForTest(p supervisorLivenessProbe) func() {
 	prev := supervisorLivenessProbeFns
@@ -42,6 +58,10 @@ func supervisorPortLive(port int) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+func supervisorPortOwnerPID(port int) (int, bool, error) {
+	return api.LoopbackPortOwnerPID(port)
 }
 
 func hydrateControllerRunningStates(ctrl *supervisorController, currentRunning map[string]bool) {
@@ -125,7 +145,7 @@ func sweepSupervisorLivenessOnce(
 			})
 		}
 		eventKind := api.EvChildExit
-		if reason == "port_unbound" {
+		if supervisorLivenessReasonNeedsRestart(reason) {
 			eventKind = api.EvManualRestart
 		}
 		loop.Post(api.LoopEvent{
@@ -145,22 +165,76 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 	if probe.PIDAlive == nil {
 		probe.PIDAlive = process.IsPidAlive
 	}
-	if probe.PortLive == nil {
-		probe.PortLive = supervisorPortLive
-	}
 	if entry.CurrentPID <= 0 {
 		return false, "missing_pid"
 	}
 	if !probe.PIDAlive(entry.CurrentPID) {
 		return false, "pid_dead"
 	}
-	if d.Port > 0 && !probe.PortLive(d.Port) {
+	if probe.PIDIdentity != nil {
+		if entry.StartedAt.IsZero() {
+			return false, "pid_identity_missing"
+		}
+		expectedExe := canonicalMcphubPath()
+		if expectedExe == "" {
+			return false, "pid_identity_missing"
+		}
+		err := probe.PIDIdentity(process.PIDIdentityProof{
+			PID:            entry.CurrentPID,
+			ExecutablePath: expectedExe,
+			StartedAt:      entry.StartedAt.UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			if errors.Is(err, process.ErrProcessIdentityUnsupported) {
+				// Keep the PIDAlive result on platforms without start-time proof.
+			} else if errors.Is(err, process.ErrProcessAlreadyExited) {
+				return false, "pid_dead"
+			} else {
+				return false, "pid_identity_mismatch"
+			}
+		}
+	}
+	if d.Port <= 0 {
+		return true, ""
+	}
+	if probe.PortOwnerPID != nil {
+		ownerPID, ok, err := probe.PortOwnerPID(d.Port)
+		if err != nil {
+			return false, "port_owner_unverified"
+		}
+		if !ok {
+			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < supervisorPortBindGrace {
+				return true, ""
+			}
+			return false, "port_unbound"
+		}
+		if supervisorSelfPIDFn != nil && ownerPID == supervisorSelfPIDFn() {
+			return false, "port_owner_self"
+		}
+		if ownerPID != entry.CurrentPID {
+			return false, "port_owner_mismatch"
+		}
+		return true, ""
+	}
+	if probe.PortLive == nil {
+		probe.PortLive = supervisorPortLive
+	}
+	if !probe.PortLive(d.Port) {
 		if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < supervisorPortBindGrace {
 			return true, ""
 		}
 		return false, "port_unbound"
 	}
 	return true, ""
+}
+
+func supervisorLivenessReasonNeedsRestart(reason string) bool {
+	switch reason {
+	case "port_unbound", "port_owner_mismatch", "port_owner_self", "port_owner_unverified":
+		return true
+	default:
+		return false
+	}
 }
 
 func supervisorIntentPortMapForStateDir(stateDir string) map[string]int {

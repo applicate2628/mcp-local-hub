@@ -309,6 +309,227 @@ func TestSupervisorLivenessSweepPostsChildExitForDeadRunningPID(t *testing.T) {
 	}
 }
 
+func TestSupervisorLivenessSweepPostsChildExitForDeadPIDWithForeignListener(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return false },
+		PortOwnerPID: func(port int) (int, bool, error) {
+			return 44000, true, nil
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		if ev.Kind != api.EvChildExit || ev.TaskName != taskName {
+			t.Fatalf("event = %+v, want EvChildExit for %s", ev, taskName)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness sweep did not post EvChildExit for dead PID with foreign listener")
+	}
+}
+
+func TestSupervisorLivenessSweepRestartsAlivePIDWithForeignPortOwner(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PortOwnerPID: func(port int) (int, bool, error) {
+			if port != 9123 {
+				t.Fatalf("PortOwnerPID called with port %d, want 9123", port)
+			}
+			return 44000, true, nil
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		if ev.Kind != api.EvManualRestart || ev.TaskName != taskName {
+			t.Fatalf("event = %+v, want EvManualRestart for %s", ev, taskName)
+		}
+		if ev.Body["reason"] != "port_owner_mismatch" {
+			t.Fatalf("event reason = %v, want port_owner_mismatch", ev.Body["reason"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness sweep did not post EvManualRestart for foreign port owner")
+	}
+}
+
+func TestSupervisorLivenessSweepDoesNotRestartAlivePIDOwningPort(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PortOwnerPID: func(port int) (int, bool, error) {
+			return 22036, true, nil
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		t.Fatalf("liveness sweep posted event for PID owning its port: %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestSupervisorLivenessSweepRejectsRecycledPID(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(process.PIDIdentityProof) error {
+			return process.ErrProcessIdentityMismatch
+		},
+		PortOwnerPID: func(port int) (int, bool, error) {
+			return 22036, true, nil
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		if ev.Kind != api.EvChildExit || ev.TaskName != taskName {
+			t.Fatalf("event = %+v, want EvChildExit for %s", ev, taskName)
+		}
+		if ev.Body["reason"] != "pid_identity_mismatch" {
+			t.Fatalf("event reason = %v, want pid_identity_mismatch", ev.Body["reason"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness sweep did not post EvChildExit for recycled PID")
+	}
+}
+
+func TestSupervisorLivenessSweepRejectsSelfOwnedPort(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	prevSelf := supervisorSelfPIDFn
+	supervisorSelfPIDFn = func() int { return 22036 }
+	defer func() { supervisorSelfPIDFn = prevSelf }()
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PortOwnerPID: func(port int) (int, bool, error) {
+			return 22036, true, nil
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		if ev.Kind != api.EvManualRestart || ev.TaskName != taskName {
+			t.Fatalf("event = %+v, want EvManualRestart for %s", ev, taskName)
+		}
+		if ev.Body["reason"] != "port_owner_self" {
+			t.Fatalf("event reason = %v, want port_owner_self", ev.Body["reason"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness sweep did not post EvManualRestart for self-owned port")
+	}
+}
+
 func TestSupervisorLivenessSweepRestartsAlivePIDWithUnboundPort(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`

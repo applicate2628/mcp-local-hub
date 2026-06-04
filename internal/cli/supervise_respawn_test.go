@@ -345,6 +345,50 @@ func TestHandleRespawn_RunningDaemonRespawnsSuccessfully(t *testing.T) {
 	}
 }
 
+func TestHandleRespawn_IdleDaemonSkipsTerminateAndStarts(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	intent := &api.SupervisorIntentFile{
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+	}
+	deps, spawnCalls, terminateCalls := newRespawnTestDeps(t, intent)
+	deps.respawnLate.Set(
+		func(d api.SupervisorDaemon) error {
+			spawnCalls.Add(1)
+			return nil
+		},
+		func(d api.SupervisorDaemon) error {
+			terminateCalls.Add(1)
+			return errors.New("no running PID recorded")
+		},
+	)
+
+	req := api.IPCRequest{
+		ID:  44,
+		Cmd: "respawn",
+		Args: map[string]any{
+			"task_name": taskName,
+			"force":     false,
+		},
+	}
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, req, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final {
+		t.Fatalf("expected idle daemon respawn OK+Final; got %+v", resp)
+	}
+	if terminateCalls.Load() != 0 {
+		t.Fatalf("idle respawn must not terminate without a recorded PID; got %d terminate calls", terminateCalls.Load())
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("idle respawn must spawn once; got %d", spawnCalls.Load())
+	}
+}
+
 func TestHandleRespawn_BareFormTaskNameMatchesCanonical(t *testing.T) {
 	intent := &api.SupervisorIntentFile{
 		Daemons: []api.SupervisorDaemon{

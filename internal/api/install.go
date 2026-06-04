@@ -2269,10 +2269,7 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 	// fall through to restart the remaining scheduler tasks for this
 	// server, skipping any task name already respawned via the supervisor
 	// (same combine-and-skip behavior as RestartAll). Bot PR #268 r3.
-	handledTasks := make(map[string]struct{}, len(results))
-	for _, r := range results {
-		handledTasks[strings.TrimPrefix(r.TaskName, "\\")] = struct{}{}
-	}
+	handledTasks := successfulRestartTaskNames(results)
 	sch, err := restartSchedulerFactory()
 	if err != nil {
 		if supervisorHandled && schedulerUnavailableError(err) {
@@ -2429,6 +2426,21 @@ type RestartResult struct {
 	Err      string `json:"error"`
 }
 
+func successfulRestartTaskNames(results []RestartResult) map[string]struct{} {
+	handledTasks := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result.Err != "" {
+			continue
+		}
+		name := strings.TrimPrefix(result.TaskName, "\\")
+		if name == "" {
+			continue
+		}
+		handledTasks[name] = struct{}{}
+	}
+	return handledTasks
+}
+
 // RestartAll stops+starts every scheduler task under our prefix. Returns a
 // per-task result list with any errors.
 //
@@ -2445,10 +2457,7 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	handledTasks := make(map[string]struct{}, len(results))
-	for _, result := range results {
-		handledTasks[strings.TrimPrefix(result.TaskName, "\\")] = struct{}{}
-	}
+	handledTasks := successfulRestartTaskNames(results)
 
 	sch, err := restartSchedulerFactory()
 	if err != nil {

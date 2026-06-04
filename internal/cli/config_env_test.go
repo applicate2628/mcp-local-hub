@@ -2,13 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/api/daemon_env_overlay"
+	"mcp-local-hub/internal/config"
 )
 
 func TestConfigEnvSetWritesOperatorOverlayForSingleDaemonServer(t *testing.T) {
@@ -165,6 +169,53 @@ func TestConfigEnvUnsetRemovesOnlyRequestedKey(t *testing.T) {
 	}
 }
 
+func TestConfigEnvUnsetMissingKeyPreservesAutoDiscoverySource(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	seedConfigEnvIntent(t, stateDir, api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-clangd-default`,
+		Server:   "clangd",
+		Daemon:   "default",
+	})
+	overlayPath := filepath.Join(stateDir, overlayBaseName)
+	manifest := &config.ServerManifest{
+		Name:             "clangd",
+		Kind:             "global",
+		Transport:        "stdio-bridge",
+		Command:          "clangd",
+		RequiredBinaries: []string{"clangd"},
+	}
+	firstBinDir := seedConfigEnvFakeBinary(t, "clangd")
+	if err := seedOverlayFromDiscovery(context.Background(), []*config.ServerManifest{manifest}, overlayPath, []string{firstBinDir}); err != nil {
+		t.Fatalf("initial seedOverlayFromDiscovery: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runConfigEnvUnset(stateDir, "clangd", "MISSING_KEY", &out); err != nil {
+		t.Fatalf("runConfigEnvUnset missing key: %v", err)
+	}
+	afterUnset, err := daemon_env_overlay.Load(overlayPath)
+	if err != nil {
+		t.Fatalf("load overlay after missing-key unset: %v", err)
+	}
+	row := afterUnset.Daemons[`\mcp-local-hub-clangd-default`]
+	if row.Source != "auto-discovery" {
+		t.Fatalf("missing-key unset Source = %q, want auto-discovery", row.Source)
+	}
+
+	secondBinDir := seedConfigEnvFakeBinary(t, "clangd")
+	if err := seedOverlayFromDiscovery(context.Background(), []*config.ServerManifest{manifest}, overlayPath, []string{secondBinDir}); err != nil {
+		t.Fatalf("refresh seedOverlayFromDiscovery: %v", err)
+	}
+	refreshed, err := daemon_env_overlay.Load(overlayPath)
+	if err != nil {
+		t.Fatalf("load refreshed overlay: %v", err)
+	}
+	gotPath := refreshed.Daemons[`\mcp-local-hub-clangd-default`].Env["PATH"]
+	if !strings.Contains(gotPath, secondBinDir) {
+		t.Fatalf("discovery refresh PATH = %q, want refreshed bin dir %q", gotPath, secondBinDir)
+	}
+}
+
 func TestDaemonOverlayEnvLoadsExpandedOperatorRow(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
@@ -192,6 +243,19 @@ func TestDaemonOverlayEnvLoadsExpandedOperatorRow(t *testing.T) {
 	if got["Path"] != `D:\memory\bin;C:\parent\bin` {
 		t.Fatalf("Path = %q, want parent path expanded", got["Path"])
 	}
+}
+
+func seedConfigEnvFakeBinary(t *testing.T, name string) string {
+	t.Helper()
+	binDir := apitest.HardenedTempDir(t)
+	binName := name
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, binName), []byte{0x4d, 0x5a}, 0o755); err != nil {
+		t.Fatalf("seed fake binary: %v", err)
+	}
+	return binDir
 }
 
 func seedConfigEnvIntent(t *testing.T, stateDir string, daemons ...api.SupervisorDaemon) {
