@@ -32,4 +32,7 @@ global:
   - server: perftools
     daemon: default
     port: 9131
+  - server: repomix
+    daemon: default
+    port: 9133
 workspace_scoped: []
