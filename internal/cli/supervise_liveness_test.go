@@ -119,6 +119,123 @@ func TestLoadSupervisorCurrentRunningPersistsDeadRecordedPIDAsIdle(t *testing.T)
 	}
 }
 
+func TestSupervisorStartupRuntimeDoesNotHydrateStaleCleanedStoppedDaemon(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	startedAt := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	if err := api.WriteSupervisorState(filepath.Join(stateDir, "supervisor-state.json"), &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			taskName: {
+				State:         "running",
+				CurrentPID:    22036,
+				PIDGeneration: 7,
+				StartedAt:     startedAt,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	currentRunningVerifyPIDIdentityFn = func(process.PIDIdentityProof) error {
+		return process.ErrProcessIdentityUnsupported
+	}
+	currentRunningIsPIDAliveFn = func(pid int) bool {
+		if pid != 22036 {
+			t.Fatalf("liveness checked pid %d, want 22036", pid)
+		}
+		return false
+	}
+	defer func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+	}()
+
+	tracker, currentRunning, runningPIDs, err := loadSupervisorStartupRuntime(stateDir)
+	if err != nil {
+		t.Fatalf("loadSupervisorStartupRuntime: %v", err)
+	}
+	if len(currentRunning) != 0 || len(runningPIDs) != 0 {
+		t.Fatalf("stale cleaned daemon must not be current-running: currentRunning=%v pids=%v", currentRunning, runningPIDs)
+	}
+	entry, ok := tracker.Get(taskName)
+	if !ok {
+		t.Fatalf("tracker entry missing for %s", taskName)
+	}
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+		t.Fatalf("tracker hydrated stale running state: %+v", entry)
+	}
+
+	now := time.Date(2026, 6, 4, 10, 1, 0, 0, time.UTC)
+	stoppedIntent := &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		taskName: {
+			Desired:   api.IntentDesiredStopped,
+			Reason:    api.IntentReasonUserDisabled,
+			UpdatedAt: now,
+		},
+	}}
+	spawned := false
+	r := NewReconciler(func(api.SupervisorDaemon) error {
+		spawned = true
+		return nil
+	}, func(api.SupervisorDaemon) error { return nil })
+	r.Reconcile(intent, stoppedIntent, currentRunning, now)
+	if spawned {
+		t.Fatal("stale cleaned daemon with stopped daemon-intent was respawned")
+	}
+
+	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	if err != nil {
+		t.Fatalf("supervisorStatusDaemons: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0]["state"] == "Running" || rows[0]["state"] == "Restarting" {
+		t.Fatalf("stale cleaned daemon surfaced as active: %+v", rows[0])
+	}
+	if got := rows[0]["current_pid"]; got != 0 {
+		t.Fatalf("current_pid = %v, want 0", got)
+	}
+	if _, ok := rows[0]["stale_pid"]; ok {
+		t.Fatalf("stale cleaned daemon reported stale_pid from tracker: %+v", rows[0])
+	}
+
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restoreProbe := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(int) bool { return false },
+		PortLive: func(int) bool { return false },
+	})
+	defer restoreProbe()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+	select {
+	case ev := <-events:
+		t.Fatalf("liveness reposted stale cleaned daemon: %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestSupervisorLivenessSweepPostsChildExitForDeadRunningPID(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`

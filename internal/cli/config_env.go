@@ -232,15 +232,21 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 		if taskName == "" || isSupervisorMaintenanceTask(taskName) {
 			continue
 		}
-		server, daemon := api.ParseManagedTaskName(taskName)
+		server := strings.TrimSpace(d.Server)
+		daemon := strings.TrimSpace(d.Daemon)
 		if server == "" {
-			server = d.Server
+			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
+			server = parsedServer
+			if daemon == "" {
+				daemon = parsedDaemon
+			}
 		}
 		if daemon == "" {
-			daemon = d.Daemon
-			if daemon == "" {
-				daemon = "default"
-			}
+			_, parsedDaemon := api.ParseManagedTaskName(taskName)
+			daemon = parsedDaemon
+		}
+		if daemon == "" {
+			daemon = "default"
 		}
 		target := configEnvTarget{
 			TaskName:  taskName,

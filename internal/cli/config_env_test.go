@@ -61,6 +61,72 @@ func TestConfigEnvSetRejectsAmbiguousMultiDaemonServer(t *testing.T) {
 	}
 }
 
+func TestConfigEnvSetListWorkspaceLSPUsesDescriptorIdentity(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-lsp-deadbeef-go`
+	seedConfigEnvIntent(t, stateDir, api.SupervisorDaemon{
+		TaskName:  taskName,
+		Server:    "mcp-language-server",
+		Daemon:    "lsp-deadbeef-go",
+		Workspace: `D:\workspaces\go`,
+		Port:      9124,
+	})
+
+	var out bytes.Buffer
+	if err := runConfigEnvSet(stateDir, "mcp-language-server/lsp-deadbeef-go", "GOPLSCACHE", `D:\cache\gopls`, &out); err != nil {
+		t.Fatalf("runConfigEnvSet: %v", err)
+	}
+
+	ov, err := daemon_env_overlay.Load(filepath.Join(stateDir, overlayBaseName))
+	if err != nil {
+		t.Fatalf("load overlay: %v", err)
+	}
+	row, ok := ov.Daemons[taskName]
+	if !ok {
+		t.Fatalf("workspace LSP overlay row missing: %+v", ov.Daemons)
+	}
+	if got := row.Env["GOPLSCACHE"]; got != `D:\cache\gopls` {
+		t.Fatalf("GOPLSCACHE = %q, want D:\\cache\\gopls", got)
+	}
+
+	out.Reset()
+	if err := runConfigEnvList(stateDir, "mcp-language-server/lsp-deadbeef-go", &out); err != nil {
+		t.Fatalf("runConfigEnvList: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "mcp-language-server/lsp-deadbeef-go") {
+		t.Fatalf("list output used wrong identity, got %q", got)
+	}
+	if !strings.Contains(got, "GOPLSCACHE=D:\\cache\\gopls") {
+		t.Fatalf("list output missing override, got %q", got)
+	}
+}
+
+func TestConfigEnvSetLegacyTaskNameFallbackStillWorks(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	seedConfigEnvIntent(t, stateDir, api.SupervisorDaemon{
+		TaskName: taskName,
+	})
+
+	var out bytes.Buffer
+	if err := runConfigEnvSet(stateDir, "memory/default", "MEMORY_FILE_PATH", `D:\memory\legacy.jsonl`, &out); err != nil {
+		t.Fatalf("runConfigEnvSet: %v", err)
+	}
+
+	ov, err := daemon_env_overlay.Load(filepath.Join(stateDir, overlayBaseName))
+	if err != nil {
+		t.Fatalf("load overlay: %v", err)
+	}
+	row, ok := ov.Daemons[taskName]
+	if !ok {
+		t.Fatalf("legacy task-name overlay row missing: %+v", ov.Daemons)
+	}
+	if got := row.Env["MEMORY_FILE_PATH"]; got != `D:\memory\legacy.jsonl` {
+		t.Fatalf("MEMORY_FILE_PATH = %q, want D:\\memory\\legacy.jsonl", got)
+	}
+}
+
 func TestConfigEnvUnsetRemovesOnlyRequestedKey(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	seedConfigEnvIntent(t, stateDir, api.SupervisorDaemon{

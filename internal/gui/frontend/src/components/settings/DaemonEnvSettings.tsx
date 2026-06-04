@@ -10,6 +10,11 @@ const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 type Banner = { kind: "ok" | "error"; text: string };
 
+function stableEnvSignature(env: Record<string, string> | undefined): string {
+  if (!env) return "";
+  return JSON.stringify(Object.entries(env).sort(([a], [b]) => a.localeCompare(b)));
+}
+
 export function DaemonEnvSettings(): preact.JSX.Element {
   const [rows, setRows] = useState<DaemonEnvRow[]>([]);
   const [selectedTask, setSelectedTask] = useState("");
@@ -21,6 +26,10 @@ export function DaemonEnvSettings(): preact.JSX.Element {
   const selected = useMemo(
     () => rows.find((row) => row.task_name === selectedTask) ?? rows[0],
     [rows, selectedTask],
+  );
+  const selectedEnvSignature = useMemo(
+    () => stableEnvSignature(selected?.env),
+    [selected?.env],
   );
 
   useEffect(() => {
@@ -38,7 +47,7 @@ export function DaemonEnvSettings(): preact.JSX.Element {
       setKey(nextKey);
     }
     setValue(selected.env[nextKey] ?? "");
-  }, [selected?.task_name]);
+  }, [selected?.task_name, selectedEnvSignature]);
 
   async function refreshRows() {
     setBusy(true);

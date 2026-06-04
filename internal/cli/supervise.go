@@ -578,17 +578,17 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		return fmt.Errorf("load intent files: %w", intentErr)
 	}
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
-	runtimeTracker, trackerErr := loadDaemonRuntimeTrackerFromStatePath(statePath)
-	if trackerErr != nil {
+	runtimeTracker, currentRunning, runningPIDs, stateErr := loadSupervisorStartupRuntime(stateDir)
+	if stateErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "error",
 			Source:   "lifecycle",
 			Event:    "supervise-startup-failed",
 			Body: map[string]any{
-				"err": trackerErr.Error(),
+				"err": stateErr.Error(),
 			},
 		})
-		return fmt.Errorf("load supervisor-state.json: %w", trackerErr)
+		return fmt.Errorf("load supervisor-state.json: %w", stateErr)
 	}
 
 	// Load daemon-env-overrides.yaml ONCE at startup. Per spec
@@ -686,18 +686,6 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// over the production closures so wiring tests can capture spawn
 	// fan-out without launching real child processes.
 	//
-	currentRunning, runningPIDs, stateErr := loadSupervisorCurrentRunning(stateDir)
-	if stateErr != nil {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "error",
-			Source:   "lifecycle",
-			Event:    "supervise-startup-failed",
-			Body: map[string]any{
-				"err": stateErr.Error(),
-			},
-		})
-		return fmt.Errorf("load supervisor-state.json: %w", stateErr)
-	}
 	// PER-SPAWN Job Object architecture (ADR #239 Option B,
 	// 2026-05-28). Each daemon spawn allocates its own Job Object
 	// inside the spawn closure, so orphan cleanup is task-scoped
@@ -1823,6 +1811,18 @@ func loadIntentFiles(
 // A missing file is valid first boot. Any other read/parse error is fatal:
 // corrupt supervisor-state.json is an untrusted warm-start input and must not
 // silently collapse to "no daemons running".
+func loadSupervisorStartupRuntime(stateDir string) (*DaemonRuntimeTracker, map[string]bool, map[string]runningProcessIdentity, error) {
+	currentRunning, runningPIDs, err := loadSupervisorCurrentRunning(stateDir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tracker, err := loadDaemonRuntimeTrackerFromStatePath(filepath.Join(stateDir, "supervisor-state.json"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return tracker, currentRunning, runningPIDs, nil
+}
+
 func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]runningProcessIdentity, error) {
 	result := map[string]bool{}
 	pids := map[string]runningProcessIdentity{}
