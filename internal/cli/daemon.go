@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/daemon_env_overlay"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/secrets"
@@ -103,7 +104,11 @@ See also: install, logs, restart, status.`,
 			// Resolve env.
 			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
-			env, err := resolver.ResolveMap(m.Env)
+			envRefs, err := daemonEnvRefsWithOverlay(server, daemonName, m.Env)
+			if err != nil {
+				return err
+			}
+			env, err := resolver.ResolveMap(envRefs)
 			if err != nil {
 				return err
 			}
@@ -295,6 +300,34 @@ See also: install, logs, restart, status.`,
 	// Hidden — supervisor-intent.json descriptors point here.
 	c.AddCommand(newDaemonSerenaProxyCmd())
 	return c
+}
+
+func daemonEnvRefsWithOverlay(server, daemonName string, manifestEnv map[string]string) (map[string]string, error) {
+	merged := make(map[string]string, len(manifestEnv))
+	for k, v := range manifestEnv {
+		merged[k] = v
+	}
+	stateDir, err := stateDirFunc()
+	if err != nil {
+		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
+	}
+	ov, err := daemon_env_overlay.Load(filepath.Join(stateDir, overlayBaseName))
+	if err != nil {
+		return nil, fmt.Errorf("load env overlay: %w", err)
+	}
+	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
+	overlayEnv := daemon_env_overlay.LookupOverlay(ov, taskName)
+	if len(overlayEnv) == 0 {
+		return merged, nil
+	}
+	expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ())
+	if err != nil {
+		return nil, fmt.Errorf("expand env overlay for %s: %w", taskName, err)
+	}
+	for k, v := range expanded {
+		merged[k] = v
+	}
+	return merged, nil
 }
 
 // logBaseDir returns the per-OS directory for daemon logs.

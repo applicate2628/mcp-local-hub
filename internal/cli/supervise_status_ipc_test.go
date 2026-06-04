@@ -48,6 +48,11 @@ func TestIPCStatusReadsRuntimeTracker(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	tracker.MarkSpawned(`\mcp-local-hub-memory-default`, 4321, time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC))
 	tracker.MarkTerminated(`\mcp-local-hub-serena-codex`)
+	restoreLiveness := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 4321 },
+		PortLive: func(port int) bool { return port == 9101 },
+	})
+	defer restoreLiveness()
 
 	serverConn, clientConn := net.Pipe()
 	defer clientConn.Close()

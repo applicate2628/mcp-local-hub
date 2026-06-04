@@ -2259,6 +2259,11 @@ func (a *API) stopKillCore(server, daemonFilter string) ([]RestartResult, error)
 // to opts.Writer (or os.Stderr by default) and never propagate — the
 // restart already happened.
 func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
+	if results, handled, err := restartSupervisorOwnedDaemons(context.Background(), server, daemonFilter); err != nil {
+		return nil, err
+	} else if handled {
+		return results, nil
+	}
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err
@@ -2419,6 +2424,11 @@ type RestartResult struct {
 // stale daemon they wanted to replace. We have to kill the daemon
 // process by port first.
 func (a *API) RestartAll() ([]RestartResult, error) {
+	if results, handled, err := restartSupervisorOwnedDaemons(context.Background(), "", ""); err != nil {
+		return nil, err
+	} else if handled {
+		return results, nil
+	}
 	sch, err := scheduler.New()
 	if err != nil {
 		return nil, err

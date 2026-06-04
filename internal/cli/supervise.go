@@ -767,6 +767,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	}
 	ctrl.intentCache.Refresh(intent)
 	ctrl.daemonIntent.Refresh(daemonIntent)
+	hydrateControllerRunningStates(ctrl, currentRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
 
 	// Crash-event bridge: the production spawn fn posts crashEvent
@@ -779,6 +780,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// receive crash events and don't need this goroutine.
 	if reconcileSpawnFn == nil {
 		go runCrashEventBridge(loopCtx, crashCh, loop, events)
+		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events)
 	}
 
 	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json
@@ -1836,11 +1838,19 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		return result, pids, nil
 	}
 	expectedExe := canonicalMcphubPath()
+	intentPorts := supervisorIntentPortMapForStateDir(stateDir)
+	stale := map[string]struct{}{}
+	markStale := func(taskName string) {
+		if taskName != "" {
+			stale[taskName] = struct{}{}
+		}
+	}
 	for taskName, ds := range state.Daemons {
 		if ds.State != "running" || ds.CurrentPID <= 0 {
 			continue
 		}
 		if ds.PIDGeneration <= 0 || ds.StartedAt == "" || expectedExe == "" {
+			markStale(taskName)
 			continue
 		}
 		proof := process.PIDIdentityProof{
@@ -1850,14 +1860,49 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		}
 		if err := currentRunningVerifyPIDIdentityFn(proof); err != nil {
 			if !errors.Is(err, process.ErrProcessIdentityUnsupported) || !currentRunningIsPIDAliveFn(ds.CurrentPID) {
+				markStale(taskName)
 				continue
 			}
 		}
-		result[taskName] = true
-		pids[taskName] = runningProcessIdentity{
+		startedAt := time.Time{}
+		if parsed, err := time.Parse(time.RFC3339Nano, ds.StartedAt); err == nil {
+			startedAt = parsed.UTC()
+		}
+		canonicalTask := canonicalSupervisorTaskName(taskName)
+		if port := intentPorts[canonicalTask]; port > 0 {
+			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
+				TaskName: canonicalTask,
+				Port:     port,
+			}, DaemonRuntimeEntry{
+				State:      daemonRuntimeStateRunning,
+				CurrentPID: ds.CurrentPID,
+				StartedAt:  startedAt,
+			}, time.Now().UTC())
+			if !live {
+				if reason != "port_unbound" {
+					markStale(taskName)
+					continue
+				}
+			}
+		}
+		result[canonicalTask] = true
+		pids[canonicalTask] = runningProcessIdentity{
 			PID:           ds.CurrentPID,
 			PIDGeneration: ds.PIDGeneration,
 			StartedAt:     ds.StartedAt,
+		}
+	}
+	if len(stale) > 0 {
+		for taskName := range stale {
+			ds := state.Daemons[taskName]
+			ds.State = "idle"
+			ds.CurrentPID = 0
+			ds.StartedAt = ""
+			ds.JobProtection = nil
+			state.Daemons[taskName] = ds
+		}
+		if err := api.WriteSupervisorState(statePath, state); err != nil {
+			return result, pids, fmt.Errorf("persist stale supervisor-state cleanup: %w", err)
 		}
 	}
 	return result, pids, nil

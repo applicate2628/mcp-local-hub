@@ -30,6 +30,7 @@ import {
   type WeeklyScheduleSwapFailure,
 } from "../../lib/api-daemons";
 import { WeeklyMembershipTable } from "./WeeklyMembershipTable";
+import { DaemonEnvSettings } from "./DaemonEnvSettings";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionDaemonsProps = {
@@ -308,6 +309,8 @@ export function SectionDaemons({
         onDirtyChange={setTableDirty}
         onDeltasChange={setTableDeltas}
       />
+
+      <DaemonEnvSettings />
 
       <div class="settings-section-footer">
         {banner ? (

@@ -66,6 +66,20 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 				port = p
 			}
 		}
+		stalePID := 0
+		if ok && runtimeState.State == daemonRuntimeStateRunning {
+			live, _ := supervisorDaemonEntryLive(api.SupervisorDaemon{
+				TaskName: d.TaskName,
+				Server:   server,
+				Daemon:   daemon,
+				Port:     port,
+			}, runtimeState, time.Now().UTC())
+			if !live {
+				stalePID = runtimeState.CurrentPID
+				stateText = "Restarting"
+				runtimeState.CurrentPID = 0
+			}
+		}
 		row := map[string]any{
 			"task_name":        taskName,
 			"server":           server,
@@ -81,6 +95,9 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 			"backoff_until":    "",
 			"quarantine_since": "",
 			"is_maintenance":   isSupervisorMaintenanceTask(taskName),
+		}
+		if stalePID != 0 {
+			row["stale_pid"] = stalePID
 		}
 		// Surface orphan PID when present (Windows post-create orphan
 		// path where best-effort kill failed). Operator visibility for

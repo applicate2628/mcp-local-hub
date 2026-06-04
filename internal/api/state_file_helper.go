@@ -72,6 +72,16 @@ func WriteStateFileAtomic(path string, payload any) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
+	return WriteStateFileBytesAtomic(path, raw)
+}
+
+// WriteStateFileBytesAtomic writes an already-marshaled state-file payload
+// through the same hardened state-file pipeline as WriteStateFileAtomic.
+//
+// This exists for state files whose on-disk format is not JSON (for example,
+// operator-authored YAML) but that still need the state-file parent-DACL relax
+// policy, audit event, atomic temp+rename write, and per-file flock.
+func WriteStateFileBytesAtomic(path string, raw []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
@@ -89,6 +99,17 @@ func WriteStateFileAtomic(path string, payload any) error {
 	}
 	defer func() { _ = lk.Unlock() }()
 
+	return WriteStateFileBytesLockHeld(path, raw)
+}
+
+// WriteStateFileBytesLockHeld writes an already-marshaled state-file payload
+// through the hardened state-file secure writer without acquiring the per-file
+// flock. Callers use this only for read-modify-write helpers that already hold
+// path + ".lock"; otherwise use WriteStateFileBytesAtomic.
+func WriteStateFileBytesLockHeld(path string, raw []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
 	return secureWriteStateFileWithOperatorOpt(path, raw)
 }
 
