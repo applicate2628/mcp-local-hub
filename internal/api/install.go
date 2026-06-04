@@ -592,8 +592,11 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 		}
 		reg := NewRegistry(regPath)
 		if err := reg.Load(); err == nil {
-			for _, e := range reg.Workspaces {
+			for _, e := range reg.LSPEntries() {
 				if e.TaskName == "" {
+					continue
+				}
+				if !IsLazyProxyTaskName(e.TaskName) {
 					continue
 				}
 				bare := strings.TrimPrefix(e.TaskName, "\\")

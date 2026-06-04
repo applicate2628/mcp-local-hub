@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 )
 
 var lspEnsureLocks sync.Map // map[string]*sync.Mutex, keyed by workspaceKey + "\x00" + language
@@ -86,11 +88,39 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		if _, err := os.Stat(canonicalExe); err != nil {
 			return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
 		}
+		sch, err := newScheduler()
+		if err != nil {
+			return WorkspaceEntry{}, fmt.Errorf("scheduler for LSP promote: %w", err)
+		}
+		var legacyXML []byte
+		if xml, xerr := sch.ExportXML(prior.TaskName); xerr == nil {
+			legacyXML = xml
+		} else if !errors.Is(xerr, scheduler.ErrTaskNotFound) {
+			return WorkspaceEntry{}, fmt.Errorf("export legacy LSP task %s: %w", prior.TaskName, xerr)
+		}
+		restoreLegacyTask := func() {}
+		if len(legacyXML) > 0 {
+			capturedXML := legacyXML
+			restoreLegacyTask = func() {
+				if prior.Port > 0 {
+					_ = killByPortFn(prior.Port, 5*time.Second)
+				}
+				_ = sch.ImportXML(prior.TaskName, capturedXML)
+				_ = sch.Run(prior.TaskName)
+			}
+		}
 		if portReady && !owned {
 			_ = killByPortFn(prior.Port, 5*time.Second)
 		}
+		if len(legacyXML) > 0 {
+			if derr := sch.Delete(prior.TaskName); derr != nil && !errors.Is(derr, scheduler.ErrTaskNotFound) {
+				restoreLegacyTask()
+				return WorkspaceEntry{}, fmt.Errorf("delete legacy LSP task %s before promote: %w", prior.TaskName, derr)
+			}
+		}
 		restoreIntent, err := a.upsertLSPSupervisorIntent(prior, canonicalExe)
 		if err != nil {
+			restoreLegacyTask()
 			return WorkspaceEntry{}, err
 		}
 		intentWritten := true
@@ -105,12 +135,14 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		if _, err := registerSupervisorReconcileFn(reconcileCtx, true); err != nil {
 			cancel()
 			rollbackIntent()
+			restoreLegacyTask()
 			return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
 		}
 		cancel()
 
 		if err := proxyReadinessFn(prior.Port, 10*time.Second); err != nil {
 			rollbackIntent()
+			restoreLegacyTask()
 			return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", prior.Port, err)
 		}
 		return prior, nil

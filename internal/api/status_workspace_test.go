@@ -172,6 +172,17 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
 		Lifecycle:     LifecycleActive,
 	})
+	if err := reg.PutSerena(WorkspaceEntry{
+		WorkspaceKey:  "serena1234",
+		WorkspacePath: "/home/u/serena",
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+		TaskName:      "mcp-local-hub-serena-default",
+		Lifecycle:     LifecycleActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := reg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +209,11 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	}
 	if row.Lifecycle != LifecycleActive {
 		t.Fatalf("Lifecycle = %q, want %q", row.Lifecycle, LifecycleActive)
+	}
+	for _, row := range rows {
+		if row.TaskName == "mcp-local-hub-serena-default" || row.Language == SerenaLanguageSentinel {
+			t.Fatalf("StatusWithOpts merged non-LSP registry row: %+v", row)
+		}
 	}
 }
 

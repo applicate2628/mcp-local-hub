@@ -171,6 +171,12 @@ export function collectLspRows(
     // language still surfaces (e.g. a legacy direct-stdio entry an
     // operator never migrated to the workspace registry).
     const expectedNames = new Set<string>();
+    // The shared per-language router entry (mcp-language-server-<lang>) serves
+    // every registered workspace of that language via path routing. A migrated
+    // workspace's client_entries may still name the old per-workspace suffixed
+    // entry, so recognize the router name explicitly; rollback reconstructs
+    // pre-router entries from client_entries, so the registry is not rewritten.
+    expectedNames.add(`${LSP_MANIFEST_SERVER}-${language}`);
     for (const we of filteredWs) {
       for (const v of Object.values(we.client_entries ?? {})) {
         if (v) expectedNames.add(v);

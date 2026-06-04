@@ -144,6 +144,9 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 				if legacy == nil || !entryPointsAtLegacyLSPPort(legacy, portsByLanguage[language]) {
 					continue
 				}
+				// Leave registry ClientEntries on the legacy name so rollback
+				// can reconstruct pre-router entries; GUI reads recognize the
+				// shared router name separately for visibility.
 				ops = append(ops, lspClientRouterOp{
 					kind:      "remove",
 					language:  language,

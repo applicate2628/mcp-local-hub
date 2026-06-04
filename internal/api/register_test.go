@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1164,6 +1165,60 @@ func TestRegister_SupervisedWritesIntentAndDeletesLegacyLSPTask(t *testing.T) {
 	}
 }
 
+func TestRegister_SupervisedDeleteLegacyTaskFailureAbortsBeforeIntent(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	reconcileCalled := false
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalled = true
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, "go")
+	h.fakeSch.tasks[taskName] = true
+	h.fakeSch.xml[taskName] = []byte(`<Task name="` + taskName + `"/>`)
+	h.fakeSch.failDeleteErr = fmt.Errorf("scheduler access denied")
+
+	_, err = mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err == nil {
+		t.Fatal("expected supervised register to fail when deleting the legacy task fails")
+	}
+	if !strings.Contains(err.Error(), "delete legacy task "+taskName+" before supervised promote") {
+		t.Fatalf("error = %v, want legacy delete context", err)
+	}
+	if reconcileCalled {
+		t.Fatal("supervised register reconciled after legacy task deletion failed")
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if intent != nil {
+		intentTask := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")
+		if row := intent.FindSupervisorDaemonByTaskName(intentTask); row != nil {
+			t.Fatalf("supervisor-intent row %s was written despite delete failure: %+v", intentTask, row)
+		}
+	}
+}
+
 func TestRegister_EntryNameCollision(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
@@ -1686,7 +1741,9 @@ type fakeScheduler struct {
 	runHook           func(name string)      // optional hook called at the top of Run before the induced-failure check
 	runNames          []string               // ordered list of task names passed to Run
 	listSeed          []scheduler.TaskStatus // pre-seeded tasks returned (prefix-filtered) by List; empty by default
+	failDeleteErr     error                  // if non-nil, Delete returns this error before mutating state
 	deleteNames       []string               // ordered list of task names passed to Delete (prune observability)
+	importNames       []string               // ordered list of task names passed to ImportXML
 }
 
 func writeSupervisorIntentForRegisterTest(t *testing.T, path string, f *SupervisorIntentFile) {
@@ -1725,6 +1782,10 @@ func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
 	return nil
 }
 func (f *fakeScheduler) Delete(name string) error {
+	if f.failDeleteErr != nil {
+		f.deleteNames = append(f.deleteNames, name)
+		return f.failDeleteErr
+	}
 	delete(f.tasks, name)
 	f.deleteNames = append(f.deleteNames, name)
 	// Mirror real Delete on the seeded-List surface so a pruned task no longer
@@ -1764,6 +1825,7 @@ func (f *fakeScheduler) ImportXML(name string, xml []byte) error {
 	if f.xml == nil {
 		f.xml = map[string][]byte{}
 	}
+	f.importNames = append(f.importNames, name)
 	f.xml[name] = xml
 	f.tasks[name] = true
 	return nil
