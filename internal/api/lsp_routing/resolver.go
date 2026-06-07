@@ -26,8 +26,8 @@ type ResolveResult struct {
 	Entry         *api.WorkspaceEntry
 	// ProjectMarker is true only when WorkspaceRoot was selected by one of
 	// the language-specific project_markers from the manifest. A .git fallback
-	// can resolve an already-registered row, but first-touch auto-register must
-	// require this stronger marker.
+	// can resolve an already-registered row, but markers are discovery hints only
+	// and must not be treated as authorization to register a new workspace.
 	ProjectMarker bool
 }
 
@@ -94,7 +94,8 @@ func markerMap(languages []config.LanguageSpec) map[string][]string {
 
 // ResolveByPath maps an absolute file or directory path plus language to a
 // canonical workspace root. The result is returned even when no matching
-// registry row exists yet, allowing the future router to auto-register on miss.
+// registry row exists yet so callers can produce a precise error or require
+// explicit registration before forwarding LSP traffic.
 func (r *WorkspaceResolver) ResolveByPath(path, language string) (*ResolveResult, error) {
 	if path == "" || strings.TrimSpace(language) == "" {
 		return nil, ErrInvalidPath

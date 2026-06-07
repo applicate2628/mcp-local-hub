@@ -416,18 +416,14 @@ func (s *Server) workspaceFromResolvedLSPPath(
 		}
 		return resolved.Entry, true
 	}
-	if !resolved.ProjectMarker {
-		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
-			"no language project marker for "+language+" under "+pathArg+"; refusing .git-only LSP auto-register")
-		return nil, false
-	}
-	if deps.AutoRegisterFn == nil {
-		writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
-			"LSP auto-register is not configured", nil)
-		return nil, false
-	}
-	entry, ok := s.ensureResolvedLSPWorkspace(w, r, deps, tb, resolved, language)
-	return entry, ok
+	// Do not let untrusted MCP tool arguments authorize new local workspaces.
+	// The router may use caller-supplied paths to choose among already-registered
+	// workspace proxies, but first-touch registration must come from an explicit
+	// user action (setup warm rows, GUI Enable, or mcphub register). Project
+	// markers are only discovery hints, not an access-control boundary.
+	writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
+		"LSP workspace for "+pathArg+" is not registered; run mcphub register for this workspace before using the LSP router")
+	return nil, false
 }
 
 func isRelativeLSPPathArg(pathArg string) bool {
