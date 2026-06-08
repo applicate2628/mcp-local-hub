@@ -130,7 +130,7 @@ describe("SectionDaemons (editable, A4-b PR #1 / Task 11)", () => {
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
   });
 
-  it("bubbles dirty=true via onDirtyChange after editing daemon env", async () => {
+  it("bubbles env dirty to the navigation guard without enabling section Save", async () => {
     const onDirty = vi.fn();
     const { findByTestId } = render(<SectionDaemons snapshot={snap()} onDirtyChange={onDirty} />);
     const saveBtn = (await findByTestId("daemons-save")) as HTMLButtonElement;
@@ -143,7 +143,7 @@ describe("SectionDaemons (editable, A4-b PR #1 / Task 11)", () => {
     fireEvent.input(value, { target: { value: "draft.jsonl" } });
 
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
-    expect(saveBtn.disabled).toBe(false);
+    expect(saveBtn.disabled).toBe(true);
   });
 
   it("Reset clears membership edits and resets dirty state (P2-A)", async () => {

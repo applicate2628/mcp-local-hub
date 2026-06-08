@@ -76,11 +76,11 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 			if msg == "" {
 				msg = result.Code
 			}
-			results = append(results, RestartResult{TaskName: d.TaskName, Err: msg})
+			results = append(results, RestartResult{TaskName: d.TaskName, Err: msg, Code: result.Code})
 			continue
 		}
 		NewAPI().recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), nil)
-		results = append(results, RestartResult{TaskName: d.TaskName})
+		results = append(results, RestartResult{TaskName: d.TaskName, Code: result.Code})
 	}
 	return results, true, nil
 }

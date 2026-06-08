@@ -101,7 +101,8 @@ export function SectionDaemons({
   const schedDirty = schedValue !== persistedSched;
   const retryDirty = retryValue !== persistedRetry;
   const knobDirty = knobValue !== persistedKnob;
-  const dirty = schedDirty || retryDirty || knobDirty || tableDirty || envDirty;
+  const sectionDirty = schedDirty || retryDirty || knobDirty || tableDirty;
+  const dirty = sectionDirty || envDirty;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
@@ -121,7 +122,7 @@ export function SectionDaemons({
   }
 
   async function save() {
-    if (!dirty) return;
+    if (!sectionDirty) return;
     setBusy(true);
     setBanner(null);
     setSchedError(null);
@@ -323,7 +324,7 @@ export function SectionDaemons({
         ) : null}
         <button
           type="button"
-          disabled={!dirty || busy}
+          disabled={!sectionDirty || busy}
           onClick={() => void save()}
           data-testid="daemons-save"
         >

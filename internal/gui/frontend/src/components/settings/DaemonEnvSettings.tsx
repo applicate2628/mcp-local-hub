@@ -7,6 +7,7 @@ import {
 } from "../../api";
 
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const DEFAULT_ENV_KEY = "MEMORY_FILE_PATH";
 
 type Banner = { kind: "ok" | "error"; text: string };
 
@@ -24,9 +25,14 @@ export function DaemonEnvSettings({
 }: DaemonEnvSettingsProps = {}): preact.JSX.Element {
   const [rows, setRows] = useState<DaemonEnvRow[]>([]);
   const [selectedTask, setSelectedTask] = useState("");
-  const [key, setKey] = useState("MEMORY_FILE_PATH");
+  const [key, setKey] = useState(DEFAULT_ENV_KEY);
   const [value, setValue] = useState("");
-  const [draftBase, setDraftBase] = useState({ taskName: "", envSignature: "" });
+  const [draftBase, setDraftBase] = useState({
+    taskName: "",
+    envSignature: "",
+    key: DEFAULT_ENV_KEY,
+    value: "",
+  });
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
 
@@ -46,10 +52,7 @@ export function DaemonEnvSettings({
     ) {
       return false;
     }
-    if (!Object.prototype.hasOwnProperty.call(selected.env, key)) {
-      return key.trim() !== "" || value !== "";
-    }
-    return value !== selected.env[key];
+    return key !== draftBase.key || value !== draftBase.value;
   }, [selected?.task_name, selectedEnvSignature, draftBase, key, value]);
 
   useEffect(() => {
@@ -70,6 +73,8 @@ export function DaemonEnvSettings({
     setDraftBase({
       taskName: selected.task_name,
       envSignature: selectedEnvSignature,
+      key: nextKey,
+      value: selected.env[nextKey] ?? "",
     });
   }, [selected?.task_name, selectedEnvSignature]);
 
@@ -141,7 +146,7 @@ export function DaemonEnvSettings({
             setSelectedTask(task);
             const row = rows.find((r) => r.task_name === task);
             const keys = Object.keys(row?.env ?? {}).sort();
-            const nextKey = keys[0] ?? "MEMORY_FILE_PATH";
+            const nextKey = keys[0] ?? DEFAULT_ENV_KEY;
             setKey(nextKey);
             setValue(row?.env[nextKey] ?? "");
           }}

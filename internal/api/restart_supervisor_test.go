@@ -194,7 +194,7 @@ func TestRestartFallsBackToSchedulerWhenSupervisorRespawnFails(t *testing.T) {
 	}
 }
 
-func TestRestartAllFallsBackToSchedulerWhenSupervisorRespawnFails(t *testing.T) {
+func TestRestartAllDoesNotFallBackToSchedulerWhenSupervisorRespawnIsRefused(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)
 	defer restoreState()
@@ -226,11 +226,51 @@ func TestRestartAllFallsBackToSchedulerWhenSupervisorRespawnFails(t *testing.T) 
 	if err != nil {
 		t.Fatalf("RestartAll: %v", err)
 	}
+	if len(fake.runNames) != 0 {
+		t.Fatalf("scheduler fallback Run calls = %v, want none for supervisor refusal", fake.runNames)
+	}
+	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err == "" {
+		t.Fatalf("results = %+v, want only supervisor refusal row", results)
+	}
+}
+
+func TestRestartAllFallsBackToSchedulerWhenSupervisorUnavailable(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	const taskName = `\mcp-local-hub-foo-default`
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "foo",
+			Daemon:   "default",
+		}},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+		return RespawnResult{Success: false, Code: "SUPERVISOR_UNAVAILABLE", Message: "supervisor unavailable"}, nil
+	})
+	defer restoreRespawn()
+
+	fake := &restartAllFakeScheduler{tasks: []scheduler.TaskStatus{{Name: taskName}}}
+	origFactory := restartSchedulerFactory
+	restartSchedulerFactory = func() (scheduler.Scheduler, error) { return fake, nil }
+	defer func() { restartSchedulerFactory = origFactory }()
+
+	results, err := NewAPI().RestartAll()
+	if err != nil {
+		t.Fatalf("RestartAll: %v", err)
+	}
 	if len(fake.runNames) != 1 || fake.runNames[0] != taskName {
 		t.Fatalf("scheduler fallback Run calls = %v, want [%s]", fake.runNames, taskName)
 	}
 	if len(results) != 2 || results[0].Err == "" || results[1].Err != "" {
-		t.Fatalf("results = %+v, want supervisor failure row followed by scheduler success", results)
+		t.Fatalf("results = %+v, want supervisor unavailable row followed by scheduler success", results)
 	}
 }
 

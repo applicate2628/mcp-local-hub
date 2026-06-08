@@ -576,3 +576,121 @@ func TestSupervisorLivenessSweepRestartsAlivePIDWithUnboundPort(t *testing.T) {
 		t.Fatal("liveness sweep did not post EvManualRestart for unbound live port")
 	}
 }
+
+func TestSupervisorLivenessSweepClearsStalePIDBeforeRestartPost(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PortLive: func(port int) bool {
+			if port != 9123 {
+				t.Fatalf("PortLive called with port %d, want 9123", port)
+			}
+			return false
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		if ev.Kind != api.EvManualRestart || ev.TaskName != taskName {
+			t.Fatalf("event = %+v, want EvManualRestart for %s", ev, taskName)
+		}
+		entry, ok := tracker.Get(taskName)
+		if !ok {
+			t.Fatalf("tracker entry missing for %s", taskName)
+		}
+		if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+			t.Fatalf("liveness posted restart before clearing stale runtime state: %+v", entry)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness sweep did not post EvManualRestart for unbound live port")
+	}
+}
+
+func TestSupervisorLivenessRestartWithClearedPIDSpawnsThroughControllerWithoutTerminate(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	intentCache := newIntentCache()
+	intentCache.Refresh(intent)
+	loop := api.NewEventLoop(16)
+	spawned := make(chan struct{}, 1)
+	terminated := make(chan struct{}, 1)
+	ctrl := &supervisorController{
+		intentCache:         intentCache,
+		eventLoop:           loop,
+		tracker:             tracker,
+		daemonIntent:        newDaemonIntentCache(),
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			if d.TaskName != taskName {
+				t.Fatalf("spawn task = %q, want %q", d.TaskName, taskName)
+			}
+			tracker.MarkSpawned(d.TaskName, 33000, time.Now().UTC())
+			spawned <- struct{}{}
+			return nil
+		},
+		terminate: func(api.SupervisorDaemon) error {
+			terminated <- struct{}{}
+			return nil
+		},
+	}
+	ctrl.smStates.Store(taskName, api.StRunning)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PortLive: func(port int) bool {
+			if port != 9123 {
+				t.Fatalf("PortLive called with port %d, want 9123", port)
+			}
+			return false
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case <-terminated:
+		t.Fatal("liveness restart attempted to terminate stale PID")
+	case <-spawned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness restart did not spawn through controller")
+	}
+}

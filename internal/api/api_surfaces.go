@@ -466,12 +466,17 @@ func (a *API) StatusContext(ctx context.Context) ([]DaemonStatus, error) {
 		rows []DaemonStatus
 		err  error
 	}
+	// Snapshot the test seam before spawning (see RestartContext): on ctx
+	// cancellation the select returns without waiting, so this goroutine can
+	// outlive the caller and reading the global inside it would race a later
+	// test's t.Cleanup restore. Capture into a local.
+	srcFn := statusContextSrcFn
 	ch := make(chan result, 1)
 	go func() {
 		var rows []DaemonStatus
 		var err error
-		if statusContextSrcFn != nil {
-			rows, err = statusContextSrcFn()
+		if srcFn != nil {
+			rows, err = srcFn()
 		} else {
 			rows, err = a.statusInternal(ctx)
 		}
@@ -504,12 +509,19 @@ func (a *API) RestartContext(ctx context.Context, server, daemonFilter string) (
 		results []RestartResult
 		err     error
 	}
+	// Snapshot the test seam before spawning: on ctx cancellation the select
+	// below returns without waiting, so this goroutine can outlive the caller
+	// (documented best-effort cancellation). Reading restartContextSrcFn inside
+	// the goroutine would then race a later test's t.Cleanup restore of the
+	// global. Capture it into a local so the leaked goroutine never touches the
+	// mutable package var.
+	srcFn := restartContextSrcFn
 	ch := make(chan result, 1)
 	go func() {
 		var res []RestartResult
 		var err error
-		if restartContextSrcFn != nil {
-			res, err = restartContextSrcFn(server, daemonFilter)
+		if srcFn != nil {
+			res, err = srcFn(server, daemonFilter)
 		} else {
 			res, err = a.Restart(server, daemonFilter)
 		}
@@ -543,12 +555,15 @@ func (a *API) RestartContextWithSnapshot(ctx context.Context, server, daemonFilt
 		results []RestartResult
 		err     error
 	}
+	// Snapshot the test seam before spawning (see RestartContext): the leaked
+	// goroutine on ctx cancellation must not read the mutable global.
+	srcFn := restartContextWithSnapshotSrcFn
 	ch := make(chan result, 1)
 	go func() {
 		var res []RestartResult
 		var err error
-		if restartContextWithSnapshotSrcFn != nil {
-			res, err = restartContextWithSnapshotSrcFn(server, daemonFilter, snap)
+		if srcFn != nil {
+			res, err = srcFn(server, daemonFilter, snap)
 		} else {
 			// TODO(task 5): production body. For Task 0 there is no
 			// production caller — the watchdog driver (Task 9) is the

@@ -417,6 +417,15 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 			currentState = s
 		}
 	}
+	// Liveness restarts are posted only after the runtime tracker has
+	// invalidated a known-stale PID. Treat that verified tracker state as
+	// spawnable so EvManualRestart goes through the SM without firing the
+	// terminate side effect against a dead or recycled PID.
+	if currentState == api.StRunning && supervisorLivenessRestartClearedRuntime(ev) && c.tracker != nil {
+		if entry, ok := c.tracker.Get(ev.TaskName); ok && entry.State == daemonRuntimeStateIdle && entry.CurrentPID == 0 {
+			currentState = api.StIdle
+		}
+	}
 
 	now := time.Now().UTC()
 

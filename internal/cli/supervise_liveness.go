@@ -17,6 +17,8 @@ const (
 	supervisorPortProbeTimeout = 300 * time.Millisecond
 	supervisorPortBindGrace    = 5 * time.Second
 	supervisorLivenessInterval = 5 * time.Second
+
+	supervisorLivenessRuntimeClearedBodyKey = "runtime_pid_cleared"
 )
 
 type supervisorLivenessProbe struct {
@@ -109,7 +111,6 @@ func sweepSupervisorLivenessOnce(
 	loop *api.EventLoop,
 	events *api.SupervisorEventLog,
 ) {
-	_ = stateDir
 	if tracker == nil || loop == nil || intent == nil {
 		return
 	}
@@ -148,16 +149,36 @@ func sweepSupervisorLivenessOnce(
 		if supervisorLivenessReasonNeedsRestart(reason) {
 			eventKind = api.EvManualRestart
 		}
+		body := map[string]any{
+			"pid":    entry.CurrentPID,
+			"port":   d.Port,
+			"reason": reason,
+		}
+		if eventKind == api.EvManualRestart {
+			tracker.MarkExited(taskName)
+			body[supervisorLivenessRuntimeClearedBodyKey] = true
+			if stateDir != "" {
+				_ = persistDaemonRuntimeTracker(events, tracker, filepath.Join(stateDir, "supervisor-state.json"), taskName)
+			}
+		}
 		loop.Post(api.LoopEvent{
 			Kind:     eventKind,
 			TaskName: taskName,
-			Body: map[string]any{
-				"pid":    entry.CurrentPID,
-				"port":   d.Port,
-				"reason": reason,
-			},
+			Body:     body,
 		})
 	}
+}
+
+func supervisorLivenessRestartClearedRuntime(ev api.LoopEvent) bool {
+	if ev.Kind != api.EvManualRestart || ev.Body == nil {
+		return false
+	}
+	cleared, _ := ev.Body[supervisorLivenessRuntimeClearedBodyKey].(bool)
+	if !cleared {
+		return false
+	}
+	reason, _ := ev.Body["reason"].(string)
+	return supervisorLivenessReasonNeedsRestart(reason)
 }
 
 func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) (bool, string) {
