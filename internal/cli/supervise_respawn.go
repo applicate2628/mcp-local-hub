@@ -117,8 +117,9 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	// We accept BOTH bare and canonical forms so a hand-edited
 	// supervisor-intent.json (rare but possible) still matches.
 	var desc *api.SupervisorDaemon
+	var ctrl *supervisorController
 	if deps.controllerProvider != nil {
-		if ctrl := deps.controllerProvider(); ctrl != nil && ctrl.intentCache != nil {
+		if ctrl = deps.controllerProvider(); ctrl != nil && ctrl.intentCache != nil {
 			if snap, ok := ctrl.intentCache.snap.Load().(*intentSnapshot); ok && snap != nil && snap.intent != nil {
 				for i := range snap.intent.Daemons {
 					d := &snap.intent.Daemons[i]
@@ -269,12 +270,23 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
-	if err := spawnFn(*desc); err != nil {
+	var spawnErr error
+	routeIdleRespawnThroughController := false
+	if !shouldTerminate && ctrl != nil && ctrl.eventLoop != nil {
+		smState, _ := ctrl.GetSMState(taskName)
+		routeIdleRespawnThroughController = smState == api.StIdle
+	}
+	if routeIdleRespawnThroughController {
+		spawnErr = ctrl.postIdleRespawnAndWait(taskName, time.Duration(gracefulTimeoutMs)*time.Millisecond)
+	} else {
+		spawnErr = spawnFn(*desc)
+	}
+	if spawnErr != nil {
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			Error: &api.IPCErr{
 				Code:    ipcErrorRespawnFailed,
-				Message: fmt.Sprintf("spawn failed: %v", err),
+				Message: fmt.Sprintf("spawn failed: %v", spawnErr),
 			},
 			Final: true,
 		})

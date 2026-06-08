@@ -32,6 +32,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -94,6 +95,8 @@ type supervisorController struct {
 	failureWindow       time.Duration
 	quarantineThreshold int
 }
+
+const idleRespawnResultBodyKey = "idle_respawn_result"
 
 // daemonIntentCache is the per-task DaemonIntent snapshot owned by
 // the controller. Same atomic.Value pattern as IntentCache; readers
@@ -320,6 +323,54 @@ func (c *supervisorController) GetSMState(taskName string) (api.SMState, bool) {
 	return s, true
 }
 
+func (c *supervisorController) postIdleRespawnAndWait(taskName string, timeout time.Duration) error {
+	if c == nil || c.eventLoop == nil {
+		return errors.New("controller event loop unavailable")
+	}
+	resultCh := make(chan error, 1)
+	c.eventLoop.Post(api.LoopEvent{
+		Kind:     api.EvManualRestart,
+		TaskName: taskName,
+		Body: map[string]any{
+			idleRespawnResultBodyKey: resultCh,
+		},
+	})
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case err := <-resultCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return errors.New("timed out waiting for idle respawn state-machine transition")
+	}
+}
+
+func idleRespawnResultChannel(ev api.LoopEvent) chan error {
+	if ev.Body == nil {
+		return nil
+	}
+	ch, _ := ev.Body[idleRespawnResultBodyKey].(chan error)
+	return ch
+}
+
+func completeIdleRespawnEvent(ev api.LoopEvent, err error) {
+	ch := idleRespawnResultChannel(ev)
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- err:
+	default:
+	}
+}
+
 // handleLoopEvent is the single dispatch path for spawn/exit events.
 // Replaces both the direct r.spawn(d) call in supervise_reconcile.go:118
 // AND the runRespawnDispatcher goroutine in
@@ -350,6 +401,7 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 				},
 			})
 		}
+		completeIdleRespawnEvent(ev, fmt.Errorf("task %s not found in controller intent cache", ev.TaskName))
 		return
 	}
 
@@ -422,6 +474,7 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 				},
 			})
 		}
+		completeIdleRespawnEvent(ev, fmt.Errorf("no state-machine transition for %s from %s", ev.Kind, currentState))
 		return
 	}
 
@@ -500,7 +553,13 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		}
 	}
 
-	c.executeSideEffect(side, newState, d, ev)
+	sideEffectErr := c.executeSideEffect(side, newState, d, ev)
+	if idleRespawnResultChannel(ev) != nil {
+		if sideEffectErr == nil && !strings.Contains(side, "create-process") {
+			sideEffectErr = fmt.Errorf("idle respawn did not spawn: %s", side)
+		}
+		completeIdleRespawnEvent(ev, sideEffectErr)
+	}
 }
 
 // executeSideEffect absorbs the dispatcher's responsibilities
@@ -517,11 +576,10 @@ func (c *supervisorController) executeSideEffect(
 	newState api.SMState,
 	d *api.SupervisorDaemon,
 	ev api.LoopEvent,
-) {
+) error {
 	if c == nil || d == nil {
-		return
+		return nil
 	}
-	_ = side // captured for future audit-row extensions
 
 	switch newState {
 	case api.StSpawning:
@@ -540,7 +598,7 @@ func (c *supervisorController) executeSideEffect(
 		// queued_action=stop via the "issue terminate, queued_action=
 		// none" side string from the StExiting transition.
 		if !strings.Contains(side, "create-process") {
-			return
+			return nil
 		}
 
 		// bot PR #246 r2 P2: refuse to fire spawn for a legacy nil-RuntimeSpec
@@ -575,7 +633,7 @@ func (c *supervisorController) executeSideEffect(
 					},
 				})
 			}
-			return
+			return errors.New("legacy serena-proxy descriptor carries no runtime_spec")
 		}
 
 		// "bump pid_generation, create-process" - fire the spawn
@@ -642,24 +700,27 @@ func (c *supervisorController) executeSideEffect(
 		// and let the next reconcile-driven EvStart re-attempt;
 		// falling back to blocking Post would reintroduce the
 		// deadlock we are avoiding.
-		if c.spawn != nil {
-			err := c.spawn(*d)
-			if c.eventLoop != nil {
-				switch {
-				case err == nil:
-					if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName}) {
-						c.emitSelfChannelSaturated(d.TaskName, "EvHealthOK")
-					}
-				case errors.Is(err, errSpawnPreChild):
-					if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName}) {
-						c.emitSelfChannelSaturated(d.TaskName, "EvChildExit")
-					}
+		if c.spawn == nil {
+			return errors.New("spawn function unavailable")
+		}
+		err := c.spawn(*d)
+		if c.eventLoop != nil {
+			switch {
+			case err == nil:
+				if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName}) {
+					c.emitSelfChannelSaturated(d.TaskName, "EvHealthOK")
+				}
+			case errors.Is(err, errSpawnPreChild):
+				if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName}) {
+					c.emitSelfChannelSaturated(d.TaskName, "EvChildExit")
 				}
 			}
 		}
+		return err
 
 	case api.StBackoffWaiting:
 		c.handleBackoffWaiting(d, ev)
+		return nil
 
 	case api.StQuarantined:
 		// Reached via EvTimerDue while at threshold. Emit the
@@ -677,6 +738,7 @@ func (c *supervisorController) executeSideEffect(
 				},
 			})
 		}
+		return nil
 
 	case api.StExiting:
 		// "issue terminate, queued_action=*" - fire the terminate
@@ -686,14 +748,16 @@ func (c *supervisorController) executeSideEffect(
 		if c.terminate != nil {
 			_ = c.terminate(*d)
 		}
+		return nil
 
 	case api.StRunning, api.StIdle:
 		// Steady / no-op states. No side effect required.
 		// StRunning is reached on EvHealthOK (clears the spawning
 		// gate). StIdle is reached on EvChildExit while exiting,
 		// graceful drain, or initial reconcile of a stopped intent.
-		return
+		return nil
 	}
+	return nil
 }
 
 // emitSelfChannelSaturated logs an audit row when PostSelf on the

@@ -389,6 +389,73 @@ func TestHandleRespawn_IdleDaemonSkipsTerminateAndStarts(t *testing.T) {
 	}
 }
 
+func TestHandleRespawn_IdleDaemonChildExitRoutesThroughSM(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{
+		Daemons: []api.SupervisorDaemon{descriptor},
+	}
+
+	var spawnCalls atomic.Int32
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return nil
+	}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+	ctrl.smStates.Store(taskName, api.StIdle)
+
+	deps, _, terminateCalls := newRespawnTestDeps(t, intent)
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(
+		fakeSpawn,
+		func(d api.SupervisorDaemon) error {
+			terminateCalls.Add(1)
+			return errors.New("idle daemon must not terminate")
+		},
+	)
+
+	req := api.IPCRequest{
+		ID:  45,
+		Cmd: "respawn",
+		Args: map[string]any{
+			"task_name": taskName,
+			"force":     false,
+		},
+	}
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, req, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final {
+		t.Fatalf("expected idle daemon respawn OK+Final; got %+v", resp)
+	}
+	if terminateCalls.Load() != 0 {
+		t.Fatalf("idle respawn must not terminate without a recorded PID; got %d terminate calls", terminateCalls.Load())
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("idle respawn must spawn once; got %d", spawnCalls.Load())
+	}
+
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st, _ := ctrl.GetSMState(taskName)
+		if st == api.StBackoffWaiting {
+			if spawnCalls.Load() != 1 {
+				t.Fatalf("idle child exit triggered immediate duplicate spawn: got %d spawns", spawnCalls.Load())
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(taskName)
+	t.Fatalf("after idle respawn child exit: state=%s; want %s (regression: respawn left controller SM in StIdle so EvChildExit was unhandled)", st, api.StBackoffWaiting)
+}
+
 func TestHandleRespawn_BareFormTaskNameMatchesCanonical(t *testing.T) {
 	intent := &api.SupervisorIntentFile{
 		Daemons: []api.SupervisorDaemon{
