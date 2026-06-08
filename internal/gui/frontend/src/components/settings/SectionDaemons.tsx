@@ -83,6 +83,8 @@ export function SectionDaemons({
   const [tableDirty, setTableDirty] = useState(false);
   const [tableDeltas, setTableDeltas] = useState<MembershipDelta[]>([]);
   const [tableResetKey, setTableResetKey] = useState(0);
+  const [envDirty, setEnvDirty] = useState(false);
+  const [envResetKey, setEnvResetKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
   const [schedError, setSchedError] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export function SectionDaemons({
   const schedDirty = schedValue !== persistedSched;
   const retryDirty = retryValue !== persistedRetry;
   const knobDirty = knobValue !== persistedKnob;
-  const dirty = schedDirty || retryDirty || knobDirty || tableDirty;
+  const dirty = schedDirty || retryDirty || knobDirty || tableDirty || envDirty;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
@@ -115,6 +117,7 @@ export function SectionDaemons({
     // fires → onDirtyChange(false) bubbles. Mirrors the discardKey pattern in
     // app.tsx used for navigation discard.
     setTableResetKey((k) => k + 1);
+    setEnvResetKey((k) => k + 1);
   }
 
   async function save() {
@@ -310,7 +313,7 @@ export function SectionDaemons({
         onDeltasChange={setTableDeltas}
       />
 
-      <DaemonEnvSettings />
+      <DaemonEnvSettings key={envResetKey} onDirtyChange={setEnvDirty} />
 
       <div class="settings-section-footer">
         {banner ? (

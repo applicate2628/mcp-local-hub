@@ -66,6 +66,21 @@ const (
 	ipcErrorRespawnTerminateFailed = "RESPAWN_TERMINATE_FAILED"
 )
 
+func shouldRouteNonRunningRespawnThroughController(ctrl *supervisorController, taskName string) (bool, error) {
+	if ctrl == nil || ctrl.eventLoop == nil {
+		return false, nil
+	}
+	smState, _ := ctrl.GetSMState(taskName)
+	switch smState {
+	case api.StIdle, api.StBackoffWaiting, api.StQuarantined:
+		return true, nil
+	case api.StSpawning, api.StRunning, api.StExiting:
+		return false, fmt.Errorf("controller state %s is not directly spawnable without a live PID", smState)
+	default:
+		return false, fmt.Errorf("unknown controller state %q", smState)
+	}
+}
+
 // handleRespawn implements the `respawn` IPC verb. Body shape:
 //
 //	{"id": N, "cmd": "respawn", "args": {"task_name": "\\mcp-local-hub-foo-default", "force": false}}
@@ -185,7 +200,18 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 			shouldTerminate = false
 		}
 	}
-	if state == daemonRuntimeStateQuarantine && !force {
+	controllerState := api.StIdle
+	controllerStateKnown := false
+	if ctrl != nil {
+		controllerState, controllerStateKnown = ctrl.GetSMState(taskName)
+	}
+	if controllerStateKnown {
+		switch controllerState {
+		case api.StIdle, api.StBackoffWaiting, api.StQuarantined:
+			shouldTerminate = false
+		}
+	}
+	if (state == daemonRuntimeStateQuarantine || (controllerStateKnown && controllerState == api.StQuarantined)) && !force {
 		_ = deps.events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "ipc",
@@ -271,15 +297,16 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	}
 
 	var spawnErr error
-	routeIdleRespawnThroughController := false
-	if !shouldTerminate && ctrl != nil && ctrl.eventLoop != nil {
-		smState, _ := ctrl.GetSMState(taskName)
-		routeIdleRespawnThroughController = smState == api.StIdle
+	routeNonRunningRespawnThroughController := false
+	if !shouldTerminate {
+		routeNonRunningRespawnThroughController, spawnErr = shouldRouteNonRunningRespawnThroughController(ctrl, taskName)
 	}
-	if routeIdleRespawnThroughController {
-		spawnErr = ctrl.postIdleRespawnAndWait(taskName, time.Duration(gracefulTimeoutMs)*time.Millisecond)
-	} else {
-		spawnErr = spawnFn(*desc)
+	if spawnErr == nil {
+		if routeNonRunningRespawnThroughController {
+			spawnErr = ctrl.postIdleRespawnAndWait(taskName, time.Duration(gracefulTimeoutMs)*time.Millisecond)
+		} else {
+			spawnErr = spawnFn(*desc)
+		}
 	}
 	if spawnErr != nil {
 		return writeIPCFrame(conn, api.IPCResponse{

@@ -32,11 +32,35 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
+const defaultDaemonEnvResponse = {
+  daemons: [
+    {
+      task_name: "\\mcp-local-hub-memory-default",
+      server: "memory",
+      daemon: "default",
+      env: { MEMORY_FILE_PATH: "old.jsonl" },
+    },
+  ],
+};
+
+function mockSettingsFetch(membershipBody: unknown = { rows: [] }) {
+  mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/daemon/env")) {
+      return jsonResponse(defaultDaemonEnvResponse);
+    }
+    if (url.includes("/api/daemons/weekly-refresh-membership")) {
+      return jsonResponse(membershipBody);
+    }
+    return jsonResponse({});
+  });
+}
+
 beforeEach(() => {
   mockFetch.mockReset();
   // Default: empty membership — keeps tests focused on the field-row UI
   // and avoids cross-coupling failures with WeeklyMembershipTable internals.
-  mockFetch.mockResolvedValue(jsonResponse({ rows: [] }));
+  mockSettingsFetch();
   vi.stubGlobal("fetch", mockFetch);
 });
 
@@ -106,16 +130,35 @@ describe("SectionDaemons (editable, A4-b PR #1 / Task 11)", () => {
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
   });
 
+  it("bubbles dirty=true via onDirtyChange after editing daemon env", async () => {
+    const onDirty = vi.fn();
+    const { findByTestId } = render(<SectionDaemons snapshot={snap()} onDirtyChange={onDirty} />);
+    const saveBtn = (await findByTestId("daemons-save")) as HTMLButtonElement;
+    const value = (await findByTestId("daemon-env-value")) as HTMLInputElement;
+
+    await waitFor(() => expect(value.value).toBe("old.jsonl"));
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
+    expect(saveBtn.disabled).toBe(true);
+
+    fireEvent.input(value, { target: { value: "draft.jsonl" } });
+
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+    expect(saveBtn.disabled).toBe(false);
+  });
+
   it("Reset clears membership edits and resets dirty state (P2-A)", async () => {
     const onDirty = vi.fn();
     // Seed one membership row so the table renders a checkbox.
-    mockFetch.mockResolvedValue(
-      jsonResponse({
-        rows: [
-          { workspace_key: "ws1", workspace_path: "/ws1", language: "python", weekly_refresh: false },
-        ],
-      })
-    );
+    mockSettingsFetch({
+      rows: [
+        {
+          workspace_key: "ws1",
+          workspace_path: "/ws1",
+          language: "python",
+          weekly_refresh: false,
+        },
+      ],
+    });
     render(<SectionDaemons snapshot={snap()} onDirtyChange={onDirty} />);
     // Wait for the table to finish loading.
     await waitFor(() => expect(mockFetch).toHaveBeenCalled());
@@ -130,13 +173,16 @@ describe("SectionDaemons (editable, A4-b PR #1 / Task 11)", () => {
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
 
     // Seed the re-fetch that happens after Reset remounts the table.
-    mockFetch.mockResolvedValue(
-      jsonResponse({
-        rows: [
-          { workspace_key: "ws1", workspace_path: "/ws1", language: "python", weekly_refresh: false },
-        ],
-      })
-    );
+    mockSettingsFetch({
+      rows: [
+        {
+          workspace_key: "ws1",
+          workspace_path: "/ws1",
+          language: "python",
+          weekly_refresh: false,
+        },
+      ],
+    });
 
     // Click Reset — bumps tableResetKey → WeeklyMembershipTable remounts → edits cleared.
     const resetBtn = document.querySelector('[data-testid="daemons-reset"]') as HTMLButtonElement;

@@ -10,16 +10,23 @@ const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 type Banner = { kind: "ok" | "error"; text: string };
 
+export type DaemonEnvSettingsProps = {
+  onDirtyChange?: (dirty: boolean) => void;
+};
+
 function stableEnvSignature(env: Record<string, string> | undefined): string {
   if (!env) return "";
   return JSON.stringify(Object.entries(env).sort(([a], [b]) => a.localeCompare(b)));
 }
 
-export function DaemonEnvSettings(): preact.JSX.Element {
+export function DaemonEnvSettings({
+  onDirtyChange = () => {},
+}: DaemonEnvSettingsProps = {}): preact.JSX.Element {
   const [rows, setRows] = useState<DaemonEnvRow[]>([]);
   const [selectedTask, setSelectedTask] = useState("");
   const [key, setKey] = useState("MEMORY_FILE_PATH");
   const [value, setValue] = useState("");
+  const [draftBase, setDraftBase] = useState({ taskName: "", envSignature: "" });
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
 
@@ -31,6 +38,19 @@ export function DaemonEnvSettings(): preact.JSX.Element {
     () => stableEnvSignature(selected?.env),
     [selected?.env],
   );
+  const envDirty = useMemo(() => {
+    if (!selected) return false;
+    if (
+      draftBase.taskName !== selected.task_name ||
+      draftBase.envSignature !== selectedEnvSignature
+    ) {
+      return false;
+    }
+    if (!Object.prototype.hasOwnProperty.call(selected.env, key)) {
+      return key.trim() !== "" || value !== "";
+    }
+    return value !== selected.env[key];
+  }, [selected?.task_name, selectedEnvSignature, draftBase, key, value]);
 
   useEffect(() => {
     void refreshRows();
@@ -42,12 +62,20 @@ export function DaemonEnvSettings(): preact.JSX.Element {
       setSelectedTask(selected.task_name);
     }
     const keys = Object.keys(selected.env).sort();
-    const nextKey = keys.includes(key) ? key : keys[0] ?? key;
+    const nextKey = keys.includes(key) ? key : (keys[0] ?? key);
     if (nextKey !== key) {
       setKey(nextKey);
     }
     setValue(selected.env[nextKey] ?? "");
+    setDraftBase({
+      taskName: selected.task_name,
+      envSignature: selectedEnvSignature,
+    });
   }, [selected?.task_name, selectedEnvSignature]);
+
+  useEffect(() => {
+    onDirtyChange(envDirty);
+  }, [envDirty, onDirtyChange]);
 
   async function refreshRows() {
     setBusy(true);

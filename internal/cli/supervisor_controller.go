@@ -531,6 +531,9 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	if currentState == api.StExiting && (newState == api.StIdle || newState == api.StSpawning) {
 		c.queuedActions.Store(ev.TaskName, "")
 	}
+	if strings.Contains(side, "reset failures") && c.tracker != nil {
+		c.tracker.ClearCrashes(ev.TaskName)
+	}
 	// Sync tracker runtime state when SM transitions to StIdle from a
 	// non-idle state. Without this, persistDaemonRuntimeTracker below
 	// would write supervisor-state.json with stale tracker fields

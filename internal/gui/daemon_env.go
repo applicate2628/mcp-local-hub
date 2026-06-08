@@ -219,15 +219,19 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		if taskName == "" || (taskFilter != "" && taskName != taskFilter) {
 			continue
 		}
-		server, daemonName := api.ParseManagedTaskName(taskName)
-		if server == "" {
-			server = d.Server
+		server := d.Server
+		daemonName := d.Daemon
+		if server == "" || daemonName == "" {
+			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
+			if server == "" {
+				server = parsedServer
+			}
+			if daemonName == "" {
+				daemonName = parsedDaemon
+			}
 		}
 		if daemonName == "" {
-			daemonName = d.Daemon
-			if daemonName == "" {
-				daemonName = "default"
-			}
+			daemonName = "default"
 		}
 		env := daemon_env_overlay.LookupOverlay(ov, taskName)
 		if env == nil {

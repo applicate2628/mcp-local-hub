@@ -127,6 +127,20 @@ func newRespawnTestDeps(t *testing.T, intent *api.SupervisorIntentFile) (ipcDisp
 	return deps, &spawnCalls, &terminateCalls
 }
 
+func waitForRespawnSMState(t *testing.T, ctrl *supervisorController, taskName string, want api.SMState) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st, _ := ctrl.GetSMState(taskName)
+		if st == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(taskName)
+	t.Fatalf("state for %s = %s; want %s", taskName, st, want)
+}
+
 func TestHandleRespawn_UnknownTaskReturnsUnknownTaskError(t *testing.T) {
 	intent := &api.SupervisorIntentFile{
 		Daemons: []api.SupervisorDaemon{
@@ -454,6 +468,204 @@ func TestHandleRespawn_IdleDaemonChildExitRoutesThroughSM(t *testing.T) {
 	}
 	st, _ := ctrl.GetSMState(taskName)
 	t.Fatalf("after idle respawn child exit: state=%s; want %s (regression: respawn left controller SM in StIdle so EvChildExit was unhandled)", st, api.StBackoffWaiting)
+}
+
+func TestHandleRespawn_MissingControllerStateRoutesIdleRespawnThroughSM(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	var spawnCalls atomic.Int32
+	var ctrl *supervisorController
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		if ctrl != nil {
+			ctrl.tracker.MarkSpawned(d.TaskName, int(spawnCalls.Load()), time.Now().UTC())
+		}
+		return nil
+	}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, fakeSpawn)
+	defer cancel()
+
+	deps, _, terminateCalls := newRespawnTestDeps(t, intent)
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(
+		fakeSpawn,
+		func(d api.SupervisorDaemon) error {
+			terminateCalls.Add(1)
+			return errors.New("idle daemon must not terminate")
+		},
+	)
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{
+		ID:  46,
+		Cmd: "respawn",
+		Args: map[string]any{
+			"task_name": taskName,
+			"force":     false,
+		},
+	}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final {
+		t.Fatalf("expected missing-state idle respawn OK+Final; got %+v", resp)
+	}
+	if terminateCalls.Load() != 0 {
+		t.Fatalf("missing-state idle respawn must not terminate without a recorded PID; got %d terminate calls", terminateCalls.Load())
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("missing-state idle respawn must spawn once through the controller; got %d", spawnCalls.Load())
+	}
+	waitForRespawnSMState(t, ctrl, taskName, api.StRunning)
+
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+	waitForRespawnSMState(t, ctrl, taskName, api.StBackoffWaiting)
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("missing-state child exit triggered duplicate spawn: got %d spawns", spawnCalls.Load())
+	}
+}
+
+func TestHandleRespawn_QuarantinedForceRoutesThroughSMAndResetsFailures(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	var spawnCalls atomic.Int32
+	var ctrl *supervisorController
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		if ctrl != nil {
+			ctrl.tracker.MarkSpawned(d.TaskName, int(spawnCalls.Load()), time.Now().UTC())
+		}
+		return nil
+	}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, fakeSpawn)
+	defer cancel()
+	ctrl.smStates.Store(taskName, api.StQuarantined)
+	now := time.Now().UTC()
+	for i := 0; i < respawnQuarantineThreshold-1; i++ {
+		ctrl.tracker.RecordCrashAndCountInWindow(taskName, now.Add(time.Duration(i)*time.Millisecond), respawnFailureWindow)
+	}
+	ctrl.tracker.HydrateFromState(&api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			taskName: {State: daemonRuntimeStateQuarantine, CurrentPID: 1234},
+		},
+	})
+
+	deps, _, terminateCalls := newRespawnTestDeps(t, intent)
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(
+		fakeSpawn,
+		func(d api.SupervisorDaemon) error {
+			terminateCalls.Add(1)
+			return errors.New("quarantined daemon has no live PID to terminate")
+		},
+	)
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{
+		ID:  47,
+		Cmd: "respawn",
+		Args: map[string]any{
+			"task_name": taskName,
+			"force":     true,
+		},
+	}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final {
+		t.Fatalf("expected forced quarantine respawn OK+Final; got %+v", resp)
+	}
+	if terminateCalls.Load() != 0 {
+		t.Fatalf("forced quarantine respawn must not terminate without a recorded PID; got %d terminate calls", terminateCalls.Load())
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("forced quarantine respawn must spawn once through the controller; got %d", spawnCalls.Load())
+	}
+	waitForRespawnSMState(t, ctrl, taskName, api.StRunning)
+	if got := ctrl.tracker.CrashCountInWindow(taskName, time.Now().UTC(), respawnFailureWindow); got != 0 {
+		t.Fatalf("forced quarantine EvManualRestart must reset failure counters; got %d failures still tracked", got)
+	}
+
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+	waitForRespawnSMState(t, ctrl, taskName, api.StBackoffWaiting)
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("forced quarantine child exit triggered duplicate spawn: got %d spawns", spawnCalls.Load())
+	}
+}
+
+func TestHandleRespawn_BackoffWaitingRoutesThroughSMAndCancelsStaleTimer(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	var spawnCalls atomic.Int32
+	var ctrl *supervisorController
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		if ctrl != nil {
+			ctrl.tracker.MarkSpawned(d.TaskName, int(spawnCalls.Load()), time.Now().UTC())
+		}
+		return nil
+	}
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, fakeSpawn)
+	defer cancel()
+	ctrl.tracker.MarkSpawned(taskName, 1234, time.Now().UTC())
+	ctrl.smStates.Store(taskName, api.StRunning)
+
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+	waitForRespawnSMState(t, ctrl, taskName, api.StBackoffWaiting)
+
+	deps, _, terminateCalls := newRespawnTestDeps(t, intent)
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(
+		fakeSpawn,
+		func(d api.SupervisorDaemon) error {
+			terminateCalls.Add(1)
+			return errors.New("backoff daemon has no live PID to terminate")
+		},
+	)
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{
+		ID:  48,
+		Cmd: "respawn",
+		Args: map[string]any{
+			"task_name": taskName,
+			"force":     false,
+		},
+	}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final {
+		t.Fatalf("expected backoff respawn OK+Final; got %+v", resp)
+	}
+	if terminateCalls.Load() != 0 {
+		t.Fatalf("backoff respawn must not terminate without a recorded PID; got %d terminate calls", terminateCalls.Load())
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("backoff respawn must spawn once through the controller; got %d", spawnCalls.Load())
+	}
+	waitForRespawnSMState(t, ctrl, taskName, api.StRunning)
+
+	time.Sleep(1200 * time.Millisecond)
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("stale pre-manual-restart backoff timer fired duplicate spawn: got %d spawns", spawnCalls.Load())
+	}
+
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+	waitForRespawnSMState(t, ctrl, taskName, api.StBackoffWaiting)
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("backoff child exit triggered immediate duplicate spawn: got %d spawns", spawnCalls.Load())
+	}
 }
 
 func TestHandleRespawn_BareFormTaskNameMatchesCanonical(t *testing.T) {
