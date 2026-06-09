@@ -35,6 +35,12 @@ type DaemonStatus struct {
 	// (P2 surface-orphan-PID-through-status-clients).
 	OrphanPID int `json:"orphan_pid,omitempty"`
 
+	// StalePID is the wedged PID of a port-stale running daemon the
+	// supervisor is terminate-restarting (state "Restarting"). Diagnostic
+	// only via `mcphub status --json`; zero (omitted) on the happy path.
+	// Sourced from the supervisor IPC status response (deep-sec #268 Reg-F1).
+	StalePID int `json:"stale_pid,omitempty"`
+
 	// JobProtection records the per-spawn Windows Job Object
 	// allocation state for the daemon's current spawn attempt.
 	// Tri-state via *bool with backward-compatible default:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1469,5 +1470,199 @@ func TestSupervisorLivenessForeignTerminateFailureNoSynthesizeNoRespawn(t *testi
 	st, _ := ctrl.GetSMState(taskName)
 	if st != api.StExiting {
 		t.Fatalf("after terminate failure the SM state = %s, want %s (left for retry)", st, api.StExiting)
+	}
+}
+
+// TestSupervisorLivenessSweepClearedRestartPerformsClearOnLoop is the Codex
+// deep-sec PR #268 Conc-F2 guard for the single-writer relocation: a dead-PID
+// restart reason carries the clear instruction in the event body, and the
+// actual tracker MarkExited + supervisor-state.json persist happen on the
+// event-loop goroutine (inside handleLoopEvent), NOT in the sweep goroutine.
+// The sweep itself performs zero tracker mutations. The handler clears the
+// stale recorded PID, then the SM treats the verified-idle state as spawnable
+// and spawns WITHOUT issuing a terminate against the dead PID. The on-disk
+// row reflects the loop-side clear.
+func TestSupervisorLivenessSweepClearedRestartPerformsClearOnLoop(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	if err := tracker.PersistTo(statePath); err != nil {
+		t.Fatalf("seed persist: %v", err)
+	}
+	intentCache := newIntentCache()
+	intentCache.Refresh(intent)
+	loop := api.NewEventLoop(16)
+	spawned := make(chan struct{}, 1)
+	terminated := make(chan struct{}, 1)
+	ctrl := &supervisorController{
+		intentCache:         intentCache,
+		eventLoop:           loop,
+		tracker:             tracker,
+		statePath:           statePath,
+		daemonIntent:        newDaemonIntentCache(),
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			tracker.MarkSpawned(d.TaskName, 33000, time.Now().UTC())
+			// Mirror the production spawn closure, which persists the new
+			// running state to supervisor-state.json after MarkSpawned.
+			_ = tracker.PersistTo(statePath)
+			spawned <- struct{}{}
+			return nil
+		},
+		terminate: func(api.SupervisorDaemon) error {
+			terminated <- struct{}{}
+			return nil
+		},
+	}
+	ctrl.smStates.Store(taskName, api.StRunning)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	// Post the cleared-restart event the sweep would emit for a dead-PID
+	// restart reason. The tracker is NOT pre-cleared here (unlike the older
+	// test) — proving the loop-side clear is what invalidates the stale PID.
+	loop.Post(api.LoopEvent{
+		Kind:     api.EvManualRestart,
+		TaskName: taskName,
+		Body: map[string]any{
+			"reason":                                supervisorLivenessReasonPortUnbound,
+			supervisorLivenessRuntimeClearedBodyKey: true,
+		},
+	})
+
+	select {
+	case <-terminated:
+		t.Fatal("cleared liveness restart issued a terminate against the dead PID")
+	case <-spawned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleared liveness restart did not spawn through the controller")
+	}
+
+	// The loop-side MarkExited+persist updated the on-disk row: the stale PID
+	// 22036 was cleared before the respawn recorded 33000.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		after, err := api.ReadSupervisorState(statePath)
+		if err != nil {
+			t.Fatalf("read supervisor-state.json: %v", err)
+		}
+		if after.Daemons[taskName].CurrentPID == 33000 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	after, _ := api.ReadSupervisorState(statePath)
+	t.Fatalf("on-disk row never reflected loop-side clear+respawn: %+v", after.Daemons[taskName])
+}
+
+// TestSupervisorLivenessSweepConcurrentWithHandlerNoRace is the Conc-F2
+// -race guard: the 5s liveness sweep runs in its OWN goroutine while the
+// event-loop handler concurrently mutates the same task's tracker entry and
+// persists supervisor-state.json. With the fix the sweep performs zero
+// tracker mutations and no off-loop persist, so there is no read/modify/
+// persist sequence racing the handler's MarkSpawned/MarkExited+persist for
+// the same task. Run under `go test -race` over this + the handler/spawn set
+// to detect any reintroduced off-loop tracker write. The assertion is simply
+// that the run completes without a detected data race and the final on-disk
+// state is internally consistent (parseable, version set).
+func TestSupervisorLivenessSweepConcurrentWithHandlerNoRace(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	if err := tracker.PersistTo(statePath); err != nil {
+		t.Fatalf("seed persist: %v", err)
+	}
+	intentCache := newIntentCache()
+	intentCache.Refresh(intent)
+	loop := api.NewEventLoop(64)
+	ctrl := &supervisorController{
+		intentCache:         intentCache,
+		eventLoop:           loop,
+		tracker:             tracker,
+		statePath:           statePath,
+		daemonIntent:        newDaemonIntentCache(),
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			tracker.MarkSpawned(d.TaskName, 33000, time.Now().UTC())
+			return nil
+		},
+		terminate: func(api.SupervisorDaemon) error { return nil },
+	}
+	ctrl.smStates.Store(taskName, api.StRunning)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	// The sweep observes a dead PID (PIDAlive false) -> EvChildExit path
+	// (non-restart reason) -> the handler drives the SM. The probe is shared
+	// process-global state, so set it once for the whole concurrent run.
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(int) bool { return false },
+		PortLive: func(int) bool { return false },
+	})
+	defer restore()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	// Sweep goroutine: hammers sweepSupervisorLivenessOnce (the same call the
+	// 5s monitor makes) on its own goroutine, exactly as production does.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+		}
+	}()
+	// Handler-feeder goroutine: concurrently drives spawn/exit transitions for
+	// the SAME task so the loop goroutine mutates the tracker + persists while
+	// the sweep runs.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			loop.Post(api.LoopEvent{Kind: api.EvManualRestart, TaskName: taskName})
+			loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+		}
+	}()
+	wg.Wait()
+
+	// Drain a moment so any in-flight loop persist settles, then assert the
+	// on-disk state is internally consistent (no torn/partial write surfaced
+	// as a parse error or lost version).
+	time.Sleep(100 * time.Millisecond)
+	final, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("final supervisor-state.json unreadable (torn write / race corruption): %v", err)
+	}
+	if final.Version == 0 {
+		t.Fatalf("final supervisor-state.json lost version field: %+v", final)
 	}
 }

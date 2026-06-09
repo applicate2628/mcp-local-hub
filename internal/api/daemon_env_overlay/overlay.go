@@ -14,11 +14,19 @@
 //   - discovered_at / modified_at: RFC3339Nano timestamps for the
 //     GUI's Servers matrix.
 //
-// Load enforces three safety properties before YAML decode:
-//   - The path must open via hardenedOpen (Task 2.4 swaps in the
-//     platform-specific implementation; this task ships a stub).
+// Load enforces four safety properties before YAML decode:
+//   - The path must open via hardenedOpen (platform-specific
+//     symlink/reparse-point refusal in read_hardening_{posix,windows}.go).
 //   - The opened file must be a regular file (rejects symlinks /
 //     devices / pipes via f.Stat().Mode().IsRegular()).
+//   - The file's PARENT directory must pass the read-side parent-DACL
+//     gate (checkStateDirParentReadSafe in parent_check.go) — the
+//     read-side mirror of the write-side gate. This is what makes the
+//     MCPHUB_REQUIRE_SINGLE_USER_HOME strict posture and the
+//     MCPHUB_ALLOW_UNHARDENED_STATE_READ relax opt-out actually fire on
+//     the load path: on a broadened parent, strict mode refuses the
+//     read so a co-resident principal who swapped the directory entry
+//     cannot inject attacker-controlled env into supervised daemons.
 //   - The file body must be UTF-8 and at most MaxOverlaySize bytes.
 //
 // Decoding uses yaml.v3's KnownFields(true) so unknown keys are
@@ -32,10 +40,53 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path/filepath"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
+
+// errTransientOverlayRead is the sentinel that marks an open/stat I/O
+// failure consistent with a concurrent atomic-rename of the overlay
+// file by a writer (GUI WriteOverlay → api.WriteStateFileBytesLockHeld).
+// The writer publishes via an atomic rename (POSIX renameat /
+// Windows FileRenameInformationEx with FILE_RENAME_POSIX_SEMANTICS), so
+// a reader can only ever observe the COMPLETE old file, the COMPLETE
+// new file, or — on Windows, during the brief in-kernel replace window
+// — a transient open/stat error (sharing violation / momentary
+// not-found). There is never a torn/partial read.
+//
+// Load retries exactly once when loadOnce returns an error matching this
+// sentinel, so the spawn-time "live overlay reload" reads the
+// just-applied edit instead of silently degrading to the stale cached
+// startup snapshot (the PR#222 P1-1 regression). Genuine parse failures
+// (oversize, non-UTF-8, malformed YAML, irregular file, parent-gate
+// rejection) are NOT tagged transient and are NOT retried — they surface
+// to the caller unchanged so the fail-loud (loadOverlayAtStartup) and
+// graceful-degradation (spawn closure) behaviors both hold.
+var errTransientOverlayRead = errors.New("daemon_env_overlay: transient overlay read (concurrent rename); retry candidate")
+
+// transientReadError tags an open/stat I/O failure as a retry candidate
+// while preserving the underlying error verbatim. It satisfies
+// errors.Is(err, errTransientOverlayRead) (for the retry decision) and
+// exposes the underlying error via Unwrap so the final surfaced error,
+// after retries are exhausted, is the clean open/stat error with no
+// internal "retry candidate" framing.
+type transientReadError struct{ inner error }
+
+func (e *transientReadError) Error() string { return e.inner.Error() }
+func (e *transientReadError) Unwrap() error { return e.inner }
+func (e *transientReadError) Is(target error) bool { return target == errTransientOverlayRead }
+
+// underlyingReadError returns the open/stat error a transientReadError
+// wraps, or err unchanged when err is not a transientReadError.
+func underlyingReadError(err error) error {
+	var t *transientReadError
+	if errors.As(err, &t) {
+		return t.inner
+	}
+	return err
+}
 
 // MaxOverlaySize is the per-file size cap enforced by Load. Anything
 // larger is rejected before YAML decode runs. 64 KiB is comfortably
@@ -75,22 +126,86 @@ type DaemonRow struct {
 //     unknown YAML keys surface as errors.
 //
 // The returned Overlay always has a non-nil Daemons map.
+//
+// Concurrency note: a single transient open/stat failure (consistent
+// with a writer's in-flight atomic rename — see errTransientOverlayRead)
+// is retried exactly once before surfacing. Genuine parse failures are
+// never retried.
 func Load(path string) (*Overlay, error) {
+	ov, err := loadOnce(path)
+	if err == nil {
+		return ov, nil
+	}
+	if errors.Is(err, errTransientOverlayRead) {
+		// One retry: the only error class tagged transient is an
+		// open/stat I/O failure during a concurrent atomic rename. The
+		// rename is atomic, so the second attempt observes the COMPLETE
+		// old or COMPLETE new file (never partial).
+		ov, err = loadOnce(path)
+		if err == nil {
+			return ov, nil
+		}
+		// Still failing after the retry. Surface the underlying
+		// open/stat error (strip the transient tag) so callers never
+		// see the internal "retry candidate" framing. underlyingReadError
+		// is a no-op for a non-transient error from the retry (e.g. the
+		// file now exists but is malformed), so that surfaces verbatim.
+		return nil, underlyingReadError(err)
+	}
+	// Non-transient failure on the first attempt (parent-gate rejection,
+	// irregular file, oversize, non-UTF-8, malformed YAML) — surface
+	// verbatim.
+	return nil, err
+}
+
+// loadOnce performs a single open → stat → IsRegular → parent-gate →
+// size-cap → UTF-8 → decode pass. Open/stat I/O failures are tagged with
+// transientReadError (matches errTransientOverlayRead) so Load can decide
+// whether to retry; all other failures (parent-gate rejection, irregular
+// file, oversize, non-UTF-8, malformed YAML) are returned untagged and
+// are NOT retried.
+func loadOnce(path string) (*Overlay, error) {
 	f, err := hardenedOpen(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return emptyOverlay(), nil
 		}
-		return nil, fmt.Errorf("%s: open: %w", path, err)
+		// Open failure that is NOT "missing file" — on Windows this is
+		// the class that can transiently appear during a writer's
+		// atomic rename (sharing violation). Tag transient so Load
+		// retries once; the surfaced error after retry is this clean
+		// open error.
+		return nil, &transientReadError{inner: fmt.Errorf("%s: open: %w", path, err)}
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("%s: stat: %w", path, err)
+		// Stat on an open handle failing is likewise consistent with a
+		// concurrent rename swapping the underlying entry. Tag transient
+		// for retry.
+		return nil, &transientReadError{inner: fmt.Errorf("%s: stat: %w", path, err)}
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: not a regular file (mode=%s)", path, info.Mode())
+	}
+
+	// Read-side parent-DACL gate (Sec-F1): the read-side mirror of the
+	// write-side secureWriteStateFileWithOperatorOpt gate. Runs AFTER
+	// the regular-file check and BEFORE the size read, exactly per the
+	// plan's wiring (servers-matrix revamp plan §"Load ... ->
+	// checkStateDirParentReadSafe(parentDir) -> size cap"). The gate
+	// already encodes strict / explicit-relax / default-refuse
+	// semantics (MCPHUB_REQUIRE_SINGLE_USER_HOME /
+	// MCPHUB_ALLOW_UNHARDENED_STATE_READ); propagate its error verbatim
+	// so the operator posture is identical on the read and write paths.
+	// Without this, a broadened %LOCALAPPDATA% parent that grants a
+	// co-resident principal FILE_DELETE_CHILD would let that principal
+	// swap daemon-env-overrides.yaml for an attacker-owned regular file
+	// that opens fine here, injecting attacker-controlled env (PATH
+	// binary-planting) into every supervised daemon.
+	if gateErr := checkStateDirParentReadSafe(filepath.Dir(path)); gateErr != nil {
+		return nil, gateErr
 	}
 
 	// Read at most MaxOverlaySize+1 so we can detect overrun even when

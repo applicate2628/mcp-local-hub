@@ -182,12 +182,21 @@ func sweepSupervisorLivenessOnce(
 			"port":   d.Port,
 			"reason": reason,
 		}
+		// Single-writer discipline (Codex deep-sec PR #268 Conc-F2): the
+		// sweep runs on its own goroutine, but tracker mutations + the
+		// supervisor-state.json persist for a task must happen ONLY on the
+		// event-loop goroutine so a sweep clear can never race a handler
+		// MarkSpawned/MarkExited+persist (PersistTo snapshots the tracker
+		// BEFORE taking supervisorStateFileMu, so two concurrent persists
+		// can last-writer-win with a stale snapshot). Instead of clearing
+		// the runtime here, mark the event so handleLoopEvent performs the
+		// MarkExited+persist on the loop before the SM transition. The
+		// reason routing is unchanged: a dead-PID restart reason
+		// (NeedsRestart && !HasLivePID) carries the clear instruction; a
+		// live-PID restart reason keeps its PID for the terminate-first
+		// handoff (its old reaper / terminate owns the exit).
 		if eventKind == api.EvManualRestart && !supervisorLivenessReasonHasLivePID(reason) {
-			tracker.MarkExited(taskName)
 			body[supervisorLivenessRuntimeClearedBodyKey] = true
-			if stateDir != "" {
-				_ = persistDaemonRuntimeTracker(events, tracker, filepath.Join(stateDir, "supervisor-state.json"), taskName)
-			}
 		}
 		loop.Post(api.LoopEvent{
 			Kind:     eventKind,

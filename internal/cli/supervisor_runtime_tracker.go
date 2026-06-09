@@ -430,6 +430,22 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 	}
 	snapshot := t.Snapshot()
 	return mutateSupervisorStateFile(path, func(file *api.SupervisorStateFile) error {
+		// PRESERVE the four file-owned fields the tracker does NOT model.
+		// The in-memory DaemonRuntimeEntry carries State/CurrentPID/
+		// PIDGeneration/OrphanPID/JobProtection/StartedAt only; it has no
+		// RestartHistory/BackoffUntil/QuarantineSince/QueuedAction field.
+		// This mutate REPLACES file.Daemons wholesale, so building each
+		// row purely from the tracker snapshot would zero those four on
+		// every persist — and the new persist-on-every-transition cadence
+		// makes the loss guaranteed. HydrateFromState reads RestartHistory
+		// (length → RestartCount) on cold start, and the spec carries the
+		// 30-min sliding window + queued_action across restart through
+		// these fields, so a wholesale zero-fill drops cross-restart state
+		// written by other paths. Snapshot the pre-existing rows BEFORE the
+		// rebuild and copy the four fields forward for tasks the tracker
+		// still owns; the tracker never holds a fresh value for any of them
+		// (Codex deep-sec PR #268 Conc-F1).
+		previous := file.Daemons
 		file.Daemons = make(map[string]api.SupervisorDaemonState, len(snapshot))
 		for taskName, entry := range snapshot {
 			daemonState := api.SupervisorDaemonState{
@@ -438,6 +454,12 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 				PIDGeneration: entry.PIDGeneration,
 				OrphanPID:     entry.OrphanPID,
 				JobProtection: entry.JobProtection,
+			}
+			if prior, ok := previous[taskName]; ok {
+				daemonState.RestartHistory = prior.RestartHistory
+				daemonState.BackoffUntil = prior.BackoffUntil
+				daemonState.QuarantineSince = prior.QuarantineSince
+				daemonState.QueuedAction = prior.QueuedAction
 			}
 			if !entry.StartedAt.IsZero() {
 				daemonState.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)

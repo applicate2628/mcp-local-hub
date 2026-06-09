@@ -71,10 +71,30 @@ type supervisorController struct {
 	// true on spawn-success (after which a cmd.Wait DOES exist), so the
 	// SECOND restart of a previously-foreign daemon correctly relies on the
 	// real exit event and never double-posts.
-	ownSpawned   sync.Map // taskName -> bool (own-spawned this process lifetime)
-	events       *api.SupervisorEventLog
-	graceful     *gracefulCounter
-	daemonIntent *daemonIntentCache
+	ownSpawned sync.Map // taskName -> bool (own-spawned this process lifetime)
+	// reaperOutstanding records, per task, whether a real own cmd.Wait /
+	// reaper goroutine the controller launched is still expected to post a
+	// real EvChildExit. It is the race-safe complement to ownSpawned:
+	// ownSpawned tracks INTENT membership (and is dropped by
+	// clearRemovedTaskRuntime on re-registration so a later genuinely-
+	// foreign PID under the same name can still be synthesized), but a
+	// re-registration that drops ownSpawned does NOT make the previous
+	// own child's reaper disappear — that reaper is still live and will
+	// post the real EvChildExit when the child finally dies. Synthesizing
+	// a foreign EvChildExit while that real one is still pending would
+	// double-post for a single exit and double-spawn (Codex deep-sec PR
+	// #268 Conc-F3). So the StExiting synthesize is gated on
+	// reaperOutstanding being absent in ADDITION to !ownSpawned: a real
+	// reaper outstanding suppresses the synthesize, and the real exit
+	// drives the single respawn. Set true on spawn-success (a fresh reaper
+	// is now live); cleared when the controller observes the task's real
+	// EvChildExit (any EvChildExit reaching handleLoopEvent is a real
+	// exit observation — the synthetic one fires only for foreign tasks
+	// that never had an entry here, so clearing it for them is a no-op).
+	reaperOutstanding sync.Map // taskName -> bool (real own reaper expected to post EvChildExit)
+	events            *api.SupervisorEventLog
+	graceful          *gracefulCounter
+	daemonIntent      *daemonIntentCache
 
 	// spawn is the production SpawnFunc closure constructed in
 	// runSupervise. executeSideEffect calls it when the SM transition
@@ -261,9 +281,22 @@ func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
 	c.smStates.Delete(taskName)
 	c.queuedActions.Delete(taskName)
-	// Drop the own-spawned marker too: a re-registered task with the same
-	// name must be reclassified from scratch (its old child is gone), so a
-	// stale "owned" entry must not suppress a later foreign-PID synthesize.
+	// Drop the own-spawned marker: a re-registered task with the same name
+	// must be reclassified from scratch so a stale "owned" entry does not
+	// suppress a later genuinely-foreign-PID synthesize.
+	//
+	// Do NOT drop reaperOutstanding here. The premise "its old child is
+	// gone" is FALSE during a race: the previous own child's cmd.Wait
+	// reaper may still be live and will post the real EvChildExit. Dropping
+	// ownSpawned flips the task to "foreign" immediately, but the
+	// reaperOutstanding marker survives and keeps the StExiting synthesize
+	// suppressed until that real exit is observed — without it, a terminate
+	// in the re-registration window would synthesize a foreign EvChildExit
+	// that races the still-pending real one and double-spawns (Codex
+	// deep-sec PR #268 Conc-F3). The marker is cleared when handleLoopEvent
+	// sees the real EvChildExit (including for a now-removed task, via the
+	// early clear before the orphan-drop), so genuine removal does not leak
+	// it and a subsequent foreign re-registration is still synthesizable.
 	c.ownSpawned.Delete(taskName)
 	if c.tracker != nil {
 		c.tracker.Remove(taskName)
@@ -403,6 +436,20 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	if c == nil {
 		return
 	}
+	// Any EvChildExit reaching the controller is an observation that the
+	// task's real own reaper (if it had one) has fired its exit — clear
+	// the reaperOutstanding marker so a subsequent terminate is free to
+	// synthesize a foreign exit if the task is genuinely foreign now. Done
+	// BEFORE the intent lookup so a real exit for a task already removed
+	// from intent (orphan-drop path below) still clears the marker rather
+	// than leaking it (Codex deep-sec PR #268 Conc-F3). A re-spawn driven
+	// by this same EvChildExit re-sets reaperOutstanding in
+	// executeSideEffect's spawn-success branch, so this clear cannot strand
+	// a freshly-respawned child. Harmless for synthetic / foreign exits:
+	// those tasks have no reaperOutstanding entry, so Delete is a no-op.
+	if ev.Kind == api.EvChildExit {
+		c.reaperOutstanding.Delete(ev.TaskName)
+	}
 	d, ok := c.intentCache.Lookup(ev.TaskName)
 	if !ok {
 		// Daemon dropped from intent OR not yet known (controller
@@ -436,13 +483,27 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 			currentState = s
 		}
 	}
-	// Liveness restarts are posted only after the runtime tracker has
-	// invalidated a known-stale PID. Treat that verified tracker state as
-	// spawnable so EvManualRestart goes through the SM without firing the
-	// terminate side effect against a dead or recycled PID.
-	if currentState == api.StRunning && supervisorLivenessRestartClearedRuntime(ev) && c.tracker != nil {
-		if entry, ok := c.tracker.Get(ev.TaskName); ok && entry.State == daemonRuntimeStateIdle && entry.CurrentPID == 0 {
-			currentState = api.StIdle
+	// Liveness restarts for a dead-PID reason carry a clear instruction
+	// (supervisorLivenessRuntimeClearedBodyKey). The actual MarkExited +
+	// persist now happens HERE on the event-loop goroutine instead of in
+	// the sweep goroutine, so the tracker mutation + supervisor-state.json
+	// write for the task stay single-writer and cannot race a concurrent
+	// handler MarkSpawned/MarkExited+persist (Codex deep-sec PR #268
+	// Conc-F2). The clear is idempotent — MarkExited on an already-idle
+	// entry is a no-op-equivalent — so a sweep that pre-cleared (older
+	// callers / tests) still lands on the same state. After clearing, the
+	// SM treats the verified-idle tracker state as spawnable so the
+	// EvManualRestart goes through the SM without firing the terminate
+	// side effect against a dead or recycled PID.
+	if supervisorLivenessRestartClearedRuntime(ev) && c.tracker != nil {
+		c.tracker.MarkExited(ev.TaskName)
+		if c.statePath != "" {
+			_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, ev.TaskName)
+		}
+		if currentState == api.StRunning {
+			if entry, ok := c.tracker.Get(ev.TaskName); ok && entry.State == daemonRuntimeStateIdle && entry.CurrentPID == 0 {
+				currentState = api.StIdle
+			}
 		}
 	}
 
@@ -745,6 +806,13 @@ func (c *supervisorController) executeSideEffect(
 			// own-spawned here after its first terminate-then-respawn, so
 			// its SECOND restart relies on the real exit event.
 			c.ownSpawned.Store(d.TaskName, true)
+			// A fresh real reaper is now live and WILL post a real
+			// EvChildExit when this child exits. Mark it outstanding so the
+			// synthesize gate suppresses a foreign EvChildExit even if a
+			// concurrent intent re-registration drops ownSpawned before the
+			// real exit arrives (Codex deep-sec PR #268 Conc-F3). Cleared
+			// when handleLoopEvent observes the real EvChildExit.
+			c.reaperOutstanding.Store(d.TaskName, true)
 		}
 		if c.eventLoop != nil {
 			switch {
@@ -801,16 +869,27 @@ func (c *supervisorController) executeSideEffect(
 			return nil
 		}
 		termErr := c.terminate(*d)
-		// Synthesize ONLY when (a) the task is foreign (no own cmd.Wait,
-		// else we would double-emit against the real exit event) AND
-		// (b) terminate returned nil — the production TerminateFunc
-		// returns nil only on paths where the targeted PID is GONE
-		// (already-dead, identity-mismatch/reuse, or confirmed-terminated),
-		// never while the live daemon is still running. On a terminate
-		// failure we leave the entry for the next liveness sweep / retry
-		// rather than respawning over a process that may still be alive.
+		// Synthesize ONLY when ALL of:
+		//   (a) the task is foreign (not own-spawned, no own cmd.Wait — else
+		//       we double-emit against the real exit event), AND
+		//   (b) no real own reaper is still outstanding for this task — a
+		//       concurrent intent re-registration can drop ownSpawned
+		//       (clearRemovedTaskRuntime) WHILE the previous own child's
+		//       reaper is still live and will post the real EvChildExit;
+		//       synthesizing here would race that real exit and double-spawn
+		//       (Codex deep-sec PR #268 Conc-F3). reaperOutstanding survives
+		//       the ownSpawned drop and is cleared only when the real exit is
+		//       observed, so it closes the re-registration window that the
+		//       ownSpawned boolean alone cannot, AND
+		//   (c) terminate returned nil — the production TerminateFunc returns
+		//       nil only on paths where the targeted PID is GONE (already-
+		//       dead, identity-mismatch/reuse, or confirmed-terminated),
+		//       never while the live daemon is still running. On a terminate
+		//       failure we leave the entry for the next liveness sweep /
+		//       retry rather than respawning over a possibly-live process.
 		_, owned := c.ownSpawned.Load(d.TaskName)
-		if termErr == nil && !owned {
+		_, reaperPending := c.reaperOutstanding.Load(d.TaskName)
+		if termErr == nil && !owned && !reaperPending {
 			c.synthesizeForeignChildExit(d, ev)
 		}
 		return nil
@@ -836,8 +915,12 @@ func (c *supervisorController) executeSideEffect(
 //
 // Caller contract (enforced at the StExiting call site): invoked ONLY
 // when terminate returned nil (the targeted PID is gone — no race against
-// a live process or a late real exit) AND the task is NOT own-spawned (so
-// there is no real EvChildExit to double up against).
+// a live process or a late real exit) AND the task is NOT own-spawned AND
+// no real own reaper is outstanding for the task (reaperOutstanding
+// absent). The own-spawned + reaperOutstanding pair together guarantee
+// there is no real EvChildExit still pending to double up against, even
+// across an intent re-registration that dropped ownSpawned mid-flight
+// (Codex deep-sec PR #268 Conc-F3).
 //
 // Uses PostSelf, not Post: this runs inside handleLoopEvent (a registered
 // loop handler), and an inline Post from a handler can deadlock on a full
