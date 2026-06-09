@@ -71,13 +71,17 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		}
 		stalePID := 0
 		if ok && runtimeState.State == daemonRuntimeStateRunning {
-			live, _ := supervisorDaemonEntryLive(api.SupervisorDaemon{
+			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
 				TaskName: d.TaskName,
 				Server:   server,
 				Daemon:   daemon,
 				Port:     port,
 			}, runtimeState, time.Now().UTC())
-			if !live {
+			// port_owner_unverified is a probe ERROR (e.g. netstat blocked),
+			// not a restart: the liveness sweep deliberately only observes it
+			// (no EvManualRestart), so the status must not report "Restarting"
+			// for it — keep the running view (deep-sec #268).
+			if !live && reason != supervisorLivenessReasonPortOwnerUnverified {
 				stalePID = runtimeState.CurrentPID
 				stateText = "Restarting"
 				runtimeState.CurrentPID = 0
@@ -157,6 +161,9 @@ func daemonRuntimeStartedAt(startedAt time.Time) string {
 }
 
 func isSupervisorMaintenanceTask(taskName string) bool {
-	name := strings.TrimPrefix(taskName, `\`)
-	return strings.HasSuffix(name, "-weekly-refresh")
+	// Use the shared predicate so *-watchdog rows are treated as maintenance
+	// too (not just *-weekly-refresh) — keeps the CLI env selectors and the
+	// status is_maintenance flag consistent with the rest of the codebase
+	// (deep-sec #268: a watchdog row must be excluded from env selectors).
+	return api.IsMaintenanceTaskName(taskName)
 }
