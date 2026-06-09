@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -44,7 +45,16 @@ func defaultSupervisorLivenessProbe() supervisorLivenessProbe {
 		PIDIdentity: process.VerifyPIDIdentity,
 		PortLive:    supervisorPortLive,
 	}
-	probe.PortOwnerPID = supervisorPortOwnerPID
+	// Install the OS-level port-owner verification ONLY on platforms with a real
+	// implementation (Windows netstat, Linux /proc). On macOS and other POSIX
+	// targets api.LoopbackPortOwnerPID fails closed (errPortOwnerUnsupported);
+	// installing it there would short-circuit the PortLive TCP fallback below and
+	// classify every live daemon port_owner_unverified forever — a regression from
+	// the prior TCP liveness on the documented macOS-preview/POSIX paths (Codex
+	// bot #271 P2). A nil PortOwnerPID falls through to PortLive.
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
+		probe.PortOwnerPID = supervisorPortOwnerPID
+	}
 	return probe
 }
 

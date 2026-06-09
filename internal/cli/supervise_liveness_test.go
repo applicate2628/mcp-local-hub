@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1955,8 +1956,22 @@ func TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts(t *testing.T
 
 func TestDefaultSupervisorLivenessProbeUsesPortOwnerVerification(t *testing.T) {
 	probe := defaultSupervisorLivenessProbe()
-	if probe.PortOwnerPID == nil {
-		t.Fatal("default liveness probe must verify socket owner on every platform; TCP-only liveness trusts foreign listeners")
+	switch runtime.GOOS {
+	case "windows", "linux":
+		// These platforms have a real OS-level socket-owner proof (Windows
+		// netstat, Linux /proc), so liveness MUST use it — TCP-only liveness
+		// trusts a foreign listener squatting the daemon port.
+		if probe.PortOwnerPID == nil {
+			t.Fatalf("on %s the default liveness probe must verify socket owner; TCP-only liveness trusts foreign listeners", runtime.GOOS)
+		}
+	default:
+		// macOS and other POSIX targets fail closed at api.LoopbackPortOwnerPID;
+		// installing it would block the PortLive TCP fallback and classify every
+		// live daemon port_owner_unverified forever (Codex bot #271 P2), so
+		// PortOwnerPID MUST stay nil there to preserve TCP liveness.
+		if probe.PortOwnerPID != nil {
+			t.Fatalf("on %s PortOwnerPID must be nil so the PortLive TCP fallback runs", runtime.GOOS)
+		}
 	}
 }
 

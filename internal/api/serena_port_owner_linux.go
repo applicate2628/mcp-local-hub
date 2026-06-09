@@ -42,6 +42,16 @@ func loopbackTCPListenInode(port int) (string, bool, error) {
 func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// A missing table (e.g. /proc/net/tcp6 on an IPv6-disabled host) is NOT a
+		// probe error — it just means no listener of that address family exists,
+		// so the caller's IPv4 "unbound" result must stand. Masking it as an error
+		// would propagate to port_owner_unverified and leave a wedged daemon that
+		// dropped its listener running forever instead of classifying it
+		// port_unbound (Codex bot #271 P2). Only a non-ENOENT read error
+		// (permission, I/O) is a genuine probe failure.
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
 		return "", false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", path, err)
 	}
 	wantPort := strings.ToUpper(fmt.Sprintf("%04X", port))
@@ -108,7 +118,15 @@ func pidForSocketInode(inode string) (int, bool, error) {
 		}
 	}
 	if sawPermissionError {
-		return 0, false, fmt.Errorf("loopbackPortOwnerPID: socket inode %s found but owning /proc fd was not readable", inode)
+		// The socket inode exists in /proc/net/tcp but its owning /proc/<pid>/fd
+		// is unreadable — a DIFFERENT UID owns the port. The supervisor can always
+		// read its OWN daemon's fds (same UID), so an unreadable owner is provably
+		// NOT the tracked daemon. Report a found-but-foreign owner (pid 0, ok=true)
+		// so liveness classifies it port_owner_mismatch and restarts the daemon
+		// whose port is squatted, instead of port_owner_unverified which leaves
+		// the cross-user impersonation in place (Codex bot #271 P2). pid 0 != the
+		// daemon's tracked PID and != the supervisor self PID → mismatch.
+		return 0, true, nil
 	}
 	return 0, false, nil
 }
