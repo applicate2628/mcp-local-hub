@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -45,9 +44,7 @@ func defaultSupervisorLivenessProbe() supervisorLivenessProbe {
 		PIDIdentity: process.VerifyPIDIdentity,
 		PortLive:    supervisorPortLive,
 	}
-	if runtime.GOOS == "windows" {
-		probe.PortOwnerPID = supervisorPortOwnerPID
-	}
+	probe.PortOwnerPID = supervisorPortOwnerPID
 	return probe
 }
 
@@ -161,8 +158,8 @@ func sweepSupervisorLivenessOnce(
 			continue
 		}
 		// Port-owner PROBE ERROR (could not determine the socket owner — e.g.
-		// netstat policy-blocked) that even the TCP fallback could not turn
-		// into a positive liveness result. This is observed but is NOT proof
+		// netstat policy-blocked or /proc owner mapping unavailable). This is
+		// observed but is NOT proof
 		// the daemon is dead, so it must drive NEITHER a restart
 		// (EvManualRestart → fleet restart loop) NOR a teardown (the default
 		// EvChildExit → StRunning→StBackoffWaiting crash path). Emit the warn
@@ -179,7 +176,7 @@ func sweepSupervisorLivenessOnce(
 					Body: map[string]any{
 						"pid":  entry.CurrentPID,
 						"port": d.Port,
-						"note": "OS-level port-owner probe failed and the TCP fallback did not confirm liveness; leaving the daemon running (a probe error is not proof of a dead or foreign-owned daemon, so no restart is issued)",
+						"note": "OS-level port-owner probe failed; leaving the daemon running (a probe error is not proof of a dead or foreign-owned daemon, so no restart is issued)",
 					},
 				})
 			}

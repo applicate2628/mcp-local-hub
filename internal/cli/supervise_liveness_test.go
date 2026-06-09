@@ -1952,3 +1952,28 @@ func TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts(t *testing.T
 		t.Fatal("confirmed owner mismatch did not post EvManualRestart")
 	}
 }
+
+func TestDefaultSupervisorLivenessProbeUsesPortOwnerVerification(t *testing.T) {
+	probe := defaultSupervisorLivenessProbe()
+	if probe.PortOwnerPID == nil {
+		t.Fatal("default liveness probe must verify socket owner on every platform; TCP-only liveness trusts foreign listeners")
+	}
+}
+
+func TestSupervisorDaemonEntryLiveWithoutOwnerProbeOnlyUsedForTestSeams(t *testing.T) {
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(process.PIDIdentityProof) error { return nil },
+		PortLive:    func(int) bool { return true },
+		// Deliberately nil PortOwnerPID to document the legacy vulnerable seam.
+	})
+	defer restore()
+
+	live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{Port: 9123}, DaemonRuntimeEntry{
+		CurrentPID: 22036,
+		StartedAt:  time.Now().UTC().Add(-time.Minute),
+	}, time.Now().UTC())
+	if !live || reason != "" {
+		t.Fatalf("nil PortOwnerPID test seam live=%v reason=%q, want legacy TCP-only live", live, reason)
+	}
+}
