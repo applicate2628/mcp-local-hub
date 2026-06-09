@@ -47,6 +47,7 @@ type lspRegisterRequest struct {
 
 func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*lspRegisterReport, error) {
 	report := &lspRegisterReport{Workspace: workspacePath}
+	blessedRoot := ""
 	for _, language := range languages {
 		entry, err := ensureLSPRegisteredForGUI(context.Background(), "", workspacePath, language)
 		if err != nil {
@@ -68,8 +69,38 @@ func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*
 		if report.WorkspaceKey == "" {
 			report.WorkspaceKey = entry.WorkspaceKey
 		}
+		// The GUI "Enable" / lsp-register handler is an EXPLICIT operator
+		// action, so a successful registration blesses the workspace's
+		// canonical root for the router's first-touch auto-register gate
+		// (same seed semantics as the `mcphub register` CLI path). The
+		// router's own auto-register seam does NOT reach here, so an
+		// untrusted tool-call path can never bless itself. entry.WorkspacePath
+		// is the CanonicalWorkspacePath form EnsureLSPRegistered persisted;
+		// it is identical across the languages of one register call, so
+		// bless once.
+		if blessedRoot == "" && entry.WorkspacePath != "" {
+			blessedRoot = entry.WorkspacePath
+		}
+	}
+	if blessedRoot != "" {
+		if err := blessLSPTrustedRootForGUI(blessedRoot); err != nil {
+			// Best-effort: the register succeeded; surface the bless
+			// failure as a warning so a later sibling-workspace
+			// auto-register failure is diagnosable, but never fail the
+			// register over it.
+			report.Warnings = append(report.Warnings,
+				fmt.Sprintf("could not record %s as an LSP trusted root (router auto-register of sibling workspaces under this tree may require explicit register): %v", blessedRoot, err))
+		}
 	}
 	return report, nil
+}
+
+// blessLSPTrustedRootForGUI is the explicit-register bless seam for the
+// GUI lsp-register handler. A package-level var so tests can assert it
+// fires at the explicit register site — and assert the ROUTER path never
+// reaches it. Production delegates to api.BlessDefaultTrustedRoot.
+var blessLSPTrustedRootForGUI = func(workspaceRoot string) error {
+	return api.BlessDefaultTrustedRoot(workspaceRoot)
 }
 
 func registerLSPRegisterRoutes(s *Server) {

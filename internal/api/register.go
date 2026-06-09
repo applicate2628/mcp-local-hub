@@ -247,7 +247,34 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		report.Entries = append(report.Entries, entry)
 	}
 	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, allClients, w)...)
+	// EXPLICIT register → bless this workspace's canonical root as a
+	// trusted root for the GUI LSP router's first-touch auto-register
+	// gate. This is the operator-action seed: after an explicit register
+	// of a workspace, sibling/child workspaces under the same tree may
+	// auto-register through the router without re-registering. The
+	// router's own auto-register path does NOT call this (it goes through
+	// EnsureLSPRegistered, not Register), so an untrusted tool-call path
+	// can never bless itself. Best-effort: a bless failure only warns —
+	// the register itself succeeded; the worst case is a sibling needing
+	// its own explicit register. See internal/api/lsp_trusted_roots.go.
+	if len(report.Entries) > 0 {
+		if err := registerBlessTrustedRootFn(canonical); err != nil {
+			fmt.Fprintf(w, "warning: could not record %s as an LSP trusted root (router auto-register of sibling workspaces under this tree may require explicit register): %v\n", canonical, err)
+			report.Warnings = append(report.Warnings,
+				fmt.Sprintf("could not record %s as an LSP trusted root: %v", canonical, err))
+		}
+	}
 	return report, nil
+}
+
+// registerBlessTrustedRootFn is the explicit-register bless seam. In
+// production it blesses the workspace's canonical root in the default
+// trusted-roots store; tests override it (newRegisterHarness defaults it
+// to a no-op so register tests never write the real %LOCALAPPDATA%
+// store). The ROUTER auto-register path does NOT use this seam — it goes
+// through EnsureLSPRegistered, which never blesses.
+var registerBlessTrustedRootFn = func(canonicalWorkspaceRoot string) error {
+	return BlessDefaultTrustedRoot(canonicalWorkspaceRoot)
 }
 
 func preflightSchedulerlessRegisterSupervisor() error {

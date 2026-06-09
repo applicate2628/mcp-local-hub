@@ -182,6 +182,17 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 	prev := ensureLSPRegisteredForGUI
 	t.Cleanup(func() { ensureLSPRegisteredForGUI = prev })
 
+	// Stub the explicit-register bless seam so the test does NOT touch the
+	// real %LOCALAPPDATA% trusted-roots store, and so we can assert the
+	// EXPLICIT register blesses the workspace's canonical root exactly once.
+	prevBless := blessLSPTrustedRootForGUI
+	t.Cleanup(func() { blessLSPTrustedRootForGUI = prevBless })
+	var blessed []string
+	blessLSPTrustedRootForGUI = func(workspaceRoot string) error {
+		blessed = append(blessed, workspaceRoot)
+		return nil
+	}
+
 	var calls []string
 	ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspacePath, language string) (api.WorkspaceEntry, error) {
 		if ctx == nil {
@@ -193,7 +204,7 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 		calls = append(calls, language)
 		return api.WorkspaceEntry{
 			WorkspaceKey:  "project",
-			WorkspacePath: workspacePath,
+			WorkspacePath: "/canonical/dev/project",
 			Language:      language,
 			Backend:       "mcp-language-server",
 			Port:          9200 + len(calls),
@@ -209,8 +220,8 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 	if len(calls) != 2 || calls[0] != "go" || calls[1] != "python" {
 		t.Fatalf("EnsureLSPRegistered calls = %v, want [go python]", calls)
 	}
-	if report.Workspace != "D:/dev/project" || report.WorkspaceKey != "project" {
-		t.Fatalf("report workspace = (%q, %q), want (D:/dev/project, project)", report.Workspace, report.WorkspaceKey)
+	if report.WorkspaceKey != "project" {
+		t.Fatalf("report workspace key = %q, want project", report.WorkspaceKey)
 	}
 	if len(report.Entries) != 2 {
 		t.Fatalf("report entries = %d, want 2", len(report.Entries))
@@ -223,11 +234,56 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 			t.Fatalf("GUI LSP enable must not write client entries; got %+v", entry.ClientEntries)
 		}
 	}
+	// Bless once per workspace (not once per language), using the canonical
+	// WorkspacePath EnsureLSPRegistered returned — NOT the raw request path.
+	if len(blessed) != 1 {
+		t.Fatalf("explicit GUI register should bless the trusted root exactly once, got %d: %v", len(blessed), blessed)
+	}
+	if blessed[0] != "/canonical/dev/project" {
+		t.Fatalf("blessed root = %q, want the canonical WorkspacePath /canonical/dev/project", blessed[0])
+	}
+}
+
+// TestRealLSPRegistrar_DoesNotBlessWhenEveryLanguageFails asserts the
+// bless seam is NOT invoked when no language registered successfully —
+// there is no canonical root to seed trust from.
+func TestRealLSPRegistrar_DoesNotBlessWhenEveryLanguageFails(t *testing.T) {
+	prev := ensureLSPRegisteredForGUI
+	t.Cleanup(func() { ensureLSPRegisteredForGUI = prev })
+	ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspacePath, language string) (api.WorkspaceEntry, error) {
+		return api.WorkspaceEntry{}, errors.New("register failed")
+	}
+
+	prevBless := blessLSPTrustedRootForGUI
+	t.Cleanup(func() { blessLSPTrustedRootForGUI = prevBless })
+	blessCalls := 0
+	blessLSPTrustedRootForGUI = func(workspaceRoot string) error {
+		blessCalls++
+		return nil
+	}
+
+	report, err := (realLSPRegistrar{}).RegisterLSP("D:/dev/project", []string{"go"})
+	if err != nil {
+		t.Fatalf("RegisterLSP: %v", err)
+	}
+	if len(report.Entries) != 0 {
+		t.Fatalf("expected zero entries on total failure, got %+v", report.Entries)
+	}
+	if blessCalls != 0 {
+		t.Fatalf("bless must not fire when no language registered, got %d calls", blessCalls)
+	}
 }
 
 func TestRealLSPRegistrar_ReportsPartialBatchFailures(t *testing.T) {
 	prev := ensureLSPRegisteredForGUI
 	t.Cleanup(func() { ensureLSPRegisteredForGUI = prev })
+
+	// Stub the bless seam so the test does not write the real
+	// %LOCALAPPDATA% trusted-roots store (the "go" language registers ok,
+	// which would otherwise bless).
+	prevBless := blessLSPTrustedRootForGUI
+	t.Cleanup(func() { blessLSPTrustedRootForGUI = prevBless })
+	blessLSPTrustedRootForGUI = func(string) error { return nil }
 
 	ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspacePath, language string) (api.WorkspaceEntry, error) {
 		if language == "not-a-language" {

@@ -31,7 +31,13 @@ type registerHarness struct {
 	regPath     string
 	fakeSch     *fakeScheduler
 	fakeClients *fakeClientsMap
-	restore     func()
+	// blessedRoots records every canonical root the register path tried to
+	// bless as an LSP trusted root. The harness stubs the bless seam to a
+	// no-op capture so register tests never write the real %LOCALAPPDATA%
+	// trusted-roots store; a dedicated test asserts the explicit-register
+	// bless fires.
+	blessedRoots *[]string
+	restore      func()
 }
 
 func newRegisterHarness(t *testing.T) *registerHarness {
@@ -44,6 +50,17 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	origRegistryPath := testRegistryPathOverride
 	origReadiness := proxyReadinessFn
 	origCanonical := testCanonicalMcphubPathOverride
+	origBless := registerBlessTrustedRootFn
+
+	// Stub the explicit-register bless seam: capture the canonical roots
+	// (so a dedicated test can assert the bless fired) AND keep every
+	// register test from touching the real %LOCALAPPDATA% trusted-roots
+	// store. Production wires this to BlessDefaultTrustedRoot.
+	blessed := &[]string{}
+	registerBlessTrustedRootFn = func(canonicalWorkspaceRoot string) error {
+		*blessed = append(*blessed, canonicalWorkspaceRoot)
+		return nil
+	}
 
 	// Create a stub mcphub binary so canonicalMcphubPath()'s
 	// os.Stat preflight succeeds. Production code calls it to verify
@@ -91,15 +108,17 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	testRegistryPathOverride = regPath
 
 	return &registerHarness{
-		regPath:     regPath,
-		fakeSch:     sch,
-		fakeClients: fc,
+		regPath:      regPath,
+		fakeSch:      sch,
+		fakeClients:  fc,
+		blessedRoots: blessed,
 		restore: func() {
 			testSchedulerFactory = origSchedulerNew
 			testClientFactory = origClientFactory
 			testRegistryPathOverride = origRegistryPath
 			proxyReadinessFn = origReadiness
 			testCanonicalMcphubPathOverride = origCanonical
+			registerBlessTrustedRootFn = origBless
 		},
 	}
 }
