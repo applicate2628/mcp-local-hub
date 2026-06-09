@@ -411,6 +411,122 @@ func TestDaemonEnvWithOverlayPathCaseMatrix(t *testing.T) {
 	}
 }
 
+func TestDaemonOverlayEnvDirectInvocationAppliesParentPathOnce(t *testing.T) {
+	for _, sep := range []string{":", ";"} {
+		t.Run("sep_"+sep, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+			parentPath := "/usr/bin" + sep + "/bin"
+			prefix := "/opt/bin"
+			t.Setenv("PATH", parentPath)
+			seedDaemonPathOverlay(t, stateDir, prefix+sep+"${parent_path}", nil)
+
+			env, err := daemonOverlayEnv("memory", "default")
+			if err != nil {
+				t.Fatalf("daemonOverlayEnv: %v", err)
+			}
+
+			want := prefix + sep + parentPath
+			if env["PATH"] != want {
+				t.Fatalf("PATH = %q, want direct overlay applied once as %q", env["PATH"], want)
+			}
+			if strings.Count(env["PATH"], prefix) != 1 {
+				t.Fatalf("PATH = %q, want prefix %q exactly once", env["PATH"], prefix)
+			}
+		})
+	}
+}
+
+func TestDaemonEnvWithOverlaySkipsSupervisorAppliedOverlay(t *testing.T) {
+	for _, sep := range []string{":", ";"} {
+		t.Run("sep_"+sep, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+			parentPath := "/usr/bin" + sep + "/bin"
+			prefix := "/opt/bin"
+			supervisorAppliedPath := prefix + sep + parentPath
+			t.Setenv("PATH", supervisorAppliedPath)
+			t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+			seedDaemonPathOverlay(t, stateDir, prefix+sep+"${parent_path}", nil)
+
+			env, err := daemonEnvWithOverlay("memory", "default", map[string]string{}, secrets.NewResolver(nil, nil))
+			if err != nil {
+				t.Fatalf("daemonEnvWithOverlay: %v", err)
+			}
+
+			effectivePath := effectiveChildPathFromEnvMap(os.Environ(), env)
+			if effectivePath != supervisorAppliedPath {
+				t.Fatalf("effective child PATH = %q, want supervisor-applied PATH exactly once as %q; daemon env=%v", effectivePath, supervisorAppliedPath, env)
+			}
+			if strings.Count(effectivePath, prefix) != 1 {
+				t.Fatalf("effective child PATH = %q, want prefix %q exactly once", effectivePath, prefix)
+			}
+		})
+	}
+}
+
+func TestAppendDaemonOverlayAppliedMarkerWinsOverManifestOverlayValue(t *testing.T) {
+	env := appendDaemonOverlayAppliedMarker([]string{
+		daemonOverlayAppliedEnvVar + "=overlay-spoof",
+		"PATH=/opt/bin",
+	})
+
+	if got := countEnvKey(env, daemonOverlayAppliedEnvVar); got != 1 {
+		t.Fatalf("%s count = %d, want exactly one; env=%v", daemonOverlayAppliedEnvVar, got, env)
+	}
+	if got := lookupEnvValue(env, daemonOverlayAppliedEnvVar); got != daemonOverlayAppliedEnvValue {
+		t.Fatalf("%s = %q, want supervisor marker value %q; env=%v", daemonOverlayAppliedEnvVar, got, daemonOverlayAppliedEnvValue, env)
+	}
+}
+
+func seedDaemonPathOverlay(t *testing.T, stateDir, pathValue string, extra map[string]string) {
+	t.Helper()
+	env := map[string]string{"PATH": pathValue}
+	for k, v := range extra {
+		env[k] = v
+	}
+	if err := daemon_env_overlay.WriteOverlay(filepath.Join(stateDir, overlayBaseName), func(ov *daemon_env_overlay.Overlay) error {
+		ov.Daemons[`\mcp-local-hub-memory-default`] = daemon_env_overlay.DaemonRow{
+			Source: "operator",
+			Env:    env,
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed overlay: %v", err)
+	}
+}
+
+func effectiveChildPathFromEnvMap(parent []string, env map[string]string) string {
+	path := lookupEnvValue(parent, "PATH")
+	for k, v := range env {
+		if strings.EqualFold(k, "PATH") {
+			path = v
+		}
+	}
+	return path
+}
+
+func countEnvKey(env []string, key string) int {
+	count := 0
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok && strings.EqualFold(k, key) {
+			count++
+		}
+	}
+	return count
+}
+
+func lookupEnvValue(env []string, key string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(env[i], "=")
+		if ok && strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
+}
+
 func assertPathFamilyEntries(t *testing.T, env map[string]string, want int) {
 	t.Helper()
 	got := 0

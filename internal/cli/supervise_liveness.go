@@ -19,6 +19,15 @@ const (
 	supervisorLivenessInterval = 5 * time.Second
 
 	supervisorLivenessRuntimeClearedBodyKey = "runtime_pid_cleared"
+
+	supervisorLivenessReasonMissingPID          = "missing_pid"
+	supervisorLivenessReasonPIDDead             = "pid_dead"
+	supervisorLivenessReasonPIDIdentityMissing  = "pid_identity_missing"
+	supervisorLivenessReasonPIDIdentityMismatch = "pid_identity_mismatch"
+	supervisorLivenessReasonPortOwnerUnverified = "port_owner_unverified"
+	supervisorLivenessReasonPortUnbound         = "port_unbound"
+	supervisorLivenessReasonPortOwnerSelf       = "port_owner_self"
+	supervisorLivenessReasonPortOwnerMismatch   = "port_owner_mismatch"
 )
 
 type supervisorLivenessProbe struct {
@@ -154,7 +163,7 @@ func sweepSupervisorLivenessOnce(
 			"port":   d.Port,
 			"reason": reason,
 		}
-		if eventKind == api.EvManualRestart {
+		if eventKind == api.EvManualRestart && !supervisorLivenessReasonHasLivePID(reason) {
 			tracker.MarkExited(taskName)
 			body[supervisorLivenessRuntimeClearedBodyKey] = true
 			if stateDir != "" {
@@ -187,18 +196,18 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 		probe.PIDAlive = process.IsPidAlive
 	}
 	if entry.CurrentPID <= 0 {
-		return false, "missing_pid"
+		return false, supervisorLivenessReasonMissingPID
 	}
 	if !probe.PIDAlive(entry.CurrentPID) {
-		return false, "pid_dead"
+		return false, supervisorLivenessReasonPIDDead
 	}
 	if probe.PIDIdentity != nil {
 		if entry.StartedAt.IsZero() {
-			return false, "pid_identity_missing"
+			return false, supervisorLivenessReasonPIDIdentityMissing
 		}
 		expectedExe := canonicalMcphubPath()
 		if expectedExe == "" {
-			return false, "pid_identity_missing"
+			return false, supervisorLivenessReasonPIDIdentityMissing
 		}
 		err := probe.PIDIdentity(process.PIDIdentityProof{
 			PID:            entry.CurrentPID,
@@ -209,9 +218,9 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 			if errors.Is(err, process.ErrProcessIdentityUnsupported) {
 				// Keep the PIDAlive result on platforms without start-time proof.
 			} else if errors.Is(err, process.ErrProcessAlreadyExited) {
-				return false, "pid_dead"
+				return false, supervisorLivenessReasonPIDDead
 			} else {
-				return false, "pid_identity_mismatch"
+				return false, supervisorLivenessReasonPIDIdentityMismatch
 			}
 		}
 	}
@@ -221,19 +230,19 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 	if probe.PortOwnerPID != nil {
 		ownerPID, ok, err := probe.PortOwnerPID(d.Port)
 		if err != nil {
-			return false, "port_owner_unverified"
+			return false, supervisorLivenessReasonPortOwnerUnverified
 		}
 		if !ok {
 			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < supervisorPortBindGrace {
 				return true, ""
 			}
-			return false, "port_unbound"
+			return false, supervisorLivenessReasonPortUnbound
 		}
 		if supervisorSelfPIDFn != nil && ownerPID == supervisorSelfPIDFn() {
-			return false, "port_owner_self"
+			return false, supervisorLivenessReasonPortOwnerSelf
 		}
 		if ownerPID != entry.CurrentPID {
-			return false, "port_owner_mismatch"
+			return false, supervisorLivenessReasonPortOwnerMismatch
 		}
 		return true, ""
 	}
@@ -244,14 +253,29 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 		if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < supervisorPortBindGrace {
 			return true, ""
 		}
-		return false, "port_unbound"
+		return false, supervisorLivenessReasonPortUnbound
 	}
 	return true, ""
 }
 
 func supervisorLivenessReasonNeedsRestart(reason string) bool {
 	switch reason {
-	case "port_unbound", "port_owner_mismatch", "port_owner_self", "port_owner_unverified":
+	case supervisorLivenessReasonPortUnbound,
+		supervisorLivenessReasonPortOwnerMismatch,
+		supervisorLivenessReasonPortOwnerSelf,
+		supervisorLivenessReasonPortOwnerUnverified:
+		return true
+	default:
+		return false
+	}
+}
+
+func supervisorLivenessReasonHasLivePID(reason string) bool {
+	switch reason {
+	case supervisorLivenessReasonPortUnbound,
+		supervisorLivenessReasonPortOwnerMismatch,
+		supervisorLivenessReasonPortOwnerSelf,
+		supervisorLivenessReasonPortOwnerUnverified:
 		return true
 	default:
 		return false

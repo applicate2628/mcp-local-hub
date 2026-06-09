@@ -20,6 +20,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	daemonOverlayAppliedEnvVar   = "MCPHUB_DAEMON_ENV_OVERLAY_APPLIED"
+	daemonOverlayAppliedEnvValue = "supervisor"
+)
+
 func newDaemonCmdReal() *cobra.Command {
 	var server, daemonName string
 	c := &cobra.Command{
@@ -331,6 +336,9 @@ func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
 }
 
 func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
+	if daemonOverlayAlreadyApplied(os.Environ()) {
+		return nil, nil
+	}
 	stateDir, err := stateDirFunc()
 	if err != nil {
 		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
@@ -353,6 +361,32 @@ func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
 		return overlayEnv, nil
 	}
 	return expanded, nil
+}
+
+func daemonOverlayAlreadyApplied(env []string) bool {
+	return daemonOverlayMarkerValue(env) == daemonOverlayAppliedEnvValue
+}
+
+func appendDaemonOverlayAppliedMarker(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok && strings.EqualFold(k, daemonOverlayAppliedEnvVar) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, daemonOverlayAppliedEnvVar+"="+daemonOverlayAppliedEnvValue)
+}
+
+func daemonOverlayMarkerValue(env []string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(env[i], "=")
+		if ok && strings.EqualFold(k, daemonOverlayAppliedEnvVar) {
+			return v
+		}
+	}
+	return ""
 }
 
 // logBaseDir returns the per-OS directory for daemon logs.

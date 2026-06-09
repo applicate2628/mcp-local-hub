@@ -2338,6 +2338,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// own emit path; the daemon spawns with the literal token in
 		// its env so the operator sees the failure in the child's
 		// observed PATH rather than a silent skip.
+		overlayApplied := len(overlayEnv) > 0
 		if len(overlayEnv) > 0 {
 			if expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ()); err == nil {
 				overlayEnv = expanded
@@ -2362,6 +2363,9 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// os.Environ directly).
 		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
 			cmd.Env = merged
+		}
+		if overlayApplied {
+			cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
 		}
 
 		// Intent-path control channel (bot PR #246 P2). A serena-proxy resolves
