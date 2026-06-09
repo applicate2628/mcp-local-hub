@@ -2,6 +2,7 @@ package cli
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -26,6 +27,18 @@ func normExeForTest(command string) string {
 	return filepath.Clean(exe)
 }
 
+// testDaemonCommandPath returns a platform-native fake daemon command path so
+// daemonExpectedIdentityExe sees a path WITH the OS separator, not a bare name:
+// a Windows-style constant on a POSIX runner has no separator and would be
+// treated as a bare command (LookPath fails -> canonical fallback), failing the
+// "uses the command" assertions (Codex bot #270 P1).
+func testDaemonCommandPath() string {
+	if runtime.GOOS == "windows" {
+		return `C:\Users\someone\.local\bin\mcphub.exe`
+	}
+	return "/home/someone/.local/bin/mcphub"
+}
+
 // TestDaemonExpectedIdentityExe_UsesCommandNotSupervisorPath is the unit guard
 // for the helper: a non-empty configured Command resolves to that command's
 // normalized path (the daemon's install path), NOT the supervisor's own
@@ -34,7 +47,7 @@ func normExeForTest(command string) string {
 func TestDaemonExpectedIdentityExe_UsesCommandNotSupervisorPath(t *testing.T) {
 	// A daemon install path deliberately different from this test binary's
 	// os.Executable() (the "supervisor" path in production terms).
-	const daemonCmd = `C:\Users\someone\.local\bin\mcphub.exe`
+	daemonCmd := testDaemonCommandPath()
 	got := daemonExpectedIdentityExe(daemonCmd)
 	want := normExeForTest(daemonCmd)
 	if got != want {
@@ -70,7 +83,7 @@ func TestDaemonExpectedIdentityExe_UsesCommandNotSupervisorPath(t *testing.T) {
 // probe asserts it received the DAEMON's command path and returns nil (verified),
 // so the daemon is reported live with no mismatch.
 func TestSupervisorDaemonEntryLive_IdentityUsesDaemonCommandNotSupervisorPath(t *testing.T) {
-	const daemonCmd = `C:\Users\someone\.local\bin\mcphub.exe`
+	daemonCmd := testDaemonCommandPath()
 	wantExe := normExeForTest(daemonCmd)
 	if wantExe == canonicalMcphubPath() {
 		t.Skip("test daemon command unexpectedly equals the supervisor path; mismatch is unobservable")
@@ -113,7 +126,7 @@ func TestSupervisorDaemonEntryLive_IdentityUsesDaemonCommandNotSupervisorPath(t 
 // the reason is still pid_identity_mismatch. The fix only changes WHICH expected
 // path is compared, not whether a real mismatch is honored.
 func TestSupervisorDaemonEntryLive_GenuineForeignExeStillMismatches(t *testing.T) {
-	const daemonCmd = `C:\Users\someone\.local\bin\mcphub.exe`
+	daemonCmd := testDaemonCommandPath()
 	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
 		PIDAlive: func(pid int) bool { return pid == 22036 },
 		PIDIdentity: func(proof process.PIDIdentityProof) error {
@@ -161,7 +174,7 @@ func TestProductionTerminateFn_IdentityProofUsesDaemonCommand(t *testing.T) {
 	statePath := filepath.Join(tmpHome, "supervisor-state.json")
 
 	const taskName = `\mcp-local-hub-memory-default`
-	const daemonCmd = `C:\Users\someone\.local\bin\mcphub.exe`
+	daemonCmd := testDaemonCommandPath()
 	wantExe := normExeForTest(daemonCmd)
 	if wantExe == canonicalMcphubPath() {
 		t.Skip("test daemon command unexpectedly equals the supervisor path; mismatch is unobservable")
@@ -231,7 +244,7 @@ func TestProductionTerminateFn_IdentityProofUsesDaemonCommand(t *testing.T) {
 func TestLoadSupervisorCurrentRunning_IdentityUsesIntentCommandNotSupervisorPath(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	const taskName = `\mcp-local-hub-memory-default`
-	const daemonCmd = `C:\Users\someone\.local\bin\mcphub.exe`
+	daemonCmd := testDaemonCommandPath()
 	wantExe := normExeForTest(daemonCmd)
 	if wantExe == canonicalMcphubPath() {
 		t.Skip("test daemon command unexpectedly equals the supervisor path; mismatch is unobservable")
@@ -321,7 +334,7 @@ func TestLoadSupervisorCurrentRunning_IdentityUsesIntentCommandNotSupervisorPath
 func TestLoadSupervisorCurrentRunning_PortBearingInnerRecheckUsesIntentCommand(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	const taskName = `\mcp-local-hub-memory-default`
-	const daemonCmd = `C:\Users\someone\.local\bin\mcphub.exe`
+	daemonCmd := testDaemonCommandPath()
 	wantExe := normExeForTest(daemonCmd)
 	if wantExe == canonicalMcphubPath() {
 		t.Skip("test daemon command unexpectedly equals the supervisor path; mismatch is unobservable")
