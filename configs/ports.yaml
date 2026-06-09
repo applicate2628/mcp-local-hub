@@ -1,10 +1,7 @@
 global:
   - server: serena
-    daemon: claude
+    daemon: unified
     port: 9121
-  - server: serena
-    daemon: codex
-    port: 9122
   - server: memory
     daemon: default
     port: 9123

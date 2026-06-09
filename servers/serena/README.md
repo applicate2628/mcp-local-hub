@@ -1,11 +1,9 @@
 # Serena (MCP server)
 
-Two daemons, split by Serena context:
-
-| Context | Port | Clients |
-|---|---:|---|
-| claude | 9121 | Claude Code, Cursor, VS Code, Gemini CLI, Qwen CLI, Antigravity relay |
-| codex | 9122 | Codex CLI |
+One unified daemon on `--context codex`, port 9121, serving every client —
+Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, Qwen CLI, and the
+Antigravity relay (post-2026-05-20 review replaced the old claude/codex
+split; see manifest.yaml for the rationale).
 
 Default install writes `claude-code`, `codex-cli`, and `cursor`. Use
 `--clients ...` or `--all-clients` to opt in VS Code, Gemini CLI, Qwen CLI, or
