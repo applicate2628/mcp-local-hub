@@ -1786,3 +1786,137 @@ func TestSerenaRouter_AutoRegister_Unwired_Returns503(t *testing.T) {
 		t.Errorf("resolved_path = %q, want the requested path", resp.ResolvedPath)
 	}
 }
+
+// ---------------------------------------------------------------------
+// activate_project routing (fix/serena-activate-project-routing)
+// ---------------------------------------------------------------------
+//
+// The serena `activate_project` tool carries its workspace-root path in
+// the `project` argument (verified against the serena tool schema:
+// activate_project's sole arg is `project`, "name of a registered
+// project or a path to a project directory"). Before this fix
+// extractPathArg recognized only relative_path/file_path/name_path/path,
+// so activate_project was treated as pathless → never bound a fresh
+// session → every subsequent call 503'd missing_session. These tests
+// pin the new behavior.
+
+// TestSerenaRouter_ExtractPathArg_RecognizesProject asserts the `project`
+// key is recognized, and that it is LOWEST precedence (existing path keys
+// still win so no other routing changes).
+func TestSerenaRouter_ExtractPathArg_RecognizesProject(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     map[string]any
+		wantPath string
+		wantOk   bool
+	}{
+		{
+			name:     "project recognized as path-arg",
+			args:     map[string]any{"project": "/proj/alpha"},
+			wantPath: "/proj/alpha",
+			wantOk:   true,
+		},
+		{
+			name:     "relative_path still wins over project",
+			args:     map[string]any{"relative_path": "/r", "project": "/p"},
+			wantPath: "/r",
+			wantOk:   true,
+		},
+		{
+			name:     "path still wins over project",
+			args:     map[string]any{"path": "/explicit", "project": "/p"},
+			wantPath: "/explicit",
+			wantOk:   true,
+		},
+		{
+			name:     "empty project string is skipped",
+			args:     map[string]any{"project": ""},
+			wantPath: "",
+			wantOk:   false,
+		},
+		{
+			name:     "non-string project is skipped",
+			args:     map[string]any{"project": 42},
+			wantPath: "",
+			wantOk:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(tc.args)
+			got, ok := extractPathArg(raw)
+			if got != tc.wantPath || ok != tc.wantOk {
+				t.Errorf("extractPathArg(%s) = (%q, %v), want (%q, %v)",
+					string(raw), got, ok, tc.wantPath, tc.wantOk)
+			}
+		})
+	}
+}
+
+// TestSerenaRouter_ActivateProject_BindsAndForwards is the end-to-end
+// must-fix: activate_project for a REGISTERED workspace path must
+//   - resolve via the `project` arg,
+//   - forward to that workspace's daemon (HTTP 200, NOT 503),
+//   - BindSession so a SUBSEQUENT PATHLESS call (get_current_config)
+//     on the same session routes to the same daemon (not 503
+//     missing_session).
+func TestSerenaRouter_ActivateProject_BindsAndForwards(t *testing.T) {
+	var mu sync.Mutex
+	hits := make([]string, 0, 2) // tools/call names that reached the upstream daemon
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var probe struct {
+			Method string `json:"method"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &probe)
+		// The router forwards initialize → notifications/initialized before
+		// the first tool call; record only the tools/call forwards so the
+		// assertion sees the actual tools, not the handshake.
+		if probe.Method == "tools/call" {
+			mu.Lock()
+			hits = append(hits, probe.Params.Name)
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201, TaskName: `\mcp-local-hub-serena-alpha`}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// 1) activate_project(registered path) → resolve + forward + bind.
+	actBody := buildToolCallBody(t, "activate_project", map[string]any{"project": "/proj/alpha"})
+	rrAct := postSerena(t, s, actBody, map[string]string{"Mcp-Session-Id": "sess-activate"})
+	if rrAct.Code != http.StatusOK {
+		t.Fatalf("activate_project status = %d, want 200 (not 503 missing_session); body=%s",
+			rrAct.Code, rrAct.Body.String())
+	}
+	if got := deps.Sessions.LookupSession("sess-activate"); got == nil || got.WorkspaceKey != "alpha" {
+		t.Fatalf("after activate_project, LookupSession(sess-activate) = %+v, want alpha binding", got)
+	}
+
+	// 2) Subsequent PATHLESS call on the SAME session must route via the
+	// bound session (not 503 missing_session).
+	cfgBody := buildToolCallBody(t, "get_current_config", map[string]any{})
+	rrCfg := postSerena(t, s, cfgBody, map[string]string{"Mcp-Session-Id": "sess-activate"})
+	if rrCfg.Code != http.StatusOK {
+		t.Fatalf("subsequent pathless get_current_config status = %d, want 200 (session bound); body=%s",
+			rrCfg.Code, rrCfg.Body.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(hits) != 2 || hits[0] != "activate_project" || hits[1] != "get_current_config" {
+		t.Fatalf("upstream daemon tool hits = %v, want [activate_project get_current_config]", hits)
+	}
+}

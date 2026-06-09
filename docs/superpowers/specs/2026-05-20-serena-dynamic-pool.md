@@ -138,7 +138,7 @@ mcphub-router принимает все client-side serena tool-calls на ед�
 
 ### Mode 1: Path-aware (default для большинства tools)
 
-Tool args содержат `relative_path` / `file_path` / `name_path` (e.g. `find_symbol`, `replace_symbol_body`, `find_referencing_symbols`, `search_for_pattern` с `file_pattern`):
+Tool args содержат `relative_path` / `file_path` / `name_path` / `path` (e.g. `find_symbol`, `replace_symbol_body`, `find_referencing_symbols`, `search_for_pattern` с `file_pattern`):
 
 ```
 1. Resolve path:
@@ -148,6 +148,19 @@ Tool args содержат `relative_path` / `file_path` / `name_path` (e.g. `fi
 2. Walk parents до первого `.serena/project.yml` → workspace identified
 3. Lookup mcphub workspace registry → daemon-port → forward request
 ```
+
+**`activate_project` is also path-aware via its `project` arg (RESOLVED — `extractPathArg` recognizes `project`, lowest precedence).**
+Editors that lead with `activate_project` (flow: `activate_project` → `check_onboarding`)
+carry the workspace-ROOT path in the `project` argument. That arg is the LAST key
+`extractPathArg` checks (internal/gui/serena_router.go), so it is path-aware Mode 1:
+resolve → forward → BindSession, identical to `relative_path`/`file_path`/`name_path`/`path`.
+The workspace-root path matches the registered entry because `resolveAbsolute` ancestor-walks
+to `.serena/project.yml`, which sits AT the workspace root. Among serena's tool set ONLY
+`activate_project` declares a `project` arg, so no other tool's routing changes.
+Caveat: serena's `project` arg also accepts a registered NAME (not just a path); a bare
+name does NOT resolve here (Mode 1 resolves paths, not names) → falls to auto-register →
+no marker at a bare name → 503. The dynamic-pool migrate-configured client always sends the
+PATH, so the name case is a documented follow-up, not a regression.
 
 ### Mode 2: Sticky-session (для no-path tools — pending codex consult)
 
@@ -165,6 +178,16 @@ Tools БЕЗ path-аргумента (`list_memories`, `get_current_config`, `wr
 - (B) Default workspace из `workspaces.yaml` (есть поле `default: true`?)
 - (C) Reject + require client to call path-tool first
 - (D) Aggregate from all daemons (only for read-only queries: `list_memories` etc.)
+
+**RESOLVED for the `activate_project`-first case (fix/serena-activate-project-routing):**
+The most common "pathless-first-call" scenario was not actually pathless — editors lead
+with `activate_project`, whose `project` arg IS the workspace-root path. By recognizing
+`project` in `extractPathArg`, that lead-off call now binds the sticky session via Mode 1
+(resolve → forward → BindSession), so every subsequent pathless call (`get_current_config`,
+`list_memories`, etc.) routes to the bound daemon. The remaining genuinely-pathless-first
+case (a non-`activate_project` no-path tool as the very first call with no prior bind) still
+returns 503 missing_session per candidate (C) — the client must lead with a path-bearing or
+`activate_project` call first.
 
 ### Mode 3: Auto-register on miss
 

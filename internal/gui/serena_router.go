@@ -309,6 +309,21 @@ func lifecycleParamsObjectOrNull(params json.RawMessage) bool {
 //   - file_path     : edit_file, read_file
 //   - name_path     : insert_after_symbol, replace_symbol_body
 //   - path          : list_dir, search_for_pattern
+//   - project       : activate_project ONLY (the workspace-ROOT path the
+//     editor's lead-off call carries). It is the LAST key checked so it
+//     is lowest precedence and changes no other tool's routing; among
+//     serena's tool set only activate_project declares a `project` arg
+//     (serena schema: activate_project's sole arg is `project`, "the name
+//     of a registered project OR a path to a project directory"). Without
+//     it activate_project resolved as pathless → never bound a fresh
+//     session → every subsequent call 503'd missing_session, making
+//     per-project serena unusable for editors that lead with
+//     activate_project. When `project` is a registered NAME rather than a
+//     path it does NOT match here (ResolveByPath only resolves absolute
+//     paths via the .serena/project.yml ancestor walk, or relative paths
+//     that exist under a registered workspace); the dynamic-pool
+//     migrate-configured client always sends the PATH, so the name case
+//     is a documented follow-up, not a regression.
 func extractPathArg(arguments json.RawMessage) (string, bool) {
 	if len(arguments) == 0 {
 		return "", false
@@ -317,7 +332,7 @@ func extractPathArg(arguments json.RawMessage) (string, bool) {
 	if uerr := json.Unmarshal(arguments, &args); uerr != nil {
 		return "", false
 	}
-	for _, key := range []string{"relative_path", "file_path", "name_path", "path"} {
+	for _, key := range []string{"relative_path", "file_path", "name_path", "path", "project"} {
 		raw, ok := args[key]
 		if !ok {
 			continue
