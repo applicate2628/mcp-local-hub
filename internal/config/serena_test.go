@@ -18,21 +18,27 @@ func TestSerenaManifestParses(t *testing.T) {
 	if m.Name != "serena" {
 		t.Errorf("Name = %q", m.Name)
 	}
-	// Shared-daemon layout: claude context for Claude-family clients and
-	// opt-in clients that can use that tool preset + codex (separate,
-	// Codex-specific). Antigravity connects via `mcp relay` subprocess
-	// (stdio->HTTP bridge) because its Cascade agent rejects direct
-	// loopback-HTTP entries.
-	if len(m.Daemons) != 2 {
-		t.Errorf("len(Daemons) = %d, want 2 (claude + codex)", len(m.Daemons))
+	// Unified-daemon layout (post-2026-05-20 architectural review): ONE serena
+	// daemon on --context codex for ALL clients, replacing the old
+	// claude(9121)+codex(9122) split. See servers/serena/manifest.yaml for the
+	// rationale (resource savings + search_for_pattern/activate_project for every
+	// agent). Antigravity connects via `mcp relay` subprocess (stdio->HTTP
+	// bridge) because its Cascade agent rejects direct loopback-HTTP entries.
+	if len(m.Daemons) != 1 {
+		t.Errorf("len(Daemons) = %d, want 1 (unified)", len(m.Daemons))
+	}
+	if len(m.Daemons) == 1 && m.Daemons[0].Name != "unified" {
+		t.Errorf("Daemons[0].Name = %q, want unified", m.Daemons[0].Name)
 	}
 	if len(m.ClientBindings) != 7 {
 		t.Errorf("len(ClientBindings) = %d, want 7 managed clients", len(m.ClientBindings))
 	}
-	// Non-Codex clients route to the "claude" daemon. Antigravity gets there
-	// via a stdio-relay spawn; the others use HTTP client entries.
-	sharedClaude := map[string]bool{
+	// EVERY client (including codex-cli) routes to the single "unified" daemon.
+	// Antigravity gets there via a stdio-relay spawn; the others use HTTP
+	// client entries.
+	wantUnified := map[string]bool{
 		"claude-code": false,
+		"codex-cli":   false,
 		"cursor":      false,
 		"vscode":      false,
 		"gemini-cli":  false,
@@ -40,14 +46,14 @@ func TestSerenaManifestParses(t *testing.T) {
 		"antigravity": false,
 	}
 	for _, b := range m.ClientBindings {
-		if _, ok := sharedClaude[b.Client]; ok {
-			if b.Daemon != "claude" {
-				t.Errorf("binding %s.daemon = %q, want claude (shared daemon)", b.Client, b.Daemon)
+		if _, ok := wantUnified[b.Client]; ok {
+			if b.Daemon != "unified" {
+				t.Errorf("binding %s.daemon = %q, want unified", b.Client, b.Daemon)
 			}
-			sharedClaude[b.Client] = true
+			wantUnified[b.Client] = true
 		}
 	}
-	for client, seen := range sharedClaude {
+	for client, seen := range wantUnified {
 		if !seen {
 			t.Errorf("binding for client %q not found", client)
 		}
