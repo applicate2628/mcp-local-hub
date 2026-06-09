@@ -363,6 +363,24 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	// Phase 1: paired LSP teardown. Unregister errors loud only on a hard
 	// failure; a missing supervisor (no live IPC) is downgraded to a warning
 	// inside Unregister, so this works whether or not a supervisor is running.
+	//
+	// Phase-split atomicity tradeoff (deep-sec P3-a). The classify (above) and
+	// the two mutation phases run under SEPARATE registry locks — they have to,
+	// because (*api.API).Unregister acquires its own lock and would deadlock
+	// against a held one. A concurrent same-user actor (a second `mcphub
+	// workspace unregister`, an auto-register, a migrate) that empties the LSP
+	// rows BETWEEN classify and Phase 1 can make Phase 1 error; for `--backend
+	// all` we then return WITHOUT having removed the serena (Phase 2) row, so the
+	// two backends are no longer dropped atomically the way the old
+	// single-lock RemoveByBackend("all") did. This is a SAFE, fail-loud,
+	// RETRYABLE outcome — not corruption: the serena row simply remains and a
+	// re-run of the same command removes it (classify will then see only the
+	// serena row in scope). We intentionally do NOT reorder Phase 2 ahead of this
+	// error return: removing the serena row while the paired LSP teardown failed
+	// would leave the LSP descriptor/row mismatch UNreported and half-applied,
+	// which is worse than a clean retryable error. The window is a same-user race
+	// only (the registry is a per-user 0600 boundary), so the operator who hit it
+	// is the one who can re-run.
 	if len(lspLangs) > 0 {
 		report, uerr := unregisterLSPWorkspaceFn(canonical, lspLangs)
 		if uerr != nil {

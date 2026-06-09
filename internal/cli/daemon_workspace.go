@@ -93,6 +93,19 @@ construct the backend lifecycle. Human invocation is not supported.`,
 						err)
 				}
 			}()
+			// Pre-existing orphan class (deep-sec P3-b, note-only — NOT fixed
+			// here). This uses the STRICT canonicalizer, which fails when the
+			// workspace dir was DELETED after registration; the proxy then exits
+			// non-zero ("canonical workspace path") and the supervisor churns it
+			// toward quarantine. The reconcile orphan-exclusion guard does NOT
+			// suppress this case: that guard keys on api.LSPRegistryRowBacksDescriptor,
+			// which uses the TOLERANT CanonicalWorkspacePathForCleanup (best-effort
+			// on a missing dir) and therefore still FINDS the backing row, so the
+			// descriptor is NOT classified as an orphan and is still spawned. The
+			// strict/tolerant asymmetry (this spawn path vs. the predicate) is the
+			// gap. Closing it (e.g. excluding descriptors whose workspace dir is
+			// gone, or auto-unregistering on deleted-dir) is a separate tracked
+			// follow-up, intentionally out of scope for this PR.
 			canonical, err := api.CanonicalWorkspacePath(workspaceFlag)
 			if err != nil {
 				return fmt.Errorf("canonical workspace path: %w", err)
