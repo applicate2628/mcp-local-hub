@@ -57,9 +57,24 @@ type supervisorController struct {
 	// into SMContext.QueuedAction and writes it back based on the SM's
 	// side-effect string (which encodes set/clear queued_action directives).
 	queuedActions sync.Map // taskName -> string
-	events        *api.SupervisorEventLog
-	graceful      *gracefulCounter
-	daemonIntent  *daemonIntentCache
+	// ownSpawned records every task whose `spawn` closure this controller
+	// fired SUCCESSFULLY during the CURRENT supervisor process lifetime.
+	// It is the discriminator between own-spawned children (which have a
+	// live cmd.Wait/reaper goroutine in this process that posts the real
+	// EvChildExit on exit) and FOREIGN warm-start PIDs hydrated from
+	// supervisor-state.json by a previous supervisor (which have NO
+	// cmd.Wait goroutine here). The StExiting terminate path uses this map
+	// to decide whether to SYNTHESIZE the follow-up EvChildExit: a foreign
+	// PID's terminate produces no real exit event, so without a synthetic
+	// one the SM stays wedged in StExiting with queued_action=respawn never
+	// consumed (Codex bot #268 r11 P2, supervise_liveness.go:179). Marked
+	// true on spawn-success (after which a cmd.Wait DOES exist), so the
+	// SECOND restart of a previously-foreign daemon correctly relies on the
+	// real exit event and never double-posts.
+	ownSpawned   sync.Map // taskName -> bool (own-spawned this process lifetime)
+	events       *api.SupervisorEventLog
+	graceful     *gracefulCounter
+	daemonIntent *daemonIntentCache
 
 	// spawn is the production SpawnFunc closure constructed in
 	// runSupervise. executeSideEffect calls it when the SM transition
@@ -246,6 +261,10 @@ func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
 	c.smStates.Delete(taskName)
 	c.queuedActions.Delete(taskName)
+	// Drop the own-spawned marker too: a re-registered task with the same
+	// name must be reclassified from scratch (its old child is gone), so a
+	// stale "owned" entry must not suppress a later foreign-PID synthesize.
+	c.ownSpawned.Delete(taskName)
 	if c.tracker != nil {
 		c.tracker.Remove(taskName)
 		if c.statePath != "" {
@@ -716,6 +735,17 @@ func (c *supervisorController) executeSideEffect(
 			return errors.New("spawn function unavailable")
 		}
 		err := c.spawn(*d)
+		if err == nil {
+			// This controller now owns a live child for the task: the
+			// production spawn closure launched it AND its cmd.Wait/reaper
+			// goroutine, which posts the real EvChildExit on exit. Record
+			// own-spawned so the StExiting terminate path does NOT
+			// synthesize a duplicate EvChildExit for this task (Codex bot
+			// #268 r11 P2). A previously-foreign warm-start PID flips to
+			// own-spawned here after its first terminate-then-respawn, so
+			// its SECOND restart relies on the real exit event.
+			c.ownSpawned.Store(d.TaskName, true)
+		}
 		if c.eventLoop != nil {
 			switch {
 			case err == nil:
@@ -754,11 +784,34 @@ func (c *supervisorController) executeSideEffect(
 
 	case api.StExiting:
 		// "issue terminate, queued_action=*" - fire the terminate
-		// closure. Errors are swallowed: the terminate fn itself
-		// emits per-daemon audit rows and the SM owns retry via
-		// EvChildExit when the child actually exits.
-		if c.terminate != nil {
-			_ = c.terminate(*d)
+		// closure. For OWN-spawned children the terminate fn's audit
+		// rows + the cmd.Wait goroutine's real EvChildExit drive the
+		// next transition, so the SM owns retry when the child actually
+		// exits and we do nothing more here.
+		//
+		// For a FOREIGN warm-start PID (one this supervisor never
+		// spawned — typically the live-but-port-stale handoff from a
+		// previous supervisor, supervise_liveness.go:179) there is NO
+		// cmd.Wait goroutine in this process, so a successful terminate
+		// produces no follow-up EvChildExit and the SM would wedge in
+		// StExiting with queued_action=respawn never consumed. Synthesize
+		// the EvChildExit so StExiting -> consume queued respawn ->
+		// StSpawning -> single respawn completes (Codex bot #268 r11 P2).
+		if c.terminate == nil {
+			return nil
+		}
+		termErr := c.terminate(*d)
+		// Synthesize ONLY when (a) the task is foreign (no own cmd.Wait,
+		// else we would double-emit against the real exit event) AND
+		// (b) terminate returned nil — the production TerminateFunc
+		// returns nil only on paths where the targeted PID is GONE
+		// (already-dead, identity-mismatch/reuse, or confirmed-terminated),
+		// never while the live daemon is still running. On a terminate
+		// failure we leave the entry for the next liveness sweep / retry
+		// rather than respawning over a process that may still be alive.
+		_, owned := c.ownSpawned.Load(d.TaskName)
+		if termErr == nil && !owned {
+			c.synthesizeForeignChildExit(d, ev)
 		}
 		return nil
 
@@ -770,6 +823,50 @@ func (c *supervisorController) executeSideEffect(
 		return nil
 	}
 	return nil
+}
+
+// synthesizeForeignChildExit posts the follow-up EvChildExit for a
+// FOREIGN warm-start PID after its StExiting terminate succeeded. Such a
+// PID was inherited from a previous supervisor (hydrated into smState=
+// StRunning by hydrateControllerRunningStates) and has NO cmd.Wait/reaper
+// goroutine in this process, so nothing else will ever post the
+// EvChildExit that StExiting needs to consume queued_action=respawn. The
+// synthetic event drives StExiting -> StSpawning -> single respawn,
+// completing the warm-start restart (Codex bot #268 r11 P2).
+//
+// Caller contract (enforced at the StExiting call site): invoked ONLY
+// when terminate returned nil (the targeted PID is gone — no race against
+// a live process or a late real exit) AND the task is NOT own-spawned (so
+// there is no real EvChildExit to double up against).
+//
+// Uses PostSelf, not Post: this runs inside handleLoopEvent (a registered
+// loop handler), and an inline Post from a handler can deadlock on a full
+// buffer / lose FIFO priority to pre-queued external events. PostSelf
+// lands on the priority channel and is drained before the next external
+// event — the same discipline the StSpawning success branch uses for its
+// EvHealthOK / pre-child EvChildExit self-posts. On selfCh saturation
+// (should never happen at production cap) the saturated-audit row fires
+// and the next liveness sweep re-drives the restart.
+func (c *supervisorController) synthesizeForeignChildExit(d *api.SupervisorDaemon, ev api.LoopEvent) {
+	if c == nil || d == nil || c.eventLoop == nil {
+		return
+	}
+	if c.events != nil {
+		reason, _ := ev.Body["reason"].(string)
+		_ = c.events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "daemon-foreign-exit-synthesized",
+			TaskName: d.TaskName,
+			Body: map[string]any{
+				"reason": reason,
+				"note":   "foreign warm-start PID terminated with no cmd.Wait in this supervisor; synthesizing EvChildExit so the queued respawn completes",
+			},
+		})
+	}
+	if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName}) {
+		c.emitSelfChannelSaturated(d.TaskName, "EvChildExit")
+	}
 }
 
 // emitSelfChannelSaturated logs an audit row when PostSelf on the

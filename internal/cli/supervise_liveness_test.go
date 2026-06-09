@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -415,6 +417,8 @@ func TestLoadSupervisorStartupRuntimeTerminatesAliveExpiredUnboundPortBeforeResp
 	// drives the terminate-first restart.
 	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
 
+	// Terminate-first ordering: the live stale PID is terminated BEFORE any
+	// respawn (no spawn-over-live duplicate).
 	select {
 	case pid := <-terminated:
 		if pid != 22036 {
@@ -426,29 +430,25 @@ func TestLoadSupervisorStartupRuntimeTerminatesAliveExpiredUnboundPortBeforeResp
 		t.Fatal("startup sweep did not terminate the alive expired unbound port")
 	}
 
-	// No respawn until the terminated child actually exits.
-	select {
-	case pid := <-spawned:
-		t.Fatalf("startup sweep spawned pid %d before EvChildExit", pid)
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
-
+	// FOREIGN warm-start PID (hydrated via hydrateControllerRunningStates, never
+	// own-spawned by this controller, terminate returns nil without marking the
+	// tracker): the controller synthesizes the follow-up EvChildExit after the
+	// successful terminate (#268 r11 P2), so the queued respawn completes
+	// automatically — no manual EvChildExit post.
 	select {
 	case pid := <-spawned:
 		if pid != 33000 {
 			t.Fatalf("respawn pid = %d, want replacement 33000", pid)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("terminate-first startup restart did not respawn after EvChildExit")
+		t.Fatal("terminate-first startup restart wedged in StExiting: synthetic EvChildExit never drove the queued respawn")
 	}
 
-	// Exactly one respawn — no duplicate.
+	// Exactly one respawn — the synthetic exit must not double-fire.
 	select {
 	case pid := <-spawned:
 		t.Fatalf("startup restart spawned a duplicate replacement pid %d", pid)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(150 * time.Millisecond):
 	}
 }
 
@@ -1072,6 +1072,8 @@ func TestSupervisorLivenessRestartForAliveUnboundPortTerminatesBeforeRespawn(t *
 
 	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
 
+	// Terminate-first ordering: the old live PID is terminated BEFORE any
+	// respawn (no spawn-over-live).
 	select {
 	case pid := <-terminated:
 		if pid != 22036 {
@@ -1083,27 +1085,26 @@ func TestSupervisorLivenessRestartForAliveUnboundPortTerminatesBeforeRespawn(t *
 		t.Fatal("liveness restart did not terminate old live pid")
 	}
 
-	select {
-	case pid := <-spawned:
-		t.Fatalf("liveness spawned pid %d before EvChildExit from terminated daemon", pid)
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
-
+	// The terminate closure here returns nil WITHOUT marking the tracker
+	// terminated and the daemon was never own-spawned by this controller, so
+	// it is a FOREIGN warm-start PID with no cmd.Wait goroutine. The
+	// controller SYNTHESIZES the follow-up EvChildExit after the successful
+	// terminate (#268 r11 P2), so the queued respawn fires automatically — no
+	// manual EvChildExit post is required.
 	select {
 	case pid := <-spawned:
 		if pid != 33000 {
 			t.Fatalf("spawned pid = %d, want replacement pid 33000", pid)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("liveness terminate-first restart did not respawn after EvChildExit")
+		t.Fatal("liveness terminate-first restart wedged in StExiting: synthetic EvChildExit never drove the queued respawn")
 	}
 
+	// Exactly one respawn — the synthetic exit must not double-fire.
 	select {
 	case pid := <-spawned:
 		t.Fatalf("liveness spawned duplicate replacement pid %d", pid)
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(150 * time.Millisecond):
 	}
 }
 
@@ -1167,5 +1168,306 @@ func TestSupervisorLivenessRestartWithClearedPIDSpawnsThroughControllerWithoutTe
 	case <-spawned:
 	case <-time.After(2 * time.Second):
 		t.Fatal("cleared liveness restart did not spawn through controller")
+	}
+}
+
+// TestSupervisorLivenessForeignWarmStartPIDSynthesizesChildExitAndRespawns is
+// the Codex bot #268 r11 P2 fix guard. A FOREIGN warm-start PID inherited from
+// a previous supervisor (smState hydrated to StRunning by
+// hydrateControllerRunningStates, the live PID still in the tracker) that is
+// alive-but-port-stale must complete its restart: sweep -> EvManualRestart ->
+// StExiting -> terminate (succeeds) -> the controller SYNTHESIZES the follow-up
+// EvChildExit (no cmd.Wait goroutine exists for a foreign PID in this process)
+// -> queued respawn fires exactly once. Pre-fix the SM wedged in StExiting with
+// queued_action=respawn never consumed. Note the test posts NO manual
+// EvChildExit — the synthetic one is the whole point.
+func TestSupervisorLivenessForeignWarmStartPIDSynthesizesChildExitAndRespawns(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	// Hydrate the FOREIGN live PID exactly as loadSupervisorCurrentRunning
+	// retains it for the warm-start handoff. The controller never spawned it,
+	// so it is NOT in ownSpawned.
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	intentCache := newIntentCache()
+	intentCache.Refresh(intent)
+	loop := api.NewEventLoop(16)
+	spawned := make(chan int, 4)
+	terminated := make(chan int, 1)
+	ctrl := &supervisorController{
+		intentCache:         intentCache,
+		eventLoop:           loop,
+		tracker:             tracker,
+		daemonIntent:        newDaemonIntentCache(),
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			if d.TaskName != taskName {
+				t.Fatalf("spawn task = %q, want %q", d.TaskName, taskName)
+			}
+			tracker.MarkSpawned(d.TaskName, 33000, time.Now().UTC())
+			spawned <- 33000
+			return nil
+		},
+		terminate: func(d api.SupervisorDaemon) error {
+			if d.TaskName != taskName {
+				t.Fatalf("terminate task = %q, want %q", d.TaskName, taskName)
+			}
+			e, ok := tracker.Get(d.TaskName)
+			if !ok {
+				t.Fatalf("tracker entry missing for %s", d.TaskName)
+			}
+			// Mirror the production terminate fn: the targeted PID is gone
+			// after a successful terminate.
+			tracker.MarkTerminated(d.TaskName)
+			terminated <- e.CurrentPID
+			return nil
+		},
+	}
+	// Warm-start hydration: SM state is StRunning for the foreign PID, the
+	// same call runSupervise makes via hydrateControllerRunningStates.
+	hydrateControllerRunningStates(ctrl, map[string]bool{taskName: true})
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	// Live PID, port owned by nobody (unbound) past the bind grace -> a
+	// live-PID restart reason (port_unbound) -> EvManualRestart -> StExiting.
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(proof process.PIDIdentityProof) error {
+			if proof.PID != 22036 {
+				t.Fatalf("PIDIdentity pid = %d, want 22036", proof.PID)
+			}
+			return nil
+		},
+		PortOwnerPID: func(port int) (int, bool, error) {
+			if port != 9123 {
+				t.Fatalf("PortOwnerPID called with port %d, want 9123", port)
+			}
+			return 0, false, nil
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	// Terminate fires FIRST against the foreign live PID; no respawn yet.
+	select {
+	case pid := <-terminated:
+		if pid != 22036 {
+			t.Fatalf("terminated pid = %d, want foreign live pid 22036", pid)
+		}
+	case pid := <-spawned:
+		t.Fatalf("respawned pid %d before terminating the foreign live pid", pid)
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness sweep did not terminate the foreign warm-start PID")
+	}
+
+	// The SYNTHETIC EvChildExit (no manual post here) must drive the queued
+	// respawn exactly once.
+	select {
+	case pid := <-spawned:
+		if pid != 33000 {
+			t.Fatalf("respawn pid = %d, want replacement 33000", pid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("foreign warm-start restart wedged in StExiting: synthetic EvChildExit never drove the queued respawn")
+	}
+
+	// Exactly one respawn — the synthetic exit must not double-fire.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("foreign warm-start restart spawned a duplicate replacement pid %d", pid)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	st, _ := ctrl.GetSMState(taskName)
+	if st != api.StRunning {
+		t.Fatalf("after synthetic respawn the SM state = %s, want %s", st, api.StRunning)
+	}
+}
+
+// TestSupervisorLivenessOwnSpawnedRestartUsesRealChildExitNoSyntheticDoublePost
+// is the negative guard for the #268 r11 P2 fix: an OWN-spawned child (the
+// controller fired its spawn closure, so a real cmd.Wait posts EvChildExit on
+// exit) must NOT get a synthetic EvChildExit on its terminate. It restarts only
+// after the REAL exit event, and the spawn closure fires exactly twice total
+// (initial + one respawn) — never a third from a stray synthetic post.
+func TestSupervisorLivenessOwnSpawnedRestartUsesRealChildExitNoSyntheticDoublePost(t *testing.T) {
+	taskName := `\mcp-local-hub-memory-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "memory", Daemon: "default", Port: 9123}
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{descriptor}}
+	tracker := NewDaemonRuntimeTracker()
+	intentCache := newIntentCache()
+	intentCache.Refresh(intent)
+	loop := api.NewEventLoop(16)
+	spawned := make(chan int, 4)
+	terminated := make(chan int, 2)
+	var spawnPID int32 = 40000
+	ctrl := &supervisorController{
+		intentCache:         intentCache,
+		eventLoop:           loop,
+		tracker:             tracker,
+		daemonIntent:        newDaemonIntentCache(),
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			pid := int(atomic.AddInt32(&spawnPID, 1))
+			tracker.MarkSpawned(d.TaskName, pid, time.Now().UTC())
+			spawned <- pid
+			return nil
+		},
+		terminate: func(d api.SupervisorDaemon) error {
+			e, _ := tracker.Get(d.TaskName)
+			tracker.MarkTerminated(d.TaskName)
+			terminated <- e.CurrentPID
+			return nil
+		},
+	}
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	// Own-spawn the daemon via EvStart -> spawn fires -> EvHealthOK -> StRunning,
+	// AND the controller marks it own-spawned.
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: taskName})
+	select {
+	case <-spawned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("EvStart did not spawn the own daemon")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := ctrl.GetSMState(taskName); st == api.StRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Manual restart of the OWN-spawned daemon -> StExiting -> terminate.
+	loop.Post(api.LoopEvent{Kind: api.EvManualRestart, TaskName: taskName})
+	select {
+	case <-terminated:
+	case <-time.After(2 * time.Second):
+		t.Fatal("EvManualRestart did not terminate the own daemon")
+	}
+
+	// No synthetic EvChildExit for an own-spawned daemon: nothing respawns
+	// until the REAL cmd.Wait exit event arrives.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("own-spawned restart synthesized a respawn (pid %d) before the real EvChildExit", pid)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Simulate the real cmd.Wait EvChildExit; queued respawn fires once.
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+	select {
+	case <-spawned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("own-spawned restart did not respawn after the real EvChildExit")
+	}
+
+	// Exactly two spawns total (initial + one respawn). A third would mean a
+	// stray synthetic EvChildExit double-fired.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("own-spawned restart spawned a third time (pid %d) — synthetic double-post leaked", pid)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+// TestSupervisorLivenessForeignTerminateFailureNoSynthesizeNoRespawn guards the
+// terminate-failure branch: when the foreign warm-start PID's terminate
+// RETURNS AN ERROR (the PID may still be alive), the controller must NOT
+// synthesize an EvChildExit and must NOT respawn over a possibly-live process.
+// The wedged entry is left for the next liveness sweep to retry.
+func TestSupervisorLivenessForeignTerminateFailureNoSynthesizeNoRespawn(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	intentCache := newIntentCache()
+	intentCache.Refresh(intent)
+	loop := api.NewEventLoop(16)
+	spawned := make(chan int, 2)
+	terminated := make(chan int, 1)
+	ctrl := &supervisorController{
+		intentCache:         intentCache,
+		eventLoop:           loop,
+		tracker:             tracker,
+		daemonIntent:        newDaemonIntentCache(),
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			spawned <- 33000
+			return nil
+		},
+		terminate: func(d api.SupervisorDaemon) error {
+			e, _ := tracker.Get(d.TaskName)
+			terminated <- e.CurrentPID
+			// Terminate FAILED — the live PID may still be running.
+			return errors.New("terminate failed: access denied")
+		},
+	}
+	hydrateControllerRunningStates(ctrl, map[string]bool{taskName: true})
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(process.PIDIdentityProof) error { return nil },
+		PortOwnerPID: func(port int) (int, bool, error) {
+			return 0, false, nil // unbound -> port_unbound, live-PID restart reason
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	// Terminate is attempted against the foreign live PID and fails.
+	select {
+	case pid := <-terminated:
+		if pid != 22036 {
+			t.Fatalf("terminated pid = %d, want foreign live pid 22036", pid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness sweep did not attempt to terminate the foreign warm-start PID")
+	}
+
+	// No synthesize on terminate failure -> NO respawn over the possibly-live
+	// process. The SM stays in StExiting awaiting the next sweep.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("terminate failure still respawned (pid %d) over a possibly-live foreign process", pid)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	st, _ := ctrl.GetSMState(taskName)
+	if st != api.StExiting {
+		t.Fatalf("after terminate failure the SM state = %s, want %s (left for retry)", st, api.StExiting)
 	}
 }

@@ -1035,9 +1035,16 @@ func TestSupervisorController_B1_StopDuringSpawn_EvHealthOK_RoutesToStExiting(t 
 	ctrl.terminate = fakeTerminate
 
 	// Stage: state=StSpawning, queued_action=stop (as if the
-	// StSpawning + EvIntentUpdate(stopped) transition fired).
+	// StSpawning + EvIntentUpdate(stopped) transition fired). In
+	// production a daemon only reaches StSpawning by the controller firing
+	// its spawn closure, so it is OWN-spawned (has a live cmd.Wait that
+	// posts the real EvChildExit). Mark it so the StExiting terminate path
+	// does NOT synthesize a foreign-PID EvChildExit (#268 r11 P2) — that
+	// would otherwise race past the StExiting state this test guards
+	// straight to StIdle once queued_action=none cleared the respawn.
 	ctrl.smStates.Store(descriptor.TaskName, api.StSpawning)
 	ctrl.queuedActions.Store(descriptor.TaskName, "stop")
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
 
 	loop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: descriptor.TaskName})
 

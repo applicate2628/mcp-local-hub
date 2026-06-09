@@ -5,6 +5,7 @@ import {
   respawnDaemon,
   type DaemonEnvRow,
 } from "../../api";
+import { ConfirmModal } from "../ConfirmModal";
 
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DEFAULT_ENV_KEY = "MEMORY_FILE_PATH";
@@ -35,6 +36,13 @@ export function DaemonEnvSettings({
   });
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
+  // Finding #268 r11 P2 (DaemonEnvSettings.tsx:53): when the operator picks a
+  // different daemon while the current row has an unsaved edit (envDirty),
+  // intercept the switch and stash the target task here so a ConfirmModal can
+  // gate the discard. The <select> stays controlled by selected?.task_name, so
+  // it visually reverts on cancel; the parent dirty guard is NOT cleared until
+  // the edit is actually applied or the operator confirms the discard.
+  const [pendingSwitchTask, setPendingSwitchTask] = useState<string | null>(null);
 
   const selected = useMemo(
     () => rows.find((row) => row.task_name === selectedTask) ?? rows[0],
@@ -82,7 +90,13 @@ export function DaemonEnvSettings({
     onDirtyChange(envDirty);
   }, [envDirty, onDirtyChange]);
 
-  async function refreshRows() {
+  // refreshRows reports success/failure to its caller so apply() can avoid
+  // overwriting a refresh-error banner with a bare "Saved" (Finding #268 r11
+  // P3, DaemonEnvSettings.tsx:112). The mount effect and the Refresh button
+  // ignore the return value — for them the in-band error banner set here is
+  // the only feedback path. Returns { ok: true } on success, or
+  // { ok: false, error } when listDaemonEnv rejects.
+  async function refreshRows(): Promise<{ ok: boolean; error?: string }> {
     setBusy(true);
     setBanner(null);
     try {
@@ -91,11 +105,39 @@ export function DaemonEnvSettings({
       if (selectedTask && result.daemons.every((row) => row.task_name !== selectedTask)) {
         setSelectedTask(result.daemons[0]?.task_name ?? "");
       }
+      return { ok: true };
     } catch (err) {
-      setBanner({ kind: "error", text: (err as Error).message });
+      const message = (err as Error).message;
+      setBanner({ kind: "error", text: message });
+      return { ok: false, error: message };
     } finally {
       setBusy(false);
     }
+  }
+
+  // performSwitch applies the daemon selection + seeds the editor from the
+  // target row. Extracted so both the unguarded onChange path and the
+  // ConfirmModal "discard and switch" confirm path reuse identical logic.
+  function performSwitch(task: string) {
+    setSelectedTask(task);
+    const row = rows.find((r) => r.task_name === task);
+    const keys = Object.keys(row?.env ?? {}).sort();
+    const nextKey = keys[0] ?? DEFAULT_ENV_KEY;
+    setKey(nextKey);
+    setValue(row?.env[nextKey] ?? "");
+  }
+
+  function confirmSwitch() {
+    const task = pendingSwitchTask;
+    setPendingSwitchTask(null);
+    if (task !== null) performSwitch(task);
+  }
+
+  function cancelSwitch() {
+    // Drop the pending target; the controlled <select> reverts to the
+    // current daemon and the unsaved edit stays intact (envDirty unchanged,
+    // so the parent dirty guard is preserved).
+    setPendingSwitchTask(null);
   }
 
   async function apply() {
@@ -116,8 +158,19 @@ export function DaemonEnvSettings({
     setBanner(null);
     try {
       await applyDaemonEnv(selected.task_name, { [trimmedKey]: value });
-      await refreshRows();
-      setBanner({ kind: "ok", text: "Saved. Restart the daemon for the change to take effect." });
+      const refreshed = await refreshRows();
+      if (refreshed.ok) {
+        setBanner({ kind: "ok", text: "Saved. Restart the daemon for the change to take effect." });
+      } else {
+        // The POST succeeded but the follow-up list fetch failed, so the
+        // editor still shows the pre-apply row and may look dirty. Surface
+        // the refresh failure instead of replacing it with a bare "Saved"
+        // (Finding #268 r11 P3, DaemonEnvSettings.tsx:112).
+        setBanner({
+          kind: "error",
+          text: `Saved, but could not refresh the list: ${refreshed.error ?? "unknown error"}. Restart the daemon for the change to take effect.`,
+        });
+      }
     } catch (err) {
       setBanner({ kind: "error", text: (err as Error).message });
     } finally {
@@ -150,12 +203,17 @@ export function DaemonEnvSettings({
           disabled={busy || rows.length === 0}
           onChange={(e) => {
             const task = (e.currentTarget as HTMLSelectElement).value;
-            setSelectedTask(task);
-            const row = rows.find((r) => r.task_name === task);
-            const keys = Object.keys(row?.env ?? {}).sort();
-            const nextKey = keys[0] ?? DEFAULT_ENV_KEY;
-            setKey(nextKey);
-            setValue(row?.env[nextKey] ?? "");
+            // Same task re-selected → nothing to guard.
+            if (task === (selected?.task_name ?? "")) return;
+            // Unsaved edit on the current row → gate the switch behind a
+            // ConfirmModal instead of silently overwriting the draft. The
+            // <select> is controlled by selected?.task_name, so it visually
+            // reverts to the current daemon until the operator confirms.
+            if (envDirty) {
+              setPendingSwitchTask(task);
+              return;
+            }
+            performSwitch(task);
           }}
           data-testid="daemon-env-task"
         >
@@ -215,6 +273,23 @@ export function DaemonEnvSettings({
           Restart
         </button>
       </div>
+
+      <ConfirmModal
+        open={pendingSwitchTask !== null}
+        title="Discard unsaved env changes?"
+        body={
+          <p>
+            You have an unsaved env override for{" "}
+            <b>{selected ? `${selected.server}/${selected.daemon}` : "this daemon"}</b>
+            {selected ? <> (<code>{selected.task_name}</code>)</> : null}. Switching
+            daemons discards that edit.
+          </p>
+        }
+        confirmLabel="Discard and switch"
+        danger
+        onConfirm={confirmSwitch}
+        onCancel={cancelSwitch}
+      />
     </div>
   );
 }
