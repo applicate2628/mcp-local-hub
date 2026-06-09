@@ -1786,3 +1786,181 @@ func TestSerenaRouter_AutoRegister_Unwired_Returns503(t *testing.T) {
 		t.Errorf("resolved_path = %q, want the requested path", resp.ResolvedPath)
 	}
 }
+
+// ---------------------------------------------------------------------
+// activate_project routing (fix/serena-activate-project-routing)
+// ---------------------------------------------------------------------
+//
+// The serena `activate_project` tool carries its workspace-root path in
+// the `project` argument (verified against the serena tool schema:
+// activate_project's sole arg is `project`, "name of a registered
+// project or a path to a project directory"). Before this fix
+// extractPathArg recognized only relative_path/file_path/name_path/path,
+// so activate_project was treated as pathless → never bound a fresh
+// session → every subsequent call 503'd missing_session. These tests
+// pin the new behavior.
+
+// TestSerenaRouter_ExtractPathArg_RecognizesProject asserts the `project`
+// key is recognized, and that it is LOWEST precedence (existing path keys
+// still win so no other routing changes).
+func TestSerenaRouter_ExtractPathArg_RecognizesProject(t *testing.T) {
+	// osAbsProject is an OS-native ABSOLUTE path: "/proj/alpha" on POSIX,
+	// "C:\proj\alpha" on Windows (VolumeName of the working dir supplies the
+	// drive letter). Asserts the absolute-only project guard recognizes the
+	// platform's real absolute form, not just the POSIX-rooted literal.
+	wd, _ := os.Getwd()
+	osAbsProject := filepath.Join(filepath.VolumeName(wd)+string(filepath.Separator), "proj", "alpha")
+	if !filepath.IsAbs(osAbsProject) {
+		t.Fatalf("test setup: %q is not absolute on this OS", osAbsProject)
+	}
+	// The POSIX-rooted literal "/proj/alpha" is absolute on POSIX but NOT
+	// on Windows (filepath.IsAbs requires a volume name there) — the same
+	// split ResolveByPath itself uses. So its expected outcome is OS-aware:
+	// recognized on POSIX, skipped (falls to 503) on Windows.
+	posixRootedOK := filepath.IsAbs("/proj/alpha")
+	posixRootedWant := ""
+	if posixRootedOK {
+		posixRootedWant = "/proj/alpha"
+	}
+	cases := []struct {
+		name     string
+		args     map[string]any
+		wantPath string
+		wantOk   bool
+	}{
+		{
+			name:     "POSIX-rooted project: recognized on POSIX, skipped on Windows (matches ResolveByPath IsAbs split)",
+			args:     map[string]any{"project": "/proj/alpha"},
+			wantPath: posixRootedWant,
+			wantOk:   posixRootedOK,
+		},
+		{
+			// An OS-native absolute path is recognized regardless of
+			// platform: POSIX "/proj/alpha", Windows "C:\proj\alpha".
+			name:     "OS-native absolute project recognized as path-arg",
+			args:     map[string]any{"project": osAbsProject},
+			wantPath: osAbsProject,
+			wantOk:   true,
+		},
+		{
+			// P3 (fable r1): a BARE registered-NAME is NOT an absolute
+			// path, so it is skipped here and falls through to the
+			// documented 503 rather than being silently mis-bound by
+			// resolveRelative's join-onto-each-workspace match.
+			name:     "bare relative project name is skipped (falls to 503)",
+			args:     map[string]any{"project": "docs"},
+			wantPath: "",
+			wantOk:   false,
+		},
+		{
+			name:     "relative_path still wins over project",
+			args:     map[string]any{"relative_path": "/r", "project": "/p"},
+			wantPath: "/r",
+			wantOk:   true,
+		},
+		{
+			name:     "path still wins over project",
+			args:     map[string]any{"path": "/explicit", "project": "/p"},
+			wantPath: "/explicit",
+			wantOk:   true,
+		},
+		{
+			name:     "empty project string is skipped",
+			args:     map[string]any{"project": ""},
+			wantPath: "",
+			wantOk:   false,
+		},
+		{
+			name:     "non-string project is skipped",
+			args:     map[string]any{"project": 42},
+			wantPath: "",
+			wantOk:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(tc.args)
+			got, ok := extractPathArg(raw)
+			if got != tc.wantPath || ok != tc.wantOk {
+				t.Errorf("extractPathArg(%s) = (%q, %v), want (%q, %v)",
+					string(raw), got, ok, tc.wantPath, tc.wantOk)
+			}
+		})
+	}
+}
+
+// TestSerenaRouter_ActivateProject_BindsAndForwards is the end-to-end
+// must-fix: activate_project for a REGISTERED workspace path must
+//   - resolve via the `project` arg,
+//   - forward to that workspace's daemon (HTTP 200, NOT 503),
+//   - BindSession so a SUBSEQUENT PATHLESS call (get_current_config)
+//     on the same session routes to the same daemon (not 503
+//     missing_session).
+func TestSerenaRouter_ActivateProject_BindsAndForwards(t *testing.T) {
+	var mu sync.Mutex
+	hits := make([]string, 0, 2) // tools/call names that reached the upstream daemon
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var probe struct {
+			Method string `json:"method"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &probe)
+		// The router forwards initialize → notifications/initialized before
+		// the first tool call; record only the tools/call forwards so the
+		// assertion sees the actual tools, not the handshake.
+		if probe.Method == "tools/call" {
+			mu.Lock()
+			hits = append(hits, probe.Params.Name)
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	// activate_project's project arg is routed ONLY when absolute (fable
+	// r1 P3 guard in extractPathArg, mirroring ResolveByPath's own
+	// filepath.IsAbs split). Use an OS-native absolute workspace path so
+	// the test exercises the real absolute branch on the host OS: POSIX
+	// "/proj/alpha", Windows "C:\proj\alpha" ("/proj/alpha" is NOT absolute
+	// on Windows per filepath.IsAbs, so a POSIX literal would be skipped).
+	wd, _ := os.Getwd()
+	wsPath := filepath.Join(filepath.VolumeName(wd)+string(filepath.Separator), "proj", "alpha")
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201, TaskName: `\mcp-local-hub-serena-alpha`}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// 1) activate_project(registered path) → resolve + forward + bind.
+	actBody := buildToolCallBody(t, "activate_project", map[string]any{"project": wsPath})
+	rrAct := postSerena(t, s, actBody, map[string]string{"Mcp-Session-Id": "sess-activate"})
+	if rrAct.Code != http.StatusOK {
+		t.Fatalf("activate_project status = %d, want 200 (not 503 missing_session); body=%s",
+			rrAct.Code, rrAct.Body.String())
+	}
+	if got := deps.Sessions.LookupSession("sess-activate"); got == nil || got.WorkspaceKey != "alpha" {
+		t.Fatalf("after activate_project, LookupSession(sess-activate) = %+v, want alpha binding", got)
+	}
+
+	// 2) Subsequent PATHLESS call on the SAME session must route via the
+	// bound session (not 503 missing_session).
+	cfgBody := buildToolCallBody(t, "get_current_config", map[string]any{})
+	rrCfg := postSerena(t, s, cfgBody, map[string]string{"Mcp-Session-Id": "sess-activate"})
+	if rrCfg.Code != http.StatusOK {
+		t.Fatalf("subsequent pathless get_current_config status = %d, want 200 (session bound); body=%s",
+			rrCfg.Code, rrCfg.Body.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(hits) != 2 || hits[0] != "activate_project" || hits[1] != "get_current_config" {
+		t.Fatalf("upstream daemon tool hits = %v, want [activate_project get_current_config]", hits)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -309,6 +310,24 @@ func lifecycleParamsObjectOrNull(params json.RawMessage) bool {
 //   - file_path     : edit_file, read_file
 //   - name_path     : insert_after_symbol, replace_symbol_body
 //   - path          : list_dir, search_for_pattern
+//   - project       : activate_project ONLY (the workspace-ROOT path the
+//     editor's lead-off call carries). It is the LAST key checked so it
+//     is lowest precedence and changes no other tool's routing; among
+//     serena's tool set only activate_project declares a `project` arg
+//     (serena schema: activate_project's sole arg is `project`, "the name
+//     of a registered project OR a path to a project directory"). Without
+//     it activate_project resolved as pathless → never bound a fresh
+//     session → every subsequent call 503'd missing_session, making
+//     per-project serena unusable for editors that lead with
+//     activate_project. The `project` key is routed ONLY when its value
+//     is an ABSOLUTE path: a bare registered-NAME is skipped here so it
+//     falls through to the documented 503 rather than being silently
+//     mis-bound by resolveRelative (which would join the name onto each
+//     registered WorkspacePath and return the first that Lstat-exists —
+//     e.g. project="docs" coincidentally binding /proj/aaa when
+//     /proj/aaa/docs exists). The dynamic-pool migrate-configured client
+//     always sends the absolute PATH, so the registered-NAME case is a
+//     documented follow-up (name resolution), not a regression.
 func extractPathArg(arguments json.RawMessage) (string, bool) {
 	if len(arguments) == 0 {
 		return "", false
@@ -317,7 +336,7 @@ func extractPathArg(arguments json.RawMessage) (string, bool) {
 	if uerr := json.Unmarshal(arguments, &args); uerr != nil {
 		return "", false
 	}
-	for _, key := range []string{"relative_path", "file_path", "name_path", "path"} {
+	for _, key := range []string{"relative_path", "file_path", "name_path", "path", "project"} {
 		raw, ok := args[key]
 		if !ok {
 			continue
@@ -327,6 +346,12 @@ func extractPathArg(arguments json.RawMessage) (string, bool) {
 			continue
 		}
 		if v == "" {
+			continue
+		}
+		// project carries a workspace ROOT; route it only when absolute.
+		// A bare registered-NAME must fall to the documented 503 (name
+		// resolution is a follow-up), not a coincidental resolveRelative match.
+		if key == "project" && !filepath.IsAbs(v) {
 			continue
 		}
 		return v, true
