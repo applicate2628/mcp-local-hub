@@ -49,7 +49,7 @@ func TestParseManifest_McpLanguageServerShipped(t *testing.T) {
 	}
 	wantMarkers := map[string][]string{
 		"clangd":      {"compile_commands.json", ".clangd"},
-		"fortran":     {"fpm.toml"},
+		"fortran":     {"fpm.toml", ".fortls"},
 		"go":          {"go.mod"},
 		"javascript":  {"package.json", "tsconfig.json", "jsconfig.json"},
 		"python":      {"pyproject.toml", "setup.py", "setup.cfg"},
