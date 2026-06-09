@@ -686,24 +686,41 @@ emits the info event `supervisor-interlock-handoff-window` (phase `reconcile-rea
 `duplicate-spawn-exit`) so an operator can tell a known-benign window apart from a recurrence of the
 original 30 s-IPC-timeout bug.
 
-**Auto-register Starter-A extension (the second reaping flow).** The held lock prevents ACQUIRE, not KILL,
-so a *second* flow that reaps-then-starts must be brought under the SAME interlock: the serena auto-register
-cutover (`AutoRegisterSerenaWorkspace`, [internal/api/serena_auto_register.go](../../../internal/api/serena_auto_register.go))
+**Auto-register Starter-A extension (the second reaping flow) — reaps THEN acquires (bot PR #276 r2 P1).**
+The held lock prevents ACQUIRE, not KILL, so a *second* flow that reaps-then-starts must be brought under
+the SAME interlock: the serena auto-register cutover
+(`AutoRegisterSerenaWorkspace`, [internal/api/serena_auto_register.go](../../../internal/api/serena_auto_register.go))
 force-kills the supervisor by PID read from `supervisor.lock.owner.json` on its INTRODUCE branch. It
-acquires the SAME `supervisor.lock` (via the quiet acquire) BEFORE its own reap, with the identical
-acquire→write-with-bypass-token→release lifetime the migrate uses. Two properties make this safe
-(bot PR #276 finding 1): (1) the acquire is QUIET, so it does NOT overwrite the owner sidecar — the sidecar
-keeps naming the OLD supervisor, and auto-register's own reap targets the right PID (an earlier design that used
-the full acquire would have stamped the sidecar with the router/GUI PID, so the reap fired by the same
-cutover would force-kill the caller); and (2) the flock makes the two reaping flows mutually exclusive. If
-the migrate holds the lock, auto-register's acquire fails BEFORE it reaps anything — so it can NEVER
-force-kill the migrate's lock-holding PID; it defers pre-commit, rolls back its registry row, emits the
-distinct info event `serena-auto-register-deferred-on-interlock` (NOT a misleading "supervisor running"
-refusal — there is no supervisor, a CLI holds the lock), and returns an honest error the router maps to 503
-→ the client retries. Symmetrically, if auto-register holds the lock, the migrate's acquire-FAIL fail-loud
-branch fires. The two reaping flows are now mutually exclusive and neither can kill the other's lock-holding
-process. (The auto-register LIVE-ADD branch does NOT reap and is already §7.1-safe via `HasRuntimeSpecRow()`;
-it is unchanged and relies on the registry flock the migrate also takes for its cross-process serialization.)
+acquires the SAME `supervisor.lock` (via the quiet acquire) **IMMEDIATELY AFTER its own reap, not before
+it** — mirroring the migrate's reap-then-acquire-immediately ordering, with the identical
+reap→acquire→write-with-bypass-token→release lifetime. The acquire CANNOT precede the reap: the RUNNING
+supervisor it is introducing-while-running holds `supervisor.lock` (acquired in `runSupervise`,
+[supervise.go:373](../../../internal/cli/supervise.go)), so a pre-reap quiet `TryLock` could NEVER succeed
+on that exact case — every introduce-while-running auto-register would then defer with a 503 and never
+reap/install (the precise bot r2 P1 defect). Only the reap frees that flock (it kills the holder → the OS
+releases its byte-range lock), so the acquire must come AFTER. Two properties make this safe: (1) the
+acquire is QUIET, so it never overwrites the owner sidecar — and acquiring AFTER the reap is doubly safe,
+because the reap already read the intact OLD-supervisor sidecar before any lock touch, while the quiet
+acquire never writes it, so during the held-lock window the sidecar still names the now-DEAD old supervisor
+and a concurrent reaper that reads it sees a dead PID → `taskkill` returns "process not found" (exit 128) →
+benign no-op → it never force-kills THIS live process; and (2) the flock makes the two reaping flows
+mutually exclusive on the FREED post-reap lock. If the migrate (or another auto-register) reaped the same
+supervisor and won the race for the freed lock, this cutover's post-reap acquire FAILS → it defers: it emits
+the distinct info event `serena-auto-register-deferred-on-interlock` (NOT a misleading "supervisor running"
+refusal — there is no supervisor, a CLI peer holds the freed lock), drives the `failPreCommit` recovery
+restart for its OWN reap (which fails fast while the race-winner holds the lock — correct, because the winner
+IS the live supervisor it will restart from its own committed intent), rolls back its registry row, and
+returns an honest error the router maps to 503 → the client retries by the time the winner has settled.
+Symmetrically, if auto-register holds the freed lock first, the migrate's acquire-FAIL fail-loud branch
+fires. The two reaping flows are now mutually exclusive on the freed lock and neither can kill the other's
+lock-holding process. The double-reap that the two flows may perform concurrently (both see the supervisor
+running, both kill it) is benign: `ReapSupervisorForRestart` on an already-dead supervisor is a no-op —
+QuiesceTimers/ExitGraceful IPC fail (no pipe), the force-kill fallback's `taskkill /F /T /PID <dead>`
+returns exit 128 (`isAlreadyExitedError` → benign), and the port-unbound verify passes. The only residual is
+the shared "BOTH reaping flows fail after a reap" case (the winner ALSO fails post-reap), surfaced as a
+fail-loud 503 + `mcphub supervise` operator guidance, never a silent no-supervisor half-state. (The
+auto-register LIVE-ADD branch does NOT reap and is already §7.1-safe via `HasRuntimeSpecRow()`; it is
+unchanged and relies on the registry flock the migrate also takes for its cross-process serialization.)
 
 Why `supervisor.lock` and not a broader `migration.lock`: `migration.lock` is a DIFFERENT leaf and neither
 the serena migrate driver nor the v5-upgrade path (`runV5UpgradeWindows`) takes it, so it is not a usable

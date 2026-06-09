@@ -1705,16 +1705,19 @@ func TestReadUntrustedSerenaProjectYML_SymlinkedSerenaDir_Rejected(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2 (Revision 2 / Starter A) — the INTRODUCE-while-running cutover acquires
-// the supervisor.lock interlock BEFORE its reap so a concurrent serena migrate
-// cannot force-kill it (and vice versa).
+// Phase 2 (Revision 2 / Starter A) + bot PR #276 r2 P1 — the INTRODUCE-while-running
+// cutover acquires the supervisor.lock interlock IMMEDIATELY AFTER its reap (NOT
+// before): the running supervisor holds the lock, so the reap must free it first.
 // ---------------------------------------------------------------------------
 
-// TestAutoRegisterSerena_Introduce_AcquiresInterlockBeforeReap asserts the
-// ordering: the interlock acquire fires BEFORE the reap (so the two reaping flows
-// are mutually exclusive — the reap can never read a sidecar pointing at a peer
-// cutover's process and kill it).
-func TestAutoRegisterSerena_Introduce_AcquiresInterlockBeforeReap(t *testing.T) {
+// TestAutoRegisterSerena_Introduce_AcquiresInterlockAfterReap asserts the ordering
+// (bot PR #276 r2 P1): the interlock acquire fires AFTER the reap, not before. The
+// running supervisor holds supervisor.lock; a pre-reap acquire could never succeed on
+// this introduce-while-running case. The full introduce order is
+// reap→acquire→install→start. (This test stubs the acquire to always succeed; the
+// production-fidelity "a REAL held lock blocks a pre-reap acquire but the post-reap
+// acquire succeeds" case is TestAutoRegisterSerena_Introduce_WhileSupervisorHoldsLock_ReapsThenAcquires_Succeeds.)
+func TestAutoRegisterSerena_Introduce_AcquiresInterlockAfterReap(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
 	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
@@ -1742,36 +1745,122 @@ func TestAutoRegisterSerena_Introduce_AcquiresInterlockBeforeReap(t *testing.T) 
 	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
 		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
 	}
-	// acquire MUST precede reap; the full introduce order is acquire→reap→install→start.
-	if len(order) != 4 || order[0] != "acquire" || order[1] != "reap" || order[2] != "install" || order[3] != "start" {
-		t.Fatalf("cutover order = %v, want [acquire reap install start]", order)
+	// reap MUST precede acquire; the full introduce order is reap→acquire→install→start.
+	if len(order) != 4 || order[0] != "reap" || order[1] != "acquire" || order[2] != "install" || order[3] != "start" {
+		t.Fatalf("cutover order = %v, want [reap acquire install start]", order)
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
 		t.Errorf("registry has %d serena rows, want 1", len(rows))
 	}
 }
 
-// TestAutoRegisterSerena_Introduce_DefersWhenInterlockHeld_NoReap_NoKill: when the
-// interlock acquire FAILS (a concurrent migrate/cutover holds it), the introduce
-// path DEFERS pre-reap — the reap seam is NEVER invoked (so it cannot kill the
-// peer's lock-holding process), the registry row is rolled back, and the distinct
-// serena-auto-register-deferred-on-interlock event is emitted.
-func TestAutoRegisterSerena_Introduce_DefersWhenInterlockHeld_NoReap_NoKill(t *testing.T) {
+// TestAutoRegisterSerena_Introduce_WhileSupervisorHoldsLock_ReapsThenAcquires_Succeeds
+// is the bot PR #276 r2 P1 regression guard — the exact case the bot said currently
+// 503s. A REAL supervisor.lock is held BEFORE the call (simulating the live
+// supervisor that holds it on its startup). The introduce-while-running cutover must
+// nonetheless SUCCEED: the reap RELEASES that held lock (the reap stub here releases
+// it, as the real reap kills the holder → the OS frees the flock), and only then does
+// the post-reap acquire take the freed lock and install. A pre-reap acquire (the
+// unfixed code) would TryLock the still-held lock, fail, and defer with a 503 — never
+// reaching reap/install. This test FAILS on the unfixed acquire-then-reap ordering.
+func TestAutoRegisterSerena_Introduce_WhileSupervisorHoldsLock_ReapsThenAcquires_Succeeds(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
+
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	lockPath := filepath.Join(sd, "supervisor.lock")
+
+	// Simulate the RUNNING supervisor holding supervisor.lock on its startup. We hold
+	// the REAL flock so the production-fidelity TryLock contention is exercised.
+	heldByOldSupervisor, herr := AcquireSupervisorLockQuiet(lockPath)
+	if herr != nil {
+		t.Fatalf("seed held supervisor.lock: %v", herr)
+	}
+	oldSupervisorReleased := false
+	releaseOldSupervisor := func() {
+		if oldSupervisorReleased {
+			return
+		}
+		oldSupervisorReleased = true
+		heldByOldSupervisor.Release()
+	}
+	t.Cleanup(releaseOldSupervisor)
+
+	// The reap RELEASES the held lock (the real reap kills the supervisor that holds it;
+	// the OS then frees the flock). Without this release the post-reap acquire would
+	// still be blocked — proving the held lock is what the reap clears.
+	var (
+		reapRan, acquireRan, installRan bool
+	)
+	stubAutoRegisterCutover(t,
+		func(context.Context) error {
+			reapRan = true
+			releaseOldSupervisor() // the reap freed the lock the dead supervisor held
+			return nil
+		},
+		func(context.Context) error { return nil },
+	)
+	// Production interlock binding (REAL quiet acquire on the gate path). Before the
+	// reap this would fail (lock held); after the reap it succeeds.
+	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		acquireRan = true
+		return realAutoRegisterInterlockAcquire()
+	})
+	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
+		installRan = true
+		// The cutover holds its OWN (post-reap) lock now → a valid matching bypass token.
+		if lk := opts.SupervisorLockBypass.lk; lk == nil || lk.path != lockPath {
+			t.Errorf("install must receive a matching bypass token (post-reap held lock); got %+v", opts.SupervisorLockBypass.lk)
+		}
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("introduce-while-supervisor-holds-lock must SUCCEED (reap frees the lock, then acquire takes it): %v", err)
+	}
+	if !reapRan || !acquireRan || !installRan {
+		t.Fatalf("expected reap+acquire+install to all run; reap=%v acquire=%v install=%v", reapRan, acquireRan, installRan)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1 (the introduce committed)", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_DefersWhenInterlockHeldAfterReap_RecoversAndRollsBack:
+// the post-reap acquire FAILS (a concurrent migrate/cutover reaped the same supervisor
+// and won the race for the freed lock). Because the acquire is now AFTER the reap (bot
+// PR #276 r2 P1), the reap DID run — so this is a POST-reap defer: the reap seam ran,
+// the recovery-restart (failPreCommit) start seam runs (the system is not left
+// supervisor-less by US — the winner restarts one, but we still attempt the recovery
+// for our OWN reap), the registry row is rolled back, the install NEVER runs, and the
+// distinct serena-auto-register-deferred-on-interlock event is emitted.
+func TestAutoRegisterSerena_Introduce_DefersWhenInterlockHeldAfterReap_RecoversAndRollsBack(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
 	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
 
-	heldErr := errors.New("supervisor.lock held by live PID 4321")
+	heldErr := errors.New("supervisor.lock held (quiet acquire could not take the flock)")
+	var reapRan, startRan bool
+	// The reap RUNS (defer is now POST-reap); the recovery-restart start RUNS too.
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { reapRan = true; return nil },
+		func(context.Context) error { startRan = true; return nil },
+	)
+	// Acquire fails AFTER the reap.
 	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		if !reapRan {
+			t.Fatalf("the interlock acquire must fire AFTER the reap (bot PR #276 r2 P1)")
+		}
 		return nil, func() {}, heldErr
 	})
-	// The reap + start seams must NEVER be reached (defer is pre-reap).
-	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must NOT run when the interlock acquire failed (no kill)"); return nil },
-		func(context.Context) error { t.Fatalf("start must NOT run when the interlock acquire failed"); return nil },
-	)
 	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
-		t.Fatalf("install must NOT run when the interlock acquire failed (pre-reap defer)")
+		t.Fatalf("install must NOT run when the post-reap interlock acquire failed (defer before the write)")
 		return "", nil
 	})
 	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
@@ -1779,14 +1868,20 @@ func TestAutoRegisterSerena_Introduce_DefersWhenInterlockHeld_NoReap_NoKill(t *t
 	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
 	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
 	if err == nil {
-		t.Fatal("expected a defer-on-interlock error when the interlock is held")
+		t.Fatal("expected a defer-on-interlock error when the post-reap acquire fails")
 	}
 	if !errors.Is(err, heldErr) {
 		t.Fatalf("error = %v, want it to wrap the held-interlock acquire failure", err)
 	}
-	// HONEST error (another cutover holds the lock — NOT "supervisor running").
-	if !strings.Contains(err.Error(), "holds supervisor.lock") {
-		t.Errorf("error must name the honest interlock-held reason; got %v", err)
+	// HONEST error (another cutover acquired the lock — NOT "supervisor running").
+	if !strings.Contains(err.Error(), "supervisor.lock") {
+		t.Errorf("error must name the honest interlock reason; got %v", err)
+	}
+	if !reapRan {
+		t.Error("the reap must have run before the post-reap defer (the defer is after the reap)")
+	}
+	if !startRan {
+		t.Error("the recovery-restart start must run on the post-reap defer (failPreCommit restores a supervisor for our own reap)")
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
 		t.Errorf("registry has %d serena rows after a deferred introduce, want 0 (rollback)", len(rows))
@@ -1860,18 +1955,19 @@ func TestAutoRegisterSerena_Introduce_PassesInterlockBypassTokenToInstall(t *tes
 }
 
 // TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller is the bot PR
-// #276 finding-1 regression guard. The introduce-while-running cutover acquires the
-// interlock BEFORE its reap. If that acquire used the FULL AcquireSupervisorLock it
-// would OVERWRITE supervisor.lock.owner.json with the CALLER's (router/GUI) PID, so
-// the subsequent reap — which reads that sidecar to choose the PID it
-// taskkills/IPC-handshakes against — would target the CALLER instead of the old
-// supervisor. The fix is the QUIET acquire (no sidecar write), so the sidecar still
-// names the OLD supervisor when the reap runs.
+// #276 finding-1 regression guard. Under the reap-then-acquire ordering (r2 P1) the
+// reap runs BEFORE any interlock touch, AND the post-reap acquire is QUIET (no
+// sidecar write), so the sidecar names the OLD supervisor when the reap reads it —
+// doubly safe. A regression to the FULL AcquireSupervisorLock would OVERWRITE
+// supervisor.lock.owner.json with the CALLER's (router/GUI) PID; if such an acquire
+// ever ran before the reap again, the reap — which reads that sidecar to choose the
+// PID it taskkills/IPC-handshakes against — would target the CALLER instead of the
+// old supervisor.
 //
 // The test seeds the sidecar with a sentinel OLD-supervisor PID, wires the REAL
 // quiet acquire stub, and the reap stub asserts ReadSupervisorLockOwner STILL
-// reports that sentinel — never the caller's os.Getpid() — while the interlock is
-// held. A regression to the sidecar-overwriting acquire fails this assertion.
+// reports that sentinel — never the caller's os.Getpid(). A regression to the
+// sidecar-overwriting acquire fails this assertion.
 func TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller(t *testing.T) {
 	_ = autoRegisterTestEnv(t) // isolates registry + state dir; path not asserted here
 	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
