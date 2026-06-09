@@ -227,21 +227,10 @@ func (r *Reconciler) Reconcile(
 		// re-registering the workspace (which re-materializes the row) or by
 		// removing the stale descriptor.
 		if r.LSPRegistryHasRow != nil && isLSPWorkspaceProxyDescriptor(d) && !running && !r.LSPRegistryHasRow(d) {
-			if r.Events != nil {
-				_ = r.Events.Emit(api.SupervisorEvent{
-					Severity: "warn",
-					Source:   "lifecycle",
-					Event:    "orphaned-lsp-descriptor-skipped",
-					TaskName: d.TaskName,
-					Body: map[string]any{
-						"server":    d.Server,
-						"workspace": d.Workspace,
-						"language":  lspWorkspaceProxyArgValue(d, "--language"),
-						"reason":    "LSP workspace-proxy descriptor has no backing registry row (workspaces.yaml); the proxy would exit 1 \"not registered\" and churn into quarantine, so it is excluded from the reconcile spawn-desired set",
-						"action":    "re-register the workspace language (`mcphub workspace register` / `mcphub install`) to re-materialize the registry row, or remove this stale supervisor-intent descriptor",
-					},
-				})
-			}
+			// Single-owner emit shared with the apply-mode IPC drift classifier
+			// (supervise_reconcile_ipc.go) so the two orphan-exclusion paths can
+			// never diverge on the operator-facing message / remediation.
+			emitOrphanedLSPDescriptorSkipped(r.Events, d)
 			continue
 		}
 

@@ -220,6 +220,33 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		smState := lookupControllerSMState(deps, taskName)
 		action := classifyDriftAction(schedState, hasSched, intentDesired, isSupervisorOwnedDescriptorForReconcile(d))
 
+		// Orphaned-LSP-descriptor exclusion, mirroring the startup reconciler
+		// guard at supervise_reconcile.go:229. classifyDriftAction returns
+		// post_ev_intent_update for a SPAWN (intent=running, sched missing/stopped)
+		// of a supervisor-owned descriptor — but it has no view of the workspace
+		// registry, so an LSP workspace-proxy descriptor whose backing
+		// workspaces.yaml row was removed by `mcphub workspace unregister` (which
+		// can drop the row but, on an older code path / partial failure, leave the
+		// paired supervisor-intent descriptor) would be re-SPAWNED here in
+		// apply-mode (`mcphub reconcile --apply`, and the implicit apply every
+		// register/unregister fires via DialSupervisorIPCReconcile(apply=true)).
+		// The unbacked proxy then loads the registry, misses its (workspace_key,
+		// language) row, exits 1 "not registered", and churns into quarantine —
+		// the exact bug Bug 1's startup guard fixed, recurring on the apply-mode
+		// IPC path (all-return-paths miss). Downgrade ONLY the spawn direction
+		// (intent=running) to needs_manual_review so apply-mode never dispatches
+		// EvIntentUpdate for the orphan; a terminate-direction post_ev_intent_update
+		// (intent=stopped on a running orphan) is left intact so an operator stop
+		// can still reach a live process, exactly as the startup guard's `!running`
+		// gate allows.
+		if intentDesired == api.ReconcileIntentDesiredRunning &&
+			action == api.ReconcileActionPostEvIntentUpdate &&
+			isLSPWorkspaceProxyDescriptor(d) &&
+			!api.LSPRegistryRowBacksDescriptor(d) {
+			action = api.ReconcileActionNeedsManualReview
+			emitOrphanedLSPDescriptorSkipped(deps.events, d)
+		}
+
 		drift = append(drift, api.DriftEntry{
 			TaskName:       taskName,
 			SchedulerState: schedState,

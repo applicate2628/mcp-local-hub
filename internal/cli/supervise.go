@@ -2285,6 +2285,32 @@ func lspWorkspaceProxyArgValue(d api.SupervisorDaemon, flag string) string {
 	return ""
 }
 
+// emitOrphanedLSPDescriptorSkipped emits the single operator-actionable warn
+// event fired whenever the reconcile excludes an orphaned LSP workspace-proxy
+// descriptor (one whose backing workspaces.yaml row is gone) from the
+// spawn-desired set. It is the one owner of this event body so the STARTUP
+// reconciler guard (supervise_reconcile.go) and the APPLY-MODE IPC drift
+// classifier (supervise_reconcile_ipc.go) can never diverge on the message,
+// severity, or remediation guidance. Best-effort: a nil log is a no-op.
+func emitOrphanedLSPDescriptorSkipped(events *api.SupervisorEventLog, d api.SupervisorDaemon) {
+	if events == nil {
+		return
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityWarn,
+		Source:   "lifecycle",
+		Event:    "orphaned-lsp-descriptor-skipped",
+		TaskName: d.TaskName,
+		Body: map[string]any{
+			"server":    d.Server,
+			"workspace": d.Workspace,
+			"language":  lspWorkspaceProxyArgValue(d, "--language"),
+			"reason":    "LSP workspace-proxy descriptor has no backing registry row (workspaces.yaml); the proxy would exit 1 \"not registered\" and churn into quarantine, so it is excluded from the reconcile spawn-desired set",
+			"action":    "re-register the workspace language (`mcphub workspace register` / `mcphub install`) to re-materialize the registry row, or remove this stale supervisor-intent descriptor",
+		},
+	})
+}
+
 // appendSupervisorIntentChannel returns cmdEnv with the
 // MCPHUB_SUPERVISOR_INTENT_PATH control-channel var appended LAST so it wins
 // over any same-key entry the manifest/overlay merge may have produced (Go's
