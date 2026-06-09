@@ -267,6 +267,222 @@ func TestSupervisorStartupRuntimeDoesNotHydrateStaleCleanedStoppedDaemon(t *test
 	}
 }
 
+func TestLoadSupervisorStartupRuntimeTreatsExpiredUnboundPortAsStale(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	startedAt := time.Now().UTC().Add(-(supervisorPortBindGrace + time.Second))
+	if err := api.WriteSupervisorState(filepath.Join(stateDir, "supervisor-state.json"), &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			taskName: {
+				State:         "running",
+				CurrentPID:    22036,
+				PIDGeneration: 7,
+				StartedAt:     startedAt.Format(time.RFC3339Nano),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	currentRunningVerifyPIDIdentityFn = func(process.PIDIdentityProof) error {
+		return process.ErrProcessIdentityUnsupported
+	}
+	currentRunningIsPIDAliveFn = func(pid int) bool { return pid == 22036 }
+	restoreProbe := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PortLive: func(port int) bool {
+			if port != 9123 {
+				t.Fatalf("PortLive called with port %d, want 9123", port)
+			}
+			return false
+		},
+	})
+	t.Cleanup(func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+		restoreProbe()
+	})
+
+	tracker, currentRunning, runningPIDs, err := loadSupervisorStartupRuntime(stateDir)
+	if err != nil {
+		t.Fatalf("loadSupervisorStartupRuntime: %v", err)
+	}
+	if len(currentRunning) != 0 || len(runningPIDs) != 0 {
+		t.Fatalf("expired unbound port must not suppress startup spawn: currentRunning=%v pids=%v", currentRunning, runningPIDs)
+	}
+	entry, ok := tracker.Get(taskName)
+	if !ok {
+		t.Fatalf("tracker entry missing for %s", taskName)
+	}
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+		t.Fatalf("expired unbound port not cleared before startup reconcile: %+v", entry)
+	}
+	after, err := api.ReadSupervisorState(filepath.Join(stateDir, "supervisor-state.json"))
+	if err != nil {
+		t.Fatalf("read supervisor-state.json after stale cleanup: %v", err)
+	}
+	row := after.Daemons[taskName]
+	if row.State != "idle" || row.CurrentPID != 0 || row.StartedAt != "" {
+		t.Fatalf("expired unbound port row not persisted as idle: %+v", row)
+	}
+
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	intentCache := newIntentCache()
+	intentCache.Refresh(intent)
+	loop := api.NewEventLoop(16)
+	spawned := make(chan struct{}, 1)
+	terminated := make(chan struct{}, 1)
+	ctrl := &supervisorController{
+		intentCache:         intentCache,
+		eventLoop:           loop,
+		tracker:             tracker,
+		daemonIntent:        newDaemonIntentCache(),
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			if d.TaskName != taskName {
+				t.Fatalf("spawn task = %q, want %q", d.TaskName, taskName)
+			}
+			tracker.MarkSpawned(d.TaskName, 33000, time.Now().UTC())
+			spawned <- struct{}{}
+			return nil
+		},
+		terminate: func(api.SupervisorDaemon) error {
+			terminated <- struct{}{}
+			return nil
+		},
+	}
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	reconciler := NewReconciler(func(d api.SupervisorDaemon) error {
+		if d.TaskName != taskName {
+			t.Fatalf("spawn task = %q, want %q", d.TaskName, taskName)
+		}
+		t.Fatal("startup stale unbound port bypassed EventLoop state-machine path")
+		return nil
+	}, func(api.SupervisorDaemon) error {
+		t.Fatal("startup stale unbound port bypassed EventLoop state-machine path for terminate")
+		return nil
+	})
+	reconciler.EventLoop = loop
+	reconciler.Reconcile(intent, nil, currentRunning, time.Now().UTC())
+	select {
+	case <-terminated:
+		t.Fatal("startup stale unbound port attempted to terminate stale PID")
+	case <-spawned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup reconcile did not respawn expired unbound port immediately")
+	}
+}
+
+func TestLoadSupervisorStartupRuntimeKeepsWithinGraceUnboundPortRunning(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	startedAt := time.Now().UTC()
+	if err := api.WriteSupervisorState(filepath.Join(stateDir, "supervisor-state.json"), &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			taskName: {
+				State:         "running",
+				CurrentPID:    22036,
+				PIDGeneration: 7,
+				StartedAt:     startedAt.Format(time.RFC3339Nano),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	currentRunningVerifyPIDIdentityFn = func(process.PIDIdentityProof) error {
+		return process.ErrProcessIdentityUnsupported
+	}
+	currentRunningIsPIDAliveFn = func(pid int) bool { return pid == 22036 }
+	restoreProbe := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 },
+		PortLive: func(port int) bool {
+			if port != 9123 {
+				t.Fatalf("PortLive called with port %d, want 9123", port)
+			}
+			return false
+		},
+	})
+	t.Cleanup(func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+		restoreProbe()
+	})
+
+	_, currentRunning, runningPIDs, err := loadSupervisorStartupRuntime(stateDir)
+	if err != nil {
+		t.Fatalf("loadSupervisorStartupRuntime: %v", err)
+	}
+	if !currentRunning[taskName] {
+		t.Fatalf("within-grace unbound port must stay current-running: %v", currentRunning)
+	}
+	if runningPIDs[taskName].PID != 22036 {
+		t.Fatalf("running PID snapshot = %+v, want pid 22036", runningPIDs[taskName])
+	}
+
+	spawned := false
+	reconciler := NewReconciler(func(api.SupervisorDaemon) error {
+		spawned = true
+		return nil
+	}, func(api.SupervisorDaemon) error {
+		t.Fatal("within-grace unbound port must not terminate")
+		return nil
+	})
+	reconciler.Reconcile(&api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}, nil, currentRunning, time.Now().UTC())
+	if spawned {
+		t.Fatal("within-grace unbound port was respawned")
+	}
+}
+
 func TestSupervisorLivenessSweepPostsChildExitForDeadRunningPID(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`

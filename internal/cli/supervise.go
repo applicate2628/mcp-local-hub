@@ -1870,7 +1870,7 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		}
 		canonicalTask := canonicalSupervisorTaskName(taskName)
 		if port := intentPorts[canonicalTask]; port > 0 {
-			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
+			live, _ := supervisorDaemonEntryLive(api.SupervisorDaemon{
 				TaskName: canonicalTask,
 				Port:     port,
 			}, DaemonRuntimeEntry{
@@ -1879,10 +1879,8 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 				StartedAt:  startedAt,
 			}, time.Now().UTC())
 			if !live {
-				if reason != "port_unbound" {
-					markStale(taskName)
-					continue
-				}
+				markStale(taskName)
+				continue
 			}
 		}
 		result[canonicalTask] = true

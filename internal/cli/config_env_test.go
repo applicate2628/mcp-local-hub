@@ -219,12 +219,20 @@ func TestConfigEnvUnsetMissingKeyPreservesAutoDiscoverySource(t *testing.T) {
 func TestDaemonOverlayEnvLoadsExpandedOperatorRow(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
-	t.Setenv("Path", `C:\parent\bin`)
+	parentPath := "/parent/bin"
+	pathKey := "PATH"
+	pathSep := ":"
+	if runtime.GOOS == "windows" {
+		parentPath = `C:\parent\bin`
+		pathKey = "Path"
+		pathSep = ";"
+	}
+	t.Setenv(pathKey, parentPath)
 	if err := daemon_env_overlay.WriteOverlay(filepath.Join(stateDir, overlayBaseName), func(ov *daemon_env_overlay.Overlay) error {
 		ov.Daemons[`\mcp-local-hub-memory-default`] = daemon_env_overlay.DaemonRow{
 			Source: "operator",
 			Env: map[string]string{
-				"Path":             `D:\memory\bin;${parent_path}`,
+				pathKey:            "D:\\memory\\bin" + pathSep + "${parent_path}",
 				"MEMORY_FILE_PATH": `D:\memory\memory.jsonl`,
 			},
 		}
@@ -240,8 +248,9 @@ func TestDaemonOverlayEnvLoadsExpandedOperatorRow(t *testing.T) {
 	if got["MEMORY_FILE_PATH"] != `D:\memory\memory.jsonl` {
 		t.Fatalf("MEMORY_FILE_PATH = %q, want override", got["MEMORY_FILE_PATH"])
 	}
-	if got["Path"] != `D:\memory\bin;C:\parent\bin` {
-		t.Fatalf("Path = %q, want parent path expanded", got["Path"])
+	wantPath := "D:\\memory\\bin" + pathSep + parentPath
+	if got[pathKey] != wantPath {
+		t.Fatalf("%s = %q, want parent path expanded to %q", pathKey, got[pathKey], wantPath)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -310,10 +311,23 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range overlayEnv {
-		env[k] = v
+	return mergeDaemonEnvMaps(env, overlayEnv), nil
+}
+
+func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
+	if len(manifest) == 0 && len(overlay) == 0 {
+		return map[string]string{}
 	}
-	return env, nil
+	merged := mergeDaemonEnv(nil, manifest, overlay)
+	out := make(map[string]string, len(merged))
+	for _, kv := range merged {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {

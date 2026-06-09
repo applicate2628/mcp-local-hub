@@ -321,6 +321,109 @@ func TestDaemonEnvWithOverlayResolvesManifestBeforeLiteralOverlay(t *testing.T) 
 	}
 }
 
+func TestDaemonEnvWithOverlayPathCaseMatrix(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest map[string]string
+		overlay  map[string]string
+		assert   func(t *testing.T, env map[string]string)
+	}{
+		{
+			name:     "overlay PATH against manifest Path",
+			manifest: map[string]string{"Path": "manifest-path"},
+			overlay:  map[string]string{"PATH": "overlay-path"},
+			assert: func(t *testing.T, env map[string]string) {
+				t.Helper()
+				if runtime.GOOS == "windows" {
+					assertPathFamilyEntries(t, env, 1)
+					if env["PATH"] != "overlay-path" {
+						t.Fatalf("PATH = %q, want overlay-path", env["PATH"])
+					}
+					if _, ok := env["Path"]; ok {
+						t.Fatalf("Windows merge kept manifest Path alongside overlay PATH: %v", env)
+					}
+					return
+				}
+				assertPathFamilyEntries(t, env, 2)
+				if env["Path"] != "manifest-path" || env["PATH"] != "overlay-path" {
+					t.Fatalf("POSIX merge = %v, want distinct Path manifest and PATH overlay entries", env)
+				}
+			},
+		},
+		{
+			name:     "overlay PATH against manifest PATH",
+			manifest: map[string]string{"PATH": "manifest-path"},
+			overlay:  map[string]string{"PATH": "overlay-path"},
+			assert: func(t *testing.T, env map[string]string) {
+				t.Helper()
+				assertPathFamilyEntries(t, env, 1)
+				if env["PATH"] != "overlay-path" {
+					t.Fatalf("PATH = %q, want overlay-path", env["PATH"])
+				}
+			},
+		},
+		{
+			name:     "only manifest Path",
+			manifest: map[string]string{"Path": "manifest-path"},
+			assert: func(t *testing.T, env map[string]string) {
+				t.Helper()
+				assertPathFamilyEntries(t, env, 1)
+				if env["Path"] != "manifest-path" {
+					t.Fatalf("Path = %q, want manifest-path", env["Path"])
+				}
+			},
+		},
+		{
+			name:    "only overlay PATH",
+			overlay: map[string]string{"PATH": "overlay-path"},
+			assert: func(t *testing.T, env map[string]string) {
+				t.Helper()
+				assertPathFamilyEntries(t, env, 1)
+				if env["PATH"] != "overlay-path" {
+					t.Fatalf("PATH = %q, want overlay-path", env["PATH"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+			if len(tt.overlay) > 0 {
+				if err := daemon_env_overlay.WriteOverlay(filepath.Join(stateDir, overlayBaseName), func(ov *daemon_env_overlay.Overlay) error {
+					ov.Daemons[`\mcp-local-hub-memory-default`] = daemon_env_overlay.DaemonRow{
+						Source: "operator",
+						Env:    tt.overlay,
+					}
+					return nil
+				}); err != nil {
+					t.Fatalf("seed overlay: %v", err)
+				}
+			}
+
+			env, err := daemonEnvWithOverlay("memory", "default", tt.manifest, secrets.NewResolver(nil, nil))
+			if err != nil {
+				t.Fatalf("daemonEnvWithOverlay: %v", err)
+			}
+			tt.assert(t, env)
+		})
+	}
+}
+
+func assertPathFamilyEntries(t *testing.T, env map[string]string, want int) {
+	t.Helper()
+	got := 0
+	for k := range env {
+		if strings.EqualFold(k, "PATH") {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("Path-family entry count = %d, want %d; env=%v", got, want, env)
+	}
+}
+
 func TestDaemonOverlayEnvKeepsLiteralValuesWhenParentPathExpansionFails(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
