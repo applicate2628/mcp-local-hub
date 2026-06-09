@@ -31,24 +31,15 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"mcp-local-hub/internal/api"
 )
 
-// migrateSerenaReconcileReadyTimeout bounds how long defaultMigrateSerenaStart
-// waits for the freshly-started supervisor to reach reconcile_ready=true via
-// IPC `status`. Set to 60s as defence-in-depth against the known-benign
-// release→child-acquire supervisor.lock hand-off window (the migrate releases
-// the interlock immediately before the start, so the fresh supervisor must
-// re-acquire the lock and bind its IPC pipe before `status` can answer). The
-// poll's cost is ~constant in pool size (it polls one IPC endpoint, not per
-// daemon), so widening the window is cheap. Even on a timeout the POST-COMMIT
-// start (step 10) now downgrades to a warning rather than a scary exit-1
-// (ErrMigrateSerenaReconcileReadyTimeout), but the wider window makes that
-// downgrade rarely necessary. The forward-migration step-14 budget
-// (internal/migration/journal.go:846) remains 30s; this cutover path widens it.
-const migrateSerenaReconcileReadyTimeout = 60 * time.Second
+// migrateSerenaReconcileReadyTimeout (the 60s reconcile-ready poll bound this
+// START driver consumes via waitReconcileReadyViaIPC) is defined cross-platform
+// in migrate_serena.go — NOT here under //go:build windows — because the driver's
+// POST-COMMIT downgrade messaging (step 10) references it and must compile on
+// every GOOS (Linux is shipping beta scope). See its doc comment there.
 
 // migrateSerenaUpgradeDeps builds the shared Windows v5UpgradeDeps used by both
 // the reap and the start seams.

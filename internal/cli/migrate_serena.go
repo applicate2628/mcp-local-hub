@@ -261,6 +261,25 @@ var migrateSerenaStartFn = defaultMigrateSerenaStart
 // unaffected by the existence of the sentinel.
 var ErrMigrateSerenaReconcileReadyTimeout = errors.New("serena migrate: supervisor started but did not report reconcile-ready within the bounded window")
 
+// migrateSerenaReconcileReadyTimeout bounds how long the Windows START driver
+// (defaultMigrateSerenaStart) waits for the freshly-started supervisor to reach
+// reconcile_ready=true via IPC `status`. Set to 60s as defence-in-depth against
+// the known-benign release→child-acquire supervisor.lock hand-off window (the
+// migrate releases the interlock immediately before the start, so the fresh
+// supervisor must re-acquire the lock and bind its IPC pipe before `status` can
+// answer). The poll's cost is ~constant in pool size (it polls one IPC endpoint,
+// not per daemon), so widening the window is cheap. Even on a timeout the
+// POST-COMMIT start (step 10) downgrades to a warning rather than a scary exit-1
+// (ErrMigrateSerenaReconcileReadyTimeout), but the wider window makes that
+// downgrade rarely necessary. The forward-migration step-14 budget
+// (internal/migration/journal.go:846) remains 30s; this cutover path widens it.
+//
+// Defined here (cross-platform) — NOT under //go:build windows — because the
+// driver's POST-COMMIT downgrade messaging in this file (step 10) references it,
+// and that code compiles on every GOOS (Linux is shipping beta scope). The
+// Windows-only START driver consumes it via waitReconcileReadyViaIPC.
+const migrateSerenaReconcileReadyTimeout = 60 * time.Second
+
 // migrateSerenaSupervisorHealthyFn reports whether a supervisor is currently
 // running AND reconcile-ready (Fix 5, PR #250 deeper review — consultant Q2).
 // The idempotency-recovery branch uses it to distinguish a GENUINE
@@ -1177,10 +1196,10 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 						Source:        "migration",
 						Event:         "serena-migrate-post-commit-reconcile-ready-timeout",
 						Body: map[string]any{
-							"timeout":  migrateSerenaReconcileReadyTimeout.String(),
-							"detail":   startErr.Error(),
-							"reason":   "post-commit supervisor spawn succeeded but reconcile-ready was not observed within the bounded window; the intent is committed and the registry is NOT rolled back — the supervisor reconciles eventually",
-							"action":   "run `mcphub status` to confirm the supervisor came up; no operator action is required if it is reconcile-ready",
+							"timeout":   migrateSerenaReconcileReadyTimeout.String(),
+							"detail":    startErr.Error(),
+							"reason":    "post-commit supervisor spawn succeeded but reconcile-ready was not observed within the bounded window; the intent is committed and the registry is NOT rolled back — the supervisor reconciles eventually",
+							"action":    "run `mcphub status` to confirm the supervisor came up; no operator action is required if it is reconcile-ready",
 							"committed": true,
 						},
 					})
