@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -243,6 +244,53 @@ func supervisorLivenessRestartClearedRuntime(ev api.LoopEvent) bool {
 	return supervisorLivenessReasonNeedsRestart(reason)
 }
 
+// daemonExpectedIdentityExe returns the executable path a DAEMON process is
+// expected to run as: its configured Command (the exact exe the supervisor
+// exec'd via exec.Command(d.Command, d.Args...)), normalized to match the
+// internal comparison done by process.VerifyPIDIdentity
+// (normalizeWindowsExecutablePath / normalizeExpectedExecutablePath both apply
+// filepath.Abs + EvalSymlinks + Clean). Falls back to canonicalMcphubPath()
+// (the SUPERVISOR's own binary) only when command is empty, for
+// defense-in-depth on legacy intent rows that predate a populated Command.
+//
+// This MUST NOT be confused with canonicalMcphubPath(): a daemon's expected
+// exe is its install path (e.g. ~/.local/bin/mcphub.exe), which differs from
+// the supervisor's own os.Executable() whenever the supervisor runs from a
+// different binary than the daemons it spawned (e.g. a dev build supervising
+// release-path daemons). Comparing a daemon's exe to the supervisor's own path
+// is the false-mismatch bug fixed here — it drove every live daemon to
+// pid_identity_mismatch → fleet-wide restart churn (bug
+// 2026-06-09-supervisor-loses-current-pid-false-quarantine.md, Layer A).
+func daemonExpectedIdentityExe(command string) string {
+	if command == "" {
+		return canonicalMcphubPath()
+	}
+	exe := command
+	// A bare command name (no directory part) is resolved by exec.Command via
+	// PATH (LookPath), NOT relative to the supervisor's CWD. filepath.Abs would
+	// wrongly prepend the CWD, so the identity proof would compare the live
+	// daemon against <cwd>/<name> and report a false pid_identity_mismatch for
+	// legacy/fallback rows whose Command is bare (e.g. "mcphub.exe" from the
+	// supervisorDaemonsFromPlan mcphubShortName fallback). Resolve it the same
+	// way spawn does; if it is not on PATH it is unspawnable anyway, so fall
+	// back to the supervisor's own binary (the prior behavior for these rows).
+	// (Codex bot #270 P2.)
+	if filepath.Base(exe) == exe {
+		looked, err := exec.LookPath(exe)
+		if err != nil {
+			return canonicalMcphubPath()
+		}
+		exe = looked
+	}
+	if abs, err := filepath.Abs(exe); err == nil {
+		exe = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return filepath.Clean(exe)
+}
+
 func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) (bool, string) {
 	probe := supervisorLivenessProbeFns
 	if probe.PIDAlive == nil {
@@ -258,7 +306,13 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 		if entry.StartedAt.IsZero() {
 			return false, supervisorLivenessReasonPIDIdentityMissing
 		}
-		expectedExe := canonicalMcphubPath()
+		// The daemon runs from its CONFIGURED command (d.Command — the exact
+		// exe the supervisor exec'd), which may differ from the supervisor's
+		// own binary. Compare the live PID against the daemon's exe, NOT the
+		// supervisor's canonicalMcphubPath(), or a dev-build supervisor would
+		// flag every release-path daemon pid_identity_mismatch (bug
+		// 2026-06-09-supervisor-loses-current-pid-false-quarantine.md).
+		expectedExe := daemonExpectedIdentityExe(d.Command)
 		if expectedExe == "" {
 			return false, supervisorLivenessReasonPIDIdentityMissing
 		}
@@ -383,6 +437,27 @@ func supervisorIntentPortMapForStateDir(stateDir string) map[string]int {
 	}
 	for _, d := range intent.Daemons {
 		out[canonicalSupervisorTaskName(d.TaskName)] = d.Port
+	}
+	return out
+}
+
+// supervisorIntentCommandMapForStateDir returns canonical task name ->
+// configured Command from supervisor-intent.json. The startup runtime scan
+// (loadSupervisorCurrentRunning) needs this because supervisor-state.json
+// (api.SupervisorDaemonState) carries only runtime PID/state, NOT the
+// daemon's exe path, yet the PID-identity proof must compare against the
+// DAEMON's configured exe (its install path), not the supervisor's own
+// canonicalMcphubPath(). A task absent from intent (or whose Command is
+// empty) yields no entry; the caller falls back to canonicalMcphubPath()
+// via daemonExpectedIdentityExe(""). Mirrors supervisorIntentPortMapForStateDir.
+func supervisorIntentCommandMapForStateDir(stateDir string) map[string]string {
+	out := map[string]string{}
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil || intent == nil {
+		return out
+	}
+	for _, d := range intent.Daemons {
+		out[canonicalSupervisorTaskName(d.TaskName)] = d.Command
 	}
 	return out
 }
