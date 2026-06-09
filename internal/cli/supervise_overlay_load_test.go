@@ -324,7 +324,7 @@ func TestOverlayKeySetSortedDeterministic(t *testing.T) {
 // (daemonOverlayKeysFromEnv → overlayMapFromInjectedKeys) against that
 // environment to prove a key present in BOTH the manifest and the overlay
 // resolves to the OVERLAY value even when the overlay file would be
-// unreadable. Covers both GOOS for the NUL join/split + case-fold readback.
+// unreadable. Covers both GOOS for the comma join/split + case-fold readback.
 func TestSupervisorInjectsOverlayKeySetReconstructsAcrossUnreadableReload(t *testing.T) {
 	// Overlay key spelled platform-appropriately so the round-trip exercises
 	// the real PATH-family case-fold path on Windows and the exact path on
@@ -353,7 +353,7 @@ func TestSupervisorInjectsOverlayKeySetReconstructsAcrossUnreadableReload(t *tes
 	merged = appendDaemonOverlayAppliedMarker(merged)
 	merged = appendDaemonOverlayKeys(merged, overlayKeySet(overlayEnv))
 
-	// The injected key set must carry both keys, NUL-joined and sorted.
+	// The injected key set must carry both keys, comma-joined and sorted.
 	if got := lookupEnvValue(merged, daemonOverlayKeysEnvVar); got == "" {
 		t.Fatalf("%s not injected into child env", daemonOverlayKeysEnvVar)
 	}

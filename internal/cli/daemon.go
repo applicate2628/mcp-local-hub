@@ -24,7 +24,7 @@ import (
 const (
 	daemonOverlayAppliedEnvVar   = "MCPHUB_DAEMON_ENV_OVERLAY_APPLIED"
 	daemonOverlayAppliedEnvValue = "supervisor"
-	// daemonOverlayKeysEnvVar carries the NUL-joined set of overlay keys
+	// daemonOverlayKeysEnvVar carries the comma-joined set of overlay keys
 	// the supervisor applied (overlay-wins) into this wrapper's
 	// environment before spawning it. It exists so the marker-present
 	// reload-FAILURE path can reconstruct the overlay key set (and read
@@ -39,11 +39,13 @@ const (
 	// manifest/overlay row can spoof the key set.
 	daemonOverlayKeysEnvVar = "MCPHUB_DAEMON_ENV_OVERLAY_KEYS"
 	// daemonOverlayKeysSep is the join delimiter for daemonOverlayKeysEnvVar.
-	// NUL can never appear in an environment-variable NAME on any OS (env
-	// blocks are NUL-terminated), so it is an unambiguous separator that no
-	// real overlay key can contain — the split can never mis-parse a key
-	// that legitimately holds a comma or other punctuation.
-	daemonOverlayKeysSep = "\x00"
+	// It must be valid INSIDE an environment-variable VALUE: a NUL byte is
+	// NOT — the OS env block is NUL-terminated, so a NUL embedded in
+	// cmd.Env's value truncates the variable (or fails the spawn) before the
+	// daemon starts (Codex bot #268 P1). A comma is safe: overlay key NAMES
+	// match [A-Za-z_][A-Za-z0-9_]* (no comma can appear), so the comma-joined
+	// set splits back unambiguously.
+	daemonOverlayKeysSep = ","
 )
 
 func newDaemonCmdReal() *cobra.Command {
@@ -511,7 +513,7 @@ func overlayMapFromInjectedKeys(keys []string, env []string) map[string]string {
 }
 
 // daemonOverlayKeysFromEnv returns the overlay key set the supervisor
-// injected via daemonOverlayKeysEnvVar (the NUL-joined value written at
+// injected via daemonOverlayKeysEnvVar (the comma-joined value written at
 // spawn time). The LAST matching entry wins, mirroring Go exec
 // duplicate-key semantics so a supervisor-appended trusted value beats any
 // earlier spoofed entry left in the inherited env. Empty segments (from a
@@ -571,7 +573,7 @@ func appendDaemonOverlayAppliedMarker(env []string) []string {
 }
 
 // appendDaemonOverlayKeys returns env with daemonOverlayKeysEnvVar set to
-// the NUL-joined overlay key set (each key spelled as the overlay stored
+// the comma-joined overlay key set (each key spelled as the overlay stored
 // it, so the wrapper's case-fold reader matches the supervisor-written
 // os.Environ() entry on Windows). Strip-then-append mirrors
 // appendDaemonOverlayAppliedMarker exactly: any pre-existing

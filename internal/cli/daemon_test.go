@@ -834,7 +834,7 @@ func TestDaemonOverlayEnvSupervisedReloadFailureNoInjectedKeysFallsBackToNil(t *
 }
 
 // TestDaemonOverlayKeysFromEnv covers the split semantics of the
-// supervisor-injected MCPHUB_DAEMON_ENV_OVERLAY_KEYS value: NUL-joined
+// supervisor-injected MCPHUB_DAEMON_ENV_OVERLAY_KEYS value: comma-joined
 // segments, last-entry-wins on duplicate vars (a trusted supervisor append
 // beats an earlier spoof), and empty-segment dropping so a malformed value
 // never yields an empty-named key.
