@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -316,13 +317,60 @@ func TestLSPRouter_RegisteredWorkspaceWaitsForEnsureBeforeForward(t *testing.T) 
 	}
 }
 
-func TestLSPRouter_UnregisteredMarkerWorkspaceAutoRegistersThenForwards(t *testing.T) {
+func TestLSPRouter_UntrustedMarkerWorkspaceRefusedAndNotAutoRegistered(t *testing.T) {
+	// SECURITY (trusted-root gate): an unregistered, project-marker-bearing
+	// workspace whose root is NOT contained by any trusted root must be
+	// REFUSED with the #269 "not registered" error, and AutoRegisterFn must
+	// NOT be called — the untrusted MCP tool-argument path must not be able
+	// to authorize a brand-new local LSP workspace.
+	var autoCalls atomic.Int32
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/alpha/main.py": {
+			WorkspaceRoot: "/repo/alpha",
+			WorkspaceKey:  "alpha",
+			Registered:    false,
+			ProjectMarker: true, // marker present, but markers are NOT authorization
+		},
+	}}
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			autoCalls.Add(1)
+			return nil, errors.New("auto-register must not run for an untrusted root")
+		},
+		// Untrusted: no root contains /repo/alpha.
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) { return false, nil },
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/alpha/main.py"}}`)
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/call status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if autoCalls.Load() != 0 {
+		t.Fatalf("auto-register calls = %d, want 0 (untrusted root must not auto-register)", autoCalls.Load())
+	}
+	if !strings.Contains(rr.Body.String(), "is not registered") ||
+		!strings.Contains(rr.Body.String(), "mcphub register") {
+		t.Fatalf("untrusted workspace error should require explicit registration, got: %s", rr.Body.String())
+	}
+}
+
+// TestLSPRouter_TrustedRootWorkspaceAutoRegistersThenForwards is the
+// other half of the gate: a path UNDER a trusted root (operator-config
+// allowed root OR a root blessed by a prior explicit register) DOES
+// auto-register and forward — the convenience PR #266 shipped is kept.
+func TestLSPRouter_TrustedRootWorkspaceAutoRegistersThenForwards(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"registered":true}}`))
 	}))
 	t.Cleanup(upstream.Close)
 
 	var autoCalls atomic.Int32
+	var checkedRoot string
 	entry := api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201}
 	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
 		"python|/repo/alpha/main.py": {
@@ -344,6 +392,12 @@ func TestLSPRouter_UnregisteredMarkerWorkspaceAutoRegistersThenForwards(t *testi
 			}
 			return &entry, nil
 		},
+		// Trusted: /repo/alpha is contained by a trusted root. The gate is
+		// the only thing that lets first-touch auto-register proceed.
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) {
+			checkedRoot = workspaceRoot
+			return true, nil
+		},
 		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return upstream.URL },
 	})
 
@@ -353,11 +407,173 @@ func TestLSPRouter_UnregisteredMarkerWorkspaceAutoRegistersThenForwards(t *testi
 		t.Fatalf("tools/call status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	if autoCalls.Load() != 1 {
-		t.Fatalf("auto-register calls = %d, want 1", autoCalls.Load())
+		t.Fatalf("auto-register calls = %d, want 1 (trusted root must auto-register)", autoCalls.Load())
+	}
+	if checkedRoot != "/repo/alpha" {
+		t.Fatalf("trusted-root gate checked %q, want the resolved WorkspaceRoot /repo/alpha", checkedRoot)
+	}
+}
+
+// TestLSPRouter_TrustedRootGateErrorFailsClosed asserts the gate fails
+// CLOSED: a TrustedRootCheckFn error (corrupt store, insecure-parent
+// rejection) refuses auto-register exactly like an untrusted path,
+// rather than silently authorizing.
+func TestLSPRouter_TrustedRootGateErrorFailsClosed(t *testing.T) {
+	var autoCalls atomic.Int32
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/alpha/main.py": {
+			WorkspaceRoot: "/repo/alpha",
+			WorkspaceKey:  "alpha",
+			Registered:    false,
+			ProjectMarker: true,
+		},
+	}}
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			autoCalls.Add(1)
+			return nil, errors.New("auto-register must not run when the gate errors")
+		},
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) {
+			return false, errors.New("corrupt trusted-roots store")
+		},
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/alpha/main.py"}}`)
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/call status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if autoCalls.Load() != 0 {
+		t.Fatalf("auto-register calls = %d, want 0 (gate error must fail closed)", autoCalls.Load())
+	}
+	if !strings.Contains(rr.Body.String(), "is not registered") {
+		t.Fatalf("gate-error refusal should use the not-registered error, got: %s", rr.Body.String())
+	}
+}
+
+// TestLSPRouter_NilTrustedRootGateFailsClosed asserts that legacy deps
+// with no TrustedRootCheckFn wired refuse first-touch auto-register — an
+// unset gate must never silently authorize.
+func TestLSPRouter_NilTrustedRootGateFailsClosed(t *testing.T) {
+	var autoCalls atomic.Int32
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/alpha/main.py": {
+			WorkspaceRoot: "/repo/alpha",
+			WorkspaceKey:  "alpha",
+			Registered:    false,
+			ProjectMarker: true,
+		},
+	}}
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			autoCalls.Add(1)
+			return nil, errors.New("auto-register must not run with no gate wired")
+		},
+		// TrustedRootCheckFn intentionally nil.
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/alpha/main.py"}}`)
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/call status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if autoCalls.Load() != 0 {
+		t.Fatalf("auto-register calls = %d, want 0 (nil gate must fail closed)", autoCalls.Load())
+	}
+}
+
+// TestLSPRouter_AutoRegisterPathDoesNotBless is the load-bearing
+// security invariant: the ROUTER's first-touch auto-register path must
+// NEVER bless a trusted root. Blessing on the router path would let an
+// untrusted MCP tool-argument path self-trust and pass the gate on the
+// very next request, re-opening the vulnerability.
+//
+// The router exposes no bless seam by construction (lspRouterDeps has
+// AutoRegisterFn + a read-only TrustedRootCheckFn, no bless function),
+// so this test redirects the state dir to a fresh temp tree, drives a
+// trusted first-touch auto-register through the real router handler, and
+// asserts the on-disk lsp-trusted-roots.json store is NOT created or
+// modified by the router path.
+func TestLSPRouter_AutoRegisterPathDoesNotBless(t *testing.T) {
+	stateDir := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restore)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"registered":true}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	storePath, err := api.DefaultLSPTrustedRootsPath()
+	if err != nil {
+		t.Fatalf("resolve trusted-roots store path: %v", err)
+	}
+	if _, statErr := os.Stat(storePath); statErr == nil {
+		t.Fatalf("trusted-roots store unexpectedly exists before the router runs: %s", storePath)
+	}
+
+	entry := api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201}
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/alpha/main.py": {
+			WorkspaceRoot: "/repo/alpha",
+			WorkspaceKey:  "alpha",
+			Registered:    false,
+			ProjectMarker: true,
+		},
+	}}
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			// Production wires this to api.NewAPI().EnsureLSPRegistered,
+			// which performs NO bless. The stub mirrors that contract: it
+			// registers but must not write the trusted-roots store.
+			return &entry, nil
+		},
+		// Trusted so the first-touch auto-register PROCEEDS — that is the
+		// path that must not bless.
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) { return true, nil },
+		UpstreamURLFn:      func(ws *api.WorkspaceEntry) string { return upstream.URL },
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/alpha/main.py"}}`)
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/call status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The router auto-registered (trusted), but it must NOT have blessed:
+	// the on-disk store must still not exist.
+	if _, statErr := os.Stat(storePath); statErr == nil {
+		t.Fatalf("ROUTER auto-register path blessed a trusted root (store created at %s) — this re-opens the vulnerability", storePath)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("unexpected stat error on trusted-roots store: %v", statErr)
+	}
+	// And the live gate still reports the store empty (no root recorded).
+	f, err := api.LoadDefaultLSPTrustedRoots()
+	if err != nil {
+		t.Fatalf("load trusted-roots after router run: %v", err)
+	}
+	if len(f.Roots) != 0 {
+		t.Fatalf("router path must record zero trusted roots, got %v", f.Roots)
 	}
 }
 
 func TestLSPRouter_GitOnlyResolvedWorkspaceDoesNotAutoSpawn(t *testing.T) {
+	// Under the trusted-root gate, an unregistered git-only workspace that
+	// is NOT under any trusted root is refused at the authorization
+	// boundary (not the marker gate, which PR #269 retired). AutoRegisterFn
+	// must not be called.
 	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
 		"python|/repo/gitonly/main.py": {
 			WorkspaceRoot: "/repo/gitonly",
@@ -375,6 +591,7 @@ func TestLSPRouter_GitOnlyResolvedWorkspaceDoesNotAutoSpawn(t *testing.T) {
 			t.Fatal("git-only fallback must not auto-register")
 			return nil, errors.New("unexpected auto-register")
 		},
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) { return false, nil },
 	})
 
 	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/gitonly/main.py"}}`)
@@ -382,8 +599,9 @@ func TestLSPRouter_GitOnlyResolvedWorkspaceDoesNotAutoSpawn(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("git-only status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "language project marker") {
-		t.Fatalf("git-only error should name marker gate, got: %s", rr.Body.String())
+	if !strings.Contains(rr.Body.String(), "is not registered") ||
+		!strings.Contains(rr.Body.String(), "mcphub register") {
+		t.Fatalf("git-only untrusted error should require explicit registration, got: %s", rr.Body.String())
 	}
 }
 

@@ -38,6 +38,18 @@ type lspRouterDeps struct {
 	UpstreamTimeout        time.Duration
 	BackendKindForLanguage func(language string) (string, bool)
 	AutoRegisterFn         func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error)
+	// TrustedRootCheckFn is the authorization gate for FIRST-TOUCH
+	// auto-register. Given a resolved workspace root, it reports whether
+	// that root is equal to, or a true subdirectory of, an operator-
+	// trusted root (an operator-configured allowed root OR a root blessed
+	// by a prior EXPLICIT register). workspaceFromResolvedLSPPath calls
+	// this BEFORE AutoRegisterFn and refuses (exactly as PR #269 did)
+	// when it returns false. An error fails CLOSED (refuse). Production
+	// wires this to api.LSPWorkspaceRootTrusted, which reads the live
+	// <state-dir>/lsp-trusted-roots.json store. When nil (legacy deps
+	// without the gate wired), the router fails CLOSED on first touch:
+	// an unset gate must never silently authorize untrusted paths.
+	TrustedRootCheckFn func(workspaceRoot string) (bool, error)
 }
 
 var lspRouterTestSeam func() *lspRouterDeps
@@ -66,6 +78,12 @@ func (s *Server) SetLSPRouterProduction(resolver *lsp_routing.WorkspaceResolver,
 			}
 			return &entry, nil
 		},
+		// Trusted-root gate: reads the live on-disk lsp-trusted-roots.json
+		// store on each first-touch decision. NOTE this is the READ path
+		// only — it never blesses. Blessing happens exclusively at the
+		// explicit register call sites (internal/gui/lsp_register.go and
+		// the `mcphub register` CLI path).
+		TrustedRootCheckFn: api.LSPWorkspaceRootTrusted,
 	})
 }
 
@@ -416,9 +434,20 @@ func (s *Server) workspaceFromResolvedLSPPath(
 		}
 		return resolved.Entry, true
 	}
-	if !resolved.ProjectMarker {
+	// First-touch auto-register. The ProjectMarker is NOT an
+	// authorization boundary — it is only a discovery hint (per PR #269's
+	// reasoning, an attacker-named path commonly carries a marker). The
+	// trusted-root gate below is the authorization boundary: auto-register
+	// proceeds ONLY when the resolved workspace root is equal to, or a
+	// true subdirectory of, an operator-trusted root (an operator-
+	// configured allowed root OR a root blessed by a prior EXPLICIT
+	// register). Untrusted MCP tool arguments must never authorize a new
+	// local LSP workspace. The store lives at
+	// <state-dir>/lsp-trusted-roots.json; see
+	// internal/api/lsp_trusted_roots.go.
+	if !s.lspWorkspaceRootIsTrusted(deps, resolved) {
 		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
-			"no language project marker for "+language+" under "+pathArg+"; refusing .git-only LSP auto-register")
+			"LSP workspace for "+pathArg+" is not registered; run mcphub register for this workspace before using the LSP router")
 		return nil, false
 	}
 	if deps.AutoRegisterFn == nil {
@@ -428,6 +457,36 @@ func (s *Server) workspaceFromResolvedLSPPath(
 	}
 	entry, ok := s.ensureResolvedLSPWorkspace(w, r, deps, tb, resolved, language)
 	return entry, ok
+}
+
+// lspWorkspaceRootIsTrusted is the router-side adapter over the
+// trusted-root authorization gate. It resolves the workspace root from
+// the ResolveResult (the resolver supplies resolved.WorkspaceRoot in
+// canonical form for an unregistered first-touch; fall back to
+// resolved.Entry.WorkspacePath defensively), then consults
+// deps.TrustedRootCheckFn.
+//
+// Fail-CLOSED on every uncertainty: a nil gate (legacy deps without the
+// gate wired), an empty workspace root, or a gate error (corrupt store,
+// insecure-parent rejection) all return false so the caller emits the
+// "not registered" refusal. An unset or erroring gate must never
+// silently authorize an untrusted path.
+func (s *Server) lspWorkspaceRootIsTrusted(deps *lspRouterDeps, resolved *lsp_routing.ResolveResult) bool {
+	if deps == nil || deps.TrustedRootCheckFn == nil {
+		return false
+	}
+	workspaceRoot := resolved.WorkspaceRoot
+	if workspaceRoot == "" && resolved.Entry != nil {
+		workspaceRoot = resolved.Entry.WorkspacePath
+	}
+	if workspaceRoot == "" {
+		return false
+	}
+	trusted, err := deps.TrustedRootCheckFn(workspaceRoot)
+	if err != nil {
+		return false
+	}
+	return trusted
 }
 
 func isRelativeLSPPathArg(pathArg string) bool {
