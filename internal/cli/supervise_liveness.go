@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -265,6 +266,22 @@ func daemonExpectedIdentityExe(command string) string {
 		return canonicalMcphubPath()
 	}
 	exe := command
+	// A bare command name (no directory part) is resolved by exec.Command via
+	// PATH (LookPath), NOT relative to the supervisor's CWD. filepath.Abs would
+	// wrongly prepend the CWD, so the identity proof would compare the live
+	// daemon against <cwd>/<name> and report a false pid_identity_mismatch for
+	// legacy/fallback rows whose Command is bare (e.g. "mcphub.exe" from the
+	// supervisorDaemonsFromPlan mcphubShortName fallback). Resolve it the same
+	// way spawn does; if it is not on PATH it is unspawnable anyway, so fall
+	// back to the supervisor's own binary (the prior behavior for these rows).
+	// (Codex bot #270 P2.)
+	if filepath.Base(exe) == exe {
+		looked, err := exec.LookPath(exe)
+		if err != nil {
+			return canonicalMcphubPath()
+		}
+		exe = looked
+	}
 	if abs, err := filepath.Abs(exe); err == nil {
 		exe = abs
 	}

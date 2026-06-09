@@ -48,6 +48,15 @@ func TestDaemonExpectedIdentityExe_UsesCommandNotSupervisorPath(t *testing.T) {
 	if fb := daemonExpectedIdentityExe(""); fb != canonicalMcphubPath() {
 		t.Fatalf("daemonExpectedIdentityExe(\"\") = %q, want canonicalMcphubPath() %q", fb, canonicalMcphubPath())
 	}
+
+	// A BARE command name (no directory) is resolved via PATH like exec.Command,
+	// NOT filepath.Abs'd to <cwd>/<name>. A name not on PATH is unspawnable, so
+	// it falls back to the supervisor's own binary (NOT a CWD-prefixed path).
+	// This is the Codex bot #270 P2 regression guard.
+	const bareNotOnPath = "mcphub-definitely-not-on-path-xyz123.exe"
+	if got := daemonExpectedIdentityExe(bareNotOnPath); got != canonicalMcphubPath() {
+		t.Fatalf("daemonExpectedIdentityExe(%q) = %q, want canonicalMcphubPath() %q (a bare name off PATH must fall back, not get CWD-prefixed)", bareNotOnPath, got, canonicalMcphubPath())
+	}
 }
 
 // TestSupervisorDaemonEntryLive_IdentityUsesDaemonCommandNotSupervisorPath is
