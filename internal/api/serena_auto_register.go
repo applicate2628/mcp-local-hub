@@ -295,12 +295,18 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	}
 
 	// 7c-bis. ACQUIRE the supervisor.lock interlock BEFORE the introduce-while-
-	//     running reap (Phase 2 / Revision 2 / Starter A). Held across
-	//     reap→install→start, it makes THIS cutover and the serena migrate cutover
-	//     mutually exclusive: without it, a concurrent migrate that acquired the
-	//     interlock first overwrote supervisor.lock.owner.json with its own CLI PID,
-	//     so our reap below would read that sidecar and taskkill the MIGRATE process
-	//     mid-cutover (and symmetrically the migrate could kill us). ONLY the reap
+	//     running reap (Phase 2 / Revision 2 / Starter A + bot PR #276 finding 1).
+	//     Held across reap→install→start, it makes THIS cutover and the serena
+	//     migrate cutover mutually exclusive: the flock lets only one reaping flow
+	//     run at a time, so neither can force-kill the other's lock-holding process.
+	//     CRITICAL: the acquire is QUIET (autoRegisterAcquireInterlockFn wires
+	//     api.AcquireSupervisorLockQuiet — flock only, NO owner-sidecar write). The
+	//     reap below reads supervisor.lock.owner.json to choose the PID it
+	//     taskkills/IPC-handshakes; a FULL acquire would overwrite that sidecar with
+	//     THIS (router/GUI) process's PID, so our own reap would target the caller
+	//     instead of the old supervisor (bot PR #276 finding 1). The quiet acquire
+	//     leaves the sidecar naming the OLD supervisor, so the reap hits the right
+	//     PID; the quiet handle still mints a valid §7.1 bypass token. ONLY the reap
 	//     path (needReap) needs this — the no-supervisor-running introduce
 	//     (needStart && !needReap) kills nothing, and the LIVE-ADD path neither
 	//     reaps nor introduces. interlockBypass starts as the zero value (no bypass)
@@ -840,22 +846,27 @@ var autoRegisterStartSupportedFn func() bool
 
 // autoRegisterAcquireInterlockFn acquires the supervisor.lock interlock the
 // INTRODUCE-while-running cutover HOLDS across its reap→install→start critical
-// section (Phase 2 / Revision 2 / Starter A of
+// section (Phase 2 / Revision 2 / Starter A + bot PR #276 finding 1 of
 // .plans/2026-06/plan-serena-lock-interlock-2026-06-09.md). It is the SAME seam
-// the migrate uses (the CLI wires both to defaultAcquireSupervisorInterlock).
-// Holding it makes the two reaping flows — this auto-register cutover and the
-// serena migrate — MUTUALLY EXCLUSIVE: without it, a concurrent migrate that
-// acquired the interlock first overwrote supervisor.lock.owner.json with its OWN
-// CLI PID, so this cutover's reap would read that sidecar and taskkill the MIGRATE
-// process mid-cutover (and vice versa).
+// the migrate uses (the CLI wires both to defaultAcquireSupervisorInterlock, which
+// uses the QUIET acquire api.AcquireSupervisorLockQuiet — flock only, NO
+// owner-sidecar write). Holding it makes the two reaping flows — this auto-register
+// cutover and the serena migrate — MUTUALLY EXCLUSIVE (the flock lets only one reap
+// at a time, so neither force-kills the other's lock-holding process). The acquire
+// MUST be quiet: the reap reads supervisor.lock.owner.json to pick the PID it
+// taskkills, so a full acquire that stamped the sidecar with THIS CLI process's PID
+// would make this cutover's own reap target the caller instead of the old
+// supervisor (bot PR #276 finding 1). The quiet acquire leaves the sidecar naming
+// the OLD supervisor.
 //
 // It returns the live lock HANDLE (so the cutover mints the typed §7.1 bypass
 // token via AllowSpecBearingWriteBypass — needed because the held lock is now our
-// OWN, which the gate's probe would otherwise misread as a foreign supervisor) and
-// an idempotent release closure. A non-nil error means another serena cutover /
-// migrate already holds the lock → this cutover DEFERS pre-reap (rolls back its
-// registry row, emits serena-auto-register-deferred-on-interlock, returns an
-// honest error the router maps to 503 → client retries).
+// OWN, which the gate's probe would otherwise misread as a foreign supervisor; the
+// quiet handle still carries .fl + .path, the only fields the gate identity check
+// reads) and an idempotent release closure. A non-nil error means another serena
+// cutover / migrate already holds the lock → this cutover DEFERS pre-reap (rolls
+// back its registry row, emits serena-auto-register-deferred-on-interlock, returns
+// an honest error the router maps to 503 → client retries).
 //
 // nil (unwired / non-Windows) is consistent with the existing introduce
 // cutover-support gate (the introduce path already fails loud pre-commit on a

@@ -252,16 +252,19 @@ func stubAcquireInterlock(t *testing.T, fn func() (*api.SupervisorLock, func(), 
 // realInterlockAcquire is a cross-platform stand-in for the Windows production
 // interlock binding (defaultAcquireSupervisorInterlock): it acquires the REAL
 // supervisor.lock on the §7.1 gate's exact path — filepath.Join(
-// api.DaemonStateDir(), "supervisor.lock") — and returns the handle plus an
-// idempotent release. Using it as the acquire stub lets the lock-semantics tests
-// (a contender's direct AcquireSupervisorLock must fail while held; the bypass
-// token must pass the gate) run identically on Windows and POSIX CI.
+// api.DaemonStateDir(), "supervisor.lock") — via the QUIET acquire (flock only,
+// NO owner-sidecar write, matching production after bot PR #276 finding 1) and
+// returns the handle plus an idempotent release. Using it as the acquire stub lets
+// the lock-semantics tests (a contender's direct AcquireSupervisorLock must fail
+// while held; the bypass token must pass the gate; a concurrent reap must read the
+// OLD supervisor's intact sidecar rather than the migrate's PID) run identically on
+// Windows and POSIX CI.
 func realInterlockAcquire() (*api.SupervisorLock, func(), error) {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return nil, func() {}, err
 	}
-	lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	lock, err := api.AcquireSupervisorLockQuiet(filepath.Join(stateDir, "supervisor.lock"))
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -2943,6 +2946,90 @@ func TestMigrateSerena_Interlock_AcquireFailsLoud_WhenForeignHolderWonTheWindow(
 	}
 	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
 		t.Error("no spec-bearing intent must be written on the acquire-fail path (legacy untouched)")
+	}
+}
+
+// TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap is the
+// bot PR #276 finding-2 regression guard. The interlock was historically acquired
+// at step 7e — AFTER the step-7 reap, the registry re-read, the start-supported
+// re-check, and the late-reap decision — leaving an UNLOCKED post-reap gap in which
+// a foreign supervisor could take supervisor.lock. The fix acquires the interlock
+// IMMEDIATELY after the reap (acquireInterlockOnce), so any actor that tries to
+// take the lock in the post-reap work window now FAILS.
+//
+// Deterministic injection: a supervisor IS running at the probe (willReap=true), so
+// the step-7 reap fires. The start-supported seam (migrateSerenaStartSupportedFn)
+// runs in the post-reap gap — AFTER the step-7 reap, in the OLD code BEFORE the
+// step-7e acquire. Inside it we attempt a concurrent api.AcquireSupervisorLock on
+// the gate's exact path:
+//   - OLD code (acquire at step 7e): the migrate had NOT yet acquired here → the
+//     concurrent acquire would SUCCEED → the gap is open.
+//   - FIXED code (acquire immediately after the reap): the migrate ALREADY holds
+//     the lock here → the concurrent acquire FAILS → the gap is closed.
+// The test asserts the concurrent acquire FAILS, so a regression that moves the
+// acquire back past the post-reap work breaks it.
+func TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	// A supervisor IS running → step-7 reap fires; the interlock must be taken right
+	// after it (the fix), so the post-reap-gap probe below cannot acquire.
+	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// The step-7 reap is stubbed to succeed (no real supervisor to kill).
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	defer stubAcquireInterlock(t, realInterlockAcquire)()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+
+	// The post-reap-gap probe: this seam fires AFTER the step-7 reap and (in the OLD
+	// code) BEFORE the step-7e acquire. With the fix the migrate already holds the
+	// lock here, so a concurrent acquire MUST fail.
+	gapProbed := false
+	concurrentAcquireBlockedInGap := false
+	defer stubStartSupported(t, func() bool {
+		gapProbed = true
+		if lk, acqErr := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock")); acqErr != nil {
+			concurrentAcquireBlockedInGap = true
+		} else {
+			lk.Release() // gap was open (regression); release so other tests are not wedged
+		}
+		return true
+	})()
+
+	// Stub install + start so the run completes (the §7.1 gate is not the unit under
+	// test here; the post-reap-gap exclusion is).
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+		mi := &api.SupervisorIntentFile{
+			Version: 1,
+			Daemons: []api.SupervisorDaemon{{
+				TaskName: api.SerenaTaskNameForWorkspace(ws),
+				Server:   "serena",
+				Port:     9150,
+				RuntimeSpec: &api.DaemonRuntimeSpec{
+					SpecVersion: api.DaemonRuntimeSpecVersion, ChildCommand: "go",
+					UpstreamPort: 9151, ExternalPort: 9150, WorkspacePath: ws,
+				},
+			}},
+		}
+		if werr := api.WriteStateFileAtomic(intentPath, mi); werr != nil {
+			return "", werr
+		}
+		return intentPath, nil
+	})()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("migrate must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	if !gapProbed {
+		t.Fatal("the post-reap-gap probe (start-supported seam) must have run")
+	}
+	if !concurrentAcquireBlockedInGap {
+		t.Fatal("finding 2 REGRESSION: a concurrent AcquireSupervisorLock SUCCEEDED in the post-reap work window — the interlock was acquired too late (the post-reap gap is open). The fix must acquire the interlock IMMEDIATELY after the reap")
 	}
 }
 

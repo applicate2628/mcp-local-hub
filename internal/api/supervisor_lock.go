@@ -34,6 +34,15 @@ type SupervisorLock struct {
 	path  string
 	fl    *flock.Flock
 	owner SupervisorLockOwner
+	// quiet marks a flock-only acquire (AcquireSupervisorLockQuiet) that did NOT
+	// write <path>.owner.json. A quiet holder borrows the flock as a pure mutex
+	// (the serena reap→write→start interlock) and must NOT touch the sidecar: the
+	// sidecar is the REAP's PID source (ForceKillSupervisor /
+	// QuiesceTimers / ExitGraceful read it to target the OLD supervisor), so
+	// overwriting it with the interlock-holder's own CLI PID would make the reap
+	// kill the caller instead of the old supervisor. Release() therefore skips the
+	// sidecar removal for a quiet lock — it never owned that file.
+	quiet bool
 }
 
 var (
@@ -89,6 +98,50 @@ func AcquireSupervisorLock(path string) (*SupervisorLock, error) {
 	return &SupervisorLock{path: path, fl: lk, owner: owner}, nil
 }
 
+// AcquireSupervisorLockQuiet takes <path>.lock via flock WITHOUT writing (or
+// touching) <path>.owner.json. It is the variant the serena migrate / serena
+// auto-register cutovers use to borrow supervisor.lock as a pure reap→write→start
+// mutex (Phase 2 of .plans/2026-06/plan-serena-lock-interlock-2026-06-09.md).
+//
+// Why no sidecar write: the owner sidecar is the REAP's PID source — the reap
+// primitive (ReapSupervisorForRestart → ForceKillSupervisor /
+// QuiesceTimers / ExitGraceful, internal/cli/install_migration_wiring_windows.go)
+// reads <path>.owner.json to pick the PID it taskkills / IPC-handshakes against.
+// The migrate and auto-register reap the OLD supervisor while (or just before)
+// holding this interlock; if the interlock acquire OVERWROTE the sidecar with the
+// CLI holder's own os.Getpid() (as the full AcquireSupervisorLock does,
+// supervisor_lock.go), the reap would read that and force-kill the migrate /
+// router process instead of the old supervisor (bot PR #276 finding 1), and the
+// post-reap acquire-too-late gap would let a foreign supervisor slip in (finding
+// 2). A QUIET acquire leaves the sidecar pointing at the old supervisor (or
+// absent), so the reap targets the correct PID, while the flock still provides the
+// mutual exclusion the interlock needs.
+//
+// The returned *SupervisorLock has .path and .fl set (Owner() is the zero value —
+// a quiet holder never recorded one), so it STILL mints a valid §7.1 bypass token:
+// AllowSpecBearingWriteBypass()'s gate identity check verifies only
+// lk.fl != nil (still held) AND lk.path == the gate's supervisor.lock path
+// (install_parsed_manifest.go) — neither needs the sidecar. The interlock callers
+// are CLI processes that never serve supervisor IPC, so they have no legitimate
+// reason to own the sidecar that feeds the supervisor's IPC hello frame.
+//
+// Contention diagnostics are weaker here than AcquireSupervisorLock by design:
+// since this never wrote a sidecar, on a failed TryLock it reports a generic
+// "held" error rather than probing a PID. The interlock callers map that to a
+// fail-loud / defer-and-retry path; a precise PID is not needed.
+func AcquireSupervisorLockQuiet(path string) (*SupervisorLock, error) {
+	lk := flock.New(path + ".lock")
+	got, err := lk.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("flock: %w", err)
+	}
+	if !got {
+		return nil, fmt.Errorf("supervisor.lock held (quiet acquire could not take the flock at %s)", path+".lock")
+	}
+	// Deliberately NO owner-sidecar write — see the doc comment.
+	return &SupervisorLock{path: path, fl: lk, quiet: true}, nil
+}
+
 // Owner returns the exact sidecar identity written when the lock was acquired.
 // IPC listeners use this as the single source of truth for hello frames.
 func (l *SupervisorLock) Owner() SupervisorLockOwner {
@@ -125,7 +178,14 @@ func (l *SupervisorLock) Release() {
 	if l == nil || l.fl == nil {
 		return
 	}
-	os.Remove(l.path + ".owner.json")
+	// A quiet holder (AcquireSupervisorLockQuiet) never wrote the sidecar — it
+	// belongs to the OLD supervisor the interlock caller reaps — so the quiet
+	// Release must NOT remove it (removing the old supervisor's sidecar would
+	// strip the reap's PID source for any concurrent reader). Only a full
+	// AcquireSupervisorLock holder owns the sidecar and tidies it here.
+	if !l.quiet {
+		os.Remove(l.path + ".owner.json")
+	}
 	_ = l.fl.Unlock()
 	l.fl = nil
 }

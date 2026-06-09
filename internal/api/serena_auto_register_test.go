@@ -208,16 +208,18 @@ func stubAutoRegisterAcquireInterlock(t *testing.T, fn func() (*SupervisorLock, 
 // production interlock binding: it acquires the REAL supervisor.lock on the §7.1
 // gate's exact path (filepath.Join(DaemonStateDir(), "supervisor.lock") — the same
 // resolver the install gate uses; redirected to the test temp dir via
-// SetDaemonStateRootForTest in autoRegisterTestEnv) and returns the handle plus an
-// idempotent release. Using it as the acquire stub lets the bypass-token identity
-// check (lk.path == the gate path) and the held-lock lifetime run identically on
-// Windows and POSIX CI.
+// SetDaemonStateRootForTest in autoRegisterTestEnv) via the QUIET acquire (flock
+// only, NO owner-sidecar write — matching production after bot PR #276 finding 1)
+// and returns the handle plus an idempotent release. Using it as the acquire stub
+// lets the bypass-token identity check (lk.path == the gate path), the held-lock
+// lifetime, AND the finding-1 invariant (the reap reads the OLD supervisor's intact
+// sidecar, not the caller's PID) run identically on Windows and POSIX CI.
 func realAutoRegisterInterlockAcquire() (*SupervisorLock, func(), error) {
 	stateDir, err := DaemonStateDir()
 	if err != nil {
 		return nil, func() {}, err
 	}
-	lock, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	lock, err := AcquireSupervisorLockQuiet(filepath.Join(stateDir, "supervisor.lock"))
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -1854,6 +1856,82 @@ func TestAutoRegisterSerena_Introduce_PassesInterlockBypassTokenToInstall(t *tes
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
 		t.Errorf("registry has %d serena rows, want 1", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller is the bot PR
+// #276 finding-1 regression guard. The introduce-while-running cutover acquires the
+// interlock BEFORE its reap. If that acquire used the FULL AcquireSupervisorLock it
+// would OVERWRITE supervisor.lock.owner.json with the CALLER's (router/GUI) PID, so
+// the subsequent reap — which reads that sidecar to choose the PID it
+// taskkills/IPC-handshakes against — would target the CALLER instead of the old
+// supervisor. The fix is the QUIET acquire (no sidecar write), so the sidecar still
+// names the OLD supervisor when the reap runs.
+//
+// The test seeds the sidecar with a sentinel OLD-supervisor PID, wires the REAL
+// quiet acquire stub, and the reap stub asserts ReadSupervisorLockOwner STILL
+// reports that sentinel — never the caller's os.Getpid() — while the interlock is
+// held. A regression to the sidecar-overwriting acquire fails this assertion.
+func TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller(t *testing.T) {
+	_ = autoRegisterTestEnv(t) // isolates registry + state dir; path not asserted here
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
+
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	lockPath := filepath.Join(sd, "supervisor.lock")
+	// Seed the OLD supervisor's sidecar. A sentinel PID that is NOT this process's
+	// PID so the assertion is unambiguous. (The reap stub reads the sidecar
+	// directly; it does not go through AcquireSupervisorLock's liveness probe, so
+	// any value works as the OLD-supervisor identity.)
+	const oldSupervisorPID = 424242
+	if oldSupervisorPID == os.Getpid() {
+		t.Fatalf("sentinel PID collided with the test process PID; pick another")
+	}
+	if err := WriteStateFileAtomic(lockPath+".owner.json", SupervisorLockOwner{
+		PID:       oldSupervisorPID,
+		StartedAt: "2026-06-09T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed old-supervisor sidecar: %v", err)
+	}
+
+	// REAL quiet acquire (matches production); it must NOT clobber the seeded sidecar.
+	stubAutoRegisterAcquireInterlock(t, realAutoRegisterInterlockAcquire)
+
+	var reapSawPID int
+	reapRan := false
+	stubAutoRegisterCutover(t,
+		func(context.Context) error {
+			reapRan = true
+			owner, oErr := ReadSupervisorLockOwner(lockPath)
+			if oErr != nil {
+				t.Errorf("reap could not read the owner sidecar (the quiet acquire must leave it intact): %v", oErr)
+				return nil
+			}
+			reapSawPID = owner.PID
+			return nil
+		},
+		func(context.Context) error { return nil },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if !reapRan {
+		t.Fatal("the reap seam must have run on the introduce-while-running path")
+	}
+	if reapSawPID == os.Getpid() {
+		t.Fatalf("finding 1 REGRESSION: the reap read the CALLER's PID (%d) from the sidecar — the interlock acquire overwrote it; a concurrent reap would force-kill the caller, not the old supervisor", reapSawPID)
+	}
+	if reapSawPID != oldSupervisorPID {
+		t.Fatalf("the reap must read the OLD supervisor's PID (%d) from the intact sidecar; got %d", oldSupervisorPID, reapSawPID)
 	}
 }
 

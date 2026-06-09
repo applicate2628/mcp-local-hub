@@ -123,6 +123,18 @@ func defaultMigrateSerenaStartSupported() bool {
 // equals the gate-probed path and the typed bypass token (AllowSpecBearingWriteBypass)
 // passes the gate's IDENTITY check.
 //
+// It uses the QUIET acquire (api.AcquireSupervisorLockQuiet — flock only, NO
+// owner-sidecar write), NOT api.AcquireSupervisorLock (bot PR #276 finding 1). The
+// full acquire overwrites supervisor.lock.owner.json with THIS CLI process's PID;
+// the reap primitive (ForceKillSupervisor / QuiesceTimers / ExitGraceful) reads
+// that sidecar to choose the PID it taskkills / IPC-handshakes against, so a
+// sidecar-overwriting acquire makes a concurrent serena auto-register reap target
+// the migrate process instead of the old supervisor. The quiet acquire leaves the
+// sidecar pointing at the OLD supervisor (or absent), so every reap targets the
+// correct PID, while the flock still provides the reap→write→start mutual
+// exclusion. The quiet handle still has .fl + .path set, so it mints a valid §7.1
+// bypass token (the gate identity check needs only those, not the sidecar).
+//
 // HIGHEST-PRIORITY invariant: the path MUST be api.DaemonStateDir(), NOT
 // stateDirFunc(). stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE for the cli's own
 // audit-log path, but the §7.1 gate inside InstallParsedManifest resolves its
@@ -142,7 +154,7 @@ func defaultAcquireSupervisorInterlock() (*api.SupervisorLock, func(), error) {
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("resolve state-dir for the supervisor.lock interlock: %w", err)
 	}
-	lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	lock, err := api.AcquireSupervisorLockQuiet(filepath.Join(stateDir, "supervisor.lock"))
 	if err != nil {
 		return nil, func() {}, err
 	}

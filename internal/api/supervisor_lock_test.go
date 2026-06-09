@@ -173,6 +173,70 @@ func TestSupervisorLock_RetriesMissingOwnerDuringReleaseWindow(t *testing.T) {
 	}
 }
 
+// TestAcquireSupervisorLockQuiet_PreservesOwnerSidecar is the bot PR #276 finding-1
+// unit guard on the primitive itself. AcquireSupervisorLockQuiet must NOT write or
+// remove <path>.owner.json: it is the serena reap→write→start interlock acquire,
+// and the sidecar is the REAP's PID source. A full AcquireSupervisorLock would
+// overwrite it with the CLI holder's own PID (so a concurrent reap force-kills the
+// caller); the quiet acquire leaves it pointing at the OLD supervisor. The quiet
+// handle must still: (a) hold the flock (exclude a second acquire) and (b) carry
+// .fl + .path so it mints a valid §7.1 bypass token.
+func TestAcquireSupervisorLockQuiet_PreservesOwnerSidecar(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor.lock")
+
+	// (0) No sidecar before the quiet acquire → the quiet acquire must NOT create one.
+	lkNoSidecar, err := AcquireSupervisorLockQuiet(path)
+	if err != nil {
+		t.Fatalf("quiet acquire (no pre-existing sidecar): %v", err)
+	}
+	if _, statErr := os.Stat(path + ".owner.json"); !os.IsNotExist(statErr) {
+		t.Fatalf("quiet acquire must NOT write the owner sidecar; stat err = %v (want not-exist)", statErr)
+	}
+	// The quiet handle still excludes a concurrent full acquire (the flock is held).
+	if second, acqErr := AcquireSupervisorLock(path); acqErr == nil {
+		second.Release()
+		t.Fatal("a full AcquireSupervisorLock must FAIL while a quiet lock holds the flock")
+	}
+	// The quiet handle mints a valid bypass token (.fl + .path set; sidecar absent).
+	bp := lkNoSidecar.AllowSpecBearingWriteBypass()
+	if bp.lk == nil || bp.lk.fl == nil || bp.lk.path != path {
+		t.Fatalf("quiet handle must mint a bypass token with fl != nil and path == %q; got lk=%v", path, bp.lk)
+	}
+	lkNoSidecar.Release()
+	// Release of a quiet lock that never wrote a sidecar must not create one either.
+	if _, statErr := os.Stat(path + ".owner.json"); !os.IsNotExist(statErr) {
+		t.Fatalf("quiet Release must not create the owner sidecar; stat err = %v", statErr)
+	}
+
+	// (1) Seed an OLD-supervisor sidecar, then quiet-acquire + release: the sidecar
+	// must survive UNCHANGED (the reap reads it to target the right PID).
+	const oldPID = 313131
+	if err := writeStaleOwner(path, oldPID, "2026-06-09T00:00:00Z"); err != nil {
+		t.Fatalf("seed old-supervisor sidecar: %v", err)
+	}
+	lk, err := AcquireSupervisorLockQuiet(path)
+	if err != nil {
+		t.Fatalf("quiet acquire over seeded sidecar: %v", err)
+	}
+	owner, err := ReadSupervisorLockOwner(path)
+	if err != nil {
+		t.Fatalf("read owner after quiet acquire: %v", err)
+	}
+	if owner.PID != oldPID {
+		t.Fatalf("quiet acquire overwrote the owner sidecar PID: got %d, want the seeded old-supervisor PID %d (a reap would now target the wrong process)", owner.PID, oldPID)
+	}
+	lk.Release()
+	// The quiet Release must NOT delete the old supervisor's sidecar.
+	owner, err = ReadSupervisorLockOwner(path)
+	if err != nil {
+		t.Fatalf("quiet Release deleted the old-supervisor sidecar (it must leave it intact): %v", err)
+	}
+	if owner.PID != oldPID {
+		t.Fatalf("quiet Release changed the sidecar PID: got %d, want %d", owner.PID, oldPID)
+	}
+}
+
 func writeStaleOwner(path string, pid int, started string) error {
 	raw, _ := json.Marshal(SupervisorLockOwner{PID: pid, StartedAt: started})
 	return os.WriteFile(path+".owner.json", raw, 0600)
