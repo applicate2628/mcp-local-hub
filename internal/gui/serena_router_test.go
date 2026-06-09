@@ -1804,6 +1804,24 @@ func TestSerenaRouter_AutoRegister_Unwired_Returns503(t *testing.T) {
 // key is recognized, and that it is LOWEST precedence (existing path keys
 // still win so no other routing changes).
 func TestSerenaRouter_ExtractPathArg_RecognizesProject(t *testing.T) {
+	// osAbsProject is an OS-native ABSOLUTE path: "/proj/alpha" on POSIX,
+	// "C:\proj\alpha" on Windows (VolumeName of the working dir supplies the
+	// drive letter). Asserts the absolute-only project guard recognizes the
+	// platform's real absolute form, not just the POSIX-rooted literal.
+	wd, _ := os.Getwd()
+	osAbsProject := filepath.Join(filepath.VolumeName(wd)+string(filepath.Separator), "proj", "alpha")
+	if !filepath.IsAbs(osAbsProject) {
+		t.Fatalf("test setup: %q is not absolute on this OS", osAbsProject)
+	}
+	// The POSIX-rooted literal "/proj/alpha" is absolute on POSIX but NOT
+	// on Windows (filepath.IsAbs requires a volume name there) — the same
+	// split ResolveByPath itself uses. So its expected outcome is OS-aware:
+	// recognized on POSIX, skipped (falls to 503) on Windows.
+	posixRootedOK := filepath.IsAbs("/proj/alpha")
+	posixRootedWant := ""
+	if posixRootedOK {
+		posixRootedWant = "/proj/alpha"
+	}
 	cases := []struct {
 		name     string
 		args     map[string]any
@@ -1811,10 +1829,28 @@ func TestSerenaRouter_ExtractPathArg_RecognizesProject(t *testing.T) {
 		wantOk   bool
 	}{
 		{
-			name:     "project recognized as path-arg",
+			name:     "POSIX-rooted project: recognized on POSIX, skipped on Windows (matches ResolveByPath IsAbs split)",
 			args:     map[string]any{"project": "/proj/alpha"},
-			wantPath: "/proj/alpha",
+			wantPath: posixRootedWant,
+			wantOk:   posixRootedOK,
+		},
+		{
+			// An OS-native absolute path is recognized regardless of
+			// platform: POSIX "/proj/alpha", Windows "C:\proj\alpha".
+			name:     "OS-native absolute project recognized as path-arg",
+			args:     map[string]any{"project": osAbsProject},
+			wantPath: osAbsProject,
 			wantOk:   true,
+		},
+		{
+			// P3 (fable r1): a BARE registered-NAME is NOT an absolute
+			// path, so it is skipped here and falls through to the
+			// documented 503 rather than being silently mis-bound by
+			// resolveRelative's join-onto-each-workspace match.
+			name:     "bare relative project name is skipped (falls to 503)",
+			args:     map[string]any{"project": "docs"},
+			wantPath: "",
+			wantOk:   false,
 		},
 		{
 			name:     "relative_path still wins over project",
@@ -1886,7 +1922,15 @@ func TestSerenaRouter_ActivateProject_BindsAndForwards(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 
-	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201, TaskName: `\mcp-local-hub-serena-alpha`}
+	// activate_project's project arg is routed ONLY when absolute (fable
+	// r1 P3 guard in extractPathArg, mirroring ResolveByPath's own
+	// filepath.IsAbs split). Use an OS-native absolute workspace path so
+	// the test exercises the real absolute branch on the host OS: POSIX
+	// "/proj/alpha", Windows "C:\proj\alpha" ("/proj/alpha" is NOT absolute
+	// on Windows per filepath.IsAbs, so a POSIX literal would be skipped).
+	wd, _ := os.Getwd()
+	wsPath := filepath.Join(filepath.VolumeName(wd)+string(filepath.Separator), "proj", "alpha")
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201, TaskName: `\mcp-local-hub-serena-alpha`}
 	deps := &serenaRouterDeps{
 		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
 		Sessions:      NewInMemorySessionRouter(),
@@ -1895,7 +1939,7 @@ func TestSerenaRouter_ActivateProject_BindsAndForwards(t *testing.T) {
 	s := newSerenaTestServer(t, deps)
 
 	// 1) activate_project(registered path) → resolve + forward + bind.
-	actBody := buildToolCallBody(t, "activate_project", map[string]any{"project": "/proj/alpha"})
+	actBody := buildToolCallBody(t, "activate_project", map[string]any{"project": wsPath})
 	rrAct := postSerena(t, s, actBody, map[string]string{"Mcp-Session-Id": "sess-activate"})
 	if rrAct.Code != http.StatusOK {
 		t.Fatalf("activate_project status = %d, want 200 (not 503 missing_session); body=%s",

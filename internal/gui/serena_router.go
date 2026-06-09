@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -318,12 +319,15 @@ func lifecycleParamsObjectOrNull(params json.RawMessage) bool {
 //     it activate_project resolved as pathless → never bound a fresh
 //     session → every subsequent call 503'd missing_session, making
 //     per-project serena unusable for editors that lead with
-//     activate_project. When `project` is a registered NAME rather than a
-//     path it does NOT match here (ResolveByPath only resolves absolute
-//     paths via the .serena/project.yml ancestor walk, or relative paths
-//     that exist under a registered workspace); the dynamic-pool
-//     migrate-configured client always sends the PATH, so the name case
-//     is a documented follow-up, not a regression.
+//     activate_project. The `project` key is routed ONLY when its value
+//     is an ABSOLUTE path: a bare registered-NAME is skipped here so it
+//     falls through to the documented 503 rather than being silently
+//     mis-bound by resolveRelative (which would join the name onto each
+//     registered WorkspacePath and return the first that Lstat-exists —
+//     e.g. project="docs" coincidentally binding /proj/aaa when
+//     /proj/aaa/docs exists). The dynamic-pool migrate-configured client
+//     always sends the absolute PATH, so the registered-NAME case is a
+//     documented follow-up (name resolution), not a regression.
 func extractPathArg(arguments json.RawMessage) (string, bool) {
 	if len(arguments) == 0 {
 		return "", false
@@ -342,6 +346,12 @@ func extractPathArg(arguments json.RawMessage) (string, bool) {
 			continue
 		}
 		if v == "" {
+			continue
+		}
+		// project carries a workspace ROOT; route it only when absolute.
+		// A bare registered-NAME must fall to the documented 503 (name
+		// resolution is a follow-up), not a coincidental resolveRelative match.
+		if key == "project" && !filepath.IsAbs(v) {
 			continue
 		}
 		return v, true
