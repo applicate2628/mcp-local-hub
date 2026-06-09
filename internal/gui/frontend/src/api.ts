@@ -550,3 +550,68 @@ export async function postManifestEdit(
   }
   throw new Error(`/api/manifest/edit: ${body?.error ?? resp.statusText}`);
 }
+
+// ───────────────────────────────────────────────────────────────────
+// LSP trusted roots (Settings → Trusted Roots, PR #272 follow-up)
+//
+// Thin wrappers around /api/lsp/trusted-roots (GET/POST/DELETE). The
+// store is the authorization boundary the GUI LSP router consults
+// before first-touch auto-register; this lets the operator view / add /
+// remove operator-config roots in the GUI instead of hand-editing
+// <state-dir>/lsp-trusted-roots.json. Every method returns the fresh
+// list so the caller can re-render without a follow-up GET.
+// ───────────────────────────────────────────────────────────────────
+
+export interface TrustedRootsResponse {
+  roots: string[];
+  path: string;
+}
+
+// normalizeTrustedRoots guarantees a non-null `roots` array and a string
+// `path` regardless of what the wire carried. The production backend
+// always sends both, but a defensive normalize keeps the UI from
+// crashing on an older/partial body (consistent with fetchOrThrow's
+// shape-guard philosophy).
+function normalizeTrustedRoots(raw: Partial<TrustedRootsResponse>): TrustedRootsResponse {
+  return {
+    roots: Array.isArray(raw.roots) ? raw.roots : [],
+    path: typeof raw.path === "string" ? raw.path : "",
+  };
+}
+
+// getTrustedRoots reads the current operator-config trusted roots. An
+// absent store yields an empty `roots` array (the backend maps a missing
+// file to empty), so the empty-state render is the normal first-run path.
+export async function getTrustedRoots(): Promise<TrustedRootsResponse> {
+  return normalizeTrustedRoots(
+    await fetchOrThrow<Partial<TrustedRootsResponse>>("/api/lsp/trusted-roots", "object"),
+  );
+}
+
+// addTrustedRoot blesses `root` as a trusted root (POST). The backend
+// rejects empty / relative paths with 400; the message embeds the
+// backend code (LSP_TRUSTED_ROOTS_NOT_ABSOLUTE / _INVALID) so the
+// caller can surface a precise validation error. Resolves to the
+// refreshed list on success.
+export async function addTrustedRoot(root: string): Promise<TrustedRootsResponse> {
+  return normalizeTrustedRoots(
+    await fetchOrThrow<Partial<TrustedRootsResponse>>("/api/lsp/trusted-roots", "object", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root }),
+    }),
+  );
+}
+
+// removeTrustedRoot un-trusts `root` (DELETE). Removing an absent root
+// is an idempotent no-op success server-side. Resolves to the refreshed
+// list on success.
+export async function removeTrustedRoot(root: string): Promise<TrustedRootsResponse> {
+  return normalizeTrustedRoots(
+    await fetchOrThrow<Partial<TrustedRootsResponse>>("/api/lsp/trusted-roots", "object", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root }),
+    }),
+  );
+}

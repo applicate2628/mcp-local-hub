@@ -3,13 +3,14 @@ import { render } from "@testing-library/preact";
 import { SectionNav } from "./SectionNav";
 
 describe("SectionNav", () => {
-  it("renders 6 section links in order", () => {
+  it("renders 7 section links in order", () => {
     const { container } = render(<SectionNav active={null} />);
     const links = container.querySelectorAll("a");
-    expect(links).toHaveLength(6);
+    expect(links).toHaveLength(7);
     expect(links[0].textContent).toBe("Appearance");
-    expect(links[4].textContent).toBe("Maintenance");
-    expect(links[5].textContent).toBe("Advanced");
+    expect(links[4].textContent).toBe("Trusted Roots");
+    expect(links[5].textContent).toBe("Maintenance");
+    expect(links[6].textContent).toBe("Advanced");
   });
 
   it("uses query-string deep-link syntax (Codex r1 P1.1)", () => {
