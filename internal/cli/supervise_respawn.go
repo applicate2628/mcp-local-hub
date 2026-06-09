@@ -258,18 +258,22 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	// the spawn (StRunning with a bumped PIDGeneration) within the graceful
 	// budget to keep the synchronous IPC RespawnResult contract.
 	//
-	// Gated on a KNOWN controller state of StRunning — the exact steady-state
-	// case the finding targets ("Apply + Restart" of a running daemon). In
-	// production a running daemon always has smStates==StRunning by the time
-	// an IPC respawn can reach the wired controller (own-spawn sets it, and
-	// hydrateControllerRunningStates seeds warm-start PIDs at startup). The
-	// transient mid-restart states (StSpawning / StExiting) and the
-	// ctrl-not-yet-wired window fall through to the legacy direct path
-	// below, unchanged — driving EvManualRestart at StSpawning has no SM
-	// transition and EvManualRestart at StExiting only coalesces, neither of
-	// which is the finding's scope.
+	// Gated on a KNOWN controller state of StRunning OR StExiting. StRunning is
+	// the steady-state "Apply + Restart" case (own-spawn sets it; warm-start
+	// PIDs are seeded by hydrateControllerRunningStates at startup). StExiting
+	// is the in-flight stop/restart case — the operator clicks Restart while a
+	// terminate is already in progress and the tracker still holds a live
+	// CurrentPID: EvManualRestart at StExiting COALESCES queued_action=respawn
+	// through the SM, so it must ALSO stay on the controller path. A direct
+	// terminate+spawn there would not be recorded as the controller's spawn,
+	// and the old child's later EvChildExit could drive StExiting->StIdle +
+	// MarkExited, clearing the tracker for the freshly spawned process and
+	// leaving a live daemon untracked (Codex bot #268 P1). Only StSpawning
+	// (EvManualRestart has no SM transition there) and the ctrl-not-yet-wired
+	// window fall through to the legacy direct path below.
 	if shouldTerminate && ctrl != nil && ctrl.eventLoop != nil &&
-		controllerStateKnown && controllerState == api.StRunning {
+		controllerStateKnown &&
+		(controllerState == api.StRunning || controllerState == api.StExiting) {
 		if err := ctrl.postManualRestartAndWaitRunning(taskName, time.Duration(gracefulTimeoutMs)*time.Millisecond); err != nil {
 			_ = deps.events.Emit(api.SupervisorEvent{
 				Severity: "error",
