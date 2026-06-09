@@ -351,6 +351,12 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			func(c context.Context) error { return defaultMigrateSerenaReap(c, io.Discard) },
 			func(c context.Context) error { return defaultMigrateSerenaStart(c, io.Discard) },
 			defaultMigrateSerenaStartSupported,
+			// Phase 2 / Starter A: the introduce-while-running cutover holds the
+			// SAME supervisor.lock interlock the migrate uses, so the two reaping
+			// flows are mutually exclusive (neither force-kills the other's
+			// lock-holding process). Windows-only real lock; the non-Windows binding
+			// is a no-op (the introduce path 503s off-Windows anyway).
+			defaultAcquireSupervisorInterlock,
 		)
 		// Sweep all three serena session stores on one ticker: the
 		// cross-package sticky-routing SessionRouter AND (Finding 2) the

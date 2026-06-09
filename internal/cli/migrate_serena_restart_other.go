@@ -62,6 +62,19 @@ func defaultMigrateSerenaStartSupported() bool {
 	return false
 }
 
+// defaultAcquireSupervisorInterlock is the non-Windows no-op binding for
+// acquireSupervisorInterlockFn. The spec-bearing serena dynamic-pool path is
+// unreachable on non-Windows (defaultMigrateSerenaReap fails loud first — the
+// reap precedes the intent write in the reap-first ordering), so the interlock
+// is never meaningfully held here. It returns a nil handle, a no-op release, and
+// a nil error so the driver's acquire/release plumbing compiles and is inert on
+// this platform (a nil handle means the driver mints a zero-value bypass token,
+// which the §7.1 gate treats as no-bypass — harmless because the path never
+// reaches a real spec-bearing write here).
+func defaultAcquireSupervisorInterlock() (*api.SupervisorLock, func(), error) {
+	return nil, func() {}, nil
+}
+
 // defaultMigrateSerenaSupervisorHealthy is the non-Windows health probe for Fix
 // 5's idempotency-recovery branch. There is no IPC reconcile-ready probe wired
 // off Windows in v0.5.0, so health degrades to a supervisor-lock liveness check:

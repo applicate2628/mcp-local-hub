@@ -73,6 +73,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -277,6 +278,27 @@ var migrateSerenaSupervisorRunningFn = defaultMigrateSerenaSupervisorRunning
 // false elsewhere); tests override it to drive the preflight without a real
 // platform split.
 var migrateSerenaStartSupportedFn = defaultMigrateSerenaStartSupported
+
+// acquireSupervisorInterlockFn acquires the supervisor.lock interlock the migrate
+// HOLDS across its reap→write→start critical section (Phase 2 of
+// .plans/2026-06/plan-serena-lock-interlock-2026-06-09.md). While held, no other
+// actor can ACQUIRE supervisor.lock, so no foreign supervisor can START
+// (every supervisor-starter calls api.AcquireSupervisorLock and fails fast on a
+// held lock → its child exits) AND no concurrent serena auto-register cutover can
+// force-kill the migrate's lock-holding process (Revision 2 / Starter A — the two
+// reaping flows are mutually exclusive). It returns the live lock HANDLE (so the
+// caller can mint the typed §7.1 bypass token via AllowSpecBearingWriteBypass) and
+// an idempotent release closure. A non-nil error means a foreign supervisor or
+// another serena cutover already holds the lock → the migrate fails loud (acquire
+// is post-reap-PRE-write, so the intent is not yet committed; §2b).
+//
+// Default is the per-platform binding (defaultAcquireSupervisorInterlock): on
+// Windows it acquires the real lock on api.DaemonStateDir()'s supervisor.lock leaf
+// — the gate's EXACT resolver — so the held-lock path equals the §7.1 gate-probed
+// path; on non-Windows it is a no-op (nil handle + no-op release + nil error),
+// since the spec-bearing path is unreachable there (the reap stub fails loud
+// first). Tests override it to drive a concurrent acquirer deterministically.
+var acquireSupervisorInterlockFn = defaultAcquireSupervisorInterlock
 
 // defaultMigrateSerenaSupervisorRunning is the production binding for
 // migrateSerenaSupervisorRunningFn: a cross-platform supervisor-lock liveness
@@ -685,6 +707,22 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		return err
 	}
 
+	// Interlock release closure (Phase 2 / Revision 3). The supervisor.lock
+	// interlock is acquired AFTER the reap (post step 7d, before the step-8 write)
+	// and HELD across reap→write→start so no foreign supervisor can start and no
+	// concurrent serena auto-register cutover can force-kill THIS process. Per
+	// Revision 3 the release is armed ONLY at the moment of a successful acquire —
+	// NOT at function entry — because the start sites BEFORE the acquire (the
+	// re-read-fail recovery start below; and structurally the early recovery-start
+	// at the top of the function which returns before this point) never held the
+	// interlock and must not release a never-acquired lock. Until armed, this is a
+	// no-op; every start site calls it (the pre-acquire ones are harmless no-ops),
+	// keeping one release discipline. The acquire site swaps in the real idempotent
+	// release (the underlying (*SupervisorLock).Release nils its flock, so a second
+	// call is a no-op too). Mirrors releaseRegistryLock's idempotent-closure shape.
+	var interlockBypass api.InstallParsedManifestBypass
+	releaseInterlock := func() {}
+
 	// 7. REAP the OLD supervisor BEFORE the spec-bearing intent write (reap-first
 	//    ordering — bot PR #250). Only for a cutover (willReap): an OLD supervisor
 	//    binary's intent watcher uses DisallowUnknownFields and would reject the
@@ -732,6 +770,11 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	if reReadErr != nil {
 		err = fmt.Errorf("re-read registry under a re-acquired lock before the intent write: %w", reReadErr)
 		if willReap {
+			// Release the interlock before the recovery start (no-op here: the
+			// interlock is acquired AFTER step 7d, so this pre-acquire path never
+			// held it — the call keeps one release discipline). The recovered
+			// supervisor must AcquireSupervisorLock itself.
+			releaseInterlock()
 			fmt.Fprintln(w, "registry re-read failed after the supervisor reap — restarting a supervisor to restore the prior (legacy) intent…")
 			if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
 				err = fmt.Errorf("%w; AND the recovery supervisor start ALSO failed: %v — "+
@@ -834,18 +877,83 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		}
 	}
 
+	// 7e. ACQUIRE the supervisor.lock interlock (Phase 2 / Revision 3). This runs
+	//     AFTER both reap sites (step 7 + the late reap 7d) and BEFORE the step-8
+	//     spec-bearing write, and the lock is HELD across reap→write→start. Holding
+	//     it means (a) no foreign supervisor can START in the reap→write window —
+	//     every starter calls api.AcquireSupervisorLock and fails fast on a held
+	//     lock (supervise.go) → its child exits; AND (b) no concurrent serena
+	//     auto-register cutover can read supervisor.lock.owner.json, see THIS
+	//     process's PID, and taskkill the migrate mid-cutover (Revision 2 / Starter
+	//     A — the two reaping flows are now mutually exclusive).
+	//
+	//     Acquire ONLY when this run will actually do a spec-bearing write that the
+	//     §7.1 gate guards — i.e. there are install workspaces (the same condition
+	//     the late reap + the post-commit start key on). A zero-workspace install
+	//     writes a non-spec intent an old supervisor reads fine; it neither reaped
+	//     nor needs the interlock. On non-Windows the binding is a no-op (nil
+	//     handle); the reap stub already failed loud above, so this is unreachable
+	//     in practice there.
+	//
+	//     Arm the release ON ACQUIRE (Revision 3): swap the no-op closure for the
+	//     real idempotent release returned by the seam, and mint the typed §7.1
+	//     bypass token from the held handle so the step-8 gate does not misread our
+	//     OWN lock as a foreign supervisor. A nil handle (non-Windows no-op)
+	//     yields a zero-value token (no bypass) — harmless because that path never
+	//     reaches a real spec-bearing write.
+	//
+	//     ACQUIRE-FAIL is FAIL-LOUD (do NOT block): a foreign supervisor — or a
+	//     concurrent serena auto-register/upgrade cutover — won the window and now
+	//     holds supervisor.lock. The acquire is post-reap-PRE-write, so the intent
+	//     is NOT yet committed and legacy serena is the reaped-but-restartable
+	//     prior state; the deferred outer stack restores the reconcile + registry +
+	//     re-read allocations, and — because willReap is already the historical
+	//     fact of whether a reap ran — the recovery-start owed for our OWN reap is
+	//     driven below via that same fact. The operator waits for the racer to
+	//     settle and re-runs.
+	if len(installWorkspaces) > 0 {
+		lock, release, acqErr := acquireSupervisorInterlockFn()
+		if acqErr != nil {
+			// Release the interlock before the recovery start (no-op: acquire
+			// failed, nothing held). If we reaped our own supervisor, restart one
+			// from the still-on-disk OLD (legacy) intent so we never leave
+			// no-supervisor-running; the deferred outer stack restores the rest.
+			releaseInterlock()
+			err = fmt.Errorf(
+				"acquire the supervisor.lock interlock before the runtime_spec intent write: %w; "+
+					"a supervisor (or another serena cutover) started during the migrate window and now holds supervisor.lock — "+
+					"the new dynamic-pool intent was NOT written and legacy serena is untouched. "+
+					"Wait for it to settle (`mcphub status`) and re-run the migrate", acqErr)
+			if willReap {
+				fmt.Fprintln(w, "could not acquire the supervisor.lock interlock after the reap — restarting a supervisor to restore the prior (legacy) intent…")
+				if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
+					err = fmt.Errorf("%w; AND the recovery supervisor start ALSO failed: %v — "+
+						"NO supervisor is running and the prior (legacy) intent is on disk; "+
+						"run `mcphub supervise` from a shell to restore the legacy serena daemons", err, startErr)
+				}
+			}
+			return err
+		}
+		releaseInterlock = release
+		interlockBypass = lock.AllowSpecBearingWriteBypass()
+	}
+
 	// 8. Write the spec-bearing intent. The §7.1 gate inside InstallParsedManifest
 	//    now passes NATURALLY — after the reap no supervisor holds the lock, so the
 	//    spec-bearing write is the safe state (the NEXT supervisor start is THIS
-	//    binary). The inner stack owns scheduler/client/intent undos; on error here
-	//    those are ALREADY undone and the deferred outer stack restores the
-	//    reconcile + registry. The dynamic-pool manifest carries no client_bindings
-	//    (the /serena/mcp router owns routing), so the only side effect is the
-	//    per-workspace supervisor-intent fan-out driven by opts.Workspaces (the
-	//    finding-#2 re-read snapshot).
+	//    binary). The interlock we hold IS supervisor.lock, so the gate's probe
+	//    would see it held; the minted bypass token (interlockBypass) tells the
+	//    gate the held lock is our OWN handle (verified-identity check, Phase 1) so
+	//    the spec-bearing write proceeds. The inner stack owns scheduler/client/
+	//    intent undos; on error here those are ALREADY undone and the deferred
+	//    outer stack restores the reconcile + registry. The dynamic-pool manifest
+	//    carries no client_bindings (the /serena/mcp router owns routing), so the
+	//    only side effect is the per-workspace supervisor-intent fan-out driven by
+	//    opts.Workspaces (the finding-#2 re-read snapshot).
 	intentPath, ierr := installParsedManifestFn(ctx, api.NewAPI(), dynamicManifest, api.InstallParsedManifestOpts{
-		Writer:     w,
-		Workspaces: installWorkspaces,
+		Writer:               w,
+		Workspaces:           installWorkspaces,
+		SupervisorLockBypass: interlockBypass,
 	})
 	if ierr != nil {
 		// Recovery invariant: if we reaped (step 7) but the write failed, NO
@@ -855,12 +963,21 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		// still restores the reconcile + registry (legacy is the source of truth).
 		err = ierr
 		if willReap {
+			// Release the interlock before the recovery start — the started
+			// supervisor must AcquireSupervisorLock itself (the held lock would
+			// block it). Idempotent.
+			releaseInterlock()
 			fmt.Fprintln(w, "intent write failed after the supervisor reap — restarting a supervisor to restore the prior (legacy) intent…")
 			if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
 				err = fmt.Errorf("%w; AND the recovery supervisor start ALSO failed: %v — "+
 					"NO supervisor is running and the prior (legacy) intent is on disk; "+
 					"run `mcphub supervise` from a shell to restore the legacy serena daemons", err, startErr)
 			}
+		} else {
+			// No reap (and thus no recovery start) on this path, but we may still
+			// hold the interlock (acquired when installWorkspaces>0). Release it so
+			// it never leaks past this error return.
+			releaseInterlock()
 		}
 		return err
 	}
@@ -873,6 +990,19 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	//    a workspace (split-state). Clear the stack so the deferred undo is a
 	//    no-op from here on.
 	rollback = nil
+
+	// Wire the Revision 4 hand-off-window observer for the duration of the start
+	// (both the scanErr-recovery start and the normal start below). The START
+	// primitive calls migrateSerenaHandoffWindowFn when the benign
+	// release→child-acquire window actually materializes (a >1-retry reconcile or a
+	// duplicate-spawn singleton exit); we emit the named event through this run's
+	// audit log so an operator can tell a known-benign window apart from a
+	// recurrence of the original bare-IPC-timeout bug. Reset to the no-op on return
+	// so a later stray call is inert. Best-effort: emit failure is non-fatal.
+	migrateSerenaHandoffWindowFn = func(phase string) {
+		emitSerenaInterlockHandoffWindowEvent(events, phase)
+	}
+	defer func() { migrateSerenaHandoffWindowFn = func(string) {} }()
 
 	// 10. START the new supervisor (only after a cutover reap). It cold-reconciles
 	//     from the just-written intent, re-materializing any nil-spec serena rows
@@ -894,6 +1024,10 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		// operator guidance.
 		err = fmt.Errorf("verify supervisor-intent runtime_spec rows after the committed write: %w "+
 			"(the intent is committed; the registry is NOT rolled back)", scanErr)
+		// Release the interlock before any start (the started supervisor must
+		// AcquireSupervisorLock itself) and on the no-start branch too (avoid a
+		// leak). Idempotent.
+		releaseInterlock()
 		if willStart {
 			if willReap {
 				fmt.Fprintln(w, "intent-verify re-read failed after the supervisor reap — starting the supervisor anyway so the committed intent is reconciled…")
@@ -910,6 +1044,15 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		}
 		return err
 	}
+	// Release the interlock before the (normal or no-op) start. The just-started
+	// supervisor must AcquireSupervisorLock itself; holding it here would block the
+	// child's own acquire. Releasing right before the start opens the benign
+	// release→child-acquire hand-off window (Revision 4): the intent is already
+	// committed (the §7.1 write-blocking property is past), the singleton makes a
+	// racing duplicate exit, an old-decoder winner self-crashes with nothing
+	// re-spawning it, and the start's own reconcile-ready poll covers the pre-bind
+	// pipe race. Idempotent (a later belt-and-suspenders release is a no-op).
+	releaseInterlock()
 	if willStart {
 		fmt.Fprintln(w, "Starting the supervisor so it reconciles the new serena dynamic-pool intent…")
 		if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
@@ -1116,6 +1259,44 @@ func openMigrateSerenaAuditLog(w io.Writer) *api.SupervisorEventLog {
 		return nil
 	}
 	return events
+}
+
+// migrateSerenaHandoffWindowFn is the Revision 4 observability seam. After the
+// migrate releases supervisor.lock immediately before starting the successor (the
+// benign release→child-acquire hand-off window), the START primitive calls this
+// when that window actually exercises its tolerance — the pre-bind pipe race
+// materialized but resolved (waitReconcileReadyViaIPC needed >1 retry), or a
+// duplicate-spawn singleton exit was observed. The driver wires it to an emit
+// closure (over the run's audit log) around the start and resets it after; the
+// default is a no-op so a stray call off the migrate path is inert. It is
+// observability ONLY — never a gate; the driver's emit is best-effort.
+var migrateSerenaHandoffWindowFn = func(phase string) {}
+
+// emitSerenaInterlockHandoffWindowEvent writes the Revision 4
+// `supervisor-interlock-handoff-window` info event to the supplied audit log
+// (best-effort; a nil log or emit failure is silently non-fatal — mirrors
+// emitWorkspaceAutoRegisteredEvent). phase is "reconcile-ready-retry" (the
+// pre-bind pipe race resolved after >1 poll) or "duplicate-spawn-exit" (a racing
+// duplicate supervisor exited via the singleton). The note documents WHY the
+// window is known-benign so an operator can tell it apart from a recurrence of
+// the original bare-IPC-timeout bug.
+func emitSerenaInterlockHandoffWindowEvent(events *api.SupervisorEventLog, phase string) {
+	if events == nil {
+		return
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		SchemaVersion: api.SupervisorEventSchemaVersion,
+		TS:            time.Now().UTC().Format(time.RFC3339Nano),
+		Severity:      api.SupervisorEventSeverityInfo,
+		Source:        "migration",
+		Event:         "supervisor-interlock-handoff-window",
+		Body: map[string]any{
+			"phase": phase,
+			"note": "known-benign hand-off window: the migrate released supervisor.lock before " +
+				"starting the successor; a racing duplicate exits via the singleton, an old-decoder " +
+				"winner self-crashes, and reconcile-ready retries cover the pre-bind pipe race",
+		},
+	})
 }
 
 // printSerenaReconcileReport prints the per-(client, server) reconcile rows.

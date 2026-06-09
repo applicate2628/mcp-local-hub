@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -115,6 +116,41 @@ func defaultMigrateSerenaStartSupported() bool {
 	return true
 }
 
+// defaultAcquireSupervisorInterlock is the Windows production binding for
+// acquireSupervisorInterlockFn. It acquires supervisor.lock on the EXACT leaf the
+// §7.1 install gate probes — filepath.Join(api.DaemonStateDir(), "supervisor.lock")
+// (install_parsed_manifest.go:342's gateLockPath resolver) — so the held-lock path
+// equals the gate-probed path and the typed bypass token (AllowSpecBearingWriteBypass)
+// passes the gate's IDENTITY check.
+//
+// HIGHEST-PRIORITY invariant: the path MUST be api.DaemonStateDir(), NOT
+// stateDirFunc(). stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE for the cli's own
+// audit-log path, but the §7.1 gate inside InstallParsedManifest resolves its
+// stateDir via api.DaemonStateDir(); a mismatch would acquire a DIFFERENT lock
+// leaf than the gate probes, so the gate's identity check would REJECT the bypass
+// (probe runs → fail-closed) and the migrate would re-open the very split-brain
+// this interlock prevents. (The Phase-1 in-gate path-mismatch guard is the
+// backstop, but the call site must still hard-code the right resolver.)
+//
+// It returns the live lock HANDLE (so the driver mints the bypass token) and an
+// IDEMPOTENT release closure (the driver calls release at multiple start sites; a
+// second call is a harmless no-op because (*SupervisorLock).Release() nils its
+// flock). A non-nil error means a foreign supervisor — or a concurrent serena
+// cutover — already holds the lock.
+func defaultAcquireSupervisorInterlock() (*api.SupervisorLock, func(), error) {
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("resolve state-dir for the supervisor.lock interlock: %w", err)
+	}
+	lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return nil, func() {}, err
+	}
+	var once sync.Once
+	release := func() { once.Do(lock.Release) }
+	return lock, release, nil
+}
+
 // defaultMigrateSerenaSupervisorHealthy is the Windows production health probe
 // for Fix 5's idempotency-recovery branch. It reports (true, nil) ONLY when a
 // supervisor is both running (holds supervisor.lock) AND reconcile-ready (IPC
@@ -174,6 +210,19 @@ func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
 		return err
 	}
 	fmt.Fprintln(w, "supervisor started; waiting for it to reconcile the on-disk serena intent…")
+
+	// Revision 4 hand-off-window observation: the migrate released supervisor.lock
+	// immediately before this start, so the fresh supervisor must acquire the lock
+	// and bind its IPC pipe before `status` answers. If the FIRST reconcile probe
+	// is not ready-or-errors, the benign release→child-acquire pre-bind pipe race
+	// materialized (it then resolves under the bounded poll below) — signal the
+	// observer so the driver emits the named event, letting an operator distinguish
+	// this known-benign window from a recurrence of the original bare-IPC-timeout
+	// bug. Best-effort and non-blocking; a probe error here is NOT fatal (the
+	// bounded poll is the authoritative readiness gate).
+	if ready, perr := probeReconcileReadyOnce(deps.pipePath); perr != nil || !ready {
+		migrateSerenaHandoffWindowFn("reconcile-ready-retry")
+	}
 
 	// Self-verify: poll IPC `status` until reconcile_ready=true (reuse the
 	// existing forward-migration readiness primitive). Bounded so a hung start
