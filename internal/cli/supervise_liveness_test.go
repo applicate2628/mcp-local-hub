@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1664,5 +1665,284 @@ func TestSupervisorLivenessSweepConcurrentWithHandlerNoRace(t *testing.T) {
 	}
 	if final.Version == 0 {
 		t.Fatalf("final supervisor-state.json lost version field: %+v", final)
+	}
+}
+
+// --- Codex bot #268 P2 (supervise_liveness.go:261): a port-owner PROBE ERROR
+// must NOT trigger a restart. ----------------------------------------------
+
+// TestSupervisorDaemonEntryLive_PortOwnerProbeError_TCPUp_ReturnsLive is the
+// unit guard for the degrade path: when the OS-level port-owner probe ERRORS
+// (netstat could not run) but the TCP loopback probe confirms the port is
+// bound+answering, supervisorDaemonEntryLive returns LIVE — a probe error is
+// not proof of a dead daemon, and the TCP answer positively confirms the
+// identity-verified PID is serving.
+func TestSupervisorDaemonEntryLive_PortOwnerProbeError_TCPUp_ReturnsLive(t *testing.T) {
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(int) bool { return true },
+		PIDIdentity: func(process.PIDIdentityProof) error { return process.ErrProcessIdentityUnsupported },
+		PortLive:    func(int) bool { return true }, // TCP says the port answers
+		PortOwnerPID: func(int) (int, bool, error) {
+			return 0, false, errors.New("netstat -ano failed: access denied")
+		},
+	})
+	defer restore()
+
+	d := api.SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Port: 9123}
+	entry := DaemonRuntimeEntry{
+		State:      daemonRuntimeStateRunning,
+		CurrentPID: 22036,
+		StartedAt:  time.Now().UTC().Add(-time.Minute), // well past bind grace
+	}
+	live, reason := supervisorDaemonEntryLive(d, entry, time.Now().UTC())
+	if !live {
+		t.Fatalf("owner-probe error + TCP up = not live (reason %q); want live (probe error is not proof of death, TCP confirms serving)", reason)
+	}
+	if reason != "" {
+		t.Fatalf("live daemon carried reason %q; want empty", reason)
+	}
+}
+
+// TestSupervisorDaemonEntryLive_PortOwnerProbeError_TCPDownPastGrace_Unverified
+// guards the genuinely-ambiguous tail: owner probe ERRORS and the TCP fallback
+// ALSO fails to confirm the port, past the bind grace. supervisorDaemonEntryLive
+// returns (false, port_owner_unverified) — NOT a confirmed mismatch — and that
+// reason is deliberately excluded from supervisorLivenessReasonNeedsRestart so
+// the sweep never restarts on it.
+func TestSupervisorDaemonEntryLive_PortOwnerProbeError_TCPDownPastGrace_Unverified(t *testing.T) {
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(int) bool { return true },
+		PIDIdentity: func(process.PIDIdentityProof) error { return process.ErrProcessIdentityUnsupported },
+		PortLive:    func(int) bool { return false }, // TCP cannot confirm either
+		PortOwnerPID: func(int) (int, bool, error) {
+			return 0, false, errors.New("netstat -ano failed: access denied")
+		},
+	})
+	defer restore()
+
+	d := api.SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Port: 9123}
+	entry := DaemonRuntimeEntry{
+		State:      daemonRuntimeStateRunning,
+		CurrentPID: 22036,
+		StartedAt:  time.Now().UTC().Add(-(supervisorPortBindGrace + time.Second)),
+	}
+	live, reason := supervisorDaemonEntryLive(d, entry, time.Now().UTC())
+	if live {
+		t.Fatalf("owner-probe error + TCP down past grace = live; want not-live with the unverified reason")
+	}
+	if reason != supervisorLivenessReasonPortOwnerUnverified {
+		t.Fatalf("reason = %q; want %q", reason, supervisorLivenessReasonPortOwnerUnverified)
+	}
+	if supervisorLivenessReasonNeedsRestart(reason) {
+		t.Fatalf("%q is a needs-restart reason; want excluded (a probe error must not restart)", reason)
+	}
+}
+
+// TestSupervisorDaemonEntryLive_PortOwnerProbeError_WithinGrace_ReturnsLive: a
+// probe error while the daemon is still inside the port-bind grace (a fresh
+// spawn that may not have bound yet) is live regardless of TCP, mirroring the
+// unbound-within-grace rule.
+func TestSupervisorDaemonEntryLive_PortOwnerProbeError_WithinGrace_ReturnsLive(t *testing.T) {
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(int) bool { return true },
+		PIDIdentity: func(process.PIDIdentityProof) error { return process.ErrProcessIdentityUnsupported },
+		PortLive:    func(int) bool { return false },
+		PortOwnerPID: func(int) (int, bool, error) {
+			return 0, false, errors.New("netstat -ano failed: access denied")
+		},
+	})
+	defer restore()
+
+	d := api.SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Port: 9123}
+	entry := DaemonRuntimeEntry{
+		State:      daemonRuntimeStateRunning,
+		CurrentPID: 22036,
+		StartedAt:  time.Now().UTC(), // just spawned, within grace
+	}
+	live, reason := supervisorDaemonEntryLive(d, entry, time.Now().UTC())
+	if !live {
+		t.Fatalf("owner-probe error within bind grace = not live (reason %q); want live", reason)
+	}
+}
+
+// TestSupervisorLivenessReasonNeedsRestart_ProbeErrorExcluded pins the
+// invariant table: confirmed problems restart; the probe-error reason does not.
+func TestSupervisorLivenessReasonNeedsRestart_ProbeErrorExcluded(t *testing.T) {
+	cases := []struct {
+		reason string
+		want   bool
+	}{
+		{supervisorLivenessReasonPortUnbound, true},
+		{supervisorLivenessReasonPortOwnerMismatch, true},
+		{supervisorLivenessReasonPortOwnerSelf, true},
+		{supervisorLivenessReasonPortOwnerUnverified, false}, // PROBE ERROR — no restart
+		{supervisorLivenessReasonPIDDead, false},
+		{supervisorLivenessReasonMissingPID, false},
+	}
+	for _, tc := range cases {
+		if got := supervisorLivenessReasonNeedsRestart(tc.reason); got != tc.want {
+			t.Fatalf("NeedsRestart(%q) = %v; want %v", tc.reason, got, tc.want)
+		}
+	}
+}
+
+// TestSupervisorLivenessSweepNoRestartOnPortOwnerProbeErrorTCPUp is the core
+// anti-loop guard: a healthy port-bearing daemon whose OS-level owner probe
+// FAILS (e.g. netstat policy-blocked) but whose port answers over TCP must NOT
+// be restarted — the sweep posts NO event (no EvManualRestart, no EvChildExit),
+// so the 5s cadence cannot loop the fleet (Codex bot #268 P2).
+func TestSupervisorLivenessSweepNoRestartOnPortOwnerProbeErrorTCPUp(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(process.PIDIdentityProof) error { return nil },
+		PortLive:    func(int) bool { return true }, // TCP confirms healthy
+		PortOwnerPID: func(int) (int, bool, error) {
+			return 0, false, errors.New("netstat -ano failed: access denied")
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		t.Fatalf("port-owner probe error on a TCP-healthy daemon posted %+v; want NO event (no restart loop)", ev)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestSupervisorLivenessSweepObservesProbeErrorTCPDownWithoutRestart guards the
+// ambiguous tail in the SWEEP: owner probe error + TCP down + past grace must
+// emit an observable warn (daemon-port-owner-unverified) but post NEITHER an
+// EvManualRestart NOR an EvChildExit — a probe failure is not proof the daemon
+// is dead OR foreign-owned, so it is observed, not acted on.
+func TestSupervisorLivenessSweepObservesProbeErrorTCPDownWithoutRestart(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
+	auditLog, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer auditLog.Close()
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-(supervisorPortBindGrace + time.Second)))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(process.PIDIdentityProof) error { return nil },
+		PortLive:    func(int) bool { return false }, // TCP cannot confirm
+		PortOwnerPID: func(int) (int, bool, error) {
+			return 0, false, errors.New("netstat -ano failed: access denied")
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog)
+
+	// No event posted — neither restart nor teardown.
+	select {
+	case ev := <-events:
+		t.Fatalf("probe error (TCP down, past grace) posted %+v; want NO event (probe error must not restart or tear down)", ev)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// The observable warn fired.
+	body, err := readSupervisorEventsLog(eventsPath)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	if !strings.Contains(body, "daemon-port-owner-unverified") {
+		t.Fatalf("observable warn daemon-port-owner-unverified not emitted; log:\n%s", body)
+	}
+	// And it did NOT mislabel the daemon as a generic stale/restart candidate.
+	if strings.Contains(body, "daemon-running-state-stale") {
+		t.Fatalf("probe error mislabeled as daemon-running-state-stale (a restart/teardown reason); log:\n%s", body)
+	}
+}
+
+// TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts is the
+// negative control: a CONFIRMED owner mismatch (a DIFFERENT live PID owns the
+// port, no probe error) must STILL route to EvManualRestart with reason
+// port_owner_mismatch. The #268 P2 fix narrows ONLY the probe-error path; a
+// real foreign owner is unchanged.
+func TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(process.PIDIdentityProof) error { return nil },
+		PortLive:    func(int) bool { return true },
+		PortOwnerPID: func(int) (int, bool, error) {
+			return 44000, true, nil // a DIFFERENT live PID owns the port (no err)
+		},
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
+	select {
+	case ev := <-events:
+		if ev.Kind != api.EvManualRestart || ev.TaskName != taskName {
+			t.Fatalf("event = %+v, want EvManualRestart for %s", ev, taskName)
+		}
+		if ev.Body["reason"] != supervisorLivenessReasonPortOwnerMismatch {
+			t.Fatalf("event reason = %v, want %s", ev.Body["reason"], supervisorLivenessReasonPortOwnerMismatch)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("confirmed owner mismatch did not post EvManualRestart")
 	}
 }

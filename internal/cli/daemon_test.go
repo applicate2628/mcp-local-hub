@@ -752,6 +752,240 @@ func TestDaemonOverlayEnvDirectReloadFailureSurfacesError(t *testing.T) {
 	}
 }
 
+// TestDaemonOverlayEnvSupervisedReloadFailureOverlayWinsOnOverlapKey is the
+// Codex bot #268 daemon.go:380 P2 regression guard — the residual the prior
+// overlay fix flagged itself. A supervisor-spawned wrapper (marker present)
+// hits an UNREADABLE overlay file AND a key is present in BOTH the manifest
+// and the cached operator overlay. The OLD degrade returned a nil overlay
+// map, so daemonEnvWithOverlay put ONLY the manifest value into cfg.Env;
+// StdioHost/HTTPHost append cfg.Env AFTER os.Environ(), so the manifest
+// default (last duplicate) clobbered the supervisor-applied overlay value
+// that was only present as an inherited parent entry — the operator override
+// silently lost during exactly the corrupt/transient-read fallback this path
+// handles. The fix reconstructs the overlay map from the supervisor-injected
+// MCPHUB_DAEMON_ENV_OVERLAY_KEYS key set (reading each key's already-expanded
+// value back from os.Environ), so the overlay WINS in cfg.Env even with the
+// file unreadable.
+func TestDaemonOverlayEnvSupervisedReloadFailureOverlayWinsOnOverlapKey(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+	const overlayValue = `D:\memory`
+	const manifestDefault = `C:\default\memory.json`
+	// The supervisor merged the overlay value (overlay-wins) into THIS
+	// wrapper's environment and injected the applied overlay KEY SET before
+	// spawning us. A literal value has no ${parent_path}, so the value in
+	// os.Environ() is exactly the overlay literal.
+	t.Setenv("MEMORY_FILE_PATH", overlayValue)
+	t.Setenv(daemonOverlayKeysEnvVar, "MEMORY_FILE_PATH")
+
+	// Overlay file present but UNREADABLE (oversize → non-retryable Load
+	// error). The wrapper cannot read the overlay's key set from the file.
+	writeOversizeOverlayFile(t, stateDir)
+
+	// daemonOverlayEnv must NOT error on the marker path and must
+	// reconstruct the overlay map from the injected key set.
+	overlayMap, err := daemonOverlayEnv("memory", "default")
+	if err != nil {
+		t.Fatalf("daemonOverlayEnv on supervised reload failure: want non-fatal degrade, got error: %v", err)
+	}
+	if overlayMap["MEMORY_FILE_PATH"] != overlayValue {
+		t.Fatalf("reconstructed overlay MEMORY_FILE_PATH = %q, want overlay override %q read back from os.Environ", overlayMap["MEMORY_FILE_PATH"], overlayValue)
+	}
+
+	// End-to-end: cfg.Env must carry the overlay value so it WINS the
+	// StdioHost append(os.Environ(), cfg.Env...) duplicate-key resolution,
+	// even though the manifest carries the SAME key with a different value.
+	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+		"MEMORY_FILE_PATH": manifestDefault,
+	}, secrets.NewResolver(nil, nil))
+	if err != nil {
+		t.Fatalf("daemonEnvWithOverlay on supervised reload failure: want non-fatal, got error: %v", err)
+	}
+	if env["MEMORY_FILE_PATH"] != overlayValue {
+		t.Fatalf("cfg.Env MEMORY_FILE_PATH = %q, want overlay override %q (manifest default %q must not clobber on unreadable file)", env["MEMORY_FILE_PATH"], overlayValue, manifestDefault)
+	}
+	if got := effectiveChildValueFromEnvMap(os.Environ(), env, "MEMORY_FILE_PATH"); got != overlayValue {
+		t.Fatalf("effective child MEMORY_FILE_PATH = %q, want overlay override %q (overlay wins on unreadable file)", got, overlayValue)
+	}
+}
+
+// TestDaemonOverlayEnvSupervisedReloadFailureNoInjectedKeysFallsBackToNil
+// proves the degrade still returns a nil overlay map (manifest-only env)
+// when the supervisor applied NO overlay for this daemon — the injected key
+// set is empty/absent — so the no-overlay path is unchanged.
+func TestDaemonOverlayEnvSupervisedReloadFailureNoInjectedKeysFallsBackToNil(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+	// No MCPHUB_DAEMON_ENV_OVERLAY_KEYS set — supervisor applied no overlay
+	// for this daemon (marker is present for the fleet, but this row had no
+	// overlay). Clear any inherited value for determinism.
+	t.Setenv(daemonOverlayKeysEnvVar, "")
+	writeOversizeOverlayFile(t, stateDir)
+
+	got, err := daemonOverlayEnv("memory", "default")
+	if err != nil {
+		t.Fatalf("daemonOverlayEnv: want non-fatal degrade, got error: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("daemonOverlayEnv degrade with no injected keys: want nil overlay map, got %v", got)
+	}
+}
+
+// TestDaemonOverlayKeysFromEnv covers the split semantics of the
+// supervisor-injected MCPHUB_DAEMON_ENV_OVERLAY_KEYS value: NUL-joined
+// segments, last-entry-wins on duplicate vars (a trusted supervisor append
+// beats an earlier spoof), and empty-segment dropping so a malformed value
+// never yields an empty-named key.
+func TestDaemonOverlayKeysFromEnv(t *testing.T) {
+	sep := daemonOverlayKeysSep
+	tests := []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{
+			name: "absent var",
+			env:  []string{"PATH=/bin"},
+			want: nil,
+		},
+		{
+			name: "empty value",
+			env:  []string{daemonOverlayKeysEnvVar + "="},
+			want: nil,
+		},
+		{
+			name: "single key",
+			env:  []string{daemonOverlayKeysEnvVar + "=MEMORY_FILE_PATH"},
+			want: []string{"MEMORY_FILE_PATH"},
+		},
+		{
+			name: "two keys nul-joined",
+			env:  []string{daemonOverlayKeysEnvVar + "=A" + sep + "B"},
+			want: []string{"A", "B"},
+		},
+		{
+			name: "empty segments dropped",
+			env:  []string{daemonOverlayKeysEnvVar + "=" + sep + "A" + sep + sep + "B" + sep},
+			want: []string{"A", "B"},
+		},
+		{
+			name: "last duplicate wins over earlier spoof",
+			env: []string{
+				daemonOverlayKeysEnvVar + "=SPOOFED",
+				daemonOverlayKeysEnvVar + "=REAL_KEY",
+			},
+			want: []string{"REAL_KEY"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := daemonOverlayKeysFromEnv(tt.env)
+			if len(got) != len(tt.want) {
+				t.Fatalf("daemonOverlayKeysFromEnv(%v) = %v, want %v", tt.env, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("daemonOverlayKeysFromEnv(%v)[%d] = %q, want %q", tt.env, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestAppendDaemonOverlayKeysStripsSpoof asserts the keys-marker injection
+// strips any pre-existing MCPHUB_DAEMON_ENV_OVERLAY_KEYS entry (a manifest or
+// overlay row that names the reserved key, or an inherited spoof) before
+// appending the trusted key set LAST — mirroring the APPLIED marker's
+// strip-then-set discipline so no manifest/overlay value can inject or drop
+// keys.
+func TestAppendDaemonOverlayKeysStripsSpoof(t *testing.T) {
+	env := appendDaemonOverlayKeys([]string{
+		daemonOverlayKeysEnvVar + "=SPOOF_KEY_A" + daemonOverlayKeysSep + "SPOOF_KEY_B",
+		"PATH=/opt/bin",
+	}, []string{"REAL_KEY"})
+
+	if got := countEnvKey(env, daemonOverlayKeysEnvVar); got != 1 {
+		t.Fatalf("%s count = %d, want exactly one; env=%v", daemonOverlayKeysEnvVar, got, env)
+	}
+	if got := lookupEnvValue(env, daemonOverlayKeysEnvVar); got != "REAL_KEY" {
+		t.Fatalf("%s = %q, want trusted key set %q; env=%v", daemonOverlayKeysEnvVar, got, "REAL_KEY", env)
+	}
+	// The spoofed segment must be gone: a wrapper reading it back must NOT
+	// see SPOOF_KEY_A / SPOOF_KEY_B.
+	keys := daemonOverlayKeysFromEnv(env)
+	if len(keys) != 1 || keys[0] != "REAL_KEY" {
+		t.Fatalf("reconstructed keys = %v, want exactly [REAL_KEY] after strip-spoof", keys)
+	}
+}
+
+// TestAppendDaemonOverlayKeysSpoofedRowCannotResurrectClobber is the
+// end-to-end strip-spoof proof: a manifest/overlay row that names the
+// reserved keys var cannot drive the wrapper to reconstruct an attacker-
+// chosen key (and thus cannot resurrect the manifest clobber by dropping the
+// real overlap key from the reconstructed set). The supervisor's trusted
+// append wins; the wrapper reconstructs only the real key.
+func TestAppendDaemonOverlayKeysSpoofedRowCannotResurrectClobber(t *testing.T) {
+	// Simulate the supervisor merge output where a malicious overlay/manifest
+	// row defined MCPHUB_DAEMON_ENV_OVERLAY_KEYS=DECOY (so the merged cmd.Env
+	// carries the spoof), then the supervisor strip-then-appends the REAL key
+	// set for the daemon.
+	cmdEnv := []string{
+		"MEMORY_FILE_PATH=D:\\overlay",
+		daemonOverlayKeysEnvVar + "=DECOY",
+	}
+	cmdEnv = appendDaemonOverlayKeys(cmdEnv, []string{"MEMORY_FILE_PATH"})
+
+	keys := daemonOverlayKeysFromEnv(cmdEnv)
+	if len(keys) != 1 || keys[0] != "MEMORY_FILE_PATH" {
+		t.Fatalf("reconstructed keys = %v, want exactly [MEMORY_FILE_PATH]; DECOY spoof must be stripped", keys)
+	}
+	got := overlayMapFromInjectedKeys(keys, cmdEnv)
+	if got["MEMORY_FILE_PATH"] != "D:\\overlay" {
+		t.Fatalf("reconstructed overlay MEMORY_FILE_PATH = %q, want D:\\overlay (read from env)", got["MEMORY_FILE_PATH"])
+	}
+	if _, ok := got["DECOY"]; ok {
+		t.Fatalf("reconstructed overlay must not contain spoofed DECOY key; got %v", got)
+	}
+}
+
+// TestOverlayMapFromInjectedKeysPathFamilyCaseFold exercises the GOOS-specific
+// branch of the reconstruction: on Windows an overlay `PATH` key must find a
+// `Path=` entry the supervisor wrote (case-insensitive PATH-family match,
+// mirroring mergeDaemonEnv's normalizer); on POSIX the match is exact.
+func TestOverlayMapFromInjectedKeysPathFamilyCaseFold(t *testing.T) {
+	// Overlay stored the key as "PATH"; the supervisor wrote "Path=" into
+	// the environment (Windows kernel folds them; the merge preserves the
+	// winning source's casing, which may differ from the overlay's).
+	env := []string{"Path=C:\\overlay\\bin"}
+	got := overlayMapFromInjectedKeys([]string{"PATH"}, env)
+	if runtime.GOOS == "windows" {
+		if got["PATH"] != "C:\\overlay\\bin" {
+			t.Fatalf("Windows reconstruct PATH = %q, want case-folded match of Path= entry", got["PATH"])
+		}
+	} else {
+		// POSIX: "PATH" != "Path", so the key is missing from env. The
+		// fallback expands the literal overlay value (here empty, so it
+		// stays empty) rather than crashing — the overlay still wins with
+		// whatever literal it had.
+		if v, ok := got["PATH"]; !ok || v != "" {
+			t.Fatalf("POSIX reconstruct PATH = (%q,%v), want empty-literal fallback (no case-fold match)", v, ok)
+		}
+	}
+}
+
+// TestOverlayMapFromInjectedKeysEmptyKeysYieldsEmptyMap pins the empty-key-set
+// contract used by the degrade caller to decide nil-vs-reconstructed.
+func TestOverlayMapFromInjectedKeysEmptyKeysYieldsEmptyMap(t *testing.T) {
+	if got := overlayMapFromInjectedKeys(nil, os.Environ()); len(got) != 0 {
+		t.Fatalf("overlayMapFromInjectedKeys(nil, _) = %v, want empty map", got)
+	}
+	if got := overlayMapFromInjectedKeys([]string{}, os.Environ()); len(got) != 0 {
+		t.Fatalf("overlayMapFromInjectedKeys([], _) = %v, want empty map", got)
+	}
+}
+
 func TestDaemonOverlayEnvKeepsLiteralValuesWhenParentPathExpansionFails(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)

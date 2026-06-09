@@ -2189,6 +2189,26 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 	return out
 }
 
+// overlayKeySet returns the overlay map's keys (original spelling) in
+// deterministic sorted order. The supervisor injects this set via
+// MCPHUB_DAEMON_ENV_OVERLAY_KEYS at spawn time so the wrapper's
+// reload-FAILURE path can reconstruct the overlay map from os.Environ()
+// without a successful overlay-file reload. Sorting makes the injected
+// value stable across map-iteration order (matters for the audit trail and
+// for deterministic tests). Returns nil for an empty/nil map so the caller
+// can treat it as "no overlay applied".
+func overlayKeySet(overlay map[string]string) []string {
+	if len(overlay) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(overlay))
+	for k := range overlay {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // isSerenaProxyDescriptor reports whether a SupervisorDaemon descriptor is a
 // serena per-workspace proxy row, identified by its wrapper argv carrying the
 // `daemon serena-proxy` subcommand (the shape
@@ -2386,6 +2406,17 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		}
 		if overlayApplied {
 			cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
+			// Inject the applied overlay KEY SET alongside the APPLIED
+			// marker. The wrapper's marker-present reload-FAILURE path
+			// reconstructs the overlay map from these keys (reading each
+			// key's already-expanded value back from os.Environ) when the
+			// overlay file is unreadable, so a key present in BOTH the
+			// manifest and the cached overlay still resolves to the
+			// operator override instead of the manifest default in cfg.Env
+			// (closes Codex bot #268 daemon.go:380 P2). Keys are spelled as
+			// the overlay stored them; appendDaemonOverlayKeys strips any
+			// spoofed value first (same discipline as the APPLIED marker).
+			cmd.Env = appendDaemonOverlayKeys(cmd.Env, overlayKeySet(overlayEnv))
 		}
 
 		// Intent-path control channel (bot PR #246 P2). A serena-proxy resolves

@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -284,4 +285,112 @@ func TestMakeProductionSpawnFnAppliesOverlayEnv(t *testing.T) {
 	if !strings.Contains(pathLine, "/system/parent") {
 		t.Fatalf("merged PATH should preserve parent via ${parent_path}; got %q", pathLine)
 	}
+}
+
+// TestOverlayKeySetSortedDeterministic pins the supervisor-side key-set
+// helper: keys are returned in sorted order (so the injected
+// MCPHUB_DAEMON_ENV_OVERLAY_KEYS value is stable across map-iteration order),
+// the original key spelling is preserved (so the wrapper's case-fold reader
+// matches the supervisor-written os.Environ() entry on Windows), and an
+// empty/nil map yields nil.
+func TestOverlayKeySetSortedDeterministic(t *testing.T) {
+	if got := overlayKeySet(nil); got != nil {
+		t.Fatalf("overlayKeySet(nil) = %v, want nil", got)
+	}
+	if got := overlayKeySet(map[string]string{}); got != nil {
+		t.Fatalf("overlayKeySet(empty) = %v, want nil", got)
+	}
+	got := overlayKeySet(map[string]string{
+		"ZEBRA":            "z",
+		"ALPHA":            "a",
+		"MEMORY_FILE_PATH": "m",
+	})
+	want := []string{"ALPHA", "MEMORY_FILE_PATH", "ZEBRA"}
+	if len(got) != len(want) {
+		t.Fatalf("overlayKeySet = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("overlayKeySet[%d] = %q, want %q (sorted)", i, got[i], want[i])
+		}
+	}
+}
+
+// TestSupervisorInjectsOverlayKeySetReconstructsAcrossUnreadableReload is the
+// supervisor↔wrapper round-trip for the Codex bot #268 daemon.go:380 P2 fix.
+// It reproduces the supervisor's spawn-time env construction (the same pure
+// helper chain TestMakeProductionSpawnFnAppliesOverlayEnv pins), captures the
+// resulting child environment, and then drives the WRAPPER-side reconstruction
+// (daemonOverlayKeysFromEnv → overlayMapFromInjectedKeys) against that
+// environment to prove a key present in BOTH the manifest and the overlay
+// resolves to the OVERLAY value even when the overlay file would be
+// unreadable. Covers both GOOS for the NUL join/split + case-fold readback.
+func TestSupervisorInjectsOverlayKeySetReconstructsAcrossUnreadableReload(t *testing.T) {
+	// Overlay key spelled platform-appropriately so the round-trip exercises
+	// the real PATH-family case-fold path on Windows and the exact path on
+	// POSIX. MEMORY_FILE_PATH is a non-PATH key common to both.
+	pathKey := "PATH"
+	if runtime.GOOS == "windows" {
+		pathKey = "Path"
+	}
+	overlayEnv := map[string]string{
+		pathKey:            "C:/overlay/bin",
+		"MEMORY_FILE_PATH": "D:/overlay/memory.json",
+	}
+	manifest := map[string]string{
+		// Same keys as the overlay, different values — the clobber the fix
+		// must prevent.
+		pathKey:            "C:/manifest/bin",
+		"MEMORY_FILE_PATH": "C:/manifest/memory.json",
+	}
+
+	// --- Supervisor side: build the child env exactly as the spawn fn does. ---
+	parent := os.Environ()
+	merged := mergeDaemonEnv(parent, manifest, overlayEnv)
+	if merged == nil {
+		t.Fatalf("mergeDaemonEnv returned nil; expected non-empty with overlay+manifest")
+	}
+	merged = appendDaemonOverlayAppliedMarker(merged)
+	merged = appendDaemonOverlayKeys(merged, overlayKeySet(overlayEnv))
+
+	// The injected key set must carry both keys, NUL-joined and sorted.
+	if got := lookupEnvValue(merged, daemonOverlayKeysEnvVar); got == "" {
+		t.Fatalf("%s not injected into child env", daemonOverlayKeysEnvVar)
+	}
+
+	// --- Wrapper side: reconstruct from the injected keys (file unreadable). ---
+	injectedKeys := daemonOverlayKeysFromEnv(merged)
+	if len(injectedKeys) != 2 {
+		t.Fatalf("injected keys = %v, want 2 (overlay key set round-tripped)", injectedKeys)
+	}
+	reconstructed := overlayMapFromInjectedKeys(injectedKeys, merged)
+
+	// The reconstructed overlay map is what daemonEnvWithOverlay merges over
+	// the manifest (overlay-wins). Model that final merge to get cfg.Env.
+	cfgEnv := overlayWinsMergeForTest(manifest, reconstructed)
+
+	// Effective child value = append(parent==merged child env, cfg.Env...);
+	// last duplicate wins. The overlay value must win for BOTH keys.
+	if got := effectiveChildValueFromEnvMap(merged, cfgEnv, "MEMORY_FILE_PATH"); got != "D:/overlay/memory.json" {
+		t.Fatalf("effective child MEMORY_FILE_PATH = %q, want overlay value (overlay wins on unreadable file)", got)
+	}
+	if got := effectiveChildValueFromEnvMap(merged, cfgEnv, "PATH"); got != "C:/overlay/bin" {
+		t.Fatalf("effective child PATH = %q, want overlay value (case-fold readback, overlay wins)", got)
+	}
+}
+
+// overlayWinsMergeForTest models mergeDaemonEnvMaps (manifest < overlay) as a
+// plain map so the supervisor↔wrapper round-trip test can compute cfg.Env
+// without depending on the unexported daemon.go merge surface signature.
+func overlayWinsMergeForTest(manifest, overlay map[string]string) map[string]string {
+	merged := mergeDaemonEnv(nil, manifest, overlay)
+	out := make(map[string]string, len(merged))
+	for _, kv := range merged {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }

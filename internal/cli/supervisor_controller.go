@@ -649,7 +649,21 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// already routes EvChildExit correctly. reaperOutstanding was
 	// already cleared above (the reaper genuinely fired), so dropping the
 	// event here does not strand the marker.
+	//
+	// We suppress the RESPAWN (no auto-restart of a deliberately-stopped
+	// daemon) but STILL drive the SM state to StIdle before returning. The
+	// reaper already marked the runtime tracker idle / current_pid=0 BEFORE
+	// posting this event (supervise.go cmd.Wait: MarkExited+persist precede
+	// the crashCh post), so leaving smStates at StRunning would desync the
+	// SM from the tracker. A later /api/daemon/respawn then takes the
+	// non-running path, but shouldRouteNonRunningRespawnThroughController
+	// rejects a stale StRunning as "not spawnable without a live PID" — the
+	// operator could not restart the daemon until the supervisor restarted.
+	// Storing StIdle (which matches the idle tracker) makes that non-running
+	// respawn route through the idle transition normally (Codex bot #268 P2,
+	// supervisor_controller.go:664).
 	if ev.Kind == api.EvChildExit && currentState == api.StRunning && supervisorEventIsCleanExit(ev) {
+		c.smStates.Store(ev.TaskName, api.StIdle)
 		if c.events != nil {
 			_ = c.events.Emit(api.SupervisorEvent{
 				Severity: "debug",
@@ -657,7 +671,7 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 				Event:    "controller-clean-exit-ignored-running",
 				TaskName: ev.TaskName,
 				Body: map[string]any{
-					"note": "clean child exit at StRunning with no controller-driven exit in flight; deliberate-shutdown contract suppresses respawn",
+					"note": "clean child exit at StRunning with no controller-driven exit in flight; deliberate-shutdown contract suppresses respawn, SM driven to idle to match the already-idle tracker so a later manual respawn can route",
 				},
 			})
 		}

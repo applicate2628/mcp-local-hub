@@ -58,6 +58,46 @@ func TestRestartUsesSupervisorRespawnForIntentDaemon(t *testing.T) {
 	}
 }
 
+func TestRestartAllSkipsWatchdogMaintenanceRow(t *testing.T) {
+	// deep-sec #268: the restart maintenance filter must skip *-watchdog rows
+	// (not just *-weekly-refresh) so a legacy/hand-edited intent watchdog row
+	// is never sent through supervisor respawn as if it were a daemon.
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-watchdog`,
+			Server:   "watchdog",
+			Daemon:   "default",
+		}},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	var respawned []string
+	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+		respawned = append(respawned, taskName)
+		return RespawnResult{Success: true, Code: "OK"}, nil
+	})
+	defer restoreRespawn()
+
+	fake := &restartAllFakeScheduler{}
+	origFactory := restartSchedulerFactory
+	restartSchedulerFactory = func() (scheduler.Scheduler, error) { return fake, nil }
+	defer func() { restartSchedulerFactory = origFactory }()
+
+	if _, err := NewAPI().RestartAll(); err != nil {
+		t.Fatalf("RestartAll: %v", err)
+	}
+	if len(respawned) != 0 {
+		t.Fatalf("watchdog maintenance row respawned = %v, want none (must be skipped)", respawned)
+	}
+}
+
 func TestRestartSupervisorOwnedDaemonsUsesDescriptorIdentityForWorkspaceLSP(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)

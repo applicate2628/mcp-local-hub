@@ -1610,10 +1610,17 @@ func TestSupervisorController_NonCleanExitDuringRestart_OwnDaemon_SingleRespawn(
 // deliberate-shutdown-contract guard: a CLEAN child exit observed while
 // the daemon is still StRunning (NO controller-driven exit in flight —
 // e.g. an external clean kill, or `mcphub stop` that has not yet driven
-// the SM to StExiting) must be DROPPED. The daemon must NOT enter
+// the SM to StExiting) must DROP the respawn. The daemon must NOT enter
 // StBackoffWaiting / respawn. This preserves the contract the wait
 // goroutine historically enforced by suppressing clean exits; the drop
 // now lives in handleLoopEvent (#268 P1).
+//
+// #268 P2 (supervisor_controller.go:664): the drop now ALSO drives the SM
+// to StIdle to match the already-idle tracker (the reaper cleared
+// current_pid before posting the event), so a later /api/daemon/respawn can
+// route through the non-running idle transition. Pre-fix the SM stayed at
+// StRunning and shouldRouteNonRunningRespawnThroughController rejected the
+// restart until the supervisor was bounced.
 func TestSupervisorController_CleanExitAtRunningDropped(t *testing.T) {
 	var spawnCalls atomic.Int32
 	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
@@ -1630,8 +1637,8 @@ func TestSupervisorController_CleanExitAtRunningDropped(t *testing.T) {
 
 	// Give the loop time to process the (dropped) event.
 	time.Sleep(250 * time.Millisecond)
-	if st, _ := ctrl.GetSMState(descriptor.TaskName); st != api.StRunning {
-		t.Fatalf("clean exit at StRunning changed state to %s; want StRunning (deliberate-shutdown contract: clean exit must be dropped)", st)
+	if st, _ := ctrl.GetSMState(descriptor.TaskName); st != api.StIdle {
+		t.Fatalf("clean exit at StRunning left state %s; want StIdle (#268 P2: SM must be driven to idle to match the already-idle tracker so a later manual respawn can route)", st)
 	}
 	if got := spawnCalls.Load(); got != 0 {
 		t.Fatalf("clean exit at StRunning triggered %d respawns; want 0 (deliberate-shutdown contract broken)", got)
@@ -1641,6 +1648,56 @@ func TestSupervisorController_CleanExitAtRunningDropped(t *testing.T) {
 	// handleLoopEvent).
 	if _, ok := ctrl.reaperOutstanding.Load(descriptor.TaskName); ok {
 		t.Fatalf("reaperOutstanding not cleared after a real (clean) exit was observed and dropped")
+	}
+	// The daemon is now respawnable: a non-running respawn routes through the
+	// idle transition instead of being rejected as a stale StRunning.
+	route, err := shouldRouteNonRunningRespawnThroughController(ctrl, descriptor.TaskName)
+	if err != nil {
+		t.Fatalf("after clean-exit drop the daemon is not spawnable: %v (#268 P2 regression: SM stuck at StRunning)", err)
+	}
+	if !route {
+		t.Fatalf("after clean-exit drop shouldRouteNonRunningRespawnThroughController = false; want true (idle is spawnable)")
+	}
+}
+
+// TestSupervisorController_CleanExitAtRunning_ThenManualRespawnSucceeds is the
+// end-to-end #268 P2 guard: after a clean self-exit at StRunning drives the SM
+// to StIdle (respawn suppressed), an operator-issued respawn of the now-idle
+// task must actually spawn through the controller's idle transition — proving
+// the daemon is restartable without a supervisor bounce. Pre-fix the SM was
+// wedged at StRunning and the respawn path rejected it.
+func TestSupervisorController_CleanExitAtRunning_ThenManualRespawnSucceeds(t *testing.T) {
+	var spawnCalls atomic.Int32
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+
+	// Steady-state running, own-spawned daemon. The tracker mirrors the
+	// already-cleared (idle) runtime the reaper leaves before posting the
+	// clean exit.
+	ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
+	ctrl.reaperOutstanding.Store(descriptor.TaskName, true)
+	ctrl.tracker.MarkSpawned(descriptor.TaskName, 22036, time.Now().UTC())
+	ctrl.tracker.MarkExited(descriptor.TaskName) // reaper already cleared pid
+
+	// Clean self-exit at StRunning: respawn suppressed, SM -> StIdle.
+	loop.Post(cleanChildExitEvent(descriptor.TaskName))
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StIdle)
+	if got := spawnCalls.Load(); got != 0 {
+		t.Fatalf("clean exit auto-respawned (spawn=%d); want 0 before the manual respawn", got)
+	}
+
+	// Operator respawn of the idle task drives StIdle -> StSpawning ->
+	// (EvHealthOK) StRunning and fires the spawn closure exactly once.
+	if err := ctrl.postIdleRespawnAndWait(descriptor.TaskName, 2*time.Second); err != nil {
+		t.Fatalf("manual respawn of the post-clean-exit idle daemon failed: %v", err)
+	}
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StRunning)
+	if got := spawnCalls.Load(); got != 1 {
+		t.Fatalf("manual respawn fired %d spawns; want exactly 1", got)
 	}
 }
 

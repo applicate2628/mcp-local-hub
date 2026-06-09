@@ -93,6 +93,9 @@ func normalizeSupervisorRestartTaskName(taskName string) string {
 }
 
 func isSupervisorRestartMaintenanceTask(taskName string) bool {
-	name := strings.TrimPrefix(taskName, `\`)
-	return strings.HasSuffix(name, "-weekly-refresh")
+	// Use the shared maintenance predicate so *-watchdog rows are skipped on
+	// restart too, not just *-weekly-refresh: a watchdog row left in a legacy
+	// or hand-edited supervisor-intent.json must not go through supervisor
+	// respawn as if it were a daemon (deep-sec #268).
+	return isMaintenanceTaskName(taskName)
 }

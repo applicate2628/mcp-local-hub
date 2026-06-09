@@ -160,6 +160,31 @@ func sweepSupervisorLivenessOnce(
 		if live {
 			continue
 		}
+		// Port-owner PROBE ERROR (could not determine the socket owner — e.g.
+		// netstat policy-blocked) that even the TCP fallback could not turn
+		// into a positive liveness result. This is observed but is NOT proof
+		// the daemon is dead, so it must drive NEITHER a restart
+		// (EvManualRestart → fleet restart loop) NOR a teardown (the default
+		// EvChildExit → StRunning→StBackoffWaiting crash path). Emit the warn
+		// for observability and leave the daemon running (post no event); the
+		// next sweep re-probes. A genuine owner-mismatch / unbound-port / dead
+		// PID still routes to its own restart/exit reason (Codex bot #268 P2).
+		if reason == supervisorLivenessReasonPortOwnerUnverified {
+			if events != nil {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "warn",
+					Source:   "liveness",
+					Event:    "daemon-port-owner-unverified",
+					TaskName: taskName,
+					Body: map[string]any{
+						"pid":  entry.CurrentPID,
+						"port": d.Port,
+						"note": "OS-level port-owner probe failed and the TCP fallback did not confirm liveness; leaving the daemon running (a probe error is not proof of a dead or foreign-owned daemon, so no restart is issued)",
+					},
+				})
+			}
+			continue
+		}
 		if events != nil {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
@@ -258,6 +283,40 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 	if probe.PortOwnerPID != nil {
 		ownerPID, ok, err := probe.PortOwnerPID(d.Port)
 		if err != nil {
+			// PROBE ERROR: the OS-level owner lookup could not run (e.g.
+			// netstat is policy-blocked by AppLocker/WDAC, or the port is out
+			// of range). This is NOT proof the daemon is dead — it only means
+			// we could not VERIFY who owns the socket. Treating it as a kill
+			// signal restart-loops the whole fleet indefinitely because every
+			// 5s sweep repeats the same failing probe (Codex bot #268 P2,
+			// supervise_liveness.go:261). Degrade to the TCP loopback liveness
+			// probe: the PID is already alive + identity-verified at this
+			// point, so a bound+answering port is positive proof the daemon is
+			// serving — return live. Distinguish this from a confirmed owner
+			// MISMATCH below (a DIFFERENT live PID owns the port), which is a
+			// real wedged-handoff that legitimately needs a restart.
+			portLive := probe.PortLive
+			if portLive == nil {
+				portLive = supervisorPortLive
+			}
+			if portLive(d.Port) {
+				return true, ""
+			}
+			// Port not answering yet, but within the bind grace a
+			// freshly-spawned daemon may not have bound — treat as live (same
+			// grace rule as the port-unbound and TCP-probe paths below).
+			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < supervisorPortBindGrace {
+				return true, ""
+			}
+			// Past grace, port not answering, owner unverifiable. This is
+			// genuinely ambiguous: it is still NOT proof a FOREIGN process owns
+			// the port (the definition of port_owner_mismatch), so a probe
+			// error must not drive a restart. Return the UNVERIFIED reason; the
+			// sweep observes it with a warn and leaves the daemon running
+			// (port_owner_unverified is deliberately excluded from
+			// supervisorLivenessReasonNeedsRestart). The live PID is retained
+			// for handoff because the reason stays in
+			// supervisorLivenessReasonHasLivePID.
 			return false, supervisorLivenessReasonPortOwnerUnverified
 		}
 		if !ok {
@@ -286,12 +345,27 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 	return true, ""
 }
 
+// supervisorLivenessReasonNeedsRestart reports whether a not-live reason
+// represents a CONFIRMED problem the supervisor should resolve by restarting
+// the daemon (terminate-first → respawn). Only reasons that prove the daemon
+// is no longer correctly serving its port qualify:
+//   - port_unbound: the port is not bound and the bind grace has elapsed.
+//   - port_owner_mismatch: a DIFFERENT live process owns the port.
+//   - port_owner_self: the supervisor itself owns the port (stale handoff).
+//
+// port_owner_unverified is deliberately EXCLUDED: it is a probe ERROR (the
+// OS-level owner lookup could not run), NOT proof of a dead or foreign-owned
+// daemon. Restarting on a probe failure would loop the fleet indefinitely
+// (Codex bot #268 P2). The sweep short-circuits that reason to an
+// observe-only warn with no event posted, so it never reaches this predicate
+// in practice; excluding it here keeps the "what restarts" invariant honest
+// at its source. (It DOES remain in supervisorLivenessReasonHasLivePID so the
+// startup retain-for-handoff path keeps the live PID rather than clearing it.)
 func supervisorLivenessReasonNeedsRestart(reason string) bool {
 	switch reason {
 	case supervisorLivenessReasonPortUnbound,
 		supervisorLivenessReasonPortOwnerMismatch,
-		supervisorLivenessReasonPortOwnerSelf,
-		supervisorLivenessReasonPortOwnerUnverified:
+		supervisorLivenessReasonPortOwnerSelf:
 		return true
 	default:
 		return false
