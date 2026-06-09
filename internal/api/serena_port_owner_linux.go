@@ -30,28 +30,24 @@ func loopbackPortOwnerPID(port int) (int, bool, error) {
 }
 
 func loopbackTCPListenInode(port int) (string, bool, error) {
-	inode, ok, err := loopbackTCPListenInodeFromProcNet("/proc/net/tcp", port)
-	if err != nil || ok {
-		return inode, ok, err
-	}
-	// Go daemons bind 127.0.0.1, but checking tcp6 as a no-risk fallback lets
-	// dual-stack loopback listeners be verified instead of misclassified.
-	return loopbackTCPListenInodeFromProcNet("/proc/net/tcp6", port)
+	// Liveness is tied to the IPv4 127.0.0.1 listener ONLY: this repo writes
+	// client URLs as http://127.0.0.1:<port> and the proxy bind path uses
+	// 127.0.0.1, so a daemon that is alive but listening only on ::1 (IPv6
+	// loopback) is unreachable by clients and must be treated as down. Do NOT
+	// fall back to /proc/net/tcp6 — an IPv6-only listener returning the tracked
+	// PID would make supervisorDaemonEntryLive report healthy for a daemon whose
+	// 127.0.0.1 socket is dead, suppressing the restart clients need (Codex bot
+	// #271 r2 P2).
+	return loopbackTCPListenInodeFromProcNet("/proc/net/tcp", port)
 }
 
 func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// A missing table (e.g. /proc/net/tcp6 on an IPv6-disabled host) is NOT a
-		// probe error — it just means no listener of that address family exists,
-		// so the caller's IPv4 "unbound" result must stand. Masking it as an error
-		// would propagate to port_owner_unverified and leave a wedged daemon that
-		// dropped its listener running forever instead of classifying it
-		// port_unbound (Codex bot #271 P2). Only a non-ENOENT read error
-		// (permission, I/O) is a genuine probe failure.
-		if os.IsNotExist(err) {
-			return "", false, nil
-		}
+		// /proc/net/tcp always exists on Linux (IPv4 is always present), so a
+		// read failure here is a genuine probe error — not a benign missing table.
+		// (The previous tcp6 fallback that could legitimately be absent was
+		// removed in favor of IPv4-only liveness; see loopbackTCPListenInode.)
 		return "", false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", path, err)
 	}
 	wantPort := strings.ToUpper(fmt.Sprintf("%04X", port))
@@ -73,13 +69,10 @@ func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, err
 }
 
 func isProcNetLoopbackAddress(addr string) bool {
-	switch strings.ToUpper(addr) {
-	case "0100007F", // 127.0.0.1 in /proc/net/tcp little-endian hex.
-		"00000000000000000000000001000000": // ::1 in /proc/net/tcp6.
-		return true
-	default:
-		return false
-	}
+	// 127.0.0.1 in /proc/net/tcp little-endian hex. Only the IPv4 loopback is
+	// accepted: liveness reads /proc/net/tcp exclusively (no tcp6 fallback), so
+	// the ::1 form never reaches here (Codex bot #271 r2 P2).
+	return strings.ToUpper(addr) == "0100007F"
 }
 
 func pidForSocketInode(inode string) (int, bool, error) {

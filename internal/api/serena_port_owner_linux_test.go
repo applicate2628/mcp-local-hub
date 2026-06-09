@@ -46,17 +46,3 @@ func TestLoopbackTCPListenInodeFromProcNetRequiresLoopbackListen(t *testing.T) {
 		t.Fatalf("inode=%q ok=%v, want 12345 true", inode, ok)
 	}
 }
-
-func TestLoopbackTCPListenInodeFromProcNetMissingTableIsNotError(t *testing.T) {
-	// A missing /proc/net table (e.g. /proc/net/tcp6 on an IPv6-disabled host)
-	// must be treated as "no listener of that family", NOT a probe error, so the
-	// caller's IPv4 unbound result stands and a wedged daemon is classified
-	// port_unbound rather than port_owner_unverified (Codex bot #271 P2).
-	inode, ok, err := loopbackTCPListenInodeFromProcNet(t.TempDir()+"/does-not-exist", 9099)
-	if err != nil {
-		t.Fatalf("missing table returned a probe error: %v", err)
-	}
-	if ok || inode != "" {
-		t.Fatalf("missing table inode=%q ok=%v, want \"\" false", inode, ok)
-	}
-}
