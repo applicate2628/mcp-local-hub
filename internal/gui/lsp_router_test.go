@@ -605,6 +605,43 @@ func TestLSPRouter_GitOnlyResolvedWorkspaceDoesNotAutoSpawn(t *testing.T) {
 	}
 }
 
+func TestLSPRouter_TrustedRootGitOnlyWorkspaceRefusedByMarkerGuard(t *testing.T) {
+	// Defense-in-depth (Codex bot #272 P2): even UNDER a trusted root, a git-only
+	// first-touch (ProjectMarker=false) must be refused by the restored marker
+	// guard — a broad trusted root must not let a non-project directory spawn a
+	// language daemon. The refusal is the MARKER message (not the trusted-root
+	// "is not registered" message), and AutoRegisterFn must not be called.
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/trusted/gitonly/main.py": {
+			WorkspaceRoot: "/repo/trusted/gitonly",
+			WorkspaceKey:  "trusted-gitonly",
+			Registered:    false,
+			ProjectMarker: false,
+		},
+	}}
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			t.Fatal("trusted git-only first-touch must not auto-register without a project marker")
+			return nil, errors.New("unexpected auto-register")
+		},
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) { return true, nil },
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/trusted/gitonly/main.py"}}`)
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("trusted git-only status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "no language project marker") ||
+		!strings.Contains(rr.Body.String(), "refusing .git-only") {
+		t.Fatalf("trusted git-only first-touch should hit the marker-guard refusal, got: %s", rr.Body.String())
+	}
+}
+
 func TestLSPRouter_WorkspaceNotFoundReturnsJSONRPCError(t *testing.T) {
 	s := NewServer(Config{Port: 9125})
 	s.SetLSPRouterDeps(&lspRouterDeps{

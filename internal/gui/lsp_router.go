@@ -450,6 +450,20 @@ func (s *Server) workspaceFromResolvedLSPPath(
 			"LSP workspace for "+pathArg+" is not registered; run mcphub register for this workspace before using the LSP router")
 		return nil, false
 	}
+	// Defense-in-depth on top of the trusted-root gate: even inside a trusted
+	// tree, first-touch auto-register still requires the language's own project
+	// marker, not just a .git ancestor. A broad trusted root (a home dir or
+	// monorepo parent) would otherwise let any git-only subdirectory spawn a
+	// language daemon it has no project files for — wasteful and surprising. The
+	// marker is a discovery hint, NOT an authorization boundary (the trusted-root
+	// gate above is the authorization); restoring it keeps the path-bearing
+	// branch consistent with the pathless branch, which already enforces
+	// HasProjectMarker (Codex bot #272 P2).
+	if !resolved.ProjectMarker {
+		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
+			"no language project marker for "+language+" under "+pathArg+"; refusing .git-only LSP auto-register")
+		return nil, false
+	}
 	if deps.AutoRegisterFn == nil {
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
 			"LSP auto-register is not configured", nil)
@@ -596,6 +610,16 @@ func lspPathlessWorkspace(w http.ResponseWriter, r *http.Request, deps *lspRoute
 		return nil, false
 	case 1:
 		ws := candidates[0]
+		// Trust chain (why no trusted-root gate on this branch): a pathless call
+		// re-ensures a NEW language on a workspace already bound to this session.
+		// Session candidates are populated ONLY by TouchWorkspace, which fires
+		// solely after a path-bearing call already passed the trusted-root + marker
+		// gate in workspaceFromResolvedLSPPath and forwarded successfully. So
+		// ws.WorkspaceKey/WorkspacePath is provably an already-authorized root, and
+		// the re-ensure uses that candidate's OWN identity (never an
+		// attacker-supplied path). The HasProjectMarker check below is the
+		// per-language discovery bound, consistent with the path-bearing branch
+		// (Codex review #272 sonnet F1 — documents the load-bearing invariant).
 		if deps.AutoRegisterFn == nil {
 			return &ws, true
 		}

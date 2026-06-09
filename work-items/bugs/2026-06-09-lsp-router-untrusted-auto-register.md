@@ -146,3 +146,29 @@ registry is not subject to the gate.
   router was vulnerable to the common-project-marker abuse.
 - PR #269 should be closed AFTER this branch merges (the lead does that, not the
   implementer).
+
+## Review synthesis (Codex bot + opus + sonnet review loop)
+
+- **Codex PR bot (merge gate):** 1 P2 — restore the project-marker guard on the
+  path-bearing first-touch. FIXED in `workspaceFromResolvedLSPPath` (requires
+  `resolved.ProjectMarker` AFTER the trusted-root check); test
+  `TestLSPRouter_TrustedRootGitOnlyWorkspaceRefusedByMarkerGuard`.
+- **opus (authoritative):** gate SOUND — no P1/P2. Every untrusted-input path to
+  spawn is gated, bless-only-on-explicit airtight, containment correct,
+  fail-closed everywhere, TOCTOU bounded.
+- **sonnet (breadth):** core fix confirmed; F1 (pathless trust chain
+  undocumented) addressed with a load-bearing-invariant comment in
+  `lspPathlessWorkspace`.
+
+### Deferred P3 hardening (opus verdict SOUND; none block merge; follow-up pass)
+
+- **F2** `rootContains` TrimRight strips only `os.PathSeparator` (fail-closed; canonicalization prevents in prod).
+- **F3** no file-size cap on `lsp-trusted-roots.json` read (`io.LimitReader`; same pattern as `supervisor_intent.go`).
+- **F4** per-request store read, no mtime cache (localhost throughput only).
+- **F5** `Version > 1` silently accepted (forward-compat; roots additive).
+- **F6** `MkdirAll` inherits ACL on Windows before flock (write DACL check mitigates).
+- **F7** `/api/lsp/register` `workspace_path` no length cap (localhost+same-origin gated; blessed root is canonical not raw).
+- **F8** no de-trust on `mcphub unregister` (intentional; document + optional `lsp detrust`).
+- **F9 / opus P3b** operator hand-adding `/` or a drive root re-opens whole-FS; a non-canonicalizable stored root is silently dropped — warn-on-load for depth-0 / un-canonicalizable roots.
+- **F10** package-level bless seam vars reassignable in-package (accepted test-seam pattern).
+- **opus P3a** refusal message says "not registered" even on store load error (fail-closed, imprecise diagnostics).
