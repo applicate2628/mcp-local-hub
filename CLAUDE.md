@@ -1136,18 +1136,24 @@ schema" above:
   bare-30 s-IPC-timeout bug; emit-failure is silently non-fatal.
 - `serena-auto-register-deferred-on-interlock` (`severity: info`,
   `source: reconcile`) — fired when a serena auto-register INTRODUCE
-  cutover could NOT acquire `supervisor.lock` after its reap because a
-  concurrent serena migrate/cutover reaped the same supervisor and won
-  the race for the freed lock first. The auto-register acquires the
-  interlock IMMEDIATELY AFTER its reap (bot PR #276 r2 P1 — the running
-  supervisor holds the lock, so a pre-reap acquire could never succeed),
-  so this defer is POST-reap: the cutover drives its `failPreCommit`
-  recovery restart (the race winner restarts the supervisor), rolls back
-  its registry row, and returns an honest error the `/serena/mcp` router
-  maps to 503 → the client retries (by which time the winner has
-  settled). It is deliberately a DISTINCT event, NOT a misleading
-  `spec-bearing-install-refused` / "supervisor running" (there is no
-  supervisor — a CLI peer holds the freed lock).
+  cutover could NOT acquire `supervisor.lock` because a concurrent
+  serena migrate/cutover holds it. It fires on BOTH spec-bearing
+  introduce sub-paths: (a) the introduce-WHILE-RUNNING case
+  (`needReap`) — the auto-register acquires the interlock IMMEDIATELY
+  AFTER its reap (bot PR #276 r2 P1 — the running supervisor holds the
+  lock, so a pre-reap acquire could never succeed), so a defer there is
+  POST-reap and the cutover drives its `failPreCommit` recovery restart
+  (the race winner restarts the supervisor); and (b) the
+  NO-supervisor introduce (`needStart && !needReap && !priorHasSpec`,
+  bot PR #276 r4 P2) — the spec-bearing `runtime_spec` write also holds
+  the interlock across its write→start window, and a defer there is
+  PRE-reap (nothing was reaped, so `failPreCommit` owes no recovery
+  restart — it just rolls back the registry row). Either way the
+  cutover rolls back its registry row and returns an honest error the
+  `/serena/mcp` router maps to 503 → the client retries (by which time
+  the winner has settled). It is deliberately a DISTINCT event, NOT a
+  misleading `spec-bearing-install-refused` / "supervisor running"
+  (there is no supervisor — a CLI peer holds the lock).
 
 ## Marketplace (G5, v0.3.0)
 

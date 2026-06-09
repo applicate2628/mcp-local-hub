@@ -722,6 +722,28 @@ fail-loud 503 + `mcphub supervise` operator guidance, never a silent no-supervis
 auto-register LIVE-ADD branch does NOT reap and is already §7.1-safe via `HasRuntimeSpecRow()`; it is
 unchanged and relies on the registry flock the migrate also takes for its cross-process serialization.)
 
+**Auto-register no-supervisor INTRODUCE — also holds the interlock for its no-reap spec-bearing write (bot
+PR #276 r4 P2).** The reap-then-acquire extension above covers the introduce-WHILE-RUNNING case
+(`needReap`). But the FIRST serena workspace can also be introduced while NO supervisor is running
+(`needStart && !needReap && !priorHasSpec` — e.g. the GUI is up but the supervisor crashed or has not
+started after a zero-workspace migrate). That path reaps NOTHING, yet it still writes the spec-bearing
+`runtime_spec` intent (the §7.1 introduce gate's `HasRuntimeSpecRow() && !prior` fires) and then STARTS a
+supervisor. Without the interlock that write→start window is UNPROTECTED exactly like the original migrate
+bug: the §7.1 gate passes naturally (nothing running at the probe), but an old-decoder supervisor could take
+the `supervisor.lock` singleton between the liveness probe and the auto-register's own start, read the
+just-written `runtime_spec` with `DisallowUnknownFields`, and split-brain. So the no-supervisor introduce
+ACQUIRES the SAME quiet interlock immediately BEFORE its `InstallParsedManifest`, mirroring the migrate's
+no-reap step-7e boundary (`acquireInterlockOnce` taken `if len(installWorkspaces) > 0` when neither reap
+fired) — and passes the minted bypass token into the install so the gate sees the held lock is its own
+handle. No supervisor holds the lock on this path, so the quiet `TryLock` normally succeeds; an acquire-FAIL
+means a concurrent migrate/cutover already holds it, so this cutover DEFERS — emits the distinct
+`serena-auto-register-deferred-on-interlock` info event and returns the honest 503. Because NOTHING was
+reaped on this path, `failPreCommit` owes no recovery restart (`needReap=false` → it releases the interlock
+defensively and rolls back the registry row only). The auto-register LIVE-ADD-to-a-stopped-pool case
+(`needStart && !needReap` but `priorHasSpec=true`) is NOT spec-bearing — the prior intent already carries
+`runtime_spec`, so the §7.1 introduce gate never fires — and therefore needs no interlock even when the
+supervisor is stopped.)
+
 **Kill-target identity gate — the reaper VALIDATES its target before force-killing (bot PR #276 r3 P2).**
 The double-reap "dead PID → `taskkill` exit 128 → benign no-op" reasoning above holds ONLY while the
 recorded PID stays dead. The owner sidecar `supervisor.lock.owner.json` is best-effort and SURVIVES a
