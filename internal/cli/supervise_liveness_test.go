@@ -1677,11 +1677,17 @@ func TestSupervisorLivenessSweepConcurrentWithHandlerNoRace(t *testing.T) {
 // bound+answering, supervisorDaemonEntryLive returns LIVE — a probe error is
 // not proof of a dead daemon, and the TCP answer positively confirms the
 // identity-verified PID is serving.
-func TestSupervisorDaemonEntryLive_PortOwnerProbeError_TCPUp_ReturnsLive(t *testing.T) {
+func TestSupervisorDaemonEntryLive_PortOwnerProbeError_TCPUp_PastGrace_StillUnverified(t *testing.T) {
+	// deep-sec #268 round-6: an owner-probe error past grace must NOT report a
+	// clean live just because SOME listener answers on the port — it could be a
+	// DIFFERENT process while the tracked PID is merely still alive. It must
+	// surface port_owner_unverified (warn, no restart), not suppress the
+	// ambiguity. round-2 still holds: port_owner_unverified is excluded from
+	// supervisorLivenessReasonNeedsRestart, so there is no fleet restart loop.
 	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
 		PIDAlive:    func(int) bool { return true },
 		PIDIdentity: func(process.PIDIdentityProof) error { return process.ErrProcessIdentityUnsupported },
-		PortLive:    func(int) bool { return true }, // TCP says the port answers
+		PortLive:    func(int) bool { return true }, // a (possibly FOREIGN) listener answers
 		PortOwnerPID: func(int) (int, bool, error) {
 			return 0, false, errors.New("netstat -ano failed: access denied")
 		},
@@ -1695,11 +1701,11 @@ func TestSupervisorDaemonEntryLive_PortOwnerProbeError_TCPUp_ReturnsLive(t *test
 		StartedAt:  time.Now().UTC().Add(-time.Minute), // well past bind grace
 	}
 	live, reason := supervisorDaemonEntryLive(d, entry, time.Now().UTC())
-	if !live {
-		t.Fatalf("owner-probe error + TCP up = not live (reason %q); want live (probe error is not proof of death, TCP confirms serving)", reason)
+	if live {
+		t.Fatalf("owner-probe error past grace must NOT report live just because a (possibly foreign) listener answers")
 	}
-	if reason != "" {
-		t.Fatalf("live daemon carried reason %q; want empty", reason)
+	if reason != supervisorLivenessReasonPortOwnerUnverified {
+		t.Fatalf("reason = %q, want port_owner_unverified", reason)
 	}
 }
 

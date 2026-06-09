@@ -289,22 +289,13 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 			// we could not VERIFY who owns the socket. Treating it as a kill
 			// signal restart-loops the whole fleet indefinitely because every
 			// 5s sweep repeats the same failing probe (Codex bot #268 P2,
-			// supervise_liveness.go:261). Degrade to the TCP loopback liveness
-			// probe: the PID is already alive + identity-verified at this
-			// point, so a bound+answering port is positive proof the daemon is
-			// serving — return live. Distinguish this from a confirmed owner
-			// MISMATCH below (a DIFFERENT live PID owns the port), which is a
-			// real wedged-handoff that legitimately needs a restart.
-			portLive := probe.PortLive
-			if portLive == nil {
-				portLive = supervisorPortLive
-			}
-			if portLive(d.Port) {
-				return true, ""
-			}
-			// Port not answering yet, but within the bind grace a
-			// freshly-spawned daemon may not have bound — treat as live (same
-			// grace rule as the port-unbound and TCP-probe paths below).
+			// supervise_liveness.go:261). But it is ALSO NOT proof the daemon
+			// is healthy: a bound+answering port could be a DIFFERENT process
+			// while the tracked PID is merely still alive, so we must NOT report
+			// a clean live and suppress the ambiguity just because some listener
+			// answers (Codex bot #268 P2, supervise_liveness.go:303). Within the
+			// bind grace a freshly-spawned daemon may not have bound yet — give
+			// it grace; otherwise fall through to the UNVERIFIED reason below.
 			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < supervisorPortBindGrace {
 				return true, ""
 			}
