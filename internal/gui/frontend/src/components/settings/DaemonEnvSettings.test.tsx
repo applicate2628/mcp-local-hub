@@ -125,4 +125,24 @@ describe("DaemonEnvSettings", () => {
 
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
   });
+
+  it("disables Apply on the initial empty draft and does not write a placeholder override", async () => {
+    vi.mocked(listDaemonEnv).mockResolvedValueOnce(emptyEnvResponse);
+
+    const { findByTestId } = render(<DaemonEnvSettings />);
+
+    const task = (await findByTestId("daemon-env-task")) as HTMLSelectElement;
+    await waitFor(() => expect(task.value).toBe("\\mcp-local-hub-memory-default"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const applyBtn = (await findByTestId("daemon-env-apply")) as HTMLButtonElement;
+    expect(applyBtn.disabled).toBe(true);
+    fireEvent.click(applyBtn);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(applyDaemonEnv).not.toHaveBeenCalled();
+
+    const value = (await findByTestId("daemon-env-value")) as HTMLInputElement;
+    fireEvent.input(value, { target: { value: "D:\\memory\\memory.jsonl" } });
+    await waitFor(() => expect(applyBtn.disabled).toBe(false));
+  });
 });

@@ -267,10 +267,21 @@ func TestSupervisorStartupRuntimeDoesNotHydrateStaleCleanedStoppedDaemon(t *test
 	}
 }
 
-func TestLoadSupervisorStartupRuntimeTreatsExpiredUnboundPortAsStale(t *testing.T) {
+// TestLoadSupervisorStartupRuntimeTerminatesAliveExpiredUnboundPortBeforeRespawn
+// guards the Codex bot #268 r10 P1 fix: a warm-restart entry whose recorded
+// PID is still a live identity-verified mcphub process but whose port is
+// unbound past the bind grace must be TERMINATED FIRST and respawned exactly
+// once — not cleared-as-idle-then-duplicated. The pre-fix behavior cleared
+// the live PID, omitted the task from currentRunning, and let the startup
+// reconcile spawn a replacement alongside the still-running wrapper
+// (duplicate daemon). Now loadSupervisorCurrentRunning KEEPS the live PID
+// (state row untouched, task IN currentRunning so reconcile no-ops), and the
+// immediate startup liveness sweep drives StRunning + EvManualRestart →
+// terminate-first → EvChildExit → single respawn.
+func TestLoadSupervisorStartupRuntimeTerminatesAliveExpiredUnboundPortBeforeRespawn(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`
-	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{{
 			TaskName: taskName,
@@ -278,7 +289,8 @@ func TestLoadSupervisorStartupRuntimeTreatsExpiredUnboundPortAsStale(t *testing.
 			Daemon:   "default",
 			Port:     9123,
 		}},
-	}); err != nil {
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 	startedAt := time.Now().UTC().Add(-(supervisorPortBindGrace + time.Second))
@@ -321,39 +333,36 @@ func TestLoadSupervisorStartupRuntimeTreatsExpiredUnboundPortAsStale(t *testing.
 	if err != nil {
 		t.Fatalf("loadSupervisorStartupRuntime: %v", err)
 	}
-	if len(currentRunning) != 0 || len(runningPIDs) != 0 {
-		t.Fatalf("expired unbound port must not suppress startup spawn: currentRunning=%v pids=%v", currentRunning, runningPIDs)
+	// The live-but-port-stale entry MUST stay current-running so reconcile
+	// no-ops it (no duplicate spawn) and the tracker keeps the live PID for
+	// the terminate-first handoff.
+	if !currentRunning[taskName] {
+		t.Fatalf("alive expired unbound port must stay current-running for terminate-first: %v", currentRunning)
+	}
+	if runningPIDs[taskName].PID != 22036 {
+		t.Fatalf("running PID snapshot = %+v, want live pid 22036", runningPIDs[taskName])
 	}
 	entry, ok := tracker.Get(taskName)
 	if !ok {
 		t.Fatalf("tracker entry missing for %s", taskName)
 	}
-	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
-		t.Fatalf("expired unbound port not cleared before startup reconcile: %+v", entry)
+	if entry.State != daemonRuntimeStateRunning || entry.CurrentPID != 22036 {
+		t.Fatalf("alive expired unbound port cleared before terminate-first restart: %+v", entry)
 	}
 	after, err := api.ReadSupervisorState(filepath.Join(stateDir, "supervisor-state.json"))
 	if err != nil {
-		t.Fatalf("read supervisor-state.json after stale cleanup: %v", err)
+		t.Fatalf("read supervisor-state.json after stale scan: %v", err)
 	}
 	row := after.Daemons[taskName]
-	if row.State != "idle" || row.CurrentPID != 0 || row.StartedAt != "" {
-		t.Fatalf("expired unbound port row not persisted as idle: %+v", row)
+	if row.State != "running" || row.CurrentPID != 22036 {
+		t.Fatalf("alive expired unbound port row was cleared instead of retained: %+v", row)
 	}
 
-	intent := &api.SupervisorIntentFile{
-		Version: 1,
-		Daemons: []api.SupervisorDaemon{{
-			TaskName: taskName,
-			Server:   "memory",
-			Daemon:   "default",
-			Port:     9123,
-		}},
-	}
 	intentCache := newIntentCache()
 	intentCache.Refresh(intent)
 	loop := api.NewEventLoop(16)
-	spawned := make(chan struct{}, 1)
-	terminated := make(chan struct{}, 1)
+	spawned := make(chan int, 2)
+	terminated := make(chan int, 1)
 	ctrl := &supervisorController{
 		intentCache:         intentCache,
 		eventLoop:           loop,
@@ -366,37 +375,185 @@ func TestLoadSupervisorStartupRuntimeTreatsExpiredUnboundPortAsStale(t *testing.
 				t.Fatalf("spawn task = %q, want %q", d.TaskName, taskName)
 			}
 			tracker.MarkSpawned(d.TaskName, 33000, time.Now().UTC())
-			spawned <- struct{}{}
+			spawned <- 33000
 			return nil
 		},
-		terminate: func(api.SupervisorDaemon) error {
-			terminated <- struct{}{}
+		terminate: func(d api.SupervisorDaemon) error {
+			if d.TaskName != taskName {
+				t.Fatalf("terminate task = %q, want %q", d.TaskName, taskName)
+			}
+			e, ok := tracker.Get(d.TaskName)
+			if !ok {
+				t.Fatalf("tracker entry missing for %s", d.TaskName)
+			}
+			terminated <- e.CurrentPID
 			return nil
 		},
 	}
+	// Startup hydrates the SM state to StRunning from currentRunning (the
+	// same call runSupervise makes at supervise.go before reconcile).
+	hydrateControllerRunningStates(ctrl, currentRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go loop.Run(ctx)
 
-	reconciler := NewReconciler(func(d api.SupervisorDaemon) error {
-		if d.TaskName != taskName {
-			t.Fatalf("spawn task = %q, want %q", d.TaskName, taskName)
-		}
-		t.Fatal("startup stale unbound port bypassed EventLoop state-machine path")
+	// Startup reconcile MUST treat the running entry as steady-state — no
+	// spawn, no terminate — so it never duplicates the wedged wrapper.
+	reconciler := NewReconciler(func(api.SupervisorDaemon) error {
+		t.Fatal("startup reconcile spawned a duplicate for the alive port-stale entry")
 		return nil
 	}, func(api.SupervisorDaemon) error {
-		t.Fatal("startup stale unbound port bypassed EventLoop state-machine path for terminate")
+		t.Fatal("startup reconcile terminated through the reconcile fan-out instead of the liveness sweep")
 		return nil
 	})
 	reconciler.EventLoop = loop
 	reconciler.Reconcile(intent, nil, currentRunning, time.Now().UTC())
+
+	// The immediate startup liveness sweep (the same call
+	// startSupervisorLivenessMonitor makes before its first ticker tick)
+	// drives the terminate-first restart.
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+
 	select {
-	case <-terminated:
-		t.Fatal("startup stale unbound port attempted to terminate stale PID")
-	case <-spawned:
+	case pid := <-terminated:
+		if pid != 22036 {
+			t.Fatalf("terminated pid = %d, want live pid 22036", pid)
+		}
+	case pid := <-spawned:
+		t.Fatalf("startup sweep spawned pid %d before terminating the live stale pid", pid)
 	case <-time.After(2 * time.Second):
-		t.Fatal("startup reconcile did not respawn expired unbound port immediately")
+		t.Fatal("startup sweep did not terminate the alive expired unbound port")
+	}
+
+	// No respawn until the terminated child actually exits.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("startup sweep spawned pid %d before EvChildExit", pid)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+
+	select {
+	case pid := <-spawned:
+		if pid != 33000 {
+			t.Fatalf("respawn pid = %d, want replacement 33000", pid)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminate-first startup restart did not respawn after EvChildExit")
+	}
+
+	// Exactly one respawn — no duplicate.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("startup restart spawned a duplicate replacement pid %d", pid)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestLoadSupervisorStartupRuntimeClearsPIDDeadAtPortStage is the
+// regression guard for the #268 r10 P1 fix's NOT-alive branch: when the
+// recorded PID passes the outer identity check but the inner liveness probe
+// finds it DEAD at the port stage (a TOCTOU race — the process died between
+// the two checks), the reason is pid_dead (NOT a live-PID reason), so the
+// entry must be cleared-as-idle and omitted from currentRunning. There is no
+// live process to terminate; the startup reconcile respawns it directly. The
+// live-retain branch must NOT fire for a dead PID.
+func TestLoadSupervisorStartupRuntimeClearsPIDDeadAtPortStage(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	startedAt := time.Now().UTC().Add(-(supervisorPortBindGrace + time.Second))
+	if err := api.WriteSupervisorState(filepath.Join(stateDir, "supervisor-state.json"), &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			taskName: {
+				State:         "running",
+				CurrentPID:    22036,
+				PIDGeneration: 7,
+				StartedAt:     startedAt.Format(time.RFC3339Nano),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	// Outer check: identity VERIFIED (nil) so the scan reaches the port
+	// stage without clearing on identity.
+	currentRunningVerifyPIDIdentityFn = func(process.PIDIdentityProof) error { return nil }
+	currentRunningIsPIDAliveFn = func(int) bool { return true }
+	// Inner liveness probe: PID is now DEAD → supervisorDaemonEntryLive
+	// returns reason pid_dead at the PIDAlive gate (before the port probe).
+	restoreProbe := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(int) bool { return false },
+		PortLive: func(int) bool { return false },
+	})
+	t.Cleanup(func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+		restoreProbe()
+	})
+
+	tracker, currentRunning, runningPIDs, err := loadSupervisorStartupRuntime(stateDir)
+	if err != nil {
+		t.Fatalf("loadSupervisorStartupRuntime: %v", err)
+	}
+	if len(currentRunning) != 0 || len(runningPIDs) != 0 {
+		t.Fatalf("dead PID at port stage must not be retained as running: currentRunning=%v pids=%v", currentRunning, runningPIDs)
+	}
+	entry, ok := tracker.Get(taskName)
+	if !ok {
+		t.Fatalf("tracker entry missing for %s", taskName)
+	}
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+		t.Fatalf("dead PID at port stage not cleared before reconcile: %+v", entry)
+	}
+	after, err := api.ReadSupervisorState(filepath.Join(stateDir, "supervisor-state.json"))
+	if err != nil {
+		t.Fatalf("read supervisor-state.json: %v", err)
+	}
+	row := after.Daemons[taskName]
+	if row.State != "idle" || row.CurrentPID != 0 || row.StartedAt != "" {
+		t.Fatalf("dead PID row not persisted as idle: %+v", row)
+	}
+
+	// Reconcile respawns the cleared entry directly (no terminate — there
+	// is no live process).
+	spawned := false
+	reconciler := NewReconciler(func(d api.SupervisorDaemon) error {
+		if d.TaskName != taskName {
+			t.Fatalf("spawn task = %q, want %q", d.TaskName, taskName)
+		}
+		spawned = true
+		return nil
+	}, func(api.SupervisorDaemon) error {
+		t.Fatal("dead PID at port stage must not terminate")
+		return nil
+	})
+	reconciler.Reconcile(&api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}, nil, currentRunning, time.Now().UTC())
+	if !spawned {
+		t.Fatal("dead PID at port stage was not respawned by startup reconcile")
 	}
 }
 

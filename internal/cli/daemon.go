@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -336,9 +337,6 @@ func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
 }
 
 func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
-	if daemonOverlayAlreadyApplied(os.Environ()) {
-		return nil, nil
-	}
 	stateDir, err := stateDirFunc()
 	if err != nil {
 		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
@@ -352,6 +350,33 @@ func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
 	if len(overlayEnv) == 0 {
 		return nil, nil
 	}
+	// Supervisor-applied path (marker present in os.Environ): the
+	// supervisor already ran ExpandParentPath over this same overlay row
+	// and merged the result (overlay-wins) into THIS wrapper's environment
+	// before spawning us. Re-expanding ${parent_path} here would double the
+	// parent PATH (the wrapper's PATH already IS the expanded overlay PATH),
+	// so r9 short-circuited by returning nil. But returning nil dropped the
+	// overlay keys from cfg.Env entirely, and StdioHost spawns the upstream
+	// child as append(os.Environ(), cfg.Env...) — so the manifest value in
+	// cfg.Env (last duplicate wins) CLOBBERED the supervisor's overlay value
+	// that was only present as an inherited parent entry (e.g. the memory
+	// server's MEMORY_FILE_PATH override silently reverting to the manifest
+	// default after restart — Codex bot #268 r10 P2).
+	//
+	// Fix: re-read each overlay key's ALREADY-EXPANDED value back from
+	// os.Environ() (case-insensitive on Windows, exact on POSIX, mirroring
+	// mergeDaemonEnv's PATH-collision normalizer). The overlay then WINS in
+	// cfg.Env (no manifest clobber) WITHOUT re-expanding ${parent_path} (no
+	// doubling). Keys somehow absent from os.Environ (cannot happen in
+	// production — the supervisor always sets every overlay key — but
+	// defends a hand-crafted env) fall back to expanding the literal value
+	// so the overlay still wins and no raw ${parent_path} token leaks to the
+	// child.
+	if daemonOverlayAlreadyApplied(os.Environ()) {
+		return overlayValuesFromEnv(overlayEnv, os.Environ()), nil
+	}
+	// Direct `mcphub daemon` invocation (no marker): expand ${parent_path}
+	// against our own environment exactly once.
 	expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ())
 	if err != nil {
 		_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-parent-path-resolve-failed", map[string]any{
@@ -361,6 +386,64 @@ func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
 		return overlayEnv, nil
 	}
 	return expanded, nil
+}
+
+// overlayValuesFromEnv returns a map keyed by each overlay key (preserving
+// the overlay's original key casing) whose value is read back from env —
+// the supervisor-expanded value already present in the wrapper's
+// environment. The env lookup is case-insensitive on Windows so an overlay
+// `Path` key still finds a `PATH=` entry the supervisor wrote, matching
+// mergeDaemonEnv's Windows PATH-family normalizer. A key with no matching
+// env entry (degenerate; the supervisor always materializes every overlay
+// key) falls back to expanding the literal overlay value against env so the
+// overlay value still wins and no literal ${parent_path} token reaches the
+// child.
+func overlayValuesFromEnv(overlay map[string]string, env []string) map[string]string {
+	out := make(map[string]string, len(overlay))
+	var missing map[string]string
+	for k := range overlay {
+		if v, ok := lookupEnvValueCaseFold(env, k); ok {
+			out[k] = v
+			continue
+		}
+		if missing == nil {
+			missing = map[string]string{}
+		}
+		missing[k] = overlay[k]
+	}
+	if len(missing) > 0 {
+		if expanded, err := daemon_env_overlay.ExpandParentPath(missing, env); err == nil {
+			for k, v := range expanded {
+				out[k] = v
+			}
+		} else {
+			for k, v := range missing {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+// lookupEnvValueCaseFold returns the value of key in env (a "K=V" slice),
+// matched case-insensitively on Windows and exactly on POSIX. The last
+// matching entry wins, mirroring Go exec env duplicate-key semantics.
+func lookupEnvValueCaseFold(env []string, key string) (string, bool) {
+	winCaseFold := runtime.GOOS == "windows"
+	for i := len(env) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(env[i], "=")
+		if !ok {
+			continue
+		}
+		if winCaseFold {
+			if strings.EqualFold(k, key) {
+				return v, true
+			}
+		} else if k == key {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 func daemonOverlayAlreadyApplied(env []string) bool {

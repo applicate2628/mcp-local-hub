@@ -465,6 +465,88 @@ func TestDaemonEnvWithOverlaySkipsSupervisorAppliedOverlay(t *testing.T) {
 	}
 }
 
+// TestDaemonEnvWithOverlaySupervisorAppliedOverlayWinsOverManifest is the
+// Codex bot #268 r10 P2 regression guard. A supervisor-spawned wrapper
+// inherits the overlay value in os.Environ() (the marker is set) AND carries
+// the manifest value for the SAME key. The r9 marker-skip dropped the
+// overlay from cfg.Env, so StdioHost's append(os.Environ(), cfg.Env...) let
+// the manifest value (last duplicate wins) clobber the overlay value that
+// was only present as an inherited parent entry — the memory server's
+// MEMORY_FILE_PATH override silently reverting to the manifest default after
+// restart. The fix re-reads the already-expanded overlay value back from
+// os.Environ() so the overlay WINS in cfg.Env and the upstream child sees
+// the operator override.
+func TestDaemonEnvWithOverlaySupervisorAppliedOverlayWinsOverManifest(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+	const overlayValue = `D:\memory`
+	const manifestDefault = `C:\default\memory.json`
+	// The supervisor merged the overlay value into THIS wrapper's
+	// environment (overlay-wins) before spawning us. A literal value has no
+	// ${parent_path}, so the value present in os.Environ() is exactly the
+	// overlay literal.
+	t.Setenv("MEMORY_FILE_PATH", overlayValue)
+	seedDaemonOverlay(t, stateDir, map[string]string{"MEMORY_FILE_PATH": overlayValue})
+
+	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+		"MEMORY_FILE_PATH": manifestDefault,
+	}, secrets.NewResolver(nil, nil))
+	if err != nil {
+		t.Fatalf("daemonEnvWithOverlay: %v", err)
+	}
+	// cfg.Env (the map handed to StdioHost) must carry the overlay value so
+	// it wins the append(os.Environ(), cfg.Env...) duplicate-key resolution.
+	if env["MEMORY_FILE_PATH"] != overlayValue {
+		t.Fatalf("cfg.Env MEMORY_FILE_PATH = %q, want overlay override %q (manifest default %q must not clobber)", env["MEMORY_FILE_PATH"], overlayValue, manifestDefault)
+	}
+	// Prove the EFFECTIVE value StdioHost would pass to the upstream child.
+	if got := effectiveChildValueFromEnvMap(os.Environ(), env, "MEMORY_FILE_PATH"); got != overlayValue {
+		t.Fatalf("effective child MEMORY_FILE_PATH = %q, want overlay override %q", got, overlayValue)
+	}
+}
+
+// TestDaemonEnvWithOverlaySupervisorAppliedParentPathExpandedOnce proves the
+// supervisor-applied path prepends a ${parent_path} overlay value EXACTLY
+// once: the wrapper re-reads the already-expanded value the supervisor wrote
+// instead of re-expanding ${parent_path} against its own (already-expanded)
+// PATH, which would double the parent PATH.
+func TestDaemonEnvWithOverlaySupervisorAppliedParentPathExpandedOnce(t *testing.T) {
+	for _, sep := range []string{":", ";"} {
+		t.Run("sep_"+sep, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+			t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+			parentPath := "/usr/bin" + sep + "/bin"
+			prefix := "/opt/bin"
+			supervisorAppliedPath := prefix + sep + parentPath
+			// The supervisor already expanded ${parent_path} → this is the
+			// PATH in the wrapper's environment.
+			t.Setenv("PATH", supervisorAppliedPath)
+			// A manifest PATH that would clobber the overlay if dropped.
+			seedDaemonOverlay(t, stateDir, map[string]string{"PATH": prefix + sep + "${parent_path}"})
+
+			env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+				"PATH": "/manifest/only/bin",
+			}, secrets.NewResolver(nil, nil))
+			if err != nil {
+				t.Fatalf("daemonEnvWithOverlay: %v", err)
+			}
+			got := effectiveChildValueFromEnvMap(os.Environ(), env, "PATH")
+			if got != supervisorAppliedPath {
+				t.Fatalf("effective child PATH = %q, want supervisor-applied %q (single expansion, overlay wins)", got, supervisorAppliedPath)
+			}
+			if strings.Count(got, prefix) != 1 {
+				t.Fatalf("effective child PATH = %q, want prefix %q exactly once (no double expansion)", got, prefix)
+			}
+			// The parent path must appear exactly once (no /usr/bin doubling).
+			if strings.Count(got, "/usr/bin") != 1 {
+				t.Fatalf("effective child PATH = %q, want parent /usr/bin exactly once", got)
+			}
+		})
+	}
+}
+
 func TestAppendDaemonOverlayAppliedMarkerWinsOverManifestOverlayValue(t *testing.T) {
 	env := appendDaemonOverlayAppliedMarker([]string{
 		daemonOverlayAppliedEnvVar + "=overlay-spoof",
@@ -485,6 +567,14 @@ func seedDaemonPathOverlay(t *testing.T, stateDir, pathValue string, extra map[s
 	for k, v := range extra {
 		env[k] = v
 	}
+	seedDaemonOverlay(t, stateDir, env)
+}
+
+// seedDaemonOverlay writes an operator overlay row for the memory/default
+// daemon with the supplied env map. Generalizes seedDaemonPathOverlay for
+// non-PATH keys (e.g. MEMORY_FILE_PATH).
+func seedDaemonOverlay(t *testing.T, stateDir string, env map[string]string) {
+	t.Helper()
 	if err := daemon_env_overlay.WriteOverlay(filepath.Join(stateDir, overlayBaseName), func(ov *daemon_env_overlay.Overlay) error {
 		ov.Daemons[`\mcp-local-hub-memory-default`] = daemon_env_overlay.DaemonRow{
 			Source: "operator",
@@ -497,13 +587,36 @@ func seedDaemonPathOverlay(t *testing.T, stateDir, pathValue string, extra map[s
 }
 
 func effectiveChildPathFromEnvMap(parent []string, env map[string]string) string {
-	path := lookupEnvValue(parent, "PATH")
-	for k, v := range env {
-		if strings.EqualFold(k, "PATH") {
-			path = v
+	return effectiveChildValueFromEnvMap(parent, env, "PATH")
+}
+
+// effectiveChildValueFromEnvMap models the value the upstream child sees for
+// key when StdioHost spawns it as append(os.Environ(), cfg.Env...): the
+// parent (os.Environ) value first, then each cfg.Env entry; the last
+// matching key wins (Go exec duplicate-key semantics). PATH-family keys
+// match case-insensitively on Windows (mirrors mergeDaemonEnv); other keys
+// match exactly.
+func effectiveChildValueFromEnvMap(parent []string, env map[string]string, key string) string {
+	caseFold := runtime.GOOS == "windows" && strings.EqualFold(key, "PATH")
+	match := func(k string) bool {
+		if caseFold {
+			return strings.EqualFold(k, key)
+		}
+		return k == key
+	}
+	val := ""
+	for _, kv := range parent {
+		k, v, ok := strings.Cut(kv, "=")
+		if ok && match(k) {
+			val = v
 		}
 	}
-	return path
+	for k, v := range env {
+		if match(k) {
+			val = v
+		}
+	}
+	return val
 }
 
 func countEnvKey(env []string, key string) int {

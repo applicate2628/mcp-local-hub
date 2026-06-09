@@ -100,6 +100,13 @@ export function DaemonEnvSettings({
 
   async function apply() {
     if (!selected) return;
+    // Guard the no-op Apply: on a fresh panel the editor seeds the
+    // placeholder key with an empty value, so without this guard a user who
+    // just opens the panel and clicks Apply writes {MEMORY_FILE_PATH: ""} as a
+    // real override, pinning an empty env var and blocking auto-discovery for
+    // that row. envDirty is only true when key/value differ from the loaded
+    // baseline (Codex bot #268 r10 P2).
+    if (!envDirty) return;
     const trimmedKey = key.trim();
     if (!ENV_KEY_RE.test(trimmedKey)) {
       setBanner({ kind: "error", text: "Env key must match [A-Za-z_][A-Za-z0-9_]*." });
@@ -198,7 +205,7 @@ export function DaemonEnvSettings({
             {banner.text}
           </span>
         ) : null}
-        <button type="button" disabled={busy || !selected} onClick={() => void apply()} data-testid="daemon-env-apply">
+        <button type="button" disabled={busy || !selected || !envDirty} onClick={() => void apply()} data-testid="daemon-env-apply">
           Apply
         </button>
         <button type="button" disabled={busy} onClick={() => void refreshRows()} data-testid="daemon-env-refresh">

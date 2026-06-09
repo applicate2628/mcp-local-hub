@@ -1870,7 +1870,7 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		}
 		canonicalTask := canonicalSupervisorTaskName(taskName)
 		if port := intentPorts[canonicalTask]; port > 0 {
-			live, _ := supervisorDaemonEntryLive(api.SupervisorDaemon{
+			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
 				TaskName: canonicalTask,
 				Port:     port,
 			}, DaemonRuntimeEntry{
@@ -1879,8 +1879,28 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 				StartedAt:  startedAt,
 			}, time.Now().UTC())
 			if !live {
-				markStale(taskName)
-				continue
+				// Reason routing mirrors the r9 liveness sweep
+				// (supervise_liveness.go): a port-stale reason whose PID is
+				// STILL ALIVE (port_unbound / port_owner_{mismatch,self,
+				// unverified}) means a live-but-wedged mcphub wrapper. We
+				// must NOT clear its PID here — clearing would (a) leak the
+				// live process (the later liveness sweep reads CurrentPID=0
+				// from the just-cleaned state and skips it) AND (b) make
+				// currentRunning omit the task so the startup reconcile
+				// spawns a DUPLICATE alongside the still-running wrapper
+				// (Codex bot #268 r10 P1). Instead keep the entry running
+				// (state row untouched → tracker hydrates the live PID →
+				// the immediate startup liveness sweep terminates it FIRST
+				// then respawns exactly once). Reconcile sees it as running
+				// and no-ops, so no duplicate is spawned in the meantime.
+				// Only a NOT-alive reason (pid_dead / pid_identity_* via a
+				// TOCTOU race after the outer identity check) falls through
+				// to markStale → cleared → reconcile respawns (no live
+				// process to terminate).
+				if !supervisorLivenessReasonHasLivePID(reason) {
+					markStale(taskName)
+					continue
+				}
 			}
 		}
 		result[canonicalTask] = true

@@ -97,20 +97,39 @@ func startSupervisorLivenessMonitor(
 ) {
 	ticker := time.NewTicker(supervisorLivenessInterval)
 	defer ticker.Stop()
+	// Immediate first sweep at supervisor start, BEFORE the first ticker
+	// tick. Warm-restart leaves alive-but-port-stale daemons recorded as
+	// running in supervisor-state.json (loadSupervisorCurrentRunning keeps
+	// their live PID for exactly this handoff — Codex bot #268 r10 P1). The
+	// startup reconcile treats them as running and no-ops, so without this
+	// immediate sweep the wedged wrapper would survive the full 5s liveness
+	// interval before the terminate-first-then-respawn fires. Sweeping once
+	// up front terminates the stale PID immediately, then the ticker drives
+	// the steady-state cadence. Healthy daemons and dead-PID rows are
+	// no-ops here (dead rows were already cleared to CurrentPID=0).
+	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events)
 	for {
 		select {
 		case <-ctxDone:
 			return
 		case <-ticker.C:
-			currentIntent := intent
-			if stateDir != "" {
-				if refreshed, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json")); err == nil {
-					currentIntent = refreshed
-				}
-			}
-			sweepSupervisorLivenessOnce(stateDir, currentIntent, tracker, loop, events)
+			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events)
 		}
 	}
+}
+
+// livenessSweepIntent returns the freshest supervisor intent for a sweep:
+// the on-disk supervisor-intent.json when stateDir is set (so a mid-run
+// install/migrate that rewrote ports is honored), falling back to the
+// startup snapshot on any read error or when stateDir is empty (tests).
+func livenessSweepIntent(stateDir string, fallback *api.SupervisorIntentFile) *api.SupervisorIntentFile {
+	if stateDir == "" {
+		return fallback
+	}
+	if refreshed, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json")); err == nil {
+		return refreshed
+	}
+	return fallback
 }
 
 func sweepSupervisorLivenessOnce(
