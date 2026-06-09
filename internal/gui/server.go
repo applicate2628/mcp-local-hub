@@ -556,6 +556,7 @@ func NewServer(cfg Config) *Server {
 	registerDaemonEnvRoutes(s)
 	registerWorkspacesRoutes(s)
 	registerLSPRegisterRoutes(s)
+	registerLSPTrustedRootsRoutes(s)
 	registerSupervisorRestartRoutes(s)
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)

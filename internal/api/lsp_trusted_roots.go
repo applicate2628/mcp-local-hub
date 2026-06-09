@@ -384,6 +384,93 @@ func BlessDefaultTrustedRoot(workspaceRoot string) error {
 	return BlessTrustedRoot(path, workspaceRoot)
 }
 
+// RemoveTrustedRoot canonicalizes root and idempotently removes every
+// stored root whose canonical form equals it from the trusted-roots
+// store at path, under the SAME cross-process flock and hardened
+// state-file pipeline BlessTrustedRoot uses. It is the inverse of
+// BlessTrustedRoot and is the operator-driven "un-trust this root"
+// management surface the GUI Settings panel drives (it is NOT reachable
+// from the router's auto-register seam — removing a root only ever
+// SHRINKS trust, so it cannot re-open the vulnerability).
+//
+// Removal is by EXACT canonical equality (same case-fold/separator
+// semantics storedEqualsCanonical uses), not containment: removing a
+// broad root does NOT silently de-trust an explicitly-registered child
+// that was recorded as its own entry, matching the bless-side comment
+// that children are stored independently.
+//
+// Idempotent: removing a root that is not present (or an empty store)
+// is a no-op success and does not rewrite the file, so the published
+// file's mtime only changes when something actually changed. The
+// surviving roots are re-normalized + sorted so a hand-edited file is
+// also cleaned up on the next remove.
+func RemoveTrustedRoot(path, root string) error {
+	canonical, err := canonicalizeTrustedRoot(root)
+	if err != nil {
+		return fmt.Errorf("remove trusted root: canonicalize %q: %w", root, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("remove trusted root: mkdir state dir: %w", err)
+	}
+	lock := flock.New(path + lspTrustedRootsLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return fmt.Errorf("remove trusted root: flock %s: %w", path+lspTrustedRootsLockSuffix, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	f, err := LoadLSPTrustedRoots(path)
+	if err != nil {
+		return fmt.Errorf("remove trusted root: load %s: %w", path, err)
+	}
+
+	// Drop every stored entry whose canonical form equals the target.
+	// Compare against each entry's canonical form so a non-canonical
+	// hand-edited entry that still resolves to the target is removed too.
+	// A stored entry that fails canonicalization is retained verbatim (it
+	// cannot match the target and dropping it would be a silent edit).
+	kept := make([]string, 0, len(f.Roots))
+	removedAny := false
+	for _, stored := range f.Roots {
+		c, cerr := canonicalizeTrustedRoot(stored)
+		if cerr == nil && storedEqualsCanonical(c, canonical) {
+			removedAny = true
+			continue
+		}
+		kept = append(kept, stored)
+	}
+	if !removedAny {
+		// No matching entry: no-op success, leave the file untouched so
+		// the mtime is not churned on a removing-an-absent-root call.
+		return nil
+	}
+
+	f.Version = lspTrustedRootsVersion
+	// Re-canonicalize + dedup the survivors so a hand-edited file with
+	// duplicate or non-canonical entries is normalized on remove, keeping
+	// the on-disk file stable and reviewable (symmetric with bless).
+	f.Roots = normalizedSortedRoots(kept)
+
+	raw, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return fmt.Errorf("remove trusted root: marshal: %w", err)
+	}
+	if err := WriteStateFileBytesLockHeld(path, raw); err != nil {
+		return fmt.Errorf("remove trusted root: write %s: %w", path, err)
+	}
+	return nil
+}
+
+// RemoveDefaultTrustedRoot resolves the default store path and removes
+// root there. The GUI Settings "Trusted Roots" panel uses this.
+func RemoveDefaultTrustedRoot(root string) error {
+	path, err := DefaultLSPTrustedRootsPath()
+	if err != nil {
+		return err
+	}
+	return RemoveTrustedRoot(path, root)
+}
+
 // storedEqualsCanonical compares two already-canonical roots with the
 // same case semantics rootContains uses (EqualFold on Windows, exact
 // elsewhere).

@@ -64,6 +64,33 @@ test("All 5 section headers render", async ({ page, hub }) => {
   }
 });
 
+test("Trusted Roots section renders nav link, header, security note, and empty-state on clean home", async ({ page, hub }) => {
+  // The e2e fixture redirects LOCALAPPDATA/XDG to a temp home with no
+  // lsp-trusted-roots.json, so GET /api/lsp/trusted-roots returns an
+  // empty list and the section shows its empty-state.
+  await page.goto(hub.url + "#/settings");
+
+  // Sidebar nav link is present and uses the underscore deep-link key.
+  await expect(page.locator('a[href="#/settings?section=trusted_roots"]')).toBeVisible();
+
+  // Section header + security note render.
+  const section = page.locator('section[data-section="trusted_roots"]');
+  await expect(section.locator("h2", { hasText: "Trusted Roots" })).toBeVisible();
+  await expect(section.getByText(/Add only roots you control/)).toBeVisible();
+
+  // Empty-state appears (no roots configured on a fresh home).
+  await expect(page.locator('[data-testid="trusted-roots-empty"]')).toBeVisible();
+
+  // The Add affordance is present but disabled until a path is typed.
+  await expect(page.locator('[data-testid="trusted-roots-add-button"]')).toBeDisabled();
+});
+
+test("Trusted Roots deep-link scrolls the section into view", async ({ page, hub }) => {
+  await page.goto(hub.url + "#/settings?section=trusted_roots");
+  const target = page.locator('section[data-section="trusted_roots"]');
+  await expect(target).toBeInViewport();
+});
+
 test("Deep-link query-string scrolls Backups into view (Codex r1 P1.1)", async ({ page, hub }) => {
   await page.goto(hub.url + "#/settings?section=backups");
   const target = page.locator('section[data-section="backups"]');
