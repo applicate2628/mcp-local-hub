@@ -95,6 +95,16 @@ func underlyingReadError(err error) error {
 // or hostile huge files from being read into memory.
 const MaxOverlaySize = 64 * 1024
 
+// openOverlayFile is the indirection loadOnce uses to open the overlay
+// file. In production it is hardenedOpen (platform-specific
+// symlink/reparse-point refusal). It is a package var solely so tests can
+// inject a deterministic transient-then-present sequence — e.g. an
+// fs.ErrNotExist on the first call and a real open on the retry — to
+// exercise Load's retry/`still-missing → emptyOverlay()` classification
+// without relying on a real OS race window (which only surfaces on
+// Windows). Tests MUST restore it; production never reassigns it.
+var openOverlayFile = hardenedOpen
+
 // Overlay is the top-level YAML document persisted at
 // daemon-env-overrides.yaml under the state dir.
 type Overlay struct {
@@ -114,10 +124,11 @@ type DaemonRow struct {
 // Load reads and parses the overlay file at path.
 //
 // Behavior:
-//   - Missing file (errors.Is(err, fs.ErrNotExist) on hardenedOpen)
-//     returns an empty Overlay{Version: 1, Daemons: {}} and nil error.
-//     This lets callers treat "no file" as "no overlay" without a
-//     wrapping exists-check on every call site.
+//   - Missing file (errors.Is(err, fs.ErrNotExist) on hardenedOpen,
+//     STILL missing after the one transient retry below) returns an
+//     empty Overlay{Version: 1, Daemons: {}} and nil error. This lets
+//     callers treat "no file" as "no overlay" without a wrapping
+//     exists-check on every call site.
 //   - File present: open via hardenedOpen (Task 2.4 replaces the stub
 //     with platform-specific reparse-point / O_NOFOLLOW refusal);
 //     reject non-regular files; cap read at MaxOverlaySize+1 via
@@ -129,8 +140,15 @@ type DaemonRow struct {
 //
 // Concurrency note: a single transient open/stat failure (consistent
 // with a writer's in-flight atomic rename — see errTransientOverlayRead)
-// is retried exactly once before surfacing. Genuine parse failures are
-// never retried.
+// is retried exactly once before surfacing. fs.ErrNotExist is PART of
+// that transient class: the Windows atomic-replace window (a writer's
+// FileRenameInformationEx) can briefly surface a momentary not-found, so
+// converting the FIRST ErrNotExist straight to emptyOverlay() would
+// silently drop a just-applied operator override when a spawn-time reload
+// lands in that window. Instead the first ErrNotExist is retried once; an
+// overlay that is STILL missing after the retry is the legitimate "no
+// overlay file exists" case and returns emptyOverlay(). Genuine parse
+// failures are never retried.
 func Load(path string) (*Overlay, error) {
 	ov, err := loadOnce(path)
 	if err == nil {
@@ -138,19 +156,30 @@ func Load(path string) (*Overlay, error) {
 	}
 	if errors.Is(err, errTransientOverlayRead) {
 		// One retry: the only error class tagged transient is an
-		// open/stat I/O failure during a concurrent atomic rename. The
-		// rename is atomic, so the second attempt observes the COMPLETE
-		// old or COMPLETE new file (never partial).
+		// open/stat I/O failure during a concurrent atomic rename
+		// (including the momentary not-found the Windows replace window
+		// can surface). The rename is atomic, so the second attempt
+		// observes the COMPLETE old or COMPLETE new file (never partial),
+		// or — for a genuinely absent file — the same not-found again.
 		ov, err = loadOnce(path)
 		if err == nil {
 			return ov, nil
 		}
-		// Still failing after the retry. Surface the underlying
-		// open/stat error (strip the transient tag) so callers never
-		// see the internal "retry candidate" framing. underlyingReadError
-		// is a no-op for a non-transient error from the retry (e.g. the
-		// file now exists but is malformed), so that surfaces verbatim.
-		return nil, underlyingReadError(err)
+		// Surface the underlying open/stat error (strip the transient
+		// tag) so callers never see the internal "retry candidate"
+		// framing. underlyingReadError is a no-op for a non-transient
+		// error from the retry (e.g. the file now exists but is
+		// malformed), so that surfaces verbatim.
+		surfaced := underlyingReadError(err)
+		// Genuinely-absent file: the not-found persisted across the
+		// retry, so this is the legitimate "no overlay file" case rather
+		// than a momentary replace-window miss. Return the empty overlay
+		// exactly as the pre-retry missing-file contract did. (The
+		// stripped error preserves the fs.ErrNotExist chain via %w.)
+		if errors.Is(surfaced, fs.ErrNotExist) {
+			return emptyOverlay(), nil
+		}
+		return nil, surfaced
 	}
 	// Non-transient failure on the first attempt (parent-gate rejection,
 	// irregular file, oversize, non-UTF-8, malformed YAML) — surface
@@ -159,22 +188,30 @@ func Load(path string) (*Overlay, error) {
 }
 
 // loadOnce performs a single open → stat → IsRegular → parent-gate →
-// size-cap → UTF-8 → decode pass. Open/stat I/O failures are tagged with
-// transientReadError (matches errTransientOverlayRead) so Load can decide
-// whether to retry; all other failures (parent-gate rejection, irregular
-// file, oversize, non-UTF-8, malformed YAML) are returned untagged and
-// are NOT retried.
+// size-cap → UTF-8 → decode pass. Open/stat I/O failures — INCLUDING
+// fs.ErrNotExist — are tagged with transientReadError (matches
+// errTransientOverlayRead) so Load can decide whether to retry; all other
+// failures (parent-gate rejection, irregular file, oversize, non-UTF-8,
+// malformed YAML) are returned untagged and are NOT retried.
+//
+// fs.ErrNotExist is deliberately NOT short-circuited to emptyOverlay()
+// here: on Windows the writer's atomic-replace window can surface a
+// momentary not-found, and converting the first miss to an empty overlay
+// would drop a just-applied override before Load gets a chance to retry.
+// loadOnce stays a pure single pass; Load owns the retry decision and the
+// "still missing after the retry → emptyOverlay()" interpretation. The
+// transient wrapper preserves the underlying error via %w, so the
+// fs.ErrNotExist chain survives for Load's post-retry errors.Is check.
 func loadOnce(path string) (*Overlay, error) {
-	f, err := hardenedOpen(path)
+	f, err := openOverlayFile(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return emptyOverlay(), nil
-		}
-		// Open failure that is NOT "missing file" — on Windows this is
-		// the class that can transiently appear during a writer's
-		// atomic rename (sharing violation). Tag transient so Load
-		// retries once; the surfaced error after retry is this clean
-		// open error.
+		// Open failure: either "missing file" (fs.ErrNotExist) or — on
+		// Windows — the sharing-violation/not-found class that can
+		// transiently appear during a writer's atomic rename. Both are
+		// tagged transient so Load retries once. A genuinely-absent file
+		// still reports fs.ErrNotExist on the retry, which Load maps to
+		// emptyOverlay(); a momentary replace-window miss resolves to the
+		// COMPLETE new file on the retry.
 		return nil, &transientReadError{inner: fmt.Errorf("%s: open: %w", path, err)}
 	}
 	defer f.Close()

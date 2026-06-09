@@ -2677,16 +2677,40 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			})
 			tracker.MarkExited(taskName)
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
-			// Auto-respawn: only post to dispatcher on non-clean exit.
-			// A clean exit (exit_code=0, no waitErr) is a deliberate
-			// shutdown (mcphub stop, IPC exit, manual taskkill) and
-			// should NOT trigger respawn. The dispatcher channel may be
-			// nil for legacy / test callers — guard with nil-check.
-			if crashCh != nil && (waitErr != nil || exitCode != 0) {
+			// Child-exit notification: post EVERY exit (clean and
+			// non-clean) onto crashCh so the controller's single FIFO
+			// event loop observes the real exit and can drive the SM
+			// transition for the task. Cleanliness (exit_code==0 &&
+			// no waitErr) is carried implicitly in the crashEvent fields
+			// and re-derived by runCrashEventBridge into the LoopEvent's
+			// `clean_exit` body flag.
+			//
+			// Why clean exits must also post (Codex bot #268 P1,
+			// supervisor_controller.go:893): during a controller-driven
+			// restart an OWN daemon that handles SIGTERM and exits 0 has
+			// NO real EvChildExit posted if clean exits are suppressed
+			// here. The StExiting synthesize gate suppresses the
+			// synthetic exit for own-spawned tasks (owned==true), so the
+			// SM would wedge in StExiting with queued_action=respawn
+			// never consumed — daemon killed, never respawned. Posting
+			// the clean exit gives the controller the real EvChildExit it
+			// needs to complete the queued respawn.
+			//
+			// The deliberate-shutdown contract (clean exit on a daemon
+			// that was NOT being restarted must NOT trigger respawn) is
+			// preserved at the CONTROLLER, not here: handleLoopEvent
+			// drops a clean_exit EvChildExit when the task is still in
+			// StRunning (no controller-driven exit in flight), so a plain
+			// `mcphub stop` / external clean kill at steady state never
+			// reaches the StRunning->StBackoffWaiting respawn path.
+			//
+			// The dispatcher channel may be nil for legacy / test callers
+			// — guard with nil-check.
+			if crashCh != nil {
 				select {
 				case crashCh <- crashEvent{Daemon: d, ExitCode: exitCode, WaitErr: waitErr}:
 				default:
-					// Dispatcher backlog full (>64 concurrent crashes
+					// Dispatcher backlog full (>64 concurrent exits
 					// pending). Drop this respawn signal and audit-log
 					// it. Operator must restart supervisor to recover.
 					_ = events.Emit(api.SupervisorEvent{

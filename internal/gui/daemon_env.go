@@ -125,6 +125,11 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest, "UNKNOWN_TASK")
 		return
 	}
+	if api.IsMaintenanceTaskName(taskName) {
+		writeAPIError(w, fmt.Errorf("task_name %q is a maintenance task, not a daemon with env overrides", req.TaskName),
+			http.StatusBadRequest, "MAINTENANCE_TASK")
+		return
+	}
 
 	// Empty-env no-op short-circuit: the EnvDrawer sends `env: {}` when
 	// the operator clicks Apply with a blank PATH textarea (per
@@ -216,7 +221,10 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 	rows := make([]daemonEnvListRow, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
 		taskName := daemon_env_overlay.NormalizeOverlayKey(d.TaskName)
-		if taskName == "" || (taskFilter != "" && taskName != taskFilter) {
+		// Skip maintenance/watchdog rows: they are one-shot scheduler jobs,
+		// not daemon processes with env overrides; the CLI env selector
+		// filters them the same way (deep-sec #268).
+		if taskName == "" || api.IsMaintenanceTaskName(taskName) || (taskFilter != "" && taskName != taskFilter) {
 			continue
 		}
 		server := d.Server
@@ -319,6 +327,15 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	taskName := daemon_env_overlay.NormalizeOverlayKey(strings.TrimSpace(req.TaskName))
 	if taskName == "" {
 		writeAPIError(w, fmt.Errorf("task_name is required"), http.StatusBadRequest, "INVALID_ARGS")
+		return
+	}
+	// Maintenance/watchdog tasks are one-shot scheduler jobs, not daemon
+	// processes — they have no env overrides and must not be respawned via
+	// this endpoint (deep-sec #268: the env list must not expose them and
+	// must not drive /api/daemon/respawn against them).
+	if api.IsMaintenanceTaskName(taskName) {
+		writeAPIError(w, fmt.Errorf("task_name %q is a maintenance task, not a daemon", req.TaskName),
+			http.StatusBadRequest, "MAINTENANCE_TASK")
 		return
 	}
 

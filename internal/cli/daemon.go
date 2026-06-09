@@ -341,11 +341,49 @@ func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
 	}
+	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
+	supervisorApplied := daemonOverlayAlreadyApplied(os.Environ())
 	ov, err := daemon_env_overlay.Load(filepath.Join(stateDir, overlayBaseName))
 	if err != nil {
+		// Supervisor-spawned wrapper (marker present): the supervisor
+		// already loaded + expanded this same overlay row and merged the
+		// result (overlay-wins) into THIS wrapper's environment before
+		// spawning us; its own spawn path intentionally falls back to the
+		// cached startup overlay on a corrupt / temporarily-unreadable
+		// file (supervise.go "Load errors fall back to the cached startup
+		// overlay"). A FATAL error here would kill every restarted
+		// supervised daemon after an operator leaves
+		// daemon-env-overrides.yaml malformed (or a transient
+		// read-hardening failure hits) — even though the correct env is
+		// ALREADY present in os.Environ(). Degrade gracefully: warn and
+		// proceed with the already-applied env (return nil overlay map so
+		// cfg.Env carries the manifest values and the child inherits the
+		// supervisor-applied overlay values from os.Environ()). The
+		// marker path reads its overlay values back from os.Environ()
+		// anyway, so it does not NEED a successful reload here.
+		//
+		// Residual: with no successful reload the wrapper cannot
+		// reconstruct the exact overlay-key set, so for a key present in
+		// BOTH manifest and overlay the manifest entry re-appended in
+		// cfg.Env can win over the inherited overlay value (the r10
+		// overlap-key case). This only fires while the overlay file is
+		// actually unreadable — a degraded operator state — and is
+		// strictly preferable to crashing the daemon. The supervisor's
+		// cached startup overlay (already in os.Environ) remains the best
+		// available truth until the file is repaired.
+		if supervisorApplied {
+			_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-reload-degraded-supervised", map[string]any{
+				"task_name": taskName,
+				"err":       err.Error(),
+				"fallback":  "using supervisor-applied env from os.Environ (overlay file unreadable)",
+			})
+			return nil, nil
+		}
+		// Direct `mcphub daemon` invocation (no marker): the operator
+		// chose to run this daemon by hand and must see a malformed /
+		// unreadable overlay surface as a fatal error.
 		return nil, fmt.Errorf("load env overlay: %w", err)
 	}
-	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
 	overlayEnv := daemon_env_overlay.LookupOverlay(ov, taskName)
 	if len(overlayEnv) == 0 {
 		return nil, nil
@@ -372,7 +410,7 @@ func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
 	// defends a hand-crafted env) fall back to expanding the literal value
 	// so the overlay still wins and no raw ${parent_path} token leaks to the
 	// child.
-	if daemonOverlayAlreadyApplied(os.Environ()) {
+	if supervisorApplied {
 		return overlayValuesFromEnv(overlayEnv, os.Environ()), nil
 	}
 	// Direct `mcphub daemon` invocation (no marker): expand ${parent_path}

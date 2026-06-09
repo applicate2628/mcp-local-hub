@@ -28,6 +28,7 @@ package daemon_env_overlay
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -311,6 +312,200 @@ func TestLoad_ConcurrentWithWriteOverlay_NeverPartial(t *testing.T) {
 				}
 				if v := row.Env["FOO"]; v != "stateA" && v != "stateB" {
 					readerErr <- fmt.Errorf("Load returned FOO=%q, want a complete stateA/stateB value", v)
+					stop.Store(true)
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(readerErr)
+	for err := range readerErr {
+		t.Error(err)
+	}
+}
+
+// TestLoad_TransientNotFound_RetriesThenReadsPresentFile pins the
+// Conc-F6 refinement (Codex bot #268 overlay.go:170-171/173 P2): a
+// FIRST fs.ErrNotExist — the momentary not-found the Windows
+// atomic-replace window can surface — is retried, and the retry reads
+// the COMPLETE present file rather than degrading to emptyOverlay().
+//
+// Determinism on every OS comes from the openOverlayFile seam: the first
+// open returns fs.ErrNotExist (simulating the in-kernel replace window);
+// every later open delegates to the real hardenedOpen, which finds the
+// seeded file. Without the fix, loadOnce short-circuited the first
+// fs.ErrNotExist straight to emptyOverlay() and the present override was
+// silently dropped.
+func TestLoad_TransientNotFound_RetriesThenReadsPresentFile(t *testing.T) {
+	dir := apitest.HardenedTempDir(t)
+	if err := api.CheckStateDirParentWriteSafe(dir); err != nil {
+		t.Fatalf("apitest.HardenedTempDir produced a gate-rejecting parent (helper regression?): %v", err)
+	}
+	path := filepath.Join(dir, "daemon-env-overrides.yaml")
+	t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
+	t.Setenv(AllowUnhardenedStateReadEnv, "")
+
+	const key = "\\mcp-local-hub-memory-default"
+	if err := WriteOverlay(path, func(ov *Overlay) error {
+		ov.Daemons[key] = DaemonRow{Env: map[string]string{"FOO": "present"}}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed overlay: %v", err)
+	}
+
+	// Inject: first open → ErrNotExist (replace window); subsequent opens
+	// → real hardenedOpen (present file). Restore on cleanup.
+	var calls atomic.Int32
+	orig := openOverlayFile
+	t.Cleanup(func() { openOverlayFile = orig })
+	openOverlayFile = func(p string) (*os.File, error) {
+		if calls.Add(1) == 1 {
+			return nil, &fs.PathError{Op: "open", Path: p, Err: fs.ErrNotExist}
+		}
+		return orig(p)
+	}
+
+	ov, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after transient not-found: unexpected error: %v", err)
+	}
+	if ov == nil {
+		t.Fatalf("Load returned nil overlay")
+	}
+	// The retry must have read the COMPLETE present file, NOT emptyOverlay().
+	row, ok := ov.Daemons[key]
+	if !ok {
+		t.Fatalf("Load degraded to emptyOverlay() on a transient not-found; overlay=%+v (the present override was dropped)", ov.Daemons)
+	}
+	if row.Env["FOO"] != "present" {
+		t.Fatalf("Load FOO = %q, want the present override %q", row.Env["FOO"], "present")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("openOverlayFile call count = %d, want exactly 2 (one failed open + one retry)", got)
+	}
+}
+
+// TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry proves the
+// other half of the classification: a file that is STILL absent after the
+// single retry is the legitimate "no overlay file" case and returns
+// emptyOverlay() + nil — the pre-retry missing-file contract is
+// preserved. The seam forces fs.ErrNotExist on EVERY open so the retry
+// also misses; Load must NOT surface an error and must return the empty
+// overlay. It must also retry exactly once (two open attempts, not an
+// unbounded loop).
+func TestLoad_PersistentNotFound_ReturnsEmptyOverlayAfterRetry(t *testing.T) {
+	dir := apitest.HardenedTempDir(t)
+	path := filepath.Join(dir, "daemon-env-overrides.yaml")
+
+	var calls atomic.Int32
+	orig := openOverlayFile
+	t.Cleanup(func() { openOverlayFile = orig })
+	openOverlayFile = func(p string) (*os.File, error) {
+		calls.Add(1)
+		return nil, &fs.PathError{Op: "open", Path: p, Err: fs.ErrNotExist}
+	}
+
+	ov, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load on persistently-absent file: want nil error (empty-overlay contract), got %v", err)
+	}
+	if ov == nil || ov.Version != 1 || ov.Daemons == nil {
+		t.Fatalf("Load on absent file: want emptyOverlay() {Version:1, Daemons:{}}, got %+v", ov)
+	}
+	if len(ov.Daemons) != 0 {
+		t.Fatalf("Load on absent file: want 0 daemons, got %d", len(ov.Daemons))
+	}
+	// Exactly one retry: two open attempts total, never an infinite loop.
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("openOverlayFile call count = %d, want exactly 2 (initial + one retry)", got)
+	}
+}
+
+// TestLoad_PersistentNotFound_RealMissingFile is the seam-free companion:
+// a genuinely-missing real file (no injection) returns emptyOverlay() +
+// nil through the real hardenedOpen, proving the production missing-file
+// path still behaves as the contract promises after the retry rework.
+func TestLoad_PersistentNotFound_RealMissingFile(t *testing.T) {
+	dir := apitest.HardenedTempDir(t)
+	path := filepath.Join(dir, "this-overlay-does-not-exist.yaml")
+
+	ov, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load on real missing file: want nil error, got %v", err)
+	}
+	if ov == nil || len(ov.Daemons) != 0 {
+		t.Fatalf("Load on real missing file: want emptyOverlay(), got %+v", ov)
+	}
+}
+
+// TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race is the
+// concurrent property test: a Load racing a churning WriteOverlay across
+// the rename window must NEVER return emptyOverlay() while the file
+// actually exists with content. The file is seeded once and only ever
+// mutated (never removed), so the row is present in EVERY committed
+// state; any empty/missing-row read would mean a transient open miss
+// degraded to emptyOverlay() instead of retrying. On Windows the
+// atomic-replace window can surface that miss; on POSIX rename(2) never
+// does, so the assertion is simply always-satisfied there. Run with
+// -race.
+func TestLoad_TransientNotFound_NeverEmptyWhilePresent_Race(t *testing.T) {
+	dir := apitest.HardenedTempDir(t)
+	if err := api.CheckStateDirParentWriteSafe(dir); err != nil {
+		t.Fatalf("apitest.HardenedTempDir produced a gate-rejecting parent (helper regression?): %v", err)
+	}
+	path := filepath.Join(dir, "daemon-env-overrides.yaml")
+	t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
+	t.Setenv(AllowUnhardenedStateReadEnv, "")
+
+	const key = "\\mcp-local-hub-memory-default"
+	if err := WriteOverlay(path, func(ov *Overlay) error {
+		ov.Daemons[key] = DaemonRow{Env: map[string]string{"FOO": "stateA"}}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	const iters = 300
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters && !stop.Load(); i++ {
+			want := "stateA"
+			if i%2 == 1 {
+				want = "stateB"
+			}
+			_ = WriteOverlay(path, func(ov *Overlay) error {
+				row := ov.Daemons[key]
+				if row.Env == nil {
+					row.Env = map[string]string{}
+				}
+				row.Env["FOO"] = want
+				ov.Daemons[key] = row
+				return nil
+			})
+		}
+	}()
+
+	readerErr := make(chan error, 4)
+	for r := 0; r < 4; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iters && !stop.Load(); i++ {
+				ov, err := Load(path)
+				if err != nil {
+					// A non-nil error after the retry is tolerated (the
+					// writer may be mid-rename on a slow host); the property
+					// under test is "never silently empty while present".
+					continue
+				}
+				if _, ok := ov.Daemons[key]; !ok {
+					readerErr <- fmt.Errorf("Load returned emptyOverlay()/missing-row while the file exists with content: %+v", ov.Daemons)
 					stop.Store(true)
 					return
 				}

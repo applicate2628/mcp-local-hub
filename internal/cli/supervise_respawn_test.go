@@ -782,3 +782,169 @@ func TestHandleRespawn_SpawnFailurePropagates(t *testing.T) {
 		t.Fatalf("error message should mention root cause; got %q", resp.Error.Message)
 	}
 }
+
+// TestHandleRespawn_RunningDaemonRoutesThroughController is the #268 P1
+// (supervise_respawn.go:308) regression guard: when the controller is
+// wired (production) and the daemon is RUNNING, the IPC respawn must drive
+// StRunning -> EvManualRestart -> StExiting -> terminate -> respawn through
+// the controller's SM rather than calling terminateFn+spawnFn directly.
+// Routing through the controller is what records ownSpawned/
+// reaperOutstanding and serializes terminate before respawn, closing the
+// "old child's late exit drives backoff over the fresh PID" race. We assert
+// the SM reached StRunning (the respawn fired and went healthy), exactly
+// one terminate + one spawn, and the response advertises the controller
+// route.
+func TestHandleRespawn_RunningDaemonRoutesThroughController(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	var spawnCalls atomic.Int32
+	var terminateCalls atomic.Int32
+	var ctrl *supervisorController
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		if ctrl != nil {
+			ctrl.tracker.MarkSpawned(d.TaskName, 50000+int(spawnCalls.Load()), time.Now().UTC())
+		}
+		return nil
+	}
+	fakeTerminate := func(d api.SupervisorDaemon) error {
+		terminateCalls.Add(1)
+		if ctrl != nil {
+			// Production terminate returns nil only when the targeted PID is
+			// gone; mirror that by marking the tracker terminated.
+			ctrl.tracker.MarkTerminated(d.TaskName)
+		}
+		return nil
+	}
+	ctrl, _, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, fakeSpawn)
+	defer cancel()
+	ctrl.terminate = fakeTerminate
+	// Hydrate a running daemon with a live PID. It is NOT own-spawned in
+	// this controller (no real reaper), so the StExiting terminate's
+	// foreign-synthesize drives the queued respawn — exactly the warm-start
+	// handoff the controller already handles. Production own daemons get
+	// their real reaper exit instead; both reach StSpawning identically.
+	ctrl.tracker.MarkSpawned(taskName, 49999, time.Now().UTC())
+	ctrl.smStates.Store(taskName, api.StRunning)
+
+	deps, _, _ := newRespawnTestDeps(t, intent)
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(fakeSpawn, fakeTerminate)
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{
+		ID:  60,
+		Cmd: "respawn",
+		Args: map[string]any{
+			"task_name": taskName,
+			"force":     false,
+		},
+	}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final {
+		t.Fatalf("expected running respawn OK+Final; got %+v", resp)
+	}
+	resultMap, _ := resp.Result.(map[string]any)
+	if route, _ := resultMap["route"].(string); route != "controller-manual-restart" {
+		t.Fatalf("running respawn must advertise controller route; got result=%+v", resp.Result)
+	}
+	if terminateCalls.Load() != 1 {
+		t.Fatalf("running respawn must terminate exactly once through the SM; got %d", terminateCalls.Load())
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("running respawn must respawn exactly once through the SM; got %d", spawnCalls.Load())
+	}
+	// The handler returns synchronously only after the SM respawned; the
+	// daemon is back in StRunning (StSpawning -> EvHealthOK).
+	waitForRespawnSMState(t, ctrl, taskName, api.StRunning)
+}
+
+// TestHandleRespawn_ForcedQuarantineMissingSMStateHydratesAndResetsFailures
+// is the #268 P2 (supervise_respawn.go:75) regression guard: after a
+// supervisor cold restart the tracker reports `quarantine` (hydrated from
+// supervisor-state.json) but smStates is EMPTY. A forced respawn must
+// hydrate the missing SM state from the tracker so the EvManualRestart
+// routes through the QUARANTINED transition ("reset failures, ...") rather
+// than the StIdle transition that leaves the stale crash window intact.
+// Without the fix the daemon could immediately re-quarantine off the old
+// window even though the operator used force-restart recovery.
+func TestHandleRespawn_ForcedQuarantineMissingSMStateHydratesAndResetsFailures(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	var spawnCalls atomic.Int32
+	var ctrl *supervisorController
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		if ctrl != nil {
+			ctrl.tracker.MarkSpawned(d.TaskName, int(spawnCalls.Load()), time.Now().UTC())
+		}
+		return nil
+	}
+	ctrl, _, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, fakeSpawn)
+	defer cancel()
+
+	// Simulate the post-cold-restart hydration: tracker says quarantine
+	// (CurrentPID=0, the production MarkQuarantined polarity), smStates is
+	// DELIBERATELY left empty (setupControllerForB1Test does not seed it).
+	ctrl.tracker.HydrateFromState(&api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			taskName: {State: daemonRuntimeStateQuarantine, CurrentPID: 0},
+		},
+	})
+	// Prime a stale crash window that WOULD re-quarantine if not reset.
+	now := time.Now().UTC()
+	for i := 0; i < respawnQuarantineThreshold; i++ {
+		ctrl.tracker.RecordCrashAndCountInWindow(taskName, now.Add(time.Duration(i)*time.Millisecond), respawnFailureWindow)
+	}
+	if _, ok := ctrl.GetSMState(taskName); ok {
+		t.Fatalf("precondition: smStates must be empty for this missing-state case")
+	}
+
+	deps, _, terminateCalls := newRespawnTestDeps(t, intent)
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(
+		fakeSpawn,
+		func(d api.SupervisorDaemon) error {
+			terminateCalls.Add(1)
+			return errors.New("quarantined daemon has no live PID to terminate")
+		},
+	)
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{
+		ID:  61,
+		Cmd: "respawn",
+		Args: map[string]any{
+			"task_name": taskName,
+			"force":     true,
+		},
+	}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final {
+		t.Fatalf("expected forced quarantine respawn OK+Final; got %+v", resp)
+	}
+	if terminateCalls.Load() != 0 {
+		t.Fatalf("forced quarantine respawn must not terminate (CurrentPID=0); got %d terminate calls", terminateCalls.Load())
+	}
+	if spawnCalls.Load() != 1 {
+		t.Fatalf("forced quarantine respawn must spawn once through the controller; got %d", spawnCalls.Load())
+	}
+	waitForRespawnSMState(t, ctrl, taskName, api.StRunning)
+	// The QUARANTINED + EvManualRestart transition carries "reset failures",
+	// so the stale crash window must be cleared. The StIdle transition would
+	// NOT reset it (the pre-fix bug).
+	if got := ctrl.tracker.CrashCountInWindow(taskName, time.Now().UTC(), respawnFailureWindow); got != 0 {
+		t.Fatalf("forced quarantine restart must reset the failure window via the quarantined transition; got %d failures still tracked (regression: routed through StIdle, #268 P2)", got)
+	}
+}

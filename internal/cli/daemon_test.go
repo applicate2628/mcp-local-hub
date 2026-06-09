@@ -653,6 +653,105 @@ func assertPathFamilyEntries(t *testing.T, env map[string]string, want int) {
 	}
 }
 
+// writeOversizeOverlayFile writes a deterministically non-retryable
+// overlay file straight to the state dir: a body larger than
+// daemon_env_overlay.MaxOverlaySize so daemon_env_overlay.Load fails with
+// the (untagged, non-transient) size-cap error on every platform. Written
+// with os.WriteFile (NOT WriteOverlay) so the bad body lands verbatim
+// without the write-side hardening rejecting it.
+func writeOversizeOverlayFile(t *testing.T, stateDir string) {
+	t.Helper()
+	path := filepath.Join(stateDir, overlayBaseName)
+	// One byte over the cap is enough to trip "file exceeds N-byte cap".
+	body := make([]byte, daemon_env_overlay.MaxOverlaySize+1)
+	for i := range body {
+		body[i] = 'a'
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write oversize overlay: %v", err)
+	}
+}
+
+// TestDaemonOverlayEnvSupervisedReloadFailureIsNonFatal is the Codex bot
+// #268 daemon.go:346 P2 regression guard. When the supervisor marker is
+// present (supervisor-spawned wrapper), the supervisor has ALREADY loaded
+// + expanded the overlay and merged it (overlay-wins) into this wrapper's
+// os.Environ() before spawning us, falling back to the cached startup
+// overlay on a corrupt/unreadable file. A FATAL reload error in the
+// wrapper would kill every restarted supervised daemon after the operator
+// leaves daemon-env-overrides.yaml malformed. The fix degrades to a warn
+// and proceeds with the already-applied env. This test makes the overlay
+// file unreadable (oversize → non-retryable Load error) and asserts the
+// wrapper does NOT error and the child still sees the supervisor-applied
+// value carried in os.Environ().
+func TestDaemonOverlayEnvSupervisedReloadFailureIsNonFatal(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+	const overlayValue = `D:\memory`
+	// The supervisor merged the overlay value into THIS wrapper's
+	// environment before spawning us; it is present in os.Environ().
+	t.Setenv("MEMORY_FILE_PATH", overlayValue)
+
+	// Overlay file present but unreadable (oversize) → Load fails
+	// non-transiently. Under the OLD code this was fatal.
+	writeOversizeOverlayFile(t, stateDir)
+
+	// daemonOverlayEnv must NOT return an error on the marker path.
+	got, err := daemonOverlayEnv("memory", "default")
+	if err != nil {
+		t.Fatalf("daemonOverlayEnv on supervised reload failure: want non-fatal degrade, got error: %v", err)
+	}
+	// Degrade returns nil overlay map (proceed with already-applied env).
+	if got != nil {
+		t.Fatalf("daemonOverlayEnv degrade: want nil overlay map (proceed with os.Environ), got %v", got)
+	}
+
+	// End-to-end through daemonEnvWithOverlay: the wrapper must still
+	// build cfg.Env without error, and the child (append(os.Environ(),
+	// cfg.Env...)) must still see the supervisor-applied override because
+	// it is inherited from os.Environ() and the manifest here does not
+	// carry MEMORY_FILE_PATH (no overlap-key clobber in this case).
+	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+		"OTHER_KEY": "manifest-only",
+	}, secrets.NewResolver(nil, nil))
+	if err != nil {
+		t.Fatalf("daemonEnvWithOverlay on supervised reload failure: want non-fatal, got error: %v", err)
+	}
+	if got := effectiveChildValueFromEnvMap(os.Environ(), env, "MEMORY_FILE_PATH"); got != overlayValue {
+		t.Fatalf("effective child MEMORY_FILE_PATH = %q, want supervisor-applied override %q (inherited from os.Environ)", got, overlayValue)
+	}
+}
+
+// TestDaemonOverlayEnvDirectReloadFailureSurfacesError is the companion:
+// a DIRECT `mcphub daemon` invocation (no supervisor marker) with the same
+// unreadable overlay MUST surface the load error. The operator chose to
+// run the daemon by hand and should see a malformed/unreadable overlay
+// rather than launching with a silently-dropped override.
+func TestDaemonOverlayEnvDirectReloadFailureSurfacesError(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	// No daemonOverlayAppliedEnvVar marker — direct invocation. Clear any
+	// inherited marker so the test is deterministic regardless of the
+	// parent shell.
+	t.Setenv(daemonOverlayAppliedEnvVar, "")
+
+	writeOversizeOverlayFile(t, stateDir)
+
+	_, err := daemonOverlayEnv("memory", "default")
+	if err == nil {
+		t.Fatalf("daemonOverlayEnv direct invocation with unreadable overlay: want surfaced error, got nil")
+	}
+	if !strings.Contains(err.Error(), "load env overlay") {
+		t.Fatalf("direct-invocation error %q does not look like the surfaced load-overlay error", err)
+	}
+	// Sanity: the underlying cause is the size-cap rejection (proves the
+	// real Load error reached the caller, not a generic replacement).
+	if !strings.Contains(err.Error(), "cap") {
+		t.Fatalf("direct-invocation error %q should carry the underlying size-cap cause", err)
+	}
+}
+
 func TestDaemonOverlayEnvKeepsLiteralValuesWhenParentPathExpansionFails(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)

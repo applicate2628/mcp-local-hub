@@ -243,13 +243,85 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
+	const gracefulTimeoutMs = 5000
+
+	// Running-daemon respawn routes THROUGH the controller's state machine
+	// (Codex bot #268 P1, supervise_respawn.go:308). The controller is now
+	// the only place that records ownSpawned/reaperOutstanding and advances
+	// the SM; a direct terminate+spawn here would leave the replacement
+	// invisible to those maps AND let the old child's late EvChildExit drive
+	// backoff/respawn over the fresh PID. Driving StRunning -> EvManualRestart
+	// -> StExiting -> terminate -> (observe exit) -> StSpawning on the single
+	// FIFO loop serializes terminate before respawn, closing that race. The
+	// controller's terminate/spawn closures are the SAME ones respawnLate
+	// holds, so spawn semantics are identical; we wait for the SM to re-fire
+	// the spawn (StRunning with a bumped PIDGeneration) within the graceful
+	// budget to keep the synchronous IPC RespawnResult contract.
+	//
+	// Gated on a KNOWN controller state of StRunning — the exact steady-state
+	// case the finding targets ("Apply + Restart" of a running daemon). In
+	// production a running daemon always has smStates==StRunning by the time
+	// an IPC respawn can reach the wired controller (own-spawn sets it, and
+	// hydrateControllerRunningStates seeds warm-start PIDs at startup). The
+	// transient mid-restart states (StSpawning / StExiting) and the
+	// ctrl-not-yet-wired window fall through to the legacy direct path
+	// below, unchanged — driving EvManualRestart at StSpawning has no SM
+	// transition and EvManualRestart at StExiting only coalesces, neither of
+	// which is the finding's scope.
+	if shouldTerminate && ctrl != nil && ctrl.eventLoop != nil &&
+		controllerStateKnown && controllerState == api.StRunning {
+		if err := ctrl.postManualRestartAndWaitRunning(taskName, time.Duration(gracefulTimeoutMs)*time.Millisecond); err != nil {
+			_ = deps.events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "ipc",
+				Event:    "supervisor-respawn-controller-restart-failed",
+				Body: map[string]any{
+					"task_name": taskName,
+					"err":       err.Error(),
+				},
+			})
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    ipcErrorRespawnFailed,
+					Message: fmt.Sprintf("controller-routed restart failed: %v", err),
+				},
+				Final: true,
+			})
+		}
+		_ = deps.events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "ipc",
+			Event:    "supervisor-respawn-via-gui",
+			Body: map[string]any{
+				"task_name": taskName,
+				"force":     force,
+				"outcome":   "spawned",
+				"route":     "controller-manual-restart",
+			},
+		})
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			OK: true,
+			Result: map[string]any{
+				"task_name": taskName,
+				"state":     "spawned",
+				"route":     "controller-manual-restart",
+			},
+			Final: true,
+		})
+	}
+
+	// Legacy / no-controller path (unit-test fixtures construct deps
+	// WITHOUT a controllerProvider, and the cold-restart pre-controller
+	// window has ctrl==nil): direct terminate+spawn of the running daemon.
+	//
 	// Graceful terminate. terminateFn marks the runtime tracker entry
 	// as exited and (for production wiring) signals the child process.
 	// We don't poll for "really exited" beyond the terminateFn return —
 	// the production tracker write happens inside terminateFn and the
 	// next spawnFn call will observe the new state.
 	termStart := time.Now()
-	const gracefulTimeoutMs = 5000
 	if shouldTerminate {
 		if err := terminateFn(*desc); err != nil {
 			// Terminate failure ABORTS the respawn (closes bot PR#222 P2-4:
@@ -299,6 +371,17 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	var spawnErr error
 	routeNonRunningRespawnThroughController := false
 	if !shouldTerminate {
+		// Seed the controller SM state from the persisted tracker state
+		// when the controller has no entry yet (post-cold-restart window:
+		// the tracker is hydrated from supervisor-state.json before the
+		// controller has observed the task). Without this, a forced
+		// respawn of a quarantined/backoff task would route through the
+		// StIdle transition and skip the failure-window reset, letting the
+		// daemon immediately re-quarantine off the stale crash window
+		// (Codex bot #268 P2, supervise_respawn.go:75).
+		if ctrl != nil {
+			ctrl.hydrateSMStateFromTrackerIfMissing(taskName)
+		}
 		routeNonRunningRespawnThroughController, spawnErr = shouldRouteNonRunningRespawnThroughController(ctrl, taskName)
 	}
 	if spawnErr == nil {
