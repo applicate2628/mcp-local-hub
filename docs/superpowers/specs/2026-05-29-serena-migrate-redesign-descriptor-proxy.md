@@ -733,17 +733,43 @@ process. To close this, the supervisor reapers (`forceKillSupervisor` for rollba
 `v5UpgradeDeps.ForceKillSupervisor` — the production reap primitive that `ReapSupervisorForRestart` calls
 for BOTH the serena migrate and the auto-register INTRODUCE cutover,
 [internal/cli/install_migration_wiring_windows.go](../../../internal/cli/install_migration_wiring_windows.go))
-NAME and VALIDATE their target before the kill: `supervisorPIDIsLiveMcphubSupervisor(pid)` resolves the PID
-via the existing tested `process.LookupProcessIdentity` primitive and requires the image basename to be
-`mcphub`/`mcphub.exe` AND the command-line to be a `supervise` invocation (a supervisor runs `mcphub
-supervise [--strict-mode]` — `spawnSupervisorDetached` / `runSupervise`). A PID that fails the gate
-(reused-by-an-unrelated-process, a non-supervisor `mcphub gui`/`daemon`, or already gone /
-`ErrProcessNotFound`) is treated as "no supervisor to reap" and is NOT killed — exactly as a genuinely
-absent supervisor is treated. This is the ROOT fix: the reaper no longer blindly trusts the sidecar PID, so
-the kill-race the interlock prevents on the ACQUIRE axis cannot re-enter through a stale-sidecar/PID-reuse
-KILL on a process the reaper never confirmed is a supervisor. (A corrupt sidecar — `PID <= 0` — is still a
-propagated error on the upgrade reaper per codex r4; the identity gate only suppresses the
-live-but-not-a-supervisor case the reuse hazard introduces.) This gate covers all three reaping flows
+NAME and VALIDATE their target before the kill via `supervisorPIDIsLiveMcphubSupervisor(pid, sidecarStartedAt)`,
+which resolves the PID through the existing tested `process.LookupProcessIdentity` primitive and applies the
+**same four-gate ownership check as the sibling daemon-reap path** `migration.fourGateOwnershipCheck`
+([internal/migration/journal.go](../../../internal/migration/journal.go)), keyed on the `supervise`
+subcommand instead of `daemon` (hardened to parity per the fable-5 #276 security review):
+
+1. **Image basename** = `mcphub`/`mcphub.exe` (case-insensitive).
+2. **argv-token**: argv[1] parsed from the command-line must equal `supervise` EXACTLY — a token check, NOT a
+   substring (`strings.Contains`), so a path or flag value that merely *contains* the bytes `supervise`
+   (e.g. `mcphub gui --log-dir C:\supervise\logs`) cannot satisfy it. A supervisor runs `mcphub supervise
+   [--strict-mode]` (`spawnSupervisorDetached` / `runSupervise`).
+3. **Creation-time precedence**: the process's `CreationDateUnix` must PRECEDE the `StartedAt` the sidecar
+   recorded for the supervisor it names (`SupervisorLockOwner.StartedAt`, RFC3339Nano, parsed to Unix
+   seconds to match `CreationDateUnix`). A PID created at/after the sidecar write is a post-crash REUSE — the
+   recorded supervisor died and an unrelated process took its PID later — even if it happens to be another
+   `mcphub supervise` (a doomed duplicate mid-exit). An empty/unparseable `StartedAt` cannot anchor this
+   defense → fail closed, mirroring `fourGateOwnershipCheck`'s "createdUnix is zero" refusal.
+4. **Install-dir path**: `ExecutablePath` must sit under the mcphub install dir (`filepath.Dir(os.Executable)`,
+   the same anchor the forward migration uses for `migration.State.InstallDir`), anchoring against a same-user
+   attacker who spoofs name+argv from another directory. Skipped (fail-open on the path axis only) when the
+   install dir cannot be resolved, exactly as `fourGateOwnershipCheck` skips on `installDir == ""`.
+
+A PID that fails any gate (reused-by-an-unrelated-process, a non-supervisor `mcphub gui`/`daemon`, a reused
+`mcphub supervise` created after the sidecar, an exe outside the install dir, or already gone /
+`process.ErrProcessNotFound`) is treated as "no supervisor to reap" and is NOT killed — exactly as a
+genuinely absent supervisor is treated. **Transient probe errors fail the reap LOUD, not silent-success:**
+the gate returns a tri-state `(bool, error)` — `(true, nil)` kill, `(false, nil)` proven-not-a-supervisor
+no-op, and `(false, err)` for a non-`ErrProcessNotFound` lookup error (a WMI stall that survived
+`LookupProcessIdentity`'s 3 retries, a CLM-locked host). In the error case the reaper cannot PROVE the
+recorded PID is dead, so it propagates a reap FAILURE rather than reporting "nothing to kill" — closing the
+gap where a transient probe failure on a genuinely-live old supervisor would silently satisfy the
+reap-before-spec-bearing-write §7.1 guarantee (the generic `RunInstallUpgrade` path has no interlock backstop,
+so this loud-failure is load-bearing there). This is the ROOT fix: the reaper no longer blindly trusts the
+sidecar PID, so the kill-race the interlock prevents on the ACQUIRE axis cannot re-enter through a
+stale-sidecar/PID-reuse KILL on a process the reaper never confirmed is a supervisor. (A corrupt sidecar —
+`PID <= 0` — is still a propagated error on the upgrade reaper per codex r4; the identity gate only suppresses
+the live-but-not-a-supervisor case the reuse hazard introduces.) This gate covers all three reaping flows
 (migrate, auto-register INTRODUCE, rollback) because they share these two reaper functions.
 
 Why `supervisor.lock` and not a broader `migration.lock`: `migration.lock` is a DIFFERENT leaf and neither

@@ -536,68 +536,191 @@ func swapProcessLookupForTest(t *testing.T, ident process.ProcessIdentity, err e
 	}
 }
 
-// TestSupervisorPIDIsLiveMcphubSupervisor_Gate is the direct unit test of
-// the identity gate.
+// swapSupervisorReapInstallDirForTest overrides the install-dir anchor that
+// Gate 4 of the kill-target identity gate checks ExecutablePath against. An
+// empty dir disables Gate 4 (mirrors fourGateOwnershipCheck's installDir==""
+// skip); a non-empty dir exercises it deterministically without touching the
+// real executable layout.
+func swapSupervisorReapInstallDirForTest(t *testing.T, dir string) {
+	t.Helper()
+	orig := supervisorReapInstallDirFn
+	t.Cleanup(func() { supervisorReapInstallDirFn = orig })
+	supervisorReapInstallDirFn = func() string { return dir }
+}
+
+// liveSupervisorStartedAt is the sidecar StartedAt the gate tests anchor the
+// creation-time gate against. liveSupervisorCreatedUnix precedes it (a genuine
+// supervisor that booted before its own sidecar write); reusedCreatedUnix
+// follows it (a post-crash PID reuse) to falsify the creation-time gate. Both
+// are DERIVED from the parsed StartedAt so they cannot drift from the literal.
+const liveSupervisorStartedAt = "2026-05-17T00:00:00Z"
+
+var (
+	liveSupervisorStartedAtUnix = mustParseUnix(liveSupervisorStartedAt)
+	liveSupervisorCreatedUnix   = liveSupervisorStartedAtUnix - 3600 // 1h before
+	reusedCreatedUnix           = liveSupervisorStartedAtUnix + 3600 // 1h after
+)
+
+func mustParseUnix(rfc3339 string) int64 {
+	t, err := time.Parse(time.RFC3339Nano, rfc3339)
+	if err != nil {
+		panic(err)
+	}
+	return t.Unix()
+}
+
+// TestSupervisorPIDIsLiveMcphubSupervisor_Gate is the direct unit test of the
+// four-gate kill-target identity gate (basename + argv[1]=="supervise" +
+// creation-time precedence + install-dir path). Hardened to
+// fourGateOwnershipCheck parity per the fable-5 #276 security review.
 func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 	const pid = 4242
+	const installDir = `C:\Users\dev\.local\bin`
+	const exeUnderInstall = `C:\Users\dev\.local\bin\mcphub.exe`
 	cases := []struct {
-		name  string
-		ident process.ProcessIdentity
-		err   error
-		want  bool
+		name      string
+		ident     process.ProcessIdentity
+		startedAt string
+		err       error
+		want      bool
+		wantErr   bool
 	}{
 		{
-			name:  "live mcphub supervisor (exe)",
-			ident: process.ProcessIdentity{Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`},
-			want:  true,
+			name: "live mcphub supervisor (exe)",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`,
+				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      true,
 		},
 		{
-			name:  "live mcphub supervisor (no .exe basename)",
-			ident: process.ProcessIdentity{Basename: "mcphub", CommandLine: `/usr/local/bin/mcphub supervise`},
-			want:  true,
+			name: "live mcphub supervisor (no .exe basename)",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub", CommandLine: `C:\Users\dev\.local\bin\mcphub supervise`,
+				ExecutablePath: `C:\Users\dev\.local\bin\mcphub`, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      true,
 		},
 		{
-			name:  "reused PID belongs to unrelated process",
-			ident: process.ProcessIdentity{Basename: "notepad.exe", CommandLine: `C:\Windows\System32\notepad.exe`},
-			want:  false,
+			name: "live mcphub supervisor (quoted image with spaces)",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `"C:\Program Files\mcphub\mcphub.exe" supervise`,
+				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      true,
 		},
 		{
-			name:  "mcphub process but NOT a supervisor (gui)",
-			ident: process.ProcessIdentity{Basename: "mcphub.exe", CommandLine: `mcphub.exe gui --no-browser`},
-			want:  false,
+			name: "reused PID belongs to unrelated process",
+			ident: process.ProcessIdentity{
+				Basename: "notepad.exe", CommandLine: `C:\Windows\System32\notepad.exe`,
+				ExecutablePath: `C:\Windows\System32\notepad.exe`, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      false,
 		},
 		{
-			name:  "mcphub process but NOT a supervisor (daemon child)",
-			ident: process.ProcessIdentity{Basename: "mcphub.exe", CommandLine: `mcphub.exe daemon --server time --daemon default`},
-			want:  false,
+			name: "mcphub process but NOT a supervisor (gui)",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `mcphub.exe gui --no-browser`,
+				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      false,
 		},
 		{
-			name:  "process gone (ErrProcessNotFound)",
+			name: "mcphub process but NOT a supervisor (daemon child)",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `mcphub.exe daemon --server time --daemon default`,
+				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      false,
+		},
+		{
+			// Finding 3: "supervise" as a substring of a path/flag value, NOT
+			// argv[1], must fail the argv-token gate.
+			name: "supervise in a path value but argv[1] is not supervise",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `mcphub.exe gui --log-dir C:\supervise\logs`,
+				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      false,
+		},
+		{
+			// Finding 1 (creation-time): a PID created AFTER the sidecar write
+			// is a reuse and must fail the creation-time precedence gate even
+			// though basename + argv + path all pass.
+			name: "reused PID created after the sidecar StartedAt",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+				ExecutablePath: exeUnderInstall, CreationDateUnix: reusedCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      false,
+		},
+		{
+			// Finding 1 (install dir): a supervisor-shaped process whose exe is
+			// OUTSIDE the install dir fails Gate 4.
+			name: "argv supervise but exe outside install dir",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `C:\Temp\evil\mcphub.exe supervise`,
+				ExecutablePath: `C:\Temp\evil\mcphub.exe`, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: liveSupervisorStartedAt,
+			want:      false,
+		},
+		{
+			// Empty/unparseable StartedAt cannot anchor the creation-time
+			// defense → fail closed (no-op), mirroring fourGateOwnershipCheck's
+			// "createdUnix is zero" refusal.
+			name: "empty sidecar StartedAt fails closed",
+			ident: process.ProcessIdentity{
+				Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
+			},
+			startedAt: "",
+			want:      false,
+		},
+		{
+			name: "process gone (ErrProcessNotFound) is a benign no-op",
 			ident: process.ProcessIdentity{},
 			err:   process.ErrProcessNotFound,
 			want:  false,
 		},
 		{
-			name:  "transient lookup error",
-			ident: process.ProcessIdentity{},
-			err:   errors.New("simulated transient WMI stall"),
-			want:  false,
+			// Finding 2: a transient (non-ErrProcessNotFound) probe error must
+			// surface as an error so the reaper does NOT report success on a
+			// possibly-live old supervisor.
+			name:    "transient lookup error propagates",
+			ident:   process.ProcessIdentity{},
+			err:     errors.New("simulated transient WMI stall"),
+			want:    false,
+			wantErr: true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			swapProcessLookupForTest(t, tc.ident, tc.err)
-			if got := supervisorPIDIsLiveMcphubSupervisor(pid); got != tc.want {
-				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor(%d) = %v; want %v", pid, got, tc.want)
+			swapSupervisorReapInstallDirForTest(t, installDir)
+			got, err := supervisorPIDIsLiveMcphubSupervisor(pid, tc.startedAt)
+			if got != tc.want {
+				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor(%d) = %v; want %v (err=%v)", pid, got, tc.want, err)
+			}
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor(%d) err = %v; wantErr %v", pid, err, tc.wantErr)
 			}
 		})
 	}
-	// PID <= 0 is rejected up front (no lookup needed).
-	if supervisorPIDIsLiveMcphubSupervisor(0) {
-		t.Fatal("PID 0 must be rejected by the gate")
+	// PID <= 0 is rejected up front (no lookup needed) — benign no-op, no error.
+	if live, err := supervisorPIDIsLiveMcphubSupervisor(0, liveSupervisorStartedAt); live || err != nil {
+		t.Fatalf("PID 0 must be a benign no-op; got live=%v err=%v", live, err)
 	}
-	if supervisorPIDIsLiveMcphubSupervisor(-1) {
-		t.Fatal("negative PID must be rejected by the gate")
+	if live, err := supervisorPIDIsLiveMcphubSupervisor(-1, liveSupervisorStartedAt); live || err != nil {
+		t.Fatalf("negative PID must be a benign no-op; got live=%v err=%v", live, err)
 	}
 }
 
@@ -625,6 +748,7 @@ func TestForceKillSupervisor_Rollback_SkipsReusedNonSupervisorPID(t *testing.T) 
 		Basename:    "python.exe",
 		CommandLine: `C:\Python\python.exe some-unrelated-script.py`,
 	}, nil)
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	if err := forceKillSupervisor(lockPath)(); err != nil {
@@ -644,14 +768,17 @@ func TestForceKillSupervisor_Rollback_KillsLiveSupervisor(t *testing.T) {
 	ownerPath := lockPath + ".owner.json"
 
 	const supPID = 4242
-	body := `{"pid":4242,"started_at":"2026-05-17T00:00:00Z"}`
+	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
 	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("seed supervisor sidecar: %v", err)
 	}
 	swapProcessLookupForTest(t, process.ProcessIdentity{
-		Basename:    "mcphub.exe",
-		CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+		Basename:         "mcphub.exe",
+		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+		ExecutablePath:   `C:\Users\dev\.local\bin\mcphub.exe`,
+		CreationDateUnix: liveSupervisorCreatedUnix,
 	}, nil)
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	if err := forceKillSupervisor(lockPath)(); err != nil {
@@ -686,6 +813,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID(t *testin
 		Basename:    "node.exe",
 		CommandLine: `C:\Program Files\nodejs\node.exe server.js`,
 	}, nil)
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
@@ -705,14 +833,17 @@ func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
 	ownerPath := lockDir + ".owner.json"
 
 	const supPID = 4242
-	body := `{"pid":4242,"started_at":"2026-05-17T00:00:00Z"}`
+	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
 	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("seed supervisor sidecar: %v", err)
 	}
 	swapProcessLookupForTest(t, process.ProcessIdentity{
-		Basename:    "mcphub.exe",
-		CommandLine: `mcphub.exe supervise --strict-mode`,
+		Basename:         "mcphub.exe",
+		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`,
+		ExecutablePath:   `C:\Users\dev\.local\bin\mcphub.exe`,
+		CreationDateUnix: liveSupervisorCreatedUnix,
 	}, nil)
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
@@ -721,5 +852,194 @@ func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
 	}
 	if len(*killed) != 1 || (*killed)[0] != supPID {
 		t.Fatalf("live supervisor PID %d must be force-killed exactly once; killed=%v", supPID, *killed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fable-5 #276 Finding 1 (PID-reuse creation-time defense) + Finding 2
+// (transient-probe-error must NOT collapse into "no supervisor → success")
+// at the REAPER level. These exercise the two reaper functions through their
+// sidecar + lookup seams, not just the gate in isolation.
+// ---------------------------------------------------------------------------
+
+// TestForceKillSupervisor_Rollback_SkipsPIDCreatedAfterSidecar is the
+// Finding-1 regression for the rollback reaper: a PID that is mcphub-shaped
+// AND runs `supervise` AND lives under the install dir but was CREATED AFTER
+// the sidecar StartedAt is a post-crash PID reuse — the recorded supervisor
+// died, an unrelated `mcphub supervise` (a doomed duplicate mid-exit, say)
+// took its PID later. The creation-time precedence gate must refuse it.
+//
+// Falsified on the unfixed code (gate without the StartedAt/creation-time
+// comparison): the reaper would kill the reused PID → killed=[31337].
+func TestForceKillSupervisor_Rollback_SkipsPIDCreatedAfterSidecar(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockPath + ".owner.json"
+
+	const reusedPID = 31337
+	body := `{"pid":31337,"started_at":"` + liveSupervisorStartedAt + `"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed reused-PID sidecar: %v", err)
+	}
+	// Supervisor-shaped in every axis EXCEPT creation time: created AFTER the
+	// sidecar write → a reuse, not the recorded supervisor.
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		Basename:         "mcphub.exe",
+		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+		ExecutablePath:   `C:\Users\dev\.local\bin\mcphub.exe`,
+		CreationDateUnix: reusedCreatedUnix,
+	}, nil)
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	if err := forceKillSupervisor(lockPath)(); err != nil {
+		t.Fatalf("forceKillSupervisor on a PID created after the sidecar must be a benign no-op; got err %v", err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("reused PID %d (created after sidecar) must NOT be force-killed; killed=%v", reusedPID, *killed)
+	}
+}
+
+// TestForceKillSupervisor_Rollback_TransientProbeError_PropagatesAndDoesNotKill
+// is the Finding-2 regression for the rollback reaper: a transient
+// (non-ErrProcessNotFound) identity-probe failure on a GENUINELY-recorded
+// supervisor PID must propagate as a reap FAILURE — the reaper cannot prove
+// the PID is dead, so it must not silently report success (which would let
+// the reap-before-write §7.1 guarantee pass). It must also not kill (it
+// cannot prove the PID is a supervisor either).
+//
+// Falsified on the unfixed code (bool gate that returned false on every
+// lookup error): the reaper returned nil (silent success) for a live
+// supervisor it could not probe.
+func TestForceKillSupervisor_Rollback_TransientProbeError_PropagatesAndDoesNotKill(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockPath + ".owner.json"
+
+	const supPID = 4242
+	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed supervisor sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{}, errors.New("simulated transient WMI stall"))
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	err := forceKillSupervisor(lockPath)()
+	if err == nil {
+		t.Fatal("transient probe error on a recorded supervisor PID must PROPAGATE (not silent success); got nil")
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("an unprovable PID must NOT be force-killed; killed=%v", *killed)
+	}
+}
+
+// TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar is the
+// Finding-1 regression for the upgrade reaper.
+func TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockDir + ".owner.json"
+
+	const reusedPID = 31337
+	body := `{"pid":31337,"started_at":"` + liveSupervisorStartedAt + `"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed reused-PID sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		Basename:         "mcphub.exe",
+		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+		ExecutablePath:   `C:\Users\dev\.local\bin\mcphub.exe`,
+		CreationDateUnix: reusedCreatedUnix,
+	}, nil)
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	if err := d.ForceKillSupervisor(""); err != nil {
+		t.Fatalf("ForceKillSupervisor on a PID created after the sidecar must be benign nil; got %v", err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("reused PID %d (created after sidecar) must NOT be force-killed; killed=%v", reusedPID, *killed)
+	}
+}
+
+// TestV5UpgradeDeps_ForceKillSupervisor_TransientProbeError_Propagates is the
+// Finding-2 regression for the upgrade reaper: a transient probe error must
+// propagate from ForceKillSupervisor so the strict RunInstallUpgrade
+// orchestrator escalates rather than treating an unprovable supervisor as
+// already-reaped. ErrProcessNotFound, by contrast, is benign (covered by the
+// gate table test).
+func TestV5UpgradeDeps_ForceKillSupervisor_TransientProbeError_Propagates(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockDir + ".owner.json"
+
+	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed supervisor sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{}, errors.New("simulated transient WMI stall"))
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	err := d.ForceKillSupervisor("")
+	if err == nil {
+		t.Fatal("transient probe error must PROPAGATE from ForceKillSupervisor (not silent success); got nil")
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("an unprovable PID must NOT be force-killed; killed=%v", *killed)
+	}
+}
+
+// TestV5UpgradeDeps_ForceKillSupervisor_NotFoundIsBenign pins the Finding-2
+// boundary: ErrProcessNotFound (PID PROVEN gone) is the one lookup-error class
+// that maps to benign no-op, distinct from the transient propagation above.
+func TestV5UpgradeDeps_ForceKillSupervisor_NotFoundIsBenign(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockDir + ".owner.json"
+
+	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed supervisor sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{}, process.ErrProcessNotFound)
+	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	if err := d.ForceKillSupervisor(""); err != nil {
+		t.Fatalf("ErrProcessNotFound (PID gone) must map to benign nil; got %v", err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("a gone PID must NOT be force-killed; killed=%v", *killed)
+	}
+}
+
+// TestSupervisorCommandLineSubcommand pins the argv-token parser (Finding 3)
+// across image-quoting and substring-trap cases.
+func TestSupervisorCommandLineSubcommand(t *testing.T) {
+	cases := []struct {
+		name    string
+		cmdline string
+		want    string
+	}{
+		{"unquoted image + supervise", `C:\bin\mcphub.exe supervise --strict-mode`, "supervise"},
+		{"quoted image with spaces + supervise", `"C:\Program Files\mcphub\mcphub.exe" supervise`, "supervise"},
+		{"gui subcommand", `mcphub.exe gui --no-browser`, "gui"},
+		{"daemon subcommand", `mcphub.exe daemon --server time --daemon default`, "daemon"},
+		{"supervise only in a flag value", `mcphub.exe gui --log-dir C:\supervise\logs`, "gui"},
+		{"image only, no argv1", `C:\bin\mcphub.exe`, ""},
+		{"empty", ``, ""},
+		{"unterminated quote", `"C:\bin\mcphub.exe supervise`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := supervisorCommandLineSubcommand(tc.cmdline); got != tc.want {
+				t.Fatalf("supervisorCommandLineSubcommand(%q) = %q; want %q", tc.cmdline, got, tc.want)
+			}
+		})
 	}
 }
