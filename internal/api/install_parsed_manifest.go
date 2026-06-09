@@ -65,6 +65,21 @@ type InstallParsedManifestOpts struct {
 	// introduce would also replace the legacy serena rows with nothing. Empty = no
 	// requirement (legacy/migrate callers that legitimately install a filtered set).
 	RequireWorkspaceKey string
+	// SupervisorLockBypass, when carrying a non-nil lock that is STILL HELD and
+	// whose path matches THIS install's gate (filepath.Join(stateDir,
+	// "supervisor.lock")), authorizes the §7.1 spec-bearing write gate below to
+	// SKIP its SupervisorRunningUnderStateDir probe — the caller has proven it is
+	// the supervisor-lock holder, so the held lock is its own handle, not a
+	// foreign (possibly-old) supervisor. The token is opaque and
+	// constructor-enforced: only a holder of a real *SupervisorLock can mint one
+	// via (*SupervisorLock).AllowSpecBearingWriteBypass(). The zero value (no
+	// lock) is the default and preserves the original fail-closed behavior for
+	// every existing call site. The migrate / serena auto-register flows (Phase
+	// 2) acquire the lock around their reap+rewrite and pass the minted token
+	// here. A nil, released, or path-mismatched token is treated as NO bypass
+	// (the probe runs → fail-closed), folding the path-mismatch check into the
+	// gate itself.
+	SupervisorLockBypass InstallParsedManifestBypass
 }
 
 // InstallParsedManifest installs a pre-parsed manifest in-process and
@@ -313,18 +328,37 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// The introduction case keeps the original FAIL-CLOSED behavior (refuse on
 	// running OR undeterminable liveness).
 	if desiredIntent.HasRuntimeSpecRow() && !priorIntent.HasRuntimeSpecRow() {
-		running, pid, probeErr := SupervisorRunningUnderStateDir(stateDir)
-		switch {
-		case probeErr != nil:
-			emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-liveness-undeterminable", 0)
-			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q: could not determine whether a supervisor is running (%v) — failing closed to avoid split-brain with an older supervisor whose intent watcher uses DisallowUnknownFields. Stop any running supervisor and resolve the probe error, then re-run the install (design §7.1)", m.Name, probeErr)
-		case running:
-			emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-running", pid)
-			pidNote := ""
-			if pid > 0 {
-				pidNote = fmt.Sprintf(" (pid %d)", pid)
+		// Verified-identity bypass (Phase 1, plan "Revision 1"). The migrate /
+		// serena auto-register flows acquire THIS gate's supervisor.lock around
+		// their reap+rewrite, so the lock the probe would see held is their OWN
+		// handle, not a foreign (possibly-old) supervisor. Skip the probe ONLY
+		// when the caller proves it holds the matching lock: a non-nil token
+		// whose lock is STILL HELD (lk.fl != nil; Release() nils it,
+		// supervisor_lock.go) AND whose lk.path equals this gate's own
+		// supervisor.lock path. A nil, released, or path-mismatched token is NO
+		// bypass → the probe runs → fail-closed. Folding the path check INTO the
+		// gate means a misconfigured Phase-2 call site (wrong resolver) cannot
+		// silently re-open the split-brain.
+		gateLockPath := filepath.Join(stateDir, "supervisor.lock")
+		if bp := opts.SupervisorLockBypass.lk; bp != nil && bp.fl != nil && bp.path == gateLockPath {
+			// Verified bypass: the caller holds this gate's exact lock. Emit the
+			// info audit row (mirrors emitSpecBearingInstallRefusedEvent) and skip
+			// the probe so the spec-bearing write proceeds.
+			emitSpecBearingInstallAllowedUnderLockEvent(m.Name, gateLockPath)
+		} else {
+			running, pid, probeErr := SupervisorRunningUnderStateDir(stateDir)
+			switch {
+			case probeErr != nil:
+				emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-liveness-undeterminable", 0)
+				return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q: could not determine whether a supervisor is running (%v) — failing closed to avoid split-brain with an older supervisor whose intent watcher uses DisallowUnknownFields. Stop any running supervisor and resolve the probe error, then re-run the install (design §7.1)", m.Name, probeErr)
+			case running:
+				emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-running", pid)
+				pidNote := ""
+				if pid > 0 {
+					pidNote = fmt.Sprintf(" (pid %d)", pid)
+				}
+				return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running%s: an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. STOP the running supervisor first (the next start will be this binary, which reads runtime_spec) — note `mcphub install --upgrade` alone leaves a supervisor running, so the Phase-4 cold-restart driver or a manual stop is required — then re-run the install (design §7.1)", m.Name, pidNote)
 			}
-			return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running%s: an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. STOP the running supervisor first (the next start will be this binary, which reads runtime_spec) — note `mcphub install --upgrade` alone leaves a supervisor running, so the Phase-4 cold-restart driver or a manual stop is required — then re-run the install (design §7.1)", m.Name, pidNote)
 		}
 	}
 
@@ -709,6 +743,39 @@ func emitSpecBearingInstallRefusedEvent(server, reason string, pid int) {
 		Source:        "install",
 		Event:         "spec-bearing-install-refused",
 		Body:          body,
+	})
+}
+
+// emitSpecBearingInstallAllowedUnderLockEvent records a best-effort INFO row to
+// supervisor-events.log when the §7.1 spec-bearing write gate is bypassed
+// because the caller proved it holds the gate's own supervisor.lock (the migrate
+// / serena auto-register interlock seam, Phase 1). It is the audit mirror of
+// emitSpecBearingInstallRefusedEvent: the refuse path emits a warn, the verified
+// bypass emits an info so an operator can see WHY a spec-bearing write was
+// allowed while a lock was held. Best-effort: a log failure never blocks or
+// alters the install.
+func emitSpecBearingInstallAllowedUnderLockEvent(server, lockPath string) {
+	stateDir, sdErr := DaemonStateDir()
+	if sdErr != nil {
+		return
+	}
+	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if openErr != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	_ = logger.Emit(SupervisorEvent{
+		SchemaVersion: SupervisorEventSchemaVersion,
+		TS:            time.Now().UTC().Format(time.RFC3339Nano),
+		Severity:      SupervisorEventSeverityInfo,
+		Source:        "install",
+		Event:         "spec-bearing-write-allowed-under-caller-lock",
+		Body: map[string]any{
+			"server":           server,
+			"matched_lock":     lockPath,
+			"gate":             "spec-bearing-supervisor-intent-write (design §7.1)",
+			"bypass_rationale": "caller holds the gate's supervisor.lock (migrate/auto-register interlock); the held lock is the caller's own handle, not a foreign supervisor",
+		},
 	})
 }
 

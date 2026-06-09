@@ -221,3 +221,36 @@ func SupervisorRunningUnderStateDir(stateDir string) (running bool, pid int, err
 	owner, _ := ReadSupervisorLockOwner(lockPath)
 	return true, owner.PID, nil
 }
+
+// InstallParsedManifestBypass is an opaque, constructor-enforced capability
+// token that authorizes InstallParsedManifest to SKIP its §7.1 spec-bearing
+// supervisor-intent write gate (install_parsed_manifest.go) — the gate that
+// otherwise refuses a runtime_spec write while a supervisor holds its singleton
+// lock. The token exists because the migrate / serena auto-register flows
+// (Phase 2) acquire that VERY lock around their reap+rewrite: to those callers
+// the held lock is THEIR OWN handle, not a foreign supervisor, so the gate's
+// fail-closed refuse is a false positive for them specifically.
+//
+// The single field is UNEXPORTED, so no code outside package api can forge a
+// non-nil token: the ONLY way to obtain one with a non-nil lk is to hold a real
+// *SupervisorLock (returned by AcquireSupervisorLock) and call
+// AllowSpecBearingWriteBypass on it. The zero value (lk == nil) is "no bypass"
+// and is the default for every existing call site. The gate re-verifies
+// IDENTITY at use time (lk still held AND lk.path == the gate's own
+// supervisor.lock path), so even a real-but-mismatched or already-released token
+// is rejected — see InstallParsedManifestOpts.SupervisorLockBypass.
+//
+// It wraps a *POINTER* to the lock (not a value): SupervisorLock holds a
+// *flock.Flock, never a value lock, so copying this token (e.g. via an opts
+// copy) is safe and go vet's copylocks does not fire.
+type InstallParsedManifestBypass struct{ lk *SupervisorLock }
+
+// AllowSpecBearingWriteBypass mints the capability token that lets the holder of
+// THIS live lock bypass InstallParsedManifest's §7.1 spec-bearing write gate.
+// Calling it on a released lock yields a token whose lk.fl is nil, which the
+// gate's identity check rejects (the bypass requires the lock to be STILL held
+// at use time), so a stale token can never re-open the split-brain the gate
+// prevents.
+func (l *SupervisorLock) AllowSpecBearingWriteBypass() InstallParsedManifestBypass {
+	return InstallParsedManifestBypass{lk: l}
+}
