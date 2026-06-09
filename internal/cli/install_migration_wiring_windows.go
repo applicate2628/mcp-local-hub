@@ -410,8 +410,19 @@ var probePowerShellCLMFn = process.ProbePowerShellCLM
 // Production wires it to the real Windows implementation; tests inject
 // a fake that returns process.ErrProcessNotFound (or an arbitrary
 // other error) to drive lookupMigrationProcessIdentity's sentinel
-// mapping path.
+// mapping path. It also backs supervisorPIDIsLiveMcphubSupervisor's
+// kill-target identity gate (bot PR #276 r3 P2).
 var processLookupIdentityFn = process.LookupProcessIdentity
+
+// killPIDViaTaskkillFn is a test seam over killPIDViaTaskkill so the
+// supervisor-reaper identity-gate tests (bot PR #276 r3 P2) can observe
+// WHICH PID — if any — the reaper would force-kill WITHOUT ever shelling
+// `taskkill` against a real process. Production wires the real helper; a
+// test swaps it to record the call. The interlock/reuse hazard tests must
+// never actually kill anything (CLAUDE.md: the developer runs ~21 live
+// production daemons under their supervisor), so the kill is mediated
+// through this seam.
+var killPIDViaTaskkillFn = killPIDViaTaskkill
 
 // lookupMigrationProcessIdentity adapts process.LookupProcessIdentity
 // into the migration.ProcessIdentity shape AND maps the package-local
@@ -615,6 +626,223 @@ func pidForServerDaemonViaWmic(wantArgv string) (int, error) {
 		return pid, nil
 	}
 	return 0, migration.ErrProcessNotFound
+}
+
+// supervisorReapInstallDirFn is the test seam for the install-dir anchor of
+// the kill-target identity gate's path check (Gate 4). Production resolves it
+// to the directory of the running mcphub binary (the same anchor the migration
+// forward-flow uses for migration.State.InstallDir — filepath.Dir(os.Executable),
+// install_migration_wiring_windows.go:119). Tests inject a deterministic dir so
+// the path gate can be exercised without touching the real executable layout.
+// An empty result disables Gate 4 (mirroring fourGateOwnershipCheck's
+// installDir == "" skip, internal/migration/journal.go) — fail-open on the
+// path axis only, never on the identity axes.
+var supervisorReapInstallDirFn = defaultSupervisorReapInstallDir
+
+func defaultSupervisorReapInstallDir() string {
+	exe := canonicalMcphubPath()
+	if exe == "" {
+		return ""
+	}
+	return filepath.Dir(exe)
+}
+
+// supervisorPIDIsLiveMcphubSupervisor validates that the PID recorded in
+// supervisor.lock.owner.json is actually a LIVE mcphub supervisor process —
+// the SAME process the sidecar was written for — before any caller
+// force-kills it (bot PR #276 r3 P2; hardened to fourGateOwnershipCheck
+// parity per the fable-5 #276 security review). It is the kill-target
+// identity gate the supervisor reapers (forceKillSupervisor /
+// v5UpgradeDeps.ForceKillSupervisor) consult.
+//
+// WHY this gate exists (the root the finding names): the owner sidecar is
+// best-effort and SURVIVES a supervisor crash (a quiet interlock holder's
+// Release() deliberately leaves it in place, and an OS-killed supervisor
+// never tidies it). If that crashed supervisor's PID is later REUSED by an
+// unrelated OS process, a reaper that blindly trusts the sidecar PID would
+// `taskkill /F /T` that unrelated process. The "dead PID → taskkill exit
+// 128 → benign no-op" reasoning the §7.1.1 interlock relies on holds ONLY
+// while the PID stays dead; PID reuse breaks it. So the reaper must NAME
+// and VALIDATE its target and refuse to kill anything that fails, treating
+// a stale/reused/unrelated PID as "no supervisor to reap" (no-op), exactly
+// as a genuinely-absent supervisor is treated.
+//
+// The four gates mirror migration.fourGateOwnershipCheck
+// (internal/migration/journal.go:1505) — the established sibling for the
+// daemon-reap path — but key on the `supervise` subcommand rather than
+// `daemon`:
+//
+//	Gate 1 (image basename)  — mcphub(.exe), case-insensitive.
+//	Gate 2 (argv token)      — argv[1] == "supervise" EXACTLY (a supervisor
+//	                           runs `mcphub supervise [--strict-mode]`,
+//	                           spawnSupervisorDetached above / runSupervise in
+//	                           supervise.go). Parsed from the command-line as a
+//	                           token, NOT a substring — so a path or flag value
+//	                           merely CONTAINING "supervise" cannot satisfy it.
+//	Gate 3 (creation-time)   — the process's CreationDateUnix must PRECEDE the
+//	                           StartedAt the sidecar recorded for the supervisor
+//	                           it names. A PID created AFTER the sidecar write
+//	                           cannot be the process the sidecar was written
+//	                           for, so it is a reuse — refuse. (sidecarStartedAt
+//	                           is the RFC3339Nano string from
+//	                           SupervisorLockOwner.StartedAt; CreationDateUnix is
+//	                           Unix seconds, so the comparison is in seconds.)
+//	Gate 4 (executable path)  — ExecutablePath under the mcphub install dir,
+//	                           anchoring against a same-user attacker who spoofs
+//	                           name+argv from another directory.
+//
+// Tri-state return distinguishes the three outcomes the reaper must treat
+// differently (the fable-5 #276 Finding 2 fix):
+//
+//	(true,  nil) — proven live supervisor → kill.
+//	(false, nil) — PROVEN not the supervisor (process gone via
+//	               process.ErrProcessNotFound, or any identity gate fails) →
+//	               benign no-op ("nothing to reap").
+//	(false, err) — UNPROVABLE: a transient / non-ErrProcessNotFound lookup
+//	               error means the reaper cannot prove the supervisor is gone,
+//	               so it must NOT silently report success. The reaper
+//	               propagates this as a reap FAILURE. process.LookupProcessIdentity
+//	               already retries 3× before returning a non-ErrProcessNotFound
+//	               error, so this does not fire on routine WMI stalls.
+//
+// Reuses the existing, tested process.LookupProcessIdentity primitive via
+// the processLookupIdentityFn test seam (the same seam the migration
+// process-identity adapter uses), so this is a single owned identity path,
+// not a re-rolled probe.
+func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	ident, err := processLookupIdentityFn(pid)
+	if err != nil {
+		if errors.Is(err, process.ErrProcessNotFound) {
+			// PID is PROVEN gone — there is no supervisor to reap. Benign
+			// no-op, identical to a genuinely-absent supervisor.
+			return false, nil
+		}
+		// Transient / probe error (WMI stall survived 3 retries, CLM-locked
+		// host, etc.). We CANNOT prove the recorded PID is dead, so we must
+		// NOT report "nothing to kill" — that would let the reap-before-write
+		// §7.1 guarantee pass while a genuinely-live old supervisor keeps
+		// running. Propagate as a reap failure.
+		return false, fmt.Errorf("supervisor kill-target identity probe failed for PID %d: %w", pid, err)
+	}
+	// Gate 1: image basename is mcphub(.exe), case-insensitive. A reused PID
+	// belonging to an unrelated process (the reuse hazard the finding names)
+	// fails here.
+	base := strings.TrimSpace(ident.Basename)
+	if !strings.EqualFold(base, "mcphub.exe") && !strings.EqualFold(base, "mcphub") {
+		return false, nil
+	}
+	// Gate 2: argv[1] is EXACTLY "supervise" (token, not substring). This
+	// distinguishes the supervisor from any OTHER mcphub process that could
+	// have inherited the reused PID (a `mcphub gui` / `mcphub daemon ...` /
+	// `mcphub status`), and — unlike strings.Contains — refuses a command-line
+	// whose path or flag value merely contains the bytes "supervise".
+	if supervisorCommandLineSubcommand(ident.CommandLine) != "supervise" {
+		return false, nil
+	}
+	// Gate 3: the process creation time PRECEDES the StartedAt the sidecar
+	// recorded for the supervisor it names. A PID created at/after the sidecar
+	// write is a REUSE (the recorded supervisor died; an unrelated process took
+	// its PID later), so it is not the process the sidecar was written for.
+	// An empty/unparseable StartedAt cannot anchor this defense → fail closed
+	// (no-op), mirroring fourGateOwnershipCheck's "createdUnix is zero" refusal.
+	startedAtUnix, ok := parseSidecarStartedAtUnix(sidecarStartedAt)
+	if !ok {
+		return false, nil
+	}
+	if ident.CreationDateUnix == 0 || ident.CreationDateUnix > startedAtUnix {
+		return false, nil
+	}
+	// Gate 4: ExecutablePath under the mcphub install dir. Anchors against a
+	// same-user attacker spoofing name+argv from another directory. When the
+	// install dir cannot be resolved (empty) the gate is skipped, exactly as
+	// fourGateOwnershipCheck skips on installDir == "" — fail-open on the path
+	// axis only, never on the identity axes above.
+	installDir := supervisorReapInstallDirFn()
+	if installDir != "" {
+		absInstall, _ := filepath.Abs(installDir)
+		absExe, _ := filepath.Abs(ident.ExecutablePath)
+		if !supervisorPathHasPrefix(absExe, absInstall) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// supervisorCommandLineSubcommand extracts argv[1] (the cobra subcommand
+// token) from a process command-line, honoring quoted-image paths so a
+// `"C:\Program Files\mcphub.exe" supervise` form yields "supervise". Returns
+// "" when there is no argv[1]. Mirrors the firstArgIsGUI / cmdlineTailAfterImage
+// argv-token discipline used by the `mcphub gui --force --kill` identity gate
+// (install.go), keying on the precise daemon/command shape rather than a
+// substring — the fable-5 #276 Finding 3 fix.
+func supervisorCommandLineSubcommand(cmdline string) string {
+	rest := strings.TrimSpace(cmdline)
+	if rest == "" {
+		return ""
+	}
+	// Strip the image (argv[0]). A leading double-quote means the image path
+	// is quoted and may contain spaces — consume up to the closing quote.
+	if strings.HasPrefix(rest, `"`) {
+		if end := strings.IndexByte(rest[1:], '"'); end >= 0 {
+			rest = rest[1+end+1:]
+		} else {
+			// Unterminated quote — no parseable argv[1].
+			return ""
+		}
+	} else if idx := strings.IndexAny(rest, " \t"); idx >= 0 {
+		rest = rest[idx:]
+	} else {
+		// Image only, no argv[1].
+		return ""
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	if rest == "" {
+		return ""
+	}
+	// argv[1] is the next whitespace-delimited token.
+	if idx := strings.IndexAny(rest, " \t"); idx >= 0 {
+		return rest[:idx]
+	}
+	return rest
+}
+
+// parseSidecarStartedAtUnix parses SupervisorLockOwner.StartedAt (RFC3339Nano
+// UTC, written by AcquireSupervisorLock via time.RFC3339Nano,
+// supervisor_lock.go) into Unix SECONDS so it compares against
+// process.ProcessIdentity.CreationDateUnix (also Unix seconds). Returns
+// (0, false) on empty or unparseable input so the caller fails closed.
+func parseSidecarStartedAtUnix(startedAt string) (int64, bool) {
+	s := strings.TrimSpace(startedAt)
+	if s == "" {
+		return 0, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return 0, false
+	}
+	return t.Unix(), true
+}
+
+// supervisorPathHasPrefix reports whether path is prefix itself or any nested
+// child, case-insensitively (Windows). Mirrors migration.pathHasPrefix
+// (internal/migration/journal.go:1547), reimplemented here because that helper
+// is unexported in the migration package.
+func supervisorPathHasPrefix(path, prefix string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanPrefix := filepath.Clean(prefix)
+	if strings.EqualFold(cleanPath, cleanPrefix) {
+		return true
+	}
+	if !strings.HasSuffix(cleanPrefix, string(filepath.Separator)) {
+		cleanPrefix += string(filepath.Separator)
+	}
+	if len(cleanPath) < len(cleanPrefix) {
+		return false
+	}
+	return strings.EqualFold(cleanPath[:len(cleanPrefix)], cleanPrefix)
 }
 
 // killPIDViaTaskkill kills a process by PID via `taskkill /F /T /PID`.
@@ -923,7 +1151,23 @@ func forceKillSupervisor(lockPath string) func() error {
 		if owner.PID <= 0 {
 			return nil
 		}
-		return killPIDViaTaskkill(owner.PID)
+		// Kill-target identity gate (bot PR #276 r3 P2; hardened to
+		// fourGateOwnershipCheck parity per fable-5 #276). The owner sidecar
+		// survives a supervisor crash and its PID can be REUSED by an
+		// unrelated process. Validate the PID is the live mcphub supervisor
+		// the sidecar names (basename + argv[1]=="supervise" + creation-time
+		// precedes the sidecar StartedAt + exe under install dir) before
+		// force-killing it. A proven-not-a-supervisor PID is a no-op; a
+		// transient probe error propagates so the reaper does not silently
+		// report "nothing to kill" for a possibly-live old supervisor.
+		live, err := supervisorPIDIsLiveMcphubSupervisor(owner.PID, owner.StartedAt)
+		if err != nil {
+			return fmt.Errorf("force-kill: %w", err)
+		}
+		if !live {
+			return nil
+		}
+		return killPIDViaTaskkillFn(owner.PID)
 	}
 }
 
@@ -976,7 +1220,30 @@ func (d *v5UpgradeDeps) ForceKillSupervisor(pipePath string) error {
 	if owner.PID <= 0 {
 		return fmt.Errorf("force-kill: supervisor.lock.owner.json has invalid PID %d (corrupt sidecar)", owner.PID)
 	}
-	return killPIDViaTaskkill(owner.PID)
+	// Kill-target identity gate (bot PR #276 r3 P2; hardened to
+	// fourGateOwnershipCheck parity per fable-5 #276). The owner sidecar
+	// survives a supervisor crash and its PID can be REUSED by an unrelated
+	// process. Validate the PID is the live mcphub supervisor the sidecar
+	// names (basename + argv[1]=="supervise" + creation-time precedes the
+	// sidecar StartedAt + exe under install dir) before force-killing it:
+	//   - identity-mismatch / process-gone → benign no-op (return nil): the
+	//     reaper's contract is "kill the prior supervisor if one is running",
+	//     and a proven-not-a-supervisor PID means none is, so the upgrade /
+	//     migrate proceeds to its port-unbound verify exactly as on the
+	//     os.IsNotExist "no supervisor running" path above.
+	//   - a transient / non-ErrProcessNotFound probe error → PROPAGATE
+	//     (fable-5 #276 Finding 2): the reaper cannot prove the recorded PID
+	//     is dead, so reporting success would let the strict RunInstallUpgrade
+	//     reap-before-write guarantee pass over a possibly-live old supervisor.
+	//     (A corrupt sidecar — PID <= 0 — is still a propagated error above.)
+	live, err := supervisorPIDIsLiveMcphubSupervisor(owner.PID, owner.StartedAt)
+	if err != nil {
+		return fmt.Errorf("force-kill: %w", err)
+	}
+	if !live {
+		return nil
+	}
+	return killPIDViaTaskkillFn(owner.PID)
 }
 
 func (d *v5UpgradeDeps) StartSupervisor(binaryPath string) error {

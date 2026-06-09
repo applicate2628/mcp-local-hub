@@ -235,6 +235,49 @@ func stubStartSupported(t *testing.T, fn func() bool) func() {
 	return func() { migrateSerenaStartSupportedFn = orig }
 }
 
+// stubAcquireInterlock overrides acquireSupervisorInterlockFn for the test scope
+// (Phase 2 interlock seam). The default per-platform binding only acquires a real
+// lock on Windows; tests inject a deterministic acquire so the interlock lifetime
+// (held across reap→write→start, released before the start) is exercised on any
+// host. realInterlockAcquire below is the canonical stub: it acquires the REAL
+// supervisor.lock on the gate's exact path (api.DaemonStateDir()), matching the
+// Windows production binding cross-platform.
+func stubAcquireInterlock(t *testing.T, fn func() (*api.SupervisorLock, func(), error)) func() {
+	t.Helper()
+	orig := acquireSupervisorInterlockFn
+	acquireSupervisorInterlockFn = fn
+	return func() { acquireSupervisorInterlockFn = orig }
+}
+
+// realInterlockAcquire is a cross-platform stand-in for the Windows production
+// interlock binding (defaultAcquireSupervisorInterlock): it acquires the REAL
+// supervisor.lock on the §7.1 gate's exact path — filepath.Join(
+// api.DaemonStateDir(), "supervisor.lock") — via the QUIET acquire (flock only,
+// NO owner-sidecar write, matching production after bot PR #276 finding 1) and
+// returns the handle plus an idempotent release. Using it as the acquire stub lets
+// the lock-semantics tests (a contender's direct AcquireSupervisorLock must fail
+// while held; the bypass token must pass the gate; a concurrent reap must read the
+// OLD supervisor's intact sidecar rather than the migrate's PID) run identically on
+// Windows and POSIX CI.
+func realInterlockAcquire() (*api.SupervisorLock, func(), error) {
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		return nil, func() {}, err
+	}
+	lock, err := api.AcquireSupervisorLockQuiet(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return nil, func() {}, err
+	}
+	released := false
+	return lock, func() {
+		if released {
+			return
+		}
+		released = true
+		lock.Release()
+	}, nil
+}
+
 // seedSerenaWorkspace registers one serena workspace (sentinel row) WITH a port,
 // rooted at an existing dir (so the install fan-out does not prune it as stale).
 func seedSerenaWorkspace(t *testing.T, wsPath string) {
@@ -2633,5 +2676,396 @@ func TestMigrateSerena_PreCommitAbort_UndoesReReadAllocation_OnConcurrentRow(t *
 	// allocation back to 0).
 	if got := ports[api.WorkspaceKey(wsBefore)]; got != 0 {
 		t.Errorf("the snapshotted row must restore to its pre-migrate port 0; got %d (rows=%+v)", got, ports)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — supervisor.lock interlock (.plans/2026-06/plan-serena-lock-interlock).
+// ---------------------------------------------------------------------------
+
+// readInterlockEventsLog returns the raw JSONL bytes of the supervisor-events.log
+// under stateDir (empty string if absent). Phase-2 tests assert event presence by
+// substring — the JSONL `"event":"<name>"` token is stable across schema fields.
+// (Named distinctly from supervise_accept_loop_test.go's path-based
+// readSupervisorEventsLog to avoid a same-package redeclaration.)
+func readInterlockEventsLog(t *testing.T, stateDir string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		t.Fatalf("read supervisor-events.log: %v", err)
+	}
+	return string(raw)
+}
+
+// TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow proves the
+// interlock's core property: while the migrate HOLDS supervisor.lock across its
+// reap→write→start critical section, a concurrent direct
+// api.AcquireSupervisorLock on the gate's exact path (Revision 5 — NOT a child)
+// FAILS, so no foreign supervisor can start in the window — yet the migrate's OWN
+// spec-bearing write still commits (the typed bypass token passes the §7.1 gate
+// because the held lock is the migrate's own handle).
+func TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	defer stubStartSupported(t, func() bool { return true })()
+	// No supervisor running → no reap; the interlock is still acquired (gated on
+	// installWorkspaces>0, not willReap) so the window exists around the write.
+	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
+	// The migrate's interlock is the REAL lock on the gate path (cross-platform stub).
+	defer stubAcquireInterlock(t, realInterlockAcquire)()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+
+	// REAL install (no stub) so the §7.1 gate actually runs; INSIDE the install
+	// seam — the migrate is provably holding the interlock here (acquired at step
+	// 7e, released only just before the start) — a concurrent direct acquire on the
+	// gate's exact path MUST fail. Then delegate to the real install (forwarding
+	// opts, which carries the bypass token) so the spec-bearing write commits.
+	concurrentAcquireBlocked := false
+	concurrentProbed := false
+	restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		concurrentProbed = true
+		if lk, acqErr := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock")); acqErr != nil {
+			concurrentAcquireBlocked = true
+		} else {
+			lk.Release() // should not happen; release so we don't wedge other tests
+		}
+		return a.InstallParsedManifest(ctx, m, opts)
+	})
+	defer restoreInstall()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("migrate must succeed (the bypass token clears the §7.1 gate under the caller's own lock); got error: %v (out=%s)", err, buf.String())
+	}
+	if !concurrentProbed {
+		t.Fatal("the install seam must have run (the window-probe point)")
+	}
+	if !concurrentAcquireBlocked {
+		t.Fatal("a concurrent api.AcquireSupervisorLock during the migrate's held-interlock window MUST fail (the interlock blocks every foreign supervisor start)")
+	}
+	// The spec-bearing intent committed — proving the bypass token let the migrate's
+	// OWN write through the §7.1 gate while it held the lock.
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("read intent after interlocked migrate: %v", err)
+	}
+	if !intent.HasRuntimeSpecRow() {
+		t.Fatal("the spec-bearing intent must commit under the caller-held interlock (bypass token verified)")
+	}
+	// The audit log records the verified bypass.
+	if log := readInterlockEventsLog(t, stateDir); !strings.Contains(log, "spec-bearing-write-allowed-under-caller-lock") {
+		t.Errorf("expected the verified-bypass audit event; log=%s", log)
+	}
+}
+
+// TestMigrateSerena_Interlock_ReleasedBeforeStart proves the hand-off: the
+// interlock is RELEASED immediately before the successor start (so the started
+// supervisor can AcquireSupervisorLock itself). The start stub observes the lock
+// is ACQUIRABLE at start time.
+func TestMigrateSerena_Interlock_ReleasedBeforeStart(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	defer stubStartSupported(t, func() bool { return true })()
+	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
+	defer stubAcquireInterlock(t, realInterlockAcquire)()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	// Stub install so the run reaches the start without a real write (the interlock
+	// lifetime is the unit under test, not the §7.1 gate).
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		// Write a minimal spec-bearing intent so step-10's verify reads runtime_spec
+		// and the NORMAL start path (not the scanErr recovery) fires.
+		intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+		mi := &api.SupervisorIntentFile{
+			Version: 1,
+			Daemons: []api.SupervisorDaemon{{
+				TaskName: api.SerenaTaskNameForWorkspace(ws),
+				Server:   "serena",
+				Port:     9150,
+				RuntimeSpec: &api.DaemonRuntimeSpec{
+					SpecVersion: api.DaemonRuntimeSpecVersion, ChildCommand: "go",
+					UpstreamPort: 9151, ExternalPort: 9150, WorkspacePath: ws,
+				},
+			}},
+		}
+		if werr := api.WriteStateFileAtomic(intentPath, mi); werr != nil {
+			return "", werr
+		}
+		return intentPath, nil
+	})()
+
+	lockAcquirableAtStart := false
+	startObserved := false
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		startObserved = true
+		if lk, acqErr := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock")); acqErr == nil {
+			lockAcquirableAtStart = true
+			lk.Release()
+		}
+		return nil
+	})()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("migrate must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	if !startObserved {
+		t.Fatal("the start stub must have run")
+	}
+	if !lockAcquirableAtStart {
+		t.Fatal("the interlock MUST be released before the start (the started supervisor must be able to AcquireSupervisorLock itself)")
+	}
+}
+
+// TestMigrateSerena_Interlock_ReleasedOnRecoveryStartBranch is the Revision 3
+// regression guard. The early recovery-start (alreadyMigrated && !drift &&
+// !healthy) fires BEFORE the post-step-7 interlock acquire, so it must NOT release
+// a never-acquired lock (the armed-on-acquire closure is a no-op there). The
+// assertion is leak-free: a SECOND AcquireSupervisorLock AFTER the function
+// returns SUCCEEDS.
+func TestMigrateSerena_Interlock_ReleasedOnRecoveryStartBranch(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	// Seed a committed dynamic-pool intent (runtime already migrated), no drift.
+	ws := t.TempDir()
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	migratedIntent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: api.SerenaTaskNameForWorkspace(ws),
+			Server:   "serena",
+			Port:     9150,
+			RuntimeSpec: &api.DaemonRuntimeSpec{
+				SpecVersion: api.DaemonRuntimeSpecVersion, ChildCommand: "go",
+				UpstreamPort: 9151, ExternalPort: 9150, WorkspacePath: ws,
+			},
+		}},
+	}
+	if err := api.WriteStateFileAtomic(intentPath, migratedIntent); err != nil {
+		t.Fatalf("seed already-migrated runtime intent: %v", err)
+	}
+	// No-drift requires the registry serena row to match the intent's task.
+	seedSerenaWorkspaceWithPort(t, ws, 9150)
+
+	// !healthy → recovery start at the EARLY branch (before any interlock acquire).
+	defer stubSupervisorHealthy(t, func() (bool, error) { return false, nil })()
+	// If the interlock seam is ever called on this path, fail loud — the early
+	// recovery start must NOT acquire it.
+	defer stubAcquireInterlock(t, func() (*api.SupervisorLock, func(), error) {
+		t.Fatalf("the interlock must NOT be acquired on the early recovery-start branch (acquire is post-step-7)")
+		return nil, func() {}, nil
+	})()
+	// The early recovery start must see NO interlock held (acquirable).
+	lockAcquirableInEarlyStart := false
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		if lk, acqErr := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock")); acqErr == nil {
+			lockAcquirableInEarlyStart = true
+			lk.Release()
+		}
+		return nil
+	})()
+	// Reap/reconcile/install must NOT run on the recovery branch.
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { t.Fatalf("recovery branch must not reap"); return nil })()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		t.Fatalf("recovery branch must not reconcile")
+		return nil, nil
+	})()
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("recovery branch must not install")
+		return "", nil
+	})()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("recovery-start branch must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	if !lockAcquirableInEarlyStart {
+		t.Fatal("the early recovery start must run with NO interlock held (it precedes the acquire)")
+	}
+	// THE leak guard: a SECOND acquire after the function returns must SUCCEED — a
+	// leaked interlock would block it (and deadlock the next migrate).
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("interlock leaked: a post-return AcquireSupervisorLock must succeed, got %v", err)
+	}
+	lk.Release()
+}
+
+// TestMigrateSerena_Interlock_AcquireFailsLoud_WhenForeignHolderWonTheWindow:
+// when a foreign holder already owns supervisor.lock at the post-reap acquire
+// point, the migrate FAILS LOUD (do not block) and writes NO spec-bearing intent.
+func TestMigrateSerena_Interlock_AcquireFailsLoud_WhenForeignHolderWonTheWindow(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	defer stubStartSupported(t, func() bool { return true })()
+	// No supervisor "running" by the probe → no reap; the acquire at step 7e is the
+	// failure point (the real binding contends the foreign-held lock).
+	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
+	defer stubAcquireInterlock(t, realInterlockAcquire)()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	// A FOREIGN holder owns the lock for the whole run.
+	foreign, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("seed foreign holder: %v", err)
+	}
+	defer foreign.Release()
+
+	installRan := false
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installRan = true
+		return "", nil
+	})()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
+
+	var buf bytes.Buffer
+	err = runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatalf("the migrate MUST fail loud when a foreign holder won the interlock window (out=%s)", buf.String())
+	}
+	if !strings.Contains(err.Error(), "acquire the supervisor.lock interlock") {
+		t.Errorf("error must name the interlock acquire failure; got %v", err)
+	}
+	if installRan {
+		t.Error("the spec-bearing install must NOT run when the interlock acquire failed (pre-write)")
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Error("no spec-bearing intent must be written on the acquire-fail path (legacy untouched)")
+	}
+}
+
+// TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap is the
+// bot PR #276 finding-2 regression guard. The interlock was historically acquired
+// at step 7e — AFTER the step-7 reap, the registry re-read, the start-supported
+// re-check, and the late-reap decision — leaving an UNLOCKED post-reap gap in which
+// a foreign supervisor could take supervisor.lock. The fix acquires the interlock
+// IMMEDIATELY after the reap (acquireInterlockOnce), so any actor that tries to
+// take the lock in the post-reap work window now FAILS.
+//
+// Deterministic injection: a supervisor IS running at the probe (willReap=true), so
+// the step-7 reap fires. The start-supported seam (migrateSerenaStartSupportedFn)
+// runs in the post-reap gap — AFTER the step-7 reap, in the OLD code BEFORE the
+// step-7e acquire. Inside it we attempt a concurrent api.AcquireSupervisorLock on
+// the gate's exact path:
+//   - OLD code (acquire at step 7e): the migrate had NOT yet acquired here → the
+//     concurrent acquire would SUCCEED → the gap is open.
+//   - FIXED code (acquire immediately after the reap): the migrate ALREADY holds
+//     the lock here → the concurrent acquire FAILS → the gap is closed.
+// The test asserts the concurrent acquire FAILS, so a regression that moves the
+// acquire back past the post-reap work breaks it.
+func TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	// A supervisor IS running → step-7 reap fires; the interlock must be taken right
+	// after it (the fix), so the post-reap-gap probe below cannot acquire.
+	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	// The step-7 reap is stubbed to succeed (no real supervisor to kill).
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	defer stubAcquireInterlock(t, realInterlockAcquire)()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+
+	// The post-reap-gap probe: this seam fires AFTER the step-7 reap and (in the OLD
+	// code) BEFORE the step-7e acquire. With the fix the migrate already holds the
+	// lock here, so a concurrent acquire MUST fail.
+	gapProbed := false
+	concurrentAcquireBlockedInGap := false
+	defer stubStartSupported(t, func() bool {
+		gapProbed = true
+		if lk, acqErr := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock")); acqErr != nil {
+			concurrentAcquireBlockedInGap = true
+		} else {
+			lk.Release() // gap was open (regression); release so other tests are not wedged
+		}
+		return true
+	})()
+
+	// Stub install + start so the run completes (the §7.1 gate is not the unit under
+	// test here; the post-reap-gap exclusion is).
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+		mi := &api.SupervisorIntentFile{
+			Version: 1,
+			Daemons: []api.SupervisorDaemon{{
+				TaskName: api.SerenaTaskNameForWorkspace(ws),
+				Server:   "serena",
+				Port:     9150,
+				RuntimeSpec: &api.DaemonRuntimeSpec{
+					SpecVersion: api.DaemonRuntimeSpecVersion, ChildCommand: "go",
+					UpstreamPort: 9151, ExternalPort: 9150, WorkspacePath: ws,
+				},
+			}},
+		}
+		if werr := api.WriteStateFileAtomic(intentPath, mi); werr != nil {
+			return "", werr
+		}
+		return intentPath, nil
+	})()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("migrate must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	if !gapProbed {
+		t.Fatal("the post-reap-gap probe (start-supported seam) must have run")
+	}
+	if !concurrentAcquireBlockedInGap {
+		t.Fatal("finding 2 REGRESSION: a concurrent AcquireSupervisorLock SUCCEEDED in the post-reap work window — the interlock was acquired too late (the post-reap gap is open). The fix must acquire the interlock IMMEDIATELY after the reap")
+	}
+}
+
+// TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry is the Revision 4
+// observability guard: when the START primitive reports the benign
+// release→child-acquire hand-off window materialized (the start stub calls
+// migrateSerenaHandoffWindowFn), the driver emits the named
+// supervisor-interlock-handoff-window event to supervisor-events.log.
+func TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	defer stubStartSupported(t, func() bool { return true })()
+	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
+	defer stubAcquireInterlock(t, realInterlockAcquire)()
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	// REAL install (the bypass token clears the gate under our own lock) so the
+	// driver reaches the post-commit start with the hand-off observer wired.
+	// The start stub simulates the Windows primitive observing a >1-retry reconcile.
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		migrateSerenaHandoffWindowFn("reconcile-ready-retry")
+		return nil
+	})()
+
+	var buf bytes.Buffer
+	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		t.Fatalf("migrate must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	log := readInterlockEventsLog(t, stateDir)
+	if !strings.Contains(log, "supervisor-interlock-handoff-window") {
+		t.Fatalf("expected the Revision-4 hand-off-window event in supervisor-events.log; log=%s", log)
+	}
+	if !strings.Contains(log, "reconcile-ready-retry") {
+		t.Errorf("the hand-off event must carry the phase; log=%s", log)
 	}
 }

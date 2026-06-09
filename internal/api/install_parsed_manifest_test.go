@@ -1434,3 +1434,231 @@ func TestInstallParsedManifest_NonSpecInstallNotGatedByRunningSupervisor(t *test
 		t.Fatal("want a non-empty intent path on a successful zero-workspace install")
 	}
 }
+
+// TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock
+// is the Phase-1 typed-token bypass guard (plan-serena-lock-interlock-2026-06-09
+// "Revision 1" + "Phase 1"). The §7.1 gate normally refuses a spec-bearing
+// runtime_spec write while a supervisor holds its singleton lock. But the
+// migrate / auto-register flows (Phase 2) acquire that VERY lock around their
+// reap+rewrite, so to them the held lock is THEIR OWN handle, not a foreign
+// supervisor. A caller that proves it holds the gate's exact lock — by passing
+// the opaque token minted from (*SupervisorLock).AllowSpecBearingWriteBypass()
+// — bypasses the probe and the spec-bearing write SUCCEEDS.
+//
+// The test engineers the held lock deterministically (no timing): it acquires
+// the real supervisor.lock on the gate's exact path, then asserts
+// SupervisorRunningUnderStateDir reports running (the per-handle flock quirk
+// that makes the gate refuse WITHOUT the token), proving the bypass is what
+// flips the outcome rather than an absent supervisor.
+func TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	// Acquire the gate's exact lock — the same path the §7.1 probe inspects.
+	lk, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock on gate path: %v", err)
+	}
+	defer lk.Release()
+
+	// Sanity: with the lock held, the gate's own liveness probe reports running.
+	// This is the per-handle flock quirk that drives the refuse path — the token
+	// is the ONLY thing that flips it to a successful write.
+	running, _, probeErr := SupervisorRunningUnderStateDir(stateDir)
+	if probeErr != nil {
+		t.Fatalf("liveness probe errored: %v", probeErr)
+	}
+	if !running {
+		t.Fatal("expected SupervisorRunningUnderStateDir to report running while the lock is held (per-handle quirk); the bypass test would be vacuous otherwise")
+	}
+
+	ws := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(ws),
+		WorkspacePath: ws,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:               &buf,
+		Workspaces:           workspaces,
+		SupervisorLockBypass: lk.AllowSpecBearingWriteBypass(),
+	})
+	if err != nil {
+		t.Fatalf("spec-bearing install with a matching held-lock token must SUCCEED, got: %v", err)
+	}
+	if intentPath == "" {
+		t.Fatal("want a non-empty intent path on a successful bypassed install")
+	}
+	// The write actually committed the spec-bearing rows.
+	written, rerr := ReadSupervisorIntent(intentPath)
+	if rerr != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", rerr)
+	}
+	if !written.HasRuntimeSpecRow() {
+		t.Fatal("bypassed install must commit runtime_spec rows; none found on disk")
+	}
+	// The bypass emits the info audit event (mirrors the refuse-emit).
+	logBytes, _ := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if !strings.Contains(string(logBytes), "spec-bearing-write-allowed-under-caller-lock") {
+		t.Errorf("expected spec-bearing-write-allowed-under-caller-lock event in supervisor-events.log; got: %s", logBytes)
+	}
+}
+
+// TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken proves the
+// zero-value bypass (the default for the 14 existing call sites) preserves the
+// §7.1 fail-closed behavior: a spec-bearing write while the lock is held still
+// REFUSES and emits spec-bearing-install-refused. This is the control case for
+// the bypass test above — same held lock, no token → refuse.
+func TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	lk, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+
+	ws := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(ws),
+		WorkspacePath: ws,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	// Zero-value SupervisorLockBypass (omitted) — exactly the 14 existing sites.
+	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:     &buf,
+		Workspaces: workspaces,
+	})
+	if err == nil {
+		t.Fatal("expected §7.1 refuse with a zero-value bypass token while a supervisor is running, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
+		t.Errorf("refuse error %q missing the gate signature", err.Error())
+	}
+	logBytes, _ := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if !strings.Contains(string(logBytes), "spec-bearing-install-refused") {
+		t.Errorf("expected spec-bearing-install-refused event in supervisor-events.log; got: %s", logBytes)
+	}
+}
+
+// TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches
+// is the in-gate Crux-3 guard: a token minted from a lock whose leaf does NOT
+// match the gate's own stateDir/supervisor.lock is REJECTED — the gate treats it
+// as no-bypass, the probe runs, and the spec-bearing write REFUSES. This folds
+// the path-mismatch check INTO the gate so a misconfigured Phase-2 call site
+// (wrong resolver) cannot silently re-open the split-brain.
+func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	// Hold the gate's REAL lock so the probe reports running (the gate must
+	// refuse because the token does not match — not because no supervisor runs).
+	gateLk, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire gate supervisor lock: %v", err)
+	}
+	defer gateLk.Release()
+
+	// Mint a token from a lock on a DIFFERENT leaf (a sibling temp dir). Its
+	// .path does not equal the gate's stateDir/supervisor.lock, so the identity
+	// check must reject it.
+	otherDir := t.TempDir()
+	otherLk, err := AcquireSupervisorLock(filepath.Join(otherDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire mismatched supervisor lock: %v", err)
+	}
+	defer otherLk.Release()
+
+	ws := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(ws),
+		WorkspacePath: ws,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:               &buf,
+		Workspaces:           workspaces,
+		SupervisorLockBypass: otherLk.AllowSpecBearingWriteBypass(),
+	})
+	if err == nil {
+		t.Fatal("expected §7.1 refuse when the bypass token's lock leaf mismatches the gate path, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
+		t.Errorf("refuse error %q missing the gate signature (path-mismatch token must NOT bypass)", err.Error())
+	}
+}
+
+// TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased
+// proves the identity check verifies the lock is STILL HELD, not merely that the
+// handle once existed. A token minted from a matching lock that is then released
+// (Release() nils .fl) is stale and must be REJECTED — the gate falls through to
+// the probe and refuses.
+func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	lk, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	// Mint the token while the lock is held, then release it — the token is now
+	// stale (its .fl is nil).
+	token := lk.AllowSpecBearingWriteBypass()
+	lk.Release()
+
+	// Re-hold the gate's lock from a fresh acquire so the probe still reports
+	// running (otherwise the refuse could be attributed to "no supervisor"
+	// rather than to the stale token being rejected).
+	gateLk, err := AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("re-acquire supervisor lock after release: %v", err)
+	}
+	defer gateLk.Release()
+
+	ws := t.TempDir()
+	workspaces := []WorkspaceEntry{{
+		WorkspaceKey:  WorkspaceKey(ws),
+		WorkspacePath: ws,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9401,
+	}}
+	m := serenaTemplateManifest()
+	a := NewAPI()
+	var buf bytes.Buffer
+	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		Writer:               &buf,
+		Workspaces:           workspaces,
+		SupervisorLockBypass: token, // stale: minted then released
+	})
+	if err == nil {
+		t.Fatal("expected §7.1 refuse when the bypass token's lock was already released, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
+		t.Errorf("refuse error %q missing the gate signature (released token must NOT bypass)", err.Error())
+	}
+}

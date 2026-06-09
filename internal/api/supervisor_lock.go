@@ -34,6 +34,15 @@ type SupervisorLock struct {
 	path  string
 	fl    *flock.Flock
 	owner SupervisorLockOwner
+	// quiet marks a flock-only acquire (AcquireSupervisorLockQuiet) that did NOT
+	// write <path>.owner.json. A quiet holder borrows the flock as a pure mutex
+	// (the serena reap→write→start interlock) and must NOT touch the sidecar: the
+	// sidecar is the REAP's PID source (ForceKillSupervisor /
+	// QuiesceTimers / ExitGraceful read it to target the OLD supervisor), so
+	// overwriting it with the interlock-holder's own CLI PID would make the reap
+	// kill the caller instead of the old supervisor. Release() therefore skips the
+	// sidecar removal for a quiet lock — it never owned that file.
+	quiet bool
 }
 
 var (
@@ -89,6 +98,50 @@ func AcquireSupervisorLock(path string) (*SupervisorLock, error) {
 	return &SupervisorLock{path: path, fl: lk, owner: owner}, nil
 }
 
+// AcquireSupervisorLockQuiet takes <path>.lock via flock WITHOUT writing (or
+// touching) <path>.owner.json. It is the variant the serena migrate / serena
+// auto-register cutovers use to borrow supervisor.lock as a pure reap→write→start
+// mutex (Phase 2 of .plans/2026-06/plan-serena-lock-interlock-2026-06-09.md).
+//
+// Why no sidecar write: the owner sidecar is the REAP's PID source — the reap
+// primitive (ReapSupervisorForRestart → ForceKillSupervisor /
+// QuiesceTimers / ExitGraceful, internal/cli/install_migration_wiring_windows.go)
+// reads <path>.owner.json to pick the PID it taskkills / IPC-handshakes against.
+// The migrate and auto-register reap the OLD supervisor while (or just before)
+// holding this interlock; if the interlock acquire OVERWROTE the sidecar with the
+// CLI holder's own os.Getpid() (as the full AcquireSupervisorLock does,
+// supervisor_lock.go), the reap would read that and force-kill the migrate /
+// router process instead of the old supervisor (bot PR #276 finding 1), and the
+// post-reap acquire-too-late gap would let a foreign supervisor slip in (finding
+// 2). A QUIET acquire leaves the sidecar pointing at the old supervisor (or
+// absent), so the reap targets the correct PID, while the flock still provides the
+// mutual exclusion the interlock needs.
+//
+// The returned *SupervisorLock has .path and .fl set (Owner() is the zero value —
+// a quiet holder never recorded one), so it STILL mints a valid §7.1 bypass token:
+// AllowSpecBearingWriteBypass()'s gate identity check verifies only
+// lk.fl != nil (still held) AND lk.path == the gate's supervisor.lock path
+// (install_parsed_manifest.go) — neither needs the sidecar. The interlock callers
+// are CLI processes that never serve supervisor IPC, so they have no legitimate
+// reason to own the sidecar that feeds the supervisor's IPC hello frame.
+//
+// Contention diagnostics are weaker here than AcquireSupervisorLock by design:
+// since this never wrote a sidecar, on a failed TryLock it reports a generic
+// "held" error rather than probing a PID. The interlock callers map that to a
+// fail-loud / defer-and-retry path; a precise PID is not needed.
+func AcquireSupervisorLockQuiet(path string) (*SupervisorLock, error) {
+	lk := flock.New(path + ".lock")
+	got, err := lk.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("flock: %w", err)
+	}
+	if !got {
+		return nil, fmt.Errorf("supervisor.lock held (quiet acquire could not take the flock at %s)", path+".lock")
+	}
+	// Deliberately NO owner-sidecar write — see the doc comment.
+	return &SupervisorLock{path: path, fl: lk, quiet: true}, nil
+}
+
 // Owner returns the exact sidecar identity written when the lock was acquired.
 // IPC listeners use this as the single source of truth for hello frames.
 func (l *SupervisorLock) Owner() SupervisorLockOwner {
@@ -125,7 +178,14 @@ func (l *SupervisorLock) Release() {
 	if l == nil || l.fl == nil {
 		return
 	}
-	os.Remove(l.path + ".owner.json")
+	// A quiet holder (AcquireSupervisorLockQuiet) never wrote the sidecar — it
+	// belongs to the OLD supervisor the interlock caller reaps — so the quiet
+	// Release must NOT remove it (removing the old supervisor's sidecar would
+	// strip the reap's PID source for any concurrent reader). Only a full
+	// AcquireSupervisorLock holder owns the sidecar and tidies it here.
+	if !l.quiet {
+		os.Remove(l.path + ".owner.json")
+	}
 	_ = l.fl.Unlock()
 	l.fl = nil
 }
@@ -220,4 +280,37 @@ func SupervisorRunningUnderStateDir(stateDir string) (running bool, pid int, err
 	// diagnostic from the sidecar (absent/corrupt → 0).
 	owner, _ := ReadSupervisorLockOwner(lockPath)
 	return true, owner.PID, nil
+}
+
+// InstallParsedManifestBypass is an opaque, constructor-enforced capability
+// token that authorizes InstallParsedManifest to SKIP its §7.1 spec-bearing
+// supervisor-intent write gate (install_parsed_manifest.go) — the gate that
+// otherwise refuses a runtime_spec write while a supervisor holds its singleton
+// lock. The token exists because the migrate / serena auto-register flows
+// (Phase 2) acquire that VERY lock around their reap+rewrite: to those callers
+// the held lock is THEIR OWN handle, not a foreign supervisor, so the gate's
+// fail-closed refuse is a false positive for them specifically.
+//
+// The single field is UNEXPORTED, so no code outside package api can forge a
+// non-nil token: the ONLY way to obtain one with a non-nil lk is to hold a real
+// *SupervisorLock (returned by AcquireSupervisorLock) and call
+// AllowSpecBearingWriteBypass on it. The zero value (lk == nil) is "no bypass"
+// and is the default for every existing call site. The gate re-verifies
+// IDENTITY at use time (lk still held AND lk.path == the gate's own
+// supervisor.lock path), so even a real-but-mismatched or already-released token
+// is rejected — see InstallParsedManifestOpts.SupervisorLockBypass.
+//
+// It wraps a *POINTER* to the lock (not a value): SupervisorLock holds a
+// *flock.Flock, never a value lock, so copying this token (e.g. via an opts
+// copy) is safe and go vet's copylocks does not fire.
+type InstallParsedManifestBypass struct{ lk *SupervisorLock }
+
+// AllowSpecBearingWriteBypass mints the capability token that lets the holder of
+// THIS live lock bypass InstallParsedManifest's §7.1 spec-bearing write gate.
+// Calling it on a released lock yields a token whose lk.fl is nil, which the
+// gate's identity check rejects (the bypass requires the lock to be STILL held
+// at use time), so a stale token can never re-open the split-brain the gate
+// prevents.
+func (l *SupervisorLock) AllowSpecBearingWriteBypass() InstallParsedManifestBypass {
+	return InstallParsedManifestBypass{lk: l}
 }

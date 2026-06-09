@@ -91,6 +91,15 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	autoRegisterStartSupportedFn = func() bool { return true } // platform supports the cutover by default
 	t.Cleanup(func() { autoRegisterStartSupportedFn = prevStartSupported })
 
+	// Default the interlock seam to NIL (the unwired posture): the existing
+	// live-add / introduce tests do not exercise the Phase-2 interlock, and a nil
+	// seam makes the introduce reap proceed without it (backward-compatible). The
+	// package global persists across tests, so reset it here to avoid leakage from
+	// a prior Phase-2 test that set it. Phase-2 introduce tests override it.
+	prevInterlock := autoRegisterAcquireInterlockFn
+	autoRegisterAcquireInterlockFn = nil
+	t.Cleanup(func() { autoRegisterAcquireInterlockFn = prevInterlock })
+
 	// Reset the per-key concurrency guard so a key registered in a prior test
 	// (package-level map persists across tests) cannot leak a held/known lock.
 	serenaAutoRegisterKeyMu.Lock()
@@ -183,6 +192,45 @@ func stubAutoRegisterCutover(t *testing.T, reap, start func(ctx context.Context)
 	autoRegisterReapFn = reap
 	autoRegisterStartFn = start
 	t.Cleanup(func() { autoRegisterReapFn, autoRegisterStartFn = origReap, origStart })
+}
+
+// stubAutoRegisterAcquireInterlock overrides the Phase-2 interlock acquire seam
+// for the test scope (Revision 2 / Starter A — the INTRODUCE-while-running cutover
+// holds supervisor.lock across reap→install→start).
+func stubAutoRegisterAcquireInterlock(t *testing.T, fn func() (*SupervisorLock, func(), error)) {
+	t.Helper()
+	orig := autoRegisterAcquireInterlockFn
+	autoRegisterAcquireInterlockFn = fn
+	t.Cleanup(func() { autoRegisterAcquireInterlockFn = orig })
+}
+
+// realAutoRegisterInterlockAcquire is the cross-platform stand-in for the Windows
+// production interlock binding: it acquires the REAL supervisor.lock on the §7.1
+// gate's exact path (filepath.Join(DaemonStateDir(), "supervisor.lock") — the same
+// resolver the install gate uses; redirected to the test temp dir via
+// SetDaemonStateRootForTest in autoRegisterTestEnv) via the QUIET acquire (flock
+// only, NO owner-sidecar write — matching production after bot PR #276 finding 1)
+// and returns the handle plus an idempotent release. Using it as the acquire stub
+// lets the bypass-token identity check (lk.path == the gate path), the held-lock
+// lifetime, AND the finding-1 invariant (the reap reads the OLD supervisor's intact
+// sidecar, not the caller's PID) run identically on Windows and POSIX CI.
+func realAutoRegisterInterlockAcquire() (*SupervisorLock, func(), error) {
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return nil, func() {}, err
+	}
+	lock, err := AcquireSupervisorLockQuiet(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return nil, func() {}, err
+	}
+	released := false
+	return lock, func() {
+		if released {
+			return
+		}
+		released = true
+		lock.Release()
+	}, nil
 }
 
 // loadRegSerenaRows loads regPath and returns its serena rows.
@@ -1653,6 +1701,488 @@ func TestReadUntrustedSerenaProjectYML_SymlinkedSerenaDir_Rejected(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("error = %v, want it to name the symlink-container refusal", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (Revision 2 / Starter A) + bot PR #276 r2 P1 — the INTRODUCE-while-running
+// cutover acquires the supervisor.lock interlock IMMEDIATELY AFTER its reap (NOT
+// before): the running supervisor holds the lock, so the reap must free it first.
+// ---------------------------------------------------------------------------
+
+// TestAutoRegisterSerena_Introduce_AcquiresInterlockAfterReap asserts the ordering
+// (bot PR #276 r2 P1): the interlock acquire fires AFTER the reap, not before. The
+// running supervisor holds supervisor.lock; a pre-reap acquire could never succeed on
+// this introduce-while-running case. The full introduce order is
+// reap→acquire→install→start. (This test stubs the acquire to always succeed; the
+// production-fidelity "a REAL held lock blocks a pre-reap acquire but the post-reap
+// acquire succeeds" case is TestAutoRegisterSerena_Introduce_WhileSupervisorHoldsLock_ReapsThenAcquires_Succeeds.)
+func TestAutoRegisterSerena_Introduce_AcquiresInterlockAfterReap(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
+
+	var (
+		mu    sync.Mutex
+		order []string
+	)
+	record := func(step string) { mu.Lock(); order = append(order, step); mu.Unlock() }
+	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		record("acquire")
+		return realAutoRegisterInterlockAcquire()
+	})
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { record("reap"); return nil },
+		func(context.Context) error { record("start"); return nil },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		record("install")
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	// reap MUST precede acquire; the full introduce order is reap→acquire→install→start.
+	if len(order) != 4 || order[0] != "reap" || order[1] != "acquire" || order[2] != "install" || order[3] != "start" {
+		t.Fatalf("cutover order = %v, want [reap acquire install start]", order)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_WhileSupervisorHoldsLock_ReapsThenAcquires_Succeeds
+// is the bot PR #276 r2 P1 regression guard — the exact case the bot said currently
+// 503s. A REAL supervisor.lock is held BEFORE the call (simulating the live
+// supervisor that holds it on its startup). The introduce-while-running cutover must
+// nonetheless SUCCEED: the reap RELEASES that held lock (the reap stub here releases
+// it, as the real reap kills the holder → the OS frees the flock), and only then does
+// the post-reap acquire take the freed lock and install. A pre-reap acquire (the
+// unfixed code) would TryLock the still-held lock, fail, and defer with a 503 — never
+// reaching reap/install. This test FAILS on the unfixed acquire-then-reap ordering.
+func TestAutoRegisterSerena_Introduce_WhileSupervisorHoldsLock_ReapsThenAcquires_Succeeds(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
+
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	lockPath := filepath.Join(sd, "supervisor.lock")
+
+	// Simulate the RUNNING supervisor holding supervisor.lock on its startup. We hold
+	// the REAL flock so the production-fidelity TryLock contention is exercised.
+	heldByOldSupervisor, herr := AcquireSupervisorLockQuiet(lockPath)
+	if herr != nil {
+		t.Fatalf("seed held supervisor.lock: %v", herr)
+	}
+	oldSupervisorReleased := false
+	releaseOldSupervisor := func() {
+		if oldSupervisorReleased {
+			return
+		}
+		oldSupervisorReleased = true
+		heldByOldSupervisor.Release()
+	}
+	t.Cleanup(releaseOldSupervisor)
+
+	// The reap RELEASES the held lock (the real reap kills the supervisor that holds it;
+	// the OS then frees the flock). Without this release the post-reap acquire would
+	// still be blocked — proving the held lock is what the reap clears.
+	var (
+		reapRan, acquireRan, installRan bool
+	)
+	stubAutoRegisterCutover(t,
+		func(context.Context) error {
+			reapRan = true
+			releaseOldSupervisor() // the reap freed the lock the dead supervisor held
+			return nil
+		},
+		func(context.Context) error { return nil },
+	)
+	// Production interlock binding (REAL quiet acquire on the gate path). Before the
+	// reap this would fail (lock held); after the reap it succeeds.
+	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		acquireRan = true
+		return realAutoRegisterInterlockAcquire()
+	})
+	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
+		installRan = true
+		// The cutover holds its OWN (post-reap) lock now → a valid matching bypass token.
+		if lk := opts.SupervisorLockBypass.lk; lk == nil || lk.path != lockPath {
+			t.Errorf("install must receive a matching bypass token (post-reap held lock); got %+v", opts.SupervisorLockBypass.lk)
+		}
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("introduce-while-supervisor-holds-lock must SUCCEED (reap frees the lock, then acquire takes it): %v", err)
+	}
+	if !reapRan || !acquireRan || !installRan {
+		t.Fatalf("expected reap+acquire+install to all run; reap=%v acquire=%v install=%v", reapRan, acquireRan, installRan)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1 (the introduce committed)", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_DefersWhenInterlockHeldAfterReap_RecoversAndRollsBack:
+// the post-reap acquire FAILS (a concurrent migrate/cutover reaped the same supervisor
+// and won the race for the freed lock). Because the acquire is now AFTER the reap (bot
+// PR #276 r2 P1), the reap DID run — so this is a POST-reap defer: the reap seam ran,
+// the recovery-restart (failPreCommit) start seam runs (the system is not left
+// supervisor-less by US — the winner restarts one, but we still attempt the recovery
+// for our OWN reap), the registry row is rolled back, the install NEVER runs, and the
+// distinct serena-auto-register-deferred-on-interlock event is emitted.
+func TestAutoRegisterSerena_Introduce_DefersWhenInterlockHeldAfterReap_RecoversAndRollsBack(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
+
+	heldErr := errors.New("supervisor.lock held (quiet acquire could not take the flock)")
+	var reapRan, startRan bool
+	// The reap RUNS (defer is now POST-reap); the recovery-restart start RUNS too.
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { reapRan = true; return nil },
+		func(context.Context) error { startRan = true; return nil },
+	)
+	// Acquire fails AFTER the reap.
+	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		if !reapRan {
+			t.Fatalf("the interlock acquire must fire AFTER the reap (bot PR #276 r2 P1)")
+		}
+		return nil, func() {}, heldErr
+	})
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must NOT run when the post-reap interlock acquire failed (defer before the write)")
+		return "", nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected a defer-on-interlock error when the post-reap acquire fails")
+	}
+	if !errors.Is(err, heldErr) {
+		t.Fatalf("error = %v, want it to wrap the held-interlock acquire failure", err)
+	}
+	// HONEST error (another cutover acquired the lock — NOT "supervisor running").
+	if !strings.Contains(err.Error(), "supervisor.lock") {
+		t.Errorf("error must name the honest interlock reason; got %v", err)
+	}
+	if !reapRan {
+		t.Error("the reap must have run before the post-reap defer (the defer is after the reap)")
+	}
+	if !startRan {
+		t.Error("the recovery-restart start must run on the post-reap defer (failPreCommit restores a supervisor for our own reap)")
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after a deferred introduce, want 0 (rollback)", len(rows))
+	}
+	// The DISTINCT deferred-on-interlock event was emitted (NOT spec-bearing-install-refused).
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	raw, _ := os.ReadFile(filepath.Join(sd, SupervisorEventLogFileLeaf))
+	if !strings.Contains(string(raw), "serena-auto-register-deferred-on-interlock") {
+		t.Errorf("expected the distinct deferred-on-interlock event; log=%s", string(raw))
+	}
+	if strings.Contains(string(raw), "spec-bearing-install-refused") {
+		t.Errorf("must NOT emit spec-bearing-install-refused on the interlock-defer path; log=%s", string(raw))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_PassesInterlockBypassTokenToInstall asserts the
+// install seam receives a NON-nil bypass token whose lock path MATCHES the §7.1
+// gate's own supervisor.lock path (so the gate's identity check passes and the
+// spec-bearing write proceeds while the cutover holds its own lock). (Named with
+// "Interlock" so the Phase-2 -run filter 'Interlock|AutoRegisterIntroduce|...'
+// reaches it.)
+func TestAutoRegisterSerena_Introduce_PassesInterlockBypassTokenToInstall(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
+
+	stubAutoRegisterAcquireInterlock(t, realAutoRegisterInterlockAcquire)
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { return nil },
+		func(context.Context) error { return nil },
+	)
+
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	gateLockPath := filepath.Join(sd, "supervisor.lock")
+
+	var (
+		gotNonNil  bool
+		gotMatched bool
+	)
+	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
+		// In-package test: inspect the opaque token's unexported lock pointer.
+		if lk := opts.SupervisorLockBypass.lk; lk != nil {
+			gotNonNil = true
+			if lk.path == gateLockPath {
+				gotMatched = true
+			}
+		}
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if !gotNonNil {
+		t.Fatal("the install seam must receive a non-nil SupervisorLockBypass on the introduce-while-running path (the cutover holds its own lock)")
+	}
+	if !gotMatched {
+		t.Fatalf("the bypass token's lock path must match the gate's supervisor.lock (%s) so the §7.1 identity check passes", gateLockPath)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_NoSupervisor_AcquiresInterlockBeforeSpecBearingWrite
+// is the bot PR #276 r4 P2 regression guard. The FIRST serena workspace is introduced
+// while NO supervisor is running (needStart && !needReap && !priorHasSpec): the write
+// is still spec-bearing (runtime_spec), so the write→start window must be protected by
+// the interlock exactly as the migrate's step-7e no-reap boundary protects it. The
+// cutover must: (a) acquire the interlock (the seam fires) WITHOUT reaping (no
+// supervisor to reap), and (b) pass a NON-nil bypass token whose lock path matches the
+// §7.1 gate's supervisor.lock to the install — so the held lock authorizes the
+// spec-bearing write and excludes a foreign starter for the whole window. On the UNFIXED
+// code the interlock seam never fires on the !needReap path and the install receives a
+// zero-value bypass token → both assertions FAIL.
+func TestAutoRegisterSerena_Introduce_NoSupervisor_AcquiresInterlockBeforeSpecBearingWrite(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE (spec-bearing)
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })  // none → no reap
+
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	gateLockPath := filepath.Join(sd, "supervisor.lock")
+
+	var (
+		mu          sync.Mutex
+		order       []string
+		acquireRan  bool
+		installRan  bool
+		startRan    bool
+		gotNonNil   bool
+		gotMatched  bool
+		lockHeldDur bool // the install observed the interlock STILL held (lk.fl != nil)
+	)
+	record := func(step string) { mu.Lock(); order = append(order, step); mu.Unlock() }
+
+	// Production-fidelity interlock binding (REAL quiet acquire on the gate path). No
+	// supervisor holds the lock here, so the acquire succeeds.
+	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		acquireRan = true
+		record("acquire")
+		return realAutoRegisterInterlockAcquire()
+	})
+	// The reap MUST NOT be called — there is no supervisor to reap on this path.
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not be called on the no-supervisor introduce path"); return nil },
+		func(context.Context) error { startRan = true; record("start"); return nil },
+	)
+	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
+		installRan = true
+		record("install")
+		if lk := opts.SupervisorLockBypass.lk; lk != nil {
+			gotNonNil = true
+			if lk.path == gateLockPath {
+				gotMatched = true
+			}
+			if lk.fl != nil {
+				lockHeldDur = true
+			}
+		}
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	// Live-add reconcile must NOT fire (this is an introduce/start path).
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatalf("reconcile must not be called on the introduce/start path")
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace (no-supervisor introduce): %v", err)
+	}
+	if !acquireRan {
+		t.Fatal("the interlock acquire seam MUST fire on the no-supervisor introduce (spec-bearing write→start window must be protected) — bot PR #276 r4 P2")
+	}
+	if !installRan || !startRan {
+		t.Fatalf("expected install+start to run; install=%v start=%v", installRan, startRan)
+	}
+	if !gotNonNil {
+		t.Fatal("the install seam MUST receive a non-nil SupervisorLockBypass on the no-supervisor introduce (the cutover holds its own lock)")
+	}
+	if !gotMatched {
+		t.Fatalf("the bypass token's lock path must match the gate's supervisor.lock (%s) so the §7.1 identity check passes", gateLockPath)
+	}
+	if !lockHeldDur {
+		t.Fatal("the interlock must still be HELD (lk.fl != nil) when the spec-bearing install runs — held across write→start, not released early")
+	}
+	// Ordering: acquire BEFORE the spec-bearing install, and start AFTER it. (No reap.)
+	if len(order) != 3 || order[0] != "acquire" || order[1] != "install" || order[2] != "start" {
+		t.Fatalf("step order = %v, want [acquire install start] (no reap on the no-supervisor introduce)", order)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Errorf("registry has %d serena rows, want 1 (the no-supervisor introduce committed)", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_NoSupervisor_DefersWhenInterlockHeld_NoReap is the
+// bot PR #276 r4 P2 defer guard. When a concurrent serena migrate/cutover already holds
+// supervisor.lock, the no-supervisor introduce's interlock acquire FAILS. Because no
+// supervisor was running, NOTHING is reaped (so failPreCommit owes no recovery restart):
+// the cutover defers cleanly — install NEVER runs, the registry row is rolled back, the
+// distinct serena-auto-register-deferred-on-interlock event is emitted (NOT
+// spec-bearing-install-refused), and the honest 503 error names supervisor.lock. On the
+// UNFIXED code no acquire happens on the !needReap path, so the install runs and the
+// call SUCCEEDS → this test FAILS (it expects a defer error + no install).
+func TestAutoRegisterSerena_Introduce_NoSupervisor_DefersWhenInterlockHeld_NoReap(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })  // none → no reap
+
+	heldErr := errors.New("supervisor.lock held (quiet acquire could not take the flock)")
+	// The reap MUST NOT run (no supervisor); the start MUST NOT run (no reap → no
+	// recovery restart owed on the defer path, and the install never reaches a start).
+	stubAutoRegisterCutover(t,
+		func(context.Context) error { t.Fatalf("reap must not run on the no-supervisor introduce defer"); return nil },
+		func(context.Context) error { t.Fatalf("start must not run on the no-supervisor introduce defer (no reap → no recovery restart owed)"); return nil },
+	)
+	// The acquire fails (a concurrent cutover holds the freed lock).
+	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		return nil, func() {}, heldErr
+	})
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install must NOT run when the no-supervisor introduce interlock acquire failed (defer before the spec-bearing write)")
+		return "", nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected a defer-on-interlock error when the no-supervisor introduce acquire fails")
+	}
+	if !errors.Is(err, heldErr) {
+		t.Fatalf("error = %v, want it to wrap the held-interlock acquire failure", err)
+	}
+	// HONEST error (another cutover holds the lock — NOT "supervisor running").
+	if !strings.Contains(err.Error(), "supervisor.lock") {
+		t.Errorf("error must name the honest interlock reason; got %v", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows after a deferred no-supervisor introduce, want 0 (rollback)", len(rows))
+	}
+	// The DISTINCT deferred-on-interlock event was emitted (NOT spec-bearing-install-refused).
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	raw, _ := os.ReadFile(filepath.Join(sd, SupervisorEventLogFileLeaf))
+	if !strings.Contains(string(raw), "serena-auto-register-deferred-on-interlock") {
+		t.Errorf("expected the distinct deferred-on-interlock event; log=%s", string(raw))
+	}
+	if strings.Contains(string(raw), "spec-bearing-install-refused") {
+		t.Errorf("must NOT emit spec-bearing-install-refused on the interlock-defer path; log=%s", string(raw))
+	}
+}
+
+// TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller is the bot PR
+// #276 finding-1 regression guard. Under the reap-then-acquire ordering (r2 P1) the
+// reap runs BEFORE any interlock touch, AND the post-reap acquire is QUIET (no
+// sidecar write), so the sidecar names the OLD supervisor when the reap reads it —
+// doubly safe. A regression to the FULL AcquireSupervisorLock would OVERWRITE
+// supervisor.lock.owner.json with the CALLER's (router/GUI) PID; if such an acquire
+// ever ran before the reap again, the reap — which reads that sidecar to choose the
+// PID it taskkills/IPC-handshakes against — would target the CALLER instead of the
+// old supervisor.
+//
+// The test seeds the sidecar with a sentinel OLD-supervisor PID, wires the REAL
+// quiet acquire stub, and the reap stub asserts ReadSupervisorLockOwner STILL
+// reports that sentinel — never the caller's os.Getpid(). A regression to the
+// sidecar-overwriting acquire fails this assertion.
+func TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller(t *testing.T) {
+	_ = autoRegisterTestEnv(t) // isolates registry + state dir; path not asserted here
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
+
+	sd, derr := DaemonStateDir()
+	if derr != nil {
+		t.Fatalf("DaemonStateDir: %v", derr)
+	}
+	lockPath := filepath.Join(sd, "supervisor.lock")
+	// Seed the OLD supervisor's sidecar. A sentinel PID that is NOT this process's
+	// PID so the assertion is unambiguous. (The reap stub reads the sidecar
+	// directly; it does not go through AcquireSupervisorLock's liveness probe, so
+	// any value works as the OLD-supervisor identity.)
+	const oldSupervisorPID = 424242
+	if oldSupervisorPID == os.Getpid() {
+		t.Fatalf("sentinel PID collided with the test process PID; pick another")
+	}
+	if err := WriteStateFileAtomic(lockPath+".owner.json", SupervisorLockOwner{
+		PID:       oldSupervisorPID,
+		StartedAt: "2026-06-09T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed old-supervisor sidecar: %v", err)
+	}
+
+	// REAL quiet acquire (matches production); it must NOT clobber the seeded sidecar.
+	stubAutoRegisterAcquireInterlock(t, realAutoRegisterInterlockAcquire)
+
+	var reapSawPID int
+	reapRan := false
+	stubAutoRegisterCutover(t,
+		func(context.Context) error {
+			reapRan = true
+			owner, oErr := ReadSupervisorLockOwner(lockPath)
+			if oErr != nil {
+				t.Errorf("reap could not read the owner sidecar (the quiet acquire must leave it intact): %v", oErr)
+				return nil
+			}
+			reapSawPID = owner.PID
+			return nil
+		},
+		func(context.Context) error { return nil },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+	if !reapRan {
+		t.Fatal("the reap seam must have run on the introduce-while-running path")
+	}
+	if reapSawPID == os.Getpid() {
+		t.Fatalf("finding 1 REGRESSION: the reap read the CALLER's PID (%d) from the sidecar — the interlock acquire overwrote it; a concurrent reap would force-kill the caller, not the old supervisor", reapSawPID)
+	}
+	if reapSawPID != oldSupervisorPID {
+		t.Fatalf("the reap must read the OLD supervisor's PID (%d) from the intact sidecar; got %d", oldSupervisorPID, reapSawPID)
 	}
 }
 

@@ -294,6 +294,90 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		}
 	}
 
+	// 7c-bis. On the introduce-WHILE-RUNNING path the supervisor.lock interlock is
+	//     acquired IMMEDIATELY AFTER the reap, NOT before it (bot PR #276 r2 P1; the
+	//     no-supervisor introduce acquires at 8c with no reap — see the TWO-acquire-sites
+	//     note below). The reap KILLS the running supervisor,
+	//     which is the process that holds supervisor.lock (api.AcquireSupervisorLock
+	//     at supervise.go:373 on its startup); only after the reap does the OS release
+	//     that flock. A pre-reap acquire could therefore NEVER succeed on the exact
+	//     introduce-while-running case this cutover exists for — the live supervisor
+	//     still holds the lock, so the quiet TryLock would fail and every such
+	//     auto-register would defer with a 503 and never reap/install. So we mirror the
+	//     serena migrate's reap-then-acquire-immediately ordering (migrate_serena.go's
+	//     acquireInterlockOnce, called right after each reap): reap → acquire the FREED
+	//     lock → hold it across install→start.
+	//
+	//     The acquire is QUIET (autoRegisterAcquireInterlockFn wires
+	//     api.AcquireSupervisorLockQuiet — flock only, NO owner-sidecar write). The reap
+	//     above reads supervisor.lock.owner.json to choose the PID it
+	//     taskkills/IPC-handshakes; a FULL acquire run BEFORE the reap would overwrite
+	//     that sidecar with THIS (router/GUI) process's PID, so the reap would target
+	//     the caller instead of the old supervisor (bot PR #276 finding 1). Acquiring
+	//     AFTER the reap with the quiet variant keeps that property doubly safe: the
+	//     reap already read the (intact, old-supervisor) sidecar before we touch the
+	//     lock at all, and the quiet acquire never writes the sidecar — so during our
+	//     held-lock window the sidecar still names the now-DEAD old supervisor, and a
+	//     concurrent reaper that reads it sees a dead PID → no-op → never force-kills
+	//     THIS live process. The quiet handle still mints a valid §7.1 bypass token.
+	//
+	//     TWO acquire sites, mirroring the migrate's two reap sites + its no-reap
+	//     step-7e boundary (migrate_serena.go's acquireInterlockOnce):
+	//       - reap path (needReap, introduce-while-running): acquire IMMEDIATELY after
+	//         the reap frees the lock (bot PR #276 r2 P1; the block below).
+	//       - NO-supervisor introduce (needStart && !needReap && !priorHasSpec — no
+	//         supervisor was running, so nothing was reaped): the spec-bearing
+	//         runtime_spec write STILL happens (§7.1's HasRuntimeSpecRow && !prior gate
+	//         fires), and the install is followed by a supervisor START. Without the
+	//         interlock that write→start window is UNPROTECTED — an old-decoder
+	//         supervisor could take the singleton between the liveness probe and our
+	//         start, read the just-written runtime_spec with DisallowUnknownFields, and
+	//         split-brain (bot PR #276 r4 P2). So this path ALSO acquires the interlock
+	//         (no supervisor holds the lock → the quiet TryLock normally succeeds) right
+	//         before the install, mirroring the migrate's step-7e no-reap acquire.
+	//     The LIVE-ADD path (priorHasSpec=true) neither reaps nor introduces runtime_spec
+	//     — its write is not §7.1-gated — so it needs no interlock even when the
+	//     supervisor is stopped (needStart && !needReap but priorHasSpec=true).
+	//     interlockBypass starts as the zero value (no bypass) and releaseInterlock as a
+	//     no-op; both are armed by acquireInterlock on a successful acquire at either site.
+	var interlockBypass InstallParsedManifestBypass
+	releaseInterlock := func() {}
+	interlockHeld := false
+	// acquireInterlock takes the supervisor.lock interlock the FIRST time it is called
+	// (subsequent calls are no-ops — the lock is a singleton held across the critical
+	// section) and, on success, arms releaseInterlock + mints the §7.1 bypass token from
+	// the held handle. It is invoked immediately after a reap (reap-then-acquire — bot PR
+	// #276 r2 P1) AND at the no-reap spec-bearing-write boundary (bot PR #276 r4 P2). A
+	// non-nil return means another serena migrate/cutover won the race for the lock: the
+	// call site DEFERS — emits the distinct deferred-on-interlock event and returns the
+	// honest 503 error (recovery restart, if any is owed for our OWN reap, is driven by
+	// failPreCommit's needReap branch). When the seam is nil (unwired / non-Windows) the
+	// cutover already fails loud at the pre-commit support gate above, so this is never
+	// reached there.
+	acquireInterlock := func() error {
+		if interlockHeld {
+			return nil
+		}
+		if autoRegisterAcquireInterlockFn == nil {
+			return nil
+		}
+		lock, release, acqErr := autoRegisterAcquireInterlockFn()
+		if acqErr != nil {
+			return acqErr
+		}
+		interlockHeld = true
+		releaseInterlock = release
+		interlockBypass = lock.AllowSpecBearingWriteBypass()
+		return nil
+	}
+	// Safety net: guarantee the interlock is released on EVERY return path. The
+	// explicit releases below run BEFORE each supervisor start (required so the
+	// child can AcquireSupervisorLock); this deferred call (late-bound so it sees
+	// the armed closure) is the idempotent backstop for any path that returns
+	// without having started — it is a harmless no-op once an explicit release
+	// fired, and the only releaser when we hold the interlock but return early.
+	defer func() { releaseInterlock() }()
+
 	// commitCtx drives the irreversible cutover steps (reap → install → post-commit
 	// start, plus the failPreCommit recovery-restart) once we pass the 7c session
 	// gate below. It is DERIVED from ctx via context.WithoutCancel so a mid-cutover
@@ -311,15 +395,26 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 
 	// failPreCommit rolls back the registry row and — if we reaped a supervisor —
 	// restarts it (via commitCtx) so the prior (still-on-disk) intent is reconciled
-	// (never leave no-supervisor-running). Shared by the reap-fail and install-fail
-	// paths AFTER a reap may have run. (The session-abort gate 7c below uses plain
-	// rollback() because it runs BEFORE the reap, so the old supervisor is still up
-	// and must NOT be restarted.)
+	// (never leave no-supervisor-running). Shared by the install-fail path and the
+	// post-reap interlock-defer path (bot PR #276 r2 P1) — both land AFTER a
+	// successful reap. (The reap-FAIL path uses plain rollback() because the reap
+	// failed → nothing was killed → no recovery restart is owed; and the session-abort
+	// gate 7c below uses plain rollback() because it runs BEFORE the reap, so the old
+	// supervisor is still up and must NOT be restarted.)
 	failPreCommit := func(cause error) (*WorkspaceEntry, error) {
 		if needReap {
+			// Release the interlock before the recovery restart — the restarted
+			// supervisor must AcquireSupervisorLock itself, so the held lock would
+			// block it. Idempotent (no-op if already released or never acquired).
+			releaseInterlock()
 			if startErr := autoRegisterStartFn(commitCtx); startErr != nil {
 				cause = fmt.Errorf("%w; AND the recovery supervisor restart after the reap also failed: %v — NO supervisor is running, run `mcphub supervise`", cause, startErr)
 			}
+		} else {
+			// No reap (and thus no recovery restart) on this path, but we may not
+			// hold the interlock here either (it is acquired only when needReap).
+			// Release defensively so it never leaks past this error return.
+			releaseInterlock()
 		}
 		return rollback(cause)
 	}
@@ -339,13 +434,82 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//    daemons stay up, and rollback() removes our row.
 	if needReap {
 		if reapErr := autoRegisterReapFn(commitCtx); reapErr != nil {
+			// The reap failed (nothing was killed; the daemons stay up) — we have NOT
+			// acquired the interlock yet (it is taken only AFTER a successful reap), so
+			// no recovery restart is owed: roll back our row with plain rollback(). The
+			// safety-net deferred releaseInterlock is still a harmless no-op (nothing
+			// held).
 			return rollback(fmt.Errorf("serena auto-register: reap the running supervisor before introducing runtime_spec for %s: %w", root, reapErr))
+		}
+		// 8b. ACQUIRE the supervisor.lock interlock IMMEDIATELY after the reap (bot PR
+		//     #276 r2 P1 — reap-then-acquire, mirroring the migrate). The reap freed the
+		//     flock (it killed the old supervisor that held it), so this quiet TryLock
+		//     can now succeed — which the PRE-reap acquire never could while the
+		//     supervisor was alive. Holding it across install→start makes THIS cutover
+		//     and the serena migrate mutually exclusive on the FREED lock.
+		if acqErr := acquireInterlock(); acqErr != nil {
+			// Another serena migrate/cutover reaped the same supervisor and won the race
+			// for the freed lock. We already reaped (the old supervisor is dead), so this
+			// is a POST-reap defer: emit the DISTINCT deferred-on-interlock event (NOT
+			// spec-bearing-install-refused — a CLI peer holds the lock, no supervisor is
+			// running) and route through failPreCommit, which (needReap=true) attempts a
+			// recovery restart from the still-on-disk OLD intent before rolling back our
+			// row. That recovery start fails fast while the race-winner holds the lock —
+			// which is correct: the winner IS the live supervisor it will (re)start from
+			// its own committed intent. The router maps the returned error to 503 → the
+			// client retries, by which time the winner has settled. (Point 4 of the
+			// concurrency re-verification: the system is never left supervisor-less — the
+			// race WINNER restarts one; only if the winner ALSO fails post-reap would no
+			// supervisor run, the same already-documented "both reaping flows fail after
+			// a reap" residual the migrate shares, surfaced as a fail-loud 503 + the
+			// `mcphub supervise` operator guidance, never a silent half-state.)
+			emitSerenaAutoRegisterDeferredOnInterlockEvent(canonical, key)
+			return failPreCommit(fmt.Errorf("serena auto-register: another serena migrate/cutover acquired supervisor.lock immediately after the reap, so the one-time introduce cutover for %s was deferred — retry shortly: %w", root, acqErr))
 		}
 	}
 
-	// 9. Install (live-add OR post-reap introduce). The §7.1 gate passes: either
-	//    the prior intent already has runtime_spec (live-add), or we just reaped so
-	//    no supervisor is running (introduce).
+	// 8c. NO-supervisor INTRODUCE interlock (bot PR #276 r4 P2). When this is the
+	//     FIRST serena workspace (!priorHasSpec → spec-bearing runtime_spec write) but
+	//     no supervisor was running (!needReap, so step 8 reaped nothing), the
+	//     write→start window is still UNPROTECTED: the §7.1 gate passes naturally
+	//     (nothing running) but an old-decoder supervisor could take the
+	//     supervisor.lock singleton between the liveness probe above and the START
+	//     below, then read the just-written runtime_spec with DisallowUnknownFields and
+	//     split-brain. The migrate already closes this exact case at its step-7e no-reap
+	//     boundary (migrate_serena.go — acquire `if len(installWorkspaces) > 0`); mirror
+	//     it here. Acquire ONLY on the spec-bearing introduce (!priorHasSpec); the
+	//     LIVE-ADD-to-a-stopped-pool path (needStart && !needReap but priorHasSpec=true)
+	//     is NOT spec-bearing (the prior intent already carries runtime_spec → the gate
+	//     does not fire), so it needs no interlock. acquireInterlock is idempotent — a
+	//     no-op if step 8b already took the lock on the reap path (it never runs there:
+	//     this branch requires !needReap). No supervisor holds the lock here, so the
+	//     quiet TryLock normally succeeds; an acquire-FAIL means a concurrent serena
+	//     migrate/cutover already holds it (it reaped+acquired), so we DEFER exactly like
+	//     the post-reap defer — but with NO reap of our own, so failPreCommit owes no
+	//     recovery restart (needReap=false → it just releases defensively + rolls back).
+	if !needReap && !priorHasSpec {
+		if acqErr := acquireInterlock(); acqErr != nil {
+			// A concurrent serena migrate/cutover holds supervisor.lock (it reaped a
+			// supervisor and acquired the freed lock). We reaped NOTHING (no supervisor
+			// was running), so this is a clean pre-commit defer: emit the DISTINCT
+			// deferred-on-interlock event (NOT spec-bearing-install-refused — a CLI peer
+			// holds the lock, no supervisor is running) and route through failPreCommit,
+			// which (needReap=false) releases the interlock defensively and rolls back our
+			// registry row with no recovery restart owed (there was no supervisor to
+			// restore — the race winner brings one up from its own committed intent). The
+			// router maps the returned error to 503 → the client retries, by which time
+			// the winner has settled.
+			emitSerenaAutoRegisterDeferredOnInterlockEvent(canonical, key)
+			return failPreCommit(fmt.Errorf("serena auto-register: another serena migrate/cutover holds supervisor.lock during the no-supervisor introduce for %s, so the one-time runtime_spec write was deferred — retry shortly: %w", root, acqErr))
+		}
+	}
+
+	// 9. Install (live-add OR post-reap introduce OR no-supervisor introduce). The
+	//    §7.1 gate passes: either the prior intent already has runtime_spec (live-add),
+	//    or we just reaped so no supervisor is running (introduce-while-running), or no
+	//    supervisor was ever running (no-supervisor introduce) — and in both introduce
+	//    cases we now HOLD the interlock so the gate's probe sees OUR lock (the minted
+	//    bypass token authorizes the write).
 	// intentPath is intentionally discarded: the post-commit fan-out verify that
 	// consumed it is gone (replaced by RequireWorkspaceKey, which guarantees presence
 	// PRE-commit), and the commit point below keys off rowSaved, not the path.
@@ -362,6 +526,15 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		// install is passed the cancellable ctx so its own commit-point ctx check
 		// (fix #1) honors a session terminated mid-install.
 		RequireWorkspaceKey: key,
+		// SupervisorLockBypass: on BOTH introduce paths (introduce-while-running, which
+		// reaped+acquired at 8b; and the no-supervisor introduce, which acquired at 8c)
+		// we HOLD supervisor.lock, so the §7.1 gate's probe would see OUR lock held and
+		// misread it as a foreign supervisor. The minted token tells the gate
+		// (verified-identity check, Phase 1) the held lock is our own handle so the
+		// spec-bearing write proceeds. Zero value on the LIVE-ADD path (no interlock
+		// held) → no bypass; the gate passes naturally because the prior intent already
+		// carries runtime_spec (HasRuntimeSpecRow ⟹ the §7.1 introduce gate never fires).
+		SupervisorLockBypass: interlockBypass,
 	})
 	if iErr != nil {
 		// Covers BOTH a genuine install failure AND the RequireWorkspaceKey
@@ -408,6 +581,13 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		}
 	}
 	if needPostCommitStart {
+		// Release the interlock before the start — the started supervisor must
+		// AcquireSupervisorLock itself; holding it here would block the child's own
+		// acquire. The intent is already committed (the §7.1 write-blocking property
+		// is past), so the release→child-acquire hand-off window is benign (the
+		// singleton makes a duplicate exit; reconcile-ready retries cover the
+		// pre-bind pipe race). Idempotent (no-op if never acquired).
+		releaseInterlock()
 		if startErr := autoRegisterStartFn(commitCtx); startErr != nil {
 			// POST-COMMIT start failure: fail loud, NO registry rollback (the intent
 			// is the commit point). Audit, then return; the operator restarts the
@@ -632,6 +812,43 @@ func emitWorkspaceAutoRegisteredEvent(workspacePath, key string, port int, langu
 	})
 }
 
+// emitSerenaAutoRegisterDeferredOnInterlockEvent writes a best-effort
+// `serena-auto-register-deferred-on-interlock` INFO event to
+// supervisor-events.log when the INTRODUCE-while-running cutover could NOT acquire
+// the supervisor.lock interlock — i.e. a concurrent serena migrate / cutover reaped
+// the same supervisor and won the race for the freed post-reap lock (bot PR #276 r2
+// P1: the acquire happens AFTER the reap, so the loser deferring here has already
+// reaped). It is DISTINCT from spec-bearing-install-refused (the §7.1 gate's refuse
+// event): NO supervisor is running here — a CLI peer holds the freed lock and will
+// restart one — so this names the honest reason (another cutover is in flight; the
+// client should retry). Mirrors emitWorkspaceAutoRegisteredEvent's best-effort
+// idiom: a resolve/open/emit failure is silently non-fatal (the returned 503 error
+// is the authoritative client signal).
+func emitSerenaAutoRegisterDeferredOnInterlockEvent(workspacePath, key string) {
+	stateDir, sdErr := DaemonStateDir()
+	if sdErr != nil {
+		return
+	}
+	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if openErr != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	_ = logger.Emit(SupervisorEvent{
+		SchemaVersion: SupervisorEventSchemaVersion,
+		TS:            time.Now().UTC().Format(time.RFC3339Nano),
+		Severity:      SupervisorEventSeverityInfo,
+		Source:        "reconcile",
+		Event:         "serena-auto-register-deferred-on-interlock",
+		TaskName:      SerenaTaskNameForWorkspace(workspacePath),
+		Body: map[string]any{
+			"path":          workspacePath,
+			"workspace_key": key,
+			"reason":        "another serena migrate/cutover reaped the same supervisor and acquired the freed supervisor.lock first; this introduce cutover deferred after its own reap (the race winner restarts the supervisor) and the registry row was rolled back — the client should retry shortly",
+		},
+	})
+}
+
 // loadSerenaCatalogManifest loads + parses the embedded serena catalog manifest
 // (honoring the MCPHUB_MANIFEST_DIR_OVERRIDE test seam, so tests read a seeded
 // temp manifest with no embed leakage). It is the catalog input to both
@@ -735,18 +952,62 @@ var (
 // Windows; false elsewhere in v0.5.0).
 var autoRegisterStartSupportedFn func() bool
 
+// autoRegisterAcquireInterlockFn acquires the supervisor.lock interlock the
+// INTRODUCE-while-running cutover HOLDS across its install→start critical section,
+// acquired IMMEDIATELY AFTER the reap — NOT before it (bot PR #276 r2 P1 +
+// finding 1 of .plans/2026-06/plan-serena-lock-interlock-2026-06-09.md). The reap
+// kills the RUNNING supervisor, which is the process that holds supervisor.lock
+// (api.AcquireSupervisorLock at supervise.go:373); the OS frees that flock only
+// once the supervisor dies, so a PRE-reap acquire could NEVER succeed on the exact
+// introduce-while-running case and would defer every such cutover with a 503. The
+// post-reap acquire takes the now-FREED lock — mirroring the migrate's
+// reap-then-acquire-immediately (migrate_serena.go's acquireInterlockOnce).
+//
+// It is the SAME seam the migrate uses (the CLI wires both to
+// defaultAcquireSupervisorInterlock, which uses the QUIET acquire
+// api.AcquireSupervisorLockQuiet — flock only, NO owner-sidecar write). Holding it
+// makes the two reaping flows — this auto-register cutover and the serena migrate —
+// MUTUALLY EXCLUSIVE on the FREED post-reap lock (only one wins the quiet TryLock;
+// the loser defers). The acquire MUST be quiet so it never overwrites the sidecar:
+// during the held-lock window the sidecar still names the now-DEAD old supervisor,
+// so a concurrent reaper reads a dead PID → no-op → never force-kills THIS live
+// process (bot PR #276 finding 1 stays closed under the reap-then-acquire ordering).
+//
+// It returns the live lock HANDLE (so the cutover mints the typed §7.1 bypass
+// token via AllowSpecBearingWriteBypass — needed because the held lock is now our
+// OWN, which the gate's probe would otherwise misread as a foreign supervisor; the
+// quiet handle still carries .fl + .path, the only fields the gate identity check
+// reads) and an idempotent release closure. A non-nil error means another serena
+// cutover / migrate reaped the same supervisor and won the race for the freed lock →
+// this cutover DEFERS post-reap (emits serena-auto-register-deferred-on-interlock,
+// drives the failPreCommit recovery restart for its OWN reap, rolls back its registry
+// row, returns an honest error the router maps to 503 → client retries).
+//
+// nil (unwired / non-Windows) is consistent with the existing introduce
+// cutover-support gate (the introduce path already fails loud pre-commit on a
+// platform that cannot reap/start), so a nil interlock seam there never reaches a
+// real reap.
+var autoRegisterAcquireInterlockFn func() (*SupervisorLock, func(), error)
+
 // SetSerenaAutoRegisterCutoverPrimitives wires the supervisor reap/start used by
 // AutoRegisterSerenaWorkspace when introducing the FIRST serena runtime_spec
 // (the one-time cutover), plus the start-supported predicate that gates the
-// introduce path BEFORE any commit. Called once from CLI GUI-server startup.
-// Passing nil for reap/start clears the wiring; a nil-or-false startSupported
-// makes the introduce path fail loud pre-commit. Safe to call before the GUI
-// starts serving; the package-globals are read under the install mutex on the
-// introduce branch.
-func SetSerenaAutoRegisterCutoverPrimitives(reap, start func(ctx context.Context) error, startSupported func() bool) {
+// introduce path BEFORE any commit, plus the supervisor.lock interlock acquire
+// (Phase 2 / Starter A) the INTRODUCE-while-running cutover acquires IMMEDIATELY
+// AFTER its reap (bot PR #276 r2 P1 — the running supervisor holds the lock, so it
+// can only be taken once the reap frees it) and holds across install→start so it
+// cannot be force-killed by a concurrent migrate cutover (and vice versa). Called
+// once from CLI GUI-server startup. Passing nil for reap/start clears the wiring; a
+// nil-or-false startSupported makes the introduce path fail loud pre-commit; a nil
+// acquireInterlock makes the introduce-while-running reap proceed WITHOUT the
+// cross-process kill-race guard (consistent with the cutover being unwired off the
+// supported platform). Safe to call before the GUI starts serving; the
+// package-globals are read under the install mutex on the introduce branch.
+func SetSerenaAutoRegisterCutoverPrimitives(reap, start func(ctx context.Context) error, startSupported func() bool, acquireInterlock func() (*SupervisorLock, func(), error)) {
 	autoRegisterReapFn = reap
 	autoRegisterStartFn = start
 	autoRegisterStartSupportedFn = startSupported
+	autoRegisterAcquireInterlockFn = acquireInterlock
 }
 
 // --- per-workspace-key concurrency guard -----------------------------------
