@@ -31,12 +31,14 @@ languages:
     backend: mcp-language-server
     transport: stdio
     lsp_command: fortls
-    # fpm.toml is the Fortran Package Manager manifest; .fortls is the fortls
-    # config file — the marker for CMake/Make-based Fortran projects (the common
-    # case for scientific codes), which do not use fpm. fortls parses source
-    # directly (no compile DB needed, unlike clangd), so a .fortls file (even an
-    # empty {}) is enough to opt a project into fortls auto-register.
-    project_markers: [fpm.toml, .fortls]
+    # fpm.toml is the Fortran Package Manager manifest; .fortlsrc / .fortls.json /
+    # .fortls are fortls's three default config-file names, discovered in that
+    # order under the project root (https://fortls.fortran-lang.org/options.html).
+    # CMake/Make-based Fortran projects (the common case for scientific codes) do
+    # not use fpm; fortls parses source directly (no compile DB needed, unlike
+    # clangd), so any one of its config files (even an empty {}) opts a project
+    # into fortls auto-register.
+    project_markers: [fpm.toml, .fortlsrc, .fortls.json, .fortls]
     required_binaries: [fortls]
 
   - name: go
