@@ -16,6 +16,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // ------------------------------------------------------------------
@@ -384,6 +385,18 @@ func TestWorkspaceRegister_SucceedsAgainstLegacyGlobalEmbed(t *testing.T) {
 // B.2: unregister
 // ------------------------------------------------------------------
 
+// noopWorkspaceTestScheduler is a do-nothing api.TestSchedulerIface used by the
+// REAL-seam unregister pairing test to keep the host's Task Scheduler untouched.
+// Every method is an inert success so the legacy-task Delete in (*api.API).Unregister
+// is a no-op rather than a real schtasks invocation.
+type noopWorkspaceTestScheduler struct{}
+
+func (noopWorkspaceTestScheduler) Create(scheduler.TaskSpec) error  { return nil }
+func (noopWorkspaceTestScheduler) Delete(string) error              { return nil }
+func (noopWorkspaceTestScheduler) Run(string) error                 { return nil }
+func (noopWorkspaceTestScheduler) ExportXML(string) ([]byte, error) { return nil, nil }
+func (noopWorkspaceTestScheduler) ImportXML(string, []byte) error   { return nil }
+
 // seedTwoBackends registers one serena row + one LSP row under the same
 // workspace_key for unregister-semantic tests.
 func seedTwoBackends(t *testing.T) (regPath, wsCanon, wsKey string) {
@@ -404,12 +417,22 @@ func seedTwoBackends(t *testing.T) (regPath, wsCanon, wsKey string) {
 	}
 	// Inject a fake LSP row via PutLSP — same path the production
 	// registerOneLanguage uses (Phase 3 lazy-mode register).
+	// Port:0 is deliberate. The default (LSP-only) unregister path uses the REAL
+	// (*api.API).Unregister in TestWorkspaceUnregister_RemovesRegistryRowAndSupervisorIntentDescriptor,
+	// whose teardown calls killByPortFn(entry.Port, 5s) → killDaemonByPort, which
+	// has NO identity gate and TREE-KILLS whatever listens on entry.Port. A nonzero
+	// port here (the old 9200 was the FIRST slot of the live LSP pool, per
+	// servers/mcp-language-server/manifest.yaml `start: 9200`) would kill the
+	// developer's live workspace-proxy. SetDaemonStateRootForTest isolates FILES,
+	// not the network/process surface. With Port:0 the `entry.Port != 0` guard at
+	// internal/api/register.go SKIPS the kill, and every assertion in the callers
+	// is port-independent (they check row/descriptor presence, never the port).
 	if err := reg.PutLSP(api.WorkspaceEntry{
 		WorkspaceKey:  wsKey,
 		WorkspacePath: wsCanon,
 		Language:      "python",
 		Backend:       "mcp-language-server",
-		Port:          9200,
+		Port:          0,
 		TaskName:      "mcp-local-hub-lsp-" + wsKey + "-python",
 	}); err != nil {
 		t.Fatalf("PutLSP: %v", err)
@@ -625,8 +648,27 @@ func TestWorkspaceUnregister_BackendByLanguageNameRemovesMatchingRows(t *testing
 func TestWorkspaceUnregister_RemovesRegistryRowAndSupervisorIntentDescriptor(t *testing.T) {
 	regPath, ws, wsKey := seedTwoBackends(t)
 
+	// Stub the scheduler so the REAL Unregister's legacy-task Delete never
+	// dials the host's real Task Scheduler (schtasks). seedTwoBackends already
+	// seeds Port:0 for the row + descriptor, so the kill-by-port guard skips the
+	// network kill; this hook closes the remaining real-OS surface (no real
+	// schtasks /Delete runs against the host). Empty client set — the seeded LSP
+	// row carries no ClientEntries, so no adapter writes are exercised. The
+	// registry path stays the withStateDir-redirected temp default ("").
+	restoreHooks := api.InstallTestHooks(
+		func() (api.TestSchedulerIface, error) { return noopWorkspaceTestScheduler{}, nil },
+		func() map[string]api.TestClientIface { return map[string]api.TestClientIface{} },
+		"",
+	)
+	t.Cleanup(restoreHooks)
+
 	// Seed the supervisor-intent.json LSP descriptor that pairs with the
 	// seeded python LSP registry row — the exact shape register would write.
+	// Port:0 mirrors the seeded registry row (see seedTwoBackends): the pairing
+	// assertion keys on descriptor.TaskName, which BuildSupervisorDaemonForLSP
+	// derives from (WorkspaceKey, Language) — independent of Port — so a zero
+	// port preserves the assertion while keeping the real teardown's kill-by-port
+	// path inert.
 	intentPath, err := api.DefaultSupervisorIntentPath()
 	if err != nil {
 		t.Fatalf("intent path: %v", err)
@@ -636,7 +678,7 @@ func TestWorkspaceUnregister_RemovesRegistryRowAndSupervisorIntentDescriptor(t *
 		WorkspacePath: ws,
 		Language:      "python",
 		Backend:       "mcp-language-server",
-		Port:          9200,
+		Port:          0,
 	}, "mcphub")
 	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{
 		Version: 1,
