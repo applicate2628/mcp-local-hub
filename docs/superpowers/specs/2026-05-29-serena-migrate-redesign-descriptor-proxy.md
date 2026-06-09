@@ -530,10 +530,14 @@ several land as separate PRs (see the plan).
   ([internal/api/install_parsed_manifest.go:319-346](../../../internal/api/install_parsed_manifest.go)) so
   the row-level heal is complete. Until that runs, a serena proxy spawned from a nil-spec descriptor fails
   loud (§4 boundary defense) — it does not silently fall back to the legacy manifest read.
-- **Old supervisor reading new files is NOT auto-safe — see §7.1**. The row-level heal above presumes the
-  *new* binary is the one reading and reconciling the intent. An *old* binary that is still running would
-  fail the `DisallowUnknownFields` decode and keep its stale cache (§3) — so a restart/version gate is
-  required, not optional. §7.1 is the load-bearing addition.
+- **Old supervisor reading new files is NOT auto-safe — see §7.1 (and the reap→write→start interlock in
+  §7.1.1)**. The row-level heal above presumes the *new* binary is the one reading and reconciling the
+  intent. The precise hazard is the **decoder vintage of the currently-RUNNING supervisor process**, not
+  binary identity on disk: an *old-decoder* process still running would fail the `DisallowUnknownFields`
+  decode and keep its stale cache (§3) — so a restart/version gate is required, not optional, and "restart,
+  not re-link" is what clears it (the serena reap-path is a SAME-binary cutover; see §7.1.1's
+  decoder-vintage note). §7.1 is the load-bearing addition; §7.1.1 closes the concurrency hazard inside the
+  migrate's own reap→write→start window.
 
 ### 7.1 Supervisor upgrade/restart gate (correctness-load-bearing)
 
@@ -573,12 +577,122 @@ invent a new restart path; it requires that the migrate/install path drive this 
    reaped the prior supervisor and the new one is started and reconcile-ready.
 2. If the prior supervisor cannot be quiesced/exited (IPC unreachable, force-kill fails), the
    migrate/install **fails loud** with operator guidance (the existing cold-restart flow already surfaces
-   force-kill failures) rather than committing a new intent that a stuck old supervisor will ignore.
+   force-kill failures) rather than committing a new intent that a stuck old supervisor will ignore —
+   AND no foreign supervisor can start in the reap→write window, AND no concurrent serena auto-register
+   reap can force-kill the migrate's lock-holding process (the reap→write→start interlock of §7.1.1
+   enforces both).
 3. The new supervisor, on cold start, reconciles from the `runtime_spec`-bearing intent and re-materializes
    any nil-spec serena rows (row-level heal) BEFORE spawning — so it never spawns a proxy against a
    nil-spec descriptor (§4 sequencing requirement).
 4. Byte-symmetric v0.4.x rollback is unaffected (the gate only touches the v0.5.0 supervisor lifecycle and
    `supervisor-intent.json`, not `daemon-intent.json` / `managed-entries.json` / `watchdog-state.json`).
+
+#### 7.1.1 Reap→write→start window interlock
+
+The gate above closes the *steady-state* hazard (an old-decoder supervisor ignoring new intent). It does
+NOT by itself close the *concurrency* hazard inside the migrate's own reap→write→start sequence:
+`mcphub migrate serena legacy-to-dynamic-pool` reaps the supervisor (kills the old PID), THEN writes the
+new `runtime_spec`-bearing intent, THEN starts the successor. In the gap after the reap but before the
+write, a *foreign* supervisor can start — the GUI `ensureSupervisorRunning`, the schedulerless
+`registerEnsureSupervisorRunning`, or `POST /api/supervisor/restart` — and if it wins, the gate's
+point-in-time probe sees a supervisor running and refuses the migrate's spec-bearing write, leaving the
+migrate to fail mid-flight while a freshly-started supervisor holds the lock but has not yet bound its IPC
+pipe.
+
+**Mechanism — the lock IS the critical-section mutex (lock-as-mutex).** The migrate HOLDS
+`supervisor.lock` across the whole reap→write→start window. While it is held, no other actor can ACQUIRE
+it, and every supervisor-starter acquires it before it can run (`api.AcquireSupervisorLock` in
+`runSupervise`, [internal/cli/supervise.go:373](../../../internal/cli/supervise.go)) — so a held lock
+provably excludes every foreign START for the whole critical section. This is not a new coordination
+channel: `supervisor.lock` already IS the single-supervisor singleton mutex; the migrate borrows it as the
+critical-section mutex it already is. A racing duplicate-spawn fails its own acquire and its `runSupervise`
+returns an error, so the spawned child exits (the singleton-exit property).
+
+**Typed-token gate bypass (not a bool).** Windows byte-range locks are per-HANDLE: the §7.1 gate's
+`SupervisorRunningUnderStateDir` probe opens a SECOND flock handle and genuinely misreads the migrate's
+OWN held lock as a foreign supervisor (`ERROR_LOCK_VIOLATION` → "running"). So the gate must be told "the
+caller already holds the lock; skip the probe." That signal is a **typed capability token**, not a boolean
+flag — a `bool SupervisorLockHeldByCaller` would be a zero-cost escape hatch any future caller could set
+`true` WITHOUT holding the lock, silently re-arming the split-brain the fail-closed gate exists to prevent.
+Instead:
+
+- `InstallParsedManifest` carries `opts.SupervisorLockBypass` of opaque type `InstallParsedManifestBypass`
+  ([internal/api/supervisor_lock.go](../../../internal/api/supervisor_lock.go)). Its single field is
+  UNEXPORTED (`lk *SupervisorLock`), so no code outside package `api` can forge a non-nil token; the zero
+  value (`lk == nil`) is "no bypass" and is the default for every existing call site.
+- The token is mintable ONLY by `(*SupervisorLock).AllowSpecBearingWriteBypass()` — i.e. the ONLY way to
+  obtain a non-nil token is to already hold a real `*SupervisorLock` returned by `AcquireSupervisorLock`.
+- The gate verifies IDENTITY at use time, not truthiness: it skips the probe ONLY when the token's `lk` is
+  non-nil AND the lock is still held (`lk.fl != nil` — `Release()` nils `fl`) AND the lock's `path`
+  resolves to the gate's own `filepath.Join(stateDir, "supervisor.lock")`. A token whose lock leaf does
+  NOT match the gate's `stateDir` is REJECTED (treated as no-bypass → the probe runs → fail-closed), which
+  folds the path-consistency check INTO the gate itself. A verified bypass emits the info event
+  `spec-bearing-write-allowed-under-caller-lock` (carrying the matched lock path); a forged, mismatched, or
+  already-released token never bypasses.
+
+Net: a caller that does not hold the matching lock CANNOT obtain a non-nil bypass, so the invariant is
+enforced by the type system plus an identity check, not by a code comment.
+
+**The reap-complete→acquire gap is covered by the acquire-FAIL fail-loud branch.** The interlock is
+acquired AFTER the reap (the reap reads `supervisor.lock.owner.json` and must still name the OLD supervisor
+when it kills it). In the tiny window between reap-complete and the migrate's own acquire, a foreign
+supervisor could start and win the lock. If it does, the migrate's acquire FAILS — and that is the CORRECT
+loud-and-retryable outcome, not a bug: the acquire is post-reap-PRE-write, so the new intent is NOT yet
+committed and the legacy serena state is untouched. The migrate fails loud ("a supervisor — or another
+serena cutover — started during the migrate window and now holds supervisor.lock; the new dynamic-pool
+intent was NOT written and legacy serena is untouched; wait for it to settle and re-run the migrate") and
+the operator re-runs. No split-brain.
+
+**The release→child-acquire hand-off window is benign.** The migrate RELEASES the lock immediately before
+spawning the successor, because the child must `AcquireSupervisorLock` itself — a locked byte-range is not
+granted to a detached child on Windows. The residual window between that release and the child's acquire is
+benign on every branch: (a) the intent is already committed (the §7.1 WRITE-blocking property is past), so
+any winner reads the new `runtime_spec` correctly; (b) the singleton makes a racing duplicate-spawn exit
+([internal/cli/supervise.go:373](../../../internal/cli/supervise.go)); (c) an OLD-decoder winner fails its
+`DisallowUnknownFields` decode at cold start, the process exits, releases the lock, and NOTHING re-spawns
+it (the GUI exit-monitor only logs — `startExitMonitor` in
+[internal/cli/gui_supervisor_owner.go](../../../internal/cli/gui_supervisor_owner.go)); and (d) the
+migrate's `waitReconcileReadyViaIPC` retries 200 ms × 30 s
+([internal/cli/migrate_serena_restart_windows.go](../../../internal/cli/migrate_serena_restart_windows.go)),
+so the pre-bind pipe race is tolerated. When the window actually materialized-but-resolved, the migrate
+emits the info event `supervisor-interlock-handoff-window` (phase `reconcile-ready-retry` or
+`duplicate-spawn-exit`) so an operator can tell a known-benign window apart from a recurrence of the
+original 30 s-IPC-timeout bug.
+
+**Auto-register Starter-A extension (the second reaping flow).** The held lock prevents ACQUIRE, not KILL,
+so a *second* flow that reaps-then-starts is NOT automatically covered: the serena auto-register cutover
+(`AutoRegisterSerenaWorkspace`, [internal/api/serena_auto_register.go](../../../internal/api/serena_auto_register.go))
+force-kills the supervisor by PID read from `supervisor.lock.owner.json` on its INTRODUCE branch. But once
+the migrate acquires the interlock it OVERWRITES that sidecar with its OWN CLI-process PID — so a concurrent
+auto-register INTRODUCE firing inside the migrate's held-lock window would read the sidecar, see the
+migrate's PID, and `taskkill /F /T` the MIGRATE mid-cutover. Therefore the auto-register INTRODUCE cutover
+acquires the SAME `supervisor.lock` BEFORE its own reap (via the same interlock seam, with identical
+acquire→write-with-bypass-token→release lifetime). If the migrate holds the lock, auto-register's acquire
+fails BEFORE it reaps anything — so it can NEVER force-kill the migrate's lock-holding PID; it defers
+pre-commit, rolls back its registry row, emits the distinct info event
+`serena-auto-register-deferred-on-interlock` (NOT a misleading "supervisor running" refusal — there is no
+supervisor, a CLI holds the lock), and returns an honest error the router maps to 503 → the client retries.
+Symmetrically, if auto-register holds the lock, the migrate's acquire-FAIL fail-loud branch fires. The two
+reaping flows are now mutually exclusive and neither can kill the other's lock-holding process. (The
+auto-register LIVE-ADD branch does NOT reap and is already §7.1-safe via `HasRuntimeSpecRow()`; it is
+unchanged and relies on the registry flock the migrate also takes for its cross-process serialization.)
+
+Why `supervisor.lock` and not a broader `migration.lock`: `migration.lock` is a DIFFERENT leaf and neither
+the serena migrate driver nor the v5-upgrade path (`runV5UpgradeWindows`) takes it, so it is not a usable
+broader exclusion here; routing both reaping flows onto it would also force it into the generic
+`RunInstallUpgrade` contract that serves every v0.5.x upgrade. `supervisor.lock` is the ONE lock every
+supervisor-START already contends on, so extending the few REAP flows to take it too is the minimal change
+that closes the kill-race without inventing a new lock or widening an unrelated contract.
+
+**Decoder-vintage cross-reference.** The "old supervisor reading new files is NOT auto-safe" note above
+(§7 bullet on the reverse-direction hazard) uses *binary*-flavored phrasing, but the hazard the §7.1 gate
+and this interlock guard is precisely the **decoder vintage of the currently-RUNNING supervisor process**,
+not binary identity on disk. The serena reap-path is a SAME-binary cutover (the rename-aside binary swap is
+skipped because the binary is unchanged); a supervisor process launched from a PRIOR image keeps running
+the OLD `ReadSupervisorIntent` decoder (its `DisallowUnknownFields` will reject `runtime_spec`) until it is
+restarted — restart, not re-link, is what clears it. The interlock's job is to guarantee no process running
+an old decoder can observe the new intent and to keep the two reaping flows from killing each other across
+the cutover.
 
 The remaining migration/rollback safety properties:
 

@@ -1086,6 +1086,64 @@ warning badge.
 - Alerting integration: piping `severity: warn event:
   per-spawn-job-create-failed` to PagerDuty / Slack / etc.
 
+### Serena migrate supervisor-lock interlock (v0.5.x)
+
+`mcphub migrate serena legacy-to-dynamic-pool` reaps the running
+supervisor, writes the new `runtime_spec`-bearing
+`supervisor-intent.json`, then starts the successor. Across that whole
+reap→write→start window the migrate HOLDS `supervisor.lock` as a
+critical-section mutex so no other actor can START a supervisor inside
+the window (every supervisor-starter acquires the same lock first). The
+spec-bearing write gate is bypassed via a typed capability token
+(`InstallParsedManifestBypass`, mintable ONLY by
+`(*SupervisorLock).AllowSpecBearingWriteBypass()`) whose identity the
+gate re-verifies (lock still held AND lock path == the gate's own
+`supervisor.lock`), so a foreign supervisor can never trip the gate
+against the migrate's own held lock. The serena auto-register INTRODUCE
+cutover takes the SAME lock before its own reap, so the two reaping
+flows are mutually exclusive and neither can force-kill the other's
+lock-holding PID. Full design:
+[`docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md`](docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md)
+§7.1.1.
+
+**Operator-sequencing constraint (Starter B).** Do NOT run `mcphub
+install --upgrade` concurrently with `mcphub migrate serena
+legacy-to-dynamic-pool`. The two are NOT co-serialized — they share no
+lock (the v5-upgrade path does not take `migration.lock`, and folding
+the generic `RunInstallUpgrade` contract into the serena interlock seam
+is out of scope). Both reap-then-start and both read the same
+`supervisor.lock.owner.json`, so a concurrent `install --upgrade` can
+force-kill the migrate's lock-holding process. The collision is
+SAFE-but-noisy, not corrupting: the migrate's intent write is atomic
+temp+rename, so a death before the rename leaves legacy serena intact
+(recoverable) and a death after the rename leaves the committed
+dynamic-pool intent which the upgrade's freshly-started new-binary
+supervisor reconciles correctly. Either way there is no split-brain —
+the residual is a failed/odd-looking migrate run the operator re-runs.
+Sequence the two commands one after the other; do not overlap them.
+
+**New `supervisor-events.log` events (both `info`).** These join the
+Cross-channel routing set documented under "`supervisor-events.log`
+schema" above:
+
+- `supervisor-interlock-handoff-window` (`severity: info`, `source:
+  migration`) — fired when the known-benign release→child-acquire
+  hand-off window actually exercised its tolerance. `body.phase` is
+  `reconcile-ready-retry` (the pre-bind IPC-pipe race materialized but
+  resolved after >1 poll) or `duplicate-spawn-exit` (a racing duplicate
+  supervisor exited via the singleton). It exists so an operator can
+  tell this benign window apart from a recurrence of the original
+  bare-30 s-IPC-timeout bug; emit-failure is silently non-fatal.
+- `serena-auto-register-deferred-on-interlock` (`severity: info`,
+  `source: reconcile`) — fired when a serena auto-register INTRODUCE
+  cutover could NOT acquire `supervisor.lock` because a concurrent
+  serena migrate/cutover holds it. Auto-register DEFERS pre-reap (no
+  supervisor is killed), rolls back its registry row, and returns an
+  honest error the `/serena/mcp` router maps to 503 → the client
+  retries (by which time the migrate has settled). It is deliberately a
+  DISTINCT event, NOT a misleading `spec-bearing-install-refused` /
+  "supervisor running" (there is no supervisor — a CLI holds the lock).
+
 ## Marketplace (G5, v0.3.0)
 
 `mcphub marketplace {search,show,generate,refresh}` lets an operator
