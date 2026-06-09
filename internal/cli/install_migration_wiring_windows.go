@@ -410,8 +410,19 @@ var probePowerShellCLMFn = process.ProbePowerShellCLM
 // Production wires it to the real Windows implementation; tests inject
 // a fake that returns process.ErrProcessNotFound (or an arbitrary
 // other error) to drive lookupMigrationProcessIdentity's sentinel
-// mapping path.
+// mapping path. It also backs supervisorPIDIsLiveMcphubSupervisor's
+// kill-target identity gate (bot PR #276 r3 P2).
 var processLookupIdentityFn = process.LookupProcessIdentity
+
+// killPIDViaTaskkillFn is a test seam over killPIDViaTaskkill so the
+// supervisor-reaper identity-gate tests (bot PR #276 r3 P2) can observe
+// WHICH PID — if any — the reaper would force-kill WITHOUT ever shelling
+// `taskkill` against a real process. Production wires the real helper; a
+// test swaps it to record the call. The interlock/reuse hazard tests must
+// never actually kill anything (CLAUDE.md: the developer runs ~21 live
+// production daemons under their supervisor), so the kill is mediated
+// through this seam.
+var killPIDViaTaskkillFn = killPIDViaTaskkill
 
 // lookupMigrationProcessIdentity adapts process.LookupProcessIdentity
 // into the migration.ProcessIdentity shape AND maps the package-local
@@ -615,6 +626,68 @@ func pidForServerDaemonViaWmic(wantArgv string) (int, error) {
 		return pid, nil
 	}
 	return 0, migration.ErrProcessNotFound
+}
+
+// supervisorPIDIsLiveMcphubSupervisor validates that the PID recorded in
+// supervisor.lock.owner.json is actually a LIVE mcphub supervisor process
+// before any caller force-kills it (bot PR #276 r3 P2). It is the
+// kill-target identity gate the supervisor reapers (forceKillSupervisor /
+// v5UpgradeDeps.ForceKillSupervisor) consult.
+//
+// WHY this gate exists (the root the finding names): the owner sidecar is
+// best-effort and SURVIVES a supervisor crash (a quiet interlock holder's
+// Release() deliberately leaves it in place, and an OS-killed supervisor
+// never tidies it). If that crashed supervisor's PID is later REUSED by an
+// unrelated OS process, a reaper that blindly trusts the sidecar PID would
+// `taskkill /F /T` that unrelated process. The "dead PID → taskkill exit
+// 128 → benign no-op" reasoning the §7.1.1 interlock relies on holds ONLY
+// while the PID stays dead; PID reuse breaks it. So the reaper must NAME
+// and VALIDATE its target — image basename is mcphub(.exe) AND the
+// command-line is a `supervise` invocation — and refuse to kill anything
+// that fails, treating a stale/reused/unrelated PID as "no supervisor to
+// reap" (no-op), exactly as a genuinely-absent supervisor is treated.
+//
+// It returns true ONLY when the lookup succeeds AND both identity gates
+// pass. Any lookup failure (process gone — process.ErrProcessNotFound — or
+// a transient/probe error) returns false: we cannot PROVE the PID is a live
+// supervisor, so we must NOT kill it. The reaper maps false to its benign
+// "nothing to kill" path. The reaper still rejects a corrupt sidecar
+// (PID <= 0) up front; this gate covers the live-but-not-a-supervisor case.
+//
+// Reuses the existing, tested process.LookupProcessIdentity primitive via
+// the processLookupIdentityFn test seam (the same seam the migration
+// process-identity adapter uses), so this is a single owned identity path,
+// not a re-rolled probe. The two gates mirror migration.fourGateOwnershipCheck
+// (internal/migration/journal.go) but key on the `supervise` subcommand
+// rather than `daemon` — a supervisor runs `mcphub supervise [--strict-mode]`
+// (spawnSupervisorDetached above; runSupervise in supervise.go).
+func supervisorPIDIsLiveMcphubSupervisor(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	ident, err := processLookupIdentityFn(pid)
+	if err != nil {
+		// process.ErrProcessNotFound (the PID is gone) OR a transient/probe
+		// error. Either way we cannot prove a live supervisor — fail closed
+		// to "do not kill". A genuinely-running old supervisor would resolve
+		// cleanly; an exited or reused PID must not be force-killed.
+		return false
+	}
+	// Gate 1: image basename is mcphub(.exe), case-insensitive. A reused PID
+	// belonging to an unrelated process (the reuse hazard the finding names)
+	// fails here.
+	base := strings.TrimSpace(ident.Basename)
+	if !strings.EqualFold(base, "mcphub.exe") && !strings.EqualFold(base, "mcphub") {
+		return false
+	}
+	// Gate 2: the command-line is a `supervise` invocation. This distinguishes
+	// the supervisor from any OTHER mcphub process that could have inherited
+	// the reused PID (a `mcphub gui` / `mcphub daemon ...` / `mcphub status`),
+	// so the reaper only ever kills an actual supervisor.
+	if !strings.Contains(ident.CommandLine, "supervise") {
+		return false
+	}
+	return true
 }
 
 // killPIDViaTaskkill kills a process by PID via `taskkill /F /T /PID`.
@@ -923,7 +996,15 @@ func forceKillSupervisor(lockPath string) func() error {
 		if owner.PID <= 0 {
 			return nil
 		}
-		return killPIDViaTaskkill(owner.PID)
+		// Kill-target identity gate (bot PR #276 r3 P2): the owner sidecar
+		// survives a supervisor crash and its PID can be REUSED by an
+		// unrelated process. Validate the PID is a live mcphub supervisor
+		// before force-killing it; a stale/reused/unrelated PID is treated
+		// as "no supervisor to reap" (no-op) rather than blindly killed.
+		if !supervisorPIDIsLiveMcphubSupervisor(owner.PID) {
+			return nil
+		}
+		return killPIDViaTaskkillFn(owner.PID)
 	}
 }
 
@@ -976,7 +1057,21 @@ func (d *v5UpgradeDeps) ForceKillSupervisor(pipePath string) error {
 	if owner.PID <= 0 {
 		return fmt.Errorf("force-kill: supervisor.lock.owner.json has invalid PID %d (corrupt sidecar)", owner.PID)
 	}
-	return killPIDViaTaskkill(owner.PID)
+	// Kill-target identity gate (bot PR #276 r3 P2): the owner sidecar
+	// survives a supervisor crash and its PID can be REUSED by an unrelated
+	// process. Validate the PID is a live mcphub supervisor before
+	// force-killing it. A stale/reused/unrelated PID means there is no
+	// supervisor to reap — benign no-op (return nil), NOT an error: the
+	// reaper's contract is "kill the prior supervisor if one is running",
+	// and an identity-mismatched PID proves none is, so the upgrade /
+	// migrate proceeds to its port-unbound verify exactly as it does on the
+	// os.IsNotExist "no supervisor running" path above. (A corrupt sidecar —
+	// PID <= 0 — is still a propagated error above; this gate only suppresses
+	// the live-but-not-a-supervisor case the reuse hazard introduces.)
+	if !supervisorPIDIsLiveMcphubSupervisor(owner.PID) {
+		return nil
+	}
+	return killPIDViaTaskkillFn(owner.PID)
 }
 
 func (d *v5UpgradeDeps) StartSupervisor(binaryPath string) error {

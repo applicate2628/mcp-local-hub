@@ -488,3 +488,238 @@ func TestV5UpgradeDeps_ForceKillSupervisor_InvalidPIDPropagates(t *testing.T) {
 		t.Errorf("error should name the invalid-PID cause; got %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// bot PR #276 r3 P2: kill-target identity gate. The supervisor reapers
+// (forceKillSupervisor / v5UpgradeDeps.ForceKillSupervisor) read the PID
+// from supervisor.lock.owner.json and force-kill it. The owner sidecar
+// SURVIVES a supervisor crash (a quiet interlock holder's Release() leaves
+// it; an OS-killed supervisor never tidies it), so its recorded PID can be
+// REUSED by an unrelated OS process. The pre-fix reapers blindly
+// taskkill'd that PID — killing an unrelated live process during the
+// migrate's held-lock window. The fix validates the PID is a live mcphub
+// supervisor (basename mcphub(.exe) + `supervise` command-line) BEFORE the
+// kill; a stale/reused/unrelated PID is treated as "no supervisor to reap"
+// (no-op). These tests drive the gate through the processLookupIdentityFn
+// seam and observe the kill through the killPIDViaTaskkillFn seam so NOTHING
+// is ever actually killed.
+// ---------------------------------------------------------------------------
+
+// swapKillPIDViaTaskkillForTest replaces killPIDViaTaskkillFn for the test
+// scope and returns a pointer to a slice that records every PID the reaper
+// would have force-killed. The recorder returns nil (success) so a reaper
+// that DOES decide to kill proceeds through its normal success path.
+func swapKillPIDViaTaskkillForTest(t *testing.T) *[]int {
+	t.Helper()
+	var killed []int
+	orig := killPIDViaTaskkillFn
+	t.Cleanup(func() { killPIDViaTaskkillFn = orig })
+	killPIDViaTaskkillFn = func(pid int) error {
+		killed = append(killed, pid)
+		return nil
+	}
+	return &killed
+}
+
+// swapProcessLookupForTest installs a fixed lookup result for the
+// processLookupIdentityFn seam for the test scope.
+func swapProcessLookupForTest(t *testing.T, ident process.ProcessIdentity, err error) {
+	t.Helper()
+	orig := processLookupIdentityFn
+	t.Cleanup(func() { processLookupIdentityFn = orig })
+	processLookupIdentityFn = func(pid int) (process.ProcessIdentity, error) {
+		// Echo the requested PID so callers that read ident.PID see a
+		// faithful value (the real backend does the same).
+		out := ident
+		out.PID = pid
+		return out, err
+	}
+}
+
+// TestSupervisorPIDIsLiveMcphubSupervisor_Gate is the direct unit test of
+// the identity gate.
+func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
+	const pid = 4242
+	cases := []struct {
+		name  string
+		ident process.ProcessIdentity
+		err   error
+		want  bool
+	}{
+		{
+			name:  "live mcphub supervisor (exe)",
+			ident: process.ProcessIdentity{Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`},
+			want:  true,
+		},
+		{
+			name:  "live mcphub supervisor (no .exe basename)",
+			ident: process.ProcessIdentity{Basename: "mcphub", CommandLine: `/usr/local/bin/mcphub supervise`},
+			want:  true,
+		},
+		{
+			name:  "reused PID belongs to unrelated process",
+			ident: process.ProcessIdentity{Basename: "notepad.exe", CommandLine: `C:\Windows\System32\notepad.exe`},
+			want:  false,
+		},
+		{
+			name:  "mcphub process but NOT a supervisor (gui)",
+			ident: process.ProcessIdentity{Basename: "mcphub.exe", CommandLine: `mcphub.exe gui --no-browser`},
+			want:  false,
+		},
+		{
+			name:  "mcphub process but NOT a supervisor (daemon child)",
+			ident: process.ProcessIdentity{Basename: "mcphub.exe", CommandLine: `mcphub.exe daemon --server time --daemon default`},
+			want:  false,
+		},
+		{
+			name:  "process gone (ErrProcessNotFound)",
+			ident: process.ProcessIdentity{},
+			err:   process.ErrProcessNotFound,
+			want:  false,
+		},
+		{
+			name:  "transient lookup error",
+			ident: process.ProcessIdentity{},
+			err:   errors.New("simulated transient WMI stall"),
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			swapProcessLookupForTest(t, tc.ident, tc.err)
+			if got := supervisorPIDIsLiveMcphubSupervisor(pid); got != tc.want {
+				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor(%d) = %v; want %v", pid, got, tc.want)
+			}
+		})
+	}
+	// PID <= 0 is rejected up front (no lookup needed).
+	if supervisorPIDIsLiveMcphubSupervisor(0) {
+		t.Fatal("PID 0 must be rejected by the gate")
+	}
+	if supervisorPIDIsLiveMcphubSupervisor(-1) {
+		t.Fatal("negative PID must be rejected by the gate")
+	}
+}
+
+// TestForceKillSupervisor_Rollback_SkipsReusedNonSupervisorPID is the
+// load-bearing regression for the rollback reaper closure: a sidecar PID
+// that has been REUSED by an unrelated process must NOT be force-killed.
+//
+// Falsification on the unfixed code: without the supervisorPIDIsLiveMcphubSupervisor
+// gate, forceKillSupervisor reads owner.PID and calls killPIDViaTaskkillFn
+// unconditionally, so `killed` would contain the reused PID — the exact
+// kill-an-unrelated-process bug the finding names.
+func TestForceKillSupervisor_Rollback_SkipsReusedNonSupervisorPID(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockPath + ".owner.json"
+
+	// Seed a sidecar naming a PID that (per the lookup stub) is now an
+	// unrelated process — the post-crash PID-reuse scenario.
+	const reusedPID = 31337
+	body := `{"pid":31337,"started_at":"2026-05-17T00:00:00Z"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed reused-PID sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		Basename:    "python.exe",
+		CommandLine: `C:\Python\python.exe some-unrelated-script.py`,
+	}, nil)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	if err := forceKillSupervisor(lockPath)(); err != nil {
+		t.Fatalf("forceKillSupervisor on a reused non-supervisor PID must be a benign no-op; got err %v", err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("reused non-supervisor PID %d must NOT be force-killed; killed=%v", reusedPID, *killed)
+	}
+}
+
+// TestForceKillSupervisor_Rollback_KillsLiveSupervisor pins the positive
+// path: a sidecar PID that IS a live mcphub supervisor is still reaped
+// (the gate does not over-block the legitimate case).
+func TestForceKillSupervisor_Rollback_KillsLiveSupervisor(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockPath + ".owner.json"
+
+	const supPID = 4242
+	body := `{"pid":4242,"started_at":"2026-05-17T00:00:00Z"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed supervisor sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		Basename:    "mcphub.exe",
+		CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+	}, nil)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	if err := forceKillSupervisor(lockPath)(); err != nil {
+		t.Fatalf("forceKillSupervisor on a live supervisor PID: %v", err)
+	}
+	if len(*killed) != 1 || (*killed)[0] != supPID {
+		t.Fatalf("live supervisor PID %d must be force-killed exactly once; killed=%v", supPID, *killed)
+	}
+}
+
+// TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID is the
+// same regression for the v0.5 upgrade reaper. A reused non-supervisor PID
+// must be a benign no-op (return nil, no kill), NOT a propagated error —
+// it proves there is no supervisor to reap, so the upgrade/migrate proceeds
+// to its port-unbound verify exactly as on the "no supervisor running"
+// path.
+//
+// Falsification on the unfixed code: ForceKillSupervisor would
+// killPIDViaTaskkillFn(owner.PID) unconditionally → `killed` contains the
+// reused PID.
+func TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockDir + ".owner.json"
+
+	const reusedPID = 31337
+	body := `{"pid":31337,"started_at":"2026-05-17T00:00:00Z"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed reused-PID sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		Basename:    "node.exe",
+		CommandLine: `C:\Program Files\nodejs\node.exe server.js`,
+	}, nil)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	if err := d.ForceKillSupervisor(""); err != nil {
+		t.Fatalf("ForceKillSupervisor on a reused non-supervisor PID must be benign nil; got %v", err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("reused non-supervisor PID %d must NOT be force-killed; killed=%v", reusedPID, *killed)
+	}
+}
+
+// TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor pins the
+// positive path for the upgrade reaper.
+func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	ownerPath := lockDir + ".owner.json"
+
+	const supPID = 4242
+	body := `{"pid":4242,"started_at":"2026-05-17T00:00:00Z"}`
+	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("seed supervisor sidecar: %v", err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		Basename:    "mcphub.exe",
+		CommandLine: `mcphub.exe supervise --strict-mode`,
+	}, nil)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	if err := d.ForceKillSupervisor(""); err != nil {
+		t.Fatalf("ForceKillSupervisor on a live supervisor PID: %v", err)
+	}
+	if len(*killed) != 1 || (*killed)[0] != supPID {
+		t.Fatalf("live supervisor PID %d must be force-killed exactly once; killed=%v", supPID, *killed)
+	}
+}

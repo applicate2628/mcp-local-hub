@@ -722,6 +722,30 @@ fail-loud 503 + `mcphub supervise` operator guidance, never a silent no-supervis
 auto-register LIVE-ADD branch does NOT reap and is already §7.1-safe via `HasRuntimeSpecRow()`; it is
 unchanged and relies on the registry flock the migrate also takes for its cross-process serialization.)
 
+**Kill-target identity gate — the reaper VALIDATES its target before force-killing (bot PR #276 r3 P2).**
+The double-reap "dead PID → `taskkill` exit 128 → benign no-op" reasoning above holds ONLY while the
+recorded PID stays dead. The owner sidecar `supervisor.lock.owner.json` is best-effort and SURVIVES a
+supervisor crash — a quiet interlock holder's `Release()` deliberately leaves it in place, and an
+OS-killed supervisor never tidies it — so a crashed supervisor's PID can later be REUSED by an unrelated
+OS process. Without a kill-target check, a concurrent reaper firing inside the migrate's (or another
+cutover's) held-lock window would read that stale sidecar and `taskkill /F /T` the **reused, unrelated**
+process. To close this, the supervisor reapers (`forceKillSupervisor` for rollback and
+`v5UpgradeDeps.ForceKillSupervisor` — the production reap primitive that `ReapSupervisorForRestart` calls
+for BOTH the serena migrate and the auto-register INTRODUCE cutover,
+[internal/cli/install_migration_wiring_windows.go](../../../internal/cli/install_migration_wiring_windows.go))
+NAME and VALIDATE their target before the kill: `supervisorPIDIsLiveMcphubSupervisor(pid)` resolves the PID
+via the existing tested `process.LookupProcessIdentity` primitive and requires the image basename to be
+`mcphub`/`mcphub.exe` AND the command-line to be a `supervise` invocation (a supervisor runs `mcphub
+supervise [--strict-mode]` — `spawnSupervisorDetached` / `runSupervise`). A PID that fails the gate
+(reused-by-an-unrelated-process, a non-supervisor `mcphub gui`/`daemon`, or already gone /
+`ErrProcessNotFound`) is treated as "no supervisor to reap" and is NOT killed — exactly as a genuinely
+absent supervisor is treated. This is the ROOT fix: the reaper no longer blindly trusts the sidecar PID, so
+the kill-race the interlock prevents on the ACQUIRE axis cannot re-enter through a stale-sidecar/PID-reuse
+KILL on a process the reaper never confirmed is a supervisor. (A corrupt sidecar — `PID <= 0` — is still a
+propagated error on the upgrade reaper per codex r4; the identity gate only suppresses the
+live-but-not-a-supervisor case the reuse hazard introduces.) This gate covers all three reaping flows
+(migrate, auto-register INTRODUCE, rollback) because they share these two reaper functions.
+
 Why `supervisor.lock` and not a broader `migration.lock`: `migration.lock` is a DIFFERENT leaf and neither
 the serena migrate driver nor the v5-upgrade path (`runV5UpgradeWindows`) takes it, so it is not a usable
 broader exclusion here; routing both reaping flows onto it would also force it into the generic
