@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1950,5 +1951,44 @@ func TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts(t *testing.T
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("confirmed owner mismatch did not post EvManualRestart")
+	}
+}
+
+func TestDefaultSupervisorLivenessProbeUsesPortOwnerVerification(t *testing.T) {
+	probe := defaultSupervisorLivenessProbe()
+	switch runtime.GOOS {
+	case "windows", "linux":
+		// These platforms have a real OS-level socket-owner proof (Windows
+		// netstat, Linux /proc), so liveness MUST use it — TCP-only liveness
+		// trusts a foreign listener squatting the daemon port.
+		if probe.PortOwnerPID == nil {
+			t.Fatalf("on %s the default liveness probe must verify socket owner; TCP-only liveness trusts foreign listeners", runtime.GOOS)
+		}
+	default:
+		// macOS and other POSIX targets fail closed at api.LoopbackPortOwnerPID;
+		// installing it would block the PortLive TCP fallback and classify every
+		// live daemon port_owner_unverified forever (Codex bot #271 P2), so
+		// PortOwnerPID MUST stay nil there to preserve TCP liveness.
+		if probe.PortOwnerPID != nil {
+			t.Fatalf("on %s PortOwnerPID must be nil so the PortLive TCP fallback runs", runtime.GOOS)
+		}
+	}
+}
+
+func TestSupervisorDaemonEntryLiveWithoutOwnerProbeOnlyUsedForTestSeams(t *testing.T) {
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive:    func(pid int) bool { return pid == 22036 },
+		PIDIdentity: func(process.PIDIdentityProof) error { return nil },
+		PortLive:    func(int) bool { return true },
+		// Deliberately nil PortOwnerPID to document the legacy vulnerable seam.
+	})
+	defer restore()
+
+	live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{Port: 9123}, DaemonRuntimeEntry{
+		CurrentPID: 22036,
+		StartedAt:  time.Now().UTC().Add(-time.Minute),
+	}, time.Now().UTC())
+	if !live || reason != "" {
+		t.Fatalf("nil PortOwnerPID test seam live=%v reason=%q, want legacy TCP-only live", live, reason)
 	}
 }
