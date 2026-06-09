@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1664,6 +1665,124 @@ func TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(t *
 	// commit point — disarming is what prevents the split-state).
 	if restoreReconcileCalled {
 		t.Errorf("the reconcile-restore must NOT fire after the intent commit (the outer rollback is disarmed)")
+	}
+}
+
+// TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning is the
+// Bug 2 fix. After the dynamic-pool intent commits, the post-commit start's
+// reconcile-ready poll can time out on the benign release→child-acquire
+// supervisor.lock hand-off (DialPipe finds no pipe yet). That timeout cannot
+// corrupt (intent committed, registry NOT rolled back, supervisor reconciles
+// eventually), so step 10 must downgrade a typed ErrMigrateSerenaReconcileReadyTimeout
+// to a warning and return nil (exit 0) — NOT the scary exit-1 a hard start
+// failure produces.
+func TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning(t *testing.T) {
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	ws := t.TempDir()
+	seedSerenaWorkspaceNoPort(t, ws)
+	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	defer stubStartSupported(t, func() bool { return true })()
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	restoreReconcileCalled := false
+	defer stubRestoreReconcile(t, func(report *api.MigrateReport) error {
+		restoreReconcileCalled = true
+		return nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	// REAL install commits the spec-bearing intent; the START succeeds at the
+	// spawn step but reports the typed reconcile-ready-timeout sentinel (the
+	// production defaultMigrateSerenaStart wraps it with %w). Wrap it the same
+	// way so errors.Is finds the sentinel.
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		return fmt.Errorf("supervisor started but did not reach reconcile-ready within 60s: %w: dial pipe: file does not exist",
+			ErrMigrateSerenaReconcileReadyTimeout)
+	})()
+
+	var buf bytes.Buffer
+	err = runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("a post-commit reconcile-ready TIMEOUT must NOT fail the migrate (it is committed); got err=%v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "did not report reconcile-ready") {
+		t.Errorf("the downgrade must emit the reconcile-ready-timeout warning; got output:\n%s", out)
+	}
+	if !strings.Contains(out, "the migration is committed") {
+		t.Errorf("the warning must state the migration IS committed; got output:\n%s", out)
+	}
+	// Registry retained (no rollback) and intent committed — same invariants the
+	// hard-failure test asserts.
+	afterReg := loadRegistrySerenaPorts(t, regPath)
+	if afterReg[api.WorkspaceKey(ws)] == 0 {
+		t.Errorf("registry must RETAIN the allocated serena port after a committed migrate; rows=%+v", afterReg)
+	}
+	intent, ierr := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if ierr != nil {
+		t.Fatalf("read committed intent: %v", ierr)
+	}
+	if !intent.HasRuntimeSpecRow() {
+		t.Errorf("the spec-bearing intent must remain committed")
+	}
+	if restoreReconcileCalled {
+		t.Errorf("the reconcile-restore must NOT fire after a committed migrate")
+	}
+}
+
+// TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud guards the
+// CRITICAL SCOPE of the Bug 2 fix: the timeout downgrade is honored ONLY at the
+// normal post-commit start (step 10). The post-commit-VERIFY RECOVERY start
+// (step 10's scanErr branch — driven here by corrupting the just-committed
+// intent so the verify re-read fails) returns on ANY non-nil start error, so the
+// SAME reconcile-ready-timeout sentinel must STILL fail loud there.
+func TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud(t *testing.T) {
+	_, manifestDir := migrateSerenaTestEnv(t)
+	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+	ws := t.TempDir()
+	seedSerenaWorkspace(t, ws)
+	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+	defer stubStartSupported(t, func() bool { return true })()
+
+	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+		return &api.MigrateReport{}, nil
+	})()
+	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	// REAL install commits the spec-bearing intent, THEN corrupt it so the
+	// post-commit verify re-read errors → the driver takes the scanErr RECOVERY
+	// start branch (the same technique as TestMigrateSerena_PostCommitVerifyError_*).
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		path, ierr := a.InstallParsedManifest(ctx, m, opts)
+		if ierr != nil {
+			return "", ierr
+		}
+		if werr := os.WriteFile(path, []byte("{not-valid-json"), 0o600); werr != nil {
+			t.Fatalf("corrupt committed intent: %v", werr)
+		}
+		return path, nil
+	})()
+	// The recovery start returns the SAME timeout sentinel — it must NOT be
+	// downgraded on the recovery path; the migrate must fail loud.
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		return fmt.Errorf("supervisor started but did not reach reconcile-ready within 60s: %w: dial pipe: file does not exist",
+			ErrMigrateSerenaReconcileReadyTimeout)
+	})()
+
+	var buf bytes.Buffer
+	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
+	if err == nil {
+		t.Fatal("a RECOVERY-path reconcile-ready timeout must fail loud (the downgrade is post-commit-normal-start-only)")
+	}
+	if !strings.Contains(err.Error(), "the supervisor start ALSO failed") {
+		t.Errorf("the recovery start failure must surface loudly; got %v", err)
 	}
 }
 
