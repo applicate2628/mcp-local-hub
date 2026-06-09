@@ -225,6 +225,25 @@ export interface ApplyDaemonEnvResult {
   changed_keys: string[];
 }
 
+export interface DaemonEnvRow {
+  task_name: string;
+  server: string;
+  daemon: string;
+  workspace?: string;
+  port?: number;
+  source?: string;
+  env: Record<string, string>;
+}
+
+export interface DaemonEnvListResponse {
+  daemons: DaemonEnvRow[];
+}
+
+export async function listDaemonEnv(taskName?: string): Promise<DaemonEnvListResponse> {
+  const suffix = taskName ? `?task_name=${encodeURIComponent(taskName)}` : "";
+  return fetchOrThrow<DaemonEnvListResponse>(`/api/daemon/env${suffix}`, "object");
+}
+
 export async function applyDaemonEnv(
   taskName: string,
   env: Record<string, string>,

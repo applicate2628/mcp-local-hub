@@ -15,6 +15,10 @@ export interface DaemonStatus {
   // Windows. Closes bot finding on PR #238 f49ac70 (P2 surface-
   // orphan-PID-in-dashboard).
   orphan_pid?: number;
+  // Wedged PID of a port-stale running daemon the supervisor is
+  // terminate-restarting (state "Restarting"); diagnostic only (the
+  // "Restarting" state is the operator signal). Deep-sec #268 Reg-F1.
+  stale_pid?: number;
   // Per-spawn Windows Job Object allocation state for the daemon's
   // current spawn attempt. Tri-state with backward-compatible default:
   //   undefined → unknown / legacy state file / not yet probed

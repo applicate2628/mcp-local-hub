@@ -672,6 +672,171 @@ func TestSupervisorController_RemovedIntentClearsStateSoReregisterSpawns(t *test
 	}
 }
 
+// TestSupervisorController_ReregisterOwnSpawnedNoDoubleSynthesize is the
+// Codex deep-sec PR #268 Conc-F3 guard. An OWN-spawned task whose real
+// cmd.Wait reaper is still outstanding can have its ownSpawned marker
+// dropped by a concurrent intent re-registration (clearRemovedTaskRuntime
+// runs on the watcher / reconcile-apply goroutine during install/migrate
+// remove-then-re-add). Pre-fix, the next terminate then saw the task as
+// FOREIGN (ownSpawned absent) and synthesized an EvChildExit that RACED the
+// still-pending real exit -> two EvChildExit for one exit -> double-spawn.
+// The reaperOutstanding marker survives the ownSpawned drop and suppresses
+// the synthesize until the real exit is observed, so the real exit drives
+// exactly one respawn. The test also proves no over-suppression: once the
+// real exit clears reaperOutstanding, a later terminate of a genuinely
+// foreign PID under the same task name DOES synthesize.
+func TestSupervisorController_ReregisterOwnSpawnedNoDoubleSynthesize(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	statePath := filepath.Join(tmpHome, "supervisor-state.json")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	taskName := `\mcp-local-hub-lsp-abcd1234-go`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "mcp-language-server", Daemon: "lsp-abcd1234-go", Args: []string{"daemon", "workspace-proxy"}}
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{descriptor}}
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnPID int32 = 40000
+	spawned := make(chan int, 8)
+	terminated := make(chan int, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	loop := api.NewEventLoop(16)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		statePath:           statePath,
+		daemonIntent:        newDaemonIntentCache(),
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+		spawn: func(d api.SupervisorDaemon) error {
+			pid := int(atomic.AddInt32(&spawnPID, 1))
+			tracker.MarkSpawned(d.TaskName, pid, time.Now().UTC())
+			spawned <- pid
+			return nil
+		},
+		terminate: func(d api.SupervisorDaemon) error {
+			e, _ := tracker.Get(d.TaskName)
+			// Production terminate returns nil when the targeted PID is gone.
+			tracker.MarkTerminated(d.TaskName)
+			terminated <- e.CurrentPID
+			return nil
+		},
+	}
+	ctrl.intentCache.Refresh(intent)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go loop.Run(ctx)
+
+	// 1) Own-spawn the daemon. EvStart -> spawn -> EvHealthOK -> StRunning,
+	//    ownSpawned=true, reaperOutstanding=true (a real reaper is now live).
+	loop.Post(api.LoopEvent{Kind: api.EvStart, TaskName: taskName})
+	select {
+	case <-spawned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("EvStart did not own-spawn the daemon")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := ctrl.GetSMState(taskName); st == api.StRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, ok := ctrl.reaperOutstanding.Load(taskName); !ok {
+		t.Fatal("reaperOutstanding not set after own-spawn")
+	}
+
+	// 2) Simulate the intent re-registration race: clearRemovedTaskRuntime
+	//    drops ownSpawned (and smState/tracker) for the removed descriptor,
+	//    then the re-add restores the descriptor + StRunning. The real reaper
+	//    for the original child is STILL live (reaperOutstanding survives the
+	//    clear, by design). We assert ownSpawned was dropped but
+	//    reaperOutstanding kept.
+	ctrl.clearRemovedTaskRuntime(taskName)
+	if _, ok := ctrl.ownSpawned.Load(taskName); ok {
+		t.Fatal("clearRemovedTaskRuntime did not drop ownSpawned")
+	}
+	if _, ok := ctrl.reaperOutstanding.Load(taskName); !ok {
+		t.Fatal("clearRemovedTaskRuntime wrongly dropped reaperOutstanding (Conc-F3 regression — re-registration would double-synthesize)")
+	}
+	// Re-register: descriptor back in intent, SM hydrated to StRunning, and
+	// the tracker re-seeded with the still-live original PID 40001 (the child
+	// the reaper is watching).
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(taskName, api.StRunning)
+	tracker.MarkSpawned(taskName, 40001, time.Now().UTC())
+
+	// 3) A terminate fires in the re-registration window (e.g. a liveness
+	//    sweep posts EvManualRestart for the port-stale re-registered task).
+	//    StRunning + EvManualRestart -> StExiting (queued_action=respawn) ->
+	//    terminate returns nil. ownSpawned is absent BUT reaperOutstanding is
+	//    set -> the synthesize MUST be suppressed.
+	loop.Post(api.LoopEvent{Kind: api.EvManualRestart, TaskName: taskName})
+	select {
+	case <-terminated:
+	case <-time.After(2 * time.Second):
+		t.Fatal("EvManualRestart did not terminate the re-registered task")
+	}
+	// No synthetic EvChildExit -> nothing respawns yet (the real exit hasn't
+	// arrived). A pre-fix double-synthesize would respawn here.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("re-registration synthesized a respawn (pid %d) while the real reaper was still outstanding — Conc-F3 double-spawn", pid)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	// 4) The REAL EvChildExit (the original reaper finally fires) drives the
+	//    single queued respawn. reaperOutstanding is cleared on this exit,
+	//    then re-set by the respawn.
+	loop.Post(api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName})
+	select {
+	case <-spawned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("real EvChildExit did not drive the queued respawn after re-registration")
+	}
+	// Exactly one respawn from the real exit — no stray synthetic double.
+	select {
+	case pid := <-spawned:
+		t.Fatalf("re-registration restart spawned a duplicate (pid %d) — synthetic + real double-post leaked", pid)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// 5) No-over-suppression proof: the respawn re-set ownSpawned, so drive
+	//    the task back to a genuinely-FOREIGN classification (drop both
+	//    markers as a true removal would once the child has exited) and
+	//    confirm a terminate now DOES synthesize -> respawn, i.e. the gate
+	//    never permanently wedges a legitimate foreign synthesize.
+	for time.Now().Before(time.Now().Add(time.Second)) {
+		if st, _ := ctrl.GetSMState(taskName); st == api.StRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	ctrl.ownSpawned.Delete(taskName)
+	ctrl.reaperOutstanding.Delete(taskName)
+	ctrl.smStates.Store(taskName, api.StRunning)
+	loop.Post(api.LoopEvent{Kind: api.EvManualRestart, TaskName: taskName})
+	select {
+	case <-terminated:
+	case <-time.After(2 * time.Second):
+		t.Fatal("foreign terminate did not fire after gate cleared")
+	}
+	select {
+	case <-spawned:
+		// Synthetic EvChildExit drove the respawn — gate correctly permits a
+		// legitimate foreign synthesize once no real reaper is outstanding.
+	case <-time.After(2 * time.Second):
+		t.Fatal("foreign synthesize wedged — reaperOutstanding gate over-suppressed a legitimate foreign exit (Conc-F3 self-review failure)")
+	}
+}
+
 // TestSupervisorController_HandleEvStart_StopIntentSuppressesSpawn
 // closes the IntentDesired=stopped branch of StIdle+EvStart: SM
 // returns (StIdle, "intent suppresses spawn") and the spawn closure
@@ -1035,9 +1200,16 @@ func TestSupervisorController_B1_StopDuringSpawn_EvHealthOK_RoutesToStExiting(t 
 	ctrl.terminate = fakeTerminate
 
 	// Stage: state=StSpawning, queued_action=stop (as if the
-	// StSpawning + EvIntentUpdate(stopped) transition fired).
+	// StSpawning + EvIntentUpdate(stopped) transition fired). In
+	// production a daemon only reaches StSpawning by the controller firing
+	// its spawn closure, so it is OWN-spawned (has a live cmd.Wait that
+	// posts the real EvChildExit). Mark it so the StExiting terminate path
+	// does NOT synthesize a foreign-PID EvChildExit (#268 r11 P2) — that
+	// would otherwise race past the StExiting state this test guards
+	// straight to StIdle once queued_action=none cleared the respawn.
 	ctrl.smStates.Store(descriptor.TaskName, api.StSpawning)
 	ctrl.queuedActions.Store(descriptor.TaskName, "stop")
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
 
 	loop.Post(api.LoopEvent{Kind: api.EvHealthOK, TaskName: descriptor.TaskName})
 
@@ -1319,4 +1491,248 @@ func TestSupervisorController_C3_PreChildSpawnFailureUsesPostSelf(t *testing.T) 
 	}
 	st, _ := ctrl.GetSMState(descriptor.TaskName)
 	t.Fatalf("after EvStart pre-child fail: state=%s, spawn_calls=%d; want StBackoffWaiting + 1 spawn call (regression: PostSelf path or synth EvChildExit missing)", st, spawnCalls.Load())
+}
+
+// cleanChildExitEvent mirrors the LoopEvent runCrashEventBridge posts for
+// a CLEAN child exit (exit 0, no wait error): the clean_exit body flag is
+// true. The real production reaper now routes clean exits through crashCh
+// -> bridge so a controller-driven restart can complete its queued
+// respawn (Codex bot #268 P1).
+func cleanChildExitEvent(taskName string) api.LoopEvent {
+	return api.LoopEvent{
+		Kind:     api.EvChildExit,
+		TaskName: taskName,
+		Body: map[string]any{
+			"exit_code":                0,
+			supervisorCleanExitBodyKey: true,
+		},
+	}
+}
+
+// crashChildExitEvent mirrors the LoopEvent runCrashEventBridge posts for
+// a NON-CLEAN child exit (non-zero exit code / signal kill): clean_exit is
+// false.
+func crashChildExitEvent(taskName string) api.LoopEvent {
+	return api.LoopEvent{
+		Kind:     api.EvChildExit,
+		TaskName: taskName,
+		Body: map[string]any{
+			"exit_code":                1,
+			supervisorCleanExitBodyKey: false,
+		},
+	}
+}
+
+// TestSupervisorController_CleanExitDuringRestart_OwnDaemon_CompletesRespawn
+// is the #268 P1 (supervisor_controller.go:893) regression guard for the
+// CLEAN own-exit case: an own-spawned daemon driven through a
+// controller-driven restart (StRunning -> EvManualRestart -> StExiting)
+// that then exits CLEANLY (exit 0, no wait error) must complete its queued
+// respawn. Pre-fix, the production wait goroutine suppressed clean exits,
+// the StExiting synthesize gate suppressed the synthetic exit for own
+// tasks, and the SM wedged in StExiting with queued_action=respawn never
+// consumed. The fix posts the clean exit through crashCh -> bridge so the
+// real EvChildExit drives StExiting -> StSpawning. Exactly one respawn.
+func TestSupervisorController_CleanExitDuringRestart_OwnDaemon_CompletesRespawn(t *testing.T) {
+	var spawnCalls atomic.Int32
+	var terminateCalls atomic.Int32
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+	ctrl.terminate = func(d api.SupervisorDaemon) error { terminateCalls.Add(1); return nil }
+
+	// Stage: a running, OWN-spawned daemon (the controller spawned it, so
+	// a real reaper exists and ownSpawned/reaperOutstanding are set).
+	ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
+	ctrl.reaperOutstanding.Store(descriptor.TaskName, true)
+
+	// 1) Operator-driven restart of the running daemon: StRunning +
+	//    EvManualRestart -> StExiting (issue terminate, queued=respawn).
+	loop.Post(api.LoopEvent{Kind: api.EvManualRestart, TaskName: descriptor.TaskName})
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StExiting)
+	if terminateCalls.Load() != 1 {
+		t.Fatalf("manual restart fired %d terminates; want 1", terminateCalls.Load())
+	}
+	// No respawn yet — the queued respawn waits for the child's exit.
+	if spawnCalls.Load() != 0 {
+		t.Fatalf("respawn fired before the child exit (spawn=%d); want 0", spawnCalls.Load())
+	}
+
+	// 2) The OWN child exits CLEANLY (exit 0). The production reaper posts
+	//    this through crashCh -> bridge with clean_exit=true. At StExiting +
+	//    EvChildExit + queued=respawn -> StSpawning -> respawn fires.
+	loop.Post(cleanChildExitEvent(descriptor.TaskName))
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StRunning) // StSpawning -> EvHealthOK -> StRunning
+	if got := spawnCalls.Load(); got != 1 {
+		t.Fatalf("clean own exit during restart drove %d respawns; want exactly 1 (regression: SM wedged in StExiting, #268 P1)", got)
+	}
+}
+
+// TestSupervisorController_NonCleanExitDuringRestart_OwnDaemon_SingleRespawn
+// is the companion matrix case: a NON-CLEAN own exit during a
+// controller-driven restart must also complete the queued respawn EXACTLY
+// once, with no synthetic double-post (the StExiting synthesize gate
+// suppresses the synthetic exit because the task is own-spawned and a real
+// reaper exit is what arrives).
+func TestSupervisorController_NonCleanExitDuringRestart_OwnDaemon_SingleRespawn(t *testing.T) {
+	var spawnCalls atomic.Int32
+	var terminateCalls atomic.Int32
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+	ctrl.terminate = func(d api.SupervisorDaemon) error { terminateCalls.Add(1); return nil }
+
+	ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
+	ctrl.reaperOutstanding.Store(descriptor.TaskName, true)
+
+	loop.Post(api.LoopEvent{Kind: api.EvManualRestart, TaskName: descriptor.TaskName})
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StExiting)
+
+	// Non-clean exit (the reaper's crashCh post path). Single real
+	// EvChildExit -> StSpawning -> respawn. No synthetic double.
+	loop.Post(crashChildExitEvent(descriptor.TaskName))
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StRunning)
+	// Settle briefly to catch a stray synthetic respawn if the gate
+	// mis-fired.
+	time.Sleep(150 * time.Millisecond)
+	if got := spawnCalls.Load(); got != 1 {
+		t.Fatalf("non-clean own exit during restart drove %d respawns; want exactly 1 (regression: synthesize double-post, #268 P1)", got)
+	}
+}
+
+// TestSupervisorController_CleanExitAtRunningDropped is the
+// deliberate-shutdown-contract guard: a CLEAN child exit observed while
+// the daemon is still StRunning (NO controller-driven exit in flight —
+// e.g. an external clean kill, or `mcphub stop` that has not yet driven
+// the SM to StExiting) must DROP the respawn. The daemon must NOT enter
+// StBackoffWaiting / respawn. This preserves the contract the wait
+// goroutine historically enforced by suppressing clean exits; the drop
+// now lives in handleLoopEvent (#268 P1).
+//
+// #268 P2 (supervisor_controller.go:664): the drop now ALSO drives the SM
+// to StIdle to match the already-idle tracker (the reaper cleared
+// current_pid before posting the event), so a later /api/daemon/respawn can
+// route through the non-running idle transition. Pre-fix the SM stayed at
+// StRunning and shouldRouteNonRunningRespawnThroughController rejected the
+// restart until the supervisor was bounced.
+func TestSupervisorController_CleanExitAtRunningDropped(t *testing.T) {
+	var spawnCalls atomic.Int32
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+
+	ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
+	ctrl.reaperOutstanding.Store(descriptor.TaskName, true)
+
+	loop.Post(cleanChildExitEvent(descriptor.TaskName))
+
+	// Give the loop time to process the (dropped) event.
+	time.Sleep(250 * time.Millisecond)
+	if st, _ := ctrl.GetSMState(descriptor.TaskName); st != api.StIdle {
+		t.Fatalf("clean exit at StRunning left state %s; want StIdle (#268 P2: SM must be driven to idle to match the already-idle tracker so a later manual respawn can route)", st)
+	}
+	if got := spawnCalls.Load(); got != 0 {
+		t.Fatalf("clean exit at StRunning triggered %d respawns; want 0 (deliberate-shutdown contract broken)", got)
+	}
+	// The reaper genuinely fired, so reaperOutstanding must be cleared even
+	// though the event was dropped (the Delete-before-lookup at the top of
+	// handleLoopEvent).
+	if _, ok := ctrl.reaperOutstanding.Load(descriptor.TaskName); ok {
+		t.Fatalf("reaperOutstanding not cleared after a real (clean) exit was observed and dropped")
+	}
+	// The daemon is now respawnable: a non-running respawn routes through the
+	// idle transition instead of being rejected as a stale StRunning.
+	route, err := shouldRouteNonRunningRespawnThroughController(ctrl, descriptor.TaskName)
+	if err != nil {
+		t.Fatalf("after clean-exit drop the daemon is not spawnable: %v (#268 P2 regression: SM stuck at StRunning)", err)
+	}
+	if !route {
+		t.Fatalf("after clean-exit drop shouldRouteNonRunningRespawnThroughController = false; want true (idle is spawnable)")
+	}
+}
+
+// TestSupervisorController_CleanExitAtRunning_ThenManualRespawnSucceeds is the
+// end-to-end #268 P2 guard: after a clean self-exit at StRunning drives the SM
+// to StIdle (respawn suppressed), an operator-issued respawn of the now-idle
+// task must actually spawn through the controller's idle transition — proving
+// the daemon is restartable without a supervisor bounce. Pre-fix the SM was
+// wedged at StRunning and the respawn path rejected it.
+func TestSupervisorController_CleanExitAtRunning_ThenManualRespawnSucceeds(t *testing.T) {
+	var spawnCalls atomic.Int32
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+
+	// Steady-state running, own-spawned daemon. The tracker mirrors the
+	// already-cleared (idle) runtime the reaper leaves before posting the
+	// clean exit.
+	ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
+	ctrl.reaperOutstanding.Store(descriptor.TaskName, true)
+	ctrl.tracker.MarkSpawned(descriptor.TaskName, 22036, time.Now().UTC())
+	ctrl.tracker.MarkExited(descriptor.TaskName) // reaper already cleared pid
+
+	// Clean self-exit at StRunning: respawn suppressed, SM -> StIdle.
+	loop.Post(cleanChildExitEvent(descriptor.TaskName))
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StIdle)
+	if got := spawnCalls.Load(); got != 0 {
+		t.Fatalf("clean exit auto-respawned (spawn=%d); want 0 before the manual respawn", got)
+	}
+
+	// Operator respawn of the idle task drives StIdle -> StSpawning ->
+	// (EvHealthOK) StRunning and fires the spawn closure exactly once.
+	if err := ctrl.postIdleRespawnAndWait(descriptor.TaskName, 2*time.Second); err != nil {
+		t.Fatalf("manual respawn of the post-clean-exit idle daemon failed: %v", err)
+	}
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StRunning)
+	if got := spawnCalls.Load(); got != 1 {
+		t.Fatalf("manual respawn fired %d spawns; want exactly 1", got)
+	}
+}
+
+// TestSupervisorController_NonCleanExitAtRunningEntersBackoff is the
+// negative control for the clean-exit drop: a NON-CLEAN exit at StRunning
+// (a real crash with no controller-driven exit in flight) must STILL route
+// through StRunning -> StBackoffWaiting (crash respawn path) — the drop is
+// scoped to clean exits only.
+func TestSupervisorController_NonCleanExitAtRunningEntersBackoff(t *testing.T) {
+	var spawnCalls atomic.Int32
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+	ctrl, loop, cancel := setupControllerForB1Test(t, descriptor, "running", fakeSpawn)
+	defer cancel()
+
+	ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+	ctrl.ownSpawned.Store(descriptor.TaskName, true)
+	ctrl.reaperOutstanding.Store(descriptor.TaskName, true)
+
+	loop.Post(crashChildExitEvent(descriptor.TaskName))
+	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StBackoffWaiting)
+}
+
+// waitForSMStateHelper polls the controller SM state until it matches want
+// or a 2s deadline elapses.
+func waitForSMStateHelper(t *testing.T, ctrl *supervisorController, taskName string, want api.SMState) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, _ := ctrl.GetSMState(taskName); st == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	st, _ := ctrl.GetSMState(taskName)
+	t.Fatalf("SM state for %s = %s; want %s", taskName, st, want)
 }

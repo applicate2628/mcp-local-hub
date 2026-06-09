@@ -538,20 +538,24 @@ func TestStateMachineWiring_DoesNotDoubleRespawnWithLegacyDispatcher(t *testing.
 }
 
 // TestRespawnDispatcher_CleanExitNoRespawn preserves the contract
-// regression marker from the pre-A.2 dispatcher test. The contract is
-// now enforced by the crashCh + bridge wiring at supervise.go (the
-// production spawn fn's cmd.Wait goroutine only posts to crashCh on
-// non-clean exit), AND the controller's SM (which only transitions
-// on EvChildExit).
+// regression marker from the pre-A.2 dispatcher test. The contract
+// ("a clean exit on a daemon that is NOT being restarted must NOT be
+// respawned") is now enforced inside the CONTROLLER, not at the crashCh
+// gate.
+//
+// As of the Codex bot #268 P1 fix, the production spawn fn's cmd.Wait
+// goroutine posts EVERY exit to crashCh (clean and non-clean), because a
+// controller-driven restart of an OWN daemon that exits cleanly needs the
+// real EvChildExit to complete its queued respawn at StExiting. The
+// deliberate-shutdown contract is preserved by handleLoopEvent dropping a
+// `clean_exit`-flagged EvChildExit when the task is still StRunning (no
+// controller-driven exit in flight), so a plain clean exit at steady
+// state never reaches the StRunning->StBackoffWaiting respawn path.
+//
+// The clean-exit-at-StRunning drop is covered by the
+// TestSupervisorController_CleanExit* tests in supervisor_controller_test.go;
+// the daemon-exited diagnostic emit is covered by
+// TestProductionSpawnFn_EmitsDaemonExitedOnChildExit.
 func TestRespawnDispatcher_CleanExitNoRespawn(t *testing.T) {
-	// This contract is tested in supervise_reconcile_wiring_test.go
-	// via the existing TestProductionSpawnFn_EmitsDaemonExitedOnChildExit
-	// (which uses portableNoopCommand, exit_code=0). That test runs
-	// without a respawn dispatcher (crashCh == nil at makeProductionSpawnFn
-	// call site), so a clean exit cannot reach the controller anyway.
-	// This skip marker documents the contract gap that's covered
-	// elsewhere - when crashCh is non-nil AND exit is clean, the
-	// guard `if crashCh != nil && (waitErr != nil || exitCode != 0)`
-	// at supervise.go:2019 must short-circuit on the second clause.
-	t.Skip("contract documented; clean-exit guard verified via TestProductionSpawnFn_EmitsDaemonExitedOnChildExit + manual inspection of supervise.go cmd.Wait goroutine")
+	t.Skip("contract relocated to the controller; verified via TestSupervisorController_CleanExitAtRunningDropped + TestProductionSpawnFn_EmitsDaemonExitedOnChildExit")
 }

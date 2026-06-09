@@ -160,6 +160,25 @@ func TestDecodeSupervisorIPCStatusResult_PreservesEmptyWorkspace(t *testing.T) {
 	}
 }
 
+func TestDecodeSupervisorIPCStatusResult_PreservesStalePID(t *testing.T) {
+	// deep-sec #268 Reg-F1: the supervisor emits stale_pid for a port-stale
+	// running daemon (state "Restarting", current_pid 0). Without the
+	// supervisorIPCStatusDaemon.StalePID field, json.Unmarshal silently
+	// drops it before it reaches DaemonStatus.
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","state":"Restarting","current_pid":0,"stale_pid":22036}]}`)
+
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].StalePID != 22036 {
+		t.Fatalf("StalePID = %d, want 22036 round-tripped", rows[0].StalePID)
+	}
+}
+
 func withDaemonStateRootOverride(t *testing.T, stateDir string) {
 	t.Helper()
 	prev := daemonStateRootOverride

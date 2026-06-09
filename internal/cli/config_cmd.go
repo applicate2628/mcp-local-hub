@@ -25,5 +25,6 @@ Run 'mcphub config --help' to list available subcommands.`,
 	c.AddCommand(newOverlayQuarantineCmd())
 	// Task 5.1: offline orphan-row pruning after `mcphub unregister`.
 	c.AddCommand(newOverlayPruneOrphansCmd())
+	c.AddCommand(newConfigEnvCmd())
 	return c
 }

@@ -28,16 +28,19 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 	rows := make([]map[string]any, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
 		taskName := canonicalSupervisorTaskName(d.TaskName)
-		server, daemon := api.ParseManagedTaskName(taskName)
-		if server == "" && d.Server != "" {
-			server = d.Server
+		server := strings.TrimSpace(d.Server)
+		daemon := strings.TrimSpace(d.Daemon)
+		if server == "" || daemon == "" {
+			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
+			if server == "" {
+				server = parsedServer
+			}
+			if daemon == "" {
+				daemon = parsedDaemon
+			}
 		}
 		if daemon == "" {
-			if d.Daemon != "" {
-				daemon = d.Daemon
-			} else {
-				daemon = "default"
-			}
+			daemon = "default"
 		}
 		runtimeState, ok := daemonStates[taskName]
 		if !ok {
@@ -66,6 +69,24 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 				port = p
 			}
 		}
+		stalePID := 0
+		if ok && runtimeState.State == daemonRuntimeStateRunning {
+			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
+				TaskName: d.TaskName,
+				Server:   server,
+				Daemon:   daemon,
+				Port:     port,
+			}, runtimeState, time.Now().UTC())
+			// port_owner_unverified is a probe ERROR (e.g. netstat blocked),
+			// not a restart: the liveness sweep deliberately only observes it
+			// (no EvManualRestart), so the status must not report "Restarting"
+			// for it — keep the running view (deep-sec #268).
+			if !live && reason != supervisorLivenessReasonPortOwnerUnverified {
+				stalePID = runtimeState.CurrentPID
+				stateText = "Restarting"
+				runtimeState.CurrentPID = 0
+			}
+		}
 		row := map[string]any{
 			"task_name":        taskName,
 			"server":           server,
@@ -81,6 +102,9 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 			"backoff_until":    "",
 			"quarantine_since": "",
 			"is_maintenance":   isSupervisorMaintenanceTask(taskName),
+		}
+		if stalePID != 0 {
+			row["stale_pid"] = stalePID
 		}
 		// Surface orphan PID when present (Windows post-create orphan
 		// path where best-effort kill failed). Operator visibility for
@@ -137,6 +161,9 @@ func daemonRuntimeStartedAt(startedAt time.Time) string {
 }
 
 func isSupervisorMaintenanceTask(taskName string) bool {
-	name := strings.TrimPrefix(taskName, `\`)
-	return strings.HasSuffix(name, "-weekly-refresh")
+	// Use the shared predicate so *-watchdog rows are treated as maintenance
+	// too (not just *-weekly-refresh) — keeps the CLI env selectors and the
+	// status is_maintenance flag consistent with the rest of the codebase
+	// (deep-sec #268: a watchdog row must be excluded from env selectors).
+	return api.IsMaintenanceTaskName(taskName)
 }

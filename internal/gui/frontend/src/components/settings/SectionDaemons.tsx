@@ -30,6 +30,7 @@ import {
   type WeeklyScheduleSwapFailure,
 } from "../../lib/api-daemons";
 import { WeeklyMembershipTable } from "./WeeklyMembershipTable";
+import { DaemonEnvSettings } from "./DaemonEnvSettings";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionDaemonsProps = {
@@ -82,6 +83,8 @@ export function SectionDaemons({
   const [tableDirty, setTableDirty] = useState(false);
   const [tableDeltas, setTableDeltas] = useState<MembershipDelta[]>([]);
   const [tableResetKey, setTableResetKey] = useState(0);
+  const [envDirty, setEnvDirty] = useState(false);
+  const [envResetKey, setEnvResetKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
   const [schedError, setSchedError] = useState<string | null>(null);
@@ -98,7 +101,8 @@ export function SectionDaemons({
   const schedDirty = schedValue !== persistedSched;
   const retryDirty = retryValue !== persistedRetry;
   const knobDirty = knobValue !== persistedKnob;
-  const dirty = schedDirty || retryDirty || knobDirty || tableDirty;
+  const sectionDirty = schedDirty || retryDirty || knobDirty || tableDirty;
+  const dirty = sectionDirty || envDirty;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
@@ -114,10 +118,11 @@ export function SectionDaemons({
     // fires → onDirtyChange(false) bubbles. Mirrors the discardKey pattern in
     // app.tsx used for navigation discard.
     setTableResetKey((k) => k + 1);
+    setEnvResetKey((k) => k + 1);
   }
 
   async function save() {
-    if (!dirty) return;
+    if (!sectionDirty) return;
     setBusy(true);
     setBanner(null);
     setSchedError(null);
@@ -309,6 +314,8 @@ export function SectionDaemons({
         onDeltasChange={setTableDeltas}
       />
 
+      <DaemonEnvSettings key={envResetKey} onDirtyChange={setEnvDirty} />
+
       <div class="settings-section-footer">
         {banner ? (
           <span class={`save-banner ${banner.kind}`} role="status" data-testid="daemons-save-banner">
@@ -317,7 +324,7 @@ export function SectionDaemons({
         ) : null}
         <button
           type="button"
-          disabled={!dirty || busy}
+          disabled={!sectionDirty || busy}
           onClick={() => void save()}
           data-testid="daemons-save"
         >

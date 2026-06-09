@@ -1245,3 +1245,30 @@ menu button[disabled] {
 .env-drawer-force { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.875rem; }
 .env-drawer .info { color: #1b5e20; margin-top: 0.5rem; }
 .env-drawer .error { color: #b71c1c; margin-top: 0.5rem; }
+
+.daemon-env-settings {
+  border-top: 1px solid var(--border-color);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.daemon-env-settings h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+.daemon-env-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(260px, 1fr);
+  gap: var(--gap-sm);
+}
+.daemon-env-grid input {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+}
+.daemon-env-actions {
+  justify-content: flex-start;
+}
+@media (max-width: 720px) {
+  .daemon-env-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -134,6 +134,13 @@ type supervisorIPCStatusDaemon struct {
 	// emitted by supervisorStatusDaemons before it reached the
 	// DaemonStatus consumer.
 	OrphanPID int `json:"orphan_pid,omitempty"`
+	// StalePID surfaces the wedged PID of a port-stale running daemon the
+	// supervisor is terminate-restarting (state "Restarting"); diagnostic
+	// via `mcphub status --json`. Zero (omitted) on the happy path. Without
+	// this field json.Unmarshal would silently drop the stale_pid emitted
+	// by supervisorStatusDaemons before it reached DaemonStatus (deep-sec
+	// #268 Reg-F1, mirroring the OrphanPID precedent above).
+	StalePID int `json:"stale_pid,omitempty"`
 	// JobProtection mirrors SupervisorDaemonState.JobProtection across
 	// the IPC boundary. Tri-state via *bool: nil = unknown/legacy/not-
 	// yet-probed (no badge), &true = per-spawn Job allocated (orphan-
@@ -229,6 +236,7 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			Port:          d.Port,
 			PID:           d.CurrentPID,
 			OrphanPID:     d.OrphanPID,
+			StalePID:      d.StalePID,
 			JobProtection: d.JobProtection,
 			Workspace:     d.Workspace,
 			IsMaintenance: d.IsMaintenance,

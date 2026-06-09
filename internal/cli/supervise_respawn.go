@@ -66,6 +66,21 @@ const (
 	ipcErrorRespawnTerminateFailed = "RESPAWN_TERMINATE_FAILED"
 )
 
+func shouldRouteNonRunningRespawnThroughController(ctrl *supervisorController, taskName string) (bool, error) {
+	if ctrl == nil || ctrl.eventLoop == nil {
+		return false, nil
+	}
+	smState, _ := ctrl.GetSMState(taskName)
+	switch smState {
+	case api.StIdle, api.StBackoffWaiting, api.StQuarantined:
+		return true, nil
+	case api.StSpawning, api.StRunning, api.StExiting:
+		return false, fmt.Errorf("controller state %s is not directly spawnable without a live PID", smState)
+	default:
+		return false, fmt.Errorf("unknown controller state %q", smState)
+	}
+}
+
 // handleRespawn implements the `respawn` IPC verb. Body shape:
 //
 //	{"id": N, "cmd": "respawn", "args": {"task_name": "\\mcp-local-hub-foo-default", "force": false}}
@@ -117,8 +132,9 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	// We accept BOTH bare and canonical forms so a hand-edited
 	// supervisor-intent.json (rare but possible) still matches.
 	var desc *api.SupervisorDaemon
+	var ctrl *supervisorController
 	if deps.controllerProvider != nil {
-		if ctrl := deps.controllerProvider(); ctrl != nil && ctrl.intentCache != nil {
+		if ctrl = deps.controllerProvider(); ctrl != nil && ctrl.intentCache != nil {
 			if snap, ok := ctrl.intentCache.snap.Load().(*intentSnapshot); ok && snap != nil && snap.intent != nil {
 				for i := range snap.intent.Daemons {
 					d := &snap.intent.Daemons[i]
@@ -175,12 +191,27 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	// (leading-backslash). NormalizeOverlayKey already produces that
 	// form so the lookup is symmetric.
 	state := daemonRuntimeStateIdle
+	shouldTerminate := true
 	if deps.runtimeTracker != nil {
 		if entry, ok := deps.runtimeTracker.Get(taskName); ok {
 			state = entry.State
+			shouldTerminate = entry.CurrentPID > 0
+		} else {
+			shouldTerminate = false
 		}
 	}
-	if state == daemonRuntimeStateQuarantine && !force {
+	controllerState := api.StIdle
+	controllerStateKnown := false
+	if ctrl != nil {
+		controllerState, controllerStateKnown = ctrl.GetSMState(taskName)
+	}
+	if controllerStateKnown {
+		switch controllerState {
+		case api.StIdle, api.StBackoffWaiting, api.StQuarantined:
+			shouldTerminate = false
+		}
+	}
+	if (state == daemonRuntimeStateQuarantine || (controllerStateKnown && controllerState == api.StQuarantined)) && !force {
 		_ = deps.events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "ipc",
@@ -212,43 +243,121 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
+	const gracefulTimeoutMs = 5000
+
+	// Running-daemon respawn routes THROUGH the controller's state machine
+	// (Codex bot #268 P1, supervise_respawn.go:308). The controller is now
+	// the only place that records ownSpawned/reaperOutstanding and advances
+	// the SM; a direct terminate+spawn here would leave the replacement
+	// invisible to those maps AND let the old child's late EvChildExit drive
+	// backoff/respawn over the fresh PID. Driving StRunning -> EvManualRestart
+	// -> StExiting -> terminate -> (observe exit) -> StSpawning on the single
+	// FIFO loop serializes terminate before respawn, closing that race. The
+	// controller's terminate/spawn closures are the SAME ones respawnLate
+	// holds, so spawn semantics are identical; we wait for the SM to re-fire
+	// the spawn (StRunning with a bumped PIDGeneration) within the graceful
+	// budget to keep the synchronous IPC RespawnResult contract.
+	//
+	// Gated on a KNOWN controller state of StRunning OR StExiting. StRunning is
+	// the steady-state "Apply + Restart" case (own-spawn sets it; warm-start
+	// PIDs are seeded by hydrateControllerRunningStates at startup). StExiting
+	// is the in-flight stop/restart case — the operator clicks Restart while a
+	// terminate is already in progress and the tracker still holds a live
+	// CurrentPID: EvManualRestart at StExiting COALESCES queued_action=respawn
+	// through the SM, so it must ALSO stay on the controller path. A direct
+	// terminate+spawn there would not be recorded as the controller's spawn,
+	// and the old child's later EvChildExit could drive StExiting->StIdle +
+	// MarkExited, clearing the tracker for the freshly spawned process and
+	// leaving a live daemon untracked (Codex bot #268 P1). Only StSpawning
+	// (EvManualRestart has no SM transition there) and the ctrl-not-yet-wired
+	// window fall through to the legacy direct path below.
+	if shouldTerminate && ctrl != nil && ctrl.eventLoop != nil &&
+		controllerStateKnown &&
+		(controllerState == api.StRunning || controllerState == api.StExiting) {
+		if err := ctrl.postManualRestartAndWaitRunning(taskName, time.Duration(gracefulTimeoutMs)*time.Millisecond); err != nil {
+			_ = deps.events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "ipc",
+				Event:    "supervisor-respawn-controller-restart-failed",
+				Body: map[string]any{
+					"task_name": taskName,
+					"err":       err.Error(),
+				},
+			})
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    ipcErrorRespawnFailed,
+					Message: fmt.Sprintf("controller-routed restart failed: %v", err),
+				},
+				Final: true,
+			})
+		}
+		_ = deps.events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "ipc",
+			Event:    "supervisor-respawn-via-gui",
+			Body: map[string]any{
+				"task_name": taskName,
+				"force":     force,
+				"outcome":   "spawned",
+				"route":     "controller-manual-restart",
+			},
+		})
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID: req.ID,
+			OK: true,
+			Result: map[string]any{
+				"task_name": taskName,
+				"state":     "spawned",
+				"route":     "controller-manual-restart",
+			},
+			Final: true,
+		})
+	}
+
+	// Legacy / no-controller path (unit-test fixtures construct deps
+	// WITHOUT a controllerProvider, and the cold-restart pre-controller
+	// window has ctrl==nil): direct terminate+spawn of the running daemon.
+	//
 	// Graceful terminate. terminateFn marks the runtime tracker entry
 	// as exited and (for production wiring) signals the child process.
 	// We don't poll for "really exited" beyond the terminateFn return —
 	// the production tracker write happens inside terminateFn and the
 	// next spawnFn call will observe the new state.
 	termStart := time.Now()
-	const gracefulTimeoutMs = 5000
-	if err := terminateFn(*desc); err != nil {
-		// Terminate failure ABORTS the respawn (closes bot PR#222 P2-4:
-		// previously we logged warn + continued to spawn unconditionally,
-		// which could leave the old process alive while starting another
-		// instance — duplicate-process / port-collision risk under
-		// production wiring where terminate can fail for active daemons
-		// when no PID is available in the startup snapshot).
-		//
-		// The handler returns the terminate error to the IPC caller so
-		// the operator sees the precise failure mode instead of a
-		// silent "respawn succeeded" + a port-conflict crash on the
-		// next health check.
-		_ = deps.events.Emit(api.SupervisorEvent{
-			Severity: "error",
-			Source:   "ipc",
-			Event:    "supervisor-respawn-terminate-failed",
-			Body: map[string]any{
-				"task_name": taskName,
-				"err":       err.Error(),
-				"action":    "respawn aborted",
-			},
-		})
-		return writeIPCFrame(conn, api.IPCResponse{
-			ID: req.ID,
-			Error: &api.IPCErr{
-				Code:    ipcErrorRespawnTerminateFailed,
-				Message: "terminate failed; respawn aborted to prevent duplicate process: " + err.Error(),
-			},
-			Final: true,
-		})
+	if shouldTerminate {
+		if err := terminateFn(*desc); err != nil {
+			// Terminate failure ABORTS the respawn (closes bot PR#222 P2-4:
+			// previously we logged warn + continued to spawn unconditionally,
+			// which could leave the old process alive while starting another
+			// instance — duplicate-process / port-collision risk under
+			// production wiring where terminate can fail for active daemons
+			// when no PID is available in the startup snapshot).
+			//
+			// The handler returns the terminate error to the IPC caller so
+			// the operator sees the precise failure mode instead of a
+			// silent "respawn succeeded" + a port-conflict crash on the
+			// next health check.
+			_ = deps.events.Emit(api.SupervisorEvent{
+				Severity: "error",
+				Source:   "ipc",
+				Event:    "supervisor-respawn-terminate-failed",
+				Body: map[string]any{
+					"task_name": taskName,
+					"err":       err.Error(),
+					"action":    "respawn aborted",
+				},
+			})
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    ipcErrorRespawnTerminateFailed,
+					Message: "terminate failed; respawn aborted to prevent duplicate process: " + err.Error(),
+				},
+				Final: true,
+			})
+		}
 	}
 	if time.Since(termStart) > gracefulTimeoutMs*time.Millisecond {
 		_ = deps.events.Emit(api.SupervisorEvent{
@@ -263,12 +372,35 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
-	if err := spawnFn(*desc); err != nil {
+	var spawnErr error
+	routeNonRunningRespawnThroughController := false
+	if !shouldTerminate {
+		// Seed the controller SM state from the persisted tracker state
+		// when the controller has no entry yet (post-cold-restart window:
+		// the tracker is hydrated from supervisor-state.json before the
+		// controller has observed the task). Without this, a forced
+		// respawn of a quarantined/backoff task would route through the
+		// StIdle transition and skip the failure-window reset, letting the
+		// daemon immediately re-quarantine off the stale crash window
+		// (Codex bot #268 P2, supervise_respawn.go:75).
+		if ctrl != nil {
+			ctrl.hydrateSMStateFromTrackerIfMissing(taskName)
+		}
+		routeNonRunningRespawnThroughController, spawnErr = shouldRouteNonRunningRespawnThroughController(ctrl, taskName)
+	}
+	if spawnErr == nil {
+		if routeNonRunningRespawnThroughController {
+			spawnErr = ctrl.postIdleRespawnAndWait(taskName, time.Duration(gracefulTimeoutMs)*time.Millisecond)
+		} else {
+			spawnErr = spawnFn(*desc)
+		}
+	}
+	if spawnErr != nil {
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			Error: &api.IPCErr{
 				Code:    ipcErrorRespawnFailed,
-				Message: fmt.Sprintf("spawn failed: %v", err),
+				Message: fmt.Sprintf("spawn failed: %v", spawnErr),
 			},
 			Final: true,
 		})

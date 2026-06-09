@@ -10,9 +10,10 @@
 // applied or an error; on error WriteOverlay propagates the error
 // verbatim and DOES NOT touch the on-disk file. On success the
 // overlay is marshalled to YAML and routed through
-// api.SecureWriteClientConfig for atomic temp+rename + DACL handle-
-// binding (matches the rest of the hub's write path so the new file
-// stays owner-only regardless of the parent directory's ACL).
+// api.WriteStateFileBytesLockHeld for atomic temp+rename + DACL
+// handle-binding under the state-file policy domain (matches the
+// supervisor-intent/state write path so the new file stays owner-only
+// while keeping state-file relax/audit semantics).
 //
 // Known limitation — YAML comments are NOT preserved. The marshal
 // path here is struct-based (yaml.Marshal on *Overlay), which drops
@@ -50,8 +51,9 @@ import (
 //     flock and returns that error verbatim. The on-disk file is
 //     NOT touched — the mutator's in-memory edits never reach disk.
 //  6. Otherwise, marshal the (possibly-mutated) overlay to YAML and
-//     write it via api.SecureWriteClientConfig (atomic temp+rename
-//     + handle-bound DACL on Windows / 0600 on POSIX).
+//     write it via api.WriteStateFileBytesLockHeld (state-file
+//     atomic temp+rename + handle-bound DACL on Windows / 0600 on
+//     POSIX).
 //  7. Release the flock (deferred — fires on any return path).
 //
 // Contract details:
@@ -105,7 +107,7 @@ func WriteOverlay(path string, mutator func(*Overlay) error) error {
 		return fmt.Errorf("daemon_env_overlay.WriteOverlay: marshal %q: %w", path, err)
 	}
 
-	if err := api.SecureWriteClientConfig(path, raw); err != nil {
+	if err := api.WriteStateFileBytesLockHeld(path, raw); err != nil {
 		return fmt.Errorf("daemon_env_overlay.WriteOverlay: secure write %q: %w", path, err)
 	}
 	return nil

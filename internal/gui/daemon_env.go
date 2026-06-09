@@ -2,25 +2,25 @@
 //
 // Three POST-only routes serve the Servers-matrix env-overlay surface:
 //
-//   POST /api/daemon/env         — operator-edit Apply (overlay write only,
-//                                  NO supervisor IPC). Validates taskName
-//                                  is in current supervisor-intent.json
-//                                  AND env keys/values are character-safe;
-//                                  writes a `source: operator` row via
-//                                  daemon_env_overlay.WriteOverlay.
-//                                  Operator clicks Restart separately.
-//   POST /api/discovery/refresh  — re-run binary_discovery against the
-//                                  installed manifests and overwrite
-//                                  non-operator rows in the overlay.
-//                                  Useful when the operator installs a
-//                                  new SDK / binary into one of the
-//                                  hint directories after first install.
-//   POST /api/daemon/respawn     — dial supervisor IPC with the canonical
-//                                  `respawn` verb; force-bool forwards
-//                                  through. Maps supervisor error codes
-//                                  to HTTP status: UNKNOWN_TASK → 400,
-//                                  QUARANTINED → 409, RESPAWN_NOT_READY
-//                                  → 503, RESPAWN_FAILED → 500.
+//	POST /api/daemon/env         — operator-edit Apply (overlay write only,
+//	                               NO supervisor IPC). Validates taskName
+//	                               is in current supervisor-intent.json
+//	                               AND env keys/values are character-safe;
+//	                               writes a `source: operator` row via
+//	                               daemon_env_overlay.WriteOverlay.
+//	                               Operator clicks Restart separately.
+//	POST /api/discovery/refresh  — re-run binary_discovery against the
+//	                               installed manifests and overwrite
+//	                               non-operator rows in the overlay.
+//	                               Useful when the operator installs a
+//	                               new SDK / binary into one of the
+//	                               hint directories after first install.
+//	POST /api/daemon/respawn     — dial supervisor IPC with the canonical
+//	                               `respawn` verb; force-bool forwards
+//	                               through. Maps supervisor error codes
+//	                               to HTTP status: UNKNOWN_TASK → 400,
+//	                               QUARANTINED → 409, RESPAWN_NOT_READY
+//	                               → 503, RESPAWN_FAILED → 500.
 //
 // All three wrap requireSameOrigin so cross-origin browser tabs cannot
 // reach them (CSRF defense — see internal/gui/csrf.go).
@@ -35,7 +35,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -56,14 +55,20 @@ func registerDaemonEnvRoutes(s *Server) {
 	s.mux.HandleFunc("/api/daemon/respawn", s.requireSameOrigin(s.daemonRespawnHandler))
 }
 
-// Validation tokens — kept narrow so operators get explicit feedback
-// rather than silent truncation downstream.
-var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
 // daemonEnvRequest is the POST body shape for /api/daemon/env.
 type daemonEnvRequest struct {
 	TaskName string            `json:"task_name"`
 	Env      map[string]string `json:"env"`
+}
+
+type daemonEnvListRow struct {
+	TaskName  string            `json:"task_name"`
+	Server    string            `json:"server"`
+	Daemon    string            `json:"daemon"`
+	Workspace string            `json:"workspace,omitempty"`
+	Port      int               `json:"port,omitempty"`
+	Source    string            `json:"source,omitempty"`
+	Env       map[string]string `json:"env"`
 }
 
 // daemonEnvHandler accepts a {task_name, env} body and writes a
@@ -71,6 +76,10 @@ type daemonEnvRequest struct {
 // — the operator clicks Restart separately so they can review the
 // effective env first.
 func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s.daemonEnvListHandler(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeAPIError(w, fmt.Errorf("method %s not allowed", r.Method), http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED")
 		return
@@ -91,12 +100,12 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate env entries before any disk write so a malformed pair
 	// surfaces as a clean 400 rather than a half-written overlay.
 	for k, v := range req.Env {
-		if !envKeyPattern.MatchString(k) {
+		if !daemon_env_overlay.ValidEnvKey(k) {
 			writeAPIError(w, fmt.Errorf("invalid env key %q: must match [A-Za-z_][A-Za-z0-9_]*", k),
 				http.StatusBadRequest, "INVALID_KEY")
 			return
 		}
-		if hasControlChar(v) {
+		if daemon_env_overlay.HasControlChar(v) {
 			writeAPIError(w, fmt.Errorf("invalid env value for key %q: contains newline/NUL/control char", k),
 				http.StatusBadRequest, "INVALID_VALUE")
 			return
@@ -114,6 +123,11 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 	if !intentContainsTask(intent, taskName) {
 		writeAPIError(w, fmt.Errorf("task_name %q not in current supervisor-intent.json", req.TaskName),
 			http.StatusBadRequest, "UNKNOWN_TASK")
+		return
+	}
+	if api.IsMaintenanceTaskName(taskName) {
+		writeAPIError(w, fmt.Errorf("task_name %q is a maintenance task, not a daemon with env overrides", req.TaskName),
+			http.StatusBadRequest, "MAINTENANCE_TASK")
 		return
 	}
 
@@ -179,6 +193,78 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
+	taskFilter := strings.TrimSpace(r.URL.Query().Get("task_name"))
+	if taskFilter != "" {
+		taskFilter = daemon_env_overlay.NormalizeOverlayKey(taskFilter)
+	}
+	intent, err := loadCurrentSupervisorIntent()
+	if err != nil {
+		writeAPIError(w, fmt.Errorf("read supervisor-intent.json: %w", err), http.StatusInternalServerError, "STATE_READ_FAILED")
+		return
+	}
+	if taskFilter != "" && !intentContainsTask(intent, taskFilter) {
+		writeAPIError(w, fmt.Errorf("task_name %q not in current supervisor-intent.json", taskFilter),
+			http.StatusBadRequest, "UNKNOWN_TASK")
+		return
+	}
+	overlayPath, err := resolveOverlayPath()
+	if err != nil {
+		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
+		return
+	}
+	ov, err := daemon_env_overlay.Load(overlayPath)
+	if err != nil {
+		writeAPIError(w, fmt.Errorf("load overlay: %w", err), http.StatusInternalServerError, "OVERLAY_READ_FAILED")
+		return
+	}
+	rows := make([]daemonEnvListRow, 0, len(intent.Daemons))
+	for _, d := range intent.Daemons {
+		taskName := daemon_env_overlay.NormalizeOverlayKey(d.TaskName)
+		// Skip maintenance/watchdog rows: they are one-shot scheduler jobs,
+		// not daemon processes with env overrides; the CLI env selector
+		// filters them the same way (deep-sec #268).
+		if taskName == "" || api.IsMaintenanceTaskName(taskName) || (taskFilter != "" && taskName != taskFilter) {
+			continue
+		}
+		server := d.Server
+		daemonName := d.Daemon
+		if server == "" || daemonName == "" {
+			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
+			if server == "" {
+				server = parsedServer
+			}
+			if daemonName == "" {
+				daemonName = parsedDaemon
+			}
+		}
+		if daemonName == "" {
+			daemonName = "default"
+		}
+		env := daemon_env_overlay.LookupOverlay(ov, taskName)
+		if env == nil {
+			env = map[string]string{}
+		}
+		row := daemonEnvListRow{
+			TaskName:  taskName,
+			Server:    server,
+			Daemon:    daemonName,
+			Workspace: d.Workspace,
+			Port:      d.Port,
+			Env:       env,
+		}
+		if ov != nil {
+			if existing, ok := ov.Daemons[taskName]; ok {
+				row.Source = existing.Source
+			}
+		}
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].TaskName < rows[j].TaskName })
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"daemons": rows})
+}
+
 // discoveryRefreshRequest is the POST body shape for /api/discovery/refresh.
 // Currently no fields are required; future versions may scope discovery
 // to a specific server or daemon. The empty-body case re-runs full
@@ -241,6 +327,15 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	taskName := daemon_env_overlay.NormalizeOverlayKey(strings.TrimSpace(req.TaskName))
 	if taskName == "" {
 		writeAPIError(w, fmt.Errorf("task_name is required"), http.StatusBadRequest, "INVALID_ARGS")
+		return
+	}
+	// Maintenance/watchdog tasks are one-shot scheduler jobs, not daemon
+	// processes — they have no env overrides and must not be respawned via
+	// this endpoint (deep-sec #268: the env list must not expose them and
+	// must not drive /api/daemon/respawn against them).
+	if api.IsMaintenanceTaskName(taskName) {
+		writeAPIError(w, fmt.Errorf("task_name %q is a maintenance task, not a daemon", req.TaskName),
+			http.StatusBadRequest, "MAINTENANCE_TASK")
 		return
 	}
 
@@ -475,20 +570,4 @@ func manifestDaemonNamesForGUI(m *config.ServerManifest) []string {
 		out = append(out, name)
 	}
 	return out
-}
-
-// hasControlChar returns true if s contains a newline, NUL, or any
-// non-tab control character. Used as a defense-in-depth gate against
-// env values that would corrupt logs or process environment blocks.
-func hasControlChar(s string) bool {
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\t' {
-			continue
-		}
-		if c < 0x20 || c == 0x7f {
-			return true
-		}
-	}
-	return false
 }

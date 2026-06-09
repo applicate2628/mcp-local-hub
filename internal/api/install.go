@@ -630,6 +630,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 var forceMaterializeProbe = sendForceMaterializeTools
 
 var statusSchedulerFactory = scheduler.New
+var restartSchedulerFactory = scheduler.New
 
 func statusSchedulerTasks() ([]scheduler.TaskStatus, error) {
 	sch, err := statusSchedulerFactory()
@@ -2259,19 +2260,37 @@ func (a *API) stopKillCore(server, daemonFilter string) ([]RestartResult, error)
 // to opts.Writer (or os.Stderr by default) and never propagate — the
 // restart already happened.
 func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
-	sch, err := scheduler.New()
+	results, supervisorHandled, err := restartSupervisorOwnedDaemons(context.Background(), server, daemonFilter)
 	if err != nil {
+		return nil, err
+	}
+	// Mixed install: a server can have supervisor-owned rows AND legacy
+	// scheduler tasks. Don't short-circuit after the supervisor pass —
+	// fall through to restart the remaining scheduler tasks for this
+	// server, skipping any task name already respawned via the supervisor
+	// (same combine-and-skip behavior as RestartAll). Bot PR #268 r3.
+	handledTasks := schedulerBlockedRestartTaskNames(results)
+	sch, err := restartSchedulerFactory()
+	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	tasks, err := listTasksForServer(sch, server)
 	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
-	var results []RestartResult
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
+		if _, already := handledTasks[normalized]; already {
+			continue
+		}
 		if daemonFilter != "" {
 			wantSuffix := "-" + daemonFilter
 			if !strings.HasSuffix(normalized, wantSuffix) {
@@ -2405,6 +2424,22 @@ func portForTask(taskName string, ports map[string]map[string]int, wsByTask map[
 type RestartResult struct {
 	TaskName string `json:"task_name"`
 	Err      string `json:"error"`
+	Code     string `json:"-"`
+}
+
+func schedulerBlockedRestartTaskNames(results []RestartResult) map[string]struct{} {
+	handledTasks := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		name := strings.TrimPrefix(result.TaskName, "\\")
+		if name == "" {
+			continue
+		}
+		if result.Err != "" && result.Code == "SUPERVISOR_UNAVAILABLE" {
+			continue
+		}
+		handledTasks[name] = struct{}{}
+	}
+	return handledTasks
 }
 
 // RestartAll stops+starts every scheduler task under our prefix. Returns a
@@ -2419,23 +2454,38 @@ type RestartResult struct {
 // stale daemon they wanted to replace. We have to kill the daemon
 // process by port first.
 func (a *API) RestartAll() ([]RestartResult, error) {
-	sch, err := scheduler.New()
+	results, supervisorHandled, err := restartSupervisorOwnedDaemons(context.Background(), "", "")
 	if err != nil {
+		return nil, err
+	}
+	handledTasks := schedulerBlockedRestartTaskNames(results)
+
+	sch, err := restartSchedulerFactory()
+	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return results, nil
+		}
 		return nil, err
 	}
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
-	var results []RestartResult
 	for _, t := range tasks {
 		// Skip weekly-refresh — scheduled, not restarted.
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		port := portForTask(strings.TrimPrefix(t.Name, "\\"), ports, wsByTask)
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		if _, alreadyHandled := handledTasks[normalized]; alreadyHandled {
+			continue
+		}
+		port := portForTask(normalized, ports, wsByTask)
 		if err := killDaemonByPort(port, 5*time.Second); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue

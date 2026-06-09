@@ -578,17 +578,17 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		return fmt.Errorf("load intent files: %w", intentErr)
 	}
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
-	runtimeTracker, trackerErr := loadDaemonRuntimeTrackerFromStatePath(statePath)
-	if trackerErr != nil {
+	runtimeTracker, currentRunning, runningPIDs, stateErr := loadSupervisorStartupRuntime(stateDir)
+	if stateErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "error",
 			Source:   "lifecycle",
 			Event:    "supervise-startup-failed",
 			Body: map[string]any{
-				"err": trackerErr.Error(),
+				"err": stateErr.Error(),
 			},
 		})
-		return fmt.Errorf("load supervisor-state.json: %w", trackerErr)
+		return fmt.Errorf("load supervisor-state.json: %w", stateErr)
 	}
 
 	// Load daemon-env-overrides.yaml ONCE at startup. Per spec
@@ -686,18 +686,6 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// over the production closures so wiring tests can capture spawn
 	// fan-out without launching real child processes.
 	//
-	currentRunning, runningPIDs, stateErr := loadSupervisorCurrentRunning(stateDir)
-	if stateErr != nil {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "error",
-			Source:   "lifecycle",
-			Event:    "supervise-startup-failed",
-			Body: map[string]any{
-				"err": stateErr.Error(),
-			},
-		})
-		return fmt.Errorf("load supervisor-state.json: %w", stateErr)
-	}
 	// PER-SPAWN Job Object architecture (ADR #239 Option B,
 	// 2026-05-28). Each daemon spawn allocates its own Job Object
 	// inside the spawn closure, so orphan cleanup is task-scoped
@@ -767,6 +755,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	}
 	ctrl.intentCache.Refresh(intent)
 	ctrl.daemonIntent.Refresh(daemonIntent)
+	hydrateControllerRunningStates(ctrl, currentRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
 
 	// Crash-event bridge: the production spawn fn posts crashEvent
@@ -779,6 +768,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// receive crash events and don't need this goroutine.
 	if reconcileSpawnFn == nil {
 		go runCrashEventBridge(loopCtx, crashCh, loop, events)
+		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events)
 	}
 
 	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json
@@ -1821,6 +1811,18 @@ func loadIntentFiles(
 // A missing file is valid first boot. Any other read/parse error is fatal:
 // corrupt supervisor-state.json is an untrusted warm-start input and must not
 // silently collapse to "no daemons running".
+func loadSupervisorStartupRuntime(stateDir string) (*DaemonRuntimeTracker, map[string]bool, map[string]runningProcessIdentity, error) {
+	currentRunning, runningPIDs, err := loadSupervisorCurrentRunning(stateDir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tracker, err := loadDaemonRuntimeTrackerFromStatePath(filepath.Join(stateDir, "supervisor-state.json"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return tracker, currentRunning, runningPIDs, nil
+}
+
 func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]runningProcessIdentity, error) {
 	result := map[string]bool{}
 	pids := map[string]runningProcessIdentity{}
@@ -1836,11 +1838,19 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		return result, pids, nil
 	}
 	expectedExe := canonicalMcphubPath()
+	intentPorts := supervisorIntentPortMapForStateDir(stateDir)
+	stale := map[string]struct{}{}
+	markStale := func(taskName string) {
+		if taskName != "" {
+			stale[taskName] = struct{}{}
+		}
+	}
 	for taskName, ds := range state.Daemons {
 		if ds.State != "running" || ds.CurrentPID <= 0 {
 			continue
 		}
 		if ds.PIDGeneration <= 0 || ds.StartedAt == "" || expectedExe == "" {
+			markStale(taskName)
 			continue
 		}
 		proof := process.PIDIdentityProof{
@@ -1850,14 +1860,67 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		}
 		if err := currentRunningVerifyPIDIdentityFn(proof); err != nil {
 			if !errors.Is(err, process.ErrProcessIdentityUnsupported) || !currentRunningIsPIDAliveFn(ds.CurrentPID) {
+				markStale(taskName)
 				continue
 			}
 		}
-		result[taskName] = true
-		pids[taskName] = runningProcessIdentity{
+		startedAt := time.Time{}
+		if parsed, err := time.Parse(time.RFC3339Nano, ds.StartedAt); err == nil {
+			startedAt = parsed.UTC()
+		}
+		canonicalTask := canonicalSupervisorTaskName(taskName)
+		if port := intentPorts[canonicalTask]; port > 0 {
+			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
+				TaskName: canonicalTask,
+				Port:     port,
+			}, DaemonRuntimeEntry{
+				State:      daemonRuntimeStateRunning,
+				CurrentPID: ds.CurrentPID,
+				StartedAt:  startedAt,
+			}, time.Now().UTC())
+			if !live {
+				// Reason routing mirrors the r9 liveness sweep
+				// (supervise_liveness.go): a port-stale reason whose PID is
+				// STILL ALIVE (port_unbound / port_owner_{mismatch,self,
+				// unverified}) means a live-but-wedged mcphub wrapper. We
+				// must NOT clear its PID here — clearing would (a) leak the
+				// live process (the later liveness sweep reads CurrentPID=0
+				// from the just-cleaned state and skips it) AND (b) make
+				// currentRunning omit the task so the startup reconcile
+				// spawns a DUPLICATE alongside the still-running wrapper
+				// (Codex bot #268 r10 P1). Instead keep the entry running
+				// (state row untouched → tracker hydrates the live PID →
+				// the immediate startup liveness sweep terminates it FIRST
+				// then respawns exactly once). Reconcile sees it as running
+				// and no-ops, so no duplicate is spawned in the meantime.
+				// Only a NOT-alive reason (pid_dead / pid_identity_* via a
+				// TOCTOU race after the outer identity check) falls through
+				// to markStale → cleared → reconcile respawns (no live
+				// process to terminate).
+				if !supervisorLivenessReasonHasLivePID(reason) {
+					markStale(taskName)
+					continue
+				}
+			}
+		}
+		result[canonicalTask] = true
+		pids[canonicalTask] = runningProcessIdentity{
 			PID:           ds.CurrentPID,
 			PIDGeneration: ds.PIDGeneration,
 			StartedAt:     ds.StartedAt,
+		}
+	}
+	if len(stale) > 0 {
+		for taskName := range stale {
+			ds := state.Daemons[taskName]
+			ds.State = "idle"
+			ds.CurrentPID = 0
+			ds.StartedAt = ""
+			ds.JobProtection = nil
+			state.Daemons[taskName] = ds
+		}
+		if err := api.WriteSupervisorState(statePath, state); err != nil {
+			return result, pids, fmt.Errorf("persist stale supervisor-state cleanup: %w", err)
 		}
 	}
 	return result, pids, nil
@@ -2126,6 +2189,26 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 	return out
 }
 
+// overlayKeySet returns the overlay map's keys (original spelling) in
+// deterministic sorted order. The supervisor injects this set via
+// MCPHUB_DAEMON_ENV_OVERLAY_KEYS at spawn time so the wrapper's
+// reload-FAILURE path can reconstruct the overlay map from os.Environ()
+// without a successful overlay-file reload. Sorting makes the injected
+// value stable across map-iteration order (matters for the audit trail and
+// for deterministic tests). Returns nil for an empty/nil map so the caller
+// can treat it as "no overlay applied".
+func overlayKeySet(overlay map[string]string) []string {
+	if len(overlay) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(overlay))
+	for k := range overlay {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // isSerenaProxyDescriptor reports whether a SupervisorDaemon descriptor is a
 // serena per-workspace proxy row, identified by its wrapper argv carrying the
 // `daemon serena-proxy` subcommand (the shape
@@ -2295,6 +2378,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// own emit path; the daemon spawns with the literal token in
 		// its env so the operator sees the failure in the child's
 		// observed PATH rather than a silent skip.
+		overlayApplied := len(overlayEnv) > 0
 		if len(overlayEnv) > 0 {
 			if expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ()); err == nil {
 				overlayEnv = expanded
@@ -2319,6 +2403,20 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// os.Environ directly).
 		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
 			cmd.Env = merged
+		}
+		if overlayApplied {
+			cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
+			// Inject the applied overlay KEY SET alongside the APPLIED
+			// marker. The wrapper's marker-present reload-FAILURE path
+			// reconstructs the overlay map from these keys (reading each
+			// key's already-expanded value back from os.Environ) when the
+			// overlay file is unreadable, so a key present in BOTH the
+			// manifest and the cached overlay still resolves to the
+			// operator override instead of the manifest default in cfg.Env
+			// (closes Codex bot #268 daemon.go:380 P2). Keys are spelled as
+			// the overlay stored them; appendDaemonOverlayKeys strips any
+			// spoofed value first (same discipline as the APPLIED marker).
+			cmd.Env = appendDaemonOverlayKeys(cmd.Env, overlayKeySet(overlayEnv))
 		}
 
 		// Intent-path control channel (bot PR #246 P2). A serena-proxy resolves
@@ -2610,16 +2708,40 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			})
 			tracker.MarkExited(taskName)
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
-			// Auto-respawn: only post to dispatcher on non-clean exit.
-			// A clean exit (exit_code=0, no waitErr) is a deliberate
-			// shutdown (mcphub stop, IPC exit, manual taskkill) and
-			// should NOT trigger respawn. The dispatcher channel may be
-			// nil for legacy / test callers — guard with nil-check.
-			if crashCh != nil && (waitErr != nil || exitCode != 0) {
+			// Child-exit notification: post EVERY exit (clean and
+			// non-clean) onto crashCh so the controller's single FIFO
+			// event loop observes the real exit and can drive the SM
+			// transition for the task. Cleanliness (exit_code==0 &&
+			// no waitErr) is carried implicitly in the crashEvent fields
+			// and re-derived by runCrashEventBridge into the LoopEvent's
+			// `clean_exit` body flag.
+			//
+			// Why clean exits must also post (Codex bot #268 P1,
+			// supervisor_controller.go:893): during a controller-driven
+			// restart an OWN daemon that handles SIGTERM and exits 0 has
+			// NO real EvChildExit posted if clean exits are suppressed
+			// here. The StExiting synthesize gate suppresses the
+			// synthetic exit for own-spawned tasks (owned==true), so the
+			// SM would wedge in StExiting with queued_action=respawn
+			// never consumed — daemon killed, never respawned. Posting
+			// the clean exit gives the controller the real EvChildExit it
+			// needs to complete the queued respawn.
+			//
+			// The deliberate-shutdown contract (clean exit on a daemon
+			// that was NOT being restarted must NOT trigger respawn) is
+			// preserved at the CONTROLLER, not here: handleLoopEvent
+			// drops a clean_exit EvChildExit when the task is still in
+			// StRunning (no controller-driven exit in flight), so a plain
+			// `mcphub stop` / external clean kill at steady state never
+			// reaches the StRunning->StBackoffWaiting respawn path.
+			//
+			// The dispatcher channel may be nil for legacy / test callers
+			// — guard with nil-check.
+			if crashCh != nil {
 				select {
 				case crashCh <- crashEvent{Daemon: d, ExitCode: exitCode, WaitErr: waitErr}:
 				default:
-					// Dispatcher backlog full (>64 concurrent crashes
+					// Dispatcher backlog full (>64 concurrent exits
 					// pending). Drop this respawn signal and audit-log
 					// it. Operator must restart supervisor to recover.
 					_ = events.Emit(api.SupervisorEvent{

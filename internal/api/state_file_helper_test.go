@@ -67,6 +67,23 @@ func TestWriteStateFileAtomic(t *testing.T) {
 	}
 }
 
+func TestWriteStateFileBytesAtomicWritesRawPayload(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "daemon-env-overrides.yaml")
+	payload := []byte("version: 1\ndaemons: {}\n")
+
+	if err := WriteStateFileBytesAtomic(path, payload); err != nil {
+		t.Fatalf("write bytes: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read bytes: %v", err)
+	}
+	if string(raw) != string(payload) {
+		t.Fatalf("raw payload mismatch:\n got %q\nwant %q", string(raw), string(payload))
+	}
+}
+
 // TestWriteStateFileAtomic_AcquiresFileLock pins falsifiable claim
 // #7: concurrent WriteStateFileAtomic invocations against the same
 // path must serialize via flock.New(path + ".lock"). The test

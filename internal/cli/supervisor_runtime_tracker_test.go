@@ -166,6 +166,131 @@ func TestDaemonRuntimeTracker_PersistAndHydrate(t *testing.T) {
 	}
 }
 
+// TestDaemonRuntimeTracker_PersistPreservesFileOwnedFields is the Codex
+// deep-sec PR #268 Conc-F1 guard: PersistTo rebuilds file.Daemons
+// wholesale from the in-memory tracker, which models only State /
+// CurrentPID / PIDGeneration / OrphanPID / JobProtection / StartedAt. The
+// four file-owned fields the tracker does NOT model —
+// RestartHistory / BackoffUntil / QuarantineSince / QueuedAction — must be
+// preserved from the existing on-disk row across a persist that updates
+// State/PID, not zero-filled. Pre-fix every persist erased them, and the
+// persist-on-every-transition cadence made the loss guaranteed (the
+// cross-restart 30-min sliding window read by HydrateFromState would be
+// silently dropped on the first transition after cold start).
+func TestDaemonRuntimeTracker_PersistPreservesFileOwnedFields(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	taskName := `\mcp-local-hub-memory-default`
+
+	// Seed a row carrying all four file-owned fields with non-zero values,
+	// as a quarantine/backoff path or a previous supervisor would have
+	// written them.
+	backoffUntil := "2026-06-09T10:05:00.000000000Z"
+	quarantineSince := "2026-06-09T09:30:00.000000000Z"
+	if err := api.WriteSupervisorState(statePath, &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			taskName: {
+				State:         "backoff-waiting",
+				CurrentPID:    0,
+				PIDGeneration: 4,
+				RestartHistory: []api.RestartEvent{
+					{At: "2026-06-09T09:50:00.000000000Z", ExitCode: 1},
+					{At: "2026-06-09T09:55:00.000000000Z", ExitCode: 2},
+				},
+				BackoffUntil:    backoffUntil,
+				QuarantineSince: quarantineSince,
+				QueuedAction:    &api.QueuedAction{Kind: "respawn", Reason: "manual-restart"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	// A persist driven by a state/PID transition (e.g. the daemon respawned).
+	tracker := NewDaemonRuntimeTracker()
+	startedAt := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	tracker.MarkSpawned(taskName, 5555, startedAt)
+	if err := tracker.PersistTo(statePath); err != nil {
+		t.Fatalf("persist tracker: %v", err)
+	}
+
+	persisted, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read persisted supervisor-state.json: %v", err)
+	}
+	row := persisted.Daemons[taskName]
+	// State/PID/generation reflect the tracker's fresh values.
+	if row.State != "running" || row.CurrentPID != 5555 || row.PIDGeneration != 1 || row.StartedAt != startedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("persisted row tracker fields = %+v, want running pid=5555 generation=1 started_at", row)
+	}
+	// The four file-owned fields are RETAINED, not zeroed.
+	if len(row.RestartHistory) != 2 {
+		t.Fatalf("RestartHistory zeroed by persist: %+v (Conc-F1 regression)", row.RestartHistory)
+	}
+	if row.RestartHistory[0].ExitCode != 1 || row.RestartHistory[1].ExitCode != 2 {
+		t.Fatalf("RestartHistory corrupted by persist: %+v", row.RestartHistory)
+	}
+	if row.BackoffUntil != backoffUntil {
+		t.Fatalf("BackoffUntil = %q, want preserved %q (Conc-F1 regression)", row.BackoffUntil, backoffUntil)
+	}
+	if row.QuarantineSince != quarantineSince {
+		t.Fatalf("QuarantineSince = %q, want preserved %q (Conc-F1 regression)", row.QuarantineSince, quarantineSince)
+	}
+	if row.QueuedAction == nil || row.QueuedAction.Kind != "respawn" || row.QueuedAction.Reason != "manual-restart" {
+		t.Fatalf("QueuedAction = %+v, want preserved {respawn manual-restart} (Conc-F1 regression)", row.QueuedAction)
+	}
+}
+
+// TestDaemonRuntimeTracker_PersistDropsFieldsForRemovedDaemon is the
+// adversarial complement to the Conc-F1 preserve fix: the preserve logic
+// must NOT resurrect the four file-owned fields for a daemon the tracker
+// no longer owns (e.g. removed via clearRemovedTaskRuntime). PersistTo
+// rebuilds file.Daemons from the tracker snapshot, so a task absent from
+// the tracker is dropped from the file entirely — including its four
+// fields. This proves the preserve copy is scoped to tasks the tracker
+// still tracks, not a blanket merge that would strand stale rows.
+func TestDaemonRuntimeTracker_PersistDropsFieldsForRemovedDaemon(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	removed := `\mcp-local-hub-removed-default`
+	kept := `\mcp-local-hub-memory-default`
+
+	if err := api.WriteSupervisorState(statePath, &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			removed: {
+				State:           "quarantined",
+				PIDGeneration:   9,
+				RestartHistory:  []api.RestartEvent{{At: "2026-06-09T09:00:00.000000000Z", ExitCode: 1}},
+				QuarantineSince: "2026-06-09T09:00:00.000000000Z",
+				QueuedAction:    &api.QueuedAction{Kind: "respawn", Reason: "x"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-state.json: %v", err)
+	}
+
+	// The tracker only knows about `kept` — `removed` was dropped (e.g. its
+	// intent was removed and clearRemovedTaskRuntime called tracker.Remove).
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(kept, 4321, time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC))
+	if err := tracker.PersistTo(statePath); err != nil {
+		t.Fatalf("persist tracker: %v", err)
+	}
+
+	persisted, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read persisted supervisor-state.json: %v", err)
+	}
+	if _, ok := persisted.Daemons[removed]; ok {
+		t.Fatalf("removed daemon resurrected by persist preserve logic: %+v", persisted.Daemons[removed])
+	}
+	if _, ok := persisted.Daemons[kept]; !ok {
+		t.Fatalf("kept daemon missing after persist: %+v", persisted.Daemons)
+	}
+}
+
 func TestSupervisorCleanStartHydratesFromExistingState(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	statePath := filepath.Join(stateDir, "supervisor-state.json")

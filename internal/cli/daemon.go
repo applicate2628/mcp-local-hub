@@ -8,14 +8,44 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/daemon_env_overlay"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/secrets"
 
 	"github.com/spf13/cobra"
+)
+
+const (
+	daemonOverlayAppliedEnvVar   = "MCPHUB_DAEMON_ENV_OVERLAY_APPLIED"
+	daemonOverlayAppliedEnvValue = "supervisor"
+	// daemonOverlayKeysEnvVar carries the comma-joined set of overlay keys
+	// the supervisor applied (overlay-wins) into this wrapper's
+	// environment before spawning it. It exists so the marker-present
+	// reload-FAILURE path can reconstruct the overlay key set (and read
+	// each key's already-expanded value back from os.Environ via
+	// overlayValuesFromEnv) WITHOUT a successful overlay-file reload —
+	// closing the both-keyed clobber where, on an unreadable overlay
+	// file, a key present in BOTH the manifest and the cached operator
+	// overlay would otherwise revert to the manifest default in cfg.Env
+	// (Codex bot #268 daemon.go:380 P2 residual). The supervisor is the
+	// only writer; like the APPLIED marker it is stripped from the
+	// parent/merged env and re-appended with the trusted value so no
+	// manifest/overlay row can spoof the key set.
+	daemonOverlayKeysEnvVar = "MCPHUB_DAEMON_ENV_OVERLAY_KEYS"
+	// daemonOverlayKeysSep is the join delimiter for daemonOverlayKeysEnvVar.
+	// It must be valid INSIDE an environment-variable VALUE: a NUL byte is
+	// NOT — the OS env block is NUL-terminated, so a NUL embedded in
+	// cmd.Env's value truncates the variable (or fails the spawn) before the
+	// daemon starts (Codex bot #268 P1). A comma is safe: overlay key NAMES
+	// match [A-Za-z_][A-Za-z0-9_]* (no comma can appear), so the comma-joined
+	// set splits back unambiguously.
+	daemonOverlayKeysSep = ","
 )
 
 func newDaemonCmdReal() *cobra.Command {
@@ -103,7 +133,7 @@ See also: install, logs, restart, status.`,
 			// Resolve env.
 			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
-			env, err := resolver.ResolveMap(m.Env)
+			env, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
 			if err != nil {
 				return err
 			}
@@ -295,6 +325,284 @@ See also: install, logs, restart, status.`,
 	// Hidden — supervisor-intent.json descriptors point here.
 	c.AddCommand(newDaemonSerenaProxyCmd())
 	return c
+}
+
+func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver) (map[string]string, error) {
+	if resolver == nil {
+		return nil, fmt.Errorf("resolve manifest env for %s/%s: resolver is nil", server, daemonName)
+	}
+	env, err := resolver.ResolveMap(manifestEnv)
+	if err != nil {
+		return nil, err
+	}
+	overlayEnv, err := daemonOverlayEnv(server, daemonName)
+	if err != nil {
+		return nil, err
+	}
+	return mergeDaemonEnvMaps(env, overlayEnv), nil
+}
+
+func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
+	if len(manifest) == 0 && len(overlay) == 0 {
+		return map[string]string{}
+	}
+	merged := mergeDaemonEnv(nil, manifest, overlay)
+	out := make(map[string]string, len(merged))
+	for _, kv := range merged {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
+	stateDir, err := stateDirFunc()
+	if err != nil {
+		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
+	}
+	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
+	supervisorApplied := daemonOverlayAlreadyApplied(os.Environ())
+	ov, err := daemon_env_overlay.Load(filepath.Join(stateDir, overlayBaseName))
+	if err != nil {
+		// Supervisor-spawned wrapper (marker present): the supervisor
+		// already loaded + expanded this same overlay row and merged the
+		// result (overlay-wins) into THIS wrapper's environment before
+		// spawning us; its own spawn path intentionally falls back to the
+		// cached startup overlay on a corrupt / temporarily-unreadable
+		// file (supervise.go "Load errors fall back to the cached startup
+		// overlay"). A FATAL error here would kill every restarted
+		// supervised daemon after an operator leaves
+		// daemon-env-overrides.yaml malformed (or a transient
+		// read-hardening failure hits) — even though the correct env is
+		// ALREADY present in os.Environ(). Degrade gracefully: warn and
+		// proceed with the already-applied env.
+		//
+		// The reload failed, so we cannot read the overlay file's key
+		// set — but the supervisor injected that key set as
+		// MCPHUB_DAEMON_ENV_OVERLAY_KEYS before spawning us. Reconstruct
+		// the overlay map by reading each injected key's ALREADY-EXPANDED
+		// value back from os.Environ() (overlayValuesFromEnv, the SAME
+		// reader the success/marker path uses). That makes the operator
+		// override WIN in cfg.Env even when the file is unreadable: for a
+		// key present in BOTH the manifest and the cached overlay, the
+		// reconstructed overlay value (last duplicate) beats the manifest
+		// default StdioHost/HTTPHost would otherwise re-append after
+		// os.Environ() (closes Codex bot #268 daemon.go:380 P2 — the r10
+		// overlap-key clobber on an unreadable file). When the supervisor
+		// applied NO overlay for this daemon, the injected key set is
+		// empty and we proceed with manifest-only env (nil overlay map),
+		// exactly as before.
+		if supervisorApplied {
+			injectedKeys := daemonOverlayKeysFromEnv(os.Environ())
+			reconstructed := overlayMapFromInjectedKeys(injectedKeys, os.Environ())
+			_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-reload-degraded-supervised", map[string]any{
+				"task_name":          taskName,
+				"err":                err.Error(),
+				"fallback":           "reconstructed overlay key set from os.Environ (overlay file unreadable)",
+				"reconstructed_keys": len(reconstructed),
+			})
+			if len(reconstructed) == 0 {
+				return nil, nil
+			}
+			return reconstructed, nil
+		}
+		// Direct `mcphub daemon` invocation (no marker): the operator
+		// chose to run this daemon by hand and must see a malformed /
+		// unreadable overlay surface as a fatal error.
+		return nil, fmt.Errorf("load env overlay: %w", err)
+	}
+	overlayEnv := daemon_env_overlay.LookupOverlay(ov, taskName)
+	if len(overlayEnv) == 0 {
+		return nil, nil
+	}
+	// Supervisor-applied path (marker present in os.Environ): the
+	// supervisor already ran ExpandParentPath over this same overlay row
+	// and merged the result (overlay-wins) into THIS wrapper's environment
+	// before spawning us. Re-expanding ${parent_path} here would double the
+	// parent PATH (the wrapper's PATH already IS the expanded overlay PATH),
+	// so r9 short-circuited by returning nil. But returning nil dropped the
+	// overlay keys from cfg.Env entirely, and StdioHost spawns the upstream
+	// child as append(os.Environ(), cfg.Env...) — so the manifest value in
+	// cfg.Env (last duplicate wins) CLOBBERED the supervisor's overlay value
+	// that was only present as an inherited parent entry (e.g. the memory
+	// server's MEMORY_FILE_PATH override silently reverting to the manifest
+	// default after restart — Codex bot #268 r10 P2).
+	//
+	// Fix: re-read each overlay key's ALREADY-EXPANDED value back from
+	// os.Environ() (case-insensitive on Windows, exact on POSIX, mirroring
+	// mergeDaemonEnv's PATH-collision normalizer). The overlay then WINS in
+	// cfg.Env (no manifest clobber) WITHOUT re-expanding ${parent_path} (no
+	// doubling). Keys somehow absent from os.Environ (cannot happen in
+	// production — the supervisor always sets every overlay key — but
+	// defends a hand-crafted env) fall back to expanding the literal value
+	// so the overlay still wins and no raw ${parent_path} token leaks to the
+	// child.
+	if supervisorApplied {
+		return overlayValuesFromEnv(overlayEnv, os.Environ()), nil
+	}
+	// Direct `mcphub daemon` invocation (no marker): expand ${parent_path}
+	// against our own environment exactly once.
+	expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ())
+	if err != nil {
+		_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-parent-path-resolve-failed", map[string]any{
+			"task_name": taskName,
+			"err":       err.Error(),
+		})
+		return overlayEnv, nil
+	}
+	return expanded, nil
+}
+
+// overlayValuesFromEnv returns a map keyed by each overlay key (preserving
+// the overlay's original key casing) whose value is read back from env —
+// the supervisor-expanded value already present in the wrapper's
+// environment. The env lookup is case-insensitive on Windows so an overlay
+// `Path` key still finds a `PATH=` entry the supervisor wrote, matching
+// mergeDaemonEnv's Windows PATH-family normalizer. A key with no matching
+// env entry (degenerate; the supervisor always materializes every overlay
+// key) falls back to expanding the literal overlay value against env so the
+// overlay value still wins and no literal ${parent_path} token reaches the
+// child.
+func overlayValuesFromEnv(overlay map[string]string, env []string) map[string]string {
+	out := make(map[string]string, len(overlay))
+	var missing map[string]string
+	for k := range overlay {
+		if v, ok := lookupEnvValueCaseFold(env, k); ok {
+			out[k] = v
+			continue
+		}
+		if missing == nil {
+			missing = map[string]string{}
+		}
+		missing[k] = overlay[k]
+	}
+	if len(missing) > 0 {
+		if expanded, err := daemon_env_overlay.ExpandParentPath(missing, env); err == nil {
+			for k, v := range expanded {
+				out[k] = v
+			}
+		} else {
+			for k, v := range missing {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+// overlayMapFromInjectedKeys reconstructs the overlay env map for the
+// marker-present reload-FAILURE path. It takes the supervisor-injected
+// overlay key set (each key spelled as the overlay stored it) and reads
+// every key's ALREADY-EXPANDED value back from env via overlayValuesFromEnv
+// — the SAME reader the success/marker path uses — so the rebuilt map's
+// values match what the supervisor merged into os.Environ() at spawn time
+// (case-insensitive PATH-family match on Windows). An empty key set yields
+// an empty map so the caller can treat it as "no overlay for this daemon".
+func overlayMapFromInjectedKeys(keys []string, env []string) map[string]string {
+	if len(keys) == 0 {
+		return map[string]string{}
+	}
+	keySet := make(map[string]string, len(keys))
+	for _, k := range keys {
+		keySet[k] = ""
+	}
+	return overlayValuesFromEnv(keySet, env)
+}
+
+// daemonOverlayKeysFromEnv returns the overlay key set the supervisor
+// injected via daemonOverlayKeysEnvVar (the comma-joined value written at
+// spawn time). The LAST matching entry wins, mirroring Go exec
+// duplicate-key semantics so a supervisor-appended trusted value beats any
+// earlier spoofed entry left in the inherited env. Empty segments (from a
+// leading/trailing/duplicate separator) are dropped so a malformed value
+// never yields an empty-named key. Returns nil when the var is absent or
+// holds no non-empty key.
+func daemonOverlayKeysFromEnv(env []string) []string {
+	raw, ok := lookupEnvValueCaseFold(env, daemonOverlayKeysEnvVar)
+	if !ok || raw == "" {
+		return nil
+	}
+	var keys []string
+	for _, k := range strings.Split(raw, daemonOverlayKeysSep) {
+		if k == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// lookupEnvValueCaseFold returns the value of key in env (a "K=V" slice),
+// matched case-insensitively on Windows and exactly on POSIX. The last
+// matching entry wins, mirroring Go exec env duplicate-key semantics.
+func lookupEnvValueCaseFold(env []string, key string) (string, bool) {
+	winCaseFold := runtime.GOOS == "windows"
+	for i := len(env) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(env[i], "=")
+		if !ok {
+			continue
+		}
+		if winCaseFold {
+			if strings.EqualFold(k, key) {
+				return v, true
+			}
+		} else if k == key {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func daemonOverlayAlreadyApplied(env []string) bool {
+	return daemonOverlayMarkerValue(env) == daemonOverlayAppliedEnvValue
+}
+
+func appendDaemonOverlayAppliedMarker(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok && strings.EqualFold(k, daemonOverlayAppliedEnvVar) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, daemonOverlayAppliedEnvVar+"="+daemonOverlayAppliedEnvValue)
+}
+
+// appendDaemonOverlayKeys returns env with daemonOverlayKeysEnvVar set to
+// the comma-joined overlay key set (each key spelled as the overlay stored
+// it, so the wrapper's case-fold reader matches the supervisor-written
+// os.Environ() entry on Windows). Strip-then-append mirrors
+// appendDaemonOverlayAppliedMarker exactly: any pre-existing
+// daemonOverlayKeysEnvVar entry — whether inherited from the parent shell
+// or injected by a manifest/overlay row that names this reserved key — is
+// removed before the trusted value is appended LAST, so no manifest/overlay
+// value can spoof, inject, or drop keys. keys MUST be non-empty; callers
+// gate on overlayApplied (len(overlayEnv) > 0) before invoking, exactly as
+// they gate the APPLIED marker append.
+func appendDaemonOverlayKeys(env []string, keys []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok && strings.EqualFold(k, daemonOverlayKeysEnvVar) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, daemonOverlayKeysEnvVar+"="+strings.Join(keys, daemonOverlayKeysSep))
+}
+
+func daemonOverlayMarkerValue(env []string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		k, v, ok := strings.Cut(env[i], "=")
+		if ok && strings.EqualFold(k, daemonOverlayAppliedEnvVar) {
+			return v
+		}
+	}
+	return ""
 }
 
 // logBaseDir returns the per-OS directory for daemon logs.

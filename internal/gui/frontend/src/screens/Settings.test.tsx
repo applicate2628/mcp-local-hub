@@ -49,11 +49,33 @@ describe("SettingsScreen", () => {
   beforeEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/daemon/env")) {
+        return new Response(JSON.stringify({ daemons: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/api/daemons/weekly-refresh-membership")) {
+        return new Response(JSON.stringify({ rows: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
     // Section-level API calls (Backups list, etc.) are still needed.
     vi.spyOn(api, "getBackups").mockResolvedValue([]);
     vi.spyOn(api, "getBackupsCleanPreview").mockResolvedValue([]);
   });
-  afterEach(() => { cleanup(); });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("renders all 5 section <h2>s on success", async () => {
     // Section h2s are sourced from <h2> elements (heading role level 2).
@@ -76,6 +98,11 @@ describe("SettingsScreen", () => {
     const { container, findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} snapshot={okSnap(fakeEnv)} />);
     await findByRole("heading", { level: 1, name: "Settings" });
     expect(container.querySelector("h1")?.textContent).toBe("Settings");
+  });
+
+  it("renders daemon env override editor in Daemons settings", async () => {
+    const { findByTestId } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} snapshot={okSnap(fakeEnv)} />);
+    expect(await findByTestId("daemon-env-settings")).toBeTruthy();
   });
 
   it("calls onDirtyChange(false) initially", async () => {
