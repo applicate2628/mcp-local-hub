@@ -964,6 +964,195 @@ func TestReconcile_LegacyRunningSerenaProxy_HonorsStop(t *testing.T) {
 	}
 }
 
+// lspWorkspaceProxyArgs returns the flat argv an LSP workspace-proxy descriptor
+// carries (the shape api.BuildSupervisorDaemonForLSP emits).
+func lspWorkspaceProxyArgsForTest(port int, workspace, language string) []string {
+	return []string{
+		"daemon", "workspace-proxy",
+		"--port", strconv.Itoa(port),
+		"--workspace", workspace,
+		"--language", language,
+	}
+}
+
+func lspProxyDaemonForTest(taskName, workspace, language string, port int) api.SupervisorDaemon {
+	return api.SupervisorDaemon{
+		TaskName:  taskName,
+		Server:    "mcp-language-server",
+		Daemon:    "lsp-" + language,
+		Command:   "fake-noop",
+		Args:      lspWorkspaceProxyArgsForTest(port, workspace, language),
+		Workspace: workspace,
+		Port:      port,
+	}
+}
+
+// TestReconcile_ExcludesOrphanedLSPProxyFromDesiredSet is the orphaned-LSP-
+// daemon quarantine guard. `mcphub workspace unregister` could remove a
+// (workspace_key, language) registry row WITHOUT removing the paired
+// supervisor-intent descriptor, so the reconcile would spawn the now-unbacked
+// LSP proxy, which loads the registry, misses its row, exits 1 "not registered",
+// and churns through restart backoff into quarantine. With the
+// LSPRegistryHasRow predicate reporting "no backing row", the descriptor MUST be
+// EXCLUDED from the spawn-desired set (never reach spawn) and a single warn must
+// fire at the exclusion point.
+func TestReconcile_ExcludesOrphanedLSPProxyFromDesiredSet(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	const orphanTask = `\mcp-local-hub-lsp-deadbeef-python`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			lspProxyDaemonForTest(orphanTask, `C:\work\alpha`, "python", 9200),
+		},
+	}
+
+	spawned := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { return nil },
+	)
+	r.Events = events
+	// Predicate reports NO backing registry row — the orphan case.
+	r.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool { return false }
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{}, time.Now().UTC())
+
+	if len(spawned) != 0 {
+		t.Fatalf("orphaned LSP workspace-proxy row (no registry row) must be EXCLUDED from the desired set; got spawned=%v", spawned)
+	}
+	logStr := readFileString(t, eventsPath)
+	if !strings.Contains(logStr, `"event":"orphaned-lsp-descriptor-skipped"`) {
+		t.Fatalf("exclusion must emit an orphaned-lsp-descriptor-skipped warn event:\n%s", logStr)
+	}
+	if !strings.Contains(logStr, orphanTask) {
+		t.Fatalf("skip event must name the excluded task %q:\n%s", orphanTask, logStr)
+	}
+	if n := strings.Count(logStr, `"event":"orphaned-lsp-descriptor-skipped"`); n != 1 {
+		t.Fatalf("orphaned-lsp-descriptor-skipped must be emitted exactly once at the exclusion point; got %d:\n%s", n, logStr)
+	}
+}
+
+// TestReconcile_SpawnsBackedLSPProxy proves the orphan exclusion is precise:
+// an LSP workspace-proxy descriptor WHOSE registry row still exists (predicate
+// returns true) must still spawn normally and emit no skip event.
+func TestReconcile_SpawnsBackedLSPProxy(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	const backedTask = `\mcp-local-hub-lsp-deadbeef-python`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			lspProxyDaemonForTest(backedTask, `C:\work\alpha`, "python", 9200),
+		},
+	}
+
+	spawned := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { return nil },
+	)
+	r.Events = events
+	// Predicate reports a backing registry row — the healthy case.
+	r.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool { return true }
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{}, time.Now().UTC())
+
+	if len(spawned) != 1 || spawned[0] != backedTask {
+		t.Fatalf("a backed LSP workspace-proxy row must spawn normally; got spawned=%v", spawned)
+	}
+	logStr := readFileStringIfExists(t, eventsPath)
+	if strings.Contains(logStr, `"event":"orphaned-lsp-descriptor-skipped"`) {
+		t.Fatalf("a backed LSP row must NOT be excluded:\n%s", logStr)
+	}
+}
+
+// TestReconcile_OrphanedLSPProxy_NilPredicateSpawns pins the nil-predicate
+// default: when no LSPRegistryHasRow seam is wired (the legacy/test path), the
+// exclusion is inert and the LSP row spawns — preserving the pre-fix
+// spawn-everything behavior so the guard is opt-in via production wiring only.
+func TestReconcile_OrphanedLSPProxy_NilPredicateSpawns(t *testing.T) {
+	const lspTask = `\mcp-local-hub-lsp-deadbeef-python`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			lspProxyDaemonForTest(lspTask, `C:\work\alpha`, "python", 9200),
+		},
+	}
+
+	spawned := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { return nil },
+	)
+	// LSPRegistryHasRow left nil — the guard must be inert.
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{}, time.Now().UTC())
+
+	if len(spawned) != 1 || spawned[0] != lspTask {
+		t.Fatalf("nil-predicate path must spawn the LSP row (exclusion is opt-in); got spawned=%v", spawned)
+	}
+}
+
+// TestReconcile_RunningOrphanedLSPProxy_HonorsStop pins that the orphan
+// exclusion is SPAWN-ONLY (gated on !running): an orphaned LSP row that is
+// ALREADY RUNNING and marked stopped in daemon-intent.json must still reach the
+// `isStopped && running` terminate branch — an unconditional exclusion would
+// strand the live proxy so an operator stop could never stop it.
+func TestReconcile_RunningOrphanedLSPProxy_HonorsStop(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	const lspTask = `\mcp-local-hub-lsp-deadbeef-python`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			lspProxyDaemonForTest(lspTask, `C:\work\alpha`, "python", 9200),
+		},
+	}
+	now := time.Now().UTC()
+	daemonIntent := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			lspTask: {Desired: api.IntentDesiredStopped, UpdatedAt: now},
+		},
+	}
+
+	spawned, terminated := []string{}, []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error { spawned = append(spawned, d.TaskName); return nil },
+		func(d api.SupervisorDaemon) error { terminated = append(terminated, d.TaskName); return nil },
+	)
+	r.Events = events
+	// Even though the row is orphaned (no registry row), it is RUNNING + stopped.
+	r.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool { return false }
+	r.Reconcile(intent, daemonIntent, map[string]bool{lspTask: true}, now)
+
+	if len(spawned) != 0 {
+		t.Fatalf("a stopped row must not be spawned; got spawned=%v", spawned)
+	}
+	if len(terminated) != 1 || terminated[0] != lspTask {
+		t.Fatalf("a RUNNING orphaned LSP proxy marked stopped must be TERMINATED (not excluded); got terminated=%v", terminated)
+	}
+	logStr := readFileStringIfExists(t, eventsPath)
+	if strings.Contains(logStr, `"event":"orphaned-lsp-descriptor-skipped"`) {
+		t.Fatalf("a running row honored for stop must NOT emit the spawn-exclusion skip event:\n%s", logStr)
+	}
+}
+
 // TestReconcile_ExcludedLegacyRow_PostsNoEvStart proves the exclusion happens
 // at the EventLoop path too: when an EventLoop is wired (the production A.2
 // path), the excluded legacy row must NOT produce an EvStart event. EvStart is

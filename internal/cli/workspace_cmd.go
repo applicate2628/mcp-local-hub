@@ -53,6 +53,20 @@ const defaultWorkspaceFilename = "default-workspace.txt"
 // requiring a manifest migration first (Phase 2 cycle-break, finding #3).
 var loadSerenaManifestForCLI = loadSerenaManifestFromDisk
 
+// unregisterLSPWorkspaceFn is the test-injectable seam over the paired LSP
+// teardown. The production form is (*api.API).Unregister, which removes each
+// LSP (workspace_key, language) row TOGETHER WITH its supervisor-intent
+// descriptor (removeLSPSupervisorIntent + reconcile + kill-by-port + scheduler
+// delete + client-entry removal), so a removed registry row never leaves an
+// orphaned intent descriptor behind for the reconciler to spawn-and-quarantine.
+// `mcphub workspace unregister` previously removed LSP rows via the bare
+// reg.RemoveByBackend, which dropped the registry row WITHOUT the paired intent
+// teardown — the source of the orphaned-LSP-daemon quarantine bug. CLI tests
+// stub this so they stay hermetic (no real scheduler / netstat / IPC dial).
+var unregisterLSPWorkspaceFn = func(canonicalWorkspace string, languages []string) (*api.UnregisterReport, error) {
+	return api.NewAPI().Unregister(canonicalWorkspace, languages)
+}
+
 // loadSerenaManifestFromDisk is the production manifest loader. It uses
 // the same MCPHUB_MANIFEST_DIR_OVERRIDE seam the api package honors, so
 // tests that set the override env get hermetic manifests.
@@ -320,23 +334,66 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	if err != nil {
 		return err
 	}
-	reg := api.NewRegistry(regPath)
-	unlock, err := reg.Lock()
+
+	// Decide, under a brief registry read, which LSP languages this
+	// --backend filter targets and whether the serena (sentinel) row is in
+	// scope — WITHOUT mutating yet. The mutation is split into two phases so
+	// each owner does its own paired teardown:
+	//
+	//   - LSP rows go through unregisterLSPWorkspaceFn ((*api.API).Unregister),
+	//     which removes each (workspace_key, language) registry row TOGETHER
+	//     WITH its supervisor-intent descriptor (removeLSPSupervisorIntent +
+	//     reconcile). The bare reg.RemoveByBackend used previously dropped the
+	//     row but left the intent descriptor behind, so the supervisor would
+	//     later spawn the now-unbacked proxy → "not registered" exit 1 →
+	//     restart-backoff → quarantine. (*api.API).Unregister acquires its OWN
+	//     registry lock, so we must NOT hold the lock across that call.
+	//   - The serena (sentinel) row has no supervisor-intent LSP descriptor to
+	//     pair, so it is removed directly via RemoveByBackend("serena").
+	lspLangs, removeSerena, err := classifyWorkspaceUnregister(regPath, wsKey, backend)
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	if err := reg.Load(); err != nil {
-		return err
-	}
-
-	removed := reg.RemoveByBackend(wsKey, backend)
-	if removed == 0 {
+	if len(lspLangs) == 0 && !removeSerena {
 		return fmt.Errorf("no registry rows match workspace %s (key %s) with --backend=%q",
 			canonical, wsKey, backend)
 	}
-	if err := reg.Save(); err != nil {
-		return err
+
+	removed := 0
+	// Phase 1: paired LSP teardown. Unregister errors loud only on a hard
+	// failure; a missing supervisor (no live IPC) is downgraded to a warning
+	// inside Unregister, so this works whether or not a supervisor is running.
+	if len(lspLangs) > 0 {
+		report, uerr := unregisterLSPWorkspaceFn(canonical, lspLangs)
+		if uerr != nil {
+			return fmt.Errorf("paired LSP teardown for workspace %s: %w", canonical, uerr)
+		}
+		if report != nil {
+			removed += len(report.Removed)
+			for _, warn := range report.Warnings {
+				fmt.Fprintf(cmd.OutOrStderr(), "warning: %s\n", warn)
+			}
+		}
+	}
+
+	// Phase 2: serena (sentinel) row removal under a fresh registry lock.
+	if removeSerena {
+		reg := api.NewRegistry(regPath)
+		unlock, err := reg.Lock()
+		if err != nil {
+			return err
+		}
+		if err := reg.Load(); err != nil {
+			unlock()
+			return err
+		}
+		n := reg.RemoveByBackend(wsKey, "serena")
+		if err := reg.Save(); err != nil {
+			unlock()
+			return err
+		}
+		unlock()
+		removed += n
 	}
 
 	// If the default marker pointed at this workspace AND we removed the
@@ -350,6 +407,53 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 		"Removed %d registry row(s) for workspace %s (key %s) with --backend=%q\n",
 		removed, canonical, wsKey, backend)
 	return nil
+}
+
+// classifyWorkspaceUnregister reads the registry under a brief lock and returns
+// the LSP languages and serena-row scope a `mcphub workspace unregister
+// --backend <filter>` invocation targets, WITHOUT mutating. The drop logic
+// mirrors (*api.Registry).RemoveByBackend exactly so the unregister surface
+// keeps identical --backend semantics while routing LSP rows through the paired
+// teardown instead of a bare row delete:
+//
+//   - ""        → every LSP row (Language != serena sentinel); serena stays.
+//   - "all"     → every LSP row + the serena row.
+//   - "serena"  → the serena row only.
+//   - <name>    → LSP rows whose Backend or Language equals <name>.
+func classifyWorkspaceUnregister(regPath, wsKey, backend string) (lspLangs []string, removeSerena bool, err error) {
+	reg := api.NewRegistry(regPath)
+	unlock, lerr := reg.Lock()
+	if lerr != nil {
+		return nil, false, lerr
+	}
+	defer unlock()
+	if lerr := reg.Load(); lerr != nil {
+		return nil, false, lerr
+	}
+	for _, e := range reg.ListByWorkspace(wsKey) {
+		isSerena := e.Language == api.SerenaLanguageSentinel
+		switch backend {
+		case "":
+			if !isSerena {
+				lspLangs = append(lspLangs, e.Language)
+			}
+		case "all":
+			if isSerena {
+				removeSerena = true
+			} else {
+				lspLangs = append(lspLangs, e.Language)
+			}
+		case "serena":
+			if isSerena {
+				removeSerena = true
+			}
+		default:
+			if !isSerena && (e.Backend == backend || e.Language == backend) {
+				lspLangs = append(lspLangs, e.Language)
+			}
+		}
+	}
+	return lspLangs, removeSerena, nil
 }
 
 // newWorkspaceListCmd builds `mcphub workspace list [--json]`.

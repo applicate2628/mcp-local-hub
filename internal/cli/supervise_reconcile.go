@@ -83,6 +83,19 @@ type Reconciler struct {
 	// don't assert the audit row; production wiring sets it in
 	// runSupervise alongside EventLoop.
 	Events *api.SupervisorEventLog
+
+	// LSPRegistryHasRow reports whether an LSP workspace-proxy descriptor
+	// still has a backing registry row (a (workspace_key, language) entry in
+	// workspaces.yaml). When non-nil, an LSP workspace-proxy descriptor whose
+	// predicate returns false is EXCLUDED from the spawn-desired set instead of
+	// spawned — the proxy would otherwise exit 1 with "not registered"
+	// (internal/cli/daemon_workspace.go) and churn through restart backoff into
+	// quarantine. This closes the orphaned-LSP-daemon quarantine bug where
+	// `mcphub workspace unregister` removed the registry row but left the intent
+	// descriptor behind. Left nil by tests that don't exercise the orphan path
+	// (preserving the existing spawn-everything behavior); production wiring sets
+	// it in runSupervise alongside EventLoop + Events.
+	LSPRegistryHasRow func(d api.SupervisorDaemon) bool
 }
 
 // NewReconciler builds a Reconciler with the supplied fan-out
@@ -185,6 +198,47 @@ func (r *Reconciler) Reconcile(
 						"server": d.Server,
 						"reason": "serena-proxy descriptor carries no runtime_spec (pre-redesign / stale row); excluded from the reconcile spawn-desired set instead of spawning a proxy that would fail loud and churn through restart backoff",
 						"action": "run the serena dynamic-pool re-install/migrate to re-materialize this descriptor with a runtime_spec",
+					},
+				})
+			}
+			continue
+		}
+
+		// Desired-set exclusion for ORPHANED LSP workspace-proxy rows.
+		// `mcphub workspace unregister` (and `--backend` variants) can remove
+		// the registry row in workspaces.yaml WITHOUT removing the paired
+		// supervisor-intent descriptor. The reconcile then spawns the now-
+		// unbacked LSP proxy, which loads the registry, misses its
+		// (workspace_key, language) row, and exits 1 with "not registered"
+		// (internal/cli/daemon_workspace.go). The state machine treats that as
+		// a real failure, churns through restart backoff, and finally
+		// quarantines the daemon — a noisy, operator-confusing failure for a
+		// descriptor that should simply not exist anymore.
+		//
+		// Mirror the serena-proxy skip above: EXCLUDE the row from the SPAWN-
+		// desired set HERE (before any EvStart / spawn fires) when the predicate
+		// reports no backing registry row. Gated on !running so an ALREADY-
+		// RUNNING orphan still falls through to the `isStopped && running`
+		// terminate branch (an operator stop must still be able to stop a live
+		// process). The predicate is nil in tests that don't wire it, preserving
+		// the spawn-everything default. Emit ONE operator-actionable warn at the
+		// exclusion point so the orphan is visible without spawn-and-quarantine
+		// churn; the operator clears it by re-running `mcphub install` /
+		// re-registering the workspace (which re-materializes the row) or by
+		// removing the stale descriptor.
+		if r.LSPRegistryHasRow != nil && isLSPWorkspaceProxyDescriptor(d) && !running && !r.LSPRegistryHasRow(d) {
+			if r.Events != nil {
+				_ = r.Events.Emit(api.SupervisorEvent{
+					Severity: "warn",
+					Source:   "lifecycle",
+					Event:    "orphaned-lsp-descriptor-skipped",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"server":    d.Server,
+						"workspace": d.Workspace,
+						"language":  lspWorkspaceProxyArgValue(d, "--language"),
+						"reason":    "LSP workspace-proxy descriptor has no backing registry row (workspaces.yaml); the proxy would exit 1 \"not registered\" and churn into quarantine, so it is excluded from the reconcile spawn-desired set",
+						"action":    "re-register the workspace language (`mcphub workspace register` / `mcphub install`) to re-materialize the registry row, or remove this stale supervisor-intent descriptor",
 					},
 				})
 			}

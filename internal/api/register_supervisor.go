@@ -50,6 +50,76 @@ func BuildSupervisorDaemonForLSP(entry WorkspaceEntry, mcphubBinaryPath string) 
 	}
 }
 
+// LSPRegistryRowBacksDescriptor reports whether the supervisor-intent LSP
+// workspace-proxy descriptor d still has a backing registry row in
+// workspaces.yaml — i.e. whether `mcphub daemon workspace-proxy --workspace
+// <path> --language <lang>` would find its (workspace_key, language) entry
+// instead of exiting 1 "not registered". The supervisor reconciler calls this
+// (via the Reconciler.LSPRegistryHasRow seam) to EXCLUDE orphaned LSP
+// descriptors from the spawn-desired set rather than spawn-and-quarantine them.
+//
+// The (workspace_path, language) pair is read from the descriptor's flat argv
+// (--workspace / --language), falling back to the Workspace field for the path.
+// The lookup mirrors the unregister path's canonical/legacy-key tolerance:
+// the canonical EvalSymlinks key is tried first, then the pre-symlink legacy
+// key, so a row written under either canonicalization scheme is found. A
+// non-LSP descriptor, a descriptor missing its language, or any registry
+// read/lock failure returns true (fail OPEN — never suppress a legitimate spawn
+// on a transient registry hiccup; the worst case is the pre-fix behavior of
+// spawning a row that then fails loud, which is strictly safer than silently
+// dropping a backed daemon).
+func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) bool {
+	lang := lspDescriptorArgValue(d.Args, "--language")
+	if lang == "" {
+		return true
+	}
+	wsPath := lspDescriptorArgValue(d.Args, "--workspace")
+	if wsPath == "" {
+		wsPath = d.Workspace
+	}
+	if wsPath == "" {
+		return true
+	}
+	regPath, err := DefaultRegistryPath()
+	if err != nil {
+		return true
+	}
+	reg := NewRegistry(regPath)
+	unlock, ok, err := tryLockRegistryBrief(reg)
+	if err != nil || !ok {
+		return true
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		return true
+	}
+	// Canonical (EvalSymlinks) key first, then the legacy pre-symlink key —
+	// matching unregisterWithManifest's two-key tolerance so a row written
+	// under either scheme is recognized.
+	if canonical, cerr := CanonicalWorkspacePathForCleanup(wsPath); cerr == nil {
+		if _, found := reg.Get(WorkspaceKey(canonical), lang); found {
+			return true
+		}
+	}
+	if legacy, lerr := CanonicalWorkspacePathLegacyCompat(wsPath); lerr == nil {
+		if _, found := reg.Get(WorkspaceKey(legacy), lang); found {
+			return true
+		}
+	}
+	return false
+}
+
+// lspDescriptorArgValue returns the value following the first occurrence of
+// flag in a flat `--flag value` argv, or "" if absent.
+func lspDescriptorArgValue(args []string, flag string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
 func killObservedLiveLSPProxy(port int, taskName string, observedLive bool) error {
 	if !observedLive || port <= 0 || killByPortFn == nil {
 		return nil
