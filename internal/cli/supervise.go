@@ -1837,7 +1837,17 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 	if state == nil {
 		return result, pids, nil
 	}
-	expectedExe := canonicalMcphubPath()
+	// supervisor-state.json (api.SupervisorDaemonState) carries only the
+	// runtime PID/state — NOT the daemon's exe. The PID-identity proof must
+	// compare against the DAEMON's configured Command (its install path), not
+	// the supervisor's own canonicalMcphubPath(); a dev-build supervisor
+	// supervising release-path daemons would otherwise mark every live daemon
+	// stale on a spurious identity mismatch and respawn duplicates (bug
+	// 2026-06-09-supervisor-loses-current-pid-false-quarantine.md). Pull the
+	// per-task Command from supervisor-intent.json (canonical-keyed); a task
+	// absent from intent or with an empty Command falls back to
+	// canonicalMcphubPath() via daemonExpectedIdentityExe.
+	intentCommands := supervisorIntentCommandMapForStateDir(stateDir)
 	intentPorts := supervisorIntentPortMapForStateDir(stateDir)
 	stale := map[string]struct{}{}
 	markStale := func(taskName string) {
@@ -1849,6 +1859,7 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		if ds.State != "running" || ds.CurrentPID <= 0 {
 			continue
 		}
+		expectedExe := daemonExpectedIdentityExe(intentCommands[canonicalSupervisorTaskName(taskName)])
 		if ds.PIDGeneration <= 0 || ds.StartedAt == "" || expectedExe == "" {
 			markStale(taskName)
 			continue
@@ -1870,8 +1881,17 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 		}
 		canonicalTask := canonicalSupervisorTaskName(taskName)
 		if port := intentPorts[canonicalTask]; port > 0 {
+			// Carry the daemon's configured Command so the inner liveness
+			// re-check's PID-identity probe (process.VerifyPIDIdentity in
+			// production) compares against the daemon's OWN exe, not the
+			// supervisor's canonicalMcphubPath(). Without it a port-bearing
+			// daemon whose install path differs from the supervisor binary
+			// would false-mismatch here and be cleared as stale (the same bug
+			// the outer identity check fixes — 2026-06-09 supervisor false
+			// pid_identity_mismatch).
 			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
 				TaskName: canonicalTask,
+				Command:  intentCommands[canonicalTask],
 				Port:     port,
 			}, DaemonRuntimeEntry{
 				State:      daemonRuntimeStateRunning,
@@ -1977,9 +1997,18 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
 			return nil
 		}
+		// Identity proof for the terminate path: the target daemon runs from
+		// its CONFIGURED command (d.Command — the exact exe the supervisor
+		// exec'd), which may differ from the supervisor's own binary. Verify
+		// (and later terminate) against the daemon's exe, NOT the supervisor's
+		// canonicalMcphubPath(); otherwise a dev-build supervisor cannot verify
+		// — and therefore cannot kill — release-path daemons, worsening the
+		// orphan/port-fight (bug
+		// 2026-06-09-supervisor-loses-current-pid-false-quarantine.md). This
+		// single proof is threaded through verify → terminate → finish below.
 		proof := process.PIDIdentityProof{
 			PID:            pid,
-			ExecutablePath: canonicalMcphubPath(),
+			ExecutablePath: daemonExpectedIdentityExe(d.Command),
 			StartedAt:      target.StartedAt,
 		}
 		if err := productionVerifyPIDIdentityFn(proof); err != nil {
