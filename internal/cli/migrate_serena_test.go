@@ -1786,6 +1786,106 @@ func TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud(t *testing.
 	}
 }
 
+// TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud guards the
+// liveness gate on the Bug 2 downgrade (bot PR #278 P1): the typed
+// reconcile-ready-timeout sentinel proves only that the detached SPAWN
+// succeeded — the child may have died right after (immediate exit, crash
+// before binding IPC). The step-10 downgrade must therefore fire ONLY when
+// the spawned supervisor is demonstrably still alive (supervisor.lock
+// liveness); a dead child OR an undeterminable probe keeps the timeout fatal,
+// because exit-0 would falsely report a working migration with a committed
+// intent and no supervisor running.
+func TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud(t *testing.T) {
+	cases := []struct {
+		name       string
+		probe      func() (bool, error)
+		wantDetail string
+	}{
+		{
+			name:       "dead_supervisor",
+			probe:      func() (bool, error) { return false, nil },
+			wantDetail: "no process is holding supervisor.lock",
+		},
+		{
+			name:       "undeterminable_probe",
+			probe:      func() (bool, error) { return false, errors.New("lock probe failed") },
+			wantDetail: "supervisor liveness probe failed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir, manifestDir := migrateSerenaTestEnv(t)
+			seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+
+			ws := t.TempDir()
+			seedSerenaWorkspaceNoPort(t, ws)
+			// The SAME probe serves the pre-reap willReap decision and the
+			// downgrade gate. (false, nil) models the no-supervisor cutover
+			// whose spawned child then dies (no reap; write + start);
+			// (false, err) is treated as RUNNING pre-reap (conservative: never
+			// skip a needed reap) and as NOT-ALIVE at the downgrade gate
+			// (conservative: never certify success) — the two polarities are
+			// deliberately opposite, see the gate comment in migrate_serena.go.
+			defer stubSupervisorRunning(t, tc.probe)()
+			defer stubStartSupported(t, func() bool { return true })()
+			regPath, err := api.DefaultRegistryPath()
+			if err != nil {
+				t.Fatalf("registry path: %v", err)
+			}
+
+			defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+				return &api.MigrateReport{}, nil
+			})()
+			restoreReconcileCalled := false
+			defer stubRestoreReconcile(t, func(report *api.MigrateReport) error {
+				restoreReconcileCalled = true
+				return nil
+			})()
+			defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+			// REAL install commits the spec-bearing intent; the START succeeds
+			// at the spawn step but reports the typed sentinel — same shape as
+			// the exits-zero test; only the liveness verdict differs.
+			defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+				return fmt.Errorf("supervisor started but did not reach reconcile-ready within 60s: %w: dial pipe: file does not exist",
+					ErrMigrateSerenaReconcileReadyTimeout)
+			})()
+
+			var buf bytes.Buffer
+			err = runMigrateSerenaDynamicPool(context.Background(), &buf)
+			if err == nil {
+				t.Fatal("a post-commit reconcile-ready timeout with a NOT-demonstrably-alive supervisor must fail loud, not exit 0")
+			}
+			if !strings.Contains(err.Error(), "not demonstrably alive") {
+				t.Errorf("the failure must name the liveness verdict; got %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Errorf("the failure must carry the probe detail %q; got %v", tc.wantDetail, err)
+			}
+			if strings.Contains(buf.String(), "the migration is committed (registry intentionally NOT rolled back)") {
+				t.Errorf("the success-with-warning downgrade text must NOT print on the fail-loud path; got output:\n%s", buf.String())
+			}
+			// Same commit-point invariants as the exits-zero test: the intent
+			// stays committed and the registry is NOT rolled back — fail-loud
+			// here means "no supervisor confirmed running", not "migration
+			// undone".
+			afterReg := loadRegistrySerenaPorts(t, regPath)
+			if afterReg[api.WorkspaceKey(ws)] == 0 {
+				t.Errorf("registry must RETAIN the allocated serena port; rows=%+v", afterReg)
+			}
+			intent, ierr := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+			if ierr != nil {
+				t.Fatalf("read committed intent: %v", ierr)
+			}
+			if !intent.HasRuntimeSpecRow() {
+				t.Errorf("the spec-bearing intent must remain committed")
+			}
+			if restoreReconcileCalled {
+				t.Errorf("the reconcile-restore must NOT fire after a committed migrate")
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 11. (Fix 3) The registry flock is released BEFORE the multi-second reap, so a
 //     concurrent registry op is not blocked across the reap window. The reap

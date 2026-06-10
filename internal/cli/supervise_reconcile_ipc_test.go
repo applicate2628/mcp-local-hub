@@ -345,14 +345,20 @@ func TestReconcileIPC_ApplyExcludesOrphanedLSPDescriptor(t *testing.T) {
 	}
 	fx := newReconcileTestFixture(t, intent)
 
-	// Point api.DefaultRegistryPath() (consulted by LSPRegistryRowBacksDescriptor)
-	// at the fixture's temp state dir, where workspaces.yaml is ABSENT → the
-	// descriptor has no backing row → orphan. Without this override the predicate
-	// would read the developer's REAL registry and could find a row, masking the
-	// orphan condition under test (and is also a live-state hazard the rest of the
-	// suite avoids via the same override).
-	restoreRoot := api.SetDaemonStateRootForTest(fx.deps.stateDir)
-	t.Cleanup(restoreRoot)
+	// Hermetic registry isolation (#278 fable r2): LSPRegistryRowBacksDescriptor
+	// resolves the registry via api.DefaultRegistryPath(), an ENV-based resolver
+	// (LOCALAPPDATA / XDG_STATE_HOME) that does NOT consult the
+	// daemonStateRootOverride seam — the SetDaemonStateRootForTest call this
+	// test previously relied on never actually redirected it (the test passed
+	// only because the temp --workspace path had no row in the developer's
+	// REAL registry, and stayed exposed to a fail-open flake whenever the live
+	// registry flock was briefly contended). Redirect the env so
+	// workspaces.yaml is ABSENT under a temp root → the descriptor has no
+	// backing row → orphan, deterministically, with no read of the
+	// developer's live registry at all.
+	regRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", regRoot)
+	t.Setenv("XDG_STATE_HOME", regRoot)
 
 	// sched=missing + intent=running on a supervisor-owned row would, absent the
 	// gate, classify as post_ev_intent_update (spawn).
@@ -742,17 +748,56 @@ func TestReconcileIPC_MissingTaskInSchedulerFlaggedAsMissing(t *testing.T) {
 }
 
 func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
-	taskName := `\mcp-local-hub-lsp-b133f336-go`
+	// Hermetic registry isolation (#278 fable r2): the apply-mode orphan gate
+	// consults api.LSPRegistryRowBacksDescriptor, which resolves the registry
+	// via api.DefaultRegistryPath() — an ENV-based resolver (LOCALAPPDATA /
+	// XDG_STATE_HOME) that does NOT honor the daemonStateRootOverride seam.
+	// The original form of this test hardcoded a REAL workspace path, so its
+	// verdict depended on the developer's live workspaces.yaml (it broke the
+	// moment that workspace's go row moved under the @serena sentinel).
+	// Redirect both env vars so every platform resolves the registry under a
+	// temp root, then seed the BACKING row the descriptor needs for the spawn
+	// direction to stay post_ev_intent_update under the gate.
+	regRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", regRoot)
+	t.Setenv("XDG_STATE_HOME", regRoot)
+
+	ws := t.TempDir()
+	canonical, err := api.CanonicalWorkspacePathForCleanup(ws)
+	if err != nil {
+		t.Fatalf("canonicalize workspace: %v", err)
+	}
+	key := api.WorkspaceKey(canonical)
+	taskName := `\mcp-local-hub-lsp-` + key + `-go`
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if perr := reg.PutLSP(api.WorkspaceEntry{
+		WorkspaceKey:  key,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "mcp-language-server",
+		Port:          9200,
+		TaskName:      "mcp-local-hub-lsp-" + key + "-go",
+	}); perr != nil {
+		t.Fatalf("seed registry row: %v", perr)
+	}
+	if serr := reg.Save(); serr != nil {
+		t.Fatalf("save seeded registry: %v", serr)
+	}
+
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
 			{
 				TaskName:  taskName,
 				Server:    "mcp-language-server",
-				Daemon:    "lsp-b133f336-go",
+				Daemon:    "lsp-" + key + "-go",
 				Command:   "mcphub",
-				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", `D:\dev\mcp-local-hub`, "--language", "go"},
-				Workspace: `D:\dev\mcp-local-hub`,
+				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", ws, "--language", "go"},
+				Workspace: ws,
 				Port:      9200,
 			},
 		},

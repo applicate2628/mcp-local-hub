@@ -1179,7 +1179,8 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 		fmt.Fprintln(w, "Starting the supervisor so it reconciles the new serena dynamic-pool intent…")
 		if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
 			// POST-COMMIT downgrade (ONLY at this site): a reconcile-ready-timeout
-			// after a SUCCESSFUL spawn is benign. The intent is committed and the
+			// after a SUCCESSFUL spawn whose supervisor is DEMONSTRABLY STILL ALIVE
+			// (lock-liveness gate below) is benign. The intent is committed and the
 			// registry is intentionally NOT rolled back; the 30s/60s poll does not
 			// wait for daemon spawn, and the supervisor reconciles eventually (the
 			// GUI's ensureSupervisorRunning also brings one up). The most common
@@ -1188,6 +1189,30 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 			// scary exit-1 falsely told operators the migration failed. Downgrade
 			// to a warning and return nil — the migration IS committed.
 			if errors.Is(startErr, ErrMigrateSerenaReconcileReadyTimeout) {
+				// Bot PR #278 P1: the sentinel proves the detached SPAWN succeeded,
+				// NOT that the spawned supervisor is still alive — it fires equally
+				// when the child died right after the spawn (immediate exit, crash
+				// before binding IPC). Downgrading THAT case would report exit-0
+				// with a committed intent and NO supervisor running. Gate the
+				// downgrade on the lightweight supervisor.lock liveness probe: in
+				// the benign hand-off window the child HOLDS the lock while it
+				// warms up; a dead child leaves it free. Conservative polarity here
+				// is the OPPOSITE of the pre-reap probe (which assumes running on a
+				// probe error so a needed reap is never skipped): an undeterminable
+				// probe must NOT certify success → fail loud.
+				running, probeErr := migrateSerenaSupervisorRunningFn()
+				if probeErr != nil || !running {
+					liveness := "no process is holding supervisor.lock"
+					if probeErr != nil {
+						liveness = fmt.Sprintf("supervisor liveness probe failed: %v", probeErr)
+					}
+					return fmt.Errorf(
+						"supervisor start (§7.1) failed after the runtime_spec intent was committed: %w (%s — "+
+							"the spawned supervisor is not demonstrably alive, so this reconcile-ready timeout is NOT the benign lock hand-off window); "+
+							"the new serena dynamic-pool intent is on disk but no supervisor is confirmed running — "+
+							"run `mcphub supervise` from a shell (or re-run the migrate) so the current binary reconciles it. "+
+							"The registry is intentionally NOT rolled back: the intent is the commit point", startErr, liveness)
+				}
 				fmt.Fprintf(w, "warning: serena dynamic-pool intent committed and a supervisor spawned, but it did not report reconcile-ready within %s — likely still binding its IPC pipe. Run \"mcphub status\" to confirm; the migration is committed (registry intentionally NOT rolled back).\n", migrateSerenaReconcileReadyTimeout)
 				if events != nil {
 					_ = events.Emit(api.SupervisorEvent{
@@ -1196,11 +1221,12 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 						Source:        "migration",
 						Event:         "serena-migrate-post-commit-reconcile-ready-timeout",
 						Body: map[string]any{
-							"timeout":   migrateSerenaReconcileReadyTimeout.String(),
-							"detail":    startErr.Error(),
-							"reason":    "post-commit supervisor spawn succeeded but reconcile-ready was not observed within the bounded window; the intent is committed and the registry is NOT rolled back — the supervisor reconciles eventually",
-							"action":    "run `mcphub status` to confirm the supervisor came up; no operator action is required if it is reconcile-ready",
-							"committed": true,
+							"timeout":              migrateSerenaReconcileReadyTimeout.String(),
+							"detail":               startErr.Error(),
+							"reason":               "post-commit supervisor spawn succeeded but reconcile-ready was not observed within the bounded window; the intent is committed and the registry is NOT rolled back — the supervisor reconciles eventually",
+							"action":               "run `mcphub status` to confirm the supervisor came up; no operator action is required if it is reconcile-ready",
+							"committed":            true,
+							"supervisor_lock_live": true,
 						},
 					})
 				}
