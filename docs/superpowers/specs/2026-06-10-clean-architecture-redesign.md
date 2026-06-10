@@ -105,9 +105,9 @@ Legend: **in-flight** = #278 on `fix/serena-supervisor-robustness`; **next** = f
 
 ### 9.0 Expansion targets (the selected list — owner-confirmed 2026-06-10)
 
-The vendors to add adapters for, **selected together with the owner** (transcript L25954 + L25965), are **8 client adapters**:
+The vendors to add adapters for, **selected with the owner** (transcript L25954 + L25965, then L28280), are **10 client adapters**:
 
-| Vendor | Notes | Config-format source |
+| Vendor | Notes | Config path / format source |
 |---|---|---|
 | **OpenClaw** | CLI agent | docs.openclaw.ai/cli/mcp |
 | **Hermes** | Nous Research agent | hermes-agent.nousresearch.com/docs/reference/mcp-config-reference |
@@ -115,12 +115,14 @@ The vendors to add adapters for, **selected together with the owner** (transcrip
 | **OpenHands** | agent | research at build |
 | **Cline** | VS Code extension | research at build |
 | **Aider** | CLI | research at build |
-| **Kilo Code** | agent | research at build |
+| **Kilo Code** | VS Code agent | research at build |
 | **Windsurf** | Codeium IDE | research at build |
+| **Zed** | Zed editor | `~/.config/zed/settings.json` -> `context_servers` |
+| **Kiro** | Amazon agentic IDE | `.kiro/settings/mcp.json` |
 
 **Ollama -> SKIP** — not a native MCP client; would need a bridge (github.com/jonigl/mcp-client-for-ollama). Deferred, NOT in this scope.
 
-Sizeable feature (8 Go adapters + the 9.2 registration table + README client-versions + per-adapter demigrate/rollback symmetry tests) -> **its own PR** (originally scoped "after #268"; now after the legacy-removal/STOP work). Config formats for the 6 newer vendors are researched at build time; OpenClaw + Hermes have published MCP-config docs (above).
+Sizeable feature (10 Go adapters + the 9.2 registration table + README client-version table + per-adapter demigrate/rollback symmetry tests) -> **its own PR** (originally scoped "after #268"; now after the legacy-removal/STOP work). Config formats for the newer vendors are researched at build; OpenClaw + Hermes + Zed + Kiro have known config locations (above).
 
 ### 9.1 The canonical client set (7 today)
 
@@ -351,3 +353,16 @@ Each phase = **one PR through fable → bot → merge → redeploy** (per the re
 **Phase 8 — backlog interleave / future lanes.** GUI screen polish (§11.2), observability event-bus + API-contract reconciliation (§11.9), backups keep-N (§11.9), LSP-router first-class design (§11.1/§11.5), supervisor P3 residuals (§11.3), serena v2 features (§11.4), Linux-server lane F1–F7 (§11.7 — separate strategic lane, not pulled into v0.6 GA), macOS kqueue (§11.3), test-infra leak fixes (§11.10). Each rides whichever earlier phase cleaned the surface it touches.
 
 **Cross-cutting gates for every phase:** (1) per-phase acceptance criteria + test surface (the redesign currently lacks these — §11.1); (2) E2E spec additions where the phase changes observable GUI behavior (fail-loud, idle, hash→name, store); (3) state-file backup before any subagent `go test` (§11.10 fleet-wipe lesson); (4) redeploy = FULL supervisor restart, expect serena/LSP interruption each phase; (5) each phase is reversible only by `git reset` while local — there is no v0.4.x rollback net (§0 premise 2), so the live fleet is the safety surface.
+
+
+---
+
+## §13 npm-based delivery (install simplification — owner-requested research task)
+
+Recovered from the owner plan (transcript L28299/L28300, dropped by the mid-session compaction). Current install is multi-step + intimidating (`build.sh -> install -> ~/.local/bin -> mcphub setup` + supervisor/PATH). mcphub is a SINGLE Go binary, so it can ship the **standard npm path for native binaries** (the esbuild / sharp / @swc pattern):
+
+- Publish per-platform prebuilt binaries as **`optionalDependencies`** (`mcphub-win32-x64`, `mcphub-linux-x64`, `mcphub-darwin-arm64`, ...); a thin JS shim selects the right one at runtime.
+- Result: **`npm install -g mcphub && mcphub setup`** — one command instead of manual build-from-source.
+- Alternative: a `postinstall` script that downloads the matching binary from GitHub releases.
+
+Feasibility + design is a **research task**. Big adoption win — drops the build-from-source barrier for the free/open core. Ties to the open-core split in `.dev/mcp-local-hub-plan.md`.
