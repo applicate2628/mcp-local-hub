@@ -92,9 +92,27 @@ func setupWatchdogTestHelper(t *testing.T) (string, *watchdogFakeScheduler) {
 // runSetupWatchdog — Task 11 happy path + idempotency.
 // ---------------------------------------------------------------------------
 
+// countImportXMLByName returns how many of the fake scheduler's ImportXML
+// calls targeted the given task name. After Phase 3a, runSetupWatchdog
+// installs BOTH the watchdog (WatchdogTaskName) and the supervisor-liveness
+// (LivenessTaskName) tasks, so assertions that previously counted ALL
+// ImportXML calls now filter by name to stay watchdog-specific.
+func countImportXMLByName(fakeSch *watchdogFakeScheduler, name string) int {
+	n := 0
+	for _, c := range fakeSch.importXMLCalls {
+		if c.name == name {
+			n++
+		}
+	}
+	return n
+}
+
 // TestSetup_RunsWatchdogInstall_HappyPath asserts the post-Bootstrap
 // watchdog wiring reaches scheduler.ImportXML for the canonical
-// WatchdogTaskName and prints the §16 confirmation lines.
+// WatchdogTaskName and prints the §16 confirmation lines. Phase 3a (v0.6
+// spec §15 P1-b) ALSO installs the additive supervisor-liveness task; this
+// test now asserts BOTH ImportXML calls land (watchdog + liveness) while the
+// watchdog confirmation lines are preserved unchanged.
 func TestSetup_RunsWatchdogInstall_HappyPath(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
 
@@ -102,12 +120,13 @@ func TestSetup_RunsWatchdogInstall_HappyPath(t *testing.T) {
 	if err := runSetupWatchdog(out, false); err != nil {
 		t.Fatalf("runSetupWatchdog: %v", err)
 	}
-	calls := fakeSch.importXMLCalls
-	if len(calls) != 1 {
-		t.Fatalf("ImportXML calls = %d, want 1", len(calls))
+	if got := countImportXMLByName(fakeSch, api.WatchdogTaskName); got != 1 {
+		t.Fatalf("watchdog ImportXML calls = %d, want 1", got)
 	}
-	if calls[0].name != api.WatchdogTaskName {
-		t.Errorf("ImportXML name = %q, want %q", calls[0].name, api.WatchdogTaskName)
+	// Phase 3a additive: the supervisor-liveness task is installed alongside
+	// the watchdog (the watchdog install is UNTOUCHED).
+	if got := countImportXMLByName(fakeSch, api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness ImportXML calls = %d, want 1 (Phase 3a additive install)", got)
 	}
 	if !strings.Contains(out.String(), api.WatchdogTaskName) {
 		t.Errorf("stdout missing watchdog task name; got %q", out.String())
@@ -117,6 +136,9 @@ func TestSetup_RunsWatchdogInstall_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "mcphub watchdog uninstall") {
 		t.Errorf("stdout missing disable command hint; got %q", out.String())
+	}
+	if !strings.Contains(out.String(), api.LivenessTaskName) {
+		t.Errorf("stdout missing liveness task name; got %q", out.String())
 	}
 }
 
@@ -133,8 +155,14 @@ func TestSetup_RunsTwice_Idempotent(t *testing.T) {
 	if err := runSetupWatchdog(out, false); err != nil {
 		t.Fatalf("second runSetupWatchdog: %v", err)
 	}
-	if got := len(fakeSch.importXMLCalls); got != 2 {
-		t.Errorf("ImportXML calls = %d after two runs, want 2", got)
+	// Two runs × one watchdog ImportXML each = 2 (Phase 3a's additive liveness
+	// ImportXML is counted separately so this watchdog-idempotency assertion is
+	// unaffected by the new install).
+	if got := countImportXMLByName(fakeSch, api.WatchdogTaskName); got != 2 {
+		t.Errorf("watchdog ImportXML calls = %d after two runs, want 2", got)
+	}
+	if got := countImportXMLByName(fakeSch, api.LivenessTaskName); got != 2 {
+		t.Errorf("liveness ImportXML calls = %d after two runs, want 2", got)
 	}
 }
 
@@ -210,8 +238,8 @@ func TestSetup_Elevated_WithAllowElevated_HappyPath_AuditWritten(t *testing.T) {
 	if err := runSetupWatchdog(out, true); err != nil {
 		t.Fatalf("runSetupWatchdog with allowElevated=true: %v", err)
 	}
-	if len(fakeSch.importXMLCalls) != 1 {
-		t.Errorf("ImportXML calls = %d, want 1", len(fakeSch.importXMLCalls))
+	if got := countImportXMLByName(fakeSch, api.WatchdogTaskName); got != 1 {
+		t.Errorf("watchdog ImportXML calls = %d, want 1", got)
 	}
 
 	a := api.NewAPI()
@@ -294,9 +322,8 @@ func TestSetup_EventLogRegistrationFails_NonFatal(t *testing.T) {
 	if atomic.LoadInt32(&regCalls) != 1 {
 		t.Errorf("RegisterEventLog calls = %d, want 1", atomic.LoadInt32(&regCalls))
 	}
-	if len(fakeSch.importXMLCalls) != 1 {
-		t.Errorf("watchdog should still install when EventLog reg fails; got %d ImportXML calls",
-			len(fakeSch.importXMLCalls))
+	if got := countImportXMLByName(fakeSch, api.WatchdogTaskName); got != 1 {
+		t.Errorf("watchdog should still install when EventLog reg fails; got %d watchdog ImportXML calls", got)
 	}
 	a := api.NewAPI()
 	tail := a.ReadWatchdogLogTail(20)
@@ -508,6 +535,116 @@ func TestUninstall_ListError_FailsClosed(t *testing.T) {
 		if name == api.WatchdogTaskName {
 			t.Errorf("List error must fail-closed (keep watchdog); got delete %q", name)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Supervisor-liveness teardown — Phase 3a (v0.6 spec §15 P1-b).
+//
+// The `\mcp-local-hub-liveness` task is a hub-wide shared maintenance job
+// like the watchdog; it is torn down INSIDE the same last-server gate.
+// ---------------------------------------------------------------------------
+
+// containsTask reports whether name appears in the recorded Delete calls.
+func containsTask(deletes []string, name string) bool {
+	for _, d := range deletes {
+		if d == name {
+			return true
+		}
+	}
+	return false
+}
+
+// TestUninstall_LastServer_RemovesLivenessTask covers FIX 1(b)+(c): on a
+// last-server uninstall the supervisor-liveness task is removed alongside the
+// watchdog. The fake scheduler reports only the target server's task (plus
+// maintenance tasks), so the partial-uninstall gate authorizes the global
+// teardown.
+func TestUninstall_LastServer_RemovesLivenessTask(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	// Last-server uninstall: only the target server's task remains, plus the
+	// two hub-wide maintenance tasks (watchdog + liveness) that must NOT
+	// poison the gate.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-time-default"},
+		{Name: api.WatchdogTaskName},
+		{Name: api.LivenessTaskName},
+	}
+
+	out := &bytes.Buffer{}
+	if err := runUninstallWatchdog(out, "time"); err != nil {
+		t.Fatalf("runUninstallWatchdog: %v", err)
+	}
+	deletes := fakeSch.deletes()
+	if !containsTask(deletes, api.LivenessTaskName) {
+		t.Errorf("expected Delete(%q) on last-server uninstall; got %v", api.LivenessTaskName, deletes)
+	}
+	// The watchdog is still removed first; the liveness teardown rides
+	// alongside it inside the same gate.
+	if !containsTask(deletes, api.WatchdogTaskName) {
+		t.Errorf("expected Delete(%q) on last-server uninstall; got %v", api.WatchdogTaskName, deletes)
+	}
+	if len(deletes) == 0 || deletes[0] != api.WatchdogTaskName {
+		t.Errorf("watchdog must be deleted FIRST; got %v", deletes)
+	}
+}
+
+// TestUninstall_PartialServer_KeepsLivenessTask covers FIX 1(b)+(c): when a
+// peer server remains the supervisor-liveness task MUST stay installed — it is
+// a hub-wide shared task gated identically to the watchdog. Removing it while
+// a peer still relies on owner-relaunch recovery would strip the recovery net.
+func TestUninstall_PartialServer_KeepsLivenessTask(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	// Two managed servers tracked. Uninstall only "time"; "wolfram" remains,
+	// so neither the watchdog nor the liveness task may be removed.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-time-default"},
+		{Name: "\\mcp-local-hub-wolfram-default"},
+		{Name: api.WatchdogTaskName},
+		{Name: api.LivenessTaskName},
+	}
+
+	out := &bytes.Buffer{}
+	if err := runUninstallWatchdog(out, "time"); err != nil {
+		t.Fatalf("runUninstallWatchdog: %v", err)
+	}
+	deletes := fakeSch.deletes()
+	if containsTask(deletes, api.LivenessTaskName) {
+		t.Errorf("liveness task must NOT be deleted while a peer server remains; got %v", deletes)
+	}
+	if containsTask(deletes, api.WatchdogTaskName) {
+		t.Errorf("watchdog must NOT be deleted while a peer server remains; got %v", deletes)
+	}
+}
+
+// TestShouldRemoveGlobalWatchdog_LivenessAndWatchdogOnly_GatePasses is the
+// regression guard for the P1 defect FIX 1 closes: before `-liveness` was
+// added to api.IsMaintenanceTaskName, ServerFromTaskName("...-liveness")
+// returned "liveness" (a non-empty pseudo-server) which landed in the gate's
+// `remaining` set and made len(remaining)==0 IMPOSSIBLE while the liveness
+// task existed — permanently poisoning the last-server gate so the watchdog
+// could never be torn down. With the fix, a scheduler list of ONLY the two
+// hub-wide maintenance tasks (watchdog + liveness) and NO real server tasks
+// must let the gate authorize teardown.
+func TestShouldRemoveGlobalWatchdog_LivenessAndWatchdogOnly_GatePasses(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	// Only the two hub-wide maintenance tasks remain — no real server tasks.
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: api.LivenessTaskName},
+		{Name: api.WatchdogTaskName},
+	}
+
+	out := &bytes.Buffer{}
+	// serverBeingUninstalled is irrelevant here: there are zero real server
+	// tasks, so the remaining set must be empty regardless.
+	if !shouldRemoveGlobalWatchdog(out, "time") {
+		t.Errorf("gate must pass (return true) when only liveness + watchdog remain; output=%q", out.String())
+	}
+	if strings.Contains(out.String(), "kept installed") {
+		t.Errorf("gate should not report 'kept installed' when no real server tasks remain; got %q", out.String())
 	}
 }
 
