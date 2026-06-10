@@ -72,6 +72,21 @@
 // no last-run-result signal, no log. The durable warn restores the fail-loud
 // operational contract. The `out` writer's transient resolve-failure line still
 // goes to os.Stderr (runEnsureAliveFromState).
+//
+// LOG-CHURN NOTE (PR #283 review P3-c — accepted as-is for merge): while a
+// dead-supervisor-under-live-GUI condition persists, every ~1-min tick writes
+// one "liveness-supervisor-down-under-live-gui" warn to supervisor-events.log.
+// At ~300-400 bytes/entry that is ~0.5 MB/day, so the 10 MB log (single .log.1
+// backfile, 16 KB per-entry cap) rotates in ~2-3 weeks of continuous
+// unrecovered state. This is bounded by the existing rotation + size-cap
+// discipline and is NOT a volume regression (the pre-fix false-success line
+// produced the same cadence on the discarded stdout). De-duping per
+// gui_owner_pid is intentionally NOT done here: every tick is a SEPARATE
+// one-shot process (supervise.go:226), so there is no in-process state that
+// survives across ticks to key the de-dup on, and persisting last-emitted
+// state would require a NEW state file — explicitly out of scope for this
+// additive action ("no new state files", header above). The unrecovered state
+// is itself the real problem the operator should fix.
 package cli
 
 import (
@@ -138,12 +153,49 @@ func setGUIOwnerAliveFnForTest(fn func() (bool, int)) func() {
 
 // probeGUIOwnerAlive reports whether a live `mcphub gui` process owns the GUI
 // single-instance (pidport) lock. Read-only: it runs gui.Probe (no destructive
-// action) and reports alive=true when the recorded PID is alive (Verdict
-// Healthy OR LiveUnreachable — both mean the GUI process exists), false
-// otherwise (DeadPID / Malformed / unresolvable path). A live owner means the
-// supervisor-down state is a dead-CHILD-under-live-OWNER topology the relaunch
-// cannot recover; an absent owner means genuine OWNER death the relaunch
-// handles.
+// action) and returns the BARE Verdict.PIDAlive bit, NOT a Verdict-class
+// semantic.
+//
+// PLATFORM CONTRACT (PR #283 review P3-a — the doc must not over-claim):
+// Verdict.PIDAlive is set from the OS identity probe (id.Alive,
+// single_instance.go:483). It is true only on platforms where that probe can
+// OBSERVE the process — Windows amd64 (GA) and Linux (beta, processID
+// implemented). On platforms where the identity probe is unsupported (macOS
+// and Windows non-amd64), probeOnce force-sets PIDAlive=false
+// (single_instance.go:515-517,534-536), AND the VerdictHealthy early-return
+// (single_instance.go:499-504) does NOT re-set PIDAlive — so even a perfectly
+// healthy, ping-responding live GUI yields Verdict{Class:Healthy,
+// PIDAlive:false} there. Consequence: on macOS / Windows-non-amd64 this probe
+// returns (false, pid) for a LIVE healthy owner, so the live-GUI-owner
+// suppression in runEnsureAlive DEGRADES to the no-op relaunch path — the
+// relaunch fires but is inert (scheduler.New returns "not implemented" on
+// non-Windows), so the only effect is a misleading "liveness-relaunch-failed"
+// warn rather than the accurate live-GUI deferral. This is Windows-GA-posture
+// consistent: macOS is preview and Windows-non-amd64 is not a shipped target,
+// so suppression silently not engaging there is bounded (no focus-steal, no
+// false "relaunched owner"). On Windows amd64 (GA) and Linux (beta) PIDAlive
+// is observed correctly and suppression engages as designed.
+//
+// alive=true → the recorded PID is observed alive → the supervisor-down state
+// is a dead-CHILD-under-live-OWNER topology the relaunch cannot recover.
+// alive=false → no observable live owner (DeadPID / Malformed / unresolvable
+// path, OR an unobservable-but-healthy owner on the probe-unsupported
+// platforms above) → treated as genuine OWNER death the relaunch handles.
+//
+// DELIBERATELY the bare PIDAlive bit, NOT Verdict.Class == VerdictHealthy
+// (PR #283 review P3-b, deferred). Keying on PIDAlive treats an
+// alive-but-unreachable owner (VerdictLiveUnreachable — alive PID, ping
+// failing, e.g. a GUI mid-restart) as a live owner, which preserves the P2
+// intent of suppressing the once-per-tick focus-steal whenever an owner
+// process exists at all. The alternative (key on VerdictHealthy) would
+// eliminate the narrow PID-recycle false-positive — where a recycled PID makes
+// a dead owner look alive and suppresses a needed relaunch — and would also
+// fix the macOS gap above (VerdictHealthy is a ping-only verdict that holds on
+// macOS), but at the cost of relaunching against a LiveUnreachable owner and
+// reintroducing the focus-steal the P2 fix removed. That polarity tradeoff is
+// a behavior change against the round-1 P2 design, not a clean nit, so it is
+// left as-is for this merge; the recycle window is narrow and self-heals on
+// the next tick once the recycled PID dies or the pidport is overwritten.
 func probeGUIOwnerAlive() (bool, int) {
 	pidportPath, err := gui.PidportPath()
 	if err != nil {
