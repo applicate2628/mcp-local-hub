@@ -300,6 +300,12 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// on the configured port (0 = OS-assigned) and signals ready
 	// once the listener is live.
 	api.SupervisorIPCStatusFn = api.DialSupervisorIPCStatus
+	// §3 fail-loud (backend-loss reconcile FALLBACK signal): wire the serena
+	// router's IPC status reader so a serena daemon restart/death is reconciled
+	// against the router's live sessions even when no client request is in
+	// flight to surface the dead forward. The always-on forward-failure floor
+	// is the primary signal; this is the safety net behind it.
+	gui.SetSerenaBackendStatusFn(api.DialSupervisorIPCStatus)
 	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
 
 	// Phase C.2 wiring (v0.5.x plan §C.2): construct the serena routing
@@ -366,6 +372,14 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		// correctly-shutdown background loop and ages every store on the
 		// same 24h idle clock.
 		go runSessionCleanupTicker(ctx, s, sessions, time.Hour, serena_routing.DefaultSessionTTL)
+		// §3 fail-loud reconcile FALLBACK: a faster, lighter ticker that polls
+		// the supervisor IPC status and tears down router sessions for any
+		// serena workspace whose daemon restarted (PID changed) or vanished
+		// since the last tick. Scoped to only the workspaces the router has live
+		// sessions for, so it is a cheap no-op when the router is idle. 30s
+		// bounds the post-death zombie window for the case where NO client
+		// request fires to trip the always-on forward-failure floor.
+		go runSerenaBackendLossReconcileTicker(ctx, s, 30*time.Second)
 	} else {
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
@@ -709,6 +723,34 @@ func runSessionCleanupTicker(ctx context.Context, s *gui.Server, sessions *seren
 			if s != nil {
 				_ = s.SweepSerenaSessions(now, ttl)
 			}
+		}
+	}
+}
+
+// runSerenaBackendLossReconcileTicker is the §3.x backend-loss FALLBACK
+// signal's driver. Every `interval` it calls s.ReconcileSerenaBackendLossViaIPC,
+// which polls the supervisor IPC status and, for any serena workspace the
+// router has live sessions for whose daemon restarted (PID changed) or vanished
+// since the last tick, tears those sessions out of all three router stores so
+// the next /serena/mcp request fails loud instead of zombie-200-ing a dead
+// backend. It is owned by the GUI server lifecycle and exits when ctx is
+// cancelled. The reconcile read is bounded by a short per-tick context so a
+// slow/unreachable supervisor IPC cannot wedge the ticker. s may be nil in
+// tests; the tick is skipped then.
+func runSerenaBackendLossReconcileTicker(ctx context.Context, s *gui.Server, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if s == nil {
+				continue
+			}
+			tickCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			_ = s.ReconcileSerenaBackendLossViaIPC(tickCtx)
+			cancel()
 		}
 	}
 }

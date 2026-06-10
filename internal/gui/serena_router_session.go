@@ -35,8 +35,11 @@ package gui
 
 import (
 	"container/list"
+	"context"
 	"sync"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 // maxRouterSessions caps the number of live router-minted session entries
@@ -98,12 +101,29 @@ type routerSessionBinding struct {
 //
 // Concurrency: the map is shared across concurrent requests; every access
 // holds mu.
+//
+// §3 fail-loud (workspace→session reverse index): wsByID + idsByWS map a
+// session to the workspace it is routed to and back, so a backend-loss
+// event for a dead daemon's workspace can enumerate EVERY router session
+// bound to it and tear them all down (3-store teardown). The index is
+// maintained under the SAME mu as bindings/lru so it never drifts: every
+// removeLocked drops the reverse-index entry too, and bindWorkspace is the
+// only writer. A session with no recorded workspace (initialized but never
+// path-routed) simply has no reverse-index entry — it is not reachable by
+// workspace enumeration, which is correct (it has no daemon to lose).
 type routerSessionStore struct {
 	mu       sync.Mutex
 	bindings map[string]*routerSessionBinding
 	lru      *list.List               // values are session-id strings; front == most-recently-seen
 	lruIndex map[string]*list.Element // session id -> its lru element
 	clock    func() time.Time         // injectable; nil -> time.Now
+
+	// wsByID maps a session id -> the workspace key it is currently routed
+	// to (its last bindWorkspace). idsByWS is the inverse: workspace key ->
+	// the set of session ids routed to it. Both are kept in lockstep with
+	// bindings under mu (removeLocked drops both directions).
+	wsByID  map[string]string
+	idsByWS map[string]map[string]struct{}
 }
 
 func (st *routerSessionStore) now() time.Time {
@@ -126,6 +146,12 @@ func (st *routerSessionStore) ensureInitLocked() {
 	if st.lruIndex == nil {
 		st.lruIndex = make(map[string]*list.Element)
 	}
+	if st.wsByID == nil {
+		st.wsByID = make(map[string]string)
+	}
+	if st.idsByWS == nil {
+		st.idsByWS = make(map[string]map[string]struct{})
+	}
 }
 
 // removeLocked deletes a session id from BOTH the bindings map and the LRU
@@ -142,6 +168,114 @@ func (st *routerSessionStore) removeLocked(clientSessionID string) {
 		}
 		delete(st.lruIndex, clientSessionID)
 	}
+	// §3 fail-loud: drop the workspace reverse-index entry in lockstep so a
+	// removed session can never be re-surfaced by workspace enumeration.
+	st.removeWorkspaceIndexLocked(clientSessionID)
+}
+
+// removeWorkspaceIndexLocked drops clientSessionID from both directions of
+// the workspace reverse index (wsByID + idsByWS), pruning an emptied
+// per-workspace set so idsByWS does not accumulate empty maps. Idempotent —
+// a missing id is a no-op. Caller MUST hold mu. It is split out of
+// removeLocked so bindWorkspace can re-home a session (drop the OLD workspace
+// edge before adding the new one) without touching bindings/lru.
+func (st *routerSessionStore) removeWorkspaceIndexLocked(clientSessionID string) {
+	wsKey, ok := st.wsByID[clientSessionID]
+	if !ok {
+		return
+	}
+	delete(st.wsByID, clientSessionID)
+	if set, ok := st.idsByWS[wsKey]; ok {
+		delete(set, clientSessionID)
+		if len(set) == 0 {
+			delete(st.idsByWS, wsKey)
+		}
+	}
+}
+
+// bindWorkspace records that clientSessionID is routed to wsKey, updating the
+// reverse index (wsByID + idsByWS). It is the §3 fail-loud counterpart to the
+// sticky deps.Sessions.BindSession + serenaDaemonSessions.store calls: the
+// handler binds a router session to a workspace exactly when it establishes
+// the daemon binding, so this is called alongside those so the index stays in
+// step with where the session actually routes. A workspace switch on the same
+// session re-homes the edge (drops the OLD workspace, adds the NEW one). An
+// empty id or wsKey is ignored. It does NOT mint a bindings entry — only an
+// already-known router session has a workspace edge worth tracking (a session
+// not in bindings would be an orphan edge a sweep/unbind never cleans), so a
+// missing bindings entry skips the index write.
+func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) {
+	if clientSessionID == "" || wsKey == "" {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.ensureInitLocked()
+	// Only index a session the store actually knows. A path-only/legacy caller
+	// with no router-minted session has no bindings entry; indexing it would
+	// leave an edge no expire/unbind path (which all route through removeLocked
+	// on a known id) would ever clean.
+	if _, known := st.bindings[clientSessionID]; !known {
+		return
+	}
+	// Re-home: drop any prior workspace edge for this id before adding the new
+	// one, so a workspace switch does not leave the session listed under both.
+	if prior, ok := st.wsByID[clientSessionID]; ok {
+		if prior == wsKey {
+			return
+		}
+		st.removeWorkspaceIndexLocked(clientSessionID)
+	}
+	st.wsByID[clientSessionID] = wsKey
+	set := st.idsByWS[wsKey]
+	if set == nil {
+		set = make(map[string]struct{})
+		st.idsByWS[wsKey] = set
+	}
+	set[clientSessionID] = struct{}{}
+}
+
+// sessionsForWorkspace returns a snapshot of every router session id currently
+// routed to wsKey (the §3 fail-loud enumerate-by-workspace primitive). The
+// returned slice is a copy taken under mu, so the caller can iterate + tear
+// down each id without holding the store lock (the per-id 3-store unbind
+// touches OTHER stores, so it must run lock-free — same lock-ordering rule
+// coordinateExpiredRouterSessionUnbind documents). Returns nil when no session
+// is routed to wsKey.
+func (st *routerSessionStore) sessionsForWorkspace(wsKey string) []string {
+	if wsKey == "" {
+		return nil
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	set, ok := st.idsByWS[wsKey]
+	if !ok || len(set) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// knownWorkspaceKeys returns a snapshot of every workspace key that has at
+// least one router session routed to it (the keys of idsByWS). The IPC
+// reconcile fallback uses it to scope its backend-loss check to exactly the
+// serena workspaces the router actually has live sessions for — so it does not
+// need to classify IPC status rows by backend, and does nothing when the
+// router has no sessions. Returns nil when no workspace has a routed session.
+func (st *routerSessionStore) knownWorkspaceKeys() []string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(st.idsByWS) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(st.idsByWS))
+	for wsKey := range st.idsByWS {
+		keys = append(keys, wsKey)
+	}
+	return keys
 }
 
 // evictLRULocked drops the least-recently-seen entry (the LRU list BACK) to
@@ -512,4 +646,271 @@ func (s *Server) coordinateExpiredRouterSessionUnbind(id string, sticky sessionR
 	if sticky != nil {
 		sticky.UnbindSession(id)
 	}
+}
+
+// coordinateBackendLossUnbind is the §3 fail-loud 3-STORE teardown for a
+// single session id on backend loss. Unlike coordinateExpiredRouterSessionUnbind
+// (which assumes the caller already removed the routerSessionStore entry via
+// expire-on-read), backend loss has NO such caller — the session is still LIVE
+// in routerSessionStore, which is exactly why /serena/mcp keeps returning HTTP
+// 200 on a dead backend (the 2026-06-10 zombie). So this removes the
+// routerSessionStore entry FIRST, then the daemon-session store and the sticky
+// router — the session is gone from ALL THREE.
+//
+// Concurrency: each store owns its own lock; this acquires them one at a time
+// (never nested), so there is no lock-ordering hazard. routerSessionStore.unbind
+// routes through removeLocked, which also drops the workspace reverse-index
+// entry, so a re-enumeration of the same workspace will not re-surface this id.
+// Unbinding an id absent from a store is a no-op, so a session with no
+// downstream binding is handled cleanly. sticky may be nil (no production
+// sessionRouter wired) — only the two router-local stores are then unbound.
+func (s *Server) coordinateBackendLossUnbind(id string, sticky sessionRouter) {
+	// Router store FIRST — this is the store that returns 200 on a dead
+	// backend, so dropping it is what makes the next request fail loud.
+	s.serenaRouterSessions.unbind(id)
+	s.serenaDaemonSessions.unbind(id)
+	if sticky != nil {
+		sticky.UnbindSession(id)
+	}
+}
+
+// terminateSerenaSessionsForWorkspace is the §3 fail-loud backend-loss entry
+// point: it enumerates EVERY router session bound to wsKey (via the
+// workspace→session reverse index) and tears each out of all three session
+// stores. After this returns, the next /serena/mcp request on any of those
+// sessions finds no router-session entry → the existing -32600 "session
+// terminated" / 503 missing_session path fires → the client re-initializes,
+// instead of a zombie 200 forwarded to a dead daemon.
+//
+// It is the common owner shared by the always-on forward-failure floor (the
+// in-process trigger) and the IPC pid_generation reconcile fallback, so both
+// backend-loss signals run identical teardown. Returns the number of sessions
+// torn down (0 when no session was routed to wsKey). The enumeration snapshot
+// is taken under the router store lock; each per-id unbind runs lock-free
+// (coordinateBackendLossUnbind touches OTHER stores), the same lock-ordering
+// discipline the sweep follows.
+func (s *Server) terminateSerenaSessionsForWorkspace(wsKey string) int {
+	if wsKey == "" {
+		return 0
+	}
+	ids := s.serenaRouterSessions.sessionsForWorkspace(wsKey)
+	if len(ids) == 0 {
+		return 0
+	}
+	var sticky sessionRouter
+	if deps := s.serenaRouterDepsProd(); deps != nil {
+		sticky = deps.Sessions
+	}
+	for _, id := range ids {
+		s.coordinateBackendLossUnbind(id, sticky)
+	}
+	return len(ids)
+}
+
+// handleSerenaBackendLossOnForwardFailure is the ALWAYS-ON FLOOR of the §3.x
+// backend-loss trigger (§12 Phase 1). The serena router calls it from the
+// in-process forward-failure sites — a tool-call forward OR the upstream
+// handshake getting a CONNECTION error (dial refused / dead backend), as
+// opposed to a timeout on a slow-but-live daemon. It tears every session
+// bound to the dead daemon's workspace out of all three session stores so the
+// NEXT /serena/mcp request returns the existing -32600 "session terminated" /
+// 503 missing_session and the client re-initializes, instead of the
+// 2026-06-10 zombie (a live routerSessionStore entry keeping /serena/mcp at
+// HTTP 200 on a dead backend).
+//
+// failedSessionID is the session that hit the dead forward; it is torn down
+// directly too even if its workspace edge was not yet recorded (e.g. a
+// sessionless one-shot, or a race where the bindWorkspace had not run) — the
+// per-id unbind is a cheap no-op when there is nothing to drop. The audit is
+// best-effort (a nil/erroring auditFn is tolerated) and never blocks teardown.
+//
+// TODO(§3.x signal #1 — PREFERRED upgrade, not required here): subscribe the
+// router to a cross-process supervisor child-exit → GUI `daemon-failed` event
+// (supervisor_state_machine.go EvChildExit → controller crashCh →
+// internal/gui/events.go SSE bus) so a daemon death is observed even when NO
+// client request is in flight to surface it. The GUI event bus lacks a
+// `daemon-failed` event today (§11.9), so this floor + the IPC pid_generation
+// reconcile fallback (reconcileSerenaBackendLossViaIPC) ship first; signal #1
+// is a later upgrade once the event is added.
+func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID string, cause error, auditFn func(level, event string, fields map[string]any) error) {
+	var sticky sessionRouter
+	if deps := s.serenaRouterDepsProd(); deps != nil {
+		sticky = deps.Sessions
+	}
+	// Tear down the failed session directly first (covers a session whose
+	// workspace edge was not yet indexed, incl. the sessionless one-shot case
+	// where failedSessionID is "" — coordinateBackendLossUnbind no-ops an empty
+	// id). Then enumerate-and-tear-down every OTHER session bound to wsKey.
+	if failedSessionID != "" {
+		s.coordinateBackendLossUnbind(failedSessionID, sticky)
+	}
+	n := s.terminateSerenaSessionsForWorkspace(wsKey)
+	if auditFn != nil {
+		errStr := ""
+		if cause != nil {
+			errStr = cause.Error()
+		}
+		_ = auditFn("warn", "serena-backend-loss-session-teardown", map[string]any{
+			"workspace_key":     wsKey,
+			"sessions_torndown": n,
+			"trigger":           "forward-failure",
+			"err":               errStr,
+		})
+	}
+}
+
+// serenaBackendStatusFn is the seam for the IPC reconcile fallback's status
+// read. Production wires it (via SetSerenaBackendStatusFn at GUI boot) to
+// api.DialSupervisorIPCStatus so the gui package does not hard-depend on the
+// IPC status implementation; tests inject a fake. A nil seam (no supervisor IPC
+// wired) makes ReconcileSerenaBackendLossViaIPC a no-op.
+var serenaBackendStatusFn func(ctx context.Context) ([]api.DaemonStatus, error)
+
+// SetSerenaBackendStatusFn wires the IPC status reader the §3.x backend-loss
+// reconcile fallback uses. CLI boot (internal/cli/gui.go) calls it with
+// api.DialSupervisorIPCStatus. Passing nil disables the fallback (the
+// always-on forward-failure floor still covers real backend loss).
+func SetSerenaBackendStatusFn(fn func(ctx context.Context) ([]api.DaemonStatus, error)) {
+	serenaBackendStatusFn = fn
+}
+
+// ReconcileSerenaBackendLossViaIPC is the §3.x backend-loss FALLBACK signal
+// (signal #2 — IPC status reconciliation). It is the safety net behind the
+// always-on forward-failure floor: a serena daemon can restart (advancing its
+// PID) or vanish WITHOUT a client request being in flight to surface the dead
+// forward; this catches that on a reconcile tick. The §3.x spec frames it as
+// "pid_generation advanced (restart) or the daemon absent" — the supervisor
+// IPC status payload (internal/api.DaemonStatus) does NOT carry pid_generation,
+// so the code-true equivalent is the per-workspace CurrentPID: a workspace
+// whose PID changed vs the previous tick (a restart) OR that disappeared from
+// the status list (a stop/death) is a backend-loss signal. (DEVIATION from the
+// spec's literal pid_generation wording, re-confirmed against
+// internal/api/supervisor_ipc_status_client.go — PID is the surfaced restart
+// witness.)
+//
+// It is scoped to ONLY the workspaces the router currently has live sessions
+// for (routerSessionStore.knownWorkspaceKeys), so it does nothing when the
+// router is idle and never has to classify IPC rows by backend. For each such
+// workspace it maps WorkspaceKey -> WorkspacePath (the IPC status keys
+// workspace by PATH — supervisor_intent_build.go sets Workspace = WorkspacePath)
+// via the router's resolver, compares the fresh CurrentPID to the previous
+// tick's snapshot, and on a restart/disappearance tears down that workspace's
+// router sessions (terminateSerenaSessionsForWorkspace). A workspace seen for
+// the FIRST time (no prior snapshot) is NOT treated as a loss — only a change
+// from a known prior PID is. Returns the number of sessions torn down across
+// all workspaces this tick.
+func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
+	knownKeys := s.serenaRouterSessions.knownWorkspaceKeys()
+	if len(knownKeys) == 0 {
+		return 0
+	}
+	statusFn := serenaBackendStatusFn
+	if statusFn == nil {
+		return 0
+	}
+	deps := s.serenaRouterDepsProd()
+	if deps == nil || deps.Resolver == nil {
+		return 0
+	}
+	lister, ok := deps.Resolver.(workspaceLister)
+	if !ok {
+		return 0
+	}
+
+	// Map the router's known workspace KEYS -> their PATHS (the IPC status key).
+	pathToKey := make(map[string]string, len(knownKeys))
+	wantPaths := make(map[string]struct{}, len(knownKeys))
+	knownSet := make(map[string]struct{}, len(knownKeys))
+	for _, k := range knownKeys {
+		knownSet[k] = struct{}{}
+	}
+	for _, ws := range lister.ListWorkspaces() {
+		if ws == nil {
+			continue
+		}
+		if _, want := knownSet[ws.WorkspaceKey]; !want {
+			continue
+		}
+		pathToKey[ws.WorkspacePath] = ws.WorkspaceKey
+		wantPaths[ws.WorkspacePath] = struct{}{}
+	}
+	if len(wantPaths) == 0 {
+		return 0
+	}
+
+	rows, err := statusFn(ctx)
+	if err != nil {
+		// IPC unavailable / transient: do NOT tear down sessions on a status
+		// READ failure (that would be a false positive — the daemons may be
+		// fine and only the supervisor IPC momentarily unreachable). The
+		// always-on forward-failure floor still covers real backend loss; this
+		// fallback simply skips this tick. The snapshot is left UNCHANGED so the
+		// next successful tick compares against the last known-good PIDs.
+		return 0
+	}
+
+	// Build the fresh per-workspace-PATH PID snapshot, restricted to the
+	// workspaces the router cares about.
+	fresh := make(map[string]int, len(wantPaths))
+	for _, row := range rows {
+		if row.Workspace == "" {
+			continue
+		}
+		if _, want := wantPaths[row.Workspace]; !want {
+			continue
+		}
+		// Last writer wins if the status somehow lists a workspace twice; the
+		// supervisor emits one row per daemon so this is the daemon's PID.
+		fresh[row.Workspace] = row.PID
+	}
+
+	s.serenaBackendPIDMu.Lock()
+	prior := s.serenaBackendLastPID
+	if prior == nil {
+		prior = map[string]int{}
+	}
+	var lost []string // workspace KEYS whose backend was lost this tick
+	for path := range wantPaths {
+		newPID, present := fresh[path]
+		oldPID, hadPrior := prior[path]
+		if !hadPrior {
+			// First observation of this workspace — establish a baseline, never
+			// treat the first tick as a loss.
+			continue
+		}
+		// A workspace that was present before and is now ABSENT (stop/death), or
+		// whose PID changed (restart), is a backend-loss signal. A workspace that
+		// is absent in BOTH ticks (oldPID present but daemon never running, e.g.
+		// PID 0 both times) is not a change.
+		if !present {
+			lost = append(lost, pathToKey[path])
+			continue
+		}
+		if newPID != oldPID {
+			lost = append(lost, pathToKey[path])
+		}
+	}
+	// Persist the fresh snapshot (only the router-relevant workspaces) so the
+	// next tick compares against it. Workspaces not in `fresh` (absent now) are
+	// dropped from the snapshot — a later reappearance is a first-observation
+	// baseline again, not a spurious loss.
+	s.serenaBackendLastPID = fresh
+	s.serenaBackendPIDMu.Unlock()
+
+	total := 0
+	for _, wsKey := range lost {
+		if wsKey == "" {
+			continue
+		}
+		n := s.terminateSerenaSessionsForWorkspace(wsKey)
+		total += n
+		if deps.AuditFn != nil && n > 0 {
+			_ = deps.AuditFn("warn", "serena-backend-loss-session-teardown", map[string]any{
+				"workspace_key":     wsKey,
+				"sessions_torndown": n,
+				"trigger":           "ipc-reconcile",
+			})
+		}
+	}
+	return total
 }

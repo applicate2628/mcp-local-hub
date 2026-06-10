@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -488,6 +489,16 @@ type Server struct {
 	// and serenaDaemonSessions (session -> upstream daemon session).
 	// Thread-safe.
 	serenaRouterSessions routerSessionStore
+
+	// §3 fail-loud IPC reconcile fallback state. serenaBackendPIDMu guards
+	// serenaBackendLastPID, the per-workspace-PATH snapshot of the supervisor
+	// IPC status's CurrentPID from the PREVIOUS reconcile tick. A workspace
+	// whose PID changed (restart) or that disappeared from the status between
+	// ticks is a backend-loss signal, so reconcileSerenaBackendLossViaIPC
+	// tears down that workspace's router sessions. Owned solely by the
+	// reconcile goroutine + its tests; guarded so a future caller is safe.
+	serenaBackendPIDMu   sync.Mutex
+	serenaBackendLastPID map[string]int
 
 	// LSP router dependencies for /lsp/<language>/mcp. This route is
 	// intentionally separate from the Serena router because LSP workspace
