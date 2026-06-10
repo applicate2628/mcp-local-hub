@@ -2637,3 +2637,220 @@ func TestSerenaRouter_BackendLoss_IPCReconcileNoTeardownOnStatusError(t *testing
 		t.Errorf("session torn down on a status READ error; the floor + a later good tick handle real loss, a read error must not")
 	}
 }
+
+// ---------------------------------------------------------------------
+// §3 fail-loud — REGRESSION (PR #280, P1): a client-side request cancel
+// (MCP client interrupts an in-flight serena tool call / disconnects
+// mid-request — common with Claude Code) must NOT be misclassified as a
+// backend-loss signal. The forward carries r.Context() and the serena
+// http client is built with Timeout:0, so a client cancel surfaces as a
+// *url.Error wrapping context.Canceled, which satisfies net.Error with
+// Timeout()==false. Without the context.Canceled guard at the top of
+// isConnectionLossErr the cancel falls into the net.Error branch and is
+// read as a connection loss → handleSerenaBackendLossOnForwardFailure
+// tears down EVERY session bound to that workspace, including OTHER live
+// clients' healthy sessions on a perfectly-alive daemon.
+//
+// FALSIFIABILITY: revert the `if errors.Is(err, context.Canceled) ... {
+// return false }` guard and this test fails — the cancelling session AND
+// the uninvolved peer session are both evicted from all three stores.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_ClientCancelDoesNotTearDownWorkspace(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+
+	// The tool handler blocks until the request context is cancelled, then
+	// returns. This reproduces a client cancel that lands while the forward
+	// to a LIVE daemon is in flight: http.Client.Do returns a *url.Error
+	// wrapping context.Canceled (NOT a net timeout, NOT a dial-refused).
+	toolEntered := make(chan struct{}, 1)
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		select {
+		case toolEntered <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done() // block until the inbound request is cancelled
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Session A: the client that will cancel. Establish it with a successful
+	// tool call so it is bound in all three stores + the workspace reverse
+	// index. Use a SEPARATE non-blocking tool fn for this warm-up forward,
+	// then swap in the blocking fn for the cancel.
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}
+	sidA := mintRouterSession(t, s, "2025-11-25")
+	bodyA := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, bodyA, map[string]string{"Mcp-Session-Id": sidA}); rr.Code != http.StatusOK {
+		t.Fatalf("warm-up tool call A status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Session B: an UNINVOLVED peer client on the SAME workspace (e.g. Codex
+	// while Claude Code holds session A). It must SURVIVE A's cancel.
+	sidB := mintRouterSession(t, s, "2025-11-25")
+	bodyB := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/other.go"})
+	if rr := postSerena(t, s, bodyB, map[string]string{"Mcp-Session-Id": sidB}); rr.Code != http.StatusOK {
+		t.Fatalf("warm-up tool call B status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Precondition: both sessions live; both bound to the same workspace.
+	if !s.serenaRouterSessions.known(sidA) || !s.serenaRouterSessions.known(sidB) {
+		t.Fatalf("precondition: both sidA and sidB should be known router sessions")
+	}
+	if got := s.serenaRouterSessions.sessionsForWorkspace("alpha"); len(got) != 2 {
+		t.Fatalf("precondition: workspace 'alpha' should index 2 sessions, got %d (%v)", len(got), got)
+	}
+
+	// Now swap in the blocking tool fn and drive A's forward with a
+	// cancellable context, then cancel it mid-forward.
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		select {
+		case toolEntered <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- postSerenaCtx(t, s, ctx, bodyA, map[string]string{"Mcp-Session-Id": sidA})
+	}()
+	// Wait until the forward has reached the (blocking) daemon, then cancel
+	// the inbound request context — this is the client-disconnect signal.
+	select {
+	case <-toolEntered:
+	case <-time.After(3 * time.Second):
+		cancel()
+		t.Fatal("forward never reached the blocking daemon tool handler")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled forward did not return")
+	}
+
+	// THE falsifiable assertions: a client cancel is NOT backend loss, so the
+	// workspace's sessions must SURVIVE. Most load-bearing is sidB — a peer
+	// that had nothing to do with A's cancel; the false-positive teardown
+	// would evict it because it shares the workspace reverse index.
+	if !s.serenaRouterSessions.known(sidB) {
+		t.Errorf("PEER session sidB was torn down by sidA's client cancel — isConnectionLossErr misclassified context.Canceled as backend loss (the PR #280 P1 regression)")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sidB); !ok {
+		t.Errorf("peer sidB daemon binding torn down by a client cancel; want it intact")
+	}
+	if got := deps.Sessions.LookupSession(sidB); got == nil {
+		t.Errorf("peer sidB sticky session torn down by a client cancel; want it intact")
+	}
+	// The cancelling session itself must also survive — its daemon is alive;
+	// only the client's request was interrupted.
+	if !s.serenaRouterSessions.known(sidA) {
+		t.Errorf("cancelling session sidA was torn down by its OWN client cancel; a cancel on a LIVE daemon is not a backend-loss event")
+	}
+	// And the workspace still indexes both sessions (no eviction at all).
+	if got := s.serenaRouterSessions.sessionsForWorkspace("alpha"); len(got) != 2 {
+		t.Errorf("workspace 'alpha' should still index 2 sessions after a benign client cancel, got %d (%v)", len(got), got)
+	}
+}
+
+// ---------------------------------------------------------------------
+// §3 fail-loud — REGRESSION (PR #280, P2): the IPC reconcile must NOT
+// treat a port-stale "Restarting" daemon's transient current_pid=0 as a
+// real PID change. The supervisor IPC status reports a healthy-but-port-
+// stale daemon (state "Restarting") with current_pid=0 (the real PID is
+// moved to stale_pid) while the workspace row stays present in the list.
+// A naive 1000 -> 0 comparison classifies that as a backend loss AND
+// persists 0 as the new baseline, so when the daemon recovers (0 -> 2000)
+// the very next tick fires a SECOND spurious teardown of the just-re-
+// established healthy session.
+//
+// This drives 1000 -> (Restarting, current_pid=0) -> 2000 and asserts a
+// SINGLE teardown (on the Restarting tick: ZERO; on recovery: ZERO,
+// because the prior real PID 1000 was carried forward, not the transient
+// 0). FALSIFIABILITY: revert the restarting-row carry-forward and the
+// recovery tick fires a second teardown -> n==1 on tick3 -> test fails.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_IPCReconcileIgnoresRestartingTransient(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid")
+	}
+
+	// The status row is flipped between ticks via these closure vars to model
+	// the supervisor's port-stale terminate-restart cycle.
+	var curPID int
+	var state string
+	var stalePID int
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: state, PID: curPID, StalePID: stalePID, Port: 9201},
+		}, nil
+	}
+
+	// Tick 1: healthy daemon, PID 1000 — establishes the baseline, no loss.
+	curPID, state, stalePID = 1000, "Running", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("baseline tick tore down %d sessions; want 0", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("session torn down on the BASELINE tick")
+	}
+
+	// Tick 2: port-stale Restarting window — current_pid=0, real PID parked in
+	// stale_pid, row still present. This is NOT a backend loss; the daemon is
+	// recovering. Must NOT tear down, and must NOT persist 0 as the baseline.
+	curPID, state, stalePID = 0, "Restarting", 1000
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("Restarting/current_pid=0 transient tore down %d sessions; want 0 (port-stale restart is not backend loss)", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("session torn down on the Restarting/current_pid=0 transient tick")
+	}
+
+	// Tick 3: daemon recovered to a NEW real PID 2000. The prior real PID
+	// (1000) was carried forward across the Restarting window, so this is a
+	// genuine 1000 -> 2000 generation change -> exactly ONE teardown here.
+	// Without the carry-forward, tick2 would have persisted 0 and this would be
+	// a SECOND spurious teardown (0 -> 2000).
+	curPID, state, stalePID = 2000, "Running", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("recovery tick tore down %d sessions; want exactly 1 (the single genuine 1000->2000 generation change)", n)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after the genuine PID change; want it torn down")
+	}
+}

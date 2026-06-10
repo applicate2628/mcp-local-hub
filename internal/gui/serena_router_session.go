@@ -852,6 +852,16 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// Build the fresh per-workspace-PATH PID snapshot, restricted to the
 	// workspaces the router cares about.
 	fresh := make(map[string]int, len(wantPaths))
+	// restarting marks paths whose daemon is in the supervisor's port-stale
+	// terminate-restart window (state "Restarting"): the IPC status moves the
+	// real PID to stale_pid and reports current_pid=0 while the daemon ROW
+	// stays present in the list (internal/cli/supervise_status.go). A transient
+	// current_pid=0 is NOT a confirmed new daemon generation — the same PID may
+	// recover, or a genuinely new PID may appear — so it must not be classified
+	// as a backend loss, and a 0 must not be persisted as a PID baseline (that
+	// would make the eventual real PID look like a fresh change next tick →
+	// spurious double-teardown of a just-re-established healthy session).
+	restarting := make(map[string]bool, len(wantPaths))
 	for _, row := range rows {
 		if row.Workspace == "" {
 			continue
@@ -862,6 +872,13 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		// Last writer wins if the status somehow lists a workspace twice; the
 		// supervisor emits one row per daemon so this is the daemon's PID.
 		fresh[row.Workspace] = row.PID
+		// A port-stale Restarting daemon: real PID parked in StalePID, current
+		// PID reported as 0, row still present. Recognize it via any of the
+		// three observable signals (PID==0 / State / StalePID) so the loss loop
+		// can skip it regardless of which the supervisor populates.
+		if row.PID == 0 || row.State == "Restarting" || row.StalePID != 0 {
+			restarting[row.Workspace] = true
+		}
 	}
 
 	s.serenaBackendPIDMu.Lock()
@@ -869,13 +886,35 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	if prior == nil {
 		prior = map[string]int{}
 	}
+	// persisted is the snapshot the next tick compares against. It starts as the
+	// fresh per-PATH PIDs; transient Restarting rows carry the prior real PID
+	// forward (below) instead of persisting their 0.
+	persisted := make(map[string]int, len(fresh))
+	for path, pid := range fresh {
+		persisted[path] = pid
+	}
 	var lost []string // workspace KEYS whose backend was lost this tick
 	for path := range wantPaths {
 		newPID, present := fresh[path]
 		oldPID, hadPrior := prior[path]
 		if !hadPrior {
 			// First observation of this workspace — establish a baseline, never
-			// treat the first tick as a loss.
+			// treat the first tick as a loss. If this first observation lands in a
+			// Restarting window (current_pid=0), do not pin 0 as the baseline:
+			// carry nothing forward so the next real PID is itself a first
+			// observation, not a spurious 0→N change.
+			if present && restarting[path] {
+				delete(persisted, path)
+			}
+			continue
+		}
+		// A port-stale Restarting row (current_pid=0 / State="Restarting" /
+		// StalePID!=0) is a transient mid-restart observation, not a confirmed
+		// new generation. Do NOT classify it as loss, and carry the PRIOR real
+		// PID forward in the persisted snapshot so the eventual recovered PID is
+		// compared against the original generation — not against 0.
+		if present && restarting[path] {
+			persisted[path] = oldPID
 			continue
 		}
 		// A workspace that was present before and is now ABSENT (stop/death), or
@@ -890,11 +929,12 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			lost = append(lost, pathToKey[path])
 		}
 	}
-	// Persist the fresh snapshot (only the router-relevant workspaces) so the
-	// next tick compares against it. Workspaces not in `fresh` (absent now) are
-	// dropped from the snapshot — a later reappearance is a first-observation
-	// baseline again, not a spurious loss.
-	s.serenaBackendLastPID = fresh
+	// Persist the snapshot (only the router-relevant workspaces) so the next
+	// tick compares against it. Workspaces not in `fresh` (absent now) are
+	// dropped — a later reappearance is a first-observation baseline again, not
+	// a spurious loss. Transient Restarting rows carry the prior real PID
+	// (handled above) rather than their transient 0.
+	s.serenaBackendLastPID = persisted
 	s.serenaBackendPIDMu.Unlock()
 
 	total := 0

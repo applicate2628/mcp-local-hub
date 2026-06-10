@@ -1848,6 +1848,20 @@ func isConnectionLossErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	// A client-side cancel (MCP client interrupts an in-flight tool call /
+	// disconnects mid-request — common with Claude Code) or a context deadline
+	// is NOT a backend-loss signal: the upstream daemon may be perfectly alive.
+	// The forward sites carry r.Context() (defaultSerenaClient uses Timeout:0),
+	// so a client disconnect surfaces as a *url.Error wrapping context.Canceled,
+	// which (a) satisfies net.Error with Timeout()==false and (b) would otherwise
+	// fall into the net.Error branch below and be MISCLASSIFIED as a connection
+	// loss → false-positive workspace-wide session teardown. Exclude both context
+	// errors up front so only a genuine transport-layer connection loss qualifies.
+	// (DeadlineExceeded is already filtered by isTimeoutErr at the call sites;
+	// excluding it here makes the predicate self-contained for any caller.)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
 	// A net.Error that is NOT a timeout (dial refused, reset, broken pipe) is a
 	// connection loss. http.Client.Do wraps the dial/transport error in a
 	// *url.Error whose inner err is the *net.OpError; errors.As unwraps it.
