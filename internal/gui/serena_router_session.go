@@ -872,11 +872,30 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		// Last writer wins if the status somehow lists a workspace twice; the
 		// supervisor emits one row per daemon so this is the daemon's PID.
 		fresh[row.Workspace] = row.PID
-		// A port-stale Restarting daemon: real PID parked in StalePID, current
-		// PID reported as 0, row still present. Recognize it via any of the
-		// three observable signals (PID==0 / State / StalePID) so the loss loop
-		// can skip it regardless of which the supervisor populates.
-		if row.PID == 0 || row.State == "Restarting" || row.StalePID != 0 {
+		// A port-stale Restarting daemon: the daemon is ALIVE but its port
+		// ownership could not be reverified, so the supervisor parks the real
+		// PID in StalePID, reports current_pid=0, sets state "Restarting", and
+		// keeps the row present (internal/cli/supervise_status.go:73-88 — set
+		// ONLY inside the `state==running && !live` branch). StalePID!=0 is the
+		// UNIQUE witness of that benign alive-but-port-stale window: it is the
+		// only signal that a real PID is parked behind the transient 0.
+		//
+		// Do NOT widen this to `row.PID==0 || row.State=="Restarting"`. Those
+		// disjuncts ALSO match genuinely-dead daemons the §3 IPC floor MUST tear
+		// down, and StalePID stays 0 for all of them:
+		//   - a CRASHED daemon (supervisor state "backoff"/"spawning" ->
+		//     supervisorStatusGUIState maps to "Restarting", CurrentPID=0,
+		//     StalePID never set) -> row {PID:0, State:"Restarting", StalePID:0}
+		//   - a STOPPED/exited daemon ("idle" -> "Stopped", CurrentPID=0) ->
+		//     row {PID:0, State:"Stopped", StalePID:0}
+		//   - a QUARANTINED daemon ("quarantine" -> "Quarantined", CurrentPID=0)
+		// Marking those "restarting" would carry the dead PID forward and SKIP
+		// loss classification, leaving sessions zombie-bound to a dead backend
+		// until the next client request hits the forward-failure floor — a
+		// fail-loud path silently turned fail-quiet. Gating on StalePID!=0 lets
+		// the genuine port-stale window carry forward while a real crash/stop
+		// (StalePID==0) falls through to the loss branch as before.
+		if row.StalePID != 0 {
 			restarting[row.Workspace] = true
 		}
 	}
@@ -908,11 +927,13 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			}
 			continue
 		}
-		// A port-stale Restarting row (current_pid=0 / State="Restarting" /
-		// StalePID!=0) is a transient mid-restart observation, not a confirmed
-		// new generation. Do NOT classify it as loss, and carry the PRIOR real
-		// PID forward in the persisted snapshot so the eventual recovered PID is
-		// compared against the original generation — not against 0.
+		// A port-stale Restarting row (StalePID!=0: alive daemon, real PID parked
+		// in stale_pid, current_pid=0) is a transient mid-restart observation,
+		// not a confirmed new generation. Do NOT classify it as loss, and carry
+		// the PRIOR real PID forward in the persisted snapshot so the eventual
+		// recovered PID is compared against the original generation — not against
+		// 0. (A real crash/stop has StalePID==0 and is NOT in `restarting`, so it
+		// falls through to the loss branch below.)
 		if present && restarting[path] {
 			persisted[path] = oldPID
 			continue
