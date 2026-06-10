@@ -1200,6 +1200,14 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 				// is the OPPOSITE of the pre-reap probe (which assumes running on a
 				// probe error so a needed reap is never skipped): an undeterminable
 				// probe must NOT certify success → fail loud.
+				//
+				// The verdict is POINT-IN-TIME: a child that holds the lock at the
+				// probe instant but dies right after still exits 0 — a bounded
+				// residual window every spot liveness check has (the gate narrows
+				// the false-success surface; it cannot close it). Self-healing: the
+				// committed intent is durable, and the GUI's ensureSupervisorRunning
+				// / the next reconcile brings a supervisor back up; the warning's
+				// "run `mcphub status`" is the operator-side confirmation step.
 				running, probeErr := migrateSerenaSupervisorRunningFn()
 				if probeErr != nil || !running {
 					liveness := "no process is holding supervisor.lock"
