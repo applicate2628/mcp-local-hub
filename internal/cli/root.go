@@ -51,7 +51,6 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newWeeklyRefreshCmd())
 	root.AddCommand(newGuiCmd())
 	root.AddCommand(newTrayCmd())
-	root.AddCommand(newWatchdogCmd())
 	root.AddCommand(newSuperviseCmd())
 	root.AddCommand(newReconcileCmd())
 	root.AddCommand(newAutostartCmd())
@@ -92,14 +91,14 @@ func newCleanupCmd() *cobra.Command {
 func newStopCmd() *cobra.Command {
 	return newStopCmdReal()
 }
-func newBackupsCmd() *cobra.Command       { return newBackupsCmdReal() }
-func newManifestCmd() *cobra.Command      { return newManifestCmdReal() }
-func newSchedulerCmd() *cobra.Command     { return newSchedulerCmdReal() }
-func newSettingsCmd() *cobra.Command      { return newSettingsCmdReal() }
-func newConfigCmd() *cobra.Command        { return newConfigCmdReal() }
-func newRegisterCmd() *cobra.Command      { return newRegisterCmdReal() }
-func newUnregisterCmd() *cobra.Command    { return newUnregisterCmdReal() }
-func newWorkspacesCmd() *cobra.Command    { return newWorkspacesCmdReal() }
+func newBackupsCmd() *cobra.Command    { return newBackupsCmdReal() }
+func newManifestCmd() *cobra.Command   { return newManifestCmdReal() }
+func newSchedulerCmd() *cobra.Command  { return newSchedulerCmdReal() }
+func newSettingsCmd() *cobra.Command   { return newSettingsCmdReal() }
+func newConfigCmd() *cobra.Command     { return newConfigCmdReal() }
+func newRegisterCmd() *cobra.Command   { return newRegisterCmdReal() }
+func newUnregisterCmd() *cobra.Command { return newUnregisterCmdReal() }
+func newWorkspacesCmd() *cobra.Command { return newWorkspacesCmdReal() }
 func newLanguageServerCmd() *cobra.Command {
 	return newLanguageServerCmdReal()
 }
@@ -108,5 +107,4 @@ func newImportCmd() *cobra.Command        { return newImportCmdReal() }
 func newWeeklyRefreshCmd() *cobra.Command { return newWeeklyRefreshCmdReal() }
 func newGuiCmd() *cobra.Command           { return newGuiCmdReal() }
 func newTrayCmd() *cobra.Command          { return newTrayCmdReal() }
-func newWatchdogCmd() *cobra.Command      { return newWatchdogCmdReal() }
 func newReconcileCmd() *cobra.Command     { return newReconcileCmdReal() }

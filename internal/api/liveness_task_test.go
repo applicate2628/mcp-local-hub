@@ -6,12 +6,32 @@ import (
 	"testing"
 )
 
+// installTestCanonicalMcphubPath overrides the canonical-mcphub-path resolver
+// (canonicalMcphubPathFn, liveness_task.go) for the duration of the test. These
+// two helpers were migrated here from the deleted watchdog_xml_validator_test.go
+// when the v0.6 redesign removed the watchdog engine — the liveness-task tests
+// are now their sole consumer.
+func installTestCanonicalMcphubPath(t *testing.T, path string) {
+	t.Helper()
+	orig := canonicalMcphubPathFn
+	canonicalMcphubPathFn = func() (string, error) { return path, nil }
+	t.Cleanup(func() { canonicalMcphubPathFn = orig })
+}
+
+// installTestCurrentWindowsUser overrides the current-user resolver
+// (currentWindowsUserFn, liveness_task.go) for the duration of the test.
+func installTestCurrentWindowsUser(t *testing.T, name string) {
+	t.Helper()
+	orig := currentWindowsUserFn
+	currentWindowsUserFn = func() (string, error) { return name, nil }
+	t.Cleanup(func() { currentWindowsUserFn = orig })
+}
+
 // TestInstallLivenessTask_HappyPath asserts the supervisor-liveness install
-// (v0.6 spec §15 P1-b / §5.x Phase 3a) mirrors InstallWatchdogTask: resolve the
-// canonical mcphub path + current user via the SAME seams, then ImportXML under
-// LivenessTaskName with the liveness XML body (PT1M cadence + `supervise
-// --ensure-alive` action). Reuses the apiSurfacesFakeScheduler + seam helpers
-// from api_surfaces_test.go.
+// (v0.6 spec §15 P1-b / §5.x Phase 3a) resolves the canonical mcphub path +
+// current user via the seams, then ImportXML under LivenessTaskName with the
+// liveness XML body (PT1M cadence + `supervise --ensure-alive` action). Reuses
+// the apiSurfacesFakeScheduler + seam helpers from api_surfaces_test.go.
 func TestInstallLivenessTask_HappyPath(t *testing.T) {
 	a := NewAPI()
 	f := &apiSurfacesFakeScheduler{}

@@ -156,17 +156,6 @@ func SetTestStatusFn(fn func() ([]DaemonStatus, error)) (restore func()) {
 	return func() { statusContextSrcFn = orig }
 }
 
-// SetTestRestartWithSnapshotFn overrides the snapshot-bound restart
-// path so cross-package tests can capture the OwnershipSnapshot the
-// driver passes to RestartContextWithSnapshot.
-//
-// Returns a restore function that resets the seam.
-func SetTestRestartWithSnapshotFn(fn func(server, daemonFilter string, snap OwnershipSnapshot) ([]RestartResult, error)) (restore func()) {
-	orig := restartContextWithSnapshotSrcFn
-	restartContextWithSnapshotSrcFn = fn
-	return func() { restartContextWithSnapshotSrcFn = orig }
-}
-
 // SetTestRestartContextFn overrides the general-purpose ctx-aware
 // Restart wrapper. Used by cross-package tests that exercise paths
 // where the watchdog driver could fall back to a non-snapshot restart
@@ -210,16 +199,8 @@ func SetTestAuditAppendFn(fn func(path string, line []byte) error) (restore func
 	return func() { auditAppendWriteFn = orig }
 }
 
-// SetTestWatchdogLogAppendFn overrides the disk-append step inside
-// AppendWatchdogLog. Returns a restore function.
-func SetTestWatchdogLogAppendFn(fn func(path string, line []byte) error) (restore func()) {
-	orig := watchdogLogAppendWriteFn
-	watchdogLogAppendWriteFn = fn
-	return func() { watchdogLogAppendWriteFn = orig }
-}
-
 // SetTestCanonicalMcphubPathFn overrides the canonical-mcphub-path
-// resolver consumed by the XML validator and InstallWatchdogTask.
+// resolver consumed by the liveness-task install (liveness_task.go).
 // Returns a restore function.
 func SetTestCanonicalMcphubPathFn(fn func() (string, error)) (restore func()) {
 	orig := canonicalMcphubPathFn
@@ -228,7 +209,7 @@ func SetTestCanonicalMcphubPathFn(fn func() (string, error)) (restore func()) {
 }
 
 // SetTestCurrentWindowsUserFn overrides the current-user resolver
-// consumed by the XML validator and InstallWatchdogTask. Returns a
+// consumed by the liveness-task install (liveness_task.go). Returns a
 // restore function.
 func SetTestCurrentWindowsUserFn(fn func() (string, error)) (restore func()) {
 	orig := currentWindowsUserFn

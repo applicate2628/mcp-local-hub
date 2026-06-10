@@ -126,10 +126,10 @@ func rowKey(r api.DaemonStatus) string {
 // red and the toast pop at the same transition.
 //
 // LastResult classification is delegated to api.IsRealFailure
-// (internal/api/recovery.go) — the single canonical predicate shared
-// with the watchdog and tray icon aggregator (plan §18 single-source-
-// of-truth). The state-string "fail" match is kept as a separate
-// signal because some daemon paths emit Failed without a matching
+// (internal/api/task_classifiers.go) — the single canonical predicate
+// shared with the supervisor and tray icon aggregator (plan §18
+// single-source-of-truth). The state-string "fail" match is kept as a
+// separate signal because some daemon paths emit Failed without a matching
 // LastResult update; that fallback is local to this consumer and not
 // part of the canonical failure predicate.
 //

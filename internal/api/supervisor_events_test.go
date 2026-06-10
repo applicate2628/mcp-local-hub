@@ -73,7 +73,7 @@ func TestSupervisorEvent_EnvelopeShape(t *testing.T) {
 
 // TestSupervisorEvent_OversizeTruncation verifies the 16KB cap is
 // enforced and that identity fields (event, source, task_name) are
-// never truncated. Body fields take the hit per the watchdog_log.go
+// never truncated. Body fields take the hit per the intent_audit.go
 // precedent. The _truncated marker must be present.
 func TestSupervisorEvent_OversizeTruncation(t *testing.T) {
 	dir := t.TempDir()
@@ -120,7 +120,7 @@ func TestSupervisorEvent_OversizeTruncation(t *testing.T) {
 
 // TestSupervisorEvent_Rotation verifies 10MB rotation: an oversize
 // active log is renamed to .1 on next emit. Mirrors the precedent at
-// gui_event_log.go:166-170 + watchdog_log.go:237-241.
+// gui_event_log.go:166-170 + intent_audit.go:545-560.
 func TestSupervisorEvent_Rotation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "supervisor-events.log")
@@ -251,7 +251,7 @@ func TestSupervisorEvent_ConcurrentEmit(t *testing.T) {
 // (Event/Source/TaskName) are never truncated per §35; Emit must fail
 // closed with ErrSupervisorEventIdentityOversize rather than letting
 // the post-truncation re-marshal silently land a malformed entry.
-// Mirrors the watchdog_log.go discipline (plan §51).
+// Mirrors the intent_audit.go discipline (plan §51).
 func TestSupervisorEvent_IdentityOversize(t *testing.T) {
 	dir := t.TempDir()
 	logger, err := OpenSupervisorEventLog(filepath.Join(dir, "events.log"))

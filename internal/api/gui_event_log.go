@@ -271,5 +271,5 @@ func parseGUIEventLogTail(raw []byte, n int) []GUIEventEntry {
 	return out
 }
 
-// splitJSONLines is defined in watchdog_log.go — reused here to keep
+// splitJSONLines is defined in jsonlines.go — reused here to keep
 // one JSON-Lines tokenizer across the api package.

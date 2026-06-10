@@ -27,7 +27,7 @@
 // Same 16 KB per-entry cap, 10 MB rotation, and gofrs/flock
 // serialization discipline.
 //
-// Identity preservation (mirrors watchdog_log.go:25-36 §35):
+// Identity preservation (mirrors intent_audit.go:87-98 §35):
 // `event`, `source`, and `task_name` are identity fields and NEVER
 // truncated. When the marshaled entry exceeds the 16 KB cap the body
 // payload is replaced with a sentinel `_truncated_note` map; the
@@ -38,9 +38,9 @@
 // any *API instance exists, so this helper exposes a path-injected
 // constructor (`OpenSupervisorEventLog(path)`) returning a
 // `*SupervisorEventLog` with an `Emit(...)` method — DIFFERENT from
-// the `(*API).AppendGUIEventLog` / `(*API).AppendWatchdogLog`
-// precedents which carry an *API receiver and resolve DaemonStateDir
-// internally. The supervisor task plan explicitly specifies this
+// the `(*API).AppendGUIEventLog` precedent which carries an *API
+// receiver and resolves DaemonStateDir internally. The supervisor
+// task plan explicitly specifies this
 // constructor-based shape (Task 2.3 step 4); see spec §"Package
 // ownership" for rationale.
 package api
@@ -73,7 +73,7 @@ const SupervisorEventLogFileLeaf = "supervisor-events.log"
 const supervisorEventLogLockSuffix = ".lock"
 
 // supervisorEventLogRotatedSuffix is appended to the rotated file
-// name. Mirrors gui_event_log.go / watchdog_log.go — only .1 is
+// name. Mirrors gui_event_log.go / intent_audit.go — only .1 is
 // retained; older rotations are overwritten on next rotation.
 const supervisorEventLogRotatedSuffix = ".1"
 
@@ -84,8 +84,8 @@ const supervisorEventLogRotatedSuffix = ".1"
 const supervisorEventLogRotateSize int64 = 10 * 1024 * 1024
 
 // supervisorEventMaxBytes is the per-entry size cap per plan
-// §"supervisor-events.log (NEW)" (mirrors AuditEntryMaxBytes /
-// watchdog_log.go:25-36 §35). Marshaled JSON Lines exceeding this
+// §"supervisor-events.log (NEW)" (mirrors AuditEntryMaxBytes,
+// intent_audit.go:87-91 §35). Marshaled JSON Lines exceeding this
 // ceiling are truncated with identity-field protection.
 const supervisorEventMaxBytes = 16 * 1024
 
@@ -170,7 +170,7 @@ var ErrSupervisorEventMissingSource = errors.New("supervisor event log: missing 
 // truncated per §35; Emit fails closed so a malicious or
 // programmer-error oversize identity cannot land in the log under
 // the truncation rules used for Body. Mirrors ErrIdentityOversize
-// (intent_audit.go:118 / watchdog_log.go §51).
+// (intent_audit.go:118 §51).
 var ErrSupervisorEventIdentityOversize = errors.New("supervisor event log: identity field (event/source/task_name) exceeds 1024-byte cap")
 
 // ---------------------------------------------------------------------------
@@ -247,7 +247,7 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 //
 // NOTE — deliberate divergence: this is the ONLY best-effort (lossy-on-
 // contention) emit path among the JSONL log families. intent_audit.go and
-// watchdog_log.go both use a blocking Lock(); TryEmit is the sole exception.
+// gui_event_log.go both use a blocking Lock(); TryEmit is the sole exception.
 // The tradeoff is scoped on purpose: a TryEmit caller may silently drop its
 // audit row under event-log lock contention, so it must be used only where the
 // underlying state change is independently durable. The serena intent repair is

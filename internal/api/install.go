@@ -2371,7 +2371,8 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 		// We pass `normalized` (no leading backslash) — the canonical
 		// task-key normalization in WriteDaemonIntent (Codex deep-sec
 		// PR #135 Finding 1) prepends "\" before storage so the entry
-		// lands under the same key recovery.go indexes via row.TaskName.
+		// lands under the same key the supervisor reconcile loop
+		// (internal/cli/supervise_reconcile.go) indexes via row.TaskName.
 		a.recordRestartIntentForTask(normalized, nil)
 		results = append(results, RestartResult{TaskName: t.Name})
 	}

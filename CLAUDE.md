@@ -384,206 +384,47 @@ jobs:
 - Browser focus on activate-window (PR #22 wires SetForegroundWindow; manual smoke per D2.1).
 - Linux/macOS (blocked on scheduler test seam).
 
-## Watchdog (Phase 3B-II onward)
+## Watchdog — REMOVED in v0.6 (Phase D)
 
-The watchdog is a per-user scheduled task (`\mcp-local-hub-watchdog`)
-that runs `mcphub watchdog --once` every 5 min. Each tick walks the
-daemon registry, classifies failures via the exported `IsRealFailure`
-predicate, and restarts eligible daemons under a strictly-pure recovery
-state machine. It exists because Task Scheduler `RestartOnFailure` does
-not reliably fire for user-issued End Task / `Stop-Process -Force` kills
-on Win11 24H2+ (see
-`work-items/bugs/2026-05-07-task-scheduler-restartonfailure-not-firing.md`).
-The full design lives in
-`docs/superpowers/plans/2026-05-07-mcphub-watchdog.md` (v13). The manual
-smoke checklist lives in `docs/phase-3b-ii-verification.md` D2.6.
+The v0.4.x watchdog (the `\mcp-local-hub-watchdog` scheduled task +
+`mcphub watchdog` command + the `recovery.go` recovery state machine)
+is **DELETED**. It existed to revive scheduler-task daemons every 5
+min, a job the v0.5.0 supervisor now owns directly via its Job-Object
+reaper + reconcile loop. With the supervisor model the watchdog only
+fought it (re-spawning daemons the supervisor deliberately stopped,
+spamming `suspicious-xml` warnings against task XML its v0.4.x
+validator could not parse). The full removal is in the v0.6 redesign
+spec [`docs/superpowers/specs/2026-06-10-clean-architecture-redesign.md`](docs/superpowers/specs/2026-06-10-clean-architecture-redesign.md)
+§5 Phase C/D.
 
-### State files
+**What replaced it.** Two distinct concerns the single watchdog used
+to (partly) cover are now owned by purpose-built mechanisms:
 
-All under `<state-dir>` (resolved at runtime — see "State path" below):
+- **Daemon revival** — the supervisor's own Job-Object reaper +
+  restart-policy state machine (see "Supervisor (v0.5.0)" below). A
+  crashed daemon is respawned by the supervisor in real time, not on a
+  5-min scheduler poll.
+- **Supervisor/GUI-owner-death recovery** — the **supervisor-liveness
+  task** (`\mcp-local-hub-liveness`, installed by `mcphub setup`),
+  added in v0.6 Phase 3a. It runs `mcphub supervise --ensure-alive`
+  every ~1 min; the action probes the flock-authoritative
+  `SupervisorRunningUnderStateDir` and relaunches the owner via the
+  autostart task when no live lock holder exists. This is a NEW
+  capability the watchdog never had (the watchdog only revived
+  daemons, never the supervisor/GUI owner).
 
-```text
-<state-dir>/
-  daemon-intent.json    # 3-state intent: Desired / Reason / UpdatedAt (UTC RFC3339Nano)
-  watchdog-state.json   # cooldown + 3 sliding 30-min windows
-                        # (CorruptStrikeWindow, AuditFailureWindow, StaleClearWindow)
-  intent-audit.log      # JSON Lines audit log; rotates at 10 MB → .log.1
-  watchdog.log          # JSON Lines decision log; rotates at 10 MB → .log.1
-  --once.lock           # singleton flock for manual `--once` invocations
-  --once.lock.owner.json # sidecar with PID/started_at/hostname of current holder
-  .corrupt-*            # quarantined corrupt state files (5 newest retained)
-```
-
-Each `watchdog-state.json` field uses sliding-30-min windows over
-`[]time.Time` slices; quarantine names match `.corrupt-<basename>-<RFC3339>`.
-
-### State path
-
-- **Windows (production):** `SHGetKnownFolderPath(FOLDERID_LocalAppData)`
-  → `%LOCALAPPDATA%\mcp-local-hub\`. The env-var fallback path is
-  excluded from production builds via the `test_state_path_env`
-  build tag (CI runs the full test matrix BOTH with and without that
-  tag; release `go build` runs WITHOUT it). Plan §50 includes a
-  release-pipeline `go tool nm` assertion that the env-fallback symbol
-  is absent from the shipped binary.
-- **POSIX (test only for v0.3.0):** `$XDG_STATE_HOME/mcp-local-hub` or
-  `~/.local/state/mcp-local-hub`; dir mode 0700, files 0600. Sanity
-  check rejects world-writable parent or non-owner uid → exit 8.
-- Linux systemd-timer + macOS launchd shipping is deferred to v0.4.x.
-
-The state dir is a single-user 0600/0700 boundary (per-user on POSIX,
-per-user `%LOCALAPPDATA%` ACL on Windows). `mcphub watchdog status`
-prints absolute paths to every state file (plan §57) so operators can
-inspect / quarantine / restore them directly.
-
-### Subcommands
-
-```bash
-mcphub watchdog --once                  # one-shot recovery tick
-                                        # (5-min cadence; usually scheduled
-                                        # via the watchdog task, not run by hand)
-mcphub watchdog enable [--server NAME]  # clear stop intent (per server or all)
-mcphub watchdog disable [--server NAME] # write Desired=stopped, Reason=user-disabled
-                                        # (permanent; never auto-revived)
-mcphub watchdog install [--allow-elevated]
-                                        # install scheduled task (idempotent)
-                                        # refuses if shell is elevated unless
-                                        # --allow-elevated; uses fail-closed audit
-mcphub watchdog uninstall [--yes]       # remove scheduled task
-                                        # interactive confirm in TTY;
-                                        # non-TTY without --yes → exit 6
-mcphub watchdog status [--json]         # rich observability output
-                                        # (cooldown + 3 windows + abs paths +
-                                        # recent events + audit tail w/ redaction)
-```
-
-`mcphub setup` auto-installs the watchdog scheduled task (idempotent;
-Task 11). Manual `mcphub watchdog install` is only needed after a
-self-quarantine recovery (sub-case D2.6.11).
-
-### Exit codes (cross-command summary)
-
-```text
-0   — success
-1   — backend error (Status, manifest, scheduler, etc.)
-2   — ctx deadline exceeded (4-min app-level deadline; plan §14)
-6   — `mcphub watchdog uninstall` invoked non-interactively without `--yes`
-      (plan §64). Side-by-side with `mcphub gui --force --kill` exit 6
-      ("non-interactive shell with --kill but no --yes"; see
-      "Stuck-instance recovery" below). Both commands share the SAME
-      semantic — "interactive command requires --yes in non-interactive
-      contexts" — so operators reading exit-code docs see both
-      contexts. The `mcphub watchdog uninstall --help` text repeats
-      this note. Exit codes are command-scoped: there is no conflict.
-8   — state path sanity rejected (POSIX world-writable parent OR
-      Windows KnownFolder failed in production; plan §16)
-9   — self-quarantined (4 corrupt-state strikes within 30 min;
-      `UninstallWatchdogTaskInternal(QuarantineFourStrikes30Min)`
-      removed the scheduled task; plan §28)
-10  — emergency-fallback failed (audit-degraded cascade exhausted —
-      watchdog.log → stderr → eventlog/syslog all unreachable; plan §49)
-11  — `--allow-elevated` requested but the audit override entry could
-      not be written; install is rejected and no scheduler entry is
-      created (plan §61)
-```
-
-`mcphub watchdog --once` returns these codes via a typed
-`forceExitError` (no `os.Exit` from inside command bodies); the parent
-process picks them up. `mcphub install` and `mcphub watchdog install`
-share exit 11 for the audit-required-but-failed path.
-
-### Audit + log retention
-
-- **`intent-audit.log` and `watchdog.log` rotate at 10 MB → `.log.1`.**
-  After rotation, an `audit-rotated` self-event is written to the new
-  active file (`SystemEntry=true`, `caller_user="<rotation-system>"`).
-  Rotation is idempotent on retry; partial writes during rotation
-  retain a placeholder until the next successful append.
-- Two log files × 10 MB each = ~20 MB ceiling per log family
-  (~130 k events at typical entry size before the oldest .log.1 is
-  overwritten on the next rotation).
-- Quarantines (`.corrupt-*`) keep the **5 newest** under flock; older
-  entries pruned after rename. Per-file delete failures are non-fatal.
-
-### Per-entry size cap (16 KB)
-
-JSON Lines entries cap at 16 KB. Identity fields — `task`, `task_name`,
-`caller_user` — are NEVER truncated:
-
-- `task` exceeds 1 KB (legitimate Task Scheduler names are <100 bytes)
-  → entry rejected with `ErrIdentityOversize`. Caller treats this as
-  audit failure and fails closed (plan §51 — applies to `mcphub stop`,
-  `mcphub stop --force`, `mcphub install`, `mcphub watchdog install
-  --allow-elevated`).
-- Non-identity oversize → truncate longest non-identity string field;
-  set `_truncated:true` + `_truncated_field:"<name>"` + a 12-hex
-  `_task_hash` (first 12 chars of SHA-256 over the original `task`)
-  for forensic correlation.
-- If even truncation can't fit 16 KB → drop with placeholder entry
-  `{"action":"log-entry-dropped-oversize", ...}`.
-
-### Best-effort ctx cancellation
-
-`StatusContext` and `RestartContext` (plan §32) use a goroutine +
-ctx-select pattern: cancellation returns to the caller within ~10 ms,
-but the underlying `schtasks` / status syscall continues until it
-completes. The OS-level `<ExecutionTimeLimit>PT5M</ExecutionTimeLimit>`
-on the watchdog scheduled task guarantees the watchdog process is
-killed if an underlying op hangs. Deep ctx propagation through
-`internal/api.Restart` and `internal/scheduler` is deferred to v0.4.x.
-
-### Post-self-quarantine recovery
-
-If `mcphub watchdog status` shows:
-
-```text
-WATCHDOG SELF-QUARANTINED: scheduled task not installed.
-Last self-quarantine: 2026-05-07T15:30:00Z
-Reason: 4-strikes-30min
-Suggested action: verify state files clean; review .corrupt-* quarantines; then `mcphub watchdog install` to resume.
-```
-
-then:
-
-1. Open the state-dir path (printed at the top of status output) and
-   review the `.corrupt-*` quarantine files. They are the four (or
-   more) corrupt snapshots that drove the 30-min strike count.
-2. Verify `daemon-intent.json` and `watchdog-state.json` are clean
-   JSON (or absent — they will be re-created on the next tick).
-3. Run `mcphub watchdog install` to re-create the scheduled task.
-   The next tick (within 5 min) restores normal operation.
-
-If the corruption was caused by an external process (AV scanner,
-backup tool, etc.) the loop will likely re-quarantine. Add a
-sufficient exception in the offending tool before re-installing.
-
-### Path exposure note (§57)
-
-`mcphub watchdog status` displays absolute paths to every state file
-because operators routinely need to inspect / break the singleton
-lock / quarantine corrupt state. The state dir is a per-user 0600
-boundary on POSIX and is `%LOCALAPPDATA%`-ACL'd to the current user
-on Windows; absolute paths in status do not weaken that boundary.
-Audit-tail entries displayed by `status` redact `caller_user` for
-non-owner entries (plan §34 + §37 — `SystemEntry=true` entries are
-exempt).
-
-### Singleton lock recovery
-
-`mcphub watchdog --once` acquires `<state-dir>/--once.lock` via flock.
-The sidecar `--once.lock.owner.json` carries `{pid, started_at, hostname}`.
-
-If a stale lock blocks a manual run:
-
-1. Run `mcphub watchdog status` — the "Last flock skip" line shows the
-   recorded PID and start time.
-2. If the PID is dead (e.g., `Get-Process -Id <pid>` returns nothing),
-   delete `--once.lock` and the sidecar `--once.lock.owner.json` from
-   the state dir.
-3. Re-run `mcphub watchdog --once`.
-
-POSIX `flock` is advisory; only honored by callers that use the same
-convention. The watchdog binary always honors it.
+**Operator-visible changes.** The `mcphub watchdog ...` subcommands
+(`--once`, `enable`, `disable`, `install`, `uninstall`, `status`) are
+gone. `mcphub setup` no longer installs `\mcp-local-hub-watchdog` and
+best-effort-removes any leftover one on existing hosts; `mcphub
+uninstall` removes it on the last-server teardown. After `mcphub
+setup`, `schtasks /Query /TN \mcp-local-hub-watchdog` returns "not
+found". The `watchdog.log` / `intent-audit.log` watchdog-side entries
+are no longer written (`intent-audit.log` itself stays — the
+supervisor's `SupervisorEventLog` is the v0.6 audit/event surface).
+`IsRealFailure` (the Task Scheduler LastResult classifier) survived
+the deletion — it migrated to `internal/api/task_classifiers.go` and
+is still consumed by the tray + GUI tray-state.
 
 ## Supervisor (v0.5.0)
 
@@ -597,9 +438,10 @@ in real time, applies a persisted restart-policy state machine, and
 exposes a local-only owner-bound IPC for control commands. The full
 design lives in
 [`docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md`](docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md).
-Release scope is **Windows GA / Linux beta / macOS preview** per spec Q9;
-the v0.4.x watchdog command is preserved as read-only diagnostics for
-legacy installs.
+Release scope is **Windows GA / Linux beta / macOS preview** per spec Q9.
+(The v0.4.x watchdog command + engine were DELETED in v0.6 Phase D — see
+"Watchdog — REMOVED in v0.6 (Phase D)" above; supervisor/GUI-owner-death
+recovery is now the `\mcp-local-hub-liveness` task.)
 
 ### State files
 
@@ -805,13 +647,15 @@ set differs — supervisor envelope uses `event` discriminator + adds
 }
 ```
 
-Per-entry size cap matches `internal/api/watchdog_log.go:25-36`: 16 KB
-hard cap; identity fields (`event`, `task_name`, `source`) NEVER
-truncated; oversize identity → entry rejected with
-`ErrIdentityOversize` and caller fails closed (same posture as the
-watchdog 1 KB task-name cap). 10 MB rotation with single `.log.1`
-backfile. After rotation, an `audit-rotated` self-event is written to
-the new active file. Flock-protected appends.
+Per-entry size cap follows the `AuditIdentityFieldByteCap` posture in
+`internal/api/intent_audit.go`: 16 KB hard cap; identity fields
+(`event`, `task_name`, `source`) NEVER truncated; oversize identity →
+entry rejected with `ErrIdentityOversize` and caller fails closed.
+10 MB rotation with single `.log.1` backfile. After rotation, an
+`audit-rotated` self-event is written to the new active file.
+Flock-protected appends. (The v0.4.x `watchdog_log.go` that first
+established this shape was deleted in v0.6 Phase D; the supervisor
+event log carries the pattern forward.)
 
 Cross-channel routing: structured `warn`-severity events like
 `severity: warn, event: supervisor-state-relax-lane-active` and
@@ -979,16 +823,15 @@ again.
 | `committed` | Migration succeeded. Older journals beyond the 5 newest are pruned automatically. |
 | `rollback-in-progress` | Re-run `mcphub install --rollback-to-legacy` to finish; supervisor cold start refuses to reconcile until cleared. |
 
-### `mcphub watchdog status` note
+### `mcphub watchdog` — removed (v0.6 Phase D)
 
-`mcphub watchdog status` remains read-only for legacy v0.4.x
-diagnostics. For new installs, the canonical management surface is
-`mcphub supervise --help` plus the IPC `status` command issued via
-`mcphub status`. The status output includes a one-paragraph NOTE
-pointing operators at the v0.5.0 supervisor; the watchdog subcommands
-(`--once`, `enable`, `disable`, `install`, `uninstall`, `status`)
-remain functional for the legacy v0.4.x state files but do not
-extend or write supervisor state.
+The `mcphub watchdog` command and all its subcommands (`--once`,
+`enable`, `disable`, `install`, `uninstall`, `status`) are DELETED —
+see "Watchdog — REMOVED in v0.6 (Phase D)" above. The canonical
+management surface is `mcphub supervise --help` plus the IPC `status`
+command issued via `mcphub status`. Supervisor/GUI-owner-death
+recovery is the `\mcp-local-hub-liveness` task (`mcphub supervise
+--ensure-alive`).
 
 ### Job Protection field operator runbook (PR #242)
 

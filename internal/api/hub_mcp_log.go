@@ -301,9 +301,11 @@ func appendHubMcpLogLineUnlocked(path string, line []byte) error {
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("write hub-mcp log %s: %w", path, err)
 	}
-	// Sync to match watchdog_log.go durability — avoids losing the last
-	// appended line on power-cut/crash mid-rotation. Best-effort: the
-	// log path is observability-only, so sync errors are swallowed.
+	// Sync to match intent_audit.go:630 append durability — avoids losing
+	// the last appended line on power-cut/crash mid-rotation. Best-effort:
+	// the log path is observability-only, so sync errors are swallowed
+	// here (intent_audit.go, by contrast, returns its sync error because
+	// its audit trail is load-bearing).
 	_ = f.Sync()
 	return nil
 }

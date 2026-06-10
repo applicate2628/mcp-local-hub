@@ -1,49 +1,37 @@
-// Package api — Task 0 foundational ctx-aware API surfaces (watchdog plan v13 §32, §47, §59).
+// Package api — ctx-aware API surfaces (StatusContext / RestartContext /
+// WaitDaemonRunning-free) + the scheduler-task management surface used by
+// `mcphub status`, `mcphub restart`, and the maintenance-task install/remove
+// paths.
 //
-// This file is the single owner of the ctx-aware wrappers, the immutable
-// ownership snapshot, and the typed self-quarantine reason that later
-// watchdog tasks (1-12) build on. Production callers only see the public
-// methods on *API; tests in api_surfaces_test.go drive package-level seam
-// vars below to substitute fakes without spinning up a real Task Scheduler.
+// The v0.6 redesign (spec §5 Phase D) deleted the watchdog recovery engine
+// that originally co-owned this file (OwnershipSnapshot / DaemonRegistry /
+// OwnedXMLValidator / RecoverStoppedDaemons / the Install/UninstallWatchdog
+// task surface). What remains here is the general ctx-aware wrappers and the
+// audit/intent/scheduler seams the supervisor + CLI still consume.
 //
-// Best-effort cancellation contract (§32 + §59):
-//   StatusContext / RestartContext / RestartContextWithSnapshot run the
-//   underlying op in a goroutine. When ctx is cancelled, the wrapper
-//   returns ctx.Err() to the caller within ~10ms. The underlying op
-//   continues to completion in the background — its result is dropped.
-//   This is documented as best-effort because Status() and Restart()
-//   delegate to schtasks, which we cannot interrupt mid-call. The
-//   acceptable trade-off is that the watchdog loop never blocks past
-//   its 4-min ctx deadline.
+// Best-effort cancellation contract (§32):
 //
-// Stubs deferred to later tasks:
-//   - IntentAuditEntry / AppendIntentAudit                              → Task 3
-//   - OwnedXMLValidator real validation logic (XML export/parse/limits) → Task 6
-//   The minimal interfaces / structs / package-level seams below let
-//   later tasks satisfy the contract without re-shaping Task 0 surfaces.
+//	StatusContext / RestartContext run the underlying op in a goroutine.
+//	When ctx is cancelled, the wrapper returns ctx.Err() to the caller
+//	within ~10ms. The underlying op continues to completion in the
+//	background — its result is dropped. This is best-effort because
+//	Status() and Restart() delegate to schtasks, which we cannot interrupt
+//	mid-call.
 //
-// Task 2 wired-up surfaces (now owned by daemon_intent.go):
-//   - DaemonIntent struct, Reason / Desired enum constants, IsActiveStop
-//     predicate, ReadDaemonIntent / WriteDaemonIntent / ClearDaemonIntent
-//     methods. The readDaemonIntentFn seam below is bound during init()
-//     in daemon_intent.go to a thin adapter over ReadDaemonIntent.
+// Surfaces owned elsewhere:
+//   - IntentAuditEntry / AppendIntentAudit                 → intent_audit.go
+//   - DaemonIntent / Reason / Desired / IsActiveStop /
+//     ReadDaemonIntent / WriteDaemonIntent                 → daemon_intent.go
+//     (the readDaemonIntentFn seam below is bound by daemon_intent.go's
+//     init() to a thin adapter over ReadDaemonIntent.)
 package api
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"mcp-local-hub/internal/scheduler"
 )
-
-// WatchdogTaskName is the canonical scheduled-task name installed by
-// `mcphub watchdog install` and removed by UninstallWatchdogTask /
-// UninstallWatchdogTaskInternal. Kept as a package-level constant so
-// later tasks (5, 9, 10) reference one canonical literal.
-const WatchdogTaskName = "\\mcp-local-hub-watchdog"
 
 // ---------------------------------------------------------------------------
 // Test seams (package-level fn vars).
@@ -67,378 +55,34 @@ var statusContextSrcFn func() ([]DaemonStatus, error)
 // RestartContext. The general-purpose Restart wrapper.
 var restartContextSrcFn func(server, daemonFilter string) ([]RestartResult, error)
 
-// restartContextWithSnapshotSrcFn, when non-nil, replaces the body of
-// RestartContextWithSnapshot. Tests assert the snapshot is forwarded
-// (kill-by-port targets snap.PortMap, not live manifest).
-var restartContextWithSnapshotSrcFn func(server, daemonFilter string, snap OwnershipSnapshot) ([]RestartResult, error)
-
-// schedulerFactoryFn, when non-nil, replaces scheduler.New() for
-// UninstallWatchdogTask / UninstallWatchdogTaskInternal. Tests inject
-// an in-memory scheduler that records Delete calls.
+// schedulerFactoryFn, when non-nil, replaces scheduler.New() for the
+// maintenance-task install/remove paths (liveness + legacy-watchdog
+// cleanup) and ListManagedTasks. Tests inject an in-memory scheduler that
+// records ImportXML / Delete calls.
 var schedulerFactoryFn func() (scheduler.Scheduler, error)
 
 // appendIntentAuditFn, when non-nil, replaces the audit-append path
-// invoked by UninstallWatchdogTaskInternal. Task 3 (intent_audit.go)
-// will own the production implementation; for Task 0 the seam lets
-// tests verify the audit-entry shape (Action + Reason canonical).
+// behind the appendAudit dispatcher. intent_audit.go's init() binds the
+// production implementation; tests verify the audit-entry shape.
 var appendIntentAuditFn func(IntentAuditEntry) error
 
 // readDaemonIntentFn, when non-nil, replaces the intent-file read path
-// invoked by IntentStillRunning. Task 2 (daemon_intent.go) will own the
-// production implementation; for Task 0 the seam unblocks unit tests.
+// invoked by IntentStillRunning. daemon_intent.go owns the production
+// implementation; the seam unblocks unit tests.
 var readDaemonIntentFn func(taskName string) (DaemonIntent, bool, error)
 
 // ---------------------------------------------------------------------------
-// Stub types pending later tasks.
+// Surfaces owned by sibling files.
 // ---------------------------------------------------------------------------
 
-// (DaemonIntent / IntentDesired* / IsActiveStop moved to daemon_intent.go
-// when Task 2 landed. The readDaemonIntentFn seam above is bound to the
-// production reader by daemon_intent.go's init().)
+// (DaemonIntent / IntentDesired* / IsActiveStop live in daemon_intent.go.
+// The readDaemonIntentFn seam above is bound to the production reader by
+// daemon_intent.go's init().)
 
 // (IntentAuditEntry / NewIntentAuditEntry / newSystemAuditEntry /
 // MarshalJSON / UnmarshalJSON / IsSystemEntry / RedactIntentAuditEntryForNonOwner
-// moved to intent_audit.go when Task 3 landed. The appendIntentAuditFn
-// seam above is bound to the production AppendIntentAudit by
-// intent_audit.go's init(); UninstallWatchdogTaskInternal continues to
-// reach the real audit log through the unchanged appendAudit dispatcher
-// below.)
-
-// ---------------------------------------------------------------------------
-// SelfQuarantineReason — typed enum (§39, §56).
-// ---------------------------------------------------------------------------
-
-// SelfQuarantineReason is the typed enum carried in
-// UninstallWatchdogTaskInternal calls and the resulting audit Reason field.
-// Per §39: compile-time-typed prevents arbitrary content injection.
-type SelfQuarantineReason string
-
-const (
-	// QuarantineFourStrikes30Min is set when the watchdog hits ≥4
-	// CorruptStrikeWindow strikes in a 30-minute sliding window (§28).
-	QuarantineFourStrikes30Min SelfQuarantineReason = "4-strikes-30min"
-	// (extension point: future reasons keep the typed surface — e.g.
-	// QuarantineAuditDegraded reserved per Security #7 INFO note.)
-)
-
-// SuggestedAction returns the operator-facing recovery instructions
-// associated with each reason (§56). Used by `mcphub watchdog status`
-// when rendering the WATCHDOG SELF-QUARANTINED block (§53).
-func (r SelfQuarantineReason) SuggestedAction() string {
-	switch r {
-	case QuarantineFourStrikes30Min:
-		return "verify state files clean; review .corrupt-* quarantines; then `mcphub watchdog install` to resume"
-	default:
-		return "manual investigation required; run `mcphub watchdog install` after resolving"
-	}
-}
-
-// ---------------------------------------------------------------------------
-// OwnershipSnapshot (v9 §47/§59).
-// ---------------------------------------------------------------------------
-
-// OwnershipSnapshot is the immutable per-tick view of the ownership
-// universe consumed by the watchdog driver. Builds at `--once` start
-// from manifest + workspace registry + manifest port map. Passed
-// through RecoverStoppedDaemons + RestartContextWithSnapshot +
-// NewOwnedXMLValidatorFromSnapshot so all ownership decisions in one
-// tick see the same frozen state — defeats mid-tick rotation races.
-//
-// One-tick-scope-only: callers MUST pass a fresh LoadOwnershipSnapshot()
-// per tick. Reusing a stale snapshot across ticks is incorrect (the
-// PortMap/ManifestDaemons may be hours old).
-type OwnershipSnapshot struct {
-	// ManifestServers is server name → present in the manifest set.
-	// Derived from listManifestNamesEmbedFirst().
-	ManifestServers map[string]bool
-	// ManifestDaemons is server → daemon-name → present (per
-	// config.ServerManifest.Daemons []DaemonSpec; verified shape per
-	// plan §5 v8-update). Empty inner maps are valid for servers
-	// declared with no Daemons block.
-	ManifestDaemons map[string]map[string]bool
-	// WorkspaceTasksByKey maps a workspace-key composite ID to the
-	// scheduler task name. Derived from the workspace registry
-	// (internal/api/workspace_registry.go). Empty for non-workspace setups.
-	WorkspaceTasksByKey map[string]string
-	// PortMap maps task name → expected daemon port. Derived from
-	// manifest at snapshot time per §59. Used by
-	// RestartContextWithSnapshot to drive kill-by-port without re-reading
-	// the manifest on a possibly-rotated tick.
-	PortMap map[string]int
-	// SnapshottedAt is the UTC time the snapshot was minted (forensic
-	// correlation; used by status display and audit entries).
-	SnapshottedAt time.Time
-}
-
-// ---------------------------------------------------------------------------
-// DaemonRegistry — interface + impl (§32).
-// ---------------------------------------------------------------------------
-
-// DaemonRegistry is the immutable per-tick lookup the watchdog driver
-// uses to filter orphan tasks. IsManagedDaemon answers "did mcp-local-hub
-// install this task?" against a frozen view of {scheduler-status ∪
-// manifest-known}. Construction (LoadDaemonRegistry) takes a defensive
-// copy; subsequent IsManagedDaemon calls are pure lookups.
-type DaemonRegistry interface {
-	IsManagedDaemon(taskName string) bool
-}
-
-// daemonRegistryImpl is the immutable defensive-copy implementation
-// returned by LoadDaemonRegistry. The managed-set is built once and
-// never mutated after construction.
-type daemonRegistryImpl struct {
-	managed map[string]bool
-}
-
-// IsManagedDaemon performs a case-sensitive exact-match lookup. The
-// watchdog driver passes the scheduler row's TaskName verbatim (with
-// the leading backslash) so the registry stores names in that form.
-func (r *daemonRegistryImpl) IsManagedDaemon(taskName string) bool {
-	return r.managed[taskName]
-}
-
-// LoadDaemonRegistry returns a frozen DaemonRegistry by unioning:
-//   - Every TaskName in the live Status() snapshot (catches workspace-
-//     scoped lazy-proxy tasks not declared in any single manifest).
-//   - Every (server, daemon) pair in the manifest set (catches tasks
-//     known-installable but transiently absent from scheduler — install
-//     mid-rollback, schtasks transient failure).
-//
-// The returned registry is detached from both sources; mutating the
-// originals after construction has no effect.
-func (a *API) LoadDaemonRegistry() DaemonRegistry {
-	managed := make(map[string]bool)
-
-	// Source 1: live scheduler status (defensive copy of the slice
-	// before iteration — guards against caller mutating *during* the
-	// iteration in tests that set seam fns).
-	rows, _ := a.statusForRegistry()
-	for _, r := range rows {
-		if r.TaskName == "" {
-			continue
-		}
-		managed[r.TaskName] = true
-	}
-
-	// Source 2: manifest-known servers + their declared daemons.
-	names, _ := listManifestNamesEmbedFirst()
-	for _, name := range names {
-		data, err := loadManifestYAMLEmbedFirst(name)
-		if err != nil {
-			continue
-		}
-		m, err := parseManifestForName(name, data)
-		if err != nil {
-			continue
-		}
-		// Per-daemon task names follow the canonical pattern
-		// "\mcp-local-hub-<server>-<daemon>" (parsed by parseTaskName
-		// in status_enrich.go). Mirror that here.
-		for _, d := range m.Daemons {
-			tn := "\\mcp-local-hub-" + m.Name + "-" + d.Name
-			managed[tn] = true
-		}
-	}
-
-	return &daemonRegistryImpl{managed: managed}
-}
-
-// statusForRegistry returns a defensive snapshot of the current daemon
-// status rows. Goes through the StatusContext seam if set (so tests
-// see deterministic data); otherwise calls a.Status() directly.
-//
-// Errors are suppressed — the registry is best-effort. A status read
-// failure leaves Source 1 empty; Source 2 still populates the managed
-// set from manifest knowledge.
-func (a *API) statusForRegistry() ([]DaemonStatus, error) {
-	if statusContextSrcFn != nil {
-		rows, err := statusContextSrcFn()
-		// Defensive copy so caller mutations don't leak into the
-		// registry's frozen state.
-		out := make([]DaemonStatus, len(rows))
-		copy(out, rows)
-		return out, err
-	}
-	rows, err := a.Status()
-	out := make([]DaemonStatus, len(rows))
-	copy(out, rows)
-	return out, err
-}
-
-// ---------------------------------------------------------------------------
-// OwnedXMLValidator — interface + snapshot-bound impl (§32, §47).
-// ---------------------------------------------------------------------------
-
-// OwnedXMLValidator answers IsOwnedAndValid(taskName) — the watchdog
-// driver's last gate before issuing a restart. Per §32:
-//   - Plain validator (constructed from a fresh manifest read) exists
-//     for non-watchdog callers (tests, future tools).
-//   - Snapshot-bound validator (NewOwnedXMLValidatorFromSnapshot) wraps
-//     a frozen OwnershipSnapshot so structural checks are tick-stable
-//     even if the manifest rotates mid-tick.
-//
-// Real XML validation (DOCTYPE rejection, depth cap, schtasks deadline,
-// principal/command/args assertions) lands in Task 6
-// (watchdog_xml_validator.go). Task 0 returns an interface + snapshot-
-// bound stub that does ownership-only checks.
-type OwnedXMLValidator interface {
-	IsOwnedAndValid(taskName string) bool
-}
-
-// NewOwnedXMLValidatorFromSnapshot constructs a snapshot-bound validator.
-// Per Task 6 (watchdog_xml_validator.go) the returned validator runs the
-// FULL hardened check chain on each call: schtasks /Query /XML with a 2s
-// deadline, 64KB+1 size cap, byte-level DOCTYPE rejection, depth cap (32),
-// strict decoder with Entity=nil + CharsetReader=nil, command / principal /
-// run-level / logon-type field assertions, and structural ownership
-// (manifest server+daemon or workspace registry TaskName byte-match).
-//
-// The snap argument is captured by reference; callers must NOT mutate it
-// after passing (LoadOwnershipSnapshot already returns a defensive copy).
-//
-// Tests in watchdog_xml_validator_test.go inject the schtasksQueryXMLFn,
-// canonicalMcphubPathFn, and currentWindowsUserFn seams to drive
-// deterministic XML payloads without touching the host's real Task
-// Scheduler.
-func NewOwnedXMLValidatorFromSnapshot(snap OwnershipSnapshot) OwnedXMLValidator {
-	return &ownedXMLValidator{snap: snap}
-}
-
-// ---------------------------------------------------------------------------
-// LoadOwnershipSnapshot (§47, §59).
-// ---------------------------------------------------------------------------
-
-// LoadOwnershipSnapshot builds an immutable snapshot of the four
-// ownership maps (ManifestServers, ManifestDaemons, WorkspaceTasksByKey,
-// PortMap) plus a SnapshottedAt timestamp. Each map is a fresh copy;
-// mutating the returned struct's fields cannot leak into shared state
-// or affect future LoadOwnershipSnapshot calls.
-//
-// Errors during manifest/registry loads degrade silently — the
-// corresponding map stays empty rather than fail-closed. The watchdog
-// driver treats an empty PortMap as "no kill-by-port targets known"
-// and falls back to scheduler-only restart, which is conservative.
-func (a *API) LoadOwnershipSnapshot() OwnershipSnapshot {
-	// Back-compat best-effort variant. Drops registry load errors silently
-	// to preserve callers that historically tolerated partial snapshots
-	// (tests, exploratory tooling, etc.). The watchdog driver MUST use
-	// LoadOwnershipSnapshotChecked instead — see Codex deep-sec PR #135
-	// Finding 4 for the rationale (a phantom-vs-orphan classification on
-	// a partial snapshot is unsafe).
-	snap, _ := a.loadOwnershipSnapshotInternal()
-	return snap
-}
-
-// LoadOwnershipSnapshotChecked is the fail-closed variant of
-// LoadOwnershipSnapshot per Codex deep-sec PR #135 Finding 4. The watchdog
-// driver consumes the snapshot to decide ownership (orphan vs lazy-proxy)
-// and to drive the snapshot-bound XML validator's structural ownership
-// check. A silently-dropped workspace registry leaves the
-// WorkspaceTasksByKey + PortMap maps incomplete → a real lazy-proxy task
-// could be marked orphan (no recovery) OR a phantom task could be marked
-// owned (false-positive restart). The driver should refuse the tick on
-// any registry load error rather than make decisions on partial data.
-//
-// Manifest read failures are still tolerated (per-server `continue` inside
-// the loop) because individual broken manifests are an ordinary disk-state
-// concern that pre-dates the watchdog — failing the entire tick on one
-// unparseable YAML would be more dangerous than running with what we have.
-// Registry-level failures are different: they are global to all
-// workspace-scoped tasks at once.
-func (a *API) LoadOwnershipSnapshotChecked() (OwnershipSnapshot, error) {
-	return a.loadOwnershipSnapshotInternal()
-}
-
-// loadOwnershipSnapshotInternal builds the snapshot and returns the first
-// fatal error encountered while loading the workspace registry. Manifest
-// errors are absorbed per-entry and never propagate (see comment on
-// LoadOwnershipSnapshotChecked for the asymmetry rationale).
-//
-// Workspace-registry failures are scoped: they propagate only when this
-// host actually has at least one workspace-scoped daemon installed in
-// Task Scheduler (Codex bot P1 on PR #135 round 3). The earlier
-// catalog-based gate (round 2) was too broad — every shipped manifest
-// catalog includes the `mcp-language-server` workspace-scoped entry,
-// so a global-only deployment that never installed any lazy-proxy
-// task still tripped the fail-closed path on every watchdog tick
-// whenever DefaultRegistryPath / reg.Load errored. The installed-task
-// gate restricts fail-closed to hosts that genuinely depend on
-// registry data while keeping global-only hosts auto-recoverable.
-func (a *API) loadOwnershipSnapshotInternal() (OwnershipSnapshot, error) {
-	snap := OwnershipSnapshot{
-		ManifestServers:     make(map[string]bool),
-		ManifestDaemons:     make(map[string]map[string]bool),
-		WorkspaceTasksByKey: make(map[string]string),
-		PortMap:             make(map[string]int),
-		SnapshottedAt:       time.Now().UTC(),
-	}
-
-	// Manifest set + per-server daemons + per-task PortMap. The manifest
-	// catalog drives ManifestServers/ManifestDaemons/PortMap; the
-	// workspace-scoped fail-closed gate is decided separately below
-	// from installed-task observation, NOT from this catalog walk.
-	names, _ := listManifestNamesEmbedFirst()
-	for _, name := range names {
-		data, err := loadManifestYAMLEmbedFirst(name)
-		if err != nil {
-			continue
-		}
-		m, err := parseManifestForName(name, data)
-		if err != nil {
-			continue
-		}
-		snap.ManifestServers[m.Name] = true
-		inner := make(map[string]bool, len(m.Daemons))
-		for _, d := range m.Daemons {
-			inner[d.Name] = true
-			if d.Port != 0 {
-				tn := "\\mcp-local-hub-" + m.Name + "-" + d.Name
-				snap.PortMap[tn] = d.Port
-			}
-		}
-		snap.ManifestDaemons[m.Name] = inner
-	}
-
-	// PR #135 round 4: structurally early-exit for global-only hosts
-	// before touching the workspace registry. This makes the fix to
-	// PR #135 round 3 P1 obvious: when scheduler.List finds zero
-	// `mcp-local-hub-lsp-*` tasks installed, the host has no workspace-
-	// scoped daemons and CANNOT depend on workspace registry data.
-	// Path-resolve / load failures of the registry are therefore
-	// IRRELEVANT to recovery for that host. Returning the global-only
-	// snapshot early makes it impossible for `DefaultRegistryPath()`
-	// errors (e.g. service accounts without a resolvable home dir) to
-	// block watchdog recovery for the global daemons that are present.
-	if !hasInstalledWorkspaceScopedDaemon() {
-		return snap, nil
-	}
-
-	// Workspace registry: at least one `mcp-local-hub-lsp-*` task IS
-	// installed in this host's scheduler — the watchdog DOES depend on
-	// workspace registry data. Path-resolve and load failures from here
-	// onward propagate as errors (PR #135 Finding 4: fail-closed when
-	// the installation actually uses workspace data; PR #135 round 3
-	// P1: gate on installed tasks not manifest catalog).
-	regPath, regErr := DefaultRegistryPath()
-	if regErr != nil {
-		return snap, fmt.Errorf("resolve workspace registry path: %w", regErr)
-	}
-	reg := NewRegistry(regPath)
-	if err := reg.Load(); err != nil {
-		return snap, fmt.Errorf("load workspace registry: %w", err)
-	}
-	for _, e := range reg.Workspaces {
-		if e.TaskName == "" {
-			continue
-		}
-		key := e.WorkspaceKey + "-" + e.Language
-		snap.WorkspaceTasksByKey[key] = e.TaskName
-		if e.Port != 0 {
-			snap.PortMap[e.TaskName] = e.Port
-		}
-	}
-	return snap, nil
-}
+// live in intent_audit.go. The appendIntentAuditFn seam above is bound to
+// the production AppendIntentAudit by intent_audit.go's init().)
 
 // ---------------------------------------------------------------------------
 // StatusContext (§32).
@@ -492,7 +136,7 @@ func (a *API) StatusContext(ctx context.Context) ([]DaemonStatus, error) {
 }
 
 // ---------------------------------------------------------------------------
-// RestartContext (§32) + RestartContextWithSnapshot (§59).
+// RestartContext (§32).
 // ---------------------------------------------------------------------------
 
 // RestartContext wraps (*API).Restart with a goroutine + ctx-select
@@ -500,10 +144,6 @@ func (a *API) StatusContext(ctx context.Context) ([]DaemonStatus, error) {
 // the caller within ~10ms; the underlying Restart continues until
 // schtasks completes or fails. General-purpose: reads the manifest
 // fresh on each invocation, suitable for `mcphub restart` CLI.
-//
-// Watchdog callers MUST use RestartContextWithSnapshot instead — the
-// snapshot variant pins kill-by-port to a frozen PortMap and prevents
-// mid-tick manifest-rotation races (§59).
 func (a *API) RestartContext(ctx context.Context, server, daemonFilter string) ([]RestartResult, error) {
 	type result struct {
 		results []RestartResult
@@ -533,108 +173,6 @@ func (a *API) RestartContext(ctx context.Context, server, daemonFilter string) (
 	case r := <-ch:
 		return r.results, r.err
 	}
-}
-
-// RestartContextWithSnapshot is the watchdog-only Restart variant. Per
-// §59: consumes a frozen OwnershipSnapshot whose PortMap drives kill-
-// by-port discovery. One-tick-scope-only — callers MUST pass a fresh
-// LoadOwnershipSnapshot() per tick; reusing across ticks is incorrect.
-//
-// Tests assert behavior matches snap.PortMap, NOT the live manifest.
-// The seam restartContextWithSnapshotSrcFn lets tests verify the
-// snapshot is forwarded to the underlying impl rather than silently
-// fallen back to the fresh-manifest path.
-//
-// TODO(task 5): the production body should mirror Restart's port-
-// discovery logic (portForTask) but consult snap.PortMap before the
-// live workspaceTasksByName / manifestPortMap calls. Until Task 5
-// lands, the seam is the only production caller path; the watchdog
-// driver in Task 9 will populate it.
-func (a *API) RestartContextWithSnapshot(ctx context.Context, server, daemonFilter string, snap OwnershipSnapshot) ([]RestartResult, error) {
-	type result struct {
-		results []RestartResult
-		err     error
-	}
-	// Snapshot the test seam before spawning (see RestartContext): the leaked
-	// goroutine on ctx cancellation must not read the mutable global.
-	srcFn := restartContextWithSnapshotSrcFn
-	ch := make(chan result, 1)
-	go func() {
-		var res []RestartResult
-		var err error
-		if srcFn != nil {
-			res, err = srcFn(server, daemonFilter, snap)
-		} else {
-			// TODO(task 5): production body. For Task 0 there is no
-			// production caller — the watchdog driver (Task 9) is the
-			// only consumer and will set restartContextWithSnapshotSrcFn
-			// after Task 5 lands. Falling back to a.Restart preserves
-			// the manifest-fresh semantic for any unexpected caller
-			// without losing the ctx-cancellation contract.
-			res, err = a.Restart(server, daemonFilter)
-		}
-		ch <- result{results: res, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case r := <-ch:
-		return r.results, r.err
-	}
-}
-
-// ---------------------------------------------------------------------------
-// WaitDaemonRunning (§32).
-// ---------------------------------------------------------------------------
-
-// WaitDaemonRunning polls StatusContext every 1s until either a row
-// matching taskName has State == "Running" (returns true) or ctx is
-// done (returns false). The first poll fires immediately so a daemon
-// already running returns true with sub-second latency.
-//
-// Polling pattern: time.NewTicker(1*time.Second) + select on
-// ticker.C / ctx.Done. The ticker is stopped on exit so the goroutine
-// does not leak.
-//
-// Used by the watchdog driver (Task 9) to verify a restart actually
-// reached the Running state within the post-restart observation window.
-func (a *API) WaitDaemonRunning(ctx context.Context, taskName string) bool {
-	// Initial poll before starting the ticker so an already-Running
-	// daemon returns immediately.
-	if a.daemonIsRunning(ctx, taskName) {
-		return true
-	}
-	if err := ctx.Err(); err != nil {
-		return false
-	}
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-ticker.C:
-			if a.daemonIsRunning(ctx, taskName) {
-				return true
-			}
-		}
-	}
-}
-
-// daemonIsRunning is the per-poll helper for WaitDaemonRunning. It
-// performs one StatusContext call and matches on TaskName + State.
-// A status error returns false (the next tick will retry).
-func (a *API) daemonIsRunning(ctx context.Context, taskName string) bool {
-	rows, err := a.StatusContext(ctx)
-	if err != nil {
-		return false
-	}
-	for _, r := range rows {
-		if r.TaskName == taskName && r.State == "Running" {
-			return true
-		}
-	}
-	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -676,32 +214,14 @@ func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 }
 
 // ---------------------------------------------------------------------------
-// UninstallWatchdogTask + UninstallWatchdogTaskInternal (§32, §39, §63).
+// Scheduler-task management surface.
 // ---------------------------------------------------------------------------
-
-// UninstallWatchdogTask is the public idempotent removal of the
-// scheduled task that drives `mcphub watchdog --once`. Backed by
-// scheduler.Delete which already treats "task not found" as success
-// (idempotent). Used by `mcphub watchdog uninstall` (Task 10 wires
-// the CLI surface; Task 0 owns the API contract).
-//
-// Per §64: the CLI `watchdog uninstall` command adds an interactive
-// confirm + `--yes` flag + non-TTY exit-6. Those concerns belong to
-// the CLI layer; this API method is the unconditional execution path
-// used by both the public uninstall and any future scripted callers.
-func (a *API) UninstallWatchdogTask() error {
-	sch, err := newScheduler()
-	if err != nil {
-		return err
-	}
-	return sch.Delete(WatchdogTaskName)
-}
 
 // ListManagedTasks returns the raw scheduler view of every task
 // whose name starts with `mcp-local-hub-`. Used by the CLI partial-
 // uninstall gate (Codex bot P2) which must determine the post-
 // uninstall remaining-server set before deciding whether to remove
-// the global watchdog.
+// the hub-wide maintenance tasks (liveness / legacy watchdog).
 //
 // Routes through the schedulerFactoryFn seam so test callers can
 // drive deterministic returns without spinning up the real Task
@@ -719,119 +239,6 @@ func (a *API) ListManagedTasks() ([]scheduler.TaskStatus, error) {
 	return sch.List("mcp-local-hub-")
 }
 
-// InstallWatchdogTask is the public idempotent install of the scheduled
-// task that drives `mcphub watchdog --once` per watchdog plan v13 Task 8.
-//
-// Steps:
-//
-//  1. Resolve the canonical mcphub path via canonicalMcphubPathFn (the
-//     same seam the XML validator uses, so install + revalidation agree).
-//  2. Resolve the current per-user principal via currentWindowsUserFn
-//     (strips DOMAIN\\ prefix; matches the validator's principal check).
-//  3. Compute the working directory as the directory containing the
-//     canonical exe (filepath.Dir). Tasks invoked by Task Scheduler
-//     get a deterministic cwd this way; relative paths inside the
-//     watchdog driver behave the same on logon-trigger and 5-min
-//     repetition runs.
-//  4. Build the canonical XML via scheduler.BuildWatchdogXML — function
-//     is pure for fixed inputs, so two calls produce byte-identical XML.
-//  5. Hand the XML body to scheduler.ImportXML, which on Windows pipes it
-//     to `schtasks /Create /XML /TN <name> /F`. The /F flag makes this
-//     idempotent: re-running install overwrites the existing task without
-//     a "task already exists" error.
-//
-// Re-uses the canonicalMcphubPathFn / currentWindowsUserFn seams that
-// already exist for the XML validator (Task 6) so install and validation
-// share one source-of-truth for both fields.
-//
-// Errors propagate verbatim — failure at any step aborts before the next.
-// In particular, a path or user resolution failure short-circuits before
-// any scheduler call, so the scheduled task is never partially installed.
-//
-// CLI-level concerns (admin elevation refusal per §42, audit entry per
-// §10/§61, interactive confirm) live in the CLI layer (Task 9 / Task 10);
-// this API method is the unconditional execution path.
-func (a *API) InstallWatchdogTask() error {
-	canonicalExe, err := canonicalMcphubPathFn()
-	if err != nil {
-		return err
-	}
-	userName, err := currentWindowsUserFn()
-	if err != nil {
-		return err
-	}
-	workingDir := filepath.Dir(canonicalExe)
-	xmlDoc := scheduler.BuildWatchdogXML(canonicalExe, workingDir, userName)
-
-	sch, err := newScheduler()
-	if err != nil {
-		return err
-	}
-	return sch.ImportXML(WatchdogTaskName, []byte(xmlDoc))
-}
-
-// UninstallWatchdogTaskInternal is the typed-reason variant called
-// ONLY by the self-quarantine path (§39). Writes a sealed audit entry
-// with Action="watchdog-self-quarantined" + Reason=<enum-string-value>
-// per §63 v12 canonical contract.
-//
-// Audit-then-delete ordering: emit audit BEFORE calling scheduler.Delete
-// so a delete failure still leaves a forensic record. Audit-write
-// failures are surfaced to the caller (the watchdog driver in Task 9
-// is responsible for the §38 audit-degraded fallback cascade).
-//
-// TODO(task 3): the audit-write path currently routes through the
-// appendIntentAuditFn seam. When Task 3 (intent_audit.go) lands, the
-// production AppendIntentAudit implementation should be the default
-// behind that seam. The (*API).UninstallWatchdogTaskInternal contract
-// — Action literal, Reason enum string — must remain stable.
-func (a *API) UninstallWatchdogTaskInternal(reason SelfQuarantineReason) error {
-	// Validate the reason is a known enum value. Guards against future
-	// callers passing untyped strings via reflection or downstream
-	// API misuse. Empty / unknown reasons fall back to a generic label.
-	if !isKnownQuarantineReason(reason) {
-		// Don't reject — record the unknown reason verbatim. Forensic
-		// visibility beats fail-closed here; the audit trail will show
-		// exactly what the caller passed.
-	}
-
-	// Task 3 wired AppendIntentAudit behind the appendAudit dispatcher
-	// via init() in intent_audit.go. Caller-fingerprint fields (CallerPID,
-	// CallerExe, CallerStartTime, CallerUser) are auto-populated by
-	// AppendIntentAudit; we only set the canonical contract fields here
-	// (Action literal, Task identity, Reason enum value, Priority high).
-	entry := IntentAuditEntry{
-		TS:       time.Now().UTC(),
-		Action:   "watchdog-self-quarantined",
-		Task:     WatchdogTaskName,
-		Reason:   string(reason),
-		Priority: "high",
-	}
-	if err := appendAudit(entry); err != nil {
-		// §38 v9: audit-degraded cascade lives in Task 3 + driver. For
-		// Task 0 we surface the failure verbatim; the driver will
-		// translate into the watchdog.log + stderr + eventlog cascade.
-		return err
-	}
-
-	sch, err := newScheduler()
-	if err != nil {
-		return err
-	}
-	return sch.Delete(WatchdogTaskName)
-}
-
-// isKnownQuarantineReason returns true for declared SelfQuarantineReason
-// constants. Case-sensitive exact match.
-func isKnownQuarantineReason(r SelfQuarantineReason) bool {
-	switch r {
-	case QuarantineFourStrikes30Min:
-		return true
-	default:
-		return false
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Internal helpers.
 // ---------------------------------------------------------------------------
@@ -845,68 +252,13 @@ func newScheduler() (scheduler.Scheduler, error) {
 	return scheduler.New()
 }
 
-// lazyProxyTaskNamePrefix is the bare (no leading-backslash) prefix
-// for installed workspace-scoped lazy-proxy tasks. The Windows scheduler
-// stores the canonical name with a leading "\" but List filters on the
-// trim-prefix form (see scheduler_windows.go::List + install.go:1650).
-const lazyProxyTaskNamePrefix = "mcp-local-hub-lsp-"
-
-// hasInstalledWorkspaceScopedDaemon reports whether at least one
-// `mcp-local-hub-lsp-*` task is currently installed in the host
-// scheduler. This is the installed-task gate per Codex bot PR #135
-// round 3 P1 — the watchdog tick fail-closes on workspace-registry
-// errors only for hosts that actually depend on the registry.
-//
-// Failure semantics: if the scheduler factory cannot produce a
-// scheduler (Linux/macOS where the production factory returns
-// "not implemented", or any transient construction failure) OR
-// the List call itself errors, return false. Returning false here
-// is the conservative direction: the watchdog already has nothing
-// it can do without a working scheduler, and downgrading the gate
-// to fail-benignly on registry errors gives global-only hosts the
-// auto-recovery the bot requested. The alternative ("fail closed
-// on scheduler probe failure") would be a strict regression
-// relative to round 2 — registry errors would still abort the
-// tick on hosts that have no lazy-proxy tasks at all.
-func hasInstalledWorkspaceScopedDaemon() bool {
-	sch, err := newScheduler()
-	if err != nil {
-		return false
-	}
-	tasks, err := sch.List(lazyProxyTaskNamePrefix)
-	if err != nil {
-		return false
-	}
-	return len(tasks) > 0
-}
-
-// appendAudit is the package-level audit dispatcher. Routes through
-// the appendIntentAuditFn seam if set, otherwise returns a sentinel
-// error indicating Task 3 has not yet wired the production path.
-//
-// TODO(task 3): set appendIntentAuditFn to the real AppendIntentAudit
-// implementation in an init() inside intent_audit.go (Task 3 owner).
+// appendAudit is the package-level audit dispatcher. Routes through the
+// appendIntentAuditFn seam, which intent_audit.go's init() binds to the
+// production AppendIntentAudit. Before that binding it is a no-op rather
+// than fail-closed.
 func appendAudit(e IntentAuditEntry) error {
 	if appendIntentAuditFn != nil {
 		return appendIntentAuditFn(e)
 	}
-	// Production: until Task 3 lands, treat audit as a no-op rather
-	// than fail-closed. The watchdog driver (Task 9) refuses to emit
-	// UninstallWatchdogTaskInternal calls until Task 3 ships, so this
-	// fallback is unreachable in supported deployment timelines.
 	return nil
-}
-
-// trimTaskPrefix is a tiny helper kept here in case future Task 0+
-// consumers need to strip the leading backslash. Task Scheduler returns
-// names with a backslash (\mcp-local-hub-X); manifest-derived names
-// omit it. The Task 0 implementation prefers to keep the backslash on
-// registry/snapshot lookups so callers don't have to normalize at every
-// call site.
-//
-// Currently unused inside Task 0; kept exported for Task 1+ readers.
-//
-//nolint:unused // referenced by later watchdog tasks per plan v13.
-func trimTaskPrefix(name string) string {
-	return strings.TrimPrefix(name, "\\")
 }

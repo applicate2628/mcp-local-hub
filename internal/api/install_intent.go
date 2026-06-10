@@ -512,8 +512,9 @@ func (a *API) recordRegisterIntentForTask(taskName string, w io.Writer) {
 	// without the leading backslash (e.g. "mcp-local-hub-lsp-...").
 	// Codex deep-sec PR #135 Finding 1 fixed the original key-mismatch
 	// bug: WriteDaemonIntent now prepends the canonical "\" before
-	// storage so the entry shape matches recovery.go's lookup
-	// (row.TaskName from Status() includes the leading backslash).
+	// storage so the entry shape matches the supervisor reconcile loop's
+	// lookup (internal/cli/supervise_reconcile.go; row.TaskName carries
+	// the leading backslash).
 	// Callers may pass either shape; canonicalIntentTaskKey enforces
 	// the storage invariant.
 	canonical := canonicalIntentTaskKey(taskName)

@@ -429,9 +429,10 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	scheduledTasks := map[string]bool{}
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
-		if normalized == strings.TrimPrefix(api.WatchdogTaskName, "\\") {
-			continue
-		}
+		// v0.6 Phase D: the `\mcp-local-hub-watchdog` skip was dropped with
+		// the watchdog engine. A leftover watchdog (or the liveness) task
+		// cannot false-match a real manifest's `<server>-<daemon>` lookup in
+		// manifestHasScheduledDaemon, so no per-task skip is needed for them.
 		if normalized == api.WeeklyRefreshTaskName {
 			continue
 		}
@@ -680,16 +681,11 @@ var (
 //     references ~/.local/bin/mcphub.exe by absolute path, so they
 //     pick up the NEW binary automatically.
 //
-// Watchdog interleaving. The watchdog scheduled task runs every 5 min.
-// The upgrade window (Stop → Bootstrap → Restart) is sub-second in
-// the steady state, so a watchdog tick landing inside it is rare. If
-// one DOES land, the watchdog spawns `mcphub watchdog --once` from
-// the OLD binary, restarts a daemon, re-locks the canonical path,
-// and Bootstrap fails with `target in use`. The operator's recovery
-// is identical to step 2 failure: stop the daemon manually, rerun
-// --upgrade. A "disable watchdog during upgrade" dance would add
-// two new failure modes (re-enable might fail) for a tiny edge case;
-// not worth it for the minimal fix.
+// (Historical note: pre-v0.6 the watchdog scheduled task ran every 5
+// min and could interleave with this upgrade window, re-locking the
+// canonical path from the OLD binary. The v0.6 redesign deleted the
+// watchdog engine, so that interleaving race is gone; the supervisor
+// owns daemon revival and the liveness task owns owner-relaunch.)
 //
 // Partial restart failure. If Bootstrap succeeds but RestartAll
 // reports per-task failures, the operator is in a state where the

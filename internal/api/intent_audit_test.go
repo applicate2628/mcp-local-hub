@@ -727,8 +727,8 @@ func TestIntentAudit_PriorityField_DefaultEmptyOmitted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Wired through Task 0 seam: appendIntentAuditFn binds the production
-// AppendIntentAudit so UninstallWatchdogTaskInternal reaches real disk
+// Wired through the appendIntentAuditFn seam: it binds the production
+// AppendIntentAudit so the dispatcher reaches real disk.
 // ---------------------------------------------------------------------------
 
 func TestIntentAudit_WiresTask0Seam(t *testing.T) {
@@ -736,9 +736,8 @@ func TestIntentAudit_WiresTask0Seam(t *testing.T) {
 	dir := intentAuditTestHelper(t)
 
 	// Reset the seam so init() binding is the only source. We directly
-	// test that the production AppendIntentAudit is now what
-	// UninstallWatchdogTaskInternal reaches by going through the
-	// dispatcher.
+	// test that the production AppendIntentAudit is now what the
+	// dispatcher reaches.
 	if appendIntentAuditFn == nil {
 		t.Fatal("appendIntentAuditFn nil; Task 3 init() must wire production AppendIntentAudit")
 	}

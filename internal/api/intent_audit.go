@@ -18,8 +18,8 @@
 //     identity preservation + truncation marker + _task_hash, 10MB JSON-
 //     Lines rotation with idempotent retry on audit-rotated self-event
 //     write failure (per §26).
-//   - RedactIntentAuditEntryForNonOwner display helper (used by Task 9
-//     watchdog status command) — exempts system entries (§37, §48).
+//   - RedactIntentAuditEntryForNonOwner display helper — exempts system
+//     entries (§37, §48).
 //   - currentOSUser helper consumed by both auto-fill and redaction.
 //   - The CallerStartTime() helper bound to per-OS implementations in
 //     intent_audit_caller_*.go (Windows GetProcessTimes, Linux
@@ -27,9 +27,9 @@
 //
 // Wiring:
 //
-//   - init() binds appendIntentAuditFn (Task 0 seam) to a thin adapter
-//     over (*API).AppendIntentAudit so UninstallWatchdogTaskInternal +
-//     Task 2's WriteDaemonIntent / ClearDaemonIntent reach real disk.
+//   - init() binds appendIntentAuditFn (api_surfaces.go seam) to a thin
+//     adapter over (*API).AppendIntentAudit so daemon_intent.go's
+//     WriteDaemonIntent / ClearDaemonIntent reach real disk.
 //   - Task 2 audit-write TODOs (set-intent / clear-intent) are now
 //     fulfilled by daemon_intent.go calling (*API).AppendIntentAudit.
 //
@@ -39,8 +39,8 @@
 //     targeted failures (e.g. fail only the audit-rotated self-event)
 //     by inspecting the bytes argument.
 //   - auditRotatedFailureLogFn receives the error from a failed
-//     audit-rotated self-event append. Production wires this to
-//     watchdog.log via Task 9; for Task 3 the default is silent.
+//     audit-rotated self-event append. The default is silent (the
+//     v0.4.x watchdog.log sink was deleted in v0.6 Phase D).
 //
 // Concurrency: AppendIntentAudit takes the audit-log flock before any
 // disk read (size check, rotation, append). Concurrent callers are
@@ -371,8 +371,7 @@ func NewIntentAuditEntry(opts ...IntentAuditEntryOption) IntentAuditEntry {
 
 // newSystemAuditEntry constructs a system audit entry with
 // systemEntry=true. Package-private; only the rotation path inside
-// this file and UninstallWatchdogTaskInternal (api_surfaces.go) may
-// call this. External callers cannot forge the system flag.
+// this file may call this. External callers cannot forge the system flag.
 func newSystemAuditEntry(action string, opts ...IntentAuditEntryOption) IntentAuditEntry {
 	e := IntentAuditEntry{Action: action}
 	for _, opt := range opts {
@@ -798,14 +797,13 @@ func taskHash12(task string) string {
 // ---------------------------------------------------------------------------
 
 // init binds the appendIntentAuditFn seam (api_surfaces.go) to the
-// production AppendIntentAudit so UninstallWatchdogTaskInternal +
-// daemon_intent.go's WriteDaemonIntent / ClearDaemonIntent reach the
-// real disk path. Tests in api_surfaces_test.go continue to override
-// the seam via installTestAuditFn for deterministic capture.
+// production AppendIntentAudit so daemon_intent.go's WriteDaemonIntent /
+// ClearDaemonIntent reach the real disk path. Tests in api_surfaces_test.go
+// continue to override the seam via installTestAuditFn for deterministic
+// capture.
 func init() {
 	appendIntentAuditFn = func(e IntentAuditEntry) error {
 		api := NewAPI()
 		return api.AppendIntentAudit(e)
 	}
 }
-

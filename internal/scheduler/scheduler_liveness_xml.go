@@ -2,41 +2,53 @@ package scheduler
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 )
 
+// livenessXMLEscape XML-escapes element text for the liveness task XML.
+// Migrated here from scheduler_watchdog_xml.go when the v0.6 redesign
+// (spec §5 Phase D) deleted the watchdog XML builder — this file is the
+// surviving consumer. Local to the file so the builder remains free of
+// windows-tagged-file dependencies (the broader xmlEscape lives in
+// scheduler_windows.go). encoding/xml.EscapeText handles `<`, `>`, `&`,
+// `'`, and `"`.
+func livenessXMLEscape(s string) string {
+	var out bytes.Buffer
+	_ = xml.EscapeText(&out, []byte(s))
+	return out.String()
+}
+
 // BuildLivenessXML serializes the canonical supervisor-liveness scheduled-task
 // XML (v0.6 redesign spec §15 P1-b / §5.x Phase 3a). The liveness task is a
-// minimal, additive owner-death recovery that sits ALONGSIDE the v0.4.x
-// watchdog (it is NOT a replacement; the two target disjoint things — the
-// liveness task relaunches the supervisor/GUI OWNER, the watchdog revives
-// scheduler-task DAEMONS).
+// minimal owner-death recovery: it relaunches the supervisor/GUI OWNER if it
+// dies mid-session. It is the v0.6 supervisor-era replacement for the deleted
+// v0.4.x watchdog (which revived scheduler-task DAEMONS, a job the supervisor's
+// own Job-Object reaper + reconcile loop now owns).
 //
 // The task drives `mcphub supervise --ensure-alive` every ~1 minute via a
 // CalendarTrigger+Repetition pair, plus a LogonTrigger so the loop resumes
-// immediately after a cold boot. Structurally it mirrors BuildWatchdogXML
-// (scheduler_watchdog_xml.go) with three load-bearing differences:
+// immediately after a cold boot. Load-bearing settings:
 //
 //  1. <Interval>PT1M</Interval> — the ~1-min cadence the Phase-3a done-gate
-//     specifies ("back within ≈1 min"), vs the watchdog's PT5M.
+//     specifies ("back within ≈1 min").
 //  2. <ExecutionTimeLimit>PT1M</ExecutionTimeLimit> — a single ensure-alive
 //     tick is a flock probe + (rarely) one schtasks /Run; a 1-min cap is the
 //     OS-level safety net behind the action's own fast return.
-//  3. <Arguments>supervise --ensure-alive</Arguments> — the action is the new
-//     minimal liveness probe, NOT `watchdog --once`.
+//  3. <Arguments>supervise --ensure-alive</Arguments> — the action is the
+//     minimal liveness probe.
 //
 // MultipleInstancesPolicy=IgnoreNew matches the watchdog: the ensure-alive
 // action is idempotent (the supervisor/GUI singleton locks make a relaunch a
 // no-op when one is already coming up), and IgnoreNew at the scheduler level
 // is the second layer of defense against a tick stacking on a slow prior tick.
 //
-// Inputs are XML-escaped at element-text level (reusing watchdogXMLEscape from
-// scheduler_watchdog_xml.go). The function is pure: repeated calls with the
-// same inputs return identical bytes (no time.Now() in the body, no ambient
-// input).
+// Inputs are XML-escaped at element-text level (livenessXMLEscape, local to
+// this file). The function is pure: repeated calls with the same inputs return
+// identical bytes (no time.Now() in the body, no ambient input).
 //
 // Cross-platform: the body is pure string composition with no Windows-specific
-// dependencies, so it lives in a non-tagged file (same as BuildWatchdogXML).
+// dependencies, so it lives in a non-tagged file.
 // The scheduled-task install side fails through scheduler.New() returning
 // "not implemented" on Linux/macOS.
 func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
@@ -65,7 +77,7 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// /Create rejects the install with ERROR: Access is denied on a
 	// non-elevated shell (same trap the watchdog XML documents).
 	buf.WriteString("    <LogonTrigger>\n")
-	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", watchdogXMLEscape(userName)))
+	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(userName)))
 	buf.WriteString("      <Enabled>true</Enabled>\n")
 	buf.WriteString("    </LogonTrigger>\n")
 	buf.WriteString("  </Triggers>\n")
@@ -74,7 +86,7 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// daemon tasks.
 	buf.WriteString("  <Principals>\n")
 	buf.WriteString("    <Principal id=\"Author\">\n")
-	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", watchdogXMLEscape(userName)))
+	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(userName)))
 	buf.WriteString("      <LogonType>InteractiveToken</LogonType>\n")
 	buf.WriteString("      <RunLevel>LeastPrivilege</RunLevel>\n")
 	buf.WriteString("    </Principal>\n")
@@ -95,9 +107,9 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// Actions — bound to the per-user "Author" principal. The action is
 	// `supervise --ensure-alive` (the new minimal liveness probe).
 	buf.WriteString("  <Actions Context=\"Author\">\n    <Exec>\n")
-	buf.WriteString(fmt.Sprintf("      <Command>%s</Command>\n", watchdogXMLEscape(canonicalExe)))
+	buf.WriteString(fmt.Sprintf("      <Command>%s</Command>\n", livenessXMLEscape(canonicalExe)))
 	buf.WriteString("      <Arguments>supervise --ensure-alive</Arguments>\n")
-	buf.WriteString(fmt.Sprintf("      <WorkingDirectory>%s</WorkingDirectory>\n", watchdogXMLEscape(workingDir)))
+	buf.WriteString(fmt.Sprintf("      <WorkingDirectory>%s</WorkingDirectory>\n", livenessXMLEscape(workingDir)))
 	buf.WriteString("    </Exec>\n  </Actions>\n")
 	buf.WriteString("</Task>\n")
 

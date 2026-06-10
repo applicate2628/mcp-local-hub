@@ -183,10 +183,9 @@ func sanitizeUTF8(s string) string {
 }
 
 // mcphubURIPrefix is the leading byte sequence every legitimate
-// mcp-local-hub-owned task URI begins with. Matches the prefix used
-// by classifyOwnedTaskName in internal/api/watchdog_xml_validator.go
-// so the two filters stay aligned; a future rename in either place
-// must update both.
+// mcp-local-hub-owned task URI begins with. It scopes the windows
+// enumerate filters (see the HasPrefix checks below) so only
+// mcp-local-hub tasks are surfaced.
 const mcphubURIPrefix = `\mcp-local-hub-`
 
 // splitConcatenatedTaskXML splits a `schtasks /Query /XML ONE` output
@@ -267,8 +266,8 @@ func splitConcatenatedTaskXML(stream string) []string {
 // — the declaration mirrors the in-memory wide-char form, but the
 // on-the-wire bytes are not UTF-16 wide chars). We strip the PI
 // before decoding so encoding/xml's default UTF-8 reader handles
-// the ASCII subset cleanly. This mirrors the api package's
-// stripXMLDeclaration helper in watchdog_xml_validator.go.
+// the ASCII subset cleanly. This mirrors the
+// stripXMLDeclaration helper in internal/migration/classify_xml.go.
 type enumXMLTask struct {
 	XMLName          xml.Name             `xml:"Task"`
 	RegistrationInfo enumXMLRegInfo       `xml:"RegistrationInfo"`
@@ -347,7 +346,7 @@ func decodeOneTask(raw string) (TaskStatus, bool, error) {
 
 // stripEnumerateXMLDeclaration drops a leading `<?xml ... ?>` PI (and
 // any leading BOM / whitespace) so encoding/xml's default UTF-8
-// reader handles the ASCII body. Mirrors api/watchdog_xml_validator.go
+// reader handles the ASCII body. Mirrors internal/migration/classify_xml.go
 // stripXMLDeclaration; duplicated here so the scheduler package
 // stays free of cross-package coupling for what is otherwise a
 // 30-line helper.

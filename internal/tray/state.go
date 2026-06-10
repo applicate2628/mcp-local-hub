@@ -65,8 +65,8 @@ func Aggregate(rows []api.DaemonStatus) TrayState {
 //
 //  1. Per-row failure detection: a row trips the "looks like a
 //     failure" predicate when api.IsRealFailure(LastResult) returns
-//     true (canonical classifier shared with the watchdog —
-//     see internal/api/recovery.go) OR the state string contains
+//     true (canonical classifier shared with the supervisor —
+//     see internal/api/task_classifiers.go) OR the state string contains
 //     "fail" (defensive; deriveState emits "Failed" historically and
 //     future labels like "FailedToLaunch" should keep tripping).
 //  2. Failure suppression by intent: when a row trips (1), look up

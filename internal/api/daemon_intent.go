@@ -257,15 +257,16 @@ type IntentReadResult struct {
 // canonicalIntentTaskKey returns the canonical leading-backslash form of
 // taskName so every intent file write/read lands on a single key shape.
 //
-// Background: scheduler.List() and the watchdog driver's Status() rows
+// Background: scheduler.List() and the supervisor reconcile loop's rows
 // expose Windows Task Scheduler names with the leading "\" the OS persists
-// (e.g. "\mcp-local-hub-memory-default"). recovery.go indexes the intent
-// file via `intent.Tasks[row.TaskName]`, so any caller that wrote intent
+// (e.g. "\mcp-local-hub-memory-default"). The supervisor reconcile loop
+// (internal/cli/supervise_reconcile.go) indexes the intent file via
+// `intent.Tasks[row.TaskName]`, so any caller that wrote intent
 // under the bare form (e.g. install/uninstall paths that manifest-derive
-// their task names) used to slip past the lookup → the watchdog auto-revived
-// a daemon the operator had just stopped/uninstalled. Per the security
-// review, Option A normalizes at this single boundary instead of asking
-// every call site to remember.
+// their task names) used to slip past the lookup → the reconcile loop
+// revived a daemon the operator had just stopped/uninstalled. Per the
+// security review, Option A normalizes at this single boundary instead of
+// asking every call site to remember.
 //
 // The contract is purely lexical: prepend "\" if missing. Names that
 // already have the leading backslash are returned unchanged. Empty input
@@ -749,9 +750,10 @@ func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string
 
 	// Codex deep-sec PR #135 Finding 1: normalize the storage key to the
 	// canonical leading-backslash form BEFORE any persistence work so every
-	// intent record lands on the same key shape that recovery.go indexes
-	// (`intent.Tasks[row.TaskName]` where row.TaskName comes from Status()
-	// with the leading "\").
+	// intent record lands on the same key shape that the supervisor
+	// reconcile loop (internal/cli/supervise_reconcile.go) indexes
+	// (`intent.Tasks[row.TaskName]` where row.TaskName carries the
+	// leading "\").
 	//
 	// PR #135 round 3 P2: cap-check on the CANONICAL key, not the raw
 	// input. canonicalIntentTaskKey can prepend exactly one byte ("\\"),
