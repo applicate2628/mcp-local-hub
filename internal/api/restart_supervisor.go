@@ -175,7 +175,8 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 			// StIdle→StSpawning. This mirrors the stop side, which is
 			// synchronous via reconcile for exactly this cache-vs-disk
 			// reason (#279 fable r3 F-A).
-			if _, reconcileErr := supervisorReconcileApplyFn(ctx, true); reconcileErr != nil {
+			resp, reconcileErr := supervisorReconcileApplyFn(ctx, true)
+			if reconcileErr != nil {
 				// The supervisor was alive ms ago (it just refused the
 				// respawn), so an ErrSupervisorIPCUnavailable here is no
 				// different from any other reconcile failure: plain error
@@ -190,9 +191,24 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 				})
 				continue
 			}
-			// reconcile --apply accepted: the spawn is dispatched through
-			// the SM (mirror the stop side's success-row semantics).
-			results = append(results, RestartResult{TaskName: d.TaskName})
+			// reconcile --apply transport accepted — but the supervisor's
+			// drift classifier posts EvIntentUpdate for THIS target only
+			// when it is a PROXY-SHAPED supervisor-owned descriptor
+			// (isSupervisorOwnedDescriptorForReconcile in internal/cli/
+			// supervise_reconcile_ipc.go — `daemon workspace-proxy` /
+			// `daemon serena-proxy` argv). A REGULAR global daemon
+			// (`daemon --server X --daemon Y`) classifies
+			// needs_manual_review on the spawn direction, so the supervisor
+			// posts NOTHING for it and the spawn converges only via the
+			// ~60s IntentWatcher (Desired=running is durably on disk,
+			// verified above). Inspect this target's drift entry so the row
+			// states the truth: a post_ev_intent_update entry → plain
+			// success row (truly dispatched, as before); otherwise →
+			// success-but-deferred row (empty Err + Code =
+			// DeferredToIntentWatcherCode). This is the proxy-vs-regular
+			// split eaf7a94's "spawn is dispatched through the SM" claim
+			// over-generalized (#279 opus gate).
+			results = append(results, supervisorDispatchRowForTarget(d.TaskName, "", resp.Drift))
 			continue
 		}
 		// QUARANTINED (force-gate holds) and any other failure: error row,

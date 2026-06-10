@@ -197,3 +197,119 @@ func TestReconcileIPC_SupervisorOwnedStoppedIntentQuarantinedStaysNoOp(t *testin
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// regularGlobalDaemonIntentForReconcileTest builds a one-daemon intent whose
+// descriptor is a REGULAR global daemon (`daemon --server foo --daemon
+// default`), so isSupervisorOwnedDescriptorForReconcile is FALSE for it.
+// This is the shape memory / paper-search / time daemons carry — the case
+// the supervisor's reconcile classifier does NOT post EvIntentUpdate for.
+func regularGlobalDaemonIntentForReconcileTest(taskName string) *api.SupervisorIntentFile {
+	return &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName: taskName,
+				Server:   "foo",
+				Daemon:   "default",
+				Command:  "mcphub",
+				Args:     []string{"daemon", "--server", "foo", "--daemon", "default"},
+				Port:     9242,
+			},
+		},
+	}
+}
+
+// TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM documents the
+// CURRENT supervisor-side reality the api-side stop/restart paths now report
+// honestly as DeferredToIntentWatcherCode (#279 opus gate): a REGULAR global
+// daemon descriptor is NOT supervisor-owned to isSupervisorOwnedDescriptorFor
+// Reconcile (that predicate is true ONLY for proxy-shaped argv), so the drift
+// classifier posts NOTHING for it on either direction:
+//
+//   - terminate direction (stopped intent + live SM) → no_op, AppliedCount=0
+//     (the post_ev gate requires supervisorOwned, which a regular daemon is
+//     not). This is the case the api side now reports as deferred-to-watcher
+//     rather than as a synchronous SM dispatch.
+//   - spawn direction (running intent + missing scheduler row) →
+//     needs_manual_review (legacy missing-scheduler-task semantics —
+//     broadening this to post_ev for regular daemons belongs to Phase B/F of
+//     the redesign spec, NOT this honesty fix).
+//
+// Either way the daemon converges only via the supervisor's ~60s
+// IntentWatcher; this test pins that no EvIntentUpdate is posted in apply
+// mode so a future classifier broadening cannot silently regress the parked
+// boundary without flipping this test.
+func TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+
+	t.Run("terminate direction stopped intent live SM stays no_op", func(t *testing.T) {
+		fx := newReconcileTestFixture(t, regularGlobalDaemonIntentForReconcileTest(taskName))
+		seedStoppedDaemonIntentForReconcileTest(t, fx.deps.stateDir, taskName)
+		// Live SM state; no scheduler row (mirrors a regular daemon the
+		// supervisor is actively running but which has no scheduler task).
+		fx.ctrl.smStates.Store(taskName, api.StRunning)
+		installSchedulerListFake(t, nil)
+
+		req := api.IPCRequest{ID: 91, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+		conn := newFakeIPCConn()
+		if err := handleReconcile(conn, req, fx.deps); err != nil {
+			t.Fatalf("handleReconcile: %v", err)
+		}
+		_, body := decodeReconcileResponse(t, conn)
+		if len(body.Drift) != 1 {
+			t.Fatalf("drift = %+v, want exactly one row", body.Drift)
+		}
+		entry := body.Drift[0]
+		if entry.Action != api.ReconcileActionNoOp {
+			t.Errorf("Action = %q, want %q (regular daemon: terminate gate requires supervisorOwned)",
+				entry.Action, api.ReconcileActionNoOp)
+		}
+		if entry.IntentDesired != api.ReconcileIntentDesiredStopped {
+			t.Errorf("IntentDesired = %q, want %q", entry.IntentDesired, api.ReconcileIntentDesiredStopped)
+		}
+		if body.AppliedCount != 0 {
+			t.Fatalf("AppliedCount = %d, want 0 (nothing posted for a regular daemon)", body.AppliedCount)
+		}
+		select {
+		case ev := <-fx.postedCh:
+			t.Fatalf("unexpected event posted for regular daemon terminate: %+v", ev)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+
+	t.Run("spawn direction running intent missing scheduler stays needs_manual_review", func(t *testing.T) {
+		fx := newReconcileTestFixture(t, regularGlobalDaemonIntentForReconcileTest(taskName))
+		// No daemon-intent override → computeIntentDesired defaults to
+		// running (the mixed-bootstrap default). No scheduler row → missing.
+		installSchedulerListFake(t, nil)
+
+		req := api.IPCRequest{ID: 92, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+		conn := newFakeIPCConn()
+		if err := handleReconcile(conn, req, fx.deps); err != nil {
+			t.Fatalf("handleReconcile: %v", err)
+		}
+		_, body := decodeReconcileResponse(t, conn)
+		if len(body.Drift) != 1 {
+			t.Fatalf("drift = %+v, want exactly one row", body.Drift)
+		}
+		entry := body.Drift[0]
+		if entry.SchedulerState != api.ReconcileSchedulerStateMissing {
+			t.Errorf("SchedulerState = %q, want %q", entry.SchedulerState, api.ReconcileSchedulerStateMissing)
+		}
+		if entry.IntentDesired != api.ReconcileIntentDesiredRunning {
+			t.Errorf("IntentDesired = %q, want %q", entry.IntentDesired, api.ReconcileIntentDesiredRunning)
+		}
+		if entry.Action != api.ReconcileActionNeedsManualReview {
+			t.Errorf("Action = %q, want %q (regular daemon spawn: legacy missing-scheduler-task semantics)",
+				entry.Action, api.ReconcileActionNeedsManualReview)
+		}
+		if body.AppliedCount != 0 {
+			t.Fatalf("AppliedCount = %d, want 0 (needs_manual_review never dispatches)", body.AppliedCount)
+		}
+		select {
+		case ev := <-fx.postedCh:
+			t.Fatalf("unexpected event posted for regular daemon spawn: %+v", ev)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+}

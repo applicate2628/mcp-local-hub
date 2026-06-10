@@ -409,12 +409,20 @@ func TestRestartQuarantinedDoesNotWriteRunningIntent(t *testing.T) {
 // The respawn dial observes the still-stopped intent (the write happens
 // AFTER the first refusal, never for a quarantined daemon); the reconcile
 // stub asserts apply=true AND that Desired=running is already on disk
-// before it returns. Exactly 1 respawn dial + 1 reconcile call; one
-// success row. The supervisor half of this path (reconcile re-reading disk
-// and applyReconcileDrift refreshing the cache BEFORE the spawn-direction
-// post) is covered by internal/cli's TestReconcileIPC_SupervisorOwnedMissing
-// TaskAppliesStart + the applyReconcileDrift cache-refresh ordering — not
-// duplicated here.
+// before it returns. The supervisor half of this path (reconcile re-reading
+// disk and applyReconcileDrift refreshing the cache BEFORE the
+// spawn-direction post) is covered by internal/cli's
+// TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart + the
+// applyReconcileDrift cache-refresh ordering — not duplicated here.
+//
+// #279 opus gate: the reconcile stub now returns REALISTIC per-target
+// drift and the test exercises BOTH ownership shapes — a regular
+// `time-default` global daemon (classifies needs_manual_review on the
+// spawn direction; the supervisor posts NOTHING, so it converges only via
+// the ~60s IntentWatcher → success-but-deferred row) and a proxy-shaped
+// `time-proxy` descriptor (classifies post_ev_intent_update; truly
+// dispatched → plain success row). One respawn dial + one reconcile call
+// PER target.
 func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)
@@ -422,47 +430,61 @@ func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 	t.Setenv("LOCALAPPDATA", stateDir)
 	t.Setenv("XDG_STATE_HOME", stateDir)
 
-	const taskName = `\mcp-local-hub-time-default`
+	const regularTask = `\mcp-local-hub-time-default`
+	const proxyTask = `\mcp-local-hub-time-proxy`
 	intent := &SupervisorIntentFile{
 		Version: 1,
-		Daemons: []SupervisorDaemon{{
-			TaskName: taskName,
-			Server:   "time",
-			Daemon:   "default",
-			Port:     9128,
-		}},
+		Daemons: []SupervisorDaemon{
+			{TaskName: regularTask, Server: "time", Daemon: "default", Port: 9128},
+			{TaskName: proxyTask, Server: "time", Daemon: "proxy", Port: 9129,
+				Args: []string{"daemon", "serena-proxy"}},
+		},
 	}
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
-		Desired:   IntentDesiredStopped,
-		Reason:    IntentReasonUserStop,
-		UpdatedAt: time.Now().UTC(),
-	}, auditWhoMcphubStop); err != nil {
-		t.Fatalf("seed stopped daemon-intent: %v", err)
+	for _, tn := range []string{regularTask, proxyTask} {
+		if err := NewAPI().WriteDaemonIntent(tn, DaemonIntent{
+			Desired:   IntentDesiredStopped,
+			Reason:    IntentReasonUserStop,
+			UpdatedAt: time.Now().UTC(),
+		}, auditWhoMcphubStop); err != nil {
+			t.Fatalf("seed stopped daemon-intent for %s: %v", tn, err)
+		}
 	}
 
 	var dials int
-	var dialDesired string
+	dialDesired := map[string]string{}
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		dials++
-		dialDesired = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+		dialDesired[taskName] = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
 		return RespawnResult{Success: false, Code: RespawnRefusedIntentStoppedCode, Message: "respawn refused: daemon-intent says Desired=stopped"}, nil
 	})
 	defer restoreRespawn()
 
 	var reconcileCalls int32
 	var gotApply bool
-	var intentDesiredAtReconcile string
 	restoreReconcile := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		atomic.AddInt32(&reconcileCalls, 1)
 		gotApply = apply
-		// The running intent must already be on disk when the reconcile
-		// fires — the reconcile reads daemon-intent.json fresh and would
-		// otherwise classify this task as still-stopped and post nothing.
-		intentDesiredAtReconcile = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
-		return ReconcileResponse{AppliedCount: 1}, nil
+		// The running intent for the target being dispatched must already
+		// be on disk when the reconcile fires — the reconcile reads
+		// daemon-intent.json fresh and would otherwise classify the task as
+		// still-stopped and post nothing.
+		if d := NewAPI().ReadDaemonIntent().File.Tasks[regularTask].Desired; d != IntentDesiredRunning {
+			// The loop dispatches the regular task first; by the time ANY
+			// reconcile fires, that task's running intent is on disk.
+			t.Errorf("intent at reconcile time = %q, want %q (running must be on disk BEFORE the reconcile)", d, IntentDesiredRunning)
+		}
+		// Realistic drift: only the proxy descriptor was posted; the
+		// regular daemon converges via the IntentWatcher.
+		return ReconcileResponse{
+			AppliedCount: 1,
+			Drift: []DriftEntry{
+				{TaskName: regularTask, Action: ReconcileActionNeedsManualReview},
+				{TaskName: proxyTask, Action: ReconcileActionPostEvIntentUpdate},
+			},
+		}, nil
 	})
 	defer restoreReconcile()
 
@@ -471,33 +493,56 @@ func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 		t.Fatalf("restartSupervisorOwnedDaemons: %v", err)
 	}
 	if !handled {
-		t.Fatal("handled=false; supervisor-owned time daemon should be restarted")
+		t.Fatal("handled=false; supervisor-owned time daemons should be restarted")
 	}
-	if dials != 1 {
-		t.Fatalf("respawn dials = %d; want exactly 1 (refuse → write running → reconcile, NO redial)", dials)
+	if dials != 2 {
+		t.Fatalf("respawn dials = %d; want exactly 2 (one per target: refuse → write running → reconcile, NO redial)", dials)
 	}
-	if dialDesired != IntentDesiredStopped {
-		t.Fatalf("intent at the respawn dial = %q, want %q (no intent write before the dial — only after a stopped-intent refusal)",
-			dialDesired, IntentDesiredStopped)
+	for _, tn := range []string{regularTask, proxyTask} {
+		if dialDesired[tn] != IntentDesiredStopped {
+			t.Fatalf("intent at the respawn dial for %s = %q, want %q (no intent write before the dial — only after a stopped-intent refusal)",
+				tn, dialDesired[tn], IntentDesiredStopped)
+		}
 	}
-	if got := atomic.LoadInt32(&reconcileCalls); got != 1 {
-		t.Fatalf("reconcile calls = %d; want exactly 1 (the dispatch replaces the redial)", got)
+	if got := atomic.LoadInt32(&reconcileCalls); got != 2 {
+		t.Fatalf("reconcile calls = %d; want exactly 2 (one dispatch per target, replacing the redial)", got)
 	}
 	if !gotApply {
 		t.Fatal("reconcile dialed with apply=false, want apply=true")
 	}
-	if intentDesiredAtReconcile != IntentDesiredRunning {
-		t.Fatalf("intent at reconcile time = %q, want %q (running intent must be on disk BEFORE the reconcile)",
-			intentDesiredAtReconcile, IntentDesiredRunning)
-	}
 	// Post-call the running intent stays on disk so the IntentWatcher
 	// converges even if the supervisor missed the EvIntentUpdate.
-	after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
-	if after != IntentDesiredRunning {
-		t.Fatalf("daemon-intent after dispatch = %q, want %q", after, IntentDesiredRunning)
+	for _, tn := range []string{regularTask, proxyTask} {
+		if after := NewAPI().ReadDaemonIntent().File.Tasks[tn].Desired; after != IntentDesiredRunning {
+			t.Fatalf("daemon-intent after dispatch for %s = %q, want %q", tn, after, IntentDesiredRunning)
+		}
 	}
-	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
-		t.Fatalf("results = %+v, want one supervisor success row", results)
+	if len(results) != 2 {
+		t.Fatalf("results = %+v, want two supervisor rows (regular + proxy)", results)
+	}
+	byTask := map[string]RestartResult{}
+	for _, r := range results {
+		byTask[r.TaskName] = r
+	}
+	// Regular daemon → watcher-deferred (empty Err + the typed Code).
+	regular, ok := byTask[regularTask]
+	if !ok {
+		t.Fatalf("missing regular-daemon row in %+v", results)
+	}
+	if regular.Err != "" {
+		t.Fatalf("regular row Err = %q, want empty (deferred is not a failure)", regular.Err)
+	}
+	if regular.Code != DeferredToIntentWatcherCode {
+		t.Fatalf("regular row Code = %q, want %q (no EvIntentUpdate posted; IntentWatcher converges)",
+			regular.Code, DeferredToIntentWatcherCode)
+	}
+	// Proxy descriptor → truly dispatched → plain success row.
+	proxy, ok := byTask[proxyTask]
+	if !ok {
+		t.Fatalf("missing proxy-daemon row in %+v", results)
+	}
+	if proxy.Err != "" || proxy.Code != "" {
+		t.Fatalf("proxy row = %+v, want plain success (empty Err + empty Code; truly dispatched)", proxy)
 	}
 }
 

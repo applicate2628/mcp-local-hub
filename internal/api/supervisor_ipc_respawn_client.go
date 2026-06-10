@@ -22,6 +22,43 @@ import (
 // (#279 fable N1).
 const RespawnRefusedIntentStoppedCode = "RESPAWN_REFUSED_INTENT_STOPPED"
 
+// DeferredToIntentWatcherCode marks a supervisor-aware stop/restart row
+// whose intent is durably recorded but whose SYNCHRONOUS reconcile
+// dispatch did NOT post EvIntentUpdate for this target — the daemon will
+// be reconciled by the supervisor's IntentWatcher within its ~60s poll
+// instead. It is set on a RestartResult with an EMPTY Err (not a
+// failure — the stop/start is committed on disk and durable), so callers
+// reading the result can tell "deferred to the watcher" apart from both
+// "synchronously dispatched" (empty Err, empty Code) and "failed" (Err
+// != "").
+//
+// WHY this exists: the supervisor's reconcile drift classifier posts
+// EvIntentUpdate only for PROXY-SHAPED supervisor-owned descriptors —
+// isSupervisorOwnedDescriptorForReconcile (internal/cli/
+// supervise_reconcile_ipc.go) is true ONLY for `daemon workspace-proxy`
+// / `daemon serena-proxy` argv. A REGULAR global daemon
+// (`daemon --server X --daemon Y` — memory, paper-search, time, …) is
+// NOT supervisorOwned to that classifier, so classifyDriftAction returns
+// needs_manual_review on the spawn direction and no_op on the terminate
+// direction (whose post_ev gate also requires supervisorOwned). Nothing
+// is posted; the daemon's stop/start converges only via the
+// IntentWatcher. Reporting a plain synchronous-success row for such a
+// daemon would be FALSE (fail-quiet) — so the caller inspects the
+// per-target drift entry and emits this Code when the entry is not a
+// post_ev_intent_update. Broadening the classifier to cover regular
+// daemons changes legacy missing-scheduler-task semantics and belongs to
+// Phase B/F of docs/superpowers/specs/2026-06-10-clean-architecture-
+// redesign.md (parked — see work-items/bugs/2026-06-10-reconcile-
+// dispatch-proxy-only-plus-quarantine-revive.md), not this honesty fix.
+//
+// Code is RestartResult.Code (json:"-"), so this introduces NO wire
+// change. schedulerBlockedRestartTaskNames (install.go) still includes
+// rows carrying this Code in the skip set — it drops only rows with
+// Err != "" AND Code == "SUPERVISOR_UNAVAILABLE" — so the legacy
+// kill/run loop keeps skipping these supervisor-owned task names
+// (intent is on disk; the watcher owns convergence; no taskkill).
+const DeferredToIntentWatcherCode = "DEFERRED_TO_INTENT_WATCHER"
+
 // RespawnResult is the operator-facing outcome of a respawn IPC call.
 // Code mirrors the supervisor-side IPC error codes so HTTP handlers
 // can map them to status codes without re-parsing strings:

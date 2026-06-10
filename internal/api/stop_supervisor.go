@@ -15,7 +15,61 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 )
+
+// supervisorDispatchRowForTarget builds the per-target RestartResult row
+// for a target whose stop/start intent was just dispatched through ONE
+// `reconcile --apply`. It is the HONESTY seam shared by both the stop
+// path (stopSupervisorOwnedDaemons) and the refused-restart branch
+// (restartSupervisorOwnedDaemons): the transport-level reconcile call
+// succeeding does NOT mean THIS target's EvIntentUpdate was posted.
+//
+// The supervisor's drift classifier only posts EvIntentUpdate for
+// PROXY-SHAPED supervisor-owned descriptors (isSupervisorOwnedDescriptor
+// ForReconcile in internal/cli/supervise_reconcile_ipc.go is true ONLY
+// for `daemon workspace-proxy` / `daemon serena-proxy` argv). A REGULAR
+// global daemon (`daemon --server X --daemon Y`) classifies
+// needs_manual_review (spawn direction) / no_op (terminate direction)
+// and gets NOTHING posted — it converges only via the supervisor's
+// ~60s IntentWatcher. So we look up THIS target's drift entry by task
+// name (normalized leading-backslash on both sides) and:
+//
+//   - Action == post_ev_intent_update → plain success row (empty Err,
+//     empty Code): the SM was actually dispatched for this target.
+//   - any other Action (needs_manual_review, no_op) OR a missing drift
+//     entry → success-but-deferred row: empty Err (the intent is durable
+//     on disk) + Code = DeferredToIntentWatcherCode, so the row is not a
+//     failure but also does not falsely claim synchronous SM dispatch.
+//
+// extraCode is OR-ed in when non-empty so the restart path can preserve
+// its RESPAWN_REFUSED_INTENT_STOPPED provenance code on a TRULY-dispatched
+// row (the stop path passes "").
+func supervisorDispatchRowForTarget(taskName, extraCode string, drift []DriftEntry) RestartResult {
+	if entry, ok := findDriftEntryForTask(taskName, drift); ok &&
+		entry.Action == ReconcileActionPostEvIntentUpdate {
+		// Truly dispatched through the SM this reconcile.
+		return RestartResult{TaskName: taskName, Code: extraCode}
+	}
+	// Not posted for this target (proxy-only classifier, or no drift
+	// entry at all): durable on disk, IntentWatcher converges within
+	// ~60s. Surface that honestly via the typed Code; Err stays empty.
+	return RestartResult{TaskName: taskName, Code: DeferredToIntentWatcherCode}
+}
+
+// findDriftEntryForTask returns the drift entry whose TaskName matches
+// the target, comparing on the bare (leading-backslash-stripped) form so
+// the api-side canonical name and the cli-side canonicalTaskNameForReconcile
+// name compare equal regardless of which side added the prefix.
+func findDriftEntryForTask(taskName string, drift []DriftEntry) (DriftEntry, bool) {
+	want := strings.TrimPrefix(taskName, `\`)
+	for _, entry := range drift {
+		if strings.TrimPrefix(entry.TaskName, `\`) == want {
+			return entry, true
+		}
+	}
+	return DriftEntry{}, false
+}
 
 // supervisorReconcileApplyFunc is the side-neutral seam for dialing the
 // supervisor IPC `reconcile --apply` verb. It is shared by BOTH the stop
@@ -60,8 +114,22 @@ func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) fun
 //     non-clean exit to respawn — the exact churn this path exists to
 //     kill — so the caller must skip these task names and surface the
 //     error rows instead.
-//   - Success → per-target success rows (one reconcile covers every
-//     target; the supervisor fans EvIntentUpdate out per drifted task).
+//   - Success → per-target rows derived from the reconcile's per-target
+//     drift action, NOT a blanket success. The supervisor's drift
+//     classifier posts EvIntentUpdate only for PROXY-SHAPED
+//     supervisor-owned descriptors (isSupervisorOwnedDescriptorFor
+//     Reconcile in internal/cli/supervise_reconcile_ipc.go — `daemon
+//     workspace-proxy` / `daemon serena-proxy` argv). A REGULAR global
+//     daemon (`daemon --server X --daemon Y`) classifies no_op on the
+//     terminate direction (its post_ev gate requires supervisorOwned),
+//     so the supervisor posts nothing and the daemon stops only via the
+//     ~60s IntentWatcher. We therefore inspect THIS target's drift entry:
+//     a post_ev_intent_update entry → plain success row; anything else (or
+//     a missing entry) → success-but-deferred row (empty Err + Code =
+//     DeferredToIntentWatcherCode) so the row never FALSELY claims a
+//     synchronous SM dispatch that did not happen. The stop is durable
+//     either way (Desired=stopped is on disk); the only difference is
+//     whether convergence was synchronous or is the watcher's job.
 //
 // PRECONDITION: the caller must have recorded Desired=stopped intent for
 // the targets (recordStopIntent) BEFORE calling — the reconcile reads
@@ -75,7 +143,8 @@ func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string
 	if len(targets) == 0 {
 		return nil, false, nil
 	}
-	if _, err := supervisorReconcileApplyFn(ctx, true); err != nil {
+	resp, err := supervisorReconcileApplyFn(ctx, true)
+	if err != nil {
 		if errors.Is(err, ErrSupervisorIPCUnavailable) {
 			return nil, false, nil
 		}
@@ -88,9 +157,14 @@ func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string
 		}
 		return results, true, nil
 	}
+	// Reconcile transport succeeded — but the response's per-target drift
+	// tells us which targets the supervisor actually posted EvIntentUpdate
+	// for (proxy-shaped descriptors) versus which converge only via the
+	// IntentWatcher (regular daemons). Report each honestly; the stop path
+	// passes "" for extraCode (no provenance code to preserve).
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {
-		results = append(results, RestartResult{TaskName: d.TaskName})
+		results = append(results, supervisorDispatchRowForTarget(d.TaskName, "", resp.Drift))
 	}
 	return results, true, nil
 }

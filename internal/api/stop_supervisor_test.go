@@ -68,8 +68,31 @@ func stopSupervisorTestIntent() *SupervisorIntentFile {
 // dial exactly one reconcile with apply=true, and (3) NOT taskkill the
 // handled task even when a scheduler row with the same name exists —
 // taskkill is the non-clean exit the supervisor reaper respawns.
+//
+// The reconcile stub returns REALISTIC per-target drift (#279 opus gate):
+// the regular `time-default` global daemon classifies needs_manual_review
+// on the terminate direction (it is NOT a proxy-shaped descriptor, so the
+// supervisor posts NO EvIntentUpdate and it converges only via the ~60s
+// IntentWatcher), while a proxy-shaped `time-proxy` descriptor classifies
+// post_ev_intent_update (truly dispatched). The result rows must reflect
+// that split: the regular target carries Code=DeferredToIntentWatcherCode
+// with EMPTY Err (durable, not a failure), and the proxy target is a plain
+// success row.
 func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
-	kills, fake := stopSupervisorTestSetup(t, stopSupervisorTestIntent(),
+	const proxyTask = `\mcp-local-hub-time-proxy`
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: stopSupervisorTestTask, Server: "time", Daemon: "default", Port: 9128},
+			// Proxy-shaped supervisor-owned descriptor (same server so the
+			// Stop("time", "") scope selects both). Its argv is what the
+			// cli-side classifier keys proxy-ownership on; the api side does
+			// not inspect Args, so the drift stub below drives the action.
+			{TaskName: proxyTask, Server: "time", Daemon: "proxy", Port: 9129,
+				Args: []string{"daemon", "serena-proxy"}},
+		},
+	}
+	kills, fake := stopSupervisorTestSetup(t, intent,
 		[]scheduler.TaskStatus{{Name: stopSupervisorTestTask}})
 
 	var reconcileCalls int32
@@ -83,7 +106,15 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 		// desired=running and stop nothing.
 		res := NewAPI().ReadDaemonIntent()
 		intentDesiredAtReconcile = res.File.Tasks[stopSupervisorTestTask].Desired
-		return ReconcileResponse{AppliedCount: 1}, nil
+		// Realistic drift: the regular daemon got nothing posted
+		// (needs_manual_review); only the proxy was dispatched.
+		return ReconcileResponse{
+			AppliedCount: 1,
+			Drift: []DriftEntry{
+				{TaskName: stopSupervisorTestTask, Action: ReconcileActionNeedsManualReview},
+				{TaskName: proxyTask, Action: ReconcileActionPostEvIntentUpdate},
+			},
+		}, nil
 	})
 	defer restore()
 
@@ -107,8 +138,30 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 	if len(fake.stopNames) != 0 {
 		t.Fatalf("scheduler Stop calls = %v, want none for the handled task", fake.stopNames)
 	}
-	if len(results) != 1 || results[0].TaskName != stopSupervisorTestTask || results[0].Err != "" {
-		t.Fatalf("results = %+v, want one supervisor success row", results)
+	if len(results) != 2 {
+		t.Fatalf("results = %+v, want two supervisor rows (regular + proxy)", results)
+	}
+	byTask := map[string]RestartResult{}
+	for _, r := range results {
+		byTask[r.TaskName] = r
+	}
+	regular, ok := byTask[stopSupervisorTestTask]
+	if !ok {
+		t.Fatalf("missing regular-daemon row in %+v", results)
+	}
+	if regular.Err != "" {
+		t.Fatalf("regular row Err = %q, want empty (deferred is not a failure)", regular.Err)
+	}
+	if regular.Code != DeferredToIntentWatcherCode {
+		t.Fatalf("regular row Code = %q, want %q (no EvIntentUpdate posted; IntentWatcher converges)",
+			regular.Code, DeferredToIntentWatcherCode)
+	}
+	proxy, ok := byTask[proxyTask]
+	if !ok {
+		t.Fatalf("missing proxy-daemon row in %+v", results)
+	}
+	if proxy.Err != "" || proxy.Code != "" {
+		t.Fatalf("proxy row = %+v, want plain success (empty Err + empty Code; truly dispatched)", proxy)
 	}
 }
 
@@ -190,7 +243,13 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 		gotApply = apply
 		res := NewAPI().ReadDaemonIntent()
 		intentDesiredAtReconcile = res.File.Tasks[stopSupervisorTestTask].Desired
-		return ReconcileResponse{AppliedCount: 1}, nil
+		// Realistic drift: the lone regular daemon converges via the
+		// IntentWatcher (no EvIntentUpdate posted).
+		return ReconcileResponse{
+			Drift: []DriftEntry{
+				{TaskName: stopSupervisorTestTask, Action: ReconcileActionNeedsManualReview},
+			},
+		}, nil
 	})
 	defer restore()
 
@@ -216,9 +275,17 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 		t.Fatalf("results = %+v, want supervisor row + legacy row", results)
 	}
 	if results[0].TaskName != stopSupervisorTestTask || results[0].Err != "" {
-		t.Fatalf("results[0] = %+v, want supervisor success row", results[0])
+		t.Fatalf("results[0] = %+v, want supervisor row (empty Err)", results[0])
 	}
-	if results[1].TaskName != legacyTask || results[1].Err != "" {
-		t.Fatalf("results[1] = %+v, want legacy success row", results[1])
+	// The lone regular daemon converges via the IntentWatcher, so its row
+	// is success-but-deferred (#279 opus gate), not a plain success.
+	if results[0].Code != DeferredToIntentWatcherCode {
+		t.Fatalf("results[0].Code = %q, want %q (regular daemon → watcher-deferred)",
+			results[0].Code, DeferredToIntentWatcherCode)
+	}
+	// The legacy task goes through the kill loop (not supervisor-owned), so
+	// it stays a plain success row with no deferred Code.
+	if results[1].TaskName != legacyTask || results[1].Err != "" || results[1].Code != "" {
+		t.Fatalf("results[1] = %+v, want legacy plain-success row", results[1])
 	}
 }
