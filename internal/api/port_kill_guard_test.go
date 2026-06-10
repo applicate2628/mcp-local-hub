@@ -48,10 +48,15 @@ import (
 //     whose literal sits on a different physical line (e.g. `killByPortFn(\n
 //     9200,\n ...)`) is a single CallExpr in the AST, so it is caught
 //     regardless of line layout. A nested `net.JoinHostPort("127.0.0.1",
-//     "9200")` inside a listen sink is also caught because we recurse into the
-//     listen call's argument subtree, treating both `"host:9200"` and the bare
-//     `"9200"` port string as port candidates (range-checked against the live
-//     bands).
+//     "9200")` (or `fmt.Sprintf("127.0.0.1:%d", ...)`, or a `net.TCPAddr{...}`
+//     composite literal) inside a LISTEN sink is also caught because the scan
+//     descends ONE level into recognized address builders, treating both
+//     `"host:9200"` and the bare `"9200"` port string as port candidates
+//     (range-checked against the live bands). The descent is bounded to those
+//     address-builder shapes only — it does NOT blanket-walk the whole
+//     argument subtree, so a live-band int inside an unrelated nested helper
+//     call (timeout, retry count, buffer size) is not mistaken for a port
+//     (PR #282 round-2 P2 finding).
 //
 // # Live bands (anchored to real runtime code, not magic numbers)
 //
@@ -80,13 +85,25 @@ import (
 //   - killByPortFn(<live-band>, ...)            the production kill seam
 //   - killDaemonByPort(<live-band>, ...)        the real taskkill /F /T target
 //   - net.Listen(..., "...:<live-band>")        a real loopback bind (collision)
+//   - lc.Listen(ctx, "tcp", "...:<live-band>")  the net.ListenConfig form the
+//     SO-exclusive factory wraps (hub_mcp_listener_{windows,posix}.go); the
+//     canonical receiver name `lc` is matched, not any method named Listen
 //   - <x>.ListenAndServe()-style with a "...:<live-band>" address literal
 //   - NewListenerWithSOExclusive[Context]("...:<live-band>")  the production
 //     hub-MCP loopback bind (hub_mcp_listener_{windows,posix}.go), called at
-//     hub_mcp_bind.go:158 and directly in tests
-//   - <x>.Listen(..., "...:<live-band>")        any .Listen-suffixed call,
-//     covering the `lc.Listen(ctx, "tcp", addr)` net.ListenConfig form the
-//     factory above wraps
+//     hub_mcp_bind.go:158 and directly in tests, BOTH as a bare ident inside
+//     internal/api AND as a qualified call from other packages
+//     (api.NewListenerWithSOExclusive at internal/gui/hub_listener_test.go:152)
+//
+// The listen matcher is deliberately RECEIVER-SCOPED, not a blanket
+// "any method named Listen". An unrelated method literally named Listen on a
+// non-network type (event bus, observer, mock) that happens to carry a
+// live-band-shaped int for a non-port reason MUST NOT be flagged — matching
+// any `.Listen` selector would re-introduce the exact latent build-breaker
+// class (a harmless construct hard-failing the whole package) that the
+// AST rewrite set out to eliminate. So the selector branch only matches the
+// `net.` and `lc.` receivers plus `*.ListenAndServe` and the qualified
+// SO-exclusive factory.
 //
 // The convention this enforces (spec §2.x #3): anything reaching a kill/listen
 // sink in a test MUST use `pickFreeLocalPort(t)` (install_test.go:559) or
@@ -124,7 +141,10 @@ func TestNoLiveBandLiteralReachesKillOrListenSink(t *testing.T) {
 
 	// litPort extracts the integer port from an *ast.BasicLit if it is a
 	// live-band literal. Two literal shapes carry a port:
-	//   - an INT literal in a kill-sink arg position: killByPortFn(9200, ...)
+	//   - an INT literal in the kill-sink PORT position: killByPortFn(9200, ...).
+	//     Only call.Args[0] is scanned for kill sinks — the signature is
+	//     (port int, timeout time.Duration), so a live-band-shaped int in the
+	//     timeout arg (e.g. 9151*time.Millisecond) is NOT a port and is ignored.
 	//   - a STRING literal address in a listen-sink arg: "127.0.0.1:9200",
 	//     ":9200", or a bare "9200" (the JoinHostPort port string). The STRING
 	//     branch takes the text after the last ':' (whole string if no ':').
@@ -173,47 +193,150 @@ func TestNoLiveBandLiteralReachesKillOrListenSink(t *testing.T) {
 		return id.Name == "killByPortFn" || id.Name == "killDaemonByPort"
 	}
 
-	// listenSinkName reports whether the called function is a port-bind sink.
-	// Covers the bare-ident factory forms (NewListenerWithSOExclusive[Context])
-	// and any selector call whose final element is Listen / ListenAndServe
-	// (net.Listen, lc.Listen, srv.ListenAndServe, ...).
+	// baseIdentName returns the identifier name of a selector's receiver when
+	// the receiver is a bare ident (e.g. "net" in net.Listen, "lc" in
+	// lc.Listen, "api" in api.NewListenerWithSOExclusive). Returns "" when the
+	// receiver is anything else (a chained selector, an index expr, a call),
+	// so a deeper unrelated `.Listen` cannot accidentally match.
+	baseIdentName := func(x ast.Expr) string {
+		if id, ok := x.(*ast.Ident); ok {
+			return id.Name
+		}
+		return ""
+	}
+
+	// listenSinkName reports whether the called function is a REAL port-bind
+	// sink. It is receiver-scoped, NOT a blanket ".Listen" suffix match (see the
+	// PR #282 round-2 P2/P3 findings: a wildcard `.Listen` re-introduces the
+	// latent build-breaker class — any unrelated method named Listen on a
+	// non-network type would hard-fail the package). The recognized forms,
+	// each tied to a real bind in this tree:
+	//   - bare ident NewListenerWithSOExclusive[Context]  (internal/api calls)
+	//   - net.Listen                                      (base ident "net")
+	//   - lc.Listen                                       (base ident "lc", the
+	//     canonical net.ListenConfig var in hub_mcp_listener_{windows,posix}.go)
+	//   - <any>.ListenAndServe                            (srv/p.ListenAndServe)
+	//   - <pkg>.NewListenerWithSOExclusive[Context]       (qualified call from
+	//     another package, e.g. api.NewListenerWithSOExclusive in internal/gui)
 	listenSinkName := func(fun ast.Expr) bool {
 		switch f := fun.(type) {
 		case *ast.Ident:
 			return f.Name == "NewListenerWithSOExclusive" ||
 				f.Name == "NewListenerWithSOExclusiveContext"
 		case *ast.SelectorExpr:
-			return f.Sel.Name == "Listen" || f.Sel.Name == "ListenAndServe"
+			switch f.Sel.Name {
+			case "Listen":
+				// Only the real net binds: net.Listen and the lc.Listen
+				// net.ListenConfig form. Receiver-scoped so an unrelated
+				// bus.Listen / observer.Listen cannot match.
+				base := baseIdentName(f.X)
+				return base == "net" || base == "lc"
+			case "ListenAndServe":
+				// http.Server.ListenAndServe — receiver is the server value;
+				// the method name is unambiguous enough to match any receiver.
+				return true
+			case "NewListenerWithSOExclusive", "NewListenerWithSOExclusiveContext":
+				// Qualified cross-package call to the SO-exclusive factory
+				// (api.NewListenerWithSOExclusive at hub_listener_test.go:152).
+				return true
+			}
 		}
 		return false
 	}
 
-	// findLiveBandLitInArgs recursively scans a sink call's argument subtree for
-	// a live-band literal. Recursion covers nested-call address builders such as
-	// net.JoinHostPort("127.0.0.1", "9200") passed to a listen sink. It returns
-	// the first matching port found, or (0, false).
-	var findLiveBandLitInArgs func(args []ast.Expr) (int, bool)
-	findLiveBandLitInArgs = func(args []ast.Expr) (int, bool) {
-		for _, arg := range args {
-			var found int
-			var ok bool
-			ast.Inspect(arg, func(n ast.Node) bool {
-				if ok {
-					return false
-				}
-				if lit, isLit := n.(*ast.BasicLit); isLit {
+	// isAddressBuilder reports whether a nested CallExpr is a recognized
+	// address builder whose own direct literal args can carry a port — i.e.
+	// net.JoinHostPort("127.0.0.1", "9200") or fmt.Sprintf("127.0.0.1:%d", ...).
+	// Only these shapes are descended into. The blanket whole-subtree
+	// ast.Inspect of the prior version is deliberately NOT used: it false-
+	// positived on a live-band int sitting inside an UNRELATED nested helper
+	// call (timeout, retry count, buffer size) that is not an address at all
+	// (PR #282 round-2 P2 finding).
+	isAddressBuilder := func(call *ast.CallExpr) bool {
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		base := ""
+		if id, isID := sel.X.(*ast.Ident); isID {
+			base = id.Name
+		}
+		switch {
+		case base == "net" && sel.Sel.Name == "JoinHostPort":
+			return true
+		case base == "fmt" && sel.Sel.Name == "Sprintf":
+			return true
+		}
+		return false
+	}
+
+	// litFromAddrBuilderOneLevel scans ONE level of a recognized address-builder
+	// nested call (or a net.TCPAddr{...} composite literal) for a direct port
+	// literal among its immediate args/elements. It never recurses further.
+	litFromAddrBuilderOneLevel := func(expr ast.Expr) (int, bool) {
+		switch e := expr.(type) {
+		case *ast.CallExpr:
+			if !isAddressBuilder(e) {
+				return 0, false
+			}
+			for _, a := range e.Args {
+				if lit, isLit := a.(*ast.BasicLit); isLit {
 					if p, inBand := litPort(lit); inBand {
-						found, ok = p, true
-						return false
+						return p, true
 					}
 				}
-				return true
-			})
-			if ok {
-				return found, true
+			}
+		case *ast.CompositeLit:
+			// net.TCPAddr{IP: ..., Port: 9200} — scan the direct element
+			// values for a live-band int (recognized as a port-bearing
+			// address struct; receiver-scoped to a TCPAddr-shaped literal).
+			for _, el := range e.Elts {
+				if kv, isKV := el.(*ast.KeyValueExpr); isKV {
+					if lit, isLit := kv.Value.(*ast.BasicLit); isLit {
+						if p, inBand := litPort(lit); inBand {
+							return p, true
+						}
+					}
+				}
 			}
 		}
 		return 0, false
+	}
+
+	// scanListenArgs bounds the port search for a LISTEN sink to:
+	//   - each direct arg that is itself a string/int literal address, and
+	//   - ONE level into a recognized address builder (net.JoinHostPort,
+	//     fmt.Sprintf) or a net.TCPAddr{...} composite literal.
+	// It does NOT descend into arbitrary unrelated nested calls.
+	scanListenArgs := func(args []ast.Expr) (int, bool) {
+		for _, arg := range args {
+			if lit, isLit := arg.(*ast.BasicLit); isLit {
+				if p, inBand := litPort(lit); inBand {
+					return p, true
+				}
+				continue
+			}
+			if p, ok := litFromAddrBuilderOneLevel(arg); ok {
+				return p, true
+			}
+		}
+		return 0, false
+	}
+
+	// scanKillArgs bounds the port search for a KILL sink to call.Args[0] only
+	// — the single port position; Args[1] is the timeout (a time.Duration), so
+	// a live-band-shaped int there is NOT a port (PR #282 round-2 P3 finding).
+	// Only a direct INT literal in arg0 counts; kill sinks never take an
+	// address string or a nested address builder.
+	scanKillArgs := func(args []ast.Expr) (int, bool) {
+		if len(args) == 0 {
+			return 0, false
+		}
+		lit, isLit := args[0].(*ast.BasicLit)
+		if !isLit || lit.Kind != token.INT {
+			return 0, false
+		}
+		return litPort(lit)
 	}
 
 	type finding struct {
@@ -264,13 +387,13 @@ func TestNoLiveBandLiteralReachesKillOrListenSink(t *testing.T) {
 			}
 			switch {
 			case killSinkName(call.Fun):
-				if p, found := findLiveBandLitInArgs(call.Args); found {
+				if p, found := scanKillArgs(call.Args); found {
 					findings = append(findings, finding{
 						path: rel, line: fset.Position(call.Pos()).Line, port: p, kind: "kill-sink",
 					})
 				}
 			case listenSinkName(call.Fun):
-				if p, found := findLiveBandLitInArgs(call.Args); found {
+				if p, found := scanListenArgs(call.Args); found {
 					findings = append(findings, finding{
 						path: rel, line: fset.Position(call.Pos()).Line, port: p, kind: "listen-sink",
 					})
