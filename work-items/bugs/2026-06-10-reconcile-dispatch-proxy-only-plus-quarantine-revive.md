@@ -1,6 +1,6 @@
 # Reconcile synchronous dispatch is proxy-only; quarantine-revive on running intent
 
-- **Status:** open / deferred (two parked design items — neither blocking)
+- **Status:** item (a) CLOSED (no-legacy ownership broadening landed); item (b) open / deferred (SM-level design)
 - **Date:** 2026-06-10
 - **Severity:** P3 / design-boundary (no live data-loss; behavior is durable and converges)
 - **Context:** adjacent-finding
@@ -8,6 +8,17 @@
 - **Cross-link:** [`docs/superpowers/specs/2026-06-10-clean-architecture-redesign.md`](../../docs/superpowers/specs/2026-06-10-clean-architecture-redesign.md) — Phase B/F.
 
 ## Item (a) — synchronous SM dispatch covers ONLY proxy-shaped descriptors
+
+**CLOSED by the "all intent daemons are supervisor-owned" commit on PR #279
+(no-legacy directive, spec §0.2):** the
+reconcile classifier now broadens supervisor-ownership to ALL intent daemon
+rows — `classifyDriftAction` posts `EvIntentUpdate` for a regular `daemon
+--server X --daemon Y` descriptor on both the spawn and terminate directions,
+so `mcphub stop`/`mcphub restart` of a regular global daemon is synchronously
+dispatched through the SM exactly like a proxy. The legacy `sched=missing +
+intent=running → needs_manual_review` row died with the `supervisorOwned`
+classifier parameter; `isSupervisorOwnedDescriptorForReconcile` was deleted.
+The historical description below is retained for context.
 
 `mcphub stop` / `mcphub restart` of a supervisor-owned daemon dispatches the
 stop/start intent through ONE `reconcile --apply`
@@ -54,12 +65,12 @@ to **Phase B/F** of the redesign spec, NOT this honesty fix:
   design, so broadening the classifier becomes correct rather than a
   semantics regression.
 
-**Guard pinning the parked boundary:** `internal/cli`'s
-`TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM` asserts a
-regular `daemon --server foo --daemon default` descriptor yields `no_op`
-(terminate, live SM) / `needs_manual_review` (spawn, missing scheduler) and
-`AppliedCount=0` with no `EvIntentUpdate` posted. A future classifier
-broadening cannot silently regress this boundary without flipping that test.
+**Guard (now inverted):** `internal/cli`'s
+`TestReconcileIPC_RegularGlobalDaemonDispatchedThroughSM` (formerly
+`...NotDispatchedThroughSM`) now asserts a regular `daemon --server foo
+--daemon default` descriptor yields `post_ev_intent_update` on BOTH
+directions (terminate/live-SM and spawn/missing-scheduler), `AppliedCount=1`,
+and an `EvIntentUpdate` posted — the broadening this item tracked.
 
 ## Item (b) — fable r4 O1: quarantine-revive on running/absent intent (pre-existing SM row)
 

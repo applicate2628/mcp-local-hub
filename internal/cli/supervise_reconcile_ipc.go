@@ -218,7 +218,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		intentDesired := computeIntentDesired(taskName, daemonIntentTasks)
 		schedState, hasSched := lookupSchedulerState(schedByTask, taskName)
 		smState := lookupControllerSMState(deps, taskName)
-		action := classifyDriftAction(schedState, hasSched, intentDesired, isSupervisorOwnedDescriptorForReconcile(d), smState)
+		action := classifyDriftAction(schedState, hasSched, intentDesired, smState)
 
 		// Orphaned-LSP-descriptor exclusion, mirroring the startup reconciler
 		// guard at supervise_reconcile.go:229. classifyDriftAction returns
@@ -468,46 +468,50 @@ func normalizeSchedulerState(raw string) string {
 // classifyDriftAction computes the Action field per (scheduler-state,
 // intent-desired) pair. The matrix:
 //
-//	sched=missing   intent=running  → post_ev_intent_update for supervisor-owned descriptors; needs_manual_review for legacy scheduler-owned descriptors
-//	sched=missing   intent=stopped  → post_ev_intent_update (terminate) for supervisor-owned descriptors whose SM state is live; no_op otherwise
+//	sched=missing   intent=running  → post_ev_intent_update (spawn directly from supervisor-intent.json)
+//	sched=missing   intent=stopped  → post_ev_intent_update (terminate) when the SM state is live; no_op otherwise
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
 //	sched=stopped   intent=running  → post_ev_intent_update (spawn)
 //	sched=stopped   intent=stopped  → no_op (steady state)
 //	sched=<other>   *               → needs_manual_review (unknown scheduler state)
 //
-// For legacy scheduler-owned sched=missing + intent=running we mark
-// `needs_manual_review` rather than `post_ev_intent_update` because the
-// EvIntentUpdate event cannot bring a missing scheduler task back. For
-// supervisor-owned descriptors, there is deliberately no scheduler row:
-// the supervisor has the full command in supervisor-intent.json and can
-// spawn directly from EvIntentUpdate.
+// No-legacy ownership (spec §0.2 — no compatibility, no migration, no old
+// users): EVERY row in supervisor-intent.json is supervisor-owned. The
+// supervisor has the full command in the descriptor and spawns regular
+// daemons through the generic `daemon --server X --daemon Y` path directly
+// from EvIntentUpdate, exactly as it spawns the proxy descriptors — so a
+// missing scheduler row is NOT a "legacy task lost, operator must
+// re-install" signal any more; it is simply the by-design state of a
+// supervisor-intent descriptor. The old `sched=missing + intent=running →
+// needs_manual_review` row (a relic of the scheduler era, when regular
+// global daemons WERE Task Scheduler tasks and a missing row meant
+// re-install) therefore DIES: the spawn now posts EvIntentUpdate directly.
+// This pre-implements the Phase B/F ownership classification of the
+// redesign spec ahead of the scheduler-task removal; the hasSched=true
+// branches below are unchanged because real scheduler rows still reconcile
+// against scheduler state until Phase F removes them.
 //
-// The terminate direction on the sched=missing row is the supervisor-owned
-// mirror of the same reasoning (spec §4 Phase A.1): supervisor-owned rows
-// have NO scheduler row by design, so scheduler state can never witness
-// them running — the controller's SM state is the only witness. Without
-// this row, `mcphub stop` would write Desired=stopped into
-// daemon-intent.json and the apply-mode reconcile would classify the
-// still-running daemon as no_op; the caller's only remaining lever is
-// taskkill, whose NON-clean exit the supervisor reaper observes and
-// respawns — the stop→respawn churn that drives daemons into quarantine.
-// Posting EvIntentUpdate instead lets the SM drive
-// StRunning→StExiting→StIdle (deliberate stop, no respawn). Dead/settled
-// SM states (StIdle, StQuarantined) stay no_op: there is nothing live to
-// terminate, and a quarantined daemon's intent flip must not be treated
-// as drift (same quarantine-respect as the startup reconciler's
-// `isStopped && !running` gate).
-func classifyDriftAction(schedState string, hasSched bool, intentDesired string, supervisorOwned bool, smState api.SMState) string {
+// The terminate direction on the sched=missing row follows the same
+// reasoning (spec §4 Phase A.1): supervisor-intent rows have NO scheduler
+// row by design, so scheduler state can never witness them running — the
+// controller's SM state is the only witness. Without this row, `mcphub
+// stop` would write Desired=stopped into daemon-intent.json and the
+// apply-mode reconcile would classify the still-running daemon as no_op;
+// the caller's only remaining lever is taskkill, whose NON-clean exit the
+// supervisor reaper observes and respawns — the stop→respawn churn that
+// drives daemons into quarantine. Posting EvIntentUpdate instead lets the
+// SM drive StRunning→StExiting→StIdle (deliberate stop, no respawn).
+// Dead/settled SM states (StIdle, StQuarantined) stay no_op: there is
+// nothing live to terminate, and a quarantined daemon's intent flip must
+// not be treated as drift (same quarantine-respect as the startup
+// reconciler's `isStopped && !running` gate).
+func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
-			if supervisorOwned {
-				return api.ReconcileActionPostEvIntentUpdate
-			}
-			return api.ReconcileActionNeedsManualReview
+			return api.ReconcileActionPostEvIntentUpdate
 		}
-		if intentDesired == api.ReconcileIntentDesiredStopped &&
-			supervisorOwned && smStateIsLive(smState) {
+		if intentDesired == api.ReconcileIntentDesiredStopped && smStateIsLive(smState) {
 			return api.ReconcileActionPostEvIntentUpdate
 		}
 		return api.ReconcileActionNoOp
@@ -544,11 +548,6 @@ func smStateIsLive(s api.SMState) bool {
 		return true
 	}
 	return false
-}
-
-func isSupervisorOwnedDescriptorForReconcile(d api.SupervisorDaemon) bool {
-	return len(d.Args) >= 2 && d.Args[0] == "daemon" &&
-		(d.Args[1] == "workspace-proxy" || d.Args[1] == "serena-proxy")
 }
 
 // lookupControllerSMState reads the per-task SM state from the live

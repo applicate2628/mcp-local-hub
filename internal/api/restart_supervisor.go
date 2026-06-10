@@ -169,12 +169,11 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 			// intent files fresh from disk and refreshes the caches via
 			// applyReconcileDrift (supervise_reconcile_ipc.go:593-596)
 			// BEFORE posting, so the drift classifier's spawn direction
-			// (!hasSched && supervisorOwned && intent=running →
-			// post_ev_intent_update, classifyDriftAction supervise_
-			// reconcile_ipc.go:475) posts EvIntentUpdate(running) and drives
-			// StIdle→StSpawning. This mirrors the stop side, which is
-			// synchronous via reconcile for exactly this cache-vs-disk
-			// reason (#279 fable r3 F-A).
+			// (!hasSched && intent=running → post_ev_intent_update,
+			// classifyDriftAction in supervise_reconcile_ipc.go) posts
+			// EvIntentUpdate(running) and drives StIdle→StSpawning. This
+			// mirrors the stop side, which is synchronous via reconcile for
+			// exactly this cache-vs-disk reason (#279 fable r3 F-A).
 			resp, reconcileErr := supervisorReconcileApplyFn(ctx, true)
 			if reconcileErr != nil {
 				// The supervisor was alive ms ago (it just refused the
@@ -191,23 +190,19 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 				})
 				continue
 			}
-			// reconcile --apply transport accepted — but the supervisor's
-			// drift classifier posts EvIntentUpdate for THIS target only
-			// when it is a PROXY-SHAPED supervisor-owned descriptor
-			// (isSupervisorOwnedDescriptorForReconcile in internal/cli/
-			// supervise_reconcile_ipc.go — `daemon workspace-proxy` /
-			// `daemon serena-proxy` argv). A REGULAR global daemon
-			// (`daemon --server X --daemon Y`) classifies
-			// needs_manual_review on the spawn direction, so the supervisor
-			// posts NOTHING for it and the spawn converges only via the
-			// ~60s IntentWatcher (Desired=running is durably on disk,
-			// verified above). Inspect this target's drift entry so the row
-			// states the truth: a post_ev_intent_update entry → plain
-			// success row (truly dispatched, as before); otherwise →
-			// success-but-deferred row (empty Err + Code =
-			// DeferredToIntentWatcherCode). This is the proxy-vs-regular
-			// split eaf7a94's "spawn is dispatched through the SM" claim
-			// over-generalized (#279 opus gate).
+			// reconcile --apply transport accepted — under the no-legacy
+			// ownership model (spec §0.2) every supervisor-intent row is
+			// supervisor-owned, so the drift classifier posts EvIntentUpdate
+			// for a regular global daemon (`daemon --server X --daemon Y`)
+			// on the spawn direction exactly as it does for a proxy
+			// descriptor: that target's row is a plain success (truly
+			// dispatched). The only edge that does NOT post is a target with
+			// no matching drift entry. Inspect this target's drift entry so
+			// the row states the truth: a post_ev_intent_update entry →
+			// plain success row; otherwise → success-but-deferred row (empty
+			// Err + Code = DeferredToIntentWatcherCode, IntentWatcher
+			// converges within ~60s since Desired=running is durably on
+			// disk, verified above).
 			results = append(results, supervisorDispatchRowForTarget(d.TaskName, "", resp.Drift))
 			continue
 		}

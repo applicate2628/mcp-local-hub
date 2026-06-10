@@ -32,24 +32,21 @@ const RespawnRefusedIntentStoppedCode = "RESPAWN_REFUSED_INTENT_STOPPED"
 // "synchronously dispatched" (empty Err, empty Code) and "failed" (Err
 // != "").
 //
-// WHY this exists: the supervisor's reconcile drift classifier posts
-// EvIntentUpdate only for PROXY-SHAPED supervisor-owned descriptors —
-// isSupervisorOwnedDescriptorForReconcile (internal/cli/
-// supervise_reconcile_ipc.go) is true ONLY for `daemon workspace-proxy`
-// / `daemon serena-proxy` argv. A REGULAR global daemon
-// (`daemon --server X --daemon Y` — memory, paper-search, time, …) is
-// NOT supervisorOwned to that classifier, so classifyDriftAction returns
-// needs_manual_review on the spawn direction and no_op on the terminate
-// direction (whose post_ev gate also requires supervisorOwned). Nothing
-// is posted; the daemon's stop/start converges only via the
-// IntentWatcher. Reporting a plain synchronous-success row for such a
-// daemon would be FALSE (fail-quiet) — so the caller inspects the
-// per-target drift entry and emits this Code when the entry is not a
-// post_ev_intent_update. Broadening the classifier to cover regular
-// daemons changes legacy missing-scheduler-task semantics and belongs to
-// Phase B/F of docs/superpowers/specs/2026-06-10-clean-architecture-
-// redesign.md (parked — see work-items/bugs/2026-06-10-reconcile-
-// dispatch-proxy-only-plus-quarantine-revive.md), not this honesty fix.
+// WHY this exists: under the no-legacy ownership model (spec §0.2 — no
+// compatibility, no migration, no old users) EVERY supervisor-intent row
+// is supervisor-owned, so the reconcile drift classifier now posts
+// EvIntentUpdate for regular global daemons (`daemon --server X --daemon
+// Y` — memory, paper-search, time, …) exactly as it does for the proxy
+// descriptors: a live daemon's stop/start is the synchronous-dispatch case
+// (empty Err, empty Code), NOT the watcher-deferred norm it used to be.
+// This Code is therefore now the EDGE case: a reconcile drift entry that is
+// not a post_ev_intent_update because nothing live needed dispatching —
+// an already-idle/settled daemon whose terminate classifies no_op, or a
+// target with no matching drift entry at all (e.g. a name the reconcile
+// did not report). Reporting a plain synchronous-success row for such an
+// entry would be FALSE (fail-quiet) — so the caller inspects the per-target
+// drift entry and emits this Code when the entry is not a
+// post_ev_intent_update.
 //
 // Code is RestartResult.Code (json:"-"), so this introduces NO wire
 // change. schedulerBlockedRestartTaskNames (install.go) still includes

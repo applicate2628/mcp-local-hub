@@ -476,12 +476,12 @@ func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 			// reconcile fires, that task's running intent is on disk.
 			t.Errorf("intent at reconcile time = %q, want %q (running must be on disk BEFORE the reconcile)", d, IntentDesiredRunning)
 		}
-		// Realistic drift: only the proxy descriptor was posted; the
-		// regular daemon converges via the IntentWatcher.
+		// No-legacy drift: every supervisor-intent row is dispatched through
+		// the SM (post_ev_intent_update) — regular daemon included.
 		return ReconcileResponse{
-			AppliedCount: 1,
+			AppliedCount: 2,
 			Drift: []DriftEntry{
-				{TaskName: regularTask, Action: ReconcileActionNeedsManualReview},
+				{TaskName: regularTask, Action: ReconcileActionPostEvIntentUpdate},
 				{TaskName: proxyTask, Action: ReconcileActionPostEvIntentUpdate},
 			},
 		}, nil
@@ -524,17 +524,14 @@ func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 	for _, r := range results {
 		byTask[r.TaskName] = r
 	}
-	// Regular daemon → watcher-deferred (empty Err + the typed Code).
+	// Regular daemon → truly dispatched under no-legacy ownership → plain
+	// success row (empty Err + empty Code).
 	regular, ok := byTask[regularTask]
 	if !ok {
 		t.Fatalf("missing regular-daemon row in %+v", results)
 	}
-	if regular.Err != "" {
-		t.Fatalf("regular row Err = %q, want empty (deferred is not a failure)", regular.Err)
-	}
-	if regular.Code != DeferredToIntentWatcherCode {
-		t.Fatalf("regular row Code = %q, want %q (no EvIntentUpdate posted; IntentWatcher converges)",
-			regular.Code, DeferredToIntentWatcherCode)
+	if regular.Err != "" || regular.Code != "" {
+		t.Fatalf("regular row = %+v, want plain success (empty Err + empty Code; truly dispatched under no-legacy ownership)", regular)
 	}
 	// Proxy descriptor → truly dispatched → plain success row.
 	proxy, ok := byTask[proxyTask]

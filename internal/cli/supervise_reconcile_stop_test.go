@@ -15,13 +15,22 @@ import (
 )
 
 // TestClassifyDriftAction_TerminateDirectionSupervisorOwned covers the
-// spec §4 Phase A.1 classifier change: supervisor-owned descriptors have
-// no scheduler row by design, so the terminate direction (intent=stopped
-// against a live SM state) must classify as post_ev_intent_update — the
-// scheduler can never witness these daemons running, and without this row
-// `mcphub stop` falls back to taskkill, whose non-clean exit the reaper
-// respawns (stop→respawn churn → quarantine). Dead/settled SM states and
-// non-supervisor-owned rows stay no_op; the spawn direction is unchanged.
+// classifier matrix under the no-legacy ownership model (spec §0.2): EVERY
+// supervisor-intent row is supervisor-owned, so the supervisorOwned
+// dimension is gone from the signature. A sched=missing row is now always a
+// supervisor-intent descriptor with no scheduler row by design:
+//
+//   - terminate direction (intent=stopped against a live SM) →
+//     post_ev_intent_update; the scheduler can never witness these daemons
+//     running, and without this row `mcphub stop` falls back to taskkill,
+//     whose non-clean exit the reaper respawns (stop→respawn churn →
+//     quarantine). Dead/settled SM states stay no_op.
+//   - spawn direction (intent=running) → post_ev_intent_update (the
+//     supervisor spawns directly from supervisor-intent.json); the old
+//     needs_manual_review "legacy scheduler-owned" row is dead.
+//
+// hasSched=true rows are unchanged (real scheduler rows still reconcile
+// against scheduler state until Phase F removes them).
 func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 	const (
 		missing = api.ReconcileSchedulerStateMissing
@@ -29,38 +38,35 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 		stopped = api.ReconcileIntentDesiredStopped
 	)
 	cases := []struct {
-		name            string
-		schedState      string
-		hasSched        bool
-		intentDesired   string
-		supervisorOwned bool
-		smState         api.SMState
-		want            string
+		name          string
+		schedState    string
+		hasSched      bool
+		intentDesired string
+		smState       api.SMState
+		want          string
 	}{
-		// Terminate direction: supervisor-owned + stopped intent + live SM.
-		{"owned stopped spawning", missing, false, stopped, true, api.StSpawning, api.ReconcileActionPostEvIntentUpdate},
-		{"owned stopped running", missing, false, stopped, true, api.StRunning, api.ReconcileActionPostEvIntentUpdate},
-		{"owned stopped exiting", missing, false, stopped, true, api.StExiting, api.ReconcileActionPostEvIntentUpdate},
-		{"owned stopped backoff", missing, false, stopped, true, api.StBackoffWaiting, api.ReconcileActionPostEvIntentUpdate},
+		// Terminate direction: stopped intent + live SM (no scheduler row).
+		{"stopped spawning", missing, false, stopped, api.StSpawning, api.ReconcileActionPostEvIntentUpdate},
+		{"stopped running", missing, false, stopped, api.StRunning, api.ReconcileActionPostEvIntentUpdate},
+		{"stopped exiting", missing, false, stopped, api.StExiting, api.ReconcileActionPostEvIntentUpdate},
+		{"stopped backoff", missing, false, stopped, api.StBackoffWaiting, api.ReconcileActionPostEvIntentUpdate},
 		// Settled SM states: nothing live to terminate → no_op.
-		{"owned stopped idle", missing, false, stopped, true, api.StIdle, api.ReconcileActionNoOp},
-		{"owned stopped quarantined", missing, false, stopped, true, api.StQuarantined, api.ReconcileActionNoOp},
-		// Non-supervisor-owned stopped rows stay no_op even with a live SM.
-		{"legacy stopped running-sm", missing, false, stopped, false, api.StRunning, api.ReconcileActionNoOp},
-		// Spawn direction unchanged by the smState parameter.
-		{"owned running missing", missing, false, running, true, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
-		{"legacy running missing", missing, false, running, false, api.StIdle, api.ReconcileActionNeedsManualReview},
+		{"stopped idle", missing, false, stopped, api.StIdle, api.ReconcileActionNoOp},
+		{"stopped quarantined", missing, false, stopped, api.StQuarantined, api.ReconcileActionNoOp},
+		// Spawn direction: running intent + missing scheduler row → spawn
+		// directly from intent (the dead legacy needs_manual_review row).
+		{"running missing", missing, false, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
 		// hasSched rows unchanged.
-		{"sched running intent stopped", api.ReconcileSchedulerStateRunning, true, stopped, false, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
-		{"sched stopped intent running", api.ReconcileSchedulerStateStopped, true, running, false, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
-		{"sched stopped intent stopped", api.ReconcileSchedulerStateStopped, true, stopped, false, api.StRunning, api.ReconcileActionNoOp},
+		{"sched running intent stopped", api.ReconcileSchedulerStateRunning, true, stopped, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
+		{"sched stopped intent running", api.ReconcileSchedulerStateStopped, true, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
+		{"sched stopped intent stopped", api.ReconcileSchedulerStateStopped, true, stopped, api.StRunning, api.ReconcileActionNoOp},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyDriftAction(tc.schedState, tc.hasSched, tc.intentDesired, tc.supervisorOwned, tc.smState)
+			got := classifyDriftAction(tc.schedState, tc.hasSched, tc.intentDesired, tc.smState)
 			if got != tc.want {
-				t.Fatalf("classifyDriftAction(%q, %v, %q, owned=%v, sm=%q) = %q, want %q",
-					tc.schedState, tc.hasSched, tc.intentDesired, tc.supervisorOwned, tc.smState, got, tc.want)
+				t.Fatalf("classifyDriftAction(%q, %v, %q, sm=%q) = %q, want %q",
+					tc.schedState, tc.hasSched, tc.intentDesired, tc.smState, got, tc.want)
 			}
 		})
 	}
@@ -90,8 +96,10 @@ func seedStoppedDaemonIntentForReconcileTest(t *testing.T, stateDir, taskName st
 }
 
 // supervisorOwnedTimeIntentForReconcileTest builds a one-daemon intent
-// whose descriptor is supervisor-owned (Args[0]=="daemon" + proxy verb)
-// so isSupervisorOwnedDescriptorForReconcile matches it.
+// whose descriptor carries a proxy-shaped argv. Under the no-legacy
+// ownership model (spec §0.2) every supervisor-intent row is
+// supervisor-owned regardless of argv, so the classifier treats it the
+// same as a regular daemon — the proxy shape here is just incidental.
 func supervisorOwnedTimeIntentForReconcileTest(taskName string) *api.SupervisorIntentFile {
 	return &api.SupervisorIntentFile{
 		Version: 1,
@@ -200,9 +208,10 @@ func TestReconcileIPC_SupervisorOwnedStoppedIntentQuarantinedStaysNoOp(t *testin
 
 // regularGlobalDaemonIntentForReconcileTest builds a one-daemon intent whose
 // descriptor is a REGULAR global daemon (`daemon --server foo --daemon
-// default`), so isSupervisorOwnedDescriptorForReconcile is FALSE for it.
-// This is the shape memory / paper-search / time daemons carry — the case
-// the supervisor's reconcile classifier does NOT post EvIntentUpdate for.
+// default`) — the shape memory / paper-search / time daemons carry. Under
+// the no-legacy ownership model (spec §0.2) this row is supervisor-owned
+// exactly like a proxy descriptor, so the reconcile classifier DOES post
+// EvIntentUpdate for it on both directions.
 func regularGlobalDaemonIntentForReconcileTest(taskName string) *api.SupervisorIntentFile {
 	return &api.SupervisorIntentFile{
 		Version: 1,
@@ -219,30 +228,28 @@ func regularGlobalDaemonIntentForReconcileTest(taskName string) *api.SupervisorI
 	}
 }
 
-// TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM documents the
-// CURRENT supervisor-side reality the api-side stop/restart paths now report
-// honestly as DeferredToIntentWatcherCode (#279 opus gate): a REGULAR global
-// daemon descriptor is NOT supervisor-owned to isSupervisorOwnedDescriptorFor
-// Reconcile (that predicate is true ONLY for proxy-shaped argv), so the drift
-// classifier posts NOTHING for it on either direction:
+// TestReconcileIPC_RegularGlobalDaemonDispatchedThroughSM pins the no-legacy
+// ownership model (spec §0.2): a REGULAR global daemon descriptor is now
+// supervisor-owned exactly like a proxy descriptor, so the drift classifier
+// posts EvIntentUpdate for it on BOTH directions (the api-side stop/restart
+// paths therefore report it as a plain synchronous SM dispatch, not as
+// DeferredToIntentWatcherCode):
 //
-//   - terminate direction (stopped intent + live SM) → no_op, AppliedCount=0
-//     (the post_ev gate requires supervisorOwned, which a regular daemon is
-//     not). This is the case the api side now reports as deferred-to-watcher
-//     rather than as a synchronous SM dispatch.
+//   - terminate direction (stopped intent + live SM) → post_ev_intent_update,
+//     AppliedCount=1, EvIntentUpdate observed. This is the SM dispatch that
+//     drives StRunning→StExiting→StIdle (deliberate stop, no reaper respawn).
 //   - spawn direction (running intent + missing scheduler row) →
-//     needs_manual_review (legacy missing-scheduler-task semantics —
-//     broadening this to post_ev for regular daemons belongs to Phase B/F of
-//     the redesign spec, NOT this honesty fix).
+//     post_ev_intent_update, AppliedCount=1, EvIntentUpdate observed (the
+//     supervisor spawns the daemon directly from supervisor-intent.json; the
+//     dead legacy needs_manual_review row is gone).
 //
-// Either way the daemon converges only via the supervisor's ~60s
-// IntentWatcher; this test pins that no EvIntentUpdate is posted in apply
-// mode so a future classifier broadening cannot silently regress the parked
-// boundary without flipping this test.
-func TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM(t *testing.T) {
+// This inverts the prior parked-boundary guard
+// (TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM), which
+// asserted no_op / needs_manual_review and AppliedCount=0.
+func TestReconcileIPC_RegularGlobalDaemonDispatchedThroughSM(t *testing.T) {
 	taskName := `\mcp-local-hub-foo-default`
 
-	t.Run("terminate direction stopped intent live SM stays no_op", func(t *testing.T) {
+	t.Run("terminate direction stopped intent live SM posts EvIntentUpdate", func(t *testing.T) {
 		fx := newReconcileTestFixture(t, regularGlobalDaemonIntentForReconcileTest(taskName))
 		seedStoppedDaemonIntentForReconcileTest(t, fx.deps.stateDir, taskName)
 		// Live SM state; no scheduler row (mirrors a regular daemon the
@@ -260,24 +267,27 @@ func TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM(t *testing.T) {
 			t.Fatalf("drift = %+v, want exactly one row", body.Drift)
 		}
 		entry := body.Drift[0]
-		if entry.Action != api.ReconcileActionNoOp {
-			t.Errorf("Action = %q, want %q (regular daemon: terminate gate requires supervisorOwned)",
-				entry.Action, api.ReconcileActionNoOp)
+		if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+			t.Errorf("Action = %q, want %q (regular daemon is supervisor-owned: terminate posts EvIntentUpdate)",
+				entry.Action, api.ReconcileActionPostEvIntentUpdate)
 		}
 		if entry.IntentDesired != api.ReconcileIntentDesiredStopped {
 			t.Errorf("IntentDesired = %q, want %q", entry.IntentDesired, api.ReconcileIntentDesiredStopped)
 		}
-		if body.AppliedCount != 0 {
-			t.Fatalf("AppliedCount = %d, want 0 (nothing posted for a regular daemon)", body.AppliedCount)
+		if body.AppliedCount != 1 {
+			t.Fatalf("AppliedCount = %d, want 1 (regular daemon terminate is dispatched through the SM)", body.AppliedCount)
 		}
 		select {
 		case ev := <-fx.postedCh:
-			t.Fatalf("unexpected event posted for regular daemon terminate: %+v", ev)
-		case <-time.After(100 * time.Millisecond):
+			if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+				t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("expected EvIntentUpdate post for the regular-daemon terminate direction")
 		}
 	})
 
-	t.Run("spawn direction running intent missing scheduler stays needs_manual_review", func(t *testing.T) {
+	t.Run("spawn direction running intent missing scheduler posts EvIntentUpdate", func(t *testing.T) {
 		fx := newReconcileTestFixture(t, regularGlobalDaemonIntentForReconcileTest(taskName))
 		// No daemon-intent override → computeIntentDesired defaults to
 		// running (the mixed-bootstrap default). No scheduler row → missing.
@@ -299,17 +309,20 @@ func TestReconcileIPC_RegularGlobalDaemonNotDispatchedThroughSM(t *testing.T) {
 		if entry.IntentDesired != api.ReconcileIntentDesiredRunning {
 			t.Errorf("IntentDesired = %q, want %q", entry.IntentDesired, api.ReconcileIntentDesiredRunning)
 		}
-		if entry.Action != api.ReconcileActionNeedsManualReview {
-			t.Errorf("Action = %q, want %q (regular daemon spawn: legacy missing-scheduler-task semantics)",
-				entry.Action, api.ReconcileActionNeedsManualReview)
+		if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+			t.Errorf("Action = %q, want %q (regular daemon spawn: no-legacy → spawn directly from intent)",
+				entry.Action, api.ReconcileActionPostEvIntentUpdate)
 		}
-		if body.AppliedCount != 0 {
-			t.Fatalf("AppliedCount = %d, want 0 (needs_manual_review never dispatches)", body.AppliedCount)
+		if body.AppliedCount != 1 {
+			t.Fatalf("AppliedCount = %d, want 1 (regular daemon spawn is dispatched through the SM)", body.AppliedCount)
 		}
 		select {
 		case ev := <-fx.postedCh:
-			t.Fatalf("unexpected event posted for regular daemon spawn: %+v", ev)
-		case <-time.After(100 * time.Millisecond):
+			if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+				t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("expected EvIntentUpdate post for the regular-daemon spawn direction")
 		}
 	})
 }

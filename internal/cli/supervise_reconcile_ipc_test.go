@@ -709,11 +709,16 @@ func TestReconcileIPC_NoDriftReturnsEmptyArray(t *testing.T) {
 	}
 }
 
-// TestReconcileIPC_MissingTaskInSchedulerFlaggedAsMissing — intent has
-// a daemon descriptor, scheduler has no row → SchedulerState="missing"
-// and Action="needs_manual_review" (because EvIntentUpdate cannot
-// re-create a scheduler task; operator must re-install).
-func TestReconcileIPC_MissingTaskInSchedulerFlaggedAsMissing(t *testing.T) {
+// TestReconcileIPC_MissingTaskSpawnsViaIntentUpdate — under the no-legacy
+// ownership model (spec §0.2) EVERY supervisor-intent row is
+// supervisor-owned, so a regular `foo/default` descriptor with no scheduler
+// row + the default running intent classifies post_ev_intent_update (spawn
+// directly from supervisor-intent.json). SchedulerState is still "missing"
+// (the scheduler has no row), but a missing row is no longer a "legacy task
+// lost, operator must re-install" signal — the supervisor spawns the daemon
+// itself. This replaces the dead needs_manual_review expectation the
+// scheduler-era classifier returned here.
+func TestReconcileIPC_MissingTaskSpawnsViaIntentUpdate(t *testing.T) {
 	taskName := `\mcp-local-hub-foo-default`
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
@@ -741,9 +746,9 @@ func TestReconcileIPC_MissingTaskInSchedulerFlaggedAsMissing(t *testing.T) {
 		t.Errorf("SchedulerState = %q, want %q",
 			body.Drift[0].SchedulerState, api.ReconcileSchedulerStateMissing)
 	}
-	if body.Drift[0].Action != api.ReconcileActionNeedsManualReview {
-		t.Errorf("Action = %q, want %q for missing scheduler entry",
-			body.Drift[0].Action, api.ReconcileActionNeedsManualReview)
+	if body.Drift[0].Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("Action = %q, want %q for missing scheduler entry (no-legacy: supervisor spawns it)",
+			body.Drift[0].Action, api.ReconcileActionPostEvIntentUpdate)
 	}
 }
 
@@ -836,27 +841,6 @@ func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for EvIntentUpdate")
-	}
-}
-
-func TestIsSupervisorOwnedDescriptorForReconcile(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{name: "workspace proxy", args: []string{"daemon", "workspace-proxy", "--port", "9200"}, want: true},
-		{name: "serena proxy", args: []string{"daemon", "serena-proxy", "--server", "serena"}, want: true},
-		{name: "scheduler backed global daemon", args: []string{"daemon", "--server", "memory", "--daemon", "default"}, want: false},
-		{name: "bare daemon", args: []string{"daemon"}, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isSupervisorOwnedDescriptorForReconcile(api.SupervisorDaemon{Args: tt.args})
-			if got != tt.want {
-				t.Fatalf("isSupervisorOwnedDescriptorForReconcile(%v) = %v, want %v", tt.args, got, tt.want)
-			}
-		})
 	}
 }
 

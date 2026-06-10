@@ -25,19 +25,19 @@ import (
 // (restartSupervisorOwnedDaemons): the transport-level reconcile call
 // succeeding does NOT mean THIS target's EvIntentUpdate was posted.
 //
-// The supervisor's drift classifier only posts EvIntentUpdate for
-// PROXY-SHAPED supervisor-owned descriptors (isSupervisorOwnedDescriptor
-// ForReconcile in internal/cli/supervise_reconcile_ipc.go is true ONLY
-// for `daemon workspace-proxy` / `daemon serena-proxy` argv). A REGULAR
-// global daemon (`daemon --server X --daemon Y`) classifies
-// needs_manual_review (spawn direction) / no_op (terminate direction)
-// and gets NOTHING posted — it converges only via the supervisor's
-// ~60s IntentWatcher. So we look up THIS target's drift entry by task
-// name (normalized leading-backslash on both sides) and:
+// Under the no-legacy ownership model (spec §0.2) EVERY supervisor-intent
+// row is supervisor-owned, so the supervisor's drift classifier posts
+// EvIntentUpdate for a live regular global daemon (`daemon --server X
+// --daemon Y`) exactly as it does for a proxy descriptor — that is the
+// synchronous-dispatch case. The only entries that DON'T post are the
+// edges: an already-idle/settled daemon whose terminate classifies no_op,
+// or a target with no drift entry at all. So we look up THIS target's
+// drift entry by task name (normalized leading-backslash on both sides)
+// and:
 //
 //   - Action == post_ev_intent_update → plain success row (empty Err,
 //     empty Code): the SM was actually dispatched for this target.
-//   - any other Action (needs_manual_review, no_op) OR a missing drift
+//   - any other Action (no_op, needs_manual_review) OR a missing drift
 //     entry → success-but-deferred row: empty Err (the intent is durable
 //     on disk) + Code = DeferredToIntentWatcherCode, so the row is not a
 //     failure but also does not falsely claim synchronous SM dispatch.
@@ -115,17 +115,16 @@ func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) fun
 //     kill — so the caller must skip these task names and surface the
 //     error rows instead.
 //   - Success → per-target rows derived from the reconcile's per-target
-//     drift action, NOT a blanket success. The supervisor's drift
-//     classifier posts EvIntentUpdate only for PROXY-SHAPED
-//     supervisor-owned descriptors (isSupervisorOwnedDescriptorFor
-//     Reconcile in internal/cli/supervise_reconcile_ipc.go — `daemon
-//     workspace-proxy` / `daemon serena-proxy` argv). A REGULAR global
-//     daemon (`daemon --server X --daemon Y`) classifies no_op on the
-//     terminate direction (its post_ev gate requires supervisorOwned),
-//     so the supervisor posts nothing and the daemon stops only via the
-//     ~60s IntentWatcher. We therefore inspect THIS target's drift entry:
-//     a post_ev_intent_update entry → plain success row; anything else (or
-//     a missing entry) → success-but-deferred row (empty Err + Code =
+//     drift action, NOT a blanket success. Under the no-legacy ownership
+//     model (spec §0.2) every supervisor-intent row is supervisor-owned,
+//     so the supervisor posts EvIntentUpdate for a live regular global
+//     daemon (`daemon --server X --daemon Y`) exactly as it does for a
+//     proxy descriptor — that target's row is a plain success. The only
+//     edges that DON'T post are an already-idle/settled daemon (terminate
+//     classifies no_op) or a target with no drift entry. We therefore
+//     inspect THIS target's drift entry: a post_ev_intent_update entry →
+//     plain success row; anything else (or a missing entry) →
+//     success-but-deferred row (empty Err + Code =
 //     DeferredToIntentWatcherCode) so the row never FALSELY claims a
 //     synchronous SM dispatch that did not happen. The stop is durable
 //     either way (Desired=stopped is on disk); the only difference is
