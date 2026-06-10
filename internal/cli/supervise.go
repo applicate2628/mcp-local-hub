@@ -578,6 +578,37 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		})
 	}
 
+	// Phase 4-E1 one-time dual-intent collapse: merge any active stops from
+	// the legacy daemon-intent.json into the unified supervisor-intent.json
+	// `stops` sub-block BEFORE loadIntentFiles reads them, so the merged
+	// recovery baseline is on disk and the unified-stops readers (cache,
+	// Reconcile, GUI/tray) see a consistent source. The merge owner holds the
+	// daemon-intent.json flock across read→merge→backup→write, takes a
+	// code-baked pre-merge backup, and NEVER deletes daemon-intent.json (E1
+	// leaves the file + its legacy writers in place; E2 removes them). It is
+	// idempotent — a second boot with no stop delta writes nothing. A merge
+	// failure is non-fatal: the supervisor still boots and reads stops via the
+	// live daemon-intent.json (UnifiedStopsFile precedence), so collapse is
+	// retried on the next boot without blocking the fleet.
+	if collapseRes, collapseErr := api.RunDaemonIntentCollapse(stateDir, api.DaemonIntentCollapseOpts{}); collapseErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "intent-collapse-failed",
+			Body:     map[string]any{"err": collapseErr.Error()},
+		})
+	} else if collapseRes.Wrote {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "intent-collapse-merged",
+			Body: map[string]any{
+				"entries":    len(collapseRes.Entries),
+				"backup_dir": collapseRes.BackupDir,
+			},
+		})
+	}
+
 	// Read the two intent files before exposing IPC. daemon-intent.json
 	// parse/schema failures are fail-closed: a corrupt stop/quarantine
 	// file must not collapse to daemonIntent==nil, because Reconcile
@@ -771,7 +802,14 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		quarantineThreshold: respawnQuarantineThreshold,
 	}
 	ctrl.intentCache.Refresh(intent)
-	ctrl.daemonIntent.Refresh(daemonIntent)
+	// Phase 4-E1: feed the stop predicate from the UNIFIED stops source.
+	// UnifiedStopsFile prefers the live daemon-intent.json (present in E1,
+	// still written by install_intent.go's writers) and falls back to the
+	// merged supervisor-intent.json stops sub-block — so the daemonIntent
+	// cache, Reconcile, and the SM all read the new canonical path while
+	// behaving identically to pre-E1 in the live window.
+	unifiedStops := api.UnifiedStopsFile(intent, daemonIntent)
+	ctrl.daemonIntent.Refresh(unifiedStops)
 	hydrateControllerRunningStates(ctrl, currentRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
 
@@ -796,7 +834,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// finding). The 60s poll interval is the spec-mandated upper
 	// bound on watch-miss latency; the IPC `reload` command (Task
 	// 6.3) drives faster propagation when clients call it.
-	previousDaemonIntent := daemonIntent
+	// Seed the watcher delta baseline from the SAME unified stops source the
+	// cache was seeded with (Phase 4-E1), so the first watcher delta compares
+	// against the unified snapshot, not the raw daemon-intent.json.
+	previousDaemonIntent := unifiedStops
 	watcher := NewIntentWatcher(stateDir, 60*time.Second, func() {
 		// Re-read supervisor-intent.json. Errors are warn-only; a
 		// transient read failure should NOT clear the cached
@@ -804,7 +845,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// handleLoopEvent see an empty intent and drop EvStart events
 		// as orphans).
 		supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
-		if updatedSupervisor, supErr := api.ReadSupervisorIntent(supervisorIntentPath); supErr != nil {
+		updatedSupervisor, supErr := api.ReadSupervisorIntent(supervisorIntentPath)
+		if supErr != nil {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "intent-watcher",
@@ -814,6 +856,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 					"error": supErr.Error(),
 				},
 			})
+			updatedSupervisor = nil
 		} else {
 			ctrl.refreshSupervisorIntent(updatedSupervisor)
 		}
@@ -823,7 +866,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// the loadIntentFiles boot path at supervise.go:1501).
 		daemonIntentPath := filepath.Join(stateDir, "daemon-intent.json")
 		daemonRead := api.ReadDaemonIntentFile(daemonIntentPath, daemonIntentReadLockTimeout)
-		var updatedDaemonIntent *api.DaemonIntentFile
+		var rawDaemonIntent *api.DaemonIntentFile
+		readFailed := false
 		if daemonRead.Err != nil {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
@@ -834,14 +878,21 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 					"error": daemonRead.Err.Error(),
 				},
 			})
-			updatedDaemonIntent = previousDaemonIntent
+			readFailed = true
 		} else if daemonRead.State == api.IntentStateValid {
 			parsed := daemonRead.File
-			updatedDaemonIntent = &parsed
+			rawDaemonIntent = &parsed
 		} else {
-			// IntentStateMissing - treat as nil (empty intent file).
-			updatedDaemonIntent = nil
+			// IntentStateMissing - treat as nil (empty intent file). In E1
+			// this falls back to the supervisor-intent stops sub-block.
+			rawDaemonIntent = nil
 		}
+
+		// Phase 4-E1: resolve the unified stops source via the shared
+		// fail-closed helper (see resolveWatcherDaemonIntent for the full
+		// degradation contract). supErr!=nil already nilled updatedSupervisor
+		// above, so it is threaded in as supRead==nil here.
+		updatedDaemonIntent := resolveWatcherDaemonIntent(updatedSupervisor, rawDaemonIntent, readFailed, supErr != nil, previousDaemonIntent)
 		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
 
 		// Delta-only EvIntentUpdate posting. On a typical mtime
@@ -878,7 +929,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// spawn-desired set instead of spawned, failing "not registered", and
 		// churning into quarantine.
 		reconciler.LSPRegistryHasRow = api.LSPRegistryRowBacksDescriptor
-		go reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
+		// Phase 4-E1: Reconcile reads stops via the unified source (same as
+		// the cache seed above) so the startup spawn/terminate decision and
+		// the SM read the new canonical stop path.
+		go reconciler.Reconcile(intent, unifiedStops, currentRunning, time.Now().UTC())
 	}
 
 	// Mark reconcile-ready. The flag transitions false → true once the
@@ -1084,6 +1138,50 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		shutdownMaintenance("context-cancel")
 		return ctx.Err()
 	}
+}
+
+// resolveWatcherDaemonIntent resolves the unified stops source for one
+// IntentWatcher onChange pass, applying the Phase 4-E1 fail-closed contract on
+// the controller daemon-intent cache.
+//
+// Inputs:
+//   - supRead: the freshly-read supervisor-intent.json, already nilled by the
+//     caller when its read FAILED (supErr!=nil → supRead==nil). When present it
+//     supplies the merged stops sub-block recovery baseline.
+//   - rawDaemonIntent: the freshly-read live daemon-intent.json, nil when the
+//     file is missing (IntentStateMissing) OR its read failed (then daemonFailed
+//     is true).
+//   - daemonFailed: daemon-intent.json read FAILED (lock timeout / IO / corrupt).
+//   - supFailed: supervisor-intent.json read FAILED.
+//   - previous: the snapshot the cache currently holds (the fail-closed baseline).
+//
+// Contract (the analogue of the apply-mode reconcile corrupt-read guard in
+// supervise_reconcile_ipc.go and the IPC contract PR #278 P2 locked in):
+//
+//   - daemon-intent.json read FAILED → keep `previous`. A transient failure must
+//     not un-suppress a deliberately-stopped daemon.
+//   - daemon-intent.json missing/valid BUT supervisor-intent.json read FAILED
+//     AND no live daemon-intent.json present (rawDaemonIntent==nil) → keep
+//     `previous`. Both stop sources are gone this tick: synthesizing an EMPTY
+//     UnifiedStopsFile(nil, nil) would clear the cache and a sub-block-sourced
+//     stop would un-suppress, reviving a stopped daemon (adversarial review
+//     P2-B). The watcher path previously lacked this symmetric guard that the
+//     IPC + apply-mode paths already had.
+//   - otherwise → UnifiedStopsFile(supRead, rawDaemonIntent): live
+//     daemon-intent.json wins when present (so a supervisor-intent read failure
+//     while the live file is healthy is NOT a regression — the live file is
+//     still authoritative), else the freshly-read supervisor stops sub-block.
+func resolveWatcherDaemonIntent(
+	supRead *api.SupervisorIntentFile,
+	rawDaemonIntent *api.DaemonIntentFile,
+	daemonFailed bool,
+	supFailed bool,
+	previous *api.DaemonIntentFile,
+) *api.DaemonIntentFile {
+	if daemonFailed || (supFailed && rawDaemonIntent == nil) {
+		return previous
+	}
+	return api.UnifiedStopsFile(supRead, rawDaemonIntent)
 }
 
 // defaultPipePath returns the per-OS IPC pipe (Windows) or socket

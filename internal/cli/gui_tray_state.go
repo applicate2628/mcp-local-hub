@@ -98,7 +98,14 @@ const intentCacheTTL = 5 * time.Minute
 // contention windows.
 func defaultIntentReader() api.IntentReadResult {
 	a := api.NewAPI()
-	res := a.TryReadDaemonIntent(defaultIntentReaderTimeout)
+	// Phase 4-E1: read stops through the UNIFIED source (live
+	// daemon-intent.json precedence, else the merged supervisor-intent.json
+	// stops sub-block) so the tray + toast suppression gates read the new
+	// canonical stop path. TryReadUnifiedStops preserves the same
+	// State/Err degradation contract TryReadDaemonIntent had, so the
+	// aggregator's in-process intent cache + Bug #3 user-stop suppression
+	// keep working unchanged.
+	res := a.TryReadUnifiedStops(defaultIntentReaderTimeout)
 	if res.File.Tasks == nil {
 		// Defensive: every documented IntentReadResult path returns a
 		// non-nil Tasks map, but a future regression on the api side

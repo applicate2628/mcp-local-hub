@@ -53,6 +53,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newTrayCmd())
 	root.AddCommand(newSuperviseCmd())
 	root.AddCommand(newReconcileCmd())
+	root.AddCommand(newIntentCollapseCmd())
 	root.AddCommand(newAutostartCmd())
 	root.AddCommand(newStrictModeCmd())
 	root.AddCommand(newHubMcpCmd())
@@ -108,3 +109,5 @@ func newWeeklyRefreshCmd() *cobra.Command { return newWeeklyRefreshCmdReal() }
 func newGuiCmd() *cobra.Command           { return newGuiCmdReal() }
 func newTrayCmd() *cobra.Command          { return newTrayCmdReal() }
 func newReconcileCmd() *cobra.Command     { return newReconcileCmdReal() }
+
+func newIntentCollapseCmd() *cobra.Command { return newIntentCollapseCmdReal() }

@@ -16,6 +16,33 @@ type SupervisorIntentFile struct {
 	Daemons           []SupervisorDaemon `json:"daemons"`
 	MaintenanceTimers []MaintenanceTimer `json:"maintenance_timers,omitempty"`
 	StrictMode        bool               `json:"strict_mode"`
+
+	// Stops is the v0.6 Phase 4-E dual-intent collapse target: the
+	// per-task operator-stop / quarantine override sub-block that used
+	// to live in the separate daemon-intent.json file. Keyed by canonical
+	// leading-backslash task_name (same key shape as Daemons[].TaskName).
+	// The value is the SAME DaemonIntent record the legacy file used, so
+	// the pure IsActiveStop predicate (daemon_intent.go:309) ports
+	// verbatim with no I/O — the SM input shape is unchanged (spec §5.1-E
+	// "api.Transition is untouched").
+	//
+	// Deliberately a SEPARATE sub-record rather than widening
+	// SupervisorDaemon (spec §15 P1-c): a per-daemon Desired/Reason field
+	// would force a 31-caller round-trip and re-couple immutable runtime
+	// descriptors with mutable stop-overrides, WIDENING write-contention.
+	// The separate map keeps the two concerns independent — a stop write
+	// touches only Stops, never the Daemons slice.
+	//
+	// Additive-first (Phase E1): omitempty so every pre-collapse
+	// supervisor-intent.json round-trips byte-unchanged through
+	// ReadSupervisorIntent (plain json.Unmarshal, NOT DisallowUnknownFields
+	// — supervisor_intent.go:169 — so an OLD binary that predates this
+	// field simply ignores it). In E1 the legacy daemon-intent.json STAYS
+	// on disk and STAYS written by install_intent.go's writers; this
+	// sub-block is the merged recovery baseline + the new canonical home
+	// readers learn. E2 later deletes daemon-intent.json + its writers and
+	// makes this sub-block the sole stop source.
+	Stops map[string]DaemonIntent `json:"stops,omitempty"`
 }
 
 // SupervisorDaemon is one daemon descriptor keyed by canonical
@@ -331,6 +358,60 @@ func (f *SupervisorIntentFile) HasSerenaDaemonForWorkspaceKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// StopsAsDaemonIntentFile returns the supervisor-intent stops sub-block
+// shaped as a *DaemonIntentFile so the existing IsActiveStop readers
+// consume it with NO change to their value shape. The returned file's
+// Tasks map aliases f.Stops (read-only view) when present, else an empty
+// non-nil map so callers never nil-deref.
+//
+// Phase 4-E1: this is the "new canonical path" the repointed readers
+// learn. It is the recovery-baseline source UnifiedStopsFile falls back
+// to when the live daemon-intent.json is absent/unreadable.
+func (f *SupervisorIntentFile) StopsAsDaemonIntentFile() *DaemonIntentFile {
+	if f == nil || f.Stops == nil {
+		return &DaemonIntentFile{Tasks: map[string]DaemonIntent{}}
+	}
+	return &DaemonIntentFile{Tasks: f.Stops}
+}
+
+// UnifiedStopsFile resolves the single stop source the Phase 4-E1
+// readers must consult, applying the additive-first precedence:
+//
+//   - live daemon-intent.json present (non-nil) → it is authoritative
+//     (identical to pre-E1 behavior, so E1 introduces ZERO live-stop
+//     regression while the legacy writers still maintain that file);
+//   - daemon-intent.json absent/unreadable → the merged
+//     supervisor-intent.json stops sub-block (the recovery baseline +
+//     the post-E2 canonical home).
+//
+// This precedence is what makes E1 genuinely additive: during the
+// redeploy window an OLD-binary surface still reads daemon-intent.json
+// directly, and a NEW-binary surface reading via this helper reads the
+// SAME file (since it is present), so the two never disagree. Spec §12
+// Phase 4-E1: keeping the file on disk "avoids the multi-process
+// reader-inconsistency window" — this helper encodes exactly that.
+//
+// Returns a non-nil *DaemonIntentFile (empty Tasks when both sources are
+// empty), so every reader indexes .Tasks without a nil guard.
+//
+// One owner for the precedence: all five repointed IsActiveStop call
+// sites route through this function so the rule lives in exactly one
+// place (no duplicated stop-source logic across the supervisor + GUI +
+// tray surfaces).
+func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, daemonIntentFile *DaemonIntentFile) *DaemonIntentFile {
+	if daemonIntentFile != nil {
+		// Live legacy file is the authority while it exists (E1). A
+		// present-but-empty Tasks map is STILL authoritative: it means
+		// "the operator cleared every stop", which must override a stale
+		// merged baseline (fail-closed avoidance of a phantom suppression).
+		if daemonIntentFile.Tasks == nil {
+			return &DaemonIntentFile{Tasks: map[string]DaemonIntent{}}
+		}
+		return daemonIntentFile
+	}
+	return supervisorIntent.StopsAsDaemonIntentFile()
 }
 
 // supervisorIntentLockSuffix is the gofrs/flock lock-leaf suffix for

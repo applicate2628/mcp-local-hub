@@ -171,13 +171,47 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		}
 		return writeReconcileTimeoutFrame(conn, req, err)
 	}
-	var updatedDaemonIntent *api.DaemonIntentFile
-	daemonIntentTasks := map[string]api.DaemonIntent{}
+	var rawDaemonIntent *api.DaemonIntentFile
 	if daemonIntentRes.State == api.IntentStateValid {
-		updatedDaemonIntent = &daemonIntentRes.File
-		daemonIntentTasks = daemonIntentRes.File.Tasks
+		rawDaemonIntent = &daemonIntentRes.File
 	} else if daemonIntentRes.Err != nil {
 		emitReconcileDaemonIntentReadFailed(deps.events, daemonIntentPath, daemonIntentRes)
+	}
+
+	// Phase 4-E1: resolve the stop source through the unified view so this
+	// apply-mode reconcile reads stops from the new canonical path. Live
+	// daemon-intent.json wins when present (identical to pre-E1); otherwise
+	// the supervisor-intent.json stops sub-block (updatedIntent, read above)
+	// is used. `daemonIntentTasks` (computeIntentDesired) derives from this
+	// unified source: when daemon-intent.json is corrupt or missing,
+	// rawDaemonIntent is nil and UnifiedStopsFile falls back to the
+	// supervisor-intent.json stops sub-block (the recovery baseline) — NOT an
+	// empty overlay; it is empty only when that sub-block itself is empty. The
+	// drift report is computed against whatever stops that baseline carries,
+	// exactly as the startup reconciler treats it.
+	updatedDaemonIntent := api.UnifiedStopsFile(updatedIntent, rawDaemonIntent)
+	daemonIntentTasks := updatedDaemonIntent.Tasks
+
+	// Cache-refresh source is NOT the same as the drift overlay. The
+	// controller daemonIntentCache holds the operator's last-known stop
+	// intents; refreshing it from a CORRUPT read would overwrite those
+	// with the empty fallback UnifiedStopsFile synthesizes when the live
+	// file is unreadable — a fail-quiet regression that silently un-stops
+	// a deliberately-stopped daemon (it would come right back). That
+	// violates the §3 fail-loud-not-fail-quiet contract the redesign
+	// upholds, and is the exact behavior the PR #278 P2 contract locked
+	// in (pre-E1 this was gated by `updatedDaemonIntent == nil` on a
+	// non-valid read; E1's always-non-nil unified file dropped that gate).
+	//
+	// Mirror the merge owner's "corrupt fails CLOSED" posture on the
+	// READER side: only a non-corrupt read (valid → the live file;
+	// missing → the supervisor-intent stops baseline, a legitimate
+	// recovery source) may refresh the cache. A corrupt read leaves the
+	// cache untouched so the prior stops survive until the file is
+	// repaired/quarantined.
+	var cacheRefreshDaemonIntent *api.DaemonIntentFile
+	if daemonIntentRes.State != api.IntentStateCorrupt {
+		cacheRefreshDaemonIntent = updatedDaemonIntent
 	}
 
 	// (3) Scheduler snapshot.
@@ -275,7 +309,10 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// needs_manual_review) never trigger SM events.
 	appliedCount := 0
 	if args.Apply {
-		appliedCount = applyReconcileDrift(deps, drift, updatedIntent, updatedDaemonIntent)
+		// Pass cacheRefreshDaemonIntent (nil on a corrupt read) rather than
+		// the always-non-nil unified file so applyReconcileDrift's
+		// `!= nil` guard preserves the prior daemonIntentCache on corrupt.
+		appliedCount = applyReconcileDrift(deps, drift, updatedIntent, cacheRefreshDaemonIntent)
 	}
 
 	// (8) Audit emit. Failures are non-fatal (the response is still
@@ -626,11 +663,19 @@ func lookupControllerSMState(deps ipcDispatchDeps, taskName string) api.SMState 
 // that don't wire one) the function silently skips dispatch; the
 // drift entries are still reported in the response, but appliedCount
 // will be 0 because there's no event loop to post onto.
+//
+// daemonIntentCacheRefresh is the cache-refresh source, NOT the drift
+// overlay. A nil value means "the read could not be trusted (corrupt) —
+// preserve the existing daemonIntentCache". A non-nil value (valid live
+// file, or the supervisor-intent stops baseline on a genuinely missing
+// file) refreshes the cache. The nil-preserves invariant is the §3
+// fail-loud guard against a transient corrupt read silently un-stopping
+// a deliberately-stopped daemon (PR #278 P2 contract).
 func applyReconcileDrift(
 	deps ipcDispatchDeps,
 	drift []api.DriftEntry,
 	updatedIntent *api.SupervisorIntentFile,
-	updatedDaemonIntent *api.DaemonIntentFile,
+	daemonIntentCacheRefresh *api.DaemonIntentFile,
 ) int {
 	if deps.controllerProvider == nil {
 		return 0
@@ -640,8 +685,8 @@ func applyReconcileDrift(
 		return 0
 	}
 	ctrl.refreshSupervisorIntent(updatedIntent)
-	if updatedDaemonIntent != nil {
-		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+	if daemonIntentCacheRefresh != nil {
+		ctrl.daemonIntent.Refresh(daemonIntentCacheRefresh)
 	}
 	if ctrl.eventLoop == nil {
 		return 0

@@ -321,6 +321,79 @@ func TestReconcileIPC_QuarantinedBystanderNotRevivedOnStop(t *testing.T) {
 	}
 }
 
+// seedStopsSubBlockOnSupervisorIntent rewrites supervisor-intent.json's stops
+// sub-block (the Phase 4-E1 unified stop home) so a reconcile with NO
+// daemon-intent.json on disk still reads the stop. It preserves the existing
+// daemons[] rows (the merge touches only Stops).
+func seedStopsSubBlockOnSupervisorIntent(t *testing.T, stateDir, taskName string) {
+	t.Helper()
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	got, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("read supervisor-intent.json: %v", err)
+	}
+	if got.Stops == nil {
+		got.Stops = map[string]api.DaemonIntent{}
+	}
+	got.Stops[taskName] = api.DaemonIntent{
+		Desired:   api.IntentDesiredStopped,
+		Reason:    api.IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := api.WriteSupervisorIntent(intentPath, got); err != nil {
+		t.Fatalf("write supervisor-intent.json stops sub-block: %v", err)
+	}
+}
+
+// TestReconcileIPC_ReadsStopFromSupervisorIntentSubBlock is the Phase 4-E1
+// reader-repoint proof for reader #2 (supervise_reconcile.go IsActiveStop) on
+// the apply-mode IPC path: with NO daemon-intent.json on disk, a stop recorded
+// ONLY in supervisor-intent.json's stops sub-block must still terminate a live
+// supervisor-owned daemon. Before E1 the reconcile read daemon-intent.json
+// only, so a sub-block-only stop would be invisible (the daemon would not be
+// stopped). This asserts the new canonical path is wired.
+func TestReconcileIPC_ReadsStopFromSupervisorIntentSubBlock(t *testing.T) {
+	taskName := `\mcp-local-hub-time-default`
+	fx := newReconcileTestFixture(t, supervisorOwnedTimeIntentForReconcileTest(taskName))
+	// Deliberately DO NOT seed daemon-intent.json — the stop lives only in the
+	// supervisor-intent stops sub-block (the E1 recovery-baseline / new home).
+	if _, err := os.Stat(filepath.Join(fx.deps.stateDir, "daemon-intent.json")); err == nil {
+		t.Fatalf("test precondition: daemon-intent.json must be absent")
+	}
+	seedStopsSubBlockOnSupervisorIntent(t, fx.deps.stateDir, taskName)
+
+	fx.ctrl.smStates.Store(taskName, api.StRunning)
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{ID: 142, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if len(body.Drift) != 1 {
+		t.Fatalf("drift = %+v, want exactly one row", body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.IntentDesired != api.ReconcileIntentDesiredStopped {
+		t.Fatalf("IntentDesired = %q, want stopped (read from supervisor-intent stops sub-block)", entry.IntentDesired)
+	}
+	if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Fatalf("Action = %q, want post_ev_intent_update (stop from sub-block must terminate live daemon)", entry.Action)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected EvIntentUpdate post for the sub-block-sourced stop")
+	}
+}
+
 // regularGlobalDaemonIntentForReconcileTest builds a one-daemon intent whose
 // descriptor is a REGULAR global daemon (`daemon --server foo --daemon
 // default`) — the shape memory / paper-search / time daemons carry. Under

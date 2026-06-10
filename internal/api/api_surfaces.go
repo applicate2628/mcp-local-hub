@@ -205,12 +205,45 @@ func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 	// backslash entry that WriteDaemonIntent persists.
 	taskName = canonicalIntentTaskKey(taskName)
 	intent, ok, err := readDaemonIntentFn(taskName)
-	if err != nil || !ok {
-		// Read failure or no entry → no active stop directive.
+	if err != nil {
+		// Read failure → no active stop directive (degrade to running).
 		return true
 	}
-	active, _ := intent.IsActiveStop(now)
-	return !active
+	if ok {
+		// Live daemon-intent.json has an opinion for this task — it is
+		// authoritative (Phase 4-E1 unified-stops precedence: the legacy
+		// file wins while it is still written, identical to pre-E1).
+		active, _ := intent.IsActiveStop(now)
+		return !active
+	}
+	// No live daemon-intent.json entry → fall back to the merged
+	// supervisor-intent.json stops sub-block (Phase 4-E1 new canonical
+	// path / recovery baseline). A best-effort read: any failure degrades
+	// to "no recorded preference" (running), the same as today.
+	if stopIntent, found := lookupSupervisorStop(taskName); found {
+		active, _ := stopIntent.IsActiveStop(now)
+		return !active
+	}
+	return true
+}
+
+// lookupSupervisorStop reads the supervisor-intent.json stops sub-block and
+// returns the DaemonIntent recorded for taskName (canonical key) if present.
+// Best-effort: any read/parse failure returns (zero, false) so the caller
+// degrades to "no recorded preference". Phase 4-E1: this is the fallback
+// source IntentStillRunning consults when the live daemon-intent.json has no
+// entry for the task.
+func lookupSupervisorStop(taskName string) (DaemonIntent, bool) {
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return DaemonIntent{}, false
+	}
+	got, err := ReadSupervisorIntent(path)
+	if err != nil || got == nil || got.Stops == nil {
+		return DaemonIntent{}, false
+	}
+	di, ok := got.Stops[taskName]
+	return di, ok
 }
 
 // ---------------------------------------------------------------------------

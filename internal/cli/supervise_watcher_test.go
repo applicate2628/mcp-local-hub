@@ -32,6 +32,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 // TestIntentWatcher_FiresOnSupervisorIntentChange asserts the primary
@@ -277,4 +279,133 @@ func TestIntentWatcher_NilOnChangeIsSafe(t *testing.T) {
 	// No assertion needed — surviving this far without panic IS the
 	// assertion. A panic would have killed the test goroutine and the
 	// outer test would have reported the runtime error.
+}
+
+// TestResolveWatcherDaemonIntent_FailClosedContract pins the IntentWatcher
+// onChange stop-resolution contract (adversarial review P2-B). It is the
+// watcher-path analogue of
+// TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead: when both
+// stop sources are unavailable this tick, the resolver MUST keep the prior
+// snapshot rather than synthesize an EMPTY UnifiedStopsFile(nil, nil) that
+// would clear the cache and let a sub-block-sourced stop un-suppress (the SM
+// would then revive a deliberately-stopped daemon).
+//
+// Before the fix the watcher only kept `previous` on a daemon-intent.json read
+// FAILURE; a supervisor-intent.json read failure with a MISSING
+// daemon-intent.json fell through to UnifiedStopsFile(nil, nil) → empty → cache
+// cleared. That is the latent-in-E1 / live-in-E2 fail-quiet regression this
+// test locks out.
+func TestResolveWatcherDaemonIntent_FailClosedContract(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	prevStop := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	liveStop := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	supWithBaselineStop := &api.SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+
+	// stopped reports whether the resolved file keeps taskName suppressed.
+	stopped := func(f *api.DaemonIntentFile) bool {
+		if f == nil || f.Tasks == nil {
+			return false
+		}
+		di, ok := f.Tasks[taskName]
+		return ok && di.Desired == api.IntentDesiredStopped
+	}
+
+	tests := []struct {
+		name         string
+		supRead      *api.SupervisorIntentFile
+		rawDaemon    *api.DaemonIntentFile
+		daemonFailed bool
+		supFailed    bool
+		// wantPrevious asserts the resolver returned `previous` verbatim
+		// (pointer-identity), the fail-closed branch.
+		wantPrevious bool
+		// wantStopped asserts the resolved file keeps taskName suppressed
+		// (whether via `previous` or via a live/baseline source).
+		wantStopped bool
+	}{
+		{
+			// The load-bearing P2-B case: supervisor read failed AND
+			// daemon-intent.json missing → keep previous (do NOT clear).
+			name:         "supFailed_and_missing_daemon_intent_keeps_previous",
+			supRead:      nil, // caller nils supRead when supFailed
+			rawDaemon:    nil, // missing daemon-intent.json
+			daemonFailed: false,
+			supFailed:    true,
+			wantPrevious: true,
+			wantStopped:  true,
+		},
+		{
+			// daemon-intent.json read failure → keep previous (pre-existing
+			// guard; must still hold).
+			name:         "daemon_intent_read_failure_keeps_previous",
+			supRead:      supWithBaselineStop,
+			rawDaemon:    nil,
+			daemonFailed: true,
+			supFailed:    false,
+			wantPrevious: true,
+			wantStopped:  true,
+		},
+		{
+			// Live daemon-intent.json present is authoritative even when the
+			// supervisor read failed — NOT a regression, the live file wins.
+			name:         "supFailed_but_live_daemon_intent_present_uses_live",
+			supRead:      nil,
+			rawDaemon:    liveStop,
+			daemonFailed: false,
+			supFailed:    true,
+			wantPrevious: false,
+			wantStopped:  true,
+		},
+		{
+			// Healthy both: daemon-intent.json missing → fall back to the
+			// supervisor-intent stops sub-block (recovery baseline).
+			name:         "missing_daemon_intent_falls_back_to_baseline",
+			supRead:      supWithBaselineStop,
+			rawDaemon:    nil,
+			daemonFailed: false,
+			supFailed:    false,
+			wantPrevious: false,
+			wantStopped:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveWatcherDaemonIntent(tc.supRead, tc.rawDaemon, tc.daemonFailed, tc.supFailed, prevStop)
+			if tc.wantPrevious && got != prevStop {
+				t.Fatalf("expected resolver to keep previous snapshot (pointer-identity), got %p want %p", got, prevStop)
+			}
+			if !tc.wantPrevious && got == prevStop {
+				t.Fatalf("expected resolver to NOT return previous, but it did")
+			}
+			if gotStopped := stopped(got); gotStopped != tc.wantStopped {
+				t.Fatalf("resolved stop-suppression = %v, want %v (resolved=%+v)", gotStopped, tc.wantStopped, got)
+			}
+		})
+	}
 }
