@@ -205,8 +205,14 @@ type toastFn func(title, body string) error
 // flash a red icon or fire a toast. Suppression is intent-active +
 // non-chronic; chronic-failure stays visible because that is the
 // watchdog telling the operator something is wrong.
-func aggregateTrayState(ctx context.Context, snapshots <-chan []api.DaemonStatus, trayCh chan<- tray.TrayState) {
-	aggregateTrayStateWithToast(ctx, snapshots, trayCh, tray.ShowToast, defaultIntentReader)
+// pollerErrors carries the poller's per-cycle fetch errors (PR #281
+// round-2 P2). On a down supervisor the poller early-returns before
+// fanning a snapshot, so without this channel the aggregator would
+// never recompute and the tray icon would freeze at its last value
+// (typically green) — a fail-quiet on the operator's primary health
+// signal. Receiving an error here drives the tray to StateError.
+func aggregateTrayState(ctx context.Context, snapshots <-chan []api.DaemonStatus, pollerErrors <-chan error, trayCh chan<- tray.TrayState) {
+	aggregateTrayStateWithToast(ctx, snapshots, pollerErrors, trayCh, tray.ShowToast, defaultIntentReader)
 }
 
 // intentCacheState carries the most-recent successfully-read intent
@@ -252,15 +258,49 @@ type intentCacheState struct {
 // function. Tests that exercise contention flow synthesise IntentReadResult
 // values via a fake intentReaderFn and assert the cache preserves
 // suppression across the contended cycle.
-func aggregateTrayStateWithToast(ctx context.Context, snapshots <-chan []api.DaemonStatus, trayCh chan<- tray.TrayState, showToast toastFn, readIntent intentReaderFn) {
+func aggregateTrayStateWithToast(ctx context.Context, snapshots <-chan []api.DaemonStatus, pollerErrors <-chan error, trayCh chan<- tray.TrayState, showToast toastFn, readIntent intentReaderFn) {
 	const sentinel = tray.TrayState(-1)
 	last := sentinel
 	prevFailed := map[string]bool{}
 	cache := intentCacheState{}
+	// forward coalesces redundant SetIcon calls: it pushes s onto trayCh
+	// only when s differs from the last forwarded state, and keeps `last`
+	// unchanged on a full buffer so the next cycle re-attempts the same
+	// forward. Shared by the snapshot path and the poller-error path so
+	// both honor the same coalescing + non-blocking-send discipline.
+	forward := func(s tray.TrayState) {
+		if s == last {
+			return
+		}
+		select {
+		case trayCh <- s:
+			last = s
+		default:
+			// Tray's StateCh buffer full — keep `last` unchanged so we
+			// re-attempt forward on the next cycle.
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case err, ok := <-pollerErrors:
+			if !ok {
+				// Error channel closed (test-driven shutdown). The
+				// snapshot channel remains the primary feed; keep
+				// looping so a nil errorCh case does not spin.
+				pollerErrors = nil
+				continue
+			}
+			_ = err // the error's presence, not its text, drives the icon
+			// A poller fetch error means the fail-loud status snapshot
+			// could not be obtained — typically ErrSupervisorDown. Drive
+			// the tray to StateError (the red high-priority icon) so the
+			// operator sees the supervisor is unreachable, instead of the
+			// icon freezing at its last (usually green) value because no
+			// snapshot was fanned out on the error path (PR #281 round-2
+			// P2). StateError, not an empty-snapshot StateHealthy.
+			forward(tray.StateError)
 		case rows, ok := <-snapshots:
 			if !ok {
 				return
@@ -342,18 +382,7 @@ func aggregateTrayStateWithToast(ctx context.Context, snapshots <-chan []api.Dae
 			// classifies as StateDown — operator-stopped systems must
 			// surface "nothing running", not green-icon-over-stopped.
 			s := tray.AggregateWithIntent(rows, intent, now)
-			if s == last {
-				continue
-			}
-			select {
-			case trayCh <- s:
-				last = s
-			default:
-				// Tray's StateCh buffer full — keep `last` unchanged so
-				// we re-attempt forward on the next snapshot. The next
-				// snapshot will see the same `s` (state hasn't changed
-				// from this one's perspective) and try again.
-			}
+			forward(s)
 		}
 	}
 }

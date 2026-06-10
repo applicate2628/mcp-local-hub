@@ -429,11 +429,14 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// v0.6 Workstream B (§3.1) — route the poller through the server's
 	// supervisor-IPC-owned, fail-loud snapshot (s.StatusProvider() →
 	// DaemonStatusSnapshot) rather than gui.RealStatusProvider{} →
-	// api.Status()'s scheduler-fallback path. A down supervisor must
-	// surface a `poller-error` event on the SSE channel, NOT stale
+	// api.Status()'s scheduler-fallback path. A down supervisor then
+	// emits a `poller-error` event on the SSE channel instead of stale
 	// scheduler `daemon-state` deltas that would clear the Dashboard's
 	// degraded banner and re-introduce the false-negative this phase
-	// removes on the polling channel.
+	// removes on the polling channel. The Dashboard subscribes to
+	// `poller-error` (Dashboard.tsx) and sets its degraded banner from
+	// it; the same error is also fanned to the tray aggregator's error
+	// channel below so the tray icon goes red (PR #281 round-2 P2/P3).
 	poller := gui.NewStatusPoller(s.StatusProvider(), s.Broadcaster(), 5*time.Second)
 	// Tray state plumbing (C3): wire a snapshot channel between
 	// poller and tray. Aggregator goroutine reads each snapshot,
@@ -446,8 +449,17 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// poller, and a stalled poller cannot back up status reads.
 	snapshotCh := make(chan []api.DaemonStatus, 1)
 	trayStateCh := make(chan tray.TrayState, 1)
+	// pollerErrCh feeds the tray aggregator the poller's fetch errors so
+	// a down supervisor drives the tray icon to StateError instead of
+	// freezing at its last value. The poll-error path early-returns
+	// before fanning a snapshot, so the snapshot channel alone would
+	// starve the aggregator and the icon would stay green over a down
+	// supervisor (PR #281 round-2 P2). Size-1 buffered, non-blocking
+	// send at the poller, drop-stale — matching snapshotCh.
+	pollerErrCh := make(chan error, 1)
 	poller.SetSnapshotChannel(snapshotCh)
-	go aggregateTrayState(ctx, snapshotCh, trayStateCh)
+	poller.SetErrorChannel(pollerErrCh)
+	go aggregateTrayState(ctx, snapshotCh, pollerErrCh, trayStateCh)
 	go poller.Run(ctx)
 
 	select {

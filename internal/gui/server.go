@@ -71,8 +71,18 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 // painted those stale cards — re-introducing the exact false-negative
 // this phase removes, just via the SSE channel. Routing the poller
 // through DaemonStatusSnapshot means a down supervisor yields
-// ErrSupervisorDown, the poller emits a `poller-error` event instead of
-// stale `daemon-state` deltas, and the degraded banner is never masked.
+// ErrSupervisorDown and the poller emits a `poller-error` event instead
+// of stale `daemon-state` deltas.
+//
+// The fix has two complementary effects on the Dashboard banner:
+//   1. By OMISSION — the poller no longer emits banner-CLEARING
+//      `daemon-state` deltas on a down supervisor, so onDelta's
+//      setError(null) can no longer wipe the degraded banner.
+//   2. By POSITIVE SIGNAL — the Dashboard subscribes to `poller-error`
+//      (Dashboard.tsx useEventSource map) and calls setError(...), so a
+//      down supervisor surfaces the banner within one poll cycle (5s)
+//      rather than waiting up to 30s for the separate `/api/status` 500
+//      poll. (The 30s HTTP poll remains the durable backstop.)
 //
 // DaemonStatusSnapshot derives its own bounded IPC deadline internally,
 // so context.Background() here matches the prior api.Status() ctx
@@ -609,8 +619,12 @@ func (s *Server) Broadcaster() *Broadcaster { return s.events }
 // supervisor IPC is unreachable, DaemonStatusSnapshot returns
 // api.ErrSupervisorDown rather than falling back to the legacy
 // scheduler scan, so the poller emits a `poller-error` event instead of
-// stale `daemon-state` deltas that would mask the Dashboard's degraded
-// banner (v0.6 Workstream B §3.1).
+// stale `daemon-state` deltas. The stale deltas would have CLEARED the
+// Dashboard's degraded banner (onDelta → setError(null)); the
+// `poller-error` event is now consumed by the Dashboard's useEventSource
+// map to SET the banner (PR #281 round-2 P3), and also drives the tray
+// icon to StateError via the poller's error channel (PR #281 round-2 P2,
+// wired in cli.go). (v0.6 Workstream B §3.1).
 func (s *Server) StatusProvider() statusProvider {
 	return snapshotStatusProvider{health: s.health}
 }

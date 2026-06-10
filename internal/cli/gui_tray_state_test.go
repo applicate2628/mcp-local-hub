@@ -61,7 +61,7 @@ func TestAggregateTrayState_ForwardsOnChange(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, emptyIntentReader)
 
 	// Sequence: Healthy, Healthy (dup), Partial, Partial (dup),
 	// Healthy. Expect: Healthy, Partial, Healthy — exactly 3
@@ -108,7 +108,7 @@ func TestAggregateTrayState_ExitsOnCtxCancel(t *testing.T) {
 	toaster := &fakeToaster{}
 	done := make(chan struct{})
 	go func() {
-		aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
+		aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, emptyIntentReader)
 		close(done)
 	}()
 	cancel()
@@ -132,7 +132,7 @@ func TestAggregateTrayState_ExitsOnSnapshotChannelClose(t *testing.T) {
 	toaster := &fakeToaster{}
 	done := make(chan struct{})
 	go func() {
-		aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
+		aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, emptyIntentReader)
 		close(done)
 	}()
 	close(snaps)
@@ -160,6 +160,66 @@ func emptyIntentReader() api.IntentReadResult {
 	}
 }
 
+// TestAggregateTrayState_PollerErrorDrivesStateError is the PR #281
+// round-2 P2 regression guard. The fail-loud status snapshot
+// (Server.StatusProvider() → DaemonStatusSnapshot) returns
+// api.ErrSupervisorDown when the supervisor IPC is unreachable, and on
+// that error the StatusPoller early-returns BEFORE fanning a snapshot
+// to the snapshot channel. The tray aggregator's ONLY state feed used
+// to be that snapshot channel, so a down supervisor starved the
+// aggregator and the tray icon FROZE at its last value (typically
+// StateHealthy/green) — a fail-quiet on the operator's primary health
+// signal.
+//
+// The fix routes the poller's fetch errors to a dedicated error channel
+// the aggregator selects on; an error drives the tray to StateError
+// (the red high-priority icon). This test asserts that after a healthy
+// snapshot paints StateHealthy, a poller error transitions the tray to
+// StateError — NOT an empty-snapshot StateHealthy, NOT a frozen icon.
+func TestAggregateTrayState_PollerErrorDrivesStateError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	snaps := make(chan []api.DaemonStatus, 4)
+	pollerErrs := make(chan error, 4)
+	out := make(chan tray.TrayState, 8)
+	toaster := &fakeToaster{}
+	go aggregateTrayStateWithToast(ctx, snaps, pollerErrs, out, toaster.show, emptyIntentReader)
+
+	// 1. Healthy snapshot → StateHealthy.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
+	if got := waitForState(t, out, 2*time.Second); got != tray.StateHealthy {
+		t.Fatalf("first forward = %v, want StateHealthy", got)
+	}
+
+	// 2. Supervisor goes down → poller surfaces ErrSupervisorDown →
+	//    tray MUST transition to StateError, not freeze on Healthy.
+	pollerErrs <- api.ErrSupervisorDown
+	if got := waitForState(t, out, 2*time.Second); got != tray.StateError {
+		t.Fatalf("post-error forward = %v, want StateError (regression: down supervisor froze the tray icon instead of going red)", got)
+	}
+
+	// 3. Supervisor recovers → a fresh healthy snapshot → tray returns
+	//    to StateHealthy, proving the error state is not sticky.
+	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
+	if got := waitForState(t, out, 2*time.Second); got != tray.StateHealthy {
+		t.Fatalf("post-recovery forward = %v, want StateHealthy", got)
+	}
+}
+
+// waitForState blocks until one TrayState is forwarded or the timeout
+// fires. Helper for the poller-error transition test.
+func waitForState(t *testing.T, out <-chan tray.TrayState, d time.Duration) tray.TrayState {
+	t.Helper()
+	select {
+	case s := <-out:
+		return s
+	case <-time.After(d):
+		t.Fatalf("no TrayState forwarded within %s", d)
+		return tray.TrayState(-1) // unreachable
+	}
+}
+
 // TestAggregateTrayState_ToastFiresOnFailureOnset asserts the
 // aggregator fires exactly one toast when a daemon transitions
 // into a failed state, and no further toasts on subsequent
@@ -173,7 +233,7 @@ func TestAggregateTrayState_ToastFiresOnFailureOnset(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, emptyIntentReader)
 
 	// Snapshot 1: all healthy.
 	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
@@ -234,7 +294,7 @@ func TestAggregateTrayState_ToastIgnoresTaskSchedulerInfoCodes(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, emptyIntentReader)
 
 	// Three snapshots of an orphan daemon with TS info-code "never
 	// run yet" — no toast may fire.
@@ -273,7 +333,7 @@ func TestAggregateTrayState_ToastIgnoresNeverRunSentinel(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, emptyIntentReader)
 
 	for i := 0; i < 3; i++ {
 		snaps <- []api.DaemonStatus{
@@ -301,7 +361,7 @@ func TestAggregateTrayState_ToastUsesLastResult(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, emptyIntentReader)
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, emptyIntentReader)
 
 	// Snapshot 1: clean.
 	snaps <- []api.DaemonStatus{{Server: "memory", State: "Running"}}
@@ -375,7 +435,7 @@ func TestAggregateTrayState_IntentSuppressesUserStop_NoToast_NoError(t *testing.
 	snaps := make(chan []api.DaemonStatus, 4)
 	out := make(chan tray.TrayState, 4)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, fakeIntentReader(intent))
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, fakeIntentReader(intent))
 
 	// Snapshot 1: clean (running, no intent suppression needed).
 	snaps <- []api.DaemonStatus{
@@ -447,7 +507,7 @@ func TestAggregateTrayState_ChronicFailureIntent_StillFiresToast(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 4)
 	out := make(chan tray.TrayState, 4)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, fakeIntentReader(intent))
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, fakeIntentReader(intent))
 
 	// Snapshot 1: healthy (no rows match intent yet).
 	snaps <- []api.DaemonStatus{
@@ -517,7 +577,7 @@ func TestAggregateTrayState_IntentTTLExpired_BackToError(t *testing.T) {
 	snaps := make(chan []api.DaemonStatus, 4)
 	out := make(chan tray.TrayState, 4)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, fakeIntentReader(intent))
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, fakeIntentReader(intent))
 
 	// Snapshot 1: healthy.
 	snaps <- []api.DaemonStatus{
@@ -622,7 +682,7 @@ func TestAggregateTrayState_LockContentionPreservesUserStopSuppression(t *testin
 	snaps := make(chan []api.DaemonStatus, 8)
 	out := make(chan tray.TrayState, 8)
 	toaster := &fakeToaster{}
-	go aggregateTrayStateWithToast(ctx, snaps, out, toaster.show, reader)
+	go aggregateTrayStateWithToast(ctx, snaps, nil, out, toaster.show, reader)
 
 	// Each snapshot is the same failed-but-user-stopped row. The
 	// aggregator's behaviour must follow the cache contract:

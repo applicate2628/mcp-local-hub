@@ -359,3 +359,48 @@ func TestPoller_SupervisorDownEmitsPollerErrorNotStaleDeltas(t *testing.T) {
 		}
 	}
 }
+
+// errStatus is a statusProvider that always returns the configured
+// error, modeling a down-supervisor fail-loud snapshot.
+type errStatus struct{ err error }
+
+func (e errStatus) Status() ([]api.DaemonStatus, error) { return nil, e.err }
+
+// TestPoller_FeedsErrorChannelOnFetchError is the PR #281 round-2 P2
+// regression guard at the poller layer: when status.Status() errors,
+// the poller MUST fan the error out to the error channel installed via
+// SetErrorChannel so the tray aggregator can flip the icon to a
+// degraded state instead of freezing (the poll-error path early-returns
+// before fanning a snapshot, so the snapshot channel never sees the
+// down-supervisor cycle). Without this feed the tray's only state
+// source goes silent and the icon stays green over a down supervisor.
+func TestPoller_FeedsErrorChannelOnFetchError(t *testing.T) {
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	snapCh := make(chan []api.DaemonStatus, 1)
+	p := NewStatusPoller(errStatus{err: api.ErrSupervisorDown}, b, 50*time.Millisecond)
+	p.SetErrorChannel(errCh)
+	p.SetSnapshotChannel(snapCh)
+	go p.Run(ctx)
+
+	select {
+	case got := <-errCh:
+		if !strings.Contains(got.Error(), api.ErrSupervisorDown.Error()) {
+			t.Errorf("error channel carried %q, want ErrSupervisorDown (%q)", got.Error(), api.ErrSupervisorDown.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("poller never fed the error channel on a fetch error (regression: tray would freeze on down supervisor)")
+	}
+
+	// And no snapshot is fanned on the error path — the tray must rely
+	// on the error channel, not a stale/empty snapshot.
+	select {
+	case snap := <-snapCh:
+		t.Fatalf("poller fanned a snapshot on the error path: %v (regression: empty/stale snapshot aggregates to StateHealthy and masks the down supervisor)", snap)
+	case <-time.After(200 * time.Millisecond):
+		// good — no snapshot on the error path.
+	}
+}

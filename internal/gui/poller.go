@@ -35,6 +35,7 @@ type StatusPoller struct {
 	interval   time.Duration
 	last       map[string]api.DaemonStatus // key: "<server>/<daemon>"
 	snapshotCh chan<- []api.DaemonStatus   // optional, see SetSnapshotChannel
+	errorCh    chan<- error                // optional, see SetErrorChannel
 }
 
 // SetSnapshotChannel installs an optional sink that receives the full
@@ -49,6 +50,27 @@ type StatusPoller struct {
 // safe to call concurrently with Run; wire it before Run starts.
 func (p *StatusPoller) SetSnapshotChannel(ch chan<- []api.DaemonStatus) {
 	p.snapshotCh = ch
+}
+
+// SetErrorChannel installs an optional sink that receives the fetch
+// error on every poll cycle that fails (status.Status() returned err).
+// The tray aggregator uses this to map a down supervisor to a degraded
+// tray icon (StateError): on the poll-error path poll() early-returns
+// BEFORE fanning a snapshot to snapshotCh, so without this signal the
+// tray aggregator would never recompute and the icon would FREEZE at
+// its last value — a fail-quiet on the operator's primary at-a-glance
+// health signal (PR #281 round-2 P2). An empty []DaemonStatus snapshot
+// is NOT a usable substitute because Aggregate(empty) == StateHealthy,
+// which would paint a green icon over a down supervisor.
+//
+// Send is non-blocking via buffered channel + select-default; make ch
+// buffered = 1 so a slow consumer drops to "latest error" instead of
+// stalling the poller, matching the snapshotCh discipline.
+//
+// Pass nil (or never call) to disable. SetErrorChannel is not safe to
+// call concurrently with Run; wire it before Run starts.
+func (p *StatusPoller) SetErrorChannel(ch chan<- error) {
+	p.errorCh = ch
 }
 
 // NewStatusPoller constructs a StatusPoller. It does not start any
@@ -113,6 +135,17 @@ func (p *StatusPoller) poll(ctx context.Context) {
 	rows, err := p.status.Status()
 	if err != nil {
 		p.events.Publish(Event{Type: "poller-error", Body: map[string]any{"err": err.Error()}})
+		// Feed the tray a degraded signal so its icon reflects the
+		// down supervisor instead of freezing at the last computed
+		// state. Non-blocking drop-stale, same discipline as the
+		// snapshot fan-out below: the tray aggregator only needs the
+		// latest error to flip to StateError (PR #281 round-2 P2).
+		if p.errorCh != nil {
+			select {
+			case p.errorCh <- err:
+			default:
+			}
+		}
 		return
 	}
 	// Snapshot fan-out: non-blocking send. A slow consumer's old
