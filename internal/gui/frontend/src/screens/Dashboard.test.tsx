@@ -746,3 +746,66 @@ describe("DashboardScreen — Stop button", () => {
     await waitFor(() => expect(stopBtn.textContent).toBe("Stopped"));
   });
 });
+
+// v0.6 Workstream B (§3.1): when the supervisor IPC is down, the backend
+// fails loud (/api/status → 500 STATUS_FAILED with the
+// "supervisor unreachable — restart the hub" message) instead of falling
+// back to the stale scheduler scan and painting Running daemons as
+// failed/Restarting. The Dashboard must surface that as an explicit
+// degraded state — the "Failed to load status" banner carrying the
+// backend message, plus the "Restart supervisor" recovery affordance —
+// NOT a misleading row of failed/Restarting cards.
+describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("renders the degraded banner with the supervisor-down message and NO daemon cards on /api/status 500", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        // The exact envelope writeAPIError emits for the
+        // api.ErrSupervisorDown degraded marker.
+        return Promise.resolve(
+          jsonResponse(500, {
+            error: "supervisor unreachable — restart the hub",
+            code: "STATUS_FAILED",
+          }),
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findByTestId, queryByText } = render(<DashboardScreen />);
+
+    // The fail-loud banner shows the backend's degraded message verbatim
+    // (fetchOrThrow prefixes the path, so the message is a substring).
+    const banner = await findByTestId("dashboard-error");
+    expect(banner.textContent).toContain("supervisor unreachable — restart the hub");
+
+    // NO daemon cards — the operator must not see Running daemons painted
+    // as failed/Restarting from stale scheduler data.
+    expect(document.querySelectorAll(".cards .card").length).toBe(0);
+
+    // The recovery affordance must be present and prominent so the
+    // operator can act on the "restart the hub" guidance.
+    expect(queryByText("Restart supervisor")).not.toBeNull();
+  });
+
+  it("does NOT render the degraded banner on the happy path (no false positive)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findAllByRole, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4); // 2 bulk + 2 per-card → cards rendered
+    });
+    // The error banner must be absent when the supervisor is up.
+    expect(queryByTestId("dashboard-error")).toBeNull();
+  });
+});

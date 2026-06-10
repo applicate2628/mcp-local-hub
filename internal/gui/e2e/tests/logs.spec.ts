@@ -1,6 +1,17 @@
 import { test, expect } from "../fixtures/hub";
 
 test.describe("logs", () => {
+  // Workstream B (§3.1 fail-loud): with no supervisor the GUI /api/status now
+  // FAILS LOUD (500 STATUS_FAILED) instead of the old scheduler-scan 200 []. The
+  // Logs screen is a /api/status consumer (Logs.tsx), so its no-daemons
+  // assertions need an explicit empty-status mock to reproduce the
+  // healthy-but-idle state these tests target.
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/status", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+  });
+
   test("renders heading + controls + notice when no daemons are running", async ({
     page,
     hub,

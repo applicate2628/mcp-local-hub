@@ -2,6 +2,15 @@ import { test, expect } from "../fixtures/hub";
 
 test.describe("servers", () => {
   test("matrix renders headers with correct column set", async ({ page, hub }) => {
+    // v0.6 Workstream B (§3.1): with no supervisor under the e2e fixture,
+    // the real /api/status now fails loud (500) instead of falling back to
+    // the empty scheduler scan, so the Servers screen would render its
+    // "Failed to load" banner instead of the matrix. This test verifies the
+    // matrix STRUCTURE, so stub /api/status → [] (the same convention the
+    // load-path tests below already use) to exercise the populated render.
+    await page.route("**/api/status", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
+    );
     await page.goto(`${hub.url}/#/servers`);
     await expect(page.locator("h1")).toHaveText("Servers");
     const matrix = page.locator("table.servers-matrix");
@@ -27,6 +36,13 @@ test.describe("servers", () => {
   });
 
   test("empty body when tmpHome has no client configs", async ({ page, hub }) => {
+    // Workstream B (§3.1): stub /api/status → [] so the matrix renders its
+    // empty body rather than the supervisor-down fail-loud banner (the e2e
+    // fixture has no supervisor; the real status path now 500s). See the
+    // header-columns test above for the rationale.
+    await page.route("**/api/status", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
+    );
     await page.goto(`${hub.url}/#/servers`);
     const matrix = page.locator("table.servers-matrix");
     await expect(matrix).toBeVisible();
@@ -35,6 +51,12 @@ test.describe("servers", () => {
   });
 
   test("Apply button is disabled with no dirty cells", async ({ page, hub }) => {
+    // Workstream B (§3.1): stub /api/status → [] so the matrix toolbar
+    // (and its Apply button) renders instead of the supervisor-down
+    // fail-loud banner under the no-supervisor e2e fixture.
+    await page.route("**/api/status", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
+    );
     await page.goto(`${hub.url}/#/servers`);
     const applyBtn = page.getByRole("button", { name: "Apply changes" });
     await expect(applyBtn).toBeVisible();

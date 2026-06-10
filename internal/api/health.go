@@ -36,6 +36,24 @@ import (
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 var SupervisorIPCStatusFn func(ctx context.Context) ([]DaemonStatus, error)
 
+// ErrSupervisorDown is the explicit fail-loud degraded state surfaced when
+// the supervisor IPC status seam is wired (production GUI) but the
+// supervisor is unreachable (ErrSupervisorIPCUnavailable). v0.6 Workstream
+// B (§3.1): once the GUI is wired to the supervisor IPC status seam, the
+// supervisor — not the legacy scheduler scan — owns the daemon-state truth.
+// Silently falling back to the scheduler scan painted migrated daemons
+// (whose \mcp-local-hub-* tasks were deleted) as failed/Restarting even
+// while the supervisor-owned process served verified traffic — a FALSE
+// NEGATIVE. Instead of that misleading scheduler view we surface this
+// explicit degraded marker: /api/status maps it to 500 + STATUS_FAILED and
+// the GUI Dashboard renders its "Failed to load status — Restart supervisor"
+// recovery surface. The message names the operator action so the human-
+// facing banner is actionable, not a bare identifier.
+//
+// errors.Is(err, ErrSupervisorDown) lets callers (and tests) detect the
+// degraded marker without string matching.
+var ErrSupervisorDown = errors.New("supervisor unreachable — restart the hub")
+
 // HealthSnapshot is the canonical snapshot returned by GET /api/health.
 // Owns the contract G3 (capability display) and G4 (Hub MCP routing)
 // consume. Per spec docs/superpowers/specs/2026-05-07-g2-unified-health-endpoint-design.md.
@@ -98,7 +116,7 @@ type DaemonRow struct {
 	Port          int     `json:"port"`
 	RAMBytes      uint64  `json:"ram_bytes"`
 	UptimeSec     int64   `json:"uptime_sec"`
-	State         string  `json:"state"` // "running" | "stopped" | "starting" | "failed"
+	State         string  `json:"state"` // "running" | "stopped" | "starting" | "failed" | "unknown"
 	RestartCount  int     `json:"restart_count"`
 	LastRestartAt *string `json:"last_restart_at"`
 }
@@ -396,8 +414,19 @@ func (a *API) computeDaemonsSection(ctx context.Context, nowMs int64, refresh bo
 			ipcCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 			rows, fetchErr = SupervisorIPCStatusFn(ipcCtx)
 			cancel()
+			// v0.6 Workstream B (§3.1) — FAIL LOUD, do NOT fall back to
+			// the legacy scheduler scan when IPC is unreachable. The
+			// supervisor owns the daemon-state truth once this seam is
+			// wired; the scheduler view no longer represents the live
+			// daemon set (migrated daemons have no \mcp-local-hub-* task,
+			// so they surface as failed/Restarting even while the
+			// supervisor-owned process serves verified traffic — the
+			// FALSE NEGATIVE this phase removes). Replace the silent
+			// fallback with an explicit degraded marker that propagates to
+			// 500 + STATUS_FAILED so the GUI shows "supervisor down —
+			// restart" instead of stale scheduler rows coerced to failed.
 			if errors.Is(fetchErr, ErrSupervisorIPCUnavailable) {
-				rows, fetchErr = a.StatusContext(parentCtx)
+				rows, fetchErr = nil, ErrSupervisorDown
 			}
 		default:
 			rows, fetchErr = a.StatusWithOpts(StatusOpts{}) // ProbeHealth=false; probes come in Phase 3
@@ -929,7 +958,8 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 }
 
 // normalizeDaemonState maps the existing ("Running"|"Ready"|"Failed"|"Stopped")
-// vocabulary to the spec's lowercase ("running"|"stopped"|"starting"|"failed").
+// vocabulary to the spec's lowercase ("running"|"stopped"|"starting"|"failed"
+// |"unknown").
 //
 // Used only by computeDaemonsSection when projecting into DaemonRow
 // (the lowercase wire form for HealthSnapshot.Daemons.Items). The
@@ -937,13 +967,16 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 // DaemonStatusSnapshot returns the canonical []DaemonStatus with the
 // original Title-Case state vocabulary intact, no round-trip needed.
 //
-// Codex Cloud bot P1 on PR #135 round 2: DaemonRow.State is documented
-// as the closed 4-value wire enum `running|stopped|starting|failed`.
-// The default branch must NOT pass through arbitrary scheduler states
-// (e.g. "Disabled", "Queued", "Unknown") nor the empty string — health
-// consumers depend on the enum being exhaustive. Map all unrecognized
-// inputs (and blank input) to "failed" — the most conservative
-// classification for unexpected scheduler/state vocabulary.
+// Codex Cloud bot P1 on PR #135 round 2 kept the enum closed by mapping
+// every unrecognized scheduler state (e.g. "Disabled", "Queued") and the
+// empty string to "failed". v0.6 Workstream B (§3.1) corrects that: a
+// daemon whose state is merely UNRECOGNIZED has NOT failed — coercing
+// unknown→failed is the second half of the false-negative this phase
+// removes (a supervisor row in an unmapped state, e.g. "Quarantined",
+// surfacing as "failed" while the process actually serves traffic). The
+// enum stays closed but gains an honest "unknown" slot: unrecognized and
+// blank inputs map to "unknown", never to the misleading "failed". A
+// genuinely "Failed" daemon still maps to "failed".
 func normalizeDaemonState(s string) string {
 	switch s {
 	case "Running":
@@ -955,10 +988,11 @@ func normalizeDaemonState(s string) string {
 	case "Ready", "Scheduled", "Stopped":
 		return "stopped"
 	default:
-		// Conservative classification: unknown (or blank) source state
-		// surfaces as "failed" rather than leaking arbitrary
-		// scheduler vocabulary onto the wire enum.
-		return "failed"
+		// Honest classification: an unrecognized (or blank) source state
+		// is "unknown", NOT "failed". Reporting a daemon as failed when
+		// its state is merely unmapped is a false negative (§3.1); the
+		// closed enum keeps a dedicated "unknown" value for this case.
+		return "unknown"
 	}
 }
 

@@ -856,12 +856,15 @@ func TestDaemonStatusSnapshot_RecoversAfterBackendComesBack(t *testing.T) {
 // closed wire enum contract for DaemonRow.State. The mapping covers
 // the existing Title-Case vocabulary that bubbles up from the
 // scheduler/health pipeline; unexpected inputs (and the empty string)
-// must collapse to "failed" so the wire enum remains exhaustive.
+// now map to the honest "unknown" value, NOT "failed".
 //
-// Codex Cloud bot P1 on PR #135 round 2: a permissive default branch
-// that lower-cased and passed through arbitrary scheduler states
-// (e.g. "Disabled", "Queued") leaked off-spec values onto the
-// 4-value wire enum, breaking health consumers that branch on it.
+// v0.6 Workstream B (§3.1) correction: PR #135's default branch mapped
+// every unrecognized state (e.g. "Disabled", "Queued") and the empty
+// string to "failed". That is a false negative — a daemon whose state is
+// merely UNRECOGNIZED (e.g. an unmapped supervisor state like
+// "Quarantined") has not failed. The enum stays closed but gains a
+// dedicated "unknown" slot; a genuinely "Failed" daemon still maps to
+// "failed".
 func TestNormalizeDaemonState_EnrichedAndUnexpectedStates(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -873,13 +876,16 @@ func TestNormalizeDaemonState_EnrichedAndUnexpectedStates(t *testing.T) {
 		{in: "Scheduled", want: "stopped"},
 		{in: "Stopped", want: "stopped"},
 		{in: "Failed", want: "failed"},
-		// Unknown scheduler vocabulary collapses to the conservative
-		// "failed" wire value rather than leaking through unchanged.
-		{in: "Disabled", want: "failed"},
-		{in: "Queued", want: "failed"},
-		// Empty / blank source is also conservative-failed; never
-		// promote no-data into a misleading wire enum slot.
-		{in: "", want: "failed"},
+		// Unrecognized vocabulary maps to the honest "unknown" wire value,
+		// NOT "failed" — coercing unknown→failed is the false negative
+		// Workstream B removes.
+		{in: "Disabled", want: "unknown"},
+		{in: "Queued", want: "unknown"},
+		// An unmapped supervisor state must NOT be reported as failed.
+		{in: "Quarantined", want: "unknown"},
+		// Empty / blank source is "unknown" (no data), never a misleading
+		// "failed".
+		{in: "", want: "unknown"},
 	}
 
 	for _, tc := range tests {
