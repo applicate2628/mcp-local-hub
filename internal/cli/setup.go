@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/autostart"
 )
 
 // ---------------------------------------------------------------------------
@@ -489,10 +490,24 @@ func runSetupWatchdog(out io.Writer, allowElevated bool) error {
 	// watchdog is the still-present recovery net, so a missing liveness task
 	// degrades gracefully (additive + reversible per §15 P1-b). The next
 	// `mcphub setup` re-attempts the idempotent ImportXML.
+	//
+	// SCOPING NOTE (PR #283 review P3-b): the liveness action's relaunch
+	// target is the AUTOSTART task `\mcp-local-hub-supervisor`, which `mcphub
+	// setup` does NOT install — it is created only by `mcphub install`
+	// (migration shim) or an explicit `mcphub autostart enable`. So in a
+	// setup-only state the liveness task exists but its relaunch is inert
+	// until autostart is enabled. This is fail-safe (the normal sequence is
+	// setup → install, and install enables autostart before any persistent
+	// supervisor exists, so there is nothing to recover during the gap), and
+	// a relaunch against an absent target now lands a durable
+	// `liveness-relaunch-failed` warn in supervisor-events.log (carrying the
+	// target name + the schtasks error) so the inert state is operator-visible
+	// rather than silent. The success line below is annotated accordingly.
 	if livenessErr := a.InstallLivenessTask(); livenessErr != nil {
 		fmt.Fprintf(out, "⚠ supervisor-liveness task install failed (non-fatal; watchdog still covers recovery): %v\n", livenessErr)
 	} else {
 		fmt.Fprintf(out, "✓ Installed scheduled task: %s (supervisor-liveness, cadence 1 min)\n", api.LivenessTaskName)
+		fmt.Fprintf(out, "  Note: liveness recovery relaunches via the autostart task %s, which is installed by `mcphub install` / `mcphub autostart enable` — until then the relaunch is inert (no-op; recorded in supervisor-events.log).\n", autostart.WindowsTaskName)
 	}
 
 	// 4. EventLog source registration (§60). Non-fatal.

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -72,11 +73,25 @@ func TestEnsureAlive_LiveLock_NoOp(t *testing.T) {
 	}
 }
 
+// noLiveGUIOwner installs the GUI-incumbent probe seam reporting NO live GUI
+// owner. This is the genuine OWNER-death topology the relaunch path is for, and
+// it ALSO keeps the test off the real %LOCALAPPDATA% gui.pidport (state safety:
+// the production probe reads the developer's running GUI). Every test that
+// exercises a supervisor-down branch MUST install this (or its live-owner
+// counterpart below) so the real pidport is never probed.
+func noLiveGUIOwner(t *testing.T) {
+	t.Helper()
+	restore := setGUIOwnerAliveFnForTest(func() (bool, int) { return false, 0 })
+	t.Cleanup(restore)
+}
+
 // TestEnsureAlive_FreeLock_RelaunchesOnce covers the recovery case: NO process
-// holds the flock → SupervisorRunningUnderStateDir reports not-running → the
-// action relaunches the owner exactly once via the seam.
+// holds the flock AND no live GUI owner → SupervisorRunningUnderStateDir
+// reports not-running → the action relaunches the owner exactly once via the
+// seam.
 func TestEnsureAlive_FreeLock_RelaunchesOnce(t *testing.T) {
 	stateDir := ensureAliveTestStateDir(t)
+	noLiveGUIOwner(t)
 
 	// No lock holder. Sanity-confirm the probe reports not-running, no error.
 	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || running {
@@ -100,6 +115,54 @@ func TestEnsureAlive_FreeLock_RelaunchesOnce(t *testing.T) {
 	if !strings.Contains(out.String(), "relaunched owner") {
 		t.Errorf("output should report the relaunch; got %q", out.String())
 	}
+	// Durable observability (PR #283 review P3-d): the relaunch-success outcome
+	// is mirrored to supervisor-events.log so a tick is diagnosable even though
+	// Task Scheduler discards stdout.
+	assertSupervisorEvent(t, stateDir, "liveness-relaunched-owner")
+}
+
+// TestEnsureAlive_FreeLock_LiveGUIOwner_DefersNoRelaunch covers the PR #283
+// review P2 topology: the supervisor is down (free flock) BUT a live GUI owner
+// still holds the single-instance lock. Re-firing the autostart task here would
+// short-circuit to activate-window without respawning the supervisor — a no-op
+// focus-steal. The action MUST suppress the relaunch, MUST NOT print a false
+// "relaunched owner", and MUST record an honest durable warn.
+func TestEnsureAlive_FreeLock_LiveGUIOwner_DefersNoRelaunch(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	// No supervisor lock holder → supervisor reported down.
+	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || running {
+		t.Fatalf("precondition: probe must report not-running with no lock holder; got running=%v err=%v", running, perr)
+	}
+
+	// A live GUI owner IS present (the dead-child-under-live-owner topology).
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int) { return true, 4242 })
+	defer restoreGUI()
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam fired %d times under a LIVE GUI owner; want 0 "+
+			"(re-firing the autostart task there is a no-op focus-steal, not a recovery)", got)
+	}
+	if strings.Contains(out.String(), "relaunched owner") {
+		t.Errorf("must NOT print a false 'relaunched owner' under a live GUI owner; got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "live GUI owner") || !strings.Contains(out.String(), "4242") {
+		t.Errorf("output should report the dead-supervisor-under-live-GUI deferral (with the owner pid); got %q", out.String())
+	}
+	// Durable, honest diagnostic in supervisor-events.log instead of a false
+	// success — the operator can see the unrecovered state.
+	assertSupervisorEvent(t, stateDir, "liveness-supervisor-down-under-live-gui")
 }
 
 // TestEnsureAlive_ProbeError_NoRelaunch covers the fail-closed guard-precondition:
@@ -178,8 +241,10 @@ func TestEnsureAlive_Falsification_HealthyNeverRelaunches(t *testing.T) {
 // surfacing a non-zero exit that would noise up the task's last-run record.
 func TestEnsureAlive_RelaunchFailure_StillExitsZero(t *testing.T) {
 	stateDir := ensureAliveTestStateDir(t)
+	noLiveGUIOwner(t)
 
-	// No lock holder → the action will attempt a relaunch; the seam errors.
+	// No lock holder + no live GUI owner → the action will attempt a relaunch;
+	// the seam errors.
 	var relaunches int32
 	restoreSeam := setLivenessRelaunchFnForTest(func() error {
 		atomic.AddInt32(&relaunches, 1)
@@ -196,5 +261,25 @@ func TestEnsureAlive_RelaunchFailure_StillExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "relaunch FAILED") {
 		t.Errorf("output should report the relaunch failure; got %q", out.String())
+	}
+	// Durable observability (PR #283 review P3-d): a chronically-failing
+	// relaunch must be visible despite Task Scheduler discarding stdout.
+	assertSupervisorEvent(t, stateDir, "liveness-relaunch-failed")
+}
+
+// assertSupervisorEvent fails the test unless supervisor-events.log under
+// stateDir contains a JSONL row whose "event" discriminator equals wantEvent.
+// Used to prove the durable-observability fix (PR #283 review P3-d) actually
+// writes the diagnostic the operator needs.
+func assertSupervisorEvent(t *testing.T, stateDir, wantEvent string) {
+	t.Helper()
+	logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read supervisor-events.log %q: %v", logPath, err)
+	}
+	needle := `"event":"` + wantEvent + `"`
+	if !strings.Contains(string(raw), needle) {
+		t.Fatalf("supervisor-events.log missing event %q; log body=%q", wantEvent, string(raw))
 	}
 }
