@@ -103,6 +103,25 @@ Legend: **in-flight** = #278 on `fix/serena-supervisor-robustness`; **next** = f
 
 "Agents" = the AI client adapters mcphub installs MCP entries into. The architecture is **already multi-client**: one `clients.Client` interface (`internal/clients/clients.go:52-256`), one `AllClients()` registry (`clients.go:661-673`), one shared daemon served to all clients via per-client transport adapters, and a uniform install/migrate/demigrate/reconcile pipeline. "Support a bunch of agents" is therefore mostly (i) collapsing duplicated canonical-set literals into one registration table, (ii) writing more thin adapters, and (iii) surfacing per-client enable/disable in the GUI — NOT new lifecycle machinery.
 
+### 9.0 Expansion targets (the selected list — owner-confirmed 2026-06-10)
+
+The vendors to add adapters for, **selected together with the owner** (transcript L25954 + L25965), are **8 client adapters**:
+
+| Vendor | Notes | Config-format source |
+|---|---|---|
+| **OpenClaw** | CLI agent | docs.openclaw.ai/cli/mcp |
+| **Hermes** | Nous Research agent | hermes-agent.nousresearch.com/docs/reference/mcp-config-reference |
+| **OpenCode** | agent | research at build |
+| **OpenHands** | agent | research at build |
+| **Cline** | VS Code extension | research at build |
+| **Aider** | CLI | research at build |
+| **Kilo Code** | agent | research at build |
+| **Windsurf** | Codeium IDE | research at build |
+
+**Ollama -> SKIP** — not a native MCP client; would need a bridge (github.com/jonigl/mcp-client-for-ollama). Deferred, NOT in this scope.
+
+Sizeable feature (8 Go adapters + the 9.2 registration table + README client-versions + per-adapter demigrate/rollback symmetry tests) -> **its own PR** (originally scoped "after #268"; now after the legacy-removal/STOP work). Config formats for the 6 newer vendors are researched at build time; OpenClaw + Hermes have published MCP-config docs (above).
+
 ### 9.1 The canonical client set (7 today)
 
 The build-wide set is declared in **three places that must stay in sync** — this duplication is the central scaling defect:
