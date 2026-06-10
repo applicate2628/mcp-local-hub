@@ -366,3 +366,31 @@ Recovered from the owner plan (transcript L28299/L28300, dropped by the mid-sess
 - Alternative: a `postinstall` script that downloads the matching binary from GitHub releases.
 
 Feasibility + design is a **research task**. Big adoption win — drops the build-from-source barrier for the free/open core. Ties to the open-core split in `.dev/mcp-local-hub-plan.md`.
+
+
+---
+
+## §14 Adoption & onboarding bundle (recovered late-session queue)
+
+Recovered from the owner plan (transcript L29257/L29436/L29441/L31414), dropped by the mid-session compaction. The cohesive **adoption/UX queue** that rides alongside multi-agent (§9) + the store (§10). Owner-stated order (L29441): **onboarding -> install-fixes -> hash->name -> clients(+Zed/Kiro) -> npm**.
+
+### 14.1 Onboarding — trusted-root proposal (the UX hole)
+
+A fresh internet user does NOT know about the trusted-root requirement for serena auto-register — auto-register silently refuses an unknown workspace and the user is stuck with no guidance. Onboarding layers so the user is GUIDED, not left searching:
+
+1. **`mcphub setup` proposes at install** (the main fresh-user path): `--trusted-root <path>` flag (repeatable, non-interactive) + an interactive prompt offering the current / common dev roots.
+2. **GUI first-run banner** — prompt to add a trusted root on first launch.
+3. **Refusal-error guidance** — when auto-register refuses a workspace, the error tells the user exactly how to add it as a trusted root (not a bare refusal).
+4. **README** — document the trusted-root model.
+
+Scoped as a follow-up PR after the GUI trusted-roots PR (#273).
+
+### 14.2 Install-fixes
+
+Simplify + repair the existing install flow (`build.sh -> install -> ~/.local/bin -> mcphub setup` is complex + error-prone). Distinct from but adjacent to §13 npm delivery — install-fixes covers existing-path bugs / ergonomics; §13 adds the npm one-command path.
+
+### 14.3 The rest of the queue (already specced — cross-ref)
+
+- **hash->name (UX-hashes)** — `serena - <project>` and `<language> @ <workspace-basename>` instead of `serena-<hash>` / `lsp-<hash>`, for BOTH serena and LSP daemons. = §6 #4 (display-only).
+- **clients (+Zed/Kiro)** — the 10-adapter expansion. = §9 / §9.0.
+- **npm** — one-command install. = §13.
