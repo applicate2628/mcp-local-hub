@@ -218,7 +218,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		intentDesired := computeIntentDesired(taskName, daemonIntentTasks)
 		schedState, hasSched := lookupSchedulerState(schedByTask, taskName)
 		smState := lookupControllerSMState(deps, taskName)
-		action := classifyDriftAction(schedState, hasSched, intentDesired, isSupervisorOwnedDescriptorForReconcile(d))
+		action := classifyDriftAction(schedState, hasSched, intentDesired, smState)
 
 		// Orphaned-LSP-descriptor exclusion, mirroring the startup reconciler
 		// guard at supervise_reconcile.go:229. classifyDriftAction returns
@@ -468,27 +468,87 @@ func normalizeSchedulerState(raw string) string {
 // classifyDriftAction computes the Action field per (scheduler-state,
 // intent-desired) pair. The matrix:
 //
-//	sched=missing   intent=running  → post_ev_intent_update for supervisor-owned descriptors; needs_manual_review for legacy scheduler-owned descriptors
-//	sched=missing   intent=stopped  → no_op (intent says stop and there's no task; nothing to do)
+//	sched=missing   intent=running  → post_ev_intent_update (spawn directly from supervisor-intent.json), UNLESS SM=quarantined → needs_manual_review (quarantine-respect)
+//	sched=missing   intent=stopped  → post_ev_intent_update (terminate) when the SM state is live; no_op otherwise
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
-//	sched=stopped   intent=running  → post_ev_intent_update (spawn)
+//	sched=stopped   intent=running  → post_ev_intent_update (spawn), UNLESS SM=quarantined → needs_manual_review (quarantine-respect)
 //	sched=stopped   intent=stopped  → no_op (steady state)
 //	sched=<other>   *               → needs_manual_review (unknown scheduler state)
 //
-// For legacy scheduler-owned sched=missing + intent=running we mark
-// `needs_manual_review` rather than `post_ev_intent_update` because the
-// EvIntentUpdate event cannot bring a missing scheduler task back. For
-// supervisor-owned descriptors, there is deliberately no scheduler row:
-// the supervisor has the full command in supervisor-intent.json and can
-// spawn directly from EvIntentUpdate.
-func classifyDriftAction(schedState string, hasSched bool, intentDesired string, supervisorOwned bool) string {
+// No-legacy ownership (spec §0.2 — no compatibility, no migration, no old
+// users): EVERY row in supervisor-intent.json is supervisor-owned. The
+// supervisor has the full command in the descriptor and spawns regular
+// daemons through the generic `daemon --server X --daemon Y` path directly
+// from EvIntentUpdate, exactly as it spawns the proxy descriptors — so a
+// missing scheduler row is NOT a "legacy task lost, operator must
+// re-install" signal any more; it is simply the by-design state of a
+// supervisor-intent descriptor. The old `sched=missing + intent=running →
+// needs_manual_review` row (a relic of the scheduler era, when regular
+// global daemons WERE Task Scheduler tasks and a missing row meant
+// re-install) therefore DIES: the spawn now posts EvIntentUpdate directly.
+// This pre-implements the Phase B/F ownership classification of the
+// redesign spec ahead of the scheduler-task removal; the hasSched=true
+// branches below are unchanged because real scheduler rows still reconcile
+// against scheduler state until Phase F removes them.
+//
+// The terminate direction on the sched=missing row follows the same
+// reasoning (spec §4 Phase A.1): supervisor-intent rows have NO scheduler
+// row by design, so scheduler state can never witness them running — the
+// controller's SM state is the only witness. Without this row, `mcphub
+// stop` would write Desired=stopped into daemon-intent.json and the
+// apply-mode reconcile would classify the still-running daemon as no_op;
+// the caller's only remaining lever is taskkill, whose NON-clean exit the
+// supervisor reaper observes and respawns — the stop→respawn churn that
+// drives daemons into quarantine. Posting EvIntentUpdate instead lets the
+// SM drive StRunning→StExiting→StIdle (deliberate stop, no respawn).
+// Dead/settled SM states (StIdle, StQuarantined) stay no_op: there is
+// nothing live to terminate, and a quarantined daemon's intent flip must
+// not be treated as drift (same quarantine-respect as the startup
+// reconciler's `isStopped && !running` gate).
+//
+// Spawn-direction quarantine-respect (intent=running + SM=quarantined →
+// needs_manual_review): `reconcile --apply` now fires on EVERY `mcphub
+// stop`/`mcphub restart` (via stop_supervisor.go / restart_supervisor.go),
+// and the drift loop walks ALL supervisor-intent rows — not just the
+// stop/restart target. The gate lives on BOTH spawn-direction arms: the
+// no-scheduler-row arm (supervisor-intent descriptors, the common case) AND
+// the scheduler-stopped arm (a daemon that quarantined while still carrying a
+// stale/residual scheduler-stopped row). Either arm without the gate would
+// revive the quarantined bystander on the next reconcile.
+// A BYSTANDER daemon that is genuinely quarantined
+// (StQuarantined) but whose intent is running (or absent → computeIntentDesired
+// defaults to running) would otherwise classify post_ev_intent_update, and
+// applyReconcileDrift would post EvIntentUpdate(running). The SM row
+// StQuarantined + EvIntentUpdate(running) → StSpawning RESETS the failure
+// window (supervisor_state_machine.go:204-206), so stopping or restarting ANY
+// daemon would revive EVERY quarantined bystander with its quarantine wiped —
+// breaking the quarantine contract ("force required") fleet-wide. Returning
+// needs_manual_review (NOT post) closes that: apply-mode never dispatches
+// EvIntentUpdate for the quarantined bystander, and the drift entry surfaces
+// "quarantined daemon wants running — operator must force or reset" rather than
+// pretending steady-state (no_op). This mirrors the terminate direction's
+// settled-SM no_op (smStateIsLive excludes StQuarantined) AND the startup
+// reconciler's quarantine-respect (the `isStopped && !running` gate plus the
+// Reconciler never posting EvStart/EvIntentUpdate for an untouched quarantined
+// row). Deliberate un-quarantine paths are untouched: a force respawn
+// (EvManualRestart via handleRespawn force=true) and `install --upgrade
+// --reset-failure-windows` both intentionally clear quarantine and never route
+// through this classifier. The 60s IntentWatcher does NOT have this hole for
+// bystanders (diffIntentSnapshots posts only for CHANGED intent entries, so an
+// untouched bystander gets no event), so this classifier gate (mirrored on
+// BOTH spawn-direction arms — !hasSched and scheduler-stopped) closes the
+// reconcile-side bystander revival on every spawn-direction path.
+func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
-			if supervisorOwned {
-				return api.ReconcileActionPostEvIntentUpdate
+			if smState == api.StQuarantined {
+				return api.ReconcileActionNeedsManualReview
 			}
-			return api.ReconcileActionNeedsManualReview
+			return api.ReconcileActionPostEvIntentUpdate
+		}
+		if intentDesired == api.ReconcileIntentDesiredStopped && smStateIsLive(smState) {
+			return api.ReconcileActionPostEvIntentUpdate
 		}
 		return api.ReconcileActionNoOp
 	}
@@ -500,6 +560,20 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 		return api.ReconcileActionNoOp
 	case api.ReconcileSchedulerStateStopped:
 		if intentDesired == api.ReconcileIntentDesiredRunning {
+			// Same spawn-direction quarantine-respect as the !hasSched arm:
+			// a StQuarantined daemon that ALSO carries a (stale/residual)
+			// scheduler-stopped row must NOT revive on every `reconcile
+			// --apply` (= every `mcphub stop`/`mcphub restart`). The SM row
+			// StQuarantined + EvIntentUpdate(running) → StSpawning RESETS the
+			// failure window (supervisor_state_machine.go:204-206), so without
+			// this gate stopping/restarting ANY daemon would revive a
+			// quarantined bystander that happens to retain a scheduler row,
+			// with its quarantine wiped. needs_manual_review surfaces it as
+			// drift ("quarantined daemon wants running — operator must force or
+			// reset") rather than pretending steady-state.
+			if smState == api.StQuarantined {
+				return api.ReconcileActionNeedsManualReview
+			}
 			return api.ReconcileActionPostEvIntentUpdate
 		}
 		return api.ReconcileActionNoOp
@@ -510,9 +584,20 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 	}
 }
 
-func isSupervisorOwnedDescriptorForReconcile(d api.SupervisorDaemon) bool {
-	return len(d.Args) >= 2 && d.Args[0] == "daemon" &&
-		(d.Args[1] == "workspace-proxy" || d.Args[1] == "serena-proxy")
+// smStateIsLive reports whether the SM state names a daemon the
+// supervisor is actively driving (a child exists, a spawn is in flight,
+// or a backoff timer would respawn one). These are exactly the states
+// from which api.Transition's EvIntentUpdate(stopped) rows make
+// progress toward StIdle: StRunning→StExiting (issue terminate),
+// StSpawning→queued_action=stop, StBackoffWaiting→StIdle (cancel
+// timer), StExiting→clear queued_action (cancels a pending respawn).
+// StIdle and StQuarantined are settled — see classifyDriftAction.
+func smStateIsLive(s api.SMState) bool {
+	switch s {
+	case api.StSpawning, api.StRunning, api.StExiting, api.StBackoffWaiting:
+		return true
+	}
+	return false
 }
 
 // lookupControllerSMState reads the per-task SM state from the live

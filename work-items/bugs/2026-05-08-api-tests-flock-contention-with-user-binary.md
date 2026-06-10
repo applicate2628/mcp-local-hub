@@ -24,6 +24,23 @@ Affected test names observed across runs:
 
 (any test that drives `Register → recordRegisterIntentForTask` is at risk).
 
+**2026-06-10 update (PR #279 fable r3 F-A, backend-engineer):** the same
+flock-contention flake reproduced once on
+`TestRestartAllFallsThroughToLegacySchedulerAndSkipsSupervisorHandledTasks`
+(internal/api/restart_supervisor_test.go) during the F-A fix verification:
+a single broad-run invocation took 9.0s and asserted
+`scheduler Run calls = [], want [\mcp-local-hub-memory-default]`, then
+passed 8/8 on re-run (3/3 clean HEAD + 5/5 with the fix). Root cause is
+identical: this test does NOT set `t.Setenv("LOCALAPPDATA")` /
+`t.Setenv("XDG_STATE_HOME")` (unlike the sibling
+`TestRestart*`/`TestStop*` tests that DO), so its `RestartAll →
+recordRestartIntentForTask → WriteDaemonIntent` resolves `DaemonStateDir()`
+to the production `%LOCALAPPDATA%\mcp-local-hub\` path and blocks on the
+user's running mcphub holding `daemon-intent.json.lock`. When the write
+times out / is delayed the surrounding RestartAll flow can mis-sequence,
+dropping the legacy `Run` call. Out of scope for the F-A fix (which does
+not touch this test); the mechanical fix is the same as below.
+
 ## Expected vs actual
 
 **Expected:** api package tests run hermetically against test-temp directories without contending with the user's installed mcphub on the real LocalAppData path.

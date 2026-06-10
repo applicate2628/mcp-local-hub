@@ -1722,6 +1722,40 @@ func TestSupervisorController_NonCleanExitAtRunningEntersBackoff(t *testing.T) {
 	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StBackoffWaiting)
 }
 
+// TestSupervisorController_IdleRespawn_StoppedIntent_TypedRefusal is the
+// #279 fable N1 guard for the supervisor side: an idle daemon whose
+// daemon-intent.json records Desired=stopped, when respawned through the
+// controller (EvManualRestart at StIdle), must be REFUSED — the SM returns
+// side "RESTART_REFUSED_INTENT_STOPPED" — and postIdleRespawnAndWait must
+// surface the TYPED sentinel errIdleRespawnRefusedIntentStopped so
+// handleRespawn maps it to the distinct RESPAWN_REFUSED_INTENT_STOPPED code
+// (not the generic "idle respawn did not spawn" failure). No spawn fires.
+func TestSupervisorController_IdleRespawn_StoppedIntent_TypedRefusal(t *testing.T) {
+	var spawnCalls atomic.Int32
+	descriptor := api.SupervisorDaemon{TaskName: `\mcp-local-hub-test-default`, Server: "test", Daemon: "default"}
+
+	fakeSpawn := func(d api.SupervisorDaemon) error { spawnCalls.Add(1); return nil }
+	// "stopped" intent: the SM gate at StIdle+EvManualRestart refuses the spawn.
+	ctrl, _, cancel := setupControllerForB1Test(t, descriptor, "stopped", fakeSpawn)
+	defer cancel()
+
+	ctrl.smStates.Store(descriptor.TaskName, api.StIdle)
+
+	err := ctrl.postIdleRespawnAndWait(descriptor.TaskName, 2*time.Second)
+	if err == nil {
+		t.Fatal("idle respawn with Desired=stopped returned nil; want a refusal error")
+	}
+	if !errors.Is(err, errIdleRespawnRefusedIntentStopped) {
+		t.Fatalf("idle respawn refusal err = %v; want errIdleRespawnRefusedIntentStopped (typed sentinel so handleRespawn surfaces RESPAWN_REFUSED_INTENT_STOPPED)", err)
+	}
+	if got := spawnCalls.Load(); got != 0 {
+		t.Fatalf("refused idle respawn fired %d spawns; want 0", got)
+	}
+	if st, _ := ctrl.GetSMState(descriptor.TaskName); st != api.StIdle {
+		t.Fatalf("after refused respawn state = %s; want StIdle (SM stays idle on stopped-intent refusal)", st)
+	}
+}
+
 // waitForSMStateHelper polls the controller SM state until it matches want
 // or a 2s deadline elapses.
 func waitForSMStateHelper(t *testing.T, ctrl *supervisorController, taskName string, want api.SMState) {

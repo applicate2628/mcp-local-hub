@@ -106,6 +106,7 @@ const AuditActionStopFailedNoKill = "stop-failed-no-kill"
 // can filter by command.
 const (
 	auditWhoMcphubStop          = "mcphub stop"
+	auditWhoMcphubStopAll       = "mcphub stop --all"
 	auditWhoMcphubStopForce     = "mcphub stop --force"
 	auditWhoMcphubInstall       = "mcphub install"
 	auditWhoMcphubRestart       = "mcphub restart"
@@ -191,11 +192,23 @@ func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
 	if err := a.recordStopIntent(taskNames, opts.Force); err != nil {
 		return nil, err
 	}
-	// stopKillCore runs the kill path WITHOUT re-running intent/audit
+	// Force skips the supervisor reconcile pass on purpose: --force
+	// records NO Desired=stopped intent (that is its documented
+	// contract — the daemon auto-revives), so a reconcile would read
+	// desired=running, post nothing, and the kill would be skipped for
+	// supervisor-owned daemons — i.e. --force would become a no-op for
+	// them. The straight kill path preserves the documented semantic:
+	// taskkill, supervisor reaper observes the non-clean exit, daemon
+	// auto-revives.
+	if opts.Force {
+		return a.stopKillCore(opts.Server, opts.DaemonFilter, nil)
+	}
+	// stopSupervisorAwareKill runs the supervisor reconcile pass (spec
+	// §4 Phase A.1; the stop intent recorded above is on disk for it to
+	// read) and then the kill path WITHOUT re-running intent/audit
 	// (Stop's no-force entry already invokes recordStopIntent — calling
-	// the public Stop here would double-record). Force-mode callers must
-	// reach the kill path directly without the no-force intent write.
-	return a.stopKillCore(opts.Server, opts.DaemonFilter)
+	// the public Stop here would double-record).
+	return a.stopSupervisorAwareKill(opts.Server, opts.DaemonFilter)
 }
 
 // recordStopIntent runs the BEFORE-kill writes per the StopOpts.Force
@@ -209,6 +222,17 @@ func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
 // intent_audit.go to the production AppendIntentAudit so production
 // callers reach real disk.
 func (a *API) recordStopIntent(taskNames []string, force bool) error {
+	return a.recordStopIntentAs(taskNames, force, auditWhoMcphubStop)
+}
+
+// recordStopIntentAs is recordStopIntent with an explicit `who` label for
+// the non-force intent + user-stop-audit path, so StopAll's bulk stop is
+// distinguishable from a targeted `mcphub stop X` in the forensic audit
+// log (StopAll passes auditWhoMcphubStopAll). The --force branch keeps its
+// own dedicated auditWhoMcphubStopForce label regardless of `who` — a
+// forced stop is always recorded as the --force surface; StopAll never
+// takes the force branch (its supervisor pass passes force=false).
+func (a *API) recordStopIntentAs(taskNames []string, force bool, who string) error {
 	now := time.Now().UTC()
 	for _, tn := range taskNames {
 		// Codex deep-sec PR #135 Finding 1: every audit entry carries
@@ -240,7 +264,7 @@ func (a *API) recordStopIntent(taskNames []string, force bool) error {
 			Reason:    IntentReasonUserStop,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubStop); err != nil {
+		if err := a.WriteDaemonIntent(canonical, intent, who); err != nil {
 			return fmt.Errorf("stop intent failed for %s: %w", canonical, err)
 		}
 		// Explicit Action=user-stop audit entry (distinct from
@@ -251,7 +275,7 @@ func (a *API) recordStopIntent(taskNames []string, force bool) error {
 		entry := NewIntentAuditEntry(
 			WithAction(AuditActionUserStop),
 			WithTask(canonical),
-			WithWho(auditWhoMcphubStop),
+			WithWho(who),
 			WithPriority("high"),
 			WithReason(IntentReasonUserStop),
 		)

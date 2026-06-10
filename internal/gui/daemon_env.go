@@ -19,8 +19,9 @@
 //	                               `respawn` verb; force-bool forwards
 //	                               through. Maps supervisor error codes
 //	                               to HTTP status: UNKNOWN_TASK → 400,
-//	                               QUARANTINED → 409, RESPAWN_NOT_READY
-//	                               → 503, RESPAWN_FAILED → 500.
+//	                               QUARANTINED / RESPAWN_REFUSED_INTENT_STOPPED
+//	                               → 409, RESPAWN_NOT_READY → 503,
+//	                               RESPAWN_FAILED → 500.
 //
 // All three wrap requireSameOrigin so cross-origin browser tabs cannot
 // reach them (CSRF defense — see internal/gui/csrf.go).
@@ -363,7 +364,11 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	switch result.Code {
 	case "UNKNOWN_TASK", "INVALID_ARGS":
 		status = http.StatusBadRequest
-	case "QUARANTINED":
+	case "QUARANTINED", api.RespawnRefusedIntentStoppedCode:
+		// RESPAWN_REFUSED_INTENT_STOPPED is a conflict like QUARANTINED:
+		// the daemon-intent.json records Desired=stopped, so the operator
+		// must re-enable it (e.g. mcphub restart, which writes
+		// Desired=running) before a respawn can land (#279 fable N1).
 		status = http.StatusConflict
 	case "RESPAWN_NOT_READY", "SUPERVISOR_UNAVAILABLE":
 		status = http.StatusServiceUnavailable

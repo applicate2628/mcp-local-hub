@@ -842,7 +842,19 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	sideEffectErr := c.executeSideEffect(side, newState, d, ev)
 	if idleRespawnResultChannel(ev) != nil {
 		if sideEffectErr == nil && !strings.Contains(side, "create-process") {
-			sideEffectErr = fmt.Errorf("idle respawn did not spawn: %s", side)
+			// The SM refused to spawn. When the refusal is specifically
+			// the stopped-intent gate (StIdle+EvManualRestart with
+			// IntentDesired=stopped → side "RESTART_REFUSED_INTENT_STOPPED"),
+			// complete with the typed sentinel so handleRespawn surfaces the
+			// DISTINCT RESPAWN_REFUSED_INTENT_STOPPED code rather than the
+			// generic RESPAWN_FAILED. The distinct code lets the restart
+			// caller recover (write Desired=running, retry once) without
+			// bypassing the QUARANTINED force-gate (#279 fable N1).
+			if side == "RESTART_REFUSED_INTENT_STOPPED" {
+				sideEffectErr = errIdleRespawnRefusedIntentStopped
+			} else {
+				sideEffectErr = fmt.Errorf("idle respawn did not spawn: %s", side)
+			}
 		}
 		completeIdleRespawnEvent(ev, sideEffectErr)
 	}
