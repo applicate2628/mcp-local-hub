@@ -468,7 +468,7 @@ func normalizeSchedulerState(raw string) string {
 // classifyDriftAction computes the Action field per (scheduler-state,
 // intent-desired) pair. The matrix:
 //
-//	sched=missing   intent=running  → post_ev_intent_update (spawn directly from supervisor-intent.json)
+//	sched=missing   intent=running  → post_ev_intent_update (spawn directly from supervisor-intent.json), UNLESS SM=quarantined → needs_manual_review (quarantine-respect)
 //	sched=missing   intent=stopped  → post_ev_intent_update (terminate) when the SM state is live; no_op otherwise
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
@@ -506,9 +506,39 @@ func normalizeSchedulerState(raw string) string {
 // nothing live to terminate, and a quarantined daemon's intent flip must
 // not be treated as drift (same quarantine-respect as the startup
 // reconciler's `isStopped && !running` gate).
+//
+// Spawn-direction quarantine-respect (intent=running + SM=quarantined →
+// needs_manual_review): `reconcile --apply` now fires on EVERY `mcphub
+// stop`/`mcphub restart` (via stop_supervisor.go / restart_supervisor.go),
+// and the drift loop walks ALL supervisor-intent rows — not just the
+// stop/restart target. A BYSTANDER daemon that is genuinely quarantined
+// (StQuarantined) but whose intent is running (or absent → computeIntentDesired
+// defaults to running) would otherwise classify post_ev_intent_update, and
+// applyReconcileDrift would post EvIntentUpdate(running). The SM row
+// StQuarantined + EvIntentUpdate(running) → StSpawning RESETS the failure
+// window (supervisor_state_machine.go:204-206), so stopping or restarting ANY
+// daemon would revive EVERY quarantined bystander with its quarantine wiped —
+// breaking the quarantine contract ("force required") fleet-wide. Returning
+// needs_manual_review (NOT post) closes that: apply-mode never dispatches
+// EvIntentUpdate for the quarantined bystander, and the drift entry surfaces
+// "quarantined daemon wants running — operator must force or reset" rather than
+// pretending steady-state (no_op). This mirrors the terminate direction's
+// settled-SM no_op (smStateIsLive excludes StQuarantined) AND the startup
+// reconciler's quarantine-respect (the `isStopped && !running` gate plus the
+// Reconciler never posting EvStart/EvIntentUpdate for an untouched quarantined
+// row). Deliberate un-quarantine paths are untouched: a force respawn
+// (EvManualRestart via handleRespawn force=true) and `install --upgrade
+// --reset-failure-windows` both intentionally clear quarantine and never route
+// through this classifier. The 60s IntentWatcher does NOT have this hole for
+// bystanders (diffIntentSnapshots posts only for CHANGED intent entries, so an
+// untouched bystander gets no event), so this classifier gate closes the
+// reconcile-side bystander revival completely.
 func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
+			if smState == api.StQuarantined {
+				return api.ReconcileActionNeedsManualReview
+			}
 			return api.ReconcileActionPostEvIntentUpdate
 		}
 		if intentDesired == api.ReconcileIntentDesiredStopped && smStateIsLive(smState) {

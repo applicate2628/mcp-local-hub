@@ -55,7 +55,20 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 		{"stopped quarantined", missing, false, stopped, api.StQuarantined, api.ReconcileActionNoOp},
 		// Spawn direction: running intent + missing scheduler row → spawn
 		// directly from intent (the dead legacy needs_manual_review row).
-		{"running missing", missing, false, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
+		{"running missing idle", missing, false, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
+		// Spawn direction across the live/in-flight SM states → still spawn
+		// (these are NOT settled, so a running-intent reconcile drives them).
+		{"running spawning", missing, false, running, api.StSpawning, api.ReconcileActionPostEvIntentUpdate},
+		{"running running", missing, false, running, api.StRunning, api.ReconcileActionPostEvIntentUpdate},
+		{"running exiting", missing, false, running, api.StExiting, api.ReconcileActionPostEvIntentUpdate},
+		{"running backoff", missing, false, running, api.StBackoffWaiting, api.ReconcileActionPostEvIntentUpdate},
+		// Spawn-direction quarantine-respect: a quarantined bystander whose
+		// intent is running must NOT be revived (the SM row
+		// StQuarantined+EvIntentUpdate(running) resets the failure window).
+		// needs_manual_review surfaces it as drift the operator must force/reset
+		// rather than pretending steady-state — the fix for fleet-wide bystander
+		// revival on every stop/restart (#279).
+		{"running quarantined", missing, false, running, api.StQuarantined, api.ReconcileActionNeedsManualReview},
 		// hasSched rows unchanged.
 		{"sched running intent stopped", api.ReconcileSchedulerStateRunning, true, stopped, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
 		{"sched stopped intent running", api.ReconcileSchedulerStateStopped, true, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
@@ -202,6 +215,102 @@ func TestReconcileIPC_SupervisorOwnedStoppedIntentQuarantinedStaysNoOp(t *testin
 	select {
 	case ev := <-fx.postedCh:
 		t.Fatalf("unexpected event posted for quarantined daemon: %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// twoRowIntentTargetPlusQuarantinedBystander builds a two-daemon intent: a
+// stop/restart TARGET (the daemon the operator acted on) plus a BYSTANDER that
+// is genuinely quarantined. Both are supervisor-owned with no scheduler row.
+func twoRowIntentTargetPlusQuarantinedBystander(target, bystander string) *api.SupervisorIntentFile {
+	return &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: target, Server: "target", Daemon: "default", Command: "mcphub",
+				Args: []string{"daemon", "--server", "target", "--daemon", "default"}, Port: 9242},
+			{TaskName: bystander, Server: "bystander", Daemon: "default", Command: "mcphub",
+				Args: []string{"daemon", "--server", "bystander", "--daemon", "default"}, Port: 9243},
+		},
+	}
+}
+
+// TestReconcileIPC_QuarantinedBystanderNotRevivedOnStop is the
+// handleReconcile-level proof of the #279 spawn-direction quarantine-respect
+// fix. `mcphub stop` of the TARGET fires `reconcile --apply`, which walks ALL
+// supervisor-intent rows. The target (stopped intent + live SM) must terminate
+// via one EvIntentUpdate; the quarantined BYSTANDER (no daemon-intent override
+// → computeIntentDesired defaults running, StQuarantined SM) must NOT be poked
+// — its drift entry carries needs_manual_review and apply mode posts NOTHING
+// for it. Net: exactly ONE EvIntentUpdate (the target), AppliedCount=1. Before
+// the fix the bystander classified post_ev_intent_update and the SM row
+// StQuarantined+EvIntentUpdate(running) reset its failure window, reviving it.
+func TestReconcileIPC_QuarantinedBystanderNotRevivedOnStop(t *testing.T) {
+	target := `\mcp-local-hub-target-default`
+	bystander := `\mcp-local-hub-bystander-default`
+	fx := newReconcileTestFixture(t, twoRowIntentTargetPlusQuarantinedBystander(target, bystander))
+	// Operator stopped the TARGET only: daemon-intent marks the target
+	// stopped; the bystander has no override (defaults running).
+	seedStoppedDaemonIntentForReconcileTest(t, fx.deps.stateDir, target)
+
+	// Live target SM (terminate-eligible); quarantined bystander SM.
+	fx.ctrl.smStates.Store(target, api.StRunning)
+	fx.ctrl.smStates.Store(bystander, api.StQuarantined)
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{ID: 77, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 2 || len(body.Drift) != 2 {
+		t.Fatalf("DriftCount=%d drift=%+v, want two rows (target + bystander)", body.DriftCount, body.Drift)
+	}
+
+	driftByTask := map[string]api.DriftEntry{}
+	for _, e := range body.Drift {
+		driftByTask[e.TaskName] = e
+	}
+	tgt, ok := driftByTask[target]
+	if !ok {
+		t.Fatalf("no drift entry for target %s; drift=%+v", target, body.Drift)
+	}
+	if tgt.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("target Action = %q, want %q (stopped intent + live SM → terminate)",
+			tgt.Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	bys, ok := driftByTask[bystander]
+	if !ok {
+		t.Fatalf("no drift entry for bystander %s; drift=%+v", bystander, body.Drift)
+	}
+	if bys.Action != api.ReconcileActionNeedsManualReview {
+		t.Errorf("bystander Action = %q, want %q (quarantined + running intent must not be revived)",
+			bys.Action, api.ReconcileActionNeedsManualReview)
+	}
+	if bys.SMState != api.StQuarantined {
+		t.Errorf("bystander SMState = %q, want %q", bys.SMState, api.StQuarantined)
+	}
+	if bys.IntentDesired != api.ReconcileIntentDesiredRunning {
+		t.Errorf("bystander IntentDesired = %q, want %q (absent override defaults running)",
+			bys.IntentDesired, api.ReconcileIntentDesiredRunning)
+	}
+
+	// Exactly ONE EvIntentUpdate posted — the target.
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1 (only the target is dispatched; bystander must not be poked)", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != target {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for the target %s", ev, target)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected EvIntentUpdate post for the target terminate direction")
+	}
+	// No second event for the bystander.
+	select {
+	case ev := <-fx.postedCh:
+		t.Fatalf("unexpected second event posted (bystander must not be revived): %+v", ev)
 	case <-time.After(100 * time.Millisecond):
 	}
 }

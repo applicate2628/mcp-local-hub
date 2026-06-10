@@ -1,6 +1,6 @@
 # Reconcile synchronous dispatch is proxy-only; quarantine-revive on running intent
 
-- **Status:** item (a) CLOSED (no-legacy ownership broadening landed); item (b) open / deferred (SM-level design)
+- **Status:** item (a) CLOSED (no-legacy ownership broadening landed); item (b) reconcile-side bystander revival CLOSED (spawn-direction quarantine-respect gate, PR #279); only the intent-CHANGE path remains as-designed
 - **Date:** 2026-06-10
 - **Severity:** P3 / design-boundary (no live data-loss; behavior is durable and converges)
 - **Context:** adjacent-finding
@@ -72,35 +72,65 @@ to **Phase B/F** of the redesign spec, NOT this honesty fix:
 directions (terminate/live-SM and spawn/missing-scheduler), `AppliedCount=1`,
 and an `EvIntentUpdate` posted — the broadening this item tracked.
 
-## Item (b) — fable r4 O1: quarantine-revive on running/absent intent (pre-existing SM row)
+## Item (b) — quarantine-revive on running/absent intent
 
-The spawn direction of `classifyDriftAction` — and equally the
-`IntentWatcher`'s `EvIntentUpdate` path — drives a `StQuarantined` daemon back
-to `StSpawning` **with failures RESET** when intent is running (or absent →
-default running). This is a **pre-existing spec-v13 SM row**, not introduced
-by #279: `internal/api/supervisor_state_machine.go:204-206` —
-`StQuarantined` + `EvIntentUpdate` with `IntentDesired == "running"` →
-`StSpawning, "reset failures, bump pid_generation, create-process"` (the
-`EvManualRestart` row at :207-208 does the same).
+### (b.1) reconcile-side BYSTANDER revival — CLOSED by PR #279 spawn-direction quarantine-respect gate
 
-**Why it matters:** any future gate intended to keep a quarantined daemon
-quarantined across a stop/start cycle (e.g. "do not let a plain restart bypass
-quarantine") must be designed at the **SM / IntentWatcher level**, NOT at the
-reconcile classifier. The reconcile classifier already respects quarantine on
-the terminate direction (`smStateIsLive` excludes `StQuarantined`, so a
-stopped-intent reconcile of a quarantined daemon is `no_op`) and on the
-apply-mode orphan gate, but the spawn direction (running intent) deliberately
-revives via this SM row — and the 60s `IntentWatcher` posts the SAME
-`EvIntentUpdate(running)` independent of the classifier, so gating only the
-classifier would leave the watcher path open. The force-gate work in #279
-(fable N1) gates the restart caller's intent WRITE on the typed refusal code
-so a quarantined daemon never receives a running-intent it did not earn — but
-that is the api-side caller discipline; the SM row itself still revives on any
-running intent that reaches it.
+The original parked finding warned only about the SM row in the abstract. The
+no-legacy broadening on PR #279 (aa1d089) turned it into a **live fleet-wide
+bug** by making the `!hasSched` spawn direction unconditional
+(`intentDesired==running → post_ev_intent_update`) AND making `reconcile
+--apply` fire on EVERY `mcphub stop` / `mcphub restart` (via
+`internal/api/stop_supervisor.go` / `restart_supervisor.go`). Because
+`handleReconcile`'s drift loop walks ALL supervisor-intent rows — not just the
+stop/restart target — a BYSTANDER daemon that is genuinely quarantined
+(`StQuarantined`, intent running or absent → `computeIntentDesired` defaults
+running) classified `post_ev_intent_update` → `applyReconcileDrift` posted
+`EvIntentUpdate(running)` → the SM row at
+`internal/api/supervisor_state_machine.go:204-206`
+(`StQuarantined + EvIntentUpdate(running) → StSpawning, "reset failures, ..."`)
+revived it with the failure window WIPED. Net: stopping or restarting ANY
+daemon revived EVERY quarantined bystander, breaking the quarantine contract
+("force required") fleet-wide. (Before aa1d089 regular bystanders classified
+`needs_manual_review`, so the exposure was proxy-only — the prior parked
+description.)
 
-**Action (parked):** if a "quarantine survives restart" invariant is desired,
-design it as an SM-state-aware gate on the `StQuarantined + EvIntentUpdate
-(running)` transition AND on the `IntentWatcher` post path, not as a
-classifier tweak. No live bug today (the current force-gate caller discipline
-covers the restart-caller surface); recorded so a future gate is not built at
-the wrong layer.
+**Fix (PR #279):** spawn-direction quarantine-respect in `classifyDriftAction`
+(`internal/cli/supervise_reconcile_ipc.go`): when `intentDesired==running` AND
+`smState==api.StQuarantined`, return `needs_manual_review` (NOT post) — so
+apply-mode never dispatches `EvIntentUpdate` for the quarantined bystander, and
+the drift entry surfaces "quarantined daemon wants running — operator must
+force or reset" rather than pretending steady-state. Mirrors the terminate
+direction's settled-SM `no_op` (`smStateIsLive` excludes `StQuarantined`) and
+the startup reconciler's quarantine-respect. The 60s `IntentWatcher` does NOT
+have this hole for bystanders — `diffIntentSnapshots` posts only for CHANGED
+intent entries, so an untouched bystander gets no event — therefore the
+classifier gate closes the reconcile-side bystander revival **completely**.
+Guards: `internal/cli`'s `TestClassifyDriftAction_TerminateDirectionSupervisorOwned`
+(new `running quarantined → needs_manual_review` row + live-state spawn rows
+unchanged) and `TestReconcileIPC_QuarantinedBystanderNotRevivedOnStop`
+(two-row handleReconcile proof: target terminate posted, quarantined bystander
+`needs_manual_review`, AppliedCount=1).
+
+### (b.2) intent-CHANGE path — open / by design
+
+What remains is the **intent-CHANGE** path only: when the operator restarts the
+quarantined daemon ITSELF, `diffIntentSnapshots` DOES post `EvIntentUpdate` for
+that changed entry, and the SM row
+`StQuarantined + EvIntentUpdate(running) → reset` revives it. That stays as
+designed — a deliberate restart of the quarantined daemon is gated upstream by
+the api-side QUARANTINED refusal (the restart caller refuses to write a
+running-intent the daemon did not earn; fable N1 force-gate on PR #279), and a
+force respawn (`EvManualRestart` via `handleRespawn` force=true) plus
+`install --upgrade --reset-failure-windows` are the SANCTIONED un-quarantine
+levers. The SM row resetting on a deliberate intent flip is the intended
+behavior for those sanctioned paths; only the UNINTENDED bystander revival on
+an unrelated stop/restart was a bug, and that is now closed at (b.1).
+
+**Action (parked, narrow):** if a future invariant wants "quarantine survives
+even a deliberate restart of the daemon itself", that must be designed at the
+SM / `IntentWatcher` post layer (the `StQuarantined + EvIntentUpdate(running)`
+transition), not the reconcile classifier — the classifier no longer sees the
+intent-CHANGE bystander case because the bystander gate already covers the
+untouched-row path. No live bug today: the api-side force-gate caller discipline
+covers the restart-caller surface.
