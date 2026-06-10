@@ -45,6 +45,24 @@ import (
 	"path/filepath"
 )
 
+// WindowsTaskName is the Task Scheduler entry the Windows autostart
+// shim installs (`\mcp-local-hub-supervisor`). Exported (capital) so
+// tests can pin the contract without re-stringifying the literal across
+// files. The leading backslash is intentional — Task Scheduler uses `\`
+// as the root-folder prefix and schtasks accepts both forms, but storing
+// it with the prefix keeps log output unambiguous when listing tasks via
+// `schtasks /Query`.
+//
+// It lives in the NON-tagged autostart.go (not windows.go under
+// `//go:build windows`) deliberately: it is a pure string literal with
+// no Windows dependency, and cross-platform CLI code (the
+// supervise --ensure-alive liveness relaunch in internal/cli) references
+// it for log/error text on every OS. Keeping it here lets the whole
+// module compile on Linux/macOS where the rest of windows.go does not —
+// the relaunch fails loud at runtime on non-Windows (scheduler.New()
+// returns "not implemented"), but the file must still COMPILE there.
+const WindowsTaskName = `\mcp-local-hub-supervisor`
+
 // State enumerates the lifecycle states the autostart backend can
 // detect. The ordering of constants is load-bearing for any test or
 // caller that converts State back into a numeric form; do NOT reorder

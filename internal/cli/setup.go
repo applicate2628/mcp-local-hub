@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/autostart"
 )
 
 // ---------------------------------------------------------------------------
@@ -476,6 +477,39 @@ func runSetupWatchdog(out io.Writer, allowElevated bool) error {
 	fmt.Fprintf(out, "  Logs: watchdog.log + intent-audit.log under that directory.\n")
 	fmt.Fprintf(out, "  Disable: mcphub watchdog uninstall\n")
 
+	// 3b. Install the supervisor-liveness scheduled task (v0.6 spec §15 P1-b /
+	// §5.x Phase 3a). ADDITIVE: this rides ALONGSIDE the still-present watchdog
+	// above (the watchdog install is UNTOUCHED). The two target disjoint things
+	// — the liveness task relaunches the supervisor/GUI OWNER (`supervise
+	// --ensure-alive`, ~1-min), the watchdog revives scheduler-task DAEMONS
+	// (`watchdog --once`, 5-min) — so they do not fight. Phase 3b (C+D) later
+	// removes the watchdog install; the liveness install stays at this same
+	// site as the one-for-one replacement.
+	//
+	// Non-fatal: a failed liveness install must NOT abort setup. In 3a the
+	// watchdog is the still-present recovery net, so a missing liveness task
+	// degrades gracefully (additive + reversible per §15 P1-b). The next
+	// `mcphub setup` re-attempts the idempotent ImportXML.
+	//
+	// SCOPING NOTE (PR #283 review P3-b): the liveness action's relaunch
+	// target is the AUTOSTART task `\mcp-local-hub-supervisor`, which `mcphub
+	// setup` does NOT install — it is created only by `mcphub install`
+	// (migration shim) or an explicit `mcphub autostart enable`. So in a
+	// setup-only state the liveness task exists but its relaunch is inert
+	// until autostart is enabled. This is fail-safe (the normal sequence is
+	// setup → install, and install enables autostart before any persistent
+	// supervisor exists, so there is nothing to recover during the gap), and
+	// a relaunch against an absent target now lands a durable
+	// `liveness-relaunch-failed` warn in supervisor-events.log (carrying the
+	// target name + the schtasks error) so the inert state is operator-visible
+	// rather than silent. The success line below is annotated accordingly.
+	if livenessErr := a.InstallLivenessTask(); livenessErr != nil {
+		fmt.Fprintf(out, "⚠ supervisor-liveness task install failed (non-fatal; watchdog still covers recovery): %v\n", livenessErr)
+	} else {
+		fmt.Fprintf(out, "✓ Installed scheduled task: %s (supervisor-liveness, cadence 1 min)\n", api.LivenessTaskName)
+		fmt.Fprintf(out, "  Note: liveness recovery relaunches via the autostart task %s, which is installed by `mcphub install` / `mcphub autostart enable` — until then the relaunch is inert (no-op; recorded in supervisor-events.log).\n", autostart.WindowsTaskName)
+	}
+
 	// 4. EventLog source registration (§60). Non-fatal.
 	if regErr := setupRegisterEventLog(); regErr != nil {
 		// Per §60 the failure is non-fatal: log + continue.
@@ -552,6 +586,20 @@ func runUninstallWatchdog(out io.Writer, serverBeingUninstalled string) error {
 		fmt.Fprintf(out, "⚠ watchdog uninstall failed (continuing): %v\n", err)
 	} else {
 		fmt.Fprintf(out, "✓ Removed scheduled task: %s\n", api.WatchdogTaskName)
+	}
+
+	// 2b. Supervisor-liveness scheduled task deletion (Phase 3a, v0.6 spec
+	// §15 P1-b). The `\mcp-local-hub-liveness` task is a hub-wide shared
+	// maintenance job exactly like the watchdog, so it is torn down INSIDE the
+	// same last-server gate (shouldRemoveGlobalWatchdog above) — it must NOT
+	// be removed while peer servers still rely on owner-relaunch recovery.
+	// Non-fatal + idempotent: scheduler.Delete returns nil for an absent task,
+	// matching the watchdog teardown polarity, so a missing liveness task or a
+	// transient delete failure never aborts the uninstall.
+	if err := a.UninstallLivenessTask(); err != nil {
+		fmt.Fprintf(out, "⚠ supervisor-liveness uninstall failed (continuing): %v\n", err)
+	} else {
+		fmt.Fprintf(out, "✓ Removed scheduled task: %s\n", api.LivenessTaskName)
 	}
 
 	// 3. EventLog source removal (§60). Idempotent / non-fatal.

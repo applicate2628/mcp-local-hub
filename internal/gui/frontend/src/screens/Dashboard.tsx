@@ -141,9 +141,25 @@ export function DashboardScreen() {
     }, 1500);
   }, []);
 
+  // SSE handler for poller-error. The backend StatusPoller routes
+  // through the fail-loud supervisor-IPC snapshot; when the supervisor
+  // is unreachable it emits a `poller-error` event carrying the error
+  // string (internal/gui/poller.go). Surfacing it here sets the degraded
+  // banner within one poll cycle (5s) instead of waiting up to 30s for
+  // the separate /api/status 500 poll below. This is the POSITIVE SSE
+  // degraded path: the round-1 fix only stopped the poller from CLEARING
+  // the banner (it no longer emits banner-clearing daemon-state deltas on
+  // a down supervisor); this listener makes the SSE channel actively SET
+  // it. The 30s HTTP poll remains the durable backstop. (PR #281 P3.)
+  const onPollerError = useCallback((ev: MessageEvent) => {
+    const body = JSON.parse(ev.data) as { err?: string };
+    setError(body.err ?? "supervisor unreachable");
+  }, []);
+
   useEventSource("/api/events", {
     "daemon-state": onDelta,
     "bulk-action": onBulkAction,
+    "poller-error": onPollerError,
   });
 
   // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.

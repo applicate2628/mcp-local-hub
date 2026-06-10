@@ -154,18 +154,31 @@ func IsRealFailure(lastResult int32) bool {
 // ---------------------------------------------------------------------------
 
 // isMaintenanceTaskName recognizes scheduler tasks owned by mcp-local-hub
-// itself: the watchdog (`...-watchdog`) and the weekly-refresh maintenance
-// jobs (`...-weekly-refresh`). The watchdog must not auto-recover its
-// own scheduler tasks — they are operationally stable scheduled jobs,
-// not crash-prone daemons.
+// itself: the watchdog (`...-watchdog`), the supervisor-liveness recovery
+// task (`...-liveness`), and the weekly-refresh maintenance jobs
+// (`...-weekly-refresh`). The watchdog must not auto-recover its own
+// scheduler tasks — they are operationally stable scheduled jobs, not
+// crash-prone daemons.
 //
 // The match is suffix-based so all naming variants are covered:
 //   - hub-wide global watchdog: "\\mcp-local-hub-watchdog"
+//   - hub-wide supervisor-liveness task: "\\mcp-local-hub-liveness"
 //   - per-server / hub-wide weekly refresh:
 //     "\\mcp-local-hub-<server>-weekly-refresh",
 //     "\\mcp-local-hub-weekly-refresh".
+//
+// The `-liveness` suffix was added in Phase 3a (v0.6 spec §15 P1-b): the
+// additive `\mcp-local-hub-liveness` task is a hub-wide maintenance job
+// exactly like the watchdog, so it must be (1) skipped from the
+// partial-uninstall "remaining servers" gate (internal/cli/setup.go's
+// shouldRemoveGlobalWatchdog — otherwise ServerFromTaskName("...-liveness")
+// returns "liveness", a non-empty pseudo-server that permanently poisons the
+// last-server gate so the watchdog can never be torn down) and (2) excluded
+// from the env-override / status maintenance classifiers the same way the
+// watchdog is.
 func isMaintenanceTaskName(name string) bool {
 	return strings.HasSuffix(name, "-watchdog") ||
+		strings.HasSuffix(name, "-liveness") ||
 		strings.HasSuffix(name, "-weekly-refresh")
 }
 

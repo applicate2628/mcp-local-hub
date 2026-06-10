@@ -22,14 +22,6 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-// WindowsTaskName is the Task Scheduler entry the autostart shim
-// installs. Exported (capital) so tests can pin the contract without
-// re-stringifying the literal across files. The leading backslash is
-// intentional — Task Scheduler uses `\` as the root-folder prefix and
-// schtasks accepts both forms, but storing it with the prefix keeps
-// log output unambiguous when listing tasks via `schtasks /Query`.
-const WindowsTaskName = `\mcp-local-hub-supervisor`
-
 // schedulerFactoryFn is the test seam — production paths leave it
 // pointing at scheduler.New, but autostart tests inject a recording
 // fake here so the real Task Scheduler is never touched. The

@@ -180,7 +180,14 @@ type DaemonRow struct {
 	Port          int     `json:"port"`
 	RAMBytes      uint64  `json:"ram_bytes"`
 	UptimeSec     int64   `json:"uptime_sec"`
-	State         string  `json:"state"` // "running" | "stopped" | "starting" | "failed"
+	State         string  `json:"state"` // "running" | "stopped" | "starting" | "failed" | "unknown"
+	// v0.6 Workstream B / PR #281: the wire enum gained "unknown". A
+	// genuinely UNRECOGNIZED or blank source state maps to "unknown", NOT
+	// "failed" (the prior unmapped→failed mapping was a false negative).
+	// KNOWN supervisor degraded/terminal states stay classified honestly,
+	// never collapsed to "unknown": "Restarting"/"Backoff"/"Spawning" →
+	// "starting" (degraded, supervisor recovering); "Quarantined" →
+	// "failed" (supervisor permanently gave up after a crash-loop).
 	RestartCount  int     `json:"restart_count"`
 	LastRestartAt *string `json:"last_restart_at"`
 }

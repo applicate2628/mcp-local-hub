@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -876,8 +877,27 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			"phase":         "handshake",
 			"err":           hsErr.Error(),
 		})
+		// §3 fail-loud (always-on floor): a CONNECTION failure on the handshake
+		// (dial refused / dead backend) — as opposed to a timeout on a slow-but-
+		// live daemon, or a protocol-level handshake error on a live daemon — is
+		// a backend-loss signal. Tear every session bound to this workspace out
+		// of all three stores so the next request fails loud (-32600 / 503) and
+		// the client re-initializes, instead of a zombie.
+		if isConnectionLossErr(hsErr) {
+			s.handleSerenaBackendLossOnForwardFailure(ws.WorkspaceKey, sessionID, hsErr, auditFn)
+		}
 		http.Error(w, fmt.Sprintf("upstream serena daemon at port %d MCP handshake failed: %s", ws.Port, hsErr.Error()), http.StatusBadGateway)
 		return
+	}
+
+	// §3 fail-loud: the handshake (fresh or cache-hit-reuse) succeeded, so this
+	// client session is genuinely routed to ws. Record the workspace→session
+	// edge in the router store's reverse index so a later backend-loss event
+	// for this workspace can enumerate + tear down every bound session. Keyed
+	// on a known router session only (bindWorkspace no-ops an unknown id), so a
+	// legacy/path-only caller with no router session is not indexed.
+	if sessionID != "" {
+		s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
 	}
 
 	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO
@@ -989,6 +1009,17 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			"upstream_url":  upstreamURL,
 			"err":           doErr.Error(),
 		})
+		// §3 fail-loud (always-on floor): the tool-call forward to this
+		// workspace's daemon got a CONNECTION error (dead backend / dial
+		// refused). This is the zombie path — the daemon binding cache-hit
+		// above means a prior call established the session, and the daemon then
+		// died. Tear down every session bound to this workspace so the next
+		// request fails loud instead of re-forwarding to a dead daemon. Gate on
+		// a genuine connection loss so a non-connection transport error does not
+		// over-eagerly evict a workspace's sessions.
+		if isConnectionLossErr(doErr) {
+			s.handleSerenaBackendLossOnForwardFailure(ws.WorkspaceKey, sessionID, doErr, auditFn)
+		}
 		http.Error(w, fmt.Sprintf("upstream serena daemon at port %d unreachable: %s", ws.Port, doErr.Error()), http.StatusBadGateway)
 		return
 	}
@@ -1797,6 +1828,52 @@ func isTimeoutErr(err error) bool {
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return false
+}
+
+// isConnectionLossErr reports whether err is a genuine TRANSPORT/CONNECTION
+// failure to the upstream serena daemon — a dial refused (dead backend), a
+// connection reset, or a connection dropped mid-request — as opposed to a
+// timeout (a slow-but-live daemon) or a protocol-level handshake error (a live
+// daemon that returned a malformed/error initialize result). It is the §3
+// fail-loud floor's trigger gate: ONLY a real connection loss is a backend-loss
+// signal worth tearing down a workspace's sessions for. A timeout is excluded
+// (the caller checks isTimeoutErr first, and Timeout() net errors are not
+// matched here either); a non-net error (e.g. "upstream initialize returned no
+// result") returns false so a transient protocol glitch on a live daemon does
+// NOT trigger a session teardown.
+func isConnectionLossErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// A client-side cancel (MCP client interrupts an in-flight tool call /
+	// disconnects mid-request — common with Claude Code) or a context deadline
+	// is NOT a backend-loss signal: the upstream daemon may be perfectly alive.
+	// The forward sites carry r.Context() (defaultSerenaClient uses Timeout:0),
+	// so a client disconnect surfaces as a *url.Error wrapping context.Canceled,
+	// which (a) satisfies net.Error with Timeout()==false and (b) would otherwise
+	// fall into the net.Error branch below and be MISCLASSIFIED as a connection
+	// loss → false-positive workspace-wide session teardown. Exclude both context
+	// errors up front so only a genuine transport-layer connection loss qualifies.
+	// (DeadlineExceeded is already filtered by isTimeoutErr at the call sites;
+	// excluding it here makes the predicate self-contained for any caller.)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	// A net.Error that is NOT a timeout (dial refused, reset, broken pipe) is a
+	// connection loss. http.Client.Do wraps the dial/transport error in a
+	// *url.Error whose inner err is the *net.OpError; errors.As unwraps it.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return !netErr.Timeout()
+	}
+	// Direct syscall-level connection errors (refused / reset / aborted) in case
+	// a path surfaces the raw errno without a net.Error wrapper.
+	if errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) {
 		return true
 	}
 	return false

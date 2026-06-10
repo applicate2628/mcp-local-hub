@@ -223,7 +223,61 @@ func TestDaemonStatusSnapshot_IPCErrorReturnsFailLoud(t *testing.T) {
 	}
 }
 
-func TestDaemonStatusSnapshot_IPCUnavailableFallsBackToScheduler(t *testing.T) {
+// TestDaemonStatusSnapshot_IPCUnavailableFailsLoud is the v0.6 Workstream
+// B (§3.1) inversion of the former
+// TestDaemonStatusSnapshot_IPCUnavailableFallsBackToScheduler. Once the
+// supervisor IPC status seam is wired, ErrSupervisorIPCUnavailable must
+// NO LONGER silently fall back to the legacy scheduler scan — that
+// fallback painted migrated daemons (whose \mcp-local-hub-* tasks were
+// deleted) as failed/Restarting while the supervisor-owned process served
+// traffic (the FALSE NEGATIVE). Instead DaemonStatusSnapshot returns the
+// explicit ErrSupervisorDown degraded marker so /api/status maps it to
+// 500 + STATUS_FAILED and the GUI Dashboard shows "supervisor down —
+// restart".
+//
+// State-safety note: the SetTestStatusFn scheduler seam is wired with a
+// sentinel that FAILS the test if consulted. After this fix the
+// IPC-unavailable path never reaches StatusContext/the scheduler scan, so
+// the sentinel must never fire — this both proves the fallback is gone and
+// witnesses that no real scheduler/state-dir read can occur on this path.
+func TestDaemonStatusSnapshot_IPCUnavailableFailsLoud(t *testing.T) {
+	a := NewAPI()
+
+	prev := SupervisorIPCStatusFn
+	SupervisorIPCStatusFn = func(_ context.Context) ([]DaemonStatus, error) {
+		return nil, ErrSupervisorIPCUnavailable
+	}
+	t.Cleanup(func() { SupervisorIPCStatusFn = prev })
+	// If the scheduler scan is reached, the fix regressed. Fail loudly
+	// rather than letting a real schtasks scan run (state-safety witness).
+	restoreStatus := SetTestStatusFn(func() ([]DaemonStatus, error) {
+		t.Error("scheduler-scan fallback was reached on ErrSupervisorIPCUnavailable; Workstream B must fail loud, not fall back")
+		return nil, errors.New("scheduler scan must not be reached")
+	})
+	t.Cleanup(restoreStatus)
+
+	rows, err := a.DaemonStatusSnapshot(context.Background())
+	if err == nil {
+		t.Fatalf("DaemonStatusSnapshot returned nil err on ErrSupervisorIPCUnavailable; want fail-loud ErrSupervisorDown; rows=%+v", rows)
+	}
+	if !errors.Is(err, ErrSupervisorDown) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrSupervisorDown)", err)
+	}
+	// The operator-facing message must name the recovery action so the
+	// GUI banner is actionable, not a bare identifier.
+	if !strings.Contains(err.Error(), "restart the hub") {
+		t.Errorf("err = %q, want it to name the operator action (restart the hub)", err.Error())
+	}
+	if rows != nil {
+		t.Errorf("rows = %+v, want nil on fail-loud (no stale scheduler rows)", rows)
+	}
+}
+
+// TestHealthSnapshot_IPCUnavailableFailsLoud is the /api/health-side mirror:
+// the daemons-section fetch must surface ErrSupervisorDown (→ 500
+// HEALTH_BACKEND_FAILED) rather than projecting scheduler rows into
+// HealthSnapshot.Daemons.Items via the removed fallback.
+func TestHealthSnapshot_IPCUnavailableFailsLoud(t *testing.T) {
 	a := NewAPI()
 
 	prev := SupervisorIPCStatusFn
@@ -232,18 +286,17 @@ func TestDaemonStatusSnapshot_IPCUnavailableFallsBackToScheduler(t *testing.T) {
 	}
 	t.Cleanup(func() { SupervisorIPCStatusFn = prev })
 	restoreStatus := SetTestStatusFn(func() ([]DaemonStatus, error) {
-		return []DaemonStatus{
-			{Server: "scheduler", Daemon: "default", TaskName: `\mcp-local-hub-scheduler-default`, State: "Running"},
-		}, nil
+		t.Error("scheduler-scan fallback was reached on ErrSupervisorIPCUnavailable in the health path")
+		return nil, errors.New("scheduler scan must not be reached")
 	})
 	t.Cleanup(restoreStatus)
 
-	rows, err := a.DaemonStatusSnapshot(context.Background())
-	if err != nil {
-		t.Fatalf("DaemonStatusSnapshot: %v", err)
+	_, err := a.HealthSnapshot(context.Background(), HealthOpts{})
+	if err == nil {
+		t.Fatal("HealthSnapshot returned nil err on ErrSupervisorIPCUnavailable; want fail-loud ErrSupervisorDown")
 	}
-	if len(rows) != 1 || rows[0].Server != "scheduler" {
-		t.Fatalf("rows = %+v, want scheduler fallback row", rows)
+	if !errors.Is(err, ErrSupervisorDown) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrSupervisorDown)", err)
 	}
 }
 

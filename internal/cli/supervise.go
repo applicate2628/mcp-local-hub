@@ -202,8 +202,9 @@ func setSuperviseTestExitCh(ch chan struct{}) func() {
 // end-to-end at this phase without depending on those later layers.
 func newSuperviseCmd() *cobra.Command {
 	var (
-		noIPC      bool
-		strictMode bool
+		noIPC       bool
+		strictMode  bool
+		ensureAlive bool
 	)
 	cmd := &cobra.Command{
 		Use:   "supervise",
@@ -221,15 +222,31 @@ Signals: SIGINT / SIGTERM trigger the graceful-exit flow — set
 graceful_exit_in_progress=true, cancel the event-loop context,
 release the singleton lock, and exit 0. Quiesce-drain + transient-PID
 force-termination land in Task 9.2.
+
+--ensure-alive is a SEPARATE, tiny one-shot action (NOT the long-lived
+supervisor): the \mcp-local-hub-liveness scheduled task runs it every
+~1 min. It probes the flock-authoritative supervisor.lock and relaunches
+the supervisor/GUI owner if it died mid-session; if a supervisor is
+running (or liveness is undeterminable) it is a no-op. Always exits 0.
 `,
 		// Test-only flag scoped to the no-ipc test path. Production
 		// invocations either pass --no-ipc=false (default) or omit it.
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// --ensure-alive short-circuits the long-lived supervisor: it is
+			// a probe-only liveness tick that must NOT acquire the supervisor
+			// lock or start the event loop (doing so would itself BE a
+			// supervisor). It resolves the state dir, probes liveness, and
+			// relaunches the owner only when no live lock holder exists.
+			if ensureAlive {
+				return runEnsureAliveFromState()
+			}
 			return runSupervise(cmd.Context(), noIPC, strictMode)
 		},
 	}
 	cmd.Flags().BoolVar(&noIPC, "no-ipc", false, "skip IPC listener (test flag)")
 	cmd.Flags().BoolVar(&strictMode, "strict-mode", false, "enforce strict parent-dir DACL gate")
+	cmd.Flags().BoolVar(&ensureAlive, "ensure-alive", false,
+		"one-shot supervisor-liveness tick: relaunch the owner if dead, else no-op (run by the \\mcp-local-hub-liveness task; always exits 0)")
 	return cmd
 }
 

@@ -137,6 +137,40 @@ func TestStatusEndpoint_500OnHealthBackendError(t *testing.T) {
 	}
 }
 
+// TestStatusEndpoint_ExposesSupervisorDownDegradedMarker is the v0.6
+// Workstream B (§3.1) GUI-layer assertion: when the supervisor is
+// unreachable the daemons-section fetch returns api.ErrSupervisorDown
+// instead of falling back to stale scheduler rows, and the /api/status
+// route must surface that as 500 STATUS_FAILED with the operator-facing
+// message in the body. The frontend Dashboard turns this into the
+// "Failed to load status — Restart supervisor" recovery surface, so the
+// message must NAME the action ("restart the hub"), not be a bare code.
+func TestStatusEndpoint_ExposesSupervisorDownDegradedMarker(t *testing.T) {
+	fakeH := &fakeHealth{returnDaemonErr: api.ErrSupervisorDown}
+	s := NewServer(Config{})
+	s.health = fakeH
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body=%s; want 500", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if body.Code != "STATUS_FAILED" {
+		t.Errorf("code = %q, want STATUS_FAILED", body.Code)
+	}
+	if !strings.Contains(body.Error, "restart the hub") {
+		t.Errorf("error = %q, want it to name the operator action (restart the hub)", body.Error)
+	}
+}
+
 func TestGUIStatusUsesIPCSeamWhenWired(t *testing.T) {
 	prev := api.SupervisorIPCStatusFn
 	api.SupervisorIPCStatusFn = func(_ context.Context) ([]api.DaemonStatus, error) {

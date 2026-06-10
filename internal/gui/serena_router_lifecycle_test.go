@@ -9,6 +9,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -2408,4 +2409,602 @@ func TestSerenaRouter_ToolsList_MultiDataLineSSEDaemonResponse(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	assertToolsListNames(t, rr.Body.Bytes(), []string{"read_file", "list_dir"})
+}
+
+// ---------------------------------------------------------------------
+// §3 fail-loud (zombie-connection regression, 2026-06-10 incident).
+//
+// On serena-backend loss the router must tear the client session out of
+// ALL THREE session stores — routerSessionStore (the one that keeps
+// /serena/mcp returning HTTP 200 on a dead backend), serenaDaemonSessions,
+// AND the sticky sessionRouter — so the NEXT client request gets a clean
+// fail-loud (-32600 "session terminated" / 503 missing_session) and
+// re-initializes, instead of a zombie 200 on a dead daemon.
+//
+// This drives the REAL in-process forward-failure path (the always-on
+// floor of the §3.x backend-loss trigger): a daemon that was reachable for
+// the first tool-call is CLOSED (connection-refused on the next forward),
+// which is the dead-backend signal. The assertion is falsifiable: revert
+// the routerSessionStore removal on the backend-loss path and this test
+// fails because the routerSessionStore entry survives.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_TearsDownAllThreeStores(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	// NOTE: the test closes ts mid-flow to inject backend loss; a guarded
+	// cleanup Close is harmless (Close on an already-closed server is a
+	// no-op for the test's purposes — the listener is gone either way).
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		// A non-nil audit fn keeps the forward-failure logging path live but
+		// silent in the test.
+		AuditFn: func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Step 1: synthesized initialize at the router mints the client session
+	// in routerSessionStore.
+	sid := mintRouterSession(t, s, "2025-11-25")
+
+	// Step 2: a successful path-bearing tool call establishes the upstream
+	// daemon session + the sticky binding, so ALL THREE stores hold sid.
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("first tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Precondition: sid is live in all three stores before backend loss.
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid after initialize+toolcall")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
+		t.Fatalf("precondition: serenaDaemonSessions should hold a daemon binding for sid after the first tool call")
+	}
+	if got := deps.Sessions.LookupSession(sid); got == nil || got.WorkspaceKey != "alpha" {
+		t.Fatalf("precondition: sticky session should resolve to alpha after the first tool call; got %+v", got)
+	}
+
+	// Step 3: inject backend loss — close the daemon so the next forward
+	// gets connection-refused (the dead-backend signal). This is the REAL
+	// exit path, not a store delete.
+	ts.Close()
+
+	// Step 4: the next tool call forwards to the dead daemon → connection
+	// error → the router fails loud at the connection layer and tears the
+	// session out of all three stores. The handler returns a 502/504
+	// transport error for THIS request (the dead-backend response); the
+	// teardown is the side effect we assert below.
+	rr2 := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr2.Code == http.StatusOK {
+		t.Fatalf("tool call to a dead daemon returned 200 (zombie); want a transport error. body=%s", rr2.Body.String())
+	}
+
+	// Step 5 (THE falsifiable assertion): the routerSessionStore entry is
+	// GONE after the backend-loss event. Reverting the 3-store teardown's
+	// routerSessionStore removal makes THIS fail.
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after backend loss — the zombie is back (the §3 bug). /serena/mcp would keep 200-ing a dead backend")
+	}
+	// And the other two stores are torn down too (3-store teardown).
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Errorf("serenaDaemonSessions STILL holds sid after backend loss; want it unbound")
+	}
+	if got := deps.Sessions.LookupSession(sid); got != nil {
+		t.Errorf("sticky sessionRouter STILL resolves sid after backend loss; want it unbound. got %+v", got)
+	}
+
+	// Step 6: the SUBSEQUENT request on the now-terminated session must NOT
+	// be a zombie 200 that proxies to the dead daemon. A pathless call hits
+	// the router-session liveness gate; with the session gone from all three
+	// stores it is treated as missing_session (503) / terminated, so the
+	// client re-initializes instead of staying wedged. The load-bearing
+	// assertion is the store teardown above; this step pins the
+	// client-visible fail-loud outcome.
+	pathless := buildToolCallBody(t, "list_memories", map[string]any{})
+	rr3 := postSerena(t, s, pathless, map[string]string{"Mcp-Session-Id": sid})
+	if rr3.Code == http.StatusOK {
+		var resp struct {
+			Error *struct {
+				Code int `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(rr3.Body.Bytes(), &resp)
+		if resp.Error == nil {
+			t.Errorf("pathless call on the torn-down session returned a non-error 200 (zombie); want a fail-loud error. body=%s", rr3.Body.String())
+		}
+	}
+}
+
+// ---------------------------------------------------------------------
+// §3 fail-loud — IPC reconcile FALLBACK (signal #2). A serena daemon
+// can restart (advancing its PID) without any client request in flight
+// to trip the always-on forward-failure floor. The reconcile fallback
+// polls the supervisor IPC status and, on a per-workspace PID change vs
+// the previous tick, tears down that workspace's router sessions across
+// all three stores. This drives ReconcileSerenaBackendLossViaIPC through
+// the injected status seam.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_IPCReconcileTearsDownOnPIDChange(t *testing.T) {
+	// Save/restore the package-level status seam (a global).
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	// The IPC status keys workspace by PATH (supervisor_intent_build sets
+	// Workspace = WorkspacePath), so the entry's WorkspacePath must match the
+	// status row's Workspace.
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201}
+	deps := &serenaRouterDeps{
+		// listerStubResolver implements workspaceLister (ListWorkspaces), which
+		// ReconcileSerenaBackendLossViaIPC needs to map WorkspaceKey -> path.
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Establish a live session routed to the workspace (populates the reverse
+	// index via the successful forward).
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid")
+	}
+
+	// Inject a fake IPC status whose serena workspace reports PID. The PID is
+	// read from a closure variable so the test can flip it between ticks.
+	currentPID := 1000
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: "Running", PID: currentPID, Port: 9201},
+		}, nil
+	}
+
+	// Tick 1: first observation establishes the PID baseline — NOT a loss.
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("first reconcile tick tore down %d sessions; want 0 (baseline tick must not be a loss)", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("session torn down on the BASELINE tick; the first observation must not be treated as a loss")
+	}
+
+	// Tick 2: the daemon restarted (PID advanced) — a backend-loss signal.
+	currentPID = 2000
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("reconcile after PID change tore down %d sessions; want 1", n)
+	}
+
+	// The session is gone from all three stores (3-store teardown via the
+	// reconcile path).
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after IPC-reconcile detected a PID change; want it torn down")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Errorf("serenaDaemonSessions STILL holds sid after IPC reconcile; want it unbound")
+	}
+	if got := deps.Sessions.LookupSession(sid); got != nil {
+		t.Errorf("sticky sessionRouter STILL resolves sid after IPC reconcile; want it unbound. got %+v", got)
+	}
+}
+
+// §3 fail-loud — the IPC reconcile fallback must NOT tear down sessions on a
+// status READ error (a transient supervisor-IPC outage is not backend loss).
+func TestSerenaRouter_BackendLoss_IPCReconcileNoTeardownOnStatusError(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return nil, api.ErrSupervisorIPCUnavailable
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("reconcile tore down %d sessions on a status READ error; want 0 (transient IPC outage is not backend loss)", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Errorf("session torn down on a status READ error; the floor + a later good tick handle real loss, a read error must not")
+	}
+}
+
+// ---------------------------------------------------------------------
+// §3 fail-loud — REGRESSION (PR #280, P1): a client-side request cancel
+// (MCP client interrupts an in-flight serena tool call / disconnects
+// mid-request — common with Claude Code) must NOT be misclassified as a
+// backend-loss signal. The forward carries r.Context() and the serena
+// http client is built with Timeout:0, so a client cancel surfaces as a
+// *url.Error wrapping context.Canceled, which satisfies net.Error with
+// Timeout()==false. Without the context.Canceled guard at the top of
+// isConnectionLossErr the cancel falls into the net.Error branch and is
+// read as a connection loss → handleSerenaBackendLossOnForwardFailure
+// tears down EVERY session bound to that workspace, including OTHER live
+// clients' healthy sessions on a perfectly-alive daemon.
+//
+// FALSIFIABILITY: revert the `if errors.Is(err, context.Canceled) ... {
+// return false }` guard and this test fails — the cancelling session AND
+// the uninvolved peer session are both evicted from all three stores.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_ClientCancelDoesNotTearDownWorkspace(t *testing.T) {
+	daemon := newFakeSerenaDaemon("alpha")
+
+	// The tool handler blocks until the request context is cancelled, then
+	// returns. This reproduces a client cancel that lands while the forward
+	// to a LIVE daemon is in flight: http.Client.Do returns a *url.Error
+	// wrapping context.Canceled (NOT a net timeout, NOT a dial-refused).
+	toolEntered := make(chan struct{}, 1)
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		select {
+		case toolEntered <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done() // block until the inbound request is cancelled
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	// Session A: the client that will cancel. Establish it with a successful
+	// tool call so it is bound in all three stores + the workspace reverse
+	// index. Use a SEPARATE non-blocking tool fn for this warm-up forward,
+	// then swap in the blocking fn for the cancel.
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}
+	sidA := mintRouterSession(t, s, "2025-11-25")
+	bodyA := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, bodyA, map[string]string{"Mcp-Session-Id": sidA}); rr.Code != http.StatusOK {
+		t.Fatalf("warm-up tool call A status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Session B: an UNINVOLVED peer client on the SAME workspace (e.g. Codex
+	// while Claude Code holds session A). It must SURVIVE A's cancel.
+	sidB := mintRouterSession(t, s, "2025-11-25")
+	bodyB := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/other.go"})
+	if rr := postSerena(t, s, bodyB, map[string]string{"Mcp-Session-Id": sidB}); rr.Code != http.StatusOK {
+		t.Fatalf("warm-up tool call B status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Precondition: both sessions live; both bound to the same workspace.
+	if !s.serenaRouterSessions.known(sidA) || !s.serenaRouterSessions.known(sidB) {
+		t.Fatalf("precondition: both sidA and sidB should be known router sessions")
+	}
+	if got := s.serenaRouterSessions.sessionsForWorkspace("alpha"); len(got) != 2 {
+		t.Fatalf("precondition: workspace 'alpha' should index 2 sessions, got %d (%v)", len(got), got)
+	}
+
+	// Now swap in the blocking tool fn and drive A's forward with a
+	// cancellable context, then cancel it mid-forward.
+	daemon.tool = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		select {
+		case toolEntered <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- postSerenaCtx(t, s, ctx, bodyA, map[string]string{"Mcp-Session-Id": sidA})
+	}()
+	// Wait until the forward has reached the (blocking) daemon, then cancel
+	// the inbound request context — this is the client-disconnect signal.
+	select {
+	case <-toolEntered:
+	case <-time.After(3 * time.Second):
+		cancel()
+		t.Fatal("forward never reached the blocking daemon tool handler")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled forward did not return")
+	}
+
+	// THE falsifiable assertions: a client cancel is NOT backend loss, so the
+	// workspace's sessions must SURVIVE. Most load-bearing is sidB — a peer
+	// that had nothing to do with A's cancel; the false-positive teardown
+	// would evict it because it shares the workspace reverse index.
+	if !s.serenaRouterSessions.known(sidB) {
+		t.Errorf("PEER session sidB was torn down by sidA's client cancel — isConnectionLossErr misclassified context.Canceled as backend loss (the PR #280 P1 regression)")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sidB); !ok {
+		t.Errorf("peer sidB daemon binding torn down by a client cancel; want it intact")
+	}
+	if got := deps.Sessions.LookupSession(sidB); got == nil {
+		t.Errorf("peer sidB sticky session torn down by a client cancel; want it intact")
+	}
+	// The cancelling session itself must also survive — its daemon is alive;
+	// only the client's request was interrupted.
+	if !s.serenaRouterSessions.known(sidA) {
+		t.Errorf("cancelling session sidA was torn down by its OWN client cancel; a cancel on a LIVE daemon is not a backend-loss event")
+	}
+	// And the workspace still indexes both sessions (no eviction at all).
+	if got := s.serenaRouterSessions.sessionsForWorkspace("alpha"); len(got) != 2 {
+		t.Errorf("workspace 'alpha' should still index 2 sessions after a benign client cancel, got %d (%v)", len(got), got)
+	}
+}
+
+// ---------------------------------------------------------------------
+// §3 fail-loud — REGRESSION (PR #280, P2): the IPC reconcile must NOT
+// treat a port-stale "Restarting" daemon's transient current_pid=0 as a
+// real PID change. The supervisor IPC status reports a healthy-but-port-
+// stale daemon (state "Restarting") with current_pid=0 (the real PID is
+// moved to stale_pid) while the workspace row stays present in the list.
+// A naive 1000 -> 0 comparison classifies that as a backend loss AND
+// persists 0 as the new baseline, so when the daemon recovers (0 -> 2000)
+// the very next tick fires a SECOND spurious teardown of the just-re-
+// established healthy session.
+//
+// This drives 1000 -> (Restarting, current_pid=0) -> 2000 and asserts a
+// SINGLE teardown (on the Restarting tick: ZERO; on recovery: ZERO,
+// because the prior real PID 1000 was carried forward, not the transient
+// 0). FALSIFIABILITY: revert the restarting-row carry-forward and the
+// recovery tick fires a second teardown -> n==1 on tick3 -> test fails.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_IPCReconcileIgnoresRestartingTransient(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid")
+	}
+
+	// The status row is flipped between ticks via these closure vars to model
+	// the supervisor's port-stale terminate-restart cycle.
+	var curPID int
+	var state string
+	var stalePID int
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: state, PID: curPID, StalePID: stalePID, Port: 9201},
+		}, nil
+	}
+
+	// Tick 1: healthy daemon, PID 1000 — establishes the baseline, no loss.
+	curPID, state, stalePID = 1000, "Running", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("baseline tick tore down %d sessions; want 0", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("session torn down on the BASELINE tick")
+	}
+
+	// Tick 2: port-stale Restarting window — current_pid=0, real PID parked in
+	// stale_pid, row still present. This is NOT a backend loss; the daemon is
+	// recovering. Must NOT tear down, and must NOT persist 0 as the baseline.
+	curPID, state, stalePID = 0, "Restarting", 1000
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("Restarting/current_pid=0 transient tore down %d sessions; want 0 (port-stale restart is not backend loss)", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("session torn down on the Restarting/current_pid=0 transient tick")
+	}
+
+	// Tick 3: daemon recovered to a NEW real PID 2000. The prior real PID
+	// (1000) was carried forward across the Restarting window, so this is a
+	// genuine 1000 -> 2000 generation change -> exactly ONE teardown here.
+	// Without the carry-forward, tick2 would have persisted 0 and this would be
+	// a SECOND spurious teardown (0 -> 2000).
+	curPID, state, stalePID = 2000, "Running", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("recovery tick tore down %d sessions; want exactly 1 (the single genuine 1000->2000 generation change)", n)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after the genuine PID change; want it torn down")
+	}
+}
+
+// ---------------------------------------------------------------------
+// §3 fail-loud — REGRESSION (PR #280, fix-round-2 P1): a genuinely
+// CRASHED serena daemon (supervisor state "backoff"/"spawning" ->
+// supervisorStatusGUIState maps to "Restarting", current_pid=0, and
+// crucially StalePID stays 0 because the stale-PID parking happens ONLY
+// in supervise_status.go's `state==running && !live` branch) MUST be
+// torn down by the IPC reconcile floor. The round-1 P2 fix's over-broad
+// `row.PID==0 || row.State=="Restarting" || row.StalePID!=0` detection
+// matched this crash row (via PID==0 AND State=="Restarting"), carried
+// the dead PID forward, and SUPPRESSED teardown — leaving sessions
+// zombie-bound to a dead backend for the whole backoff window.
+//
+// This drives 1000 -> (State:"Restarting", PID:0, StalePID:0 — a crash,
+// NOT a port-stale window) and asserts the crash tick tears down exactly
+// ONE session.
+//
+// FALSIFIABILITY: re-widen the restarting detection to include
+// `row.PID==0 || row.State=="Restarting"` (the round-1 form) and this
+// test fails — the crash row is marked "restarting", loss classification
+// is skipped, n==0 on the crash tick, and the session is NOT torn down.
+// The StalePID!=0-only narrowing is what makes it fire.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_IPCReconcileTearsDownOnCrashWithoutStalePID(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid")
+	}
+
+	var curPID int
+	var state string
+	var stalePID int
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: state, PID: curPID, StalePID: stalePID, Port: 9201},
+		}, nil
+	}
+
+	// Tick 1: healthy daemon, PID 1000 — establishes the baseline, no loss.
+	curPID, state, stalePID = 1000, "Running", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("baseline tick tore down %d sessions; want 0", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("session torn down on the BASELINE tick")
+	}
+
+	// Tick 2: the daemon CRASHED — supervisor "backoff"/"spawning" maps to
+	// "Restarting" with current_pid=0, and StalePID stays 0 (no alive-but-
+	// port-stale parking). This is a genuine backend loss the §3 floor MUST
+	// catch; it is NOT the benign port-stale window. Exactly one teardown.
+	curPID, state, stalePID = 0, "Restarting", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("crash tick (State=Restarting, PID=0, StalePID=0) tore down %d sessions; want exactly 1 — a crashed daemon with no parked stale PID is real backend loss, not a port-stale window", n)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after the daemon crashed; want it torn down (the §3 IPC floor must not leave sessions zombie-bound to a dead backend)")
+	}
+}
+
+// ---------------------------------------------------------------------
+// §3 fail-loud — REGRESSION (PR #280, fix-round-2 P1): a genuinely
+// STOPPED / exited serena daemon (supervisor state "idle" ->
+// supervisorStatusGUIState maps to "Stopped", current_pid=0, StalePID=0)
+// MUST be torn down by the IPC reconcile floor. The round-1 P2 fix's
+// over-broad `row.PID==0` disjunct matched this stopped row, carried the
+// prior PID forward, and SUPPRESSED teardown.
+//
+// This drives 1000 -> (State:"Stopped", PID:0, StalePID:0) and asserts
+// the stop tick tears down exactly ONE session.
+//
+// FALSIFIABILITY: re-add the `row.PID==0` disjunct to the restarting
+// detection (the round-1 form) and this test fails — the stopped row is
+// marked "restarting", loss classification is skipped, n==0 on the stop
+// tick, and the session survives bound to a dead daemon.
+// ---------------------------------------------------------------------
+func TestSerenaRouter_BackendLoss_IPCReconcileTearsDownOnStoppedDaemon(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid")
+	}
+
+	var curPID int
+	var state string
+	var stalePID int
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: state, PID: curPID, StalePID: stalePID, Port: 9201},
+		}, nil
+	}
+
+	// Tick 1: healthy daemon, PID 1000 — establishes the baseline, no loss.
+	curPID, state, stalePID = 1000, "Running", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("baseline tick tore down %d sessions; want 0", n)
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("session torn down on the BASELINE tick")
+	}
+
+	// Tick 2: the operator STOPPED the daemon — supervisor "idle" maps to
+	// "Stopped" with current_pid=0, StalePID=0. The row stays present in the
+	// list (one row per intent.Daemons) but the backend is dead. The §3 floor
+	// MUST evict the session bound to it. Exactly one teardown.
+	curPID, state, stalePID = 0, "Stopped", 0
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("stop tick (State=Stopped, PID=0, StalePID=0) tore down %d sessions; want exactly 1 — a stopped daemon is real backend loss, not a port-stale window", n)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after the daemon was stopped; want it torn down")
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,6 +51,50 @@ type realStatusProvider struct{}
 
 func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 	return api.NewAPI().Status()
+}
+
+// snapshotStatusProvider is the production poller's statusProvider. It
+// routes the SSE StatusPoller through the SAME supervisor-IPC-owned,
+// fail-loud daemons snapshot that GET /api/status uses
+// (healthBackend.DaemonStatusSnapshot), rather than api.Status()'s
+// IPC-first-but-scheduler-fallback path.
+//
+// v0.6 Workstream B (§3.1) — fail loud on the SSE channel too. The
+// /api/status route was converted to surface api.ErrSupervisorDown when
+// the supervisor IPC is unreachable (so the Dashboard renders the
+// degraded banner), but the StatusPoller was a SEPARATE channel feeding
+// the SAME Dashboard state. RealStatusProvider.Status() →
+// api.NewAPI().Status() → statusInternal STILL fell back to the legacy
+// scheduler scan on ErrSupervisorIPCUnavailable, so a down supervisor
+// produced stale scheduler rows (migrated daemons painted
+// failed/Restarting) which the poller published as `daemon-state`
+// deltas; the frontend's onDelta then cleared the degraded error and
+// painted those stale cards — re-introducing the exact false-negative
+// this phase removes, just via the SSE channel. Routing the poller
+// through DaemonStatusSnapshot means a down supervisor yields
+// ErrSupervisorDown and the poller emits a `poller-error` event instead
+// of stale `daemon-state` deltas.
+//
+// The fix has two complementary effects on the Dashboard banner:
+//   1. By OMISSION — the poller no longer emits banner-CLEARING
+//      `daemon-state` deltas on a down supervisor, so onDelta's
+//      setError(null) can no longer wipe the degraded banner.
+//   2. By POSITIVE SIGNAL — the Dashboard subscribes to `poller-error`
+//      (Dashboard.tsx useEventSource map) and calls setError(...), so a
+//      down supervisor surfaces the banner within one poll cycle (5s)
+//      rather than waiting up to 30s for the separate `/api/status` 500
+//      poll. (The 30s HTTP poll remains the durable backstop.)
+//
+// DaemonStatusSnapshot derives its own bounded IPC deadline internally,
+// so context.Background() here matches the prior api.Status() ctx
+// semantics (no caller-cancellation propagation through the 5s poll
+// cadence, which is acceptable for a fixed-interval background pump).
+type snapshotStatusProvider struct {
+	health healthBackend
+}
+
+func (p snapshotStatusProvider) Status() ([]api.DaemonStatus, error) {
+	return p.health.DaemonStatusSnapshot(context.Background())
 }
 
 // healthBackend is the narrow interface the /api/health and /api/status
@@ -489,6 +534,16 @@ type Server struct {
 	// Thread-safe.
 	serenaRouterSessions routerSessionStore
 
+	// §3 fail-loud IPC reconcile fallback state. serenaBackendPIDMu guards
+	// serenaBackendLastPID, the per-workspace-PATH snapshot of the supervisor
+	// IPC status's CurrentPID from the PREVIOUS reconcile tick. A workspace
+	// whose PID changed (restart) or that disappeared from the status between
+	// ticks is a backend-loss signal, so reconcileSerenaBackendLossViaIPC
+	// tears down that workspace's router sessions. Owned solely by the
+	// reconcile goroutine + its tests; guarded so a future caller is safe.
+	serenaBackendPIDMu   sync.Mutex
+	serenaBackendLastPID map[string]int
+
 	// LSP router dependencies for /lsp/<language>/mcp. This route is
 	// intentionally separate from the Serena router because LSP workspace
 	// proxies are sessionless upstreams and need no daemon-session handshake.
@@ -567,6 +622,23 @@ func NewServer(cfg Config) *Server {
 // Broadcaster exposes the SSE event bus. Tests publish into it directly;
 // production callers (poller goroutine in Task 12+) use it the same way.
 func (s *Server) Broadcaster() *Broadcaster { return s.events }
+
+// StatusProvider returns the statusProvider the production SSE
+// StatusPoller must poll. It is backed by the server's long-lived
+// healthBackend so the poller shares the daemons-section TTL cache with
+// GET /api/status AND inherits its fail-loud contract: when the
+// supervisor IPC is unreachable, DaemonStatusSnapshot returns
+// api.ErrSupervisorDown rather than falling back to the legacy
+// scheduler scan, so the poller emits a `poller-error` event instead of
+// stale `daemon-state` deltas. The stale deltas would have CLEARED the
+// Dashboard's degraded banner (onDelta → setError(null)); the
+// `poller-error` event is now consumed by the Dashboard's useEventSource
+// map to SET the banner (PR #281 round-2 P3), and also drives the tray
+// icon to StateError via the poller's error channel (PR #281 round-2 P2,
+// wired in cli.go). (v0.6 Workstream B §3.1).
+func (s *Server) StatusProvider() statusProvider {
+	return snapshotStatusProvider{health: s.health}
+}
 
 // OnActivateWindow registers the callback invoked when POST
 // /api/activate-window is received. A second `mcphub gui` invocation

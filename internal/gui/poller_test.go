@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -304,5 +305,102 @@ func TestPoller_DistinctDaemonsDoNotCollide(t *testing.T) {
 	}
 	if deltas["serena"]["Running"] != 2 {
 		t.Errorf("expected two Running deltas (claude, codex initial inserts), got %v", deltas)
+	}
+}
+
+// TestPoller_SupervisorDownEmitsPollerErrorNotStaleDeltas is the P1
+// regression guard for v0.6 Workstream B (§3.1). When the supervisor
+// IPC is unreachable, the production poller (Server.StatusProvider() →
+// healthBackend.DaemonStatusSnapshot) must surface api.ErrSupervisorDown
+// as a `poller-error` event and emit NO `daemon-state` deltas.
+//
+// Before the fix, the poller used gui.RealStatusProvider{} →
+// api.NewAPI().Status() → statusInternal, which fell back to the legacy
+// scheduler scan on ErrSupervisorIPCUnavailable. A down supervisor then
+// produced stale scheduler rows that the poller published as
+// `daemon-state` deltas; the frontend's onDelta cleared the degraded
+// banner (setError(null)) and painted those stale failed/Restarting
+// cards — re-introducing the exact false-negative the /api/status path
+// removes, just on the SSE channel. Routing the poller through the
+// fail-loud snapshot closes that second channel: a `poller-error`
+// carries the degraded signal and never clears the Dashboard banner.
+func TestPoller_SupervisorDownEmitsPollerErrorNotStaleDeltas(t *testing.T) {
+	fake := &fakeHealth{returnDaemonErr: api.ErrSupervisorDown}
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.health = fake
+
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(s.StatusProvider(), b, 50*time.Millisecond)
+	go p.Run(ctx)
+
+	// Wait for the first poll cycle to surface a poller-error event;
+	// assert no daemon-state delta is ever observed alongside it.
+	deadline := time.After(2 * time.Second)
+	var sawPollerErr bool
+	for !sawPollerErr {
+		select {
+		case ev := <-ch:
+			switch ev.Type {
+			case "daemon-state":
+				t.Fatalf("supervisor-down poller emitted a daemon-state delta (stale-card masking regression); body=%v", ev.Body)
+			case "poller-error":
+				errStr, _ := ev.Body["err"].(string)
+				if !strings.Contains(errStr, api.ErrSupervisorDown.Error()) {
+					t.Errorf("poller-error body err = %q, want it to carry ErrSupervisorDown (%q)", errStr, api.ErrSupervisorDown.Error())
+				}
+				sawPollerErr = true
+			}
+		case <-deadline:
+			t.Fatal("never observed a poller-error event for a down supervisor (regression: poller fell back to scheduler scan and emitted stale daemon-state deltas instead of failing loud)")
+		}
+	}
+}
+
+// errStatus is a statusProvider that always returns the configured
+// error, modeling a down-supervisor fail-loud snapshot.
+type errStatus struct{ err error }
+
+func (e errStatus) Status() ([]api.DaemonStatus, error) { return nil, e.err }
+
+// TestPoller_FeedsErrorChannelOnFetchError is the PR #281 round-2 P2
+// regression guard at the poller layer: when status.Status() errors,
+// the poller MUST fan the error out to the error channel installed via
+// SetErrorChannel so the tray aggregator can flip the icon to a
+// degraded state instead of freezing (the poll-error path early-returns
+// before fanning a snapshot, so the snapshot channel never sees the
+// down-supervisor cycle). Without this feed the tray's only state
+// source goes silent and the icon stays green over a down supervisor.
+func TestPoller_FeedsErrorChannelOnFetchError(t *testing.T) {
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	snapCh := make(chan []api.DaemonStatus, 1)
+	p := NewStatusPoller(errStatus{err: api.ErrSupervisorDown}, b, 50*time.Millisecond)
+	p.SetErrorChannel(errCh)
+	p.SetSnapshotChannel(snapCh)
+	go p.Run(ctx)
+
+	select {
+	case got := <-errCh:
+		if !strings.Contains(got.Error(), api.ErrSupervisorDown.Error()) {
+			t.Errorf("error channel carried %q, want ErrSupervisorDown (%q)", got.Error(), api.ErrSupervisorDown.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("poller never fed the error channel on a fetch error (regression: tray would freeze on down supervisor)")
+	}
+
+	// And no snapshot is fanned on the error path — the tray must rely
+	// on the error channel, not a stale/empty snapshot.
+	select {
+	case snap := <-snapCh:
+		t.Fatalf("poller fanned a snapshot on the error path: %v (regression: empty/stale snapshot aggregates to StateHealthy and masks the down supervisor)", snap)
+	case <-time.After(200 * time.Millisecond):
+		// good — no snapshot on the error path.
 	}
 }
