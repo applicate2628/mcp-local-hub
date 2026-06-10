@@ -218,7 +218,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		intentDesired := computeIntentDesired(taskName, daemonIntentTasks)
 		schedState, hasSched := lookupSchedulerState(schedByTask, taskName)
 		smState := lookupControllerSMState(deps, taskName)
-		action := classifyDriftAction(schedState, hasSched, intentDesired, isSupervisorOwnedDescriptorForReconcile(d))
+		action := classifyDriftAction(schedState, hasSched, intentDesired, isSupervisorOwnedDescriptorForReconcile(d), smState)
 
 		// Orphaned-LSP-descriptor exclusion, mirroring the startup reconciler
 		// guard at supervise_reconcile.go:229. classifyDriftAction returns
@@ -469,7 +469,7 @@ func normalizeSchedulerState(raw string) string {
 // intent-desired) pair. The matrix:
 //
 //	sched=missing   intent=running  → post_ev_intent_update for supervisor-owned descriptors; needs_manual_review for legacy scheduler-owned descriptors
-//	sched=missing   intent=stopped  → no_op (intent says stop and there's no task; nothing to do)
+//	sched=missing   intent=stopped  → post_ev_intent_update (terminate) for supervisor-owned descriptors whose SM state is live; no_op otherwise
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
 //	sched=stopped   intent=running  → post_ev_intent_update (spawn)
@@ -482,13 +482,33 @@ func normalizeSchedulerState(raw string) string {
 // supervisor-owned descriptors, there is deliberately no scheduler row:
 // the supervisor has the full command in supervisor-intent.json and can
 // spawn directly from EvIntentUpdate.
-func classifyDriftAction(schedState string, hasSched bool, intentDesired string, supervisorOwned bool) string {
+//
+// The terminate direction on the sched=missing row is the supervisor-owned
+// mirror of the same reasoning (spec §4 Phase A.1): supervisor-owned rows
+// have NO scheduler row by design, so scheduler state can never witness
+// them running — the controller's SM state is the only witness. Without
+// this row, `mcphub stop` would write Desired=stopped into
+// daemon-intent.json and the apply-mode reconcile would classify the
+// still-running daemon as no_op; the caller's only remaining lever is
+// taskkill, whose NON-clean exit the supervisor reaper observes and
+// respawns — the stop→respawn churn that drives daemons into quarantine.
+// Posting EvIntentUpdate instead lets the SM drive
+// StRunning→StExiting→StIdle (deliberate stop, no respawn). Dead/settled
+// SM states (StIdle, StQuarantined) stay no_op: there is nothing live to
+// terminate, and a quarantined daemon's intent flip must not be treated
+// as drift (same quarantine-respect as the startup reconciler's
+// `isStopped && !running` gate).
+func classifyDriftAction(schedState string, hasSched bool, intentDesired string, supervisorOwned bool, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
 			if supervisorOwned {
 				return api.ReconcileActionPostEvIntentUpdate
 			}
 			return api.ReconcileActionNeedsManualReview
+		}
+		if intentDesired == api.ReconcileIntentDesiredStopped &&
+			supervisorOwned && smStateIsLive(smState) {
+			return api.ReconcileActionPostEvIntentUpdate
 		}
 		return api.ReconcileActionNoOp
 	}
@@ -508,6 +528,22 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 		// the SM has no defined transition for it. Operator review.
 		return api.ReconcileActionNeedsManualReview
 	}
+}
+
+// smStateIsLive reports whether the SM state names a daemon the
+// supervisor is actively driving (a child exists, a spawn is in flight,
+// or a backoff timer would respawn one). These are exactly the states
+// from which api.Transition's EvIntentUpdate(stopped) rows make
+// progress toward StIdle: StRunning→StExiting (issue terminate),
+// StSpawning→queued_action=stop, StBackoffWaiting→StIdle (cancel
+// timer), StExiting→clear queued_action (cancels a pending respawn).
+// StIdle and StQuarantined are settled — see classifyDriftAction.
+func smStateIsLive(s api.SMState) bool {
+	switch s {
+	case api.StSpawning, api.StRunning, api.StExiting, api.StBackoffWaiting:
+		return true
+	}
+	return false
 }
 
 func isSupervisorOwnedDescriptorForReconcile(d api.SupervisorDaemon) bool {

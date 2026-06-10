@@ -18,20 +18,17 @@ func setSupervisorRestartHooksForTest(fn supervisorRestartRespawnFunc) func() {
 	return func() { supervisorRestartRespawnFn = prev }
 }
 
-func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string) ([]RestartResult, bool, error) {
-	intentPath, err := DefaultSupervisorIntentPath()
-	if err != nil {
-		return nil, false, fmt.Errorf("resolve supervisor intent path: %w", err)
-	}
-	intent, err := ReadSupervisorIntent(intentPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("read supervisor-intent.json: %w", err)
-	}
+// selectSupervisorOwnedTargets filters intent.Daemons down to the rows a
+// supervisor-side maintenance pass (restart respawn / stop reconcile)
+// should act on for the given (server, daemonFilter) scope. Maintenance
+// rows are skipped, server/daemon identity falls back to
+// ParseManagedTaskName when the descriptor fields are blank, and every
+// returned TaskName is normalized to canonical leading-backslash form.
+// Shared by restartSupervisorOwnedDaemons and stopSupervisorOwnedDaemons
+// (spec §4 Phase A.1).
+func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFilter string) []SupervisorDaemon {
 	if intent == nil || len(intent.Daemons) == 0 {
-		return nil, false, nil
+		return nil
 	}
 	var targets []SupervisorDaemon
 	for _, d := range intent.Daemons {
@@ -60,6 +57,33 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 		}
 		d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
 		targets = append(targets, d)
+	}
+	return targets
+}
+
+// loadSupervisorOwnedTargets reads supervisor-intent.json from the
+// default state dir and selects the supervisor-owned targets in scope.
+// A missing intent file (no supervisor install) yields (nil, nil) so
+// callers fall through to the legacy scheduler path.
+func loadSupervisorOwnedTargets(server, daemonFilter string) ([]SupervisorDaemon, error) {
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve supervisor intent path: %w", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read supervisor-intent.json: %w", err)
+	}
+	return selectSupervisorOwnedTargets(intent, server, daemonFilter), nil
+}
+
+func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string) ([]RestartResult, bool, error) {
+	targets, err := loadSupervisorOwnedTargets(server, daemonFilter)
+	if err != nil {
+		return nil, false, err
 	}
 	if len(targets) == 0 {
 		return nil, false, nil

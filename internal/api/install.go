@@ -632,6 +632,11 @@ var forceMaterializeProbe = sendForceMaterializeTools
 var statusSchedulerFactory = scheduler.New
 var restartSchedulerFactory = scheduler.New
 
+// stopSchedulerFactory mirrors restartSchedulerFactory for the Stop /
+// StopAll kill paths so tests can swap in a fake scheduler instead of
+// touching the OS scheduler (spec §4 Phase A.1).
+var stopSchedulerFactory = scheduler.New
+
 func statusSchedulerTasks() ([]scheduler.TaskStatus, error) {
 	sch, err := statusSchedulerFactory()
 	if err != nil {
@@ -2208,14 +2213,48 @@ func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
 	if err := a.recordStopIntent(taskNames, false); err != nil {
 		return nil, err
 	}
-	return a.stopKillCore(server, daemonFilter)
+	return a.stopSupervisorAwareKill(server, daemonFilter)
+}
+
+// stopSupervisorAwareKill runs the supervisor reconcile pass followed by
+// the legacy kill path, skipping any task the supervisor pass already
+// handled (spec §4 Phase A.1 — the same combine-and-skip shape Restart
+// uses). PRECONDITION: recordStopIntent must already have written
+// Desired=stopped for the in-scope tasks; the supervisor reconcile reads
+// that intent from disk.
+func (a *API) stopSupervisorAwareKill(server, daemonFilter string) ([]RestartResult, error) {
+	supResults, supervisorHandled, err := stopSupervisorOwnedDaemons(context.Background(), server, daemonFilter)
+	if err != nil {
+		return nil, err
+	}
+	// Reuse the restart skip-set builder: rows with Code ==
+	// SUPERVISOR_UNAVAILABLE are dropped (the legacy path should retry
+	// them); every other row — success OR reconcile-failed — is skipped
+	// so the kill path never taskkills a daemon a live supervisor would
+	// respawn.
+	handledTasks := schedulerBlockedRestartTaskNames(supResults)
+	killResults, err := a.stopKillCore(server, daemonFilter, handledTasks)
+	if err != nil {
+		// Mixed install where the supervisor handled every owned row and
+		// the host has no usable scheduler (POSIX beta) — mirror
+		// Restart's tolerance.
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return supResults, nil
+		}
+		return nil, err
+	}
+	return append(supResults, killResults...), nil
 }
 
 // stopKillCore is the original kill body of Stop. Extracted so Stop
 // (no-force) and StopWithOpts (Force toggle) can share the kill path
-// after each one has run its own intent/audit recording.
-func (a *API) stopKillCore(server, daemonFilter string) ([]RestartResult, error) {
-	sch, err := scheduler.New()
+// after each one has run its own intent/audit recording. handledTasks
+// holds bare (no leading backslash) task names the supervisor reconcile
+// pass already stopped; those are skipped here so the legacy path never
+// taskkills a supervisor-owned daemon (the reaper would observe the
+// non-clean exit and respawn it — the churn spec §4 kills).
+func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]struct{}) ([]RestartResult, error) {
+	sch, err := stopSchedulerFactory()
 	if err != nil {
 		return nil, err
 	}
@@ -2228,6 +2267,9 @@ func (a *API) stopKillCore(server, daemonFilter string) ([]RestartResult, error)
 	var results []RestartResult
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
+		if _, already := handledTasks[normalized]; already {
+			continue
+		}
 		if daemonFilter != "" {
 			wantSuffix := "-" + daemonFilter
 			if !strings.HasSuffix(normalized, wantSuffix) {
@@ -2239,7 +2281,7 @@ func (a *API) stopKillCore(server, daemonFilter string) ([]RestartResult, error)
 		}
 		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
-			if err := killDaemonByPort(port, 5*time.Second); err != nil {
+			if err := killByPortFn(port, 5*time.Second); err != nil {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 				continue
 			}
@@ -2542,25 +2584,64 @@ func waitForPortFree(port int, timeout time.Duration) error {
 // uninstalled). Kills the daemon process by port (see RestartAll comment
 // on why scheduler.Stop alone isn't enough). Returns per-task results so
 // the CLI can report failures.
+//
+// Spec §4 Phase A.1: supervisor-owned daemons are stopped through the
+// supervisor IPC reconcile instead of taskkill. Unlike Stop, StopAll
+// historically recorded NO stop intent at all — without a Desired=stopped
+// entry in daemon-intent.json the reconcile would see desired=running and
+// could not stop anything — so the supervisor pass here records intent
+// for its own targets FIRST. Legacy scheduler tasks keep the historical
+// no-intent kill behavior.
 func (a *API) StopAll() ([]RestartResult, error) {
-	sch, err := scheduler.New()
+	supTargets, err := loadSupervisorOwnedTargets("", "")
 	if err != nil {
+		return nil, err
+	}
+	if len(supTargets) > 0 {
+		names := make([]string, 0, len(supTargets))
+		for _, d := range supTargets {
+			names = append(names, strings.TrimPrefix(d.TaskName, `\`))
+		}
+		// Intent MUST be on disk before the reconcile reads it; a
+		// failed intent write fail-closes the supervisor pass the same
+		// way Stop's recordStopIntent does.
+		if err := a.recordStopIntent(names, false); err != nil {
+			return nil, err
+		}
+	}
+	supResults, supervisorHandled, err := stopSupervisorOwnedDaemons(context.Background(), "", "")
+	if err != nil {
+		return nil, err
+	}
+	handledTasks := schedulerBlockedRestartTaskNames(supResults)
+	sch, err := stopSchedulerFactory()
+	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return supResults, nil
+		}
 		return nil, err
 	}
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
+		if supervisorHandled && schedulerUnavailableError(err) {
+			return supResults, nil
+		}
 		return nil, err
 	}
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
-	var results []RestartResult
+	results := supResults
 	for _, t := range tasks {
 		// Skip weekly-refresh — schedule-only task; Stop has no effect anyway.
 		if strings.Contains(t.Name, "weekly-refresh") {
 			continue
 		}
-		port := portForTask(strings.TrimPrefix(t.Name, "\\"), ports, wsByTask)
-		if err := killDaemonByPort(port, 5*time.Second); err != nil {
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		if _, already := handledTasks[normalized]; already {
+			continue
+		}
+		port := portForTask(normalized, ports, wsByTask)
+		if err := killByPortFn(port, 5*time.Second); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
 		}
