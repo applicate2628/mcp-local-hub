@@ -17,14 +17,22 @@ import (
 	"errors"
 )
 
-type supervisorStopReconcileFunc func(ctx context.Context, apply bool) (ReconcileResponse, error)
+// supervisorReconcileApplyFunc is the side-neutral seam for dialing the
+// supervisor IPC `reconcile --apply` verb. It is shared by BOTH the stop
+// path (stopSupervisorOwnedDaemons, this file) and the restart path
+// (restartSupervisorOwnedDaemons, restart_supervisor.go): both dispatch a
+// drifted intent through the supervisor's state machine by re-reading the
+// intent files from disk, refreshing the controller caches, and posting
+// EvIntentUpdate per drift entry. One owner, one test hook — no duplicate
+// reconcile seam (#279 fable r3 F-A).
+type supervisorReconcileApplyFunc func(ctx context.Context, apply bool) (ReconcileResponse, error)
 
-var supervisorStopReconcileFn supervisorStopReconcileFunc = DialSupervisorIPCReconcile
+var supervisorReconcileApplyFn supervisorReconcileApplyFunc = DialSupervisorIPCReconcile
 
-func setSupervisorStopHooksForTest(fn supervisorStopReconcileFunc) func() {
-	prev := supervisorStopReconcileFn
-	supervisorStopReconcileFn = fn
-	return func() { supervisorStopReconcileFn = prev }
+func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) func() {
+	prev := supervisorReconcileApplyFn
+	supervisorReconcileApplyFn = fn
+	return func() { supervisorReconcileApplyFn = prev }
 }
 
 // stopSupervisorOwnedDaemons stops the supervisor-owned daemons in scope
@@ -67,7 +75,7 @@ func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string
 	if len(targets) == 0 {
 		return nil, false, nil
 	}
-	if _, err := supervisorStopReconcileFn(ctx, true); err != nil {
+	if _, err := supervisorReconcileApplyFn(ctx, true); err != nil {
 		if errors.Is(err, ErrSupervisorIPCUnavailable) {
 			return nil, false, nil
 		}

@@ -7,7 +7,7 @@ package api
 // XDG_STATE_HOME redirect so DefaultRegistryPath (workspaceTasksByName)
 // never touches the real registry, stopSchedulerFactory for the OS
 // scheduler, killByPortFn for the kill path, and the
-// supervisorStopReconcileFn seam for the IPC reconcile.
+// supervisorReconcileApplyFn seam for the IPC reconcile.
 
 import (
 	"context"
@@ -75,7 +75,7 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 	var reconcileCalls int32
 	var gotApply bool
 	var intentDesiredAtReconcile string
-	restore := setSupervisorStopHooksForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		atomic.AddInt32(&reconcileCalls, 1)
 		gotApply = apply
 		// Read-back assertion: the stop intent must already be on disk
@@ -120,7 +120,7 @@ func TestStopFallsBackToKillPathWhenSupervisorIPCUnavailable(t *testing.T) {
 	kills, fake := stopSupervisorTestSetup(t, stopSupervisorTestIntent(),
 		[]scheduler.TaskStatus{{Name: stopSupervisorTestTask}})
 
-	restore := setSupervisorStopHooksForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial: %w", ErrSupervisorIPCUnavailable)
 	})
 	defer restore()
@@ -149,7 +149,7 @@ func TestStopReconcileFailureKeepsSupervisorOwnedUnkilled(t *testing.T) {
 	kills, fake := stopSupervisorTestSetup(t, stopSupervisorTestIntent(),
 		[]scheduler.TaskStatus{{Name: stopSupervisorTestTask}})
 
-	restore := setSupervisorStopHooksForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, errors.New("reconcile handler exploded")
 	})
 	defer restore()
@@ -186,7 +186,7 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 
 	var intentDesiredAtReconcile string
 	var gotApply bool
-	restore := setSupervisorStopHooksForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		gotApply = apply
 		res := NewAPI().ReadDaemonIntent()
 		intentDesiredAtReconcile = res.File.Tasks[stopSupervisorTestTask].Desired

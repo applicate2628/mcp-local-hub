@@ -108,10 +108,12 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 		//   - RESPAWN_REFUSED_INTENT_STOPPED → recoverable: the daemon is
 		//     idle and the SM refused only because daemon-intent.json still
 		//     records Desired=stopped (e.g. after a supervisor-aware stop).
-		//     Write Desired=running, then redial ONCE. This is the F1
-		//     reversibility case, now intent-write-AFTER-first-refusal so
-		//     the write only happens for a daemon the SM actually wants to
-		//     spawn — never for a quarantined one.
+		//     Write Desired=running, then dispatch ONE `reconcile --apply`
+		//     (NOT a respawn redial). This is the F1 reversibility case,
+		//     now intent-write-AFTER-first-refusal so the write only happens
+		//     for a daemon the SM actually wants to spawn — never for a
+		//     quarantined one. See the reconcile-vs-redial rationale at the
+		//     branch below (#279 fable r3 F-A).
 		//   - QUARANTINED → deliberate force-gate: error row verbatim, NO
 		//     intent write. The force-gate holds (#279 fable N1 fix).
 		//   - any other failure → error row, no intent write (pre-#279
@@ -136,33 +138,61 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 		if result.Code == RespawnRefusedIntentStoppedCode {
 			// Recoverable stopped-intent refusal. Write Desired=running
 			// (the F1 reversibility intent) NOW — intentionally before the
-			// retry, and ONLY here, so the running intent is never written
-			// for a quarantined daemon. Then redial once. recordRestartIntentForTask
-			// logs its write failures through os.Stderr and never propagates;
-			// that polarity is correct — if the intent write fails, the
-			// second dial refuses again and the caller sees an honest
-			// refusal row rather than a silent success (#279 fable N1+N2).
-			NewAPI().recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), os.Stderr)
-			retry, retryErr := supervisorRestartRespawnFn(ctx, d.TaskName, false, 5000)
-			if retryErr != nil {
-				// The running intent is now on disk, so the supervisor's
-				// IntentWatcher converges the spawn on its next poll even
-				// though the synchronous redial failed — the disclosed,
-				// accepted semantic.
-				results = append(results, RestartResult{TaskName: d.TaskName, Err: retryErr.Error()})
+			// dispatch, and ONLY here, so the running intent is never
+			// written for a quarantined daemon. recordRestartIntentForTask
+			// logs write failures through os.Stderr and never propagates,
+			// so we verify the write landed via a read-back below rather
+			// than relying on a swallowed error.
+			api := NewAPI()
+			api.recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), os.Stderr)
+			if api.ReadDaemonIntent().File.Tasks[d.TaskName].Desired != IntentDesiredRunning {
+				// The intent write itself failed (logged to os.Stderr).
+				// Nothing on disk to converge — skip the reconcile and
+				// emit an honest error row. The IntentWatcher will NOT
+				// revive this daemon because disk still records stopped.
+				results = append(results, RestartResult{
+					TaskName: d.TaskName,
+					Err:      "respawn refused (intent stopped); writing Desired=running failed, so the restart cannot be dispatched — see stderr for the write error",
+					Code:     result.Code,
+				})
 				continue
 			}
-			if retry.Success {
-				results = append(results, RestartResult{TaskName: d.TaskName, Code: retry.Code})
+			// Dispatch the spawn via ONE `reconcile --apply` rather than a
+			// respawn redial. The redial is dead against the real
+			// supervisor: its SM gate reads the controller's daemonIntent
+			// CACHE (supervisor_controller.go:709 c.daemonIntent.Lookup —
+			// an atomic snapshot with NO disk fallback, :188-199), and that
+			// cache is refreshed only by boot, the 60s IntentWatcher tick,
+			// and the reconcile verb. The respawn verb never refreshes it,
+			// so a redial ms after the disk write reads the stale "stopped"
+			// snapshot and is refused again. reconcile --apply re-reads BOTH
+			// intent files fresh from disk and refreshes the caches via
+			// applyReconcileDrift (supervise_reconcile_ipc.go:593-596)
+			// BEFORE posting, so the drift classifier's spawn direction
+			// (!hasSched && supervisorOwned && intent=running →
+			// post_ev_intent_update, classifyDriftAction supervise_
+			// reconcile_ipc.go:475) posts EvIntentUpdate(running) and drives
+			// StIdle→StSpawning. This mirrors the stop side, which is
+			// synchronous via reconcile for exactly this cache-vs-disk
+			// reason (#279 fable r3 F-A).
+			if _, reconcileErr := supervisorReconcileApplyFn(ctx, true); reconcileErr != nil {
+				// The supervisor was alive ms ago (it just refused the
+				// respawn), so an ErrSupervisorIPCUnavailable here is no
+				// different from any other reconcile failure: plain error
+				// row, no fallback, no taskkill. The running intent IS on
+				// disk (verified above), so the IntentWatcher converges the
+				// spawn within ≤60s even though this synchronous dispatch
+				// failed — say so honestly in the row.
+				results = append(results, RestartResult{
+					TaskName: d.TaskName,
+					Err:      "supervisor reconcile (restart dispatch): " + reconcileErr.Error() + "; Desired=running is on disk, so the IntentWatcher converges the spawn within ~60s",
+					Code:     result.Code,
+				})
 				continue
 			}
-			msg := retry.Message
-			if msg == "" {
-				msg = retry.Code
-			}
-			// The running intent is now on disk; IntentWatcher converges
-			// the spawn on its next poll regardless of this redial's row.
-			results = append(results, RestartResult{TaskName: d.TaskName, Err: msg, Code: retry.Code})
+			// reconcile --apply accepted: the spawn is dispatched through
+			// the SM (mirror the stop side's success-row semantics).
+			results = append(results, RestartResult{TaskName: d.TaskName})
 			continue
 		}
 		// QUARANTINED (force-gate holds) and any other failure: error row,

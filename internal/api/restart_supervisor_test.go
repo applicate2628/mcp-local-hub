@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -393,14 +395,27 @@ func TestRestartQuarantinedDoesNotWriteRunningIntent(t *testing.T) {
 	}
 }
 
-// TestRestartStoppedIntentWritesRunningThenRetries is the #279 fable N1
-// recovery path: a RESPAWN_REFUSED_INTENT_STOPPED refusal (idle daemon, the
-// SM only refused because daemon-intent.json still says Desired=stopped) is
-// recoverable. The caller writes Desired=running, then redials ONCE. The
-// first dial observes the still-stopped intent (the write happens AFTER the
-// first refusal, never for a quarantined daemon), the second observes the
-// running intent and succeeds. Exactly 2 dials; one overall success row.
-func TestRestartStoppedIntentWritesRunningThenRetries(t *testing.T) {
+// TestRestartStoppedIntentWritesRunningThenReconciles is the #279 fable r3
+// F-A fix: a RESPAWN_REFUSED_INTENT_STOPPED refusal (idle daemon, the SM
+// only refused because daemon-intent.json still says Desired=stopped) is
+// recoverable, but the OLD recovery (write running → respawn REDIAL) was
+// dead against the real supervisor — the respawn verb never refreshes the
+// controller's daemonIntent cache, so the redial read the stale "stopped"
+// snapshot and was refused again. The fix writes Desired=running then
+// dispatches ONE `reconcile --apply` (which re-reads BOTH intent files
+// fresh from disk and refreshes the caches BEFORE posting EvIntentUpdate).
+// This is the true mirror of TestStopUsesSupervisorReconcileAndSkipsKill.
+//
+// The respawn dial observes the still-stopped intent (the write happens
+// AFTER the first refusal, never for a quarantined daemon); the reconcile
+// stub asserts apply=true AND that Desired=running is already on disk
+// before it returns. Exactly 1 respawn dial + 1 reconcile call; one
+// success row. The supervisor half of this path (reconcile re-reading disk
+// and applyReconcileDrift refreshing the cache BEFORE the spawn-direction
+// post) is covered by internal/cli's TestReconcileIPC_SupervisorOwnedMissing
+// TaskAppliesStart + the applyReconcileDrift cache-refresh ordering — not
+// duplicated here.
+func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)
 	defer restoreState()
@@ -429,18 +444,27 @@ func TestRestartStoppedIntentWritesRunningThenRetries(t *testing.T) {
 	}
 
 	var dials int
-	var firstDialDesired, secondDialDesired string
+	var dialDesired string
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		dials++
-		desired := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
-		if dials == 1 {
-			firstDialDesired = desired
-			return RespawnResult{Success: false, Code: RespawnRefusedIntentStoppedCode, Message: "respawn refused: daemon-intent says Desired=stopped"}, nil
-		}
-		secondDialDesired = desired
-		return RespawnResult{Success: true, Code: "OK"}, nil
+		dialDesired = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+		return RespawnResult{Success: false, Code: RespawnRefusedIntentStoppedCode, Message: "respawn refused: daemon-intent says Desired=stopped"}, nil
 	})
 	defer restoreRespawn()
+
+	var reconcileCalls int32
+	var gotApply bool
+	var intentDesiredAtReconcile string
+	restoreReconcile := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		atomic.AddInt32(&reconcileCalls, 1)
+		gotApply = apply
+		// The running intent must already be on disk when the reconcile
+		// fires — the reconcile reads daemon-intent.json fresh and would
+		// otherwise classify this task as still-stopped and post nothing.
+		intentDesiredAtReconcile = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+		return ReconcileResponse{AppliedCount: 1}, nil
+	})
+	defer restoreReconcile()
 
 	results, handled, err := restartSupervisorOwnedDaemons(context.Background(), "time", "")
 	if err != nil {
@@ -449,19 +473,106 @@ func TestRestartStoppedIntentWritesRunningThenRetries(t *testing.T) {
 	if !handled {
 		t.Fatal("handled=false; supervisor-owned time daemon should be restarted")
 	}
-	if dials != 2 {
-		t.Fatalf("respawn dials = %d; want exactly 2 (refuse → write running → redial)", dials)
+	if dials != 1 {
+		t.Fatalf("respawn dials = %d; want exactly 1 (refuse → write running → reconcile, NO redial)", dials)
 	}
-	if firstDialDesired != IntentDesiredStopped {
-		t.Fatalf("intent at FIRST dial = %q, want %q (no intent write before the first dial — only after a stopped-intent refusal)",
-			firstDialDesired, IntentDesiredStopped)
+	if dialDesired != IntentDesiredStopped {
+		t.Fatalf("intent at the respawn dial = %q, want %q (no intent write before the dial — only after a stopped-intent refusal)",
+			dialDesired, IntentDesiredStopped)
 	}
-	if secondDialDesired != IntentDesiredRunning {
-		t.Fatalf("intent at SECOND dial = %q, want %q (running intent must be written before the retry)",
-			secondDialDesired, IntentDesiredRunning)
+	if got := atomic.LoadInt32(&reconcileCalls); got != 1 {
+		t.Fatalf("reconcile calls = %d; want exactly 1 (the dispatch replaces the redial)", got)
+	}
+	if !gotApply {
+		t.Fatal("reconcile dialed with apply=false, want apply=true")
+	}
+	if intentDesiredAtReconcile != IntentDesiredRunning {
+		t.Fatalf("intent at reconcile time = %q, want %q (running intent must be on disk BEFORE the reconcile)",
+			intentDesiredAtReconcile, IntentDesiredRunning)
+	}
+	// Post-call the running intent stays on disk so the IntentWatcher
+	// converges even if the supervisor missed the EvIntentUpdate.
+	after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+	if after != IntentDesiredRunning {
+		t.Fatalf("daemon-intent after dispatch = %q, want %q", after, IntentDesiredRunning)
 	}
 	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
 		t.Fatalf("results = %+v, want one supervisor success row", results)
+	}
+}
+
+// TestRestartStoppedIntentReconcileFailureSurfacesErrorRow pins the
+// reconcile-failure sub-case (#279 fable r3 F-A): the intent write lands
+// (Desired=running on disk), but the `reconcile --apply` dispatch fails.
+// The result is a plain error row — no respawn redial, no taskkill, no
+// fallback — and the running intent stays on disk so the IntentWatcher
+// still converges the spawn within ~60s. Exactly 1 respawn dial + 1
+// reconcile call.
+func TestRestartStoppedIntentReconcileFailureSurfacesErrorRow(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+	t.Setenv("LOCALAPPDATA", stateDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	const taskName = `\mcp-local-hub-time-default`
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "time",
+			Daemon:   "default",
+			Port:     9128,
+		}},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, auditWhoMcphubStop); err != nil {
+		t.Fatalf("seed stopped daemon-intent: %v", err)
+	}
+
+	var dials int
+	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+		dials++
+		return RespawnResult{Success: false, Code: RespawnRefusedIntentStoppedCode, Message: "respawn refused: daemon-intent says Desired=stopped"}, nil
+	})
+	defer restoreRespawn()
+
+	var reconcileCalls int32
+	restoreReconcile := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		atomic.AddInt32(&reconcileCalls, 1)
+		return ReconcileResponse{}, errors.New("reconcile handler exploded")
+	})
+	defer restoreReconcile()
+
+	results, handled, err := restartSupervisorOwnedDaemons(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("restartSupervisorOwnedDaemons: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false; supervisor-owned time daemon should be handled")
+	}
+	if dials != 1 {
+		t.Fatalf("respawn dials = %d; want exactly 1 (no redial after a reconcile failure)", dials)
+	}
+	if got := atomic.LoadInt32(&reconcileCalls); got != 1 {
+		t.Fatalf("reconcile calls = %d; want exactly 1", got)
+	}
+	// The running intent must remain on disk so the IntentWatcher converges.
+	if after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired; after != IntentDesiredRunning {
+		t.Fatalf("daemon-intent after reconcile failure = %q, want %q (must stay running for IntentWatcher convergence)",
+			after, IntentDesiredRunning)
+	}
+	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err == "" {
+		t.Fatalf("results = %+v, want one supervisor error row", results)
+	}
+	if !strings.Contains(results[0].Err, "reconcile handler exploded") {
+		t.Fatalf("results[0].Err = %q, want the reconcile failure surfaced", results[0].Err)
 	}
 }
 
