@@ -854,6 +854,13 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// exclusion of legacy nil-RuntimeSpec serena-proxy rows emits its
 		// operator-actionable warn at the exclusion point.
 		reconciler.Events = events
+		// Orphaned-LSP-daemon quarantine fix: pass the registry-membership
+		// predicate so an LSP workspace-proxy descriptor whose (workspace_key,
+		// language) row was removed (e.g. by `mcphub workspace unregister`)
+		// without removing the paired intent descriptor is EXCLUDED from the
+		// spawn-desired set instead of spawned, failing "not registered", and
+		// churning into quarantine.
+		reconciler.LSPRegistryHasRow = api.LSPRegistryRowBacksDescriptor
 		go reconciler.Reconcile(intent, daemonIntent, currentRunning, time.Now().UTC())
 	}
 
@@ -2249,6 +2256,59 @@ func overlayKeySet(overlay map[string]string) []string {
 // counts as a serena-proxy row.
 func isSerenaProxyDescriptor(d api.SupervisorDaemon) bool {
 	return len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "serena-proxy"
+}
+
+// isLSPWorkspaceProxyDescriptor reports whether a SupervisorDaemon descriptor is
+// a workspace-scoped LSP proxy row, identified by Server == "mcp-language-server"
+// AND its wrapper argv carrying the `daemon workspace-proxy` subcommand (the
+// shape api.BuildSupervisorDaemonForLSP emits:
+// `daemon workspace-proxy --port … --workspace … --language …`). Serena-proxy
+// rows (`daemon serena-proxy …`) and global/legacy daemon rows
+// (`daemon --server … --daemon …`) return false. This is the single
+// classification the reconcile orphan-exclusion guard uses, so it can never
+// diverge from the descriptor the LSP register/unregister path builds.
+func isLSPWorkspaceProxyDescriptor(d api.SupervisorDaemon) bool {
+	return d.Server == "mcp-language-server" &&
+		len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "workspace-proxy"
+}
+
+// lspWorkspaceProxyArgValue returns the value of the named flag (e.g.
+// "--workspace", "--language") from an LSP workspace-proxy descriptor's argv,
+// or "" if absent. The argv shape is flat `--flag value` pairs, so a linear
+// scan for the flag token followed by its value is sufficient.
+func lspWorkspaceProxyArgValue(d api.SupervisorDaemon, flag string) string {
+	for i := 0; i+1 < len(d.Args); i++ {
+		if d.Args[i] == flag {
+			return d.Args[i+1]
+		}
+	}
+	return ""
+}
+
+// emitOrphanedLSPDescriptorSkipped emits the single operator-actionable warn
+// event fired whenever the reconcile excludes an orphaned LSP workspace-proxy
+// descriptor (one whose backing workspaces.yaml row is gone) from the
+// spawn-desired set. It is the one owner of this event body so the STARTUP
+// reconciler guard (supervise_reconcile.go) and the APPLY-MODE IPC drift
+// classifier (supervise_reconcile_ipc.go) can never diverge on the message,
+// severity, or remediation guidance. Best-effort: a nil log is a no-op.
+func emitOrphanedLSPDescriptorSkipped(events *api.SupervisorEventLog, d api.SupervisorDaemon) {
+	if events == nil {
+		return
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityWarn,
+		Source:   "lifecycle",
+		Event:    "orphaned-lsp-descriptor-skipped",
+		TaskName: d.TaskName,
+		Body: map[string]any{
+			"server":    d.Server,
+			"workspace": d.Workspace,
+			"language":  lspWorkspaceProxyArgValue(d, "--language"),
+			"reason":    "LSP workspace-proxy descriptor has no backing registry row (workspaces.yaml); the proxy would exit 1 \"not registered\" and churn into quarantine, so it is excluded from the reconcile spawn-desired set",
+			"action":    "re-register the workspace language (`mcphub workspace register` / `mcphub install`) to re-materialize the registry row, or remove this stale supervisor-intent descriptor",
+		},
+	})
 }
 
 // appendSupervisorIntentChannel returns cmdEnv with the

@@ -16,6 +16,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // ------------------------------------------------------------------
@@ -77,13 +78,30 @@ func withLegacyGlobalSerenaEmbed(t *testing.T) {
 	}
 }
 
-// withStateDir redirects the registry path to a fresh temp dir via the
-// same env-var seam DefaultRegistryPath honors.
+// withStateDir redirects the registry path AND the per-user state dir
+// (api.DaemonStateDir — where supervisor-intent.json lands) to a fresh temp dir.
+//
+// Two seams are required, NOT one:
+//   - api.DefaultRegistryPath honors LOCALAPPDATA / XDG_STATE_HOME env vars, so
+//     the registry redirect works via t.Setenv.
+//   - api.DaemonStateDir does NOT: under -tags=test_state_path_env on Windows it
+//     still prefers the real KnownFolder resolver over LOCALAPPDATA, so an env
+//     var alone leaves supervisor-intent.json resolving to the REAL
+//     %LOCALAPPDATA%\mcp-local-hub. A test that writes the supervisor intent or
+//     drives the REAL (*api.API).Unregister (paired LSP teardown → reconcile)
+//     without this override clobbers the developer's live MCP fleet. The
+//     api.SetDaemonStateRootForTest seam is the sanctioned cross-package
+//     redirect that takes precedence over the resolver in BOTH build variants.
 func withStateDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("LOCALAPPDATA", dir)
 	t.Setenv("XDG_STATE_HOME", dir)
+	// Redirect api.DaemonStateDir() to the same temp dir so any
+	// supervisor-intent.json / daemon-intent.json write (and the real Unregister
+	// reconcile path) stays hermetic and can NEVER touch the live state dir.
+	restoreStateRoot := api.SetDaemonStateRootForTest(dir)
+	t.Cleanup(restoreStateRoot)
 	// Verify the regPath actually lands inside dir (sanity check that the
 	// env seam is wired the way these tests assume).
 	regPath, err := api.DefaultRegistryPath()
@@ -92,6 +110,15 @@ func withStateDir(t *testing.T) string {
 	}
 	if !strings.HasPrefix(regPath, dir) {
 		t.Fatalf("regPath %s not under tempDir %s — env seam broken", regPath, dir)
+	}
+	// Verify the state dir (where supervisor-intent.json lands) lands inside dir
+	// too — the override is what neutralizes the live-state-wipe hazard.
+	stateDir, serr := api.DaemonStateDir()
+	if serr != nil {
+		t.Fatalf("DaemonStateDir: %v", serr)
+	}
+	if !strings.HasPrefix(stateDir, dir) {
+		t.Fatalf("stateDir %s not under tempDir %s — SetDaemonStateRootForTest seam broken", stateDir, dir)
 	}
 	return dir
 }
@@ -358,6 +385,18 @@ func TestWorkspaceRegister_SucceedsAgainstLegacyGlobalEmbed(t *testing.T) {
 // B.2: unregister
 // ------------------------------------------------------------------
 
+// noopWorkspaceTestScheduler is a do-nothing api.TestSchedulerIface used by the
+// REAL-seam unregister pairing test to keep the host's Task Scheduler untouched.
+// Every method is an inert success so the legacy-task Delete in (*api.API).Unregister
+// is a no-op rather than a real schtasks invocation.
+type noopWorkspaceTestScheduler struct{}
+
+func (noopWorkspaceTestScheduler) Create(scheduler.TaskSpec) error  { return nil }
+func (noopWorkspaceTestScheduler) Delete(string) error              { return nil }
+func (noopWorkspaceTestScheduler) Run(string) error                 { return nil }
+func (noopWorkspaceTestScheduler) ExportXML(string) ([]byte, error) { return nil, nil }
+func (noopWorkspaceTestScheduler) ImportXML(string, []byte) error   { return nil }
+
 // seedTwoBackends registers one serena row + one LSP row under the same
 // workspace_key for unregister-semantic tests.
 func seedTwoBackends(t *testing.T) (regPath, wsCanon, wsKey string) {
@@ -378,12 +417,22 @@ func seedTwoBackends(t *testing.T) (regPath, wsCanon, wsKey string) {
 	}
 	// Inject a fake LSP row via PutLSP — same path the production
 	// registerOneLanguage uses (Phase 3 lazy-mode register).
+	// Port:0 is deliberate. The default (LSP-only) unregister path uses the REAL
+	// (*api.API).Unregister in TestWorkspaceUnregister_RemovesRegistryRowAndSupervisorIntentDescriptor,
+	// whose teardown calls killByPortFn(entry.Port, 5s) → killDaemonByPort, which
+	// has NO identity gate and TREE-KILLS whatever listens on entry.Port. A nonzero
+	// port here (the old 9200 was the FIRST slot of the live LSP pool, per
+	// servers/mcp-language-server/manifest.yaml `start: 9200`) would kill the
+	// developer's live workspace-proxy. SetDaemonStateRootForTest isolates FILES,
+	// not the network/process surface. With Port:0 the `entry.Port != 0` guard at
+	// internal/api/register.go SKIPS the kill, and every assertion in the callers
+	// is port-independent (they check row/descriptor presence, never the port).
 	if err := reg.PutLSP(api.WorkspaceEntry{
 		WorkspaceKey:  wsKey,
 		WorkspacePath: wsCanon,
 		Language:      "python",
 		Backend:       "mcp-language-server",
-		Port:          9200,
+		Port:          0,
 		TaskName:      "mcp-local-hub-lsp-" + wsKey + "-python",
 	}); err != nil {
 		t.Fatalf("PutLSP: %v", err)
@@ -394,11 +443,66 @@ func seedTwoBackends(t *testing.T) (regPath, wsCanon, wsKey string) {
 	return regPath, wsCanon, wsKey
 }
 
+// withStubbedLSPUnregister replaces the paired-teardown seam with a hermetic
+// stub that performs ONLY the registry-row removal (no real scheduler, netstat,
+// or supervisor IPC dial). It mirrors the production registry effect of
+// (*api.API).Unregister so the existing registry-outcome assertions hold while
+// keeping these CLI tests fast and isolated from the host's real Task Scheduler.
+// The recorded languages let a caller assert the seam was invoked with the
+// expected per-backend language set. The dedicated pairing test
+// (TestWorkspaceUnregister_RemovesRegistryRowAndSupervisorIntentDescriptor) uses
+// the REAL seam to prove the intent descriptor is dropped together with the row.
+func withStubbedLSPUnregister(t *testing.T) *[]string {
+	t.Helper()
+	gotLangs := &[]string{}
+	prev := unregisterLSPWorkspaceFn
+	t.Cleanup(func() { unregisterLSPWorkspaceFn = prev })
+	unregisterLSPWorkspaceFn = func(canonical string, languages []string) (*api.UnregisterReport, error) {
+		*gotLangs = append(*gotLangs, languages...)
+		wsKey := api.WorkspaceKey(canonical)
+		regPath, err := api.DefaultRegistryPath()
+		if err != nil {
+			return nil, err
+		}
+		reg := api.NewRegistry(regPath)
+		unlock, err := reg.Lock()
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
+		if err := reg.Load(); err != nil {
+			return nil, err
+		}
+		report := &api.UnregisterReport{Workspace: canonical, WorkspaceKey: wsKey}
+		targets := languages
+		if len(targets) == 0 {
+			for _, e := range reg.ListByWorkspaceLSP(wsKey) {
+				targets = append(targets, e.Language)
+			}
+		}
+		for _, lang := range targets {
+			reg.Remove(wsKey, lang)
+			report.Removed = append(report.Removed, lang)
+		}
+		if err := reg.Save(); err != nil {
+			return nil, err
+		}
+		return report, nil
+	}
+	return gotLangs
+}
+
 func TestWorkspaceUnregister_RemovesLSPOnlyByDefault(t *testing.T) {
 	regPath, ws, wsKey := seedTwoBackends(t)
+	gotLangs := withStubbedLSPUnregister(t)
 
 	if _, err := runWorkspaceCmd(t, "unregister", ws); err != nil {
 		t.Fatalf("unregister: %v", err)
+	}
+	// The paired teardown seam (not the bare RemoveByBackend) must own the
+	// LSP-row removal so the supervisor-intent descriptor drops with the row.
+	if len(*gotLangs) != 1 || (*gotLangs)[0] != "python" {
+		t.Errorf("paired LSP teardown should fire for the python LSP row; got %v", *gotLangs)
 	}
 	reg := api.NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
@@ -417,9 +521,15 @@ func TestWorkspaceUnregister_RemovesLSPOnlyByDefault(t *testing.T) {
 
 func TestWorkspaceUnregister_BackendSerenaRemovesOnlySerena(t *testing.T) {
 	regPath, ws, wsKey := seedTwoBackends(t)
+	gotLangs := withStubbedLSPUnregister(t)
 
 	if _, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "serena"); err != nil {
 		t.Fatalf("unregister: %v", err)
+	}
+	// --backend serena removes ONLY the sentinel row; the paired LSP teardown
+	// seam must NOT fire (no LSP descriptor pairing involved).
+	if len(*gotLangs) != 0 {
+		t.Errorf("--backend serena must not invoke the LSP teardown seam; got %v", *gotLangs)
 	}
 	reg := api.NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
@@ -436,9 +546,15 @@ func TestWorkspaceUnregister_BackendSerenaRemovesOnlySerena(t *testing.T) {
 
 func TestWorkspaceUnregister_BackendAllRemovesEverything(t *testing.T) {
 	regPath, ws, wsKey := seedTwoBackends(t)
+	gotLangs := withStubbedLSPUnregister(t)
 
 	if _, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "all"); err != nil {
 		t.Fatalf("unregister: %v", err)
+	}
+	// --backend all routes the LSP row through the paired teardown seam AND
+	// removes the serena sentinel row directly.
+	if len(*gotLangs) != 1 || (*gotLangs)[0] != "python" {
+		t.Errorf("--backend all should route the python LSP row through the paired seam; got %v", *gotLangs)
 	}
 	reg := api.NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
@@ -451,6 +567,7 @@ func TestWorkspaceUnregister_BackendAllRemovesEverything(t *testing.T) {
 
 func TestWorkspaceUnregister_RemovesEntryButLeavesDisk(t *testing.T) {
 	_, ws, _ := seedTwoBackends(t)
+	withStubbedLSPUnregister(t)
 
 	// `.serena/project.yml` was created by makeWorkspaceDir; confirm
 	// unregister --backend all does NOT touch it.
@@ -497,8 +614,13 @@ func TestWorkspaceUnregister_BackendByLanguageNameRemovesMatchingRows(t *testing
 		t.Fatalf("save: %v", err)
 	}
 
+	gotLangs := withStubbedLSPUnregister(t)
 	if _, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "go"); err != nil {
 		t.Fatalf("unregister --backend go: %v", err)
+	}
+	// Only the matching `go` row routes through the paired teardown seam.
+	if len(*gotLangs) != 1 || (*gotLangs)[0] != "go" {
+		t.Errorf("--backend go should route ONLY the go row through the paired seam; got %v", *gotLangs)
 	}
 	reg = api.NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
@@ -512,6 +634,89 @@ func TestWorkspaceUnregister_BackendByLanguageNameRemovesMatchingRows(t *testing
 	}
 	if _, ok := reg.GetSerena(wsKey); !ok {
 		t.Error("serena row should survive --backend go")
+	}
+}
+
+// TestWorkspaceUnregister_RemovesRegistryRowAndSupervisorIntentDescriptor is the
+// orphaned-LSP-daemon quarantine fix at the unregister-source layer. It uses the
+// REAL paired-teardown seam ((*api.API).Unregister) to prove that
+// `mcphub workspace unregister` of an LSP-bearing workspace drops the
+// supervisor-intent descriptor TOGETHER WITH the registry row — so the
+// reconciler never sees an unbacked LSP descriptor to spawn-and-quarantine.
+// Before the fix, the bare reg.RemoveByBackend removed the registry row but left
+// the supervisor-intent descriptor behind.
+func TestWorkspaceUnregister_RemovesRegistryRowAndSupervisorIntentDescriptor(t *testing.T) {
+	regPath, ws, wsKey := seedTwoBackends(t)
+
+	// Stub the scheduler so the REAL Unregister's legacy-task Delete never
+	// dials the host's real Task Scheduler (schtasks). seedTwoBackends already
+	// seeds Port:0 for the row + descriptor, so the kill-by-port guard skips the
+	// network kill; this hook closes the remaining real-OS surface (no real
+	// schtasks /Delete runs against the host). Empty client set — the seeded LSP
+	// row carries no ClientEntries, so no adapter writes are exercised. The
+	// registry path stays the withStateDir-redirected temp default ("").
+	restoreHooks := api.InstallTestHooks(
+		func() (api.TestSchedulerIface, error) { return noopWorkspaceTestScheduler{}, nil },
+		func() map[string]api.TestClientIface { return map[string]api.TestClientIface{} },
+		"",
+	)
+	t.Cleanup(restoreHooks)
+
+	// Seed the supervisor-intent.json LSP descriptor that pairs with the
+	// seeded python LSP registry row — the exact shape register would write.
+	// Port:0 mirrors the seeded registry row (see seedTwoBackends): the pairing
+	// assertion keys on descriptor.TaskName, which BuildSupervisorDaemonForLSP
+	// derives from (WorkspaceKey, Language) — independent of Port — so a zero
+	// port preserves the assertion while keeping the real teardown's kill-by-port
+	// path inert.
+	intentPath, err := api.DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("intent path: %v", err)
+	}
+	descriptor := api.BuildSupervisorDaemonForLSP(api.WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: ws,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          0,
+	}, "mcphub")
+	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{descriptor},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent: %v", err)
+	}
+
+	// Default unregister → LSP-only, through the REAL paired teardown.
+	if _, err := runWorkspaceCmd(t, "unregister", ws); err != nil {
+		t.Fatalf("unregister: %v", err)
+	}
+
+	// Registry: LSP row gone, serena row stays.
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if len(reg.ListByWorkspaceLSP(wsKey)) != 0 {
+		t.Errorf("LSP registry row should be removed")
+	}
+	if _, ok := reg.GetSerena(wsKey); !ok {
+		t.Errorf("serena row must survive a default (LSP-only) unregister")
+	}
+
+	// Supervisor-intent: the paired descriptor must be GONE — the whole point
+	// of the fix. A surviving descriptor would be the orphan the reconciler
+	// spawn-and-quarantines.
+	got, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("read supervisor-intent after unregister: %v", err)
+	}
+	if got != nil {
+		for _, d := range got.Daemons {
+			if d.TaskName == descriptor.TaskName {
+				t.Fatalf("LSP supervisor-intent descriptor %q survived unregister — orphaned-daemon quarantine bug not fixed", descriptor.TaskName)
+			}
+		}
 	}
 }
 

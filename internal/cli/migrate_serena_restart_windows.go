@@ -31,17 +31,15 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"mcp-local-hub/internal/api"
 )
 
-// migrateSerenaReconcileReadyTimeout bounds how long defaultMigrateSerenaStart
-// waits for the freshly-started supervisor to reach reconcile_ready=true via
-// IPC `status`. Matches the forward-migration step-14 budget
-// (internal/migration/journal.go:846, 30s) so a cold supervisor start +
-// first-reconcile pass has the same window across both cutover paths.
-const migrateSerenaReconcileReadyTimeout = 30 * time.Second
+// migrateSerenaReconcileReadyTimeout (the 60s reconcile-ready poll bound this
+// START driver consumes via waitReconcileReadyViaIPC) is defined cross-platform
+// in migrate_serena.go — NOT here under //go:build windows — because the driver's
+// POST-COMMIT downgrade messaging (step 10) references it and must compile on
+// every GOOS (Linux is shipping beta scope). See its doc comment there.
 
 // migrateSerenaUpgradeDeps builds the shared Windows v5UpgradeDeps used by both
 // the reap and the start seams.
@@ -219,6 +217,9 @@ func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
 		return err
 	}
 	if err := deps.StartSupervisor(deps.exePath); err != nil {
+		// HARD start failure — the detached spawn itself failed. This stays
+		// fail-loud at EVERY call site (pre-commit, recovery, AND post-commit
+		// step 10): it is NOT wrapped with ErrMigrateSerenaReconcileReadyTimeout.
 		return err
 	}
 	fmt.Fprintln(w, "supervisor started; waiting for it to reconcile the on-disk serena intent…")
@@ -240,11 +241,19 @@ func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
 	// existing forward-migration readiness primitive). Bounded so a hung start
 	// cannot block forever.
 	if err := waitReconcileReadyViaIPC(deps.pipePath)(migrateSerenaReconcileReadyTimeout); err != nil {
+		// The spawn SUCCEEDED but the supervisor did not report reconcile-ready
+		// in the window. Wrap the TYPED sentinel so the POST-COMMIT start (step
+		// 10) can recognize this as the benign release→child-acquire hand-off
+		// timeout and downgrade it to a warning (the intent is committed; the
+		// supervisor reconciles eventually). EVERY OTHER call site still fails
+		// loud on this — they return on any non-nil start error. The detailed
+		// operator guidance is preserved in the wrapped message; errors.Is finds
+		// the sentinel through the %w chain.
 		return fmt.Errorf(
-			"supervisor started but did not reach reconcile-ready within %s: %w; "+
+			"supervisor started but did not reach reconcile-ready within %s: %w: %w; "+
 				"the binary spawned a detached supervisor but it never reported reconcile_ready=true over IPC — "+
 				"check `mcphub status` and the supervisor-events.log, then run `mcphub supervise` from a shell to see startup diagnostics",
-			migrateSerenaReconcileReadyTimeout, err)
+			migrateSerenaReconcileReadyTimeout, ErrMigrateSerenaReconcileReadyTimeout, err)
 	}
 	fmt.Fprintln(w, "supervisor reconcile-ready; the serena dynamic-pool daemons are reconciling on their allocated ports.")
 	return nil

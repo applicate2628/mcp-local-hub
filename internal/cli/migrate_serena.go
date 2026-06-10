@@ -234,6 +234,52 @@ var migrateSerenaReapFn = defaultMigrateSerenaReap
 // finding #2). Tests override it.
 var migrateSerenaStartFn = defaultMigrateSerenaStart
 
+// ErrMigrateSerenaReconcileReadyTimeout is the TYPED sentinel
+// defaultMigrateSerenaStart wraps ONLY when the freshly-spawned supervisor was
+// launched successfully (StartSupervisor returned nil) but did not report
+// reconcile_ready=true over IPC within the bounded poll window. It distinguishes
+// a benign post-commit readiness-poll timeout from a HARD start failure (the
+// detached spawn itself failed) so the POST-COMMIT start (step 10) can downgrade
+// the timeout to a warning while a real spawn failure still fails loud.
+//
+// Why the post-commit timeout is benign: by step 10 the dynamic-pool intent is
+// already committed (rollback == nil) and the registry is intentionally NOT
+// rolled back. The 30s/60s poll does NOT wait for daemon spawn — reconcile_ready
+// flips true when the reconcile goroutine is SCHEDULED (supervise.go reconcile-
+// ready event), not when daemons bind their ports. The single most common cause
+// of the timeout is the known-benign release→child-acquire supervisor.lock
+// hand-off window: the migrate releases the interlock immediately before the
+// start, and the fresh supervisor must re-acquire the lock and bind its IPC pipe
+// before `status` can answer — a DialPipe against a not-yet-bound pipe. The
+// supervisor reconciles eventually regardless (and the GUI's
+// ensureSupervisorRunning brings one up if the detached spawn lost a race), so
+// the timeout cannot corrupt: there is nothing to roll back and no split-brain.
+//
+// SCOPE: this sentinel is honored ONLY at the post-commit start (step 10). Every
+// pre-commit / recovery start site fails loud on ANY non-nil start error,
+// including this one — they wrap it unconditionally and return, so they are
+// unaffected by the existence of the sentinel.
+var ErrMigrateSerenaReconcileReadyTimeout = errors.New("serena migrate: supervisor started but did not report reconcile-ready within the bounded window")
+
+// migrateSerenaReconcileReadyTimeout bounds how long the Windows START driver
+// (defaultMigrateSerenaStart) waits for the freshly-started supervisor to reach
+// reconcile_ready=true via IPC `status`. Set to 60s as defence-in-depth against
+// the known-benign release→child-acquire supervisor.lock hand-off window (the
+// migrate releases the interlock immediately before the start, so the fresh
+// supervisor must re-acquire the lock and bind its IPC pipe before `status` can
+// answer). The poll's cost is ~constant in pool size (it polls one IPC endpoint,
+// not per daemon), so widening the window is cheap. Even on a timeout the
+// POST-COMMIT start (step 10) downgrades to a warning rather than a scary exit-1
+// (ErrMigrateSerenaReconcileReadyTimeout), but the wider window makes that
+// downgrade rarely necessary. The forward-migration step-14 budget
+// (internal/migration/journal.go:846) remains 30s; this cutover path widens it.
+//
+// Defined here (cross-platform) — NOT under //go:build windows — because the
+// driver's POST-COMMIT downgrade messaging in this file (step 10) references it,
+// and that code compiles on every GOOS (Linux is shipping beta scope). The
+// Windows-only START driver consumes it via waitReconcileReadyViaIPC.
+const migrateSerenaReconcileReadyTimeout = 60 * time.Second
+
 // migrateSerenaSupervisorHealthyFn reports whether a supervisor is currently
 // running AND reconcile-ready (Fix 5, PR #250 deeper review — consultant Q2).
 // The idempotency-recovery branch uses it to distinguish a GENUINE
@@ -1132,12 +1178,77 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	if willStart {
 		fmt.Fprintln(w, "Starting the supervisor so it reconciles the new serena dynamic-pool intent…")
 		if startErr := migrateSerenaStartFn(ctx, w); startErr != nil {
-			// FAIL LOUD with guidance; intent committed, registry NOT rolled back (#2).
-			return fmt.Errorf(
-				"supervisor start (§7.1) failed after the runtime_spec intent was committed: %w; "+
-					"the new serena dynamic-pool intent is on disk but no supervisor is running — "+
-					"run `mcphub supervise` from a shell (or re-run the migrate) so the current binary reconciles it. "+
-					"The registry is intentionally NOT rolled back: the intent is the commit point", startErr)
+			// POST-COMMIT downgrade (ONLY at this site): a reconcile-ready-timeout
+			// after a SUCCESSFUL spawn whose supervisor is DEMONSTRABLY STILL ALIVE
+			// (lock-liveness gate below) is benign. The intent is committed and the
+			// registry is intentionally NOT rolled back; the 30s/60s poll does not
+			// wait for daemon spawn, and the supervisor reconciles eventually (the
+			// GUI's ensureSupervisorRunning also brings one up). The most common
+			// cause is the known-benign release→child-acquire supervisor.lock
+			// hand-off window (DialPipe finds no pipe yet). Turning that into a
+			// scary exit-1 falsely told operators the migration failed. Downgrade
+			// to a warning and return nil — the migration IS committed.
+			if errors.Is(startErr, ErrMigrateSerenaReconcileReadyTimeout) {
+				// Bot PR #278 P1: the sentinel proves the detached SPAWN succeeded,
+				// NOT that the spawned supervisor is still alive — it fires equally
+				// when the child died right after the spawn (immediate exit, crash
+				// before binding IPC). Downgrading THAT case would report exit-0
+				// with a committed intent and NO supervisor running. Gate the
+				// downgrade on the lightweight supervisor.lock liveness probe: in
+				// the benign hand-off window the child HOLDS the lock while it
+				// warms up; a dead child leaves it free. Conservative polarity here
+				// is the OPPOSITE of the pre-reap probe (which assumes running on a
+				// probe error so a needed reap is never skipped): an undeterminable
+				// probe must NOT certify success → fail loud.
+				//
+				// The verdict is POINT-IN-TIME: a child that holds the lock at the
+				// probe instant but dies right after still exits 0 — a bounded
+				// residual window every spot liveness check has (the gate narrows
+				// the false-success surface; it cannot close it). Self-healing: the
+				// committed intent is durable, and the GUI's ensureSupervisorRunning
+				// / the next reconcile brings a supervisor back up; the warning's
+				// "run `mcphub status`" is the operator-side confirmation step.
+				running, probeErr := migrateSerenaSupervisorRunningFn()
+				if probeErr != nil || !running {
+					liveness := "no process is holding supervisor.lock"
+					if probeErr != nil {
+						liveness = fmt.Sprintf("supervisor liveness probe failed: %v", probeErr)
+					}
+					return fmt.Errorf(
+						"supervisor start (§7.1) failed after the runtime_spec intent was committed: %w (%s — "+
+							"the spawned supervisor is not demonstrably alive, so this reconcile-ready timeout is NOT the benign lock hand-off window); "+
+							"the new serena dynamic-pool intent is on disk but no supervisor is confirmed running — "+
+							"run `mcphub supervise` from a shell (or re-run the migrate) so the current binary reconciles it. "+
+							"The registry is intentionally NOT rolled back: the intent is the commit point", startErr, liveness)
+				}
+				fmt.Fprintf(w, "warning: serena dynamic-pool intent committed and a supervisor spawned, but it did not report reconcile-ready within %s — likely still binding its IPC pipe. Run \"mcphub status\" to confirm; the migration is committed (registry intentionally NOT rolled back).\n", migrateSerenaReconcileReadyTimeout)
+				if events != nil {
+					_ = events.Emit(api.SupervisorEvent{
+						SchemaVersion: api.SupervisorEventSchemaVersion,
+						Severity:      api.SupervisorEventSeverityWarn,
+						Source:        "migration",
+						Event:         "serena-migrate-post-commit-reconcile-ready-timeout",
+						Body: map[string]any{
+							"timeout":              migrateSerenaReconcileReadyTimeout.String(),
+							"detail":               startErr.Error(),
+							"reason":               "post-commit supervisor spawn succeeded but reconcile-ready was not observed within the bounded window; the intent is committed and the registry is NOT rolled back — the supervisor reconciles eventually",
+							"action":               "run `mcphub status` to confirm the supervisor came up; no operator action is required if it is reconcile-ready",
+							"committed":            true,
+							"supervisor_lock_live": true,
+						},
+					})
+				}
+				// Fall through to the success audit event below — the migration
+				// is committed; this is success-with-warning, exit 0.
+			} else {
+				// HARD start failure (the detached spawn itself failed) — FAIL
+				// LOUD with guidance. Intent committed, registry NOT rolled back (#2).
+				return fmt.Errorf(
+					"supervisor start (§7.1) failed after the runtime_spec intent was committed: %w; "+
+						"the new serena dynamic-pool intent is on disk but no supervisor is running — "+
+						"run `mcphub supervise` from a shell (or re-run the migrate) so the current binary reconciles it. "+
+						"The registry is intentionally NOT rolled back: the intent is the commit point", startErr)
+			}
 		}
 	} else {
 		fmt.Fprintln(w, "No registered serena workspaces — installed the dynamic-pool intent with zero daemon rows; no supervisor reap/restart required.")

@@ -311,6 +311,105 @@ func TestReconcileIPC_SchedulerUnavailableTreatsSupervisorOwnedRowsAsMissing(t *
 	}
 }
 
+// TestReconcileIPC_ApplyExcludesOrphanedLSPDescriptor is the apply-mode IPC
+// mirror of the startup reconciler's Bug 1 orphan guard (P2 all-return-paths
+// fix). An LSP workspace-proxy descriptor survives in supervisor-intent.json
+// with NO backing workspaces.yaml row (the unregister path dropped the row but
+// left the descriptor). Without the gate, apply-mode reconcile classifies it as
+// post_ev_intent_update and re-SPAWNS the unbacked proxy, which exits 1 "not
+// registered" and churns into quarantine — the exact Bug 1 recurrence on the
+// apply path. With the gate, the orphan is downgraded to needs_manual_review,
+// NO EvIntentUpdate is dispatched, and the operator-actionable
+// orphaned-lsp-descriptor-skipped warn event fires.
+func TestReconcileIPC_ApplyExcludesOrphanedLSPDescriptor(t *testing.T) {
+	taskName := `\mcp-local-hub-lsp-deadbeef-go`
+	// A real-shape LSP workspace-proxy descriptor (Server == "mcp-language-server",
+	// argv `daemon workspace-proxy --port … --workspace … --language …`) — the
+	// exact shape api.BuildSupervisorDaemonForLSP emits. The --workspace dir need
+	// not exist for the registry lookup (CanonicalWorkspacePathForCleanup is
+	// best-effort); using a temp dir keeps it realistic.
+	wsDir := t.TempDir()
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName:  taskName,
+				Server:    "mcp-language-server",
+				Daemon:    "lsp-deadbeef-go",
+				Command:   "mcphub",
+				Args:      []string{"daemon", "workspace-proxy", "--port", "9242", "--workspace", wsDir, "--language", "go"},
+				Workspace: wsDir,
+				Port:      9242,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
+	// Hermetic registry isolation (#278 fable r2): LSPRegistryRowBacksDescriptor
+	// resolves the registry via api.DefaultRegistryPath(), an ENV-based resolver
+	// (LOCALAPPDATA / XDG_STATE_HOME) that does NOT consult the
+	// daemonStateRootOverride seam — the SetDaemonStateRootForTest call this
+	// test previously relied on never actually redirected it (the test passed
+	// only because the temp --workspace path had no row in the developer's
+	// REAL registry, and stayed exposed to a fail-open flake whenever the live
+	// registry flock was briefly contended). Redirect the env so
+	// workspaces.yaml is ABSENT under a temp root → the descriptor has no
+	// backing row → orphan, deterministically, with no read of the
+	// developer's live registry at all.
+	regRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", regRoot)
+	t.Setenv("XDG_STATE_HOME", regRoot)
+
+	// sched=missing + intent=running on a supervisor-owned row would, absent the
+	// gate, classify as post_ev_intent_update (spawn).
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{
+		ID:   42,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	resp, body := decodeReconcileResponse(t, conn)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error response: %+v", resp.Error)
+	}
+	if body.DriftCount != 1 || len(body.Drift) != 1 {
+		t.Fatalf("DriftCount=%d drift=%+v, want exactly one entry", body.DriftCount, body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.TaskName != taskName {
+		t.Errorf("TaskName = %q, want %q", entry.TaskName, taskName)
+	}
+	// The orphan must be downgraded — NOT post_ev_intent_update.
+	if entry.Action != api.ReconcileActionNeedsManualReview {
+		t.Errorf("Action = %q, want %q (orphaned LSP descriptor must be excluded from the spawn-desired set)",
+			entry.Action, api.ReconcileActionNeedsManualReview)
+	}
+	// Apply mode must dispatch NOTHING for the orphan.
+	if body.AppliedCount != 0 {
+		t.Errorf("AppliedCount = %d, want 0 (no spawn for an unbacked orphan)", body.AppliedCount)
+	}
+
+	// No EvIntentUpdate may be posted for the orphan.
+	select {
+	case ev := <-fx.postedCh:
+		t.Fatalf("unexpected event posted for orphaned LSP descriptor: %+v (apply-mode must not re-spawn it)", ev)
+	case <-time.After(200 * time.Millisecond):
+		// good — nothing dispatched.
+	}
+
+	// The operator-actionable warn event must have fired (shared single-owner
+	// emit with the startup guard).
+	logRaw := readEventLogForTest(t, fx.deps.stateDir)
+	if !strings.Contains(logRaw, `"event":"orphaned-lsp-descriptor-skipped"`) {
+		t.Fatalf("expected orphaned-lsp-descriptor-skipped audit event; log:\n%s", logRaw)
+	}
+}
+
 // TestReconcileIPC_ApplyRefreshesCacheBeforePosting verifies that apply mode
 // refreshes the controller's cached supervisor intent and daemon intent from
 // the same files used for drift classification before EvIntentUpdate is
@@ -649,17 +748,56 @@ func TestReconcileIPC_MissingTaskInSchedulerFlaggedAsMissing(t *testing.T) {
 }
 
 func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
-	taskName := `\mcp-local-hub-lsp-b133f336-go`
+	// Hermetic registry isolation (#278 fable r2): the apply-mode orphan gate
+	// consults api.LSPRegistryRowBacksDescriptor, which resolves the registry
+	// via api.DefaultRegistryPath() — an ENV-based resolver (LOCALAPPDATA /
+	// XDG_STATE_HOME) that does NOT honor the daemonStateRootOverride seam.
+	// The original form of this test hardcoded a REAL workspace path, so its
+	// verdict depended on the developer's live workspaces.yaml (it broke the
+	// moment that workspace's go row moved under the @serena sentinel).
+	// Redirect both env vars so every platform resolves the registry under a
+	// temp root, then seed the BACKING row the descriptor needs for the spawn
+	// direction to stay post_ev_intent_update under the gate.
+	regRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", regRoot)
+	t.Setenv("XDG_STATE_HOME", regRoot)
+
+	ws := t.TempDir()
+	canonical, err := api.CanonicalWorkspacePathForCleanup(ws)
+	if err != nil {
+		t.Fatalf("canonicalize workspace: %v", err)
+	}
+	key := api.WorkspaceKey(canonical)
+	taskName := `\mcp-local-hub-lsp-` + key + `-go`
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if perr := reg.PutLSP(api.WorkspaceEntry{
+		WorkspaceKey:  key,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "mcp-language-server",
+		Port:          9200,
+		TaskName:      "mcp-local-hub-lsp-" + key + "-go",
+	}); perr != nil {
+		t.Fatalf("seed registry row: %v", perr)
+	}
+	if serr := reg.Save(); serr != nil {
+		t.Fatalf("save seeded registry: %v", serr)
+	}
+
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
 			{
 				TaskName:  taskName,
 				Server:    "mcp-language-server",
-				Daemon:    "lsp-b133f336-go",
+				Daemon:    "lsp-" + key + "-go",
 				Command:   "mcphub",
-				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", `D:\dev\mcp-local-hub`, "--language", "go"},
-				Workspace: `D:\dev\mcp-local-hub`,
+				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", ws, "--language", "go"},
+				Workspace: ws,
 				Port:      9200,
 			},
 		},
