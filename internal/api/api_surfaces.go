@@ -28,6 +28,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"os"
 	"time"
 
 	"mcp-local-hub/internal/scheduler"
@@ -187,41 +189,41 @@ func (a *API) RestartContext(ctx context.Context, server, daemonFilter string) (
 //   - intent.Desired = stopped + fresh (within TTL) → false
 //   - intent.Desired = stopped + stale (past TTL)   → true
 //
-// Wraps ReadDaemonIntent (Task 2 owner, daemon_intent.go) +
-// DaemonIntent.IsActiveStop. The readDaemonIntentFn seam is bound by
-// daemon_intent.go's init() to a thin adapter over ReadDaemonIntent;
-// tests overwrite it via installTestIntentReader for deterministic
-// fakes (cleanup restores the production binding).
+// Phase 4-E2 SOURCE: the supervisor-intent.json `stops` sub-block is the SOLE
+// authoritative stop source. It is consulted FIRST so a STALE leftover
+// daemon-intent.json can never override a real sub-block stop (the same
+// precedence flip UnifiedStopsFile encodes). The readDaemonIntentFn seam
+// (bound by daemon_intent.go's init() to ReadDaemonIntent over the
+// now-deleted daemon-intent.json; tests override it via installTestIntentReader)
+// is consulted ONLY as a fallback when the sub-block has no entry — in
+// production that path returns ok=false (file gone), so the sub-block decides.
 func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
-	if readDaemonIntentFn == nil {
-		// Defensive: daemon_intent.go's init() should always have wired
-		// this. If we ever observe nil here it means Task 2's init()
-		// never ran (unlikely; would imply a binary built without
-		// daemon_intent.go), so degrade to "no recorded preference".
-		return true
-	}
 	// Codex deep-sec PR #135 Finding 1: normalize the lookup key so a
 	// caller that passed the bare form still hits the canonical leading-
-	// backslash entry that WriteDaemonIntent persists.
+	// backslash entry.
 	taskName = canonicalIntentTaskKey(taskName)
+
+	// Sub-block is authoritative (E2). A best-effort read: any failure
+	// degrades to the fallback below, then to "no recorded preference".
+	if stopIntent, found := lookupSupervisorStop(taskName); found {
+		active, _ := stopIntent.IsActiveStop(now)
+		return !active
+	}
+
+	// Fallback: the legacy daemon-intent.json reader seam. In production this
+	// returns ok=false (the file is deleted by the E2 boot-merge); tests
+	// override the seam to exercise the IsActiveStop predicate directly.
+	if readDaemonIntentFn == nil {
+		// Defensive: daemon_intent.go's init() should always have wired this.
+		return true
+	}
 	intent, ok, err := readDaemonIntentFn(taskName)
 	if err != nil {
 		// Read failure → no active stop directive (degrade to running).
 		return true
 	}
 	if ok {
-		// Live daemon-intent.json has an opinion for this task — it is
-		// authoritative (Phase 4-E1 unified-stops precedence: the legacy
-		// file wins while it is still written, identical to pre-E1).
 		active, _ := intent.IsActiveStop(now)
-		return !active
-	}
-	// No live daemon-intent.json entry → fall back to the merged
-	// supervisor-intent.json stops sub-block (Phase 4-E1 new canonical
-	// path / recovery baseline). A best-effort read: any failure degrades
-	// to "no recorded preference" (running), the same as today.
-	if stopIntent, found := lookupSupervisorStop(taskName); found {
-		active, _ := stopIntent.IsActiveStop(now)
 		return !active
 	}
 	return true
@@ -230,20 +232,52 @@ func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 // lookupSupervisorStop reads the supervisor-intent.json stops sub-block and
 // returns the DaemonIntent recorded for taskName (canonical key) if present.
 // Best-effort: any read/parse failure returns (zero, false) so the caller
-// degrades to "no recorded preference". Phase 4-E1: this is the fallback
-// source IntentStillRunning consults when the live daemon-intent.json has no
-// entry for the task.
+// degrades to "no recorded preference". Phase 4-E2: this is the SOLE
+// authoritative stop source IntentStillRunning consults first.
+//
+// This best-effort shape is correct for the auto-revive predicate
+// (IntentStillRunning), where a transient read failure SHOULD degrade to
+// "permit running" rather than block a daemon forever. Callers that need to
+// DISTINGUISH a read failure from a genuine no-stop (e.g. a fail-closed
+// write-verification read-back) must use lookupSupervisorStopChecked instead.
 func lookupSupervisorStop(taskName string) (DaemonIntent, bool) {
-	path, err := DefaultSupervisorIntentPath()
+	di, found, err := lookupSupervisorStopChecked(taskName)
 	if err != nil {
 		return DaemonIntent{}, false
 	}
+	return di, found
+}
+
+// lookupSupervisorStopChecked is the error-surfacing variant of
+// lookupSupervisorStop. It returns (intent, found, err) so a caller can tell a
+// genuine "no stop recorded" (found=false, err=nil) apart from a read/parse
+// failure of the now-SOLE stop source (err!=nil). The best-effort
+// lookupSupervisorStop collapses both into (zero, false), which is the right
+// degradation for the auto-revive predicate but WRONG for a fail-closed
+// write-verification read-back: a transient/corrupt read there would otherwise
+// report a silently-failed re-enable write as success (this-PR P3b). A genuinely
+// MISSING file is NOT a read failure here — an absent stops sub-block legitimately
+// means "no stop recorded", so os.ErrNotExist degrades to (zero, false, nil).
+func lookupSupervisorStopChecked(taskName string) (DaemonIntent, bool, error) {
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return DaemonIntent{}, false, err
+	}
 	got, err := ReadSupervisorIntent(path)
-	if err != nil || got == nil || got.Stops == nil {
-		return DaemonIntent{}, false
+	if err != nil {
+		// A genuinely missing file means "no stop recorded" — not a read
+		// failure. Surface every OTHER error so the fail-closed caller can
+		// refuse to claim success on an unreadable/corrupt sole source.
+		if errors.Is(err, os.ErrNotExist) {
+			return DaemonIntent{}, false, nil
+		}
+		return DaemonIntent{}, false, err
+	}
+	if got == nil || got.Stops == nil {
+		return DaemonIntent{}, false, nil
 	}
 	di, ok := got.Stops[taskName]
-	return di, ok
+	return di, ok, nil
 }
 
 // ---------------------------------------------------------------------------

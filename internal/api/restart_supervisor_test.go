@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -12,6 +13,30 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
 )
+
+// seedSubBlockStop records a stop directly in the supervisor-intent.json stops
+// sub-block (Phase 4-E2: the sole stop source) via the production WriteStopIntent
+// path, so restart tests model "a prior stop" the way production now does.
+func seedSubBlockStop(t *testing.T, task string) {
+	t.Helper()
+	if err := NewAPI().WriteStopIntent(task, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, auditWhoMcphubStop); err != nil {
+		t.Fatalf("seed sub-block stop for %s: %v", task, err)
+	}
+}
+
+// subBlockDesiredForTest returns the Desired value recorded for task in the
+// supervisor-intent.json stops sub-block, or "" when no stop is recorded
+// (Phase 4-E2: an absent sub-block entry means "running / no stop").
+func subBlockDesiredForTest(task string) string {
+	if di, ok := lookupSupervisorStop(task); ok {
+		return di.Desired
+	}
+	return ""
+}
 
 func TestRestartUsesSupervisorRespawnForIntentDaemon(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
@@ -345,22 +370,15 @@ func TestRestartQuarantinedDoesNotWriteRunningIntent(t *testing.T) {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	// Seed daemon-intent.json at Desired=stopped — a prior stop. The fix
-	// must NOT overwrite this for a quarantined daemon.
-	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
-		Desired:   IntentDesiredStopped,
-		Reason:    IntentReasonUserStop,
-		UpdatedAt: time.Now().UTC(),
-	}, auditWhoMcphubStop); err != nil {
-		t.Fatalf("seed stopped daemon-intent: %v", err)
-	}
+	// Seed a prior stop in the stops sub-block (Phase 4-E2). The fix must NOT
+	// overwrite this for a quarantined daemon.
+	seedSubBlockStop(t, taskName)
 
 	var dials int
 	var intentDesiredAtDial string
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		dials++
-		res := NewAPI().ReadDaemonIntent()
-		intentDesiredAtDial = res.File.Tasks[taskName].Desired
+		intentDesiredAtDial = subBlockDesiredForTest(taskName)
 		return RespawnResult{Success: false, Code: "QUARANTINED", Message: "daemon is quarantined; pass force=true to override"}, nil
 	})
 	defer restoreRespawn()
@@ -381,10 +399,10 @@ func TestRestartQuarantinedDoesNotWriteRunningIntent(t *testing.T) {
 	}
 	// Read-back after the call: the running intent must NEVER have landed
 	// — the force-gate holds and the IntentWatcher must not converge a
-	// quarantine bypass.
-	after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+	// quarantine bypass. Phase 4-E2: the stop must still be in the sub-block.
+	after := subBlockDesiredForTest(taskName)
 	if after != IntentDesiredStopped {
-		t.Fatalf("daemon-intent after refused respawn = %q, want %q (quarantined daemon must not receive Desired=running)",
+		t.Fatalf("sub-block stop after refused respawn = %q, want %q (quarantined daemon must not be re-enabled)",
 			after, IntentDesiredStopped)
 	}
 	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err == "" {
@@ -447,20 +465,14 @@ func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 	for _, tn := range []string{regularTask, proxyTask} {
-		if err := NewAPI().WriteDaemonIntent(tn, DaemonIntent{
-			Desired:   IntentDesiredStopped,
-			Reason:    IntentReasonUserStop,
-			UpdatedAt: time.Now().UTC(),
-		}, auditWhoMcphubStop); err != nil {
-			t.Fatalf("seed stopped daemon-intent for %s: %v", tn, err)
-		}
+		seedSubBlockStop(t, tn)
 	}
 
 	var dials int
 	dialDesired := map[string]string{}
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		dials++
-		dialDesired[taskName] = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+		dialDesired[taskName] = subBlockDesiredForTest(taskName)
 		return RespawnResult{Success: false, Code: RespawnRefusedIntentStoppedCode, Message: "respawn refused: daemon-intent says Desired=stopped"}, nil
 	})
 	defer restoreRespawn()
@@ -470,14 +482,15 @@ func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 	restoreReconcile := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		atomic.AddInt32(&reconcileCalls, 1)
 		gotApply = apply
-		// The running intent for the target being dispatched must already
-		// be on disk when the reconcile fires — the reconcile reads
-		// daemon-intent.json fresh and would otherwise classify the task as
-		// still-stopped and post nothing.
-		if d := NewAPI().ReadDaemonIntent().File.Tasks[regularTask].Desired; d != IntentDesiredRunning {
+		// The stop for the target being dispatched must already be CLEARED
+		// from the sub-block when the reconcile fires (Phase 4-E2: Desired=
+		// running drops the entry) — the reconcile reads the sub-block fresh
+		// and would otherwise classify the task as still-stopped and post
+		// nothing.
+		if d := subBlockDesiredForTest(regularTask); d != "" {
 			// The loop dispatches the regular task first; by the time ANY
-			// reconcile fires, that task's running intent is on disk.
-			t.Errorf("intent at reconcile time = %q, want %q (running must be on disk BEFORE the reconcile)", d, IntentDesiredRunning)
+			// reconcile fires, that task's stop is cleared.
+			t.Errorf("sub-block stop at reconcile time = %q, want cleared (running must land BEFORE the reconcile)", d)
 		}
 		// No-legacy drift: every supervisor-intent row is dispatched through
 		// the SM (post_ev_intent_update) — regular daemon included.
@@ -513,11 +526,12 @@ func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 	if !gotApply {
 		t.Fatal("reconcile dialed with apply=false, want apply=true")
 	}
-	// Post-call the running intent stays on disk so the IntentWatcher
-	// converges even if the supervisor missed the EvIntentUpdate.
+	// Post-call the stop stays CLEARED from the sub-block so the IntentWatcher
+	// converges even if the supervisor missed the EvIntentUpdate (Phase 4-E2:
+	// Desired=running dropped the entry → no stop = running).
 	for _, tn := range []string{regularTask, proxyTask} {
-		if after := NewAPI().ReadDaemonIntent().File.Tasks[tn].Desired; after != IntentDesiredRunning {
-			t.Fatalf("daemon-intent after dispatch for %s = %q, want %q", tn, after, IntentDesiredRunning)
+		if after := subBlockDesiredForTest(tn); after != "" {
+			t.Fatalf("sub-block stop after dispatch for %s = %q, want cleared (running)", tn, after)
 		}
 	}
 	if len(results) != 2 {
@@ -573,13 +587,7 @@ func TestRestartStoppedIntentReconcileFailureSurfacesErrorRow(t *testing.T) {
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
-		Desired:   IntentDesiredStopped,
-		Reason:    IntentReasonUserStop,
-		UpdatedAt: time.Now().UTC(),
-	}, auditWhoMcphubStop); err != nil {
-		t.Fatalf("seed stopped daemon-intent: %v", err)
-	}
+	seedSubBlockStop(t, taskName)
 
 	var dials int
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
@@ -608,10 +616,10 @@ func TestRestartStoppedIntentReconcileFailureSurfacesErrorRow(t *testing.T) {
 	if got := atomic.LoadInt32(&reconcileCalls); got != 1 {
 		t.Fatalf("reconcile calls = %d; want exactly 1", got)
 	}
-	// The running intent must remain on disk so the IntentWatcher converges.
-	if after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired; after != IntentDesiredRunning {
-		t.Fatalf("daemon-intent after reconcile failure = %q, want %q (must stay running for IntentWatcher convergence)",
-			after, IntentDesiredRunning)
+	// The stop must remain CLEARED from the sub-block (Phase 4-E2: Desired=
+	// running dropped it) so the IntentWatcher converges the spawn.
+	if after := subBlockDesiredForTest(taskName); after != "" {
+		t.Fatalf("sub-block stop after reconcile failure = %q, want cleared (running for IntentWatcher convergence)", after)
 	}
 	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err == "" {
 		t.Fatalf("results = %+v, want one supervisor error row", results)
@@ -646,19 +654,13 @@ func TestRestartSuccessFirstTryWritesRunningIntentOnlyPostSuccess(t *testing.T) 
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
-		Desired:   IntentDesiredStopped,
-		Reason:    IntentReasonUserStop,
-		UpdatedAt: time.Now().UTC(),
-	}, auditWhoMcphubStop); err != nil {
-		t.Fatalf("seed stopped daemon-intent: %v", err)
-	}
+	seedSubBlockStop(t, taskName)
 
 	var dials int
 	var intentDesiredAtDial string
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		dials++
-		intentDesiredAtDial = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+		intentDesiredAtDial = subBlockDesiredForTest(taskName)
 		return RespawnResult{Success: true, Code: "OK"}, nil
 	})
 	defer restoreRespawn()
@@ -674,14 +676,14 @@ func TestRestartSuccessFirstTryWritesRunningIntentOnlyPostSuccess(t *testing.T) 
 		t.Fatalf("respawn dials = %d; want exactly 1 (success on first try, no retry)", dials)
 	}
 	if intentDesiredAtDial != IntentDesiredStopped {
-		t.Fatalf("intent at dial = %q, want %q (no intent written before a first-try dial)",
+		t.Fatalf("sub-block stop at dial = %q, want %q (no re-enable written before a first-try dial)",
 			intentDesiredAtDial, IntentDesiredStopped)
 	}
-	// Post-success the running intent must now be on disk.
-	after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
-	if after != IntentDesiredRunning {
-		t.Fatalf("daemon-intent after success = %q, want %q (running intent recorded post-success)",
-			after, IntentDesiredRunning)
+	// Post-success the stop must be CLEARED from the sub-block (Phase 4-E2:
+	// recordRestartIntentForTask writes Desired=running → drops the entry).
+	after := subBlockDesiredForTest(taskName)
+	if after != "" {
+		t.Fatalf("sub-block stop after success = %q, want cleared (running recorded post-success)", after)
 	}
 	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
 		t.Fatalf("results = %+v, want one supervisor success row", results)
@@ -710,6 +712,84 @@ func TestRestartFallsBackWhenNoSupervisorIntentMatches(t *testing.T) {
 	if called {
 		t.Fatal("supervisor respawn called even though supervisor-intent.json was absent")
 	}
+}
+
+// TestSupervisorStopClearVerifiedDistinguishesReadError pins the P3b
+// fail-closed correction: the restart re-enable read-back must tell a genuine
+// "stop cleared" (no entry / expired) apart from a READ FAILURE of the now-sole
+// supervisor-intent.json stops sub-block. The prior best-effort
+// IntentStillRunning predicate collapsed a corrupt/locked read into "running"
+// and would have reported a silently-failed re-enable as success.
+func TestSupervisorStopClearVerifiedDistinguishesReadError(t *testing.T) {
+	const taskName = `\mcp-local-hub-time-default`
+	now := time.Now().UTC()
+
+	t.Run("no_stop_recorded_is_cleared", func(t *testing.T) {
+		stateDir := apitest.HardenedTempDir(t)
+		restore := SetDaemonStateRootForTest(stateDir)
+		defer restore()
+		// supervisor-intent.json with no stops sub-block entry → cleared.
+		if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &SupervisorIntentFile{Version: 1}); err != nil {
+			t.Fatalf("seed supervisor-intent.json: %v", err)
+		}
+		cleared, err := supervisorStopClearVerified(taskName, now)
+		if err != nil {
+			t.Fatalf("unexpected error for genuine no-stop: %v", err)
+		}
+		if !cleared {
+			t.Fatal("cleared=false for a genuine no-stop; want true")
+		}
+	})
+
+	t.Run("missing_file_is_cleared", func(t *testing.T) {
+		stateDir := apitest.HardenedTempDir(t)
+		restore := SetDaemonStateRootForTest(stateDir)
+		defer restore()
+		// No supervisor-intent.json at all → an absent sub-block is "no stop",
+		// NOT a read failure: cleared=true, err=nil.
+		cleared, err := supervisorStopClearVerified(taskName, now)
+		if err != nil {
+			t.Fatalf("missing file must not surface as a read error: %v", err)
+		}
+		if !cleared {
+			t.Fatal("cleared=false for a missing intent file; want true (no stop recorded)")
+		}
+	})
+
+	t.Run("active_stop_is_not_cleared", func(t *testing.T) {
+		stateDir := apitest.HardenedTempDir(t)
+		restore := SetDaemonStateRootForTest(stateDir)
+		defer restore()
+		if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &SupervisorIntentFile{Version: 1}); err != nil {
+			t.Fatalf("seed supervisor-intent.json: %v", err)
+		}
+		seedSubBlockStop(t, taskName) // active user stop recorded in the sub-block
+		cleared, err := supervisorStopClearVerified(taskName, now)
+		if err != nil {
+			t.Fatalf("unexpected error for active stop: %v", err)
+		}
+		if cleared {
+			t.Fatal("cleared=true while an active stop is recorded; want false (clear did not land)")
+		}
+	})
+
+	t.Run("corrupt_read_fails_closed", func(t *testing.T) {
+		stateDir := apitest.HardenedTempDir(t)
+		restore := SetDaemonStateRootForTest(stateDir)
+		defer restore()
+		// A corrupt sole-source file: the read FAILS. This must NOT be reported
+		// as "cleared" — the whole point of P3b. cleared=false, err!=nil.
+		if err := os.WriteFile(filepath.Join(stateDir, "supervisor-intent.json"), []byte(`{"stops":`), 0o600); err != nil {
+			t.Fatalf("seed corrupt supervisor-intent.json: %v", err)
+		}
+		cleared, err := supervisorStopClearVerified(taskName, now)
+		if err == nil {
+			t.Fatal("err=nil on a corrupt sole-source read; want the read error surfaced (fail-closed)")
+		}
+		if cleared {
+			t.Fatal("cleared=true on a corrupt read; want false so the restart emits an honest error row")
+		}
+	})
 }
 
 type restartAllFakeScheduler struct {

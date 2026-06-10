@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -414,6 +413,7 @@ func fakeIntentReader(file api.DaemonIntentFile) intentReaderFn {
 //   - Suppression hides StateError (no red icon flash for clean stop).
 //   - Toast count stays at 0 (no spurious failure-onset alert).
 //   - Final state is StateDown — honest about what's running.
+//
 // The aggregator coalesces same-state forwards, so snapshot 1 (Running
 // → StateHealthy) and snapshot 2 (Stopped+suppressed → StateDown)
 // produce two distinct forwards.
@@ -606,18 +606,18 @@ func TestAggregateTrayState_IntentTTLExpired_BackToError(t *testing.T) {
 // TestAggregateTrayState_LockContentionPreservesUserStopSuppression is
 // the round 3 codex finding R1 regression guard. The flow:
 //
-//   1. Snapshot 1: row with active user-stop intent → aggregator reads
-//      a valid IntentReadResult, populates the cache, classifies as
-//      StateHealthy (suppressed user-stop excluded from denominator).
-//   2. Snapshot 2: SAME row, but the intent reader returns a degraded
-//      result (State=missing + Err=context.DeadlineExceeded — the
-//      shape TryReadDaemonIntent emits on flock contention). The cache
-//      from cycle 1 must apply, so the row STAYS suppressed.
-//   3. Snapshot 3: SAME row, intent reader now returns a valid empty
-//      file (State=valid + empty Tasks) — operator cleared the intent
-//      via `mcphub watchdog enable`. Cache REPLACES with the fresh
-//      empty snapshot; suppression no longer applies; row classifies
-//      as StateError (and a toast fires for the failure onset).
+//  1. Snapshot 1: row with active user-stop intent → aggregator reads
+//     a valid IntentReadResult, populates the cache, classifies as
+//     StateHealthy (suppressed user-stop excluded from denominator).
+//  2. Snapshot 2: SAME row, but the intent reader returns a degraded
+//     result (State=missing + Err=context.DeadlineExceeded — the
+//     shape TryReadDaemonIntent emits on flock contention). The cache
+//     from cycle 1 must apply, so the row STAYS suppressed.
+//  3. Snapshot 3: SAME row, intent reader now returns a valid empty
+//     file (State=valid + empty Tasks) — operator cleared the intent
+//     via `mcphub watchdog enable`. Cache REPLACES with the fresh
+//     empty snapshot; suppression no longer applies; row classifies
+//     as StateError (and a toast fires for the failure onset).
 //
 // This is the regression that was BROKEN by PR #142 round 3 P2's
 // initial wiring: under flock contention the aggregator dropped to
@@ -757,40 +757,30 @@ collectLoop:
 	}
 }
 
-// TestDefaultIntentReader_DoesNotBlockOnHeldLock guards the regression
-// from PR #142 round 2 P2: the tray hot path must not freeze behind a
-// long-held daemon-intent.json flock.
+// TestDefaultIntentReader_DoesNotBlockOnHeldDaemonIntentLock is the Phase 4-E2
+// successor to the PR #142 "tray hot path must not block on the ~5 MB
+// daemon-intent.json flock" regression test. After E2 the tray reader sources
+// stops from the small, lock-free supervisor-intent.json `stops` sub-block
+// (daemon-intent.json is deleted), so a long-held daemon-intent.json lock can
+// NO LONGER affect the tray read at all — it returns promptly and does NOT
+// degrade to a timeout error.
 //
-// Setup: redirect the per-user state dir to a temp location, hold the
-// daemon-intent.json.lock sibling on a goroutine for 3 seconds, then
-// invoke defaultIntentReader. Assert that the call returns within
-// the wallclock cap (well under the holder's 3s grip) with a non-nil
-// empty Tasks map and a non-nil timeout-flavoured error — the
-// graceful-degrade contract the aggregator relies on.
-//
-// Round 3 codex finding R4: previous wallclockCap (500ms) was tight
-// enough to flake on slow CI hosts (250ms intent-read timeout + a
-// loaded scheduler can produce ~600ms wallclock). Loosened to 1.5s,
-// which still proves "non-blocking" against the 3s holder grip with
-// generous CI headroom. The point of this test is to detect the
-// regression where TryReadDaemonIntent reverts to a kernel-level
-// blocking flock (that would observe the full 3s grip), NOT to
-// measure the exact retry-budget timing.
-func TestDefaultIntentReader_DoesNotBlockOnHeldLock(t *testing.T) {
+// This pins the improved contract: holding the legacy daemon-intent.json lock
+// for 3s leaves defaultIntentReader unaffected (prompt return, graceful "no
+// stops" with nil Err since there is genuinely no contention on the sub-block
+// read).
+func TestDefaultIntentReader_DoesNotBlockOnHeldDaemonIntentLock(t *testing.T) {
 	root := t.TempDir()
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
-	// Resolve the lock path the same way the API does. DaemonStateDir()
-	// will create the per-user state dir under the override on first
-	// call. We rely on the API package's own resolution to land on the
-	// same path defaultIntentReader → TryReadDaemonIntent acquires.
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		t.Fatalf("api.DaemonStateDir: %v", err)
 	}
+	// Hold the LEGACY daemon-intent.json lock for 3s — it must be irrelevant
+	// to the E2 tray read (which reads the supervisor-intent.json sub-block).
 	lockPath := filepath.Join(stateDir, "daemon-intent.json.lock")
-
 	holder := flock.New(lockPath)
 	if err := holder.Lock(); err != nil {
 		t.Fatalf("holder lock: %v", err)
@@ -806,11 +796,6 @@ func TestDefaultIntentReader_DoesNotBlockOnHeldLock(t *testing.T) {
 		<-holderDone
 	})
 
-	// Wallclock cap (round 3 codex finding R4): defaultIntentReaderTimeout
-	// is 250ms, but a loaded CI host can add several hundred ms of
-	// scheduler/syscall overhead before the goroutine returns. 1.5s
-	// is the loosened cap — still well below the 3s holder grip that
-	// a regression to blocking flock would observe.
 	const wallclockCap = 1500 * time.Millisecond
 
 	start := time.Now()
@@ -818,25 +803,22 @@ func TestDefaultIntentReader_DoesNotBlockOnHeldLock(t *testing.T) {
 	elapsed := time.Since(start)
 
 	if elapsed > wallclockCap {
-		t.Fatalf("defaultIntentReader took %s with %s timeout (cap %s) — must not block on held lock",
-			elapsed, defaultIntentReaderTimeout, wallclockCap)
+		t.Fatalf("defaultIntentReader took %s (cap %s) — the E2 sub-block read must not be affected by the daemon-intent.json lock",
+			elapsed, wallclockCap)
 	}
 	if got.File.Tasks == nil {
 		t.Fatalf("Tasks = nil, want empty (non-nil) map for graceful-degrade contract")
 	}
 	if len(got.File.Tasks) != 0 {
-		t.Errorf("Tasks length = %d, want 0 on lock-acquisition timeout fallback", len(got.File.Tasks))
+		t.Errorf("Tasks length = %d, want 0 (no stops in an empty sub-block)", len(got.File.Tasks))
 	}
-	// Round 3 codex finding R6: timeout fallback must propagate a
-	// DeadlineExceeded-wrapped error so callers (and the aggregator's
-	// cache) can branch on contention vs. real I/O failure.
+	// E2: the sub-block is absent (fresh temp dir) → genuinely "no stops",
+	// State=missing with a NIL error (no contention, no timeout — the legacy
+	// daemon-intent.json lock is no longer on the read path).
 	if got.State != api.IntentStateMissing {
-		t.Errorf("State = %q, want %q on lock-timeout fallback", got.State, api.IntentStateMissing)
+		t.Errorf("State = %q, want %q (empty sub-block)", got.State, api.IntentStateMissing)
 	}
-	if got.Err == nil {
-		t.Fatalf("Err = nil, want a non-nil timeout error on lock-acquisition timeout fallback")
-	}
-	if !errors.Is(got.Err, context.DeadlineExceeded) {
-		t.Errorf("Err = %v, want errors.Is(_, context.DeadlineExceeded) (timeout taxonomy)", got.Err)
+	if got.Err != nil {
+		t.Errorf("Err = %v, want nil (E2 sub-block read is lock-free; no timeout/contention)", got.Err)
 	}
 }

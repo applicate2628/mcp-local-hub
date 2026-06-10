@@ -121,6 +121,12 @@ type DaemonIntentCollapseResult struct {
 	// BackupDir is the absolute path of the pre-merge backup directory taken
 	// before the write. Empty in DryRun mode or when nothing was written.
 	BackupDir string
+	// DeletedLegacyFile reports whether this pass deleted the legacy
+	// daemon-intent.json (Phase 4-E2 destructive step). True only when
+	// !DryRun AND the file existed AND its active stops were confirmed in the
+	// supervisor-intent.json stops sub-block BEFORE the delete. A second
+	// (idempotent) E2 boot finds the file already gone and reports false.
+	DeletedLegacyFile bool
 }
 
 // mergeDaemonIntentStops is the PURE core: given the supervisor intent and
@@ -133,13 +139,13 @@ type DaemonIntentCollapseResult struct {
 //   - start from the supervisor intent's existing `stops` sub-block (so a
 //     prior merge's baseline is preserved across re-runs);
 //   - for each daemon-intent.json task, re-evaluate IsActiveStop(now):
-//       * active   → carry the FULL DaemonIntent record (Desired, Reason,
-//                    UpdatedAt) into the merged map, preserving TTL /
-//                    clock-skew / reason semantics verbatim;
-//       * inactive → drop it (expired/stale/running), recorded as
-//                    drop-expired ONLY when the prior baseline had it (a
-//                    stop that just expired) — a never-active task produces
-//                    no entry and no noise.
+//   - active   → carry the FULL DaemonIntent record (Desired, Reason,
+//     UpdatedAt) into the merged map, preserving TTL /
+//     clock-skew / reason semantics verbatim;
+//   - inactive → drop it (expired/stale/running), recorded as
+//     drop-expired ONLY when the prior baseline had it (a
+//     stop that just expired) — a never-active task produces
+//     no entry and no noise.
 //   - the legacy file is authoritative for the tasks it names: an entry that
 //     went inactive REMOVES the corresponding baseline stop so a re-enabled
 //     daemon is not left suppressed by a stale baseline.
@@ -253,25 +259,41 @@ func CheckDaemonIntentCollapse(stateDir string, now time.Time) (DaemonIntentColl
 
 // RunDaemonIntentCollapse is the SINGLE named merge owner. It performs the
 // one-time in-place merge: holds the daemon-intent.json flock across the
-// ENTIRE read → merge → backup → re-read-under-lock → write critical section,
-// takes a code-baked pre-merge backup, and writes the merged stops into
-// supervisor-intent.json's `stops` sub-block. It NEVER deletes
-// daemon-intent.json (that is E2).
+// ENTIRE read → merge → backup → re-read-under-lock → write → DELETE critical
+// section, takes a code-baked pre-merge backup, writes the merged stops into
+// supervisor-intent.json's `stops` sub-block, and — Phase 4-E2 — DELETES the
+// legacy daemon-intent.json (+ its .lock) ONCE the sub-block is confirmed to
+// carry the file's active stops.
 //
-// Idempotent: a second invocation whose merge produces no delta writes
-// nothing (Result.Changed=false, Wrote=false).
+// E2 deletion ordering (spec §5.1-E — "delete daemon-intent.json LAST"):
+// the file is deleted ONLY after either (a) the merge wrote the active stops
+// into the sub-block, or (b) the no-delta path confirmed the sub-block ALREADY
+// reflects them. Immediately before the delete, daemon-intent.json is re-read
+// under the held flock and every active stop it names is re-checked present in
+// the sub-block (deleteLegacyDaemonIntentIfMerged); the delete is REFUSED if
+// any active stop is missing, so a stop can never be lost to the delete. A
+// corrupt daemon-intent.json fails the merge CLOSED upstream, so the delete is
+// never reached on a corrupt file (forensic state preserved).
 //
-// Concurrency (spec §15 P1-c): WriteDaemonIntent is the daemon-intent writer
-// that matters in production — it acquires the SAME daemon-intent flock, so
-// holding it across this whole pass blocks a concurrent old-binary `mcphub
-// stop` until the merge releases — no stop is lost. (ClearDaemonIntent shares
-// the flock and the canonical-key normalization but has ZERO production
-// callers: the re-enable path writes a Desired=running tombstone via
-// WriteDaemonIntent that the merge loop drops, rather than clearing the entry,
-// so the baseline-drop relies on that Desired=running tombstone path, not on
-// ClearDaemonIntent.) The defensive re-read under the held lock immediately
-// before the write re-merges any delta as belt-and-suspenders even against a
-// hypothetical future writer that bypassed the flock.
+// Idempotent: a second invocation finds daemon-intent.json already gone →
+// readDaemonIntentForMerge returns nil → the merge is a no-op (Changed=false)
+// → the delete is a no-op (DeletedLegacyFile=false). A crash AFTER the
+// sub-block write but BEFORE the delete leaves daemon-intent.json on disk;
+// the next boot re-runs, finds the sub-block already carries the stops
+// (Changed=false), re-confirms, and deletes — so the destructive step is
+// crash-safe + retried.
+//
+// Concurrency (spec §15 P1-c): after E2 the live stop writers no longer touch
+// daemon-intent.json (they write the sub-block via WriteStopIntent). The only
+// remaining daemon-intent.json writer is an OLD binary still running its
+// pre-E2 WriteDaemonIntent path during the redeploy window — it acquires the
+// SAME daemon-intent flock, so holding the flock across this whole pass blocks
+// such a concurrent old-binary `mcphub stop` until the merge releases — no
+// stop is lost. The defensive re-read under the held lock immediately before
+// the write re-merges any delta as belt-and-suspenders even against a
+// hypothetical future writer that bypassed the flock. The delete (the E2 tail)
+// runs under the same held flock, so no old-binary write can re-create the
+// file between the verify and the delete.
 //
 // The WRITE TARGET — supervisor-intent.json — has its OWN set of concurrent
 // writers (InstallParsedManifest, serena_intent_repair, register_supervisor,
@@ -304,12 +326,12 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	daemonIntentPath := filepath.Join(stateDir, intentFileLeaf)
 	daemonLockPath := filepath.Join(stateDir, intentLockLeaf)
 
-	// Acquire the daemon-intent flock for the WHOLE critical section. This is
-	// the load-bearing concurrency guarantee: it serializes against the legacy
-	// WriteDaemonIntent writer for the entire merge (ClearDaemonIntent shares
-	// the flock but is currently unused in production — see the function
-	// docstring; the baseline-drop relies on WriteDaemonIntent's Desired=running
-	// tombstone path instead).
+	// Acquire the daemon-intent flock for the WHOLE critical section (read →
+	// merge → write → DELETE). This is the load-bearing concurrency guarantee:
+	// it serializes against an OLD binary's legacy WriteDaemonIntent writer for
+	// the entire merge AND the delete, so no concurrent old-binary `mcphub stop`
+	// can land a stop after the merge reads but before the delete, and none can
+	// re-create the file between the delete-verify and the delete itself.
 	lock := flock.New(daemonLockPath)
 	if err := lock.Lock(); err != nil {
 		return DaemonIntentCollapseResult{}, fmt.Errorf("intent-collapse: flock daemon-intent: %w", err)
@@ -347,8 +369,18 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	}
 
 	if !result.Changed {
-		// Idempotent no-op: the stops sub-block already reflects the active
-		// stops. Skip both the backup and the write.
+		// Idempotent no-op on the SUB-BLOCK: the stops sub-block already
+		// reflects the active stops (a prior boot merged them, or there were
+		// none). Skip the backup + write, but STILL attempt the E2 ordered
+		// deletion — the file may be a leftover from E1 / a crash between the
+		// E1 write and an E2 delete. deleteLegacyDaemonIntentIfMerged re-reads
+		// daemon-intent.json under the held flock and only deletes when every
+		// active stop it names is present in the on-disk sub-block.
+		deleted, delErr := deleteLegacyDaemonIntentIfMerged(stateDir, supervisorIntentPath, daemonIntentPath, daemonIntent, now)
+		if delErr != nil {
+			return result, delErr
+		}
+		result.DeletedLegacyFile = deleted
 		return result, nil
 	}
 
@@ -362,6 +394,13 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	}
 	result = mergeDaemonIntentStops(supervisorIntent, daemonIntentReread, now)
 	if !result.Changed {
+		// As above: no sub-block delta after the re-read, but the file may
+		// still need the E2 ordered deletion.
+		deleted, delErr := deleteLegacyDaemonIntentIfMerged(stateDir, supervisorIntentPath, daemonIntentPath, daemonIntentReread, now)
+		if delErr != nil {
+			return result, delErr
+		}
+		result.DeletedLegacyFile = deleted
 		return result, nil
 	}
 
@@ -425,10 +464,106 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	}
 	result.Wrote = true
 
-	// E1 INVARIANT: daemon-intent.json is NOT deleted here. It stays on disk
-	// + stays written by its existing writers as a recovery point. E2 removes
-	// it. (Documented so a future edit does not "tidy up" the delete in.)
+	// E2 ORDERED DELETION (spec §5.1-E): the sub-block now carries the active
+	// stops (just written above, under both the daemon-intent flock AND the
+	// supervisor-intent flock still held by the deferred supLock.Unlock). Delete
+	// daemon-intent.json LAST, after re-confirming under the held daemon-intent
+	// flock that every active stop it names is present in the sub-block we just
+	// wrote. If the delete is refused or fails, the merge still SUCCEEDED (the
+	// stops are safely in the sub-block) — the file just lingers for the next
+	// boot to retry, never a lost stop.
+	deleted, delErr := deleteLegacyDaemonIntentIfMerged(stateDir, supervisorIntentPath, daemonIntentPath, daemonIntentReread, now)
+	if delErr != nil {
+		return result, delErr
+	}
+	result.DeletedLegacyFile = deleted
 	return result, nil
+}
+
+// deleteLegacyDaemonIntentIfMerged performs the Phase 4-E2 destructive step:
+// it deletes the legacy daemon-intent.json (+ its .lock) ONLY after verifying
+// the supervisor-intent.json `stops` sub-block carries every ACTIVE stop the
+// file holds. The caller MUST already hold the daemon-intent flock for the
+// whole merge pass, so no concurrent old-binary writer can re-populate
+// daemon-intent.json between the verify and the delete.
+//
+// Safety order (NEVER delete before the stops persist):
+//  1. If daemon-intent.json is already gone → idempotent no-op (false, nil).
+//  2. Re-read the CURRENT supervisor-intent.json sub-block.
+//  3. Re-evaluate every daemon-intent.json task's IsActiveStop(now); for each
+//     ACTIVE stop, REFUSE the delete unless the sub-block carries the SAME
+//     record (Desired/Reason/UpdatedAt). A missing or divergent active stop
+//     means the merge has not (yet) durably captured it → keep the file.
+//  4. Only on full confirmation: os.Remove(daemon-intent.json), then
+//     best-effort os.Remove the sibling .lock.
+//
+// daemonIntent is the already-read DaemonIntentFile (may be nil when the file
+// was absent at read time); passing it avoids a redundant re-read, but step 1
+// re-stats the path so a file that vanished mid-pass is handled. now is the
+// merge clock.
+//
+// Returns (true, nil) when the file was deleted this call; (false, nil) when
+// there was nothing to delete or the delete was safely refused (stops not yet
+// confirmed — non-fatal, retried next boot); (false, err) only on an
+// unexpected I/O failure reading the sub-block for confirmation.
+func deleteLegacyDaemonIntentIfMerged(
+	stateDir, supervisorIntentPath, daemonIntentPath string,
+	daemonIntent *DaemonIntentFile,
+	now time.Time,
+) (bool, error) {
+	// Step 1: nothing to delete if the file is already gone (idempotent).
+	if _, statErr := os.Stat(daemonIntentPath); statErr != nil {
+		if errors.Is(statErr, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("intent-collapse: stat daemon-intent.json before delete: %w", statErr)
+	}
+
+	// Step 2: re-read the CURRENT sub-block (post-write or already-merged).
+	current, _, err := readSupervisorIntentForMerge(supervisorIntentPath)
+	if err != nil {
+		return false, fmt.Errorf("intent-collapse: re-read supervisor-intent.json before delete: %w", err)
+	}
+	subBlock := map[string]DaemonIntent{}
+	if current != nil && current.Stops != nil {
+		subBlock = current.Stops
+	}
+
+	// Step 3: REFUSE the delete unless every ACTIVE stop in daemon-intent.json
+	// is present + identical in the sub-block. An inactive (expired/running)
+	// task is intentionally NOT required (the merge drops those), so it is not
+	// a blocker. This is the "never lose a stop" gate.
+	if daemonIntent != nil {
+		for taskName, di := range daemonIntent.Tasks {
+			active, _ := di.IsActiveStop(now)
+			if !active {
+				continue
+			}
+			key := canonicalIntentTaskKey(taskName)
+			got, ok := subBlock[key]
+			if !ok || got.Desired != di.Desired || got.Reason != di.Reason || !got.UpdatedAt.Equal(di.UpdatedAt) {
+				// An active stop is NOT durably in the sub-block yet — keep the
+				// file so the next boot re-merges it. Never delete here.
+				return false, nil
+			}
+		}
+	}
+
+	// Step 4: confirmed — delete the file, then best-effort the sibling lock.
+	if rmErr := os.Remove(daemonIntentPath); rmErr != nil {
+		if errors.Is(rmErr, os.ErrNotExist) {
+			// Raced to gone between stat + remove — treat as already deleted.
+			return false, nil
+		}
+		return false, fmt.Errorf("intent-collapse: delete daemon-intent.json: %w", rmErr)
+	}
+	// Best-effort .lock removal: a held flock on Windows cannot be unlinked,
+	// and a stale lock file is harmless (the next flock just re-creates/opens
+	// it), so a failure here is non-fatal — the destructive step (deleting the
+	// stop data) already committed.
+	daemonLockPath := filepath.Join(stateDir, intentLockLeaf)
+	_ = os.Remove(daemonLockPath)
+	return true, nil
 }
 
 // readDaemonIntentForMerge parses daemon-intent.json from raw bytes under the
@@ -517,75 +652,82 @@ func pruneOldPreCollapseBackups(stateDir string, keep int) {
 	}
 }
 
-// TryReadUnifiedStops is the Phase 4-E1 tray/GUI-side stop reader. It is the
-// unified-source replacement for TryReadDaemonIntent on the tray hot path:
-// it reads the live daemon-intent.json (bounded by `timeout`, same flock
-// budget as TryReadDaemonIntent) AND the supervisor-intent.json stops
-// sub-block, then resolves the single stop source via UnifiedStopsFile —
-// live daemon-intent.json wins when present (so E1 introduces NO tray-side
-// behavior change while the legacy writers still maintain that file), else
-// the merged supervisor-intent.json stops sub-block (recovery baseline).
+// TryReadUnifiedStops is the Phase 4-E2 tray/GUI-side stop reader. After E2 the
+// supervisor-intent.json `stops` sub-block is the SOLE stop source
+// (daemon-intent.json is deleted), so this reads the sub-block directly and
+// no longer consults daemon-intent.json at all.
 //
-// It returns an IntentReadResult whose File carries the unified stops, with
-// the SAME State / Err degradation contract TryReadDaemonIntent has, so the
+// It returns an IntentReadResult whose File carries the sub-block stops, with
+// the SAME State / Err degradation contract TryReadDaemonIntent had, so the
 // aggregator's in-process intent cache + Bug #3 user-stop suppression keep
 // working unchanged:
-//   - daemon-intent.json valid → State=valid, File=live tasks.
-//   - daemon-intent.json missing (Err==nil) → File falls back to the
-//     supervisor stops sub-block. State is reported "valid" when that
-//     fallback yielded any stops (it IS authoritative data, not a degraded
-//     read), else "missing" with nil Err (genuinely no stops anywhere).
-//   - daemon-intent.json degraded (lock timeout / corrupt, Err!=nil) →
-//     State/Err propagated verbatim so the aggregator keeps its cached
-//     snapshot rather than flashing a red icon (the existing degrade path).
-func (a *API) TryReadUnifiedStops(timeout time.Duration) IntentReadResult {
-	res := a.TryReadDaemonIntent(timeout)
-
-	// Degraded read (lock timeout, corrupt+quarantined): keep the existing
-	// contract verbatim. The aggregator's cache covers the gap; overlaying a
-	// possibly-stale supervisor stops sub-block here could mask the degrade.
-	if res.Err != nil {
-		return res
+//   - sub-block read clean, ≥1 stop → State=valid, File=stops.
+//   - sub-block read clean, no stops (or supervisor-intent.json missing) →
+//     State=missing, nil Err (genuinely "no preference"; the aggregator may
+//     overwrite stale stops per its eviction policy).
+//   - sub-block read DEGRADED (corrupt supervisor-intent.json, parent-dir
+//     gate failure) → State=corrupt + Err set, so the aggregator KEEPS its
+//     cached snapshot rather than fail-OPEN un-suppressing a stopped daemon
+//     (the fail-loud contract, extended to the sole stop source — the E1
+//     readSupervisorStopsForTray fail-OPEN swallow is replaced).
+//
+// The `timeout` parameter is retained for signature stability but is now
+// advisory: the supervisor-intent.json read is a small lock-free os.ReadFile
+// (no ~5 MB daemon-intent.json flock to bound), so there is no lock-acquisition
+// budget to honor.
+func (a *API) TryReadUnifiedStops(_ time.Duration) IntentReadResult {
+	supervisorIntent, readErr := readSupervisorStopsForTray()
+	if readErr != nil {
+		// Degraded sub-block read: surface it (State=corrupt, Err set) so the
+		// tray aggregator preserves its prior cached stops instead of
+		// flashing "no stops" and reviving a deliberately-stopped daemon.
+		// errors.Is(os.ErrNotExist) is NOT a degrade — handled below as the
+		// genuine "no stops" path.
+		if errors.Is(readErr, os.ErrNotExist) {
+			return IntentReadResult{
+				State: IntentStateMissing,
+				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+			}
+		}
+		return IntentReadResult{
+			State: IntentStateCorrupt,
+			File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
+			Err:   readErr,
+		}
 	}
 
-	supervisorIntent := readSupervisorStopsForTray()
-	var live *DaemonIntentFile
-	if res.State == IntentStateValid {
-		f := res.File
-		live = &f
-	}
-	unified := UnifiedStopsFile(supervisorIntent, live)
+	unified := supervisorIntent.StopsAsDaemonIntentFile()
 	if unified.Tasks == nil {
 		unified.Tasks = map[string]DaemonIntent{}
 	}
 
 	out := IntentReadResult{File: *unified}
 	if len(unified.Tasks) > 0 {
-		// Authoritative stop data present (live or merged baseline).
 		out.State = IntentStateValid
 	} else {
-		// No stops anywhere — genuinely "no preference" (nil Err so the
-		// aggregator overwrites stale stops, per its eviction policy).
+		// No stops in the sub-block — genuinely "no preference" (nil Err so
+		// the aggregator overwrites stale stops, per its eviction policy).
 		out.State = IntentStateMissing
 	}
 	return out
 }
 
-// readSupervisorStopsForTray loads the supervisor-intent stops sub-block for
-// the tray-side unified read. Best-effort: any read/parse failure (missing
-// file, parent-dir gate, decode error) degrades to an empty stops sub-block
-// so the tray reader falls back to live daemon-intent.json alone — never a
-// hard failure on the tray hot path.
-func readSupervisorStopsForTray() *SupervisorIntentFile {
+// readSupervisorStopsForTray loads the supervisor-intent.json stops sub-block
+// for the tray-side unified read (the sole stop source after E2). It returns
+// the parsed intent and the read error so the caller can apply the fail-loud
+// degrade contract (a corrupt read must NOT silently un-suppress). A missing
+// supervisor-intent.json returns (empty file, os.ErrNotExist) so the caller
+// distinguishes "no stops yet" from "read degraded".
+func readSupervisorStopsForTray() (*SupervisorIntentFile, error) {
 	path, err := DefaultSupervisorIntentPath()
 	if err != nil {
-		return &SupervisorIntentFile{}
+		return &SupervisorIntentFile{}, err
 	}
 	got, err := ReadSupervisorIntent(path)
 	if err != nil {
-		return &SupervisorIntentFile{}
+		return &SupervisorIntentFile{}, err
 	}
-	return got
+	return got, nil
 }
 
 // copyFileForBackup copies src → dst at 0600. A missing src is a no-op (the

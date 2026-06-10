@@ -376,41 +376,33 @@ func (f *SupervisorIntentFile) StopsAsDaemonIntentFile() *DaemonIntentFile {
 	return &DaemonIntentFile{Tasks: f.Stops}
 }
 
-// UnifiedStopsFile resolves the single stop source the Phase 4-E1
-// readers must consult, applying the additive-first precedence:
+// UnifiedStopsFile resolves the single stop source the five repointed
+// IsActiveStop readers must consult. After Phase 4-E2 the
+// supervisor-intent.json `stops` sub-block is the SOLE, AUTHORITATIVE stop
+// source: daemon-intent.json is deleted, its writers are gone, and the live
+// stop writers (WriteStopIntent) maintain the sub-block directly.
 //
-//   - live daemon-intent.json present (non-nil) → it is authoritative
-//     (identical to pre-E1 behavior, so E1 introduces ZERO live-stop
-//     regression while the legacy writers still maintain that file);
-//   - daemon-intent.json absent/unreadable → the merged
-//     supervisor-intent.json stops sub-block (the recovery baseline +
-//     the post-E2 canonical home).
+// E1 → E2 PRECEDENCE FLIP. In E1 the live daemon-intent.json WON when present
+// (additive, zero-regression while the legacy writers still maintained it).
+// E2 inverts that: the sub-block is primary and the daemonIntentFile argument
+// is IGNORED. The argument is retained only to keep the five call sites'
+// signatures stable across the E1→E2 transition; a STALE daemon-intent.json
+// that survives a failed/partial delete (or that an OLD binary re-creates)
+// must NEVER override the sub-block now that the sub-block is the source the
+// live writers maintain. Honoring a stale daemon-intent.json here would
+// resurrect the exact dual-source split E2 removes. (Once every reader is
+// confirmed off daemon-intent.json, a later cleanup can drop the parameter
+// entirely; keeping it now narrows the E2 diff.)
 //
-// This precedence is what makes E1 genuinely additive: during the
-// redeploy window an OLD-binary surface still reads daemon-intent.json
-// directly, and a NEW-binary surface reading via this helper reads the
-// SAME file (since it is present), so the two never disagree. Spec §12
-// Phase 4-E1: keeping the file on disk "avoids the multi-process
-// reader-inconsistency window" — this helper encodes exactly that.
-//
-// Returns a non-nil *DaemonIntentFile (empty Tasks when both sources are
+// Returns a non-nil *DaemonIntentFile (empty Tasks when the sub-block is
 // empty), so every reader indexes .Tasks without a nil guard.
 //
-// One owner for the precedence: all five repointed IsActiveStop call
-// sites route through this function so the rule lives in exactly one
-// place (no duplicated stop-source logic across the supervisor + GUI +
-// tray surfaces).
-func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, daemonIntentFile *DaemonIntentFile) *DaemonIntentFile {
-	if daemonIntentFile != nil {
-		// Live legacy file is the authority while it exists (E1). A
-		// present-but-empty Tasks map is STILL authoritative: it means
-		// "the operator cleared every stop", which must override a stale
-		// merged baseline (fail-closed avoidance of a phantom suppression).
-		if daemonIntentFile.Tasks == nil {
-			return &DaemonIntentFile{Tasks: map[string]DaemonIntent{}}
-		}
-		return daemonIntentFile
-	}
+// One owner for the source: all five repointed IsActiveStop call sites route
+// through this function so the rule lives in exactly one place (no duplicated
+// stop-source logic across the supervisor + GUI + tray surfaces).
+func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, _ *DaemonIntentFile) *DaemonIntentFile {
+	// E2: the sub-block is the sole authority. daemonIntentFile (the second
+	// argument) is deliberately ignored — see the PRECEDENCE FLIP note above.
 	return supervisorIntent.StopsAsDaemonIntentFile()
 }
 

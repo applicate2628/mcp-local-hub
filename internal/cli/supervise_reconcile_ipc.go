@@ -145,6 +145,17 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			Final: true,
 		})
 	}
+	// Phase 4-E2: the supervisor-intent.json `stops` sub-block is the SOLE stop
+	// source. A genuinely MISSING file (os.ErrNotExist) is tolerated for the
+	// drift/orphan report below (intent synthesized as empty), but in apply-mode
+	// the synthesized-empty stops MUST NOT refresh the controller cache — that
+	// would clear the operator's last-known stops and a child-exit/SM evaluation
+	// in that window would REVIVE a deliberately-stopped daemon (PR #278 P2
+	// un-suppress / §3 fail-loud). This mirrors the sibling watcher path
+	// resolveWatcherDaemonIntent (supervise.go:1187), where `supFailed` is true
+	// for BOTH corrupt AND os.ErrNotExist and keeps the prior cache. Captured
+	// here BEFORE `intent` is reassigned to the empty synthetic below.
+	supervisorIntentMissing := errors.Is(err, os.ErrNotExist)
 	if intent == nil {
 		// Either ErrNotExist or read returned (nil, nil) — treat as
 		// empty intent file (no daemons declared). The orphan-detection
@@ -153,12 +164,15 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	}
 	updatedIntent := intent
 
-	// (2) Read daemon-intent.json. Missing OR corrupt → "no overrides"
-	// (the same fallback the startup reconciler uses; see
-	// supervise_reconcile.go:124-130). We do NOT fail-close here
-	// because the operator's primary need is the drift report; a
-	// corrupt intent file is a separate alarm surfaced through the
-	// usual quarantine path.
+	// (2) Read daemon-intent.json (Phase 4-E2: VESTIGIAL — the file is
+	// deleted by the boot-merge and UnifiedStopsFile ignores it, so this read
+	// returns IntentStateMissing in steady state). Retained as a defensive
+	// read so a stale leftover is handled gracefully (still ignored by the
+	// flipped UnifiedStopsFile). The SOLE stop source after E2 is the
+	// supervisor-intent.json `stops` sub-block read at step (1); a corrupt
+	// read of THAT file already fail-closed above with
+	// RECONCILE_INTENT_READ_FAILED, so the cache is never refreshed from a
+	// corrupt sole source.
 	daemonIntentPath := filepath.Join(deps.stateDir, "daemon-intent.json")
 	daemonIntentRes := api.ReadDaemonIntentFile(daemonIntentPath, daemonIntentReadTimeoutForReconcile(ctx))
 	if errors.Is(daemonIntentRes.Err, context.DeadlineExceeded) ||
@@ -178,40 +192,42 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		emitReconcileDaemonIntentReadFailed(deps.events, daemonIntentPath, daemonIntentRes)
 	}
 
-	// Phase 4-E1: resolve the stop source through the unified view so this
-	// apply-mode reconcile reads stops from the new canonical path. Live
-	// daemon-intent.json wins when present (identical to pre-E1); otherwise
-	// the supervisor-intent.json stops sub-block (updatedIntent, read above)
-	// is used. `daemonIntentTasks` (computeIntentDesired) derives from this
-	// unified source: when daemon-intent.json is corrupt or missing,
-	// rawDaemonIntent is nil and UnifiedStopsFile falls back to the
-	// supervisor-intent.json stops sub-block (the recovery baseline) — NOT an
-	// empty overlay; it is empty only when that sub-block itself is empty. The
-	// drift report is computed against whatever stops that baseline carries,
-	// exactly as the startup reconciler treats it.
+	// Phase 4-E2: resolve the stop source through the unified view. The
+	// supervisor-intent.json `stops` sub-block (updatedIntent, read at step 1)
+	// is now the SOLE, AUTHORITATIVE source; UnifiedStopsFile ignores
+	// rawDaemonIntent (the deleted/stale daemon-intent.json). `daemonIntentTasks`
+	// (computeIntentDesired) derives from this sub-block — empty only when the
+	// sub-block itself is empty. The drift report is computed against whatever
+	// stops that sub-block carries, exactly as the startup reconciler treats it.
 	updatedDaemonIntent := api.UnifiedStopsFile(updatedIntent, rawDaemonIntent)
 	daemonIntentTasks := updatedDaemonIntent.Tasks
 
-	// Cache-refresh source is NOT the same as the drift overlay. The
-	// controller daemonIntentCache holds the operator's last-known stop
-	// intents; refreshing it from a CORRUPT read would overwrite those
-	// with the empty fallback UnifiedStopsFile synthesizes when the live
-	// file is unreadable — a fail-quiet regression that silently un-stops
-	// a deliberately-stopped daemon (it would come right back). That
-	// violates the §3 fail-loud-not-fail-quiet contract the redesign
-	// upholds, and is the exact behavior the PR #278 P2 contract locked
-	// in (pre-E1 this was gated by `updatedDaemonIntent == nil` on a
-	// non-valid read; E1's always-non-nil unified file dropped that gate).
-	//
-	// Mirror the merge owner's "corrupt fails CLOSED" posture on the
-	// READER side: only a non-corrupt read (valid → the live file;
-	// missing → the supervisor-intent stops baseline, a legitimate
-	// recovery source) may refresh the cache. A corrupt read leaves the
-	// cache untouched so the prior stops survive until the file is
-	// repaired/quarantined.
+	// Cache-refresh fail-loud guard (PR #278 P2 / §3 contract, anchored to the
+	// SOLE stop source after E2). The controller daemonIntentCache holds the
+	// operator's last-known stops; refreshing it from a corrupt/unreadable sole
+	// source would un-suppress a deliberately-stopped daemon. The
+	// supervisor-intent.json corrupt-read is already fail-closed UPSTREAM (step
+	// 1 returns RECONCILE_INTENT_READ_FAILED before reaching here), so by this
+	// point the sub-block read succeeded. The daemonIntentRes-state guard below
+	// is retained as defense-in-depth (vestigial after E2 — daemon-intent.json
+	// is gone, so its state is missing/non-corrupt): only a non-corrupt
+	// daemon-intent.json read refreshes the cache, leaving the prior stops in
+	// place on any anomalous read.
 	var cacheRefreshDaemonIntent *api.DaemonIntentFile
 	if daemonIntentRes.State != api.IntentStateCorrupt {
 		cacheRefreshDaemonIntent = updatedDaemonIntent
+	}
+	// Apply-mode missing-sole-source guard (PR #278 P2, this-PR P2-BLOCKER): in
+	// apply mode, a physically ABSENT supervisor-intent.json (the sole stop
+	// source after E2) yields an empty `updatedDaemonIntent` whose empty stops
+	// would clear the controller cache via applyReconcileDrift's Refresh. Force
+	// nil so the `!= nil` guard PRESERVES the prior daemonIntentCache instead of
+	// synthesizing an empty overlay — same fail-closed posture the watcher path
+	// applies on supFailed. Dry-run / orphan-report is unaffected: it never
+	// touches the cache, and the drift report below still computes against the
+	// empty intent (the deliberate missing-file tolerance for orphan detection).
+	if args.Apply && supervisorIntentMissing {
+		cacheRefreshDaemonIntent = nil
 	}
 
 	// (3) Scheduler snapshot.

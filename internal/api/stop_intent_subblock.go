@@ -1,0 +1,264 @@
+// Package api — v0.6 Phase 4-E2 stop-intent write path (the DESTRUCTIVE
+// step of the dual-intent collapse, Workstream §5 Phase E, step E2).
+//
+// stop_intent_subblock.go owns the SOLE stop WRITE path after E2: it folds
+// every operator stop / re-enable / uninstall tombstone directly into the
+// supervisor-intent.json `stops` sub-block (supervisor_intent.go), under the
+// supervisor-intent flock, replacing the E1-era WriteDaemonIntent path that
+// wrote the now-deleted daemon-intent.json file.
+//
+// Why a new owner (not a re-purpose of WriteDaemonIntent): WriteDaemonIntent
+// remains the legacy daemon-intent.json writer the E2 one-time boot-merge
+// still reads from when an OLD binary left a daemon-intent.json behind (and
+// the merge tests seed via it). Repointing the five production stop writers
+// to this sub-block owner is the E2 write-path move; the merge owner
+// (intent_collapse.go) handles the read-side migration + the ordered file
+// deletion.
+//
+// Semantics (identical to what the merge owner persists, so a live write and a
+// boot-merge converge to the same sub-block shape — intent_collapse.go
+// mergeDaemonIntentStops):
+//   - Desired=stopped AND IsActiveStop(now) → SET Stops[task] = intent
+//     (carry Desired/Reason/UpdatedAt verbatim so TTL/clock-skew/reason
+//     semantics round-trip through the pure predicate unchanged).
+//   - Desired=running, OR an inactive/expired stop → DELETE Stops[task].
+//     This is the re-enable tombstone path: install/restart/register write
+//     Desired=running to clear a prior stop so a re-installed/restarted
+//     daemon is no longer suppressed (E1 docstring intent_collapse.go: "the
+//     re-enable path writes a Desired=running tombstone … that the merge loop
+//     drops"). After E2 the write applies that drop directly to the sub-block
+//     rather than recording a running tombstone the merge later drops.
+//
+// The sub-block therefore stays a clean ACTIVE-STOPS-ONLY map, byte-identical
+// to the merge owner's MergedStops output, so the two write paths (boot-merge
+// vs live stop) can never disagree on shape.
+package api
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/gofrs/flock"
+)
+
+// WriteStopIntent is the Phase 4-E2 SOLE stop writer. It records (or clears)
+// the per-task stop directive for taskName directly in the
+// supervisor-intent.json `stops` sub-block, replacing the E1-era
+// WriteDaemonIntent(daemon-intent.json) path for the five production stop
+// writers (recordStopIntentAs, recordInstallIntentPostSuccess,
+// recordRestartIntentForTask, recordUninstallIntentForTasks,
+// recordRegisterIntentForTask).
+//
+// Behavior mirrors WriteDaemonIntent's contract so the five callers are a
+// drop-in repoint:
+//   - canonical leading-backslash key normalization (canonicalIntentTaskKey),
+//     with the same 1KB IdentityFieldByteCap fail-closed guard on both `who`
+//     and the canonical key;
+//   - UTC normalization of UpdatedAt (zero → now);
+//   - the same set-intent / clear-intent audit emission through the
+//     appendIntentAuditFn seam, with Before/After snapshots, so the forensic
+//     trail is unchanged.
+//
+// The active/inactive decision uses IsActiveStop(now) so a Desired=running or
+// already-expired write DROPS the entry (re-enable) and a fresh stop SETS it —
+// keeping the sub-block a pure active-stops map (see file docstring).
+//
+// Concurrency: acquires the supervisor-intent flock (`<path>.lock`) for the
+// whole read-modify-write, serializing against every other supervisor-intent
+// writer (InstallParsedManifest, serena_intent_repair, the boot-merge owner,
+// the autostart shim) cross-process. It applies ONLY the Stops sub-block onto
+// the freshly-read struct, so a concurrent Daemons/StrictMode/runtime_spec
+// edit is never clobbered (same lost-update guard the merge owner uses).
+func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) error {
+	if len(who) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+	taskName = canonicalIntentTaskKey(taskName)
+	if len(taskName) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+
+	intent.UpdatedAt = intent.UpdatedAt.UTC()
+	if intent.UpdatedAt.IsZero() {
+		intent.UpdatedAt = time.Now().UTC()
+	}
+
+	before, after, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+		// SET only when the directive is an ACTIVE stop; otherwise DROP the
+		// entry (re-enable / expired tombstone). time.Now().UTC() is the
+		// evaluation clock — a future-dated stop fail-closes to active via
+		// IsActiveStop, identical to the merge owner.
+		active, _ := intent.IsActiveStop(time.Now().UTC())
+		if active {
+			stops[taskName] = intent
+		} else {
+			delete(stops, taskName)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	// Audit emission matches WriteDaemonIntent: a SET emits set-intent with
+	// the After snapshot; a DROP (entry removed) emits clear-intent with the
+	// Before snapshot. A no-op write (drop of an absent entry) emits nothing.
+	emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+	return nil
+}
+
+// ClearStopIntent removes the stop directive for taskName from the
+// supervisor-intent.json `stops` sub-block. Idempotent — a missing entry is a
+// no-op success. Same flock + canonical-key + audit contract as
+// ClearDaemonIntent (the E1-era daemon-intent.json clear), so it is a drop-in
+// repoint for any caller that explicitly cleared a stop. Emits clear-intent
+// only when the entry actually existed.
+func (a *API) ClearStopIntent(taskName string, who string) error {
+	if len(who) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+	taskName = canonicalIntentTaskKey(taskName)
+	if len(taskName) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+
+	before, _, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+		delete(stops, taskName)
+	})
+	if err != nil {
+		return err
+	}
+	if before != nil && appendIntentAuditFn != nil {
+		_ = appendIntentAuditFn(NewIntentAuditEntry(
+			WithAction("clear-intent"),
+			WithTask(taskName),
+			WithWho(who),
+			WithReason(before.Reason),
+			WithBefore(before),
+		))
+	}
+	return nil
+}
+
+// mutateStopSubBlock is the shared read-modify-write core for the sub-block
+// stop writers. It acquires the supervisor-intent flock, re-reads the file
+// fresh under it, applies `mutate` to a COPY of the existing Stops map, writes
+// ONLY the recomputed Stops sub-block back (preserving every other field of
+// the freshly-read struct), and returns the Before/After snapshots for the
+// taskName so callers can emit the matching audit entry.
+//
+// before is the prior value for taskName (nil when absent); after is the new
+// value (nil when the mutation removed/left-absent the entry).
+//
+// Lock-free write body: it commits via writeSupervisorIntentLockHeld (the same
+// helper the merge owner uses) because the flock is already held — re-entering
+// WriteSupervisorIntent would re-acquire the flock and deadlock on Windows
+// LockFileEx (the readIntentLocked/writeIntentLocked split daemon_intent.go
+// established).
+func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonIntent)) (before, after *DaemonIntent, err error) {
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return nil, nil, fmt.Errorf("stop-intent: resolve supervisor-intent path: %w", err)
+	}
+
+	lock := flock.New(path + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return nil, nil, fmt.Errorf("stop-intent: flock supervisor-intent: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	// Read FRESH under the held lock. Missing file → empty intent (a stop
+	// recorded before `mcphub install` ever ran still lands in a freshly
+	// minted supervisor-intent.json). readSupervisorIntentForMerge owns the
+	// missing-file semantics (install_parsed_manifest.go), shared with the
+	// merge owner.
+	intent, _, readErr := readSupervisorIntentForMerge(path)
+	if readErr != nil {
+		return nil, nil, fmt.Errorf("stop-intent: read supervisor-intent.json: %w", readErr)
+	}
+	if intent == nil {
+		intent = &SupervisorIntentFile{}
+	}
+
+	// Copy the existing stops so the mutation never aliases the read struct's
+	// map (defensive — the struct is local, but the copy keeps the
+	// before/after snapshot honest).
+	stops := map[string]DaemonIntent{}
+	for k, v := range intent.Stops {
+		stops[k] = v
+	}
+	if prior, ok := stops[taskName]; ok {
+		p := prior
+		before = &p
+	}
+
+	mutate(stops)
+
+	if newVal, ok := stops[taskName]; ok {
+		n := newVal
+		after = &n
+	}
+
+	// Idempotent no-op short-circuit: if the mutation produced no change to
+	// the sub-block entry, skip the write entirely (no flock-held rewrite, no
+	// audit churn). stopEntriesEqual handles both-present-and-equal and
+	// both-absent.
+	if stopEntriesEqual(before, after) {
+		return before, after, nil
+	}
+
+	intent.Stops = stops
+	// Drop an empty sub-block back to nil so the on-disk file omits the
+	// `stops` key entirely (omitempty), matching a never-stopped host.
+	if len(intent.Stops) == 0 {
+		intent.Stops = nil
+	}
+	if err := writeSupervisorIntentLockHeld(path, intent); err != nil {
+		return nil, nil, fmt.Errorf("stop-intent: write supervisor-intent.json: %w", err)
+	}
+	return before, after, nil
+}
+
+// stopEntriesEqual reports whether two optional DaemonIntent snapshots are
+// equal (both nil, or both present with the same Desired/Reason/UpdatedAt).
+// Time equality uses Equal for monotonic-clock/location safety, mirroring
+// stopsMapsEqual.
+func stopEntriesEqual(a, b *DaemonIntent) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Desired == b.Desired && a.Reason == b.Reason && a.UpdatedAt.Equal(b.UpdatedAt)
+}
+
+// emitStopIntentAudit mirrors WriteDaemonIntent's auto-emitted audit record on
+// the sub-block write path: a SET (after != nil) emits set-intent with the
+// After snapshot + the prior Before; a DROP (after == nil but before != nil)
+// emits clear-intent with the Before snapshot. A no-op (both nil) emits
+// nothing. Routed through the appendIntentAuditFn seam so tests intercept it
+// exactly as they do for WriteDaemonIntent.
+func emitStopIntentAudit(before, after *DaemonIntent, taskName, who, reason string) {
+	if appendIntentAuditFn == nil {
+		return
+	}
+	switch {
+	case after != nil:
+		_ = appendIntentAuditFn(NewIntentAuditEntry(
+			WithAction("set-intent"),
+			WithTask(taskName),
+			WithWho(who),
+			WithReason(reason),
+			WithBefore(before),
+			WithAfter(after),
+		))
+	case before != nil:
+		// after==nil with a prior entry → the write dropped the stop
+		// (re-enable). Record it as a clear so the forensic trail shows the
+		// suppression lifting.
+		_ = appendIntentAuditFn(NewIntentAuditEntry(
+			WithAction("clear-intent"),
+			WithTask(taskName),
+			WithWho(who),
+			WithReason(reason),
+			WithBefore(before),
+		))
+	}
+}

@@ -418,18 +418,15 @@ func TestReconcileIPC_ApplyRefreshesCacheBeforePosting(t *testing.T) {
 	taskName := `\mcp-local-hub-foo-default`
 	fx := newReconcileTestFixture(t, &api.SupervisorIntentFile{Version: 1})
 
+	now := time.Now().UTC()
+	// Phase 4-E2: the stop lives in supervisor-intent.json's stops sub-block
+	// (the sole stop source), not a separate daemon-intent.json.
 	freshIntent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
 			{TaskName: taskName, Server: "foo", Daemon: "default"},
 		},
-	}
-	if err := api.WriteSupervisorIntent(filepath.Join(fx.deps.stateDir, "supervisor-intent.json"), freshIntent); err != nil {
-		t.Fatalf("overwrite supervisor-intent.json with fresh intent: %v", err)
-	}
-	now := time.Now().UTC()
-	freshDaemonIntent := api.DaemonIntentFile{
-		Tasks: map[string]api.DaemonIntent{
+		Stops: map[string]api.DaemonIntent{
 			taskName: {
 				Desired:   api.IntentDesiredStopped,
 				Reason:    api.IntentReasonUserStop,
@@ -437,12 +434,8 @@ func TestReconcileIPC_ApplyRefreshesCacheBeforePosting(t *testing.T) {
 			},
 		},
 	}
-	diRaw, err := json.Marshal(freshDaemonIntent)
-	if err != nil {
-		t.Fatalf("marshal daemon-intent: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(fx.deps.stateDir, "daemon-intent.json"), diRaw, 0o600); err != nil {
-		t.Fatalf("seed daemon-intent.json: %v", err)
+	if err := api.WriteSupervisorIntent(filepath.Join(fx.deps.stateDir, "supervisor-intent.json"), freshIntent); err != nil {
+		t.Fatalf("overwrite supervisor-intent.json with fresh intent: %v", err)
 	}
 	installSchedulerListFake(t, []scheduler.TaskStatus{
 		{Name: taskName, State: "Running"},
@@ -553,6 +546,79 @@ func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead(t *testing.T)
 	}
 	if !strings.Contains(logRaw, `"state":"corrupt"`) {
 		t.Fatalf("expected corrupt state in daemon-intent audit event; log:\n%s", logRaw)
+	}
+}
+
+// TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnMissingSupervisorIntent locks
+// in the Phase 4-E2 P2-BLOCKER fix: when supervisor-intent.json — the SOLE stop
+// source after E2 — is physically ABSENT during an apply-mode reconcile, the
+// synthesized empty intent must still NOT refresh the controller daemon-intent
+// cache with empty stops. Refreshing it would clear the operator's last-known
+// stops and let a child-exit/SM evaluation in that window REVIVE a deliberately
+// stopped daemon (the un-suppress bug). This is the missing-file analogue of
+// TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead and mirrors the
+// sibling watcher path resolveWatcherDaemonIntent's fail-closed posture on
+// supFailed (which is true for both corrupt AND os.ErrNotExist).
+//
+// PRE-FIX: cacheRefreshDaemonIntent was the non-nil empty unified file (a
+// missing daemon-intent.json is non-corrupt), so applyReconcileDrift called
+// ctrl.daemonIntent.Refresh(empty) and erased previousStop → this test FAILS
+// (the Lookup below returns an empty Desired instead of the preserved stop).
+func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnMissingSupervisorIntent(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
+	// The fixture seeds supervisor-intent.json; remove it so the read returns
+	// os.ErrNotExist (the "sole stop source physically absent" case). The
+	// controller still carries the descriptor + the prior stop in-memory.
+	if err := os.Remove(filepath.Join(fx.deps.stateDir, "supervisor-intent.json")); err != nil {
+		t.Fatalf("remove supervisor-intent.json: %v", err)
+	}
+
+	previousStop := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	fx.ctrl.daemonIntent.Refresh(&previousStop)
+
+	// Scheduler reports the daemon running. With the descriptor gone from the
+	// (now-missing) intent file, the intent walk finds no declared daemons —
+	// the running task surfaces as an orphan (needs_manual_review), never a
+	// post. AppliedCount must stay 0 regardless of the cache outcome.
+	installSchedulerListFake(t, []scheduler.TaskStatus{
+		{Name: taskName, State: "Running"},
+	})
+
+	req := api.IPCRequest{
+		ID:   26,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.AppliedCount != 0 {
+		t.Fatalf("AppliedCount = %d, want 0 for orphan running daemon on missing intent; drift=%+v",
+			body.AppliedCount, body.Drift)
+	}
+
+	got := fx.ctrl.daemonIntent.Lookup(taskName)
+	if got.Desired != api.IntentDesiredStopped {
+		t.Fatalf("daemon-intent cache desired = %q, want preserved %q after missing supervisor-intent.json",
+			got.Desired, api.IntentDesiredStopped)
 	}
 }
 
@@ -980,30 +1046,20 @@ func TestReconcileIPC_TimeoutErrors(t *testing.T) {
 	}
 }
 
-// TestReconcileIPC_DaemonIntentStopOverridesDefault — when daemon-intent.json
-// declares Desired=stopped for a task whose scheduler row is running,
-// the action must be post_ev_intent_update (terminate). Exercises the
-// daemon-intent overlay parse path.
+// TestReconcileIPC_DaemonIntentStopOverridesDefault — when the
+// supervisor-intent.json stops sub-block declares Desired=stopped for a task
+// whose scheduler row is running, the action must be post_ev_intent_update
+// (terminate). Phase 4-E2: the stop lives in the sub-block (the sole stop
+// source), not a separate daemon-intent.json.
 func TestReconcileIPC_DaemonIntentStopOverridesDefault(t *testing.T) {
 	taskName := `\mcp-local-hub-foo-default`
+	now := time.Now().UTC()
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
 			{TaskName: taskName, Server: "foo", Daemon: "default"},
 		},
-	}
-	fx := newReconcileTestFixture(t, intent)
-
-	// Seed daemon-intent.json with Desired=stopped for taskName.
-	// IMPORTANT: marshal via json.Marshal on the typed struct so the
-	// backslash in the canonical leading-backslash task key is
-	// JSON-escaped properly. A hand-built raw JSON string with a
-	// literal backslash-m sequence would produce
-	// 'invalid character m in string escape code' at decode time and
-	// the file would be quarantined as corrupt.
-	now := time.Now().UTC()
-	di := api.DaemonIntentFile{
-		Tasks: map[string]api.DaemonIntent{
+		Stops: map[string]api.DaemonIntent{
 			taskName: {
 				Desired:   api.IntentDesiredStopped,
 				Reason:    api.IntentReasonUserStop,
@@ -1011,14 +1067,8 @@ func TestReconcileIPC_DaemonIntentStopOverridesDefault(t *testing.T) {
 			},
 		},
 	}
-	diRaw, err := json.Marshal(di)
-	if err != nil {
-		t.Fatalf("marshal daemon-intent: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(fx.deps.stateDir, "daemon-intent.json"),
-		diRaw, 0o600); err != nil {
-		t.Fatalf("seed daemon-intent.json: %v", err)
-	}
+	fx := newReconcileTestFixture(t, intent)
+
 	installSchedulerListFake(t, []scheduler.TaskStatus{
 		{Name: taskName, State: "Running"}, // running, intent says stop → drift
 	})

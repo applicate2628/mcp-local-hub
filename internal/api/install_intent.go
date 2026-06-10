@@ -105,15 +105,15 @@ const AuditActionStopFailedNoKill = "stop-failed-no-kill"
 // human-readable and identical to the CLI surface so log readers
 // can filter by command.
 const (
-	auditWhoMcphubStop          = "mcphub stop"
-	auditWhoMcphubStopAll       = "mcphub stop --all"
-	auditWhoMcphubStopForce     = "mcphub stop --force"
-	auditWhoMcphubInstall       = "mcphub install"
-	auditWhoMcphubRestart       = "mcphub restart"
-	auditWhoMcphubUninstall     = "mcphub uninstall"
-	auditWhoMcphubRegister      = "mcphub register"
-	auditWhoMcphubSetup         = "mcphub setup"
-	auditWhoMcphubWatchdogInst  = "mcphub watchdog install"
+	auditWhoMcphubStop         = "mcphub stop"
+	auditWhoMcphubStopAll      = "mcphub stop --all"
+	auditWhoMcphubStopForce    = "mcphub stop --force"
+	auditWhoMcphubInstall      = "mcphub install"
+	auditWhoMcphubRestart      = "mcphub restart"
+	auditWhoMcphubUninstall    = "mcphub uninstall"
+	auditWhoMcphubRegister     = "mcphub register"
+	auditWhoMcphubSetup        = "mcphub setup"
+	auditWhoMcphubWatchdogInst = "mcphub watchdog install"
 )
 
 // AuditWhoMcphubSetup is the public form of auditWhoMcphubSetup so
@@ -264,7 +264,11 @@ func (a *API) recordStopIntentAs(taskNames []string, force bool, who string) err
 			Reason:    IntentReasonUserStop,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(canonical, intent, who); err != nil {
+		// Phase 4-E2: the stop lands in supervisor-intent.json's `stops`
+		// sub-block (the SOLE stop source after daemon-intent.json is
+		// deleted), NOT the legacy daemon-intent.json. WriteStopIntent keeps
+		// the canonical-key + 1KB-cap + audit contract identical.
+		if err := a.WriteStopIntent(canonical, intent, who); err != nil {
 			return fmt.Errorf("stop intent failed for %s: %w", canonical, err)
 		}
 		// Explicit Action=user-stop audit entry (distinct from
@@ -420,11 +424,17 @@ func (a *API) recordInstallIntentPostSuccess(m *config.ServerManifest, daemonFil
 			Reason:    IntentReasonInstall,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubInstall); err != nil {
-			// Log + continue: install already happened. The watchdog
-			// treats missing intent entries as Desired=running per
-			// the bootstrap policy, so a write failure here just
-			// loses the explicit record.
+		// Phase 4-E2: Desired=running clears any prior stop from the
+		// supervisor-intent.json `stops` sub-block (re-enable on
+		// (re)install). WriteStopIntent drops the entry when the directive
+		// is not an active stop, so a freshly-installed daemon is no longer
+		// suppressed — same net effect as the E1 running-tombstone the merge
+		// loop dropped, applied directly to the sole stop source.
+		if err := a.WriteStopIntent(canonical, intent, auditWhoMcphubInstall); err != nil {
+			// Log + continue: install already happened. A missing stop
+			// entry is treated as Desired=running per the bootstrap policy,
+			// so a write failure here just loses the explicit re-enable
+			// record.
 			if w != nil {
 				fmt.Fprintf(w, "warning: write install intent for %s: %v\n", canonical, err)
 			}
@@ -450,7 +460,12 @@ func (a *API) recordRestartIntentForTask(taskName string, w io.Writer) {
 		Reason:    IntentReasonInstall, // re-asserts the install intent
 		UpdatedAt: now,
 	}
-	if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubRestart); err != nil {
+	// Phase 4-E2: Desired=running clears any prior stop from the
+	// supervisor-intent.json `stops` sub-block, re-enabling a previously
+	// stopped/quarantined daemon on restart (the RESPAWN_REFUSED_INTENT_STOPPED
+	// → re-enable contract in gui/daemon_env.go). WriteStopIntent drops the
+	// entry because Desired=running is not an active stop.
+	if err := a.WriteStopIntent(canonical, intent, auditWhoMcphubRestart); err != nil {
 		if w != nil {
 			fmt.Fprintf(w, "warning: write restart intent for %s: %v\n", canonical, err)
 		}
@@ -483,7 +498,11 @@ func (a *API) recordUninstallIntentForTasks(taskNames []string, w io.Writer) {
 			Reason:    IntentReasonUninstalled,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubUninstall); err != nil {
+		// Phase 4-E2: the uninstall tombstone (Desired=stopped,
+		// Reason=uninstalled) lands in the supervisor-intent.json `stops`
+		// sub-block so the reconcile loop respects it should the task
+		// reappear (uninstalled never expires — no user-stop TTL).
+		if err := a.WriteStopIntent(canonical, intent, auditWhoMcphubUninstall); err != nil {
 			if w != nil {
 				fmt.Fprintf(w, "warning: write uninstall intent for %s: %v\n", canonical, err)
 			}
@@ -523,7 +542,11 @@ func (a *API) recordRegisterIntentForTask(taskName string, w io.Writer) {
 		Reason:    IntentReasonRegister,
 		UpdatedAt: now,
 	}
-	if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubRegister); err != nil {
+	// Phase 4-E2: Desired=running clears any prior stop from the
+	// supervisor-intent.json `stops` sub-block, re-enabling a re-registered
+	// workspace daemon. WriteStopIntent drops the entry because
+	// Desired=running is not an active stop.
+	if err := a.WriteStopIntent(canonical, intent, auditWhoMcphubRegister); err != nil {
 		if w != nil {
 			fmt.Fprintf(w, "warning: write register intent for %s: %v\n", canonical, err)
 		}

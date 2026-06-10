@@ -54,9 +54,14 @@ import (
 // tracks under <state-dir>. Kept package-private so the reconcile
 // loop can't accidentally widen the surface — adding a new tracked
 // file is a deliberate code change in this file.
+//
+// Phase 4-E2: daemon-intent.json is DROPPED from this list. After E2 the
+// supervisor-intent.json `stops` sub-block is the SOLE stop source (the
+// boot-merge deletes daemon-intent.json + its writers are gone), so a write
+// that changes a stop now bumps supervisor-intent.json's mtime — already
+// tracked. A perpetually-absent daemon-intent.json need not be polled.
 var watchedIntentFiles = []string{
 	"supervisor-intent.json",
-	"daemon-intent.json",
 }
 
 // IntentWatcher polls the two intent files under <state-dir> for

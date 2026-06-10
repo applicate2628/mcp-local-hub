@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 type supervisorRestartRespawnFunc func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error)
@@ -106,8 +107,9 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 		// outcomes:
 		//
 		//   - RESPAWN_REFUSED_INTENT_STOPPED → recoverable: the daemon is
-		//     idle and the SM refused only because daemon-intent.json still
-		//     records Desired=stopped (e.g. after a supervisor-aware stop).
+		//     idle and the SM refused only because the supervisor-intent.json
+		//     stops sub-block still records Desired=stopped (Phase 4-E2: the
+		//     sole stop source; e.g. after a supervisor-aware stop).
 		//     Write Desired=running, then dispatch ONE `reconcile --apply`
 		//     (NOT a respawn redial). This is the F1 reversibility case,
 		//     now intent-write-AFTER-first-refusal so the write only happens
@@ -143,16 +145,40 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 			// logs write failures through os.Stderr and never propagates,
 			// so we verify the write landed via a read-back below rather
 			// than relying on a swallowed error.
+			//
+			// Phase 4-E2: recordRestartIntentForTask now CLEARS the stop from
+			// the supervisor-intent.json `stops` sub-block (Desired=running
+			// drops the entry). The read-back therefore checks that the stop is
+			// gone — by re-reading the sub-block authoritatively.
+			//
+			// P3b fail-closed: the verification must DISTINGUISH a genuine
+			// no-stop (clear landed) from a read FAILURE of the now-sole
+			// supervisor-intent.json. The plain IntentStillRunning predicate is
+			// best-effort: its lookupSupervisorStop collapses a read error and a
+			// real no-stop into the same (zero,false) → "running", so a
+			// transient/corrupt read would report a silently-FAILED re-enable
+			// write as success. supervisorStopClearVerified surfaces the read
+			// error so we keep emitting the honest "clearing the stop failed"
+			// error row on a read failure (diagnostic fidelity; the dispatched
+			// reconcile below re-reads fresh and cannot revive a still-stopped
+			// daemon, so this is fidelity-only, not a revive bug).
 			api := NewAPI()
 			api.recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), os.Stderr)
-			if api.ReadDaemonIntent().File.Tasks[d.TaskName].Desired != IntentDesiredRunning {
-				// The intent write itself failed (logged to os.Stderr).
-				// Nothing on disk to converge — skip the reconcile and
-				// emit an honest error row. The IntentWatcher will NOT
-				// revive this daemon because disk still records stopped.
+			cleared, verifyErr := supervisorStopClearVerified(d.TaskName, time.Now().UTC())
+			if !cleared {
+				// The intent write itself failed (logged to os.Stderr), OR the
+				// sole-source read-back failed so we cannot confirm the clear.
+				// Either way: nothing trustworthy on disk to converge — skip the
+				// reconcile and emit an honest error row. The IntentWatcher will
+				// NOT revive a still-stopped daemon, and on a read failure we
+				// must not claim a success we could not verify.
+				msg := "respawn refused (intent stopped); clearing the stop (Desired=running) failed, so the restart cannot be dispatched — see stderr for the write error"
+				if verifyErr != nil {
+					msg = "respawn refused (intent stopped); verifying the cleared stop failed (read of supervisor-intent.json stops sub-block: " + verifyErr.Error() + "), so the restart cannot be dispatched — see stderr for any write error"
+				}
 				results = append(results, RestartResult{
 					TaskName: d.TaskName,
-					Err:      "respawn refused (intent stopped); writing Desired=running failed, so the restart cannot be dispatched — see stderr for the write error",
+					Err:      msg,
 					Code:     result.Code,
 				})
 				continue
@@ -217,6 +243,35 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 		results = append(results, RestartResult{TaskName: d.TaskName, Err: msg, Code: result.Code})
 	}
 	return results, true, nil
+}
+
+// supervisorStopClearVerified is the fail-closed read-back for the restart
+// re-enable path. After recordRestartIntentForTask CLEARS the stop from the
+// supervisor-intent.json `stops` sub-block (Desired=running drops the entry),
+// this re-reads the sub-block — the SOLE stop source after Phase 4-E2 — and
+// reports:
+//
+//   - (true, nil)  → the stop is gone (no entry, expired, or file genuinely
+//     absent): the clear landed, dispatch may proceed.
+//   - (false, nil) → an ACTIVE stop is still recorded at `now`: the clearing
+//     write did not land; emit the honest error row.
+//   - (false, err) → the sole-source read itself FAILED (corrupt/locked/IO):
+//     we cannot confirm the clear, so fail closed and surface the read error.
+//
+// The third case is the P3b correction: the plain best-effort
+// IntentStillRunning predicate collapses a read error into "running" and would
+// have falsely reported a silently-failed re-enable as success. taskName is
+// normalized to the canonical leading-backslash key the sub-block is keyed on.
+func supervisorStopClearVerified(taskName string, now time.Time) (bool, error) {
+	stopIntent, found, err := lookupSupervisorStopChecked(canonicalIntentTaskKey(taskName))
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return true, nil
+	}
+	active, _ := stopIntent.IsActiveStop(now)
+	return !active, nil
 }
 
 func normalizeSupervisorRestartTaskName(taskName string) string {

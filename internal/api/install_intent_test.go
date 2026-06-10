@@ -105,8 +105,8 @@ func TestRecordStopIntent_NoForce_HappyPath(t *testing.T) {
 	// Finding 1: every audit entry now carries the canonical leading-
 	// backslash task identity so log filters pivot on one shape.
 	wantActions := map[string]bool{
-		"set-intent":          false,
-		AuditActionUserStop:   false,
+		"set-intent":        false,
+		AuditActionUserStop: false,
 	}
 	canonicalTask := "\\" + taskNames[0]
 	for _, e := range r.entries {
@@ -122,14 +122,11 @@ func TestRecordStopIntent_NoForce_HappyPath(t *testing.T) {
 			t.Errorf("expected audit Action=%q in entries: %+v", action, r.entries)
 		}
 	}
-	// Intent file written with Desired=stopped + Reason=user-stop.
-	res := a.ReadDaemonIntent()
-	if res.State != IntentStateValid {
-		t.Fatalf("intent state = %q, want valid (dir=%s)", res.State, dir)
-	}
-	got, ok := res.File.Tasks[canonicalTask]
+	// Phase 4-E2: the stop now lands in supervisor-intent.json's `stops`
+	// sub-block, NOT daemon-intent.json.
+	got, ok := readSubBlockStopForTest(t, dir)[canonicalTask]
 	if !ok {
-		t.Fatalf("intent file missing entry for %s; tasks=%+v", canonicalTask, res.File.Tasks)
+		t.Fatalf("stops sub-block missing entry for %s", canonicalTask)
 	}
 	if got.Desired != IntentDesiredStopped {
 		t.Errorf("Desired = %q, want %q", got.Desired, IntentDesiredStopped)
@@ -137,6 +134,28 @@ func TestRecordStopIntent_NoForce_HappyPath(t *testing.T) {
 	if got.Reason != IntentReasonUserStop {
 		t.Errorf("Reason = %q, want %q", got.Reason, IntentReasonUserStop)
 	}
+	// daemon-intent.json must NOT be written by the E2 stop path.
+	if a.ReadDaemonIntent().State == IntentStateValid {
+		t.Errorf("daemon-intent.json should not be written by the E2 stop path")
+	}
+}
+
+// readSubBlockStopForTest reads the supervisor-intent.json `stops` sub-block
+// under the test state dir (Phase 4-E2: the sole stop source). Returns an
+// empty map when the file does not exist (a no-op stop never created it).
+func readSubBlockStopForTest(t *testing.T, stateDir string) map[string]DaemonIntent {
+	t.Helper()
+	got, err := ReadSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]DaemonIntent{}
+		}
+		t.Fatalf("read supervisor-intent.json stops: %v", err)
+	}
+	if got.Stops == nil {
+		return map[string]DaemonIntent{}
+	}
+	return got.Stops
 }
 
 func TestRecordStopIntent_NoForce_AuditFailsErrIdentityOversize(t *testing.T) {
@@ -330,33 +349,38 @@ func TestRecordInstallAuditPreMutation_DaemonFilter_OnlyOneTask(t *testing.T) {
 // (audit-fail tolerated; intent-fail is logged through the writer).
 // ---------------------------------------------------------------------------
 
-func TestRecordInstallIntentPostSuccess_HappyPath(t *testing.T) {
+// Phase 4-E2: recordInstallIntentPostSuccess writes Desired=running, which on
+// the stops sub-block CLEARS any prior stop (re-enable) and is a NO-OP when no
+// prior stop exists (a never-stopped daemon needs no running record). The E1
+// behavior — an explicit Desired=running entry in daemon-intent.json — is gone.
+func TestRecordInstallIntentPostSuccess_E2_ClearsPriorStop(t *testing.T) {
 	a := NewAPI()
-	daemonIntentTestHelper(t)
+	dir := daemonIntentTestHelper(t)
 	r := &recordingAuditWriter{}
 	installRecordingAudit(t, r)
 	m := installAuditPreMutationTestManifest()
-	var buf bytes.Buffer
 
+	// Seed a prior stop for one of the install tasks in the sub-block.
+	alpha := "\\mcp-local-hub-task10test-alpha"
+	if err := a.WriteStopIntent(alpha, DaemonIntent{
+		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC(),
+	}, "tester"); err != nil {
+		t.Fatalf("seed prior stop: %v", err)
+	}
+	if _, ok := readSubBlockStopForTest(t, dir)[alpha]; !ok {
+		t.Fatalf("precondition: prior stop should be set")
+	}
+
+	var buf bytes.Buffer
 	a.recordInstallIntentPostSuccess(m, "", &buf)
 
-	res := a.ReadDaemonIntent()
-	if res.State != IntentStateValid {
-		t.Fatalf("intent state = %q, want valid", res.State)
+	// The install (Desired=running) cleared the prior stop → re-enabled.
+	if _, ok := readSubBlockStopForTest(t, dir)[alpha]; ok {
+		t.Errorf("install Desired=running should have cleared the prior stop")
 	}
-	// Codex deep-sec PR #135 Finding 1: canonical leading-backslash key.
-	for _, name := range []string{"\\mcp-local-hub-task10test-alpha", "\\mcp-local-hub-task10test-beta"} {
-		got, ok := res.File.Tasks[name]
-		if !ok {
-			t.Errorf("intent file missing entry for %s; tasks=%+v", name, res.File.Tasks)
-			continue
-		}
-		if got.Desired != IntentDesiredRunning {
-			t.Errorf("%s.Desired = %q, want %q", name, got.Desired, IntentDesiredRunning)
-		}
-		if got.Reason != IntentReasonInstall {
-			t.Errorf("%s.Reason = %q, want %q", name, got.Reason, IntentReasonInstall)
-		}
+	// daemon-intent.json must not be written by the E2 path.
+	if a.ReadDaemonIntent().State == IntentStateValid {
+		t.Errorf("daemon-intent.json should not be written by the E2 install path")
 	}
 	if buf.Len() != 0 {
 		t.Errorf("expected no warnings on happy path, got: %s", buf.String())
@@ -365,28 +389,29 @@ func TestRecordInstallIntentPostSuccess_HappyPath(t *testing.T) {
 
 func TestRecordInstallIntentPostSuccess_AuditFails_LoggedNotPropagated(t *testing.T) {
 	a := NewAPI()
-	daemonIntentTestHelper(t)
-	// All set-intent audit appends fail. WriteDaemonIntent itself
-	// still succeeds (the on-disk file is updated atomically before
-	// the audit is dispatched), so the intent file ends up populated.
-	// The function MUST NOT propagate the audit error.
+	dir := daemonIntentTestHelper(t)
+	// The clear-intent audit (emitted when re-enabling a prior stop) fails.
+	// WriteStopIntent still commits the sub-block write before dispatching the
+	// audit, so the stop is cleared; the function MUST NOT propagate the error.
 	r := &recordingAuditWriter{
-		failActions: map[string]error{"set-intent": errors.New("synthetic disk-full")},
+		failActions: map[string]error{"clear-intent": errors.New("synthetic disk-full")},
 	}
 	installRecordingAudit(t, r)
 	m := installAuditPreMutationTestManifest()
-	var buf bytes.Buffer
 
+	alpha := "\\mcp-local-hub-task10test-alpha"
+	if err := a.WriteStopIntent(alpha, DaemonIntent{
+		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC(),
+	}, "tester"); err != nil {
+		t.Fatalf("seed prior stop: %v", err)
+	}
+
+	var buf bytes.Buffer
 	a.recordInstallIntentPostSuccess(m, "", &buf)
 
-	// Even though audit failed, intent file should still be written
-	// because WriteDaemonIntent's audit path is fail-open.
-	res := a.ReadDaemonIntent()
-	if res.State != IntentStateValid {
-		t.Fatalf("intent state = %q, want valid (intent write succeeded; audit-fail is best-effort)", res.State)
-	}
-	if len(res.File.Tasks) != 2 {
-		t.Errorf("intent entries = %d, want 2", len(res.File.Tasks))
+	// Even though the clear-intent audit failed, the sub-block clear committed.
+	if _, ok := readSubBlockStopForTest(t, dir)[alpha]; ok {
+		t.Errorf("E2: prior stop should be cleared despite audit failure (fail-open)")
 	}
 }
 
@@ -551,28 +576,30 @@ func TestRecordRestartIntentForTask_AuditFails_LoggedNotPropagated(t *testing.T)
 	}
 }
 
-func TestRecordRestartIntentForTask_HappyPath(t *testing.T) {
+// Phase 4-E2: recordRestartIntentForTask writes Desired=running, which CLEARS
+// any prior stop from the sub-block (re-enable) and is a no-op on a clean
+// state. The server-restarted audit still fires.
+func TestRecordRestartIntentForTask_E2_ClearsPriorStop(t *testing.T) {
 	a := NewAPI()
-	daemonIntentTestHelper(t)
+	dir := daemonIntentTestHelper(t)
 	r := &recordingAuditWriter{}
 	installRecordingAudit(t, r)
 	var buf bytes.Buffer
 
-	a.recordRestartIntentForTask("\\mcp-local-hub-time-default", &buf)
+	task := "\\mcp-local-hub-time-default"
+	// Seed a prior stop, then restart re-enables (clears) it.
+	if err := a.WriteStopIntent(task, DaemonIntent{
+		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC(),
+	}, "tester"); err != nil {
+		t.Fatalf("seed prior stop: %v", err)
+	}
+	a.recordRestartIntentForTask(task, &buf)
 
-	res := a.ReadDaemonIntent()
-	if res.State != IntentStateValid {
-		t.Fatalf("intent state = %q, want valid", res.State)
+	if _, ok := readSubBlockStopForTest(t, dir)[task]; ok {
+		t.Errorf("restart Desired=running should have cleared the prior stop")
 	}
-	got, ok := res.File.Tasks["\\mcp-local-hub-time-default"]
-	if !ok {
-		t.Fatalf("intent file missing entry")
-	}
-	if got.Desired != IntentDesiredRunning {
-		t.Errorf("Desired = %q, want %q", got.Desired, IntentDesiredRunning)
-	}
-	if got.Reason != IntentReasonInstall {
-		t.Errorf("Reason = %q, want %q (restart re-asserts install intent)", got.Reason, IntentReasonInstall)
+	if a.ReadDaemonIntent().State == IntentStateValid {
+		t.Errorf("daemon-intent.json should not be written by the E2 restart path")
 	}
 	// Audit captured the server-restarted Action.
 	sawServerRestarted := false
@@ -589,7 +616,7 @@ func TestRecordRestartIntentForTask_HappyPath(t *testing.T) {
 
 func TestRecordUninstallIntentForTasks_HappyPath(t *testing.T) {
 	a := NewAPI()
-	daemonIntentTestHelper(t)
+	dir := daemonIntentTestHelper(t)
 	r := &recordingAuditWriter{}
 	installRecordingAudit(t, r)
 	var buf bytes.Buffer
@@ -597,17 +624,16 @@ func TestRecordUninstallIntentForTasks_HappyPath(t *testing.T) {
 	tasks := []string{"mcp-local-hub-task10test-alpha", "mcp-local-hub-task10test-beta"}
 	a.recordUninstallIntentForTasks(tasks, &buf)
 
-	res := a.ReadDaemonIntent()
-	if res.State != IntentStateValid {
-		t.Fatalf("intent state = %q, want valid", res.State)
-	}
+	// Phase 4-E2: the uninstall tombstone (Desired=stopped, uninstalled) lands
+	// in the supervisor-intent.json stops sub-block.
+	stops := readSubBlockStopForTest(t, dir)
 	// Codex deep-sec PR #135 Finding 1: storage uses canonical leading-
 	// backslash form regardless of caller-supplied shape.
 	canonicalTasks := []string{"\\" + tasks[0], "\\" + tasks[1]}
 	for _, name := range canonicalTasks {
-		got, ok := res.File.Tasks[name]
+		got, ok := stops[name]
 		if !ok {
-			t.Errorf("intent file missing entry for %s; tasks=%+v", name, res.File.Tasks)
+			t.Errorf("stops sub-block missing entry for %s; stops=%+v", name, stops)
 			continue
 		}
 		if got.Desired != IntentDesiredStopped {
@@ -648,29 +674,31 @@ func TestRecordUninstallIntentForTasks_AuditFails_LoggedNotPropagated(t *testing
 	}
 }
 
-func TestRecordRegisterIntentForTask_HappyPath(t *testing.T) {
+// Phase 4-E2: recordRegisterIntentForTask writes Desired=running, which CLEARS
+// any prior stop from the sub-block (re-enable) and is a no-op on a clean
+// state. The workspace-registered audit still fires.
+func TestRecordRegisterIntentForTask_E2_ClearsPriorStop(t *testing.T) {
 	a := NewAPI()
-	daemonIntentTestHelper(t)
+	dir := daemonIntentTestHelper(t)
 	r := &recordingAuditWriter{}
 	installRecordingAudit(t, r)
 	var buf bytes.Buffer
 
 	taskName := "mcp-local-hub-lsp-deadbeef-python"
+	canonicalTask := "\\" + taskName
+	// Seed a prior stop, then register re-enables (clears) it.
+	if err := a.WriteStopIntent(canonicalTask, DaemonIntent{
+		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC(),
+	}, "tester"); err != nil {
+		t.Fatalf("seed prior stop: %v", err)
+	}
 	a.recordRegisterIntentForTask(taskName, &buf)
 
-	res := a.ReadDaemonIntent()
-	// Codex deep-sec PR #135 Finding 1: storage uses canonical leading-
-	// backslash form regardless of caller-supplied shape.
-	canonicalTask := "\\" + taskName
-	got, ok := res.File.Tasks[canonicalTask]
-	if !ok {
-		t.Fatalf("intent file missing entry for %s; res.State=%q tasks=%+v", canonicalTask, res.State, res.File.Tasks)
+	if _, ok := readSubBlockStopForTest(t, dir)[canonicalTask]; ok {
+		t.Errorf("register Desired=running should have cleared the prior stop")
 	}
-	if got.Desired != IntentDesiredRunning {
-		t.Errorf("Desired = %q, want %q", got.Desired, IntentDesiredRunning)
-	}
-	if got.Reason != IntentReasonRegister {
-		t.Errorf("Reason = %q, want %q", got.Reason, IntentReasonRegister)
+	if a.ReadDaemonIntent().State == IntentStateValid {
+		t.Errorf("daemon-intent.json should not be written by the E2 register path")
 	}
 	// Audit emitted workspace-registered.
 	saw := false

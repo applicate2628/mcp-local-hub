@@ -4,8 +4,9 @@ package api
 // redesign.md) — make Stop/StopAll supervisor-aware. stopSupervisorOwnedDaemons
 // is the stop-side mirror of restartSupervisorOwnedDaemons: instead of a
 // per-target IPC respawn it issues ONE `reconcile --apply`, because the
-// caller has already written Desired=stopped into daemon-intent.json
-// (recordStopIntent runs BEFORE this pass); the supervisor re-reads the
+// caller has already written Desired=stopped into the supervisor-intent.json
+// `stops` sub-block (Phase 4-E2: the sole stop source; recordStopIntent runs
+// BEFORE this pass); the supervisor re-reads the
 // fresh intent, posts EvIntentUpdate per drifted task, and the SM drives
 // StRunning→StExiting→StIdle — a deliberate stop the reaper does NOT
 // respawn. The legacy alternative (killDaemonByPort = taskkill /F /T) is a
@@ -134,8 +135,9 @@ func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) fun
 //     whether convergence was synchronous or is the watcher's job.
 //
 // PRECONDITION: the caller must have recorded Desired=stopped intent for
-// the targets (recordStopIntent) BEFORE calling — the reconcile reads
-// daemon-intent.json from disk, so a stop intent that is not yet on disk
+// the targets (recordStopIntent) BEFORE calling — the reconcile reads the
+// supervisor-intent.json `stops` sub-block (Phase 4-E2: the sole stop source)
+// from disk, so a stop intent that is not yet on disk
 // cannot be applied.
 func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string) ([]RestartResult, bool, error) {
 	targets, err := loadSupervisorOwnedTargets(server, daemonFilter)

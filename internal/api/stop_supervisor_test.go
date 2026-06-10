@@ -100,9 +100,11 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 		gotApply = apply
 		// Read-back assertion: the stop intent must already be on disk
 		// when the reconcile fires, otherwise the supervisor would see
-		// desired=running and stop nothing.
-		res := NewAPI().ReadDaemonIntent()
-		intentDesiredAtReconcile = res.File.Tasks[stopSupervisorTestTask].Desired
+		// desired=running and stop nothing. Phase 4-E2: the stop lives in
+		// the supervisor-intent.json `stops` sub-block (the sole source).
+		if di, ok := lookupSupervisorStop(stopSupervisorTestTask); ok {
+			intentDesiredAtReconcile = di.Desired
+		}
 		// No-legacy drift: every supervisor-intent row is dispatched through
 		// the SM (post_ev_intent_update) — regular daemon included.
 		return ReconcileResponse{
@@ -243,8 +245,11 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 	var gotApply bool
 	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		gotApply = apply
-		res := NewAPI().ReadDaemonIntent()
-		intentDesiredAtReconcile = res.File.Tasks[stopSupervisorTestTask].Desired
+		// Phase 4-E2: the stop lives in the supervisor-intent.json stops
+		// sub-block (the sole source), read here via lookupSupervisorStop.
+		if di, ok := lookupSupervisorStop(stopSupervisorTestTask); ok {
+			intentDesiredAtReconcile = di.Desired
+		}
 		// Honesty backstop: the lone daemon is already idle/settled, so its
 		// terminate classifies no_op (nothing live to terminate) — NOT a
 		// post_ev_intent_update. The api side must report it as deferred.

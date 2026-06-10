@@ -126,8 +126,17 @@ func installTestAuditFn(t *testing.T, capture *[]IntentAuditEntry, retErr error)
 }
 
 // installTestIntentReader patches the intent-read seam.
+//
+// Phase 4-E2: IntentStillRunning now consults the supervisor-intent.json
+// `stops` sub-block FIRST (the sole authoritative source) before falling back
+// to this seam. To keep seam-only tests hermetic AND state-safe — never
+// reading the developer's LIVE supervisor-intent.json — this also redirects
+// the state dir to an empty t.TempDir(). The empty dir makes lookupSupervisorStop
+// miss, so the seam (the thing the test is actually exercising) decides.
 func installTestIntentReader(t *testing.T, fn func(taskName string) (DaemonIntent, bool, error)) {
 	t.Helper()
+	restoreRoot := SetDaemonStateRootForTest(t.TempDir())
+	t.Cleanup(restoreRoot)
 	orig := readDaemonIntentFn
 	readDaemonIntentFn = fn
 	t.Cleanup(func() { readDaemonIntentFn = orig })

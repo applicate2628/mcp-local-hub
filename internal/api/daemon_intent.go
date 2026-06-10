@@ -722,6 +722,15 @@ func isUTCInstant(raw []byte, taskName string) bool {
 // emits a "set-intent" audit entry with the pre-mutation Before
 // snapshot and the post-mutation After snapshot.
 //
+// Phase 4-E2: this is NO LONGER the live stop writer. The five production
+// stop writers (recordStopIntentAs / recordInstall/Restart/Uninstall/Register-
+// IntentForTask) now write the supervisor-intent.json `stops` sub-block via
+// WriteStopIntent (stop_intent_subblock.go). WriteDaemonIntent remains ONLY
+// to (a) write the legacy daemon-intent.json an OLD binary still owns during
+// the redeploy window, and (b) let the merge tests seed a daemon-intent.json
+// the boot-merge then migrates + deletes. Production code outside that
+// migration boundary must use WriteStopIntent.
+//
 // Atomicity:
 //  1. Acquire gofrs/flock on the sibling `.lock` file.
 //  2. Read+parse the existing file (if any). Corrupt files are

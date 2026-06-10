@@ -86,14 +86,24 @@ func TestIntentWatcher_FiresOnSupervisorIntentChange(t *testing.T) {
 	}
 }
 
-// TestIntentWatcher_FiresOnDaemonIntentChange asserts the same contract
-// against the second tracked file. Both files are equal-priority intent
-// inputs; a bug in the watchedIntentFiles slice or a typo in the
-// snapshot loop would let one file regress while the other still works.
-func TestIntentWatcher_FiresOnDaemonIntentChange(t *testing.T) {
+// TestIntentWatcher_DoesNotFireOnDaemonIntentChange pins the Phase 4-E2
+// contract: daemon-intent.json is DROPPED from watchedIntentFiles, so a
+// change to a (stale/leftover) daemon-intent.json must NOT trigger a
+// reconcile. After E2 the supervisor-intent.json `stops` sub-block is the
+// sole stop source; the watcher tracks only that file. A regression that
+// re-added daemon-intent.json to watchedIntentFiles would fire here and the
+// test would catch it.
+func TestIntentWatcher_DoesNotFireOnDaemonIntentChange(t *testing.T) {
 	dir := t.TempDir()
-	intentPath := filepath.Join(dir, "daemon-intent.json")
-	if err := os.WriteFile(intentPath, []byte(`{"version":1,"tasks":{}}`), 0600); err != nil {
+	// Seed BOTH a supervisor-intent.json (the tracked file) and a leftover
+	// daemon-intent.json so the watcher has a stable baseline and only the
+	// daemon-intent.json mutates below.
+	supPath := filepath.Join(dir, "supervisor-intent.json")
+	if err := os.WriteFile(supPath, []byte(`{"version":1,"updated_at":"2026-05-17T00:00:00Z","daemons":[],"strict_mode":false}`), 0600); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	daemonPath := filepath.Join(dir, "daemon-intent.json")
+	if err := os.WriteFile(daemonPath, []byte(`{"version":1,"tasks":{}}`), 0600); err != nil {
 		t.Fatalf("seed daemon-intent.json: %v", err)
 	}
 
@@ -111,20 +121,16 @@ func TestIntentWatcher_FiresOnDaemonIntentChange(t *testing.T) {
 		t.Fatalf("expected 0 fires before mtime change, got %d", got)
 	}
 
+	// Mutate ONLY daemon-intent.json. The watcher must stay quiet.
 	time.Sleep(50 * time.Millisecond)
-	if err := os.WriteFile(intentPath, []byte(`{"version":1,"tasks":{"\\foo":{"desired":"stopped"}}}`), 0600); err != nil {
+	if err := os.WriteFile(daemonPath, []byte(`{"version":1,"tasks":{"\\foo":{"desired":"stopped"}}}`), 0600); err != nil {
 		t.Fatalf("modify daemon-intent.json: %v", err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if fireCount.Load() > 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if got := fireCount.Load(); got == 0 {
-		t.Fatalf("expected fire after daemon-intent.json change, got 0")
+	// Wait several poll cycles; assert NO fire (daemon-intent.json untracked).
+	time.Sleep(250 * time.Millisecond)
+	if got := fireCount.Load(); got != 0 {
+		t.Fatalf("expected 0 fires after daemon-intent.json change (E2: untracked), got %d", got)
 	}
 }
 
@@ -199,12 +205,13 @@ func TestIntentWatcher_FiresOnFileCreation(t *testing.T) {
 }
 
 // TestIntentWatcher_FiresOnFileDeletion asserts the inverse presence
-// transition: deleting a tracked file (operator clears all stops by
-// removing daemon-intent.json) must trigger reconcile.
+// transition: deleting the tracked supervisor-intent.json (e.g. an operator
+// clearing the intent) must trigger reconcile. Phase 4-E2: the tracked file
+// is supervisor-intent.json (daemon-intent.json is no longer watched).
 func TestIntentWatcher_FiresOnFileDeletion(t *testing.T) {
 	dir := t.TempDir()
-	intentPath := filepath.Join(dir, "daemon-intent.json")
-	if err := os.WriteFile(intentPath, []byte(`{"version":1,"tasks":{}}`), 0600); err != nil {
+	intentPath := filepath.Join(dir, "supervisor-intent.json")
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"updated_at":"2026-05-17T00:00:00Z","daemons":[],"strict_mode":false}`), 0600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -223,7 +230,7 @@ func TestIntentWatcher_FiresOnFileDeletion(t *testing.T) {
 	}
 
 	if err := os.Remove(intentPath); err != nil {
-		t.Fatalf("remove daemon-intent.json: %v", err)
+		t.Fatalf("remove supervisor-intent.json: %v", err)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -371,14 +378,18 @@ func TestResolveWatcherDaemonIntent_FailClosedContract(t *testing.T) {
 			wantStopped:  true,
 		},
 		{
-			// Live daemon-intent.json present is authoritative even when the
-			// supervisor read failed — NOT a regression, the live file wins.
-			name:         "supFailed_but_live_daemon_intent_present_uses_live",
+			// Phase 4-E2: supervisor-intent.json read FAILED → keep previous
+			// UNCONDITIONALLY. Even a (stale) live daemon-intent.json present is
+			// IGNORED now that the sub-block is the sole source — a failed read
+			// of the sole source must not let a stale leftover decide, so the
+			// resolver fails closed to the cached snapshot. (E1 used the live
+			// file here; E2 inverts that precedence.)
+			name:         "supFailed_keeps_previous_even_with_stale_daemon_intent",
 			supRead:      nil,
 			rawDaemon:    liveStop,
 			daemonFailed: false,
 			supFailed:    true,
-			wantPrevious: false,
+			wantPrevious: true,
 			wantStopped:  true,
 		},
 		{

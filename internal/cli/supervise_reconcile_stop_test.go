@@ -5,7 +5,6 @@ package cli
 // Sibling of supervise_reconcile_ipc_test.go; uses the same fixture.
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -91,27 +90,15 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 	}
 }
 
-// seedStoppedDaemonIntentForReconcileTest writes a daemon-intent.json with
-// Desired=stopped for taskName into the fixture's state dir — the write
-// `mcphub stop` performs via recordStopIntent before dialing the reconcile.
+// seedStoppedDaemonIntentForReconcileTest records a Desired=stopped stop for
+// taskName the way `mcphub stop` does. Phase 4-E2: the stop lives in the
+// supervisor-intent.json `stops` sub-block (the sole stop source — the legacy
+// daemon-intent.json the apply-mode reconcile used to read is deleted), so this
+// delegates to the sub-block seeder. The name is retained so the many callers
+// stay unchanged.
 func seedStoppedDaemonIntentForReconcileTest(t *testing.T, stateDir, taskName string) {
 	t.Helper()
-	di := api.DaemonIntentFile{
-		Tasks: map[string]api.DaemonIntent{
-			taskName: {
-				Desired:   api.IntentDesiredStopped,
-				Reason:    api.IntentReasonUserStop,
-				UpdatedAt: time.Now().UTC(),
-			},
-		},
-	}
-	diRaw, err := json.Marshal(di)
-	if err != nil {
-		t.Fatalf("marshal daemon-intent: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(stateDir, "daemon-intent.json"), diRaw, 0o600); err != nil {
-		t.Fatalf("seed daemon-intent.json: %v", err)
-	}
+	seedStopsSubBlockOnSupervisorIntent(t, stateDir, taskName)
 }
 
 // supervisorOwnedTimeIntentForReconcileTest builds a one-daemon intent

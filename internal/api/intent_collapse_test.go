@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"mcp-local-hub/internal/api/apitest"
 	"github.com/gofrs/flock"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // seedDaemonIntent writes daemon-intent.json under the test state dir via the
@@ -121,19 +121,29 @@ func TestRunDaemonIntentCollapse_PreservesActiveStopsAndDropsExpired(t *testing.
 	}
 }
 
-// daemon-intent.json must STILL be on disk after the merge (E1 additive-first).
-func TestRunDaemonIntentCollapse_DoesNotDeleteDaemonIntent(t *testing.T) {
+// Phase 4-E2 (was E1 "DoesNotDelete"): daemon-intent.json is now DELETED after
+// the merge migrates its active stops into the sub-block. This is the inverted
+// E2 contract — the file no longer remains on disk.
+func TestRunDaemonIntentCollapse_E2_DeletesDaemonIntentAfterMerge(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	defer SetDaemonStateRootForTest(stateDir)()
 	now := time.Now().UTC()
 	seedDaemonIntent(t, `\mcp-local-hub-paper-search-default`, DaemonIntent{
 		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now,
 	})
-	if _, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now}); err != nil {
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
 		t.Fatalf("RunDaemonIntentCollapse: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(stateDir, "daemon-intent.json")); err != nil {
-		t.Fatalf("E1 invariant violated: daemon-intent.json must remain on disk: %v", err)
+	if !res.DeletedLegacyFile {
+		t.Fatalf("E2 contract: expected daemon-intent.json deleted; res=%+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "daemon-intent.json")); !os.IsNotExist(err) {
+		t.Fatalf("E2 contract violated: daemon-intent.json must be deleted (err=%v)", err)
+	}
+	// The stop must survive in the sub-block.
+	if _, ok := readSupervisorStopsFromDisk(t, stateDir)[`\mcp-local-hub-paper-search-default`]; !ok {
+		t.Fatalf("stop lost from sub-block after E2 delete")
 	}
 }
 
@@ -266,11 +276,11 @@ func TestRunDaemonIntentCollapse_HoldsDaemonIntentFlockAcrossWholeOp(t *testing.
 	lockPath := filepath.Join(stateDir, intentLockLeaf)
 
 	var (
-		mu          sync.Mutex
-		sawHeld     bool
-		mergeDone   = make(chan struct{})
-		mergeErr    error
-		mergeWrote  bool
+		mu         sync.Mutex
+		sawHeld    bool
+		mergeDone  = make(chan struct{})
+		mergeErr   error
+		mergeWrote bool
 	)
 	go func() {
 		res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
@@ -420,15 +430,19 @@ func TestRunDaemonIntentCollapse_MissingDaemonIntentNoOp(t *testing.T) {
 // Unified precedence helpers (the shape the 5 readers consume).
 // ---------------------------------------------------------------------------
 
-func TestUnifiedStopsFile_LiveDaemonIntentWinsWhenPresent(t *testing.T) {
+// Phase 4-E2 precedence FLIP: the sub-block is authoritative; a present (even
+// empty) daemon-intent.json no longer overrides it. (Was
+// TestUnifiedStopsFile_LiveDaemonIntentWinsWhenPresent under E1.)
+func TestUnifiedStopsFile_E2_SubBlockWinsOverPresentDaemonIntent(t *testing.T) {
 	sup := &SupervisorIntentFile{Stops: map[string]DaemonIntent{
 		`\mcp-local-hub-x`: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()},
 	}}
-	// Live daemon-intent.json says NO stop for x → live wins → x not stopped.
+	// A present-but-empty daemon-intent.json must be IGNORED after E2 → the
+	// sub-block stop for x STAYS.
 	live := &DaemonIntentFile{Tasks: map[string]DaemonIntent{}}
 	got := UnifiedStopsFile(sup, live)
-	if _, ok := got.Tasks[`\mcp-local-hub-x`]; ok {
-		t.Fatalf("live empty daemon-intent.json should override the baseline stop")
+	if _, ok := got.Tasks[`\mcp-local-hub-x`]; !ok {
+		t.Fatalf("E2: sub-block stop must survive a present (empty) daemon-intent.json")
 	}
 }
 
@@ -469,19 +483,23 @@ func TestStopsAsDaemonIntentFile_ViewsSubBlock(t *testing.T) {
 // TryReadUnifiedStops — the tray/GUI-side reader source (readers #4 + #5).
 // ---------------------------------------------------------------------------
 
-func TestTryReadUnifiedStops_LiveDaemonIntentWins(t *testing.T) {
+// Phase 4-E2: TryReadUnifiedStops reads ONLY the sub-block. A (stale)
+// daemon-intent.json is IGNORED. (Was TestTryReadUnifiedStops_LiveDaemonIntentWins
+// under E1.)
+func TestTryReadUnifiedStops_E2_SubBlockIsSoleSource(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	defer SetDaemonStateRootForTest(stateDir)()
 	now := time.Now().UTC()
 
-	// supervisor-intent stops sub-block has a stale baseline stop for x...
+	// supervisor-intent stops sub-block has a stop for x...
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"),
 		&SupervisorIntentFile{Version: 1, Stops: map[string]DaemonIntent{
 			`\mcp-local-hub-x`: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 		}}); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	// ...but live daemon-intent.json has a stop for a DIFFERENT task y only.
+	// ...and a STALE leftover daemon-intent.json has a stop for a DIFFERENT
+	// task y. After E2 it must be ignored.
 	seedDaemonIntent(t, `\mcp-local-hub-y`, DaemonIntent{
 		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now,
 	})
@@ -490,12 +508,13 @@ func TestTryReadUnifiedStops_LiveDaemonIntentWins(t *testing.T) {
 	if res.State != IntentStateValid {
 		t.Fatalf("want valid state, got %q (err=%v)", res.State, res.Err)
 	}
-	// Live daemon-intent.json is authoritative → only y is a stop, x is not.
-	if _, ok := res.File.Tasks[`\mcp-local-hub-y`]; !ok {
-		t.Fatalf("live stop y missing: %+v", res.File.Tasks)
+	// Sub-block is authoritative → x is a stop; the stale daemon-intent.json y
+	// is ignored.
+	if _, ok := res.File.Tasks[`\mcp-local-hub-x`]; !ok {
+		t.Fatalf("sub-block stop x missing: %+v", res.File.Tasks)
 	}
-	if _, ok := res.File.Tasks[`\mcp-local-hub-x`]; ok {
-		t.Fatalf("stale baseline x should be overridden by live daemon-intent.json")
+	if _, ok := res.File.Tasks[`\mcp-local-hub-y`]; ok {
+		t.Fatalf("stale daemon-intent.json stop y leaked through — must be ignored after E2")
 	}
 }
 

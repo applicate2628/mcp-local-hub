@@ -366,9 +366,11 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusBadRequest
 	case "QUARANTINED", api.RespawnRefusedIntentStoppedCode:
 		// RESPAWN_REFUSED_INTENT_STOPPED is a conflict like QUARANTINED:
-		// the daemon-intent.json records Desired=stopped, so the operator
-		// must re-enable it (e.g. mcphub restart, which writes
-		// Desired=running) before a respawn can land (#279 fable N1).
+		// the supervisor-intent.json `stops` sub-block records
+		// Desired=stopped (Phase 4-E2: the sole stop source), so the
+		// operator must re-enable it (e.g. mcphub restart, which writes
+		// Desired=running and clears the sub-block stop) before a respawn
+		// can land (#279 fable N1).
 		status = http.StatusConflict
 	case "RESPAWN_NOT_READY", "SUPERVISOR_UNAVAILABLE":
 		status = http.StatusServiceUnavailable
