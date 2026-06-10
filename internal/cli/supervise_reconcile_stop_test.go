@@ -73,6 +73,12 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 		{"sched running intent stopped", api.ReconcileSchedulerStateRunning, true, stopped, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
 		{"sched stopped intent running", api.ReconcileSchedulerStateStopped, true, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
 		{"sched stopped intent stopped", api.ReconcileSchedulerStateStopped, true, stopped, api.StRunning, api.ReconcileActionNoOp},
+		// Spawn-direction quarantine-respect ALSO holds on the hasSched
+		// scheduler-stopped arm: a daemon that quarantined while still carrying
+		// a stale/residual scheduler-stopped row must NOT revive on every
+		// reconcile (#279 fable r5 F-1 — same defect class as the !hasSched
+		// quarantine gate, all-return-paths).
+		{"sched stopped intent running quarantined", api.ReconcileSchedulerStateStopped, true, running, api.StQuarantined, api.ReconcileActionNeedsManualReview},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -203,7 +203,7 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 			// Err + Code = DeferredToIntentWatcherCode, IntentWatcher
 			// converges within ~60s since Desired=running is durably on
 			// disk, verified above).
-			results = append(results, supervisorDispatchRowForTarget(d.TaskName, "", resp.Drift))
+			results = append(results, supervisorDispatchRowForTarget(d.TaskName, resp.Drift))
 			continue
 		}
 		// QUARANTINED (force-gate holds) and any other failure: error row,

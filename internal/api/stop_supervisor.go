@@ -42,18 +42,21 @@ import (
 //     on disk) + Code = DeferredToIntentWatcherCode, so the row is not a
 //     failure but also does not falsely claim synchronous SM dispatch.
 //
-// extraCode is OR-ed in when non-empty so the restart path can preserve
-// its RESPAWN_REFUSED_INTENT_STOPPED provenance code on a TRULY-dispatched
-// row (the stop path passes "").
-func supervisorDispatchRowForTarget(taskName, extraCode string, drift []DriftEntry) RestartResult {
+// A truly-dispatched row carries no Code: both the stop and the
+// refused-restart call sites dispatch through the SAME `reconcile --apply`,
+// so neither has a per-target provenance code to attach to the dispatched
+// row (the restart path's RESPAWN_REFUSED_INTENT_STOPPED code lives only on
+// its OWN refusal/error rows, not on the reconcile-dispatched success row).
+func supervisorDispatchRowForTarget(taskName string, drift []DriftEntry) RestartResult {
 	if entry, ok := findDriftEntryForTask(taskName, drift); ok &&
 		entry.Action == ReconcileActionPostEvIntentUpdate {
 		// Truly dispatched through the SM this reconcile.
-		return RestartResult{TaskName: taskName, Code: extraCode}
+		return RestartResult{TaskName: taskName}
 	}
-	// Not posted for this target (proxy-only classifier, or no drift
-	// entry at all): durable on disk, IntentWatcher converges within
-	// ~60s. Surface that honestly via the typed Code; Err stays empty.
+	// Not posted for this target (terminate classifies no_op /
+	// needs_manual_review, or no drift entry at all): durable on disk,
+	// IntentWatcher converges within ~60s. Surface that honestly via the
+	// typed Code; Err stays empty.
 	return RestartResult{TaskName: taskName, Code: DeferredToIntentWatcherCode}
 }
 
@@ -158,12 +161,12 @@ func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string
 	}
 	// Reconcile transport succeeded — but the response's per-target drift
 	// tells us which targets the supervisor actually posted EvIntentUpdate
-	// for (proxy-shaped descriptors) versus which converge only via the
-	// IntentWatcher (regular daemons). Report each honestly; the stop path
-	// passes "" for extraCode (no provenance code to preserve).
+	// for (post_ev_intent_update drift entries) versus which converge only
+	// via the IntentWatcher (the no_op / needs_manual_review / missing-entry
+	// edges). Report each honestly.
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {
-		results = append(results, supervisorDispatchRowForTarget(d.TaskName, "", resp.Drift))
+		results = append(results, supervisorDispatchRowForTarget(d.TaskName, resp.Drift))
 	}
 	return results, true, nil
 }

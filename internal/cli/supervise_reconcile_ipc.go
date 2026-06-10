@@ -472,7 +472,7 @@ func normalizeSchedulerState(raw string) string {
 //	sched=missing   intent=stopped  → post_ev_intent_update (terminate) when the SM state is live; no_op otherwise
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
-//	sched=stopped   intent=running  → post_ev_intent_update (spawn)
+//	sched=stopped   intent=running  → post_ev_intent_update (spawn), UNLESS SM=quarantined → needs_manual_review (quarantine-respect)
 //	sched=stopped   intent=stopped  → no_op (steady state)
 //	sched=<other>   *               → needs_manual_review (unknown scheduler state)
 //
@@ -511,7 +511,12 @@ func normalizeSchedulerState(raw string) string {
 // needs_manual_review): `reconcile --apply` now fires on EVERY `mcphub
 // stop`/`mcphub restart` (via stop_supervisor.go / restart_supervisor.go),
 // and the drift loop walks ALL supervisor-intent rows — not just the
-// stop/restart target. A BYSTANDER daemon that is genuinely quarantined
+// stop/restart target. The gate lives on BOTH spawn-direction arms: the
+// no-scheduler-row arm (supervisor-intent descriptors, the common case) AND
+// the scheduler-stopped arm (a daemon that quarantined while still carrying a
+// stale/residual scheduler-stopped row). Either arm without the gate would
+// revive the quarantined bystander on the next reconcile.
+// A BYSTANDER daemon that is genuinely quarantined
 // (StQuarantined) but whose intent is running (or absent → computeIntentDesired
 // defaults to running) would otherwise classify post_ev_intent_update, and
 // applyReconcileDrift would post EvIntentUpdate(running). The SM row
@@ -531,8 +536,9 @@ func normalizeSchedulerState(raw string) string {
 // --reset-failure-windows` both intentionally clear quarantine and never route
 // through this classifier. The 60s IntentWatcher does NOT have this hole for
 // bystanders (diffIntentSnapshots posts only for CHANGED intent entries, so an
-// untouched bystander gets no event), so this classifier gate closes the
-// reconcile-side bystander revival completely.
+// untouched bystander gets no event), so this classifier gate (mirrored on
+// BOTH spawn-direction arms — !hasSched and scheduler-stopped) closes the
+// reconcile-side bystander revival on every spawn-direction path.
 func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
@@ -554,6 +560,20 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 		return api.ReconcileActionNoOp
 	case api.ReconcileSchedulerStateStopped:
 		if intentDesired == api.ReconcileIntentDesiredRunning {
+			// Same spawn-direction quarantine-respect as the !hasSched arm:
+			// a StQuarantined daemon that ALSO carries a (stale/residual)
+			// scheduler-stopped row must NOT revive on every `reconcile
+			// --apply` (= every `mcphub stop`/`mcphub restart`). The SM row
+			// StQuarantined + EvIntentUpdate(running) → StSpawning RESETS the
+			// failure window (supervisor_state_machine.go:204-206), so without
+			// this gate stopping/restarting ANY daemon would revive a
+			// quarantined bystander that happens to retain a scheduler row,
+			// with its quarantine wiped. needs_manual_review surfaces it as
+			// drift ("quarantined daemon wants running — operator must force or
+			// reset") rather than pretending steady-state.
+			if smState == api.StQuarantined {
+				return api.ReconcileActionNeedsManualReview
+			}
 			return api.ReconcileActionPostEvIntentUpdate
 		}
 		return api.ReconcileActionNoOp

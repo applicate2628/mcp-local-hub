@@ -415,14 +415,17 @@ func TestRestartQuarantinedDoesNotWriteRunningIntent(t *testing.T) {
 // TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart + the
 // applyReconcileDrift cache-refresh ordering — not duplicated here.
 //
-// #279 opus gate: the reconcile stub now returns REALISTIC per-target
-// drift and the test exercises BOTH ownership shapes — a regular
-// `time-default` global daemon (classifies needs_manual_review on the
-// spawn direction; the supervisor posts NOTHING, so it converges only via
-// the ~60s IntentWatcher → success-but-deferred row) and a proxy-shaped
-// `time-proxy` descriptor (classifies post_ev_intent_update; truly
-// dispatched → plain success row). One respawn dial + one reconcile call
-// PER target.
+// #279 opus gate: the reconcile stub returns REALISTIC per-target drift and
+// the test exercises BOTH ownership shapes. Under the no-legacy ownership
+// model (spec §0.2, aa1d089) EVERY supervisor-intent row is supervisor-owned,
+// so the spawn-direction classifier posts EvIntentUpdate for a regular
+// `time-default` global daemon EXACTLY as it does for a proxy-shaped
+// `time-proxy` descriptor — both classify post_ev_intent_update and both are
+// truly dispatched → plain success rows. One respawn dial + one reconcile
+// call PER target. (The DeferredToIntentWatcherCode edge — a spawn target
+// that posts NOTHING — is the no_op / missing-drift-entry case, pinned by
+// TestStopAllRecordsIntentThenReconciles via a no_op drift entry, not by
+// this test.)
 func TestRestartStoppedIntentWritesRunningThenReconciles(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)
