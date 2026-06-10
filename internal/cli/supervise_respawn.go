@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -59,12 +60,22 @@ func (r *respawnLateBindings) Set(s SpawnFunc, t TerminateFunc) {
 // GUI handler at /api/daemon/respawn can map them to HTTP status
 // codes (UNKNOWN_TASK → 400, QUARANTINED → 409, RESPAWN_FAILED → 500).
 const (
-	ipcErrorUnknownTask            = "UNKNOWN_TASK"
-	ipcErrorRespawnQuarantined     = "QUARANTINED"
-	ipcErrorRespawnFailed          = "RESPAWN_FAILED"
-	ipcErrorRespawnNotReady        = "RESPAWN_NOT_READY"
-	ipcErrorRespawnTerminateFailed = "RESPAWN_TERMINATE_FAILED"
+	ipcErrorUnknownTask              = "UNKNOWN_TASK"
+	ipcErrorRespawnQuarantined       = "QUARANTINED"
+	ipcErrorRespawnFailed            = "RESPAWN_FAILED"
+	ipcErrorRespawnNotReady          = "RESPAWN_NOT_READY"
+	ipcErrorRespawnTerminateFailed   = "RESPAWN_TERMINATE_FAILED"
+	ipcErrorRespawnRefusedIntentStop = api.RespawnRefusedIntentStoppedCode
 )
+
+// errIdleRespawnRefusedIntentStopped is the typed sentinel the controller
+// completes an idle-respawn event with when the SM refuses the spawn
+// because daemon-intent.json records Desired=stopped (the SM side string
+// is "RESTART_REFUSED_INTENT_STOPPED"). handleRespawn matches it via
+// errors.Is to surface the DISTINCT ipcErrorRespawnRefusedIntentStop code
+// instead of the generic RESPAWN_FAILED, so the restart caller can
+// recover by writing Desired=running and retrying once (#279 fable N1).
+var errIdleRespawnRefusedIntentStopped = errors.New("idle respawn refused: daemon-intent says Desired=stopped")
 
 func shouldRouteNonRunningRespawnThroughController(ctrl *supervisorController, taskName string) (bool, error) {
 	if ctrl == nil || ctrl.eventLoop == nil {
@@ -396,6 +407,23 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		}
 	}
 	if spawnErr != nil {
+		// A stopped-intent refusal is a DISTINCT, recoverable outcome —
+		// not a generic spawn failure. The SM refused the spawn because
+		// daemon-intent.json still records Desired=stopped; the restart
+		// caller resolves it by writing Desired=running and retrying once.
+		// Surface the distinct code so it never gets conflated with a real
+		// RESPAWN_FAILED nor accidentally bypasses the QUARANTINED
+		// force-gate (#279 fable N1).
+		if errors.Is(spawnErr, errIdleRespawnRefusedIntentStopped) {
+			return writeIPCFrame(conn, api.IPCResponse{
+				ID: req.ID,
+				Error: &api.IPCErr{
+					Code:    ipcErrorRespawnRefusedIntentStop,
+					Message: "respawn refused: daemon-intent.json records Desired=stopped; write Desired=running first (mcphub restart re-asserts it) then retry",
+				},
+				Final: true,
+			})
+		}
 		return writeIPCFrame(conn, api.IPCResponse{
 			ID: req.ID,
 			Error: &api.IPCErr{

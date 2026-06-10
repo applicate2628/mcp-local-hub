@@ -315,17 +315,14 @@ func TestRestartAllFallsBackToSchedulerWhenSupervisorUnavailable(t *testing.T) {
 	}
 }
 
-// TestRestartWritesRunningIntentBeforeRespawn pins the fable F1 fix: a
-// supervisor-aware stop leaves daemon-intent.json at Desired=stopped, and
-// the respawn handler routes an idle daemon through the controller
-// (EvManualRestart) whose SM gate REFUSES the spawn unless the intent
-// already says Desired=running. So restartSupervisorOwnedDaemons must
-// write Desired=running BEFORE dialing the respawn — asserted via a
-// read-back inside the respawn stub (mirror of
-// TestStopUsesSupervisorReconcileAndSkipsKill). If the write happened only
-// post-success (the pre-fix ordering) the stub would observe the prior
-// stopped intent and the gate would refuse the respawn in production.
-func TestRestartWritesRunningIntentBeforeRespawn(t *testing.T) {
+// TestRestartQuarantinedDoesNotWriteRunningIntent is the #279 fable N1 fix:
+// a QUARANTINED respawn refusal is a DELIBERATE force-gate. The restart
+// caller must NOT write Desired=running for a quarantined daemon — doing so
+// (the daba5d0 pre-dial write) let the supervisor's IntentWatcher converge a
+// spawn ≤60s later without force, answering the refusal yet delivering the
+// spawn anyway (split-brain). The error row surfaces and daemon-intent.json
+// stays at its prior stopped value (no running intent written).
+func TestRestartQuarantinedDoesNotWriteRunningIntent(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)
 	defer restoreState()
@@ -346,9 +343,8 @@ func TestRestartWritesRunningIntentBeforeRespawn(t *testing.T) {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	// Seed daemon-intent.json at Desired=stopped, exactly the state a
-	// prior supervisor-aware stop leaves behind — this is the state the
-	// fix must overwrite before the respawn dial.
+	// Seed daemon-intent.json at Desired=stopped — a prior stop. The fix
+	// must NOT overwrite this for a quarantined daemon.
 	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
 		Desired:   IntentDesiredStopped,
 		Reason:    IntentReasonUserStop,
@@ -357,12 +353,91 @@ func TestRestartWritesRunningIntentBeforeRespawn(t *testing.T) {
 		t.Fatalf("seed stopped daemon-intent: %v", err)
 	}
 
-	var intentDesiredAtRespawn string
+	var dials int
+	var intentDesiredAtDial string
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
-		// Read-back: the running intent must already be on disk when the
-		// respawn fires, otherwise the SM gate would refuse the spawn.
+		dials++
 		res := NewAPI().ReadDaemonIntent()
-		intentDesiredAtRespawn = res.File.Tasks[taskName].Desired
+		intentDesiredAtDial = res.File.Tasks[taskName].Desired
+		return RespawnResult{Success: false, Code: "QUARANTINED", Message: "daemon is quarantined; pass force=true to override"}, nil
+	})
+	defer restoreRespawn()
+
+	results, handled, err := restartSupervisorOwnedDaemons(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("restartSupervisorOwnedDaemons: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false; supervisor-owned time daemon should be handled")
+	}
+	if dials != 1 {
+		t.Fatalf("respawn dials = %d; want exactly 1 (no retry for QUARANTINED)", dials)
+	}
+	if intentDesiredAtDial != IntentDesiredStopped {
+		t.Fatalf("daemon-intent at dial = %q, want %q (no running intent must be written BEFORE the quarantine dial)",
+			intentDesiredAtDial, IntentDesiredStopped)
+	}
+	// Read-back after the call: the running intent must NEVER have landed
+	// — the force-gate holds and the IntentWatcher must not converge a
+	// quarantine bypass.
+	after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+	if after != IntentDesiredStopped {
+		t.Fatalf("daemon-intent after refused respawn = %q, want %q (quarantined daemon must not receive Desired=running)",
+			after, IntentDesiredStopped)
+	}
+	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err == "" {
+		t.Fatalf("results = %+v, want one supervisor refusal row", results)
+	}
+	if results[0].Code != "QUARANTINED" {
+		t.Fatalf("refusal row code = %q, want QUARANTINED", results[0].Code)
+	}
+}
+
+// TestRestartStoppedIntentWritesRunningThenRetries is the #279 fable N1
+// recovery path: a RESPAWN_REFUSED_INTENT_STOPPED refusal (idle daemon, the
+// SM only refused because daemon-intent.json still says Desired=stopped) is
+// recoverable. The caller writes Desired=running, then redials ONCE. The
+// first dial observes the still-stopped intent (the write happens AFTER the
+// first refusal, never for a quarantined daemon), the second observes the
+// running intent and succeeds. Exactly 2 dials; one overall success row.
+func TestRestartStoppedIntentWritesRunningThenRetries(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+	t.Setenv("LOCALAPPDATA", stateDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	const taskName = `\mcp-local-hub-time-default`
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "time",
+			Daemon:   "default",
+			Port:     9128,
+		}},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, auditWhoMcphubStop); err != nil {
+		t.Fatalf("seed stopped daemon-intent: %v", err)
+	}
+
+	var dials int
+	var firstDialDesired, secondDialDesired string
+	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+		dials++
+		desired := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+		if dials == 1 {
+			firstDialDesired = desired
+			return RespawnResult{Success: false, Code: RespawnRefusedIntentStoppedCode, Message: "respawn refused: daemon-intent says Desired=stopped"}, nil
+		}
+		secondDialDesired = desired
 		return RespawnResult{Success: true, Code: "OK"}, nil
 	})
 	defer restoreRespawn()
@@ -374,9 +449,83 @@ func TestRestartWritesRunningIntentBeforeRespawn(t *testing.T) {
 	if !handled {
 		t.Fatal("handled=false; supervisor-owned time daemon should be restarted")
 	}
-	if intentDesiredAtRespawn != IntentDesiredRunning {
-		t.Fatalf("daemon-intent at respawn time = %q, want %q (running intent must be written BEFORE the respawn dial so the SM gate admits the spawn)",
-			intentDesiredAtRespawn, IntentDesiredRunning)
+	if dials != 2 {
+		t.Fatalf("respawn dials = %d; want exactly 2 (refuse → write running → redial)", dials)
+	}
+	if firstDialDesired != IntentDesiredStopped {
+		t.Fatalf("intent at FIRST dial = %q, want %q (no intent write before the first dial — only after a stopped-intent refusal)",
+			firstDialDesired, IntentDesiredStopped)
+	}
+	if secondDialDesired != IntentDesiredRunning {
+		t.Fatalf("intent at SECOND dial = %q, want %q (running intent must be written before the retry)",
+			secondDialDesired, IntentDesiredRunning)
+	}
+	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
+		t.Fatalf("results = %+v, want one supervisor success row", results)
+	}
+}
+
+// TestRestartSuccessFirstTryWritesRunningIntentOnlyPostSuccess pins the
+// success path: a respawn that succeeds on the FIRST dial must observe the
+// pre-existing (stopped) intent at dial time — proving no intent is written
+// before the dial (the daba5d0 pre-dial write is removed). The running
+// intent lands only AFTER the successful dial.
+func TestRestartSuccessFirstTryWritesRunningIntentOnlyPostSuccess(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+	t.Setenv("LOCALAPPDATA", stateDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	const taskName = `\mcp-local-hub-time-default`
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "time",
+			Daemon:   "default",
+			Port:     9128,
+		}},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, auditWhoMcphubStop); err != nil {
+		t.Fatalf("seed stopped daemon-intent: %v", err)
+	}
+
+	var dials int
+	var intentDesiredAtDial string
+	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+		dials++
+		intentDesiredAtDial = NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+		return RespawnResult{Success: true, Code: "OK"}, nil
+	})
+	defer restoreRespawn()
+
+	results, handled, err := restartSupervisorOwnedDaemons(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("restartSupervisorOwnedDaemons: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false; supervisor-owned time daemon should be restarted")
+	}
+	if dials != 1 {
+		t.Fatalf("respawn dials = %d; want exactly 1 (success on first try, no retry)", dials)
+	}
+	if intentDesiredAtDial != IntentDesiredStopped {
+		t.Fatalf("intent at dial = %q, want %q (no intent written before a first-try dial)",
+			intentDesiredAtDial, IntentDesiredStopped)
+	}
+	// Post-success the running intent must now be on disk.
+	after := NewAPI().ReadDaemonIntent().File.Tasks[taskName].Desired
+	if after != IntentDesiredRunning {
+		t.Fatalf("daemon-intent after success = %q, want %q (running intent recorded post-success)",
+			after, IntentDesiredRunning)
 	}
 	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
 		t.Fatalf("results = %+v, want one supervisor success row", results)

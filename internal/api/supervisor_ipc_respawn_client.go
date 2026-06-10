@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+// RespawnRefusedIntentStoppedCode is the distinct supervisor-side
+// respawn refusal code returned when an idle daemon's respawn is
+// refused because its daemon-intent.json still records Desired=stopped
+// (the SM gate StIdle+EvManualRestart returns
+// RESTART_REFUSED_INTENT_STOPPED — supervisor_state_machine.go). It is
+// surfaced as a DISTINCT code (not the generic RESPAWN_FAILED) so the
+// restart caller can tell a recoverable stopped-intent refusal — which
+// it resolves by writing Desired=running and retrying once — apart from
+// a genuine spawn failure or a deliberate QUARANTINED force-gate
+// refusal. Wire-symmetric with cli.ipcErrorRespawnRefusedIntentStopped
+// (#279 fable N1).
+const RespawnRefusedIntentStoppedCode = "RESPAWN_REFUSED_INTENT_STOPPED"
+
 // RespawnResult is the operator-facing outcome of a respawn IPC call.
 // Code mirrors the supervisor-side IPC error codes so HTTP handlers
 // can map them to status codes without re-parsing strings:
@@ -17,6 +30,8 @@ import (
 //   - "UNKNOWN_TASK"                 → 400 (task not in current intent)
 //   - "QUARANTINED"                  → 409 (force=true required)
 //   - "RESPAWN_NOT_READY"            → 503 (supervisor still starting)
+//   - "RESPAWN_REFUSED_INTENT_STOPPED" → 409 (daemon-intent.json says Desired=stopped;
+//     write Desired=running first, then retry — see restartSupervisorOwnedDaemons)
 //   - "RESPAWN_FAILED"               → 500 (spawn closure returned error)
 //   - "INVALID_ARGS"                 → 400 (missing task_name)
 //   - "SUPERVISOR_UNAVAILABLE"       → 503 (no IPC: missing lock owner / dial failed)

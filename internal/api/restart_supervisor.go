@@ -90,45 +90,90 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 	}
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {
-		// Write Desired=running intent BEFORE the respawn dial — the
-		// mirror of the stop side's intent-first ordering
-		// (stopSupervisorOwnedDaemons records Desired=stopped before its
-		// reconcile). This is load-bearing because a successful
-		// supervisor-aware stop leaves daemon-intent.json at
-		// Desired=stopped, and the respawn handler routes an idle daemon
-		// through the controller (EvManualRestart). The SM gate for
-		// StIdle+EvManualRestart refuses the spawn unless
-		// IntentDesired=="running" && !IntentIsActiveStop
-		// (supervisor_state_machine.go), returning
-		// RESTART_REFUSED_INTENT_STOPPED → IPC RESPAWN_FAILED. Recording
-		// the running intent first makes a stop reversible by restart
-		// (`mcphub stop X` then `mcphub restart X`, GUI "Stop all" then
-		// "Run all"). recordRestartIntentForTask takes the BARE task name
-		// (no leading backslash) and logs — never propagates — its write
-		// failures; that polarity is correct here: if the intent write
-		// fails, the SM gate refuses the respawn and the caller sees an
-		// honest RESPAWN_FAILED rather than a silent success. And if the
-		// intent write succeeds but the respawn dial then fails, the
-		// running intent now on disk means the supervisor's IntentWatcher
-		// converges the spawn on its next poll.
-		NewAPI().recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), nil)
+		// Dial with force=false WITHOUT writing intent first. The
+		// pre-dial write (daba5d0, fable F1) made a stop reversible by
+		// restart, but it bypassed the deliberate QUARANTINED force-gate:
+		// a quarantined daemon's respawn is refused, yet the fresh
+		// Desired=running + UpdatedAt was already on disk, so the
+		// supervisor's IntentWatcher (≤60s poll, UpdatedAt-only diffs count
+		// as changes) posted EvIntentUpdate(running) and StQuarantined +
+		// EvIntentUpdate(running) drove StSpawning with failures RESET —
+		// the refusal was answered but the spawn was delivered anyway,
+		// without force (#279 fable N1, split-brain).
+		//
+		// The fix gates the intent write on the supervisor's typed refusal
+		// code. The respawn now refuses with one of three distinguishable
+		// outcomes:
+		//
+		//   - RESPAWN_REFUSED_INTENT_STOPPED → recoverable: the daemon is
+		//     idle and the SM refused only because daemon-intent.json still
+		//     records Desired=stopped (e.g. after a supervisor-aware stop).
+		//     Write Desired=running, then redial ONCE. This is the F1
+		//     reversibility case, now intent-write-AFTER-first-refusal so
+		//     the write only happens for a daemon the SM actually wants to
+		//     spawn — never for a quarantined one.
+		//   - QUARANTINED → deliberate force-gate: error row verbatim, NO
+		//     intent write. The force-gate holds (#279 fable N1 fix).
+		//   - any other failure → error row, no intent write (pre-#279
+		//     parity).
 		result, err := supervisorRestartRespawnFn(ctx, d.TaskName, false, 5000)
 		if err != nil {
 			results = append(results, RestartResult{TaskName: d.TaskName, Err: err.Error()})
 			continue
 		}
-		if !result.Success {
-			msg := result.Message
-			if msg == "" {
-				msg = result.Code
-			}
-			results = append(results, RestartResult{TaskName: d.TaskName, Err: msg, Code: result.Code})
+		if result.Success {
+			// Restore the pre-daba5d0 position: record Desired=running
+			// AFTER a successful respawn so the persisted intent matches
+			// the now-running daemon. recordRestartIntentForTask takes the
+			// BARE task name (no leading backslash) and logs — never
+			// propagates — its write failures through the io.Writer; pass
+			// os.Stderr so that "logged, never propagated" is actually true
+			// (#279 fable N2).
+			NewAPI().recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), os.Stderr)
+			results = append(results, RestartResult{TaskName: d.TaskName, Code: result.Code})
 			continue
 		}
-		// No post-success intent re-write: the pre-dial write above
-		// already recorded Desired=running, so a second write here would
-		// only duplicate the audit entry.
-		results = append(results, RestartResult{TaskName: d.TaskName, Code: result.Code})
+		if result.Code == RespawnRefusedIntentStoppedCode {
+			// Recoverable stopped-intent refusal. Write Desired=running
+			// (the F1 reversibility intent) NOW — intentionally before the
+			// retry, and ONLY here, so the running intent is never written
+			// for a quarantined daemon. Then redial once. recordRestartIntentForTask
+			// logs its write failures through os.Stderr and never propagates;
+			// that polarity is correct — if the intent write fails, the
+			// second dial refuses again and the caller sees an honest
+			// refusal row rather than a silent success (#279 fable N1+N2).
+			NewAPI().recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), os.Stderr)
+			retry, retryErr := supervisorRestartRespawnFn(ctx, d.TaskName, false, 5000)
+			if retryErr != nil {
+				// The running intent is now on disk, so the supervisor's
+				// IntentWatcher converges the spawn on its next poll even
+				// though the synchronous redial failed — the disclosed,
+				// accepted semantic.
+				results = append(results, RestartResult{TaskName: d.TaskName, Err: retryErr.Error()})
+				continue
+			}
+			if retry.Success {
+				results = append(results, RestartResult{TaskName: d.TaskName, Code: retry.Code})
+				continue
+			}
+			msg := retry.Message
+			if msg == "" {
+				msg = retry.Code
+			}
+			// The running intent is now on disk; IntentWatcher converges
+			// the spawn on its next poll regardless of this redial's row.
+			results = append(results, RestartResult{TaskName: d.TaskName, Err: msg, Code: retry.Code})
+			continue
+		}
+		// QUARANTINED (force-gate holds) and any other failure: error row,
+		// NO intent write — the deliberate refusal is preserved and a
+		// quarantined daemon never receives the running-intent that would
+		// let the IntentWatcher bypass the force-gate.
+		msg := result.Message
+		if msg == "" {
+			msg = result.Code
+		}
+		results = append(results, RestartResult{TaskName: d.TaskName, Err: msg, Code: result.Code})
 	}
 	return results, true, nil
 }
