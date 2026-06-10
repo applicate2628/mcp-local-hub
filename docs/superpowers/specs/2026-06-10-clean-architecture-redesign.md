@@ -32,6 +32,10 @@ Minimal coupling: each layer depends only downward. No layer reaches into the sc
 
 A hub restart / serena-backend failure must make the serena (and LSP) router **fail loud at the connection layer**: close the MCP session so the client sees a clean disconnect and auto-reconnects — NOT leave a zombie "connected but actually dead" state. The 2026-06-10 incident: a hub restart left the Claude Code serena client wedged ("Unable to connect") even though `/serena/mcp` stayed HTTP 200 — backend fine, client zombie, only a full editor restart cleared it. The router owns this: on backend loss / shutdown, terminate upstream + downstream sessions explicitly. (= serena-router-resilience.)
 
+### 3.1 Observed bug (2026-06-10): status misreports "Restarting" / hub "down" while daemons serve
+
+`mcphub status` and the GUI Dashboard paint EVERY daemon `Restarting` and the hub "down" while serena (9125/serena/mcp) + fetch (9121) actually serve verified-working MCP traffic — a false negative. Root candidates: (a) the supervisor is genuinely restart-looping (the STOP-bug churn — §4 / Workstream A), or (b) the status snapshot reads a stale / transient `Restarting` label without re-probing actual port-bound + PID-alive liveness. Fix direction: status reflects ACTUAL liveness (port + PID probe), never a stale label; the GUI fails loud ONLY when a daemon is genuinely unreachable. Couples to Workstream B (GUI fail-loud) + §4. Capture supervisor-state.json + supervisor-events.log at repro.
+
 ## §4 The STOP bug — root cause + fix (Phase A.1; highest value, ship first)
 
 ROOT: `Restart`/`RestartAll` are supervisor-aware (call `restartSupervisorOwnedDaemons` → IPC respawn); `Stop`/`StopAll`/`stopKillCore` are NOT — they `killDaemonByPort` (taskkill /F = non-clean exit) + `sch.Stop` (no-op for migrated daemons). The supervisor reaper sees the non-clean exit and RESPAWNS (only CLEAN exits drop); the 60s `IntentWatcher` poll hasn't seen the `daemon-intent.json` stop yet → race → repeated stops churn to Quarantine. This is the live paper-search symptom (stop→failed→stuck→won't restart).
@@ -76,7 +80,7 @@ This roadmap supersedes the original 8-section sketch by adding the two owner-re
 
 | Workstream | Goal | Status | Depends-on |
 |---|---|---|---|
-| **A — STOP fix** (§4) | Make `Stop`/`StopAll` supervisor-aware (IPC `reconcile --apply`); kill the stop→failed→Quarantine churn | next (ship first) | #278 merged |
+| **A — STOP fix** (§4) | Make `Stop`/`StopAll` supervisor-aware (IPC `reconcile --apply`); kill the stop→failed→Quarantine churn | **DONE** (8ab8a42, awaiting deploy) | #278 merged |
 | **B — GUI fail-loud** (§5) | Stop surfacing legacy watchdog/serena-unified rows when IPC down; show "supervisor down — restart" | next (independent) | #278 merged |
 | **C — drop watchdog task** (§5) | Stop `setup.go` auto-installing `\mcp-local-hub-watchdog`; uninstall on existing hosts | future | A |
 | **D — delete watchdog engine** (§5) | Remove `watchdog.go` / `recovery.go` / `watchdog_state.go` | future | C |
@@ -93,7 +97,7 @@ This roadmap supersedes the original 8-section sketch by adding the two owner-re
 | **LSP router design** | First-class spec for the LSP router (modes/lifecycle/fail-loud parity with serena) — currently named, undesigned | future | §3 |
 | **G6 remote-MCP** | `transport: remote-http` install path (URL+headers+secrets, no daemon) | future | feeds §10 remote shape |
 
-Legend: **in-flight** = #278 on `fix/serena-supervisor-robustness`; **next** = first PR block after #278; **future** = later phased PR.
+Legend: #278 = **MERGED** (2c7c343 on master); STOP-fix (A) = **DONE** (8ab8a42, awaiting deploy); **next** = first PR block after STOP deploy; **future** = later phased PR.
 
 ---
 
@@ -285,7 +289,7 @@ A→F legacy-removal, §3 connection-robustness, and feature bugs #4/#6/#8/demig
 - No-path-args sticky-session default-workspace fallback — RESOLVED; broad routing edge stays a verify item.
 - `didOpen/didClose` no per-client refcount — OPEN hidden multi-agent bug. `lazy_proxy.go`.
 - Phase H operational hygiene tooling (aggressive-cleanup CLI/GUI, upstream codex per-subagent reap) — DEFERRED.
-- #278 LSP-orphan reconcile guard + migrate-timeout — **in-flight on current branch**, merges independently before Phase A.
+- #278 LSP-orphan reconcile guard + migrate-timeout — **MERGED** (2c7c343 on master).
 
 ### 11.5 LSP lane (Servers-matrix revamp; draft, partly shipped)
 - LSP router untrusted auto-register hardening — FIXED on `security/lsp-trusted-root-gate` (#272/#273); confirm merged. `bugs/2026-06-09-lsp-router-untrusted-auto-register.md`.
@@ -328,7 +332,7 @@ F1 platform-lane refactor (`internal/platform/{windows,linux,darwin}/`); F2 Linu
 
 Each phase = **one PR through fable → bot → merge → redeploy** (per the redeploy-always discipline; every redeploy is a FULL supervisor restart that interrupts running serena/LSP daemons — batch where possible). The dependency spine is: #278 → STOP → fail-loud → legacy-removal → unified-intent → scheduler-drop, with multi-agent and the GUI store riding the clean layers, and the backlog interleaved where each item touches the same surface.
 
-**Phase 0 — in-flight (current branch).** #278 (LSP-orphan reconcile guard + migrate-timeout) on `fix/serena-supervisor-robustness` merges independently. **Gate before Phase A:** confirm #278's exact scope is closed at HEAD and that the demigrate/#4/#6 fold-ins do not collide with its in-flight reconcile guard.
+**Phase 0 — DONE.** #278 merged to master (2c7c343); the STOP fix (Workstream A) is committed (8ab8a42 on `fix/stop-supervisor-aware`), awaiting deploy. **Gate:** deploy STOP + confirm the §3.1 status-misreport bug clears after a clean supervisor restart.
 
 **Phase 1 — STOP fix (Workstream A, §4).** One additive PR, no schema change: `stopSupervisorOwnedDaemons` mirroring `restartSupervisorOwnedDaemons`; wire at `install.go` Stop (~:2200) + StopAll (~:2545). Ships first — fixes the live paper-search bug. Fold in **#4 hash→name** (display-only, independent) and **demigrate-serena-router** (independent) as small sibling commits or adjacent PRs. **Add the §3 fail-loud mechanism design + regression harness here** (the STOP path and the connection-teardown path both live in the supervisor/router seam).
 
