@@ -70,8 +70,6 @@ Dependency chain A → C → D → E → F; **B independent**.
 
 ---
 
-## Roadmap overview" table and §9+. The summaries already carry verified file:line anchors, so I have what I need to synthesize without re-reading every source. I'll produce the canonical roadmap.
-
 ## Roadmap overview
 
 This roadmap supersedes the original 8-section sketch by adding the two owner-requested workstreams the first pass dropped — **multi-agent/multi-client adapter scaling (§9)** and the **GUI one-click MCP Store (§10)** — plus the full deferred-work inventory (§11) and a unified phased sequencing (§12). Sections §0–§8 above stand unchanged.

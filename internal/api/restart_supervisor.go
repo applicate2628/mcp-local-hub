@@ -90,6 +90,28 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 	}
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {
+		// Write Desired=running intent BEFORE the respawn dial — the
+		// mirror of the stop side's intent-first ordering
+		// (stopSupervisorOwnedDaemons records Desired=stopped before its
+		// reconcile). This is load-bearing because a successful
+		// supervisor-aware stop leaves daemon-intent.json at
+		// Desired=stopped, and the respawn handler routes an idle daemon
+		// through the controller (EvManualRestart). The SM gate for
+		// StIdle+EvManualRestart refuses the spawn unless
+		// IntentDesired=="running" && !IntentIsActiveStop
+		// (supervisor_state_machine.go), returning
+		// RESTART_REFUSED_INTENT_STOPPED → IPC RESPAWN_FAILED. Recording
+		// the running intent first makes a stop reversible by restart
+		// (`mcphub stop X` then `mcphub restart X`, GUI "Stop all" then
+		// "Run all"). recordRestartIntentForTask takes the BARE task name
+		// (no leading backslash) and logs — never propagates — its write
+		// failures; that polarity is correct here: if the intent write
+		// fails, the SM gate refuses the respawn and the caller sees an
+		// honest RESPAWN_FAILED rather than a silent success. And if the
+		// intent write succeeds but the respawn dial then fails, the
+		// running intent now on disk means the supervisor's IntentWatcher
+		// converges the spawn on its next poll.
+		NewAPI().recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), nil)
 		result, err := supervisorRestartRespawnFn(ctx, d.TaskName, false, 5000)
 		if err != nil {
 			results = append(results, RestartResult{TaskName: d.TaskName, Err: err.Error()})
@@ -103,7 +125,9 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 			results = append(results, RestartResult{TaskName: d.TaskName, Err: msg, Code: result.Code})
 			continue
 		}
-		NewAPI().recordRestartIntentForTask(strings.TrimPrefix(d.TaskName, `\`), nil)
+		// No post-success intent re-write: the pre-dial write above
+		// already recorded Desired=running, so a second write here would
+		// only duplicate the audit entry.
 		results = append(results, RestartResult{TaskName: d.TaskName, Code: result.Code})
 	}
 	return results, true, nil

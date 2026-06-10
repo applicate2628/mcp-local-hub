@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
@@ -311,6 +312,74 @@ func TestRestartAllFallsBackToSchedulerWhenSupervisorUnavailable(t *testing.T) {
 	}
 	if len(results) != 2 || results[0].Err == "" || results[1].Err != "" {
 		t.Fatalf("results = %+v, want supervisor unavailable row followed by scheduler success", results)
+	}
+}
+
+// TestRestartWritesRunningIntentBeforeRespawn pins the fable F1 fix: a
+// supervisor-aware stop leaves daemon-intent.json at Desired=stopped, and
+// the respawn handler routes an idle daemon through the controller
+// (EvManualRestart) whose SM gate REFUSES the spawn unless the intent
+// already says Desired=running. So restartSupervisorOwnedDaemons must
+// write Desired=running BEFORE dialing the respawn — asserted via a
+// read-back inside the respawn stub (mirror of
+// TestStopUsesSupervisorReconcileAndSkipsKill). If the write happened only
+// post-success (the pre-fix ordering) the stub would observe the prior
+// stopped intent and the gate would refuse the respawn in production.
+func TestRestartWritesRunningIntentBeforeRespawn(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+	t.Setenv("LOCALAPPDATA", stateDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	const taskName = `\mcp-local-hub-time-default`
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "time",
+			Daemon:   "default",
+			Port:     9128,
+		}},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	// Seed daemon-intent.json at Desired=stopped, exactly the state a
+	// prior supervisor-aware stop leaves behind — this is the state the
+	// fix must overwrite before the respawn dial.
+	if err := NewAPI().WriteDaemonIntent(taskName, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}, auditWhoMcphubStop); err != nil {
+		t.Fatalf("seed stopped daemon-intent: %v", err)
+	}
+
+	var intentDesiredAtRespawn string
+	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+		// Read-back: the running intent must already be on disk when the
+		// respawn fires, otherwise the SM gate would refuse the spawn.
+		res := NewAPI().ReadDaemonIntent()
+		intentDesiredAtRespawn = res.File.Tasks[taskName].Desired
+		return RespawnResult{Success: true, Code: "OK"}, nil
+	})
+	defer restoreRespawn()
+
+	results, handled, err := restartSupervisorOwnedDaemons(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("restartSupervisorOwnedDaemons: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false; supervisor-owned time daemon should be restarted")
+	}
+	if intentDesiredAtRespawn != IntentDesiredRunning {
+		t.Fatalf("daemon-intent at respawn time = %q, want %q (running intent must be written BEFORE the respawn dial so the SM gate admits the spawn)",
+			intentDesiredAtRespawn, IntentDesiredRunning)
+	}
+	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
+		t.Fatalf("results = %+v, want one supervisor success row", results)
 	}
 }
 

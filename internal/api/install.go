@@ -2604,8 +2604,10 @@ func (a *API) StopAll() ([]RestartResult, error) {
 		}
 		// Intent MUST be on disk before the reconcile reads it; a
 		// failed intent write fail-closes the supervisor pass the same
-		// way Stop's recordStopIntent does.
-		if err := a.recordStopIntent(names, false); err != nil {
+		// way Stop's recordStopIntent does. Use the --all who label so
+		// the forensic audit log distinguishes a bulk "stop everything"
+		// from a targeted `mcphub stop X` (fable F3).
+		if err := a.recordStopIntentAs(names, false, auditWhoMcphubStopAll); err != nil {
 			return nil, err
 		}
 	}

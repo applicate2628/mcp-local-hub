@@ -106,6 +106,7 @@ const AuditActionStopFailedNoKill = "stop-failed-no-kill"
 // can filter by command.
 const (
 	auditWhoMcphubStop          = "mcphub stop"
+	auditWhoMcphubStopAll       = "mcphub stop --all"
 	auditWhoMcphubStopForce     = "mcphub stop --force"
 	auditWhoMcphubInstall       = "mcphub install"
 	auditWhoMcphubRestart       = "mcphub restart"
@@ -221,6 +222,17 @@ func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
 // intent_audit.go to the production AppendIntentAudit so production
 // callers reach real disk.
 func (a *API) recordStopIntent(taskNames []string, force bool) error {
+	return a.recordStopIntentAs(taskNames, force, auditWhoMcphubStop)
+}
+
+// recordStopIntentAs is recordStopIntent with an explicit `who` label for
+// the non-force intent + user-stop-audit path, so StopAll's bulk stop is
+// distinguishable from a targeted `mcphub stop X` in the forensic audit
+// log (StopAll passes auditWhoMcphubStopAll). The --force branch keeps its
+// own dedicated auditWhoMcphubStopForce label regardless of `who` — a
+// forced stop is always recorded as the --force surface; StopAll never
+// takes the force branch (its supervisor pass passes force=false).
+func (a *API) recordStopIntentAs(taskNames []string, force bool, who string) error {
 	now := time.Now().UTC()
 	for _, tn := range taskNames {
 		// Codex deep-sec PR #135 Finding 1: every audit entry carries
@@ -252,7 +264,7 @@ func (a *API) recordStopIntent(taskNames []string, force bool) error {
 			Reason:    IntentReasonUserStop,
 			UpdatedAt: now,
 		}
-		if err := a.WriteDaemonIntent(canonical, intent, auditWhoMcphubStop); err != nil {
+		if err := a.WriteDaemonIntent(canonical, intent, who); err != nil {
 			return fmt.Errorf("stop intent failed for %s: %w", canonical, err)
 		}
 		// Explicit Action=user-stop audit entry (distinct from
@@ -263,7 +275,7 @@ func (a *API) recordStopIntent(taskNames []string, force bool) error {
 		entry := NewIntentAuditEntry(
 			WithAction(AuditActionUserStop),
 			WithTask(canonical),
-			WithWho(auditWhoMcphubStop),
+			WithWho(who),
 			WithPriority("high"),
 			WithReason(IntentReasonUserStop),
 		)

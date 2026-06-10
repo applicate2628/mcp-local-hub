@@ -36,9 +36,16 @@ func setSupervisorStopHooksForTest(fn supervisorStopReconcileFunc) func() {
 //     the stop.
 //   - IPC unavailable (errors.Is ErrSupervisorIPCUnavailable) → (nil,
 //     false, nil): the supervisor is down, so nothing will respawn a
-//     killed daemon — the legacy kill path is correct AND curing (it
-//     actually stops the orphaned process the dead supervisor left
-//     behind).
+//     killed daemon — the legacy kill path is then correct (no reaper
+//     to fight). The fallback covers any REMAINING SCHEDULER ROWS in
+//     scope; it does NOT necessarily reach an orphan the dead
+//     supervisor left behind, because stopKillCore iterates only
+//     scheduler tasks and supervisor-owned daemons have no scheduler
+//     row. An orphan that outlived a dead supervisor (the
+//     job-protection-failure edge — see the Job Protection runbook in
+//     CLAUDE.md) is a pre-existing gap this path does not close;
+//     recordStopIntent has still written Desired=stopped, so the next
+//     supervisor to come up will not respawn it.
 //   - Reconcile reachable but failed → per-target error rows with
 //     handled=true: the supervisor is ALIVE but did not confirm the
 //     stop. Falling through to taskkill here would hand the reaper a
