@@ -396,3 +396,331 @@ Simplify + repair the existing install flow (`build.sh -> install -> ~/.local/bi
 - **hash->name (UX-hashes)** — `serena - <project>` and `<language> @ <workspace-basename>` instead of `serena-<hash>` / `lsp-<hash>`, for BOTH serena and LSP daemons. = §6 #4 (display-only).
 - **clients (+Zed/Kiro)** — the 10-adapter expansion. = §9 / §9.0.
 - **npm** — one-command install. = §13.
+
+
+---
+
+# Appendix A — Implementation elaboration (2026-06-10, architect pass)
+
+Closes the §11.1 gaps with verified file:line anchors. Becomes the review-loop artifact. (Inline **[SPEC-CORRECTION]** marks where the body sections above were found stale; reconcile during implementation.)
+
+## §5.1 Legacy → bugs traceability
+
+This maps each legacy-removal phase to the concrete bug class it removes, with the live code anchor for both the **defect mechanism** and the **fix site**.
+
+### The dual-model substrate (why these bugs share one root)
+
+mcphub today runs **two** desired-state models simultaneously:
+
+1. **v0.5.x supervisor model** — `supervisor-intent.json` (descriptors) + the pure restart state machine `api.Transition` (`internal/api/supervisor_state_machine.go:47`), driven by the controller (`internal/cli/supervisor_controller.go`). Child exits feed `EvChildExit`; the clean/non-clean distinction is the `clean_exit` body flag (`supervisor_controller.go:144`).
+2. **v0.4.x legacy model** — `daemon-intent.json` (3-state stop overrides: `DaemonIntent{Desired,Reason,UpdatedAt}`, `internal/api/daemon_intent.go:219`) + the scheduler/watchdog/recovery engine (`internal/api/recovery.go`, the `\mcp-local-hub-watchdog` task).
+
+Every bug below is an **interference pattern between the two models**. Removing the class (Phases A–F) removes the interference, not the instances.
+
+### (a) STOP → failed → Quarantine churn (live paper-search bug) — fixed by A + E
+
+**Mechanism:** The non-clean exit gate. `api.Transition` routes `StRunning + EvChildExit → StBackoffWaiting "arm timer"` (`supervisor_state_machine.go:125-126`) for any **non-clean** exit; only a clean exit (`clean_exit=true`) observed in `StRunning` is dropped (`supervisor_controller.go:136-144`). The legacy stop path (`StopAll`, `killDaemonByPort`) kills via `taskkill /PID <pid> /F /T` (`internal/api/install.go:2677`) — a non-clean exit — so the reaper respawns before the 60-second `IntentWatcher` poll (`internal/cli/supervise_watcher.go:107-109`, `pollInterval = 60s`) reads the fresh `daemon-intent.json` stop. The race re-stops, climbing the failure counter toward `StQuarantined` (`supervisor_state_machine.go:182-185`, `Failures >= 10`).
+
+**Fix site (A — already implemented):** `Stop`/`StopAll` are now supervisor-aware. `StopAll` records stop intent first (`recordStopIntentAs`, `internal/api/install_intent.go:235`) then calls `stopSupervisorOwnedDaemons` (`install.go:2614`), which drives `EvIntentUpdate{stopped}` → `StRunning → StExiting` (`supervisor_state_machine.go:128-129`) — a deliberate stop with no respawn. The shared target selector is `selectSupervisorOwnedTargets` (`internal/api/restart_supervisor.go:29`), mirroring `restartSupervisorOwnedDaemons` (`restart_supervisor.go:83`).
+
+> **[SPEC-CORRECTION — §4 / Workstream A]** §4 is written in future tense ("FIX: make `Stop`/`StopAll` supervisor-aware … Add `stopSupervisorOwnedDaemons` mirroring `restartSupervisorOwnedDaemons`; wire at `install.go` Stop (~:2200) + StopAll (~:2545)"). **This is already in the tree.** `stopSupervisorOwnedDaemons`, `recordStopIntentAs`, `selectSupervisorOwnedTargets`, and the `stopSchedulerFactory` test seam (`install.go:638`) all exist; `StopAll`'s supervisor pass is at `install.go:2595-2654` (not ~2545), and the comments read "spec §4 Phase A.1". The roadmap table (line 83) correctly marks A **DONE (8ab8a42)**, but §4's prose contradicts it. Update §4 to past tense and re-anchor the line numbers (`StopAll` at `install.go:2595`; the `killByPortFn` legacy fallback at `install.go:2646`).
+
+**Phase E's contribution:** E collapses `daemon-intent.json` into `supervisor-intent.json` so there is no second file the 60s `IntentWatcher` must poll and no window where the supervisor's in-memory `daemonIntentCache` (`supervisor_controller.go:168`) is stale relative to a just-written `daemon-intent.json`. A removes the *symptom* on the live fleet today; E removes the *race window* permanently.
+
+### (b) hub-down / false "Restarting" status (§3.1) — fixed by B + (C/D context)
+
+**Mechanism:** The IPC→scheduler silent fallback. `computeDaemonsSection` (`internal/api/health.go:321`) is the single owner of `/api/status` + `/api/health` daemon rows. When the supervisor IPC seam returns `ErrSupervisorIPCUnavailable`, it **silently falls back to the legacy scheduler scan** (`health.go:399-401`: `if errors.Is(fetchErr, ErrSupervisorIPCUnavailable) { rows, fetchErr = a.StatusContext(parentCtx) }`). `StatusContext` reads the Windows Task Scheduler view (`internal/scheduler/scheduler_windows.go:332` `Status`), whose state vocabulary is normalized by `normalizeDaemonState` (`health.go:947`) — and any unknown/blank scheduler state maps to `"failed"` (`health.go:957-961`). A migrated daemon whose `\mcp-local-hub-*` task was deleted (Phase F's end-state) or is in a transient scheduler state therefore surfaces as `failed`/`Restarting` even while the supervisor-owned process serves traffic on its port.
+
+**Fix site (B):** B makes the GUI/status layer fail loud instead of falling back. Two coupled changes: (1) the GUI's `realHealthBackend.DaemonStatusSnapshot` (`internal/gui/server.go:81`) must surface the IPC error as "supervisor down — restart" rather than rendering the scheduler-derived rows; (2) `computeDaemonsSection`'s `ErrSupervisorIPCUnavailable` branch (`health.go:399-401`) is the production fallback that must be **removed or gated behind a deploy flag** once the watchdog/scheduler tasks no longer exist (post-D/F), because after D/F the scheduler view is *guaranteed* stale.
+
+> **[SPEC-CORRECTION — §3.1 root candidate (b)]** §3.1 lists root candidate (b) as "the status snapshot reads a stale/transient Restarting label without re-probing actual port-bound + PID-alive liveness." The verified mechanism is narrower and **more actionable**: the label is not stale-cached at the status layer — it is **freshly computed from the legacy scheduler scan** via the `ErrSupervisorIPCUnavailable` fallback at `health.go:399-401`, then coerced to `failed` by `normalizeDaemonState` (`health.go:957-961`). The fix is not "re-probe port+PID" (the IPC status path already reports authoritative PID/port from `supervisor-state.json`); it is "stop falling back to the scheduler view when IPC is down." This makes (b) a **B-only** fix, with C/D removing the stale scheduler data source entirely. Candidate (a) ("supervisor genuinely restart-looping = the STOP churn") is the **same** root as §5.1(a) above and is fixed by A.
+
+### (c) watchdog FIGHTS the supervisor every 5 min — fixed by C
+
+**Mechanism:** The auto-installed watchdog task. `mcphub setup` calls `a.InstallWatchdogTask()` unconditionally (`internal/cli/setup.go:471`), which imports the `\mcp-local-hub-watchdog` scheduled-task XML (`internal/api/api_surfaces.go:754-771`, `sch.ImportXML(WatchdogTaskName, …)`). That task runs `mcphub watchdog --once` every 5 minutes; the recovery engine (`internal/api/recovery.go:299`) reads `daemon-intent.json` via `IsActiveStop` and restarts any daemon it believes failed — including supervisor-owned daemons the supervisor is deliberately holding in `StExiting`/`StQuarantined`. Two restart authorities, one fleet.
+
+**Fix site (C):** Remove the `a.InstallWatchdogTask()` call at `setup.go:471` and add an idempotent **uninstall** on existing hosts (the API already exposes `UninstallWatchdogTask`, `api_surfaces.go:692`, `sch.Delete(WatchdogTaskName)`). The uninstall-on-upgrade lives in the same `runSetupWatchdog` flow (`setup.go:423`). Depends on A because, until Stop is supervisor-aware, the watchdog is the only thing reviving daemons after the churn — removing it before A would leave genuinely-stuck daemons dead.
+
+### (d) "super-stale code, watchdog + supervisor appeared in dashboard" — fixed by B + D
+
+**Mechanism:** Same fallback as (b), surfacing **legacy task rows**. When IPC is down, the scheduler scan (`health.go:400` → `StatusContext` → `sch.List("mcp-local-hub-")`, e.g. `StopAll`'s use at `install.go:2626`) returns **every** `mcp-local-hub-*` task — including the `\mcp-local-hub-watchdog` maintenance task and any stale per-daemon legacy tasks — which then render as dashboard daemon rows. The supervisor's own rows and the watchdog row both appear because the scheduler prefix match doesn't distinguish maintenance tasks from daemon tasks at that layer (the maintenance filter `isMaintenanceTaskName` lives in the supervisor path, e.g. `restart_supervisor.go:148`, not the scheduler scan).
+
+**Fix site:** B (stop rendering scheduler rows when IPC down) removes the *display*; D (delete `watchdog.go`/`recovery.go`/`watchdog_state.go` + the `InstallWatchdogTask`/`UninstallWatchdogTask` API surface) removes the *source* of the watchdog row. After D, there is no watchdog task to leak into any view.
+
+### Traceability matrix
+
+| Phase | Removes bug class | Defect mechanism anchor | Fix-site anchor |
+|---|---|---|---|
+| **A** STOP-fix | (a) STOP→Quarantine churn | `supervisor_state_machine.go:125-126` (non-clean→backoff); `install.go:2677` (taskkill /F); `supervise_watcher.go:107` (60s poll) | `install.go:2595-2654` (`StopAll` supervisor pass); `restart_supervisor.go:29` (selector); `install_intent.go:235` (intent-first) — **already landed** |
+| **B** GUI fail-loud | (b) false Restarting/down; (d) legacy rows in dashboard | `health.go:399-401` (IPC→scheduler silent fallback); `health.go:957-961` (unknown→failed); `gui/server.go:81` | new: surface IPC error as "supervisor down — restart"; gate/remove `health.go:399-401` fallback |
+| **C** drop watchdog task | (c) watchdog fights supervisor | `setup.go:471` (`InstallWatchdogTask()` call); `api_surfaces.go:754` (task import) | remove call at `setup.go:471`; add uninstall via `api_surfaces.go:692` |
+| **D** delete watchdog engine | (c)/(d) source removal | `recovery.go:299` (`IsActiveStop` restart decision); `api_surfaces.go:722-771` (install API) | delete `watchdog.go`/`recovery.go`/`watchdog_state.go`; remove `Install/UninstallWatchdogTask` |
+| **E** collapse dual-intent | (a) race window permanently | `daemon_intent.go:219` (`DaemonIntent`); `supervise_watcher.go:57-59` (`watchedIntentFiles` = both) | unify into `supervisor-intent.json`; migrate 6 readers (see §5.1-E mechanics below) |
+| **F** drop scheduler/migration | residual scheduler-view staleness | `install.go:2626` (`sch.List`); `internal/migration/`; `install --rollback-to-legacy` | global daemons → supervisor-intent; delete migration engine |
+
+> **[SPEC-CORRECTION — "4 readers"]** §5 line 53 says Phase E must "migrate the 4 readers (supervisor controller, tray, restart_supervisor)." The verified reader count for `DaemonIntent.IsActiveStop` is **6 call sites**, not 4: `internal/api/recovery.go:299` (watchdog engine — deleted by D, so it drops out of E's scope), `internal/tray/state.go:220`, `internal/cli/gui_tray_state.go:165`, `internal/api/api_surfaces.go:674`, `internal/cli/supervise_reconcile.go:148`, and `internal/cli/supervisor_controller.go:710`. `restart_supervisor.go` does **not** call `IsActiveStop` (it reads `supervisor-intent.json` already). Restate E's reader-migration scope as the 5 surviving `IsActiveStop` callers after D removes `recovery.go`.
+
+---
+
+## §5.x Per-phase acceptance criteria + test plan (mirrors the v0.5.0 supervisor implementation-outline style)
+
+Each phase below has: **Done gate** (the falsifiable PASS condition), **Test surface** (Go unit + Playwright E2E additions, keyed to the current 103-test suite), and a **Falsification test** (the experiment that, if it passes, proves the phase did NOT do its job).
+
+### Phase A — STOP fix (status: landed; this is the gate for re-verification)
+
+- **Done gate:** `mcphub stop <serena daemon>` then `mcphub status` shows the daemon at `stopped` (not `failed`/`Restarting`), and it stays stopped across at least two 60s `IntentWatcher` poll cycles. `mcphub restart <daemon>` revives it.
+- **Test surface (Go):** `internal/api/stop_supervisor_test.go` (exists per codegraph blast-radius). Assert: (1) `StopAll` records `Desired=stopped,Reason=user-stop` via `recordStopIntentAs` BEFORE the reconcile; (2) the SM receives `EvIntentUpdate{stopped}` and lands `StExiting`, never `StBackoffWaiting`; (3) the legacy `killByPortFn` path (`install.go:2646`) fires only for non-supervisor tasks.
+- **Test surface (E2E):** Servers matrix "Stop all" → daemon row resolves to a **stopped** state and "Run all" revives it. No new spec file needed if the existing servers suite (8 tests) covers the row-state assertion; add one populated-row case once the seed fixture exists (currently deferred per CLAUDE.md "What's NOT covered").
+- **Falsification test:** kill a supervisor-owned daemon with `taskkill /F` directly (bypassing `mcphub stop`) and confirm the supervisor **does** respawn it — proving the non-clean→respawn path is intact and A only suppressed *deliberate* stops, not crash recovery. If `taskkill /F` no longer respawns, A over-reached.
+
+### Phase B — GUI fail-loud
+
+- **Done gate:** with the supervisor down (no `supervisor.lock`), `/api/status` returns HTTP 500 `STATUS_FAILED` (it already does on total IPC failure per `health.go:411-430`) and the GUI Dashboard renders "supervisor down — restart" instead of any daemon rows. Zero watchdog/legacy rows ever appear.
+- **Test surface (Go):** new test asserting `computeDaemonsSection` does NOT call `StatusContext` on `ErrSupervisorIPCUnavailable` once the fallback is removed (currently `health.go:399-401` *does* call it). Assert `normalizeDaemonState` is no longer reachable from the IPC-down path.
+- **Test surface (E2E — NEW spec required):** `internal/gui/e2e/specs/dashboard-fail-loud.spec.ts`. Fixture sets `MCPHUB_E2E_SUPERVISOR=none` (the existing seam, CLAUDE.md GUI E2E section) so no supervisor IPC is reachable; assert the Dashboard shows the fail-loud banner and **no daemon cards**, and the Servers matrix shows the same. This is a genuinely-new observable-behavior surface → adds to the 103-test count.
+- **Falsification test:** with the supervisor **up**, confirm normal rows render (B must not break the happy path). With supervisor up but one daemon genuinely `failed`, confirm that one daemon (and only it) shows red — proving B fails loud on real failure, not on transport hiccups.
+
+### Phase C — drop watchdog task
+
+- **Done gate:** after `mcphub setup` on a clean host, `schtasks /Query /TN \mcp-local-hub-watchdog` returns "not found." On a host that previously had the task, `mcphub setup`/`mcphub install --upgrade` deletes it.
+- **Test surface (Go):** extend `internal/cli/setup_watchdog_test.go` (exists) — invert its current assertions: assert `runSetupWatchdog` does **not** call `InstallWatchdogTask` (no `ImportXML` on the injected scheduler) and **does** call `UninstallWatchdogTask` (one `Delete(WatchdogTaskName)`) when the task pre-exists. The existing `schedulerFactoryFn` seam (`api_surfaces.go:78`) records the calls.
+- **Falsification test:** start the supervisor, hold a daemon in deliberate `StExiting` (via `mcphub stop`), wait >5 min, confirm the daemon stays stopped (no watchdog revival). If it revives, the watchdog task is still installed/active.
+
+### Phase D — delete watchdog engine
+
+- **Done gate:** `internal/api/recovery.go`, `internal/cli/watchdog.go` (command), `watchdog_state.go` are gone; `go build ./...` + `go vet ./...` clean; no remaining caller of `IsActiveStop` from a recovery context (only the 5 supervisor/tray/api-surface readers remain, see §5.1-E).
+- **Test surface (Go):** delete `recovery_test.go`, `watchdog_test.go`, `watchdog_state_test.go`. The drift here is **compile-time** — the gate is the clean build plus the §5.1-E reader migration. Run the repo's canonical pre-push: `go build ./... && go vet ./... && go test -count=1 ./...` plus the tagged `internal/api/ internal/cli/` run (CLAUDE.md PR workflow Step 1).
+- **Falsification test:** `grep` the tree for `WatchdogTaskName`, `InstallWatchdogTask`, `mcphub watchdog --once` references outside docs/migration-compat; any live reference means D is incomplete. (Per CLAUDE.md memory `feedback_kosyak_surgical_edits_leave_stale_text` — run the full cross-cutting grep, not a single-section check.)
+
+### Phase E — collapse dual-intent (mechanics in §5.1-E below; criteria here)
+
+- **Done gate:** `daemon-intent.json` and `internal/api/install_intent.go`'s writers are gone; `watchedIntentFiles` (`supervise_watcher.go:57`) lists only `supervisor-intent.json`; all stop/idle/disable intent lives in `supervisor-intent.json`; the live fleet's existing stops survive the in-place merge (serena pool keeps running, paper-search stays stopped if it was).
+- **Test surface (Go):** new `internal/api/intent_collapse_test.go`: given a populated `daemon-intent.json` (user-stop on paper-search) + a populated `supervisor-intent.json` (running serena pool), the one-time merge produces a single `supervisor-intent.json` with the paper-search stop preserved (`IsActiveStop` semantics intact: TTL, clock-skew, reason). Reuse the `DaemonIntent.IsActiveStop` table tests (`daemon_intent_test.go:240-303`) against the unified schema.
+- **Test surface (E2E — NEW):** `dashboard-idle.spec.ts` is deferred to Phase 5; for E itself, no new GUI behavior is observable (it is a persistence-layer change), so no E2E addition — **but** add a guard that the tray/Dashboard still suppress stopped daemons via the migrated `IsActiveStop` readers (`tray/state.go:220`, `gui_tray_state.go:165`).
+- **Falsification test:** after the merge, manually re-add a `daemon-intent.json` to the state dir and confirm the supervisor **ignores** it (no longer a watched file). If the supervisor still reacts, E did not fully cut the second reader.
+
+### Phase F — drop scheduler/migration
+
+- **Done gate:** `internal/migration/` deleted; `mcphub install --rollback-to-legacy` and `migrate-legacy` removed; global daemons (memory/time/wolfram/…) spawn from `supervisor-intent.json` reconcile, not from `\mcp-local-hub-*` scheduler tasks; `mcphub setup` creates zero scheduler tasks on Windows.
+- **Test surface (Go):** the migration package's tests (`internal/migration/*_test.go`) are deleted with the package; add a fresh-install test asserting `Install` (`internal/api/install.go:229`) writes a `supervisor-intent.json` descriptor and starts the daemon via the supervisor seam rather than `sch.Create`.
+- **Falsification test:** fresh install on a clean Windows host → `schtasks /Query /TN \mcp-local-hub-*` returns nothing, yet `mcphub status` shows all 10 global daemons running. If any `\mcp-local-hub-*` task exists, F is incomplete.
+
+### Feature workstreams
+
+| Workstream | Done gate | Test surface | Falsification test |
+|---|---|---|---|
+| **#4 hash→name** | CLI status + Dashboard show `serena · <project>` / `<lang> @ <basename>` not `serena-<8hex>` | E2E: NEW assertion in dashboard/servers suite that the rendered label matches `serena · ` + the workspace basename from `/api/status` (the `workspace` field is already in status). Pure display → small E2E delta. | feed a workspace whose path basename collides with the hash prefix; confirm the human name still wins. Confirm a daemon with no `workspace` field falls back gracefully (no empty `serena · `). |
+| **#6 idle-shutdown** | serena pool daemon sleeps after N idle min, wakes on next `/serena/mcp`; `IntentReasonIdle` on the **unified** intent; 60s sweeper | Go: new `IntentReasonIdle` added to `isKnownIntentReason` (`daemon_intent.go:660`), `IsActiveStop` honors it WITHOUT the user-stop TTL (`daemon_intent.go:320-321` only TTLs `IntentReasonUserStop`); router clears it + 503-retries on wake. E2E NEW `dashboard-idle.spec.ts`: daemon shows "idle (sleeping)" state, next request wakes it. | set idle threshold to 1 min, make a tool call, confirm the daemon is NOT killed mid-call (the sweeper must read last-activity, not wall-clock since spawn). Confirm a `user-disabled` daemon is never woken by an idle wake. |
+| **#8 config-centralization** | `configs/ports.yaml` is the **runtime** port owner (not test-only); daemon ports auto-allocated; tier-A values GUI-settable | Go: a production reader of `ParsePortRegistry` (`config/ports.go:33`) exists and is consulted by `Install`/allocate paths; guard-test greps for live-band literals (`9121`/`9200`/`9128`) reaching `killByPortFn`/`net.Listen`. | introduce a hardcoded `Port: 9200` in a non-test path; the guard-test must fail. (Direct memory lesson: this literal once killed a live daemon.) |
+| **demigrate-serena-router** | GUI uncheck-cursor-serena succeeds when the entry is the `/serena/mcp` router shape | Go: extend `internal/api/demigrate_test.go` — `liveEntryMatchesManifestBinding` (`managed_entries.go:355`) recognizes `http://127.0.0.1:9125/serena/mcp` as hub-managed. E2E: existing servers-matrix uncheck-via-hub test, but seeded with a router-shape cursor entry. | seed a cursor entry pointing at a *foreign* remote URL; demigrate must STILL refuse it (the widened matcher must not become "remove anything"). |
+| **§9 multi-agent table** | the 4 duplicated canonical-set literals collapse to one registration table; adding a client = one entry | Go: drift-guard test asserts the table is the single source for `SupportedClientNames`/`AllClients`/`serenaReconcileClientSet`/`DefaultInstallClientNames`. Per-adapter demigrate symmetry test. | add a client to one literal but not the table; the drift-guard must fail. |
+| **§10 GUI store** | every install persists a manifest under `defaultManifestDir()`; port auto-allocated, never literal | Go: post-install assert the manifest file exists on disk (the §10.0 "fetch was lost" regression guard). E2E NEW store screen suite. | install a store entry, then trigger a reconcile, then assert the daemon survives (it would vanish if the manifest were in-memory-only — the exact "fetch was lost" failure). |
+
+---
+
+## §5.1-E Phase E intent-collapse mechanics (the hard one §11.1 flags)
+
+**The problem §11.1 names:** research-mode deleted the migration engine, but the live host has a **populated `daemon-intent.json`** (per-task stop overrides) AND a **populated `supervisor-intent.json`** (running serena pool descriptors). E must merge them into one file **without** the deleted migration machinery.
+
+### What `daemon-intent.json` actually holds (the data to migrate)
+
+`DaemonIntentFile.Tasks` is `map[taskName]DaemonIntent{Desired, Reason, UpdatedAt}` (`daemon_intent.go:219-226`). The behavior to preserve is entirely in `IsActiveStop` (`daemon_intent.go:308-325`):
+- `Desired=stopped` is an active stop unless overridden;
+- **clock-skew-future** fail-closed (`daemon_intent.go:313-314`);
+- **stale bound** (>365d) clears the stop (`daemon_intent.go:317`);
+- **TTL** applies **only** to `Reason=user-stop` (`daemon_intent.go:320-321`) — `user-disabled` never expires.
+
+So the merge must carry `Desired`, `Reason`, `UpdatedAt` per task into the unified file's per-daemon record, and the unified-file reader must reproduce `IsActiveStop` exactly (port the pure predicate verbatim — it has no I/O).
+
+### Where `IsActiveStop`/TTL/`IntentReason` move
+
+Move the pure predicate and its constants (`StopIntentTTL`, `ClockSkewFutureTolerance`, `ClockSkewStaleBound`, `IntentReason*`) onto the **`SupervisorDaemon` descriptor** (`supervisor-intent.json`'s per-daemon row). The supervisor already threads `IntentIsActiveStop` into the SM via `SMContext.IntentIsActiveStop` (`supervisor_state_machine.go:33`), and the controller computes it today from `daemonIntentCache.Lookup(...).IsActiveStop(now)` (`supervisor_controller.go:710`). After E, the controller computes it from the unified descriptor's stop fields instead — **the SM input shape does not change**, only the source file. This is why E is low-risk for the supervisor: `api.Transition` is untouched.
+
+### The one-time in-place merge (no migration engine)
+
+Because there is "nothing to roll back to" (§0 premise 2), E does **not** need the journal/rollback machinery in `internal/migration/`. It needs a single idempotent boot-time reconcile:
+
+1. On `mcphub supervise` startup (or `mcphub install --upgrade`), if `daemon-intent.json` exists alongside `supervisor-intent.json`:
+   - read both under their existing flocks (`daemon-intent.json` via `ReadDaemonIntent`, `daemon_intent.go:356`; supervisor-intent via `ReadSupervisorIntent`);
+   - for each `daemon-intent.json` task with an **active** stop (re-evaluate `IsActiveStop(now)` so expired/stale stops are dropped, not carried), write the stop fields onto the matching `supervisor-intent.json` daemon row (match by canonical leading-backslash `task_name`, `daemon_intent.go:275`);
+   - atomic-write the unified `supervisor-intent.json` (temp+rename, same as `WriteDaemonIntent` discipline);
+   - delete `daemon-intent.json` and its `.lock`.
+2. The merge is **idempotent**: a second boot finds no `daemon-intent.json` and is a no-op. A crash mid-merge leaves `daemon-intent.json` intact (it is deleted last) → the next boot re-runs cleanly. This is the "live fleet is the safety surface" posture (§0 premise 2) — no journal needed because the input file is the recovery point until the rename commits.
+
+> This is **not** a kostyl: the merge names the root cause (two desired-state files) and removes one. It is allowed under §0 premise 2 specifically because there is no compat contract to preserve; the in-place merge is the *minimal* transition, not a workaround that hides a defect.
+
+### The 4 daemon-intent readers to migrate (anchored)
+
+> Using the verified set (see §5.1 [SPEC-CORRECTION "4 readers"]). After Phase D deletes `recovery.go:299`, **5** `IsActiveStop` readers remain, of which these are the ones that read `daemon-intent.json` content and must repoint at the unified file:
+
+1. `internal/cli/supervisor_controller.go:710` — `di.IsActiveStop(now)` feeds `SMContext.IntentIsActiveStop`. Repoint `daemonIntentCache` (`supervisor_controller.go:168`) to read the unified descriptor.
+2. `internal/cli/supervise_reconcile.go:148` — `entry.IsActiveStop(now)` in the reconcile spawn/terminate decision. Repoint to the unified per-daemon row.
+3. `internal/tray/state.go:220` — tray suppression of stopped daemons. Repoint the tray's intent read.
+4. `internal/cli/gui_tray_state.go:165` — GUI tray-state mirror. Same.
+5. `internal/api/api_surfaces.go:674` — the `intent.IsActiveStop(now)` helper used by status surfaces. Repoint.
+
+Also migrate the **writers**: `recordStopIntentAs` (`install_intent.go:235`, calls `WriteDaemonIntent`) and `recordRestartIntentForTask` (used by `restart_supervisor.go:114`) must write the unified file. The `IntentWatcher`'s `watchedIntentFiles` (`supervise_watcher.go:57-59`) drops `daemon-intent.json`.
+
+### Ordering constraint with #6 idle-shutdown — sequence #6 AFTER E
+
+`IntentReasonIdle` is a NEW reason value. If #6 lands first, it adds a writer to `daemon-intent.json` (`isKnownIntentReason`, `daemon_intent.go:660`, and the `IsActiveStop` TTL branch at `daemon_intent.go:320-321`) — **the very file E is deleting**. The redesign §12 Phase 5 already states this ("Lands AFTER Phase 4-E … do NOT author a second stop path"), and it is correct. Concretely: #6 must (a) add `IntentReasonIdle` to the **unified** schema's known-reason set, and (b) ensure `IsActiveStop` does NOT apply the user-stop TTL to `IntentReasonIdle` (idle daemons sleep indefinitely until a `/serena/mcp` wake clears the reason). Authoring #6 on the dual-intent file first would require re-authoring it on the unified file in E — wasted churn and a window where two reasons live in two files.
+
+> **[SPEC-CORRECTION — §11.1 ordering claim]** §11.1 says "Ordering between #6 (`IntentReasonIdle`) and Phase E … is unspecified." §12 Phase 5 *does* specify it (E first). The contradiction is between §11.1 (the gap list) and §12 (the sequencing). Resolve by deleting the §11.1 "unspecified" claim and pointing to §12 Phase 5 + this §5.1-E section as the canonical resolution.
+
+---
+
+## §3.x Fail-loud mechanism design (zombie-connection regression)
+
+### Which layer holds the MCP session handle
+
+The **serena router** (`internal/gui/serena_router.go`) owns three session stores, all in package `gui`:
+1. **router-minted client sessions** — `routerSessionStore` (`serena_router_session.go:101`): maps the client `Mcp-Session-Id` minted at `initialize` to its negotiated protocol version, with 24h idle TTL + LRU cap (`maxRouterSessions = 4096`, `serena_router_session.go:75`).
+2. **sticky routing** — the cross-package `sessionRouter` interface (`serena_router.go:39`: `BindSession`/`LookupSession`/`UnbindSession`) maps client session → workspace.
+3. **upstream daemon sessions** — `serenaDaemonSessions` (the daemon-side `Mcp-Session-Id`).
+
+The coordinated-unbind owner is `coordinateExpiredRouterSessionUnbind` (`serena_router_session.go:510`): it unbinds an id from the daemon store AND the sticky router together, so a terminated session is gone from all three. The periodic reclaimer is `SweepSerenaSessions` (`serena_router_session.go:473`), wired into the existing `runSessionCleanupTicker` (no new goroutine).
+
+> **This is the layer that must fail loud.** Today the router tears down sessions on **idle TTL** (24h) and on explicit client **DELETE** — but NOT on **backend loss**. That is the zombie gap.
+
+### The zombie mechanism (2026-06-10 incident)
+
+When the hub restarts (or the serena backend daemon dies), the upstream `/serena/mcp` daemon endpoint is replaced/restarted, but the **router's client-side session stores survive** (they live in the long-lived GUI `Server`, not the daemon). The client still holds a `Mcp-Session-Id` the router still considers `routerSessionLive` (`serena_router_session.go:269`), so `/serena/mcp` keeps returning HTTP 200 at the router layer — but every forward to the now-dead/replaced upstream fails or hits a daemon that never saw this session's `initialize`. The client is "connected" (200, live router session) yet effectively dead — exactly the spec's zombie. Only an editor restart mints a fresh session.
+
+### How the router should detect backend loss + tear down
+
+Three detection signals, in increasing fidelity:
+
+1. **Child-exit event (highest fidelity, preferred).** The supervisor already observes child exits via `EvChildExit` (`supervisor_state_machine.go:21`) and the controller's `crashCh` bridge (`supervisor_controller.go:459` "clean exits now flow through crashCh too"). The GUI router subscribes (via the existing `/api/events` SSE bus, `internal/gui/events.go`) to a `daemon-failed`/`daemon-restarted` event for serena-pool daemons. On receipt, the router runs `coordinateExpiredRouterSessionUnbind` (`serena_router_session.go:510`) for **every** session bound to that daemon's workspace — terminating the client session deterministically so the client sees a clean disconnect and re-`initialize`s. (§11.9 already lists `daemon-failed` as a missing event — **this is its first hard consumer**.)
+2. **IPC status reconciliation (medium).** On any reconcile tick, if `DialSupervisorIPCStatus` (`internal/api/supervisor_ipc_status_client.go:32`) reports a serena daemon's `pid_generation` advanced (restart) or the daemon absent, sweep that daemon's sessions. This is the fallback when SSE is missed.
+3. **Health-probe on forward failure (lowest, but always-on).** When a `/serena/mcp` forward returns a connection error or the daemon's session is unknown upstream, the router does NOT silently retry on the stale session — it unbinds (the three stores) and returns `-32600 "session terminated"` (the same code the expired-on-read path already returns, `serena_router_session.go:461`), forcing the client to re-`initialize`. The router already has the budgets for this: `serenaCleanupTimeout = 5s` (`serena_router_session.go:81`) for detached teardown forwards.
+
+**SSE/HTTP streaming teardown:** the router's forward path already uses detached, short-budget contexts for teardown (`cleanupContext`, `serena_router_session.go:108`) so a hung daemon delays the client by at most 5s, not the 60s `serenaUpstreamTimeout` (`serena_router_session.go:71`). On backend-loss the router must (a) close any in-flight SSE GET stream for the affected sessions, and (b) `UnbindSession` so the next client request is treated as unknown → 503/`-32600` → reconnect. The DELETE teardown path (`unbind`, `serena_router_session.go:376`) is the template; backend-loss is just a new trigger for the same teardown.
+
+### The LSP router (named-but-undesigned, §11.1)
+
+The LSP router (`internal/api/lsp_client_router.go`, the `/lsp/<lang>/mcp` peer) and the per-`(workspace,language)` `LazyProxy` (`internal/daemon/lazy_proxy.go`) must get the **same** fail-loud trigger. `LazyProxy.Stop` (`lazy_proxy.go:200`) already closes the endpoint + HTTP server + lifecycle; the gap is that the **router** doesn't tear down client sessions when the proxy stops. Mirror the serena `coordinateExpiredRouterSessionUnbind` pattern for LSP. The `didOpen/didClose` no-refcount multi-agent bug (§11.1, `lazy_proxy.go`) is a separate but adjacent finding — see Adjacent findings.
+
+### Deterministic reproduction harness → regression test
+
+```
+1. Start the hub + a serena pool daemon for workspace W.
+2. Client A: POST /serena/mcp initialize → capture Mcp-Session-Id S (routerSessionStore now has S live).
+3. Client A: one successful tool call through S (sticky + daemon bindings established).
+4. Inject backend loss: kill the serena daemon for W via the supervisor's
+   deliberate path (taskkill the daemon PID, OR drive EvChildExit through the
+   controller's crashCh bridge, supervisor_controller.go:459).
+5. ASSERT (current = zombie): POST /serena/mcp with session S returns 200 and a
+   live routerSessionStore entry → FAIL (this is the bug).
+6. ASSERT (fixed): within one reconcile tick / SSE event, S is unbound from all
+   three stores (routerSessionStore + daemonSessions + sticky), and the next
+   request on S returns -32600 "session terminated" → the client re-initializes.
+```
+
+The Go test lives in `internal/gui/serena_router_lifecycle_test.go` (the lifecycle suite already exists). It uses the `serenaRouterTestSeam` (`serena_router.go:66`) to inject a fake upstream whose endpoint flips to "dead," then asserts the session sweep fires on the backend-loss event rather than only on the 24h idle TTL. The harness's step 4 must drive the **real** exit event path, not just delete the store entry (per the race-window/end-to-end-channel disciplines in AGENTS.md).
+
+> **[SPEC-CORRECTION — §3 vs §3.1 conflation]** §3 (zombie connection) and §3.1 (false "Restarting") are **two distinct bugs** the spec sometimes treats as one ("Couples to Workstream B"). §3.1 is a **status-display** bug fixed at `health.go:399-401` (B). §3 is a **session-lifecycle** bug fixed in the serena/LSP **router** (`serena_router_session.go`), which is a different layer and a different PR surface. They share the "fail loud, no zombie state" *principle* but not the *fix site*. Keep them as separate workstreams: §3.1 → B; §3 → the router fail-loud design above, folded into Phase 1 per §12.
+
+---
+
+## §2.x Port-ownership migration inventory (the killed-live-daemon class)
+
+### The current split (three owners, one of which is stale)
+
+**Owner 1 — embedded manifests (the de-facto runtime source).** Each `servers/<s>/manifest.yaml` declares its daemon port inline. Verified example: `servers/serena/manifest.yaml:62` declares `port: 9121` for the `unified` daemon. `Install` loads these embed-FS-first (`internal/api/manifest_source.go` per §10.0; `Install` at `install.go:239`), and `findDaemonPort(m, binding.Daemon)` (used by `liveEntryMatchesManifestBinding`, `managed_entries.go:356`) reads the manifest port as truth for client-config URL shape. **This is what actually owns global daemon ports at runtime today.**
+
+**Owner 2 — `configs/ports.yaml` (currently TEST-ONLY).** Parsed by `config.ParsePortRegistry` (`internal/config/ports.go:33`). The **only** reader is the drift-guard test `internal/config/serena_test.go:75-143`, which asserts every embedded-manifest declared port has a matching `ports.yaml` entry. No production code reads it. Its content (read this session, `configs/ports.yaml:1-32`): 10 global entries (serena/unified=9121, memory=9123, sequential-thinking=9124, wolfram=9132, godbolt=9126, paper-search-mcp=9127, time=9128, gdb=9129, lldb=9130, perftools=9131) and `workspace_scoped: []` (empty).
+
+**Owner 3 — `AllocatePort` / `AllocateSerenaPort` (the dynamic-pool runtime owner for workspace-scoped + serena pool).** `AllocatePort(reg *Registry, pool config.PortPool)` (`internal/api/port_alloc.go:40`) returns the lowest free port in the pool that is both unallocated in the workspace `Registry` AND not OS-bound. The serena dynamic pool uses `reg.AllocateSerenaPort(pool)` (`internal/api/serena_auto_register.go:188`) over `EffectiveSerenaPortPool` (`serena_dynamic_pool.go:149`). Allocated serena ports persist to `workspaces.yaml` (the `Registry`, `internal/api/workspace_registry.go:82`).
+
+### The bug class (test-Port:9200-killed-live-daemon)
+
+The split means the **test convention** (pools at `9200-9299`, e.g. `port_alloc_test.go:21`, `e2e/lazy_register_test.go:197`) overlaps the **runtime allocation band**. A test that hardcodes `Port: 9200` and calls `killByPortFn`/`net.Listen` can hit a **live** workspace-scoped daemon the running pool allocated at 9200. The CLAUDE.md memory `feedback_common_logic_flexible_defaults_via_gui` records this exact incident ("Port:9200 literal → killed live daemon").
+
+> **[SPEC-CORRECTION — §2 stale-data finding]** §2 says "promote `configs/ports.yaml` from a test-only fixture to the RUNTIME port owner." Two problems make the promotion non-trivial: **(1)** `configs/ports.yaml` still lists `serena/unified port: 9121` (`configs/ports.yaml:2-4`) — the **legacy** pre-dynamic-pool global. The running architecture uses the serena **dynamic pool** via `AllocateSerenaPort`, and `defaultLegacySerenaPort = 9121` is explicitly the *legacy* constant (`serena_client_reconcile.go:59`). So `ports.yaml` does not model the live serena topology at all. **(2)** `ports.yaml` has `workspace_scoped: []` (empty) — it models zero of the dynamic pools that actually cause the killed-live-daemon collisions. Promoting it as-is would make a stale file the runtime owner. §2 must first **reconcile `ports.yaml` to the dynamic-pool reality** (model the serena pool range and the `9200-9299` workspace band as *reserved bands*, not static ports) before it can be the runtime owner.
+
+### Cutover that does NOT repeat the killed-live-daemon class
+
+1. **`configs/ports.yaml` becomes the band authority, not a port-per-daemon list.** Extend its schema: keep `global` (static global daemon ports, the 10 entries), and make `workspace_scoped` declare **reserved pool ranges** (serena pool band, LSP workspace band) — the ranges `AllocatePort` is allowed to draw from. The existing `PortRegistry.Validate` (`config/ports.go:50`) already detects global-vs-pool overlap (`ports.go:62-67`) and pool-vs-pool overlap (`ports.go:69-78`) — reuse it as the boot-time guard so a global port can never sit inside a pool band.
+2. **`AllocatePort` reads the band from the promoted `ports.yaml`** instead of a per-manifest `port_pool` literal. The manifest's `port_pool` becomes a default the config can override (tier-A → GUI per #8). The serena pool's `EffectiveSerenaPortPool` (`serena_dynamic_pool.go:149`) reads the same authority.
+3. **Test-port convention (the guard the spec already names, §6/#8):** any value reaching `killByPortFn` (`install.go:2660`) or `net.Listen` in a test uses `pickFreeLocalPort(t)` / `:0` — never a literal in the live band. A drift-guard test greps the non-test tree for live-band literals (`9121`/`9123`-`9132`/`9200`-`9299`) reaching kill/listen and fails on any match. This is the falsification test for #8.
+4. **No port a test allocates can be a band a production daemon uses,** because production draws only from the `ports.yaml`-declared bands and tests draw only from `:0`/`pickFreeLocalPort`. The overlap that caused the incident is structurally impossible once tests stop using fixed live-band literals.
+
+### Interaction with serena pool + persisted state + hub-port-change
+
+- **`AllocatePort` + `workspaces.yaml`:** the serena pool persists allocated ports to the `Registry` (`workspace_registry.go:82`, saved atomically `Save` at `workspace_registry.go:157`). The cutover must keep `AllocatePort` reading the live `Registry` taken-set (`port_alloc.go:40` already does) so a band-config change never re-allocates a port a persisted workspace already holds. Validate at boot: every persisted `serena_port` falls inside the new `ports.yaml` serena band; a persisted port outside the band is a warn (operator changed the band) — fail loud, do not silently re-home.
+- **Hub-port-change → client-config-rewrite:** the **hub rendezvous port** (`gui_server.port`, read via `SettingsGet("gui_server.port")` at `lsp_client_router.go:278`, `cli/gui.go:200`) is *separate* from daemon ports and stays stable/GUI-configurable (§2 is correct here). On hub-port change, the install reconcile rewrites every client config (`cli/install.go:370` "rewrites every client config to `http://127.0.0.1:<stale>…`"). The daemon-port band cutover does **not** touch this flow: clients only ever see the hub port + `/serena/mcp` path (the router shape, `clients.go:167`), never a per-daemon port. So #8's band cutover is invisible to clients — only the hub→daemon mapping changes, which is internal.
+
+---
+
+## §0.x Redesign risk register + rollback story
+
+§0 premise 2 deleted the v0.4.x rollback net. Each A→F phase is **one PR → redeploy → FULL supervisor restart** (the CLAUDE.md "redeploy always after merge" discipline + `feedback_always_redeploy_after_merge`), which interrupts the live serena/LSP fleet every phase. There is no compat safety net — **the live fleet is the safety surface**. This register defines the per-phase reversibility, recovery, and deploy-gating.
+
+### Reversibility (git-local) vs recovery (live-fleet)
+
+| Phase | Reversible while local? | Live-fleet recovery if it breaks serena | Pre-deploy gate |
+|---|---|---|---|
+| **A** (landed) | Yes — `git reset --hard` before push; additive, no schema change (`install.go:2595`) | `mcphub restart serena` revives; worst case `taskkill` the daemon and the supervisor respawns (non-clean→backoff still works) | already in tree; gate is re-verify the §5.1(a) falsification test |
+| **B** | Yes — display-only change at `health.go:399-401` + `gui/server.go:81`; no persisted-state change | none needed — B cannot break serena (it changes status *rendering*, not lifecycle). Revert restores the fallback. | **must land BEFORE C/D** — see deploy-gating below |
+| **C** | Yes — removing the `setup.go:471` call is a one-line revert; the watchdog task is re-installable via `mcphub watchdog install` | if removing the watchdog leaves a genuinely-stuck daemon, `mcphub restart` or `mcphub watchdog install` (still present until D) re-arms recovery | **gate: A deployed + §3.1 status bug cleared** (so you can SEE whether daemons are actually healthy without the watchdog) |
+| **D** | Partially — deletes files; `git reset` restores them while local, but once the watchdog command is gone there is no fallback recovery engine | the supervisor IS the recovery engine after D; recovery is `mcphub restart`/`mcphub supervise` reconcile. If the supervisor itself is broken, recovery is manual `taskkill` + restart supervise | **gate: C deployed and stable ≥1 session** (watchdog uninstalled everywhere first) |
+| **E** | Risky — deletes `daemon-intent.json` after the in-place merge. `git reset` restores the *code*, but the **deleted `daemon-intent.json` is gone**. | **Back up the live state dir before deploying E** (per CLAUDE.md memory `feedback_kosyak_subagent_test_wiped_live_supervisor_intent` — state-file wipes kill the fleet). The merge is idempotent and deletes `daemon-intent.json` LAST, so a crash mid-merge is recoverable; but a *bug* in the merge that mis-reads a stop could lose a stop preference. Recovery: re-issue `mcphub stop <daemon>` for any daemon whose stop was lost. | **gate: D deployed; full state-dir backup taken; intent_collapse_test green** |
+| **F** | Hard — deletes `internal/migration/` + rollback command. Once `--rollback-to-legacy` is gone, there is no path back to the scheduler model. | the supervisor model is the only model after F. Recovery for a broken fresh-install is `mcphub supervise` reconcile from `supervisor-intent.json`; if that file is bad, restore from the E backup. | **gate: E deployed and stable; serena pool + all 10 globals confirmed healthy under supervisor-only** |
+
+### Deploy-gating (the hard ordering)
+
+**The STOP fix (A) AND the §3.1 status bug (B) MUST clear before C/D remove the scheduler fallback.** Rationale: C/D delete the watchdog and (eventually) the scheduler view. Until §3.1 is fixed (B), `mcphub status` may paint healthy daemons as `failed` via the `health.go:399-401` fallback — so an operator removing the watchdog (C) would be flying blind, unable to tell a genuinely-broken daemon from a status false-negative. Sequence is therefore **A → B → C → D → E → F**, with A+B as a hard gate on C. (§12 already encodes A→B→…; this register makes the *gate* explicit and ties it to the live-fleet observability requirement.)
+
+### State-backup discipline (mandatory, every phase touching the state dir)
+
+Per CLAUDE.md memory `feedback_kosyak_subagent_test_wiped_live_supervisor_intent`: before ANY phase that runs `go test` over `internal/api`/`internal/cli` or that mutates the live state dir (E, F especially), **back up `supervisor-intent.json` + `daemon-intent.json` + `workspaces.yaml`** (jq-filterable copies under `/.scratch/`), because a test that forgets to `t.Setenv` the `test_state_path_env` override can overwrite the live intent and kill the fleet. The `MCPHUB_STATE_DIR_OVERRIDE` seam (`internal/cli/supervise.go:159-163`) is the test redirect; tests must set it, and the redesign's per-phase checklist (§12 cross-cutting gate 3) must enforce the backup.
+
+### Per-phase "is this reversible by git reset" rule
+
+A→D are reversible by `git reset --hard HEAD~N` while local (additive code or file deletions git tracks). **E and F are NOT fully reversible** because they delete persisted runtime files (`daemon-intent.json`) and the rollback command, which `git reset` does not restore on the live host. For E/F the recovery surface is the **state-dir backup**, not git. This is the operational consequence of §0 premise 2 ("nothing to roll back to") and must be stated in the §12 cross-cutting gates.
+
+---
+
+## Adjacent findings
+
+Per the Adjacent findings protocol, issues surfaced during this analysis that are **outside the admitted scope** (elaborating the spec) and are the orchestrator's call to admit:
+
+1. **`didOpen/didClose` no-refcount multi-agent bug (`internal/daemon/lazy_proxy.go`).** §11.1/§11.4 already list it as OPEN. It is *adjacent* to the §3 fail-loud LSP-router work (same file, same lifecycle layer) but is a distinct defect (missing per-client refcount on document open/close). Do NOT fold it into the §3 design; it needs its own fix-design. `context: adjacent-finding, status: open`.
+
+2. **`configs/ports.yaml` is stale for serena (`configs/ports.yaml:2-4` lists legacy `serena/unified=9121`; the running architecture uses the dynamic pool).** This is a latent drift the §2 promotion must fix first, but it is *also* a standalone correctness issue: the drift-guard test (`serena_test.go`) passes because it checks ports.yaml against the embedded manifest (which still declares 9121, `serena/manifest.yaml:62`), so the test cannot catch that the *runtime* no longer uses 9121. Flag for a bug doc if §2 is not admitted soon.
+
+---
+
+## Summary of spec corrections (the review-loop checklist)
+
+1. **§4 / Workstream A** — written future-tense but **already landed**; re-anchor `StopAll` to `install.go:2595` (not ~2545), update to past tense. (roadmap line 83 already says DONE — §4 prose contradicts it.)
+2. **§5 line 53 "4 readers"** — verified **6** `IsActiveStop` call sites; after D deletes `recovery.go:299`, **5** remain; `restart_supervisor.go` is NOT an `IsActiveStop` reader.
+3. **§3.1 root candidate (b)** — not "stale label"; it is the **`health.go:399-401` IPC→scheduler silent fallback** + `normalizeDaemonState` unknown→failed (`health.go:957-961`). Makes (b) a B-only fix.
+4. **§3 vs §3.1 conflated** — two distinct bugs/layers: §3.1 = status display (`health.go`, Workstream B); §3 = session lifecycle (`serena_router_session.go`, router fail-loud). Keep separate.
+5. **§2 ports.yaml promotion** — `configs/ports.yaml` is **test-only** (sole reader: `serena_test.go`) AND **stale** (legacy `serena/unified=9121`, empty `workspace_scoped`). Must be reconciled to the dynamic-pool reality before it can be the runtime owner.
+6. **§11.1 "#6/E ordering unspecified"** — contradicts §12 Phase 5, which DOES specify E-before-#6. Resolve in favor of §12 + §5.1-E.
+
+**Gate decision: PASS** — these six sections are traceable to verified `file:line` facts, the spec's admitted §11.1 gaps are closed, six concrete spec corrections are surfaced for the review loop, and two adjacent findings are filed rather than silently folded in.
+
+**Relevant files (absolute paths):**
+- `d:/dev/mcp-local-hub/docs/superpowers/specs/2026-06-10-clean-architecture-redesign.md` (target spec)
+- `d:/dev/mcp-local-hub/internal/api/install.go` (Stop/StopAll/killDaemonByPort — `:2595`, `:2646`, `:2669`, `:2677`)
+- `d:/dev/mcp-local-hub/internal/api/restart_supervisor.go` (supervisor-owned selector — `:29`, `:83`)
+- `d:/dev/mcp-local-hub/internal/api/install_intent.go` (`recordStopIntentAs` — `:235`)
+- `d:/dev/mcp-local-hub/internal/api/supervisor_state_machine.go` (`Transition` — `:47`, non-clean→backoff `:125`)
+- `d:/dev/mcp-local-hub/internal/cli/supervisor_controller.go` (`clean_exit` gate — `:144`; `IsActiveStop` reader `:710`)
+- `d:/dev/mcp-local-hub/internal/api/daemon_intent.go` (`DaemonIntent`/`IsActiveStop` — `:219`, `:308`)
+- `d:/dev/mcp-local-hub/internal/cli/supervise_watcher.go` (`watchedIntentFiles` — `:57`)
+- `d:/dev/mcp-local-hub/internal/cli/setup.go` (watchdog auto-install — `:471`)
+- `d:/dev/mcp-local-hub/internal/api/api_surfaces.go` (`InstallWatchdogTask`/`UninstallWatchdogTask` — `:692`, `:754`)
+- `d:/dev/mcp-local-hub/internal/api/health.go` (`computeDaemonsSection` IPC→scheduler fallback — `:399`; `normalizeDaemonState` — `:947`)
+- `d:/dev/mcp-local-hub/internal/api/recovery.go` (recovery `IsActiveStop` — `:299`)
+- `d:/dev/mcp-local-hub/internal/gui/serena_router.go` + `serena_router_session.go` (session stores + coordinated unbind — `:473`, `:510`)
+- `d:/dev/mcp-local-hub/internal/config/ports.go` + `d:/dev/mcp-local-hub/configs/ports.yaml` (port registry parser + stale data)
+- `d:/dev/mcp-local-hub/internal/api/port_alloc.go` (`AllocatePort` — `:40`); `serena_dynamic_pool.go` (`EffectiveSerenaPortPool` — `:149`)
+- `d:/dev/mcp-local-hub/internal/api/managed_entries.go` (`liveEntryMatchesManifestBinding` — `:355`); `demigrate.go:324`
+- `d:/dev/mcp-local-hub/internal/clients/clients.go` (`isHubURLShapeEntry` — `:513`; legacy→router rewrite note `:167`)
+- `d:/dev/mcp-local-hub/servers/serena/manifest.yaml` (static `port: 9121` — `:62`)agentId: a3dfdfbf76c87e445 (use SendMessage with to: 'a3dfdfbf76c87e445' to continue this agent)
+<usage>subagent_tokens: 229221
+tool_uses: 36
+duration_ms: 405354</usage>
