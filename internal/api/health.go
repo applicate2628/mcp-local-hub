@@ -972,18 +972,36 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 // empty string to "failed". v0.6 Workstream B (§3.1) corrects that: a
 // daemon whose state is merely UNRECOGNIZED has NOT failed — coercing
 // unknown→failed is the second half of the false-negative this phase
-// removes (a supervisor row in an unmapped state, e.g. "Quarantined",
-// surfacing as "failed" while the process actually serves traffic). The
-// enum stays closed but gains an honest "unknown" slot: unrecognized and
-// blank inputs map to "unknown", never to the misleading "failed". A
-// genuinely "Failed" daemon still maps to "failed".
+// removes (a row in an unmapped state surfacing as "failed" while the
+// process actually serves traffic). The enum stays closed but gains an
+// honest "unknown" slot: unrecognized and blank inputs map to "unknown",
+// never to the misleading "failed".
+//
+// Workstream B follow-up (PR #281 review P2): "unknown" must NOT swallow
+// the supervisor's KNOWN degraded/terminal vocabulary — that would be a
+// fail-loud→fail-quiet polarity weakening on the /api/health wire enum.
+// The supervisor producer (cli/supervise_status.go:supervisorStatusGUIState
+// + the port-stale-wedge case) emits "Restarting" (a daemon the
+// supervisor is terminate-restarting: backoff / backoff-waiting /
+// spawning / port-stale wedge) and "Quarantined" (the supervisor
+// PERMANENTLY gave up after a 4-strike / crash-loop quarantine — a real
+// hard failure). The IPC client (supervisor_ipc_status_client.go) passes
+// both through to here. Map those honestly:
+//   - "Restarting"/"Backoff"/"Spawning" → "starting" (degraded but the
+//     supervisor is actively recovering — failure-adjacent, not terminal),
+//   - "Quarantined" → "failed" (a quarantined crash-looped daemon IS a
+//     real failure a monitor on state=="failed" must keep seeing).
+// "unknown" is reserved ONLY for genuinely-unrecognized/blank vocabulary
+// (e.g. "Disabled", "Queued", ""), preserving the fail-loud signal for
+// real failures while still fixing the original unmapped→failed false
+// negative. A genuinely "Failed" daemon still maps to "failed".
 func normalizeDaemonState(s string) string {
 	switch s {
 	case "Running":
 		return "running"
-	case "Starting":
+	case "Starting", "Restarting", "Backoff", "Spawning":
 		return "starting"
-	case "Failed":
+	case "Failed", "Quarantined":
 		return "failed"
 	case "Ready", "Scheduled", "Stopped":
 		return "stopped"
@@ -992,6 +1010,8 @@ func normalizeDaemonState(s string) string {
 		// is "unknown", NOT "failed". Reporting a daemon as failed when
 		// its state is merely unmapped is a false negative (§3.1); the
 		// closed enum keeps a dedicated "unknown" value for this case.
+		// KNOWN degraded/terminal supervisor states are handled above so
+		// they never silently fall to "unknown" (fail-quiet weakening).
 		return "unknown"
 	}
 }

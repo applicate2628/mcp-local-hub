@@ -80,7 +80,14 @@ Stays as-is. The `hub` section of `/api/health` includes the same fields plus `s
         "pid": 1234, "port": 9100,
         "ram_bytes": 50000000,
         "uptime_sec": 300,
-        "state": "running",        // "running" | "stopped" | "starting" | "failed"
+        "state": "running",        // "running" | "stopped" | "starting" | "failed" | "unknown"
+                                   //   (v0.6 Workstream B / PR #281): the enum gained "unknown".
+                                   //   Polarity: a genuinely UNRECOGNIZED or blank source state maps
+                                   //   to "unknown", NOT "failed" (the prior unmapped→failed mapping was
+                                   //   a false negative). KNOWN supervisor degraded/terminal states are
+                                   //   still classified honestly, NOT collapsed to "unknown":
+                                   //   "Restarting"/"Backoff"/"Spawning" → "starting" (degraded, recovering);
+                                   //   "Quarantined" → "failed" (supervisor permanently gave up).
         "restart_count": 0,
         "last_restart_at": null
       }

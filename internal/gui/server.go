@@ -52,6 +52,40 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 	return api.NewAPI().Status()
 }
 
+// snapshotStatusProvider is the production poller's statusProvider. It
+// routes the SSE StatusPoller through the SAME supervisor-IPC-owned,
+// fail-loud daemons snapshot that GET /api/status uses
+// (healthBackend.DaemonStatusSnapshot), rather than api.Status()'s
+// IPC-first-but-scheduler-fallback path.
+//
+// v0.6 Workstream B (§3.1) — fail loud on the SSE channel too. The
+// /api/status route was converted to surface api.ErrSupervisorDown when
+// the supervisor IPC is unreachable (so the Dashboard renders the
+// degraded banner), but the StatusPoller was a SEPARATE channel feeding
+// the SAME Dashboard state. RealStatusProvider.Status() →
+// api.NewAPI().Status() → statusInternal STILL fell back to the legacy
+// scheduler scan on ErrSupervisorIPCUnavailable, so a down supervisor
+// produced stale scheduler rows (migrated daemons painted
+// failed/Restarting) which the poller published as `daemon-state`
+// deltas; the frontend's onDelta then cleared the degraded error and
+// painted those stale cards — re-introducing the exact false-negative
+// this phase removes, just via the SSE channel. Routing the poller
+// through DaemonStatusSnapshot means a down supervisor yields
+// ErrSupervisorDown, the poller emits a `poller-error` event instead of
+// stale `daemon-state` deltas, and the degraded banner is never masked.
+//
+// DaemonStatusSnapshot derives its own bounded IPC deadline internally,
+// so context.Background() here matches the prior api.Status() ctx
+// semantics (no caller-cancellation propagation through the 5s poll
+// cadence, which is acceptable for a fixed-interval background pump).
+type snapshotStatusProvider struct {
+	health healthBackend
+}
+
+func (p snapshotStatusProvider) Status() ([]api.DaemonStatus, error) {
+	return p.health.DaemonStatusSnapshot(context.Background())
+}
+
 // healthBackend is the narrow interface the /api/health and /api/status
 // handlers need. Wired in NewServer to a realHealthBackend whose `api`
 // field references the long-lived Server.api instance — Phase G2's
@@ -567,6 +601,19 @@ func NewServer(cfg Config) *Server {
 // Broadcaster exposes the SSE event bus. Tests publish into it directly;
 // production callers (poller goroutine in Task 12+) use it the same way.
 func (s *Server) Broadcaster() *Broadcaster { return s.events }
+
+// StatusProvider returns the statusProvider the production SSE
+// StatusPoller must poll. It is backed by the server's long-lived
+// healthBackend so the poller shares the daemons-section TTL cache with
+// GET /api/status AND inherits its fail-loud contract: when the
+// supervisor IPC is unreachable, DaemonStatusSnapshot returns
+// api.ErrSupervisorDown rather than falling back to the legacy
+// scheduler scan, so the poller emits a `poller-error` event instead of
+// stale `daemon-state` deltas that would mask the Dashboard's degraded
+// banner (v0.6 Workstream B §3.1).
+func (s *Server) StatusProvider() statusProvider {
+	return snapshotStatusProvider{health: s.health}
+}
 
 // OnActivateWindow registers the callback invoked when POST
 // /api/activate-window is received. A second `mcphub gui` invocation

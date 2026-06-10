@@ -425,7 +425,16 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	go func() { errCh <- s.Start(ctx, ready) }()
 
 	// Poll daemon status every 5s and push daemon-state events onto /api/events.
-	poller := gui.NewStatusPoller(gui.RealStatusProvider{}, s.Broadcaster(), 5*time.Second)
+	//
+	// v0.6 Workstream B (§3.1) — route the poller through the server's
+	// supervisor-IPC-owned, fail-loud snapshot (s.StatusProvider() →
+	// DaemonStatusSnapshot) rather than gui.RealStatusProvider{} →
+	// api.Status()'s scheduler-fallback path. A down supervisor must
+	// surface a `poller-error` event on the SSE channel, NOT stale
+	// scheduler `daemon-state` deltas that would clear the Dashboard's
+	// degraded banner and re-introduce the false-negative this phase
+	// removes on the polling channel.
+	poller := gui.NewStatusPoller(s.StatusProvider(), s.Broadcaster(), 5*time.Second)
 	// Tray state plumbing (C3): wire a snapshot channel between
 	// poller and tray. Aggregator goroutine reads each snapshot,
 	// computes a TrayState, and pushes onto trayStateCh ONLY when
