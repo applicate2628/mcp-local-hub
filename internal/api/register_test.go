@@ -57,6 +57,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	origReadiness := proxyReadinessFn
 	origCanonical := testCanonicalMcphubPathOverride
 	origBless := registerBlessTrustedRootFn
+	origForceKill := forceKillByPortFn
 
 	// Stub the explicit-register bless seam: capture the canonical roots
 	// (so a dedicated test can assert the bless fired) AND keep every
@@ -89,6 +90,9 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	// opt into "readiness always succeeds"; specific tests that want
 	// to exercise the readiness-failure path override this again.
 	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		return portKillNoListener, nil
+	}
 
 	fc := &fakeClientsMap{
 		entries:         map[string]map[string]string{},
@@ -125,6 +129,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 			proxyReadinessFn = origReadiness
 			testCanonicalMcphubPathOverride = origCanonical
 			registerBlessTrustedRootFn = origBless
+			forceKillByPortFn = origForceKill
 		},
 	}
 }
@@ -2129,13 +2134,13 @@ func TestUnregister_UnknownWorkspaceErrors(t *testing.T) {
 func TestUnregister_KillsStaleProxyByPort(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
-	// Fake killByPortFn — records the ports it was asked to kill.
-	origKill := killByPortFn
-	defer func() { killByPortFn = origKill }()
+	// Fake forceKillByPortFn — records the ports it was asked to kill.
+	origForceKill := forceKillByPortFn
+	defer func() { forceKillByPortFn = origForceKill }()
 	var killed []int
-	killByPortFn = func(port int, timeout time.Duration) error {
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		killed = append(killed, port)
-		return nil
+		return portKillKilled, nil
 	}
 	ws := t.TempDir()
 	m := nineLanguageManifest()
@@ -2170,10 +2175,10 @@ func TestUnregister_KillsStaleProxyByPort(t *testing.T) {
 func TestUnregister_KillProxyFailureIsWarning(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
-	origKill := killByPortFn
-	defer func() { killByPortFn = origKill }()
-	killByPortFn = func(port int, timeout time.Duration) error {
-		return fmt.Errorf("induced kill failure for port %d", port)
+	origForceKill := forceKillByPortFn
+	defer func() { forceKillByPortFn = origForceKill }()
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		return portKillNoListener, fmt.Errorf("induced kill failure for port %d", port)
 	}
 	ws := t.TempDir()
 	m := nineLanguageManifest()
@@ -2193,6 +2198,128 @@ func TestUnregister_KillProxyFailureIsWarning(t *testing.T) {
 	_ = reg.Load()
 	if len(reg.Workspaces) != 0 {
 		t.Errorf("registry rows remain after Unregister: %+v", reg.Workspaces)
+	}
+}
+
+func TestUnregister_ForeignPortOwnerNotKilled(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origKill := killByPortFn
+	origForceKill := forceKillByPortFn
+	defer func() {
+		killByPortFn = origKill
+		forceKillByPortFn = origForceKill
+	}()
+	legacyKillCalled := false
+	killByPortFn = func(port int, timeout time.Duration) error {
+		legacyKillCalled = true
+		return nil
+	}
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		if port != 33041 {
+			t.Fatalf("forceKillByPortFn port = %d, want 33041", port)
+		}
+		return portKillIdentityMismatch, errors.New("port owned by foreign process")
+	}
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	entryName := "mcp-language-server-go-foreign"
+	entry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          33041,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": entryName},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(entry); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"][entryName] = "http://localhost:33041/mcp"
+
+	rpt, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+	if legacyKillCalled {
+		t.Fatal("unregister used killByPortFn on a foreign owner; want identity-mismatch warning without kill")
+	}
+	warnings := strings.Join(rpt.Warnings, "\n")
+	if !strings.Contains(warnings, "port owned by foreign process") || !strings.Contains(warnings, "not killing") {
+		t.Fatalf("warnings = %v, want foreign-owner not-killing warning", rpt.Warnings)
+	}
+}
+
+func TestUnregister_McphubPortOwnerKilledWithIdentityGate(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origKill := killByPortFn
+	origForceKill := forceKillByPortFn
+	defer func() {
+		killByPortFn = origKill
+		forceKillByPortFn = origForceKill
+	}()
+	killByPortFn = func(port int, timeout time.Duration) error {
+		t.Fatalf("unregister must use outcome-aware kill path, got killByPortFn(%d)", port)
+		return nil
+	}
+	var killed []int
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		if timeout != 5*time.Second {
+			t.Errorf("kill timeout = %s, want 5s", timeout)
+		}
+		killed = append(killed, port)
+		return portKillKilled, nil
+	}
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	entryName := "mcp-language-server-go-mcphub"
+	entry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          33042,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": entryName},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(entry); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"][entryName] = "http://localhost:33042/mcp"
+
+	if _, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+	if !slices.Equal(killed, []int{33042}) {
+		t.Fatalf("forceKillByPortFn ports = %v, want [33042]", killed)
 	}
 }
 
@@ -2437,6 +2564,132 @@ func TestUnregister_SupervisedRemovesIntentAndReconciles(t *testing.T) {
 	}
 }
 
+func TestUnregister_SupervisedRemovesStopWithDescriptorAndAllowsRegisterAgain(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	origKill := killByPortFn
+	origForceKill := forceKillByPortFn
+	defer func() {
+		killByPortFn = origKill
+		forceKillByPortFn = origForceKill
+	}()
+	killByPortFn = func(port int, timeout time.Duration) error { return nil }
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		return portKillKilled, nil
+	}
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")
+	siblingTask := `\mcp-local-hub-lsp-sibling-python`
+	entryName := "mcp-language-server-go-stop"
+	entry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          33043,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": entryName},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(entry); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"][entryName] = "http://localhost:33043/mcp"
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	stopped := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(entry, testCanonicalMcphubPathOverride),
+		},
+		Stops: map[string]DaemonIntent{
+			taskName:    stopped,
+			siblingTask: stopped,
+		},
+	})
+
+	reconcileSawRegisterStop := false
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		intent, err := ReadSupervisorIntent(intentPath)
+		if err != nil {
+			return ReconcileResponse{}, err
+		}
+		if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+			if _, ok := intent.Stops[taskName]; ok {
+				reconcileSawRegisterStop = true
+			}
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		intent, err := ReadSupervisorIntent(intentPath)
+		if err != nil {
+			return err
+		}
+		if _, ok := intent.Stops[taskName]; ok {
+			return errors.New("readiness suppressed by stale stop")
+		}
+		return nil
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	if _, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Unregister supervised: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after unregister: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+		t.Fatalf("descriptor %s survived unregister: %+v", taskName, row)
+	}
+	if _, ok := intent.Stops[taskName]; ok {
+		t.Errorf("stop tombstone %s survived descriptor removal", taskName)
+	}
+	if _, ok := intent.Stops[siblingTask]; !ok {
+		t.Fatalf("sibling stop %s was pruned with unrelated descriptor", siblingTask)
+	}
+
+	if _, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	}); err != nil {
+		t.Fatalf("supervised register after unregister: %v", err)
+	}
+	if reconcileSawRegisterStop {
+		t.Fatal("register reconcile saw the stale stop for the descriptor being re-added")
+	}
+	intent, err = ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after register: %v", err)
+	}
+	if _, ok := intent.Stops[taskName]; ok {
+		t.Fatalf("stop tombstone %s survived register-again flow", taskName)
+	}
+	if _, ok := intent.Stops[siblingTask]; !ok {
+		t.Fatalf("sibling stop %s did not survive register-again flow", siblingTask)
+	}
+}
+
 func TestUnregister_LegacyOnlyDeletesSchedulerTaskWithoutReconcile(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
@@ -2533,12 +2786,20 @@ func TestUnregister_IntentRemovalFailureLeavesRegistryAndClients(t *testing.T) {
 	defer func() { registerSupervisorReconcileFn = origReconcile }()
 
 	origKill := killByPortFn
+	origForceKill := forceKillByPortFn
 	var killed []int
 	killByPortFn = func(port int, timeout time.Duration) error {
 		killed = append(killed, port)
 		return nil
 	}
-	defer func() { killByPortFn = origKill }()
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		killed = append(killed, port)
+		return portKillKilled, nil
+	}
+	defer func() {
+		killByPortFn = origKill
+		forceKillByPortFn = origForceKill
+	}()
 
 	ws := t.TempDir()
 	canonical, err := CanonicalWorkspacePath(ws)

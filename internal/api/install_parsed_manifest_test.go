@@ -2022,6 +2022,48 @@ func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T
 	}
 }
 
+// TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath
+// pins the install-time owner handoff for a drifted existing shim. StateDrifted
+// means the stored command line or binary path disagrees with the canonical
+// Enable(opts) body, so install must rewrite it before relying on that owner.
+//
+// Negative-control: pre-fix ensureGlobalInstallAutostartOwner only warned for
+// StateDrifted, so the fake Enable count stayed 0 and the canonical path was
+// never applied.
+func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath(t *testing.T) {
+	canonical := filepath.Join(t.TempDir(), MCPHubBinaryName())
+	t.Cleanup(SetTestCanonicalMcphubPath(canonical))
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateDrifted}
+	installFakeAutostartBackend(t, fb)
+
+	ensureGlobalInstallAutostartOwner(io.Discard, true)
+
+	if fb.enableCalls != 1 {
+		t.Fatalf("autostart Enable calls = %d, want 1 for drifted owner", fb.enableCalls)
+	}
+	if got := fb.enableOpts[0].MCPHubPath; got != canonical {
+		t.Fatalf("autostart Enable MCPHubPath = %q, want canonical %q", got, canonical)
+	}
+	if !fb.enableOpts[0].StrictMode {
+		t.Fatalf("autostart Enable opts = %+v, want StrictMode=true", fb.enableOpts[0])
+	}
+}
+
+func TestEnsureGlobalInstallAutostartOwner_EnabledStatesDoNotRewriteShim(t *testing.T) {
+	for _, state := range []autostart.State{autostart.StateEnabledRunning, autostart.StateEnabledStopped} {
+		t.Run(state.String(), func(t *testing.T) {
+			fb := &fakeInstallAutostartBackend{statusReturn: state}
+			installFakeAutostartBackend(t, fb)
+
+			ensureGlobalInstallAutostartOwner(io.Discard, false)
+
+			if fb.enableCalls != 0 {
+				t.Fatalf("autostart Enable calls = %d, want 0 for %s", fb.enableCalls, state)
+			}
+		})
+	}
+}
+
 func TestKillLegacySchedulerTaskDaemonByPortBestEffort_ForeignOwnerNotKilled(t *testing.T) {
 	origKill := killByPortFn
 	origForceKill := forceKillByPortFn

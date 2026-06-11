@@ -946,12 +946,18 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 			// but does NOT terminate the running child — without this kill,
 			// the proxy keeps the port bound until the next reboot, which
 			// breaks immediate re-register and leaves the registry/scheduler
-			// disagreeing with what's actually on the network. Errors are
-			// downgraded to warnings because a successful kill-on-absent
-			// (nothing listening) is expected for cold workspaces and MUST
-			// not fail the teardown path.
-			if killByPortFn != nil && entry.Port != 0 {
-				if err := killByPortFn(entry.Port, 5*time.Second); err != nil {
+			// disagreeing with what's actually on the network. The outcome
+			// path proves the listener is mcphub-owned before killing; stale
+			// registry rows must not terminate a foreign process that reused
+			// the old port. Kill-on-absent (nothing listening) remains a
+			// benign no-op for cold workspaces.
+			if forceKillByPortFn != nil && entry.Port != 0 {
+				outcome, err := forceKillByPortFn(entry.Port, 5*time.Second)
+				if outcome == portKillIdentityMismatch {
+					report.Warnings = append(report.Warnings,
+						fmt.Sprintf("kill proxy on port %d (task %s): port owned by foreign process, not killing: %v",
+							entry.Port, entry.TaskName, err))
+				} else if err != nil {
 					report.Warnings = append(report.Warnings,
 						fmt.Sprintf("kill proxy on port %d (task %s): %v",
 							entry.Port, entry.TaskName, err))

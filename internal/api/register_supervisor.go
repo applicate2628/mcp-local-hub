@@ -471,7 +471,14 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 	if !removed {
 		return func() {}, false, nil
 	}
+	priorStop, hadPriorStop := desired.Stops[taskName]
 	desired.Daemons = kept
+	// Descriptor removal owns the matching stop tombstone too: this mirrors the
+	// install prune invariant that row removed => its stop entry goes with it.
+	// Keeping both changes in one intent write avoids a re-register window where
+	// reconcile observes the re-added descriptor but an old stop still suppresses
+	// readiness before recordRegisterIntentForTask can clear it.
+	desired.Stops = pruneStopsForRemovedSupervisorTargets(desired.Stops, []SupervisorDaemon{removedDescriptor})
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
@@ -479,8 +486,37 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 	}
 
 	return func() {
-		upsertSupervisorIntentDescriptor(intentPath, removedDescriptor)
+		upsertSupervisorIntentDescriptorAndStop(intentPath, removedDescriptor, priorStop, hadPriorStop)
 	}, true, nil
+}
+
+func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorDaemon, stop DaemonIntent, restoreStop bool) {
+	lock := flock.New(path + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return
+	}
+	defer func() { _ = lock.Unlock() }()
+	current, _, err := readSupervisorIntentForMerge(path)
+	if err != nil {
+		return
+	}
+	desired := cloneSupervisorIntentFile(current)
+	kept := desired.Daemons[:0]
+	for _, daemon := range desired.Daemons {
+		if daemon.TaskName != descriptor.TaskName {
+			kept = append(kept, daemon)
+		}
+	}
+	desired.Daemons = append(kept, descriptor)
+	if restoreStop {
+		if desired.Stops == nil {
+			desired.Stops = map[string]DaemonIntent{}
+		}
+		desired.Stops[canonicalIntentTaskKey(descriptor.TaskName)] = stop
+	}
+	desired.Version = 1
+	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	_ = writeSupervisorIntentLockHeld(path, desired)
 }
 
 func removeSupervisorIntentDescriptor(path, taskName string, removeFileIfEmpty bool) {

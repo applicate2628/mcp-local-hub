@@ -827,7 +827,7 @@ func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool) {
 		return
 	}
 	switch state {
-	case autostart.StateAbsent:
+	case autostart.StateAbsent, autostart.StateDrifted:
 		if err := backend.Enable(opts); err != nil {
 			warnAutostartOwner(w, "enable", err)
 		}
