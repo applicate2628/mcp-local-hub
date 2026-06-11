@@ -96,6 +96,81 @@ func assertSerenaSessionGone(t *testing.T, s *Server, sessions *InMemorySessionR
 	}
 }
 
+func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickAbsentRowTearsDownBoundSession(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const wsPath = "/proj/absent-alpha"
+	const sid = "sid-absent-alpha"
+	ws := serenaWS("absent-alpha", wsPath, 9301)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-loss")
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return nil, nil
+	}
+
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("precondition: backend PID baseline for %q should be absent on the first tick", wsPath)
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("first tick with absent IPC row tore down %d sessions; want 1 because the bound daemon vanished before the first observation", n)
+	}
+	assertSerenaSessionGone(t, s, sessions, sid)
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("absent-row backend loss persisted a PID baseline for %q; want no persisted entry", wsPath)
+	}
+}
+
+func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickAbsentRowWithIdleStopSurvives(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const wsPath = "/proj/idle-absent-alpha"
+	const sid = "sid-idle-absent-alpha"
+	ws := serenaWS("idle-absent-alpha", wsPath, 9301)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-idle")
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return nil, nil
+	}
+
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("first tick with absent IPC row plus active idle stop tore down %d sessions; want 0 so idle wake can preserve the session", n)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("idle absent-row first tick persisted a PID baseline for %q; want no PID baseline while idle-stopped", wsPath)
+	}
+}
+
+func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickRunningRowEstablishesBaseline(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const wsPath = "/proj/running-alpha"
+	const sid = "sid-running-alpha"
+	const pid = 3333
+	ws := serenaWS("running-alpha", wsPath, 9301)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-running")
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pid, Port: ws.Port},
+		}, nil
+	}
+
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("first running-row observation tore down %d sessions; want 0 because it should establish the baseline", n)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
+		t.Fatalf("baseline after first running-row observation = (%d,%v), want (%d,true)", got, ok, pid)
+	}
+}
+
 func TestSerenaRouter_BackendLoss_IPCReconcilePreservesIdleStoppedAndPostWakePID(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 	withTempSerenaStateRoot(t)

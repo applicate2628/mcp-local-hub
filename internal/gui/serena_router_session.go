@@ -1006,6 +1006,20 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 				persistedIdle[path] = serenaBackendPostIdleGraceTicks
 				continue
 			}
+			// A first observation with NO IPC row is loss, not a harmless
+			// baseline miss. A router-bound session exists only after the
+			// daemon handshake completed, so the daemon was alive at bind time.
+			// The supervisor status producer emits one row for every remaining
+			// intent descriptor in every runtime state (running, stopped/idle,
+			// backoff/spawning, quarantined; backoff renders as "Restarting").
+			// With active idle stops handled above via the resolver task name
+			// for absent rows, a genuinely absent row means the descriptor was
+			// removed, not that startup/backoff is transiently rowless.
+			if !present {
+				lost = append(lost, pathToKey[path])
+				delete(persisted, path)
+				continue
+			}
 			if deadNow {
 				lost = append(lost, pathToKey[path])
 				delete(persisted, path)
