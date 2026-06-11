@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -216,6 +217,169 @@ func TestStopForcePrefersSupervisorPIDOverDescriptorPort(t *testing.T) {
 	}
 	if len(portKills) != 0 {
 		t.Fatalf("port kills = %v, want none when supervisor PID is live", portKills)
+	}
+}
+
+func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
+	const taskName = `\mcp-local-hub-laneatest-default`
+	const bareTask = "mcp-local-hub-laneatest-default"
+	const stalePID = 62101
+
+	t.Run("port unbound returns already-not-running success", func(t *testing.T) {
+		const port = 33005
+		origLookup := lookupProcess
+		origIdent := processIdentityByPID
+		origForcePort := forceKillByPortFn
+		origPIDKill := stopForceKillPIDFn
+		t.Cleanup(func() {
+			lookupProcess = origLookup
+			processIdentityByPID = origIdent
+			forceKillByPortFn = origForcePort
+			stopForceKillPIDFn = origPIDKill
+		})
+
+		forceKillByPortFn = killDaemonByPortOutcome
+		processIdentityByPID = func(pid int) (string, string, bool) {
+			if pid != stalePID {
+				t.Fatalf("processIdentityByPID pid = %d, want stale PID %d", pid, stalePID)
+			}
+			return "node.exe", "explorer.exe", true
+		}
+		var portLookups int
+		lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+			portLookups++
+			if gotPort != port {
+				t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			}
+			return 0, 0, 0, false
+		}
+		stopForceKillPIDFn = func(pid int) error {
+			t.Fatalf("stopForceKillPIDFn called for refused foreign PID %d", pid)
+			return nil
+		}
+
+		result := forceKillOneSupervisorTarget(
+			SupervisorDaemon{TaskName: taskName, Port: port},
+			map[string]int{bareTask: stalePID},
+		)
+		if result.Err != "" {
+			t.Fatalf("forceKillOneSupervisorTarget error = %q, want success after port classifier reports no listener", result.Err)
+		}
+		if portLookups == 0 {
+			t.Fatal("port classifier was not consulted after PID identity refusal")
+		}
+	})
+
+	t.Run("port rebound by mcphub is killed by port path", func(t *testing.T) {
+		const port = 33006
+		const portOwnerPID = 62102
+		origLookup := lookupProcess
+		origIdent := processIdentityByPID
+		origForcePort := forceKillByPortFn
+		origTaskkill := taskkillProcessTreeByPIDFn
+		origPIDKill := stopForceKillPIDFn
+		t.Cleanup(func() {
+			lookupProcess = origLookup
+			processIdentityByPID = origIdent
+			forceKillByPortFn = origForcePort
+			taskkillProcessTreeByPIDFn = origTaskkill
+			stopForceKillPIDFn = origPIDKill
+		})
+
+		forceKillByPortFn = killDaemonByPortOutcome
+		killed := false
+		lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+			if gotPort != port {
+				t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			}
+			if killed {
+				return 0, 0, 0, false
+			}
+			return portOwnerPID, 0, 0, true
+		}
+		processIdentityByPID = func(pid int) (string, string, bool) {
+			switch pid {
+			case stalePID:
+				return "node.exe", "explorer.exe", true
+			case portOwnerPID:
+				return "mcphub.exe", "svchost.exe", true
+			default:
+				t.Fatalf("processIdentityByPID pid = %d, want stale PID %d or port owner PID %d", pid, stalePID, portOwnerPID)
+				return "", "", false
+			}
+		}
+		var taskkillPIDs []int
+		taskkillProcessTreeByPIDFn = func(pid int) error {
+			taskkillPIDs = append(taskkillPIDs, pid)
+			killed = true
+			return nil
+		}
+		stopForceKillPIDFn = func(pid int) error {
+			t.Fatalf("stopForceKillPIDFn called for refused foreign PID %d", pid)
+			return nil
+		}
+
+		result := forceKillOneSupervisorTarget(
+			SupervisorDaemon{TaskName: taskName, Port: port},
+			map[string]int{bareTask: stalePID},
+		)
+		if result.Err != "" {
+			t.Fatalf("forceKillOneSupervisorTarget error = %q, want port-path kill success", result.Err)
+		}
+		if len(taskkillPIDs) != 1 || taskkillPIDs[0] != portOwnerPID {
+			t.Fatalf("taskkill PIDs = %v, want [%d]", taskkillPIDs, portOwnerPID)
+		}
+	})
+}
+
+func TestStopForcePIDKillErrorFallsThroughToPortClassifier(t *testing.T) {
+	const taskName = `\mcp-local-hub-laneatest-default`
+	const bareTask = "mcp-local-hub-laneatest-default"
+	const pid = 62201
+	const port = 33007
+
+	origLookup := lookupProcess
+	origIdent := processIdentityByPID
+	origForcePort := forceKillByPortFn
+	origPIDKill := stopForceKillPIDFn
+	t.Cleanup(func() {
+		lookupProcess = origLookup
+		processIdentityByPID = origIdent
+		forceKillByPortFn = origForcePort
+		stopForceKillPIDFn = origPIDKill
+	})
+
+	forceKillByPortFn = killDaemonByPortOutcome
+	processIdentityByPID = func(gotPID int) (string, string, bool) {
+		if gotPID != pid {
+			t.Fatalf("processIdentityByPID pid = %d, want %d", gotPID, pid)
+		}
+		return "mcphub.exe", "svchost.exe", true
+	}
+	stopForceKillPIDFn = func(gotPID int) error {
+		if gotPID != pid {
+			t.Fatalf("stopForceKillPIDFn pid = %d, want %d", gotPID, pid)
+		}
+		return errors.New("synthetic stale PID already gone")
+	}
+	var portLookups int
+	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+		portLookups++
+		if gotPort != port {
+			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+		}
+		return 0, 0, 0, false
+	}
+
+	result := forceKillOneSupervisorTarget(
+		SupervisorDaemon{TaskName: taskName, Port: port},
+		map[string]int{bareTask: pid},
+	)
+	if result.Err != "" {
+		t.Fatalf("forceKillOneSupervisorTarget error = %q, want success after stale PID kill error and no port listener", result.Err)
+	}
+	if portLookups == 0 {
+		t.Fatal("port classifier was not consulted after PID kill error")
 	}
 }
 

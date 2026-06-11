@@ -11,9 +11,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/config"
 )
+
+func assertSupervisorIntentFlockAvailableDuringIPCStatus(t *testing.T, stateDir string) {
+	t.Helper()
+	probe := flock.New(filepath.Join(stateDir, supervisorIntentFileLeaf) + supervisorIntentLockSuffix)
+	locked, err := probe.TryLock()
+	if err != nil {
+		t.Fatalf("probe supervisor-intent flock during IPC status: %v", err)
+	}
+	if !locked {
+		t.Fatal("supervisor IPC status was called while the supervisor-intent flock was held")
+	}
+	if err := probe.Unlock(); err != nil {
+		t.Fatalf("unlock supervisor-intent flock probe: %v", err)
+	}
+}
 
 func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge(t *testing.T) {
 	stateDir := phaseFStateDir(t)
@@ -34,6 +51,7 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 	origStatus := supervisorIPCStatusFn
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		order = append(order, "ipc-status")
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
 		return []DaemonStatus{
 			{TaskName: `\mcp-local-hub-demo-alpha`, PID: 4101, State: "Running"},
 			{TaskName: `\mcp-local-hub-demo-beta`, PID: 4102, State: "Running"},
@@ -94,6 +112,7 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 	origStatus := supervisorIPCStatusFn
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		order = append(order, "ipc-status")
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
 		return []DaemonStatus{
 			{TaskName: priorRows[0].TaskName, PID: 5101, State: "Running"},
 			{TaskName: priorRows[1].TaskName, PID: 5102, State: "Running"},
@@ -175,6 +194,7 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 
 			origStatus := supervisorIPCStatusFn
 			supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+				assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
 				return []DaemonStatus{{TaskName: removedTask, PID: 6201, State: "Running"}}, nil
 			}
 			t.Cleanup(func() { supervisorIPCStatusFn = origStatus })

@@ -132,6 +132,15 @@ func TestSerenaRouter_BackendLoss_IPCReconcilePreservesIdleStoppedAndPostWakePID
 	if err != nil || !clearAllowed {
 		t.Fatalf("clear idle stop = (%v,%v), want (nil,true)", err, clearAllowed)
 	}
+	row = api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Stopped", PID: 0, StalePID: 0, Port: ws.Port}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("post-clear wake window tore down %d sessions; want 0 while the idle grace preserves the waking session", n)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidA {
+		t.Fatalf("baseline during post-clear wake window = (%d,%v), want (%d,true)", got, ok, pidA)
+	}
+
 	row = api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port}
 	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
 		t.Fatalf("first post-idle wake PID change tore down %d sessions; want 0 and baseline refresh", n)
@@ -144,6 +153,47 @@ func TestSerenaRouter_BackendLoss_IPCReconcilePreservesIdleStoppedAndPostWakePID
 	row = api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Stopped", PID: 0, StalePID: 0, Port: ws.Port}
 	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
 		t.Fatalf("stopped daemon without an idle stop tore down %d sessions; want 1 real backend-loss teardown", n)
+	}
+	assertSerenaSessionGone(t, s, sessions, sid)
+}
+
+func TestSerenaRouter_BackendLoss_IPCReconcileIdleGraceExpiresWithoutRespawn(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const wsPath = "/proj/idle-never-respawns"
+	const sid = "sid-idle-never-respawns"
+	const pidA = 3333
+	ws := serenaWS("idle-never-respawns", wsPath, 9302)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-idle")
+	seedSerenaBackendBaseline(s, wsPath, pidA)
+
+	row := api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Stopped", PID: 0, StalePID: 0, Port: ws.Port}
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{row}, nil
+	}
+
+	now := time.Date(2026, 6, 11, 12, 30, 0, 0, time.UTC)
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, now); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("idle-stopped daemon tore down %d sessions; want 0", n)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+
+	clearAllowed, err := api.NewAPI().ClearStopIntentIfReason(ws.TaskName, api.IntentReasonIdle, "test")
+	if err != nil || !clearAllowed {
+		t.Fatalf("clear idle stop = (%v,%v), want (nil,true)", err, clearAllowed)
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("first post-clear dead tick tore down %d sessions; want 0 during bounded idle grace", n)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("second post-clear dead tick tore down %d sessions; want 1 after idle grace is exhausted", n)
 	}
 	assertSerenaSessionGone(t, s, sessions, sid)
 }

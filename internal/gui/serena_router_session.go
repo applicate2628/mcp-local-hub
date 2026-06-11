@@ -811,6 +811,8 @@ func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID 
 // wired) makes ReconcileSerenaBackendLossViaIPC a no-op.
 var serenaBackendStatusFn func(ctx context.Context) ([]api.DaemonStatus, error)
 
+const serenaBackendPostIdleGraceTicks = 2
+
 // SetSerenaBackendStatusFn wires the IPC status reader the §3.x backend-loss
 // reconcile fallback uses. CLI boot (internal/cli/gui.go) calls it with
 // api.DialSupervisorIPCStatus. Passing nil disables the fallback (the
@@ -970,7 +972,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	}
 	priorIdle := s.serenaBackendIdlePaths
 	if priorIdle == nil {
-		priorIdle = map[string]bool{}
+		priorIdle = map[string]int{}
 	}
 	// persisted is the snapshot the next tick compares against. It starts as the
 	// fresh per-PATH PIDs; transient Restarting rows carry the prior real PID
@@ -979,7 +981,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	for path, pid := range fresh {
 		persisted[path] = pid
 	}
-	persistedIdle := make(map[string]bool, len(wantPaths))
+	persistedIdle := make(map[string]int, len(wantPaths))
 	var lost []string // workspace KEYS whose backend was lost this tick
 	for path := range wantPaths {
 		newPID, present := fresh[path]
@@ -1001,7 +1003,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			}
 			if idleNow {
 				delete(persisted, path)
-				persistedIdle[path] = true
+				persistedIdle[path] = serenaBackendPostIdleGraceTicks
 				continue
 			}
 			if deadNow {
@@ -1023,10 +1025,18 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		}
 		if idleNow {
 			persisted[path] = oldPID
-			persistedIdle[path] = true
+			persistedIdle[path] = serenaBackendPostIdleGraceTicks
 			continue
 		}
 		if deadNow {
+			if remaining := priorIdle[path]; remaining > 0 {
+				remaining--
+				if remaining > 0 {
+					persisted[path] = oldPID
+					persistedIdle[path] = remaining
+					continue
+				}
+			}
 			lost = append(lost, pathToKey[path])
 			delete(persisted, path)
 			continue
@@ -1046,7 +1056,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			// is now valid against (the request path re-handshakes the daemon
 			// session). Refresh the baseline once instead of declaring backend
 			// loss; a later crash/stop is no longer idle-marked and tears down.
-			if priorIdle[path] && newPID != 0 {
+			if priorIdle[path] > 0 && newPID != 0 {
 				persisted[path] = newPID
 				continue
 			}

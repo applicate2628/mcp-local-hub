@@ -252,6 +252,16 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	}
 	intentPath = joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 
+	// Capture live PIDs before taking the supervisor-intent flock. This is a
+	// preliminary superset: the lock-held merge below recomputes the
+	// authoritative removed set, and any row that appeared after this pre-read
+	// simply has no captured PID and falls back to the port classifier.
+	preCaptureTargets, err := preliminarySupervisorTargetsForServer(intentPath, m.Name)
+	if err != nil {
+		return "", err
+	}
+	removedSupervisorPIDByTask := supervisorOwnedLivePIDsForTargets(ctx, preCaptureTargets)
+
 	// FIX 1 — atomic read-merge-write of supervisor-intent.json.
 	//
 	// The read (buildMergedSupervisorIntent) → merge → write sequence must be
@@ -377,12 +387,6 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 			}
 		}
 	}
-
-	// Capture live PIDs before the intent write and later reconcile nudge. Once
-	// the supervisor re-reads the merged intent, removed rows may no longer be
-	// visible through IPC status, but those already-running child processes still
-	// need a post-nudge force-kill.
-	removedSupervisorPIDByTask := supervisorOwnedLivePIDsForTargets(ctx, removedSupervisorTargetsAfterInstall)
 
 	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
 	// push — this is a read-only-ish probe that leaves no committed side
@@ -524,6 +528,23 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	nudgeResult := supervisorReconcileNudgeResult{status: supervisorReconcileNudgeSucceeded}
 
 	if superviseGlobal {
+		stateDir, err := DaemonStateDir()
+		if err != nil {
+			return fmt.Errorf("resolve state dir: %w", err)
+		}
+		intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+		if daemonFilter == "" {
+			// Pre-capture a superset before the intent flock. The locked merge
+			// below recomputes the authoritative removed targets; rows that were
+			// not present in this pre-read have no captured PID and use the port
+			// path after the reconcile nudge.
+			preCaptureTargets, err := preliminarySupervisorTargetsForServer(intentPath, m.Name)
+			if err != nil {
+				return err
+			}
+			removedSupervisorPIDByTask = supervisorOwnedLivePIDsForTargets(ctx, preCaptureTargets)
+		}
+
 		// The supervisor-intent flock is held ONLY across the read-merge-write
 		// critical section below. It MUST be released before the fall-through to
 		// recordInstallIntentPostSuccess at the end of this function:
@@ -536,12 +557,6 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 		// post-success stop-subblock write — rather than at installPlanCore's own
 		// return.
 		runLocked := func() error {
-			stateDir, err := DaemonStateDir()
-			if err != nil {
-				return fmt.Errorf("resolve state dir: %w", err)
-			}
-			intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
-
 			// Hold the canonical per-file flock across the read-merge AND the
 			// commit inside executeInstallTo's intermediate hook, exactly as
 			// InstallParsedManifest does (FIX 1 there) — otherwise two concurrent
@@ -568,9 +583,6 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 				return err
 			}
 			removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
-			// Capture live PIDs before the post-install reconcile nudge; after
-			// the nudge, removed rows may disappear from the supervisor's IPC view.
-			removedSupervisorPIDByTask = supervisorOwnedLivePIDsForTargets(ctx, removedSupervisorTargetsAfterInstall)
 			desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
 			intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
 				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifacts(priorIntent, m.Name))
@@ -899,6 +911,23 @@ func pruneStopsForRemovedSupervisorTargets(stops map[string]DaemonIntent, remove
 		return nil
 	}
 	return kept
+}
+
+func preliminarySupervisorTargetsForServer(intentPath, server string) ([]SupervisorDaemon, error) {
+	prior, existed, err := readSupervisorIntentForMerge(intentPath)
+	if err != nil {
+		return nil, err
+	}
+	if !existed || prior == nil || server == "" {
+		return nil, nil
+	}
+	targets := make([]SupervisorDaemon, 0, len(prior.Daemons))
+	for _, d := range prior.Daemons {
+		if supervisorIntentRowOwnedBy(d, server) {
+			targets = append(targets, d)
+		}
+	}
+	return targets, nil
 }
 
 func supervisorOwnedLivePIDsForTargets(ctx context.Context, targets []SupervisorDaemon) map[string]int {
@@ -1264,6 +1293,18 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 
+	if captureLivePIDs {
+		// Capture before taking the supervisor-intent flock. The locked cleanup
+		// below recomputes the authoritative removed rows; rows that appear after
+		// this pre-read have no captured PID and fall back to their descriptor
+		// port after the reconcile nudge.
+		preCaptureTargets, err := preliminarySupervisorTargetsForServer(intentPath, server)
+		if err != nil {
+			return false, nil, nil, err
+		}
+		removedPIDByTask = supervisorOwnedLivePIDsForTargets(ctx, preCaptureTargets)
+	}
+
 	// Serialize the read-merge-write as ONE critical section against every
 	// other supervisor-intent writer (install / migrate / autostart / stop),
 	// exactly as buildMergedSupervisorIntent's callers do. Holding the flock
@@ -1322,9 +1363,6 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 
 	if !changed {
 		return false, nil, nil, nil // this server owned nothing in the intent
-	}
-	if captureLivePIDs {
-		removedPIDByTask = supervisorOwnedLivePIDsForTargets(ctx, removedDaemons)
 	}
 
 	merged := &SupervisorIntentFile{

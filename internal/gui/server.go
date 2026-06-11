@@ -543,11 +543,13 @@ type Server struct {
 	// reconcile goroutine + its tests; guarded so a future caller is safe.
 	serenaBackendPIDMu   sync.Mutex
 	serenaBackendLastPID map[string]int
-	// serenaBackendIdlePaths marks workspace paths that the previous reconcile
-	// tick classified as intentionally idle-stopped. The first running PID after
-	// that phase is a wake respawn, not backend loss, so reconcile refreshes the
-	// baseline once and then clears this marker. Guarded by serenaBackendPIDMu.
-	serenaBackendIdlePaths map[string]bool
+	// serenaBackendIdlePaths tracks workspace paths that were intentionally
+	// idle-stopped and the remaining post-clear grace ticks. The first running
+	// PID after that phase is a wake respawn, not backend loss, so reconcile
+	// refreshes the baseline once and then clears this marker. A cleared idle
+	// stop followed by PID0/Stopped consumes the bounded grace before normal
+	// backend-loss teardown resumes. Guarded by serenaBackendPIDMu.
+	serenaBackendIdlePaths map[string]int
 
 	// v0.6 idle-shutdown (#6, spec §6) per-daemon LAST-ACTIVITY tracking.
 	// serenaActivityMu guards serenaLastActivity: WorkspaceKey -> the wall
