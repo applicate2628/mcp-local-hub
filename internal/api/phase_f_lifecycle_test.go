@@ -726,6 +726,15 @@ func TestStopForceKillSupervisorOwned_PortlessFallsBackToPID(t *testing.T) {
 	stopForceKillPIDFn = func(pid int) error { killedPIDs = append(killedPIDs, pid); return nil }
 	t.Cleanup(func() { stopForceKillPIDFn = origPID })
 
+	origIdentity := processIdentityByPID
+	processIdentityByPID = func(pid int) (string, string, bool) {
+		if pid == 4242 {
+			return "mcphub.exe", "svchost.exe", true
+		}
+		return "", "", false
+	}
+	t.Cleanup(func() { processIdentityByPID = origIdentity })
+
 	// IPC status reports the live PID for the task.
 	origStatus := supervisorIPCStatusFn
 	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
@@ -783,6 +792,15 @@ func TestStopForceKillSupervisorOwned_UnsupportedPortKillFallsBackToPID(t *testi
 	origPID := stopForceKillPIDFn
 	stopForceKillPIDFn = func(pid int) error { killedPIDs = append(killedPIDs, pid); return nil }
 	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+
+	origIdentity := processIdentityByPID
+	processIdentityByPID = func(pid int) (string, string, bool) {
+		if pid == 4243 {
+			return "mcphub.exe", "svchost.exe", true
+		}
+		return "", "", false
+	}
+	t.Cleanup(func() { processIdentityByPID = origIdentity })
 
 	origStatus := supervisorIPCStatusFn
 	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {

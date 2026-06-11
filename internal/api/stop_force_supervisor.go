@@ -88,11 +88,20 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 }
 
 // forceKillOneSupervisorTarget kills a single supervisor-owned descriptor.
-// Port is the primary target (the daemon's listening socket — the same signal
-// stopKillCore uses). Unsupported port lookup falls back to a PID resolved from
-// the IPC status snapshot; if neither path can target a process, only a
-// zero-port descriptor is treated as already-stopped.
+// A supervisor IPC PID snapshot is preferred when available because it was
+// captured from the supervisor-owned task identity. Port ownership is a fallback
+// for rows without a live PID snapshot; the shared port-kill path verifies the
+// resolved listener PID is still an mcphub image before taskkill.
 func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) RestartResult {
+	if pid, ok := pidByTask[strings.TrimPrefix(d.TaskName, `\`)]; ok && pid > 0 {
+		if err := requireMcphubPIDImage(pid); err != nil {
+			return RestartResult{TaskName: d.TaskName, Err: fmt.Sprintf("force kill daemon by pid %d: %v", pid, err)}
+		}
+		if err := stopForceKillPIDFn(pid); err != nil {
+			return RestartResult{TaskName: d.TaskName, Err: fmt.Sprintf("force kill daemon by pid %d: %v", pid, err)}
+		}
+		return RestartResult{TaskName: d.TaskName}
+	}
 	portKillUnsupported := false
 	if d.Port != 0 {
 		outcome, err := forceKillByPortFn(d.Port, 5*time.Second)
@@ -103,12 +112,6 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 			return RestartResult{TaskName: d.TaskName}
 		}
 		portKillUnsupported = outcome == portKillLookupUnavailable
-	}
-	if pid, ok := pidByTask[strings.TrimPrefix(d.TaskName, `\`)]; ok && pid > 0 {
-		if err := stopForceKillPIDFn(pid); err != nil {
-			return RestartResult{TaskName: d.TaskName, Err: fmt.Sprintf("force kill daemon by pid %d: %v", pid, err)}
-		}
-		return RestartResult{TaskName: d.TaskName}
 	}
 	if portKillUnsupported {
 		return RestartResult{TaskName: d.TaskName, Err: "force kill daemon by port: " + errPortKillUnsupported.Error() + "; no live PID fallback"}

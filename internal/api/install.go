@@ -1636,8 +1636,7 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 	if !ok {
 		return false
 	}
-	const me = "mcphub.exe"
-	if !strings.EqualFold(image, me) && !strings.EqualFold(parentImage, me) {
+	if !isMcphubProcessImage(image) && !isMcphubProcessImage(parentImage) {
 		return false
 	}
 	if schedulerStatusForOwnPort == nil {
@@ -1666,9 +1665,16 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	if err != nil || intent == nil {
 		return false
 	}
-	row, ok := supervisorIntentDaemonForPort(intent, port, server, daemon)
+	row, matchedInternalPort, ok := supervisorIntentDaemonForPort(intent, port, server, daemon)
 	if !ok {
 		return false
+	}
+	if matchedInternalPort {
+		// Native-http's internal listener is held by the upstream child, not
+		// the supervisor-reported mcphub daemon PID. For this arm the trust
+		// ladder deliberately downgrades to descriptor row + +10000 offset
+		// match; callers only probe this port for native-http manifests.
+		return true
 	}
 	portPID, havePortPID := supervisorOwnedPortPID(port)
 	if !havePortPID {
@@ -1682,19 +1688,24 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	return livePIDs[taskKey] == portPID
 }
 
-func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool) {
+func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool, bool) {
 	if intent == nil {
-		return SupervisorDaemon{}, false
+		return SupervisorDaemon{}, false, false
 	}
 	for _, row := range intent.Daemons {
-		if row.Port != port {
+		matchedExternalPort := row.Port == port
+		matchedInternalPort := row.Port > 0 && row.Port+config.NativeHTTPInternalPortOffset == port
+		if row.RuntimeSpec != nil && row.RuntimeSpec.UpstreamPort == port {
+			matchedInternalPort = true
+		}
+		if !matchedExternalPort && !matchedInternalPort {
 			continue
 		}
 		if supervisorIntentRowMatchesServerDaemon(row, server, daemon) {
-			return row, true
+			return row, matchedInternalPort && !matchedExternalPort, true
 		}
 	}
-	return SupervisorDaemon{}, false
+	return SupervisorDaemon{}, false, false
 }
 
 func supervisorIntentRowMatchesServerDaemon(row SupervisorDaemon, server, daemon string) bool {
@@ -1769,6 +1780,45 @@ func statusOwnedByCurrentUser(owner string) bool {
 // portHeldByOurDaemon then returns false and the Preflight collision
 // check fails as before.
 var processIdentityByPID func(pid int) (image, parentImage string, ok bool)
+
+const mcphubProcessImageName = "mcphub.exe"
+
+func isMcphubProcessImage(image string) bool {
+	return strings.EqualFold(strings.TrimSpace(image), mcphubProcessImageName)
+}
+
+func mcphubPIDImageVerified(pid int) (image, parentImage string, verified bool, err error) {
+	if processIdentityByPID == nil {
+		return "", "", false, errors.New("process identity lookup unavailable")
+	}
+	image, parentImage, ok := processIdentityByPID(pid)
+	if !ok {
+		return image, parentImage, false, fmt.Errorf("process identity lookup failed for pid %d", pid)
+	}
+	return image, parentImage, isMcphubProcessImage(image), nil
+}
+
+func requireMcphubPIDImage(pid int) error {
+	image, parentImage, verified, err := mcphubPIDImageVerified(pid)
+	if err != nil {
+		return err
+	}
+	if !verified {
+		return fmt.Errorf("pid %d image %q parent %q is not %s", pid, image, parentImage, mcphubProcessImageName)
+	}
+	return nil
+}
+
+func requireMcphubPortOwnerPID(port, pid int) error {
+	image, parentImage, verified, err := mcphubPIDImageVerified(pid)
+	if err != nil {
+		return fmt.Errorf("process identity for port %d pid %d: %w", port, pid, err)
+	}
+	if !verified {
+		return fmt.Errorf("port owned by foreign process: port %d pid %d image %q parent %q", port, pid, image, parentImage)
+	}
+	return nil
+}
 
 // schedulerStatusForOwnPort is a function-pointer seam for the
 // own-port detection helper above. Production init wires it to
@@ -2382,6 +2432,9 @@ func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]
 	var results []RestartResult
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
+		if !isHubDaemonSchedulerTaskName(normalized) {
+			continue
+		}
 		if _, already := handledTasks[normalized]; already {
 			continue
 		}
@@ -2390,9 +2443,6 @@ func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]
 			if !strings.HasSuffix(normalized, wantSuffix) {
 				continue
 			}
-		}
-		if strings.Contains(t.Name, "weekly-refresh") {
-			continue // schedule-only task, nothing to kill
 		}
 		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
@@ -2445,6 +2495,9 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 	wsByTask := workspaceTasksByName()
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
+		if !isHubDaemonSchedulerTaskName(normalized) {
+			continue
+		}
 		if _, already := handledTasks[normalized]; already {
 			continue
 		}
@@ -2453,9 +2506,6 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 			if !strings.HasSuffix(normalized, wantSuffix) {
 				continue
 			}
-		}
-		if strings.Contains(t.Name, "weekly-refresh") {
-			continue
 		}
 		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
@@ -2600,6 +2650,28 @@ func schedulerBlockedRestartTaskNames(results []RestartResult) map[string]struct
 	return handledTasks
 }
 
+const supervisorAutostartTaskLeaf = "mcp-local-hub-supervisor"
+
+func isHubInfrastructureTaskName(taskName string) bool {
+	name := strings.TrimPrefix(strings.TrimSpace(taskName), "\\")
+	// The autostart constant lives in internal/autostart as
+	// WindowsTaskName. Keep the leaf local here to avoid an api ->
+	// autostart import cycle.
+	if name == supervisorAutostartTaskLeaf {
+		return true
+	}
+	return isMaintenanceTaskName(name)
+}
+
+func isHubDaemonSchedulerTaskName(taskName string) bool {
+	name := strings.TrimPrefix(strings.TrimSpace(taskName), "\\")
+	if name == "" || isHubInfrastructureTaskName(name) {
+		return false
+	}
+	server, daemon := ParseManagedTaskName(name)
+	return server != "" && daemon != ""
+}
+
 // RestartAll stops+starts every scheduler task under our prefix. Returns a
 // per-task result list with any errors.
 //
@@ -2635,11 +2707,10 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
 	for _, t := range tasks {
-		// Skip weekly-refresh — scheduled, not restarted.
-		if strings.Contains(t.Name, "weekly-refresh") {
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		if !isHubDaemonSchedulerTaskName(normalized) {
 			continue
 		}
-		normalized := strings.TrimPrefix(t.Name, "\\")
 		if _, alreadyHandled := handledTasks[normalized]; alreadyHandled {
 			continue
 		}
@@ -2750,11 +2821,10 @@ func (a *API) StopAll() ([]RestartResult, error) {
 	wsByTask := workspaceTasksByName()
 	results := supResults
 	for _, t := range tasks {
-		// Skip weekly-refresh — schedule-only task; Stop has no effect anyway.
-		if strings.Contains(t.Name, "weekly-refresh") {
+		normalized := strings.TrimPrefix(t.Name, "\\")
+		if !isHubDaemonSchedulerTaskName(normalized) {
 			continue
 		}
-		normalized := strings.TrimPrefix(t.Name, "\\")
 		if _, already := handledTasks[normalized]; already {
 			continue
 		}
@@ -2784,9 +2854,22 @@ const (
 	portKillLookupUnavailable
 	portKillNoListener
 	portKillKilled
+	portKillIdentityMismatch
 )
 
 var forceKillByPortFn = killDaemonByPortOutcome
+
+var taskkillProcessTreeByPIDFn = taskkillProcessTreeByPID
+
+func taskkillProcessTreeByPID(pid int) error {
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T")
+	process.NoConsole(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
 
 // killDaemonByPort finds the process listening on 127.0.0.1:port, kills
 // its whole tree with taskkill /F /T, and polls until the port is free.
@@ -2812,11 +2895,11 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 	if !ok {
 		return portKillNoListener, nil
 	}
-	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return portKillNoListener, fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
+	if err := requireMcphubPortOwnerPID(port, pid); err != nil {
+		return portKillIdentityMismatch, err
+	}
+	if err := taskkillProcessTreeByPIDFn(pid); err != nil {
+		return portKillNoListener, err
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
