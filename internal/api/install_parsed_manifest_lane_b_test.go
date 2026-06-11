@@ -242,6 +242,79 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 	}
 }
 
+func TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	installFakeScheduler(t, newInstallFakeScheduler())
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+	const removedTask = `\mcp-local-hub-demo-beta`
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: removedTask, Server: "demo", Daemon: "beta", Command: "old", Port: 0},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent: %v", err)
+	}
+
+	origStatus := supervisorIPCStatusFn
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+		return []DaemonStatus{{TaskName: removedTask, PID: 6201, State: "Running"}}, nil
+	}
+	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
+
+	var killedPIDs []int
+	origPID := stopForceKillPIDFn
+	stopForceKillPIDFn = func(pid int) error {
+		killedPIDs = append(killedPIDs, pid)
+		return nil
+	}
+	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+
+	origProbe := installSupervisorRunningProbeFn
+	installSupervisorRunningProbeFn = func(string) (bool, int, error) { return true, 4242, nil }
+	t.Cleanup(func() { installSupervisorRunningProbeFn = origProbe })
+
+	origStart := installAutostartOwnerStartFn
+	installAutostartOwnerStartFn = func() error {
+		t.Fatal("autostart owner start must not run when the supervisor lock is already held")
+		return nil
+	}
+	t.Cleanup(func() { installAutostartOwnerStartFn = origStart })
+
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, errSupervisorUnavailableForTest()
+	}))
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://example.invalid/mcp",
+	}
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+		t.Fatalf("installPlanCore: %v", err)
+	}
+
+	if len(killedPIDs) != 0 {
+		t.Fatalf("held supervisor lock after IPC failure killed removed PID(s) %v, want none", killedPIDs)
+	}
+	out := buf.String()
+	for _, want := range []string{"supervisor lock is held", "IPC is unreachable", "mcphub restart", "force kill removed supervisor targets skipped"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("install output missing %q; output:\n%s", want, out)
+		}
+	}
+}
+
 func TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)

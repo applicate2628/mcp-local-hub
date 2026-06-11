@@ -2934,3 +2934,68 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated(t *
 		t.Errorf("sibling other/d not preserved verbatim: %+v", otherRows[0])
 	}
 }
+
+// TestBuildMergedSupervisorIntent_FullInstall_BlankServerHyphenatedDaemonRowNotDuplicated
+// is the bot PR #288 r19 F1 regression: legacy blank-Server rows must be
+// matched by the manifest server prefix, not by ParseManagedTaskName's
+// last-hyphen split. A row for server demo / daemon alpha-beta used to parse as
+// server demo-alpha / daemon beta, so a full reinstall preserved the stale row
+// and appended a duplicate fresh descriptor.
+//
+// Negative-control: with the ParseManagedTaskName fallback this test fails with
+// two rows keyed \mcp-local-hub-demo-alpha-beta.
+func TestBuildMergedSupervisorIntent_FullInstall_BlankServerHyphenatedDaemonRowNotDuplicated(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Command: "stale-blank-alpha-beta", Port: 9991},
+			{TaskName: `\mcp-local-hub-other-alpha-beta`, Server: "other", Daemon: "alpha-beta", Command: "preserve-other", Port: 9993},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha-beta", Port: 33013},
+		},
+	}
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
+	}
+
+	var alphaBetaRows []SupervisorDaemon
+	for _, d := range merged.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == `\mcp-local-hub-demo-alpha-beta` {
+			alphaBetaRows = append(alphaBetaRows, d)
+		}
+	}
+	if len(alphaBetaRows) != 1 {
+		t.Fatalf("full install produced %d rows for task \\mcp-local-hub-demo-alpha-beta, want exactly 1; rows=%+v", len(alphaBetaRows), merged.Daemons)
+	}
+	if got := alphaBetaRows[0]; got.Server != "demo" || got.Daemon != "alpha-beta" || got.Command == "stale-blank-alpha-beta" || got.Port != 33013 {
+		t.Errorf("surviving alpha-beta row is stale/blank, not the fresh manifest row: %+v", got)
+	}
+
+	var otherRows []SupervisorDaemon
+	for _, d := range merged.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == `\mcp-local-hub-other-alpha-beta` {
+			otherRows = append(otherRows, d)
+		}
+	}
+	if len(otherRows) != 1 {
+		t.Fatalf("sibling other/alpha-beta = %d rows, want exactly 1 (preserved verbatim); rows=%+v", len(otherRows), merged.Daemons)
+	}
+	if otherRows[0].Command != "preserve-other" || otherRows[0].Port != 9993 {
+		t.Errorf("sibling other/alpha-beta not preserved verbatim: %+v", otherRows[0])
+	}
+}

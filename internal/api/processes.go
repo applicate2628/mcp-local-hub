@@ -367,6 +367,7 @@ func init() {
 		parentImage, _, _ = procNameAndParent(parentPID)
 		return image, parentImage, true
 	}
+	processNameAndParentByPID = procNameAndParent
 
 	// Batch variant: one netstat + one wmic for N ports.
 	lookupProcessBatch = func(ports []int) map[int]struct {

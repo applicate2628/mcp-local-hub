@@ -1658,12 +1658,15 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 // ownership checks.
 //
 // Trust ladder:
-//   - Native-http internal port: fail closed unless the descriptor row matches
-//     AND the supervisor IPC status reports a live PID for that task. The
-//     listener is held by the daemon's upstream child (often uvx/python rather
-//     than mcphub.exe), so image/parent-image gates false-reject valid daemons;
-//     the stale-descriptor attack requires the mcphub daemon to be down, and a
-//     live supervisor-reported daemon PID closes that stale-row case.
+//   - Native-http internal port: require the descriptor row plus a live
+//     supervisor-reported wrapper PID. When the port-owner lookup and process
+//     parent walk are available, also prove the internal listener's parent chain
+//     reaches that wrapper PID within a bounded depth; a resolvable chain that
+//     does not reach it is a foreign listener and is rejected. If the lookup or
+//     walk surface is unavailable, keep the previous live-wrapper-PID downgrade:
+//     this matches the best-effort identity-gate posture used elsewhere on
+//     hosts without process probes, and avoids breaking valid installs when the
+//     OS cannot expose ancestry.
 //   - External port: fail closed unless both proof surfaces are available and
 //     agree: the live listener PID from port-owner lookup must equal the live
 //     supervisor-reported PID for the matching task.
@@ -1697,10 +1700,13 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 		return false
 	}
 	if matchedInternalPort {
-		// The internal listener belongs to the upstream child, not necessarily
-		// the mcphub daemon PID. Requiring the descriptor row plus a live
-		// supervisor IPC PID proves the owning daemon is up without assuming the
-		// child's image or direct parent shape.
+		owned, resolved := internalPortListenerChainsToWrapperPID(port, livePID)
+		if resolved {
+			return owned
+		}
+		// No usable port-owner or ancestry proof. Keep the documented downgrade:
+		// descriptor row + live supervisor wrapper PID is the best available
+		// identity signal on hosts where process lookup is unavailable.
 		return true
 	}
 	portPID, havePortPID := supervisorOwnedPortPID(port)
@@ -1708,6 +1714,39 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 		return false
 	}
 	return livePID == portPID
+}
+
+const internalPortParentWalkDepth = 3
+
+func internalPortListenerChainsToWrapperPID(port int, wrapperPID int) (owned bool, resolved bool) {
+	if wrapperPID <= 0 {
+		return false, true
+	}
+	listenerPID, havePortPID := supervisorOwnedPortPID(port)
+	if !havePortPID {
+		return false, false
+	}
+	if listenerPID == wrapperPID {
+		return true, true
+	}
+	if processNameAndParentByPID == nil {
+		return false, false
+	}
+	cur := listenerPID
+	for depth := 0; depth < internalPortParentWalkDepth; depth++ {
+		_, parentPID, ok := processNameAndParentByPID(cur)
+		if !ok {
+			return false, false
+		}
+		if parentPID == wrapperPID {
+			return true, true
+		}
+		if parentPID <= 0 || parentPID == cur {
+			return false, true
+		}
+		cur = parentPID
+	}
+	return false, true
 }
 
 func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool, bool) {
@@ -1802,6 +1841,12 @@ func statusOwnedByCurrentUser(owner string) bool {
 // portHeldByOurDaemon then returns false and the Preflight collision
 // check fails as before.
 var processIdentityByPID func(pid int) (image, parentImage string, ok bool)
+
+// processNameAndParentByPID returns the process image basename plus parent PID
+// for callers that need a bounded ancestry walk rather than only the direct
+// parent image. Production is wired in processes.go next to processIdentityByPID;
+// tests supply fakes.
+var processNameAndParentByPID func(pid int) (image string, parentPID int, ok bool)
 
 const mcphubProcessImageName = "mcphub.exe"
 

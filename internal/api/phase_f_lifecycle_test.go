@@ -452,7 +452,9 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
 // TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart
 // is the double-start guard: if the IPC nudge saw an unavailable supervisor but
 // the flock-authoritative probe now reports one running, install must not fire
-// the autostart owner a second time.
+// the autostart owner a second time. A held lock is not convergence, though:
+// the operator output must say the supervisor is wedged rather than claiming a
+// successful nudge.
 func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart(t *testing.T) {
 	phaseFStateDir(t)
 	preparePreflightBinaryChecks(t)
@@ -486,8 +488,11 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart(
 		t.Fatalf("installPlanCore(no supervisor): %v should be non-fatal", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "supervisor already running") {
-		t.Fatalf("install output missing running-supervisor skip confirmation; got:\n%s", out)
+	if !strings.Contains(out, "supervisor lock is held") || !strings.Contains(out, "IPC is unreachable") {
+		t.Fatalf("install output missing wedged-supervisor warning; got:\n%s", out)
+	}
+	if strings.Contains(out, "supervisor already running") {
+		t.Fatalf("install output claimed convergence for a lock-held/IPC-unreachable supervisor; got:\n%s", out)
 	}
 	if strings.Contains(out, "will start on the next `mcphub supervise`") {
 		t.Fatalf("install output kept the stale pending-daemon note even though supervisor is running; got:\n%s", out)
