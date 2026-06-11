@@ -60,16 +60,17 @@ import (
 //
 // # Live bands (anchored to real runtime code, not magic numbers)
 //
-//   - 9121–9132  global daemon ports, incl. the legacy serena 9121/9122 split.
-//     Source: configs/ports.yaml (10 globals) + serena_dynamic_pool.go:69
-//     ("clears 9121–9132") + defaultLegacySerenaPort = 9121.
+//   - 9121–9133  global daemon ports, incl. the legacy serena 9121/9122 split.
+//     Source: configs/ports.yaml (11 globals) + serena_dynamic_pool.go:69
+//     ("clears 9121–9132") + defaultLegacySerenaPort = 9121 + fetch on 9133
+//     (PR #287 moved it off the legacy serena port).
 //   - 9150–9199  serena dynamic pool. Source: serena_dynamic_pool.go:77-78
 //     (serenaDefaultPortPoolStart / serenaDefaultPortPoolEnd).
 //   - 9200–9299  LSP workspace-proxy pool. Source: serena_dynamic_pool.go:69
 //     comment + servers/mcp-language-server/manifest.yaml `start: 9200`.
 //
-// Note 9133–9149 is an intentional gap (not a live band), so the guard checks
-// two ranges: [9121,9132] and [9150,9299].
+// Note 9134–9149 is an intentional gap (not a live band), so the guard checks
+// two ranges: [9121,9133] and [9150,9299].
 //
 // # Scope: SINK-SCOPED, deliberately NOT a blanket `9xxx` grep
 //
