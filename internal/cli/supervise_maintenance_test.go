@@ -288,6 +288,60 @@ func TestMaintenance_BlankServerWeeklyRefreshTimersKeyByParsedName(t *testing.T)
 	}
 }
 
+func TestMaintenance_ServerWeeklyRefreshTimersSeedFromLegacyFiredAt(t *testing.T) {
+	timers := []api.MaintenanceTimer{
+		{Kind: "server-weekly-refresh", Server: "alpha"},
+		{Kind: "server-weekly-refresh", Server: "beta"},
+	}
+	state := newTestState(t)
+
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 4, 0, 0, 0, loc)
+	legacyFiredAt := time.Date(2026, 5, 17, 3, 30, 0, 0, loc).UTC().Format(time.RFC3339Nano)
+	state.SetMaintenanceFiredAt("server-weekly-refresh", legacyFiredAt)
+
+	sched := NewMaintenanceScheduler(state)
+	var fired []string
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired = append(fired, t.Server) })
+
+	sched.Tick(now, timers)
+	if len(fired) != 0 {
+		t.Fatalf("legacy fired_at seed should suppress upgraded per-server timers; fired=%v", fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh:alpha"); ok {
+		t.Fatalf("alpha per-server key written before a genuine fire; state=%+v", state.fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh:beta"); ok {
+		t.Fatalf("beta per-server key written before a genuine fire; state=%+v", state.fired)
+	}
+	if got := state.fired["server-weekly-refresh"]; got != legacyFiredAt {
+		t.Fatalf("legacy key = %q, want preserved %q", got, legacyFiredAt)
+	}
+
+	nextWindow := time.Date(2026, 5, 24, 4, 0, 0, 0, loc)
+	sched.Tick(nextWindow, timers)
+	if len(fired) != 2 || fired[0] != "alpha" || fired[1] != "beta" {
+		t.Fatalf("next genuine window fired servers = %v, want [alpha beta]", fired)
+	}
+	alphaStored := state.fired["server-weekly-refresh:alpha"]
+	betaStored := state.fired["server-weekly-refresh:beta"]
+	if alphaStored == "" || betaStored == "" {
+		t.Fatalf("genuine fire must write new per-server keys; state=%+v", state.fired)
+	}
+	if got := state.fired["server-weekly-refresh"]; got != legacyFiredAt {
+		t.Fatalf("legacy key = %q, want stale entry preserved %q", got, legacyFiredAt)
+	}
+
+	fired = nil
+	sched.Tick(nextWindow.Add(time.Minute), timers)
+	if len(fired) != 0 {
+		t.Fatalf("later tick should read new per-server fired_at keys and not re-fire; fired=%v state=%+v", fired, state.fired)
+	}
+	if state.fired["server-weekly-refresh:alpha"] != alphaStored || state.fired["server-weekly-refresh:beta"] != betaStored {
+		t.Fatalf("per-server fired_at changed without a new due window; state=%+v", state.fired)
+	}
+}
+
 // TestMaintenance_FirstFireSkippedBeforeFirstDue — empty state but `now`
 // is mid-week (Wednesday) → no fire yet because the synthetic baseline
 // is most-recent past Sun 03:00 local and next_due is the NEXT Sun

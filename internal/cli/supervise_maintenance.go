@@ -352,7 +352,17 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 		}
 
 		timerKey := maintenanceTimerIdentityKey(t)
-		baseline, fired := s.parseLastFiredOrSynthesise(timerKey, now)
+		baseline, fired, found := s.parseLastFiredOrSynthesise(timerKey, now)
+		if !found && timerKey != t.Kind {
+			// One-way rekey migration for hosts that already recorded the
+			// pre-C3 shared server-weekly-refresh fired_at. The first real
+			// fire below writes timerKey; the legacy bare-kind entry is left
+			// untouched so not-yet-upgraded readers can still see it.
+			if legacyBaseline, legacyFired, _ := s.parseLastFiredOrSynthesise(t.Kind, now); legacyFired {
+				baseline = legacyBaseline
+				fired = true
+			}
+		}
 		// Real last-fire → strictly-after boundary (a fire at exactly
 		// Sun 03:00:00 must not re-fire next tick, PR #243 bot round-2
 		// P2). Synthetic baseline → inclusive, so a fresh install
@@ -573,29 +583,39 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt, timerKey st
 // no diagnostic). Caller flow on first install reaches this with no
 // stored entry.
 //
-// The bool return reports whether the baseline is a REAL last-fire
-// (from cache or disk) vs a SYNTHETIC catch-up baseline. The caller
-// uses it to pick a strictly-after vs inclusive due boundary (PR #243
-// bot round-2 P2): a real fire at exactly Sun 03:00:00 must not re-fire
-// next tick, but a synthetic baseline must fire on the first tick.
-func (s *MaintenanceScheduler) parseLastFiredOrSynthesise(kind string, now time.Time) (time.Time, bool) {
-	if raw, ok := s.loadLastFiredLocally(kind); ok && raw != "" {
-		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			return t, true
+// The second bool return reports whether the baseline is a REAL
+// last-fire (from cache or disk) vs a SYNTHETIC catch-up baseline. The
+// caller uses it to pick a strictly-after vs inclusive due boundary (PR
+// #243 bot round-2 P2): a real fire at exactly Sun 03:00:00 must not
+// re-fire next tick, but a synthetic baseline must fire on the first
+// tick. The third bool reports whether the exact key had any stored
+// entry (including empty or unparseable), so migration fallback can be
+// limited to genuinely absent per-server keys.
+func (s *MaintenanceScheduler) parseLastFiredOrSynthesise(kind string, now time.Time) (time.Time, bool, bool) {
+	found := false
+	if raw, ok := s.loadLastFiredLocally(kind); ok {
+		found = true
+		if raw != "" {
+			if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				return t, true, true
+			}
+			// Cache poisoning is impossible in production (only
+			// rememberLastFiredLocally writes here, with a known
+			// time.RFC3339Nano value) but the parse-fail branch matches
+			// the state-store path defensively.
+			log.Printf("severity=warn event=maintenance-last-fired-cache-unparseable kind=%q value=%q", kind, raw)
 		}
-		// Cache poisoning is impossible in production (only
-		// rememberLastFiredLocally writes here, with a known
-		// time.RFC3339Nano value) but the parse-fail branch matches
-		// the state-store path defensively.
-		log.Printf("severity=warn event=maintenance-last-fired-cache-unparseable kind=%q value=%q", kind, raw)
 	}
-	if raw, ok := s.state.GetMaintenanceFiredAt(kind); ok && raw != "" {
-		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			return t, true
+	if raw, ok := s.state.GetMaintenanceFiredAt(kind); ok {
+		found = true
+		if raw != "" {
+			if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				return t, true, true
+			}
+			log.Printf("severity=warn event=maintenance-last-fired-unparseable kind=%q value=%q", kind, raw)
 		}
-		log.Printf("severity=warn event=maintenance-last-fired-unparseable kind=%q value=%q", kind, raw)
 	}
-	return mostRecentPastSunday0300Local(now), false
+	return mostRecentPastSunday0300Local(now), false, found
 }
 
 // nextSunday0300Local returns the earliest Sunday 03:00 local time

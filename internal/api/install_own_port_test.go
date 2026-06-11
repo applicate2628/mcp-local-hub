@@ -232,6 +232,84 @@ func TestPreflight_AllowsSameSupervisorOwnedPortAndRejectsForeignIntentRow(t *te
 	}
 }
 
+func TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	const (
+		port    = 33011
+		portPID = 66011
+	)
+	const taskName = `\mcp-local-hub-demo-alpha`
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "demo",
+			Daemon:   "alpha",
+			Command:  "go",
+			Port:     port,
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
+
+	origLookup := lookupProcess
+	origStatus := supervisorIPCStatusFn
+	t.Cleanup(func() {
+		lookupProcess = origLookup
+		supervisorIPCStatusFn = origStatus
+	})
+
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: portPID, State: "Running"}}, nil
+	}
+	lookupProcess = nil
+	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); got {
+		t.Fatal("intent row with unavailable port-owner lookup = true, want false")
+	}
+
+	lookupProcess = func(p int) (int, uint64, int64, bool) {
+		if p == port {
+			return portPID, 0, 0, true
+		}
+		return 0, 0, 0, false
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return nil, errors.New("supervisor IPC unavailable")
+	}
+	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); got {
+		t.Fatal("intent row with unreachable supervisor IPC = true, want false")
+	}
+
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: portPID, State: "Running"}}, nil
+	}
+	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); !got {
+		t.Fatal("intent row with matching port PID and live supervisor PID = false, want true")
+	}
+
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: portPID + 1, State: "Running"}}, nil
+	}
+	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); got {
+		t.Fatal("intent row with mismatched port PID and live supervisor PID = true, want false")
+	}
+
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, State: "Running"}}, nil
+	}
+	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); got {
+		t.Fatal("intent row without live supervisor PID = true, want false")
+	}
+
+	lookupProcess = nil
+	supervisorIPCStatusFn = nil
+	if got := portHeldBySupervisorIntentDaemon(port+config.NativeHTTPInternalPortOffset, "demo", "alpha"); !got {
+		t.Fatal("matching native-http internal port row = false, want true")
+	}
+}
+
 // TestParseNameParent pins the CSV parser used by both wmic and
 // PowerShell paths in procNameAndParent (bot r2 P2 closure). The parser
 // must accept both Windows shapes and reject malformed rows.

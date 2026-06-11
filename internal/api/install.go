@@ -1653,6 +1653,22 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 	return statusOwnedByCurrentUser(st.Owner)
 }
 
+// portHeldBySupervisorIntentDaemon recognizes ports owned by the v0.6
+// supervisor-intent path before falling back to legacy scheduler-task
+// ownership checks.
+//
+// Trust ladder:
+//   - Native-http internal port: descriptor row plus the documented
+//     external+10000/RuntimeSpec.UpstreamPort match is enough. That listener is
+//     held by the daemon's upstream child, so there is no supervisor daemon PID
+//     to compare.
+//   - External port: fail closed unless both proof surfaces are available and
+//     agree: the live listener PID from port-owner lookup must equal the live
+//     supervisor-reported PID for the matching task.
+//
+// Callers reach this only after preflightPortInUse(port) is already true, so a
+// missing proof surface cannot mean "port is free"; it leaves the normal port
+// collision error in place.
 func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	if port == 0 || server == "" || daemon == "" {
 		return false
@@ -1678,14 +1694,15 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	}
 	portPID, havePortPID := supervisorOwnedPortPID(port)
 	if !havePortPID {
-		return true
+		return false
 	}
 	livePIDs, reachable := supervisorOwnedLivePIDsWithReachability(context.Background())
 	if !reachable {
-		return true
+		return false
 	}
 	taskKey := strings.TrimPrefix(supervisorIntentDaemonTaskName(row, server, daemon), `\`)
-	return livePIDs[taskKey] == portPID
+	livePID, ok := livePIDs[taskKey]
+	return ok && livePID == portPID
 }
 
 func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool, bool) {
