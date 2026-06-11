@@ -2389,7 +2389,10 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 			Kind:      config.KindGlobal,
 			Transport: config.TransportStdioBridge,
 			Command:   "go",
-			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 9313}},
+			Daemons: []config.DaemonSpec{
+				{Name: "alpha", Port: 9313},
+				{Name: "beta", Port: 33013},
+			},
 		}
 		var buf bytes.Buffer
 		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
@@ -2398,7 +2401,7 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
 		}
 		if len(killed) != 1 || killed[0] != 9313 {
-			t.Fatalf("forceKillByPortFn ports = %v, want [9313] so the supervised copy can bind", killed)
+			t.Fatalf("forceKillByPortFn ports = %v, want only the listed legacy task port [9313]", killed)
 		}
 	})
 
@@ -2438,6 +2441,80 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		}
 		if !strings.Contains(buf.String(), "daemon port unknown") {
 			t.Fatalf("cleanup warning = %q, want daemon port unknown warning", buf.String())
+		}
+	})
+
+	t.Run("filtered install skips absent legacy task without delete or kill", func(t *testing.T) {
+		daemonIntentTestHelper(t)
+		f := newInstallFakeScheduler()
+		installFakeScheduler(t, f)
+
+		origLookup := lookupProcess
+		lookupProcess = nil
+		t.Cleanup(func() { lookupProcess = origLookup })
+
+		var killed []int
+		origKill := forceKillByPortFn
+		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+			killed = append(killed, port)
+			return portKillKilled, nil
+		}
+		t.Cleanup(func() { forceKillByPortFn = origKill })
+
+		m := &config.ServerManifest{
+			Name:      "demo",
+			Kind:      config.KindGlobal,
+			Transport: config.TransportStdioBridge,
+			Command:   "go",
+			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 33031}},
+		}
+		var buf bytes.Buffer
+		cleanupLegacySchedulerTasksForSupervisorInstall(m, "alpha", &buf)
+
+		if len(f.deleteNames) != 0 {
+			t.Fatalf("deleted legacy tasks = %v, want none when filtered task is absent", f.deleteNames)
+		}
+		if len(killed) != 0 {
+			t.Fatalf("forceKillByPortFn ports = %v, want none when filtered task is absent", killed)
+		}
+	})
+
+	t.Run("filtered install deletes and kills when legacy task exists", func(t *testing.T) {
+		daemonIntentTestHelper(t)
+		f := newInstallFakeScheduler()
+		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
+		installFakeScheduler(t, f)
+
+		origLookup := lookupProcess
+		lookupProcess = nil
+		t.Cleanup(func() { lookupProcess = origLookup })
+
+		var killed []int
+		origKill := forceKillByPortFn
+		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+			if len(f.deleteNames) == 0 {
+				t.Errorf("forceKillByPortFn called before deleting the filtered legacy scheduler task")
+			}
+			killed = append(killed, port)
+			return portKillKilled, nil
+		}
+		t.Cleanup(func() { forceKillByPortFn = origKill })
+
+		m := &config.ServerManifest{
+			Name:      "demo",
+			Kind:      config.KindGlobal,
+			Transport: config.TransportStdioBridge,
+			Command:   "go",
+			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 33032}},
+		}
+		var buf bytes.Buffer
+		cleanupLegacySchedulerTasksForSupervisorInstall(m, "alpha", &buf)
+
+		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
+			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
+		}
+		if len(killed) != 1 || killed[0] != 33032 {
+			t.Fatalf("forceKillByPortFn ports = %v, want [33032]", killed)
 		}
 	})
 }

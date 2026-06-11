@@ -1093,6 +1093,26 @@ func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, d
 	}
 	if daemonFilter != "" {
 		name := "mcp-local-hub-" + m.Name + "-" + daemonFilter
+		tasks, err := sch.List(name)
+		if err != nil {
+			if schedulerUnavailableError(err) {
+				return
+			}
+			if w != nil {
+				fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped: list task %s: %v\n", name, err)
+			}
+			return
+		}
+		exists := false
+		for _, task := range tasks {
+			if strings.TrimPrefix(task.Name, "\\") == name {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			return
+		}
 		if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
 			killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
 		}
@@ -1114,6 +1134,8 @@ func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, d
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
+		// Full installs only delete/kill tasks returned by List(prefix), so
+		// existence is proven before Delete's idempotent missing-task success.
 		if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
 			killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
 		}
