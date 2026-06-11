@@ -8,6 +8,9 @@ global:
   - server: sequential-thinking
     daemon: default
     port: 9124
+  - server: fetch
+    daemon: default
+    port: 9133
   - server: wolfram
     daemon: default
     port: 9132
