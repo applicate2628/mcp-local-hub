@@ -587,16 +587,17 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// after re-confirming every active stop is durably in the sub-block (never
 	// before, so a stop is never lost). It is idempotent: a second boot finds
 	// the file already gone and is a no-op; a crash between the write and the
-	// delete is retried next boot. A merge/delete failure is non-fatal: the
-	// supervisor still boots and reads stops via the sub-block
-	// (UnifiedStopsFile is now sub-block-authoritative), so collapse is retried
-	// on the next boot without blocking the fleet.
-	if collapseRes, collapseErr := api.RunDaemonIntentCollapse(stateDir, api.DaemonIntentCollapseOpts{}); collapseErr != nil {
+	// delete is retried next boot. A merge/delete failure is non-fatal only
+	// after the subsequent fail-closed gate proves no active legacy stop would
+	// be lost by UnifiedStopsFile's sub-block-authoritative read.
+	var collapseErr error
+	if collapseRes, err := api.RunDaemonIntentCollapse(stateDir, api.DaemonIntentCollapseOpts{}); err != nil {
+		collapseErr = err
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
 			Event:    "intent-collapse-failed",
-			Body:     map[string]any{"err": collapseErr.Error()},
+			Body:     map[string]any{"err": err.Error()},
 		})
 	} else if collapseRes.Wrote || collapseRes.DeletedLegacyFile {
 		_ = events.Emit(api.SupervisorEvent{
@@ -627,6 +628,18 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 			},
 		})
 		return fmt.Errorf("load intent files: %w", intentErr)
+	}
+	if collapseErr != nil && hasUnmergedActiveLegacyStops(intent, daemonIntent, time.Now().UTC()) {
+		startupErr := fmt.Errorf("run daemon-intent collapse: %w", collapseErr)
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "supervise-startup-failed",
+			Body: map[string]any{
+				"err": startupErr.Error(),
+			},
+		})
+		return startupErr
 	}
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	runtimeTracker, currentRunning, runningPIDs, stateErr := loadSupervisorStartupRuntime(stateDir)
@@ -1841,6 +1854,39 @@ func loadOverlayAtStartup(stateDir string, events *api.SupervisorEventLog, inten
 	}
 
 	return ov, nil
+}
+
+// hasUnmergedActiveLegacyStops returns true when startup must fail closed after
+// a collapse error because valid legacy daemon-intent.json stops are still not
+// durably represented in supervisor-intent.json's authoritative stops sub-block.
+func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, daemonIntent *api.DaemonIntentFile, now time.Time) bool {
+	if daemonIntent == nil || len(daemonIntent.Tasks) == 0 {
+		return false
+	}
+	var supervisorStops map[string]api.DaemonIntent
+	if supervisorIntent != nil {
+		supervisorStops = supervisorIntent.Stops
+	}
+	for taskName, legacyStop := range daemonIntent.Tasks {
+		active, _ := legacyStop.IsActiveStop(now)
+		if !active {
+			continue
+		}
+		// The collapse merge persists under the canonical leading-backslash
+		// key (api canonicalIntentTaskKey), but older v0.4.x writers could
+		// leave BARE keys in daemon-intent.json. Canonicalize before the
+		// sub-block lookup, else an already-merged bare-key stop reads as
+		// "unmerged" and permanently fail-closes startup (bot PR #285 P2).
+		key := taskName
+		if key != "" && key[0] != '\\' {
+			key = `\` + key
+		}
+		subBlockStop, ok := supervisorStops[key]
+		if !ok || subBlockStop.Desired != legacyStop.Desired || subBlockStop.Reason != legacyStop.Reason || !subBlockStop.UpdatedAt.Equal(legacyStop.UpdatedAt) {
+			return true
+		}
+	}
+	return false
 }
 
 // loadIntentFiles attempts to read the supervisor-intent.json and
