@@ -85,8 +85,8 @@ const LivenessTaskName = "\\mcp-local-hub-liveness"
 
 // InstallLivenessTask is the idempotent install of the supervisor-liveness
 // scheduled task: resolve the canonical mcphub.exe path + the current Windows
-// user, render the liveness XML via scheduler.BuildLivenessXML, and ImportXML
-// it under LivenessTaskName.
+// user, render the liveness XML via scheduler.BuildLivenessXML, encode it
+// for Task Scheduler's /XML parser, and ImportXML it under LivenessTaskName.
 //
 // CLI-level concerns (admin-elevation refusal, audit entry, interactive
 // confirm) live in the CLI layer that calls this (runSetupWatchdog rides the
@@ -107,12 +107,13 @@ func (a *API) InstallLivenessTask() error {
 	}
 	workingDir := livenessWorkingDir(canonicalExe)
 	xmlDoc := scheduler.BuildLivenessXML(canonicalExe, workingDir, userName)
+	xmlBytes := scheduler.EncodeXMLUTF16LEBOM(xmlDoc)
 
 	sch, err := newScheduler()
 	if err != nil {
 		return err
 	}
-	return sch.ImportXML(LivenessTaskName, []byte(xmlDoc))
+	return sch.ImportXML(LivenessTaskName, xmlBytes)
 }
 
 // UninstallLivenessTask is the idempotent removal of the supervisor-liveness

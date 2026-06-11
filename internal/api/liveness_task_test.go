@@ -1,9 +1,11 @@
 package api
 
 import (
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 // installTestCanonicalMcphubPath overrides the canonical-mcphub-path resolver
@@ -50,7 +52,7 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 	if imports[0].name != LivenessTaskName {
 		t.Errorf("ImportXML target name: got %q, want %q", imports[0].name, LivenessTaskName)
 	}
-	body := string(imports[0].xml)
+	body := decodeUTF16LEBOMForTest(t, imports[0].xml)
 	wantFragments := []string{
 		"<Interval>PT1M</Interval>",
 		"<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>",
@@ -69,6 +71,32 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 	// is a distinct, additive task (the watchdog install is untouched).
 	if strings.Contains(body, "watchdog --once") {
 		t.Errorf("liveness ImportXML body unexpectedly contains the watchdog action")
+	}
+}
+
+func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
+	a := NewAPI()
+	f := &apiSurfacesFakeScheduler{}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCurrentWindowsUser(t, "test")
+
+	if err := a.InstallLivenessTask(); err != nil {
+		t.Fatalf("InstallLivenessTask: %v", err)
+	}
+	imports := f.importCalls()
+	if len(imports) != 1 {
+		t.Fatalf("expected 1 ImportXML call, got %d", len(imports))
+	}
+	if len(imports[0].xml) < 2 || imports[0].xml[0] != 0xFF || imports[0].xml[1] != 0xFE {
+		t.Fatalf("ImportXML bytes must start with UTF-16 LE BOM; first bytes=% x", imports[0].xml[:min(len(imports[0].xml), 8)])
+	}
+	decoded := decodeUTF16LEBOMForTest(t, imports[0].xml)
+	if !strings.HasPrefix(decoded, `<?xml version="1.0" encoding="UTF-16"?>`) {
+		t.Fatalf("decoded liveness XML prefix = %q", decoded[:min(len(decoded), 80)])
+	}
+	if !strings.Contains(decoded, "<Arguments>supervise --ensure-alive</Arguments>") {
+		t.Fatalf("decoded liveness XML missing ensure-alive action:\n%s", decoded)
 	}
 }
 
@@ -156,6 +184,21 @@ func TestLivenessWorkingDir_OSIndependent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func decodeUTF16LEBOMForTest(t *testing.T, b []byte) string {
+	t.Helper()
+	if len(b) < 2 || b[0] != 0xFF || b[1] != 0xFE {
+		t.Fatalf("missing UTF-16 LE BOM; first bytes=% x", b[:min(len(b), 8)])
+	}
+	if (len(b)-2)%2 != 0 {
+		t.Fatalf("UTF-16 LE payload has odd byte length: %d", len(b)-2)
+	}
+	units := make([]uint16, 0, (len(b)-2)/2)
+	for i := 2; i < len(b); i += 2 {
+		units = append(units, binary.LittleEndian.Uint16(b[i:i+2]))
+	}
+	return string(utf16.Decode(units))
 }
 
 // TestUninstallLivenessTask_DeletesByName asserts the symmetric teardown

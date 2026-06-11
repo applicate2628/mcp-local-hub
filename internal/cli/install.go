@@ -611,6 +611,65 @@ var (
 	upgradeTargetPathFn func() (string, error)
 )
 
+func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string, err error) {
+	errOut := cmd.ErrOrStderr()
+	a := api.NewAPI()
+
+	curExe, target, err = resolveUpgradeSelfPaths()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve self-replace guard paths: %w", err)
+	}
+	if upgradeIsSelfReplace(curExe, target) {
+		return "", "", fmt.Errorf(
+			"refusing to --upgrade from the canonical binary at %s "+
+				"(current executable %s resolves to the same file via path or symlink/junction/short-name alias): "+
+				"the running image cannot replace itself on Windows. "+
+				"Build a new binary (e.g. `go build ./cmd/mcphub`) and run "+
+				"`./mcphub install --upgrade` (or `.\\mcphub.exe install --upgrade`) "+
+				"from the build directory instead.",
+			target, curExe)
+	}
+
+	if runtime.GOOS == "windows" {
+		version := upgradeBuildVersion()
+		if version == "dev" || version == "" {
+			return "", "", fmt.Errorf(
+				"refusing to --upgrade from a dev-build binary at %s: "+
+					"current executable was built without the build scripts' ldflags "+
+					"(version=%q, expected a semver like \"0.4.0\"). "+
+					"On Windows this binary is also CONSOLE-subsystem (no `-H windowsgui` "+
+					"linker flag), which would cause terminal flashes on every "+
+					"Scheduler-invoked daemon and prevent the tray icon from rendering. "+
+					"Recovery: rebuild via `bash build.sh` (or `pwsh build.ps1`), then "+
+					"run `./bin/mcphub.exe install --upgrade` from the build directory.",
+				curExe, version)
+		}
+	}
+
+	guiProcs, guiErr := findRunningGUIsOnTarget(a, target)
+	if guiErr != nil {
+		// Best-effort: a wmic failure must not block the upgrade — fall through
+		// and let the binary-copy/rename step surface "target in use" if a GUI
+		// is actually running.
+		fmt.Fprintf(errOut, "⚠ GUI detection failed (best-effort): %v\n", guiErr)
+	} else if len(guiProcs) > 0 {
+		pids := make([]string, 0, len(guiProcs))
+		for _, p := range guiProcs {
+			pids = append(pids, fmt.Sprintf("%d", p.PID))
+		}
+		return "", "", fmt.Errorf(
+			"refusing to --upgrade with a running mcphub GUI on the target path %s "+
+				"(PIDs: %s). The GUI process holds the binary file lock; "+
+				"Bootstrap would fail with `target in use` and leave the "+
+				"daemon fleet down (StopAll runs before Bootstrap). "+
+				"Recovery: stop the GUI (tray menu → Quit, or "+
+				"`Stop-Process -Id <PID> -Force` in PowerShell), then "+
+				"rerun `./mcphub install --upgrade`",
+			target, strings.Join(pids, ", "))
+	}
+	return curExe, target, nil
+}
+
 // runInstallUpgrade is the entry point behind `mcphub install --upgrade`.
 //
 // Flow:
@@ -662,105 +721,8 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 	errOut := cmd.ErrOrStderr()
 
-	// 1. Self-replace guard. Compare by filesystem identity (inode /
-	// Windows FileID via os.SameFile) rather than cleaned path string:
-	// aliases (symlinks, NTFS junctions, 8.3 short-names) can make
-	// curExe and target differ as strings while pointing at the same
-	// underlying file. Bot r3 P2 closure on PR #181: pre-fix, the
-	// guard would let an aliased self-replace through, StopAll would
-	// stop every daemon, and copyExe would then fail with "target in
-	// use" (the running image still holds the file lock) — fleet down
-	// for an avoidable reason.
-	curExe, target, err := resolveUpgradeSelfPaths()
-	if err != nil {
-		return fmt.Errorf("resolve self-replace guard paths: %w", err)
-	}
-	if upgradeIsSelfReplace(curExe, target) {
-		return fmt.Errorf(
-			"refusing to --upgrade from the canonical binary at %s "+
-				"(current executable %s resolves to the same file via path or symlink/junction/short-name alias): "+
-				"the running image cannot replace itself on Windows. "+
-				"Build a new binary (e.g. `go build ./cmd/mcphub`) and run "+
-				"`./mcphub install --upgrade` (or `.\\mcphub.exe install --upgrade`) "+
-				"from the build directory instead.",
-			target, curExe)
-	}
-
-	// 1b. Dev-build guard (PR #188 / A8 closure): on WINDOWS, refuse
-	// to copy a source binary that was built without the build
-	// scripts' ldflags (`-X main.version=...` + `-H windowsgui`).
-	// Such a binary shows `version=dev / commit=unknown` from
-	// `mcphub version` and is a CONSOLE-subsystem executable that
-	// spawns visible terminals for every Scheduler-invoked daemon.
-	// The 2026-05-15 user session caught exactly this: a plain
-	// `go build ./cmd/mcphub` had replaced the canonical
-	// .local/bin/mcphub.exe, terminals flashed on every daemon
-	// spawn, and tray failed to render. The repair was
-	// `bash build.sh && ./bin/mcphub.exe install --upgrade` —
-	// which this guard now enforces preemptively.
-	//
-	// Codex bot r5 P2 closure: SCOPED to Windows only. On POSIX
-	// the `-H windowsgui` linker flag doesn't exist (no CONSOLE-
-	// subsystem analog), and POSIX devs commonly run untagged
-	// `go build ./cmd/mcphub` binaries for local testing. The
-	// guard's safety property (no CONSOLE-subsystem regression)
-	// is Windows-specific, so refusing dev-builds on POSIX would
-	// block the existing developer path without benefit.
-	if runtime.GOOS == "windows" {
-		version := upgradeBuildVersion()
-		if version == "dev" || version == "" {
-			return fmt.Errorf(
-				"refusing to --upgrade from a dev-build binary at %s: "+
-					"current executable was built without the build scripts' ldflags "+
-					"(version=%q, expected a semver like \"0.4.0\"). "+
-					"On Windows this binary is also CONSOLE-subsystem (no `-H windowsgui` "+
-					"linker flag), which would cause terminal flashes on every "+
-					"Scheduler-invoked daemon and prevent the tray icon from rendering. "+
-					"Recovery: rebuild via `bash build.sh` (or `pwsh build.ps1`), then "+
-					"run `./bin/mcphub.exe install --upgrade` from the build directory.",
-				curExe, version)
-		}
-	}
-
-	// 1c. Running-GUI guard (PR #188 / A8 closure): detect a
-	// running `mcphub.exe gui` process whose image path equals
-	// `target` and refuse with a clear stop-the-GUI hint. The
-	// previous flow stopped daemons via StopAll but did NOT
-	// touch the GUI — if a GUI was running on the canonical
-	// install path, Bootstrap (step 3) would then fail with
-	// "target in use" because the GUI holds an open handle on
-	// the file. The 2026-05-15 smoke session walked into this
-	// exactly: upgrade had to be re-run after manually killing
-	// the GUI. Surface it as a refusal BEFORE StopAll runs so
-	// the operator's daemon fleet stays up — pre-fix, daemons
-	// were stopped and then Bootstrap failed, leaving the
-	// fleet down until a manual recovery.
-	//
-	// Identity match: cmdline starts with the target path (so
-	// daemons spawned from the same binary but from a build
-	// dir don't false-trigger) AND argv[1] equals "gui" (or
-	// argv has length 1 — the Explorer-double-click entry path
-	// per cmd/mcphub/main.go shouldAutoLaunchGUI).
-	guiProcs, guiErr := findRunningGUIsOnTarget(a, target)
-	if guiErr != nil {
-		// Best-effort: a wmic failure must not block the
-		// upgrade — fall through and let Bootstrap surface the
-		// "target in use" error if a GUI was actually running.
-		fmt.Fprintf(errOut, "⚠ GUI detection failed (best-effort): %v\n", guiErr)
-	} else if len(guiProcs) > 0 {
-		pids := make([]string, 0, len(guiProcs))
-		for _, p := range guiProcs {
-			pids = append(pids, fmt.Sprintf("%d", p.PID))
-		}
-		return fmt.Errorf(
-			"refusing to --upgrade with a running mcphub GUI on the target path %s "+
-				"(PIDs: %s). The GUI process holds the binary file lock; "+
-				"Bootstrap would fail with `target in use` and leave the "+
-				"daemon fleet down (StopAll runs before Bootstrap). "+
-				"Recovery: stop the GUI (tray menu → Quit, or "+
-				"`Stop-Process -Id <PID> -Force` in PowerShell), then "+
-				"rerun `./mcphub install --upgrade`",
-			target, strings.Join(pids, ", "))
+	if _, _, err := runInstallUpgradePreflightGuards(cmd); err != nil {
+		return err
 	}
 
 	// 2. Stop all daemons (release the binary lock).
@@ -1267,6 +1229,9 @@ func runV5UpgradeReal(cmd *cobra.Command) error {
 		// via misuse and the legacy runInstallUpgrade is the closest safe
 		// fallback.
 		return runInstallUpgrade(cmd)
+	}
+	if _, _, err := runInstallUpgradePreflightGuards(cmd); err != nil {
+		return err
 	}
 	return v5UpgradeFn(cmd)
 }

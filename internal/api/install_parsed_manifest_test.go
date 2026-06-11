@@ -1867,6 +1867,45 @@ func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTa
 	}
 }
 
+func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) {
+	daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", true, &buf); err != nil {
+		t.Fatalf("installPlanCore(global dry-run): %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"Supervisor intent rows to write",
+		"mcp-local-hub-demo-alpha",
+		"mcp-local-hub-demo-beta",
+		"Maintenance timers to ensure",
+		"mcp-local-hub-demo-weekly-refresh",
+		"Autostart owner to ensure",
+		"Legacy scheduler tasks to clean",
+		"Removed supervisor targets to kill",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("global dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Scheduler tasks to create") {
+		t.Errorf("global supervisor dry-run must not claim scheduler tasks will be created:\n%s", out)
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Fatalf("dry-run mutated scheduler: createCount=%d runCount=%d", f.createCount, f.runCount)
+	}
+}
+
 // TestInstallPlanCore_GlobalInstall_EnablesAbsentAutostartOwner pins the logon
 // owner handoff for the supervisor-intent path. A global install suppresses
 // per-daemon scheduler tasks, so an absent autostart shim must be enabled or a
@@ -1980,6 +2019,67 @@ func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T
 
 	if fb.enableCalls != 0 {
 		t.Fatalf("autostart Enable calls = %d, want 0 when owner is already enabled", fb.enableCalls)
+	}
+}
+
+func TestKillLegacySchedulerTaskDaemonByPortBestEffort_ForeignOwnerNotKilled(t *testing.T) {
+	origKill := killByPortFn
+	origForceKill := forceKillByPortFn
+	origLookup := lookupProcess
+	t.Cleanup(func() {
+		killByPortFn = origKill
+		forceKillByPortFn = origForceKill
+		lookupProcess = origLookup
+	})
+	lookupProcess = nil
+
+	legacyKillCalled := false
+	killByPortFn = func(port int, timeout time.Duration) error {
+		legacyKillCalled = true
+		return nil
+	}
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		if port != 33031 {
+			t.Fatalf("forceKillByPortFn port = %d, want 33031", port)
+		}
+		return portKillIdentityMismatch, errors.New("port owned by foreign process")
+	}
+
+	var buf bytes.Buffer
+	killLegacySchedulerTaskDaemonByPortBestEffort("mcp-local-hub-demo-alpha", 33031, &buf)
+	if legacyKillCalled {
+		t.Fatal("legacy handoff used killByPortFn on a foreign owner; want identity-mismatch warning without kill")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "port owned by foreign process") || !strings.Contains(out, "not killing") {
+		t.Fatalf("warning = %q, want foreign-owner not-killing warning", out)
+	}
+}
+
+func TestKillLegacySchedulerTaskDaemonByPortBestEffort_McphubOwnerKilled(t *testing.T) {
+	origKill := killByPortFn
+	origForceKill := forceKillByPortFn
+	origLookup := lookupProcess
+	t.Cleanup(func() {
+		killByPortFn = origKill
+		forceKillByPortFn = origForceKill
+		lookupProcess = origLookup
+	})
+	lookupProcess = nil
+
+	killByPortFn = func(port int, timeout time.Duration) error {
+		t.Fatalf("legacy handoff must use outcome-aware kill path, got killByPortFn(%d)", port)
+		return nil
+	}
+	var killedPorts []int
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		killedPorts = append(killedPorts, port)
+		return portKillKilled, nil
+	}
+
+	killLegacySchedulerTaskDaemonByPortBestEffort("mcp-local-hub-demo-alpha", 33032, io.Discard)
+	if !reflect.DeepEqual(killedPorts, []int{33032}) {
+		t.Fatalf("killed ports = %v, want [33032]", killedPorts)
 	}
 }
 
@@ -2271,18 +2371,18 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		t.Cleanup(func() { lookupProcess = origLookup })
 
 		var killed []int
-		origKill := killByPortFn
-		killByPortFn = func(port int, timeout time.Duration) error {
+		origKill := forceKillByPortFn
+		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 			if len(f.deleteNames) == 0 {
-				t.Errorf("killByPortFn called before deleting the legacy scheduler task")
+				t.Errorf("forceKillByPortFn called before deleting the legacy scheduler task")
 			}
 			if timeout != 5*time.Second {
 				t.Errorf("kill timeout = %s, want 5s", timeout)
 			}
 			killed = append(killed, port)
-			return nil
+			return portKillKilled, nil
 		}
-		t.Cleanup(func() { killByPortFn = origKill })
+		t.Cleanup(func() { forceKillByPortFn = origKill })
 
 		m := &config.ServerManifest{
 			Name:      "demo",
@@ -2298,7 +2398,7 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
 		}
 		if len(killed) != 1 || killed[0] != 9313 {
-			t.Fatalf("killByPortFn ports = %v, want [9313] so the supervised copy can bind", killed)
+			t.Fatalf("forceKillByPortFn ports = %v, want [9313] so the supervised copy can bind", killed)
 		}
 	})
 
@@ -2313,12 +2413,12 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		t.Cleanup(func() { lookupProcess = origLookup })
 
 		var killed []int
-		origKill := killByPortFn
-		killByPortFn = func(port int, timeout time.Duration) error {
+		origKill := forceKillByPortFn
+		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 			killed = append(killed, port)
-			return nil
+			return portKillKilled, nil
 		}
-		t.Cleanup(func() { killByPortFn = origKill })
+		t.Cleanup(func() { forceKillByPortFn = origKill })
 
 		m := &config.ServerManifest{
 			Name:      "demo",
@@ -2334,7 +2434,7 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
 		}
 		if len(killed) != 0 {
-			t.Fatalf("killByPortFn ports = %v, want none for port 0", killed)
+			t.Fatalf("forceKillByPortFn ports = %v, want none for port 0", killed)
 		}
 		if !strings.Contains(buf.String(), "daemon port unknown") {
 			t.Fatalf("cleanup warning = %q, want daemon port unknown warning", buf.String())

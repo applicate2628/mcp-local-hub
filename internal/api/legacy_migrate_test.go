@@ -216,22 +216,29 @@ func TestMigrateLegacy_RemovesLegacyAfterSuccess(t *testing.T) {
 	}
 }
 
-// TestMigrateLegacy_PreservesInPlaceReplacedEntry guards the narrow case
-// where a legacy row already used the CANONICAL managed name (e.g.
-// "mcp-language-server-python") — the exact name Register's ResolveEntryName
-// would return for the new registration. In that case Register.AddEntry
-// overwrites the legacy key in place with the new workspace-proxy URL,
-// and a subsequent RemoveEntry call would wipe the freshly-migrated
-// entry. Migration should detect the in-place replacement and skip
-// RemoveEntry. The workspace ends up registered AND the client config
-// has the correct new URL — which is the success criterion.
-func TestMigrateLegacy_PreservesInPlaceReplacedEntry(t *testing.T) {
+// TestMigrateLegacy_RemovesRouterCanonicalLegacyEntryWhenRegisterUsesSuffixedWorkspaceEntry
+// guards the router-era name reservation. The canonical
+// "mcp-language-server-python" key is now LSPRouterEntryName("python"), so
+// Register writes the workspace proxy under a suffixed per-workspace name
+// instead of replacing that key in place. Migration must remove the obsolete
+// legacy canonical entry and keep the new suffixed workspace-proxy entry.
+func TestMigrateLegacy_RemovesRouterCanonicalLegacyEntryWhenRegisterUsesSuffixedWorkspaceEntry(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	ws := t.TempDir()
-	// Pre-seed the legacy entry under the EXACT canonical name Register
-	// will produce for this language. Register.AddEntry will overwrite
-	// this value with the new URL; RemoveEntry MUST NOT follow.
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("canonical workspace: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	shortKey := wsKey
+	if len(shortKey) > 4 {
+		shortKey = shortKey[:4]
+	}
+	wantEntryName := "mcp-language-server-python-" + shortKey
+	// Pre-seed the old direct entry under the router-canonical name. Register
+	// should write the workspace proxy to wantEntryName, then migration should
+	// remove this obsolete legacy key.
 	h.fakeClients.entries["codex-cli"]["mcp-language-server-python"] = "legacy-url"
 	entries := []LegacyLSEntry{
 		{Client: "codex-cli", EntryName: "mcp-language-server-python", Workspace: ws, Language: "python", LspCommand: "pyright-langserver"},
@@ -244,15 +251,18 @@ func TestMigrateLegacy_PreservesInPlaceReplacedEntry(t *testing.T) {
 	if len(report.Applied) != 1 {
 		t.Fatalf("expected Applied=1, got %+v", report)
 	}
-	got, stillThere := h.fakeClients.entries["codex-cli"]["mcp-language-server-python"]
+	if _, stillThere := h.fakeClients.entries["codex-cli"]["mcp-language-server-python"]; stillThere {
+		t.Fatal("obsolete router-canonical legacy entry still present after migration")
+	}
+	got, stillThere := h.fakeClients.entries["codex-cli"][wantEntryName]
 	if !stillThere {
-		t.Fatal("freshly-migrated entry was deleted by post-register cleanup (regression)")
+		t.Fatalf("registered suffixed workspace-proxy entry %q was removed", wantEntryName)
 	}
 	if got == "legacy-url" {
-		t.Errorf("entry still holds legacy URL: Register.AddEntry did not overwrite")
+		t.Errorf("suffixed entry still holds legacy URL: Register.AddEntry did not write the workspace proxy")
 	}
 	// The URL should now be a workspace-proxy loopback URL.
-	if !strings.HasPrefix(got, "http://localhost:") {
+	if !strings.HasPrefix(got, "http://127.0.0.1:") && !strings.HasPrefix(got, "http://localhost:") {
 		t.Errorf("expected workspace-proxy URL, got %q", got)
 	}
 }

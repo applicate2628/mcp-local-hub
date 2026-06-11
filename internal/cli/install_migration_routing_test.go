@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -78,6 +79,8 @@ func TestDispatchUpgradeReal_RoutesToV5UpgradeWhenIntentPresent(t *testing.T) {
 		t.Fatalf("write intent: %v", err)
 	}
 
+	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
+	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
 	var v5Invoked bool
 	v5UpgradeFn = func(cmd *cobra.Command) error {
 		v5Invoked = true
@@ -92,6 +95,48 @@ func TestDispatchUpgradeReal_RoutesToV5UpgradeWhenIntentPresent(t *testing.T) {
 	}
 	if !v5Invoked {
 		t.Fatal("supervisor-intent.json present → expected the v5 cold-restart upgrade path, but v5UpgradeFn was not invoked")
+	}
+}
+
+func TestDispatchUpgradeReal_SupervisorPathRunsUpgradeGuardsBeforeV5(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("dev-build upgrade guard is Windows-only")
+	}
+	resetUpgradeRoutingSeams(t)
+	resetUpgradeSeams(t)
+
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if err := os.WriteFile(intentPath, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write intent: %v", err)
+	}
+
+	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
+	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
+	upgradeBuildVersionFn = func() string { return "dev" }
+	var v5Invoked bool
+	v5UpgradeFn = func(cmd *cobra.Command) error {
+		v5Invoked = true
+		return nil
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err = dispatchUpgradeReal(cmd)
+	if err == nil {
+		t.Fatal("dispatchUpgradeReal: want dev-build refusal before v5 upgrade, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to --upgrade from a dev-build binary") {
+		t.Fatalf("dispatchUpgradeReal error = %v, want dev-build guard refusal", err)
+	}
+	if v5Invoked {
+		t.Fatal("v5 upgrade path was invoked despite dev-build guard failure")
 	}
 }
 

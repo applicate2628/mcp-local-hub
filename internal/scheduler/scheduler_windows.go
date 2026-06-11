@@ -208,7 +208,7 @@ func (w *windowsScheduler) Create(spec TaskSpec) error {
 	}
 	defer os.Remove(tmp.Name())
 	// Task Scheduler requires UTF-16 LE with BOM. Re-encode.
-	utf16 := utf8ToUTF16WithBOM(xmlDoc)
+	utf16 := EncodeXMLUTF16LEBOM(xmlDoc)
 	if _, err := tmp.Write(utf16); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write xml: %w", err)
@@ -222,30 +222,6 @@ func (w *windowsScheduler) Create(spec TaskSpec) error {
 		return fmt.Errorf("schtasks /Create: %w: %s", err, string(out))
 	}
 	return nil
-}
-
-// utf8ToUTF16WithBOM converts a UTF-8 string to UTF-16 LE with a BOM, which
-// is what Task Scheduler's /XML flag requires.
-func utf8ToUTF16WithBOM(s string) []byte {
-	var out bytes.Buffer
-	out.WriteByte(0xFF)
-	out.WriteByte(0xFE) // UTF-16 LE BOM
-	for _, r := range s {
-		if r <= 0xFFFF {
-			out.WriteByte(byte(r))
-			out.WriteByte(byte(r >> 8))
-		} else {
-			// surrogate pair
-			r -= 0x10000
-			hi := 0xD800 + (r >> 10)
-			lo := 0xDC00 + (r & 0x3FF)
-			out.WriteByte(byte(hi))
-			out.WriteByte(byte(hi >> 8))
-			out.WriteByte(byte(lo))
-			out.WriteByte(byte(lo >> 8))
-		}
-	}
-	return out.Bytes()
 }
 
 func (w *windowsScheduler) Delete(name string) error {

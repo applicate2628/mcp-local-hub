@@ -1658,10 +1658,12 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 // ownership checks.
 //
 // Trust ladder:
-//   - Native-http internal port: descriptor row plus the documented
-//     external+10000/RuntimeSpec.UpstreamPort match is enough. That listener is
-//     held by the daemon's upstream child, so there is no supervisor daemon PID
-//     to compare.
+//   - Native-http internal port: fail closed unless the descriptor row matches
+//     AND the supervisor IPC status reports a live PID for that task. The
+//     listener is held by the daemon's upstream child (often uvx/python rather
+//     than mcphub.exe), so image/parent-image gates false-reject valid daemons;
+//     the stale-descriptor attack requires the mcphub daemon to be down, and a
+//     live supervisor-reported daemon PID closes that stale-row case.
 //   - External port: fail closed unless both proof surfaces are available and
 //     agree: the live listener PID from port-owner lookup must equal the live
 //     supervisor-reported PID for the matching task.
@@ -1685,24 +1687,27 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	if !ok {
 		return false
 	}
-	if matchedInternalPort {
-		// Native-http's internal listener is held by the upstream child, not
-		// the supervisor-reported mcphub daemon PID. For this arm the trust
-		// ladder deliberately downgrades to descriptor row + +10000 offset
-		// match; callers only probe this port for native-http manifests.
-		return true
-	}
-	portPID, havePortPID := supervisorOwnedPortPID(port)
-	if !havePortPID {
-		return false
-	}
 	livePIDs, reachable := supervisorOwnedLivePIDsWithReachability(context.Background())
 	if !reachable {
 		return false
 	}
 	taskKey := strings.TrimPrefix(supervisorIntentDaemonTaskName(row, server, daemon), `\`)
 	livePID, ok := livePIDs[taskKey]
-	return ok && livePID == portPID
+	if !ok || livePID <= 0 {
+		return false
+	}
+	if matchedInternalPort {
+		// The internal listener belongs to the upstream child, not necessarily
+		// the mcphub daemon PID. Requiring the descriptor row plus a live
+		// supervisor IPC PID proves the owning daemon is up without assuming the
+		// child's image or direct parent shape.
+		return true
+	}
+	portPID, havePortPID := supervisorOwnedPortPID(port)
+	if !havePortPID {
+		return false
+	}
+	return livePID == portPID
 }
 
 func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool, bool) {
@@ -1875,13 +1880,17 @@ func printPlanTo(w io.Writer, p *Plan) error {
 	for _, t := range p.SchedulerTasks {
 		fmt.Fprintf(w, "    \u2022 %s  [%s]\n        %s %v\n", t.Name, t.Trigger, t.Command, t.Args)
 	}
+	printClientUpdatesTo(w, p)
+	fmt.Fprintln(w, "\nNo changes made.")
+	_ = clients.Client(nil) // keep import live for later tasks
+	return nil
+}
+
+func printClientUpdatesTo(w io.Writer, p *Plan) {
 	fmt.Fprintf(w, "\n  Client configs to update (%d):\n", len(p.ClientUpdates))
 	for _, u := range p.ClientUpdates {
 		fmt.Fprintf(w, "    \u2022 %s (%s)\n        %s  \u2192  %s\n", u.Client, u.Path, u.Action, displayURLOf(u))
 	}
-	fmt.Fprintln(w, "\nNo changes made.")
-	_ = clients.Client(nil) // keep import live for later tasks
-	return nil
 }
 
 // installPlanOpts carries the per-caller knobs installPlan needs that are

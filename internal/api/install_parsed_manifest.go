@@ -506,7 +506,16 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 // for each planned task exactly as the legacy path did
 // (recordInstallIntentPostSuccess).
 func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, daemonFilter string, dryRun bool, w io.Writer) error {
+	// Phase F: a global manifest's daemon lifecycle is owned by
+	// supervisor-intent.json, not by per-daemon scheduler tasks. Full global
+	// installs must enter this merge even when the NEW manifest contributes zero
+	// rows (daemonless remote-http): the full install still owns removal of this
+	// server's prior descriptor rows and per-server weekly timer.
+	superviseGlobal := m.Kind != config.KindWorkspaceScoped && (len(plan.SupervisorIntent) > 0 || daemonFilter == "")
 	if dryRun {
+		if superviseGlobal {
+			return a.printSupervisorGlobalInstallDryRun(m, plan, daemonFilter, w)
+		}
 		return a.installPlan(ctx, m, plan, installPlanOpts{
 			Writer:       w,
 			DaemonFilter: daemonFilter,
@@ -514,12 +523,6 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 		})
 	}
 
-	// Phase F: a global manifest's daemon lifecycle is owned by
-	// supervisor-intent.json, not by per-daemon scheduler tasks. Full global
-	// installs must enter this merge even when the NEW manifest contributes zero
-	// rows (daemonless remote-http): the full install still owns removal of this
-	// server's prior descriptor rows and per-server weekly timer.
-	superviseGlobal := m.Kind != config.KindWorkspaceScoped && (len(plan.SupervisorIntent) > 0 || daemonFilter == "")
 	var nudgeAfterInstall bool
 	var ensureAutostartAfterInstall bool
 	var autostartStrictMode bool
@@ -713,6 +716,99 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 		w,
 	)
 	return nil
+}
+
+func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan *Plan, daemonFilter string, w io.Writer) error {
+	if w == nil {
+		w = os.Stderr
+	}
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return fmt.Errorf("resolve state dir: %w", err)
+	}
+	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+	desiredIntent, priorIntent, _, err := a.buildMergedSupervisorIntent(m, intentPath, nil, daemonFilter, io.Discard)
+	if err != nil {
+		return err
+	}
+	removed := removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
+	legacyTasks, legacyErr := legacySchedulerTasksForSupervisorInstallDryRun(m, daemonFilter)
+
+	fmt.Fprintf(w, "Install plan for server %q (dry-run):\n\n", plan.Server)
+	daemonRows := supervisorDaemonsFromPlan(m, daemonFilter)
+	fmt.Fprintf(w, "  Supervisor intent rows to write (%d):\n", len(daemonRows))
+	for _, d := range daemonRows {
+		fmt.Fprintf(w, "    \u2022 %s  [port %d]\n        %s %v\n", strings.TrimPrefix(d.TaskName, `\`), d.Port, d.Command, d.Args)
+	}
+
+	var timers []MaintenanceTimer
+	if desiredIntent != nil {
+		for _, tm := range desiredIntent.MaintenanceTimers {
+			if maintenanceTimerOwnedBy(tm, m.Name) {
+				timers = append(timers, tm)
+			}
+		}
+	}
+	fmt.Fprintf(w, "\n  Maintenance timers to ensure (%d):\n", len(timers))
+	for _, tm := range timers {
+		fmt.Fprintf(w, "    \u2022 %s  [%s]\n        %s %v\n", strings.TrimPrefix(tm.Name, `\`), tm.Kind, tm.Command, tm.Args)
+	}
+
+	autostartAction := "no-op"
+	if len(plan.SupervisorIntent) > 0 {
+		autostartAction = "ensure supervisor owner autostart is enabled"
+	}
+	fmt.Fprintf(w, "\n  Autostart owner to ensure: %s\n", autostartAction)
+
+	fmt.Fprintf(w, "\n  Legacy scheduler tasks to clean (%d):\n", len(legacyTasks))
+	if legacyErr != nil {
+		fmt.Fprintf(w, "    \u2022 unable to preview legacy cleanup: %v\n", legacyErr)
+	} else {
+		for _, name := range legacyTasks {
+			fmt.Fprintf(w, "    \u2022 %s\n", strings.TrimPrefix(name, `\`))
+		}
+	}
+
+	fmt.Fprintf(w, "\n  Removed supervisor targets to kill (%d):\n", len(removed))
+	for _, d := range removed {
+		fmt.Fprintf(w, "    \u2022 %s  [port %d]\n", strings.TrimPrefix(d.TaskName, `\`), d.Port)
+	}
+
+	printClientUpdatesTo(w, plan)
+	fmt.Fprintln(w, "\nNo changes made.")
+	return nil
+}
+
+func legacySchedulerTasksForSupervisorInstallDryRun(m *config.ServerManifest, daemonFilter string) ([]string, error) {
+	if m == nil || m.Name == "" {
+		return nil, nil
+	}
+	if daemonFilter != "" {
+		return []string{"mcp-local-hub-" + m.Name + "-" + daemonFilter}, nil
+	}
+	sch, err := newScheduler()
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	prefix := "mcp-local-hub-" + m.Name + "-"
+	tasks, err := sch.List(prefix)
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		name := strings.TrimPrefix(task.Name, `\`)
+		if strings.HasPrefix(name, prefix) {
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }
 
 func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool) {
@@ -1069,7 +1165,14 @@ func killLegacySchedulerTaskDaemonByPortBestEffort(taskName string, port int, w 
 	if legacySchedulerTaskPortOwnedBySupervisor(taskName, port) {
 		return
 	}
-	if err := killByPortFn(port, 5*time.Second); err != nil {
+	outcome, err := forceKillByPortFn(port, 5*time.Second)
+	if outcome == portKillIdentityMismatch {
+		if w != nil {
+			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped daemon kill for %s on port %d: port owned by foreign process, not killing: %v\n", taskName, port, err)
+		}
+		return
+	}
+	if err != nil {
 		if w != nil {
 			fmt.Fprintf(w, "⚠ Failed to stop legacy daemon after removing scheduler task %s on port %d: %v\n", taskName, port, err)
 		}

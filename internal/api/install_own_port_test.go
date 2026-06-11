@@ -305,8 +305,20 @@ func TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof(t *testing.T) 
 
 	lookupProcess = nil
 	supervisorIPCStatusFn = nil
+	if got := portHeldBySupervisorIntentDaemon(port+config.NativeHTTPInternalPortOffset, "demo", "alpha"); got {
+		t.Fatal("native-http internal port with unreachable supervisor IPC = true, want false")
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: portPID, State: "Running"}}, nil
+	}
 	if got := portHeldBySupervisorIntentDaemon(port+config.NativeHTTPInternalPortOffset, "demo", "alpha"); !got {
-		t.Fatal("matching native-http internal port row = false, want true")
+		t.Fatal("native-http internal port with matching descriptor row and live supervisor PID = false, want true")
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, State: "Running"}}, nil
+	}
+	if got := portHeldBySupervisorIntentDaemon(port+config.NativeHTTPInternalPortOffset, "demo", "alpha"); got {
+		t.Fatal("native-http internal port without live supervisor PID = true, want false")
 	}
 }
 
