@@ -1729,6 +1729,79 @@ func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTa
 	}
 }
 
+func TestInstallPlanCore_GlobalFilteredInstall_ReplacesOnlySelectedDaemon(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: "\\mcp-local-hub-demo-alpha", Server: "demo", Daemon: "alpha", Command: "stale-alpha", Port: 9991},
+			{TaskName: "\\mcp-local-hub-demo-beta", Server: "demo", Daemon: "beta", Command: "preserve-beta", Port: 9992},
+			{TaskName: "\\mcp-local-hub-other-d", Server: "other", Daemon: "d", Command: "preserve-other", Port: 9993},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "alpha")
+	if err != nil {
+		t.Fatalf("BuildPlan(filtered): %v", err)
+	}
+	if got := len(plan.SupervisorIntent); got != 1 {
+		t.Fatalf("filtered plan SupervisorIntent rows = %d, want 1", got)
+	}
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	if err := a.installPlanCore(context.Background(), m, plan, "alpha", false, &buf); err != nil {
+		t.Fatalf("installPlanCore(filtered global install): %v", err)
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent(%s): %v", intentPath, err)
+	}
+	byKey := map[string]SupervisorDaemon{}
+	for _, d := range written.Daemons {
+		byKey[d.Server+"/"+d.Daemon] = d
+	}
+	alpha, ok := byKey["demo/alpha"]
+	if !ok {
+		t.Fatalf("filtered install did not write selected daemon demo/alpha; rows=%+v", written.Daemons)
+	}
+	if alpha.Port != 9211 || alpha.Command == "stale-alpha" {
+		t.Errorf("selected daemon was not refreshed from the manifest: %+v", alpha)
+	}
+	beta, ok := byKey["demo/beta"]
+	if !ok {
+		t.Fatalf("filtered install dropped unselected existing daemon demo/beta; rows=%+v", written.Daemons)
+	}
+	if beta.Command != "preserve-beta" || beta.Port != 9992 {
+		t.Errorf("unselected existing daemon was not preserved verbatim: %+v", beta)
+	}
+	other, ok := byKey["other/d"]
+	if !ok {
+		t.Fatalf("filtered install dropped sibling server daemon other/d; rows=%+v", written.Daemons)
+	}
+	if other.Command != "preserve-other" || other.Port != 9993 {
+		t.Errorf("sibling server daemon was not preserved verbatim: %+v", other)
+	}
+	if _, ok := byKey["demo/"]; ok {
+		t.Fatalf("unexpected empty daemon key present: rows=%+v", written.Daemons)
+	}
+	for _, d := range written.Daemons {
+		if d.Server == "demo" && d.Daemon != "alpha" && d.Daemon != "beta" {
+			t.Fatalf("filtered install wrote unrequested demo daemon %q; rows=%+v", d.Daemon, written.Daemons)
+		}
+	}
+}
+
 // TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated is the
 // v0.6 Phase F FALSIFICATION test (spec §5 "Phase F", line 639): a fresh global
 // install must create ZERO `\mcp-local-hub-<server>-<daemon>` per-daemon Task
