@@ -100,18 +100,13 @@ func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) fun
 //   - No supervisor intent file, or no targets in scope → (nil, false,
 //     nil): nothing is supervisor-owned here, the legacy kill path owns
 //     the stop.
-//   - IPC unavailable (errors.Is ErrSupervisorIPCUnavailable) → (nil,
-//     false, nil): the supervisor is down, so nothing will respawn a
-//     killed daemon — the legacy kill path is then correct (no reaper
-//     to fight). The fallback covers any REMAINING SCHEDULER ROWS in
-//     scope; it does NOT necessarily reach an orphan the dead
-//     supervisor left behind, because stopKillCore iterates only
-//     scheduler tasks and supervisor-owned daemons have no scheduler
-//     row. An orphan that outlived a dead supervisor (the
-//     job-protection-failure edge — see the Job Protection runbook in
-//     CLAUDE.md) is a pre-existing gap this path does not close;
-//     recordStopIntent has still written Desired=stopped, so the next
-//     supervisor to come up will not respawn it.
+//   - IPC unavailable (errors.Is ErrSupervisorIPCUnavailable) → direct
+//     descriptor kill rows with handled=true: the supervisor is down, so
+//     nothing will respawn a killed daemon, and fresh v0.6 supervisor-owned
+//     global daemons have no scheduler rows for the legacy path to find.
+//     Reuse the stop --force descriptor kill surface, but pass no live PID map
+//     because IPC is unavailable; descriptor Port remains the targetable kill
+//     surface and unsupported hosts fail loud per target.
 //   - Reconcile reachable but failed → per-target error rows with
 //     handled=true: the supervisor is ALIVE but did not confirm the
 //     stop. Falling through to taskkill here would hand the reaper a
@@ -150,7 +145,11 @@ func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string
 	resp, err := supervisorReconcileApplyFn(ctx, true)
 	if err != nil {
 		if errors.Is(err, ErrSupervisorIPCUnavailable) {
-			return nil, false, nil
+			results := make([]RestartResult, 0, len(targets))
+			for _, d := range targets {
+				results = append(results, forceKillOneSupervisorTarget(d, nil))
+			}
+			return results, true, nil
 		}
 		results := make([]RestartResult, 0, len(targets))
 		for _, d := range targets {

@@ -37,6 +37,12 @@ type API struct {
 	// the cache lifecycle, TTL constants, and singleflight collapsing logic.
 	healthCache healthCache
 
+	// v0.6 serena idle-wake coordination. See
+	// internal/api/serena_idle_shutdown.go for the lifecycle; the map is lazy so
+	// steady-state API construction stays cheap.
+	serenaWakeInFlightMu sync.Mutex
+	serenaWakeInFlight   map[string]bool
+
 	// HealthStatusFn is the test seam used by HealthSnapshot to read the
 	// daemons section. Production: nil → falls back to a.StatusWithOpts.
 	// Tests overwrite this to inject deterministic []DaemonStatus.

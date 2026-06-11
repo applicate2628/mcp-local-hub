@@ -216,6 +216,7 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
+	wakeAPI := api.NewAPI()
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: resolver,
 		Sessions: sessions,
@@ -227,9 +228,10 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 			return api.NewAPI().AutoRegisterSerenaWorkspace(ctx, absPath)
 		},
 		// v0.6 idle-shutdown (#6): the next-request wake for an idle-stopped
-		// serena daemon. api.NewAPI() per call mirrors AutoRegisterFn above.
+		// serena daemon. Reuse one API handle so its in-flight wake registry
+		// collapses concurrent requests for the same starting daemon.
 		WakeIdleFn: func(ctx context.Context, taskName string, port int, who string) error {
-			return api.NewAPI().WakeIdleSerenaDaemon(ctx, taskName, port, who)
+			return wakeAPI.WakeIdleSerenaDaemon(ctx, taskName, port, who)
 		},
 	})
 }

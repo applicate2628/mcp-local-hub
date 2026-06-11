@@ -640,6 +640,55 @@ func TestRunDaemonIntentCollapse_PreservesConcurrentSupervisorIntentEdit(t *test
 	}
 }
 
+func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenFreshRereadAlreadyMerged(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+	now := time.Now().UTC()
+	supPath := filepath.Join(stateDir, "supervisor-intent.json")
+	daemonPath := filepath.Join(stateDir, "daemon-intent.json")
+	task := `\mcp-local-hub-paper-search-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now}
+
+	if err := WriteSupervisorIntent(supPath, &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	seedDaemonIntent(t, task, stop)
+
+	var hookFired bool
+	collapseAfterFirstSupervisorReadHook = func() {
+		hookFired = true
+		if err := WriteSupervisorIntent(supPath, &SupervisorIntentFile{
+			Version: 1,
+			Stops: map[string]DaemonIntent{
+				task: stop,
+			},
+		}); err != nil {
+			t.Errorf("concurrent supervisor-intent write: %v", err)
+		}
+	}
+	defer func() { collapseAfterFirstSupervisorReadHook = nil }()
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if !hookFired {
+		t.Fatalf("concurrent-writer hook never fired")
+	}
+	if res.Changed || res.Wrote {
+		t.Fatalf("fresh reread already had the merged stops, so collapse must not rewrite; res=%+v", res)
+	}
+	if !res.DeletedLegacyFile {
+		t.Fatalf("fresh no-op merge must still delete merged legacy daemon-intent.json; res=%+v", res)
+	}
+	if _, err := os.Stat(daemonPath); !os.IsNotExist(err) {
+		t.Fatalf("daemon-intent.json survived fresh no-op merge; stat err=%v", err)
+	}
+	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; got.Reason != IntentReasonUserStop || !got.UpdatedAt.Equal(now) {
+		t.Fatalf("merged stop missing or mutated after cleanup: %+v", got)
+	}
+}
+
 // TestPruneOldPreCollapseBackups_KeepsNewestN is the P3-2 retention test:
 // pruneOldPreCollapseBackups must keep exactly the newest preCollapseBackupRetention
 // directories (by lexicographic timestamp suffix, which is chronological) and

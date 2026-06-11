@@ -441,6 +441,11 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	// the non-Stops fields we must preserve.
 	result = mergeDaemonIntentStops(freshSupervisorIntent, daemonIntentReread, now)
 	if !result.Changed {
+		deleted, delErr := deleteLegacyDaemonIntentIfMerged(stateDir, supervisorIntentPath, daemonIntentPath, daemonIntentReread, now)
+		if delErr != nil {
+			return result, delErr
+		}
+		result.DeletedLegacyFile = deleted
 		return result, nil
 	}
 

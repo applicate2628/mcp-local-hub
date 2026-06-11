@@ -122,6 +122,57 @@ var serenaWakeReadinessFn = func(ctx context.Context, taskName string, port int,
 // specific prior stop without a real state dir.
 var serenaWakeReadStopFn = readSerenaUnifiedStopForTask
 
+func (a *API) serenaWakeIsInFlight(taskName string) bool {
+	if a == nil {
+		return false
+	}
+	taskName = canonicalIntentTaskKey(taskName)
+	// Hold the in-flight mutex across compare-and-clear plus mark. Otherwise a
+	// second request can read "no active stop" in the tiny window after the file
+	// clear but before the wake is registered, which is exactly the blind-forward
+	// race this registry closes.
+	a.serenaWakeInFlightMu.Lock()
+	defer a.serenaWakeInFlightMu.Unlock()
+	return a.serenaWakeInFlight[taskName]
+}
+
+func (a *API) clearSerenaWakeInFlight(taskName string) {
+	if a == nil {
+		return
+	}
+	taskName = canonicalIntentTaskKey(taskName)
+	a.serenaWakeInFlightMu.Lock()
+	defer a.serenaWakeInFlightMu.Unlock()
+	delete(a.serenaWakeInFlight, taskName)
+}
+
+func serenaWakeReadyTimeout(ctx context.Context) time.Duration {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := serenaWakeReadinessTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl); rem < timeout {
+			timeout = rem
+		}
+	}
+	return timeout
+}
+
+func runSerenaWakeReadiness(ctx context.Context, taskName string, port int, readyContext string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := serenaWakeReadyTimeout(ctx)
+	if timeout <= 0 {
+		return fmt.Errorf("serena idle wake: %s, but the wake deadline expired before the daemon on port %d became ready (retry — the supervisor is bringing it up)", readyContext, port)
+	}
+	if rdErr := serenaWakeReadinessFn(ctx, taskName, port, timeout); rdErr != nil {
+		return fmt.Errorf("serena idle wake: %s, but the daemon on port %d was not ready in time: %w (retry — the supervisor is bringing it up)", readyContext, port, rdErr)
+	}
+	return nil
+}
+
 // serenaStopReadCache is the FIX-5 hot-path guard. Every /serena/mcp request
 // classifies the daemon's stop via readSerenaUnifiedStopForTask, which used to
 // read+parse the full supervisor-intent.json (and walk the secure-read DACL
@@ -413,8 +464,9 @@ func sleepUntilNextSerenaWakePoll(ctx context.Context, deadline time.Time) error
 // passes its detached+bounded request context).
 func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port int, who string) error {
 	now := time.Now().UTC()
+	taskKey := canonicalIntentTaskKey(taskName)
 
-	prior, err := serenaWakeReadStopFn(canonicalIntentTaskKey(taskName))
+	prior, err := serenaWakeReadStopFn(taskKey)
 	if err != nil {
 		return err
 	}
@@ -423,6 +475,9 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 		// No active stop → daemon presumed up. Fast no-op (steady-state hot
 		// path). A future-dated clock-skew stop also lands here as active with
 		// the synthetic clock-skew reason, which is NOT idle → refused below.
+		if a.serenaWakeIsInFlight(taskKey) {
+			return runSerenaWakeReadiness(ctx, taskName, port, fmt.Sprintf("%s wake already in progress", taskName))
+		}
 		return nil
 	}
 	if reason != IntentReasonIdle {
@@ -444,12 +499,27 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 	// clear reports clearAllowed=false and the wake refuses immediately. An
 	// absent entry remains clearAllowed=true so two concurrent idle wakes
 	// converge without treating the second clear as an operator stop.
-	clearAllowed, err := a.ClearStopIntentIfReason(taskName, IntentReasonIdle, who)
+	a.serenaWakeInFlightMu.Lock()
+	clearAllowed, err := a.ClearStopIntentIfReason(taskKey, IntentReasonIdle, who)
+	ownsInFlight := false
+	if err == nil && clearAllowed {
+		if a.serenaWakeInFlight == nil {
+			a.serenaWakeInFlight = make(map[string]bool)
+		}
+		if !a.serenaWakeInFlight[taskKey] {
+			a.serenaWakeInFlight[taskKey] = true
+			ownsInFlight = true
+		}
+	}
+	a.serenaWakeInFlightMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("serena idle wake: clear idle stop for %s: %w", taskName, err)
 	}
 	if !clearAllowed {
 		return ErrWakeRefusedOperatorStop
+	}
+	if ownsInFlight {
+		defer a.clearSerenaWakeInFlight(taskKey)
 	}
 
 	// Nudge the supervisor to reconcile NOW. Best-effort: any reconcile error is
@@ -473,17 +543,5 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 	// Probe the external port for readiness, bounded by BOTH the fixed budget
 	// AND the caller's remaining deadline so a slow respawn cannot block past
 	// the router's advertised window.
-	timeout := serenaWakeReadinessTimeout
-	if dl, ok := ctx.Deadline(); ok {
-		if rem := time.Until(dl); rem < timeout {
-			timeout = rem
-		}
-	}
-	if timeout <= 0 {
-		return fmt.Errorf("serena idle wake: %s cleared and reconcile nudged, but the wake deadline expired before the daemon on port %d became ready (retry — the supervisor is bringing it up)", taskName, port)
-	}
-	if rdErr := serenaWakeReadinessFn(ctx, taskName, port, timeout); rdErr != nil {
-		return fmt.Errorf("serena idle wake: %s cleared and reconcile nudged, but the daemon on port %d was not ready in time: %w (retry — the supervisor is bringing it up)", taskName, port, rdErr)
-	}
-	return nil
+	return runSerenaWakeReadiness(ctx, taskName, port, fmt.Sprintf("%s cleared and reconcile nudged", taskName))
 }

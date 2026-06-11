@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -576,6 +577,93 @@ func TestWakeIdleSerenaDaemon_Idle_ReadinessTimeout_StopStillCleared(t *testing.
 	}
 	if _, ok := ReadSupervisorIntentForTest(t, stateDir).Stops[task]; ok {
 		t.Fatalf("idle stop must already be cleared even when readiness times out (the daemon IS coming up)")
+	}
+}
+
+func TestWakeIdleSerenaDaemon_NoStopWaitsForInFlightWake(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-serena-inflight`
+	if err := NewAPI().WriteSerenaIdleStop(task, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+
+	origRec, origReady := serenaWakeReconcileFn, serenaWakeReadinessFn
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}
+	firstReadinessStarted := make(chan struct{})
+	secondReadinessStarted := make(chan struct{})
+	releaseReadiness := make(chan struct{})
+	var readinessCalls int32
+	serenaWakeReadinessFn = func(ctx context.Context, taskName string, port int, timeout time.Duration) error {
+		switch atomic.AddInt32(&readinessCalls, 1) {
+		case 1:
+			close(firstReadinessStarted)
+		case 2:
+			close(secondReadinessStarted)
+		}
+		select {
+		case <-releaseReadiness:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
+
+	a := NewAPI()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- a.WakeIdleSerenaDaemon(ctx, task, 9400, "tester")
+	}()
+
+	select {
+	case <-firstReadinessStarted:
+	case err := <-firstDone:
+		t.Fatalf("first wake returned before entering readiness: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("first wake did not reach readiness")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- a.WakeIdleSerenaDaemon(ctx, task, 9400, "tester")
+	}()
+
+	select {
+	case err := <-secondDone:
+		close(releaseReadiness)
+		<-firstDone
+		t.Fatalf("second wake returned before the in-flight readiness probe completed: %v", err)
+	case <-secondReadinessStarted:
+	case <-time.After(time.Second):
+		close(releaseReadiness)
+		<-firstDone
+		t.Fatal("second wake did not wait on the in-flight readiness probe")
+	}
+
+	select {
+	case err := <-secondDone:
+		close(releaseReadiness)
+		<-firstDone
+		t.Fatalf("second wake returned before readiness was released: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseReadiness)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first wake after readiness release: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second wake after readiness release: %v", err)
+	}
+	if got := atomic.LoadInt32(&readinessCalls); got != 2 {
+		t.Fatalf("readiness calls = %d, want 2 (original wake + in-flight fast-path wait)", got)
 	}
 }
 

@@ -206,13 +206,22 @@ func TestStopSerenaSupervisorTargetRecordsStopIntentForSentinelRow(t *testing.T)
 	}
 }
 
-// TestStopFallsBackToKillPathWhenSupervisorIPCUnavailable: a dead
-// supervisor (ErrSupervisorIPCUnavailable) means nothing will respawn a
-// killed daemon, so the legacy kill path is correct AND curing — it must
-// run.
-func TestStopFallsBackToKillPathWhenSupervisorIPCUnavailable(t *testing.T) {
+// TestStopKillsSupervisorDescriptorWhenSupervisorIPCUnavailable: a dead
+// supervisor (ErrSupervisorIPCUnavailable) cannot reap supervisor-owned v0.6
+// daemons, and fresh supervisor-owned daemons have no scheduler rows. The stop
+// path must therefore kill the descriptor directly and mark the supervisor pass
+// handled instead of silently falling through to the legacy scheduler loop.
+func TestStopKillsSupervisorDescriptorWhenSupervisorIPCUnavailable(t *testing.T) {
 	kills, fake := stopSupervisorTestSetup(t, stopSupervisorTestIntent(),
 		[]scheduler.TaskStatus{{Name: stopSupervisorTestTask}})
+
+	var forceKillPorts []int
+	origForceKill := forceKillByPortFn
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		forceKillPorts = append(forceKillPorts, port)
+		return portKillKilled, nil
+	}
+	t.Cleanup(func() { forceKillByPortFn = origForceKill })
 
 	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial: %w", ErrSupervisorIPCUnavailable)
@@ -223,14 +232,55 @@ func TestStopFallsBackToKillPathWhenSupervisorIPCUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if got := atomic.LoadInt32(kills); got != 1 {
-		t.Fatalf("killByPortFn calls = %d, want 1 (legacy kill path must run when the supervisor is down)", got)
+	if got := atomic.LoadInt32(kills); got != 0 {
+		t.Fatalf("legacy killByPortFn calls = %d, want 0 (descriptor force-kill handles supervisor-owned IPC-down target)", got)
 	}
-	if len(fake.stopNames) != 1 || fake.stopNames[0] != stopSupervisorTestTask {
-		t.Fatalf("scheduler Stop calls = %v, want [%s]", fake.stopNames, stopSupervisorTestTask)
+	if len(forceKillPorts) != 1 || forceKillPorts[0] != 9128 {
+		t.Fatalf("forceKillByPortFn ports = %v, want [9128]", forceKillPorts)
+	}
+	if len(fake.stopNames) != 0 {
+		t.Fatalf("scheduler Stop calls = %v, want none for supervisor-handled IPC-down target", fake.stopNames)
 	}
 	if len(results) != 1 || results[0].TaskName != stopSupervisorTestTask || results[0].Err != "" {
-		t.Fatalf("results = %+v, want one legacy kill success row", results)
+		t.Fatalf("results = %+v, want one descriptor kill success row", results)
+	}
+}
+
+func TestStopSupervisorOwnedDaemons_IPCUnavailableKillsLoadedTargetsAndHandles(t *testing.T) {
+	stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
+
+	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial: %w", ErrSupervisorIPCUnavailable)
+	})
+	defer restore()
+
+	var forceKillPorts []int
+	origForceKill := forceKillByPortFn
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		forceKillPorts = append(forceKillPorts, port)
+		return portKillKilled, nil
+	}
+	t.Cleanup(func() { forceKillByPortFn = origForceKill })
+
+	origPID := stopForceKillPIDFn
+	stopForceKillPIDFn = func(pid int) error {
+		t.Fatalf("IPC-down stop must pass nil pidByTask and avoid PID fallback; got pid=%d", pid)
+		return nil
+	}
+	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+
+	results, handled, err := stopSupervisorOwnedDaemons(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("stopSupervisorOwnedDaemons: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false, want true so the legacy scheduler fallback is not taken")
+	}
+	if len(forceKillPorts) != 1 || forceKillPorts[0] != 9128 {
+		t.Fatalf("forceKillByPortFn ports = %v, want [9128]", forceKillPorts)
+	}
+	if len(results) != 1 || results[0].TaskName != stopSupervisorTestTask || results[0].Err != "" {
+		t.Fatalf("results = %+v, want one descriptor kill success row", results)
 	}
 }
 
