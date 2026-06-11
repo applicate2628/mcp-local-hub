@@ -40,6 +40,61 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 )
 
+// TestSuperviseCommand_FailsClosedWhenIntentCollapseCannotMergeLegacyStops verifies that
+// startup aborts when E2 collapse fails before active legacy stops are durable
+// in supervisor-intent.json's sub-block.
+func TestSuperviseCommand_FailsClosedWhenIntentCollapseCannotMergeLegacyStops(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	restoreStateRoot := api.SetDaemonStateRootForTest(stateDir)
+	defer restoreStateRoot()
+
+	now := time.Now().UTC()
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	if err := api.NewAPI().WriteDaemonIntent(`\mcp-local-hub-paper-search-default`, api.DaemonIntent{
+		Desired:   api.IntentDesiredStopped,
+		Reason:    api.IntentReasonUserStop,
+		UpdatedAt: now,
+	}, "test"); err != nil {
+		t.Fatalf("seed legacy daemon-intent.json: %v", err)
+	}
+
+	// Force RunDaemonIntentCollapse to fail after it has found active legacy
+	// stops but before it can persist them into supervisor-intent.json. The
+	// legacy daemon-intent.json remains valid/readable, so continuing startup
+	// would drop the stop through UnifiedStopsFile's E2 sub-block-only rule.
+	supervisorIntentLockPath := filepath.Join(stateDir, "supervisor-intent.json.lock")
+	if err := os.Remove(supervisorIntentLockPath); err != nil {
+		t.Fatalf("remove supervisor-intent lock file before poisoning path: %v", err)
+	}
+	if err := os.Mkdir(supervisorIntentLockPath, 0o700); err != nil {
+		t.Fatalf("poison supervisor-intent lock path: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := runSupervise(ctx, true, false)
+	if err == nil {
+		t.Fatal("runSupervise succeeded after an unmerged legacy stop collapse failure; want fail-closed error")
+	}
+	if !strings.Contains(err.Error(), "run daemon-intent collapse") {
+		t.Fatalf("runSupervise error = %v; want collapse failure", err)
+	}
+
+	got, readErr := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if readErr != nil {
+		t.Fatalf("read supervisor-intent.json after failed collapse: %v", readErr)
+	}
+	if len(got.Stops) != 0 {
+		t.Fatalf("failed collapse unexpectedly wrote stops: %+v", got.Stops)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "daemon-intent.json")); statErr != nil {
+		t.Fatalf("legacy daemon-intent.json should remain for retry after failed collapse: %v", statErr)
+	}
+}
+
 // TestSuperviseCommand_AcquiresLockAndExitsOnSignal verifies the
 // happy-path lifecycle: start → lock acquired (owner sidecar
 // present) → graceful-exit triggered via the test seam → err=nil.
