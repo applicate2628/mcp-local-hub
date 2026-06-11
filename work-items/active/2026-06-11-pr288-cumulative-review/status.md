@@ -6,8 +6,8 @@ State: PARKED-FOR-REBOOT, ждём bot r11 verdict
 
 ## Где мы
 
-master = b83c709 (запушен). #288 раунды r1-r10 пофикшены и на master.
-#289 СМЕРЖЕН (10146b3). 4 codex-security PR (#284-#287) смержены ранее.
+master = b83c709 (запушен). PR 288 раунды r1-r10 пофикшены и на master.
+PR 289 СМЕРЖЕН (10146b3). 4 codex-security PR (284-287) смержены ранее.
 
 Раунды #288: r5=3 наход. (51e4873) → r6=3 (bfc469d) → r7=2+тест-гигиена
 (6fa9f55) → r8=2 (522ac09) → r9=1 PID-fallback (17834f1) → r10=4
@@ -16,12 +16,25 @@ install/wake (b83c709). Бот ретриггернут на b83c709 в ~11:57 U
 
 ## Resume после ребута (точная последовательность)
 
-1. Полл r11 на HEAD=b83c70921a866af836c8b27c792f81148e39de25:
+**r11 ВЕРДИКТ УЖЕ ПОЛУЧЕН до ребута (12:01 UTC): 2 P1 на b83c709.**
+Находки: .scratch/codex-prompts/pr288-r11-findings.txt
+Готовый промпт: .scratch/codex-prompts/pr288-r11-fixes.md
+(F1 = Preflight не признаёт supervisor-owned порт → reinstall падает;
+F2 = legacy-task cleanup не убивает процесс → орфан держит порт → quarantine.
+ОБА бьют в редеплой — фиксить ДО редеплоя.)
+
+0. СРАЗУ: `git worktree add .claude/worktrees/codex-288r11 -b codex-288r11-fixes master`
+   → диспатч codex по готовому промпту (паттерн п.2 ниже) → верифай → squash
+   на master → push → ретриггер → полл r12. Шаг 1 ниже НЕ нужен (вердикт есть).
+
+1. (исполнено до ребута) Полл r11 на HEAD=b83c70921a866af836c8b27c792f81148e39de25:
+
    ```bash
    H=b83c70921a866af836c8b27c792f81148e39de25
    gh api repos/applicate2628/mcp-local-hub/pulls/288/reviews --paginate | jq -r --arg sha "$H" '.[] | select(.user.login=="chatgpt-codex-connector[bot]") | select(.commit_id==$sha) | "\(.state) @ \(.submitted_at)"'
    gh api repos/applicate2628/mcp-local-hub/pulls/288/comments --paginate | jq --arg sha "$H" '[.[] | select(.user.login=="chatgpt-codex-connector[bot]") | select(.original_commit_id==$sha)] | length'
    ```
+
    ВНИМАНИЕ: если master сдвинулся (новый фикс-раунд) — фильтровать по НОВОМУ
    `git rev-parse HEAD` (KOSYAK: local HEAD после push, не gh headRefOid).
    PASS-правило CLAUDE.md: no-major-issues/👍/APPROVED на ТЕКУЩЕМ HEAD +
