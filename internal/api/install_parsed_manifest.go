@@ -673,9 +673,37 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		return nil, nil, false, err
 	}
 
+	// On a filtered install, the fresh row supervisorDaemonsFromPlan
+	// materializes is keyed by this canonical task name. A prior row that
+	// names the SAME task must be dropped here regardless of how its Server /
+	// Daemon fields are populated, or it survives the field-based filter and
+	// the fresh row appends alongside it -> DUPLICATE task_name entries
+	// (duplicate status rows, ambiguous stop/restart selection). Legacy /
+	// older-writer rows can carry a blank or stale Daemon (other intent
+	// readers tolerate that by re-deriving from the task name via
+	// ParseManagedTaskName), so the field match alone is not sufficient (bot
+	// PR #284 P2). Empty daemonFilter -> empty filteredTaskName -> the
+	// task-name fallback is inert (the full-install branch already drops every
+	// row for m.Name).
+	var filteredTaskName string
+	if daemonFilter != "" {
+		filteredTaskName = canonicalIntentTaskKey("mcp-local-hub-" + m.Name + "-" + daemonFilter)
+	}
 	kept := make([]SupervisorDaemon, 0, len(prior.Daemons))
 	for _, d := range prior.Daemons {
-		if d.Server == m.Name && (daemonFilter == "" || d.Daemon == daemonFilter) {
+		// Full install: drop every row this server owns.
+		if daemonFilter == "" {
+			if d.Server == m.Name {
+				continue // replaced below
+			}
+			kept = append(kept, d)
+			continue
+		}
+		// Filtered install: drop the selected daemon's row. Match on the
+		// populated fields first, then fall back to the canonical task name so
+		// a blank-/stale-Daemon legacy row for the same task is not duplicated.
+		if (d.Server == m.Name && d.Daemon == daemonFilter) ||
+			canonicalIntentTaskKey(d.TaskName) == filteredTaskName {
 			continue // replaced below
 		}
 		kept = append(kept, d)
