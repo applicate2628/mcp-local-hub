@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
@@ -1891,5 +1893,50 @@ func TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated(t *t
 	// scheduler's nil==default-on contract honors the timer.
 	if got.Enabled != nil {
 		t.Errorf("materialized weekly-refresh timer Enabled = %v, want nil (default-on on a fresh install)", *got.Enabled)
+	}
+}
+
+// TestBuildMergedSupervisorIntent_PreservesStopsSubBlock locks in the
+// cross-phase E2xF contract (bot PR #284 P2): the install merge must carry
+// the prior stops sub-block VERBATIM — it owns descriptors + this server's
+// weekly timer, never the operator stops. Pre-fix the merged struct omitted
+// Stops entirely, so ANY install wiped every operator stop across ALL
+// servers (the stopped daemons respawned on the next reconcile).
+func TestBuildMergedSupervisorIntent_PreservesStopsSubBlock(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	stop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-other-d`, Server: "other", Daemon: "d", Command: "keep", Port: 9991},
+		},
+		Stops: map[string]DaemonIntent{
+			`\mcp-local-hub-other-d`: stop, // sibling server's operator stop
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	m := &config.ServerManifest{
+		Name: "demo",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 9992},
+		},
+	}
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent: %v", err)
+	}
+	got, ok := merged.Stops[`\mcp-local-hub-other-d`]
+	if !ok {
+		t.Fatalf("install merge DROPPED the prior stops sub-block — every operator stop would be wiped on any install")
+	}
+	if got.Desired != stop.Desired || got.Reason != stop.Reason || !got.UpdatedAt.Equal(stop.UpdatedAt) {
+		t.Fatalf("stop entry mutated by the install merge: got %+v want %+v", got, stop)
 	}
 }

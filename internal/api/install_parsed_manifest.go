@@ -688,6 +688,13 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		Daemons:           kept,
 		MaintenanceTimers: mergeServerWeeklyRefreshTimer(m, daemonFilter, prior.MaintenanceTimers),
 		StrictMode:        prior.StrictMode,
+		// Stops is the E2 sub-block — the SOLE per-daemon stop source. The
+		// install merge does not own stops; dropping it here would wipe
+		// every operator stop across ALL servers on any install (bot PR
+		// #284 P2 — cross-phase E2×F regression). The post-success
+		// recordStopIntentAs / ClearStopIntent writers adjust ONLY the
+		// installed daemons' entries afterwards.
+		Stops: prior.Stops,
 	}
 	return merged, prior, existed, nil
 }
