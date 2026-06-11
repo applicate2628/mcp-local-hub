@@ -110,6 +110,19 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 	}
 	t.Cleanup(func() { forceKillByPortFn = origForceKill })
 
+	// Lane A inverted the kill preference: a captured supervisor-reported PID
+	// is killed FIRST (identity-gated, best-effort), and the port kill is only
+	// the no-PID-snapshot fallback. The IPC fake above reports PID 5101 for
+	// the dropped row, so the kill must arrive via stopForceKillPIDFn.
+	var killedPIDs []int
+	origPIDKill := stopForceKillPIDFn
+	stopForceKillPIDFn = func(pid int) error {
+		order = append(order, "kill-pid")
+		killedPIDs = append(killedPIDs, pid)
+		return nil
+	}
+	t.Cleanup(func() { stopForceKillPIDFn = origPIDKill })
+
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
 		order = append(order, "nudge")
 		return ReconcileResponse{}, nil
@@ -122,11 +135,14 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 		t.Fatalf("InstallParsedManifest: %v", err)
 	}
 
-	if !reflect.DeepEqual(killedPorts, []int{dropEntry.Port}) {
-		t.Fatalf("killed ports = %v, want [%d] for the dropped workspace row only", killedPorts, dropEntry.Port)
+	if !reflect.DeepEqual(killedPIDs, []int{5101}) {
+		t.Fatalf("killed PIDs = %v, want [5101] for the dropped workspace row only", killedPIDs)
 	}
-	if !reflect.DeepEqual(order, []string{"ipc-status", "nudge", "kill-port"}) {
-		t.Fatalf("ipc/nudge/kill order = %v, want [ipc-status nudge kill-port]", order)
+	if len(killedPorts) != 0 {
+		t.Fatalf("killed ports = %v, want none (PID-first kill must not fall through to the port path)", killedPorts)
+	}
+	if !reflect.DeepEqual(order, []string{"ipc-status", "nudge", "kill-pid"}) {
+		t.Fatalf("ipc/nudge/kill order = %v, want [ipc-status nudge kill-pid]", order)
 	}
 }
 

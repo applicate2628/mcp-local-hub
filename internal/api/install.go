@@ -1787,21 +1787,29 @@ func isMcphubProcessImage(image string) bool {
 	return strings.EqualFold(strings.TrimSpace(image), mcphubProcessImageName)
 }
 
-func mcphubPIDImageVerified(pid int) (image, parentImage string, verified bool, err error) {
+// mcphubPIDImageVerified probes the identity of pid. The identity gate is
+// BEST-EFFORT hardening, not a precondition: when the lookup surface is
+// structurally unavailable (nil seam, POSIX !ok — processIdentityByPID is
+// Windows wmic/CIM-backed), the caller must PROCEED with the kill rather than
+// refuse — the PIDs reaching these gates come from the supervisor's own IPC
+// snapshot (a trusted source), and refusing on a missing probe would break
+// stop --force on every host without the lookup (the exact silent-drop class
+// the r9 PID fallback closed). Only a POSITIVE foreign-image verdict refuses.
+func mcphubPIDImageVerified(pid int) (image, parentImage string, verified, lookupAvailable bool) {
 	if processIdentityByPID == nil {
-		return "", "", false, errors.New("process identity lookup unavailable")
+		return "", "", false, false
 	}
 	image, parentImage, ok := processIdentityByPID(pid)
 	if !ok {
-		return image, parentImage, false, fmt.Errorf("process identity lookup failed for pid %d", pid)
+		return image, parentImage, false, false
 	}
-	return image, parentImage, isMcphubProcessImage(image), nil
+	return image, parentImage, isMcphubProcessImage(image), true
 }
 
 func requireMcphubPIDImage(pid int) error {
-	image, parentImage, verified, err := mcphubPIDImageVerified(pid)
-	if err != nil {
-		return err
+	image, parentImage, verified, lookupAvailable := mcphubPIDImageVerified(pid)
+	if !lookupAvailable {
+		return nil // best-effort gate: no probe surface → proceed (see doc above)
 	}
 	if !verified {
 		return fmt.Errorf("pid %d image %q parent %q is not %s", pid, image, parentImage, mcphubProcessImageName)
@@ -1810,9 +1818,9 @@ func requireMcphubPIDImage(pid int) error {
 }
 
 func requireMcphubPortOwnerPID(port, pid int) error {
-	image, parentImage, verified, err := mcphubPIDImageVerified(pid)
-	if err != nil {
-		return fmt.Errorf("process identity for port %d pid %d: %w", port, pid, err)
+	image, parentImage, verified, lookupAvailable := mcphubPIDImageVerified(pid)
+	if !lookupAvailable {
+		return nil // best-effort gate: no probe surface → proceed (see doc above)
 	}
 	if !verified {
 		return fmt.Errorf("port owned by foreign process: port %d pid %d image %q parent %q", port, pid, image, parentImage)
