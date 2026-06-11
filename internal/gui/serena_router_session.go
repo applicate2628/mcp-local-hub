@@ -708,7 +708,7 @@ func (s *Server) terminateSerenaSessionsForWorkspace(wsKey string) int {
 	return len(ids)
 }
 
-func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.WorkspaceEntry) {
+func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.WorkspaceEntry, replaceStaleBaseline bool) {
 	if ws == nil || ws.WorkspacePath == "" {
 		return
 	}
@@ -735,18 +735,11 @@ func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.Works
 	if pid <= 0 {
 		return
 	}
-	// Snapshot the reverse index before taking serenaBackendPIDMu so this path
-	// never nests the router-session lock inside the PID lock. seed runs after
-	// bindWorkspace, so count <= 1 means this session is the first observer of a
-	// fresh generation after an unbound window and may replace a stale baseline.
-	// The gap before the PID lock is benign: a racing second bind observes count
-	// >1 in its own seed and therefore keeps the established live-session baseline.
-	boundSessionCount := len(s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey))
 	s.serenaBackendPIDMu.Lock()
 	if s.serenaBackendLastPID == nil {
 		s.serenaBackendLastPID = map[string]int{}
 	}
-	if _, exists := s.serenaBackendLastPID[ws.WorkspacePath]; !exists || boundSessionCount <= 1 {
+	if _, exists := s.serenaBackendLastPID[ws.WorkspacePath]; !exists || replaceStaleBaseline {
 		s.serenaBackendLastPID[ws.WorkspacePath] = pid
 	}
 	s.serenaBackendPIDMu.Unlock()

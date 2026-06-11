@@ -2711,6 +2711,85 @@ func TestSerenaRouter_BackendLoss_SeedReplacesStaleBaselineForFirstBoundSession(
 	}
 }
 
+func TestSerenaRouter_BackendLoss_CacheHitPreservesSingleSessionBaseline(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	port := testServerPort(t, ts)
+	if port >= 9121 && port <= 9299 {
+		t.Skipf("httptest selected live mcphub port %d", port)
+	}
+
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: port}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	currentPID := 1000
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: "Running", PID: currentPID, Port: port},
+		}, nil
+	}
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("initial tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := s.serenaRouterSessions.sessionsForWorkspace("alpha"); len(got) != 1 {
+		t.Fatalf("precondition: workspace 'alpha' should index exactly one session, got %d (%v)", len(got), got)
+	}
+
+	s.serenaBackendPIDMu.Lock()
+	baseline := s.serenaBackendLastPID[wsPath]
+	s.serenaBackendPIDMu.Unlock()
+	if baseline != 1000 {
+		t.Fatalf("initial seeded baseline = %d, want PID 1000", baseline)
+	}
+	daemon.mu.Lock()
+	mintCount := daemon.mintCount
+	daemon.mu.Unlock()
+
+	currentPID = 2000
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("cache-hit tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	daemon.mu.Lock()
+	gotMintCount := daemon.mintCount
+	daemon.mu.Unlock()
+	if gotMintCount != mintCount {
+		t.Fatalf("cache-hit request minted %d new daemon sessions; want 0", gotMintCount-mintCount)
+	}
+
+	s.serenaBackendPIDMu.Lock()
+	baseline = s.serenaBackendLastPID[wsPath]
+	s.serenaBackendPIDMu.Unlock()
+	if baseline != 1000 {
+		t.Fatalf("cache-hit request clobbered baseline to %d; want to preserve old PID 1000 for restart detection", baseline)
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("reconcile after cached single-session PID 1000 -> current PID 2000 tore down %d sessions; want 1", n)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after cached single-session PID change; want it torn down")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Errorf("serenaDaemonSessions STILL holds sid after cached single-session PID change; want it unbound")
+	}
+	if got := deps.Sessions.LookupSession(sid); got != nil {
+		t.Errorf("sticky sessionRouter STILL resolves sid after cached single-session PID change; want it unbound. got %+v", got)
+	}
+}
+
 func TestSerenaRouter_BackendLoss_SeedPreservesBaselineWithExistingSessions(t *testing.T) {
 	prevStatusFn := serenaBackendStatusFn
 	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
@@ -2736,7 +2815,7 @@ func TestSerenaRouter_BackendLoss_SeedPreservesBaselineWithExistingSessions(t *t
 		}, nil
 	}
 
-	s.seedSerenaBackendPIDBaseline(context.Background(), ws)
+	s.seedSerenaBackendPIDBaseline(context.Background(), ws, false)
 
 	s.serenaBackendPIDMu.Lock()
 	gotBaseline := s.serenaBackendLastPID[wsPath]
