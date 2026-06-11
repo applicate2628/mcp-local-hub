@@ -486,37 +486,65 @@ func TestReconcileIPC_ApplyRefreshesCacheBeforePosting(t *testing.T) {
 	}
 }
 
-// TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead locks in the
-// reconcile apply-mode safety rule: a corrupt daemon-intent.json is usable as
-// an empty overlay for drift calculation, but it must not refresh the
-// controller cache with the empty fallback and erase previously loaded
-// operator stop/disable intents.
-func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead(t *testing.T) {
+// TestReconcileIPC_ApplyRefreshesCacheFromSubBlockDespiteCorruptDaemonIntent is
+// the corrupt-daemon-intent companion to the PR #286 regression guard. Post-E2
+// the supervisor-intent.json `stops` sub-block is the SOLE, AUTHORITATIVE stop
+// source and UnifiedStopsFile IGNORES the vestigial daemon-intent.json, so a
+// CORRUPT daemon-intent.json is irrelevant to the cache: when supervisor-intent
+// was read SUCCESSFULLY (carrying a FRESH stop in the sub-block), apply-mode MUST
+// refresh the controller cache from that sub-block and APPLY the stop, regardless
+// of the corrupt vestigial file.
+//
+// This replaces the prior preserve-on-corrupt-daemon-intent assertion, which
+// encoded the SAME conflation bot PR #286 flagged ("daemon-intent untrusted"
+// wrongly treated as "stops view untrusted"). The authoritative-source corrupt
+// case is a DIFFERENT path: a corrupt supervisor-intent.json fail-closes UPSTREAM
+// with RECONCILE_INTENT_READ_FAILED (the handler returns an error and never calls
+// applyReconcileDrift, so the cache is untouched) — that genuine preserve mode is
+// covered by the upstream read-failure path, not this vestigial-file test.
+//
+// NEGATIVE CONTROL: under the over-broad `State != Corrupt` guard the corrupt
+// daemon-intent.json forces cacheRefreshDaemonIntent=nil, the fresh sub-block stop
+// never reaches the cache, and this test FAILS at the cache-observation assertion.
+func TestReconcileIPC_ApplyRefreshesCacheFromSubBlockDespiteCorruptDaemonIntent(t *testing.T) {
 	taskName := `\mcp-local-hub-foo-default`
+	now := time.Now().UTC()
+	// Fresh stop in the AUTHORITATIVE supervisor-intent.json stops sub-block.
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
 			{TaskName: taskName, Server: "foo", Daemon: "default"},
 		},
-	}
-	fx := newReconcileTestFixture(t, intent)
-
-	previousStop := api.DaemonIntentFile{
-		Tasks: map[string]api.DaemonIntent{
+		Stops: map[string]api.DaemonIntent{
 			taskName: {
 				Desired:   api.IntentDesiredStopped,
 				Reason:    api.IntentReasonUserStop,
-				UpdatedAt: time.Now().UTC(),
+				UpdatedAt: now,
 			},
 		},
 	}
-	fx.ctrl.daemonIntent.Refresh(&previousStop)
+	fx := newReconcileTestFixture(t, intent)
 
+	// Pre-seed the controller cache with NO stop, so the fresh stop can ONLY
+	// arrive via a successful cache refresh from the sub-block.
+	fx.ctrl.daemonIntent.Refresh(&api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}})
+
+	// Corrupt vestigial daemon-intent.json → ReadDaemonIntentFile reports
+	// State=corrupt with Err set. UnifiedStopsFile ignores it entirely.
 	if err := os.WriteFile(filepath.Join(fx.deps.stateDir, "daemon-intent.json"), []byte(`{"tasks":`), 0o600); err != nil {
 		t.Fatalf("seed corrupt daemon-intent.json: %v", err)
 	}
+	// Scheduler reports the daemon running → intent=stopped is a terminate drift.
 	installSchedulerListFake(t, []scheduler.TaskStatus{
 		{Name: taskName, State: "Running"},
+	})
+
+	observedDesired := make(chan string, 1)
+	fx.loop.RegisterHandler(func(ev api.LoopEvent) {
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			return
+		}
+		observedDesired <- fx.ctrl.daemonIntent.Lookup(taskName).Desired
 	})
 
 	req := api.IPCRequest{
@@ -529,23 +557,146 @@ func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead(t *testing.T)
 		t.Fatalf("handleReconcile: %v", err)
 	}
 	_, body := decodeReconcileResponse(t, conn)
-	if body.AppliedCount != 0 {
-		t.Fatalf("AppliedCount = %d, want 0 for running scheduler + empty corrupt-read overlay; drift=%+v",
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1 for running scheduler + fresh sub-block stop drift; drift=%+v",
 			body.AppliedCount, body.Drift)
+	}
+
+	select {
+	case got := <-observedDesired:
+		if got != api.IntentDesiredStopped {
+			t.Fatalf("daemon-intent cache desired observed during EvIntentUpdate = %q, want refreshed %q "+
+				"(the fresh sub-block stop must reach the cache despite the corrupt daemon-intent.json)",
+				got, api.IntentDesiredStopped)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for EvIntentUpdate cache observation")
 	}
 
 	got := fx.ctrl.daemonIntent.Lookup(taskName)
 	if got.Desired != api.IntentDesiredStopped {
-		t.Fatalf("daemon-intent cache desired = %q, want preserved %q after corrupt read",
+		t.Fatalf("daemon-intent cache desired = %q, want refreshed %q from the authoritative sub-block "+
+			"despite the corrupt vestigial daemon-intent.json",
 			got.Desired, api.IntentDesiredStopped)
 	}
 
+	// The corrupt vestigial read is still surfaced as a warn audit event — the
+	// fix changes the cache trust decision, NOT the diagnostic emit.
 	logRaw := readEventLogForTest(t, fx.deps.stateDir)
 	if !strings.Contains(logRaw, `"event":"daemon-intent-read-failed"`) {
 		t.Fatalf("expected daemon-intent-read-failed audit event; log:\n%s", logRaw)
 	}
 	if !strings.Contains(logRaw, `"state":"corrupt"`) {
 		t.Fatalf("expected corrupt state in daemon-intent audit event; log:\n%s", logRaw)
+	}
+}
+
+// TestReconcileIPC_ApplyRefreshesCacheFromSubBlockDespiteDaemonReadError is the
+// PR #286 regression guard. It locks in the CORRECT post-E2 semantics: the
+// supervisor-intent.json `stops` sub-block is the SOLE, AUTHORITATIVE stop
+// source, and UnifiedStopsFile ignores the vestigial daemon-intent.json. So when
+// supervisor-intent.json was read SUCCESSFULLY (carrying a FRESH stop in the
+// sub-block) but the vestigial daemon-intent.json read ERRORS (State=missing with
+// Err set — e.g. a stale directory at its path), apply-mode MUST refresh the
+// controller cache from the fresh sub-block and APPLY the stop. The daemon-intent
+// read error must NOT gate that refresh.
+//
+// The earlier PR #286 fix gated the refresh on daemonIntentRes.Err == nil, which
+// inverted this: a stale daemon-intent.json directory skipped the refresh, the
+// controller kept its stale (running-default) cache, and the operator's fresh
+// stop was never applied (AppliedCount lied; stop reconciliation broke). This
+// test asserts the OPPOSITE of that broken behavior — the fresh stop LANDS.
+//
+// NEGATIVE CONTROL: under the over-broad `daemonIntentRes.Err == nil` guard the
+// observed cache Desired stays empty (running-default) and this test FAILS at the
+// cache-observation assertion below.
+func TestReconcileIPC_ApplyRefreshesCacheFromSubBlockDespiteDaemonReadError(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	now := time.Now().UTC()
+	// Fresh stop in the AUTHORITATIVE supervisor-intent.json stops sub-block.
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+		Stops: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: now,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
+	// Pre-seed the controller cache with NO stop, so the fresh stop can ONLY
+	// arrive via a successful cache refresh from the sub-block. If the refresh
+	// is wrongly skipped, the handler observes this empty (running-default) cache.
+	fx.ctrl.daemonIntent.Refresh(&api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{}})
+
+	// Force os.ReadFile(daemon-intent.json) to fail with a non-ENOENT read error
+	// (EISDIR). This is the bot's exact scenario: the vestigial path is anomalous
+	// but the authoritative sub-block is healthy.
+	if err := os.Mkdir(filepath.Join(fx.deps.stateDir, "daemon-intent.json"), 0o700); err != nil {
+		t.Fatalf("seed unreadable daemon-intent.json directory: %v", err)
+	}
+	// Scheduler reports the daemon running → intent=stopped is a terminate drift
+	// (post_ev_intent_update). Apply must dispatch EvIntentUpdate AND the
+	// controller cache must carry the fresh stop when the handler reads it.
+	installSchedulerListFake(t, []scheduler.TaskStatus{
+		{Name: taskName, State: "Running"},
+	})
+
+	observedDesired := make(chan string, 1)
+	fx.loop.RegisterHandler(func(ev api.LoopEvent) {
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			return
+		}
+		observedDesired <- fx.ctrl.daemonIntent.Lookup(taskName).Desired
+	})
+
+	req := api.IPCRequest{
+		ID:   27,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1 for running scheduler + fresh sub-block stop drift; drift=%+v",
+			body.AppliedCount, body.Drift)
+	}
+
+	select {
+	case got := <-observedDesired:
+		if got != api.IntentDesiredStopped {
+			t.Fatalf("daemon-intent cache desired observed during EvIntentUpdate = %q, want refreshed %q "+
+				"(the fresh sub-block stop must reach the cache despite the daemon-intent read error)",
+				got, api.IntentDesiredStopped)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for EvIntentUpdate cache observation")
+	}
+
+	got := fx.ctrl.daemonIntent.Lookup(taskName)
+	if got.Desired != api.IntentDesiredStopped {
+		t.Fatalf("daemon-intent cache desired = %q, want refreshed %q from the authoritative sub-block "+
+			"despite the vestigial daemon-intent read error",
+			got.Desired, api.IntentDesiredStopped)
+	}
+
+	// The daemon-intent read failure is still surfaced as a warn audit event
+	// (the read is attempted; its error is logged) — the fix changes the cache
+	// trust decision, NOT the diagnostic emit.
+	logRaw := readEventLogForTest(t, fx.deps.stateDir)
+	if !strings.Contains(logRaw, `"event":"daemon-intent-read-failed"`) {
+		t.Fatalf("expected daemon-intent-read-failed audit event; log:\n%s", logRaw)
+	}
+	if !strings.Contains(logRaw, `"state":"missing"`) {
+		t.Fatalf("expected missing state in daemon-intent audit event; log:\n%s", logRaw)
 	}
 }
 

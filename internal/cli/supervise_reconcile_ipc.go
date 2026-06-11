@@ -205,18 +205,28 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// Cache-refresh fail-loud guard (PR #278 P2 / §3 contract, anchored to the
 	// SOLE stop source after E2). The controller daemonIntentCache holds the
 	// operator's last-known stops; refreshing it from a corrupt/unreadable sole
-	// source would un-suppress a deliberately-stopped daemon. The
-	// supervisor-intent.json corrupt-read is already fail-closed UPSTREAM (step
-	// 1 returns RECONCILE_INTENT_READ_FAILED before reaching here), so by this
-	// point the sub-block read succeeded. The daemonIntentRes-state guard below
-	// is retained as defense-in-depth (vestigial after E2 — daemon-intent.json
-	// is gone, so its state is missing/non-corrupt): only a non-corrupt
-	// daemon-intent.json read refreshes the cache, leaving the prior stops in
-	// place on any anomalous read.
-	var cacheRefreshDaemonIntent *api.DaemonIntentFile
-	if daemonIntentRes.State != api.IntentStateCorrupt {
-		cacheRefreshDaemonIntent = updatedDaemonIntent
-	}
+	// source would un-suppress a deliberately-stopped daemon — but the SOLE stop
+	// source after E2 is the supervisor-intent.json `stops` sub-block, NOT
+	// daemon-intent.json. The refresh source is updatedDaemonIntent =
+	// UnifiedStopsFile(updatedIntent, rawDaemonIntent), and UnifiedStopsFile
+	// deliberately IGNORES rawDaemonIntent (supervisor_intent.go:403) — it returns
+	// the sub-block unconditionally. So the trust decision must follow the
+	// AUTHORITATIVE supervisor-intent read, never the vestigial daemon-intent read:
+	//   (a) supervisor-intent read OK  → REFRESH from the sub-block, regardless of
+	//       any daemon-intent read error (the unified view ignores it anyway).
+	//   (b) supervisor-intent MISSING under apply → preserve (nil) via the
+	//       missing-sole-source guard immediately below.
+	//   (c) supervisor-intent CORRUPT → already fail-closed UPSTREAM (step 1
+	//       returns RECONCILE_INTENT_READ_FAILED before reaching here), so it is
+	//       unreachable at this point.
+	// Gating the refresh on daemonIntentRes.Err was the regression bot PR #286
+	// caught: a stale daemon-intent.json directory (EISDIR → State=missing, Err
+	// set) would skip the refresh and leave a FRESH operator stop in the
+	// authoritative sub-block un-applied — drift computes the terminate and posts
+	// EvIntentUpdate, but the controller reads the STALE cache and defaults the
+	// daemon back to running. The daemon-intent-read state therefore does NOT gate
+	// the refresh post-E2; only the missing-sole-source guard does.
+	cacheRefreshDaemonIntent := updatedDaemonIntent
 	// Apply-mode missing-sole-source guard (PR #278 P2, this-PR P2-BLOCKER): in
 	// apply mode, a physically ABSENT supervisor-intent.json (the sole stop
 	// source after E2) yields an empty `updatedDaemonIntent` whose empty stops
@@ -325,9 +335,10 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// needs_manual_review) never trigger SM events.
 	appliedCount := 0
 	if args.Apply {
-		// Pass cacheRefreshDaemonIntent (nil on a corrupt read) rather than
-		// the always-non-nil unified file so applyReconcileDrift's
-		// `!= nil` guard preserves the prior daemonIntentCache on corrupt.
+		// Pass cacheRefreshDaemonIntent (nil ONLY when the authoritative
+		// supervisor-intent.json is physically absent under apply) rather than the
+		// always-non-nil unified file, so applyReconcileDrift's `!= nil` guard
+		// preserves the prior daemonIntentCache on a missing sole stop source.
 		appliedCount = applyReconcileDrift(deps, drift, updatedIntent, cacheRefreshDaemonIntent)
 	}
 
@@ -681,12 +692,16 @@ func lookupControllerSMState(deps ipcDispatchDeps, taskName string) api.SMState 
 // will be 0 because there's no event loop to post onto.
 //
 // daemonIntentCacheRefresh is the cache-refresh source, NOT the drift
-// overlay. A nil value means "the read could not be trusted (corrupt) —
-// preserve the existing daemonIntentCache". A non-nil value (valid live
-// file, or the supervisor-intent stops baseline on a genuinely missing
-// file) refreshes the cache. The nil-preserves invariant is the §3
-// fail-loud guard against a transient corrupt read silently un-stopping
-// a deliberately-stopped daemon (PR #278 P2 contract).
+// overlay. After E2 the source is the supervisor-intent.json `stops` sub-block
+// (the sole stop authority). A nil value means "the authoritative sole stop
+// source — supervisor-intent.json — was physically absent under apply" → preserve
+// the existing daemonIntentCache. A non-nil value (the sub-block read
+// successfully) refreshes the cache. The nil-preserves invariant is the §3
+// fail-loud guard against a transient missing sole source silently un-stopping a
+// deliberately-stopped daemon (PR #278 P2 contract). It is NOT gated on the
+// vestigial daemon-intent.json read state — UnifiedStopsFile ignores that file,
+// so a stale daemon-intent.json read error must not block a fresh sub-block stop
+// from reaching the cache (PR #286 regression fix).
 func applyReconcileDrift(
 	deps ipcDispatchDeps,
 	drift []api.DriftEntry,
