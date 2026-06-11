@@ -549,6 +549,93 @@ func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnCorruptRead(t *testing.T)
 	}
 }
 
+// TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnDaemonReadError locks in
+// the apply-mode fail-closed rule for non-corrupt daemon-intent read failures.
+// ReadDaemonIntentFile reports these as State=missing with Err set (for
+// example, when daemon-intent.json is unexpectedly a directory). That result is
+// not the trusted E2 "file is genuinely absent" path, so apply-mode must not
+// refresh the controller cache from the supervisor fallback and erase a prior
+// user stop before posting EvIntentUpdate.
+func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnDaemonReadError(t *testing.T) {
+	taskName := `\mcp-local-hub-foo-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: taskName, Server: "foo", Daemon: "default"},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
+	previousStop := api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	fx.ctrl.daemonIntent.Refresh(&previousStop)
+
+	// Force os.ReadFile(daemon-intent.json) to fail with a non-ENOENT read
+	// error. The supervisor-intent fallback has no stop entry, so a buggy cache
+	// refresh would clear previousStop and make the event handler see the daemon
+	// as desired-running.
+	if err := os.Mkdir(filepath.Join(fx.deps.stateDir, "daemon-intent.json"), 0o700); err != nil {
+		t.Fatalf("seed unreadable daemon-intent.json directory: %v", err)
+	}
+	installSchedulerListFake(t, []scheduler.TaskStatus{
+		{Name: taskName, State: "Stopped"},
+	})
+
+	observedDesired := make(chan string, 1)
+	fx.loop.RegisterHandler(func(ev api.LoopEvent) {
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			return
+		}
+		observedDesired <- fx.ctrl.daemonIntent.Lookup(taskName).Desired
+	})
+
+	req := api.IPCRequest{
+		ID:   27,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1 for stopped scheduler + fallback desired-running drift; drift=%+v",
+			body.AppliedCount, body.Drift)
+	}
+
+	select {
+	case got := <-observedDesired:
+		if got != api.IntentDesiredStopped {
+			t.Fatalf("daemon-intent cache desired observed during EvIntentUpdate = %q, want preserved %q",
+				got, api.IntentDesiredStopped)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for EvIntentUpdate cache observation")
+	}
+
+	got := fx.ctrl.daemonIntent.Lookup(taskName)
+	if got.Desired != api.IntentDesiredStopped {
+		t.Fatalf("daemon-intent cache desired = %q, want preserved %q after daemon-intent read error",
+			got.Desired, api.IntentDesiredStopped)
+	}
+
+	logRaw := readEventLogForTest(t, fx.deps.stateDir)
+	if !strings.Contains(logRaw, `"event":"daemon-intent-read-failed"`) {
+		t.Fatalf("expected daemon-intent-read-failed audit event; log:\n%s", logRaw)
+	}
+	if !strings.Contains(logRaw, `"state":"missing"`) {
+		t.Fatalf("expected missing state in daemon-intent audit event; log:\n%s", logRaw)
+	}
+}
+
 // TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnMissingSupervisorIntent locks
 // in the Phase 4-E2 P2-BLOCKER fix: when supervisor-intent.json — the SOLE stop
 // source after E2 — is physically ABSENT during an apply-mode reconcile, the

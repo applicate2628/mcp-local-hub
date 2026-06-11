@@ -212,9 +212,12 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// is retained as defense-in-depth (vestigial after E2 — daemon-intent.json
 	// is gone, so its state is missing/non-corrupt): only a non-corrupt
 	// daemon-intent.json read refreshes the cache, leaving the prior stops in
-	// place on any anomalous read.
+	// place on any anomalous read. A State=missing result with Err set (for
+	// example EISDIR/permission/lock failures) is also untrusted: it is not the
+	// ordinary absent-file E2 path, so apply-mode must preserve the prior cache
+	// rather than refreshing from a synthesized fallback.
 	var cacheRefreshDaemonIntent *api.DaemonIntentFile
-	if daemonIntentRes.State != api.IntentStateCorrupt {
+	if daemonIntentRes.Err == nil && daemonIntentRes.State != api.IntentStateCorrupt {
 		cacheRefreshDaemonIntent = updatedDaemonIntent
 	}
 	// Apply-mode missing-sole-source guard (PR #278 P2, this-PR P2-BLOCKER): in
@@ -325,9 +328,9 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// needs_manual_review) never trigger SM events.
 	appliedCount := 0
 	if args.Apply {
-		// Pass cacheRefreshDaemonIntent (nil on a corrupt read) rather than
+		// Pass cacheRefreshDaemonIntent (nil on an untrusted read) rather than
 		// the always-non-nil unified file so applyReconcileDrift's
-		// `!= nil` guard preserves the prior daemonIntentCache on corrupt.
+		// `!= nil` guard preserves the prior daemonIntentCache on read failures.
 		appliedCount = applyReconcileDrift(deps, drift, updatedIntent, cacheRefreshDaemonIntent)
 	}
 
@@ -681,12 +684,12 @@ func lookupControllerSMState(deps ipcDispatchDeps, taskName string) api.SMState 
 // will be 0 because there's no event loop to post onto.
 //
 // daemonIntentCacheRefresh is the cache-refresh source, NOT the drift
-// overlay. A nil value means "the read could not be trusted (corrupt) —
-// preserve the existing daemonIntentCache". A non-nil value (valid live
-// file, or the supervisor-intent stops baseline on a genuinely missing
-// file) refreshes the cache. The nil-preserves invariant is the §3
-// fail-loud guard against a transient corrupt read silently un-stopping
-// a deliberately-stopped daemon (PR #278 P2 contract).
+// overlay. A nil value means "the read could not be trusted" — preserve the
+// existing daemonIntentCache. A non-nil value (valid live file, or the
+// supervisor-intent stops baseline on a genuinely missing file) refreshes the
+// cache. The nil-preserves invariant is the §3 fail-loud guard against a
+// transient read failure silently un-stopping a deliberately-stopped daemon
+// (PR #278 P2 contract).
 func applyReconcileDrift(
 	deps ipcDispatchDeps,
 	drift []api.DriftEntry,
