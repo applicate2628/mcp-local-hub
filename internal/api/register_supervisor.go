@@ -563,5 +563,13 @@ func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {
 			out.MaintenanceTimers[i].Enabled = &enabled
 		}
 	}
+	// E2 stops sub-block: `out := *in` copies only the map HEADER — a
+	// mutation through the clone would alias the caller's map. Deep-clone.
+	if in.Stops != nil {
+		out.Stops = make(map[string]DaemonIntent, len(in.Stops))
+		for k, v := range in.Stops {
+			out.Stops[k] = v
+		}
+	}
 	return &out
 }

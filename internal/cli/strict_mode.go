@@ -284,15 +284,17 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		StrictMode: desired,
 	}
 	if original != nil {
-		// Preserve fields we don't own — daemons + maintenance timers
-		// are written by the supervisor + migration driver. We only
-		// flip the strict_mode bit.
+		// Preserve fields we don't own — daemons, maintenance timers AND
+		// the E2 stops sub-block (the sole per-daemon stop source; dropping
+		// it here would wipe every operator stop on a strict-mode flip).
+		// We only flip the strict_mode bit.
 		newIntent.Version = original.Version
 		if newIntent.Version == 0 {
 			newIntent.Version = 1
 		}
 		newIntent.Daemons = original.Daemons
 		newIntent.MaintenanceTimers = original.MaintenanceTimers
+		newIntent.Stops = original.Stops
 	}
 	writeFn := deps.WriteIntentFn
 	if writeFn == nil {
@@ -317,6 +319,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 			}
 			revertIntent.Daemons = original.Daemons
 			revertIntent.MaintenanceTimers = original.MaintenanceTimers
+			revertIntent.Stops = original.Stops
 		}
 		if revertErr := writeFn(deps.IntentPath, revertIntent); revertErr != nil {
 			// Both writes failed — write breadcrumb + exit 10.
@@ -504,6 +507,8 @@ func reconcileBothResources(target bool, deps StrictModeDeps) error {
 		}
 		newIntent.Daemons = preserved.Daemons
 		newIntent.MaintenanceTimers = preserved.MaintenanceTimers
+		// E2 stops sub-block — preserve, same as the step-1 writer above.
+		newIntent.Stops = preserved.Stops
 	}
 	writeFn := deps.WriteIntentFn
 	if writeFn == nil {
