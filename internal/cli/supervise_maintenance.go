@@ -289,6 +289,12 @@ func maintenanceTimerIdentityKey(t api.MaintenanceTimer) string {
 	if t.Server != "" {
 		return t.Kind + ":" + t.Server
 	}
+	if t.Kind == "server-weekly-refresh" {
+		server, _ := api.ParseManagedTaskName(t.Name)
+		if server != "" {
+			return t.Kind + ":" + server
+		}
+	}
 	return t.Kind
 }
 

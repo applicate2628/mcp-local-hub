@@ -231,6 +231,84 @@ func TestWriteStopIntent_EmitsSetIntentAndClearIntentAudit(t *testing.T) {
 	}
 }
 
+func TestWriteStopIntentIdleGuarded_AuditsRefusalWithoutSetIntent(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	var captured []IntentAuditEntry
+	installTestAuditFn(t, &captured, nil)
+
+	a := NewAPI()
+	now := time.Now().UTC()
+	operatorTask := `\mcp-local-hub-operator-default`
+	if err := a.WriteStopIntent(operatorTask, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now,
+	}, "operator"); err != nil {
+		t.Fatalf("seed operator stop: %v", err)
+	}
+
+	captured = nil
+	if err := a.WriteStopIntentIdleGuarded(operatorTask, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonIdle,
+		UpdatedAt: now.Add(time.Minute),
+	}, "idle-sweeper", now.Add(time.Minute)); err != nil {
+		t.Fatalf("idle guarded refusal: %v", err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("idle guarded refusal audit entries = %+v, want one distinct refusal event", captured)
+	}
+	if captured[0].Action == "set-intent" {
+		t.Fatalf("idle guarded refusal emitted set-intent: %+v", captured[0])
+	}
+	if captured[0].Action != "idle-stop-refused-operator-stop-active" {
+		t.Fatalf("idle guarded refusal action = %q, want idle-stop-refused-operator-stop-active", captured[0].Action)
+	}
+	if captured[0].Who != "idle-sweeper" || captured[0].Task != operatorTask {
+		t.Fatalf("idle guarded refusal identity mismatch: %+v", captured[0])
+	}
+	if captured[0].Priority != "" {
+		t.Fatalf("idle guarded refusal priority = %q, want default info-level empty priority", captured[0].Priority)
+	}
+	if captured[0].Before == nil || captured[0].Before.Reason != IntentReasonUserStop {
+		t.Fatalf("idle guarded refusal Before = %+v, want operator stop snapshot", captured[0].Before)
+	}
+	got := readSupervisorIntentFromDisk(t, stateDir).Stops[operatorTask]
+	if got.Reason != IntentReasonUserStop {
+		t.Fatalf("idle guarded refusal changed stored stop reason to %q, want %q", got.Reason, IntentReasonUserStop)
+	}
+
+	idleTask := `\mcp-local-hub-idle-default`
+	captured = nil
+	if err := a.WriteStopIntentIdleGuarded(idleTask, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonIdle,
+		UpdatedAt: now,
+	}, "idle-sweeper", now); err != nil {
+		t.Fatalf("idle guarded genuine write: %v", err)
+	}
+	if len(captured) != 1 || captured[0].Action != "set-intent" || captured[0].After == nil {
+		t.Fatalf("genuine idle write audit = %+v, want one set-intent with After", captured)
+	}
+	if captured[0].After.Reason != IntentReasonIdle {
+		t.Fatalf("genuine idle write After.Reason = %q, want %q", captured[0].After.Reason, IntentReasonIdle)
+	}
+
+	captured = nil
+	clearAllowed, err := a.ClearStopIntentIfReason(idleTask, IntentReasonIdle, "wake")
+	if err != nil {
+		t.Fatalf("ClearStopIntentIfReason: %v", err)
+	}
+	if !clearAllowed {
+		t.Fatal("ClearStopIntentIfReason returned false for matching idle stop")
+	}
+	if len(captured) != 1 || captured[0].Action != "clear-intent" || captured[0].Before == nil {
+		t.Fatalf("matching clear audit = %+v, want one clear-intent with Before", captured)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ROUND-TRIP: a stop written via WriteStopIntent survives a read through the
 // sub-block ALONE (daemon-intent.json absent), via UnifiedStopsFile + the five

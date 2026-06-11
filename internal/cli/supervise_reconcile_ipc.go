@@ -271,11 +271,12 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// (5) Walk intent → compute drift entries per declared daemon.
 	drift := make([]api.DriftEntry, 0, len(intent.Daemons)+len(schedTasks))
 	seenIntentTasks := make(map[string]struct{}, len(intent.Daemons))
+	now := time.Now().UTC()
 	for _, d := range intent.Daemons {
 		taskName := canonicalTaskNameForReconcile(d.TaskName)
 		seenIntentTasks[taskName] = struct{}{}
 
-		intentDesired := computeIntentDesired(taskName, daemonIntentTasks)
+		intentDesired := computeIntentDesired(taskName, daemonIntentTasks, now)
 		schedState, hasSched := lookupSchedulerState(schedByTask, taskName)
 		smState := lookupControllerSMState(deps, taskName)
 		action := classifyDriftAction(schedState, hasSched, intentDesired, smState)
@@ -471,7 +472,7 @@ func parseReconcileArgs(raw map[string]any) (api.ReconcileArgs, error) {
 // daemon-intent.json overrides take precedence; absent entries default
 // to "running" (the mixed-bootstrap default at
 // daemon_intent.go:230).
-func computeIntentDesired(taskName string, daemonIntent map[string]api.DaemonIntent) string {
+func computeIntentDesired(taskName string, daemonIntent map[string]api.DaemonIntent, now time.Time) string {
 	if daemonIntent == nil {
 		return api.ReconcileIntentDesiredRunning
 	}
@@ -485,7 +486,7 @@ func computeIntentDesired(taskName string, daemonIntent map[string]api.DaemonInt
 			return api.ReconcileIntentDesiredRunning
 		}
 	}
-	if entry.Desired == api.IntentDesiredStopped {
+	if active, _ := entry.IsActiveStop(now); active {
 		return api.ReconcileIntentDesiredStopped
 	}
 	if entry.Desired == api.IntentDesiredRunning {

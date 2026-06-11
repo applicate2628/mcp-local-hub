@@ -253,6 +253,41 @@ func TestMaintenance_ServerWeeklyRefreshTimersKeyByServer(t *testing.T) {
 	}
 }
 
+func TestMaintenance_BlankServerWeeklyRefreshTimersKeyByParsedName(t *testing.T) {
+	timers := []api.MaintenanceTimer{
+		{Name: `\mcp-local-hub-alpha-weekly-refresh`, Kind: "server-weekly-refresh"},
+		{Name: `\mcp-local-hub-beta-weekly-refresh`, Kind: "server-weekly-refresh"},
+	}
+	state := newTestState(t)
+
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 4, 0, 0, 0, loc)
+	sched := NewMaintenanceScheduler(state)
+	var fired []string
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired = append(fired, t.Name) })
+	sched.Tick(now, timers)
+
+	if len(fired) != 2 || fired[0] != timers[0].Name || fired[1] != timers[1].Name {
+		t.Fatalf("fired timers = %v, want both blank-Server canonical timer names", fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh:alpha"); !ok {
+		t.Fatalf("missing alpha parsed-name fired_at entry; state=%+v", state.fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh:beta"); !ok {
+		t.Fatalf("missing beta parsed-name fired_at entry; state=%+v", state.fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh"); ok {
+		t.Fatalf("blank-Server server timer wrote shared kind-only fired_at entry; state=%+v", state.fired)
+	}
+	if got := maintenanceTimerIdentityKey(api.MaintenanceTimer{
+		Name:   `\mcp-local-hub-alpha-weekly-refresh`,
+		Kind:   "server-weekly-refresh",
+		Server: "alpha",
+	}); got != "server-weekly-refresh:alpha" {
+		t.Fatalf("populated Server identity key = %q, want server-weekly-refresh:alpha", got)
+	}
+}
+
 // TestMaintenance_FirstFireSkippedBeforeFirstDue — empty state but `now`
 // is mid-week (Wednesday) → no fire yet because the synthetic baseline
 // is most-recent past Sun 03:00 local and next_due is the NEXT Sun

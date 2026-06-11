@@ -83,7 +83,7 @@ func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) 
 		intent.UpdatedAt = time.Now().UTC()
 	}
 
-	before, after, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+	before, after, changed, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
 		// SET only when the directive is an ACTIVE stop; otherwise DROP the
 		// entry (re-enable / expired tombstone). time.Now().UTC() is the
 		// evaluation clock — a future-dated stop fail-closes to active via
@@ -102,7 +102,9 @@ func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) 
 	// Audit emission matches WriteDaemonIntent: a SET emits set-intent with
 	// the After snapshot; a DROP (entry removed) emits clear-intent with the
 	// Before snapshot. A no-op write (drop of an absent entry) emits nothing.
-	emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+	if changed {
+		emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+	}
 	return nil
 }
 
@@ -140,7 +142,8 @@ func (a *API) WriteStopIntentIdleGuarded(taskName string, intent DaemonIntent, w
 		intent.UpdatedAt = time.Now().UTC()
 	}
 
-	before, after, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+	var refused *DaemonIntent
+	before, after, changed, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
 		// FIX-2a: arbitration under the flock. If an ACTIVE non-idle stop is
 		// already present, REFUSE the idle SET (operator reasons win). Read the
 		// prior entry from the (copied) sub-block the mutate operates on.
@@ -149,6 +152,8 @@ func (a *API) WriteStopIntentIdleGuarded(taskName string, intent DaemonIntent, w
 			if active && reason != IntentReasonIdle {
 				// An operator stop / chronic-failure / clock-skew-suspect is
 				// active: leave it untouched. Do NOT downgrade it to idle.
+				p := prior
+				refused = &p
 				return
 			}
 		}
@@ -164,7 +169,11 @@ func (a *API) WriteStopIntentIdleGuarded(taskName string, intent DaemonIntent, w
 	if err != nil {
 		return err
 	}
-	emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+	if changed {
+		emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+	} else if refused != nil {
+		emitIdleStopRefusedAudit(refused, taskName, who)
+	}
 	return nil
 }
 
@@ -191,7 +200,7 @@ func (a *API) ClearStopIntentIfReason(taskName string, wantReason string, who st
 		return false, ErrEntryOversize
 	}
 
-	before, _, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+	before, _, changed, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
 		// FIX-2b: only delete when the CURRENT entry still matches wantReason.
 		// An entry that was replaced by an operator stop (different reason)
 		// between the caller's lock-free read and now is LEFT in place.
@@ -205,7 +214,7 @@ func (a *API) ClearStopIntentIfReason(taskName string, wantReason string, who st
 	// Emit clear-intent only when we actually removed the matching entry. before
 	// is the prior snapshot; the entry was removed iff before existed AND its
 	// reason matched wantReason (the only case the mutate deletes).
-	if before != nil && before.Reason == wantReason && appendIntentAuditFn != nil {
+	if changed && before != nil && before.Reason == wantReason && appendIntentAuditFn != nil {
 		_ = appendIntentAuditFn(NewIntentAuditEntry(
 			WithAction("clear-intent"),
 			WithTask(taskName),
@@ -232,13 +241,13 @@ func (a *API) ClearStopIntent(taskName string, who string) error {
 		return ErrEntryOversize
 	}
 
-	before, _, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+	before, _, changed, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
 		delete(stops, taskName)
 	})
 	if err != nil {
 		return err
 	}
-	if before != nil && appendIntentAuditFn != nil {
+	if changed && before != nil && appendIntentAuditFn != nil {
 		_ = appendIntentAuditFn(NewIntentAuditEntry(
 			WithAction("clear-intent"),
 			WithTask(taskName),
@@ -258,22 +267,23 @@ func (a *API) ClearStopIntent(taskName string, who string) error {
 // taskName so callers can emit the matching audit entry.
 //
 // before is the prior value for taskName (nil when absent); after is the new
-// value (nil when the mutation removed/left-absent the entry).
+// value (nil when the mutation removed/left-absent the entry). changed reports
+// whether that entry actually changed and a write was committed.
 //
 // Lock-free write body: it commits via writeSupervisorIntentLockHeld (the same
 // helper the merge owner uses) because the flock is already held — re-entering
 // WriteSupervisorIntent would re-acquire the flock and deadlock on Windows
 // LockFileEx (the readIntentLocked/writeIntentLocked split daemon_intent.go
 // established).
-func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonIntent)) (before, after *DaemonIntent, err error) {
+func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonIntent)) (before, after *DaemonIntent, changed bool, err error) {
 	path, err := DefaultSupervisorIntentPath()
 	if err != nil {
-		return nil, nil, fmt.Errorf("stop-intent: resolve supervisor-intent path: %w", err)
+		return nil, nil, false, fmt.Errorf("stop-intent: resolve supervisor-intent path: %w", err)
 	}
 
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
-		return nil, nil, fmt.Errorf("stop-intent: flock supervisor-intent: %w", err)
+		return nil, nil, false, fmt.Errorf("stop-intent: flock supervisor-intent: %w", err)
 	}
 	defer func() { _ = lock.Unlock() }()
 
@@ -284,7 +294,7 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 	// merge owner.
 	intent, _, readErr := readSupervisorIntentForMerge(path)
 	if readErr != nil {
-		return nil, nil, fmt.Errorf("stop-intent: read supervisor-intent.json: %w", readErr)
+		return nil, nil, false, fmt.Errorf("stop-intent: read supervisor-intent.json: %w", readErr)
 	}
 	if intent == nil {
 		intent = &SupervisorIntentFile{}
@@ -314,7 +324,7 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 	// audit churn). stopEntriesEqual handles both-present-and-equal and
 	// both-absent.
 	if stopEntriesEqual(before, after) {
-		return before, after, nil
+		return before, after, false, nil
 	}
 
 	intent.Stops = stops
@@ -324,9 +334,9 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 		intent.Stops = nil
 	}
 	if err := writeSupervisorIntentLockHeld(path, intent); err != nil {
-		return nil, nil, fmt.Errorf("stop-intent: write supervisor-intent.json: %w", err)
+		return nil, nil, false, fmt.Errorf("stop-intent: write supervisor-intent.json: %w", err)
 	}
-	return before, after, nil
+	return before, after, true, nil
 }
 
 // stopEntriesEqual reports whether two optional DaemonIntent snapshots are
@@ -372,4 +382,17 @@ func emitStopIntentAudit(before, after *DaemonIntent, taskName, who, reason stri
 			WithBefore(before),
 		))
 	}
+}
+
+func emitIdleStopRefusedAudit(before *DaemonIntent, taskName, who string) {
+	if appendIntentAuditFn == nil {
+		return
+	}
+	_ = appendIntentAuditFn(NewIntentAuditEntry(
+		WithAction("idle-stop-refused-operator-stop-active"),
+		WithTask(taskName),
+		WithWho(who),
+		WithReason(before.Reason),
+		WithBefore(before),
+	))
 }

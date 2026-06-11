@@ -1248,6 +1248,88 @@ func TestReconcileIPC_DaemonIntentStopOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestReconcileIPC_ExpiredUserStopClassifiesDesiredRunning(t *testing.T) {
+	expiredTask := `\mcp-local-hub-expired-default`
+	freshTask := `\mcp-local-hub-fresh-default`
+	now := time.Now().UTC()
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: expiredTask, Server: "expired", Daemon: "default"},
+			{TaskName: freshTask, Server: "fresh", Daemon: "default"},
+		},
+		Stops: map[string]api.DaemonIntent{
+			expiredTask: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: now.Add(-api.StopIntentTTL - time.Hour),
+			},
+			freshTask: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: now,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	installSchedulerListFake(t, []scheduler.TaskStatus{
+		{Name: expiredTask, State: "Running"},
+		{Name: freshTask, State: "Running"},
+	})
+
+	req := api.IPCRequest{
+		ID:   28,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1 (only fresh active stop should post); drift=%+v",
+			body.AppliedCount, body.Drift)
+	}
+
+	byTask := map[string]api.DriftEntry{}
+	for _, entry := range body.Drift {
+		byTask[entry.TaskName] = entry
+	}
+	expired := byTask[expiredTask]
+	if expired.IntentDesired != api.ReconcileIntentDesiredRunning {
+		t.Fatalf("expired user-stop IntentDesired = %q, want %q",
+			expired.IntentDesired, api.ReconcileIntentDesiredRunning)
+	}
+	if expired.Action != api.ReconcileActionNoOp {
+		t.Fatalf("expired user-stop Action = %q, want %q for already-running daemon",
+			expired.Action, api.ReconcileActionNoOp)
+	}
+	fresh := byTask[freshTask]
+	if fresh.IntentDesired != api.ReconcileIntentDesiredStopped {
+		t.Fatalf("fresh user-stop IntentDesired = %q, want %q",
+			fresh.IntentDesired, api.ReconcileIntentDesiredStopped)
+	}
+	if fresh.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Fatalf("fresh user-stop Action = %q, want %q",
+			fresh.Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != freshTask {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for fresh stop %s only", ev, freshTask)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fresh stop EvIntentUpdate")
+	}
+	select {
+	case ev := <-fx.postedCh:
+		t.Fatalf("unexpected second event posted for expired stop: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 type reconcileContextSchedulerForTest struct {
 	listContext func(context.Context, string) ([]scheduler.TaskStatus, error)
 }
