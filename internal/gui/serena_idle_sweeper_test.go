@@ -419,8 +419,8 @@ func TestRouterForward_InFlightCounterAndRestamp(t *testing.T) {
 	release := make(chan struct{})
 	daemon := newFakeSerenaDaemon("forwardflight")
 	daemon.tool = func(w http.ResponseWriter, _ *http.Request, _ []byte) {
-		close(entered)  // the forward is now in-flight in the handler.
-		<-release       // block until the test releases it (mid-call).
+		close(entered) // the forward is now in-flight in the handler.
+		<-release      // block until the test releases it (mid-call).
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
@@ -605,6 +605,84 @@ func TestRouterToolsList_AllIdle_WakesCandidateAndSucceeds(t *testing.T) {
 	}
 	if wokeTask != `\mcp-local-hub-serena-toolswake` || wokePort != 9312 {
 		t.Fatalf("wake called with (%q,%d), want (\\mcp-local-hub-serena-toolswake, 9312)", wokeTask, wokePort)
+	}
+	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+}
+
+// TestRouterToolsList_AllIdle_FirstWakeRefusedTriesNextCandidate covers the
+// multi-workspace pool case: a user-stopped row may refuse wake, but a later
+// merely-idle sibling can still be woken and satisfy tools/list.
+//
+// Negative-control: wake only the first eligible candidate and this test leaves
+// the second daemon asleep, so tools/list returns "no daemon answered".
+func TestRouterToolsList_AllIdle_FirstWakeRefusedTriesNextCandidate(t *testing.T) {
+	wsStopped := serenaWS("stopped", "/proj/stopped", 9313)
+	wsIdle := serenaWS("idle", "/proj/idle", 9314)
+
+	firstDaemon := newFakeSerenaDaemon("stopped")
+	firstDaemon.tool = func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	firstTS := httptest.NewServer(firstDaemon.handler())
+	t.Cleanup(firstTS.Close)
+
+	var stateMu sync.Mutex
+	secondAwake := false
+	secondDaemon := newFakeSerenaDaemon("idle")
+	secondDaemon.tool = func(w http.ResponseWriter, _ *http.Request, b []byte) {
+		stateMu.Lock()
+		up := secondAwake
+		stateMu.Unlock()
+		if !up {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if !strings.Contains(string(b), `"tools/list"`) {
+			t.Errorf("upstream body did not carry tools/list; got %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	secondTS := httptest.NewServer(secondDaemon.handler())
+	t.Cleanup(secondTS.Close)
+
+	var wakeOrder []string
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{wsStopped, wsIdle}},
+			list:         []*api.WorkspaceEntry{wsStopped, wsIdle},
+		},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.WorkspaceKey == wsStopped.WorkspaceKey {
+				return firstTS.URL
+			}
+			return secondTS.URL
+		},
+		AuditFn: func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(_ context.Context, taskName string, _ int, _ string) error {
+			wakeOrder = append(wakeOrder, taskName)
+			if taskName == wsStopped.TaskName {
+				return api.ErrWakeRefusedOperatorStop
+			}
+			stateMu.Lock()
+			secondAwake = true
+			stateMu.Unlock()
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildLifecycleBody(t, "tools/list", map[string]any{})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list should wake the second eligible candidate after first refusal; status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	wantOrder := []string{wsStopped.TaskName, wsIdle.TaskName}
+	if len(wakeOrder) != len(wantOrder) || wakeOrder[0] != wantOrder[0] || wakeOrder[1] != wantOrder[1] {
+		t.Fatalf("wake order = %v, want %v", wakeOrder, wantOrder)
 	}
 	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
 }

@@ -604,18 +604,19 @@ func normalizeSchedulerState(raw string) string {
 // BOTH spawn-direction arms — !hasSched and scheduler-stopped) closes the
 // reconcile-side bystander revival on every spawn-direction path.
 //
-// Spawn-direction backoff preservation: StBackoffWaiting is also a
-// supervisor-owned wait state. Its timer, not reconcile --apply, owns the next
-// retry. Posting EvIntentUpdate(running) here would preempt the backoff timer
-// on unrelated applies and collapse the crash-loop delay, so both spawn arms
-// classify it no_op.
+// Spawn-direction settled-state preservation: StRunning is already at
+// desired=running, and StBackoffWaiting is a supervisor-owned wait state. Its
+// timer, not reconcile --apply, owns the next retry. Posting
+// EvIntentUpdate(running) here would preempt the backoff timer on unrelated
+// applies and collapse the crash-loop delay, so both spawn arms classify
+// backoff no_op.
 func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
 			if smState == api.StQuarantined {
 				return api.ReconcileActionNeedsManualReview
 			}
-			if smState == api.StBackoffWaiting {
+			if smState == api.StRunning || smState == api.StBackoffWaiting {
 				return api.ReconcileActionNoOp
 			}
 			return api.ReconcileActionPostEvIntentUpdate

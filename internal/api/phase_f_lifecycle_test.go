@@ -626,6 +626,60 @@ func TestStopForceKillSupervisorOwned_PortlessFallsBackToPID(t *testing.T) {
 	}
 }
 
+// TestStopForceKillSupervisorOwned_UnsupportedPortKillFallsBackToPID covers the
+// POSIX supervisor-owned force path: descriptor ports exist, but the production
+// port lookup hook is absent, so the port kill cannot target a process and must
+// fall through to the IPC PID.
+//
+// Negative-control: keep killDaemonByPort returning nil when lookupProcess is
+// nil and this test records no PID kill.
+func TestStopForceKillSupervisorOwned_UnsupportedPortKillFallsBackToPID(t *testing.T) {
+	stateDir := phaseFStateDir(t)
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 9315},
+		},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	origKill := killByPortFn
+	origLookup := lookupProcess
+	killByPortFn = killDaemonByPort
+	lookupProcess = nil
+	t.Cleanup(func() {
+		killByPortFn = origKill
+		lookupProcess = origLookup
+	})
+
+	var killedPIDs []int
+	origPID := stopForceKillPIDFn
+	stopForceKillPIDFn = func(pid int) error { killedPIDs = append(killedPIDs, pid); return nil }
+	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+
+	origStatus := supervisorIPCStatusFn
+	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: `\mcp-local-hub-time-default`, PID: 4243, State: "Running"}}, nil
+	}
+	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
+
+	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false, want true (a supervisor-owned target was in scope)")
+	}
+	if len(killedPIDs) != 1 || killedPIDs[0] != 4243 {
+		t.Fatalf("PID-fallback kills = %v, want exactly [4243]", killedPIDs)
+	}
+	if len(results) != 1 || results[0].Err != "" {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+}
+
 // TestStopForceKillSupervisorOwned_NoTargets_NoOp asserts the no-op path: a
 // server with no supervisor-owned descriptor returns (nil,false,nil) so the
 // caller falls through to the legacy stopKillCore.

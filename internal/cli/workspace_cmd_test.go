@@ -519,6 +519,53 @@ func TestWorkspaceUnregister_RemovesLSPOnlyByDefault(t *testing.T) {
 	}
 }
 
+// TestClassifyWorkspaceUnregister_LegacyKeyFallback pins the pre-classification
+// path used by `mcphub workspace unregister`: rows written before symlink-aware
+// canonicalization may exist only under the legacy workspace key, and the CLI
+// must find them before it decides "no registry rows match".
+//
+// Negative-control: classify only ListByWorkspace(canonicalKey) and this test
+// returns no languages, so it fails before api.Unregister gets its own legacy
+// fallback chance.
+func TestClassifyWorkspaceUnregister_LegacyKeyFallback(t *testing.T) {
+	withStateDir(t)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	const (
+		canonicalKey = "newkey00"
+		legacyKey    = "oldkey00"
+	)
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := reg.PutLSP(api.WorkspaceEntry{
+		WorkspaceKey:  legacyKey,
+		WorkspacePath: "/legacy/workspace",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		TaskName:      "mcp-local-hub-lsp-" + legacyKey + "-python",
+	}); err != nil {
+		t.Fatalf("PutLSP legacy row: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	langs, removeSerena, err := classifyWorkspaceUnregister(regPath, canonicalKey, legacyKey, "")
+	if err != nil {
+		t.Fatalf("classifyWorkspaceUnregister: %v", err)
+	}
+	if removeSerena {
+		t.Fatal("default unregister must not target serena rows")
+	}
+	if len(langs) != 1 || langs[0] != "python" {
+		t.Fatalf("classified languages = %v, want [python] from legacy key", langs)
+	}
+}
+
 func TestWorkspaceUnregister_BackendSerenaRemovesOnlySerena(t *testing.T) {
 	regPath, ws, wsKey := seedTwoBackends(t)
 	gotLangs := withStubbedLSPUnregister(t)

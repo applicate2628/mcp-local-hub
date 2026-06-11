@@ -2685,6 +2685,8 @@ func (a *API) StopAll() ([]RestartResult, error) {
 // Tests assign a fake in their setup and restore the default in defer.
 var killByPortFn = killDaemonByPort
 
+var errPortKillUnsupported = errors.New("port kill unsupported: process lookup unavailable")
+
 // killDaemonByPort finds the process listening on 127.0.0.1:port, kills
 // its whole tree with taskkill /F /T, and polls until the port is free.
 // Returns nil when nothing is listening (nothing to kill).
@@ -2693,8 +2695,11 @@ var killByPortFn = killDaemonByPort
 // Killing only hub.exe leaves the grandchildren running and occupying
 // the child-stdin side of the pipe.
 func killDaemonByPort(port int, timeout time.Duration) error {
-	if lookupProcess == nil || port == 0 {
+	if port == 0 {
 		return nil
+	}
+	if lookupProcess == nil {
+		return errPortKillUnsupported
 	}
 	pid, _, _, ok := lookupProcess(port)
 	if !ok {

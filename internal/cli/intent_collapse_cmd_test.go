@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,8 @@ func TestIntentCollapseCmd_CheckEndToEndIsPureRead(t *testing.T) {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 	daemonPath := filepath.Join(stateDir, "daemon-intent.json")
-	daemonRaw := []byte(`{"tasks":{"\\mcp-local-hub-foo-default":{"desired":"stopped","reason":"user-stop","updated_at":"2026-06-10T00:00:00Z"}}}`)
+	freshUpdatedAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	daemonRaw := []byte(fmt.Sprintf(`{"tasks":{"\\mcp-local-hub-foo-default":{"desired":"stopped","reason":"user-stop","updated_at":%q}}}`, freshUpdatedAt))
 	if err := os.WriteFile(daemonPath, daemonRaw, 0o600); err != nil {
 		t.Fatalf("seed daemon-intent.json: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -72,6 +73,33 @@ func globalTwoDaemonManifest() *config.ServerManifest {
 		Daemons:       []config.DaemonSpec{{Name: "alpha", Port: 9211}, {Name: "beta", Port: 9212}},
 		WeeklyRefresh: true,
 	}
+}
+
+type fakeInstallAutostartBackend struct {
+	statusReturn autostart.State
+	statusErr    error
+	enableErr    error
+	enableCalls  int
+	enableOpts   []autostart.Options
+}
+
+func (f *fakeInstallAutostartBackend) Enable(opts autostart.Options) error {
+	f.enableCalls++
+	f.enableOpts = append(f.enableOpts, opts)
+	return f.enableErr
+}
+
+func (f *fakeInstallAutostartBackend) Disable() error { return nil }
+
+func (f *fakeInstallAutostartBackend) Status(opts autostart.Options) (autostart.State, error) {
+	return f.statusReturn, f.statusErr
+}
+
+func installFakeAutostartBackend(t *testing.T, fb *fakeInstallAutostartBackend) {
+	t.Helper()
+	orig := installAutostartBackendFactoryFn
+	installAutostartBackendFactoryFn = func() (autostart.Backend, error) { return fb, nil }
+	t.Cleanup(func() { installAutostartBackendFactoryFn = orig })
 }
 
 // TestExecuteInstallTo_PassAPassB_Separation asserts the two-pass
@@ -1836,6 +1864,81 @@ func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTa
 	}
 	if f.runCount != 0 {
 		t.Errorf("scheduler Run calls = %d, want 0; Phase F defers every daemon spawn to the supervisor reconcile loop (runNames: %v)", f.runCount, f.runNames)
+	}
+}
+
+// TestInstallPlanCore_GlobalInstall_EnablesAbsentAutostartOwner pins the logon
+// owner handoff for the supervisor-intent path. A global install suppresses
+// per-daemon scheduler tasks, so an absent autostart shim must be enabled or a
+// reboot leaves no owner that can start the supervisor.
+//
+// Negative-control: remove the post-install autostart owner ensure call and the
+// fake Enable count stays 0, so this test fails.
+func TestInstallPlanCore_GlobalInstall_EnablesAbsentAutostartOwner(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	// Seed only strict_mode so the install's merged intent must preserve it and
+	// thread the same value into autostart.Enable.
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version:    1,
+		StrictMode: true,
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent strict_mode: %v", err)
+	}
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateAbsent}
+	installFakeAutostartBackend(t, fb)
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}))
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(global install): %v", err)
+	}
+
+	if fb.enableCalls != 1 {
+		t.Fatalf("autostart Enable calls = %d, want 1 for absent owner", fb.enableCalls)
+	}
+	if len(fb.enableOpts) != 1 || !fb.enableOpts[0].StrictMode {
+		t.Fatalf("autostart Enable opts = %+v, want StrictMode=true from supervisor-intent", fb.enableOpts)
+	}
+}
+
+// TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops proves install
+// does not rewrite an existing logon owner merely because daemon scheduler tasks
+// are suppressed.
+//
+// Negative-control: unconditionally call Enable after the supervisor-path
+// install and the fake Enable count becomes 1, so this test fails.
+func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T) {
+	daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped}
+	installFakeAutostartBackend(t, fb)
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}))
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(global install): %v", err)
+	}
+
+	if fb.enableCalls != 0 {
+		t.Fatalf("autostart Enable calls = %d, want 0 when owner is already enabled", fb.enableCalls)
 	}
 }
 

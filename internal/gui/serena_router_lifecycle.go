@@ -879,16 +879,16 @@ func (s *Server) handleToolsList(
 	writeJSONRPCResult(w, tb.ID, json.RawMessage(result), nil)
 }
 
-// wakeOneSerenaCandidateForToolsList wakes the FIRST eligible serena candidate
+// wakeOneSerenaCandidateForToolsList wakes an eligible serena candidate
 // before a tools/list fetch (FIX-4). It is the tools/list-path counterpart to
 // the tool-call wake (serena_router.go) that the lifecycle path otherwise lacks:
 // without it, a tools/list against an all-idle pool can never wake a daemon and
 // fails permanently. It is best-effort and intentionally narrow:
 //
 //   - nil WakeIdleFn → no-op (partially-wired routing, back-compat).
-//   - picks the first SERENA candidate with a non-empty TaskName + Port (the
-//     wake needs both). LSP rows are skipped — the serena tools/list pool is
-//     serena-only. One live daemon is enough (shared static catalog).
+//   - tries SERENA candidates with a non-empty TaskName + Port (the wake needs
+//     both). LSP rows are skipped — the serena tools/list pool is serena-only.
+//     One live daemon is enough (shared static catalog).
 //   - bounded (30s, covering clear + reconcile-nudge + readiness) and detached
 //     from r.Context() (a client disconnect must not abort the supervisor
 //     nudge mid-flight), mirroring the tool-call wake posture.
@@ -906,7 +906,8 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 	if s == nil || deps == nil || deps.WakeIdleFn == nil {
 		return
 	}
-	var target *api.WorkspaceEntry
+	wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+	defer wakeCancel()
 	for _, ws := range entries {
 		if ws == nil || ws.TaskName == "" || ws.Port == 0 {
 			continue
@@ -914,25 +915,20 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 		if !isSerenaWorkspaceEntry(ws) {
 			continue
 		}
-		target = ws
-		break
-	}
-	if target == nil {
+		if err := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-tools-list-wake"); err != nil {
+			// Non-fatal: an operator-stop refusal or a not-ready respawn just
+			// means this candidate cannot answer yet. Try the next eligible
+			// workspace inside the same bounded wake budget; if none wake, the
+			// fetch loop below still returns the honest pool failure.
+			_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
+				"workspace_key": ws.WorkspaceKey,
+				"task_name":     ws.TaskName,
+				"port":          ws.Port,
+				"err":           err.Error(),
+			})
+			continue
+		}
 		return
-	}
-	wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-	defer wakeCancel()
-	if err := deps.WakeIdleFn(wakeCtx, target.TaskName, target.Port, "serena-tools-list-wake"); err != nil {
-		// Non-fatal: an operator-stop refusal or a not-ready respawn just means
-		// the fetch loop below will try (and possibly fail loud on) the pool. We
-		// audit it so the wake attempt is diagnosable, but never block tools/list
-		// on it.
-		_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
-			"workspace_key": target.WorkspaceKey,
-			"task_name":     target.TaskName,
-			"port":          target.Port,
-			"err":           err.Error(),
-		})
 	}
 }
 

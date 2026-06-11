@@ -55,10 +55,11 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 		// Spawn direction: running intent + missing scheduler row → spawn
 		// directly from intent (the dead legacy needs_manual_review row).
 		{"running missing idle", missing, false, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
-		// Spawn direction across the live/in-flight SM states → still spawn
-		// (these are NOT settled, so a running-intent reconcile drives them).
+		// Spawn direction across in-flight SM states → still spawn (these are
+		// NOT settled, so a running-intent reconcile drives them). StRunning is
+		// already at the desired state and must be no_op.
 		{"running spawning", missing, false, running, api.StSpawning, api.ReconcileActionPostEvIntentUpdate},
-		{"running running", missing, false, running, api.StRunning, api.ReconcileActionPostEvIntentUpdate},
+		{"running running", missing, false, running, api.StRunning, api.ReconcileActionNoOp},
 		{"running exiting", missing, false, running, api.StExiting, api.ReconcileActionPostEvIntentUpdate},
 		{"running backoff", missing, false, running, api.StBackoffWaiting, api.ReconcileActionNoOp},
 		// Spawn-direction quarantine-respect: a quarantined bystander whose
@@ -362,6 +363,63 @@ func TestReconcileIPC_BackoffBystanderNotRespawnedOnApply(t *testing.T) {
 	select {
 	case ev := <-fx.postedCh:
 		t.Fatalf("unexpected second event posted (backoff timer must not be preempted): %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestReconcileIPC_RunningBystanderNotRepostedOnApply(t *testing.T) {
+	target := `\mcp-local-hub-target-default`
+	bystander := `\mcp-local-hub-bystander-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: target, Server: "target", Daemon: "default", Command: "mcphub",
+				Args: []string{"daemon", "--server", "target", "--daemon", "default"}, Port: 9244},
+			{TaskName: bystander, Server: "bystander", Daemon: "default", Command: "mcphub",
+				Args: []string{"daemon", "--server", "bystander", "--daemon", "default"}, Port: 9245},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	fx.ctrl.smStates.Store(target, api.StIdle)
+	fx.ctrl.smStates.Store(bystander, api.StRunning)
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{ID: 79, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 2 || len(body.Drift) != 2 {
+		t.Fatalf("DriftCount=%d drift=%+v, want two rows (target + bystander)", body.DriftCount, body.Drift)
+	}
+
+	driftByTask := map[string]api.DriftEntry{}
+	for _, e := range body.Drift {
+		driftByTask[e.TaskName] = e
+	}
+	if got := driftByTask[target].Action; got != api.ReconcileActionPostEvIntentUpdate {
+		t.Fatalf("target Action = %q, want %q (idle missing row still gets spawn intent)",
+			got, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if got := driftByTask[bystander].Action; got != api.ReconcileActionNoOp {
+		t.Fatalf("bystander Action = %q, want %q (running bystander is already at desired=running)",
+			got, api.ReconcileActionNoOp)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1 (only the idle target is dispatched)", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != target {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for target row %s", ev, target)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected EvIntentUpdate post for the idle target")
+	}
+	select {
+	case ev := <-fx.postedCh:
+		t.Fatalf("unexpected second event posted (running bystander must not receive EvIntentUpdate): %+v", ev)
 	case <-time.After(100 * time.Millisecond):
 	}
 }

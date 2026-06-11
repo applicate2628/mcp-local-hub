@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -84,22 +85,33 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 }
 
 // forceKillOneSupervisorTarget kills a single supervisor-owned descriptor.
-// Port is the primary target (the daemon's listening socket — the same
-// signal stopKillCore uses); a zero-port descriptor falls back to a PID kill
-// resolved from the IPC status snapshot. A target with neither a port nor a
-// live PID is treated as already-stopped (success row).
+// Port is the primary target (the daemon's listening socket — the same signal
+// stopKillCore uses). Unsupported port lookup falls back to a PID resolved from
+// the IPC status snapshot; if neither path can target a process, only a
+// zero-port descriptor is treated as already-stopped.
 func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) RestartResult {
+	portKillUnsupported := false
 	if d.Port != 0 {
 		if err := killByPortFn(d.Port, 5*time.Second); err != nil {
-			return RestartResult{TaskName: d.TaskName, Err: "force kill daemon by port: " + err.Error()}
+			if errors.Is(err, errPortKillUnsupported) {
+				portKillUnsupported = true
+			} else {
+				return RestartResult{TaskName: d.TaskName, Err: "force kill daemon by port: " + err.Error()}
+			}
+		} else {
+			// killByPortFn returned nil after a real lookup, so the process was
+			// killed or the port was verifiably unbound.
+			return RestartResult{TaskName: d.TaskName}
 		}
-		return RestartResult{TaskName: d.TaskName}
 	}
 	if pid, ok := pidByTask[strings.TrimPrefix(d.TaskName, `\`)]; ok && pid > 0 {
 		if err := stopForceKillPIDFn(pid); err != nil {
 			return RestartResult{TaskName: d.TaskName, Err: fmt.Sprintf("force kill daemon by pid %d: %v", pid, err)}
 		}
 		return RestartResult{TaskName: d.TaskName}
+	}
+	if portKillUnsupported {
+		return RestartResult{TaskName: d.TaskName, Err: "force kill daemon by port: " + errPortKillUnsupported.Error() + "; no live PID fallback"}
 	}
 	// No port and no live PID: the daemon is already not running, so the
 	// force-stop goal already holds. Success row (no Err).

@@ -63,8 +63,11 @@ var loadSerenaManifestForCLI = loadSerenaManifestFromDisk
 // reg.RemoveByBackend, which dropped the registry row WITHOUT the paired intent
 // teardown — the source of the orphaned-LSP-daemon quarantine bug. CLI tests
 // stub this so they stay hermetic (no real scheduler / netstat / IPC dial).
-var unregisterLSPWorkspaceFn = func(canonicalWorkspace string, languages []string) (*api.UnregisterReport, error) {
-	return api.NewAPI().Unregister(canonicalWorkspace, languages)
+// The workspace argument is the operator-supplied path, not the resolved
+// canonical path, so api.Unregister can compute its own legacy-key fallback for
+// pre-symlink-canonicalization registry rows.
+var unregisterLSPWorkspaceFn = func(workspacePath string, languages []string) (*api.UnregisterReport, error) {
+	return api.NewAPI().Unregister(workspacePath, languages)
 }
 
 // loadSerenaManifestFromDisk is the production manifest loader. It uses
@@ -329,6 +332,11 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 		return err
 	}
 	wsKey := api.WorkspaceKey(canonical)
+	legacyCanonical, err := api.CanonicalWorkspacePathLegacyCompat(rawPath)
+	if err != nil {
+		return err
+	}
+	legacyWSKey := api.WorkspaceKey(legacyCanonical)
 
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
@@ -350,7 +358,7 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	//     registry lock, so we must NOT hold the lock across that call.
 	//   - The serena (sentinel) row has no supervisor-intent LSP descriptor to
 	//     pair, so it is removed directly via RemoveByBackend("serena").
-	lspLangs, removeSerena, err := classifyWorkspaceUnregister(regPath, wsKey, backend)
+	lspLangs, removeSerena, err := classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend)
 	if err != nil {
 		return err
 	}
@@ -382,7 +390,7 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	// only (the registry is a per-user 0600 boundary), so the operator who hit it
 	// is the one who can re-run.
 	if len(lspLangs) > 0 {
-		report, uerr := unregisterLSPWorkspaceFn(canonical, lspLangs)
+		report, uerr := unregisterLSPWorkspaceFn(rawPath, lspLangs)
 		if uerr != nil {
 			return fmt.Errorf("paired LSP teardown for workspace %s: %w", canonical, uerr)
 		}
@@ -406,6 +414,9 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			return err
 		}
 		n := reg.RemoveByBackend(wsKey, "serena")
+		if legacyWSKey != wsKey {
+			n += reg.RemoveByBackend(legacyWSKey, "serena")
+		}
 		if err := reg.Save(); err != nil {
 			unlock()
 			return err
@@ -438,7 +449,7 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 //   - "all"     → every LSP row + the serena row.
 //   - "serena"  → the serena row only.
 //   - <name>    → LSP rows whose Backend or Language equals <name>.
-func classifyWorkspaceUnregister(regPath, wsKey, backend string) (lspLangs []string, removeSerena bool, err error) {
+func classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend string) (lspLangs []string, removeSerena bool, err error) {
 	reg := api.NewRegistry(regPath)
 	unlock, lerr := reg.Lock()
 	if lerr != nil {
@@ -448,18 +459,18 @@ func classifyWorkspaceUnregister(regPath, wsKey, backend string) (lspLangs []str
 	if lerr := reg.Load(); lerr != nil {
 		return nil, false, lerr
 	}
-	for _, e := range reg.ListByWorkspace(wsKey) {
+	for _, e := range workspaceRowsForUnregister(reg, wsKey, legacyWSKey) {
 		isSerena := e.Language == api.SerenaLanguageSentinel
 		switch backend {
 		case "":
 			if !isSerena {
-				lspLangs = append(lspLangs, e.Language)
+				lspLangs = appendUniqueString(lspLangs, e.Language)
 			}
 		case "all":
 			if isSerena {
 				removeSerena = true
 			} else {
-				lspLangs = append(lspLangs, e.Language)
+				lspLangs = appendUniqueString(lspLangs, e.Language)
 			}
 		case "serena":
 			if isSerena {
@@ -467,11 +478,28 @@ func classifyWorkspaceUnregister(regPath, wsKey, backend string) (lspLangs []str
 			}
 		default:
 			if !isSerena && (e.Backend == backend || e.Language == backend) {
-				lspLangs = append(lspLangs, e.Language)
+				lspLangs = appendUniqueString(lspLangs, e.Language)
 			}
 		}
 	}
 	return lspLangs, removeSerena, nil
+}
+
+func workspaceRowsForUnregister(reg *api.Registry, wsKey, legacyWSKey string) []api.WorkspaceEntry {
+	rows := append([]api.WorkspaceEntry{}, reg.ListByWorkspace(wsKey)...)
+	if legacyWSKey != "" && legacyWSKey != wsKey {
+		rows = append(rows, reg.ListByWorkspace(legacyWSKey)...)
+	}
+	return rows
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 // newWorkspaceListCmd builds `mcphub workspace list [--json]`.

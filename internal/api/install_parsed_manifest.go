@@ -35,8 +35,15 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/config"
 )
+
+// installAutostartBackendFactoryFn is the install-path seam for ensuring the
+// supervisor logon owner after global supervisor-intent installs. Production
+// uses the OS backend; tests inject a fake so no real Task Scheduler,
+// systemd-user, or launchctl state is touched.
+var installAutostartBackendFactoryFn = autostart.New
 
 // InstallParsedManifestOpts controls an InstallParsedManifest invocation.
 //
@@ -490,6 +497,8 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	// server's prior descriptor rows and per-server weekly timer.
 	superviseGlobal := m.Kind != config.KindWorkspaceScoped && (len(plan.SupervisorIntent) > 0 || daemonFilter == "")
 	var nudgeAfterInstall bool
+	var ensureAutostartAfterInstall bool
+	var autostartStrictMode bool
 
 	if superviseGlobal {
 		// The supervisor-intent flock is held ONLY across the read-merge-write
@@ -539,6 +548,10 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifacts(priorIntent, m.Name))
 			nudgeAfterInstall = len(plan.SupervisorIntent) > 0 ||
 				(daemonFilter == "" && supervisorIntentHasServerDaemonRows(priorIntent, m.Name))
+			if len(plan.SupervisorIntent) > 0 {
+				ensureAutostartAfterInstall = true
+				autostartStrictMode = desiredIntent.StrictMode
+			}
 			// Defense-in-depth: a global manifest must never materialize a
 			// runtime_spec row. If one ever appeared it would need the §7.1
 			// supervisor-running gate (which lives in InstallParsedManifest), so
@@ -609,6 +622,9 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			return err
 		}
 		cleanupLegacySchedulerTasksForSupervisorInstall(m, daemonFilter, w)
+		if ensureAutostartAfterInstall {
+			ensureGlobalInstallAutostartOwner(w, autostartStrictMode)
+		}
 	} else {
 		// Global manifest with no daemons (e.g. remote-http): client-config
 		// writes only — no scheduler tasks, no supervisor-intent rows.
@@ -646,6 +662,39 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 		nudgeSupervisorReconcileAfterGlobalInstall(context.Background(), w)
 	}
 	return nil
+}
+
+func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool) {
+	backend, err := installAutostartBackendFactoryFn()
+	if err != nil {
+		warnAutostartOwner(w, "resolve backend", err)
+		return
+	}
+	opts := autostart.Options{StrictMode: strictMode}
+	state, err := backend.Status(opts)
+	if err != nil {
+		warnAutostartOwner(w, "read status", err)
+		return
+	}
+	switch state {
+	case autostart.StateAbsent:
+		if err := backend.Enable(opts); err != nil {
+			warnAutostartOwner(w, "enable", err)
+		}
+	case autostart.StateEnabledRunning, autostart.StateEnabledStopped:
+		return
+	default:
+		if w != nil {
+			fmt.Fprintf(w, "  warning: supervisor autostart owner is %s; run `mcphub autostart enable` to reconcile\n", state)
+		}
+	}
+}
+
+func warnAutostartOwner(w io.Writer, action string, err error) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (manual: mcphub autostart enable)\n", action, err)
 }
 
 // nudgeSupervisorReconcileAfterGlobalInstall asks a running supervisor to
