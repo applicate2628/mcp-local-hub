@@ -1731,6 +1731,79 @@ func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTa
 	}
 }
 
+func TestInstallPlanCore_GlobalFilteredInstall_ReplacesOnlySelectedDaemon(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: "\\mcp-local-hub-demo-alpha", Server: "demo", Daemon: "alpha", Command: "stale-alpha", Port: 9991},
+			{TaskName: "\\mcp-local-hub-demo-beta", Server: "demo", Daemon: "beta", Command: "preserve-beta", Port: 9992},
+			{TaskName: "\\mcp-local-hub-other-d", Server: "other", Daemon: "d", Command: "preserve-other", Port: 9993},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "alpha")
+	if err != nil {
+		t.Fatalf("BuildPlan(filtered): %v", err)
+	}
+	if got := len(plan.SupervisorIntent); got != 1 {
+		t.Fatalf("filtered plan SupervisorIntent rows = %d, want 1", got)
+	}
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	if err := a.installPlanCore(context.Background(), m, plan, "alpha", false, &buf); err != nil {
+		t.Fatalf("installPlanCore(filtered global install): %v", err)
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent(%s): %v", intentPath, err)
+	}
+	byKey := map[string]SupervisorDaemon{}
+	for _, d := range written.Daemons {
+		byKey[d.Server+"/"+d.Daemon] = d
+	}
+	alpha, ok := byKey["demo/alpha"]
+	if !ok {
+		t.Fatalf("filtered install did not write selected daemon demo/alpha; rows=%+v", written.Daemons)
+	}
+	if alpha.Port != 9211 || alpha.Command == "stale-alpha" {
+		t.Errorf("selected daemon was not refreshed from the manifest: %+v", alpha)
+	}
+	beta, ok := byKey["demo/beta"]
+	if !ok {
+		t.Fatalf("filtered install dropped unselected existing daemon demo/beta; rows=%+v", written.Daemons)
+	}
+	if beta.Command != "preserve-beta" || beta.Port != 9992 {
+		t.Errorf("unselected existing daemon was not preserved verbatim: %+v", beta)
+	}
+	other, ok := byKey["other/d"]
+	if !ok {
+		t.Fatalf("filtered install dropped sibling server daemon other/d; rows=%+v", written.Daemons)
+	}
+	if other.Command != "preserve-other" || other.Port != 9993 {
+		t.Errorf("sibling server daemon was not preserved verbatim: %+v", other)
+	}
+	if _, ok := byKey["demo/"]; ok {
+		t.Fatalf("unexpected empty daemon key present: rows=%+v", written.Daemons)
+	}
+	for _, d := range written.Daemons {
+		if d.Server == "demo" && d.Daemon != "alpha" && d.Daemon != "beta" {
+			t.Fatalf("filtered install wrote unrequested demo daemon %q; rows=%+v", d.Daemon, written.Daemons)
+		}
+	}
+}
+
 // TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated is the
 // v0.6 Phase F FALSIFICATION test (spec §5 "Phase F", line 639): a fresh global
 // install must create ZERO `\mcp-local-hub-<server>-<daemon>` per-daemon Task
@@ -1865,5 +1938,174 @@ func TestBuildMergedSupervisorIntent_PreservesStopsSubBlock(t *testing.T) {
 	}
 	if got.Desired != stop.Desired || got.Reason != stop.Reason || !got.UpdatedAt.Equal(stop.UpdatedAt) {
 		t.Fatalf("stop entry mutated by the install merge: got %+v want %+v", got, stop)
+	}
+}
+
+// TestInstallPlanCore_GlobalFilteredInstall_BlankDaemonRowNotDuplicated is the
+// bot PR #284 P2 (finding 1) regression: a legacy / older-writer
+// supervisor-intent row whose Daemon field is BLANK but whose task_name IS the
+// selected daemon's canonical task (`\mcp-local-hub-demo-alpha`) must be
+// REPLACED by the filtered install, not preserved alongside the freshly
+// materialized row. The field-only filter (`d.Server == m.Name && d.Daemon ==
+// daemonFilter`) misses the blank-Daemon row, so the stale row survives AND the
+// fresh row appends -> DUPLICATE task_name entries (duplicate status rows,
+// ambiguous stop/restart selection). The task-name fallback added to
+// buildMergedSupervisorIntent's kept-loop closes this.
+//
+// Negative-control: without the canonical-task-name fallback this test fails
+// because the blank-Daemon stale row survives, producing TWO rows keyed
+// `\mcp-local-hub-demo-alpha`.
+//
+// State safety: daemonIntentTestHelper redirects the state dir to a fresh
+// t.TempDir; nothing touches the live host %LOCALAPPDATA%\mcp-local-hub\.
+func TestInstallPlanCore_GlobalFilteredInstall_BlankDaemonRowNotDuplicated(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			// Legacy/older-writer row: task_name IS demo/alpha but the Server
+			// AND Daemon fields are blank (other intent readers re-derive them
+			// from the task name via ParseManagedTaskName). The field-only
+			// filter cannot see this is the selected daemon's row.
+			{TaskName: `\mcp-local-hub-demo-alpha`, Command: "stale-blank-alpha", Port: 9991},
+			{TaskName: `\mcp-local-hub-demo-beta`, Server: "demo", Daemon: "beta", Command: "preserve-beta", Port: 9992},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "alpha")
+	if err != nil {
+		t.Fatalf("BuildPlan(filtered alpha): %v", err)
+	}
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	if err := a.installPlanCore(context.Background(), m, plan, "alpha", false, &buf); err != nil {
+		t.Fatalf("installPlanCore(filtered global install): %v", err)
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent(%s): %v", intentPath, err)
+	}
+
+	// CORE assertion: exactly ONE row keyed to the selected daemon's task name.
+	// Pre-fix the blank-Daemon stale row + the fresh row both carry this key.
+	const alphaTask = `\mcp-local-hub-demo-alpha`
+	var alphaRows []SupervisorDaemon
+	for _, d := range written.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == alphaTask {
+			alphaRows = append(alphaRows, d)
+		}
+	}
+	if len(alphaRows) != 1 {
+		t.Fatalf("filtered install produced %d rows for task %q, want exactly 1 (no duplicate); rows=%+v", len(alphaRows), alphaTask, written.Daemons)
+	}
+	// The surviving alpha row must be the freshly materialized one (populated
+	// Server/Daemon from the manifest, refreshed port/command), not the stale
+	// blank row.
+	got := alphaRows[0]
+	if got.Server != "demo" || got.Daemon != "alpha" {
+		t.Errorf("surviving alpha row has blank/stale identity fields %+v; want Server=demo Daemon=alpha (fresh row)", got)
+	}
+	if got.Command == "stale-blank-alpha" || got.Port != 9211 {
+		t.Errorf("surviving alpha row was not refreshed from the manifest: %+v", got)
+	}
+
+	// The unselected sibling beta is preserved verbatim.
+	var betaRows []SupervisorDaemon
+	for _, d := range written.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == `\mcp-local-hub-demo-beta` {
+			betaRows = append(betaRows, d)
+		}
+	}
+	if len(betaRows) != 1 {
+		t.Fatalf("unselected sibling beta = %d rows, want exactly 1 (preserved verbatim); rows=%+v", len(betaRows), written.Daemons)
+	}
+	if betaRows[0].Command != "preserve-beta" || betaRows[0].Port != 9992 {
+		t.Errorf("unselected sibling beta not preserved verbatim: %+v", betaRows[0])
+	}
+}
+
+// TestBuildMergedSupervisorIntent_FilteredInstall_PreservesSiblingStop is the
+// bot PR #284 P2 (finding 2) regression for the FILTERED path: master's
+// 4ed263d carries prior.Stops verbatim into the merged file. This locks that
+// the Stops preservation COMPOSES with the daemonFilter kept-loop — a
+// user-stopped SIBLING daemon (beta stopped, filtered install of alpha) keeps
+// BOTH its descriptor row AND its stop tombstone. If the fix had been written
+// only for the full-install branch, the filtered branch would silently respawn
+// the stopped sibling on the next reconcile.
+//
+// Driven directly against buildMergedSupervisorIntent (like the
+// PreservesStopsSubBlock test above) so the assertion isolates the merge
+// contract from scheduler/preflight noise.
+func TestBuildMergedSupervisorIntent_FilteredInstall_PreservesSiblingStop(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	betaStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Now().UTC(),
+	}
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha`, Server: "demo", Daemon: "alpha", Command: "stale-alpha", Port: 9991},
+			{TaskName: `\mcp-local-hub-demo-beta`, Server: "demo", Daemon: "beta", Command: "preserve-beta", Port: 9992},
+		},
+		Stops: map[string]DaemonIntent{
+			// Operator stopped the SIBLING beta. The filtered install of alpha
+			// must not disturb beta's descriptor OR its stop tombstone.
+			`\mcp-local-hub-demo-beta`: betaStop,
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := globalTwoDaemonManifest() // alpha (9211) + beta (9212)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "alpha", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent(filtered alpha): %v", err)
+	}
+
+	// Sibling beta's stop tombstone survives the filtered install.
+	got, ok := merged.Stops[`\mcp-local-hub-demo-beta`]
+	if !ok {
+		t.Fatalf("filtered install DROPPED the sibling beta stop tombstone — beta would respawn on the next reconcile despite the operator stop")
+	}
+	if got.Desired != betaStop.Desired || got.Reason != betaStop.Reason || !got.UpdatedAt.Equal(betaStop.UpdatedAt) {
+		t.Fatalf("sibling stop tombstone mutated by the filtered merge: got %+v want %+v", got, betaStop)
+	}
+
+	// Sibling beta's DESCRIPTOR is also preserved verbatim (not just the stop).
+	byKey := map[string]SupervisorDaemon{}
+	for _, d := range merged.Daemons {
+		byKey[canonicalIntentTaskKey(d.TaskName)] = d
+	}
+	beta, ok := byKey[`\mcp-local-hub-demo-beta`]
+	if !ok {
+		t.Fatalf("filtered install dropped the sibling beta descriptor; rows=%+v", merged.Daemons)
+	}
+	if beta.Command != "preserve-beta" || beta.Port != 9992 {
+		t.Errorf("sibling beta descriptor not preserved verbatim: %+v", beta)
+	}
+
+	// The selected alpha row was refreshed from the manifest.
+	alpha, ok := byKey[`\mcp-local-hub-demo-alpha`]
+	if !ok {
+		t.Fatalf("filtered install dropped the selected alpha descriptor; rows=%+v", merged.Daemons)
+	}
+	if alpha.Command == "stale-alpha" || alpha.Port != 9211 {
+		t.Errorf("selected alpha row not refreshed from manifest: %+v", alpha)
 	}
 }

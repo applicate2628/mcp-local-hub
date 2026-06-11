@@ -622,8 +622,9 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 const supervisorIntentFileLeaf = "supervisor-intent.json"
 
 // buildMergedSupervisorIntent loads the existing supervisor-intent.json (if
-// any), removes the daemons that belong to m.Name, appends the daemons this
-// install plans for m, and returns the merged file plus the prior raw bytes
+// any), removes the daemons this install owns for m.Name (all rows on a full
+// install, or only daemonFilter's row on a partial install), appends the
+// daemons this install plans for m, and returns the merged file plus the prior raw bytes
 // (for rollback). Ownership-preserving: daemons for OTHER servers are left
 // untouched.
 //
@@ -635,7 +636,7 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 //     (one SupervisorDaemon per registered serena workspace), keyed by the
 //     canonical SerenaTaskNameForWorkspace task name.
 //   - Otherwise (a workspace-scoped manifest with no registered workspaces)
-//     -> supervisorDaemonsFromPlan(m): the static per-daemon descriptors
+//     -> supervisorDaemonsFromPlan(m, daemonFilter): the static per-daemon descriptors
 //     (empty for a template-only manifest with no workspaces). This keeps the
 //     template-only-no-workspaces path byte-identical to the pre-D.3b
 //     behavior.
@@ -664,21 +665,50 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 //
 // Siblings' timers are ALWAYS preserved untouched; only THIS server's
 // server-weekly-refresh timer is replaced, mirroring the Daemons replace-by-
-// server logic above.
+// server logic above for full installs. Filtered installs replace only the
+// selected daemon row and preserve this server's other daemon rows verbatim.
 func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return nil, nil, false, err
 	}
 
+	// On a filtered install, the fresh row supervisorDaemonsFromPlan
+	// materializes is keyed by this canonical task name. A prior row that
+	// names the SAME task must be dropped here regardless of how its Server /
+	// Daemon fields are populated, or it survives the field-based filter and
+	// the fresh row appends alongside it -> DUPLICATE task_name entries
+	// (duplicate status rows, ambiguous stop/restart selection). Legacy /
+	// older-writer rows can carry a blank or stale Daemon (other intent
+	// readers tolerate that by re-deriving from the task name via
+	// ParseManagedTaskName), so the field match alone is not sufficient (bot
+	// PR #284 P2). Empty daemonFilter -> empty filteredTaskName -> the
+	// task-name fallback is inert (the full-install branch already drops every
+	// row for m.Name).
+	var filteredTaskName string
+	if daemonFilter != "" {
+		filteredTaskName = canonicalIntentTaskKey("mcp-local-hub-" + m.Name + "-" + daemonFilter)
+	}
 	kept := make([]SupervisorDaemon, 0, len(prior.Daemons))
 	for _, d := range prior.Daemons {
-		if d.Server == m.Name {
+		// Full install: drop every row this server owns.
+		if daemonFilter == "" {
+			if d.Server == m.Name {
+				continue // replaced below
+			}
+			kept = append(kept, d)
+			continue
+		}
+		// Filtered install: drop the selected daemon's row. Match on the
+		// populated fields first, then fall back to the canonical task name so
+		// a blank-/stale-Daemon legacy row for the same task is not duplicated.
+		if (d.Server == m.Name && d.Daemon == daemonFilter) ||
+			canonicalIntentTaskKey(d.TaskName) == filteredTaskName {
 			continue // replaced below
 		}
 		kept = append(kept, d)
 	}
-	kept = append(kept, serenaOrPlanDaemons(m, workspaces, w)...)
+	kept = append(kept, serenaOrPlanDaemons(m, workspaces, daemonFilter, w)...)
 
 	merged = &SupervisorIntentFile{
 		Version:           1,
@@ -789,14 +819,15 @@ func fanOutAuditTaskNames(m *config.ServerManifest, desired *SupervisorIntentFil
 // contributes for m. It fans out per registered serena workspace when m is a
 // workspace-scoped dynamic-pool manifest (DaemonTemplate != nil) and the
 // workspaces snapshot is non-empty; otherwise it falls back to the static
-// plan-derived set (supervisorDaemonsFromPlan), which is what api.Install and
+// plan-derived set (supervisorDaemonsFromPlan), filtered by daemonFilter when
+// the operator requested a single daemon, which is what api.Install and
 // the template-only-no-workspaces path use.
 //
 // BuildSupervisorDaemonsForSerena itself guards on m.DaemonTemplate != nil,
 // m.Kind == KindWorkspaceScoped, and len(workspaces) > 0 (returning nil
 // otherwise), so a non-workspace-scoped manifest or an empty workspaces
 // snapshot deterministically takes the plan-derived branch here.
-func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry, w io.Writer) []SupervisorDaemon {
+func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) []SupervisorDaemon {
 	if m.DaemonTemplate != nil && len(workspaces) > 0 {
 		// FIX 3 — drop stale workspace rows (path no longer exists on disk)
 		// BEFORE the fan-out. BuildSupervisorDaemonsForSerena's contract
@@ -826,7 +857,7 @@ func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry, 
 			return serena
 		}
 	}
-	return supervisorDaemonsFromPlan(m)
+	return supervisorDaemonsFromPlan(m, daemonFilter)
 }
 
 // workspacePathStale reports whether a workspace path is stale (deleted /
@@ -1033,7 +1064,9 @@ func emitSpecBearingInstallAllowedUnderLockEvent(server, lockPath string) {
 // long-lived supervisor child keyed by the canonical leading-backslash task
 // name. Workspace-scoped manifests carry no static Daemons (their fan-out is
 // the D.2 helper, out of this slice's scope) so this returns nil for them.
-func supervisorDaemonsFromPlan(m *config.ServerManifest) []SupervisorDaemon {
+// daemonFilter limits the materialized rows for partial installs; empty means
+// all manifest daemons.
+func supervisorDaemonsFromPlan(m *config.ServerManifest, daemonFilter string) []SupervisorDaemon {
 	if m.Kind == config.KindWorkspaceScoped {
 		return nil
 	}
@@ -1047,6 +1080,9 @@ func supervisorDaemonsFromPlan(m *config.ServerManifest) []SupervisorDaemon {
 	}
 	out := make([]SupervisorDaemon, 0, len(m.Daemons))
 	for _, d := range m.Daemons {
+		if daemonFilter != "" && d.Name != daemonFilter {
+			continue
+		}
 		bare := "mcp-local-hub-" + m.Name + "-" + d.Name
 		out = append(out, SupervisorDaemon{
 			TaskName: canonicalIntentTaskKey(bare),
