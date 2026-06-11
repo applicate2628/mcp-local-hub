@@ -29,6 +29,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -106,11 +108,12 @@ var serenaWakeReconcileFn = func(ctx context.Context, apply bool) (ReconcileResp
 	return DialSupervisorIPCReconcile(ctx, apply)
 }
 
-// serenaWakeReadinessFn is the seam over verifyProxyReady used by
-// WakeIdleSerenaDaemon. Default polls the daemon's external port /mcp; tests
-// override it. Mirrors autoRegisterReadinessFn.
-var serenaWakeReadinessFn = func(port int, timeout time.Duration) error {
-	return verifySerenaProxyReady(port, timeout)
+// serenaWakeReadinessFn is the seam over the full wake readiness proof used by
+// WakeIdleSerenaDaemon. Default first proves the daemon port's OS owner matches
+// the supervisor-reported child PID, then runs the existing serena initialize
+// probe. Tests that focus on stop/clear behavior override the whole proof.
+var serenaWakeReadinessFn = func(ctx context.Context, taskName string, port int, timeout time.Duration) error {
+	return verifySerenaWakeReady(ctx, taskName, port, timeout)
 }
 
 // serenaWakeReadStopFn is the seam over the unified-intent stop read used by
@@ -216,6 +219,174 @@ func readSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
 // retry) rather than blocking the call. Mirrors the auto-register budget.
 const serenaWakeReadinessTimeout = 20 * time.Second
 
+const serenaWakeReadinessPollInterval = 50 * time.Millisecond
+
+func verifySerenaWakeReady(ctx context.Context, taskName string, port int, timeout time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deadline := time.Now().Add(timeout)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	if time.Until(deadline) <= 0 {
+		return fmt.Errorf("serena idle wake: readiness deadline expired before probing port %d", port)
+	}
+
+	if serenaWakePortOwnerProofSupported() {
+		expectedPID, err := waitForSerenaWakeSupervisorPID(ctx, taskName, deadline)
+		if err != nil {
+			return err
+		}
+		if err := waitForSerenaWakePortOwner(ctx, taskName, port, expectedPID, deadline); err != nil {
+			return err
+		}
+		if rem := time.Until(deadline); rem <= 0 {
+			return fmt.Errorf("serena idle wake: readiness deadline expired before serena initialize probe on port %d", port)
+		} else if err := verifySerenaProxyReady(port, rem); err != nil {
+			return err
+		}
+		if ok, err := verifySerenaWakePortOwnerNow(taskName, port, expectedPID); err != nil {
+			return fmt.Errorf("serena idle wake: port-owner proof failed after serena initialize probe: %w", err)
+		} else if !ok {
+			return fmt.Errorf("serena idle wake: port-owner proof failed after serena initialize probe: no process owns loopback LISTENING port %d for %s (supervisor-reported daemon PID %d is not listening)", port, canonicalIntentTaskKey(taskName), expectedPID)
+		}
+		return nil
+	}
+
+	// Windows and Linux have an OS-level loopback LISTENING-port owner lookup.
+	// Other platforms keep the pre-existing protocol sanity probe until their
+	// owner lookup is implemented; unsupported platforms do not claim the PID
+	// identity boundary.
+	return verifySerenaProxyReady(port, time.Until(deadline))
+}
+
+func serenaWakePortOwnerProofSupported() bool {
+	return runtime.GOOS == "windows" || runtime.GOOS == "linux"
+}
+
+func waitForSerenaWakeSupervisorPID(ctx context.Context, taskName string, deadline time.Time) (int, error) {
+	wantTask := canonicalIntentTaskKey(taskName)
+	statusCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	var lastErr error
+	var lastRow DaemonStatus
+	var sawRow bool
+	for {
+		rows, err := supervisorIPCStatusFn(statusCtx)
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = nil
+			if row, ok := serenaWakeStatusRowForTask(rows, wantTask); ok {
+				sawRow = true
+				lastRow = row
+				if serenaWakeStatusRowHasLivePID(row) {
+					return row.PID, nil
+				}
+			}
+		}
+
+		if time.Until(deadline) <= 0 {
+			return 0, serenaWakeSupervisorPIDWaitError(wantTask, sawRow, lastRow, lastErr)
+		}
+		if err := sleepUntilNextSerenaWakePoll(statusCtx, deadline); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 0, serenaWakeSupervisorPIDWaitError(wantTask, sawRow, lastRow, lastErr)
+			}
+			return 0, fmt.Errorf("serena idle wake: wait for supervisor status live PID for %s: %w", wantTask, err)
+		}
+	}
+}
+
+func serenaWakeStatusRowForTask(rows []DaemonStatus, taskName string) (DaemonStatus, bool) {
+	for _, row := range rows {
+		if canonicalIntentTaskKey(row.TaskName) == taskName {
+			return row, true
+		}
+	}
+	return DaemonStatus{}, false
+}
+
+func serenaWakeStatusRowHasLivePID(row DaemonStatus) bool {
+	if row.PID <= 0 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(row.State)) {
+	case "running", "ready":
+		return true
+	default:
+		return false
+	}
+}
+
+func serenaWakeSupervisorPIDWaitError(taskName string, sawRow bool, lastRow DaemonStatus, lastErr error) error {
+	if lastErr != nil {
+		return fmt.Errorf("serena idle wake: supervisor status for %s did not report a live PID before deadline: %w", taskName, lastErr)
+	}
+	if sawRow {
+		return fmt.Errorf("serena idle wake: supervisor status for %s did not report a live PID before deadline (last state=%q pid=%d)", taskName, lastRow.State, lastRow.PID)
+	}
+	return fmt.Errorf("serena idle wake: supervisor status did not report task %s with a live PID before deadline", taskName)
+}
+
+func waitForSerenaWakePortOwner(ctx context.Context, taskName string, port, expectedPID int, deadline time.Time) error {
+	waitCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	for {
+		ok, err := verifySerenaWakePortOwnerNow(taskName, port, expectedPID)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+		if time.Until(deadline) <= 0 {
+			return fmt.Errorf("serena idle wake: no process owns loopback LISTENING port %d for %s before deadline (supervisor-reported daemon PID %d is not listening yet)", port, canonicalIntentTaskKey(taskName), expectedPID)
+		}
+		if sleepErr := sleepUntilNextSerenaWakePoll(waitCtx, deadline); sleepErr != nil {
+			if errors.Is(sleepErr, context.DeadlineExceeded) {
+				return fmt.Errorf("serena idle wake: no process owns loopback LISTENING port %d for %s before deadline (supervisor-reported daemon PID %d is not listening yet)", port, canonicalIntentTaskKey(taskName), expectedPID)
+			}
+			return fmt.Errorf("serena idle wake: wait for port-owner proof for %s on port %d: %w", canonicalIntentTaskKey(taskName), port, sleepErr)
+		}
+	}
+}
+
+func verifySerenaWakePortOwnerNow(taskName string, port, expectedPID int) (bool, error) {
+	ownerPID, ok, err := loopbackPortOwnerFn(port)
+	if err != nil {
+		return false, fmt.Errorf("serena idle wake: resolve OS owner of loopback port %d for %s: %w", port, canonicalIntentTaskKey(taskName), err)
+	}
+	if !ok {
+		return false, nil
+	}
+	if ownerPID != expectedPID {
+		return false, fmt.Errorf("serena idle wake: loopback port %d is owned by PID %d, not the supervisor-reported daemon PID %d for %s", port, ownerPID, expectedPID, canonicalIntentTaskKey(taskName))
+	}
+	return true, nil
+}
+
+func sleepUntilNextSerenaWakePoll(ctx context.Context, deadline time.Time) error {
+	sleep := serenaWakeReadinessPollInterval
+	if rem := time.Until(deadline); rem < sleep {
+		sleep = rem
+	}
+	if sleep <= 0 {
+		return context.DeadlineExceeded
+	}
+	timer := time.NewTimer(sleep)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 // WakeIdleSerenaDaemon is the router's next-request wake for an idle-stopped
 // serena pool daemon (spec §6 #6). Contract (the router caller in
 // internal/gui/serena_router.go relies on it):
@@ -310,7 +481,7 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 	if timeout <= 0 {
 		return fmt.Errorf("serena idle wake: %s cleared and reconcile nudged, but the wake deadline expired before the daemon on port %d became ready (retry — the supervisor is bringing it up)", taskName, port)
 	}
-	if rdErr := serenaWakeReadinessFn(port, timeout); rdErr != nil {
+	if rdErr := serenaWakeReadinessFn(ctx, taskName, port, timeout); rdErr != nil {
 		return fmt.Errorf("serena idle wake: %s cleared and reconcile nudged, but the daemon on port %d was not ready in time: %w (retry — the supervisor is bringing it up)", taskName, port, rdErr)
 	}
 	return nil

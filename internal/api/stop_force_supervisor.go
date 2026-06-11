@@ -32,10 +32,13 @@ import (
 // the force-kill path is exercisable without touching real processes.
 var stopForceKillPIDFn = process.BestEffortKillByPID
 
-// supervisorIPCStatusFn is the test seam for the IPC status read the force
-// path uses to recover a live PID when a descriptor has no port. Production:
-// DialSupervisorIPCStatus. An unreachable supervisor (ErrSupervisorIPCUnavailable)
-// is non-fatal — the port path already covers the common case.
+// supervisorIPCStatusFn is the test seam for supervisor IPC status reads that
+// need the supervisor-owned live PID map. The force path uses it to recover a
+// live PID when a descriptor has no port; the serena idle-wake readiness proof
+// uses it to bind the woken task to the supervisor-reported child PID before
+// trusting the daemon port. Production: DialSupervisorIPCStatus. In the force
+// path, an unreachable supervisor (ErrSupervisorIPCUnavailable) is non-fatal —
+// the port path already covers the common case.
 var supervisorIPCStatusFn = DialSupervisorIPCStatus
 
 // stopForceKillSupervisorOwned terminates the supervisor-owned daemons in
