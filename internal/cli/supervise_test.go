@@ -95,6 +95,38 @@ func TestSuperviseCommand_FailsClosedWhenIntentCollapseCannotMergeLegacyStops(t 
 	}
 }
 
+// TestHasUnmergedActiveLegacyStops_BareKeyMatchesCanonicalSubBlock locks in
+// the canonicalization fix (bot PR #285 P2): older v0.4.x writers could leave
+// BARE task keys in daemon-intent.json, while the collapse merge persists the
+// stop under the canonical leading-backslash key. The gate must canonicalize
+// the legacy key before the sub-block lookup, else an already-merged stop
+// reads as "unmerged" and permanently fail-closes startup.
+func TestHasUnmergedActiveLegacyStops_BareKeyMatchesCanonicalSubBlock(t *testing.T) {
+	now := time.Now().UTC()
+	stop := api.DaemonIntent{
+		Desired:   api.IntentDesiredStopped,
+		Reason:    api.IntentReasonUserStop,
+		UpdatedAt: now,
+	}
+	supervisorIntent := &api.SupervisorIntentFile{
+		Version: 1,
+		Stops:   map[string]api.DaemonIntent{`\mcp-local-hub-foo-default`: stop},
+	}
+	legacy := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{"mcp-local-hub-foo-default": stop}, // BARE key
+	}
+	if hasUnmergedActiveLegacyStops(supervisorIntent, legacy, now) {
+		t.Fatalf("bare-key legacy stop already merged under the canonical key must NOT read as unmerged (would permanently fail-close startup)")
+	}
+	// Falsification: a genuinely-unmerged stop still trips the gate.
+	missing := &api.DaemonIntentFile{
+		Tasks: map[string]api.DaemonIntent{"mcp-local-hub-bar-default": stop},
+	}
+	if !hasUnmergedActiveLegacyStops(supervisorIntent, missing, now) {
+		t.Fatalf("genuinely-unmerged active legacy stop must trip the fail-closed gate")
+	}
+}
+
 // TestSuperviseCommand_AcquiresLockAndExitsOnSignal verifies the
 // happy-path lifecycle: start → lock acquired (owner sidecar
 // present) → graceful-exit triggered via the test seam → err=nil.

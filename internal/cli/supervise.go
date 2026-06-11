@@ -1872,7 +1872,16 @@ func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, da
 		if !active {
 			continue
 		}
-		subBlockStop, ok := supervisorStops[taskName]
+		// The collapse merge persists under the canonical leading-backslash
+		// key (api canonicalIntentTaskKey), but older v0.4.x writers could
+		// leave BARE keys in daemon-intent.json. Canonicalize before the
+		// sub-block lookup, else an already-merged bare-key stop reads as
+		// "unmerged" and permanently fail-closes startup (bot PR #285 P2).
+		key := taskName
+		if key != "" && key[0] != '\\' {
+			key = `\` + key
+		}
+		subBlockStop, ok := supervisorStops[key]
 		if !ok || subBlockStop.Desired != legacyStop.Desired || subBlockStop.Reason != legacyStop.Reason || !subBlockStop.UpdatedAt.Equal(legacyStop.UpdatedAt) {
 			return true
 		}
