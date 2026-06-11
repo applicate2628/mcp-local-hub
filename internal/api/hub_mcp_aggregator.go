@@ -59,7 +59,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -614,11 +613,11 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	// MUST use distinct ids within a session — this is a protocol
 	// contract violation, surfaced as -32600.
 	inserted := sess.InsertInFlight(key, inflightEntry{
-		DaemonRef:        canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port},
-		DaemonSessionID:  daemonSID,
-		DaemonProtocol:   daemonProto,
-		DaemonRequestID:  daemonReqID,
-		StartedAt:        time.Now(),
+		DaemonRef:       canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port},
+		DaemonSessionID: daemonSID,
+		DaemonProtocol:  daemonProto,
+		DaemonRequestID: daemonReqID,
+		StartedAt:       time.Now(),
 	})
 	if !inserted {
 		return buildJSONRPCError(clientReqID, -32600, "duplicate request id; original call still in flight", nil)
@@ -1073,6 +1072,10 @@ func isSSEContentType(ct string) bool {
 // maxBytes caps total bytes read; exceeding it returns an error so
 // a runaway daemon can't OOM the hub.
 func readSSEResponse(r io.Reader, maxBytes int) ([]byte, error) {
+	return readSSESelectedResponse(r, maxBytes, selectJSONRPCResponse, "JSON-RPC response event")
+}
+
+func readSSESelectedResponse(r io.Reader, maxBytes int, selectResponse func([][]byte) ([]byte, bool), responseDescription string) ([]byte, error) {
 	scanner := bufio.NewScanner(r)
 	// Allow a single line up to maxBytes — some daemons emit one
 	// large `data:` line containing the full JSON envelope.
@@ -1091,7 +1094,7 @@ func readSSEResponse(r io.Reader, maxBytes int) ([]byte, error) {
 		if len(line) == 0 {
 			// Empty line: dispatch the accumulated event.
 			if len(dataLines) > 0 {
-				if payload, ok := selectJSONRPCResponse(dataLines); ok {
+				if payload, ok := selectResponse(dataLines); ok {
 					return payload, nil
 				}
 				dataLines = nil
@@ -1123,11 +1126,11 @@ func readSSEResponse(r io.Reader, maxBytes int) ([]byte, error) {
 	// Stream ended without a trailing blank line — dispatch any
 	// final partial event.
 	if len(dataLines) > 0 {
-		if payload, ok := selectJSONRPCResponse(dataLines); ok {
+		if payload, ok := selectResponse(dataLines); ok {
 			return payload, nil
 		}
 	}
-	return nil, errors.New("SSE stream ended without a JSON-RPC response event")
+	return nil, fmt.Errorf("SSE stream ended without a %s", responseDescription)
 }
 
 // selectJSONRPCResponse joins the accumulated `data:` lines of an SSE

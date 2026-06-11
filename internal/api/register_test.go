@@ -7,10 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2796,6 +2800,30 @@ func TestVerifyReadinessServerInfo_AllowsSerenaJSONAndSSE(t *testing.T) {
 	}
 }
 
+func TestVerifyReadinessServerInfo_MultiEventSSESelectsResponseEvent(t *testing.T) {
+	allowed := map[string]struct{}{"serena": {}}
+	progress := "event: progress\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progress\":1}}\n\n"
+
+	body := []byte(progress +
+		"event: response\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"serverInfo\":{\"name\":\"serena\"}}}\n\n")
+	if err := verifyReadinessServerInfo(body, allowed); err != nil {
+		t.Fatalf("multi-event SSE readiness result rejected: %v", err)
+	}
+
+	wrongName := []byte(progress +
+		"event: response\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"serverInfo\":{\"name\":\"not-serena\"}}}\n\n")
+	err := verifyReadinessServerInfo(wrongName, allowed)
+	if err == nil {
+		t.Fatal("multi-event SSE readiness result with wrong name must be rejected")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("wrong-name SSE should reach serverInfo validation, got: %v", err)
+	}
+}
+
 func TestVerifyReadinessServerInfo_RejectsWrongOrMissingServerName(t *testing.T) {
 	allowed := map[string]struct{}{"serena": {}}
 	for name, body := range map[string][]byte{
@@ -2807,5 +2835,139 @@ func TestVerifyReadinessServerInfo_RejectsWrongOrMissingServerName(t *testing.T)
 				t.Fatal("readiness without serena serverInfo.name must be rejected")
 			}
 		})
+	}
+}
+
+func TestVerifyProxyReadyForServerNames_AcceptsJSONFiniteAndHeldOpenSSE(t *testing.T) {
+	allowed := map[string]struct{}{"serena": {}}
+	jsonResult := `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"serena","version":"1"},"capabilities":{}}}`
+	sseResult := "event: response\n" +
+		"data: " + jsonResult + "\n\n"
+
+	cases := map[string]struct {
+		contentType string
+		body        string
+		holdOpen    bool
+	}{
+		"plain-json":    {contentType: "application/json", body: jsonResult},
+		"finite-sse":    {contentType: "text/event-stream", body: sseResult},
+		"held-open-sse": {contentType: "text/event-stream", body: sseResult, holdOpen: true},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var release func()
+			hold := make(chan struct{})
+			if tc.holdOpen {
+				release = func() {
+					select {
+					case <-hold:
+					default:
+						close(hold)
+					}
+				}
+				t.Cleanup(release)
+			}
+			_, port := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				_, _ = w.Write([]byte(tc.body))
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				if tc.holdOpen {
+					select {
+					case <-hold:
+					case <-r.Context().Done():
+					case <-time.After(5 * time.Second):
+					}
+				}
+			})
+
+			err := verifyReadinessPromptly(t, port, 3*time.Second, allowed, release)
+			if err != nil {
+				t.Fatalf("readiness probe rejected %s response: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestVerifyProxyReady_GenericAllowlistDoesNotReadHeldOpenBody(t *testing.T) {
+	hold := make(chan struct{})
+	release := func() {
+		select {
+		case <-hold:
+		default:
+			close(hold)
+		}
+	}
+	t.Cleanup(release)
+
+	_, port := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	})
+
+	if err := verifyReadinessPromptly(t, port, 3*time.Second, nil, release); err != nil {
+		t.Fatalf("generic readiness probe with nil allowlist must accept HTTP 200 without body read: %v", err)
+	}
+}
+
+func newReadinessHTTPTestServer(t *testing.T, h http.HandlerFunc) (*httptest.Server, int) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on ephemeral loopback port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if port >= 9121 && port <= 9299 {
+		_ = ln.Close()
+		t.Fatalf("httptest allocated live mcphub port %d", port)
+	}
+	srv := httptest.NewUnstartedServer(h)
+	srv.Listener = ln
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	portText := strings.TrimPrefix(srv.URL, "http://127.0.0.1:")
+	parsedPort, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse httptest port from %q: %v", srv.URL, err)
+	}
+	if parsedPort != port {
+		t.Fatalf("httptest URL port %d != listener port %d", parsedPort, port)
+	}
+	return srv, port
+}
+
+func verifyReadinessPromptly(t *testing.T, port int, timeout time.Duration, allowed map[string]struct{}, release func()) error {
+	t.Helper()
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		done <- verifyProxyReadyForServerNames(port, timeout, allowed)
+	}()
+	select {
+	case err := <-done:
+		if elapsed := time.Since(start); elapsed > 750*time.Millisecond {
+			t.Fatalf("readiness probe returned after %s; expected prompt return before stream timeout", elapsed)
+		}
+		return err
+	case <-time.After(750 * time.Millisecond):
+		if release != nil {
+			release()
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
+		t.Fatalf("readiness probe blocked on response body; expected prompt return")
+		return nil
 	}
 }
