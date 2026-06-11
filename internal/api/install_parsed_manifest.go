@@ -728,16 +728,27 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 	if w == nil {
 		w = os.Stderr
 	}
-	stateDir, err := DaemonStateDir()
+	stateDir, err := daemonStateDirReadOnly()
 	if err != nil {
 		return fmt.Errorf("resolve state dir: %w", err)
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
-	desiredIntent, priorIntent, _, err := a.buildMergedSupervisorIntent(m, intentPath, nil, daemonFilter, io.Discard)
-	if err != nil {
-		return err
+	desiredIntent, priorIntent, priorExisted, mergeErr := a.buildMergedSupervisorIntent(m, intentPath, nil, daemonFilter, io.Discard)
+	var priorDiffUnavailable string
+	if mergeErr != nil {
+		desiredIntent = &SupervisorIntentFile{
+			Version:           1,
+			Daemons:           supervisorDaemonsFromPlan(m, daemonFilter),
+			MaintenanceTimers: mergeServerWeeklyRefreshTimer(m, daemonFilter, nil),
+		}
+		priorDiffUnavailable = fmt.Sprintf("unable to read prior supervisor intent at %s: %v", intentPath, mergeErr)
+	} else if !priorExisted {
+		priorDiffUnavailable = fmt.Sprintf("prior supervisor intent not found at %s", intentPath)
 	}
-	removed := removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
+	var removed []SupervisorDaemon
+	if mergeErr == nil && priorExisted {
+		removed = removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
+	}
 	legacyTasks, legacyErr := legacySchedulerTasksForSupervisorInstallDryRun(m, daemonFilter)
 
 	fmt.Fprintf(w, "Install plan for server %q (dry-run):\n\n", plan.Server)
@@ -776,6 +787,9 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 	}
 
 	fmt.Fprintf(w, "\n  Removed supervisor targets to kill (%d):\n", len(removed))
+	if priorDiffUnavailable != "" {
+		fmt.Fprintf(w, "    \u2022 Prior supervisor-intent diff unavailable: %s; removed-targets / legacy cleanup preview omitted.\n", priorDiffUnavailable)
+	}
 	for _, d := range removed {
 		fmt.Fprintf(w, "    \u2022 %s  [port %d]\n", strings.TrimPrefix(d.TaskName, `\`), d.Port)
 	}

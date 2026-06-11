@@ -410,6 +410,136 @@ func TestReconcileIPC_ApplyExcludesOrphanedLSPDescriptor(t *testing.T) {
 	}
 }
 
+func TestReconcileIPC_ApplyTerminatesRunningOrphanedLSPDescriptor(t *testing.T) {
+	descriptor := api.BuildSupervisorDaemonForLSP(api.WorkspaceEntry{
+		WorkspaceKey:  "deadbeef",
+		WorkspacePath: t.TempDir(),
+		Language:      "go",
+		Port:          33061,
+	}, "mcphub")
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{descriptor},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	fx.ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+
+	regRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", regRoot)
+	t.Setenv("XDG_STATE_HOME", regRoot)
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{
+		ID:   43,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 1 || len(body.Drift) != 1 {
+		t.Fatalf("DriftCount=%d drift=%+v, want exactly one terminate-direction entry", body.DriftCount, body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.TaskName != descriptor.TaskName {
+		t.Errorf("TaskName = %q, want %q", entry.TaskName, descriptor.TaskName)
+	}
+	if entry.IntentDesired != api.ReconcileIntentDesiredStopped {
+		t.Errorf("IntentDesired = %q, want %q (running orphan must be reported as terminate-direction drift)",
+			entry.IntentDesired, api.ReconcileIntentDesiredStopped)
+	}
+	if entry.SMState != api.StRunning {
+		t.Errorf("SMState = %q, want %q", entry.SMState, api.StRunning)
+	}
+	if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("Action = %q, want %q (running orphan must be driven through the terminate path)",
+			entry.Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+	if got := fx.ctrl.daemonIntent.Lookup(descriptor.TaskName).Desired; got != api.IntentDesiredStopped {
+		t.Fatalf("controller daemon-intent cache for orphan = %q, want %q before EvIntentUpdate dispatch",
+			got, api.IntentDesiredStopped)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != descriptor.TaskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, descriptor.TaskName)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("expected EvIntentUpdate post for running orphan LSP descriptor")
+	}
+
+	logRaw := readEventLogForTest(t, fx.deps.stateDir)
+	if !strings.Contains(logRaw, `"event":"orphaned-lsp-descriptor-skipped"`) {
+		t.Fatalf("expected orphaned-lsp-descriptor-skipped audit event; log:\n%s", logRaw)
+	}
+}
+
+func TestReconcileIPC_LSPRegistryReadFailureLeavesDescriptorAlone(t *testing.T) {
+	descriptor := api.BuildSupervisorDaemonForLSP(api.WorkspaceEntry{
+		WorkspaceKey:  "deadbeef",
+		WorkspacePath: t.TempDir(),
+		Language:      "go",
+		Port:          33062,
+	}, "mcphub")
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{descriptor},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	fx.ctrl.smStates.Store(descriptor.TaskName, api.StRunning)
+
+	regRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", regRoot)
+	t.Setenv("XDG_STATE_HOME", regRoot)
+	regDir := filepath.Join(regRoot, "mcp-local-hub")
+	if err := os.MkdirAll(regDir, 0o700); err != nil {
+		t.Fatalf("mkdir registry dir: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(regDir, "workspaces.yaml"), 0o700); err != nil {
+		t.Fatalf("plant unreadable registry shape: %v", err)
+	}
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{
+		ID:   44,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 1 || len(body.Drift) != 1 {
+		t.Fatalf("DriftCount=%d drift=%+v, want exactly one steady-state entry", body.DriftCount, body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.Action != api.ReconcileActionNoOp {
+		t.Errorf("Action = %q, want %q (registry read failure must fail open and leave running descriptor alone)",
+			entry.Action, api.ReconcileActionNoOp)
+	}
+	if entry.IntentDesired != api.ReconcileIntentDesiredRunning {
+		t.Errorf("IntentDesired = %q, want %q", entry.IntentDesired, api.ReconcileIntentDesiredRunning)
+	}
+	if body.AppliedCount != 0 {
+		t.Fatalf("AppliedCount = %d, want 0", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		t.Fatalf("unexpected event posted on registry read failure: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+	}
+	logRaw := readEventLogForTest(t, fx.deps.stateDir)
+	if strings.Contains(logRaw, `"event":"orphaned-lsp-descriptor-skipped"`) {
+		t.Fatalf("read-failure fail-open path must not emit orphan skip event; log:\n%s", logRaw)
+	}
+}
+
 // TestReconcileIPC_ApplyRefreshesCacheBeforePosting verifies that apply mode
 // refreshes the controller's cached supervisor intent and daemon intent from
 // the same files used for drift classification before EvIntentUpdate is

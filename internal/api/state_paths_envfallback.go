@@ -49,6 +49,24 @@ func daemonStateDir() (string, error) {
 	return posixStateDir()
 }
 
+func daemonStateDirReadOnly() (string, error) {
+	if daemonStateRootOverride != "" {
+		return daemonStateRootOverride, nil
+	}
+	if runtime.GOOS == "windows" {
+		root, err := resolveKnownFolderWithEnvFallback()
+		if err != nil {
+			return "", err
+		}
+		return joinStateRoot(root), nil
+	}
+	parent, err := posixParentDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, stateDirName), nil
+}
+
 // resolveKnownFolderWithEnvFallback runs the resolver first; if it
 // fails OR returns an empty string, consults LOCALAPPDATA, then
 // USERPROFILE\AppData\Local. Returns errKnownFolderUnavailable when

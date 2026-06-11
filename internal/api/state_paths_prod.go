@@ -15,7 +15,10 @@
 
 package api
 
-import "runtime"
+import (
+	"path/filepath"
+	"runtime"
+)
 
 // testEnvFallbackBuild is true iff the env-fallback variant of
 // daemonStateDir is the one compiled into the test binary. Always
@@ -45,6 +48,24 @@ func daemonStateDir() (string, error) {
 		return ensureStateRoot(joinStateRoot(root))
 	}
 	return posixStateDir()
+}
+
+func daemonStateDirReadOnly() (string, error) {
+	if daemonStateRootOverride != "" {
+		return daemonStateRootOverride, nil
+	}
+	if runtime.GOOS == "windows" {
+		root, err := resolveKnownFolderProduction()
+		if err != nil {
+			return "", err
+		}
+		return joinStateRoot(root), nil
+	}
+	parent, err := posixParentDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, stateDirName), nil
 }
 
 // resolveKnownFolderProduction is the production Windows path.

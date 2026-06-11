@@ -1906,6 +1906,94 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 	}
 }
 
+func TestInstallPlanCore_GlobalDryRunDoesNotCreateMissingStateDir(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := filepath.Join(t.TempDir(), "missing-state")
+	daemonStateRootOverride = stateDir
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", true, &buf); err != nil {
+		t.Fatalf("installPlanCore(global dry-run): %v", err)
+	}
+	if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+		t.Fatalf("global dry-run must not create state dir %s; stat err = %v", stateDir, statErr)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"Supervisor intent rows to write",
+		"mcp-local-hub-demo-alpha",
+		"Maintenance timers to ensure",
+		"Autostart owner to ensure",
+		"Prior supervisor-intent diff unavailable",
+		"not found",
+		"No changes made.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("global dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Fatalf("dry-run mutated scheduler: createCount=%d runCount=%d", f.createCount, f.runCount)
+	}
+}
+
+func TestInstallPlanCore_GlobalDryRunCorruptIntentStillPrintsPlan(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	before := []byte("{ this is not valid json")
+	if err := os.WriteFile(intentPath, before, 0o600); err != nil {
+		t.Fatalf("seed corrupt supervisor intent: %v", err)
+	}
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", true, &buf); err != nil {
+		t.Fatalf("installPlanCore(global dry-run) over corrupt intent must still succeed: %v", err)
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("re-read corrupt supervisor intent: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("dry-run mutated corrupt supervisor intent: before=%q after=%q", before, after)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"Supervisor intent rows to write",
+		"mcp-local-hub-demo-alpha",
+		"mcp-local-hub-demo-beta",
+		"Maintenance timers to ensure",
+		"mcp-local-hub-demo-weekly-refresh",
+		"Prior supervisor-intent diff unavailable",
+		"decode",
+		"No changes made.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("global dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Fatalf("dry-run mutated scheduler: createCount=%d runCount=%d", f.createCount, f.runCount)
+	}
+}
+
 // TestInstallPlanCore_GlobalInstall_EnablesAbsentAutostartOwner pins the logon
 // owner handoff for the supervisor-intent path. A global install suppresses
 // per-daemon scheduler tasks, so an absent autostart shim must be enabled or a

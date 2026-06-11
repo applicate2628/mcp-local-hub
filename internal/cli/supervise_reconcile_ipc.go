@@ -279,33 +279,30 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		intentDesired := computeIntentDesired(taskName, daemonIntentTasks, now)
 		schedState, hasSched := lookupSchedulerState(schedByTask, taskName)
 		smState := lookupControllerSMState(deps, taskName)
-		action := classifyDriftAction(schedState, hasSched, intentDesired, smState)
+		var action string
 
-		// Orphaned-LSP-descriptor exclusion, mirroring the startup reconciler
-		// guard at supervise_reconcile.go:229. classifyDriftAction returns
-		// post_ev_intent_update for a SPAWN (intent=running, sched missing/stopped)
-		// of a supervisor-owned descriptor — but it has no view of the workspace
-		// registry, so an LSP workspace-proxy descriptor whose backing
-		// workspaces.yaml row was removed by `mcphub workspace unregister` (which
-		// can drop the row but, on an older code path / partial failure, leave the
-		// paired supervisor-intent descriptor) would be re-SPAWNED here in
-		// apply-mode (`mcphub reconcile --apply`, and the implicit apply every
-		// register/unregister fires via DialSupervisorIPCReconcile(apply=true)).
-		// The unbacked proxy then loads the registry, misses its (workspace_key,
-		// language) row, exits 1 "not registered", and churns into quarantine —
-		// the exact bug Bug 1's startup guard fixed, recurring on the apply-mode
-		// IPC path (all-return-paths miss). Downgrade ONLY the spawn direction
-		// (intent=running) to needs_manual_review so apply-mode never dispatches
-		// EvIntentUpdate for the orphan; a terminate-direction post_ev_intent_update
-		// (intent=stopped on a running orphan) is left intact so an operator stop
-		// can still reach a live process, exactly as the startup guard's `!running`
-		// gate allows.
+		// Orphaned-LSP-descriptor handling mirrors the startup reconciler guard
+		// before the generic drift action filter. classifyDriftAction has no
+		// registry view, so it would treat a running orphan (intent=running,
+		// StRunning) as no_op and leave the unregistered proxy serving until a
+		// supervisor restart. The shared predicate fails open on registry
+		// read/lock failures, preserving the leave-alone posture for uncertain
+		// registry state.
 		if intentDesired == api.ReconcileIntentDesiredRunning &&
-			action == api.ReconcileActionPostEvIntentUpdate &&
 			isLSPWorkspaceProxyDescriptor(d) &&
 			!api.LSPRegistryRowBacksDescriptor(d) {
-			action = api.ReconcileActionNeedsManualReview
 			emitOrphanedLSPDescriptorSkipped(deps.events, d)
+			if smState == api.StRunning {
+				intentDesired = api.ReconcileIntentDesiredStopped
+				action = api.ReconcileActionPostEvIntentUpdate
+				if args.Apply {
+					markOrphanedLSPStopIntentForReconcile(cacheRefreshDaemonIntent, taskName, now)
+				}
+			} else {
+				action = api.ReconcileActionNeedsManualReview
+			}
+		} else {
+			action = classifyDriftAction(schedState, hasSched, intentDesired, smState)
 		}
 
 		drift = append(drift, api.DriftEntry{
@@ -693,6 +690,20 @@ func lookupControllerSMState(deps ipcDispatchDeps, taskName string) api.SMState 
 	}
 	st, _ := ctrl.GetSMState(taskName)
 	return st
+}
+
+func markOrphanedLSPStopIntentForReconcile(file *api.DaemonIntentFile, taskName string, now time.Time) {
+	if file == nil {
+		return
+	}
+	if file.Tasks == nil {
+		file.Tasks = map[string]api.DaemonIntent{}
+	}
+	file.Tasks[taskName] = api.DaemonIntent{
+		Desired:   api.IntentDesiredStopped,
+		Reason:    api.IntentReasonUninstalled,
+		UpdatedAt: now,
+	}
 }
 
 // applyReconcileDrift posts EvIntentUpdate per drift entry with
