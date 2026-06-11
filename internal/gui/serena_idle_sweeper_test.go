@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -683,6 +684,99 @@ func TestRouterToolsList_AllIdle_FirstWakeRefusedTriesNextCandidate(t *testing.T
 	wantOrder := []string{wsStopped.TaskName, wsIdle.TaskName}
 	if len(wakeOrder) != len(wantOrder) || wakeOrder[0] != wantOrder[0] || wakeOrder[1] != wantOrder[1] {
 		t.Fatalf("wake order = %v, want %v", wakeOrder, wantOrder)
+	}
+	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+}
+
+// TestRouterToolsList_NoOpWakeDeadPortTriesNextCandidate covers the case where
+// WakeIdleFn returns nil through its fast no-op path for a stale/dead first row.
+// A nil wake is only terminal if that candidate is actually serving; otherwise
+// tools/list must continue to a later wakeable idle-stopped sibling.
+//
+// Negative-control: pre-fix wakeOneSerenaCandidateForToolsList returns after the
+// first nil wake, leaving the second candidate asleep and tools/list returns
+// "no daemon answered".
+func TestRouterToolsList_NoOpWakeDeadPortTriesNextCandidate(t *testing.T) {
+	deadLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate dead candidate port: %v", err)
+	}
+	deadPort := deadLn.Addr().(*net.TCPAddr).Port
+	if err := deadLn.Close(); err != nil {
+		t.Fatalf("close dead candidate listener: %v", err)
+	}
+
+	wsDead := serenaWS("dead-noop", "/proj/dead-noop", deadPort)
+	wsIdle := serenaWS("idle-wakeable", "/proj/idle-wakeable", 0)
+
+	var stateMu sync.Mutex
+	secondAwake := false
+	secondDaemon := newFakeSerenaDaemon("idle-wakeable")
+	secondDaemon.tool = func(w http.ResponseWriter, _ *http.Request, b []byte) {
+		stateMu.Lock()
+		up := secondAwake
+		stateMu.Unlock()
+		if !up {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if !strings.Contains(string(b), `"tools/list"`) {
+			t.Errorf("upstream body did not carry tools/list; got %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	secondTS := httptest.NewServer(secondDaemon.handler())
+	t.Cleanup(secondTS.Close)
+	wsIdle.Port = secondTS.Listener.Addr().(*net.TCPAddr).Port
+
+	var probedPorts []int
+	origPortLive := serenaToolsListPortLiveFn
+	serenaToolsListPortLiveFn = func(_ context.Context, port int) bool {
+		probedPorts = append(probedPorts, port)
+		return port == wsIdle.Port
+	}
+	t.Cleanup(func() { serenaToolsListPortLiveFn = origPortLive })
+
+	var wakeOrder []string
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{wsDead, wsIdle}},
+			list:         []*api.WorkspaceEntry{wsDead, wsIdle},
+		},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws.WorkspaceKey == wsIdle.WorkspaceKey {
+				return secondTS.URL
+			}
+			return "http://127.0.0.1:1"
+		},
+		AuditFn: func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(_ context.Context, taskName string, _ int, _ string) error {
+			wakeOrder = append(wakeOrder, taskName)
+			if taskName == wsIdle.TaskName {
+				stateMu.Lock()
+				secondAwake = true
+				stateMu.Unlock()
+			}
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list should continue after dead no-op wake and wake the second candidate; status=%d body=%s wakeOrder=%v", rr.Code, rr.Body.String(), wakeOrder)
+	}
+	wantOrder := []string{wsDead.TaskName, wsIdle.TaskName}
+	if len(wakeOrder) != len(wantOrder) || wakeOrder[0] != wantOrder[0] || wakeOrder[1] != wantOrder[1] {
+		t.Fatalf("wake order = %v, want %v", wakeOrder, wantOrder)
+	}
+	wantProbes := []int{wsDead.Port, wsIdle.Port}
+	if len(probedPorts) != len(wantProbes) || probedPorts[0] != wantProbes[0] || probedPorts[1] != wantProbes[1] {
+		t.Fatalf("probed ports = %v, want %v", probedPorts, wantProbes)
 	}
 	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
 }

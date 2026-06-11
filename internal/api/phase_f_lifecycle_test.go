@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -318,6 +319,7 @@ func TestInstallPlanCore_GlobalFreshInstall_NudgesSupervisorReconcile(t *testing
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
 
 	var reconcileCalls int32
 	var gotApply atomic.Bool
@@ -345,15 +347,24 @@ func TestInstallPlanCore_GlobalFreshInstall_NudgesSupervisorReconcile(t *testing
 	}
 }
 
-// TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_PrintsHint asserts that
-// when no supervisor is running (ErrSupervisorIPCUnavailable), the install
-// completes and prints the operator hint to start one — the descriptor is on
-// disk and the next supervisor start spawns it.
-func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_PrintsHint(t *testing.T) {
+// TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartFailurePrintsHint
+// asserts that when no supervisor is running and the immediate autostart owner
+// start fails, the install still completes and keeps the operator hint — the
+// descriptor is on disk and the next supervisor start spawns it.
+func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartFailurePrintsHint(t *testing.T) {
 	phaseFStateDir(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+	origProbe := installSupervisorRunningProbeFn
+	installSupervisorRunningProbeFn = func(string) (bool, int, error) { return false, 0, nil }
+	t.Cleanup(func() { installSupervisorRunningProbeFn = origProbe })
+
+	origStart := installAutostartOwnerStartFn
+	installAutostartOwnerStartFn = func() error { return fmt.Errorf("synthetic autostart start failure") }
+	t.Cleanup(func() { installAutostartOwnerStartFn = origStart })
 
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, errSupervisorUnavailableForTest()
@@ -371,6 +382,115 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_PrintsHint(t *testing.T
 	}
 	if out := buf.String(); !strings.Contains(out, "no running supervisor") {
 		t.Errorf("expected operator hint about no running supervisor; got output:\n%s", out)
+	}
+}
+
+// TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
+// locks the first-install contract: when the descriptor write succeeds but the
+// post-install reconcile sees no running supervisor, install should start the
+// already-enabled autostart owner immediately instead of leaving the daemon
+// pending until a manual supervise or next logon.
+//
+// Negative-control: pre-fix nudgeSupervisorReconcileAfterGlobalInstall only
+// prints the old next-supervise/logon note, so the positive started-owner line
+// is absent and the stale pending-daemon note remains.
+func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow(t *testing.T) {
+	phaseFStateDir(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+	probeCalls := 0
+	origProbe := installSupervisorRunningProbeFn
+	installSupervisorRunningProbeFn = func(stateDir string) (bool, int, error) {
+		probeCalls++
+		if stateDir == "" {
+			t.Fatal("supervisor running probe received empty stateDir")
+		}
+		return false, 0, nil
+	}
+	t.Cleanup(func() { installSupervisorRunningProbeFn = origProbe })
+
+	startCalls := 0
+	origStart := installAutostartOwnerStartFn
+	installAutostartOwnerStartFn = func() error {
+		startCalls++
+		return nil
+	}
+	t.Cleanup(func() { installAutostartOwnerStartFn = origStart })
+
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, errSupervisorUnavailableForTest()
+	}))
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+		t.Fatalf("installPlanCore(no supervisor): %v should be non-fatal", err)
+	}
+	if probeCalls != 1 {
+		t.Fatalf("supervisor running probe calls = %d, want 1", probeCalls)
+	}
+	if startCalls != 1 {
+		t.Fatalf("autostart owner start calls = %d, want 1", startCalls)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "supervisor autostart owner started") {
+		t.Fatalf("install output missing started-owner confirmation; got:\n%s", out)
+	}
+	if strings.Contains(out, "will start on the next `mcphub supervise`") {
+		t.Fatalf("install output kept the stale pending-daemon note after a successful owner start; got:\n%s", out)
+	}
+}
+
+// TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart
+// is the double-start guard: if the IPC nudge saw an unavailable supervisor but
+// the flock-authoritative probe now reports one running, install must not fire
+// the autostart owner a second time.
+func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart(t *testing.T) {
+	phaseFStateDir(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+	origProbe := installSupervisorRunningProbeFn
+	installSupervisorRunningProbeFn = func(string) (bool, int, error) { return true, 1234, nil }
+	t.Cleanup(func() { installSupervisorRunningProbeFn = origProbe })
+
+	origStart := installAutostartOwnerStartFn
+	installAutostartOwnerStartFn = func() error {
+		t.Fatal("autostart owner start must not run when supervisor probe reports running")
+		return nil
+	}
+	t.Cleanup(func() { installAutostartOwnerStartFn = origStart })
+
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, errSupervisorUnavailableForTest()
+	}))
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+		t.Fatalf("installPlanCore(no supervisor): %v should be non-fatal", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "supervisor already running") {
+		t.Fatalf("install output missing running-supervisor skip confirmation; got:\n%s", out)
+	}
+	if strings.Contains(out, "will start on the next `mcphub supervise`") {
+		t.Fatalf("install output kept the stale pending-daemon note even though supervisor is running; got:\n%s", out)
 	}
 }
 
@@ -393,6 +513,7 @@ func TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks(t *testing.T
 		{Name: `\mcp-local-hub-supervisor`},
 	}
 	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
 
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, nil
@@ -454,6 +575,7 @@ func TestInstallPlanCore_GlobalDaemonlessFullInstallDropsStaleSupervisorRows(t *
 
 	f := newInstallFakeScheduler()
 	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
 
 	var reconcileCalls int32
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {

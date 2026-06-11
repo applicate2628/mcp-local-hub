@@ -11,17 +11,18 @@
 //   - server-weekly-refresh    — Sunday 03:00 local
 //
 // Both fire weekly with DST + sleep catch-up. Persistence is
-// `supervisor-state.maintenance_fired_at[kind]` serialised as
+// `supervisor-state.maintenance_fired_at[key]` serialised as
 // RFC3339Nano UTC (Z-suffix) — comparison uses time.Time arithmetic
-// only, never manual hour math.
+// only, never manual hour math. key is Kind for legacy single-instance
+// timers and Kind:Server for server-scoped timers.
 //
 // Task 9.2 extensions (additive to Task 9.1):
 //
 //   - `Spawner` interface abstracts the OS-level spawn so tests can
 //     inject a synthetic process surface; production wiring (a later
 //     task) uses os/exec.
-//   - Per-timer in-process mutex serialises fires of the same `Kind`;
-//     different Kinds run concurrently.
+//   - Per-timer in-process mutex serialises fires of the same timer
+//     identity key; different keys run concurrently.
 //   - "Record PID BEFORE syscall" invariant: a `PID=0` claim slot is
 //     written to `supervisor-state.transient_pids` BEFORE
 //     `Spawner.Start` is invoked, then the slot is rewritten to the
@@ -54,7 +55,7 @@ import (
 // is the source of truth that QuiesceHandler.Drain consumes).
 type StateStore interface {
 	GetMaintenanceFiredAt(kind string) (string, bool)
-	// SetMaintenanceFiredAt persists the per-kind last-fired
+	// SetMaintenanceFiredAt persists the per-timer-key last-fired
 	// timestamp. Returns non-nil error when the underlying disk
 	// write fails (transient disk error, AV scanner holding the
 	// file open, quota policy denial). Scheduler uses the error to
@@ -142,11 +143,11 @@ type MaintenanceScheduler struct {
 	// Task 9.2 additions:
 	spawner  Spawner
 	mu       sync.Mutex
-	inflight map[string]struct{} // keyed by t.Kind; entry presence = "fire in progress"
+	inflight map[string]struct{} // keyed by maintenanceTimerIdentityKey; entry presence = "fire in progress"
 	clock    func() time.Time    // UTC clock used for StartedAt timestamping in fire(); test-injectable
 
 	// lastFiredCache is the in-process authoritative store for the
-	// last-fired-at timestamp per kind. Closes the consultant
+	// last-fired-at timestamp per timer identity. Closes the consultant
 	// strategic concern on PR #243 (repeated-fire-storm prevention):
 	// pre-PR, a transient StateStore.SetMaintenanceFiredAt failure
 	// (disk full, AV scanner holding the file open, quota policy)
@@ -161,7 +162,7 @@ type MaintenanceScheduler struct {
 	// unconditionally inside Tick, before the state-store call.
 	//
 	// Cross-restart durability remains the StateStore's responsibility
-	// (the on-disk supervisor-state.maintenance_fired_at[kind] is the
+	// (the on-disk supervisor-state.maintenance_fired_at[key] is the
 	// source of truth across supervisor cold starts). The cache only
 	// covers the storm window between a transient write failure and
 	// the next successful persist OR supervisor restart.
@@ -172,7 +173,7 @@ type MaintenanceScheduler struct {
 	// across multiple kinds, and inflight goroutines reading the
 	// cache via the next Tick must observe the most-recent write.
 	lastFiredCacheMu sync.RWMutex
-	lastFiredCache   map[string]string // kind -> RFC3339Nano UTC; matches StateStore on-disk representation
+	lastFiredCache   map[string]string // timer identity key -> RFC3339Nano UTC; matches StateStore on-disk representation
 }
 
 // NewMaintenanceScheduler builds a scheduler backed by the supplied
@@ -284,13 +285,20 @@ func (s *MaintenanceScheduler) SetClock(c func() time.Time) {
 	s.clock = c
 }
 
+func maintenanceTimerIdentityKey(t api.MaintenanceTimer) string {
+	if t.Server != "" {
+		return t.Kind + ":" + t.Server
+	}
+	return t.Kind
+}
+
 // Tick is one evaluation pass. Called every 60s by the reconcile
 // loop (Task 7.1 caller wiring lands later). Pure with respect to
 // `now` and the state store for cadence math — no clock calls, no I/O.
 //
 // Per-timer algorithm (spec lines 458-462):
 //
-//   - Compute next_due from last_fired_at[kind]:
+//   - Compute next_due from last_fired_at[key]:
 //   - real last_fired_at → first Sun 03:00 local STRICTLY after it,
 //     so a fire that lands exactly on Sun 03:00:00 does not re-fire
 //     on the next 60s tick (PR #243 bot round-2 P2);
@@ -337,7 +345,8 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 			continue
 		}
 
-		baseline, fired := s.parseLastFiredOrSynthesise(t.Kind, now)
+		timerKey := maintenanceTimerIdentityKey(t)
+		baseline, fired := s.parseLastFiredOrSynthesise(timerKey, now)
 		// Real last-fire → strictly-after boundary (a fire at exactly
 		// Sun 03:00:00 must not re-fire next tick, PR #243 bot round-2
 		// P2). Synthetic baseline → inclusive, so a fresh install
@@ -364,7 +373,7 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 				// storm-prevention cache (engage on persist error,
 				// clear on success). No PID tracking, no per-timer
 				// mutex engagement.
-				s.persistFiredAt(t.Kind, firedAt)
+				s.persistFiredAt(timerKey, firedAt)
 				s.fireHook(t)
 				continue
 			}
@@ -376,7 +385,7 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 			// computes next_due 7 days out, and silently skips the
 			// whole window. fire() persists fired_at only on spawn
 			// success.
-			s.fire(t, firedAt)
+			s.fire(t, firedAt, timerKey)
 		}
 	}
 }
@@ -413,15 +422,15 @@ func (s *MaintenanceScheduler) Tick(now time.Time, timers []api.MaintenanceTimer
 //     `RemoveTransientPID(realPID)`, then release the inflight slot.
 //     Wait MUST return (the contract); the goroutine has a clear exit
 //     condition.
-func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
+func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt, timerKey string) {
 	// Step 1: acquire the per-timer slot.
 	s.mu.Lock()
-	if _, busy := s.inflight[t.Kind]; busy {
+	if _, busy := s.inflight[timerKey]; busy {
 		s.mu.Unlock()
-		log.Printf("severity=warn event=maintenance-fire-skipped-busy kind=%q", t.Kind)
+		log.Printf("severity=warn event=maintenance-fire-skipped-busy kind=%q timer_key=%q", t.Kind, timerKey)
 		return
 	}
-	s.inflight[t.Kind] = struct{}{}
+	s.inflight[timerKey] = struct{}{}
 	s.mu.Unlock()
 
 	// Step 2: write the PID=0 claim slot BEFORE the spawn syscall.
@@ -436,7 +445,7 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 		// cleanup, and the cold-start reaper. Release the slot so the
 		// next Tick retries; fired_at is untouched.
 		s.mu.Lock()
-		delete(s.inflight, t.Kind)
+		delete(s.inflight, timerKey)
 		s.mu.Unlock()
 		log.Printf("severity=error event=maintenance-claim-write-failed kind=%q err=%v", t.Kind, err)
 		return
@@ -456,7 +465,7 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 				// scheduler is in-process; re-raising matches Go
 				// convention for unexpected programmer error.
 				s.mu.Lock()
-				delete(s.inflight, t.Kind)
+				delete(s.inflight, timerKey)
 				s.mu.Unlock()
 				panic(r)
 			}
@@ -471,7 +480,7 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 		// suppress the timer for the rest of the week.
 		s.state.RemoveTransientClaim(t.Kind, startedAt)
 		s.mu.Lock()
-		delete(s.inflight, t.Kind)
+		delete(s.inflight, timerKey)
 		s.mu.Unlock()
 		log.Printf("severity=warn event=maintenance-spawn-error kind=%q err=%v", t.Kind, startErr)
 		return
@@ -482,7 +491,7 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 		// rollback as startErr, no fired_at advance.
 		s.state.RemoveTransientClaim(t.Kind, startedAt)
 		s.mu.Lock()
-		delete(s.inflight, t.Kind)
+		delete(s.inflight, timerKey)
 		s.mu.Unlock()
 		log.Printf("severity=warn event=maintenance-spawn-bad-pid kind=%q pid=%d", t.Kind, pid)
 		return
@@ -504,7 +513,7 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 		}
 		s.state.RemoveTransientClaim(t.Kind, startedAt)
 		s.mu.Lock()
-		delete(s.inflight, t.Kind)
+		delete(s.inflight, timerKey)
 		s.mu.Unlock()
 		return
 	}
@@ -513,7 +522,7 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 	// Cadence advances only AFTER durable real-PID tracking is
 	// established (PR #243 bot P1#3 + round-2 P1). persistFiredAt also
 	// reconciles the storm-prevention cache (PR #243 bot P1#1).
-	s.persistFiredAt(t.Kind, firedAt)
+	s.persistFiredAt(timerKey, firedAt)
 
 	// Step 6: fire the observability hook AFTER spawn + record.
 	s.fireHook(t)
@@ -521,7 +530,7 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 	// Step 7: drain goroutine. The goroutine has a single exit
 	// condition (Spawner.Wait returning) and updates only state +
 	// the inflight map under s.mu; no `for {}` loop.
-	go func(pid int, kind string) {
+	go func(pid int, key string) {
 		// Wait MUST return per the Spawner contract; we ignore its
 		// error because either path means "process is gone, drain
 		// the entry".
@@ -529,9 +538,9 @@ func (s *MaintenanceScheduler) fire(t api.MaintenanceTimer, firedAt string) {
 
 		s.state.RemoveTransientPID(pid)
 		s.mu.Lock()
-		delete(s.inflight, kind)
+		delete(s.inflight, key)
 		s.mu.Unlock()
-	}(pid, t.Kind)
+	}(pid, timerKey)
 }
 
 // parseLastFiredOrSynthesise returns either the parsed last_fired_at

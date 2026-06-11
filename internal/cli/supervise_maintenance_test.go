@@ -218,6 +218,41 @@ func TestMaintenance_FirstFireWithoutPriorTimestamp(t *testing.T) {
 	}
 }
 
+// TestMaintenance_ServerWeeklyRefreshTimersKeyByServer covers the global
+// multi-server case: server-weekly-refresh timers share a Kind but have
+// distinct Server values, so firing one server must not suppress its sibling.
+//
+// Negative-control: pre-fix Tick keys maintenance_fired_at by Kind alone. The
+// first timer writes server-weekly-refresh, then the second timer reads it as
+// already fired and never refreshes.
+func TestMaintenance_ServerWeeklyRefreshTimersKeyByServer(t *testing.T) {
+	timers := []api.MaintenanceTimer{
+		{Kind: "server-weekly-refresh", Server: "alpha"},
+		{Kind: "server-weekly-refresh", Server: "beta"},
+	}
+	state := newTestState(t)
+
+	loc := time.Local
+	now := time.Date(2026, 5, 17, 4, 0, 0, 0, loc) // Sunday 04:00 local
+	sched := NewMaintenanceScheduler(state)
+	var fired []string
+	sched.SetFireHook(func(t api.MaintenanceTimer) { fired = append(fired, t.Server) })
+	sched.Tick(now, timers)
+
+	if len(fired) != 2 || fired[0] != "alpha" || fired[1] != "beta" {
+		t.Fatalf("fired servers = %v, want [alpha beta]", fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh:alpha"); !ok {
+		t.Fatalf("missing alpha fired_at entry; state=%+v", state.fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh:beta"); !ok {
+		t.Fatalf("missing beta fired_at entry; state=%+v", state.fired)
+	}
+	if _, ok := state.GetMaintenanceFiredAt("server-weekly-refresh"); ok {
+		t.Fatalf("server-scoped timer wrote legacy Kind-only fired_at entry; state=%+v", state.fired)
+	}
+}
+
 // TestMaintenance_FirstFireSkippedBeforeFirstDue — empty state but `now`
 // is mid-week (Wednesday) → no fire yet because the synthetic baseline
 // is most-recent past Sun 03:00 local and next_due is the NEXT Sun

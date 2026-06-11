@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"sync"
@@ -53,6 +54,19 @@ var supportedProtocolVersions = map[string]struct{}{
 // the router does not recognize (or omits the field). It is the latest
 // revision in supportedProtocolVersions.
 const defaultProtocolVersion = "2025-11-25"
+
+var serenaToolsListPortLiveFn = func(ctx context.Context, port int) bool {
+	if port <= 0 {
+		return false
+	}
+	d := net.Dialer{Timeout: 300 * time.Millisecond}
+	conn, err := d.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
 
 // supportedProtocolVersionsList returns the supported MCP protocol
 // versions as a sorted slice, for the error.data.supported field on an
@@ -928,7 +942,15 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 			})
 			continue
 		}
-		return
+		if serenaToolsListPortLiveFn(wakeCtx, ws.Port) {
+			return
+		}
+		_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
+			"workspace_key": ws.WorkspaceKey,
+			"task_name":     ws.TaskName,
+			"port":          ws.Port,
+			"err":           "wake returned nil but candidate port is not accepting TCP connections",
+		})
 	}
 }
 

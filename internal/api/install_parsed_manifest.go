@@ -44,6 +44,8 @@ import (
 // uses the OS backend; tests inject a fake so no real Task Scheduler,
 // systemd-user, or launchctl state is touched.
 var installAutostartBackendFactoryFn = autostart.New
+var installAutostartOwnerStartFn = autostart.StartOwner
+var installSupervisorRunningProbeFn = SupervisorRunningUnderStateDir
 
 // InstallParsedManifestOpts controls an InstallParsedManifest invocation.
 //
@@ -683,6 +685,9 @@ func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool) {
 		return
 	}
 	opts := autostart.Options{StrictMode: strictMode}
+	if canonical, err := canonicalMcphubPath(); err == nil {
+		opts.MCPHubPath = canonical
+	}
 	state, err := backend.Status(opts)
 	if err != nil {
 		warnAutostartOwner(w, "read status", err)
@@ -713,17 +718,50 @@ func warnAutostartOwner(w io.Writer, action string, err error) {
 // reconcile so a freshly-installed global daemon spawns immediately instead of
 // waiting up to 60s for the IntentWatcher poll (which only feeds stops, not new
 // descriptors — see installPlanCore F2 note). Best-effort: when no supervisor
-// is running (ErrSupervisorIPCUnavailable) it prints the operator hint to start
-// one; any other reconcile error is non-fatal — the descriptor is durably on
-// disk, so the next supervisor start spawns it via the startup-path reconcile.
+// is running (ErrSupervisorIPCUnavailable) it tries to start the autostart owner
+// now, falling back to the operator hint if that best-effort start fails. Any
+// other reconcile error is non-fatal — the descriptor is durably on disk, so the
+// next supervisor start spawns it via the startup-path reconcile.
 func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer) {
 	if _, err := supervisorReconcileApplyFn(ctx, true); err != nil {
-		if errors.Is(err, ErrSupervisorIPCUnavailable) && w != nil {
-			fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
+		if errors.Is(err, ErrSupervisorIPCUnavailable) {
+			if startAutostartOwnerAfterUnavailableSupervisor(w) {
+				return
+			}
+			if w != nil {
+				fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
+			}
 		}
 		// Any other reconcile error is non-fatal: the descriptor is on disk and
 		// the supervisor converges it on its next startup / watcher / reconcile.
 	}
+}
+
+func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer) bool {
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		warnAutostartOwner(w, "resolve state dir before start", err)
+		return false
+	}
+	running, pid, err := installSupervisorRunningProbeFn(stateDir)
+	if err != nil {
+		warnAutostartOwner(w, "probe supervisor before start", err)
+		return false
+	}
+	if running {
+		if w != nil {
+			fmt.Fprintf(w, "  supervisor already running (pid=%d); autostart owner start skipped.\n", pid)
+		}
+		return true
+	}
+	if err := installAutostartOwnerStartFn(); err != nil {
+		warnAutostartOwner(w, "start", err)
+		return false
+	}
+	if w != nil {
+		fmt.Fprintln(w, "  supervisor autostart owner started; installed daemons will reconcile shortly.")
+	}
+	return true
 }
 
 func supervisorIntentHasServerDaemonRows(intent *SupervisorIntentFile, server string) bool {

@@ -1911,6 +1911,47 @@ func TestInstallPlanCore_GlobalInstall_EnablesAbsentAutostartOwner(t *testing.T)
 	}
 }
 
+// TestInstallPlanCore_GlobalInstall_AutostartEnableUsesCanonicalMcphubPath
+// proves install-created autostart shims point at the canonical installed
+// binary, not os.Executable from the current build/download directory.
+//
+// Negative-control: pre-fix ensureGlobalInstallAutostartOwner builds
+// autostart.Options with an empty MCPHubPath, so the fake records "".
+func TestInstallPlanCore_GlobalInstall_AutostartEnableUsesCanonicalMcphubPath(t *testing.T) {
+	daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	canonical := filepath.Join(t.TempDir(), MCPHubBinaryName())
+	if err := os.WriteFile(canonical, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("write canonical stub: %v", err)
+	}
+	t.Cleanup(SetTestCanonicalMcphubPath(canonical))
+
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateAbsent}
+	installFakeAutostartBackend(t, fb)
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}))
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(global install): %v", err)
+	}
+
+	if fb.enableCalls != 1 {
+		t.Fatalf("autostart Enable calls = %d, want 1", fb.enableCalls)
+	}
+	if got := fb.enableOpts[0].MCPHubPath; got != canonical {
+		t.Fatalf("autostart Enable MCPHubPath = %q, want canonical %q", got, canonical)
+	}
+}
+
 // TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops proves install
 // does not rewrite an existing logon owner merely because daemon scheduler tasks
 // are suppressed.
