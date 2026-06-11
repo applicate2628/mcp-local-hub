@@ -958,17 +958,12 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	sch, err := scheduler.New()
-	if err != nil {
-		return nil, err
-	}
 	report := &UninstallReport{Server: m.Name}
 	// Delete tasks scoped to THIS server. The trailing dash narrows
 	// "mcp-local-hub-foo-*" without sweeping "mcp-local-hub-foobar-*"
 	// (PR #126). The retired-manifest path uninstallWithoutManifest
 	// uses the same shape.
-	prefix := "mcp-local-hub-" + m.Name + "-"
-	tasks, err := sch.List(prefix)
+	sch, tasks, err := uninstallSchedulerTasksForServer(m.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -982,11 +977,13 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 		taskNamesForIntent = append(taskNamesForIntent, strings.TrimPrefix(t.Name, "\\"))
 	}
 	a.recordUninstallIntentForTasks(taskNamesForIntent, nil)
-	for _, t := range tasks {
-		if err := sch.Delete(t.Name); err != nil {
-			report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
-		} else {
-			report.TasksDeleted = append(report.TasksDeleted, t.Name)
+	if sch != nil {
+		for _, t := range tasks {
+			if err := sch.Delete(t.Name); err != nil {
+				report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
+			} else {
+				report.TasksDeleted = append(report.TasksDeleted, t.Name)
+			}
 		}
 	}
 	// v0.6 Phase F (bot PR #288 F1): a global daemon lives in
@@ -1116,16 +1113,11 @@ func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon, expectedURL string
 // prefix + RemoveEntry across every known client. An entry that does
 // not exist is not an error.
 func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) {
-	sch, err := scheduler.New()
-	if err != nil {
-		return nil, err
-	}
 	report := &UninstallReport{Server: server}
 	// Trailing dash matches the main Uninstall path's narrowing from
 	// PR #31 so "mcp-local-hub-gdb-default" matches but "mcp-local-hub-
 	// gdbtool-*" does not.
-	prefix := "mcp-local-hub-" + server + "-"
-	tasks, err := sch.List(prefix)
+	sch, tasks, err := uninstallSchedulerTasksForServer(server)
 	if err != nil {
 		return nil, err
 	}
@@ -1136,11 +1128,13 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 		retiredTaskNames = append(retiredTaskNames, strings.TrimPrefix(t.Name, "\\"))
 	}
 	a.recordUninstallIntentForTasks(retiredTaskNames, nil)
-	for _, t := range tasks {
-		if err := sch.Delete(t.Name); err != nil {
-			report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
-		} else {
-			report.TasksDeleted = append(report.TasksDeleted, t.Name)
+	if sch != nil {
+		for _, t := range tasks {
+			if err := sch.Delete(t.Name); err != nil {
+				report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf("delete %s: %v", t.Name, err))
+			} else {
+				report.TasksDeleted = append(report.TasksDeleted, t.Name)
+			}
 		}
 	}
 	// v0.6 Phase F (bot PR #288 F1): also clear any supervisor-intent
@@ -1169,6 +1163,25 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 		report.ClientsUpdated = append(report.ClientsUpdated, name)
 	}
 	return report, nil
+}
+
+func uninstallSchedulerTasksForServer(server string) (scheduler.Scheduler, []scheduler.TaskStatus, error) {
+	sch, err := newScheduler()
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	prefix := "mcp-local-hub-" + server + "-"
+	tasks, err := sch.List(prefix)
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	return sch, tasks, nil
 }
 
 // BuildPlanOpts controls plan-time filtering.

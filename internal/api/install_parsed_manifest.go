@@ -483,12 +483,13 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 		})
 	}
 
-	// Phase F: a global manifest's daemons spawn from supervisor-intent.json,
-	// not from per-daemon scheduler tasks. supervisorDaemonsFromPlan(m) (via
-	// serenaOrPlanDaemons inside buildMergedSupervisorIntent) materializes the
-	// rows from the plan. A global manifest with zero daemons (remote-http)
-	// contributes no rows and falls through to the client-config-only path.
-	superviseGlobal := m.Kind != config.KindWorkspaceScoped && len(plan.SupervisorIntent) > 0
+	// Phase F: a global manifest's daemon lifecycle is owned by
+	// supervisor-intent.json, not by per-daemon scheduler tasks. Full global
+	// installs must enter this merge even when the NEW manifest contributes zero
+	// rows (daemonless remote-http): the full install still owns removal of this
+	// server's prior descriptor rows and per-server weekly timer.
+	superviseGlobal := m.Kind != config.KindWorkspaceScoped && (len(plan.SupervisorIntent) > 0 || daemonFilter == "")
+	var nudgeAfterInstall bool
 
 	if superviseGlobal {
 		// The supervisor-intent flock is held ONLY across the read-merge-write
@@ -534,6 +535,10 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			if err != nil {
 				return err
 			}
+			intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
+				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifacts(priorIntent, m.Name))
+			nudgeAfterInstall = len(plan.SupervisorIntent) > 0 ||
+				(daemonFilter == "" && supervisorIntentHasServerDaemonRows(priorIntent, m.Name))
 			// Defense-in-depth: a global manifest must never materialize a
 			// runtime_spec row. If one ever appeared it would need the §7.1
 			// supervisor-running gate (which lives in InstallParsedManifest), so
@@ -543,35 +548,40 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 				return fmt.Errorf("installPlanCore: global manifest %q unexpectedly produced a runtime_spec-bearing supervisor-intent row; global installs must not carry runtime_spec (that path is InstallParsedManifest's)", m.Name)
 			}
 
-			// Pre-flight the secure-write so a doomed install fails fast with a
-			// pristine end-state (mirrors InstallParsedManifest step 2).
-			if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
-				return fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+			if intentWriteNeeded {
+				// Pre-flight the secure-write so a doomed install fails fast with a
+				// pristine end-state (mirrors InstallParsedManifest step 2).
+				if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
+					return fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+				}
 			}
 
-			intermediate := func() (func(), error) {
-				if cerr := ctx.Err(); cerr != nil {
-					return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
-				}
-				if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
-					return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
-				}
-				undo := func() {
-					if priorExisted {
-						if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
-							fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
-						} else {
-							fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
+			var intermediate intentWriteStep
+			if intentWriteNeeded {
+				intermediate = func() (func(), error) {
+					if cerr := ctx.Err(); cerr != nil {
+						return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
+					}
+					if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
+						return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
+					}
+					undo := func() {
+						if priorExisted {
+							if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
+								fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
+							} else {
+								fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
+							}
+							return
 						}
-						return
+						if rerr := os.Remove(intentPath); rerr != nil && !os.IsNotExist(rerr) {
+							fmt.Fprintf(w, "  rollback: remove supervisor-intent failed: %v\n", rerr)
+						} else {
+							fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
+						}
 					}
-					if rerr := os.Remove(intentPath); rerr != nil && !os.IsNotExist(rerr) {
-						fmt.Fprintf(w, "  rollback: remove supervisor-intent failed: %v\n", rerr)
-					} else {
-						fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
-					}
+					return undo, nil
 				}
-				return undo, nil
 			}
 
 			if err := a.installPlan(ctx, m, plan, installPlanOpts{
@@ -580,7 +590,9 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 				DryRun:       false,
 				// Defer every daemon spawn to the supervisor reconcile loop; create
 				// no per-daemon scheduler task; the daemon set is owned by
-				// supervisor-intent.json so the obsolete-task prune is skipped.
+				// supervisor-intent.json, so the legacy scheduler cleanup below is
+				// a best-effort handoff delete rather than executeInstallTo's
+				// rollback-scoped replacement/prune.
 				StartTasks:         false,
 				Intermediate:       intermediate,
 				SkipSchedulerTasks: true,
@@ -596,6 +608,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 		if err := runLocked(); err != nil {
 			return err
 		}
+		cleanupLegacySchedulerTasksForSupervisorInstall(m, daemonFilter, w)
 	} else {
 		// Global manifest with no daemons (e.g. remote-http): client-config
 		// writes only — no scheduler tasks, no supervisor-intent rows.
@@ -629,7 +642,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	// classifyDriftAction !hasSched + running → post_ev_intent_update). When no
 	// supervisor is running, print the operator hint. Only fires for the
 	// supervise-global branch that actually wrote descriptor rows.
-	if superviseGlobal {
+	if nudgeAfterInstall {
 		nudgeSupervisorReconcileAfterGlobalInstall(context.Background(), w)
 	}
 	return nil
@@ -649,6 +662,89 @@ func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer
 		}
 		// Any other reconcile error is non-fatal: the descriptor is on disk and
 		// the supervisor converges it on its next startup / watcher / reconcile.
+	}
+}
+
+func supervisorIntentHasServerDaemonRows(intent *SupervisorIntentFile, server string) bool {
+	if intent == nil {
+		return false
+	}
+	for _, d := range intent.Daemons {
+		if supervisorIntentRowOwnedBy(d, server) {
+			return true
+		}
+	}
+	return false
+}
+
+func supervisorIntentHasServerLifecycleArtifacts(intent *SupervisorIntentFile, server string) bool {
+	if supervisorIntentHasServerDaemonRows(intent, server) {
+		return true
+	}
+	if intent == nil {
+		return false
+	}
+	for _, tm := range intent.MaintenanceTimers {
+		if serverWeeklyRefreshTimerOwnedBy(tm, server) {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, daemonFilter string, w io.Writer) {
+	if m == nil || m.Name == "" {
+		return
+	}
+	sch, err := newScheduler()
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return
+		}
+		if w != nil {
+			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped: %v\n", err)
+		}
+		return
+	}
+	if daemonFilter != "" {
+		deleteLegacySchedulerTaskBestEffort(sch, "mcp-local-hub-"+m.Name+"-"+daemonFilter, w)
+		return
+	}
+	prefix := "mcp-local-hub-" + m.Name + "-"
+	tasks, err := sch.List(prefix)
+	if err != nil {
+		if schedulerUnavailableError(err) {
+			return
+		}
+		if w != nil {
+			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped: list tasks for %s: %v\n", m.Name, err)
+		}
+		return
+	}
+	for _, task := range tasks {
+		name := strings.TrimPrefix(task.Name, "\\")
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		deleteLegacySchedulerTaskBestEffort(sch, name, w)
+	}
+}
+
+func deleteLegacySchedulerTaskBestEffort(sch interface{ Delete(string) error }, name string, w io.Writer) {
+	if strings.TrimSpace(name) == "" {
+		return
+	}
+	if err := sch.Delete(name); err != nil {
+		if schedulerUnavailableError(err) {
+			return
+		}
+		if w != nil {
+			fmt.Fprintf(w, "⚠ Failed to remove legacy scheduler task %s: %v\n", name, err)
+		}
+		return
+	}
+	if w != nil {
+		fmt.Fprintf(w, "✓ Scheduler task removed (legacy supervisor handoff): %s\n", name)
 	}
 }
 
@@ -677,8 +773,8 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 //     behavior.
 //
 // MaintenanceTimers are merged (not blindly carried verbatim) by
-// mergeServerWeeklyRefreshTimer so a GLOBAL manifest's `weekly_refresh: true`
-// is honored on the supervisor model:
+// mergeServerWeeklyRefreshTimer so a GLOBAL manifest's `weekly_refresh`
+// setting is honored on the supervisor model:
 //
 //   - For a GLOBAL full install (m.Kind != KindWorkspaceScoped &&
 //     m.WeeklyRefresh && daemonFilter == ""), this server's prior
@@ -691,12 +787,15 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 //     timer must materialize HERE or the weekly restart is silently dropped.
 //     A prior timer's operator off-switch (Enabled=&false) is preserved across
 //     the replace so a deliberately-disabled timer is not silently re-enabled.
+//   - For a GLOBAL full install with weekly_refresh=false, this server's prior
+//     server-weekly-refresh timer is DROPPED, mirroring the legacy scheduler
+//     path's prune of `mcp-local-hub-<server>-weekly-refresh` when the manifest
+//     flag flips off.
 //   - Otherwise (workspace-scoped manifest — serena sets weekly_refresh=false;
-//     a filtered/per-daemon install; or a global manifest without weekly_-
-//     refresh) the prior set is carried through VERBATIM (this server's timers
-//     AND every sibling's). Preserving the prior set untouched means an
-//     operator's deliberately-disabled timer survives every re-install of an
-//     unrelated manifest.
+//     or a filtered/per-daemon install) the prior set is carried through
+//     VERBATIM (this server's timers AND every sibling's). Preserving the prior
+//     set untouched means an operator's deliberately-disabled timer survives
+//     every re-install of an unrelated/partial manifest.
 //
 // Siblings' timers are ALWAYS preserved untouched; only THIS server's
 // server-weekly-refresh timer is replaced, mirroring the Daemons replace-by-
@@ -958,7 +1057,9 @@ func (a *API) removeServerFromSupervisorIntentBestEffort(server string, report *
 // merge for a per-server install. It mirrors buildMergedSupervisorIntent's
 // Daemons replace-by-server logic: every sibling server's timers pass through
 // untouched, and THIS server's server-weekly-refresh timer is replaced (when
-// the manifest wants one) or left verbatim (when it does not).
+// the manifest wants one), dropped (when a full global install turns it off),
+// or left verbatim (for workspace-scoped / filtered installs that do not own
+// the whole-server timer).
 //
 // Materialization condition (matches the pre-Phase-F Pass A gate at
 // install.go:1230 — `m.WeeklyRefresh && opts.DaemonFilter == ""`): the manifest
@@ -971,30 +1072,28 @@ func (a *API) removeServerFromSupervisorIntentBestEffort(server string, report *
 // task name `\mcp-local-hub-<server>-weekly-refresh`), and preserves any prior
 // timer's operator off-switch (Enabled=&false) so a re-install never silently
 // re-enables a deliberately-disabled timer.
-//
-// When the condition does NOT hold (workspace-scoped manifest, a global
-// manifest without weekly_refresh, or a filtered install), the prior set is
-// returned untouched — preserving an operator's disabled timer across an
-// unrelated re-install.
 func mergeServerWeeklyRefreshTimer(m *config.ServerManifest, daemonFilter string, prior []MaintenanceTimer) []MaintenanceTimer {
-	wantTimer := m.Kind != config.KindWorkspaceScoped && m.WeeklyRefresh && daemonFilter == ""
-	if !wantTimer {
+	if m.Kind == config.KindWorkspaceScoped || daemonFilter != "" {
 		return prior
 	}
 
 	wantName := canonicalIntentTaskKey("mcp-local-hub-" + m.Name + "-weekly-refresh")
 
 	// Preserve every sibling timer; drop this server's prior
-	// server-weekly-refresh timer (it is re-materialized below). Capture its
-	// Enabled off-switch so a deliberately-disabled timer is not re-enabled.
+	// server-weekly-refresh timer (it is either re-materialized below or
+	// intentionally removed when weekly_refresh=false). Capture its Enabled
+	// off-switch so a deliberately-disabled timer is not re-enabled.
 	out := make([]MaintenanceTimer, 0, len(prior)+1)
 	var priorEnabled *bool
 	for _, tm := range prior {
-		if tm.Server == m.Name && tm.Kind == "server-weekly-refresh" {
+		if serverWeeklyRefreshTimerOwnedBy(tm, m.Name) {
 			priorEnabled = tm.Enabled
 			continue // replaced below
 		}
 		out = append(out, tm)
+	}
+	if !m.WeeklyRefresh {
+		return out
 	}
 
 	// Resolve the mcphub binary the supervisor will exec, matching
@@ -1014,6 +1113,10 @@ func mergeServerWeeklyRefreshTimer(m *config.ServerManifest, daemonFilter string
 		Enabled: priorEnabled,
 	})
 	return out
+}
+
+func serverWeeklyRefreshTimerOwnedBy(tm MaintenanceTimer, server string) bool {
+	return tm.Kind == "server-weekly-refresh" && maintenanceTimerOwnedBy(tm, server)
 }
 
 // fanOutAuditTaskNames returns the per-workspace task names the pre-mutation

@@ -942,6 +942,114 @@ func TestInstallParsedManifest_PreservesPriorMaintenanceTimers(t *testing.T) {
 	}
 }
 
+// TestMergeServerWeeklyRefreshTimer_FullInstallWeeklyFalseDropsOnlyThisServer
+// covers the Phase-F lifecycle edge where a full reinstall flips
+// weekly_refresh from true to false. The old scheduler path pruned this
+// server's mcp-local-hub-<server>-weekly-refresh task; the supervisor-intent
+// merge must now drop only this server's server-weekly-refresh timer while
+// preserving sibling timers. Filtered installs still preserve timers verbatim
+// because a single-daemon install does not own the whole-server timer.
+//
+// Negative-control: restore mergeServerWeeklyRefreshTimer's !wantTimer branch
+// to `return prior` and the full-install assertion fails because demo's timer
+// survives.
+func TestMergeServerWeeklyRefreshTimer_FullInstallWeeklyFalseDropsOnlyThisServer(t *testing.T) {
+	disabled := false
+	targetTimer := MaintenanceTimer{
+		Name:    `\mcp-local-hub-demo-weekly-refresh`,
+		Kind:    "server-weekly-refresh",
+		Server:  "demo",
+		Command: "mcphub",
+		Args:    []string{"restart", "--server", "demo"},
+		Enabled: &disabled,
+	}
+	siblingTimer := MaintenanceTimer{
+		Name:    `\mcp-local-hub-other-weekly-refresh`,
+		Kind:    "server-weekly-refresh",
+		Server:  "other",
+		Command: "mcphub",
+		Args:    []string{"restart", "--server", "other"},
+	}
+	prior := []MaintenanceTimer{targetTimer, siblingTimer}
+	m := &config.ServerManifest{
+		Name:          "demo",
+		Kind:          config.KindGlobal,
+		WeeklyRefresh: false,
+	}
+
+	full := mergeServerWeeklyRefreshTimer(m, "", prior)
+	if len(full) != 1 {
+		t.Fatalf("full install timers = %d, want 1 sibling only; timers=%+v", len(full), full)
+	}
+	if !reflect.DeepEqual(full[0], siblingTimer) {
+		t.Fatalf("full install did not preserve sibling timer verbatim:\n got  %+v\n want %+v", full[0], siblingTimer)
+	}
+
+	filtered := mergeServerWeeklyRefreshTimer(m, "alpha", prior)
+	if !reflect.DeepEqual(filtered, prior) {
+		t.Fatalf("filtered install mutated timers; got %+v want prior %+v", filtered, prior)
+	}
+}
+
+// TestMergeServerWeeklyRefreshTimer_BlankServerNameFallbackReplacesWithoutDuplicate
+// covers the legacy timer shape whose Server field is blank but whose canonical
+// Name belongs to this server. Reinstalling weekly_refresh:true must recognize
+// and replace that prior timer rather than appending a duplicate.
+//
+// Negative-control: restore the replace match to `tm.Server == m.Name` and the
+// blank-Server prior timer survives alongside the fresh timer, so the owned
+// timer count becomes 2.
+func TestMergeServerWeeklyRefreshTimer_BlankServerNameFallbackReplacesWithoutDuplicate(t *testing.T) {
+	disabled := false
+	prior := []MaintenanceTimer{
+		{
+			Name:    `\mcp-local-hub-demo-weekly-refresh`,
+			Kind:    "server-weekly-refresh",
+			Server:  "",
+			Command: "old",
+			Args:    []string{"old"},
+			Enabled: &disabled,
+		},
+		{
+			Name:    `\mcp-local-hub-other-weekly-refresh`,
+			Kind:    "server-weekly-refresh",
+			Server:  "other",
+			Command: "other",
+			Args:    []string{"restart", "--server", "other"},
+		},
+	}
+	m := &config.ServerManifest{
+		Name:          "demo",
+		Kind:          config.KindGlobal,
+		WeeklyRefresh: true,
+	}
+
+	got := mergeServerWeeklyRefreshTimer(m, "", prior)
+	var owned []MaintenanceTimer
+	var sawSibling bool
+	for _, tm := range got {
+		if tm.Name == `\mcp-local-hub-other-weekly-refresh` && tm.Server == "other" {
+			sawSibling = true
+			continue
+		}
+		if maintenanceTimerOwnedBy(tm, "demo") {
+			owned = append(owned, tm)
+		}
+	}
+	if len(owned) != 1 {
+		t.Fatalf("owned demo timers = %d, want exactly 1 replacement; timers=%+v", len(owned), got)
+	}
+	if owned[0].Server != "demo" || owned[0].Command == "old" {
+		t.Fatalf("demo timer was not replaced with a fresh canonical timer: %+v", owned[0])
+	}
+	if owned[0].Enabled == nil || *owned[0].Enabled != false {
+		t.Fatalf("operator off-switch was not preserved from blank-Server prior timer: %+v", owned[0])
+	}
+	if !sawSibling {
+		t.Fatalf("sibling timer was not preserved; timers=%+v", got)
+	}
+}
+
 // derefBool renders a *bool for error messages without panicking on nil.
 func derefBool(b *bool) string {
 	if b == nil {

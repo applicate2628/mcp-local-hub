@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -37,6 +38,11 @@ func phaseFStateDir(t *testing.T) string {
 	t.Cleanup(SetDaemonStateRootForTest(stateDir))
 	t.Setenv("LOCALAPPDATA", stateDir)
 	t.Setenv("XDG_STATE_HOME", stateDir)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(stateDir, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(stateDir, "config"))
+	t.Setenv("HOME", filepath.Join(stateDir, "home"))
+	t.Setenv("USERPROFILE", filepath.Join(stateDir, "home"))
+	t.Setenv("APPDATA", filepath.Join(stateDir, "AppData", "Roaming"))
 	return stateDir
 }
 
@@ -193,6 +199,106 @@ func TestRemoveServerFromSupervisorIntentBestEffort_NudgesReconcileOnlyWhenChang
 	}
 }
 
+// TestUninstall_SchedulerUnavailableStillRemovesSupervisorIntent asserts the
+// POSIX Phase-F lifecycle edge: a global daemon may exist only as a
+// supervisor-intent descriptor, with no per-daemon scheduler task. If the
+// scheduler backend is unavailable, uninstall must treat legacy tasks as an
+// empty set and still remove this server's supervisor-intent artifacts.
+//
+// Negative-control: restore Uninstall/uninstallWithoutManifest to return on
+// scheduler.ErrNotImplemented before removeServerFromSupervisorIntentBestEffort
+// and both subtests fail with an uninstall error plus surviving intent rows.
+func TestUninstall_SchedulerUnavailableStillRemovesSupervisorIntent(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		server string
+		call   func(*API, string) (*UninstallReport, error)
+	}{
+		{
+			name:   "manifest-backed",
+			server: "time",
+			call: func(a *API, server string) (*UninstallReport, error) {
+				return a.Uninstall(server)
+			},
+		},
+		{
+			name:   "retired-manifest",
+			server: "gdb",
+			call: func(a *API, server string) (*UninstallReport, error) {
+				return a.uninstallWithoutManifest(server)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := phaseFStateDir(t)
+			intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+			seed := &SupervisorIntentFile{
+				Version: 1,
+				Daemons: []SupervisorDaemon{
+					{TaskName: `\mcp-local-hub-` + tc.server + `-default`, Server: tc.server, Daemon: "default", Command: "cmd", Port: 9128},
+					{TaskName: `\mcp-local-hub-other-default`, Server: "other", Daemon: "default", Command: "other", Port: 9991},
+				},
+				MaintenanceTimers: []MaintenanceTimer{
+					{Name: `\mcp-local-hub-` + tc.server + `-weekly-refresh`, Kind: "server-weekly-refresh", Server: tc.server},
+					{Name: `\mcp-local-hub-other-weekly-refresh`, Kind: "server-weekly-refresh", Server: "other"},
+				},
+			}
+			if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+				t.Fatalf("seed supervisor-intent: %v", err)
+			}
+
+			restoreScheduler := SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+				return nil, fmt.Errorf("fake posix scheduler: %w", scheduler.ErrNotImplemented)
+			})
+			t.Cleanup(restoreScheduler)
+
+			var reconcileCalls int32
+			t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+				if !apply {
+					t.Errorf("uninstall reconcile nudge apply = false, want true")
+				}
+				atomic.AddInt32(&reconcileCalls, 1)
+				return ReconcileResponse{}, nil
+			}))
+
+			report, err := tc.call(NewAPI(), tc.server)
+			if err != nil {
+				t.Fatalf("uninstall with scheduler unavailable: %v", err)
+			}
+			if report == nil || report.Server != tc.server {
+				t.Fatalf("report = %+v, want server %q", report, tc.server)
+			}
+			if len(report.TasksDeleted) != 0 {
+				t.Fatalf("scheduler-unavailable uninstall deleted tasks = %v, want none", report.TasksDeleted)
+			}
+
+			got, err := ReadSupervisorIntent(intentPath)
+			if err != nil {
+				t.Fatalf("ReadSupervisorIntent: %v", err)
+			}
+			for _, d := range got.Daemons {
+				if supervisorIntentRowOwnedBy(d, tc.server) {
+					t.Fatalf("%s supervisor descriptor survived scheduler-unavailable uninstall: %+v", tc.server, d)
+				}
+			}
+			if len(got.Daemons) != 1 || got.Daemons[0].Server != "other" {
+				t.Fatalf("sibling daemon not preserved after uninstall; got %+v", got.Daemons)
+			}
+			for _, tm := range got.MaintenanceTimers {
+				if maintenanceTimerOwnedBy(tm, tc.server) {
+					t.Fatalf("%s maintenance timer survived scheduler-unavailable uninstall: %+v", tc.server, tm)
+				}
+			}
+			if len(got.MaintenanceTimers) != 1 || got.MaintenanceTimers[0].Server != "other" {
+				t.Fatalf("sibling timer not preserved after uninstall; got %+v", got.MaintenanceTimers)
+			}
+			if calls := atomic.LoadInt32(&reconcileCalls); calls != 1 {
+				t.Fatalf("reconcile nudge calls = %d, want 1 after removing supervisor-intent rows", calls)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // F2 — a fresh GLOBAL install nudges the supervisor reconcile so the new
 // descriptor spawns immediately (the IntentWatcher only feeds stops, not new
@@ -265,6 +371,141 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_PrintsHint(t *testing.T
 	}
 	if out := buf.String(); !strings.Contains(out, "no running supervisor") {
 		t.Errorf("expected operator hint about no running supervisor; got output:\n%s", out)
+	}
+}
+
+// TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks
+// asserts the Phase-F handoff cleanup: supervisor-path installs must remove
+// stale pre-v0.6 per-daemon scheduler tasks for this server so those legacy
+// tasks cannot spawn daemons outside the supervisor after logon.
+//
+// Negative-control: remove the legacy scheduler cleanup from the supervise
+// global branch and deleteNames stays empty, so this test fails.
+func TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks(t *testing.T) {
+	phaseFStateDir(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	f.listSeed = []scheduler.TaskStatus{
+		{Name: `\mcp-local-hub-demo-alpha`},
+		{Name: `\mcp-local-hub-demo-beta`},
+		{Name: `\mcp-local-hub-demo-weekly-refresh`},
+		{Name: `\mcp-local-hub-other-alpha`},
+		{Name: `\mcp-local-hub-supervisor`},
+	}
+	installFakeScheduler(t, f)
+
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}))
+
+	m := globalTwoDaemonManifest()
+	m.WeeklyRefresh = false // full reinstall flips the per-server weekly timer off.
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(global install): %v", err)
+	}
+
+	deleted := map[string]bool{}
+	for _, name := range f.deleteNames {
+		deleted[strings.TrimPrefix(name, `\`)] = true
+	}
+	for _, want := range []string{"mcp-local-hub-demo-alpha", "mcp-local-hub-demo-beta", "mcp-local-hub-demo-weekly-refresh"} {
+		if !deleted[want] {
+			t.Fatalf("legacy scheduler task %q was not deleted; deleteNames=%v", want, f.deleteNames)
+		}
+	}
+	for _, forbidden := range []string{"mcp-local-hub-other-alpha", "mcp-local-hub-supervisor"} {
+		if deleted[forbidden] {
+			t.Fatalf("deleted non-owned/control-plane task %q; deleteNames=%v", forbidden, f.deleteNames)
+		}
+	}
+}
+
+// TestInstallPlanCore_GlobalDaemonlessFullInstallDropsStaleSupervisorRows
+// asserts the daemonless reinstall edge: switching a global server to
+// transport=remote-http contributes zero supervisor rows, but a full install
+// still owns this server's prior rows and must remove them, preserving
+// siblings and nudging reconcile so the old daemon terminates.
+//
+// Negative-control: route zero-row global installs through the old
+// client-config-only branch and the demo row survives while reconcileCalls
+// stays 0.
+func TestInstallPlanCore_GlobalDaemonlessFullInstallDropsStaleSupervisorRows(t *testing.T) {
+	stateDir := phaseFStateDir(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha`, Server: "demo", Daemon: "alpha", Command: "old", Port: 9211},
+			{TaskName: `\mcp-local-hub-other-default`, Server: "other", Daemon: "default", Command: "other", Port: 9991},
+		},
+		MaintenanceTimers: []MaintenanceTimer{
+			{Name: `\mcp-local-hub-demo-weekly-refresh`, Kind: "server-weekly-refresh", Server: "demo"},
+			{Name: `\mcp-local-hub-other-weekly-refresh`, Kind: "server-weekly-refresh", Server: "other"},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed supervisor-intent: %v", err)
+	}
+
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	var reconcileCalls int32
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		if !apply {
+			t.Errorf("daemonless reinstall reconcile nudge apply = false, want true")
+		}
+		atomic.AddInt32(&reconcileCalls, 1)
+		return ReconcileResponse{}, nil
+	}))
+
+	m := &config.ServerManifest{
+		Name:           "demo",
+		Kind:           config.KindGlobal,
+		Transport:      config.TransportRemoteHTTP,
+		URL:            "https://example.invalid/mcp",
+		ClientBindings: nil,
+		WeeklyRefresh:  false,
+	}
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan(remote-http): %v", err)
+	}
+	if len(plan.SupervisorIntent) != 0 {
+		t.Fatalf("remote-http plan SupervisorIntent = %+v, want none", plan.SupervisorIntent)
+	}
+
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(daemonless full install): %v", err)
+	}
+
+	got, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	for _, d := range got.Daemons {
+		if supervisorIntentRowOwnedBy(d, "demo") {
+			t.Fatalf("daemonless full install left stale demo descriptor row: %+v", d)
+		}
+	}
+	if len(got.Daemons) != 1 || got.Daemons[0].Server != "other" {
+		t.Fatalf("sibling daemon row not preserved; got %+v", got.Daemons)
+	}
+	for _, tm := range got.MaintenanceTimers {
+		if maintenanceTimerOwnedBy(tm, "demo") {
+			t.Fatalf("daemonless full install left stale demo weekly timer: %+v", tm)
+		}
+	}
+	if len(got.MaintenanceTimers) != 1 || got.MaintenanceTimers[0].Server != "other" {
+		t.Fatalf("sibling maintenance timer not preserved; got %+v", got.MaintenanceTimers)
+	}
+	if calls := atomic.LoadInt32(&reconcileCalls); calls != 1 {
+		t.Fatalf("reconcile nudge calls = %d, want 1 after dropping stale daemon rows", calls)
 	}
 }
 
