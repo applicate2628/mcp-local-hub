@@ -2602,6 +2602,60 @@ func TestSerenaRouter_BackendLoss_IPCReconcileTearsDownOnPIDChange(t *testing.T)
 	}
 }
 
+func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickPIDChangeAfterBindTearsDown(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	port := testServerPort(t, ts)
+	if port >= 9121 && port <= 9299 {
+		t.Skipf("httptest selected live mcphub port %d", port)
+	}
+
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: port}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	currentPID := 1000
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: "Running", PID: currentPID, Port: port},
+		}, nil
+	}
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid after bind")
+	}
+
+	currentPID = 2000
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("first reconcile after bind-time PID 1000 -> current PID 2000 tore down %d sessions; want 1", n)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after first observed post-bind PID change; want it torn down")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Errorf("serenaDaemonSessions STILL holds sid after first observed post-bind PID change; want it unbound")
+	}
+	if got := deps.Sessions.LookupSession(sid); got != nil {
+		t.Errorf("sticky sessionRouter STILL resolves sid after first observed post-bind PID change; want it unbound. got %+v", got)
+	}
+}
+
 // §3 fail-loud — the IPC reconcile fallback must NOT tear down sessions on a
 // status READ error (a transient supervisor-IPC outage is not backend loss).
 func TestSerenaRouter_BackendLoss_IPCReconcileNoTeardownOnStatusError(t *testing.T) {

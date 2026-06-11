@@ -646,11 +646,14 @@ func TestStopForceKillSupervisorOwned_UnsupportedPortKillFallsBackToPID(t *testi
 	}
 
 	origKill := killByPortFn
+	origForceKill := forceKillByPortFn
 	origLookup := lookupProcess
 	killByPortFn = killDaemonByPort
+	forceKillByPortFn = killDaemonByPortOutcome
 	lookupProcess = nil
 	t.Cleanup(func() {
 		killByPortFn = origKill
+		forceKillByPortFn = origForceKill
 		lookupProcess = origLookup
 	})
 
@@ -704,8 +707,21 @@ func swapStopSchedulerFactory(f scheduler.Scheduler) func() {
 
 func swapKillByPort(fn func(port int, timeout time.Duration) error) func() {
 	orig := killByPortFn
+	origForce := forceKillByPortFn
 	killByPortFn = fn
-	return func() { killByPortFn = orig }
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		if err := fn(port, timeout); err != nil {
+			return portKillNoListener, err
+		}
+		if port == 0 {
+			return portKillNoPort, nil
+		}
+		return portKillKilled, nil
+	}
+	return func() {
+		killByPortFn = orig
+		forceKillByPortFn = origForce
+	}
 }
 
 // errSupervisorUnavailableForTest wraps ErrSupervisorIPCUnavailable so the

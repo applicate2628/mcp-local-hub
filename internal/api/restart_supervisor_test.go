@@ -222,6 +222,56 @@ func TestRestartAllFallsThroughToLegacySchedulerAndSkipsSupervisorHandledTasks(t
 	}
 }
 
+func TestRestartAll_NilLookupPortKillNoOpRunsScheduler(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+	t.Setenv("LOCALAPPDATA", stateDir)
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	port := pickFreeLocalPort(t)
+	for port >= 9121 && port <= 9299 {
+		port = pickFreeLocalPort(t)
+	}
+	const taskName = `\mcp-local-hub-serena-ephemeral`
+	regPath, err := DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+	reg := NewRegistry(regPath)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:  "ephemeral",
+		WorkspacePath: filepath.Join(stateDir, "workspace"),
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          port,
+		TaskName:      taskName,
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+
+	fake := &restartAllFakeScheduler{tasks: []scheduler.TaskStatus{{Name: taskName}}}
+	origFactory := restartSchedulerFactory
+	restartSchedulerFactory = func() (scheduler.Scheduler, error) { return fake, nil }
+	defer func() { restartSchedulerFactory = origFactory }()
+
+	origLookup := lookupProcess
+	lookupProcess = nil
+	defer func() { lookupProcess = origLookup }()
+
+	results, err := NewAPI().RestartAll()
+	if err != nil {
+		t.Fatalf("RestartAll: %v", err)
+	}
+	if len(fake.runNames) != 1 || fake.runNames[0] != taskName {
+		t.Fatalf("scheduler Run calls = %v, want [%s]; results=%+v", fake.runNames, taskName, results)
+	}
+	if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
+		t.Fatalf("results = %+v, want one successful legacy restart row", results)
+	}
+}
+
 func TestRestartFallsBackToSchedulerWhenSupervisorRespawnFails(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)

@@ -178,16 +178,17 @@ func (a *API) WriteStopIntentIdleGuarded(taskName string, intent DaemonIntent, w
 // refused if the entry is no longer idle (the operator stop survives, and the
 // wake's caller treats the daemon as still-down).
 //
-// Idempotent: a missing entry, OR an entry whose Reason != wantReason, is a
-// no-op success (returns nil, clears nothing). Emits clear-intent only when an
-// entry was actually removed.
-func (a *API) ClearStopIntentIfReason(taskName string, wantReason string, who string) error {
+// It returns clearAllowed=true when the caller may proceed (matching entry
+// cleared, or no entry existed) and clearAllowed=false when a different current
+// reason blocked the clear. Emits clear-intent only when an entry was actually
+// removed.
+func (a *API) ClearStopIntentIfReason(taskName string, wantReason string, who string) (bool, error) {
 	if len(who) > IdentityFieldByteCap {
-		return ErrEntryOversize
+		return false, ErrEntryOversize
 	}
 	taskName = canonicalIntentTaskKey(taskName)
 	if len(taskName) > IdentityFieldByteCap {
-		return ErrEntryOversize
+		return false, ErrEntryOversize
 	}
 
 	before, _, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
@@ -199,7 +200,7 @@ func (a *API) ClearStopIntentIfReason(taskName string, wantReason string, who st
 		}
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Emit clear-intent only when we actually removed the matching entry. before
 	// is the prior snapshot; the entry was removed iff before existed AND its
@@ -213,7 +214,7 @@ func (a *API) ClearStopIntentIfReason(taskName string, wantReason string, who st
 			WithBefore(before),
 		))
 	}
-	return nil
+	return before == nil || before.Reason == wantReason, nil
 }
 
 // ClearStopIntent removes the stop directive for taskName from the

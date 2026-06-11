@@ -708,6 +708,43 @@ func (s *Server) terminateSerenaSessionsForWorkspace(wsKey string) int {
 	return len(ids)
 }
 
+func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.WorkspaceEntry) {
+	if ws == nil || ws.WorkspacePath == "" {
+		return
+	}
+	statusFn := serenaBackendStatusFn
+	if statusFn == nil {
+		return
+	}
+	rows, err := statusFn(ctx)
+	if err != nil {
+		return
+	}
+	pid := 0
+	for _, row := range rows {
+		if row.Workspace != ws.WorkspacePath {
+			continue
+		}
+		if row.PID > 0 {
+			pid = row.PID
+		} else if row.StalePID > 0 {
+			pid = row.StalePID
+		}
+		break
+	}
+	if pid <= 0 {
+		return
+	}
+	s.serenaBackendPIDMu.Lock()
+	if s.serenaBackendLastPID == nil {
+		s.serenaBackendLastPID = map[string]int{}
+	}
+	if _, exists := s.serenaBackendLastPID[ws.WorkspacePath]; !exists {
+		s.serenaBackendLastPID[ws.WorkspacePath] = pid
+	}
+	s.serenaBackendPIDMu.Unlock()
+}
+
 // handleSerenaBackendLossOnForwardFailure is the ALWAYS-ON FLOOR of the §3.x
 // backend-loss trigger (§12 Phase 1). The serena router calls it from the
 // in-process forward-failure sites — a tool-call forward OR the upstream

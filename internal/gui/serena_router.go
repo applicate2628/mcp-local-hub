@@ -960,7 +960,14 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// on a known router session only (bindWorkspace no-ops an unknown id), so a
 	// legacy/path-only caller with no router session is not indexed.
 	if sessionID != "" {
+		// Bind BEFORE seeding the PID baseline: bindWorkspace indexes
+		// ws.WorkspaceKey into knownWorkspaceKeys, and the 30s reconcile tick
+		// only builds wantPaths from bound workspaces. Seeding the baseline
+		// first left a window where a tick firing between seed and bind would
+		// rebuild serenaBackendLastPID without this (not-yet-bound) workspace,
+		// dropping the just-seeded baseline (PR #288 r5 adversarial review).
 		s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
+		s.seedSerenaBackendPIDBaseline(r.Context(), ws)
 	}
 
 	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO

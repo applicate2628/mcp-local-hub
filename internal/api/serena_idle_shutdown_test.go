@@ -256,15 +256,25 @@ func TestWakeIdleSerenaDaemon_CompareAndClear_OperatorStopSurvives(t *testing.T)
 		t.Fatalf("concurrent operator stop write: %v", err)
 	}
 
+	reconcileCalled, readyCalled := false, false
 	origRec, origReady := serenaWakeReconcileFn, serenaWakeReadinessFn
-	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil }
-	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error { return nil } // readiness irrelevant here
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		reconcileCalled = true
+		return ReconcileResponse{}, nil
+	}
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error {
+		readyCalled = true
+		return nil
+	}
 	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
 
-	// The wake proceeds (it saw idle), but its compare-and-clear must NOT erase
-	// the now-operator stop. The call may return nil (it cleared nothing and
-	// readiness passed), but the on-disk operator stop MUST survive.
-	_ = NewAPI().WakeIdleSerenaDaemon(context.Background(), task, 9206, "tester")
+	err := NewAPI().WakeIdleSerenaDaemon(context.Background(), task, 0, "tester")
+	if !errors.Is(err, ErrWakeRefusedOperatorStop) {
+		t.Fatalf("wake that loses the idle-clear race to an operator stop must refuse; got %v", err)
+	}
+	if reconcileCalled || readyCalled {
+		t.Fatalf("lost-clear wake must not nudge reconcile (%v) or probe readiness (%v)", reconcileCalled, readyCalled)
+	}
 
 	sup := ReadSupervisorIntentForTest(t, stateDir)
 	di, ok := sup.Stops[task]
@@ -290,8 +300,12 @@ func TestClearStopIntentIfReason_CompareAndClear(t *testing.T) {
 	if err := a.WriteSerenaIdleStop(taskIdle, now); err != nil {
 		t.Fatalf("seed idle: %v", err)
 	}
-	if err := a.ClearStopIntentIfReason(taskIdle, IntentReasonIdle, "tester"); err != nil {
+	clearAllowed, err := a.ClearStopIntentIfReason(taskIdle, IntentReasonIdle, "tester")
+	if err != nil {
 		t.Fatalf("clear idle: %v", err)
+	}
+	if !clearAllowed {
+		t.Fatalf("clear idle returned clearAllowed=false, want true for matching idle stop")
 	}
 	if _, ok := ReadSupervisorIntentForTest(t, stateDir).Stops[taskIdle]; ok {
 		t.Fatalf("idle stop must be cleared by a matching-reason compare-and-clear")
@@ -304,8 +318,12 @@ func TestClearStopIntentIfReason_CompareAndClear(t *testing.T) {
 	}, "operator"); err != nil {
 		t.Fatalf("seed user-stop: %v", err)
 	}
-	if err := a.ClearStopIntentIfReason(taskOp, IntentReasonIdle, "tester"); err != nil {
+	clearAllowed, err = a.ClearStopIntentIfReason(taskOp, IntentReasonIdle, "tester")
+	if err != nil {
 		t.Fatalf("compare-and-clear (mismatch) must be a no-op success; got %v", err)
+	}
+	if clearAllowed {
+		t.Fatalf("compare-and-clear mismatch returned clearAllowed=true, want false so wake refuses operator races")
 	}
 	di, ok := ReadSupervisorIntentForTest(t, stateDir).Stops[taskOp]
 	if !ok || di.Reason != IntentReasonUserStop {
@@ -313,8 +331,12 @@ func TestClearStopIntentIfReason_CompareAndClear(t *testing.T) {
 	}
 
 	// Absent entry → no-op success.
-	if err := a.ClearStopIntentIfReason(`\mcp-local-hub-serena-absent`, IntentReasonIdle, "tester"); err != nil {
+	clearAllowed, err = a.ClearStopIntentIfReason(`\mcp-local-hub-serena-absent`, IntentReasonIdle, "tester")
+	if err != nil {
 		t.Fatalf("compare-and-clear on an absent entry must be a no-op success; got %v", err)
+	}
+	if !clearAllowed {
+		t.Fatalf("compare-and-clear on an absent entry returned clearAllowed=false, want true for idempotent concurrent wakes")
 	}
 }
 
@@ -361,8 +383,12 @@ func TestReadSerenaUnifiedStopForTask_CacheReflectsWrites(t *testing.T) {
 	}
 
 	// Clear it via the compare-and-clear → the next read must see it GONE.
-	if err := NewAPI().ClearStopIntentIfReason(task, IntentReasonIdle, "tester"); err != nil {
+	clearAllowed, err := NewAPI().ClearStopIntentIfReason(task, IntentReasonIdle, "tester")
+	if err != nil {
 		t.Fatalf("ClearStopIntentIfReason: %v", err)
+	}
+	if !clearAllowed {
+		t.Fatalf("ClearStopIntentIfReason returned clearAllowed=false, want true for matching idle stop")
 	}
 	di4, err := readSerenaUnifiedStopForTask(task)
 	if err != nil {

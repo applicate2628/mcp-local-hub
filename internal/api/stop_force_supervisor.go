@@ -18,7 +18,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -55,9 +54,10 @@ var supervisorIPCStatusFn = DialSupervisorIPCStatus
 //     nothing is supervisor-owned here; the legacy stopKillCore owns the
 //     stop (it still iterates the scheduler tasks for legacy rows).
 //   - Otherwise → one RestartResult row per target with handled=true. Each
-//     target is killed by its descriptor Port via the shared killByPortFn
-//     (the same primitive stopKillCore uses); a target with no descriptor
-//     port falls back to a PID kill resolved from the supervisor IPC status.
+//     target is killed by its descriptor Port via the shared port-kill
+//     primitive; a target with no descriptor port, no port-owner lookup, or no
+//     current port listener falls back to a PID kill resolved from the
+//     supervisor IPC status.
 //     A target that is already not running (no port bound, no live PID) is a
 //     success row — the force-stop goal (daemon not running) already holds.
 //
@@ -95,17 +95,14 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) RestartResult {
 	portKillUnsupported := false
 	if d.Port != 0 {
-		if err := killByPortFn(d.Port, 5*time.Second); err != nil {
-			if errors.Is(err, errPortKillUnsupported) {
-				portKillUnsupported = true
-			} else {
-				return RestartResult{TaskName: d.TaskName, Err: "force kill daemon by port: " + err.Error()}
-			}
-		} else {
-			// killByPortFn returned nil after a real lookup, so the process was
-			// killed or the port was verifiably unbound.
+		outcome, err := forceKillByPortFn(d.Port, 5*time.Second)
+		if err != nil {
+			return RestartResult{TaskName: d.TaskName, Err: "force kill daemon by port: " + err.Error()}
+		}
+		if outcome == portKillKilled {
 			return RestartResult{TaskName: d.TaskName}
 		}
+		portKillUnsupported = outcome == portKillLookupUnavailable
 	}
 	if pid, ok := pidByTask[strings.TrimPrefix(d.TaskName, `\`)]; ok && pid > 0 {
 		if err := stopForceKillPIDFn(pid); err != nil {
@@ -116,8 +113,9 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 	if portKillUnsupported {
 		return RestartResult{TaskName: d.TaskName, Err: "force kill daemon by port: " + errPortKillUnsupported.Error() + "; no live PID fallback"}
 	}
-	// No port and no live PID: the daemon is already not running, so the
-	// force-stop goal already holds. Success row (no Err).
+	// No targetable port listener and no live PID: the daemon is already not
+	// running from the caller's observable kill surfaces, so the force-stop goal
+	// already holds. Success row (no Err).
 	return RestartResult{TaskName: d.TaskName}
 }
 

@@ -441,14 +441,15 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 	// that read and this clear must NOT be erased by a blind delete. The
 	// compare-and-clear is performed under the supervisor-intent flock, so it is
 	// atomic against that operator write: if the entry is no longer idle, the
-	// clear is refused (the operator stop survives) and we proceed to nudge +
-	// probe anyway — but the supervisor's reconcile will keep the daemon stopped
-	// because the operator stop is still on the unified intent, so the readiness
-	// probe below times out → router 503 → the operator stop wins. (Refusing the
-	// clear is success; ClearStopIntentIfReason returns nil on a reason
-	// mismatch.) The clear is idempotent so two concurrent idle wakes converge.
-	if err := a.ClearStopIntentIfReason(taskName, IntentReasonIdle, who); err != nil {
+	// clear reports clearAllowed=false and the wake refuses immediately. An
+	// absent entry remains clearAllowed=true so two concurrent idle wakes
+	// converge without treating the second clear as an operator stop.
+	clearAllowed, err := a.ClearStopIntentIfReason(taskName, IntentReasonIdle, who)
+	if err != nil {
 		return fmt.Errorf("serena idle wake: clear idle stop for %s: %w", taskName, err)
+	}
+	if !clearAllowed {
+		return ErrWakeRefusedOperatorStop
 	}
 
 	// Nudge the supervisor to reconcile NOW. Best-effort: any reconcile error is

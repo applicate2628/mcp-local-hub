@@ -2687,36 +2687,53 @@ var killByPortFn = killDaemonByPort
 
 var errPortKillUnsupported = errors.New("port kill unsupported: process lookup unavailable")
 
+type portKillOutcome int
+
+const (
+	portKillNoPort portKillOutcome = iota
+	portKillLookupUnavailable
+	portKillNoListener
+	portKillKilled
+)
+
+var forceKillByPortFn = killDaemonByPortOutcome
+
 // killDaemonByPort finds the process listening on 127.0.0.1:port, kills
 // its whole tree with taskkill /F /T, and polls until the port is free.
-// Returns nil when nothing is listening (nothing to kill).
+// Returns nil when nothing is listening (nothing to kill), or when the host has
+// no process-lookup hook for port-owner discovery.
 //
 // /T is critical: our hub.exe spawns npx/uvx which spawn node/python.
 // Killing only hub.exe leaves the grandchildren running and occupying
 // the child-stdin side of the pipe.
 func killDaemonByPort(port int, timeout time.Duration) error {
+	_, err := killDaemonByPortOutcome(port, timeout)
+	return err
+}
+
+func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, error) {
 	if port == 0 {
-		return nil
+		return portKillNoPort, nil
 	}
 	if lookupProcess == nil {
-		return errPortKillUnsupported
+		return portKillLookupUnavailable, nil
 	}
 	pid, _, _, ok := lookupProcess(port)
 	if !ok {
-		return nil
+		return portKillNoListener, nil
 	}
 	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T")
 	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
+		return portKillNoListener, fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if _, _, _, stillUp := lookupProcess(port); !stillUp {
-			return nil
+			return portKillKilled, nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("port %d still bound after %s", port, timeout)
+	return portKillNoListener, fmt.Errorf("port %d still bound after %s", port, timeout)
 }
