@@ -210,11 +210,11 @@ func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
 // sees the security-boundary downgrade even when the primary
 // channel is unreachable.
 //
-// Both channels are best-effort: a log failure never blocks the
-// underlying state-file write. The pipeline's correctness rests on
-// the file-level DACL/mode hardening, not on whether the audit row
-// landed; absence of an audit row is dashboard-visible (no event
-// would appear) but the data itself is still owner-only.
+// Both channels are best-effort: supervisor-events.log uses TryEmit so lock
+// contention never blocks the underlying state-file write. The pipeline's
+// correctness rests on the file-level DACL/mode hardening, not on whether the
+// audit row landed; absence of an audit row is dashboard-visible (no event would
+// appear) but the data itself is still owner-only.
 func emitStateFileFallbackEvent(path, parentDir string, gateErr error) {
 	body := map[string]any{
 		"path":   path,
@@ -253,7 +253,7 @@ func emitStateFileFallbackEvent(path, parentDir string, gateErr error) {
 	}
 	defer func() { _ = logger.Close() }()
 
-	if emitErr := logger.Emit(SupervisorEvent{
+	if emitErr := logger.TryEmit(SupervisorEvent{
 		SchemaVersion: SupervisorEventSchemaVersion,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Severity:      SupervisorEventSeverityWarn,

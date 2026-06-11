@@ -45,6 +45,9 @@ func TestAllocatePort_ExhaustedWhenEntirePoolOSBound(t *testing.T) {
 }
 
 func TestAllocatePort_FirstFreeInEmptyRegistry(t *testing.T) {
+	origAvail := portAvailable
+	defer func() { portAvailable = origAvail }()
+	portAvailable = func(int) bool { return true }
 	reg := NewRegistry(t.TempDir() + "/reg.yaml")
 	got, err := AllocatePort(reg, config.PortPool{Start: 9200, End: 9299})
 	if err != nil {
@@ -56,6 +59,9 @@ func TestAllocatePort_FirstFreeInEmptyRegistry(t *testing.T) {
 }
 
 func TestAllocatePort_SkipsAllocated(t *testing.T) {
+	origAvail := portAvailable
+	defer func() { portAvailable = origAvail }()
+	portAvailable = func(int) bool { return true }
 	reg := NewRegistry(t.TempDir() + "/reg.yaml")
 	reg.Put(WorkspaceEntry{WorkspaceKey: "a", Language: "python", Port: 9200})
 	reg.Put(WorkspaceEntry{WorkspaceKey: "b", Language: "python", Port: 9201})
@@ -69,6 +75,9 @@ func TestAllocatePort_SkipsAllocated(t *testing.T) {
 }
 
 func TestAllocatePort_FillsHoles(t *testing.T) {
+	origAvail := portAvailable
+	defer func() { portAvailable = origAvail }()
+	portAvailable = func(int) bool { return true }
 	reg := NewRegistry(t.TempDir() + "/reg.yaml")
 	reg.Put(WorkspaceEntry{WorkspaceKey: "a", Language: "python", Port: 9200})
 	reg.Put(WorkspaceEntry{WorkspaceKey: "b", Language: "go", Port: 9202})

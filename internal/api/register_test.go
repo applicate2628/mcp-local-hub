@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -1940,6 +1942,113 @@ func TestUnregister_FullRemovesAllLanguages(t *testing.T) {
 	}
 }
 
+func TestUnregister_MixedCanonicalAndLegacyKeysRemovesBoth(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReconcile := registerSupervisorReconcileFn
+	reconcileCalls := 0
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		if !apply {
+			t.Fatalf("supervised unregister called reconcile with apply=false")
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	rawPath, canonical, legacy := mixedKeyWorkspaceAliasForUnregister(t)
+	wsKey := WorkspaceKey(canonical)
+	legacyWSKey := WorkspaceKey(legacy)
+	canonicalEntry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          0,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": "go-entry"},
+		Lifecycle:     LifecycleConfigured,
+	}
+	legacyEntry := WorkspaceEntry{
+		WorkspaceKey:  legacyWSKey,
+		WorkspacePath: legacy,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          0,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(legacyWSKey, "python"),
+		ClientEntries: map[string]string{"codex-cli": "python-entry"},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(canonicalEntry); err != nil {
+		t.Fatalf("PutLSP canonical: %v", err)
+	}
+	if err := reg.PutLSP(legacyEntry); err != nil {
+		t.Fatalf("PutLSP legacy: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"]["go-entry"] = "http://localhost:0/mcp"
+	h.fakeClients.entries["codex-cli"]["python-entry"] = "http://localhost:0/mcp"
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(canonicalEntry, testCanonicalMcphubPathOverride),
+			BuildSupervisorDaemonForLSP(legacyEntry, testCanonicalMcphubPathOverride),
+		},
+	})
+
+	rpt, err := mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), rawPath, []string{"go", "python"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Unregister mixed-key rows: %v", err)
+	}
+	sort.Strings(rpt.Removed)
+	if want := []string{"go", "python"}; !slices.Equal(rpt.Removed, want) {
+		t.Fatalf("Removed = %v, want %v", rpt.Removed, want)
+	}
+	if len(rpt.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none for languages present under either key", rpt.Warnings)
+	}
+	if reconcileCalls != 2 {
+		t.Fatalf("reconcile calls = %d, want 2 supervised descriptor removals", reconcileCalls)
+	}
+
+	reg = NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 0 {
+		t.Fatalf("canonical LSP rows survived unregister: %+v", rows)
+	}
+	if rows := reg.ListByWorkspaceLSP(legacyWSKey); len(rows) != 0 {
+		t.Fatalf("legacy LSP rows survived unregister: %+v", rows)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after unregister: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row != nil {
+		t.Fatalf("canonical supervisor-intent row survived unregister: %+v", row)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(legacyWSKey, "python")); row != nil {
+		t.Fatalf("legacy supervisor-intent row survived unregister: %+v", row)
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"]["go-entry"]; ok {
+		t.Fatal("canonical client entry survived unregister")
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"]["python-entry"]; ok {
+		t.Fatal("legacy client entry survived unregister")
+	}
+}
+
 func TestUnregister_PreservesSharedLSPRouterEntry(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
@@ -2644,6 +2753,35 @@ func writeSupervisorIntentForRegisterTest(t *testing.T, path string, f *Supervis
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatalf("write supervisor intent seed: %v", err)
 	}
+}
+
+func mixedKeyWorkspaceAliasForUnregister(t *testing.T) (string, string, string) {
+	t.Helper()
+	realDir := filepath.Join(t.TempDir(), "real")
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatalf("mkdir real workspace: %v", err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("cmd", "/c", "mklink", "/J", alias, realDir).CombinedOutput()
+		if err != nil {
+			t.Fatalf("create temp junction: %v; output=%s", err, out)
+		}
+	} else if err := os.Symlink(realDir, alias); err != nil {
+		t.Fatalf("create temp symlink: %v", err)
+	}
+	canonical, err := CanonicalWorkspacePathForCleanup(alias)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePathForCleanup(alias): %v", err)
+	}
+	legacy, err := CanonicalWorkspacePathLegacyCompat(alias)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePathLegacyCompat(alias): %v", err)
+	}
+	if WorkspaceKey(canonical) == WorkspaceKey(legacy) {
+		t.Fatalf("mixed-key fixture did not produce distinct keys: canonical=%q legacy=%q", canonical, legacy)
+	}
+	return alias, canonical, legacy
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {

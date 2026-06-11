@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -612,6 +614,75 @@ func TestWorkspaceUnregister_BackendAllRemovesEverything(t *testing.T) {
 	}
 }
 
+func TestWorkspaceUnregister_BackendAllRemovesMixedCanonicalAndLegacyLSPRows(t *testing.T) {
+	withStateDir(t)
+	rawPath, canonical, legacy := mixedKeyWorkspaceAliasForUnregisterCmd(t)
+	wsKey := api.WorkspaceKey(canonical)
+	legacyWSKey := api.WorkspaceKey(legacy)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          0,
+		TaskName:      "serena-" + wsKey,
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.PutLSP(api.WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          0,
+		TaskName:      api.LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+	}); err != nil {
+		t.Fatalf("PutLSP canonical: %v", err)
+	}
+	if err := reg.PutLSP(api.WorkspaceEntry{
+		WorkspaceKey:  legacyWSKey,
+		WorkspacePath: legacy,
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          0,
+		TaskName:      api.LSPTaskNameForWorkspaceLanguage(legacyWSKey, "python"),
+	}); err != nil {
+		t.Fatalf("PutLSP legacy: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	restoreHooks := api.InstallTestHooks(
+		func() (api.TestSchedulerIface, error) { return noopWorkspaceTestScheduler{}, nil },
+		func() map[string]api.TestClientIface { return map[string]api.TestClientIface{} },
+		"",
+	)
+	t.Cleanup(restoreHooks)
+
+	out, err := runWorkspaceCmd(t, "unregister", rawPath, "--backend", "all")
+	if err != nil {
+		t.Fatalf("workspace unregister --backend all: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "warning: language python not registered") {
+		t.Fatalf("legacy-only python was reported absent instead of removed:\n%s", out)
+	}
+	reg = api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspace(wsKey); len(rows) != 0 {
+		t.Fatalf("canonical rows survived --backend all: %+v", rows)
+	}
+	if rows := reg.ListByWorkspace(legacyWSKey); len(rows) != 0 {
+		t.Fatalf("legacy rows survived --backend all: %+v", rows)
+	}
+}
+
 func TestWorkspaceUnregister_RemovesEntryButLeavesDisk(t *testing.T) {
 	_, ws, _ := seedTwoBackends(t)
 	withStubbedLSPUnregister(t)
@@ -822,6 +893,35 @@ func makeWorkspaceDirNamed(t *testing.T, root, name string, seedLanguages []stri
 		t.Fatalf("canonicalize %s: %v", ws, err)
 	}
 	return canon
+}
+
+func mixedKeyWorkspaceAliasForUnregisterCmd(t *testing.T) (string, string, string) {
+	t.Helper()
+	realDir := filepath.Join(t.TempDir(), "real")
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatalf("mkdir real workspace: %v", err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if runtime.GOOS == "windows" {
+		out, err := exec.Command("cmd", "/c", "mklink", "/J", alias, realDir).CombinedOutput()
+		if err != nil {
+			t.Fatalf("create temp junction: %v; output=%s", err, out)
+		}
+	} else if err := os.Symlink(realDir, alias); err != nil {
+		t.Fatalf("create temp symlink: %v", err)
+	}
+	canonical, err := api.CanonicalWorkspacePathForCleanup(alias)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePathForCleanup(alias): %v", err)
+	}
+	legacy, err := api.CanonicalWorkspacePathLegacyCompat(alias)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePathLegacyCompat(alias): %v", err)
+	}
+	if api.WorkspaceKey(canonical) == api.WorkspaceKey(legacy) {
+		t.Fatalf("mixed-key fixture did not produce distinct keys: canonical=%q legacy=%q", canonical, legacy)
+	}
+	return alias, canonical, legacy
 }
 
 func TestWorkspaceList_TabularOutput(t *testing.T) {

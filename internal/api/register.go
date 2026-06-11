@@ -848,8 +848,8 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 	wsKey := WorkspaceKey(canonical)
 	// Legacy fallback: registry rows written before EvalSymlinks-based
 	// canonicalization landed used the abs+clean+drive-normalized form
-	// only. If the new key has no rows, retry against the legacy key
-	// once so a one-shot symlink-migration unregister works.
+	// only. Keep both key sets available below so mixed-key workspaces
+	// (some rows canonical, some legacy) clean up every targeted row.
 	legacyCanonical, err := CanonicalWorkspacePathLegacyCompat(workspacePath)
 	if err != nil {
 		return nil, err
@@ -873,21 +873,25 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 	// `--backend all` (mapped to RemoveByBackend in the CLI). Using
 	// ListByWorkspaceLSP centralises the sentinel filter at both the
 	// canonical-key lookup and the legacy-key fallback.
-	existing := reg.ListByWorkspaceLSP(wsKey)
+	canonicalExisting := reg.ListByWorkspaceLSP(wsKey)
+	legacyExisting := []WorkspaceEntry{}
 	activeWSKey := wsKey
-	if len(existing) == 0 && legacyWSKey != wsKey {
-		existing = reg.ListByWorkspaceLSP(legacyWSKey)
-		if len(existing) > 0 {
+	if legacyWSKey != wsKey {
+		legacyExisting = reg.ListByWorkspaceLSP(legacyWSKey)
+		if len(canonicalExisting) == 0 && len(legacyExisting) > 0 {
 			activeWSKey = legacyWSKey
 		}
 	}
-	if len(existing) == 0 {
+	if len(canonicalExisting) == 0 && len(legacyExisting) == 0 {
 		return nil, fmt.Errorf("workspace %s (key %s) is not registered", canonical, wsKey)
 	}
 	targets := languages
 	if len(targets) == 0 {
-		for _, e := range existing {
-			targets = append(targets, e.Language)
+		for _, e := range canonicalExisting {
+			targets = appendUniqueUnregisterLanguage(targets, e.Language)
+		}
+		for _, e := range legacyExisting {
+			targets = appendUniqueUnregisterLanguage(targets, e.Language)
 		}
 	}
 	allClients := clientsAllForRegister()
@@ -906,80 +910,100 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		}
 	}
 	for _, lang := range targets {
-		entry, ok := reg.Get(activeWSKey, lang)
-		if !ok {
+		var entries []WorkspaceEntry
+		if entry, ok := reg.Get(wsKey, lang); ok {
+			entries = append(entries, entry)
+		}
+		if legacyWSKey != wsKey {
+			if entry, ok := reg.Get(legacyWSKey, lang); ok {
+				entries = append(entries, entry)
+			}
+		}
+		if len(entries) == 0 {
 			report.Warnings = append(report.Warnings,
 				fmt.Sprintf("language %s not registered for workspace %s", lang, canonical))
 			continue
 		}
-		intentTaskName := LSPIntentTaskNameForWorkspaceLanguage(activeWSKey, lang)
-		if _, supervisorManaged, err := a.removeLSPSupervisorIntent(activeWSKey, lang); err != nil {
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
-			continue
-		} else if supervisorManaged {
-			ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
-			if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
+		for _, entry := range entries {
+			targetWSKey := entry.WorkspaceKey
+			intentTaskName := LSPIntentTaskNameForWorkspaceLanguage(targetWSKey, lang)
+			if _, supervisorManaged, err := a.removeLSPSupervisorIntent(targetWSKey, lang); err != nil {
 				report.Warnings = append(report.Warnings,
-					fmt.Sprintf("supervisor reconcile after removing %s: %v", intentTaskName, err))
-			} else {
-				fmt.Fprintf(w, "✓ removed supervisor intent %s\n", intentTaskName)
-			}
-			cancel()
-		}
-		// 1. Kill any live proxy bound to this language's port BEFORE we
-		// Delete the scheduler task. sch.Delete removes the task record
-		// but does NOT terminate the running child — without this kill,
-		// the proxy keeps the port bound until the next reboot, which
-		// breaks immediate re-register and leaves the registry/scheduler
-		// disagreeing with what's actually on the network. Errors are
-		// downgraded to warnings because a successful kill-on-absent
-		// (nothing listening) is expected for cold workspaces and MUST
-		// not fail the teardown path.
-		if killByPortFn != nil && entry.Port != 0 {
-			if err := killByPortFn(entry.Port, 5*time.Second); err != nil {
-				report.Warnings = append(report.Warnings,
-					fmt.Sprintf("kill proxy on port %d (task %s): %v",
-						entry.Port, entry.TaskName, err))
-			}
-		}
-		// 2. Remove scheduler task. Task Scheduler's Delete is the
-		// supported way to stop a logon-triggered task from respawning.
-		// The kill-by-port above already terminated any live proxy; this
-		// Delete prevents it from being re-launched at next logon.
-		if sch != nil {
-			if err := sch.Delete(entry.TaskName); err != nil {
-				report.Warnings = append(report.Warnings,
-					fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
-			} else {
-				fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
-			}
-		}
-		// 2. Remove client entries.
-		for clientName, entryName := range entry.ClientEntries {
-			client, ok := allClients[clientName]
-			if !ok || !client.Exists() {
+					fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
 				continue
+			} else if supervisorManaged {
+				ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
+				if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
+					report.Warnings = append(report.Warnings,
+						fmt.Sprintf("supervisor reconcile after removing %s: %v", intentTaskName, err))
+				} else {
+					fmt.Fprintf(w, "✓ removed supervisor intent %s\n", intentTaskName)
+				}
+				cancel()
 			}
-			if shouldPreserveSharedLSPRouterEntry(client, entryName, lang) {
-				fmt.Fprintf(w, "✓ preserved shared LSP router entry %s in %s\n", entryName, clientName)
-				continue
+			// 1. Kill any live proxy bound to this language's port BEFORE we
+			// Delete the scheduler task. sch.Delete removes the task record
+			// but does NOT terminate the running child — without this kill,
+			// the proxy keeps the port bound until the next reboot, which
+			// breaks immediate re-register and leaves the registry/scheduler
+			// disagreeing with what's actually on the network. Errors are
+			// downgraded to warnings because a successful kill-on-absent
+			// (nothing listening) is expected for cold workspaces and MUST
+			// not fail the teardown path.
+			if killByPortFn != nil && entry.Port != 0 {
+				if err := killByPortFn(entry.Port, 5*time.Second); err != nil {
+					report.Warnings = append(report.Warnings,
+						fmt.Sprintf("kill proxy on port %d (task %s): %v",
+							entry.Port, entry.TaskName, err))
+				}
 			}
-			if err := client.RemoveEntry(entryName); err != nil {
-				report.Warnings = append(report.Warnings,
-					fmt.Sprintf("remove entry %s from %s: %v", entryName, clientName, err))
-			} else {
-				fmt.Fprintf(w, "\u2713 removed %s entry from %s\n", entryName, clientName)
+			// 2. Remove scheduler task. Task Scheduler's Delete is the
+			// supported way to stop a logon-triggered task from respawning.
+			// The kill-by-port above already terminated any live proxy; this
+			// Delete prevents it from being re-launched at next logon.
+			if sch != nil {
+				if err := sch.Delete(entry.TaskName); err != nil {
+					report.Warnings = append(report.Warnings,
+						fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
+				} else {
+					fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
+				}
 			}
+			// 2. Remove client entries.
+			for clientName, entryName := range entry.ClientEntries {
+				client, ok := allClients[clientName]
+				if !ok || !client.Exists() {
+					continue
+				}
+				if shouldPreserveSharedLSPRouterEntry(client, entryName, lang) {
+					fmt.Fprintf(w, "✓ preserved shared LSP router entry %s in %s\n", entryName, clientName)
+					continue
+				}
+				if err := client.RemoveEntry(entryName); err != nil {
+					report.Warnings = append(report.Warnings,
+						fmt.Sprintf("remove entry %s from %s: %v", entryName, clientName, err))
+				} else {
+					fmt.Fprintf(w, "\u2713 removed %s entry from %s\n", entryName, clientName)
+				}
+			}
+			// 3. Drop registry row.
+			reg.Remove(targetWSKey, lang)
+			report.Removed = append(report.Removed, lang)
 		}
-		// 3. Drop registry row.
-		reg.Remove(activeWSKey, lang)
-		report.Removed = append(report.Removed, lang)
 	}
 	if err := reg.Save(); err != nil {
 		return report, fmt.Errorf("persist registry: %w", err)
 	}
 	return report, nil
+}
+
+func appendUniqueUnregisterLanguage(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func shouldPreserveSharedLSPRouterEntry(client registerClient, entryName, language string) bool {
