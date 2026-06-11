@@ -657,6 +657,17 @@ func shouldRemoveGlobalWatchdog(out io.Writer, serverBeingUninstalled string) bo
 		}
 		remaining[srv] = struct{}{}
 	}
+	supervisorRemaining, siErr := supervisorIntentManagedServerSignals()
+	if siErr != nil {
+		fmt.Fprintf(out, "⚠ watchdog gate: supervisor-intent read failed (keeping watchdog installed): %v\n", siErr)
+		return false
+	}
+	for srv := range supervisorRemaining {
+		if srv == serverBeingUninstalled {
+			continue
+		}
+		remaining[srv] = struct{}{}
+	}
 	if len(remaining) == 0 {
 		return true
 	}

@@ -532,11 +532,11 @@ func normalizeSchedulerState(raw string) string {
 // classifyDriftAction computes the Action field per (scheduler-state,
 // intent-desired) pair. The matrix:
 //
-//	sched=missing   intent=running  → post_ev_intent_update (spawn directly from supervisor-intent.json), UNLESS SM=quarantined → needs_manual_review (quarantine-respect)
+//	sched=missing   intent=running  → post_ev_intent_update (spawn directly from supervisor-intent.json), UNLESS SM=quarantined → needs_manual_review or SM=backoff-waiting → no_op
 //	sched=missing   intent=stopped  → post_ev_intent_update (terminate) when the SM state is live; no_op otherwise
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
-//	sched=stopped   intent=running  → post_ev_intent_update (spawn), UNLESS SM=quarantined → needs_manual_review (quarantine-respect)
+//	sched=stopped   intent=running  → post_ev_intent_update (spawn), UNLESS SM=quarantined → needs_manual_review or SM=backoff-waiting → no_op
 //	sched=stopped   intent=stopped  → no_op (steady state)
 //	sched=<other>   *               → needs_manual_review (unknown scheduler state)
 //
@@ -603,11 +603,20 @@ func normalizeSchedulerState(raw string) string {
 // untouched bystander gets no event), so this classifier gate (mirrored on
 // BOTH spawn-direction arms — !hasSched and scheduler-stopped) closes the
 // reconcile-side bystander revival on every spawn-direction path.
+//
+// Spawn-direction backoff preservation: StBackoffWaiting is also a
+// supervisor-owned wait state. Its timer, not reconcile --apply, owns the next
+// retry. Posting EvIntentUpdate(running) here would preempt the backoff timer
+// on unrelated applies and collapse the crash-loop delay, so both spawn arms
+// classify it no_op.
 func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
 			if smState == api.StQuarantined {
 				return api.ReconcileActionNeedsManualReview
+			}
+			if smState == api.StBackoffWaiting {
+				return api.ReconcileActionNoOp
 			}
 			return api.ReconcileActionPostEvIntentUpdate
 		}
@@ -637,6 +646,9 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 			// reset") rather than pretending steady-state.
 			if smState == api.StQuarantined {
 				return api.ReconcileActionNeedsManualReview
+			}
+			if smState == api.StBackoffWaiting {
+				return api.ReconcileActionNoOp
 			}
 			return api.ReconcileActionPostEvIntentUpdate
 		}

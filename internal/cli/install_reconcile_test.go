@@ -1,9 +1,17 @@
 package cli
 
 import (
+	"bytes"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
+
+	"github.com/spf13/cobra"
 )
 
 // TestManifestHasScheduledDaemon_FlagsInstalledManifests pins the
@@ -42,9 +50,9 @@ func TestManifestHasScheduledDaemon_FlagsInstalledManifests(t *testing.T) {
 	}
 
 	cases := []struct {
-		manifest  config.ServerManifest
-		wantFlag  bool
-		whyShort  string
+		manifest config.ServerManifest
+		wantFlag bool
+		whyShort string
 	}{
 		{
 			manifest: config.ServerManifest{
@@ -103,5 +111,40 @@ func TestManifestHasScheduledDaemon_FlagsInstalledManifests(t *testing.T) {
 					tc.manifest.Name, got, tc.wantFlag, tc.whyShort)
 			}
 		})
+	}
+}
+
+func TestReconcileHubMode_SupervisorIntentOnlyServerCountsInstalled(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-time-default`,
+			Server:   "time",
+			Daemon:   "default",
+			Port:     9128,
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		return &setupFakeScheduler{listResult: nil}, nil
+	})
+	t.Cleanup(restoreScheduler)
+
+	var stdout, stderr bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	if err := runReconcileHubMode(cmd, true); err != nil {
+		t.Fatalf("runReconcileHubMode dry-run: %v; stderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "entry=time") {
+		t.Fatalf("supervisor-intent-only time install did not produce time restore ops; output=%q", stdout.String())
 	}
 }

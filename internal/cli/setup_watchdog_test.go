@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -495,6 +496,50 @@ func TestUninstall_PartialServer_KeepsWatchdog(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "watchdog kept installed") {
 		t.Errorf("stdout missing 'watchdog kept installed' informational line; got %q", out.String())
+	}
+}
+
+func TestUninstall_SupervisorIntentPeerOnly_KeepsWatchdogAndLiveness(t *testing.T) {
+	stateDir, fakeSch := setupWatchdogTestHelper(t)
+
+	fakeSch.listResult = []scheduler.TaskStatus{
+		{Name: "\\mcp-local-hub-time-default"},
+		{Name: api.LegacyWatchdogTaskName},
+		{Name: api.LivenessTaskName},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-wolfram-default`,
+			Server:   "wolfram",
+			Daemon:   "default",
+			Port:     9126,
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	removeEventLogCalls := int32(0)
+	setupRemoveEventLogFn = func() error {
+		atomic.AddInt32(&removeEventLogCalls, 1)
+		return nil
+	}
+
+	out := &bytes.Buffer{}
+	if err := runUninstallWatchdog(out, "time"); err != nil {
+		t.Fatalf("runUninstallWatchdog: %v", err)
+	}
+	if containsTask(fakeSch.deletes(), api.LegacyWatchdogTaskName) {
+		t.Errorf("legacy watchdog must NOT be deleted while supervisor-intent peer remains; got %v", fakeSch.deletes())
+	}
+	if containsTask(fakeSch.deletes(), api.LivenessTaskName) {
+		t.Errorf("liveness must NOT be deleted while supervisor-intent peer remains; got %v", fakeSch.deletes())
+	}
+	if got := atomic.LoadInt32(&removeEventLogCalls); got != 0 {
+		t.Errorf("EventLog removal must be skipped while supervisor-intent peer remains; got %d calls", got)
+	}
+	if !strings.Contains(out.String(), "wolfram") {
+		t.Errorf("stdout should identify the supervisor-intent peer retaining maintenance tasks; got %q", out.String())
 	}
 }
 

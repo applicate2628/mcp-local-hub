@@ -40,6 +40,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/config"
@@ -178,7 +179,7 @@ type StopOpts struct {
 // always uses Force=false. New callers (Task 11 CLI, future GUI
 // surfaces) should use StopWithOpts directly.
 func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
-	taskNames, err := stopTaskNamesForServer(opts.Server, opts.DaemonFilter)
+	taskNames, err := stopIntentTaskNamesForServer(opts.Server, opts.DaemonFilter)
 	if err != nil {
 		// Codex deep-sec PR #135 Finding 3: emit a stop-failed-no-kill audit
 		// entry so the forensic trail records the blocked stop attempt even
@@ -681,6 +682,42 @@ func stopTaskNamesForServer(server, daemonFilter string) ([]string, error) {
 			continue
 		}
 		out = append(out, "mcp-local-hub-"+m.Name+"-"+d.Name)
+	}
+	return out, nil
+}
+
+func stopIntentTaskNamesForServer(server, daemonFilter string) ([]string, error) {
+	taskNames, err := stopTaskNamesForServer(server, daemonFilter)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := loadSupervisorOwnedTargets(server, daemonFilter)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(taskNames)+len(targets))
+	out := make([]string, 0, len(taskNames)+len(targets))
+	for _, name := range taskNames {
+		key := strings.TrimPrefix(canonicalIntentTaskKey(name), `\`)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	for _, d := range targets {
+		key := strings.TrimPrefix(canonicalIntentTaskKey(d.TaskName), `\`)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
 	}
 	return out, nil
 }

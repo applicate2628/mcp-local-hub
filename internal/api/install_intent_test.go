@@ -840,6 +840,9 @@ func TestInstall_AuditFailsErrIdentityOversize_NoSchedulerMutation(t *testing.T)
 	a := NewAPI()
 	daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
+	origPreflightPortInUse := preflightPortInUse
+	preflightPortInUse = func(int) bool { return false }
+	t.Cleanup(func() { preflightPortInUse = origPreflightPortInUse })
 
 	r := &recordingAuditWriter{
 		failActions: map[string]error{AuditActionServerInstall: ErrIdentityOversize},

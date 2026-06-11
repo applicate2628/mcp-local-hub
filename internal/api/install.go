@@ -797,6 +797,7 @@ func sendForceMaterializeTools(port int, backend string) string {
 }
 
 var healthProbeLivePortFn = portInUse
+var preflightPortInUse = portInUse
 var registryOnlyStatusPortLiveFn = portInUse
 
 func finalizeRegistryOnlyWorkspaceStates(rows []DaemonStatus, liveByTask map[string]bool) {
@@ -1513,7 +1514,7 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		if daemonFilter != "" && d.Name != daemonFilter {
 			continue
 		}
-		if portInUse(d.Port) {
+		if preflightPortInUse(d.Port) {
 			// Bug-bash A6 (#6) closure: distinguish "our own running
 			// daemon already holds this port" (idempotent reinstall;
 			// tolerate and continue) from "a foreign process stole
@@ -1524,7 +1525,7 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
-			if portInUse(internal) {
+			if preflightPortInUse(internal) {
 				if !portHeldByOurDaemon(internal, m.Name, d.Name) {
 					return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
 						internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
@@ -2227,7 +2228,7 @@ func clientConfigPath(name string) (string, error) {
 // (incl. ErrIdentityOversize) returns the error verbatim and skips
 // the kill. New callers that need --force should use StopWithOpts.
 func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
-	taskNames, err := stopTaskNamesForServer(server, daemonFilter)
+	taskNames, err := stopIntentTaskNamesForServer(server, daemonFilter)
 	if err != nil {
 		// Codex deep-sec PR #135 Finding 3: same forensic-trail emission as
 		// StopWithOpts (no-force path).

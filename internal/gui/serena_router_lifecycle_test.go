@@ -3008,3 +3008,50 @@ func TestSerenaRouter_BackendLoss_IPCReconcileTearsDownOnStoppedDaemon(t *testin
 		t.Errorf("routerSessionStore STILL holds sid after the daemon was stopped; want it torn down")
 	}
 }
+
+func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickPIDZeroTearsDownBoundSession(t *testing.T) {
+	prevStatusFn := serenaBackendStatusFn
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+
+	daemon := newFakeSerenaDaemon("alpha")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	const wsPath = "/proj/alpha"
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: wsPath, Port: 9201}
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatalf("precondition: routerSessionStore should hold sid")
+	}
+
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, State: "Stopped", PID: 0, StalePID: 0, Port: 9201},
+		}, nil
+	}
+
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("first status tick with PID=0/StalePID=0/Stopped tore down %d sessions; want exactly 1 because the bound backend is already dead", n)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after first PID=0 stopped tick; want it torn down")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Errorf("serenaDaemonSessions STILL holds sid after first PID=0 stopped tick; want it unbound")
+	}
+	if got := deps.Sessions.LookupSession(sid); got != nil {
+		t.Errorf("sticky sessionRouter STILL resolves sid after first PID=0 stopped tick; want it unbound. got %+v", got)
+	}
+}

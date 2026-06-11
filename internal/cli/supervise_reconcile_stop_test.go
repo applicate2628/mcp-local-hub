@@ -60,7 +60,7 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 		{"running spawning", missing, false, running, api.StSpawning, api.ReconcileActionPostEvIntentUpdate},
 		{"running running", missing, false, running, api.StRunning, api.ReconcileActionPostEvIntentUpdate},
 		{"running exiting", missing, false, running, api.StExiting, api.ReconcileActionPostEvIntentUpdate},
-		{"running backoff", missing, false, running, api.StBackoffWaiting, api.ReconcileActionPostEvIntentUpdate},
+		{"running backoff", missing, false, running, api.StBackoffWaiting, api.ReconcileActionNoOp},
 		// Spawn-direction quarantine-respect: a quarantined bystander whose
 		// intent is running must NOT be revived (the SM row
 		// StQuarantined+EvIntentUpdate(running) resets the failure window).
@@ -71,6 +71,7 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 		// hasSched rows unchanged.
 		{"sched running intent stopped", api.ReconcileSchedulerStateRunning, true, stopped, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
 		{"sched stopped intent running", api.ReconcileSchedulerStateStopped, true, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
+		{"sched stopped intent running backoff", api.ReconcileSchedulerStateStopped, true, running, api.StBackoffWaiting, api.ReconcileActionNoOp},
 		{"sched stopped intent stopped", api.ReconcileSchedulerStateStopped, true, stopped, api.StRunning, api.ReconcileActionNoOp},
 		// Spawn-direction quarantine-respect ALSO holds on the hasSched
 		// scheduler-stopped arm: a daemon that quarantined while still carrying
@@ -304,6 +305,63 @@ func TestReconcileIPC_QuarantinedBystanderNotRevivedOnStop(t *testing.T) {
 	select {
 	case ev := <-fx.postedCh:
 		t.Fatalf("unexpected second event posted (bystander must not be revived): %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestReconcileIPC_BackoffBystanderNotRespawnedOnApply(t *testing.T) {
+	idle := `\mcp-local-hub-idle-default`
+	backoff := `\mcp-local-hub-backoff-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{TaskName: idle, Server: "idle", Daemon: "default", Command: "mcphub",
+				Args: []string{"daemon", "--server", "idle", "--daemon", "default"}, Port: 9242},
+			{TaskName: backoff, Server: "backoff", Daemon: "default", Command: "mcphub",
+				Args: []string{"daemon", "--server", "backoff", "--daemon", "default"}, Port: 9243},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	fx.ctrl.smStates.Store(idle, api.StIdle)
+	fx.ctrl.smStates.Store(backoff, api.StBackoffWaiting)
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{ID: 78, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 2 || len(body.Drift) != 2 {
+		t.Fatalf("DriftCount=%d drift=%+v, want two rows (idle + backoff)", body.DriftCount, body.Drift)
+	}
+
+	driftByTask := map[string]api.DriftEntry{}
+	for _, e := range body.Drift {
+		driftByTask[e.TaskName] = e
+	}
+	if got := driftByTask[idle].Action; got != api.ReconcileActionPostEvIntentUpdate {
+		t.Fatalf("idle Action = %q, want %q (missing idle row still gets spawn intent)",
+			got, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if got := driftByTask[backoff].Action; got != api.ReconcileActionNoOp {
+		t.Fatalf("backoff Action = %q, want %q (apply must not reset the SM-owned backoff timer)",
+			got, api.ReconcileActionNoOp)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1 (only the idle row is dispatched)", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != idle {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for idle row %s", ev, idle)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected EvIntentUpdate post for the idle row")
+	}
+	select {
+	case ev := <-fx.postedCh:
+		t.Fatalf("unexpected second event posted (backoff timer must not be preempted): %+v", ev)
 	case <-time.After(100 * time.Millisecond):
 	}
 }

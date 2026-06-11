@@ -36,6 +36,7 @@ package gui
 import (
 	"container/list"
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -852,6 +853,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// Build the fresh per-workspace-PATH PID snapshot, restricted to the
 	// workspaces the router cares about.
 	fresh := make(map[string]int, len(wantPaths))
+	deadBackend := make(map[string]bool, len(wantPaths))
 	// restarting marks paths whose daemon is in the supervisor's port-stale
 	// terminate-restart window (state "Restarting"): the IPC status moves the
 	// real PID to stale_pid and reports current_pid=0 while the daemon ROW
@@ -898,6 +900,9 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		if row.StalePID != 0 {
 			restarting[row.Workspace] = true
 		}
+		if row.PID == 0 && row.StalePID == 0 && !strings.EqualFold(row.State, "Running") {
+			deadBackend[row.Workspace] = true
+		}
 	}
 
 	s.serenaBackendPIDMu.Lock()
@@ -916,13 +921,19 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	for path := range wantPaths {
 		newPID, present := fresh[path]
 		oldPID, hadPrior := prior[path]
+		deadNow := present && deadBackend[path]
 		if !hadPrior {
-			// First observation of this workspace — establish a baseline, never
-			// treat the first tick as a loss. If this first observation lands in a
-			// Restarting window (current_pid=0), do not pin 0 as the baseline:
-			// carry nothing forward so the next real PID is itself a first
-			// observation, not a spurious 0→N change.
+			// First observation of this workspace normally establishes a
+			// baseline. Two PID-0 cases are exceptions: a port-stale Restarting
+			// row carries no baseline forward, and a present-but-dead row is
+			// immediate backend loss because existing sessions are already bound
+			// to a non-live backend.
 			if present && restarting[path] {
+				delete(persisted, path)
+				continue
+			}
+			if deadNow {
+				lost = append(lost, pathToKey[path])
 				delete(persisted, path)
 			}
 			continue
@@ -936,6 +947,11 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		// falls through to the loss branch below.)
 		if present && restarting[path] {
 			persisted[path] = oldPID
+			continue
+		}
+		if deadNow {
+			lost = append(lost, pathToKey[path])
+			delete(persisted, path)
 			continue
 		}
 		// A workspace that was present before and is now ABSENT (stop/death), or

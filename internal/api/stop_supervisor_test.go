@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
@@ -157,6 +158,51 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 	}
 	if proxy.Err != "" || proxy.Code != "" {
 		t.Fatalf("proxy row = %+v, want plain success (empty Err + empty Code; truly dispatched)", proxy)
+	}
+}
+
+func TestStopSerenaSupervisorTargetRecordsStopIntentForSentinelRow(t *testing.T) {
+	const serenaTask = `\mcp-local-hub-serena-deadbeef`
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName:  serenaTask,
+			Server:    "serena",
+			Daemon:    "default",
+			Workspace: `C:\work\alpha`,
+			Port:      9500,
+		}},
+	}
+	stopSupervisorTestSetup(t, intent, nil)
+
+	var stopActiveAtReconcile bool
+	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		if di, ok := lookupSupervisorStop(serenaTask); ok {
+			stopActiveAtReconcile, _ = di.IsActiveStop(time.Now().UTC())
+		}
+		return ReconcileResponse{
+			AppliedCount: 1,
+			Drift: []DriftEntry{
+				{TaskName: serenaTask, Action: ReconcileActionPostEvIntentUpdate},
+			},
+		}, nil
+	})
+	defer restore()
+
+	results, err := NewAPI().Stop("serena", "")
+	if err != nil {
+		t.Fatalf("Stop serena: %v", err)
+	}
+	if !stopActiveAtReconcile {
+		t.Fatalf("serena sentinel stop intent was not active before supervisor reconcile")
+	}
+	if got, ok := lookupSupervisorStop(serenaTask); !ok {
+		t.Fatalf("supervisor-intent stops sub-block missing serena sentinel row %s", serenaTask)
+	} else if active, reason := got.IsActiveStop(time.Now().UTC()); !active || reason != IntentReasonUserStop {
+		t.Fatalf("serena stop IsActiveStop=(%v,%q), want active user-stop; intent=%+v", active, reason, got)
+	}
+	if len(results) != 1 || results[0].TaskName != serenaTask || results[0].Err != "" {
+		t.Fatalf("results = %+v, want one successful serena supervisor row", results)
 	}
 }
 

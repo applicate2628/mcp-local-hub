@@ -340,15 +340,18 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 	// manifest (including templates the user never installed). In
 	// gate-OFF mode, that writes per-daemon AddReplace ops for
 	// servers the user never ran, polluting client configs with
-	// dead localhost URLs. Intersect ManifestList with the set of
-	// servers that have at least one scheduled daemon task
-	// (ListManagedTasks → ParseManagedTaskName) — those represent
-	// "the user ran `mcphub install --server X`" intent. The
-	// scheduler tasks survive gate transitions (reconcile only
-	// rewrites client configs, never tears down tasks), so this
-	// set is stable across gate ON ↔ OFF toggles.
+	// dead localhost URLs. Intersect ManifestList with install
+	// signals from either legacy scheduler rows or v0.6
+	// supervisor-intent daemon rows. Fresh supervisor-owned installs
+	// deliberately have no per-daemon scheduler tasks, so
+	// supervisor-intent `Daemons[].server` is now an equivalent
+	// "the user ran `mcphub install --server X`" signal.
+	supervisorInstalledServers, siErr := supervisorIntentManagedServerSignals()
+	if siErr != nil {
+		return fmt.Errorf("read supervisor-intent installed servers: %w", siErr)
+	}
 	tasks, tErr := a.ListManagedTasks()
-	if tErr != nil {
+	if tErr != nil && !api.SchedulerUnavailableError(tErr) {
 		return fmt.Errorf("list managed tasks: %w", tErr)
 	}
 	// codex bot phase5 r16 P1 closure on PR #160: do NOT derive the
@@ -407,7 +410,7 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		if pErr != nil {
 			return fmt.Errorf("parse manifest %q: %w", name, pErr)
 		}
-		if !manifestHasScheduledDaemon(m, scheduledTasks) {
+		if !manifestHasInstallSignal(m, scheduledTasks, supervisorInstalledServers) {
 			continue // not installed on this machine
 		}
 		manifests = append(manifests, *m)
@@ -485,6 +488,16 @@ func manifestHasScheduledDaemon(m *config.ServerManifest, scheduledTasks map[str
 		}
 	}
 	return false
+}
+
+func manifestHasInstallSignal(m *config.ServerManifest, scheduledTasks map[string]bool, supervisorInstalledServers map[string]struct{}) bool {
+	if m == nil {
+		return false
+	}
+	if _, ok := supervisorInstalledServers[m.Name]; ok {
+		return true
+	}
+	return manifestHasScheduledDaemon(m, scheduledTasks)
 }
 
 // readHubEndpointGateForReconcile returns the persisted gate state
