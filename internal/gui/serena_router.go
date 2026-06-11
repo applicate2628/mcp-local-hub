@@ -962,20 +962,24 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// on a known router session only (bindWorkspace no-ops an unknown id), so a
 	// legacy/path-only caller with no router session is not indexed.
 	if sessionID != "" {
-		// Capture whether this workspace had any live router sessions BEFORE this
-		// request's bind. Only the first observer after an unbound window may
-		// replace a stale PID baseline; a cache-hit request for an already-bound
-		// single session must preserve the old baseline so the IPC reconciler can
-		// still detect a backend restart.
-		replaceStaleBaseline := len(s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey)) == 0
 		// Bind BEFORE seeding the PID baseline: bindWorkspace indexes
 		// ws.WorkspaceKey into knownWorkspaceKeys, and the 30s reconcile tick
 		// only builds wantPaths from bound workspaces. Seeding the baseline
 		// first left a window where a tick firing between seed and bind would
 		// rebuild serenaBackendLastPID without this (not-yet-bound) workspace,
 		// dropping the just-seeded baseline (PR #288 r5 adversarial review).
-		s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
-		s.seedSerenaBackendPIDBaseline(r.Context(), ws, replaceStaleBaseline)
+		//
+		// Stale-baseline replacement is decided by bindWorkspace's atomic
+		// (newlyBound, boundCount) pair: only the request that CREATED the
+		// workspace's first binding (newlyBound && boundCount == 1) is the
+		// first observer after an unbound window and may replace the
+		// baseline. A cache-hit re-request of an already-bound session has
+		// newlyBound == false (PR #291 — the overwrite masked daemon
+		// restarts), and a RACING second first-request observes boundCount
+		// == 2 under the store lock and preserves the baseline (PR #291 bot
+		// P1 — a pre-bind sessions==0 snapshot let both racers qualify).
+		newlyBound, boundCount := s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
+		s.seedSerenaBackendPIDBaseline(r.Context(), ws, newlyBound && boundCount == 1)
 	}
 
 	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO

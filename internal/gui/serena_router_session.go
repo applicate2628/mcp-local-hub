@@ -205,9 +205,18 @@ func (st *routerSessionStore) removeWorkspaceIndexLocked(clientSessionID string)
 // already-known router session has a workspace edge worth tracking (a session
 // not in bindings would be an orphan edge a sweep/unbind never cleans), so a
 // missing bindings entry skips the index write.
-func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) {
+// bindWorkspace returns (newlyBound, boundCount): newlyBound is true iff this
+// call CREATED the id→wsKey edge (a cache-hit re-request of an already-bound
+// session returns false), and boundCount is the number of sessions bound to
+// wsKey AFTER this call, read under the same st.mu hold. The pair lets the
+// caller decide stale-PID-baseline replacement atomically with respect to
+// concurrent binds: only the request that observes (newlyBound && boundCount
+// == 1) is the workspace's first observer after an unbound window; a racing
+// second first-request sees boundCount == 2 and preserves the baseline (PR
+// #291 bot P1 — a pre-bind sessions==0 snapshot let BOTH racers qualify).
+func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) (newlyBound bool, boundCount int) {
 	if clientSessionID == "" || wsKey == "" {
-		return
+		return false, 0
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -217,13 +226,13 @@ func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) {
 	// leave an edge no expire/unbind path (which all route through removeLocked
 	// on a known id) would ever clean.
 	if _, known := st.bindings[clientSessionID]; !known {
-		return
+		return false, len(st.idsByWS[wsKey])
 	}
 	// Re-home: drop any prior workspace edge for this id before adding the new
 	// one, so a workspace switch does not leave the session listed under both.
 	if prior, ok := st.wsByID[clientSessionID]; ok {
 		if prior == wsKey {
-			return
+			return false, len(st.idsByWS[wsKey])
 		}
 		st.removeWorkspaceIndexLocked(clientSessionID)
 	}
@@ -234,6 +243,7 @@ func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) {
 		st.idsByWS[wsKey] = set
 	}
 	set[clientSessionID] = struct{}{}
+	return true, len(set)
 }
 
 // sessionsForWorkspace returns a snapshot of every router session id currently
