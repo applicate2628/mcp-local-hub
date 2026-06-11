@@ -1339,14 +1339,14 @@ func TestSupervise_IPC_VersionPinning(t *testing.T) {
 
 // TestMergeDaemonEnvOverlayWinsOverManifest pins the precedence rule
 // for the Task 2.7 three-arg mergeDaemonEnv: parent < manifest < overlay.
-// Both manifest and overlay use the same Path-family key (the manifest
-// uses "Path"; the overlay also uses "Path"). The overlay value must
-// win in the output, and only one Path-family entry must appear.
+// Parent, manifest, and overlay intentionally use the same Path-family casing.
+// The test pins overlay precedence without relying on Windows-only case-folding;
+// only one Path-family entry must appear on every platform.
 //
 // Spec ref: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md
 // §"Spawn-time env merge"; Plan Task 2.7 acceptance criterion #3.
 func TestMergeDaemonEnvOverlayWinsOverManifest(t *testing.T) {
-	parent := []string{"PATH=/system", "OTHER=parent"}
+	parent := []string{"Path=/system", "OTHER=parent"}
 	manifest := map[string]string{"Path": "/manifest"}
 	overlay := map[string]string{"Path": "/overlay"}
 

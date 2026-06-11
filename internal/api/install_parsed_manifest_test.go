@@ -2015,6 +2015,95 @@ func TestInstallPlanCore_GlobalFilteredInstall_ReplacesOnlySelectedDaemon(t *tes
 	}
 }
 
+func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+	const (
+		alphaTask = "\\mcp-local-hub-demo-alpha"
+		betaTask  = "\\mcp-local-hub-demo-beta"
+		otherTask = "\\mcp-local-hub-other-d"
+	)
+	now := time.Unix(1700000000, 0).UTC()
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: alphaTask, Server: "demo", Daemon: "alpha", Command: "stale-alpha", Port: 9321},
+			{TaskName: betaTask, Server: "demo", Daemon: "beta", Command: "stale-beta", Port: 9322},
+			{TaskName: otherTask, Server: "other", Daemon: "d", Command: "preserve-other", Port: 9323},
+		},
+		Stops: map[string]DaemonIntent{
+			alphaTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			betaTask:  {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			otherTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	var order []string
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		order = append(order, "nudge")
+		return ReconcileResponse{}, nil
+	}))
+
+	var killPorts []int
+	origForceKill := forceKillByPortFn
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		order = append(order, "kill")
+		killPorts = append(killPorts, port)
+		return portKillKilled, nil
+	}
+	t.Cleanup(func() { forceKillByPortFn = origForceKill })
+
+	m := &config.ServerManifest{
+		Name:          "demo",
+		Kind:          config.KindGlobal,
+		Transport:     config.TransportNativeHTTP,
+		Command:       "go",
+		Daemons:       []config.DaemonSpec{{Name: "alpha", Port: 9321}},
+		WeeklyRefresh: true,
+	}
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan(full reinstall): %v", err)
+	}
+	if got := len(plan.SupervisorIntent); got != 2 {
+		t.Fatalf("plan SupervisorIntent rows = %d, want 2 (alpha daemon + weekly refresh)", got)
+	}
+
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(full reinstall): %v", err)
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent(%s): %v", intentPath, err)
+	}
+	for _, d := range written.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == canonicalIntentTaskKey(betaTask) {
+			t.Fatalf("removed daemon %s survived merged intent: %+v", betaTask, written.Daemons)
+		}
+	}
+	if len(killPorts) != 1 || killPorts[0] != 9322 {
+		t.Fatalf("forceKillByPortFn ports = %v, want [9322] for removed beta only", killPorts)
+	}
+	if len(order) != 2 || order[0] != "nudge" || order[1] != "kill" {
+		t.Fatalf("reconcile/kill order = %v, want [nudge kill]", order)
+	}
+	if _, ok := written.Stops[betaTask]; ok {
+		t.Fatalf("removed daemon %s retained a dangling stop entry: %+v", betaTask, written.Stops)
+	}
+	if _, ok := written.Stops[otherTask]; !ok {
+		t.Fatalf("sibling stop %s was not preserved: %+v", otherTask, written.Stops)
+	}
+}
+
 // TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated is the
 // v0.6 Phase F FALSIFICATION test (spec §5 "Phase F", line 639): a fresh global
 // install must create ZERO `\mcp-local-hub-<server>-<daemon>` per-daemon Task

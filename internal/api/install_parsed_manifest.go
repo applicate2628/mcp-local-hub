@@ -499,6 +499,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	var nudgeAfterInstall bool
 	var ensureAutostartAfterInstall bool
 	var autostartStrictMode bool
+	var removedSupervisorTargetsAfterInstall []SupervisorDaemon
 
 	if superviseGlobal {
 		// The supervisor-intent flock is held ONLY across the read-merge-write
@@ -544,6 +545,8 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			if err != nil {
 				return err
 			}
+			removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
+			desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
 			intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
 				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifacts(priorIntent, m.Name))
 			nudgeAfterInstall = len(plan.SupervisorIntent) > 0 ||
@@ -661,6 +664,11 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	if nudgeAfterInstall {
 		nudgeSupervisorReconcileAfterGlobalInstall(context.Background(), w)
 	}
+	// A live supervisor may still hold the removed descriptor rows in its
+	// in-memory intent cache until the reconcile nudge above refreshes it. Kill
+	// only after the nudge has had a chance to drop those rows, otherwise the
+	// child exit can look like a crash of a still-desired daemon and be respawned.
+	killRemovedSupervisorTargetsAfterGlobalInstall(removedSupervisorTargetsAfterInstall, w)
 	return nil
 }
 
@@ -739,6 +747,60 @@ func supervisorIntentHasServerLifecycleArtifacts(intent *SupervisorIntentFile, s
 		}
 	}
 	return false
+}
+
+func removedSupervisorTargetsForFullInstall(prior, merged *SupervisorIntentFile, server, daemonFilter string) []SupervisorDaemon {
+	if daemonFilter != "" || prior == nil || merged == nil || server == "" {
+		return nil
+	}
+	freshTasks := make(map[string]struct{})
+	for _, d := range merged.Daemons {
+		if supervisorIntentRowOwnedBy(d, server) {
+			freshTasks[canonicalIntentTaskKey(d.TaskName)] = struct{}{}
+		}
+	}
+
+	var removed []SupervisorDaemon
+	for _, d := range prior.Daemons {
+		if !supervisorIntentRowOwnedBy(d, server) {
+			continue
+		}
+		if _, replaced := freshTasks[canonicalIntentTaskKey(d.TaskName)]; replaced {
+			continue
+		}
+		removed = append(removed, d)
+	}
+	return removed
+}
+
+func pruneStopsForRemovedSupervisorTargets(stops map[string]DaemonIntent, removed []SupervisorDaemon) map[string]DaemonIntent {
+	if len(stops) == 0 || len(removed) == 0 {
+		return stops
+	}
+	removedTasks := make(map[string]struct{}, len(removed))
+	for _, d := range removed {
+		removedTasks[canonicalIntentTaskKey(d.TaskName)] = struct{}{}
+	}
+	kept := make(map[string]DaemonIntent, len(stops))
+	for taskName, intent := range stops {
+		if _, drop := removedTasks[canonicalIntentTaskKey(taskName)]; drop {
+			continue
+		}
+		kept[taskName] = intent
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
+}
+
+func killRemovedSupervisorTargetsAfterGlobalInstall(targets []SupervisorDaemon, w io.Writer) {
+	for _, d := range targets {
+		result := forceKillOneSupervisorTarget(d, nil)
+		if result.Err != "" && w != nil {
+			fmt.Fprintf(w, "  warning: force kill removed supervisor target %s: %s\n", d.TaskName, result.Err)
+		}
+	}
 }
 
 func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, daemonFilter string, w io.Writer) {
