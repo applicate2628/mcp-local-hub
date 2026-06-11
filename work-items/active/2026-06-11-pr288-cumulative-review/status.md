@@ -1,4 +1,13 @@
-# PR #288 cumulative review — parking state (reboot 2026-06-11 ~12:00 UTC)
+# PR #288 cumulative review — parking state
+
+PARKED 14:32 UTC → resume 17:02 UTC (user: "припаркуйся на 2.5 часа, после продолжишь").
+State at park: master c14a8cd запушен (= r11 + internal sweep S/A/B/C + интеграция +
+D1-D3 + r12 + r13). Полл r14 (bicqow8yk) крутится на c14a8cd — если вердикт придёт
+во время парковки: ЗАПИСАТЬ, НЕ действовать до 17:02. Codex-only окно тоже до ~17:10
+(fable точечно — исключение). После resume: вердикт r14 → PASS = закрыть #288 (НЕ
+мержить) → REDEPLOY-бандл → финал-чистка; находки → codex r14-раунд по паттерну.
+
+## (старая парковка — reboot 2026-06-11 ~12:00 UTC, исполнена)
 
 Template: review (REVIEW-ONLY PR — закрыть, НЕ мержить)
 Orchestrator: main conversation
