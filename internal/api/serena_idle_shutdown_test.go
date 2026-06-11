@@ -3,7 +3,10 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,18 +104,19 @@ func TestSerenaIdleShutdownThreshold_Parse(t *testing.T) {
 	}
 }
 
-// The registry default for the GUI-settable threshold is 30m (spec §6).
-func TestSerenaIdleShutdown_RegistryDefaultIs30m(t *testing.T) {
+// The registry default keeps idle-shutdown disabled. Stopping idle daemons releases
+// their loopback ports before wake, so operators must explicitly opt in.
+func TestSerenaIdleShutdown_RegistryDefaultIsOff(t *testing.T) {
 	def := findDef(SerenaIdleShutdownSettingKey)
 	if def == nil {
 		t.Fatalf("setting %q missing from SettingsRegistry", SerenaIdleShutdownSettingKey)
 	}
-	if def.Default != "30m" {
-		t.Fatalf("default = %q, want 30m", def.Default)
+	if def.Default != "off" {
+		t.Fatalf("default = %q, want off", def.Default)
 	}
 	d, enabled := SerenaIdleShutdownThreshold(def.Default)
-	if !enabled || d != 30*time.Minute {
-		t.Fatalf("default 30m must parse to 30m enabled; got (%v,%v)", d, enabled)
+	if enabled || d != 0 {
+		t.Fatalf("default off must parse to disabled; got (%v,%v)", d, enabled)
 	}
 }
 
@@ -254,7 +258,7 @@ func TestWakeIdleSerenaDaemon_CompareAndClear_OperatorStopSurvives(t *testing.T)
 
 	origRec, origReady := serenaWakeReconcileFn, serenaWakeReadinessFn
 	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil }
-	serenaWakeReadinessFn = func(int, time.Duration) error { return nil } // readiness irrelevant here
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error { return nil } // readiness irrelevant here
 	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
 
 	// The wake proceeds (it saw idle), but its compare-and-clear must NOT erase
@@ -385,7 +389,7 @@ func ReadSupervisorIntentForTest(t *testing.T, stateDir string) *SupervisorInten
 // ---------------------------------------------------------------------------
 
 // withWakeSeams swaps the three wake seams and restores them on cleanup.
-func withWakeSeams(t *testing.T, readStop func(string) (DaemonIntent, error), reconcile func(context.Context, bool) (ReconcileResponse, error), readiness func(int, time.Duration) error) {
+func withWakeSeams(t *testing.T, readStop func(string) (DaemonIntent, error), reconcile func(context.Context, bool) (ReconcileResponse, error), readiness func(context.Context, string, int, time.Duration) error) {
 	t.Helper()
 	origRead, origRec, origReady := serenaWakeReadStopFn, serenaWakeReconcileFn, serenaWakeReadinessFn
 	serenaWakeReadStopFn = readStop
@@ -408,7 +412,7 @@ func TestWakeIdleSerenaDaemon_NoStop_NoOp(t *testing.T) {
 			reconcileCalled = true
 			return ReconcileResponse{}, nil
 		},
-		func(int, time.Duration) error { readyCalled = true; return nil },
+		func(context.Context, string, int, time.Duration) error { readyCalled = true; return nil },
 	)
 	if err := NewAPI().WakeIdleSerenaDaemon(context.Background(), `\mcp-local-hub-serena-up`, 9201, "tester"); err != nil {
 		t.Fatalf("wake of an up daemon must be a no-op success; got %v", err)
@@ -443,7 +447,7 @@ func TestWakeIdleSerenaDaemon_UserDisabled_Refused(t *testing.T) {
 		reconcileCalled = true
 		return ReconcileResponse{}, nil
 	}
-	serenaWakeReadinessFn = func(int, time.Duration) error { readyCalled = true; return nil }
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error { readyCalled = true; return nil }
 	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
 
 	err := NewAPI().WakeIdleSerenaDaemon(context.Background(), task, 9202, "tester")
@@ -473,7 +477,10 @@ func TestWakeIdleSerenaDaemon_UserStop_Refused(t *testing.T) {
 			t.Fatal("reconcile must not be called for user-stop")
 			return ReconcileResponse{}, nil
 		},
-		func(int, time.Duration) error { t.Fatal("readiness must not be called for user-stop"); return nil },
+		func(context.Context, string, int, time.Duration) error {
+			t.Fatal("readiness must not be called for user-stop")
+			return nil
+		},
 	)
 	if err := NewAPI().WakeIdleSerenaDaemon(context.Background(), `\mcp-local-hub-serena-us`, 9203, "tester"); !errors.Is(err, ErrWakeRefusedOperatorStop) {
 		t.Fatalf("user-stop wake must be refused; got %v", err)
@@ -501,7 +508,7 @@ func TestWakeIdleSerenaDaemon_Idle_ClearsNudgesAndReady(t *testing.T) {
 		reconcileApply = apply
 		return ReconcileResponse{}, nil
 	}
-	serenaWakeReadinessFn = func(int, time.Duration) error { readyCalled = true; return nil }
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error { readyCalled = true; return nil }
 	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
 
 	if err := NewAPI().WakeIdleSerenaDaemon(context.Background(), task, 9204, "tester"); err != nil {
@@ -534,7 +541,7 @@ func TestWakeIdleSerenaDaemon_Idle_ReadinessTimeout_StopStillCleared(t *testing.
 
 	origRec, origReady := serenaWakeReconcileFn, serenaWakeReadinessFn
 	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil }
-	serenaWakeReadinessFn = func(int, time.Duration) error { return errors.New("not ready in time") }
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error { return errors.New("not ready in time") }
 	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
 
 	err := NewAPI().WakeIdleSerenaDaemon(context.Background(), task, 9205, "tester")
@@ -544,4 +551,140 @@ func TestWakeIdleSerenaDaemon_Idle_ReadinessTimeout_StopStillCleared(t *testing.
 	if _, ok := ReadSupervisorIntentForTest(t, stateDir).Stops[task]; ok {
 		t.Fatalf("idle stop must already be cleared even when readiness times out (the daemon IS coming up)")
 	}
+}
+
+func TestWakeIdleSerenaDaemon_RefusesForeignPortOwnerDespiteSerenaResponse(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("OS-level loopback port-owner proof is enforced on Windows and Linux")
+	}
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-serena-owner-mismatch`
+	if err := NewAPI().WriteSerenaIdleStop(task, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	_, port := newReadinessHTTPTestServer(t, perfectSerenaInitializeHandler)
+
+	const supervisorPID = 4242
+	const attackerPID = 7331
+	origRec, origStatus, origOwner := serenaWakeReconcileFn, supervisorIPCStatusFn, loopbackPortOwnerFn
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: task, State: "Running", PID: supervisorPID, Port: port}}, nil
+	}
+	loopbackPortOwnerFn = func(gotPort int) (int, bool, error) {
+		if gotPort != port {
+			t.Errorf("owner lookup got port %d, want %d", gotPort, port)
+		}
+		return attackerPID, true, nil
+	}
+	t.Cleanup(func() {
+		serenaWakeReconcileFn = origRec
+		supervisorIPCStatusFn = origStatus
+		loopbackPortOwnerFn = origOwner
+	})
+
+	err := NewAPI().WakeIdleSerenaDaemon(context.Background(), task, port, "tester")
+	if err == nil {
+		t.Fatal("foreign process serving a perfect serena initialize response must be refused")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "owned by PID 7331") || !strings.Contains(msg, "supervisor-reported daemon PID 4242") {
+		t.Fatalf("expected explicit owner-PID mismatch diagnostic, got: %v", err)
+	}
+}
+
+func TestWakeIdleSerenaDaemon_AcceptsMatchingPortOwnerAndSerenaResponse(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("OS-level loopback port-owner proof is enforced on Windows and Linux")
+	}
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-serena-owner-match`
+	if err := NewAPI().WriteSerenaIdleStop(task, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	_, port := newReadinessHTTPTestServer(t, perfectSerenaInitializeHandler)
+
+	const supervisorPID = 4242
+	origRec, origStatus, origOwner := serenaWakeReconcileFn, supervisorIPCStatusFn, loopbackPortOwnerFn
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: task, State: "Running", PID: supervisorPID, Port: port}}, nil
+	}
+	loopbackPortOwnerFn = func(gotPort int) (int, bool, error) {
+		if gotPort != port {
+			t.Errorf("owner lookup got port %d, want %d", gotPort, port)
+		}
+		return supervisorPID, true, nil
+	}
+	t.Cleanup(func() {
+		serenaWakeReconcileFn = origRec
+		supervisorIPCStatusFn = origStatus
+		loopbackPortOwnerFn = origOwner
+	})
+
+	if err := NewAPI().WakeIdleSerenaDaemon(context.Background(), task, port, "tester"); err != nil {
+		t.Fatalf("matching supervisor PID + port owner + serena response must pass: %v", err)
+	}
+}
+
+func TestWakeIdleSerenaDaemon_StatusPIDNotLiveFailsAfterPolling(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("OS-level loopback port-owner proof is enforced on Windows and Linux")
+	}
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-serena-no-live-pid`
+	if err := NewAPI().WriteSerenaIdleStop(task, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	_, port := newReadinessHTTPTestServer(t, perfectSerenaInitializeHandler)
+
+	statusCalls := 0
+	origRec, origStatus, origOwner := serenaWakeReconcileFn, supervisorIPCStatusFn, loopbackPortOwnerFn
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		statusCalls++
+		if statusCalls == 1 {
+			return []DaemonStatus{{TaskName: task, State: "Restarting", PID: 0, Port: port}}, nil
+		}
+		return []DaemonStatus{}, nil
+	}
+	loopbackPortOwnerFn = func(int) (int, bool, error) {
+		t.Fatal("owner lookup must wait until supervisor status reports a live PID")
+		return 0, false, nil
+	}
+	t.Cleanup(func() {
+		serenaWakeReconcileFn = origRec
+		supervisorIPCStatusFn = origStatus
+		loopbackPortOwnerFn = origOwner
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 140*time.Millisecond)
+	defer cancel()
+	err := NewAPI().WakeIdleSerenaDaemon(ctx, task, port, "tester")
+	if err == nil {
+		t.Fatal("wake readiness must fail when supervisor status never reports a live PID")
+	}
+	if statusCalls < 2 {
+		t.Fatalf("status should be polled until the wake deadline; calls=%d", statusCalls)
+	}
+	if !strings.Contains(err.Error(), "supervisor status") || !strings.Contains(err.Error(), "live PID") {
+		t.Fatalf("expected honest no-live-PID diagnostic, got: %v", err)
+	}
+}
+
+func perfectSerenaInitializeHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"Serena","version":"1"},"capabilities":{}}}`))
 }

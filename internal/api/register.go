@@ -20,6 +20,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1066,6 +1067,16 @@ var proxyReadinessFn = verifyProxyReady
 // after sch.Run so register can error-and-rollback instead of
 // reporting a successful registration whose proxy never came up.
 func verifyProxyReady(port int, timeout time.Duration) error {
+	return verifyProxyReadyForServerNames(port, timeout, nil)
+}
+
+func verifySerenaProxyReady(port int, timeout time.Duration) error {
+	return verifyProxyReadyForServerNames(port, timeout, map[string]struct{}{"serena": {}})
+}
+
+const readinessResponseMaxBytes = 1 << 20
+
+func verifyProxyReadyForServerNames(port int, timeout time.Duration, allowedServerNames map[string]struct{}) error {
 	deadline := time.Now().Add(timeout)
 	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"mcphub-register-readiness","version":"1.0.0"},"capabilities":{}}}`)
@@ -1084,17 +1095,124 @@ func verifyProxyReady(port int, timeout time.Duration) error {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
-			return nil
+			if len(allowedServerNames) == 0 {
+				_ = resp.Body.Close()
+				return nil
+			}
+			respBody, readErr := readReadinessResponse(resp)
+			_ = resp.Body.Close()
+			if readErr != nil {
+				lastErr = fmt.Errorf("read readiness response: %w", readErr)
+			} else if err := verifyReadinessServerInfo(respBody, allowedServerNames); err != nil {
+				lastErr = err
+			} else {
+				return nil
+			}
+		} else {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("readiness probe status %d", resp.StatusCode)
 		}
-		lastErr = fmt.Errorf("readiness probe status %d", resp.StatusCode)
 		time.Sleep(200 * time.Millisecond)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("timeout after %s", timeout)
 	}
 	return lastErr
+}
+
+func readReadinessResponse(resp *http.Response) ([]byte, error) {
+	if isSSEContentType(resp.Header.Get("Content-Type")) {
+		return readReadinessSSEResponse(resp.Body, readinessResponseMaxBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, readinessResponseMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > readinessResponseMaxBytes {
+		return nil, fmt.Errorf("readiness response too large (> %d bytes)", readinessResponseMaxBytes)
+	}
+	return raw, nil
+}
+
+func verifyReadinessServerInfo(body []byte, allowedServerNames map[string]struct{}) error {
+	payload := bytes.TrimSpace(body)
+	if looksLikeSSE(payload) {
+		var err error
+		payload, err = readReadinessSSEResponse(bytes.NewReader(payload), len(payload)+1)
+		if err != nil {
+			return err
+		}
+	}
+	var env readinessJSONRPCEnvelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return fmt.Errorf("decode readiness response: %w", err)
+	}
+	if err := validateReadinessJSONRPCEnvelope(env); err != nil {
+		return err
+	}
+	if env.Error != nil {
+		return fmt.Errorf("readiness response JSON-RPC error code=%d: %s", env.Error.Code, env.Error.Message)
+	}
+	name := strings.ToLower(strings.TrimSpace(env.Result.ServerInfo.Name))
+	if name == "" {
+		return fmt.Errorf("readiness response missing serverInfo.name")
+	}
+	if _, ok := allowedServerNames[name]; !ok {
+		return fmt.Errorf("readiness response serverInfo.name %q not allowed", env.Result.ServerInfo.Name)
+	}
+	return nil
+}
+
+type readinessJSONRPCEnvelope struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Error   *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Result *struct {
+		ServerInfo struct {
+			Name string `json:"name"`
+		} `json:"serverInfo"`
+	} `json:"result"`
+}
+
+func looksLikeSSE(payload []byte) bool {
+	return bytes.HasPrefix(payload, []byte("data:")) || bytes.Contains(payload, []byte("\ndata:"))
+}
+
+func readReadinessSSEResponse(r io.Reader, maxBytes int) ([]byte, error) {
+	return readSSESelectedResponse(r, maxBytes, selectReadinessJSONRPCResponse, "readiness JSON-RPC response event")
+}
+
+func selectReadinessJSONRPCResponse(dataLines [][]byte) ([]byte, bool) {
+	payload := bytes.Join(dataLines, []byte("\n"))
+	var env readinessJSONRPCEnvelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return nil, false
+	}
+	if validateReadinessJSONRPCEnvelope(env) != nil {
+		return nil, false
+	}
+	return payload, true
+}
+
+func validateReadinessJSONRPCEnvelope(env readinessJSONRPCEnvelope) error {
+	if env.JSONRPC != "2.0" {
+		return fmt.Errorf("readiness response missing JSON-RPC 2.0 envelope")
+	}
+	if !bytes.Equal(bytes.TrimSpace(env.ID), []byte("1")) {
+		return fmt.Errorf("readiness response missing matching JSON-RPC id 1")
+	}
+	if env.Method != "" {
+		return fmt.Errorf("readiness response is a JSON-RPC notification, not a response")
+	}
+	if env.Result == nil && env.Error == nil {
+		return fmt.Errorf("readiness response missing result or error")
+	}
+	return nil
 }
 
 // --- Test seams ---------------------------------------------------------
