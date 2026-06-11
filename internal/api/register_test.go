@@ -2690,6 +2690,162 @@ func TestUnregister_SupervisedRemovesStopWithDescriptorAndAllowsRegisterAgain(t 
 	}
 }
 
+func TestRegister_SupervisedClearsDescriptorAbsentStopBeforeReconcile(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")
+	siblingTask := `\mcp-local-hub-lsp-sibling-python`
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	stopped := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			taskName:    stopped,
+			siblingTask: stopped,
+		},
+	})
+
+	reconcileCalled := false
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalled = true
+		if !apply {
+			t.Fatalf("supervised register reconcile apply = false, want true")
+		}
+		intent, err := ReadSupervisorIntent(intentPath)
+		if err != nil {
+			return ReconcileResponse{}, err
+		}
+		if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil {
+			t.Fatalf("reconcile saw no descriptor %s; rows=%+v", taskName, intent.Daemons)
+		}
+		if _, ok := intent.Stops[taskName]; ok {
+			t.Fatalf("reconcile saw stale stop %s; register must clear it before readiness", taskName)
+		}
+		if _, ok := intent.Stops[siblingTask]; !ok {
+			t.Fatalf("reconcile lost unrelated sibling stop %s; stops=%+v", siblingTask, intent.Stops)
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	m := nineLanguageManifest()
+	m.PortPool = &config.PortPool{Start: 33050, End: 33059}
+	report, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err != nil {
+		t.Fatalf("Register supervised with descriptor-absent stop: %v", err)
+	}
+	if !reconcileCalled {
+		t.Fatal("register did not call supervisor reconcile")
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(report.Entries))
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after register: %v", err)
+	}
+	if _, ok := intent.Stops[taskName]; ok {
+		t.Fatalf("stop tombstone %s survived successful register", taskName)
+	}
+	if _, ok := intent.Stops[siblingTask]; !ok {
+		t.Fatalf("sibling stop %s did not survive register; stops=%+v", siblingTask, intent.Stops)
+	}
+}
+
+func TestRegister_SupervisedRollbackRestoresStopClearedBeforeReadinessFailure(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	stopped := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			taskName: stopped,
+		},
+	})
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		intent, err := ReadSupervisorIntent(intentPath)
+		if err != nil {
+			return ReconcileResponse{}, err
+		}
+		if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil {
+			t.Fatalf("reconcile saw no descriptor %s; rows=%+v", taskName, intent.Daemons)
+		}
+		if _, ok := intent.Stops[taskName]; ok {
+			t.Fatalf("reconcile saw stale stop %s before readiness failure", taskName)
+		}
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	origReadiness := proxyReadinessFn
+	proxyReadinessFn = func(port int, timeout time.Duration) error {
+		return errors.New("synthetic readiness timeout")
+	}
+	defer func() { proxyReadinessFn = origReadiness }()
+
+	m := nineLanguageManifest()
+	m.PortPool = &config.PortPool{Start: 33060, End: 33069}
+	_, err = mustNewAPI(t).registerWithManifest(m, ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err == nil {
+		t.Fatal("Register succeeded despite synthetic readiness failure")
+	}
+	if !strings.Contains(err.Error(), "synthetic readiness timeout") {
+		t.Fatalf("error = %v, want synthetic readiness timeout", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after rollback: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+		t.Fatalf("rollback left descriptor %s after readiness failure: %+v", taskName, row)
+	}
+	gotStop, ok := intent.Stops[taskName]
+	if !ok {
+		t.Fatalf("rollback did not restore prior stop %s; stops=%+v", taskName, intent.Stops)
+	}
+	if gotStop.Desired != stopped.Desired || gotStop.Reason != stopped.Reason || !gotStop.UpdatedAt.Equal(stopped.UpdatedAt) {
+		t.Fatalf("restored stop = %+v, want %+v", gotStop, stopped)
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 0 {
+		t.Fatalf("rollback left registry rows after readiness failure: %+v", rows)
+	}
+}
+
 func TestUnregister_LegacyOnlyDeletesSchedulerTaskWithoutReconcile(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()

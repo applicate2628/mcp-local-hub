@@ -215,22 +215,33 @@ func (r *Reconciler) Reconcile(
 		// quarantines the daemon — a noisy, operator-confusing failure for a
 		// descriptor that should simply not exist anymore.
 		//
-		// Mirror the serena-proxy skip above: EXCLUDE the row from the SPAWN-
-		// desired set HERE (before any EvStart / spawn fires) when the predicate
-		// reports no backing registry row. Gated on !running so an ALREADY-
-		// RUNNING orphan still falls through to the `isStopped && running`
-		// terminate branch (an operator stop must still be able to stop a live
-		// process). The predicate is nil in tests that don't wire it, preserving
-		// the spawn-everything default. Emit ONE operator-actionable warn at the
+		// Mirror the serena-proxy skip above for NOT-running orphan descriptors:
+		// EXCLUDE the row from the SPAWN-desired set HERE (before any EvStart /
+		// spawn fires) when the predicate reports no backing registry row. For an
+		// ALREADY-RUNNING orphan with no active stop, the descriptor is still
+		// present in intent, so the reconciler has enough information to drive the
+		// terminate direction immediately instead of letting `intent=running &&
+		// running` fall through to no-op and hold the port forever. A running
+		// orphan that is already stopped falls through to the normal `isStopped &&
+		// running` branch below, preserving the existing operator-stop audit shape.
+		// The predicate is nil in tests that don't wire it, preserving the
+		// spawn-everything default. Emit ONE operator-actionable warn at the
 		// exclusion point so the orphan is visible without spawn-and-quarantine
 		// churn; the operator clears it by re-running `mcphub install` /
 		// re-registering the workspace (which re-materializes the row) or by
 		// removing the stale descriptor.
-		if r.LSPRegistryHasRow != nil && isLSPWorkspaceProxyDescriptor(d) && !running && !r.LSPRegistryHasRow(d) {
+		if r.LSPRegistryHasRow != nil && isLSPWorkspaceProxyDescriptor(d) && !r.LSPRegistryHasRow(d) {
+			if running && isStopped {
+				_ = r.terminate(d)
+				continue
+			}
 			// Single-owner emit shared with the apply-mode IPC drift classifier
 			// (supervise_reconcile_ipc.go) so the two orphan-exclusion paths can
 			// never diverge on the operator-facing message / remediation.
 			emitOrphanedLSPDescriptorSkipped(r.Events, d)
+			if running {
+				_ = r.terminate(d)
+			}
 			continue
 		}
 

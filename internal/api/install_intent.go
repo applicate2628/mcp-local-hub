@@ -547,7 +547,6 @@ func (a *API) recordUninstallIntentForTasks(taskNames []string, w io.Writer) {
 // are logged through w and never propagate — the workspace is
 // already registered (registry on disk + scheduler task created).
 func (a *API) recordRegisterIntentForTask(taskName string, w io.Writer) {
-	now := time.Now().UTC()
 	// Register's task names come from the workspace registry path
 	// without the leading backslash (e.g. "mcp-local-hub-lsp-...").
 	// Codex deep-sec PR #135 Finding 1 fixed the original key-mismatch
@@ -557,17 +556,12 @@ func (a *API) recordRegisterIntentForTask(taskName string, w io.Writer) {
 	// the leading backslash).
 	// Callers may pass either shape; canonicalIntentTaskKey enforces
 	// the storage invariant.
-	canonical := canonicalIntentTaskKey(taskName)
-	intent := DaemonIntent{
-		Desired:   IntentDesiredRunning,
-		Reason:    IntentReasonRegister,
-		UpdatedAt: now,
-	}
 	// Phase 4-E2: Desired=running clears any prior stop from the
 	// supervisor-intent.json `stops` sub-block, re-enabling a re-registered
 	// workspace daemon. WriteStopIntent drops the entry because
 	// Desired=running is not an active stop.
-	if err := a.WriteStopIntent(canonical, intent, auditWhoMcphubRegister); err != nil {
+	canonical, err := a.writeRegisterRunningIntentForTask(taskName)
+	if err != nil {
 		if w != nil {
 			fmt.Fprintf(w, "warning: write register intent for %s: %v\n", canonical, err)
 		}
@@ -583,6 +577,16 @@ func (a *API) recordRegisterIntentForTask(taskName string, w io.Writer) {
 			fmt.Fprintf(w, "warning: write register audit for %s: %v\n", canonical, err)
 		}
 	}
+}
+
+func (a *API) writeRegisterRunningIntentForTask(taskName string) (string, error) {
+	canonical := canonicalIntentTaskKey(taskName)
+	intent := DaemonIntent{
+		Desired:   IntentDesiredRunning,
+		Reason:    IntentReasonRegister,
+		UpdatedAt: time.Now().UTC(),
+	}
+	return canonical, a.WriteStopIntent(canonical, intent, auditWhoMcphubRegister)
 }
 
 // ---------------------------------------------------------------------------

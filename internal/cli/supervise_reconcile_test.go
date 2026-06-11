@@ -14,6 +14,9 @@
 //     by the reconciler — orphan handling belongs to Task 13.1 cold-
 //     start reaper since the reconciler has no descriptor to fan a
 //     terminate through.
+//  4. LSP workspace-proxy descriptors whose backing registry row is gone
+//     are excluded from the desired set; if one is already running, the
+//     reconciler uses the descriptor it still has to terminate it.
 package cli
 
 import (
@@ -95,5 +98,83 @@ func TestReconcile_TerminatesExtras(t *testing.T) {
 	// the separate cold-start reaper Task 13.1).
 	if len(terminated) != 0 {
 		t.Fatalf("orphan termination should be deferred to cold-start reaper, got %v", terminated)
+	}
+}
+
+func TestReconcile_TerminatesRunningOrphanedLSPDescriptor(t *testing.T) {
+	descriptor := api.BuildSupervisorDaemonForLSP(api.WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "/tmp/mcphub-lsp",
+		Language:      "go",
+		Port:          33051,
+	}, "mcphub")
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{descriptor},
+	}
+
+	spawned := []string{}
+	terminated := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error {
+			spawned = append(spawned, d.TaskName)
+			return nil
+		},
+		func(d api.SupervisorDaemon) error {
+			terminated = append(terminated, d.TaskName)
+			return nil
+		},
+	)
+	r.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool {
+		if d.TaskName != descriptor.TaskName {
+			t.Fatalf("registry predicate saw task %q, want %q", d.TaskName, descriptor.TaskName)
+		}
+		return false
+	}
+
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{descriptor.TaskName: true}, time.Now())
+
+	if len(spawned) != 0 {
+		t.Fatalf("running orphan LSP descriptor must not spawn; got %v", spawned)
+	}
+	if len(terminated) != 1 || terminated[0] != descriptor.TaskName {
+		t.Fatalf("running orphan LSP descriptor terminated = %v, want [%s]", terminated, descriptor.TaskName)
+	}
+}
+
+func TestReconcile_LSPRegistryReadErrorFailOpenLeavesRunningDescriptor(t *testing.T) {
+	descriptor := api.BuildSupervisorDaemonForLSP(api.WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "/tmp/mcphub-lsp",
+		Language:      "go",
+		Port:          33052,
+	}, "mcphub")
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{descriptor},
+	}
+
+	spawned := []string{}
+	terminated := []string{}
+	r := NewReconciler(
+		func(d api.SupervisorDaemon) error {
+			spawned = append(spawned, d.TaskName)
+			return nil
+		},
+		func(d api.SupervisorDaemon) error {
+			terminated = append(terminated, d.TaskName)
+			return nil
+		},
+	)
+	r.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool {
+		// api.LSPRegistryRowBacksDescriptor fails open on registry read/lock
+		// errors; the reconciler seam sees that transient read failure as true.
+		return true
+	}
+
+	r.Reconcile(intent, &api.DaemonIntentFile{}, map[string]bool{descriptor.TaskName: true}, time.Now())
+
+	if len(spawned) != 0 || len(terminated) != 0 {
+		t.Fatalf("registry read-error fail-open must leave running descriptor alone; spawned=%v terminated=%v", spawned, terminated)
 	}
 }

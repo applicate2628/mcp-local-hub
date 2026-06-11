@@ -335,6 +335,9 @@ func (a *API) registerOneLanguageSupervised(
 		}
 		restoreIntent()
 	})
+	if canonicalTaskName, err := a.writeRegisterRunningIntentForTask(taskName); err != nil {
+		return WorkspaceEntry{}, fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
 	defer cancel()
 	if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
@@ -396,16 +399,17 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	desired.Daemons = append(kept, descriptor)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	priorStop, hadPriorStop := desired.Stops[descriptor.TaskName]
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
 		return nil, fmt.Errorf("write supervisor-intent LSP row %s: %w", descriptor.TaskName, err)
 	}
 
 	return func() {
 		if replaced {
-			upsertSupervisorIntentDescriptor(intentPath, priorDescriptor)
+			upsertSupervisorIntentDescriptorAndStop(intentPath, priorDescriptor, priorStop, hadPriorStop)
 			return
 		}
-		removeSupervisorIntentDescriptor(intentPath, descriptor.TaskName, !existed)
+		removeSupervisorIntentDescriptorAndStop(intentPath, descriptor.TaskName, !existed, priorStop, hadPriorStop)
 	}, nil
 }
 
@@ -520,6 +524,10 @@ func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorD
 }
 
 func removeSupervisorIntentDescriptor(path, taskName string, removeFileIfEmpty bool) {
+	removeSupervisorIntentDescriptorAndStop(path, taskName, removeFileIfEmpty, DaemonIntent{}, false)
+}
+
+func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIfEmpty bool, stop DaemonIntent, restoreStop bool) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
 		return
@@ -539,11 +547,17 @@ func removeSupervisorIntentDescriptor(path, taskName string, removeFileIfEmpty b
 		}
 		kept = append(kept, daemon)
 	}
-	if !removed {
+	if !removed && !restoreStop {
 		return
 	}
 	desired.Daemons = kept
-	if removeFileIfEmpty && len(desired.Daemons) == 0 && len(desired.MaintenanceTimers) == 0 && !desired.StrictMode {
+	if restoreStop {
+		if desired.Stops == nil {
+			desired.Stops = map[string]DaemonIntent{}
+		}
+		desired.Stops[canonicalIntentTaskKey(taskName)] = stop
+	}
+	if removeFileIfEmpty && len(desired.Daemons) == 0 && len(desired.MaintenanceTimers) == 0 && !desired.StrictMode && len(desired.Stops) == 0 {
 		_ = os.Remove(path)
 		return
 	}
