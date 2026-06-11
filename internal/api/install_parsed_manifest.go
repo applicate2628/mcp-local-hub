@@ -500,6 +500,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	var ensureAutostartAfterInstall bool
 	var autostartStrictMode bool
 	var removedSupervisorTargetsAfterInstall []SupervisorDaemon
+	var removedSupervisorPIDByTask map[string]int
 
 	if superviseGlobal {
 		// The supervisor-intent flock is held ONLY across the read-merge-write
@@ -546,6 +547,9 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 				return err
 			}
 			removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
+			// Capture live PIDs before the post-install reconcile nudge; after
+			// the nudge, removed rows may disappear from the supervisor's IPC view.
+			removedSupervisorPIDByTask = supervisorOwnedLivePIDsForTargets(ctx, removedSupervisorTargetsAfterInstall)
 			desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
 			intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
 				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifacts(priorIntent, m.Name))
@@ -668,7 +672,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	// in-memory intent cache until the reconcile nudge above refreshes it. Kill
 	// only after the nudge has had a chance to drop those rows, otherwise the
 	// child exit can look like a crash of a still-desired daemon and be respawned.
-	killRemovedSupervisorTargetsAfterGlobalInstall(removedSupervisorTargetsAfterInstall, w)
+	killRemovedSupervisorTargetsAfterGlobalInstall(removedSupervisorTargetsAfterInstall, removedSupervisorPIDByTask, w)
 	return nil
 }
 
@@ -794,9 +798,30 @@ func pruneStopsForRemovedSupervisorTargets(stops map[string]DaemonIntent, remove
 	return kept
 }
 
-func killRemovedSupervisorTargetsAfterGlobalInstall(targets []SupervisorDaemon, w io.Writer) {
+func supervisorOwnedLivePIDsForTargets(ctx context.Context, targets []SupervisorDaemon) map[string]int {
+	if len(targets) == 0 {
+		return nil
+	}
+	livePIDs := supervisorOwnedLivePIDs(ctx)
+	if len(livePIDs) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(targets))
 	for _, d := range targets {
-		result := forceKillOneSupervisorTarget(d, nil)
+		taskName := strings.TrimPrefix(d.TaskName, `\`)
+		if pid := livePIDs[taskName]; pid > 0 {
+			out[taskName] = pid
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func killRemovedSupervisorTargetsAfterGlobalInstall(targets []SupervisorDaemon, pidByTask map[string]int, w io.Writer) {
+	for _, d := range targets {
+		result := forceKillOneSupervisorTarget(d, pidByTask)
 		if result.Err != "" && w != nil {
 			fmt.Fprintf(w, "  warning: force kill removed supervisor target %s: %s\n", d.TaskName, result.Err)
 		}

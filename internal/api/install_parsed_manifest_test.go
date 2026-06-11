@@ -2055,11 +2055,27 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	var killPorts []int
 	origForceKill := forceKillByPortFn
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		order = append(order, "kill")
+		order = append(order, "kill-port")
 		killPorts = append(killPorts, port)
-		return portKillKilled, nil
+		return portKillLookupUnavailable, nil
 	}
 	t.Cleanup(func() { forceKillByPortFn = origForceKill })
+
+	var killedPIDs []int
+	origPID := stopForceKillPIDFn
+	stopForceKillPIDFn = func(pid int) error {
+		order = append(order, "kill-pid")
+		killedPIDs = append(killedPIDs, pid)
+		return nil
+	}
+	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+
+	origStatus := supervisorIPCStatusFn
+	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
+		order = append(order, "ipc-status")
+		return []DaemonStatus{{TaskName: betaTask, PID: 4244, State: "Running"}}, nil
+	}
+	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
 
 	m := &config.ServerManifest{
 		Name:          "demo",
@@ -2093,8 +2109,11 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	if len(killPorts) != 1 || killPorts[0] != 9322 {
 		t.Fatalf("forceKillByPortFn ports = %v, want [9322] for removed beta only", killPorts)
 	}
-	if len(order) != 2 || order[0] != "nudge" || order[1] != "kill" {
-		t.Fatalf("reconcile/kill order = %v, want [nudge kill]", order)
+	if len(killedPIDs) != 1 || killedPIDs[0] != 4244 {
+		t.Fatalf("PID-fallback kills = %v, want exactly [4244]", killedPIDs)
+	}
+	if len(order) != 4 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-port" || order[3] != "kill-pid" {
+		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-port kill-pid]", order)
 	}
 	if _, ok := written.Stops[betaTask]; ok {
 		t.Fatalf("removed daemon %s retained a dangling stop entry: %+v", betaTask, written.Stops)
