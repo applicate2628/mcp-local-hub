@@ -2256,6 +2256,89 @@ func TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated(t *t
 	}
 }
 
+func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort(t *testing.T) {
+	t.Run("legacy daemon task is deleted before its manifest port is killed", func(t *testing.T) {
+		daemonIntentTestHelper(t)
+		f := newInstallFakeScheduler()
+		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
+		installFakeScheduler(t, f)
+
+		origLookup := lookupProcess
+		lookupProcess = nil
+		t.Cleanup(func() { lookupProcess = origLookup })
+
+		var killed []int
+		origKill := killByPortFn
+		killByPortFn = func(port int, timeout time.Duration) error {
+			if len(f.deleteNames) == 0 {
+				t.Errorf("killByPortFn called before deleting the legacy scheduler task")
+			}
+			if timeout != 5*time.Second {
+				t.Errorf("kill timeout = %s, want 5s", timeout)
+			}
+			killed = append(killed, port)
+			return nil
+		}
+		t.Cleanup(func() { killByPortFn = origKill })
+
+		m := &config.ServerManifest{
+			Name:      "demo",
+			Kind:      config.KindGlobal,
+			Transport: config.TransportStdioBridge,
+			Command:   "go",
+			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 9313}},
+		}
+		var buf bytes.Buffer
+		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
+
+		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
+			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
+		}
+		if len(killed) != 1 || killed[0] != 9313 {
+			t.Fatalf("killByPortFn ports = %v, want [9313] so the supervised copy can bind", killed)
+		}
+	})
+
+	t.Run("zero port deletes task but skips kill with warning", func(t *testing.T) {
+		daemonIntentTestHelper(t)
+		f := newInstallFakeScheduler()
+		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
+		installFakeScheduler(t, f)
+
+		origLookup := lookupProcess
+		lookupProcess = nil
+		t.Cleanup(func() { lookupProcess = origLookup })
+
+		var killed []int
+		origKill := killByPortFn
+		killByPortFn = func(port int, timeout time.Duration) error {
+			killed = append(killed, port)
+			return nil
+		}
+		t.Cleanup(func() { killByPortFn = origKill })
+
+		m := &config.ServerManifest{
+			Name:      "demo",
+			Kind:      config.KindGlobal,
+			Transport: config.TransportStdioBridge,
+			Command:   "go",
+			Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 0}},
+		}
+		var buf bytes.Buffer
+		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
+
+		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-alpha" {
+			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-alpha]", f.deleteNames)
+		}
+		if len(killed) != 0 {
+			t.Fatalf("killByPortFn ports = %v, want none for port 0", killed)
+		}
+		if !strings.Contains(buf.String(), "daemon port unknown") {
+			t.Fatalf("cleanup warning = %q, want daemon port unknown warning", buf.String())
+		}
+	})
+}
+
 // TestBuildMergedSupervisorIntent_PreservesStopsSubBlock locks in the
 // cross-phase E2xF contract (bot PR #284 P2): the install merge must carry
 // the prior stops sub-block VERBATIM — it owns descriptors + this server's

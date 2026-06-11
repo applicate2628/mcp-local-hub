@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"os/user"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -137,6 +141,95 @@ func TestPortHeldByOurDaemon_NilSeams(t *testing.T) {
 			t.Errorf("nil schedulerStatusForOwnPort = true, want false")
 		}
 	})
+}
+
+func TestPreflight_AllowsSameSupervisorOwnedPortAndRejectsForeignIntentRow(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+
+	const (
+		port    = 9311
+		portPID = 55221
+	)
+	taskName := `\mcp-local-hub-demo-alpha`
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "alpha", Port: port}},
+	}
+
+	origPortInUse := preflightPortInUse
+	origLookup := lookupProcess
+	origIdent := processIdentityByPID
+	origSched := schedulerStatusForOwnPort
+	origStatus := supervisorIPCStatusFn
+	t.Cleanup(func() {
+		preflightPortInUse = origPortInUse
+		lookupProcess = origLookup
+		processIdentityByPID = origIdent
+		schedulerStatusForOwnPort = origSched
+		supervisorIPCStatusFn = origStatus
+	})
+	preflightPortInUse = func(p int) bool { return p == port }
+	lookupProcess = func(p int) (int, uint64, int64, bool) {
+		if p == port {
+			return portPID, 0, 0, true
+		}
+		return 0, 0, 0, false
+	}
+	processIdentityByPID = func(pid int) (string, string, bool) {
+		if pid == portPID {
+			return "mcphub.exe", "svchost.exe", true
+		}
+		return "", "", false
+	}
+	// Post-v0.6 supervisor-owned installs no longer have a per-daemon scheduler
+	// task, so the legacy scheduler proof must not be required for this path.
+	schedulerStatusForOwnPort = func(string) (scheduler.TaskStatus, error) {
+		return scheduler.TaskStatus{}, scheduler.ErrTaskNotFound
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: portPID, State: "Running"}}, nil
+	}
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "demo",
+			Daemon:   "alpha",
+			Command:  "go",
+			Port:     port,
+		}},
+	}); err != nil {
+		t.Fatalf("seed same-server supervisor intent: %v", err)
+	}
+	if err := Preflight(m, "alpha"); err != nil {
+		t.Fatalf("Preflight should accept the same supervisor-owned daemon port: %v", err)
+	}
+
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-other-alpha`,
+			Server:   "other",
+			Daemon:   "alpha",
+			Command:  "go",
+			Port:     port,
+		}},
+	}); err != nil {
+		t.Fatalf("seed foreign supervisor intent: %v", err)
+	}
+	err := Preflight(m, "alpha")
+	if err == nil {
+		t.Fatal("Preflight accepted a foreign supervisor-intent row on the same port; want port collision")
+	}
+	if !strings.Contains(err.Error(), "port 9311 already in use") {
+		t.Fatalf("Preflight error = %v, want port collision for foreign owner", err)
+	}
 }
 
 // TestParseNameParent pins the CSV parser used by both wmic and

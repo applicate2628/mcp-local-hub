@@ -881,7 +881,10 @@ func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, d
 		return
 	}
 	if daemonFilter != "" {
-		deleteLegacySchedulerTaskBestEffort(sch, "mcp-local-hub-"+m.Name+"-"+daemonFilter, w)
+		name := "mcp-local-hub-" + m.Name + "-" + daemonFilter
+		if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
+			killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
+		}
 		return
 	}
 	prefix := "mcp-local-hub-" + m.Name + "-"
@@ -900,26 +903,80 @@ func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, d
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		deleteLegacySchedulerTaskBestEffort(sch, name, w)
+		if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
+			killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
+		}
 	}
 }
 
-func deleteLegacySchedulerTaskBestEffort(sch interface{ Delete(string) error }, name string, w io.Writer) {
+func deleteLegacySchedulerTaskBestEffort(sch interface{ Delete(string) error }, name string, w io.Writer) bool {
 	if strings.TrimSpace(name) == "" {
-		return
+		return false
 	}
 	if err := sch.Delete(name); err != nil {
 		if schedulerUnavailableError(err) {
-			return
+			return false
 		}
 		if w != nil {
 			fmt.Fprintf(w, "⚠ Failed to remove legacy scheduler task %s: %v\n", name, err)
 		}
-		return
+		return false
 	}
 	if w != nil {
 		fmt.Fprintf(w, "✓ Scheduler task removed (legacy supervisor handoff): %s\n", name)
 	}
+	return true
+}
+
+func daemonPortForLegacySchedulerTask(m *config.ServerManifest, taskName string) int {
+	if m == nil {
+		return 0
+	}
+	server, daemon := ParseManagedTaskName(taskName)
+	if server != m.Name || daemon == "" {
+		return 0
+	}
+	for _, d := range m.Daemons {
+		if d.Name == daemon {
+			return d.Port
+		}
+	}
+	return 0
+}
+
+func killLegacySchedulerTaskDaemonByPortBestEffort(taskName string, port int, w io.Writer) {
+	if port == 0 {
+		if w != nil {
+			fmt.Fprintf(w, "⚠ Legacy scheduler cleanup skipped daemon kill for %s: daemon port unknown\n", taskName)
+		}
+		return
+	}
+	if legacySchedulerTaskPortOwnedBySupervisor(taskName, port) {
+		return
+	}
+	if err := killByPortFn(port, 5*time.Second); err != nil {
+		if w != nil {
+			fmt.Fprintf(w, "⚠ Failed to stop legacy daemon after removing scheduler task %s on port %d: %v\n", taskName, port, err)
+		}
+	}
+}
+
+func legacySchedulerTaskPortOwnedBySupervisor(taskName string, port int) bool {
+	portPID, havePortPID := supervisorOwnedPortPID(port)
+	if !havePortPID {
+		return false
+	}
+	livePIDs, reachable := supervisorOwnedLivePIDsWithReachability(context.Background())
+	if !reachable {
+		// Without both PID proof surfaces we cannot distinguish a legacy orphan
+		// from a supervised child. Keep the handoff progressing: delete prevents
+		// relaunch, and a bounded port kill is safe on a rerun because the
+		// supervisor's restart policy respawns its desired child after an external
+		// kill during upgrade.
+		return false
+	}
+	taskKey := strings.TrimPrefix(canonicalIntentTaskKey(taskName), `\`)
+	return livePIDs[taskKey] == portPID
 }
 
 // supervisorIntentFileLeaf is the canonical basename of the supervisor

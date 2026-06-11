@@ -127,9 +127,17 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 // map only loses the rare port-less-descriptor fallback, never the common
 // case; we do not pretend we have PIDs we could not read.
 func supervisorOwnedLivePIDs(ctx context.Context) map[string]int {
+	pids, _ := supervisorOwnedLivePIDsWithReachability(ctx)
+	return pids
+}
+
+func supervisorOwnedLivePIDsWithReachability(ctx context.Context) (map[string]int, bool) {
+	if supervisorIPCStatusFn == nil {
+		return map[string]int{}, false
+	}
 	rows, err := supervisorIPCStatusFn(ctx)
 	if err != nil {
-		return map[string]int{}
+		return map[string]int{}, false
 	}
 	out := make(map[string]int, len(rows))
 	for _, r := range rows {
@@ -137,5 +145,5 @@ func supervisorOwnedLivePIDs(ctx context.Context) map[string]int {
 			out[strings.TrimPrefix(r.TaskName, `\`)] = r.PID
 		}
 	}
-	return out
+	return out, true
 }

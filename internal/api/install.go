@@ -1576,12 +1576,22 @@ func checkSecretRefs(env map[string]string) error {
 }
 
 // portHeldByOurDaemon reports whether `port` is held by THIS server's
-// own scheduler-managed daemon, distinguishing "idempotent reinstall
-// while my daemon is already running" from "foreign process stole the
-// port we need". Bug-bash A6 (#6) closure: pre-fix, the Preflight
-// port-in-use check raised the SAME error in both cases — operator
-// saw `port 9129 already in use` for every server during `install
-// --all` even when those daemons were our own running tasks.
+// own daemon, distinguishing "idempotent reinstall while my daemon is
+// already running" from "foreign process stole the port we need".
+// Bug-bash A6 (#6) closure: pre-fix, the Preflight port-in-use check
+// raised the SAME error in both cases — operator saw `port 9129 already
+// in use` for every server during `install --all` even when those
+// daemons were our own running tasks.
+//
+// v0.6 Phase F moved global daemons from per-daemon scheduler tasks to
+// supervisor-intent.json. Accept that supervisor-owned path first: the
+// intent must contain THIS server+daemon row with the same port; when
+// both supervisor IPC and the OS port-owner lookup are available, the
+// supervisor-reported live PID must equal the listener PID. If either
+// proof surface is unavailable, the same trust ladder used by the idle
+// wake readiness path downgrades to the intent-row match alone; the
+// alternative would make reinstalls fail on hosts/platforms without one
+// of those probes even though the supervisor descriptor is authoritative.
 //
 // Three-part identity gate (bot r1 P1 + r2 P1 closure on PR #180):
 // scheduler task name alone is not enough — a stale orphan / foreign
@@ -1605,6 +1615,9 @@ func checkSecretRefs(env map[string]string) error {
 // lookup, and scheduler.New().Status respectively. Tests assign
 // fakes for each.
 func portHeldByOurDaemon(port int, server, daemon string) bool {
+	if portHeldBySupervisorIntentDaemon(port, server, daemon) {
+		return true
+	}
 	if lookupProcess == nil {
 		return false
 	}
@@ -1639,6 +1652,83 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 		return false
 	}
 	return statusOwnedByCurrentUser(st.Owner)
+}
+
+func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
+	if port == 0 || server == "" || daemon == "" {
+		return false
+	}
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return false
+	}
+	intent, err := ReadSupervisorIntent(joinStateFilePath(stateDir, supervisorIntentFileLeaf))
+	if err != nil || intent == nil {
+		return false
+	}
+	row, ok := supervisorIntentDaemonForPort(intent, port, server, daemon)
+	if !ok {
+		return false
+	}
+	portPID, havePortPID := supervisorOwnedPortPID(port)
+	if !havePortPID {
+		return true
+	}
+	livePIDs, reachable := supervisorOwnedLivePIDsWithReachability(context.Background())
+	if !reachable {
+		return true
+	}
+	taskKey := strings.TrimPrefix(supervisorIntentDaemonTaskName(row, server, daemon), `\`)
+	return livePIDs[taskKey] == portPID
+}
+
+func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool) {
+	if intent == nil {
+		return SupervisorDaemon{}, false
+	}
+	for _, row := range intent.Daemons {
+		if row.Port != port {
+			continue
+		}
+		if supervisorIntentRowMatchesServerDaemon(row, server, daemon) {
+			return row, true
+		}
+	}
+	return SupervisorDaemon{}, false
+}
+
+func supervisorIntentRowMatchesServerDaemon(row SupervisorDaemon, server, daemon string) bool {
+	if server == "" || daemon == "" {
+		return false
+	}
+	parsedServer, parsedDaemon := ParseManagedTaskName(row.TaskName)
+	serverMatches := row.Server == server
+	if row.Server == "" {
+		serverMatches = parsedServer == server
+	}
+	daemonMatches := row.Daemon == daemon
+	if row.Daemon == "" {
+		daemonMatches = parsedDaemon == daemon
+	}
+	return serverMatches && daemonMatches
+}
+
+func supervisorIntentDaemonTaskName(row SupervisorDaemon, server, daemon string) string {
+	if strings.TrimSpace(row.TaskName) != "" {
+		return canonicalIntentTaskKey(row.TaskName)
+	}
+	return canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemon)
+}
+
+func supervisorOwnedPortPID(port int) (int, bool) {
+	if lookupProcess == nil {
+		return 0, false
+	}
+	pid, _, _, ok := lookupProcess(port)
+	if !ok || pid == 0 {
+		return 0, false
+	}
+	return pid, true
 }
 
 func statusOwnedByCurrentUser(owner string) bool {
