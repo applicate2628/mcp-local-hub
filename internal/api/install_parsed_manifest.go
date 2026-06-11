@@ -599,9 +599,15 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			// runtime_spec row. If one ever appeared it would need the §7.1
 			// supervisor-running gate (which lives in InstallParsedManifest), so
 			// refuse rather than write a spec-bearing intent through this gate-less
-			// path.
-			if desiredIntent.HasRuntimeSpecRow() {
-				return fmt.Errorf("installPlanCore: global manifest %q unexpectedly produced a runtime_spec-bearing supervisor-intent row; global installs must not carry runtime_spec (that path is InstallParsedManifest's)", m.Name)
+			// path. Scope the check to THIS server's rows: the merged intent
+			// legitimately carries OTHER servers' spec-bearing rows (the serena
+			// dynamic-pool rows after `mcphub migrate serena
+			// legacy-to-dynamic-pool`), and a whole-file check made EVERY global
+			// install fail on such hosts (live-host fetch install, 2026-06-12).
+			for _, d := range desiredIntent.Daemons {
+				if d.RuntimeSpec != nil && supervisorIntentRowOwnedBy(d, m.Name) {
+					return fmt.Errorf("installPlanCore: global manifest %q unexpectedly produced a runtime_spec-bearing supervisor-intent row; global installs must not carry runtime_spec (that path is InstallParsedManifest's)", m.Name)
+				}
 			}
 
 			if intentWriteNeeded {
