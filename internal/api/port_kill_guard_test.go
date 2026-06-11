@@ -137,7 +137,7 @@ func TestNoLiveBandLiteralReachesKillOrListenSink(t *testing.T) {
 
 	// inLiveBand reports whether p falls in a live daemon-port band.
 	inLiveBand := func(p int) bool {
-		return (p >= 9121 && p <= 9132) || (p >= 9150 && p <= 9299)
+		return (p >= 9121 && p <= 9133) || (p >= 9150 && p <= 9299)
 	}
 
 	// litPort extracts the integer port from an *ast.BasicLit if it is a
