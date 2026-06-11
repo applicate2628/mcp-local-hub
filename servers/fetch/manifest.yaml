@@ -2,9 +2,10 @@
 # Wrapped by mcphub as an HTTP daemon (stdio-bridge) so every client reaches it via the hub.
 #
 # Restored + committed 2026-06-10: the prior fetch manifest was LOCAL-ONLY (never in git) and
-# got lost on a working-tree reset, leaving the client entries pointing at a dead port (9121,
-# the old unified-serena port) — `claude mcp list` showed `fetch ✘ Failed`. Committing the
-# manifest so it survives resets and `mcphub install --server fetch` can always re-materialize it.
+# got lost on a working-tree reset, leaving the client entries pointing at a dead port
+# (the old unified-serena port) — `claude mcp list` showed `fetch ✘ Failed`. Committing
+# the manifest so it survives resets and `mcphub install --server fetch` can always
+# re-materialize it.
 name: fetch
 kind: global
 command: uvx
@@ -13,7 +14,7 @@ base_args:
 transport: stdio-bridge
 daemons:
   - name: default
-    port: 9121
+    port: 9133
 client_bindings:
   - client: claude-code
     daemon: default

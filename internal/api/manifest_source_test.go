@@ -89,6 +89,35 @@ func TestListManifestNamesEmbedFirst_UnionsDiskAdditions(t *testing.T) {
 	}
 }
 
+// TestEmbeddedManifests_GlobalDaemonPortsAreUnique guards install-all and
+// stopped-fleet flows: the live port preflight cannot detect two shipped
+// manifests that statically declare the same loopback port until one daemon
+// has already occupied it. Keep shipped daemon ports globally unique so bulk
+// installs cannot write shadowing client entries.
+func TestEmbeddedManifests_GlobalDaemonPortsAreUnique(t *testing.T) {
+	ownersByPort := map[int]string{}
+	for _, name := range embeddedManifestNames() {
+		data, err := loadManifestYAMLEmbedFirst(name)
+		if err != nil {
+			t.Fatalf("loadManifestYAMLEmbedFirst(%s): %v", name, err)
+		}
+		mf, err := parseManifestForName(name, data)
+		if err != nil {
+			t.Fatalf("parseManifestForName(%s): %v", name, err)
+		}
+		for _, daemon := range mf.Daemons {
+			if daemon.Port == 0 {
+				continue
+			}
+			owner := name + "/" + daemon.Name
+			if prior, ok := ownersByPort[daemon.Port]; ok {
+				t.Fatalf("embedded daemon port %d is declared by both %s and %s", daemon.Port, prior, owner)
+			}
+			ownersByPort[daemon.Port] = owner
+		}
+	}
+}
+
 func containsSubstring(data []byte, want string) bool {
 	return len(data) >= len(want) && indexSubstring(string(data), want) >= 0
 }
