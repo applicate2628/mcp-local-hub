@@ -2,8 +2,14 @@
 
 PARKED 19:21 UTC → resume 22:21 UTC (cron 073b98f1; user: "припаркуйся на 3 часа,
 потом продолжай (ждем обновление лимитов)"). master bcfe284 (r17 заземлён);
-полл r18 (b7fqi7b2e) добегает в фоне — бот к 19:21 ещё НЕ ревьюил bcfe284; на
-resume: если вердикта нет — ретриггер. Раунды: r14=5 → r15=1 → r16=3 → r17=2.
+r18 ВЕРДИКТ ПОЛУЧЕН (19:22, до фактической парковки): 2 P2 на bcfe284 —
+(1) dry-run лезет в state-dir/intent (DaemonStateDir создаёт дир, corrupt
+intent роняет превью); (2) IPC-apply путь пропускает RUNNING-орфаны (зеркало
+r17-F2 на второй reconcile-поверхности). Находки:
+.scratch/codex-prompts/pr288-r18-findings.txt. ГОТОВЫЙ ПРОМПТ:
+.scratch/codex-prompts/pr288-r18-fixes.md. На resume шаг 1 = worktree
+codex-288r18 off master + диспатч codex по готовому промпту (НЕ ретриггер —
+вердикт уже есть). Раунды: r14=5 → r15=1 → r16=3 → r17=2 → r18=2.
 
 (пред. парковка) PARKED 14:32 UTC → resume 17:02 UTC (исполнена).
 State at park: master c14a8cd запушен (= r11 + internal sweep S/A/B/C + интеграция +
