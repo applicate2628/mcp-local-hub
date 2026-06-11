@@ -1,0 +1,640 @@
+package gui
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"mcp-local-hub/internal/api"
+)
+
+// withIdleSweeperSeams wires the threshold + stop seams and a backend status
+// reader, restoring all three on cleanup. capturedStops receives every
+// task_name the sweeper idle-stops.
+func withIdleSweeperSeams(t *testing.T, threshold time.Duration, enabled bool, status func(context.Context) ([]api.DaemonStatus, error)) *[]string {
+	t.Helper()
+	origThresh, origStop, origStatus := serenaIdleThresholdFn, serenaIdleStopFn, serenaBackendStatusFn
+	captured := &[]string{}
+	serenaIdleThresholdFn = func() (time.Duration, bool) { return threshold, enabled }
+	serenaIdleStopFn = func(taskName string, _ time.Time) error {
+		*captured = append(*captured, taskName)
+		return nil
+	}
+	serenaBackendStatusFn = status
+	t.Cleanup(func() {
+		serenaIdleThresholdFn, serenaIdleStopFn, serenaBackendStatusFn = origThresh, origStop, origStatus
+	})
+	return captured
+}
+
+// serenaSweeperServer builds a router server with a single serena workspace
+// (sentinel-language, serena backend) and the lister/resolver wired.
+func serenaSweeperServer(t *testing.T, ws *api.WorkspaceEntry) *Server {
+	t.Helper()
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return "http://unused" },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		// WakeIdleFn deliberately nil — these tests exercise the SWEEPER, not
+		// the handler wake.
+	}
+	return newSerenaTestServer(t, deps)
+}
+
+func serenaWS(key, path string, port int) *api.WorkspaceEntry {
+	return &api.WorkspaceEntry{
+		WorkspaceKey:  key,
+		WorkspacePath: path,
+		Port:          port,
+		Backend:       "serena",
+		Language:      api.SerenaLanguageSentinel,
+		TaskName:      `\mcp-local-hub-serena-` + key,
+	}
+}
+
+// FALSIFICATION (spec §6): with the idle threshold at 1 minute, a daemon that
+// just had activity recorded (the "mid-call / recently-active" case) is NOT
+// idle-stopped. The sweeper reads LAST-ACTIVITY, not wall-clock since spawn.
+func TestIdleSweeper_RecentlyActive_NotKilled(t *testing.T) {
+	const wsPath = "/proj/alpha"
+	ws := serenaWS("alpha", wsPath, 9201)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	// The daemon has a LONG uptime (2h) but activity 10s ago — last-activity is
+	// the baseline, so it is NOT idle despite the long uptime.
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9201, UptimeSec: 7200}}, nil
+		},
+	)
+	s.recordSerenaActivity("alpha", now.Add(-10*time.Second))
+
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("recently-active daemon was idle-stopped (%d); the sweeper must read last-activity, not uptime-since-spawn", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("recently-active daemon must NOT be stopped; captured=%v", *captured)
+	}
+}
+
+// A daemon idle longer than the threshold (last-activity well in the past) IS
+// idle-stopped via the unified-intent stop writer.
+func TestIdleSweeper_Idle_Stopped(t *testing.T) {
+	const wsPath = "/proj/beta"
+	ws := serenaWS("beta", wsPath, 9202)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	captured := withIdleSweeperSeams(t, 30*time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9202, UptimeSec: 7200}}, nil
+		},
+	)
+	// Last activity 45 minutes ago — past the 30m threshold.
+	s.recordSerenaActivity("beta", now.Add(-45*time.Minute))
+
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
+		t.Fatalf("idle daemon must be stopped; got n=%d", n)
+	}
+	if len(*captured) != 1 || (*captured)[0] != `\mcp-local-hub-serena-beta` {
+		t.Fatalf("expected idle stop for \\mcp-local-hub-serena-beta; captured=%v", *captured)
+	}
+	// The activity baseline must be dropped after the idle-stop.
+	if _, ok := s.lastSerenaActivity("beta"); ok {
+		t.Fatalf("activity baseline must be dropped after idle-stop")
+	}
+}
+
+// "off" disables idle-shutdown: nothing is stopped even when long-idle.
+func TestIdleSweeper_Off_Disabled(t *testing.T) {
+	const wsPath = "/proj/gamma"
+	ws := serenaWS("gamma", wsPath, 9203)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, 0, false, // "off"
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9203, UptimeSec: 99999}}, nil
+		},
+	)
+	s.recordSerenaActivity("gamma", now.Add(-99*time.Hour))
+
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("off must disable idle-shutdown; got n=%d", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("off must stop nothing; captured=%v", *captured)
+	}
+}
+
+// A freshly-spawned daemon with NO recorded activity is NOT idled until its
+// uptime exceeds the threshold (the never-called fallback baseline).
+func TestIdleSweeper_NeverCalled_FreshUptime_NotKilled(t *testing.T) {
+	const wsPath = "/proj/delta"
+	ws := serenaWS("delta", wsPath, 9204)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	// Uptime 20s, threshold 1m, NO activity recorded → not idle yet.
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9204, UptimeSec: 20}}, nil
+		},
+	)
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("freshly-spawned daemon (uptime < threshold, no activity) must not be idled; got n=%d", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("fresh daemon must not be stopped; captured=%v", *captured)
+	}
+}
+
+// A never-called daemon whose uptime exceeds the threshold IS idled (uptime
+// fallback baseline) — provided the GUI itself has been up past the threshold
+// (the GUI-restart baseline cap, FIX-1; here the GUI started 1h ago).
+func TestIdleSweeper_NeverCalled_LongUptime_Killed(t *testing.T) {
+	const wsPath = "/proj/epsilon"
+	ws := serenaWS("epsilon", wsPath, 9205)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	// GUI has been up 1h (> the 1m threshold), so the GUI-restart cap does not
+	// suppress the idle-kill of a long-uptime never-called daemon.
+	s.guiProcessStart = now.Add(-time.Hour)
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9205, UptimeSec: 600}}, nil
+		},
+	)
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
+		t.Fatalf("never-called daemon up 10m past a 1m threshold must be idled; got n=%d", n)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one idle stop; captured=%v", *captured)
+	}
+}
+
+// FIX-1 (fable's coupled-hazard insight): after a GUI RESTART, a daemon with a
+// LONG supervisor uptime (3h) that was active just before the restart must NOT
+// be idle-killed on the first post-restart sweep. The restart wiped
+// serenaLastActivity, so the sweeper falls back to uptime — but the
+// GUI-restart baseline caps idle at time-since-GUI-start. With the GUI up only
+// 30s and a 1m threshold, no daemon is idled even though uptime is 3h. Without
+// the cap, real uptime (now populated by FIX-1's IPC decode) would kill it.
+func TestIdleSweeper_GUIRestartBaseline_LongUptimeNotKilled(t *testing.T) {
+	const wsPath = "/proj/restart"
+	ws := serenaWS("restart", wsPath, 9210)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	// The GUI just restarted 30s ago; the activity map is empty (simulating the
+	// wipe). The daemon has a 3h supervisor uptime.
+	s.guiProcessStart = now.Add(-30 * time.Second)
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9210, UptimeSec: 3 * 3600}}, nil
+		},
+	)
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("a 3h-uptime daemon must NOT be idle-killed when the GUI restarted 30s ago (threshold 1m); got n=%d — the GUI-restart baseline is missing", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("GUI-restart baseline must keep the daemon alive; captured=%v", *captured)
+	}
+
+	// Once the GUI has been up PAST the threshold (here 2m), the same
+	// never-called long-uptime daemon IS idled — the cap no longer binds.
+	s.guiProcessStart = now.Add(-2 * time.Minute)
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
+		t.Fatalf("after the GUI has been up past the threshold, the long-uptime never-called daemon must be idled; got n=%d", n)
+	}
+}
+
+// FIX-3 (mid-call protection): a daemon with an OPEN /serena/mcp forward is
+// NEVER idle-stopped, even when its last-activity is well past the threshold
+// (the activity was stamped ONCE at call-start; a single long streaming call
+// keeps the in-flight counter incremented). Once the forward completes, the same
+// long-idle daemon IS idled.
+func TestIdleSweeper_InFlightForward_NotKilledMidCall(t *testing.T) {
+	const wsPath = "/proj/inflight"
+	ws := serenaWS("inflight", wsPath, 9211)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9211, UptimeSec: 7200}}, nil
+		},
+	)
+	// Activity was stamped at call-start, 45m ago (well past the 1m threshold) —
+	// the call is STILL streaming (mid-call), so the in-flight counter is open.
+	s.recordSerenaActivity("inflight", now.Add(-45*time.Minute))
+	s.enterSerenaForward("inflight")
+
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("a daemon with an OPEN forward must NOT be idle-killed mid-call; got n=%d", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("mid-call daemon must not be stopped; captured=%v", *captured)
+	}
+
+	// The call completes: the forward closes AND last-activity is re-stamped to
+	// now (the production defer does both). The daemon is no longer mid-call and
+	// its activity is fresh → still not idled.
+	s.exitSerenaForward("inflight")
+	s.recordSerenaActivity("inflight", now)
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("a just-finished call re-stamps activity, so the daemon must not be immediately idled; got n=%d", n)
+	}
+
+	// Time advances past the threshold with no further activity → NOW it idles.
+	later := now.Add(2 * time.Minute)
+	if n := s.SweepIdleSerenaDaemons(context.Background(), later); n != 1 {
+		t.Fatalf("after the forward completes AND the threshold elapses, the daemon must be idled; got n=%d", n)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected exactly one idle stop after the call finished + threshold; captured=%v", *captured)
+	}
+}
+
+// FIX-3 counter discipline: nested forwards (two concurrent calls) keep the
+// daemon protected until BOTH complete; the counter never goes negative.
+func TestIdleSweeper_InFlightCounter_Balanced(t *testing.T) {
+	const wsPath = "/proj/counter"
+	ws := serenaWS("counter", wsPath, 9212)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9212, UptimeSec: 7200}}, nil
+		},
+	)
+	s.recordSerenaActivity("counter", now.Add(-45*time.Minute))
+
+	// Two concurrent forwards open.
+	s.enterSerenaForward("counter")
+	s.enterSerenaForward("counter")
+	if !s.hasSerenaForwardInFlight("counter") {
+		t.Fatalf("two opens must register in-flight")
+	}
+	// One closes — still protected.
+	s.exitSerenaForward("counter")
+	if !s.hasSerenaForwardInFlight("counter") {
+		t.Fatalf("one of two forwards still open must keep the daemon protected")
+	}
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("a daemon with one forward still open must not be idled; got n=%d", n)
+	}
+	// Second closes — no longer in-flight.
+	s.exitSerenaForward("counter")
+	if s.hasSerenaForwardInFlight("counter") {
+		t.Fatalf("after both forwards close, the daemon must not be in-flight")
+	}
+	// A defensive extra exit must not drive the count negative / re-create state.
+	s.exitSerenaForward("counter")
+	if s.hasSerenaForwardInFlight("counter") {
+		t.Fatalf("an extra exit must stay a no-op (count never negative)")
+	}
+	// With no forward open and stale activity, the daemon now idles.
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
+		t.Fatalf("after all forwards close, the long-idle daemon must idle; got n=%d", n)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one idle stop; captured=%v", *captured)
+	}
+}
+
+// A non-running (Stopped/Restarting) daemon is never idle-stopped.
+func TestIdleSweeper_NotRunning_Skipped(t *testing.T) {
+	const wsPath = "/proj/zeta"
+	ws := serenaWS("zeta", wsPath, 9206)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Stopped", PID: 0, Port: 9206, UptimeSec: 0}}, nil
+		},
+	)
+	s.recordSerenaActivity("zeta", now.Add(-99*time.Hour))
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("a non-running daemon must not be idle-stopped; got n=%d", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("stopped daemon must not be re-stopped; captured=%v", *captured)
+	}
+}
+
+// A status-read failure must NOT idle-stop anything (false-positive guard).
+func TestIdleSweeper_StatusReadError_NoStop(t *testing.T) {
+	const wsPath = "/proj/eta"
+	ws := serenaWS("eta", wsPath, 9207)
+	s := serenaSweeperServer(t, ws)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return nil, context.DeadlineExceeded
+		},
+	)
+	s.recordSerenaActivity("eta", now.Add(-99*time.Hour))
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("status-read failure must not idle-stop (false-positive guard); got n=%d", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("status error must stop nothing; captured=%v", *captured)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Router-handler wake integration.
+// ---------------------------------------------------------------------------
+
+// On a tool-call, the handler records activity for the resolved workspace AND
+// invokes WakeIdleFn with the daemon's task name + port BEFORE the forward; the
+// forward succeeds when the wake returns nil.
+func TestRouterWake_InvokedAndRecordsActivity(t *testing.T) {
+	const wsPath = "/proj/wake"
+	ws := serenaWS("wake", wsPath, 9301)
+
+	daemon := newFakeSerenaDaemon("wake")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	var wakeMu sync.Mutex
+	var gotTask string
+	var gotPort int
+	wakeCalls := 0
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(_ context.Context, taskName string, port int, _ string) error {
+			wakeMu.Lock()
+			defer wakeMu.Unlock()
+			wakeCalls++
+			gotTask, gotPort = taskName, port
+			return nil // daemon is up
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	wakeMu.Lock()
+	defer wakeMu.Unlock()
+	if wakeCalls != 1 {
+		t.Fatalf("WakeIdleFn called %d times, want 1", wakeCalls)
+	}
+	if gotTask != `\mcp-local-hub-serena-wake` || gotPort != 9301 {
+		t.Fatalf("wake called with (%q, %d), want (\\mcp-local-hub-serena-wake, 9301)", gotTask, gotPort)
+	}
+	if _, ok := s.lastSerenaActivity("wake"); !ok {
+		t.Fatalf("handler must record last-activity for the resolved workspace")
+	}
+}
+
+// FIX-3 (router integration): while a /serena/mcp forward is mid-flight to the
+// daemon, hasSerenaForwardInFlight reports true; once the forward completes the
+// counter is balanced back to zero AND last-activity is re-stamped. Drives the
+// REAL handler forward path with a fake daemon whose tool handler blocks.
+func TestRouterForward_InFlightCounterAndRestamp(t *testing.T) {
+	const wsPath = "/proj/forwardflight"
+	ws := serenaWS("forwardflight", wsPath, 9311)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	daemon := newFakeSerenaDaemon("forwardflight")
+	daemon.tool = func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+		close(entered)  // the forward is now in-flight in the handler.
+		<-release       // block until the test releases it (mid-call).
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		// WakeIdleFn nil — this test exercises the forward in-flight tracking.
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+		if rr.Code != http.StatusOK {
+			t.Errorf("forward status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+	}()
+
+	// Wait until the handler is mid-forward, then assert in-flight is observed.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("forward never reached the daemon tool handler")
+	}
+	if !s.hasSerenaForwardInFlight(ws.WorkspaceKey) {
+		t.Fatalf("the daemon must be marked in-flight WHILE the forward is open")
+	}
+
+	// Release the daemon; the forward completes.
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("forward did not complete after release")
+	}
+
+	// After completion: counter balanced to zero, activity re-stamped fresh.
+	if s.hasSerenaForwardInFlight(ws.WorkspaceKey) {
+		t.Fatalf("the in-flight counter must be balanced back to zero after the forward completes")
+	}
+	if _, ok := s.lastSerenaActivity(ws.WorkspaceKey); !ok {
+		t.Fatalf("forward completion must re-stamp last-activity")
+	}
+}
+
+// FALSIFICATION (spec §6): when the daemon has an operator stop, WakeIdleFn
+// returns ErrWakeRefusedOperatorStop. The handler must NOT 503 on that — it
+// falls through to the forward (which honors the operator stop by failing loud
+// against the down daemon). Here the forward reaches a live fake daemon so the
+// observable assertion is "did NOT 503 because of the refused wake".
+func TestRouterWake_OperatorStopRefused_FallsThroughToForward(t *testing.T) {
+	const wsPath = "/proj/disabled"
+	ws := serenaWS("disabled", wsPath, 9302)
+
+	daemon := newFakeSerenaDaemon("disabled")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(context.Context, string, int, string) error {
+			return api.ErrWakeRefusedOperatorStop
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	// The refused wake must NOT itself produce a 503; the handler proceeds to
+	// the forward (which here hits a live fake daemon → 200). The point is that
+	// ErrWakeRefusedOperatorStop is NOT treated as a not-ready 503.
+	if rr.Code == http.StatusServiceUnavailable {
+		t.Fatalf("operator-stop-refused wake must not 503; the handler must fall through to the forward. body=%s", rr.Body.String())
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("forward after refused wake status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// When WakeIdleFn returns a NON-refusal error (respawn not ready in time), the
+// handler 503s so the client retries.
+func TestRouterWake_NotReady_503(t *testing.T) {
+	const wsPath = "/proj/notready"
+	ws := serenaWS("notready", wsPath, 9303)
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return "http://unused" },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(context.Context, string, int, string) error {
+			return context.DeadlineExceeded // respawn not ready
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a not-ready wake must 503 so the client retries; got %d. body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// FIX-4 (codex-unique P1): an all-idle serena pool with an empty tools-list
+// cache must WAKE a candidate daemon on tools/list, not fail permanently. The
+// fake daemon REFUSES tools/list until WakeIdleFn is invoked (modelling an
+// idle-stopped daemon whose port is unbound until the supervisor respawns it on
+// wake). Without the FIX-4 wake, tools/list would return the permanent
+// "no daemon answered" error and the pool would stay asleep forever.
+func TestRouterToolsList_AllIdle_WakesCandidateAndSucceeds(t *testing.T) {
+	const wsPath = "/proj/toolswake"
+	ws := serenaWS("toolswake", wsPath, 9312)
+
+	var stateMu sync.Mutex
+	awake := false
+
+	daemon := newFakeSerenaDaemon("toolswake")
+	daemon.tool = func(w http.ResponseWriter, _ *http.Request, b []byte) {
+		stateMu.Lock()
+		up := awake
+		stateMu.Unlock()
+		if !up {
+			// Idle-stopped: as if the port were unbound — refuse so the fetch
+			// loop records a candidate failure.
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if !strings.Contains(string(b), `"tools/list"`) {
+			t.Errorf("upstream body did not carry tools/list; got %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	wakeCalls := 0
+	var wokeTask string
+	var wokePort int
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(_ context.Context, taskName string, port int, _ string) error {
+			// The wake "respawns" the daemon: it now answers tools/list.
+			stateMu.Lock()
+			awake = true
+			stateMu.Unlock()
+			wakeCalls++
+			wokeTask, wokePort = taskName, port
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	hdr := map[string]string{"Mcp-Session-Id": sid}
+	body := buildLifecycleBody(t, "tools/list", map[string]any{})
+
+	rr := postSerena(t, s, body, hdr)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list against an all-idle pool must wake a daemon and succeed; status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if wakeCalls != 1 {
+		t.Fatalf("tools/list must wake exactly one candidate; wakeCalls=%d", wakeCalls)
+	}
+	if wokeTask != `\mcp-local-hub-serena-toolswake` || wokePort != 9312 {
+		t.Fatalf("wake called with (%q,%d), want (\\mcp-local-hub-serena-toolswake, 9312)", wokeTask, wokePort)
+	}
+	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+}
+
+// A non-serena row (LSP workspace proxy) in the status is never idle-stopped by
+// this serena sweeper.
+func TestIdleSweeper_NonSerenaRow_Ignored(t *testing.T) {
+	const wsPath = "/proj/theta"
+	// An LSP (non-serena) workspace entry: the sweeper must not target it.
+	lsp := &api.WorkspaceEntry{
+		WorkspaceKey:  "theta",
+		WorkspacePath: wsPath,
+		Port:          9208,
+		Backend:       "mcp-language-server",
+		Language:      "go",
+		TaskName:      `\mcp-local-hub-lsp-theta-go`,
+	}
+	s := serenaSweeperServer(t, lsp)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Minute, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "mcp-language-server", Workspace: wsPath, State: "Running", PID: 1000, Port: 9208, UptimeSec: 99999}}, nil
+		},
+	)
+	s.recordSerenaActivity("theta", now.Add(-99*time.Hour))
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("a non-serena (LSP) daemon must not be idle-stopped by the serena sweeper; got n=%d", n)
+	}
+	if len(*captured) != 0 {
+		t.Fatalf("non-serena row must not be stopped; captured=%v", *captured)
+	}
+}

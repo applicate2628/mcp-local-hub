@@ -135,6 +135,21 @@ const IntentReasonInstall = "install"
 // register flow (workspace-scoped lazy-proxy registration).
 const IntentReasonRegister = "register"
 
+// IntentReasonIdle is the v0.6 idle-shutdown stop (#6, spec §6). The 60s
+// idle sweeper writes Desired=stopped+IntentReasonIdle for a serena pool
+// daemon that has had no /serena/mcp activity for the operator-configured
+// idle threshold, so the supervisor terminates it; the next /serena/mcp
+// request for that daemon CLEARS this stop (ClearStopIntent) and the
+// supervisor respawns it.
+//
+// Unlike IntentReasonUserStop, an idle stop NEVER expires by TTL — an idle
+// daemon sleeps indefinitely until a /serena/mcp wake clears the reason
+// (IsActiveStop deliberately does NOT apply the StopIntentTTL branch to it).
+// Unlike IntentReasonUserDisabled, it is NOT an operator stop: the router
+// wake clears ONLY IntentReasonIdle, so a user-disabled / user-stopped
+// daemon is never resurrected by an idle wake (the operator stop wins).
+const IntentReasonIdle = "idle"
+
 // ClockSkewFutureSuspectReason is the synthetic Reason returned by
 // IsActiveStop when the entry's UpdatedAt is far enough in the future
 // to suggest clock skew or tampering. Caller-side logging uses this
@@ -301,7 +316,14 @@ func canonicalIntentTaskKey(taskName string) string {
 //     treat as inert (return false). Catches install-time clock
 //     rollbacks that would otherwise persist forever.
 //  4. Reason="user-stop" + now - UpdatedAt > 24h → TTL expired; the
-//     daemon becomes eligible for auto-revive again.
+//     daemon becomes eligible for auto-revive again. The TTL branch is
+//     SCOPED to IntentReasonUserStop ALONE: IntentReasonUserDisabled,
+//     IntentReasonChronicFailure, and IntentReasonIdle (v0.6 #6, spec §6)
+//     all stay active stops past 24h. For idle this is load-bearing — an
+//     idle daemon must sleep INDEFINITELY until a /serena/mcp wake clears
+//     the reason via ClearStopIntent; a TTL-based auto-revive would let the
+//     supervisor respawn it on its own, defeating the idle-shutdown. Do NOT
+//     add IntentReasonIdle to this branch.
 //  5. Otherwise → active stop with the recorded reason.
 //
 // Pure: no I/O, no clock reads beyond the supplied `now`. Safe for
@@ -318,7 +340,9 @@ func (i DaemonIntent) IsActiveStop(now time.Time) (bool, string) {
 	if now.Sub(i.UpdatedAt) > ClockSkewStaleBound {
 		return false, ""
 	}
-	// Step 4: TTL only on user-stop.
+	// Step 4: TTL only on user-stop. IntentReasonIdle (and user-disabled,
+	// chronic-failure) are deliberately NOT covered here — an idle stop
+	// sleeps indefinitely until a /serena/mcp wake clears it (spec §6 #6).
 	if i.Reason == IntentReasonUserStop && now.Sub(i.UpdatedAt) > StopIntentTTL {
 		return false, ""
 	}
@@ -670,7 +694,8 @@ func isKnownIntentReason(r string) bool {
 		IntentReasonChronicFailure,
 		IntentReasonUninstalled,
 		IntentReasonInstall,
-		IntentReasonRegister:
+		IntentReasonRegister,
+		IntentReasonIdle:
 		return true
 	}
 	return false

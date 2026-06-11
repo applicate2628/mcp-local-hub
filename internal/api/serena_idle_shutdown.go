@@ -1,0 +1,317 @@
+// Package api — v0.6 idle-shutdown (#6, spec §6) wake + threshold helpers.
+//
+// serena_idle_shutdown.go owns the API-side surface of feature #6:
+//
+//   - SerenaIdleShutdownThreshold: parse the GUI-settable
+//     daemons.serena_idle_shutdown enum into a time.Duration (0 = disabled).
+//   - SerenaIdleStopCandidate / WriteSerenaIdleStop: the 60s sweeper's
+//     write step — mark a serena pool daemon stopped with IntentReasonIdle on
+//     the UNIFIED supervisor-intent stops sub-block (WriteStopIntent), the
+//     §4/Phase-E corrected stop-propagation path. No second stop path.
+//   - WakeIdleSerenaDaemon: the router's next-request wake — clear ONLY an
+//     IntentReasonIdle stop (ClearStopIntent), nudge the supervisor to
+//     reconcile NOW (so it respawns), and probe readiness; an operator stop
+//     (user-stop / user-disabled / chronic-failure) is REFUSED so the
+//     operator's stop wins and an idle wake never resurrects a disabled
+//     daemon (spec §6: "a user-disabled daemon is never woken by an idle
+//     wake").
+//
+// The sweeper itself (which reads per-daemon LAST-ACTIVITY, not wall-clock
+// since spawn) lives in the GUI process where /serena/mcp activity is
+// observed (internal/gui/serena_idle_sweeper.go); it calls into these
+// helpers. The supervisor (a separate process) sees the stop/clear via its
+// existing supervisor-intent.json IntentWatcher + reconcile, so the
+// stop-propagation path is unchanged from §4/Phase-E.
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"sync"
+	"time"
+)
+
+// SerenaIdleShutdownSettingKey is the GUI-settable enum that drives the idle
+// threshold (SettingsRegistry: daemons.serena_idle_shutdown).
+const SerenaIdleShutdownSettingKey = "daemons.serena_idle_shutdown"
+
+// ErrWakeRefusedOperatorStop is returned by WakeIdleSerenaDaemon when the
+// daemon's active stop is an OPERATOR stop (IntentReasonUserStop /
+// IntentReasonUserDisabled) or a chronic-failure quarantine — NOT an idle
+// stop. The wake refuses to clear it and refuses to spawn: the operator's
+// stop wins (spec §6). The router maps this to its existing not-found/down
+// 503 rather than resurrecting a daemon the operator deliberately suppressed.
+var ErrWakeRefusedOperatorStop = errors.New("serena idle wake refused: daemon has an operator stop, not an idle stop")
+
+// SerenaIdleShutdownThreshold parses the daemons.serena_idle_shutdown enum
+// value into its idle threshold. "off" (or any unrecognized value) returns
+// (0, false) → idle-shutdown disabled. Recognized values mirror
+// SettingsRegistry's enum exactly: 15m / 30m / 1h / 2h.
+//
+// Pure: no I/O. The GUI sweeper reads the setting value (api.SettingsGet)
+// once per tick and passes it here.
+func SerenaIdleShutdownThreshold(settingValue string) (time.Duration, bool) {
+	switch settingValue {
+	case "15m":
+		return 15 * time.Minute, true
+	case "30m":
+		return 30 * time.Minute, true
+	case "1h":
+		return time.Hour, true
+	case "2h":
+		return 2 * time.Hour, true
+	default:
+		// "off" and any out-of-domain value disable idle-shutdown. The
+		// registry already validates persisted values back to the default on
+		// read (SettingsListIn), so an out-of-domain value here only happens if
+		// a caller passes a raw string; failing closed to "disabled" is the
+		// safe posture.
+		return 0, false
+	}
+}
+
+// WriteSerenaIdleStop records Desired=stopped + IntentReasonIdle for taskName
+// on the UNIFIED supervisor-intent.json stops sub-block — the SOLE stop write
+// path after Phase 4-E2. The supervisor's IntentWatcher observes the
+// supervisor-intent.json mtime bump, refreshes its UnifiedStopsFile-derived
+// intent cache, and the reconcile terminates the running daemon. No second stop
+// path is authored (spec §6 / §5.1-E).
+//
+// FIX-2a: it routes through WriteStopIntentIdleGuarded (NOT the unconditional
+// WriteStopIntent) so an idle stop NEVER overwrites an ACTIVE operator stop
+// (user-stop / user-disabled / chronic-failure) written between the sweeper's
+// status snapshot and this write. The arbitration is performed atomically under
+// the supervisor-intent flock, so an operator stop always wins — an idle write
+// from a stale snapshot can never resurrect a deliberately-suppressed daemon on
+// the next request.
+//
+// `now` is the evaluation clock (injected for tests); production passes
+// time.Now().UTC(). IsActiveStop(now) classifies the idle stop as ACTIVE (it
+// never TTL-expires), so the entry is SET when no operator stop blocks it.
+func (a *API) WriteSerenaIdleStop(taskName string, now time.Time) error {
+	return a.WriteStopIntentIdleGuarded(taskName, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonIdle,
+		UpdatedAt: now.UTC(),
+	}, "serena-idle-sweeper", now)
+}
+
+// serenaWakeReconcileFn is the seam over DialSupervisorIPCReconcile used by
+// WakeIdleSerenaDaemon. Default nudges the running supervisor to reconcile NOW
+// so the just-cleared idle daemon respawns immediately (the 60s IntentWatcher
+// poll is the backstop); tests override it. Mirrors autoRegisterReconcileFn.
+var serenaWakeReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	return DialSupervisorIPCReconcile(ctx, apply)
+}
+
+// serenaWakeReadinessFn is the seam over verifyProxyReady used by
+// WakeIdleSerenaDaemon. Default polls the daemon's external port /mcp; tests
+// override it. Mirrors autoRegisterReadinessFn.
+var serenaWakeReadinessFn = func(port int, timeout time.Duration) error {
+	return verifyProxyReady(port, timeout)
+}
+
+// serenaWakeReadStopFn is the seam over the unified-intent stop read used by
+// WakeIdleSerenaDaemon's operator-stop guard. Default reads the on-disk
+// supervisor-intent.json stops sub-block; tests override it to inject a
+// specific prior stop without a real state dir.
+var serenaWakeReadStopFn = readSerenaUnifiedStopForTask
+
+// serenaStopReadCache is the FIX-5 hot-path guard. Every /serena/mcp request
+// classifies the daemon's stop via readSerenaUnifiedStopForTask, which used to
+// read+parse the full supervisor-intent.json (and walk the secure-read DACL
+// posture) UNCONDITIONALLY — even in steady state when no stop exists. This
+// cache memoizes the parsed stops sub-block keyed by the file's (mtime, size):
+// each request does only a cheap os.Stat, and re-reads+parses ONLY when the
+// stat key changed (any writer commits via atomic temp+rename, so any stop
+// write/clear bumps mtime and/or size and busts the cache).
+//
+// Correctness under concurrent writes: this cache backs ONLY the read-only stop
+// CLASSIFICATION (the lock-free read in WakeIdleSerenaDaemon). Every MUTATION
+// (WriteStopIntentIdleGuarded SET, ClearStopIntentIfReason compare-and-clear)
+// re-reads the file FRESH under the supervisor-intent flock and stays
+// authoritative — the cache never participates in a write decision. The only
+// effect of a one-request-stale cache is a benign retry: a just-written stop the
+// cache hasn't picked up yet means one extra forward attempt against a
+// down/up daemon (the next request restats and sees the new mtime). The cache is
+// therefore an optimization with no impact on the FIX-2 arbitration invariants.
+var serenaStopReadCache struct {
+	mu    sync.Mutex
+	path  string
+	mtime time.Time
+	size  int64
+	stops map[string]DaemonIntent // the parsed UnifiedStopsFile().Tasks; nil when the file is absent
+	valid bool
+}
+
+// readSerenaUnifiedStopForTask returns the current stop directive for the
+// canonical taskName from the UNIFIED supervisor-intent.json stops sub-block
+// (the SOLE stop source after Phase 4-E2 — UnifiedStopsFile). A missing intent
+// file or absent entry returns the zero DaemonIntent (Desired==""), which
+// IsActiveStop treats as "not a stop" (default-running). Read-only.
+//
+// FIX-5: it consults serenaStopReadCache. On a cache hit (file (mtime,size)
+// unchanged since the last read) it returns the cached entry WITHOUT a parse; on
+// a miss (or first call, or a changed stat) it re-reads+parses and refreshes the
+// cache under serenaStopReadCache.mu.
+func readSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return DaemonIntent{}, fmt.Errorf("serena idle wake: resolve supervisor-intent path: %w", err)
+	}
+
+	// Cheap stat for the cache key. A missing file is a valid state (no stops
+	// recorded yet) — cache it as an empty map keyed on a zero stat so repeated
+	// no-file requests do not re-stat-miss every time.
+	var statMtime time.Time
+	var statSize int64
+	fileExists := true
+	if fi, statErr := os.Stat(path); statErr != nil {
+		if !os.IsNotExist(statErr) {
+			return DaemonIntent{}, fmt.Errorf("serena idle wake: stat supervisor-intent.json: %w", statErr)
+		}
+		fileExists = false
+	} else {
+		statMtime = fi.ModTime()
+		statSize = fi.Size()
+	}
+
+	serenaStopReadCache.mu.Lock()
+	defer serenaStopReadCache.mu.Unlock()
+
+	if serenaStopReadCache.valid &&
+		serenaStopReadCache.path == path &&
+		serenaStopReadCache.size == statSize &&
+		serenaStopReadCache.mtime.Equal(statMtime) {
+		// Hit: the file is unchanged since the last parse. Return the cached
+		// entry (absent task → zero DaemonIntent → "not a stop").
+		return serenaStopReadCache.stops[taskName], nil
+	}
+
+	// Miss: (re)read + parse and refresh the cache.
+	var stops map[string]DaemonIntent
+	if fileExists {
+		intent, _, rerr := readSupervisorIntentForMerge(path)
+		if rerr != nil {
+			return DaemonIntent{}, fmt.Errorf("serena idle wake: read supervisor-intent.json: %w", rerr)
+		}
+		if intent != nil {
+			stops = UnifiedStopsFile(intent, nil).Tasks
+		}
+	}
+	serenaStopReadCache.path = path
+	serenaStopReadCache.mtime = statMtime
+	serenaStopReadCache.size = statSize
+	serenaStopReadCache.stops = stops
+	serenaStopReadCache.valid = true
+	return stops[taskName], nil
+}
+
+// serenaWakeReadinessTimeout bounds the post-respawn readiness probe in
+// WakeIdleSerenaDaemon. Generous enough for a serena child whose `.serena/`
+// cache is warm (the idle daemon was alive minutes ago, so the cache is on
+// disk) but bounded so a wedged respawn returns to the router (→ 503 + client
+// retry) rather than blocking the call. Mirrors the auto-register budget.
+const serenaWakeReadinessTimeout = 20 * time.Second
+
+// WakeIdleSerenaDaemon is the router's next-request wake for an idle-stopped
+// serena pool daemon (spec §6 #6). Contract (the router caller in
+// internal/gui/serena_router.go relies on it):
+//
+//   - The daemon has NO active stop → fast no-op success (nil). The daemon is
+//     presumed up; the caller forwards as usual. (This is the steady-state hot
+//     path: a request to a live daemon does NOT pay the clear/nudge/probe
+//     cost.)
+//
+//   - The daemon's active stop is IntentReasonIdle → CLEAR it (ClearStopIntent
+//     on the unified sub-block), nudge the supervisor to reconcile NOW
+//     (apply=true), then probe the external port for readiness. Returns nil
+//     once ready; returns a wrapped error (→ router 503, client retries) if
+//     the respawn is not ready within the bounded budget. The clear is
+//     idempotent, so two concurrent wakes converge.
+//
+//   - The daemon's active stop is an OPERATOR stop (user-stop / user-disabled)
+//     or a chronic-failure quarantine → return ErrWakeRefusedOperatorStop
+//     WITHOUT clearing the stop or spawning. The operator's stop wins; an idle
+//     wake never resurrects a deliberately-suppressed daemon.
+//
+// `port` is the daemon's external (client-facing) port (ws.Port). `who` is the
+// audit attribution for the clear. ctx bounds the whole wake (the router
+// passes its detached+bounded request context).
+func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port int, who string) error {
+	now := time.Now().UTC()
+
+	prior, err := serenaWakeReadStopFn(canonicalIntentTaskKey(taskName))
+	if err != nil {
+		return err
+	}
+	active, reason := prior.IsActiveStop(now)
+	if !active {
+		// No active stop → daemon presumed up. Fast no-op (steady-state hot
+		// path). A future-dated clock-skew stop also lands here as active with
+		// the synthetic clock-skew reason, which is NOT idle → refused below.
+		return nil
+	}
+	if reason != IntentReasonIdle {
+		// Operator stop / chronic-failure / clock-skew-suspect: the wake must
+		// NOT clear it or spawn. The operator (or fail-closed) suppression
+		// wins (spec §6).
+		return ErrWakeRefusedOperatorStop
+	}
+
+	// Idle stop → clear it so the supervisor's reconcile re-includes the daemon
+	// in the spawn-desired set, then nudge an immediate reconcile.
+	//
+	// FIX-2b: COMPARE-AND-CLEAR — delete the stop ONLY if the on-disk entry is
+	// STILL an idle stop. The IsActiveStop classification above read the stop
+	// LOCK-FREE; an operator stop (user-stop / user-disabled) written between
+	// that read and this clear must NOT be erased by a blind delete. The
+	// compare-and-clear is performed under the supervisor-intent flock, so it is
+	// atomic against that operator write: if the entry is no longer idle, the
+	// clear is refused (the operator stop survives) and we proceed to nudge +
+	// probe anyway — but the supervisor's reconcile will keep the daemon stopped
+	// because the operator stop is still on the unified intent, so the readiness
+	// probe below times out → router 503 → the operator stop wins. (Refusing the
+	// clear is success; ClearStopIntentIfReason returns nil on a reason
+	// mismatch.) The clear is idempotent so two concurrent idle wakes converge.
+	if err := a.ClearStopIntentIfReason(taskName, IntentReasonIdle, who); err != nil {
+		return fmt.Errorf("serena idle wake: clear idle stop for %s: %w", taskName, err)
+	}
+
+	// Nudge the supervisor to reconcile NOW. Best-effort: any reconcile error is
+	// non-fatal — the supervisor's 60s IntentWatcher poll is the backstop and the
+	// readiness probe below is the real success gate. (Mirrors the auto-register
+	// live-add nudge.) FIX-6d: the previous two-branch form gated on the error
+	// type and then discarded it in BOTH branches (dead condition). We instead
+	// leave a single best-effort diagnostic breadcrumb for the UNEXPECTED case —
+	// a reconcile error while the supervisor is reachable (NOT
+	// ErrSupervisorIPCUnavailable, which is the expected rollout-transition
+	// state) — so a recurring nudge failure is diagnosable instead of silently
+	// swallowed, without failing the wake.
+	if _, recErr := serenaWakeReconcileFn(ctx, true); recErr != nil &&
+		!errors.Is(recErr, ErrSupervisorIPCUnavailable) {
+		_ = LogHubMcpEvent("warn", "serena-idle-wake-reconcile-nudge-failed", map[string]any{
+			"task_name": taskName,
+			"err":       recErr.Error(),
+		})
+	}
+
+	// Probe the external port for readiness, bounded by BOTH the fixed budget
+	// AND the caller's remaining deadline so a slow respawn cannot block past
+	// the router's advertised window.
+	timeout := serenaWakeReadinessTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl); rem < timeout {
+			timeout = rem
+		}
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("serena idle wake: %s cleared and reconcile nudged, but the wake deadline expired before the daemon on port %d became ready (retry — the supervisor is bringing it up)", taskName, port)
+	}
+	if rdErr := serenaWakeReadinessFn(port, timeout); rdErr != nil {
+		return fmt.Errorf("serena idle wake: %s cleared and reconcile nudged, but the daemon on port %d was not ready in time: %w (retry — the supervisor is bringing it up)", taskName, port, rdErr)
+	}
+	return nil
+}

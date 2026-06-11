@@ -61,6 +61,19 @@ type serenaRouterDeps struct {
 	// A nil AutoRegisterFn preserves the pre-Phase-5 immediate-503
 	// behavior (back-compat for partially-wired routing).
 	AutoRegisterFn func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error)
+
+	// WakeIdleFn is the v0.6 idle-shutdown (#6, spec §6) next-request wake. On
+	// a /serena/mcp tool-call for a resolved workspace, the handler calls it
+	// BEFORE forwarding so an idle-stopped daemon is woken first. Production
+	// wires it to api.(*API).WakeIdleSerenaDaemon (SetSerenaRouterProduction).
+	// Contract: returns nil when the daemon is up OR was successfully woken
+	// (idle stop cleared + respawn ready); returns api.ErrWakeRefusedOperatorStop
+	// when the daemon has an OPERATOR stop (the wake must NOT resurrect it — the
+	// forward then proceeds and fails loud, honoring the operator stop); returns
+	// any other error when the wake/respawn did not become ready in time (router
+	// → 503, client retries). A nil WakeIdleFn disables idle-wake (back-compat
+	// for partially-wired routing); the forward proceeds unchanged.
+	WakeIdleFn func(ctx context.Context, taskName string, port int, who string) error
 }
 
 // serenaRouterTestSeam lets tests inject a fully-mocked deps bundle.
@@ -212,6 +225,11 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 		// fresh instance shares the same on-disk truth.
 		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
 			return api.NewAPI().AutoRegisterSerenaWorkspace(ctx, absPath)
+		},
+		// v0.6 idle-shutdown (#6): the next-request wake for an idle-stopped
+		// serena daemon. api.NewAPI() per call mirrors AutoRegisterFn above.
+		WakeIdleFn: func(ctx context.Context, taskName string, port int, who string) error {
+			return api.NewAPI().WakeIdleSerenaDaemon(ctx, taskName, port, who)
 		},
 	})
 }
@@ -714,6 +732,51 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v0.6 idle-shutdown (#6, spec §6) — record this tool-call as activity for
+	// the resolved workspace BEFORE the wake/forward. Stamping last-activity
+	// first guarantees a daemon currently servicing this call has a fresh
+	// timestamp, so the 60s sweeper can never idle a daemon mid-call (the
+	// falsification test). A freshly auto-registered workspace (above) records
+	// here too, so its first call already counts as activity.
+	s.recordSerenaActivity(ws.WorkspaceKey, time.Now())
+
+	// v0.6 idle-shutdown wake — if this daemon was idle-stopped, clear the idle
+	// stop and trigger a respawn before forwarding. WakeIdleFn is a fast no-op
+	// when the daemon is already up (the steady-state hot path). On an OPERATOR
+	// stop (user-stop/user-disabled) the wake REFUSES
+	// (api.ErrWakeRefusedOperatorStop) and we proceed to the forward, which
+	// fails loud against the stopped daemon — honoring the operator stop (an
+	// idle wake must never resurrect a user-disabled daemon, spec §6). Any other
+	// wake error (respawn not ready in time) → 503 so the client retries while
+	// the supervisor brings the daemon up (the SAME retry the router already
+	// uses for not-yet-ready daemons). A nil WakeIdleFn (partially-wired
+	// routing) skips the wake entirely.
+	if deps.WakeIdleFn != nil && ws.TaskName != "" {
+		// Detach from r.Context() cancellation (a client disconnect must not
+		// abort the supervisor nudge mid-flight, mirroring the auto-register
+		// posture) but BOUND the whole wake so a wedged respawn cannot hang the
+		// handler. 30s covers clear + reconcile-nudge + the ~20s readiness probe.
+		wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+		wakeErr := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-router-wake")
+		wakeCancel()
+		if wakeErr != nil {
+			if !errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
+				_ = auditFn("warn", "serena-idle-wake-not-ready", map[string]any{
+					"workspace_key": ws.WorkspaceKey,
+					"task_name":     ws.TaskName,
+					"port":          ws.Port,
+					"err":           wakeErr.Error(),
+				})
+				writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+					"serena daemon waking from idle; retry: "+wakeErr.Error(), nil)
+				return
+			}
+			// ErrWakeRefusedOperatorStop: the daemon is deliberately stopped by
+			// the operator. Do NOT wake/spawn it; fall through to the forward,
+			// which fails loud against the down daemon (operator stop wins).
+		}
+	}
+
 	// Bind the client session to a REAL upstream daemon session (P1).
 	// The router synthesized `initialize` for the client and minted the
 	// client-facing Mcp-Session-Id; the workspace daemon has never seen
@@ -938,6 +1001,29 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			delCancel()
 		}()
 	}
+
+	// FIX-3 mid-call protection: mark this forward in-flight for ws around the
+	// WHOLE forward — the upstream POST AND the SSE stream / body copy below.
+	// The idle sweeper skips any daemon with an open forward, so a single call
+	// that streams past the idle threshold (min 15m) is never idle-killed
+	// mid-call. The deferred exit fires on EVERY return path (build error,
+	// transport error, SSE completion, plain-body completion) including a panic.
+	// On completion it ALSO re-stamps last-activity so the just-finished call
+	// resets the daemon's idle clock (recordSerenaActivity was stamped ONCE at
+	// request start; a long call would otherwise leave a stale timestamp, and the
+	// next sweep right after a long call could idle a daemon that was busy until
+	// seconds ago).
+	s.enterSerenaForward(ws.WorkspaceKey)
+	defer func() {
+		// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
+		// protection. The sweeper reads counter-then-activity unsynchronized;
+		// exit-first would open a window where counter==0 while last-activity
+		// is still the stale request-START stamp — a sweep tick landing there
+		// idle-stops a daemon that finished a >threshold call nanoseconds ago
+		// (focused re-review P3, both lenses).
+		s.recordSerenaActivity(ws.WorkspaceKey, time.Now())
+		s.exitSerenaForward(ws.WorkspaceKey)
+	}()
 
 	upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if ureqErr != nil {

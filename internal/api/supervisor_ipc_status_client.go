@@ -239,10 +239,45 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			StalePID:      d.StalePID,
 			JobProtection: d.JobProtection,
 			Workspace:     d.Workspace,
+			// UptimeSec is derived HERE from the supervisor's started_at
+			// (the wire carries started_at, not a precomputed uptime_sec).
+			// The v0.6 idle sweeper (internal/gui/serena_idle_sweeper.go)
+			// uses this as the never-called fallback baseline; without it a
+			// never-called serena daemon would carry UptimeSec==0 and never
+			// be idle-stopped (FIX-1 — the production IPC path used to drop
+			// started_at on the floor, leaving UptimeSec zero in production
+			// while tests injected it). Uses time.Now() as the evaluation
+			// clock — the same wall clock the sweeper's last-activity uses.
+			UptimeSec:     supervisorIPCUptimeSec(d.StartedAt, time.Now()),
 			IsMaintenance: d.IsMaintenance,
 		})
 	}
 	return rows, nil
+}
+
+// supervisorIPCUptimeSec converts the supervisor's RFC3339(Nano) started_at
+// wire field into an uptime-in-seconds relative to `now`. It returns 0 (treated
+// downstream as "unknown / just-spawned") for an empty/unparseable started_at or
+// a future-dated start (clock skew) so a degenerate value never inflates uptime
+// and tricks the idle sweeper into killing a fresh daemon. The supervisor emits
+// started_at via daemonRuntimeStartedAt (internal/cli/supervise_status.go) in
+// time.RFC3339Nano; RFC3339Nano parses both the nano and the second-granularity
+// form, so either producer formatting round-trips.
+func supervisorIPCUptimeSec(startedAt string, now time.Time) int64 {
+	if startedAt == "" {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
+		return 0
+	}
+	d := now.Sub(t)
+	if d <= 0 {
+		// Future-dated start (clock skew) or exactly-now: not yet idle by any
+		// positive measure. Treat as just-spawned (0) rather than negative.
+		return 0
+	}
+	return int64(d / time.Second)
 }
 
 func normalizeSupervisorIPCStatusState(state string) string {

@@ -544,6 +544,41 @@ type Server struct {
 	serenaBackendPIDMu   sync.Mutex
 	serenaBackendLastPID map[string]int
 
+	// v0.6 idle-shutdown (#6, spec §6) per-daemon LAST-ACTIVITY tracking.
+	// serenaActivityMu guards serenaLastActivity: WorkspaceKey -> the wall
+	// time of the daemon's most recent /serena/mcp tool-call forward
+	// (recordSerenaActivity, called from the router handler). The 60s idle
+	// sweeper (serena_idle_sweeper.go) reads it to decide which RUNNING serena
+	// pool daemons have been idle longer than the operator-configured
+	// threshold. CRITICAL: this is LAST-ACTIVITY, not wall-clock-since-spawn —
+	// a daemon mid-call or recently-active has a fresh timestamp and is never
+	// idled (the falsification test). The map is the only owner; entries are
+	// pruned when a daemon is idle-stopped so it does not accumulate stale keys.
+	serenaActivityMu   sync.Mutex
+	serenaLastActivity map[string]time.Time
+
+	// guiProcessStart is the wall time this GUI process started (set once in
+	// NewServer). The idle sweeper's never-called fallback caps a daemon's
+	// idle-duration at time-since-GUI-start so a GUI RESTART cannot
+	// immediately idle-kill a daemon that was active just before the restart:
+	// the restart wipes serenaLastActivity (in-memory), and a daemon whose
+	// supervisor uptime already exceeds the threshold (e.g. 3h) would
+	// otherwise be killed on the very first post-restart sweep even though it
+	// serviced a call seconds before. Capping at time-since-GUI-start gives
+	// every daemon a full fresh threshold window after a GUI restart (FIX-1,
+	// fable's coupled-hazard insight). Read-only after construction.
+	guiProcessStart time.Time
+
+	// serenaInFlightMu guards serenaInFlight: WorkspaceKey -> count of
+	// /serena/mcp forwards currently in flight to that workspace's daemon
+	// (incremented around the WHOLE forward, including the SSE stream copy;
+	// decremented on completion). The idle sweeper SKIPS any daemon with an
+	// open forward so a single long-lived streaming call past the threshold is
+	// never idle-killed MID-CALL (FIX-3). A zero/absent count means no forward
+	// is open. The map prunes entries back to absent when the count hits 0.
+	serenaInFlightMu sync.Mutex
+	serenaInFlight   map[string]int
+
 	// LSP router dependencies for /lsp/<language>/mcp. This route is
 	// intentionally separate from the Serena router because LSP workspace
 	// proxies are sessionless upstreams and need no daemon-session handshake.
@@ -556,7 +591,7 @@ func NewServer(cfg Config) *Server {
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now()}
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the
 	// TTL+singleflight HealthSnapshot cache here so concurrent requests
 	// reuse the same cache; the healthBackend adapter below references

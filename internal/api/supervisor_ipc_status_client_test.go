@@ -179,6 +179,62 @@ func TestDecodeSupervisorIPCStatusResult_PreservesStalePID(t *testing.T) {
 	}
 }
 
+// FIX-1 (wire-shape regression guard): the supervisor IPC payload carries
+// `started_at` (RFC3339Nano), NOT a precomputed `uptime_sec`. The decoder must
+// DERIVE UptimeSec from started_at; the never-called idle-sweeper fallback
+// depends on a non-zero UptimeSec for a daemon that has never recorded a
+// /serena/mcp tool-call. This fixture deliberately omits uptime_sec entirely so
+// a future refactor that drops the started_at derivation (the original bug —
+// started_at was decoded but discarded, UptimeSec stayed 0 in production while
+// tests injected it) fails here loud.
+func TestDecodeSupervisorIPCStatusResult_DerivesUptimeFromStartedAt(t *testing.T) {
+	startedAt := time.Now().Add(-90 * time.Minute).UTC().Format(time.RFC3339Nano)
+	// NOTE: NO "uptime_sec" key — only started_at, exactly the supervisor wire shape.
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-serena-alpha","server":"serena","daemon":"default","workspace":"D:\\proj\\alpha","state":"Running","current_pid":7000,"started_at":"` + startedAt + `"}]}`)
+
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	// ~90 minutes uptime derived from started_at. Allow a generous band for
+	// the time.Now() taken inside the decoder vs the one taken here.
+	if rows[0].UptimeSec < 89*60 || rows[0].UptimeSec > 91*60 {
+		t.Fatalf("UptimeSec = %d, want ~5400 (90m) derived from started_at; the IPC path must populate uptime so the idle sweeper's never-called fallback works in production", rows[0].UptimeSec)
+	}
+}
+
+// FIX-1: a degenerate/missing/future-dated started_at must NOT inflate uptime
+// (which would trick the idle sweeper into killing a fresh daemon). Each maps
+// to UptimeSec 0 (downstream "unknown / just-spawned").
+func TestSupervisorIPCUptimeSec_DegenerateInputs(t *testing.T) {
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		started string
+	}{
+		{"empty", ""},
+		{"unparseable", "not-a-timestamp"},
+		{"future-dated", now.Add(2 * time.Hour).Format(time.RFC3339Nano)},
+		{"exactly-now", now.Format(time.RFC3339Nano)},
+	}
+	for _, c := range cases {
+		if got := supervisorIPCUptimeSec(c.started, now); got != 0 {
+			t.Errorf("supervisorIPCUptimeSec(%q) = %d, want 0 (degenerate must not inflate uptime)", c.name, got)
+		}
+	}
+	// A valid past start yields a positive second count.
+	if got := supervisorIPCUptimeSec(now.Add(-10*time.Minute).Format(time.RFC3339Nano), now); got != 600 {
+		t.Fatalf("supervisorIPCUptimeSec(10m ago) = %d, want 600", got)
+	}
+	// RFC3339 second-granularity form (no nanos) also parses.
+	if got := supervisorIPCUptimeSec(now.Add(-5*time.Minute).Format(time.RFC3339), now); got != 300 {
+		t.Fatalf("supervisorIPCUptimeSec(RFC3339 5m ago) = %d, want 300", got)
+	}
+}
+
 func withDaemonStateRootOverride(t *testing.T, stateDir string) {
 	t.Helper()
 	prev := daemonStateRootOverride

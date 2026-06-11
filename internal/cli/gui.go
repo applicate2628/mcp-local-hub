@@ -306,6 +306,25 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// flight to surface the dead forward. The always-on forward-failure floor
 	// is the primary signal; this is the safety net behind it.
 	gui.SetSerenaBackendStatusFn(api.DialSupervisorIPCStatus)
+	// v0.6 idle-shutdown (#6, spec §6): wire the idle sweeper's two seams.
+	// The threshold reader resolves the GUI-settable daemons.serena_idle_shutdown
+	// each tick (so an operator change takes effect within ~60s, no restart); the
+	// stop writer records Desired=stopped+IntentReasonIdle on the unified
+	// supervisor-intent stops sub-block via the §4/Phase-E corrected stop path.
+	gui.SetSerenaIdleShutdownFns(
+		func() (time.Duration, bool) {
+			v, err := api.NewAPI().SettingsGet(api.SerenaIdleShutdownSettingKey)
+			if err != nil {
+				// Read failure → disable idle-shutdown for this tick (fail-safe:
+				// never idle a daemon on a settings read error).
+				return 0, false
+			}
+			return api.SerenaIdleShutdownThreshold(v)
+		},
+		func(taskName string, now time.Time) error {
+			return api.NewAPI().WriteSerenaIdleStop(taskName, now)
+		},
+	)
 	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
 
 	// Phase C.2 wiring (v0.5.x plan §C.2): construct the serena routing
@@ -380,6 +399,16 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		// bounds the post-death zombie window for the case where NO client
 		// request fires to trip the always-on forward-failure floor.
 		go runSerenaBackendLossReconcileTicker(ctx, s, 30*time.Second)
+		// v0.6 idle-shutdown (#6, spec §6): the 60s in-GUI idle sweeper. Each
+		// tick it stops every RUNNING serena pool daemon idle longer than the
+		// operator-configured threshold (daemons.serena_idle_shutdown) by
+		// writing IntentReasonIdle on the unified intent; the next /serena/mcp
+		// request wakes it (WakeIdleFn). It reads per-daemon LAST-ACTIVITY (not
+		// wall-clock since spawn), so a daemon mid-call or recently-active is
+		// never idled. A separate goroutine from the §3 fallback because their
+		// cadences differ (60s vs 30s) and their concerns are orthogonal
+		// (idle-stop vs backend-loss teardown); both exit on ctx cancel.
+		go runSerenaIdleShutdownTicker(ctx, s, 60*time.Second)
 	} else {
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
@@ -785,6 +814,36 @@ func runLSPSessionCleanupTicker(ctx context.Context, sessions *lsp_routing.Sessi
 			return
 		case now := <-ticker.C:
 			_ = sessions.CleanupWithTTL(now, ttl)
+		}
+	}
+}
+
+// runSerenaIdleShutdownTicker is the v0.6 idle-shutdown (#6, spec §6) driver.
+// Every `interval` (60s in production) it calls s.SweepIdleSerenaDaemons, which
+// stops every RUNNING serena pool daemon idle longer than the operator-
+// configured threshold (daemons.serena_idle_shutdown) by writing
+// IntentReasonIdle on the unified supervisor-intent stops sub-block. The sweep
+// reads per-daemon LAST-ACTIVITY (recorded by the router on each /serena/mcp
+// forward), NOT wall-clock since spawn, so a daemon mid-call or recently-active
+// is never idled. It is a cheap no-op when idle-shutdown is "off", the router
+// is unwired, or no serena daemon is registered. Owned by the GUI server
+// lifecycle; exits when ctx is cancelled. The sweep's IPC status read is
+// bounded by a short per-tick context so a slow/unreachable supervisor cannot
+// wedge the ticker. s may be nil in tests; the tick is skipped then.
+func runSerenaIdleShutdownTicker(ctx context.Context, s *gui.Server, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			if s == nil {
+				continue
+			}
+			tickCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_ = s.SweepIdleSerenaDaemons(tickCtx, now)
+			cancel()
 		}
 	}
 }

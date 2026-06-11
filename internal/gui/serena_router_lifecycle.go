@@ -828,6 +828,19 @@ func (s *Server) handleToolsList(
 		}
 	}
 
+	// FIX-4: the cache missed and we are about to fetch the tool catalog from a
+	// candidate daemon. If the WHOLE serena pool is idle-stopped (every external
+	// port unbound) the fetch loop below would fail every candidate with a
+	// transport error and return a permanent "no daemon answered" error — with
+	// NO wake, the pool would stay asleep forever (tools/list is the FIRST call
+	// after initialize, before any path-bearing tool-call that would otherwise
+	// trip the wake at the tool-call site). Wake ONE serena candidate first so a
+	// fully-idle pool comes back up. The shared static tool catalog is identical
+	// across daemons, so one live daemon is enough for fetchToolsListFromAnyDaemon
+	// to answer. A nil WakeIdleFn (partially-wired routing) skips the wake
+	// (back-compat). The wake is bounded + detached, mirroring the tool-call wake.
+	s.wakeOneSerenaCandidateForToolsList(r, deps, entries, auditFn)
+
 	// Proxy one tools/list to the first live daemon. On a per-daemon
 	// failure, try the next so a single dead daemon does not blank the
 	// whole tool surface. The handshake + the upstream tools/list POST use
@@ -864,6 +877,63 @@ func (s *Server) handleToolsList(
 		s.serenaToolsListCache.put(negotiatedVersion, result, now)
 	}
 	writeJSONRPCResult(w, tb.ID, json.RawMessage(result), nil)
+}
+
+// wakeOneSerenaCandidateForToolsList wakes the FIRST eligible serena candidate
+// before a tools/list fetch (FIX-4). It is the tools/list-path counterpart to
+// the tool-call wake (serena_router.go) that the lifecycle path otherwise lacks:
+// without it, a tools/list against an all-idle pool can never wake a daemon and
+// fails permanently. It is best-effort and intentionally narrow:
+//
+//   - nil WakeIdleFn → no-op (partially-wired routing, back-compat).
+//   - picks the first SERENA candidate with a non-empty TaskName + Port (the
+//     wake needs both). LSP rows are skipped — the serena tools/list pool is
+//     serena-only. One live daemon is enough (shared static catalog).
+//   - bounded (30s, covering clear + reconcile-nudge + readiness) and detached
+//     from r.Context() (a client disconnect must not abort the supervisor
+//     nudge mid-flight), mirroring the tool-call wake posture.
+//   - an operator-stop refusal (ErrWakeRefusedOperatorStop) or any other wake
+//     error is NON-FATAL here: the fetch loop below still runs and either finds
+//     another live daemon or returns the honest retryable "no daemon answered"
+//     error. Waking is an OPTIMIZATION that turns a permanent failure into a
+//     retryable one; it never gates the tools/list response on its own.
+func (s *Server) wakeOneSerenaCandidateForToolsList(
+	r *http.Request,
+	deps *serenaRouterDeps,
+	entries []*api.WorkspaceEntry,
+	auditFn func(level, event string, fields map[string]any) error,
+) {
+	if s == nil || deps == nil || deps.WakeIdleFn == nil {
+		return
+	}
+	var target *api.WorkspaceEntry
+	for _, ws := range entries {
+		if ws == nil || ws.TaskName == "" || ws.Port == 0 {
+			continue
+		}
+		if !isSerenaWorkspaceEntry(ws) {
+			continue
+		}
+		target = ws
+		break
+	}
+	if target == nil {
+		return
+	}
+	wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+	defer wakeCancel()
+	if err := deps.WakeIdleFn(wakeCtx, target.TaskName, target.Port, "serena-tools-list-wake"); err != nil {
+		// Non-fatal: an operator-stop refusal or a not-ready respawn just means
+		// the fetch loop below will try (and possibly fail loud on) the pool. We
+		// audit it so the wake attempt is diagnosable, but never block tools/list
+		// on it.
+		_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
+			"workspace_key": target.WorkspaceKey,
+			"task_name":     target.TaskName,
+			"port":          target.Port,
+			"err":           err.Error(),
+		})
+	}
 }
 
 // isClientToolsListError classifies an upstream tools/list JSON-RPC error

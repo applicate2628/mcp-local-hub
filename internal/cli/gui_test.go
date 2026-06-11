@@ -122,3 +122,23 @@ func TestRunSessionCleanupTicker_ExpiresOldSessions(t *testing.T) {
 		}
 	}
 }
+
+// runSerenaIdleShutdownTicker (v0.6 #6) exits promptly on ctx cancel. A nil
+// Server is the safe no-op path (the tick is skipped) — this asserts the
+// goroutine lifecycle, not the sweep itself (covered by the gui-package tests).
+func TestRunSerenaIdleShutdownTicker_ExitsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		runSerenaIdleShutdownTicker(ctx, nil, 10*time.Millisecond)
+		close(done)
+	}()
+	// Let a couple of ticks fire against the nil server (no-op), then cancel.
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("runSerenaIdleShutdownTicker did not exit after ctx cancel")
+	}
+}

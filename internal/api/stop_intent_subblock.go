@@ -106,6 +106,116 @@ func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) 
 	return nil
 }
 
+// WriteStopIntentIdleGuarded is the reason-guarded idle-stop writer (FIX-2a).
+// It behaves like WriteStopIntent for an idle SET EXCEPT it REFUSES to overwrite
+// an existing ACTIVE NON-IDLE stop: an operator stop (user-stop / user-disabled)
+// or a chronic-failure quarantine written between the sweeper's status snapshot
+// and this write must WIN — the idle sweeper must never resurrect-by-overwrite
+// an operator-suppressed daemon. The arbitration is performed INSIDE the held
+// flock (in the mutate closure), so it is atomic against every other
+// supervisor-intent writer — there is no snapshot/write TOCTOU.
+//
+// Contract:
+//   - prior entry absent OR an idle stop OR an INACTIVE stop (expired/running
+//     tombstone) → SET the idle stop (the normal idle-stop path).
+//   - prior entry is an ACTIVE non-idle stop → NO-OP (the operator stop stays;
+//     returns nil — refusing is success, not an error, so the sweeper does not
+//     log a spurious failure). The idle directive is simply dropped.
+//
+// `intent` must carry Reason==IntentReasonIdle (the only reason this writer is
+// for); a caller passing another reason still gets the guard but the guard is
+// only meaningful for idle. `now` is the evaluation clock for IsActiveStop
+// (production passes time.Now().UTC()).
+func (a *API) WriteStopIntentIdleGuarded(taskName string, intent DaemonIntent, who string, now time.Time) error {
+	if len(who) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+	taskName = canonicalIntentTaskKey(taskName)
+	if len(taskName) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+
+	intent.UpdatedAt = intent.UpdatedAt.UTC()
+	if intent.UpdatedAt.IsZero() {
+		intent.UpdatedAt = time.Now().UTC()
+	}
+
+	before, after, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+		// FIX-2a: arbitration under the flock. If an ACTIVE non-idle stop is
+		// already present, REFUSE the idle SET (operator reasons win). Read the
+		// prior entry from the (copied) sub-block the mutate operates on.
+		if prior, ok := stops[taskName]; ok {
+			active, reason := prior.IsActiveStop(now.UTC())
+			if active && reason != IntentReasonIdle {
+				// An operator stop / chronic-failure / clock-skew-suspect is
+				// active: leave it untouched. Do NOT downgrade it to idle.
+				return
+			}
+		}
+		// No active non-idle stop blocking us: SET when the directive is itself
+		// an active stop, else DROP (matches WriteStopIntent's re-enable path).
+		active, _ := intent.IsActiveStop(now.UTC())
+		if active {
+			stops[taskName] = intent
+		} else {
+			delete(stops, taskName)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+	return nil
+}
+
+// ClearStopIntentIfReason is the compare-and-clear stop clearer (FIX-2b). It
+// removes the stop directive for taskName ONLY when the CURRENT on-disk entry
+// is still a stop whose Reason == wantReason — read and compared INSIDE the held
+// flock so there is no read/clear TOCTOU. This closes the wake-resurrection
+// hole: WakeIdleSerenaDaemon reads the stop lock-free to classify it as idle,
+// then clears; an operator stop written between that read and the clear would be
+// erased by a blind ClearStopIntent. With the compare-and-clear, the clear is
+// refused if the entry is no longer idle (the operator stop survives, and the
+// wake's caller treats the daemon as still-down).
+//
+// Idempotent: a missing entry, OR an entry whose Reason != wantReason, is a
+// no-op success (returns nil, clears nothing). Emits clear-intent only when an
+// entry was actually removed.
+func (a *API) ClearStopIntentIfReason(taskName string, wantReason string, who string) error {
+	if len(who) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+	taskName = canonicalIntentTaskKey(taskName)
+	if len(taskName) > IdentityFieldByteCap {
+		return ErrEntryOversize
+	}
+
+	before, _, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
+		// FIX-2b: only delete when the CURRENT entry still matches wantReason.
+		// An entry that was replaced by an operator stop (different reason)
+		// between the caller's lock-free read and now is LEFT in place.
+		if prior, ok := stops[taskName]; ok && prior.Reason == wantReason {
+			delete(stops, taskName)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	// Emit clear-intent only when we actually removed the matching entry. before
+	// is the prior snapshot; the entry was removed iff before existed AND its
+	// reason matched wantReason (the only case the mutate deletes).
+	if before != nil && before.Reason == wantReason && appendIntentAuditFn != nil {
+		_ = appendIntentAuditFn(NewIntentAuditEntry(
+			WithAction("clear-intent"),
+			WithTask(taskName),
+			WithWho(who),
+			WithReason(before.Reason),
+			WithBefore(before),
+		))
+	}
+	return nil
+}
+
 // ClearStopIntent removes the stop directive for taskName from the
 // supervisor-intent.json `stops` sub-block. Idempotent — a missing entry is a
 // no-op success. Same flock + canonical-key + audit contract as
