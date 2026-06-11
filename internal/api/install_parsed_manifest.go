@@ -269,7 +269,11 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// so the pre-flight dry-write exercises the same payload and the same
 	// secure-write pipeline the real write will use. priorIntent + priorExisted
 	// drive the rollback restore.
-	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, opts.Workspaces, w)
+	// InstallParsedManifest is the workspace-scoped / serena path and always
+	// installs the full set (no per-daemon filter), so pass "" — and serena's
+	// manifest has weekly_refresh=false, so mergeServerWeeklyRefreshTimer's
+	// materialization condition never fires here (prior timers carry verbatim).
+	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, opts.Workspaces, "", w)
 	if err != nil {
 		return "", err
 	}
@@ -448,6 +452,171 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	return intentPath, nil
 }
 
+// installPlanCore is the shared install body for the three global-manifest
+// entrypoints — (*API).Install, installUsingEmbedFirst, installFromManifestDir
+// — so the v0.6 Phase F "global daemons → supervisor-intent (not scheduler)"
+// decision lives in ONE owner rather than being duplicated across all three.
+//
+// Decision:
+//   - DRY RUN → print the plan and return (no mutation, no intent).
+//   - GLOBAL manifest with ≥1 daemon (m.Kind != workspace-scoped &&
+//     len(plan.SupervisorIntent) > 0) → SUPERVISOR-INTENT path: write the
+//     daemon descriptor rows into supervisor-intent.json (under the per-file
+//     flock, folded into executeInstallTo's rollback stack via the
+//     intermediate hook) and DEFER every daemon spawn to the supervisor
+//     reconcile loop. NO per-daemon `\mcp-local-hub-<server>-<daemon>` Task
+//     Scheduler task is created.
+//   - GLOBAL manifest with ZERO daemons (e.g. transport=remote-http) → the
+//     legacy client-config-only path (no tasks to create, no intent rows to
+//     write); StartTasks stays false because there is nothing to start.
+//
+// After a non-dry-run success it records the Desired=running re-enable intent
+// for each planned task exactly as the legacy path did
+// (recordInstallIntentPostSuccess).
+func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, daemonFilter string, dryRun bool, w io.Writer) error {
+	if dryRun {
+		return a.installPlan(ctx, m, plan, installPlanOpts{
+			Writer:       w,
+			DaemonFilter: daemonFilter,
+			DryRun:       true,
+		})
+	}
+
+	// Phase F: a global manifest's daemons spawn from supervisor-intent.json,
+	// not from per-daemon scheduler tasks. supervisorDaemonsFromPlan(m) (via
+	// serenaOrPlanDaemons inside buildMergedSupervisorIntent) materializes the
+	// rows from the plan. A global manifest with zero daemons (remote-http)
+	// contributes no rows and falls through to the client-config-only path.
+	superviseGlobal := m.Kind != config.KindWorkspaceScoped && len(plan.SupervisorIntent) > 0
+
+	if superviseGlobal {
+		// The supervisor-intent flock is held ONLY across the read-merge-write
+		// critical section below. It MUST be released before the fall-through to
+		// recordInstallIntentPostSuccess at the end of this function:
+		// recordInstallIntentPostSuccess → WriteStopIntent → mutateStopSubBlock
+		// re-acquires the SAME supervisor-intent.json.lock leaf with a BLOCKING
+		// Lock(), which is non-reentrant on Windows LockFileEx and would
+		// self-deadlock if this function still held it. Wrapping the locked work
+		// in an inline closure makes the deferred Unlock fire at the closure's
+		// return — i.e. while still inside installPlanCore but BEFORE the
+		// post-success stop-subblock write — rather than at installPlanCore's own
+		// return.
+		runLocked := func() error {
+			stateDir, err := DaemonStateDir()
+			if err != nil {
+				return fmt.Errorf("resolve state dir: %w", err)
+			}
+			intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+
+			// Hold the canonical per-file flock across the read-merge AND the
+			// commit inside executeInstallTo's intermediate hook, exactly as
+			// InstallParsedManifest does (FIX 1 there) — otherwise two concurrent
+			// installs for different servers each read a stale snapshot and the
+			// later writer clobbers the earlier writer's sibling-server rows.
+			// Because we hold the lock, the inner write uses the LOCK-FREE
+			// writeSupervisorIntentLockHeld body (re-entering WriteSupervisorIntent
+			// would deadlock).
+			lock := flock.New(intentPath + supervisorIntentLockSuffix)
+			if err := lock.Lock(); err != nil {
+				return fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+			}
+			defer func() { _ = lock.Unlock() }()
+
+			// Build the merged intent under the held lock. For a global manifest
+			// serenaOrPlanDaemons takes the supervisorDaemonsFromPlan branch (no
+			// workspaces, no runtime_spec), so this carries NO spec-bearing rows —
+			// the §7.1 supervisor-running gate does not apply. daemonFilter is
+			// threaded so a global manifest's weekly_refresh materializes a
+			// server-weekly-refresh MaintenanceTimer on a FULL install (the Phase F
+			// successor to the deleted per-server scheduler task at install.go:1230).
+			desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, nil, daemonFilter, w)
+			if err != nil {
+				return err
+			}
+			// Defense-in-depth: a global manifest must never materialize a
+			// runtime_spec row. If one ever appeared it would need the §7.1
+			// supervisor-running gate (which lives in InstallParsedManifest), so
+			// refuse rather than write a spec-bearing intent through this gate-less
+			// path.
+			if desiredIntent.HasRuntimeSpecRow() {
+				return fmt.Errorf("installPlanCore: global manifest %q unexpectedly produced a runtime_spec-bearing supervisor-intent row; global installs must not carry runtime_spec (that path is InstallParsedManifest's)", m.Name)
+			}
+
+			// Pre-flight the secure-write so a doomed install fails fast with a
+			// pristine end-state (mirrors InstallParsedManifest step 2).
+			if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
+				return fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+			}
+
+			intermediate := func() (func(), error) {
+				if cerr := ctx.Err(); cerr != nil {
+					return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
+				}
+				if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
+					return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
+				}
+				undo := func() {
+					if priorExisted {
+						if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
+							fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
+						} else {
+							fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
+						}
+						return
+					}
+					if rerr := os.Remove(intentPath); rerr != nil && !os.IsNotExist(rerr) {
+						fmt.Fprintf(w, "  rollback: remove supervisor-intent failed: %v\n", rerr)
+					} else {
+						fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
+					}
+				}
+				return undo, nil
+			}
+
+			if err := a.installPlan(ctx, m, plan, installPlanOpts{
+				Writer:       w,
+				DaemonFilter: daemonFilter,
+				DryRun:       false,
+				// Defer every daemon spawn to the supervisor reconcile loop; create
+				// no per-daemon scheduler task; the daemon set is owned by
+				// supervisor-intent.json so the obsolete-task prune is skipped.
+				StartTasks:         false,
+				Intermediate:       intermediate,
+				SkipSchedulerTasks: true,
+				SkipSchedulerPrune: true,
+			}); err != nil {
+				return err
+			}
+			return nil
+		}
+		// Run the locked critical section; its deferred Unlock fires here, so the
+		// supervisor-intent flock is released BEFORE recordInstallIntentPostSuccess
+		// below re-acquires the same leaf (which would otherwise self-deadlock).
+		if err := runLocked(); err != nil {
+			return err
+		}
+	} else {
+		// Global manifest with no daemons (e.g. remote-http): client-config
+		// writes only — no scheduler tasks, no supervisor-intent rows.
+		if err := a.installPlan(ctx, m, plan, installPlanOpts{
+			Writer:             w,
+			DaemonFilter:       daemonFilter,
+			DryRun:             false,
+			StartTasks:         false,
+			SkipSchedulerTasks: true,
+			SkipSchedulerPrune: true,
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Post-success: record Desired=running re-enable intent for each planned
+	// task (clears any prior stop tombstone). Failures are logged + tolerated —
+	// the install already happened.
+	a.recordInstallIntentPostSuccess(m, daemonFilter, w)
+	return nil
+}
+
 // supervisorIntentFileLeaf is the canonical basename of the supervisor
 // intent file under the per-user state directory.
 const supervisorIntentFileLeaf = "supervisor-intent.json"
@@ -471,17 +640,32 @@ const supervisorIntentFileLeaf = "supervisor-intent.json"
 //     template-only-no-workspaces path byte-identical to the pre-D.3b
 //     behavior.
 //
-// MaintenanceTimers are carried through from the prior intent VERBATIM (this
-// server's timers AND every sibling's). This seam is workspace-scoped-only,
-// and serena sets weekly_refresh=false, so it never materializes a
-// per-server weekly timer of its own. Preserving the prior set untouched
-// means an operator's deliberately-disabled timer (Enabled=&false) is never
-// dropped and re-added — it survives every re-install of an unrelated
-// workspace-scoped manifest. Per-server weekly-cadence machinery is out of
-// scope for this foundation seam (it would need a maintenance_fired_at schema
-// keyed by Server, not Kind, in the already-merged supervisor maintenance
-// scheduler).
-func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
+// MaintenanceTimers are merged (not blindly carried verbatim) by
+// mergeServerWeeklyRefreshTimer so a GLOBAL manifest's `weekly_refresh: true`
+// is honored on the supervisor model:
+//
+//   - For a GLOBAL full install (m.Kind != KindWorkspaceScoped &&
+//     m.WeeklyRefresh && daemonFilter == ""), this server's prior
+//     server-weekly-refresh timer is REPLACED by a freshly-materialized one
+//     (`restart --server <m.Name>`, Kind "server-weekly-refresh" — the cadence
+//     the supervisor maintenance scheduler already dispatches on, supervise_-
+//     maintenance.go:333). Pre-Phase-F this was the per-server
+//     `mcp-local-hub-<server>-weekly-refresh` scheduler task (install.go:1230);
+//     Phase F routes global installs through SkipSchedulerTasks=true, so the
+//     timer must materialize HERE or the weekly restart is silently dropped.
+//     A prior timer's operator off-switch (Enabled=&false) is preserved across
+//     the replace so a deliberately-disabled timer is not silently re-enabled.
+//   - Otherwise (workspace-scoped manifest — serena sets weekly_refresh=false;
+//     a filtered/per-daemon install; or a global manifest without weekly_-
+//     refresh) the prior set is carried through VERBATIM (this server's timers
+//     AND every sibling's). Preserving the prior set untouched means an
+//     operator's deliberately-disabled timer survives every re-install of an
+//     unrelated manifest.
+//
+// Siblings' timers are ALWAYS preserved untouched; only THIS server's
+// server-weekly-refresh timer is replaced, mirroring the Daemons replace-by-
+// server logic above.
+func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return nil, nil, false, err
@@ -497,17 +681,75 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 	kept = append(kept, serenaOrPlanDaemons(m, workspaces, w)...)
 
 	merged = &SupervisorIntentFile{
-		Version:   1,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Daemons:   kept,
-		// Preserve the prior maintenance-timer set untouched (this server's
-		// AND siblings'). See the function doc: workspace-scoped-only seam,
-		// serena has weekly_refresh=false, so there is no per-server timer to
-		// materialize here and an operator's Enabled=&false timer must survive.
-		MaintenanceTimers: prior.MaintenanceTimers,
+		Version:           1,
+		UpdatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons:           kept,
+		MaintenanceTimers: mergeServerWeeklyRefreshTimer(m, daemonFilter, prior.MaintenanceTimers),
 		StrictMode:        prior.StrictMode,
 	}
 	return merged, prior, existed, nil
+}
+
+// mergeServerWeeklyRefreshTimer is the single owner of the maintenance-timer
+// merge for a per-server install. It mirrors buildMergedSupervisorIntent's
+// Daemons replace-by-server logic: every sibling server's timers pass through
+// untouched, and THIS server's server-weekly-refresh timer is replaced (when
+// the manifest wants one) or left verbatim (when it does not).
+//
+// Materialization condition (matches the pre-Phase-F Pass A gate at
+// install.go:1230 — `m.WeeklyRefresh && opts.DaemonFilter == ""`): the manifest
+// is global (not workspace-scoped), opts weekly_refresh, and this is a FULL
+// install (no daemon filter). A weekly restart restarts the WHOLE server, so a
+// single-daemon filtered install never owns it.
+//
+// When the condition holds, the freshly-materialized timer carries the exact
+// shape the legacy scheduler task used (`restart --server <m.Name>`, canonical
+// task name `\mcp-local-hub-<server>-weekly-refresh`), and preserves any prior
+// timer's operator off-switch (Enabled=&false) so a re-install never silently
+// re-enables a deliberately-disabled timer.
+//
+// When the condition does NOT hold (workspace-scoped manifest, a global
+// manifest without weekly_refresh, or a filtered install), the prior set is
+// returned untouched — preserving an operator's disabled timer across an
+// unrelated re-install.
+func mergeServerWeeklyRefreshTimer(m *config.ServerManifest, daemonFilter string, prior []MaintenanceTimer) []MaintenanceTimer {
+	wantTimer := m.Kind != config.KindWorkspaceScoped && m.WeeklyRefresh && daemonFilter == ""
+	if !wantTimer {
+		return prior
+	}
+
+	wantName := canonicalIntentTaskKey("mcp-local-hub-" + m.Name + "-weekly-refresh")
+
+	// Preserve every sibling timer; drop this server's prior
+	// server-weekly-refresh timer (it is re-materialized below). Capture its
+	// Enabled off-switch so a deliberately-disabled timer is not re-enabled.
+	out := make([]MaintenanceTimer, 0, len(prior)+1)
+	var priorEnabled *bool
+	for _, tm := range prior {
+		if tm.Server == m.Name && tm.Kind == "server-weekly-refresh" {
+			priorEnabled = tm.Enabled
+			continue // replaced below
+		}
+		out = append(out, tm)
+	}
+
+	// Resolve the mcphub binary the supervisor will exec, matching
+	// supervisorDaemonsFromPlan's fallback posture (bare name when
+	// `mcphub setup` has not run; the install preflight surfaces that upstream).
+	command, perr := canonicalMcphubPath()
+	if perr != nil {
+		command = mcphubShortName
+	}
+
+	out = append(out, MaintenanceTimer{
+		Name:    wantName,
+		Kind:    "server-weekly-refresh",
+		Server:  m.Name,
+		Command: command,
+		Args:    []string{"restart", "--server", m.Name},
+		Enabled: priorEnabled,
+	})
+	return out
 }
 
 // fanOutAuditTaskNames returns the per-workspace task names the pre-mutation

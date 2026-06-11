@@ -40,8 +40,7 @@ type ProcessIdentity struct {
 // ErrProcessNotFound is the sentinel returned when the queried PID
 // has no matching Win32_Process row (process exited, or PID never
 // existed). Callers distinguish this from generic transport errors
-// to decide between "treat as unbound" and "abort with
-// MIGRATION_POWERSHELL_LOCKED".
+// to decide between "treat as unbound" and "abort the caller".
 var ErrProcessNotFound = errors.New("process: PID not found")
 
 // lookupRetries is the retry budget for LookupProcessIdentity.
@@ -375,7 +374,7 @@ func splitWmicCSVLine(line string) []string {
 // Returns (false, nil) when either step rejects PowerShell — the
 // caller distinguishes this from a transport error (returned as
 // (false, err)) to decide whether to fall back to wmic or abort
-// migration with MIGRATION_POWERSHELL_LOCKED.
+// the caller.
 //
 // Implementation note: powershell.exe absent from PATH counts as
 // transport error, not CLM-lock, because the diagnostic is different

@@ -92,7 +92,7 @@ func TestExecuteInstallTo_PassAPassB_Separation(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		if err := executeInstallTo(&buf, m, plan, 0, false, nil, false); err != nil {
+		if err := executeInstallTo(&buf, m, plan, 0, false, nil, false, false); err != nil {
 			t.Fatalf("executeInstallTo(startTasks=false): %v", err)
 		}
 		if f.createCount != 3 {
@@ -115,7 +115,7 @@ func TestExecuteInstallTo_PassAPassB_Separation(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		if err := executeInstallTo(&buf, m, plan, 0, true, nil, false); err != nil {
+		if err := executeInstallTo(&buf, m, plan, 0, true, nil, false, false); err != nil {
 			t.Fatalf("executeInstallTo(startTasks=true): %v", err)
 		}
 		if f.createCount != 3 {
@@ -149,7 +149,7 @@ func TestExecuteInstallTo_PassAPassB_Separation(t *testing.T) {
 		var buf bytes.Buffer
 		// A Pass B Run failure must NOT abort the install — existing
 		// warning-only contract. executeInstallTo returns nil.
-		if err := executeInstallTo(&buf, m, plan, 0, true, nil, false); err != nil {
+		if err := executeInstallTo(&buf, m, plan, 0, true, nil, false, false); err != nil {
 			t.Fatalf("executeInstallTo: Run failure must be warning-only, got error: %v", err)
 		}
 		// Pass A creates survive: all 3 tasks still present in the fake.
@@ -1660,5 +1660,163 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyRele
 	}
 	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
 		t.Errorf("refuse error %q missing the gate signature (released token must NOT bypass)", err.Error())
+	}
+}
+
+// TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTask
+// is the v0.6 Phase F DONE-GATE (spec §5 "Phase F", line 638): a fresh install
+// of a GLOBAL manifest's daemons must spawn from supervisor-intent.json via the
+// supervisor reconcile seam, NOT from per-daemon `\mcp-local-hub-<server>-<daemon>`
+// Task Scheduler tasks.
+//
+// installPlanCore is the shared owner of the Phase F "global daemons →
+// supervisor-intent (not scheduler)" decision; (*API).Install (install.go:229)
+// delegates here after manifest-load + preflight + plan-build, so driving
+// installPlanCore directly with a BuildPlan-produced plan exercises the exact
+// branch Install reaches — mirroring how the existing executeInstallTo tests in
+// this file drive the lower-level primitive directly.
+//
+// State safety: daemonIntentTestHelper redirects daemonStateRootOverride to a
+// fresh t.TempDir, so the supervisor-intent.json write lands in the temp state
+// dir, never the live host's %LOCALAPPDATA%\mcp-local-hub\.
+func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTask(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := globalTwoDaemonManifest() // KindGlobal, daemons alpha+beta, weekly-refresh
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	// Sanity: the plan must carry SupervisorIntent rows so installPlanCore takes
+	// the superviseGlobal branch (2 daemon + 1 weekly = 3).
+	if len(plan.SupervisorIntent) != 3 {
+		t.Fatalf("plan SupervisorIntent = %d, want 3 (precondition for the supervisor-intent path)", len(plan.SupervisorIntent))
+	}
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	if err := a.installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+		t.Fatalf("installPlanCore(global fresh install): %v", err)
+	}
+
+	// DONE-GATE assertion 1: supervisor-intent.json was written with a
+	// descriptor row for each global daemon (alpha + beta).
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent(%s): %v — Phase F requires global daemons spawn from this file", intentPath, err)
+	}
+	byServerDaemon := map[string]bool{}
+	for _, d := range written.Daemons {
+		byServerDaemon[d.Server+"/"+d.Daemon] = true
+	}
+	for _, want := range []string{"demo/alpha", "demo/beta"} {
+		if !byServerDaemon[want] {
+			t.Errorf("supervisor-intent.json missing daemon descriptor %q; rows=%+v", want, written.Daemons)
+		}
+	}
+
+	// DONE-GATE assertion 2: the daemons spawn via the supervisor seam, NOT via
+	// scheduler tasks — no Create (Pass A) and no Run (Pass B) was issued.
+	if f.createCount != 0 {
+		t.Errorf("scheduler Create calls = %d, want 0; Phase F global installs create NO per-daemon scheduler task (created: %v)", f.createCount, f.tasks)
+	}
+	if f.runCount != 0 {
+		t.Errorf("scheduler Run calls = %d, want 0; Phase F defers every daemon spawn to the supervisor reconcile loop (runNames: %v)", f.runCount, f.runNames)
+	}
+}
+
+// TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated is the
+// v0.6 Phase F FALSIFICATION test (spec §5 "Phase F", line 639): a fresh global
+// install must create ZERO `\mcp-local-hub-<server>-<daemon>` per-daemon Task
+// Scheduler entries. If any such task is created, Phase F is incomplete (the
+// pre-Phase-F scheduler model survived).
+//
+// Distinct from the done-gate above: that test asserts the POSITIVE (intent
+// written + no Create/Run counts); this asserts the NEGATIVE by inspecting the
+// exact task-name shape the legacy model used (`mcp-local-hub-demo-alpha`,
+// `-beta`, `-weekly-refresh`) never reached the scheduler.
+func TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	a := NewAPI()
+	var buf bytes.Buffer
+	if err := a.installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+		t.Fatalf("installPlanCore(global fresh install): %v", err)
+	}
+
+	// No per-daemon `\mcp-local-hub-<server>-<daemon>` task may exist in the
+	// fake's created-task set. The legacy model would have created exactly these
+	// three names; under Phase F the set must be empty.
+	for _, legacyTask := range []string{
+		"mcp-local-hub-demo-alpha",
+		"mcp-local-hub-demo-beta",
+		"mcp-local-hub-demo-weekly-refresh",
+	} {
+		for created := range f.tasks {
+			if strings.TrimPrefix(created, "\\") == legacyTask {
+				t.Errorf("Phase F regression: per-daemon scheduler task %q was created; global daemons must live in supervisor-intent.json, not scheduler tasks", legacyTask)
+			}
+		}
+	}
+	// And the created-specs slice (the ordered Pass A record) must be empty.
+	if len(f.createdSpecs) != 0 {
+		t.Errorf("Pass A created %d scheduler task spec(s); Phase F global install must create none: %+v", len(f.createdSpecs), f.createdSpecs)
+	}
+
+	// P2-A regression guard: the global manifest's `weekly_refresh: true` must
+	// NOT be silently dropped. Pre-Phase-F it materialized a
+	// `mcp-local-hub-demo-weekly-refresh` SCHEDULER task (the legacy assertion
+	// above proves that path is gone); Phase F's successor is a supervisor
+	// server-weekly-refresh MaintenanceTimer in supervisor-intent.json (the
+	// cadence supervise_maintenance.go:333 already dispatches on). Without the
+	// fix, mergeServerWeeklyRefreshTimer's predecessor carried only the prior
+	// (here: empty) timer set verbatim, so no timer existed and the weekly
+	// restart never fired. This block asserts the timer IS materialized — it
+	// FAILS pre-fix (written.MaintenanceTimers is empty) and passes post-fix.
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent(%s): %v", intentPath, err)
+	}
+	wantName := canonicalIntentTaskKey("mcp-local-hub-demo-weekly-refresh")
+	var got *MaintenanceTimer
+	for i := range written.MaintenanceTimers {
+		if written.MaintenanceTimers[i].Name == wantName {
+			got = &written.MaintenanceTimers[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("global manifest weekly_refresh=true was SILENTLY DROPPED: no server-weekly-refresh MaintenanceTimer %q in supervisor-intent.json; timers=%+v", wantName, written.MaintenanceTimers)
+	}
+	if got.Kind != "server-weekly-refresh" {
+		t.Errorf("materialized weekly-refresh timer Kind = %q, want %q (the cadence supervise_maintenance.go dispatches on)", got.Kind, "server-weekly-refresh")
+	}
+	if got.Server != "demo" {
+		t.Errorf("materialized weekly-refresh timer Server = %q, want %q", got.Server, "demo")
+	}
+	if !reflect.DeepEqual(got.Args, []string{"restart", "--server", "demo"}) {
+		t.Errorf("materialized weekly-refresh timer Args = %v, want [restart --server demo]", got.Args)
+	}
+	if got.Command == "" {
+		t.Errorf("materialized weekly-refresh timer Command is empty; want the resolved mcphub binary path")
+	}
+	// Enabled is nil on a fresh install (no prior off-switch to preserve), so the
+	// scheduler's nil==default-on contract honors the timer.
+	if got.Enabled != nil {
+		t.Errorf("materialized weekly-refresh timer Enabled = %v, want nil (default-on on a fresh install)", *got.Enabled)
 	}
 }

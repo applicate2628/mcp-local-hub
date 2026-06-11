@@ -374,7 +374,7 @@ func cmdlineHasToken(cmdline, token string) bool {
 // unrelated recycled mcphub PID — before killing it. The tokens mirror
 // the timer Args the supervisor execs verbatim via exec.Command:
 //   - workspace-weekly-refresh → `mcphub workspace-weekly-refresh`
-//     (internal/migration/journal.go defaultMaintenanceTimers)
+//     (internal/cli/supervise_maintenance.go maintenance-timer Args)
 //   - server-weekly-refresh    → `mcphub restart --server <name>`
 //     (internal/api/install.go weekly-refresh task Args)
 func maintenanceCmdlineSignature(kind string) ([]string, bool) {

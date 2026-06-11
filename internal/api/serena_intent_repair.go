@@ -77,13 +77,12 @@ type serenaIntentRepairEvent struct {
 //
 // Deadlock-freedom comes from TryLock on BOTH locks (skip-on-contention), NOT
 // from exclusive ownership. Other writers DO take the supervisor-intent.json.lock
-// leaf WITHOUT holding the registry lock — migration (internal/migration/journal.go
-// writeDerivedIntent -> WriteStateFileAtomic), strict-mode, and autostart all
+// leaf WITHOUT holding the registry lock — strict-mode and autostart both
 // write the intent under that leaf alone. So the repair must never BLOCK while
 // holding a lock; because both acquisitions are non-blocking, it can never wait
 // on a lock that another (possibly stuck) holder is behind. Do NOT "optimize"
 // either TryLock into a blocking Lock — that reintroduces a real deadlock against
-// a concurrent migration.
+// a concurrent intent writer.
 //
 // Clobber-safety has two independent layers: (a) vs a concurrent auto-register —
 // registry-lock mutual exclusion (auto-register holds the registry lock across its

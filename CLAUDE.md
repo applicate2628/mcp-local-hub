@@ -459,7 +459,7 @@ shared with the v0.4.x watchdog state dir for byte-symmetric rollback):
   supervisor-events.log               # NEW: JSONL audit trail; 16 KB per-entry cap; 10 MB rotation → .log.1 (schema below)
   supervisor.lock                     # NEW: supervisor singleton flock; sidecar JSON carries {pid, start_time}
                                       # IPC clients read this BEFORE opening the named pipe / unix socket for handshake
-  migration-journal-<UTC-ts>/         # NEW: per-install journal; retention 5 newest after `committed`
+  # migration-journal-<UTC-ts>/       # REMOVED in v0.6 Phase F (the forward-migration engine that wrote it is deleted)
   daemon-intent.json                  # preserved exactly (byte-symmetric for v0.4.x rollback)
   managed-entries.json                # preserved exactly
   watchdog-state.json                 # preserved unchanged; v0.5.0 supervisor does NOT extend or write
@@ -519,32 +519,48 @@ mcphub autostart enable                # Per-OS shim install (Windows: Task Sche
 mcphub autostart disable               # systemd user service; macOS managed: LaunchAgent; unmanaged Linux/macOS: none)
 mcphub autostart status                # Per-backend probe semantics
 
-mcphub install --upgrade               # Cold-restart upgrade flow (see "Cold-restart upgrade flow" below)
-mcphub install --rollback-to-legacy    # Reverses migration; re-registers v0.4.x XML; exits 0 with warnings
-                                       # via rollback-warnings.json on partial port-binding failures
-mcphub install --upgrade --reset-failure-windows
-                                       # Clears restart_history + backoff_until + quarantine_since per daemon
-                                       # AND resets state to `idle`. Default is RETAIN restart_history across upgrade.
+mcphub install --upgrade               # Cold-restart upgrade flow (see "Cold-restart upgrade flow" below).
+                                       # This is a binary-replacement + IPC-handoff flow, NOT a migration.
 ```
+
+> **v0.6 Phase F removed the v0.4.x→v0.5.0 forward-migration engine.** The
+> `internal/migration` package is deleted, and with it `mcphub install
+> --rollback-to-legacy` (the legacy-demotion path), the
+> `mcphub install --upgrade --reset-failure-windows` flag, and the
+> `migration-journal-<UTC-ts>/` per-install journal. The remaining
+> `mcphub install --upgrade` is the **cold-restart binary-replacement**
+> flow (rename-aside + IPC handoff), which never wrote a migration journal
+> and is unaffected. The `migration.lock` flock SURVIVES — it was migrated
+> out of the deleted package into `internal/api/state_dir_locks.go` and is
+> now the GENERIC universal-lock-order primitive (basename preserved for
+> byte-symmetry); it is no longer migration-engine-specific. `mcphub
+> migrate-legacy` (a SEPARATE command that converts disabled
+> mcp-language-server client-config entries into managed workspace
+> registrations — M4 Task 14) is unaffected and still ships.
 
 `mcphub restart` and `mcphub status` are **IPC-only commands** — they do
 NOT acquire `migration.lock`, only mutate supervisor in-memory + IPC
 state. This exempts them from the universal lock-acquire order and
-prevents them from deadlocking against rollback's `quiesce-timers` drain.
+prevents them from deadlocking against a `quiesce-timers` drain.
 
 ### Exit codes
 
-Exit codes are command-scoped. The v0.5.0 supervisor surfaces extend the
-v0.4.x watchdog codes already documented above (0, 1, 2, 6, 8, 9, 10,
-11) — codes 9 / 10 / 13 / 14 below are **specific to supervisor /
-migration / strict-mode surfaces** and do not collide because no
-command uses both watchdog and supervisor exit semantics in one
-invocation:
+Exit codes are command-scoped. The surviving v0.6 supervisor / strict-mode
+surfaces are below. **v0.6 Phase F removed the migration/rollback exit
+codes** — `13 ROLLBACK_TOKEN_MISMATCH`, `14 MIGRATION_POWERSHELL_LOCKED`,
+and the named abort codes `MIGRATION_PORT_LOOKUP_INCONSISTENT`,
+`ROLLBACK_ORPHAN_DAEMONS_REMAIN`, `SUPERVISOR_REFUSING_ROLLBACK_IN_PROGRESS`
+are gone with the forward-migration engine. The old `8 INSTALL_BUSY`
+(migration.lock held by another `mcphub install`) no longer fires either —
+`mcphub install --upgrade` is the cold-restart binary swap, not a
+migration. Codes 9 / 10 below survive (strict-mode + the generic
+`migration.lock` primitive in `state_dir_locks.go`):
 
 ```text
-0   — success (rollback exits 0 even with rollback-warnings.json present)
+0   — success
 1   — generic backend error
-8   — INSTALL_BUSY (`migration.lock` held by another `mcphub install`)
+8   — exitSetupStatePathRejected (`mcphub setup` state-path rejected; NOT the
+      removed install-migration INSTALL_BUSY code)
 9   — STRICT_MODE_BUSY (`migration.lock` held when `mcphub strict-mode
       {enable,disable,--recover}` tried to acquire). Universal lock order:
       migration.lock BEFORE --once.lock; refuse-if-held with explicit
@@ -557,30 +573,24 @@ invocation:
       step2_error, revert_error, ts}; emits body to stderr; exits 10.
       Subsequent `strict-mode` invocations refuse-if-held on the breadcrumb
       until `mcphub strict-mode --recover` runs or operator deletes manually.
-13  — ROLLBACK_TOKEN_MISMATCH. Rollback caller token is less privileged
-      than the supervisor process — typical scenario: supervisor started
-      under `runas /user:Administrator` and rollback invoked from a
-      non-elevated shell. Pre-flight `OpenProcess(PROCESS_TERMINATE)`
-      (Windows) or `kill(pid, 0)` (POSIX) catches this BEFORE the IPC
-      `exit{graceful}` issue so the operator sees the diagnostic
-      immediately rather than 5 s later after force-kill ACCESS_DENIED.
-14  — MIGRATION_POWERSHELL_LOCKED. PowerShell Constrained Language Mode
-      probe at migration entry detected both `wmic.exe` deprecated AND
-      PowerShell `Get-CimInstance` locked (AppLocker / WDAC publisher
-      allowlist with CIM-provider DLL blocked, or LanguageMode ≠
-      FullLanguage). Operator guidance: run migration from an admin
-      PowerShell session exempt from the AppLocker policy, or wait for
-      v0.5.x native WMI COM via `golang.org/x/sys/windows`.
 ```
 
-Additional supervisor-surfaced abort codes (non-numeric, named in
-spec): `MIGRATION_PORT_LOOKUP_INCONSISTENT`,
-`ROLLBACK_ORPHAN_DAEMONS_REMAIN`,
-`SUPERVISOR_REFUSING_ROLLBACK_IN_PROGRESS`.
+### Migration journal layout + retention — REMOVED in v0.6 Phase F
 
-### Migration journal layout + retention
+> **This entire mechanism is gone.** v0.6 Phase F deleted the
+> `internal/migration` package and with it the per-install
+> `migration-journal-<UTC-ts>/` directory, all its forward-progress
+> markers, the resume/rollback classification, and the
+> `--rollback-to-legacy` demotion path. The surviving `mcphub install
+> --upgrade` is a cold-restart binary-replacement flow (see "Cold-restart
+> upgrade flow" below) that NEVER wrote a migration journal. Global daemons
+> now spawn from `supervisor-intent.json` reconcile, not from a migrated
+> per-daemon scheduler-task set. The historical layout below is RETAINED FOR
+> REFERENCE ONLY (e.g. reading an old journal left on a pre-Phase-F host);
+> no current code writes or reads it.
 
-`mcphub install --upgrade` writes a per-install journal under
+Historical (pre-Phase-F) layout — `mcphub install --upgrade` (the deleted
+forward-migration engine) wrote a per-install journal under
 `<state-dir>/migration-journal-<UTC-timestamp>/` with forward-progress
 markers:
 
@@ -766,17 +776,29 @@ from any other process per Microsoft docs; graceful shutdown is
 **exclusively via IPC `exit`**. Task Manager → End Task →
 ungraceful Job Object close; `KILL_ON_JOB_CLOSE` reaps every child.
 
-### Post-migration / post-rollback recovery
+### Post-migration / post-rollback recovery — REMOVED in v0.6 Phase F
 
-After `mcphub install --upgrade` returns success, the journal at
-`<state-dir>/migration-journal-<UTC-ts>/` carries `committed` and the
+> **The migration/rollback recovery flow below is gone.** v0.6 Phase F
+> deleted the forward-migration engine, the `migration-journal-<UTC-ts>/`
+> directory, `mcphub install --rollback-to-legacy`, and the
+> `rollback-warnings.json` artifact. There is no migration to recover from
+> anymore — global daemons spawn from `supervisor-intent.json` reconcile.
+> The historical recovery procedure below is RETAINED FOR REFERENCE ONLY
+> (e.g. an operator on a pre-Phase-F host with a stale journal). The
+> `STRICT_MODE_REVERT_FAILED` recovery further down is UNAFFECTED — it
+> concerns strict-mode + the surviving `migration.lock` primitive, not the
+> deleted migration engine.
+
+Historical (pre-Phase-F): after `mcphub install --upgrade` (the deleted
+migration engine) returned success, the journal at
+`<state-dir>/migration-journal-<UTC-ts>/` carried `committed` and the
 classification + kill-verdict artifacts. Operators investigating
-incidents should preserve the directory (retention keeps the 5
-newest; older are pruned at the next migration).
+incidents preserved the directory (retention kept the 5 newest; older
+were pruned at the next migration).
 
-After `mcphub install --rollback-to-legacy`, operators should read
-`<state-dir>/migration-journal-<UTC-ts>/rollback-warnings.json` if
-present (schema v1):
+Historical (pre-Phase-F): after `mcphub install --rollback-to-legacy`,
+operators read `<state-dir>/migration-journal-<UTC-ts>/rollback-warnings.json`
+if present (schema v1):
 
 ```json
 {"version": 1, "warnings": [
@@ -812,16 +834,19 @@ during recovery, breadcrumb is re-asserted with updated
 `step1_error` / `step2_error` / `revert_error` and exit 10 fires
 again.
 
-**Resume classification cheat-sheet** (markers under
-`migration-journal-<UTC-ts>/`):
+**Resume classification cheat-sheet** — REMOVED in v0.6 Phase F. The
+markers below lived under the deleted `migration-journal-<UTC-ts>/`
+directory; the forward-migration engine that wrote and resumed them is
+gone. Retained for reference only (reading a pre-Phase-F host's stale
+journal):
 
-| Markers present | Operator action |
+| Markers present | Operator action (historical, pre-Phase-F) |
 |---|---|
 | `prepared` only | Safe to abort; delete journal. |
-| `pre-os-mutating` no `os-mutating-complete` | `mcphub install --upgrade` resumes from `derived-supervisor-intent.json`. |
-| `os-mutating-complete` no `committed` | Operator picks forward retry or rollback. |
-| `committed` | Migration succeeded. Older journals beyond the 5 newest are pruned automatically. |
-| `rollback-in-progress` | Re-run `mcphub install --rollback-to-legacy` to finish; supervisor cold start refuses to reconcile until cleared. |
+| `pre-os-mutating` no `os-mutating-complete` | `mcphub install --upgrade` resumed from `derived-supervisor-intent.json`. |
+| `os-mutating-complete` no `committed` | Operator picked forward retry or rollback. |
+| `committed` | Migration succeeded. Older journals beyond the 5 newest were pruned automatically. |
+| `rollback-in-progress` | Re-run `mcphub install --rollback-to-legacy` to finish; supervisor cold start refused to reconcile until cleared. |
 
 ### `mcphub watchdog` — removed (v0.6 Phase D)
 

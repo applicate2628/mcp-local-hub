@@ -40,8 +40,7 @@ func TestLookupProcessIdentity_PowerShellFallback(t *testing.T) {
 // (true, nil) on a dev host with default PowerShell policy. CLM hosts
 // (enterprise WDAC, AppLocker enforced) would return (false, nil) and
 // hit the t.Skip — see plan §"Pre-unregister daemon stop" for the
-// production fallback (wmic if available, else
-// MIGRATION_POWERSHELL_LOCKED abort).
+// production fallback (wmic if available, else the caller aborts).
 func TestProbePowerShellCLM_FullLanguagePasses(t *testing.T) {
 	ok, err := ProbePowerShellCLM()
 	if err != nil {

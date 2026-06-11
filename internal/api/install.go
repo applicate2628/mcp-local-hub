@@ -262,23 +262,11 @@ func (a *API) Install(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	// 4. Dry-run + audit-first + execute via the shared core. StartTasks=true
-	// reproduces the pre-refactor immediate-daemon-start behavior exactly.
-	if err := a.installPlan(context.Background(), m, plan, installPlanOpts{
-		Writer:       w,
-		DaemonFilter: opts.DaemonFilter,
-		DryRun:       opts.DryRun,
-		StartTasks:   true,
-	}); err != nil {
-		return err
-	}
-	if opts.DryRun {
-		return nil
-	}
-	// 5a. Post-success: record Desired=running intent for each created
-	// scheduler task. Intent failures here are logged + tolerated.
-	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
-	return nil
+	// 4. Dry-run + audit-first + execute via the shared core. v0.6 Phase F:
+	// global daemons spawn from supervisor-intent.json (installPlanCore writes
+	// the descriptor rows + defers the spawn to the supervisor reconcile loop)
+	// rather than from per-daemon scheduler tasks.
+	return a.installPlanCore(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w)
 }
 
 // InstallAll is the production entry point for bulk install. Reads
@@ -398,19 +386,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	if err := a.installPlan(context.Background(), m, plan, installPlanOpts{
-		Writer:       w,
-		DaemonFilter: opts.DaemonFilter,
-		DryRun:       opts.DryRun,
-		StartTasks:   true,
-	}); err != nil {
-		return err
-	}
-	if opts.DryRun {
-		return nil
-	}
-	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
-	return nil
+	return a.installPlanCore(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w)
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
@@ -442,19 +418,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	if err := a.installPlan(context.Background(), m, plan, installPlanOpts{
-		Writer:       w,
-		DaemonFilter: opts.DaemonFilter,
-		DryRun:       opts.DryRun,
-		StartTasks:   true,
-	}); err != nil {
-		return err
-	}
-	if opts.DryRun {
-		return nil
-	}
-	a.recordInstallIntentPostSuccess(m, opts.DaemonFilter, w)
-	return nil
+	return a.installPlanCore(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w)
 }
 
 // Status returns the slice of MCP daemons under supervisor management
@@ -1751,6 +1715,20 @@ type installPlanOpts struct {
 	// scheduler tasks, so there is nothing to reconcile here. Legacy callers
 	// leave it false (zero value), preserving their reconcile behavior exactly.
 	SkipSchedulerPrune bool
+	// SkipSchedulerTasks, when true, suppresses Pass A scheduler-task creation
+	// (sch.Create per planned daemon) AND the Pass B start inside
+	// executeInstallTo. v0.6 Phase F sets it for GLOBAL manifest installs so a
+	// fresh install writes supervisor-intent daemon rows (via Intermediate) and
+	// defers every daemon spawn to the supervisor reconcile loop — no per-daemon
+	// `\mcp-local-hub-<server>-<daemon>` Task Scheduler task is created. The plan
+	// still carries SchedulerTasks (for audit/intent task-name derivation), but
+	// they are never materialized as OS tasks. Legacy/workspace-scoped callers
+	// leave it false; workspace-scoped plans already carry zero SchedulerTasks,
+	// so the flag is a no-op there. When true the caller must also set
+	// SkipSchedulerPrune=true (the daemon set now lives in supervisor-intent,
+	// not in scheduler tasks) and pass a non-nil Intermediate that writes the
+	// supervisor-intent rows.
+	SkipSchedulerTasks bool
 	// AuditTaskNames, when non-empty, OVERRIDES the manifest-derived task list
 	// the pre-mutation audit (recordInstallAuditPreMutation) fail-closes on.
 	// Set by InstallParsedManifest's workspace-scoped fan-out path: a
@@ -1796,7 +1774,7 @@ func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *P
 	if err := a.recordInstallAuditForTasks(installAuditTaskNamesOrOverride(m, opts.DaemonFilter, opts.AuditTaskNames)); err != nil {
 		return err
 	}
-	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune)
+	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks)
 }
 
 // createdTask pairs a scheduler.TaskSpec created in Pass A with the
@@ -1848,19 +1826,29 @@ type intentWriteStep func() (rollback func(), err error)
 // against an empty planned set would delete every registered
 // mcp-local-hub-<server>-* scheduler task for that server. Legacy callers pass
 // false and keep the reconcile.
-func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool) error {
+func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool) error {
+	// v0.6 Phase F: when skipTasks is set (GLOBAL manifest install routed to the
+	// supervisor model) NEITHER Pass A scheduler-task creation NOR Pass B start
+	// runs — the daemons live in supervisor-intent.json and the supervisor
+	// reconcile loop spawns them. The caller also sets skipPrune (the daemon set
+	// is owned by supervisor-intent, not scheduler tasks) and passes a non-nil
+	// intermediate that writes those rows. Folding skipTasks into the Pass A /
+	// Pass B / needsScheduler conditions keeps the client-config block + the
+	// intermediate supervisor-intent write inside the SAME rollback scope.
+	createTasks := !skipTasks
 	// Acquire the scheduler only when there is real scheduler work: tasks to
 	// create, an obsolete-task prune to run, or a Pass B start. A
 	// workspace-scoped InstallParsedManifest (zero SchedulerTasks,
-	// skipPrune=true, startTasks=false) has none. On Linux/macOS
-	// scheduler.New() returns "not implemented", so acquiring it
-	// unconditionally would fail serena/workspace installs on those hosts
-	// before the supervisor-intent write — even though this path has no
-	// scheduler dependency and defers daemon starts to the reconciler. sch
-	// stays nil in that case and is never dereferenced: every use below is
-	// inside the SchedulerTasks loop, the prune block (FullInstall && !skipPrune),
-	// or Pass B (startTasks) — exactly the conditions in needsScheduler.
-	needsScheduler := len(p.SchedulerTasks) > 0 || (p.FullInstall && !skipPrune) || startTasks
+	// skipPrune=true, startTasks=false) — and a Phase-F global install
+	// (skipTasks=true) — has none. On Linux/macOS scheduler.New() returns "not
+	// implemented", so acquiring it unconditionally would fail serena/workspace
+	// installs on those hosts before the supervisor-intent write — even though
+	// this path has no scheduler dependency and defers daemon starts to the
+	// reconciler. sch stays nil in that case and is never dereferenced: every
+	// use below is inside the SchedulerTasks loop, the prune block (FullInstall
+	// && !skipPrune), or Pass B (startTasks) — exactly the conditions in
+	// needsScheduler.
+	needsScheduler := (createTasks && len(p.SchedulerTasks) > 0) || (p.FullInstall && !skipPrune) || (startTasks && createTasks)
 	var sch scheduler.Scheduler
 	if needsScheduler {
 		s, serr := newScheduler()
@@ -1897,8 +1885,18 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 	// Pass A — create scheduler tasks ONLY (no Run). Collect each created
 	// spec + its source trigger so Pass B can start the logon-triggered
 	// subset without re-deriving from p.SchedulerTasks.
+	//
+	// v0.6 Phase F: when createTasks is false (GLOBAL manifest routed to the
+	// supervisor model) this whole loop is skipped — no per-daemon
+	// `\mcp-local-hub-<server>-<daemon>` Task Scheduler task is created. The
+	// daemons are written into supervisor-intent.json by the intermediate hook
+	// below and spawned by the supervisor reconcile loop. createdTasks stays
+	// empty, so Pass B's start loop is a no-op too.
 	var createdTasks []createdTask
 	for _, t := range p.SchedulerTasks {
+		if !createTasks {
+			break
+		}
 		spec := scheduler.TaskSpec{
 			Name:             t.Name,
 			Description:      "mcp-local-hub: " + m.Name,

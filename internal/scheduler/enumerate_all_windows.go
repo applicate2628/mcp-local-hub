@@ -266,8 +266,8 @@ func splitConcatenatedTaskXML(stream string) []string {
 // — the declaration mirrors the in-memory wide-char form, but the
 // on-the-wire bytes are not UTF-16 wide chars). We strip the PI
 // before decoding so encoding/xml's default UTF-8 reader handles
-// the ASCII subset cleanly. This mirrors the
-// stripXMLDeclaration helper in internal/migration/classify_xml.go.
+// the ASCII subset cleanly. The stripEnumerateXMLDeclaration helper
+// below performs the same PI/BOM strip for this package's own decoder.
 type enumXMLTask struct {
 	XMLName          xml.Name             `xml:"Task"`
 	RegistrationInfo enumXMLRegInfo       `xml:"RegistrationInfo"`
@@ -346,16 +346,15 @@ func decodeOneTask(raw string) (TaskStatus, bool, error) {
 
 // stripEnumerateXMLDeclaration drops a leading `<?xml ... ?>` PI (and
 // any leading BOM / whitespace) so encoding/xml's default UTF-8
-// reader handles the ASCII body. Mirrors internal/migration/classify_xml.go
-// stripXMLDeclaration; duplicated here so the scheduler package
-// stays free of cross-package coupling for what is otherwise a
-// 30-line helper.
+// reader handles the ASCII body. The helper is local to the scheduler
+// package so it stays free of cross-package coupling for what is
+// otherwise a 30-line helper.
 //
 // Safe because: (a) the body of legitimate Task Scheduler payloads is
 // pure 7-bit ASCII (Command paths, args, names), and (b) callers of
 // parseEnumerateXML do NOT use this decoded form for any
-// security-sensitive decision — the migration classifier reads the
-// raw XML through its own hardened decoder.
+// security-sensitive decision — enumeration only reads task names,
+// triggers, and state for the status surface.
 func stripEnumerateXMLDeclaration(raw string) string {
 	// UTF-8 BOM.
 	if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {

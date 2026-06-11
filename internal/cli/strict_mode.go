@@ -44,7 +44,6 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/autostart"
-	"mcp-local-hub/internal/migration"
 )
 
 // Exit codes per spec §Q8 + plan §2603.
@@ -244,10 +243,10 @@ func RunStrictMode(args []string, deps StrictModeDeps) error {
 	}
 
 	// Acquire migration.lock + --once.lock in spec order; LIFO release.
-	locks, err := migration.AcquireMigrationLocks(deps.StateDir)
+	locks, err := api.AcquireStateDirLocks(deps.StateDir)
 	if err != nil {
-		// Both ErrMigrationLockHeld and ErrOnceLockHeld surface as
-		// STRICT_MODE_BUSY per spec Q8.
+		// Both ErrStateDirMigrationLockHeld and ErrStateDirOnceLockHeld
+		// surface as STRICT_MODE_BUSY per spec Q8.
 		return &forceExitError{code: ExitStrictModeBusy}
 	}
 	defer locks.Release()
@@ -407,7 +406,7 @@ func RunStrictModeRecover(deps StrictModeDeps) error {
 
 	// Acquire migration.lock + --once.lock (same refuse-if-held →
 	// exit 9 behavior).
-	locks, err := migration.AcquireMigrationLocks(deps.StateDir)
+	locks, err := api.AcquireStateDirLocks(deps.StateDir)
 	if err != nil {
 		return &forceExitError{code: ExitStrictModeBusy}
 	}

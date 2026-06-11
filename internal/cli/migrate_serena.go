@@ -271,8 +271,9 @@ var ErrMigrateSerenaReconcileReadyTimeout = errors.New("serena migrate: supervis
 // not per daemon), so widening the window is cheap. Even on a timeout the
 // POST-COMMIT start (step 10) downgrades to a warning rather than a scary exit-1
 // (ErrMigrateSerenaReconcileReadyTimeout), but the wider window makes that
-// downgrade rarely necessary. The forward-migration step-14 budget
-// (internal/migration/journal.go:846) remains 30s; this cutover path widens it.
+// downgrade rarely necessary. The serena_auto_register.go reconcile-ready poll
+// (see serena_auto_register.go:647) uses a 30s budget; this cutover path widens
+// it to 60s to absorb the interlock release→re-acquire→IPC-bind hand-off.
 //
 // Defined here (cross-platform) — NOT under //go:build windows — because the
 // driver's POST-COMMIT downgrade messaging in this file (step 10) references it,
