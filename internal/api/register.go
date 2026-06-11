@@ -20,6 +20,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1066,6 +1067,14 @@ var proxyReadinessFn = verifyProxyReady
 // after sch.Run so register can error-and-rollback instead of
 // reporting a successful registration whose proxy never came up.
 func verifyProxyReady(port int, timeout time.Duration) error {
+	return verifyProxyReadyForServerNames(port, timeout, nil)
+}
+
+func verifySerenaProxyReady(port int, timeout time.Duration) error {
+	return verifyProxyReadyForServerNames(port, timeout, map[string]struct{}{"serena": {}})
+}
+
+func verifyProxyReadyForServerNames(port int, timeout time.Duration, allowedServerNames map[string]struct{}) error {
 	deadline := time.Now().Add(timeout)
 	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"mcphub-register-readiness","version":"1.0.0"},"capabilities":{}}}`)
@@ -1084,17 +1093,60 @@ func verifyProxyReady(port int, timeout time.Duration) error {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
-			return nil
+			if len(allowedServerNames) == 0 {
+				return nil
+			}
+			if readErr != nil {
+				lastErr = fmt.Errorf("read readiness response: %w", readErr)
+			} else if err := verifyReadinessServerInfo(respBody, allowedServerNames); err != nil {
+				lastErr = err
+			} else {
+				return nil
+			}
+		} else {
+			lastErr = fmt.Errorf("readiness probe status %d", resp.StatusCode)
 		}
-		lastErr = fmt.Errorf("readiness probe status %d", resp.StatusCode)
 		time.Sleep(200 * time.Millisecond)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("timeout after %s", timeout)
 	}
 	return lastErr
+}
+
+func verifyReadinessServerInfo(body []byte, allowedServerNames map[string]struct{}) error {
+	payload := bytes.TrimSpace(body)
+	if bytes.HasPrefix(payload, []byte("data:")) || bytes.Contains(payload, []byte("\ndata:")) {
+		var eventData []byte
+		for _, line := range bytes.Split(payload, []byte("\n")) {
+			line = bytes.TrimSpace(line)
+			if data, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+				eventData = append(eventData, bytes.TrimSpace(data)...)
+			}
+		}
+		payload = bytes.TrimSpace(eventData)
+	}
+	var env struct {
+		Result struct {
+			ServerInfo struct {
+				Name string `json:"name"`
+			} `json:"serverInfo"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return fmt.Errorf("decode readiness response: %w", err)
+	}
+	name := strings.ToLower(strings.TrimSpace(env.Result.ServerInfo.Name))
+	if name == "" {
+		return fmt.Errorf("readiness response missing serverInfo.name")
+	}
+	if _, ok := allowedServerNames[name]; !ok {
+		return fmt.Errorf("readiness response serverInfo.name %q not allowed", env.Result.ServerInfo.Name)
+	}
+	return nil
 }
 
 // --- Test seams ---------------------------------------------------------

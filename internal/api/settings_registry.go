@@ -115,7 +115,7 @@ var SettingsRegistry = []SettingDef{
 		Pattern: `^weekly\s+(?i:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:[01]\d|2[0-3]):[0-5]\d$`,
 		Help:    "Weekly refresh schedule (format: weekly DAY HH:MM, 24-hour local time)."},
 	{Key: "daemons.serena_idle_shutdown", Section: "daemons", Type: TypeEnum,
-		Default: "30m", Enum: []string{"off", "15m", "30m", "1h", "2h"},
+		Default: "off", Enum: []string{"off", "15m", "30m", "1h", "2h"},
 		// v0.6 idle-shutdown (#6, spec §6). The 60s in-GUI idle sweeper reads
 		// this each tick: a serena pool daemon with no /serena/mcp activity for
 		// longer than this threshold is stopped (Desired=stopped +
@@ -123,7 +123,7 @@ var SettingsRegistry = []SettingDef{
 		// the next /serena/mcp request wakes it. "off" disables idle-shutdown
 		// entirely (daemons stay running until an explicit operator stop).
 		// Takes effect on the next sweep tick (~60s) — no restart required.
-		Help: "Sleep an idle serena pool daemon after this much inactivity; the next request wakes it. 'off' keeps daemons running. Takes effect within ~60s; no restart."},
+		Help: "Sleep an idle serena pool daemon after this much inactivity; the next request wakes it. Default is 'off' to avoid releasing daemon ports unless explicitly enabled. Takes effect within ~60s; no restart."},
 	{Key: "daemons.retry_policy", Section: "daemons", Type: TypeEnum,
 		Default: "exponential", Enum: []string{"none", "linear", "exponential"},
 		// A4-b PR #2 runtime applier shipped: the watchdog --once

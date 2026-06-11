@@ -101,18 +101,19 @@ func TestSerenaIdleShutdownThreshold_Parse(t *testing.T) {
 	}
 }
 
-// The registry default for the GUI-settable threshold is 30m (spec §6).
-func TestSerenaIdleShutdown_RegistryDefaultIs30m(t *testing.T) {
+// The registry default keeps idle-shutdown disabled. Stopping idle daemons releases
+// their loopback ports before wake, so operators must explicitly opt in.
+func TestSerenaIdleShutdown_RegistryDefaultIsOff(t *testing.T) {
 	def := findDef(SerenaIdleShutdownSettingKey)
 	if def == nil {
 		t.Fatalf("setting %q missing from SettingsRegistry", SerenaIdleShutdownSettingKey)
 	}
-	if def.Default != "30m" {
-		t.Fatalf("default = %q, want 30m", def.Default)
+	if def.Default != "off" {
+		t.Fatalf("default = %q, want off", def.Default)
 	}
 	d, enabled := SerenaIdleShutdownThreshold(def.Default)
-	if !enabled || d != 30*time.Minute {
-		t.Fatalf("default 30m must parse to 30m enabled; got (%v,%v)", d, enabled)
+	if enabled || d != 0 {
+		t.Fatalf("default off must parse to disabled; got (%v,%v)", d, enabled)
 	}
 }
 

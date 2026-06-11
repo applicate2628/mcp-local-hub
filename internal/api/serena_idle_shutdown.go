@@ -110,7 +110,7 @@ var serenaWakeReconcileFn = func(ctx context.Context, apply bool) (ReconcileResp
 // WakeIdleSerenaDaemon. Default polls the daemon's external port /mcp; tests
 // override it. Mirrors autoRegisterReadinessFn.
 var serenaWakeReadinessFn = func(port int, timeout time.Duration) error {
-	return verifyProxyReady(port, timeout)
+	return verifySerenaProxyReady(port, timeout)
 }
 
 // serenaWakeReadStopFn is the seam over the unified-intent stop read used by

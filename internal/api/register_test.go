@@ -2782,3 +2782,30 @@ func countEntries(fc *fakeClientsMap) int {
 	}
 	return n
 }
+
+func TestVerifyReadinessServerInfo_AllowsSerenaJSONAndSSE(t *testing.T) {
+	allowed := map[string]struct{}{"serena": {}}
+	jsonBody := []byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"serena","version":"1"},"capabilities":{}}}`)
+	if err := verifyReadinessServerInfo(jsonBody, allowed); err != nil {
+		t.Fatalf("JSON serena readiness rejected: %v", err)
+	}
+
+	sseBody := []byte(": ping\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"serverInfo\":{\"name\":\"Serena\"}}}\n\n")
+	if err := verifyReadinessServerInfo(sseBody, allowed); err != nil {
+		t.Fatalf("SSE serena readiness rejected: %v", err)
+	}
+}
+
+func TestVerifyReadinessServerInfo_RejectsWrongOrMissingServerName(t *testing.T) {
+	allowed := map[string]struct{}{"serena": {}}
+	for name, body := range map[string][]byte{
+		"wrong":   []byte(`{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"not-serena"}}}`),
+		"missing": []byte(`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := verifyReadinessServerInfo(body, allowed); err == nil {
+				t.Fatal("readiness without serena serverInfo.name must be rejected")
+			}
+		})
+	}
+}
