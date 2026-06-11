@@ -287,6 +287,8 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	if err != nil {
 		return "", err
 	}
+	removedSupervisorTargetsAfterInstall := removedSupervisorTargetsForServerMerge(priorIntent, desiredIntent, m.Name)
+	desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
 
 	// Required-workspace pre-commit guard (bot PR #253 r6 P2). A caller that
 	// auto-registers a SPECIFIC triggering workspace passes opts.RequireWorkspaceKey.
@@ -376,6 +378,12 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		}
 	}
 
+	// Capture live PIDs before the intent write and later reconcile nudge. Once
+	// the supervisor re-reads the merged intent, removed rows may no longer be
+	// visible through IPC status, but those already-running child processes still
+	// need a post-nudge force-kill.
+	removedSupervisorPIDByTask := supervisorOwnedLivePIDsForTargets(ctx, removedSupervisorTargetsAfterInstall)
+
 	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
 	// push — this is a read-only-ish probe that leaves no committed side
 	// effect (the temp file is removed immediately). The probe targets a
@@ -459,6 +467,16 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	}); err != nil {
 		return "", err
 	}
+	if len(removedSupervisorTargetsAfterInstall) > 0 {
+		nudgeResult := nudgeSupervisorReconcileAfterRemovedTargets(context.Background())
+		killRemovedSupervisorTargetsAfterGlobalInstall(
+			removedSupervisorTargetsAfterInstall,
+			removedSupervisorPIDByTask,
+			nudgeResult,
+			fmt.Sprintf("re-run install or `mcphub stop --force %s`", m.Name),
+			w,
+		)
+	}
 	return intentPath, nil
 }
 
@@ -503,6 +521,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	var autostartStrictMode bool
 	var removedSupervisorTargetsAfterInstall []SupervisorDaemon
 	var removedSupervisorPIDByTask map[string]int
+	nudgeResult := supervisorReconcileNudgeResult{status: supervisorReconcileNudgeSucceeded}
 
 	if superviseGlobal {
 		// The supervisor-intent flock is held ONLY across the read-merge-write
@@ -668,13 +687,19 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	// supervisor is running, print the operator hint. Only fires for the
 	// supervise-global branch that actually wrote descriptor rows.
 	if nudgeAfterInstall {
-		nudgeSupervisorReconcileAfterGlobalInstall(context.Background(), w)
+		nudgeResult = nudgeSupervisorReconcileAfterGlobalInstall(context.Background(), w)
 	}
 	// A live supervisor may still hold the removed descriptor rows in its
 	// in-memory intent cache until the reconcile nudge above refreshes it. Kill
 	// only after the nudge has had a chance to drop those rows, otherwise the
 	// child exit can look like a crash of a still-desired daemon and be respawned.
-	killRemovedSupervisorTargetsAfterGlobalInstall(removedSupervisorTargetsAfterInstall, removedSupervisorPIDByTask, w)
+	killRemovedSupervisorTargetsAfterGlobalInstall(
+		removedSupervisorTargetsAfterInstall,
+		removedSupervisorPIDByTask,
+		nudgeResult,
+		fmt.Sprintf("re-run install or `mcphub stop --force %s`", m.Name),
+		w,
+	)
 	return nil
 }
 
@@ -714,6 +739,33 @@ func warnAutostartOwner(w io.Writer, action string, err error) {
 	fmt.Fprintf(w, "  warning: supervisor autostart owner %s failed: %v (manual: mcphub autostart enable)\n", action, err)
 }
 
+type supervisorReconcileNudgeStatus int
+
+const (
+	supervisorReconcileNudgeSucceeded supervisorReconcileNudgeStatus = iota
+	supervisorReconcileNudgeIPCUnavailable
+	supervisorReconcileNudgeFailed
+)
+
+type supervisorReconcileNudgeResult struct {
+	status supervisorReconcileNudgeStatus
+	err    error
+}
+
+func (r supervisorReconcileNudgeResult) allowsRemovedTargetKill() bool {
+	return r.status == supervisorReconcileNudgeSucceeded || r.status == supervisorReconcileNudgeIPCUnavailable
+}
+
+func nudgeSupervisorReconcileApply(ctx context.Context) supervisorReconcileNudgeResult {
+	if _, err := supervisorReconcileApplyFn(ctx, true); err != nil {
+		if errors.Is(err, ErrSupervisorIPCUnavailable) {
+			return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeIPCUnavailable, err: err}
+		}
+		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeFailed, err: err}
+	}
+	return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeSucceeded}
+}
+
 // nudgeSupervisorReconcileAfterGlobalInstall asks a running supervisor to
 // reconcile so a freshly-installed global daemon spawns immediately instead of
 // waiting up to 60s for the IntentWatcher poll (which only feeds stops, not new
@@ -721,20 +773,26 @@ func warnAutostartOwner(w io.Writer, action string, err error) {
 // is running (ErrSupervisorIPCUnavailable) it tries to start the autostart owner
 // now, falling back to the operator hint if that best-effort start fails. Any
 // other reconcile error is non-fatal — the descriptor is durably on disk, so the
-// next supervisor start spawns it via the startup-path reconcile.
-func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer) {
-	if _, err := supervisorReconcileApplyFn(ctx, true); err != nil {
-		if errors.Is(err, ErrSupervisorIPCUnavailable) {
-			if startAutostartOwnerAfterUnavailableSupervisor(w) {
-				return
-			}
-			if w != nil {
-				fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
-			}
+// next supervisor start spawns it via the startup-path reconcile. The returned
+// outcome lets removed-target cleanup avoid killing a child while the
+// supervisor still has the old descriptor in memory.
+func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer) supervisorReconcileNudgeResult {
+	result := nudgeSupervisorReconcileApply(ctx)
+	if result.status == supervisorReconcileNudgeIPCUnavailable {
+		if startAutostartOwnerAfterUnavailableSupervisor(w) {
+			return result
 		}
-		// Any other reconcile error is non-fatal: the descriptor is on disk and
-		// the supervisor converges it on its next startup / watcher / reconcile.
+		if w != nil {
+			fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
+		}
 	}
+	// Any other reconcile error is non-fatal to the durable install, but callers
+	// must treat it as unsafe for removed-target force-kill.
+	return result
+}
+
+func nudgeSupervisorReconcileAfterRemovedTargets(ctx context.Context) supervisorReconcileNudgeResult {
+	return nudgeSupervisorReconcileApply(ctx)
 }
 
 func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer) bool {
@@ -792,7 +850,14 @@ func supervisorIntentHasServerLifecycleArtifacts(intent *SupervisorIntentFile, s
 }
 
 func removedSupervisorTargetsForFullInstall(prior, merged *SupervisorIntentFile, server, daemonFilter string) []SupervisorDaemon {
-	if daemonFilter != "" || prior == nil || merged == nil || server == "" {
+	if daemonFilter != "" {
+		return nil
+	}
+	return removedSupervisorTargetsForServerMerge(prior, merged, server)
+}
+
+func removedSupervisorTargetsForServerMerge(prior, merged *SupervisorIntentFile, server string) []SupervisorDaemon {
+	if prior == nil || merged == nil || server == "" {
 		return nil
 	}
 	freshTasks := make(map[string]struct{})
@@ -857,11 +922,32 @@ func supervisorOwnedLivePIDsForTargets(ctx context.Context, targets []Supervisor
 	return out
 }
 
-func killRemovedSupervisorTargetsAfterGlobalInstall(targets []SupervisorDaemon, pidByTask map[string]int, w io.Writer) {
+func killRemovedSupervisorTargetsAfterGlobalInstall(targets []SupervisorDaemon, pidByTask map[string]int, nudgeResult supervisorReconcileNudgeResult, retryPath string, w io.Writer) {
+	killRemovedSupervisorTargetsAfterNudge(targets, pidByTask, nudgeResult, retryPath, func(format string, args ...any) {
+		if w != nil {
+			fmt.Fprintf(w, "  warning: "+format+"\n", args...)
+		}
+	})
+}
+
+func killRemovedSupervisorTargetsAfterNudge(targets []SupervisorDaemon, pidByTask map[string]int, nudgeResult supervisorReconcileNudgeResult, retryPath string, warnf func(string, ...any)) {
+	if len(targets) == 0 {
+		return
+	}
+	if !nudgeResult.allowsRemovedTargetKill() {
+		if warnf != nil {
+			errText := "unknown reconcile failure"
+			if nudgeResult.err != nil {
+				errText = nudgeResult.err.Error()
+			}
+			warnf("force kill removed supervisor targets skipped because supervisor reconcile nudge failed: %s (retry: %s)", errText, retryPath)
+		}
+		return
+	}
 	for _, d := range targets {
 		result := forceKillOneSupervisorTarget(d, pidByTask)
-		if result.Err != "" && w != nil {
-			fmt.Fprintf(w, "  warning: force kill removed supervisor target %s: %s\n", d.TaskName, result.Err)
+		if result.Err != "" && warnf != nil {
+			warnf("force kill removed supervisor target %s: %s", d.TaskName, result.Err)
 		}
 	}
 }
@@ -1164,12 +1250,17 @@ func maintenanceTimerOwnedBy(tm MaintenanceTimer, server string) bool {
 // anything so the caller can skip the reconcile nudge when there was nothing
 // to remove.
 func (a *API) removeServerFromSupervisorIntent(server string) (changed bool, err error) {
+	changed, _, _, err = a.removeServerFromSupervisorIntentCore(context.Background(), server, false)
+	return changed, err
+}
+
+func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server string, captureLivePIDs bool) (changed bool, removedDaemons []SupervisorDaemon, removedPIDByTask map[string]int, err error) {
 	if server == "" {
-		return false, fmt.Errorf("removeServerFromSupervisorIntent: empty server")
+		return false, nil, nil, fmt.Errorf("removeServerFromSupervisorIntent: empty server")
 	}
 	stateDir, err := DaemonStateDir()
 	if err != nil {
-		return false, fmt.Errorf("resolve state dir: %w", err)
+		return false, nil, nil, fmt.Errorf("resolve state dir: %w", err)
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 
@@ -1182,22 +1273,23 @@ func (a *API) removeServerFromSupervisorIntent(server string) (changed bool, err
 	// body (re-entering WriteSupervisorIntent would deadlock).
 	lock := flock.New(intentPath + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
-		return false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+		return false, nil, nil, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
 	}
 	defer func() { _ = lock.Unlock() }()
 
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
-		return false, err
+		return false, nil, nil, err
 	}
 	if !existed {
-		return false, nil // no intent file → nothing to clean
+		return false, nil, nil, nil // no intent file → nothing to clean
 	}
 
 	keptDaemons := make([]SupervisorDaemon, 0, len(prior.Daemons))
 	for _, d := range prior.Daemons {
 		if supervisorIntentRowOwnedBy(d, server) {
 			changed = true
+			removedDaemons = append(removedDaemons, d)
 			continue
 		}
 		keptDaemons = append(keptDaemons, d)
@@ -1229,7 +1321,10 @@ func (a *API) removeServerFromSupervisorIntent(server string) (changed bool, err
 	}
 
 	if !changed {
-		return false, nil // this server owned nothing in the intent
+		return false, nil, nil, nil // this server owned nothing in the intent
+	}
+	if captureLivePIDs {
+		removedPIDByTask = supervisorOwnedLivePIDsForTargets(ctx, removedDaemons)
 	}
 
 	merged := &SupervisorIntentFile{
@@ -1241,9 +1336,9 @@ func (a *API) removeServerFromSupervisorIntent(server string) (changed bool, err
 		Stops:             keptStops,
 	}
 	if err := writeSupervisorIntentLockHeld(intentPath, merged); err != nil {
-		return false, fmt.Errorf("write supervisor intent %s: %w", intentPath, err)
+		return false, nil, nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, err)
 	}
-	return true, nil
+	return true, removedDaemons, removedPIDByTask, nil
 }
 
 // nudgeSupervisorReconcileAfterUninstall asks a running supervisor to
@@ -1254,8 +1349,8 @@ func (a *API) removeServerFromSupervisorIntent(server string) (changed bool, err
 // nothing is currently spawning the daemon, so there is nothing to nudge; any
 // other reconcile error is non-fatal to the uninstall. Uses the same
 // supervisorReconcileApplyFn seam as stopSupervisorOwnedDaemons.
-func nudgeSupervisorReconcileAfterUninstall(ctx context.Context) {
-	_, _ = supervisorReconcileApplyFn(ctx, true)
+func nudgeSupervisorReconcileAfterUninstall(ctx context.Context) supervisorReconcileNudgeResult {
+	return nudgeSupervisorReconcileApply(ctx)
 }
 
 // removeServerFromSupervisorIntentBestEffort is the uninstall-side wrapper
@@ -1268,7 +1363,7 @@ func nudgeSupervisorReconcileAfterUninstall(ctx context.Context) {
 // aborts the uninstall — uninstall is idempotent and must complete the
 // scheduler-task + client-entry removal regardless (bot PR #288 F1).
 func (a *API) removeServerFromSupervisorIntentBestEffort(server string, report *UninstallReport) {
-	changed, err := a.removeServerFromSupervisorIntent(server)
+	changed, removedTargets, removedPIDByTask, err := a.removeServerFromSupervisorIntentCore(context.Background(), server, true)
 	if err != nil {
 		if report != nil {
 			report.TaskDeleteWarns = append(report.TaskDeleteWarns,
@@ -1280,8 +1375,23 @@ func (a *API) removeServerFromSupervisorIntentBestEffort(server string, report *
 		// Only nudge when a descriptor was actually removed: a no-op cleanup
 		// (this server owned nothing in the intent — e.g. a remote-http or
 		// already-cleaned install) has no daemon to terminate.
-		nudgeSupervisorReconcileAfterUninstall(context.Background())
+		nudgeResult := nudgeSupervisorReconcileAfterUninstall(context.Background())
+		killRemovedSupervisorTargetsAfterUninstall(server, removedTargets, removedPIDByTask, nudgeResult, report)
 	}
+}
+
+func killRemovedSupervisorTargetsAfterUninstall(server string, targets []SupervisorDaemon, pidByTask map[string]int, nudgeResult supervisorReconcileNudgeResult, report *UninstallReport) {
+	killRemovedSupervisorTargetsAfterNudge(
+		targets,
+		pidByTask,
+		nudgeResult,
+		fmt.Sprintf("re-run uninstall or `mcphub stop --force %s`", server),
+		func(format string, args ...any) {
+			if report != nil {
+				report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf(format, args...))
+			}
+		},
+	)
 }
 
 // mergeServerWeeklyRefreshTimer is the single owner of the maintenance-timer
