@@ -17,11 +17,34 @@ package api
 import (
 	"fmt"
 	"os/user"
-	"path/filepath"
 	"strings"
 
 	"mcp-local-hub/internal/scheduler"
 )
+
+// livenessWorkingDir returns the directory portion of the canonical mcphub
+// executable path for the liveness task's <WorkingDirectory> element.
+//
+// It must NOT use filepath.Dir: path/filepath is OS-specific, so on a
+// non-Windows host filepath.Dir of a Windows-shaped path
+// ("C:\Users\…\bin\mcphub.exe") finds no '/' separator and returns "." —
+// which makes the rendered XML differ by host OS and fails the
+// cross-platform liveness test. The liveness task is a Windows-GA surface
+// (scheduler.New() returns "not implemented" on POSIX), but its XML must
+// render identically on any host so the test asserts one expected output.
+//
+// Splitting on the LAST separator of either kind ('\' or '/') yields the
+// correct parent dir for both the Windows canonical path (backslash) and
+// the POSIX canonical path (forward slash), independent of the host OS's
+// filepath separator. A path with no separator returns itself verbatim
+// (the original filepath.Dir(".")-style fallback never applied to a real
+// absolute exe path).
+func livenessWorkingDir(exePath string) string {
+	if i := strings.LastIndexAny(exePath, `\/`); i >= 0 {
+		return exePath[:i]
+	}
+	return exePath
+}
 
 // canonicalMcphubPathFn is the canonical-mcphub-path resolver used by the
 // scheduled-task install Command field. Production: thin adapter over the
@@ -82,7 +105,7 @@ func (a *API) InstallLivenessTask() error {
 	if err != nil {
 		return err
 	}
-	workingDir := filepath.Dir(canonicalExe)
+	workingDir := livenessWorkingDir(canonicalExe)
 	xmlDoc := scheduler.BuildLivenessXML(canonicalExe, workingDir, userName)
 
 	sch, err := newScheduler()

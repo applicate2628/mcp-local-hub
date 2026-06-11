@@ -2109,3 +2109,75 @@ func TestBuildMergedSupervisorIntent_FilteredInstall_PreservesSiblingStop(t *tes
 		t.Errorf("selected alpha row not refreshed from manifest: %+v", alpha)
 	}
 }
+
+// TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated is the
+// bot PR #288 F4 regression: on a FULL install (daemonFilter=="") the kept-loop
+// must drop a legacy / older-writer row whose Server field is BLANK but whose
+// canonical TaskName belongs to this server (`\mcp-local-hub-demo-alpha`). The
+// #284 fix added the TaskName fallback ONLY for the filtered path; the full
+// path matched only `d.Server == m.Name`, so a blank-Server row survived AND
+// the fresh row appended -> DUPLICATE task_name entries. supervisorIntentRowOwnedBy's
+// ParseManagedTaskName fallback closes this.
+//
+// Negative-control: revert the full-install branch to the field-only
+// `d.Server == m.Name` match and this test fails — TWO rows keyed
+// `\mcp-local-hub-demo-alpha` survive (verified by running the test against the
+// pre-fix code).
+//
+// Driven directly against buildMergedSupervisorIntent (like the filtered
+// blank-row precedent) so the assertion isolates the merge contract.
+func TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			// Legacy/older-writer row: task_name IS demo/alpha but BOTH Server
+			// AND Daemon fields are blank. The full-install field-only filter
+			// (d.Server == m.Name) cannot see this is owned by demo.
+			{TaskName: `\mcp-local-hub-demo-alpha`, Command: "stale-blank-alpha", Port: 9991},
+			// Sibling server's row must survive untouched.
+			{TaskName: `\mcp-local-hub-other-d`, Server: "other", Daemon: "d", Command: "preserve-other", Port: 9993},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := globalTwoDaemonManifest() // demo: alpha (9211) + beta (9212)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
+	}
+
+	// CORE assertion: exactly ONE row keyed to demo/alpha. Pre-fix the
+	// blank-Server stale row + the fresh row both carry this key.
+	var alphaRows []SupervisorDaemon
+	for _, d := range merged.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == `\mcp-local-hub-demo-alpha` {
+			alphaRows = append(alphaRows, d)
+		}
+	}
+	if len(alphaRows) != 1 {
+		t.Fatalf("full install produced %d rows for task \\mcp-local-hub-demo-alpha, want exactly 1 (no duplicate from the blank-Server legacy row); rows=%+v", len(alphaRows), merged.Daemons)
+	}
+	// The surviving alpha row must be the freshly materialized one.
+	if got := alphaRows[0]; got.Server != "demo" || got.Daemon != "alpha" || got.Command == "stale-blank-alpha" || got.Port != 9211 {
+		t.Errorf("surviving alpha row is stale/blank, not the fresh manifest row: %+v", got)
+	}
+
+	// Sibling server's row preserved verbatim.
+	var otherRows []SupervisorDaemon
+	for _, d := range merged.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == `\mcp-local-hub-other-d` {
+			otherRows = append(otherRows, d)
+		}
+	}
+	if len(otherRows) != 1 {
+		t.Fatalf("sibling other/d = %d rows, want exactly 1 (preserved verbatim); rows=%+v", len(otherRows), merged.Daemons)
+	}
+	if otherRows[0].Command != "preserve-other" || otherRows[0].Port != 9993 {
+		t.Errorf("sibling other/d not preserved verbatim: %+v", otherRows[0])
+	}
+}

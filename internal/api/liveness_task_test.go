@@ -111,6 +111,53 @@ func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
 	}
 }
 
+// TestLivenessWorkingDir_OSIndependent is the bot PR #288 F5 regression: the
+// liveness <WorkingDirectory> derivation must NOT use path/filepath.Dir, which
+// is OS-specific. On a non-Windows host filepath.Dir of a Windows-shaped path
+// finds no '/' separator and returns "." — so the rendered XML (and the
+// happy-path test's <WorkingDirectory> assertion) differed by host OS and the
+// test FAILED on Linux/macOS. livenessWorkingDir splits on the last separator
+// of EITHER kind, so it yields the correct parent dir for both the Windows
+// canonical path (backslash) and the POSIX canonical path (forward slash),
+// independent of the host's filepath separator.
+//
+// Negative-control: replacing livenessWorkingDir(canonicalExe) with
+// filepath.Dir(canonicalExe) in liveness_task.go makes the first case below
+// return "." on a non-Windows `go test` host — this test then fails there
+// (and TestInstallLivenessTask_HappyPath's WorkingDirectory fragment too).
+// On a Windows host filepath.Dir would still pass, which is exactly why the
+// pre-fix bug was invisible to a Windows-only CI run.
+func TestLivenessWorkingDir_OSIndependent(t *testing.T) {
+	cases := []struct {
+		name string
+		exe  string
+		want string
+	}{
+		{
+			name: "windows-backslash-path",
+			exe:  `C:\Users\test\.local\bin\mcphub.exe`,
+			want: `C:\Users\test\.local\bin`,
+		},
+		{
+			name: "posix-forward-slash-path",
+			exe:  "/home/test/.local/bin/mcphub",
+			want: "/home/test/.local/bin",
+		},
+		{
+			name: "no-separator-returns-self",
+			exe:  "mcphub.exe",
+			want: "mcphub.exe",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := livenessWorkingDir(tc.exe); got != tc.want {
+				t.Errorf("livenessWorkingDir(%q) = %q, want %q (must be host-OS-independent)", tc.exe, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestUninstallLivenessTask_DeletesByName asserts the symmetric teardown
 // deletes the LivenessTaskName via the scheduler factory seam.
 func TestUninstallLivenessTask_DeletesByName(t *testing.T) {

@@ -989,6 +989,15 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 			report.TasksDeleted = append(report.TasksDeleted, t.Name)
 		}
 	}
+	// v0.6 Phase F (bot PR #288 F1): a global daemon lives in
+	// supervisor-intent.json, not in a scheduler task — the sch.List/sch.Delete
+	// above removes NOTHING for it. Remove the server's descriptor rows,
+	// server-weekly-refresh timer, and stop entries from supervisor-intent.json
+	// (under the intent flock, preserving every sibling) and nudge a running
+	// supervisor to reconcile so the now-descriptorless daemon is terminated
+	// promptly instead of being respawned forever. Best-effort: a cleanup
+	// failure is a warning, never a hard error — uninstall is idempotent.
+	a.removeServerFromSupervisorIntentBestEffort(m.Name, report)
 	// Remove client entries — but ONLY entries that are unambiguously
 	// hub-managed. PR #94's check was too permissive: it treated any
 	// loopback HTTP URL as hub-managed, so a user's own MCP server
@@ -1134,6 +1143,10 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 			report.TasksDeleted = append(report.TasksDeleted, t.Name)
 		}
 	}
+	// v0.6 Phase F (bot PR #288 F1): also clear any supervisor-intent
+	// descriptor rows / timer / stops a retired server still owns and nudge
+	// reconcile — same symmetric cleanup as the manifest-backed path.
+	a.removeServerFromSupervisorIntentBestEffort(server, report)
 	for name, client := range clients.AllClients() {
 		if client == nil || !client.Exists() {
 			continue

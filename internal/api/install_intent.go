@@ -36,6 +36,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -192,16 +193,35 @@ func (a *API) StopWithOpts(opts StopOpts) ([]RestartResult, error) {
 	if err := a.recordStopIntent(taskNames, opts.Force); err != nil {
 		return nil, err
 	}
-	// Force skips the supervisor reconcile pass on purpose: --force
-	// records NO Desired=stopped intent (that is its documented
-	// contract — the daemon auto-revives), so a reconcile would read
-	// desired=running, post nothing, and the kill would be skipped for
-	// supervisor-owned daemons — i.e. --force would become a no-op for
-	// them. The straight kill path preserves the documented semantic:
-	// taskkill, supervisor reaper observes the non-clean exit, daemon
-	// auto-revives.
+	// Force skips the supervisor RECONCILE pass on purpose: --force records
+	// NO Desired=stopped intent (that is its documented contract — the daemon
+	// auto-revives), so a reconcile would read desired=running, post nothing,
+	// and the stop would silently no-op. Instead the force branch DIRECTLY
+	// kills both the supervisor-owned daemons (Phase F: no scheduler task —
+	// stopForceKillSupervisorOwned resolves them from supervisor-intent.json
+	// and kills by descriptor port / live PID; bot PR #288 F3) AND the legacy
+	// scheduler-task rows (stopKillCore). Both kills are non-clean exits the
+	// supervisor reaper observes and auto-revives — the documented force
+	// semantic. The supervisor-owned task names are passed to stopKillCore as
+	// the handled set so a row reached by both paths is never double-killed.
 	if opts.Force {
-		return a.stopKillCore(opts.Server, opts.DaemonFilter, nil)
+		supResults, supervisorHandled, err := stopForceKillSupervisorOwned(context.Background(), opts.Server, opts.DaemonFilter)
+		if err != nil {
+			return nil, err
+		}
+		handledTasks := schedulerBlockedRestartTaskNames(supResults)
+		killResults, err := a.stopKillCore(opts.Server, opts.DaemonFilter, handledTasks)
+		if err != nil {
+			// All-supervisor-owned install on a host with no usable scheduler
+			// (POSIX beta): the supervisor-owned kills already ran, so a
+			// scheduler-unavailable error is non-fatal — mirror the no-force
+			// stopSupervisorAwareKill tolerance.
+			if supervisorHandled && schedulerUnavailableError(err) {
+				return supResults, nil
+			}
+			return nil, err
+		}
+		return append(supResults, killResults...), nil
 	}
 	// stopSupervisorAwareKill runs the supervisor reconcile pass (spec
 	// §4 Phase A.1; the stop intent recorded above is on disk for it to

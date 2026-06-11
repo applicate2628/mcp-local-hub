@@ -25,6 +25,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -614,7 +615,41 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	// task (clears any prior stop tombstone). Failures are logged + tolerated —
 	// the install already happened.
 	a.recordInstallIntentPostSuccess(m, daemonFilter, w)
+
+	// v0.6 Phase F (bot PR #288 F2): a fresh global install only WRITES the
+	// supervisor-intent descriptor rows; nothing in this path spawns the
+	// daemon. A running supervisor's IntentWatcher does NOT pick up a NEW
+	// descriptor — its onChange handler posts EvIntentUpdate only for tasks
+	// that appear in the STOPS delta (resolveWatcherDaemonIntent →
+	// UnifiedStopsFile → diffIntentSnapshots), and a freshly-installed daemon
+	// has no stop entry, so it is never in that delta and never spawns until
+	// the next manual reconcile / GUI restart / supervisor cold-restart. Nudge
+	// the supervisor to reconcile now (it re-reads intent from disk and the
+	// drift classifier maps a sched-less running descriptor to a spawn —
+	// classifyDriftAction !hasSched + running → post_ev_intent_update). When no
+	// supervisor is running, print the operator hint. Only fires for the
+	// supervise-global branch that actually wrote descriptor rows.
+	if superviseGlobal {
+		nudgeSupervisorReconcileAfterGlobalInstall(context.Background(), w)
+	}
 	return nil
+}
+
+// nudgeSupervisorReconcileAfterGlobalInstall asks a running supervisor to
+// reconcile so a freshly-installed global daemon spawns immediately instead of
+// waiting up to 60s for the IntentWatcher poll (which only feeds stops, not new
+// descriptors — see installPlanCore F2 note). Best-effort: when no supervisor
+// is running (ErrSupervisorIPCUnavailable) it prints the operator hint to start
+// one; any other reconcile error is non-fatal — the descriptor is durably on
+// disk, so the next supervisor start spawns it via the startup-path reconcile.
+func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer) {
+	if _, err := supervisorReconcileApplyFn(ctx, true); err != nil {
+		if errors.Is(err, ErrSupervisorIPCUnavailable) && w != nil {
+			fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
+		}
+		// Any other reconcile error is non-fatal: the descriptor is on disk and
+		// the supervisor converges it on its next startup / watcher / reconcile.
+	}
 }
 
 // supervisorIntentFileLeaf is the canonical basename of the supervisor
@@ -691,9 +726,18 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 	}
 	kept := make([]SupervisorDaemon, 0, len(prior.Daemons))
 	for _, d := range prior.Daemons {
-		// Full install: drop every row this server owns.
+		// Full install: drop every row this server owns. The Server-field
+		// match alone is not sufficient — a legacy / older-writer row can
+		// carry a BLANK Server while its canonical TaskName belongs to this
+		// server (e.g. `\mcp-local-hub-demo-alpha` with Server=""). Such a
+		// row survives the field-only filter and the fresh row appends
+		// alongside it -> DUPLICATE task_name entries (the #284 fix added the
+		// TaskName fallback only for the FILTERED path; the full path needs
+		// the same robustness, bot PR #288 F4). supervisorIntentRowOwnedBy
+		// re-derives ownership from the task name via ParseManagedTaskName so
+		// a blank-Server row keyed to this server is dropped for replacement.
 		if daemonFilter == "" {
-			if d.Server == m.Name {
+			if supervisorIntentRowOwnedBy(d, m.Name) {
 				continue // replaced below
 			}
 			kept = append(kept, d)
@@ -725,6 +769,189 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		Stops: prior.Stops,
 	}
 	return merged, prior, existed, nil
+}
+
+// supervisorIntentRowOwnedBy reports whether a supervisor-intent daemon row
+// belongs to the named server. It matches on the populated Server field
+// first, then falls back to the canonical TaskName via ParseManagedTaskName
+// so a legacy / older-writer row with a BLANK Server (the same shape other
+// intent readers tolerate by re-deriving identity from the task name) is
+// still recognized as this server's row. Shared by the full-install
+// replace loop (buildMergedSupervisorIntent) and the uninstall cleanup
+// (removeServerFromSupervisorIntent) so both drop blank-Server rows
+// consistently (bot PR #288 F1 + F4).
+func supervisorIntentRowOwnedBy(d SupervisorDaemon, server string) bool {
+	if server == "" {
+		return false
+	}
+	if d.Server == server {
+		return true
+	}
+	parsedServer, _ := ParseManagedTaskName(d.TaskName)
+	return parsedServer == server
+}
+
+// maintenanceTimerOwnedBy reports whether a MaintenanceTimer belongs to the
+// named server. Like supervisorIntentRowOwnedBy it matches the populated
+// Server field first, then falls back to the timer's canonical Name (the
+// `\mcp-local-hub-<server>-weekly-refresh` task name) via ParseManagedTaskName
+// so a blank-Server legacy timer is still recognized. Used by the uninstall
+// cleanup to drop this server's server-weekly-refresh timer while preserving
+// every sibling's.
+func maintenanceTimerOwnedBy(tm MaintenanceTimer, server string) bool {
+	if server == "" {
+		return false
+	}
+	if tm.Server == server {
+		return true
+	}
+	parsedServer, _ := ParseManagedTaskName(tm.Name)
+	return parsedServer == server
+}
+
+// removeServerFromSupervisorIntent removes every supervisor-intent artifact a
+// v0.6 GLOBAL uninstall must clear for the named server: its Daemons rows, its
+// server-weekly-refresh MaintenanceTimer, and its Stops sub-block entries —
+// all under the canonical supervisor-intent flock, re-reading fresh and
+// writing back so EVERY other server's rows / timers / stops are preserved
+// verbatim (the same read-merge-fresh + write contract install uses, 4ed263d).
+//
+// Why this is needed (bot PR #288 F1): Phase F routes a global install through
+// supervisor-intent.json descriptor rows (no per-daemon scheduler task), so
+// the uninstall path's scheduler-task deletion (sch.List(prefix) + sch.Delete)
+// removes NOTHING for a v0.6 global — the descriptor survives and the
+// supervisor keeps (re)spawning the daemon forever. This is the symmetric
+// cleanup: install writes the rows, uninstall removes them.
+//
+// Ownership is matched via supervisorIntentRowOwnedBy / maintenanceTimerOwnedBy
+// / parsed Stops key, so blank-Server legacy rows keyed to this server are
+// caught too (same robustness as the F4 full-install replace loop).
+//
+// A missing intent file is a no-op (nothing to clean). Best-effort by
+// contract: the caller (Uninstall) treats a cleanup error as a warning, never
+// a hard failure — uninstall is idempotent and must remove the scheduler
+// tasks + client entries regardless. The function reports whether it changed
+// anything so the caller can skip the reconcile nudge when there was nothing
+// to remove.
+func (a *API) removeServerFromSupervisorIntent(server string) (changed bool, err error) {
+	if server == "" {
+		return false, fmt.Errorf("removeServerFromSupervisorIntent: empty server")
+	}
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return false, fmt.Errorf("resolve state dir: %w", err)
+	}
+	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+
+	// Serialize the read-merge-write as ONE critical section against every
+	// other supervisor-intent writer (install / migrate / autostart / stop),
+	// exactly as buildMergedSupervisorIntent's callers do. Holding the flock
+	// across the read AND the write means a concurrent install for a sibling
+	// server cannot interleave and clobber the other's rows. Because we hold
+	// the lock, the write uses the lock-free writeSupervisorIntentLockHeld
+	// body (re-entering WriteSupervisorIntent would deadlock).
+	lock := flock.New(intentPath + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	prior, existed, err := readSupervisorIntentForMerge(intentPath)
+	if err != nil {
+		return false, err
+	}
+	if !existed {
+		return false, nil // no intent file → nothing to clean
+	}
+
+	keptDaemons := make([]SupervisorDaemon, 0, len(prior.Daemons))
+	for _, d := range prior.Daemons {
+		if supervisorIntentRowOwnedBy(d, server) {
+			changed = true
+			continue
+		}
+		keptDaemons = append(keptDaemons, d)
+	}
+
+	keptTimers := make([]MaintenanceTimer, 0, len(prior.MaintenanceTimers))
+	for _, tm := range prior.MaintenanceTimers {
+		if maintenanceTimerOwnedBy(tm, server) {
+			changed = true
+			continue
+		}
+		keptTimers = append(keptTimers, tm)
+	}
+
+	var keptStops map[string]DaemonIntent
+	if len(prior.Stops) > 0 {
+		keptStops = make(map[string]DaemonIntent, len(prior.Stops))
+		for taskName, intent := range prior.Stops {
+			parsedServer, _ := ParseManagedTaskName(taskName)
+			if parsedServer == server {
+				changed = true
+				continue
+			}
+			keptStops[taskName] = intent
+		}
+		if len(keptStops) == 0 {
+			keptStops = nil // keep omitempty round-trip clean
+		}
+	}
+
+	if !changed {
+		return false, nil // this server owned nothing in the intent
+	}
+
+	merged := &SupervisorIntentFile{
+		Version:           1,
+		UpdatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons:           keptDaemons,
+		MaintenanceTimers: keptTimers,
+		StrictMode:        prior.StrictMode,
+		Stops:             keptStops,
+	}
+	if err := writeSupervisorIntentLockHeld(intentPath, merged); err != nil {
+		return false, fmt.Errorf("write supervisor intent %s: %w", intentPath, err)
+	}
+	return true, nil
+}
+
+// nudgeSupervisorReconcileAfterUninstall asks a running supervisor to
+// re-read supervisor-intent.json and converge — so the daemon whose
+// descriptor row removeServerFromSupervisorIntent just deleted is terminated
+// promptly instead of surviving until the next IntentWatcher poll (≤60s).
+// Best-effort: an unreachable supervisor (ErrSupervisorIPCUnavailable) means
+// nothing is currently spawning the daemon, so there is nothing to nudge; any
+// other reconcile error is non-fatal to the uninstall. Uses the same
+// supervisorReconcileApplyFn seam as stopSupervisorOwnedDaemons.
+func nudgeSupervisorReconcileAfterUninstall(ctx context.Context) {
+	_, _ = supervisorReconcileApplyFn(ctx, true)
+}
+
+// removeServerFromSupervisorIntentBestEffort is the uninstall-side wrapper
+// shared by the manifest-backed (Uninstall) and retired-manifest
+// (uninstallWithoutManifest) paths. It runs the supervisor-intent cleanup and,
+// only when the cleanup actually removed something, nudges a running
+// supervisor to reconcile so the now-descriptorless daemon is terminated
+// promptly. A cleanup error is recorded as a TaskDeleteWarns entry (the
+// closest existing report channel for managed-daemon-state removal) and never
+// aborts the uninstall — uninstall is idempotent and must complete the
+// scheduler-task + client-entry removal regardless (bot PR #288 F1).
+func (a *API) removeServerFromSupervisorIntentBestEffort(server string, report *UninstallReport) {
+	changed, err := a.removeServerFromSupervisorIntent(server)
+	if err != nil {
+		if report != nil {
+			report.TaskDeleteWarns = append(report.TaskDeleteWarns,
+				fmt.Sprintf("remove %s supervisor-intent rows: %v", server, err))
+		}
+		return
+	}
+	if changed {
+		// Only nudge when a descriptor was actually removed: a no-op cleanup
+		// (this server owned nothing in the intent — e.g. a remote-http or
+		// already-cleaned install) has no daemon to terminate.
+		nudgeSupervisorReconcileAfterUninstall(context.Background())
+	}
 }
 
 // mergeServerWeeklyRefreshTimer is the single owner of the maintenance-timer
