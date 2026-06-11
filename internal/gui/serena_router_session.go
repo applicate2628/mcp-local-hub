@@ -864,6 +864,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 
 	// Map the router's known workspace KEYS -> their PATHS (the IPC status key).
 	pathToKey := make(map[string]string, len(knownKeys))
+	pathToTaskName := make(map[string]string, len(knownKeys))
 	wantPaths := make(map[string]struct{}, len(knownKeys))
 	knownSet := make(map[string]struct{}, len(knownKeys))
 	for _, k := range knownKeys {
@@ -877,6 +878,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			continue
 		}
 		pathToKey[ws.WorkspacePath] = ws.WorkspaceKey
+		pathToTaskName[ws.WorkspacePath] = ws.TaskName
 		wantPaths[ws.WorkspacePath] = struct{}{}
 	}
 	if len(wantPaths) == 0 {
@@ -896,8 +898,10 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 
 	// Build the fresh per-workspace-PATH PID snapshot, restricted to the
 	// workspaces the router cares about.
+	now := time.Now().UTC()
 	fresh := make(map[string]int, len(wantPaths))
 	deadBackend := make(map[string]bool, len(wantPaths))
+	idleStopped := make(map[string]bool, len(wantPaths))
 	// restarting marks paths whose daemon is in the supervisor's port-stale
 	// terminate-restart window (state "Restarting"): the IPC status moves the
 	// real PID to stale_pid and reports current_pid=0 while the daemon ROW
@@ -918,6 +922,12 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		// Last writer wins if the status somehow lists a workspace twice; the
 		// supervisor emits one row per daemon so this is the daemon's PID.
 		fresh[row.Workspace] = row.PID
+		taskName := row.TaskName
+		if taskName == "" {
+			taskName = pathToTaskName[row.Workspace]
+		} else {
+			pathToTaskName[row.Workspace] = taskName
+		}
 		// A port-stale Restarting daemon: the daemon is ALIVE but its port
 		// ownership could not be reverified, so the supervisor parks the real
 		// PID in StalePID, reports current_pid=0, sets state "Restarting", and
@@ -945,6 +955,10 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			restarting[row.Workspace] = true
 		}
 		if row.PID == 0 && row.StalePID == 0 && !strings.EqualFold(row.State, "Running") {
+			if serenaTaskHasActiveIdleStop(taskName, now) {
+				idleStopped[row.Workspace] = true
+				continue
+			}
 			deadBackend[row.Workspace] = true
 		}
 	}
@@ -954,6 +968,10 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	if prior == nil {
 		prior = map[string]int{}
 	}
+	priorIdle := s.serenaBackendIdlePaths
+	if priorIdle == nil {
+		priorIdle = map[string]bool{}
+	}
 	// persisted is the snapshot the next tick compares against. It starts as the
 	// fresh per-PATH PIDs; transient Restarting rows carry the prior real PID
 	// forward (below) instead of persisting their 0.
@@ -961,11 +979,16 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	for path, pid := range fresh {
 		persisted[path] = pid
 	}
+	persistedIdle := make(map[string]bool, len(wantPaths))
 	var lost []string // workspace KEYS whose backend was lost this tick
 	for path := range wantPaths {
 		newPID, present := fresh[path]
 		oldPID, hadPrior := prior[path]
 		deadNow := present && deadBackend[path]
+		idleNow := idleStopped[path]
+		if !present && serenaTaskHasActiveIdleStop(pathToTaskName[path], now) {
+			idleNow = true
+		}
 		if !hadPrior {
 			// First observation of this workspace normally establishes a
 			// baseline. Two PID-0 cases are exceptions: a port-stale Restarting
@@ -974,6 +997,11 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			// to a non-live backend.
 			if present && restarting[path] {
 				delete(persisted, path)
+				continue
+			}
+			if idleNow {
+				delete(persisted, path)
+				persistedIdle[path] = true
 				continue
 			}
 			if deadNow {
@@ -993,6 +1021,11 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			persisted[path] = oldPID
 			continue
 		}
+		if idleNow {
+			persisted[path] = oldPID
+			persistedIdle[path] = true
+			continue
+		}
 		if deadNow {
 			lost = append(lost, pathToKey[path])
 			delete(persisted, path)
@@ -1007,6 +1040,16 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			continue
 		}
 		if newPID != oldPID {
+			// An intentional idle wake always respawns the daemon into a new OS
+			// PID. If the previous tick classified this path as idle-stopped, the
+			// first running PID is the wake generation the still-live router session
+			// is now valid against (the request path re-handshakes the daemon
+			// session). Refresh the baseline once instead of declaring backend
+			// loss; a later crash/stop is no longer idle-marked and tears down.
+			if priorIdle[path] && newPID != 0 {
+				persisted[path] = newPID
+				continue
+			}
 			lost = append(lost, pathToKey[path])
 		}
 	}
@@ -1016,6 +1059,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// a spurious loss. Transient Restarting rows carry the prior real PID
 	// (handled above) rather than their transient 0.
 	s.serenaBackendLastPID = persisted
+	s.serenaBackendIdlePaths = persistedIdle
 	s.serenaBackendPIDMu.Unlock()
 
 	total := 0

@@ -200,16 +200,22 @@ var serenaStopReadCache struct {
 	valid bool
 }
 
-// readSerenaUnifiedStopForTask returns the current stop directive for the
-// canonical taskName from the UNIFIED supervisor-intent.json stops sub-block
-// (the SOLE stop source after Phase 4-E2 — UnifiedStopsFile). A missing intent
-// file or absent entry returns the zero DaemonIntent (Desired==""), which
-// IsActiveStop treats as "not a stop" (default-running). Read-only.
+// ReadSerenaUnifiedStopForTask returns the current stop directive for taskName
+// from the UNIFIED supervisor-intent.json stops sub-block via the same
+// mtime/size-keyed cache WakeIdleSerenaDaemon uses. A missing intent file or
+// absent entry returns the zero DaemonIntent (Desired==""), which IsActiveStop
+// treats as "not a stop" (default-running). Read-only.
 //
 // FIX-5: it consults serenaStopReadCache. On a cache hit (file (mtime,size)
 // unchanged since the last read) it returns the cached entry WITHOUT a parse; on
 // a miss (or first call, or a changed stat) it re-reads+parses and refreshes the
 // cache under serenaStopReadCache.mu.
+func ReadSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
+	return readSerenaUnifiedStopForTask(canonicalIntentTaskKey(taskName))
+}
+
+// readSerenaUnifiedStopForTask expects a canonical taskName and implements the
+// cached stop read behind ReadSerenaUnifiedStopForTask.
 func readSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
 	path, err := DefaultSupervisorIntentPath()
 	if err != nil {

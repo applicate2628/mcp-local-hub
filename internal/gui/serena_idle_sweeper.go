@@ -164,6 +164,18 @@ func (s *Server) hasSerenaForwardInFlight(wsKey string) bool {
 	return s.serenaInFlight[wsKey] > 0
 }
 
+func serenaTaskHasActiveIdleStop(taskName string, now time.Time) bool {
+	if taskName == "" {
+		return false
+	}
+	stop, err := api.ReadSerenaUnifiedStopForTask(taskName)
+	if err != nil {
+		return false
+	}
+	active, reason := stop.IsActiveStop(now.UTC())
+	return active && reason == api.IntentReasonIdle
+}
+
 // SweepIdleSerenaDaemons is the per-tick idle-shutdown sweep (spec §6 #6). It
 // stops every RUNNING serena pool daemon that has been idle longer than the
 // operator-configured threshold by writing Desired=stopped+IntentReasonIdle on
@@ -275,6 +287,9 @@ func (s *Server) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int 
 		// Drop the activity baseline so a stale timestamp does not linger for a
 		// now-stopped daemon. The wake re-establishes it on the next call.
 		s.dropSerenaActivity(sr.key)
+		if serenaTaskHasActiveIdleStop(sr.taskName, now) {
+			s.serenaDaemonSessions.unbindWorkspace(sr.key)
+		}
 		stopped++
 		_ = api.LogHubMcpEvent("info", "serena-idle-stopped", map[string]any{
 			"task_name":      sr.taskName,

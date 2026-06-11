@@ -76,14 +76,14 @@ func (realStatusProvider) Status() ([]api.DaemonStatus, error) {
 // of stale `daemon-state` deltas.
 //
 // The fix has two complementary effects on the Dashboard banner:
-//   1. By OMISSION — the poller no longer emits banner-CLEARING
-//      `daemon-state` deltas on a down supervisor, so onDelta's
-//      setError(null) can no longer wipe the degraded banner.
-//   2. By POSITIVE SIGNAL — the Dashboard subscribes to `poller-error`
-//      (Dashboard.tsx useEventSource map) and calls setError(...), so a
-//      down supervisor surfaces the banner within one poll cycle (5s)
-//      rather than waiting up to 30s for the separate `/api/status` 500
-//      poll. (The 30s HTTP poll remains the durable backstop.)
+//  1. By OMISSION — the poller no longer emits banner-CLEARING
+//     `daemon-state` deltas on a down supervisor, so onDelta's
+//     setError(null) can no longer wipe the degraded banner.
+//  2. By POSITIVE SIGNAL — the Dashboard subscribes to `poller-error`
+//     (Dashboard.tsx useEventSource map) and calls setError(...), so a
+//     down supervisor surfaces the banner within one poll cycle (5s)
+//     rather than waiting up to 30s for the separate `/api/status` 500
+//     poll. (The 30s HTTP poll remains the durable backstop.)
 //
 // DaemonStatusSnapshot derives its own bounded IPC deadline internally,
 // so context.Background() here matches the prior api.Status() ctx
@@ -543,6 +543,11 @@ type Server struct {
 	// reconcile goroutine + its tests; guarded so a future caller is safe.
 	serenaBackendPIDMu   sync.Mutex
 	serenaBackendLastPID map[string]int
+	// serenaBackendIdlePaths marks workspace paths that the previous reconcile
+	// tick classified as intentionally idle-stopped. The first running PID after
+	// that phase is a wake respawn, not backend loss, so reconcile refreshes the
+	// baseline once and then clears this marker. Guarded by serenaBackendPIDMu.
+	serenaBackendIdlePaths map[string]bool
 
 	// v0.6 idle-shutdown (#6, spec §6) per-daemon LAST-ACTIVITY tracking.
 	// serenaActivityMu guards serenaLastActivity: WorkspaceKey -> the wall

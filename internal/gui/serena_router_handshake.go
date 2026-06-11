@@ -442,6 +442,28 @@ func (st *daemonSessionStore) unbind(clientSessionID string) {
 	st.removeLocked(clientSessionID)
 }
 
+// unbindWorkspace drops only daemon-session bindings for wsKey. It is used when
+// the idle sweeper intentionally stops a workspace daemon: the router session
+// and sticky workspace binding survive for transparent wake, but the upstream
+// daemon session id belongs to the old process generation and must be
+// re-handshaken on the next request.
+func (st *daemonSessionStore) unbindWorkspace(wsKey string) int {
+	if wsKey == "" {
+		return 0
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	n := 0
+	for id, b := range st.bindings {
+		if b == nil || b.workspaceKey != wsKey {
+			continue
+		}
+		st.removeLocked(id)
+		n++
+	}
+	return n
+}
+
 // bindingFor returns the (workspaceKey, daemonSessionID, daemonProtocolVersion)
 // bound to clientSessionID, or ok=false when there is none. Unlike lookup it
 // does NOT refresh lastSeen, expire-on-read, or filter by workspace — it is
