@@ -1678,7 +1678,12 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	if port == 0 || server == "" || daemon == "" {
 		return false
 	}
-	stateDir, err := DaemonStateDir()
+	// Read-only resolver: this ownership probe runs inside Preflight, which a
+	// --dry-run also exercises on a port collision — DaemonStateDir would
+	// MkdirAll the state directory on a first-run host as a dry-run side
+	// effect (bot PR #288 r23). A missing dir simply means no intent file →
+	// the read below fails → false (the normal collision error stands).
+	stateDir, err := daemonStateDirReadOnly()
 	if err != nil {
 		return false
 	}
