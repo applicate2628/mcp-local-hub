@@ -17,6 +17,20 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+// fakeMcphubIdentityForTest stubs processIdentityByPID to report every PID as
+// an mcphub.exe image. The PR #290 identity gate fails CLOSED when a wired
+// probe returns !ok, and on a Windows test host the production probe IS wired
+// — a real lookup of a synthetic test PID would refuse the kill and turn these
+// kill-path tests into probes of the host's process table.
+func fakeMcphubIdentityForTest(t *testing.T) {
+	t.Helper()
+	orig := processIdentityByPID
+	processIdentityByPID = func(int) (string, string, bool) {
+		return mcphubProcessImageName, mcphubProcessImageName, true
+	}
+	t.Cleanup(func() { processIdentityByPID = orig })
+}
+
 func assertSupervisorIntentFlockAvailableDuringIPCStatus(t *testing.T, stateDir string) {
 	t.Helper()
 	probe := flock.New(filepath.Join(stateDir, supervisorIntentFileLeaf) + supervisorIntentLockSuffix)
@@ -33,6 +47,7 @@ func assertSupervisorIntentFlockAvailableDuringIPCStatus(t *testing.T, stateDir 
 }
 
 func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge(t *testing.T) {
+	fakeMcphubIdentityForTest(t)
 	stateDir := phaseFStateDir(t)
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 	seed := &SupervisorIntentFile{
@@ -89,6 +104,7 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 }
 
 func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing.T) {
+	fakeMcphubIdentityForTest(t)
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	installFakeScheduler(t, newInstallFakeScheduler())
@@ -176,6 +192,7 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 		{name: "hard nudge failure skips kill", nudgeErr: errors.New("synthetic reconcile scheduler-list timeout"), wantWarn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			fakeMcphubIdentityForTest(t)
 			stateDir := daemonIntentTestHelper(t)
 			preparePreflightBinaryChecks(t)
 			installFakeScheduler(t, newInstallFakeScheduler())
