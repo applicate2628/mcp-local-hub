@@ -2287,6 +2287,7 @@ func TestInstallPlanCore_GlobalFilteredInstall_ReplacesOnlySelectedDaemon(t *tes
 }
 
 func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *testing.T) {
+	fakeMcphubIdentityForTest(t)
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	f := newInstallFakeScheduler()
@@ -2325,12 +2326,23 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 
 	var killPorts []int
 	origForceKill := forceKillByPortFn
+	origLookup := lookupProcess
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		order = append(order, "kill-port")
 		killPorts = append(killPorts, port)
-		return portKillLookupUnavailable, nil
+		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
+		return portKillNoListener, nil
 	}
-	t.Cleanup(func() { forceKillByPortFn = origForceKill })
+	lookupProcess = func(port int) (int, uint64, int64, bool) {
+		if port != 9322 {
+			t.Fatalf("lookupProcess port = %d, want 9322", port)
+		}
+		return 0, 0, 0, false
+	}
+	t.Cleanup(func() {
+		forceKillByPortFn = origForceKill
+		lookupProcess = origLookup
+	})
 
 	var killedPIDs []int
 	origPID := stopForceKillPIDFn
@@ -2377,11 +2389,11 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			t.Fatalf("removed daemon %s survived merged intent: %+v", betaTask, written.Daemons)
 		}
 	}
-	// Lane A inverted the kill preference: the captured supervisor-reported
-	// PID (4244) is killed FIRST and the port path is never consulted when a
-	// live PID snapshot exists.
+	// The captured supervisor-reported PID (4244) is killed first. The
+	// descriptor port is only polled for release; it must not fall through to a
+	// blind port kill because the removed row's port may already be reused.
 	if len(killPorts) != 0 {
-		t.Fatalf("forceKillByPortFn ports = %v, want none (PID-first kill must not fall through to the port path)", killPorts)
+		t.Fatalf("forceKillByPortFn ports = %v, want none after the PID kill", killPorts)
 	}
 	if len(killedPIDs) != 1 || killedPIDs[0] != 4244 {
 		t.Fatalf("PID kills = %v, want exactly [4244]", killedPIDs)
@@ -2532,6 +2544,47 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		}
 		if len(killed) != 1 || killed[0] != 9313 {
 			t.Fatalf("forceKillByPortFn ports = %v, want only the listed legacy task port [9313]", killed)
+		}
+	})
+
+	t.Run("hyphenated daemon name uses exact manifest match for port kill", func(t *testing.T) {
+		daemonIntentTestHelper(t)
+		f := newInstallFakeScheduler()
+		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-vscode-css`}}
+		installFakeScheduler(t, f)
+
+		origLookup := lookupProcess
+		lookupProcess = nil
+		t.Cleanup(func() { lookupProcess = origLookup })
+
+		var killed []int
+		origKill := forceKillByPortFn
+		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+			if len(f.deleteNames) == 0 {
+				t.Errorf("forceKillByPortFn called before deleting the legacy scheduler task")
+			}
+			killed = append(killed, port)
+			return portKillKilled, nil
+		}
+		t.Cleanup(func() { forceKillByPortFn = origKill })
+
+		m := &config.ServerManifest{
+			Name:      "demo",
+			Kind:      config.KindGlobal,
+			Transport: config.TransportStdioBridge,
+			Command:   "go",
+			Daemons: []config.DaemonSpec{
+				{Name: "vscode-css", Port: 33017},
+			},
+		}
+		var buf bytes.Buffer
+		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
+
+		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-vscode-css" {
+			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-vscode-css]", f.deleteNames)
+		}
+		if len(killed) != 1 || killed[0] != 33017 {
+			t.Fatalf("forceKillByPortFn ports = %v, want hyphenated daemon port [33017]", killed)
 		}
 	})
 
@@ -2932,5 +2985,70 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated(t *
 	}
 	if otherRows[0].Command != "preserve-other" || otherRows[0].Port != 9993 {
 		t.Errorf("sibling other/d not preserved verbatim: %+v", otherRows[0])
+	}
+}
+
+// TestBuildMergedSupervisorIntent_FullInstall_BlankServerHyphenatedDaemonRowNotDuplicated
+// is the bot PR #288 r19 F1 regression: legacy blank-Server rows must be
+// matched by the manifest server prefix, not by ParseManagedTaskName's
+// last-hyphen split. A row for server demo / daemon alpha-beta used to parse as
+// server demo-alpha / daemon beta, so a full reinstall preserved the stale row
+// and appended a duplicate fresh descriptor.
+//
+// Negative-control: with the ParseManagedTaskName fallback this test fails with
+// two rows keyed \mcp-local-hub-demo-alpha-beta.
+func TestBuildMergedSupervisorIntent_FullInstall_BlankServerHyphenatedDaemonRowNotDuplicated(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Command: "stale-blank-alpha-beta", Port: 9991},
+			{TaskName: `\mcp-local-hub-other-alpha-beta`, Server: "other", Daemon: "alpha-beta", Command: "preserve-other", Port: 9993},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha-beta", Port: 33013},
+		},
+	}
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
+	}
+
+	var alphaBetaRows []SupervisorDaemon
+	for _, d := range merged.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == `\mcp-local-hub-demo-alpha-beta` {
+			alphaBetaRows = append(alphaBetaRows, d)
+		}
+	}
+	if len(alphaBetaRows) != 1 {
+		t.Fatalf("full install produced %d rows for task \\mcp-local-hub-demo-alpha-beta, want exactly 1; rows=%+v", len(alphaBetaRows), merged.Daemons)
+	}
+	if got := alphaBetaRows[0]; got.Server != "demo" || got.Daemon != "alpha-beta" || got.Command == "stale-blank-alpha-beta" || got.Port != 33013 {
+		t.Errorf("surviving alpha-beta row is stale/blank, not the fresh manifest row: %+v", got)
+	}
+
+	var otherRows []SupervisorDaemon
+	for _, d := range merged.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == `\mcp-local-hub-other-alpha-beta` {
+			otherRows = append(otherRows, d)
+		}
+	}
+	if len(otherRows) != 1 {
+		t.Fatalf("sibling other/alpha-beta = %d rows, want exactly 1 (preserved verbatim); rows=%+v", len(otherRows), merged.Daemons)
+	}
+	if otherRows[0].Command != "preserve-other" || otherRows[0].Port != 9993 {
+		t.Errorf("sibling other/alpha-beta not preserved verbatim: %+v", otherRows[0])
 	}
 }

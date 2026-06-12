@@ -27,6 +27,8 @@ func resetUpgradeSeams(t *testing.T) {
 	origStop := upgradeStopAllFn
 	origBoot := upgradeBootstrapFn
 	origRestart := upgradeRestartAllFn
+	origRestartTasks := upgradeRestartTasksFn
+	origInstall := upgradeInstallServerFn
 	origExec := upgradeExecutableFn
 	origTarget := upgradeTargetPathFn
 	origFindGUI := findRunningGUIsOnTargetFn
@@ -35,6 +37,8 @@ func resetUpgradeSeams(t *testing.T) {
 		upgradeStopAllFn = origStop
 		upgradeBootstrapFn = origBoot
 		upgradeRestartAllFn = origRestart
+		upgradeRestartTasksFn = origRestartTasks
+		upgradeInstallServerFn = origInstall
 		upgradeExecutableFn = origExec
 		upgradeTargetPathFn = origTarget
 		findRunningGUIsOnTargetFn = origFindGUI
@@ -43,6 +47,8 @@ func resetUpgradeSeams(t *testing.T) {
 	upgradeStopAllFn = nil
 	upgradeBootstrapFn = nil
 	upgradeRestartAllFn = nil
+	upgradeRestartTasksFn = nil
+	upgradeInstallServerFn = nil
 	upgradeExecutableFn = nil
 	upgradeTargetPathFn = nil
 	// Default the dev-build guard seam to a valid semver so existing

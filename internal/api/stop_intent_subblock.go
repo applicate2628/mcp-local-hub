@@ -129,12 +129,20 @@ func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) 
 // only meaningful for idle. `now` is the evaluation clock for IsActiveStop
 // (production passes time.Now().UTC()).
 func (a *API) WriteStopIntentIdleGuarded(taskName string, intent DaemonIntent, who string, now time.Time) error {
+	_, err := a.WriteStopIntentIdleGuardedResult(taskName, intent, who, now)
+	return err
+}
+
+// WriteStopIntentIdleGuardedResult is the bool-returning form used by callers
+// that must distinguish an actually written idle stop from a guarded refusal.
+// The returned bool is true only when the stops sub-block changed.
+func (a *API) WriteStopIntentIdleGuardedResult(taskName string, intent DaemonIntent, who string, now time.Time) (bool, error) {
 	if len(who) > IdentityFieldByteCap {
-		return ErrEntryOversize
+		return false, ErrEntryOversize
 	}
 	taskName = canonicalIntentTaskKey(taskName)
 	if len(taskName) > IdentityFieldByteCap {
-		return ErrEntryOversize
+		return false, ErrEntryOversize
 	}
 
 	intent.UpdatedAt = intent.UpdatedAt.UTC()
@@ -167,14 +175,14 @@ func (a *API) WriteStopIntentIdleGuarded(taskName string, intent DaemonIntent, w
 		}
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if changed {
 		emitStopIntentAudit(before, after, taskName, who, intent.Reason)
 	} else if refused != nil {
 		emitIdleStopRefusedAudit(refused, taskName, who)
 	}
-	return nil
+	return changed, nil
 }
 
 // ClearStopIntentIfReason is the compare-and-clear stop clearer (FIX-2b). It

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -577,6 +578,150 @@ func TestWakeIdleSerenaDaemon_Idle_ReadinessTimeout_StopStillCleared(t *testing.
 	}
 	if _, ok := ReadSupervisorIntentForTest(t, stateDir).Stops[task]; ok {
 		t.Fatalf("idle stop must already be cleared even when readiness times out (the daemon IS coming up)")
+	}
+}
+
+func TestWakeIdleSerenaDaemon_IPCUnavailableRestoresIdleStopAndNextWakeRetries(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Now().UTC()
+	task := `\mcp-local-hub-serena-ipc-down`
+	if err := NewAPI().WriteSerenaIdleStop(task, now); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+
+	var reconcileCalls int32
+	origRec, origReady := serenaWakeReconcileFn, serenaWakeReadinessFn
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		atomic.AddInt32(&reconcileCalls, 1)
+		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	}
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error {
+		t.Fatal("readiness must not run when the supervisor IPC nudge is unavailable")
+		return nil
+	}
+	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
+
+	a := NewAPI()
+	err := a.WakeIdleSerenaDaemon(context.Background(), task, 9301, "tester")
+	if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+		t.Fatalf("wake error = %v, want ErrSupervisorIPCUnavailable", err)
+	}
+	if got := ReadSupervisorIntentForTest(t, stateDir).Stops[task]; got.Reason != IntentReasonIdle {
+		t.Fatalf("idle stop was not restored after IPC-unavailable nudge; got %+v", got)
+	}
+
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		atomic.AddInt32(&reconcileCalls, 1)
+		return ReconcileResponse{}, nil
+	}
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error { return nil }
+	if err := a.WakeIdleSerenaDaemon(context.Background(), task, 9301, "tester"); err != nil {
+		t.Fatalf("second wake should retry the restored idle stop and succeed; got %v", err)
+	}
+	if atomic.LoadInt32(&reconcileCalls) != 2 {
+		t.Fatalf("reconcile calls = %d, want 2 (second wake retried instead of fast no-op)", reconcileCalls)
+	}
+	if _, ok := ReadSupervisorIntentForTest(t, stateDir).Stops[task]; ok {
+		t.Fatalf("idle stop should be cleared after the successful retry")
+	}
+}
+
+func TestWakeIdleSerenaDaemon_IPCUnavailableRestoreDoesNotClobberOperatorStop(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	var captured []IntentAuditEntry
+	installTestAuditFn(t, &captured, nil)
+
+	now := time.Now().UTC()
+	task := `\mcp-local-hub-serena-operator-race`
+	a := NewAPI()
+	if err := a.WriteSerenaIdleStop(task, now); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	captured = nil
+
+	origRec, origReady := serenaWakeReconcileFn, serenaWakeReadinessFn
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		if err := a.WriteStopIntent(task, DaemonIntent{
+			Desired:   IntentDesiredStopped,
+			Reason:    IntentReasonUserStop,
+			UpdatedAt: now.Add(time.Minute),
+		}, "operator"); err != nil {
+			t.Fatalf("operator stop during wake: %v", err)
+		}
+		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	}
+	serenaWakeReadinessFn = func(context.Context, string, int, time.Duration) error {
+		t.Fatal("readiness must not run when the supervisor IPC nudge is unavailable")
+		return nil
+	}
+	t.Cleanup(func() { serenaWakeReconcileFn, serenaWakeReadinessFn = origRec, origReady })
+
+	err := a.WakeIdleSerenaDaemon(context.Background(), task, 9302, "tester")
+	if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+		t.Fatalf("wake error = %v, want ErrSupervisorIPCUnavailable", err)
+	}
+	got := ReadSupervisorIntentForTest(t, stateDir).Stops[task]
+	if got.Reason != IntentReasonUserStop {
+		t.Fatalf("operator stop was clobbered by idle restore; got %+v", got)
+	}
+	foundRefusal := false
+	for _, entry := range captured {
+		if entry.Action == "idle-stop-refused-operator-stop-active" && entry.Task == task {
+			foundRefusal = true
+			break
+		}
+	}
+	if !foundRefusal {
+		t.Fatalf("restore did not use the idle-guarded writer; audit entries=%+v", captured)
+	}
+}
+
+func TestWakeIdleSerenaDaemon_FollowerIPCUnavailableDoesNotRestoreStaleIdleStop(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Now().UTC()
+	task := `\mcp-local-hub-serena-follower-race`
+	taskKey := canonicalIntentTaskKey(task)
+	a := NewAPI()
+	a.serenaWakeInFlightMu.Lock()
+	a.serenaWakeInFlight = map[string]bool{taskKey: true}
+	a.serenaWakeInFlightMu.Unlock()
+
+	withWakeSeams(t,
+		func(gotTask string) (DaemonIntent, error) {
+			if gotTask != taskKey {
+				t.Fatalf("readStop task = %q, want %q", gotTask, taskKey)
+			}
+			return DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonIdle, UpdatedAt: now}, nil
+		},
+		func(context.Context, bool) (ReconcileResponse, error) {
+			return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+		},
+		func(context.Context, string, int, time.Duration) error {
+			t.Fatal("readiness must not run when the supervisor IPC nudge is unavailable")
+			return nil
+		},
+	)
+
+	err := a.WakeIdleSerenaDaemon(context.Background(), task, 9303, "tester")
+	if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+		t.Fatalf("wake error = %v, want ErrSupervisorIPCUnavailable", err)
+	}
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	got, readErr := ReadSupervisorIntent(intentPath)
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
+			return
+		}
+		t.Fatalf("ReadSupervisorIntent(%s): %v", intentPath, readErr)
+	}
+	if _, ok := got.Stops[taskKey]; ok {
+		t.Fatalf("follower restored stale idle stop despite not owning the clear: %+v", got.Stops)
 	}
 }
 

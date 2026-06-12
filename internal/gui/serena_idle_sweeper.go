@@ -51,12 +51,12 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// serenaIdleStopFn is the seam over api.(*API).WriteSerenaIdleStop the sweeper
-// uses to record the idle stop. Production wires it (SetSerenaIdleShutdownFns)
+// serenaIdleStopFn is the seam over api.(*API).WriteSerenaIdleStopResult the
+// sweeper uses to record the idle stop. Production wires it (SetSerenaIdleShutdownFns)
 // to a live api.API; tests inject a fake to assert the exact (taskName) it is
 // called with WITHOUT touching the real state dir. A nil seam disables the
 // stop-write half of the sweep (the GUI is unwired).
-var serenaIdleStopFn func(taskName string, now time.Time) error
+var serenaIdleStopFn func(taskName string, now time.Time) (bool, error)
 
 // serenaIdleThresholdFn is the seam over the GUI-settable threshold read.
 // Production reads daemons.serena_idle_shutdown via api.(*API).SettingsGet and
@@ -68,7 +68,7 @@ var serenaIdleThresholdFn func() (time.Duration, bool)
 // idle sweeper uses. CLI boot (internal/cli/gui.go) calls it with a live
 // api.API-backed threshold reader + stop writer. Passing nil for either
 // disables that half (the sweep is then a no-op for the missing half).
-func SetSerenaIdleShutdownFns(threshold func() (time.Duration, bool), stop func(taskName string, now time.Time) error) {
+func SetSerenaIdleShutdownFns(threshold func() (time.Duration, bool), stop func(taskName string, now time.Time) (bool, error)) {
 	serenaIdleThresholdFn = threshold
 	serenaIdleStopFn = stop
 }
@@ -273,7 +273,8 @@ func (s *Server) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int 
 			continue // mid-call / recently active / freshly spawned — keep alive.
 		}
 
-		if err := stopFn(sr.taskName, now); err != nil {
+		wrote, err := stopFn(sr.taskName, now)
+		if err != nil {
 			// Non-fatal: a transient stop-write failure is retried next tick.
 			// Emit a best-effort audit so the failure is diagnosable.
 			_ = api.LogHubMcpEvent("warn", "serena-idle-stop-failed", map[string]any{
@@ -281,6 +282,15 @@ func (s *Server) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int 
 				"workspace_key": sr.key,
 				"idle_secs":     int(idleFor / time.Second),
 				"err":           err.Error(),
+			})
+			continue
+		}
+		if !wrote {
+			_ = api.LogHubMcpEvent("info", "serena-idle-skipped-operator-stop-active", map[string]any{
+				"task_name":      sr.taskName,
+				"workspace_key":  sr.key,
+				"idle_secs":      int(idleFor / time.Second),
+				"threshold_secs": int(threshold / time.Second),
 			})
 			continue
 		}

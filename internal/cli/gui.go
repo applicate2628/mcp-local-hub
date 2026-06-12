@@ -321,8 +321,8 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			}
 			return api.SerenaIdleShutdownThreshold(v)
 		},
-		func(taskName string, now time.Time) error {
-			return api.NewAPI().WriteSerenaIdleStop(taskName, now)
+		func(taskName string, now time.Time) (bool, error) {
+			return api.NewAPI().WriteSerenaIdleStopResult(taskName, now)
 		},
 	)
 	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})

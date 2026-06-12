@@ -907,12 +907,11 @@ func nudgeSupervisorReconcileApply(ctx context.Context) supervisorReconcileNudge
 func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer) supervisorReconcileNudgeResult {
 	result := nudgeSupervisorReconcileApply(ctx)
 	if result.status == supervisorReconcileNudgeIPCUnavailable {
-		if startAutostartOwnerAfterUnavailableSupervisor(w) {
-			return result
+		recovery := startAutostartOwnerAfterUnavailableSupervisor(w, result.err)
+		if recovery.status == supervisorReconcileNudgeFailed {
+			return recovery
 		}
-		if w != nil {
-			fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
-		}
+		return result
 	}
 	// Any other reconcile error is non-fatal to the durable install, but callers
 	// must treat it as unsafe for removed-target force-kill.
@@ -923,31 +922,41 @@ func nudgeSupervisorReconcileAfterRemovedTargets(ctx context.Context) supervisor
 	return nudgeSupervisorReconcileApply(ctx)
 }
 
-func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer) bool {
+func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer, ipcErr error) supervisorReconcileNudgeResult {
 	stateDir, err := DaemonStateDir()
 	if err != nil {
 		warnAutostartOwner(w, "resolve state dir before start", err)
-		return false
+		warnNoRunningSupervisor(w)
+		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeIPCUnavailable, err: ipcErr}
 	}
 	running, pid, err := installSupervisorRunningProbeFn(stateDir)
 	if err != nil {
 		warnAutostartOwner(w, "probe supervisor before start", err)
-		return false
+		warnNoRunningSupervisor(w)
+		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeIPCUnavailable, err: ipcErr}
 	}
 	if running {
 		if w != nil {
-			fmt.Fprintf(w, "  supervisor already running (pid=%d); autostart owner start skipped.\n", pid)
+			fmt.Fprintf(w, "  warning: supervisor lock is held by pid=%d, but IPC is unreachable; likely a hung listener or a supervisor started with --no-ipc. Run `mcphub restart`, or kill the wedged process if restart cannot reach it.\n", pid)
 		}
-		return true
+		err := fmt.Errorf("supervisor lock is held by pid=%d but IPC is unreachable: %w", pid, ipcErr)
+		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeFailed, err: err}
 	}
 	if err := installAutostartOwnerStartFn(); err != nil {
 		warnAutostartOwner(w, "start", err)
-		return false
+		warnNoRunningSupervisor(w)
+		return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeIPCUnavailable, err: ipcErr}
 	}
 	if w != nil {
 		fmt.Fprintln(w, "  supervisor autostart owner started; installed daemons will reconcile shortly.")
 	}
-	return true
+	return supervisorReconcileNudgeResult{status: supervisorReconcileNudgeIPCUnavailable, err: ipcErr}
+}
+
+func warnNoRunningSupervisor(w io.Writer) {
+	if w != nil {
+		fmt.Fprintln(w, "Note: no running supervisor — the installed daemon will start on the next `mcphub supervise` (or via the autostart task on next logon).")
+	}
 }
 
 func supervisorIntentHasServerDaemonRows(intent *SupervisorIntentFile, server string) bool {
@@ -1185,12 +1194,13 @@ func daemonPortForLegacySchedulerTask(m *config.ServerManifest, taskName string)
 	if m == nil {
 		return 0
 	}
-	server, daemon := ParseManagedTaskName(taskName)
-	if server != m.Name || daemon == "" {
+	name := strings.TrimPrefix(taskName, "\\")
+	if name == "" {
 		return 0
 	}
+	const prefix = "mcp-local-hub-"
 	for _, d := range m.Daemons {
-		if d.Name == daemon {
+		if name == prefix+m.Name+"-"+d.Name {
 			return d.Port
 		}
 	}
@@ -1363,10 +1373,16 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 
 // supervisorIntentRowOwnedBy reports whether a supervisor-intent daemon row
 // belongs to the named server. It matches on the populated Server field
-// first, then falls back to the canonical TaskName via ParseManagedTaskName
-// so a legacy / older-writer row with a BLANK Server (the same shape other
-// intent readers tolerate by re-deriving identity from the task name) is
-// still recognized as this server's row. Shared by the full-install
+// first, then falls back to a manifest-server prefix match for a legacy /
+// older-writer row with a BLANK Server. The task grammar
+// `mcp-local-hub-<server>-<daemon>` is ambiguous when both server and daemon
+// may contain hyphens, so ParseManagedTaskName's last-hyphen split misclassifies
+// common daemon names like alpha-beta as part of the server. The prefix fallback
+// strictly improves that case because callers already know the manifest server
+// name. Residual ambiguity remains for blank-Server rows whose actual server
+// name prefix-collides with this manifest server (for example demo vs demo-x);
+// a task name alone cannot disambiguate that without a manifest registry.
+// Shared by the full-install
 // replace loop (buildMergedSupervisorIntent) and the uninstall cleanup
 // (removeServerFromSupervisorIntent) so both drop blank-Server rows
 // consistently (bot PR #288 F1 + F4).
@@ -1377,8 +1393,11 @@ func supervisorIntentRowOwnedBy(d SupervisorDaemon, server string) bool {
 	if d.Server == server {
 		return true
 	}
-	parsedServer, _ := ParseManagedTaskName(d.TaskName)
-	return parsedServer == server
+	if d.Server != "" {
+		return false
+	}
+	prefix := canonicalIntentTaskKey("mcp-local-hub-" + server + "-")
+	return strings.HasPrefix(canonicalIntentTaskKey(d.TaskName), prefix)
 }
 
 // maintenanceTimerOwnedBy reports whether a MaintenanceTimer belongs to the
@@ -1490,20 +1509,9 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 		keptTimers = append(keptTimers, tm)
 	}
 
-	var keptStops map[string]DaemonIntent
-	if len(prior.Stops) > 0 {
-		keptStops = make(map[string]DaemonIntent, len(prior.Stops))
-		for taskName, intent := range prior.Stops {
-			parsedServer, _ := ParseManagedTaskName(taskName)
-			if parsedServer == server {
-				changed = true
-				continue
-			}
-			keptStops[taskName] = intent
-		}
-		if len(keptStops) == 0 {
-			keptStops = nil // keep omitempty round-trip clean
-		}
+	keptStops := pruneStopsForRemovedSupervisorTargets(prior.Stops, removedDaemons)
+	if !stopsMapsEqual(prior.Stops, keptStops) {
+		changed = true
 	}
 
 	if !changed {

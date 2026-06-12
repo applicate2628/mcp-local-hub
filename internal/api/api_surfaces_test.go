@@ -125,14 +125,12 @@ func installTestAuditFn(t *testing.T, capture *[]IntentAuditEntry, retErr error)
 	t.Cleanup(func() { appendIntentAuditFn = orig })
 }
 
-// installTestIntentReader patches the intent-read seam.
+// installTestIntentReader patches the legacy intent-read seam.
 //
-// Phase 4-E2: IntentStillRunning now consults the supervisor-intent.json
-// `stops` sub-block FIRST (the sole authoritative source) before falling back
-// to this seam. To keep seam-only tests hermetic AND state-safe — never
-// reading the developer's LIVE supervisor-intent.json — this also redirects
-// the state dir to an empty t.TempDir(). The empty dir makes lookupSupervisorStop
-// miss, so the seam (the thing the test is actually exercising) decides.
+// Phase 4-E2: IntentStillRunning must NOT consult this seam. Tests that install
+// it also redirect the state dir to an empty t.TempDir() so any accidental
+// lookupSupervisorStop read stays hermetic and never reaches the developer's
+// live supervisor-intent.json.
 func installTestIntentReader(t *testing.T, fn func(taskName string) (DaemonIntent, bool, error)) {
 	t.Helper()
 	restoreRoot := SetDaemonStateRootForTest(t.TempDir())
@@ -140,6 +138,22 @@ func installTestIntentReader(t *testing.T, fn func(taskName string) (DaemonInten
 	orig := readDaemonIntentFn
 	readDaemonIntentFn = fn
 	t.Cleanup(func() { readDaemonIntentFn = orig })
+}
+
+func installTestSupervisorStops(t *testing.T, stops map[string]DaemonIntent) {
+	t.Helper()
+	restoreRoot := SetDaemonStateRootForTest(t.TempDir())
+	t.Cleanup(restoreRoot)
+	if stops == nil {
+		return
+	}
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	if err := WriteSupervisorIntent(path, &SupervisorIntentFile{Version: 1, Stops: stops}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -237,23 +251,42 @@ func TestRestartContext_BestEffort(t *testing.T) {
 func TestIntentStillRunning_TrueWhenNoStopIntent(t *testing.T) {
 	a := NewAPI()
 	// Missing intent file (no entry for task) → not actively stopped → true.
-	installTestIntentReader(t, func(taskName string) (DaemonIntent, bool, error) {
-		return DaemonIntent{}, false, nil
-	})
+	installTestSupervisorStops(t, nil)
 	if !a.IntentStillRunning("\\mcp-local-hub-time-default", time.Now().UTC()) {
 		t.Errorf("IntentStillRunning: want true when no intent recorded")
+	}
+}
+
+func TestIntentStillRunning_AbsentSubBlockIgnoresStaleLegacyStop(t *testing.T) {
+	a := NewAPI()
+	now := time.Now().UTC()
+	var legacyReaderCalled bool
+	installTestIntentReader(t, func(taskName string) (DaemonIntent, bool, error) {
+		legacyReaderCalled = true
+		return DaemonIntent{
+			Desired:   IntentDesiredStopped,
+			Reason:    IntentReasonUserStop,
+			UpdatedAt: now,
+		}, true, nil
+	})
+
+	if !a.IntentStillRunning("\\mcp-local-hub-time-default", now) {
+		t.Fatalf("IntentStillRunning: want true when the sole sub-block source has no stop entry")
+	}
+	if legacyReaderCalled {
+		t.Fatalf("IntentStillRunning consulted stale daemon-intent fallback after absent sub-block entry")
 	}
 }
 
 func TestIntentStillRunning_FalseWhenUserStop(t *testing.T) {
 	a := NewAPI()
 	now := time.Now().UTC()
-	installTestIntentReader(t, func(taskName string) (DaemonIntent, bool, error) {
-		return DaemonIntent{
+	installTestSupervisorStops(t, map[string]DaemonIntent{
+		`\mcp-local-hub-time-default`: {
 			Desired:   IntentDesiredStopped,
 			Reason:    IntentReasonUserStop,
 			UpdatedAt: now.Add(-5 * time.Minute),
-		}, true, nil
+		},
 	})
 	if a.IntentStillRunning("\\mcp-local-hub-time-default", now) {
 		t.Errorf("IntentStillRunning: want false during active user-stop")
@@ -264,12 +297,12 @@ func TestIntentStillRunning_TrueWhenStopExpired(t *testing.T) {
 	a := NewAPI()
 	now := time.Now().UTC()
 	// Stop intent older than TTL → IsActiveStop returns false → still running.
-	installTestIntentReader(t, func(taskName string) (DaemonIntent, bool, error) {
-		return DaemonIntent{
+	installTestSupervisorStops(t, map[string]DaemonIntent{
+		`\mcp-local-hub-time-default`: {
 			Desired:   IntentDesiredStopped,
 			Reason:    IntentReasonUserStop,
 			UpdatedAt: now.Add(-48 * time.Hour),
-		}, true, nil
+		},
 	})
 	if !a.IntentStillRunning("\\mcp-local-hub-time-default", now) {
 		t.Errorf("IntentStillRunning: want true when stop intent past TTL")

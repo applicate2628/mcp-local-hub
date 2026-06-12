@@ -1658,12 +1658,15 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 // ownership checks.
 //
 // Trust ladder:
-//   - Native-http internal port: fail closed unless the descriptor row matches
-//     AND the supervisor IPC status reports a live PID for that task. The
-//     listener is held by the daemon's upstream child (often uvx/python rather
-//     than mcphub.exe), so image/parent-image gates false-reject valid daemons;
-//     the stale-descriptor attack requires the mcphub daemon to be down, and a
-//     live supervisor-reported daemon PID closes that stale-row case.
+//   - Native-http internal port: require the descriptor row plus a live
+//     supervisor-reported wrapper PID. When the port-owner lookup and process
+//     parent walk are available, also prove the internal listener's parent chain
+//     reaches that wrapper PID within a bounded depth; a resolvable chain that
+//     does not reach it is a foreign listener and is rejected. If the lookup or
+//     walk surface is unavailable, keep the previous live-wrapper-PID downgrade:
+//     this matches the best-effort identity-gate posture used elsewhere on
+//     hosts without process probes, and avoids breaking valid installs when the
+//     OS cannot expose ancestry.
 //   - External port: fail closed unless both proof surfaces are available and
 //     agree: the live listener PID from port-owner lookup must equal the live
 //     supervisor-reported PID for the matching task.
@@ -1675,7 +1678,12 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	if port == 0 || server == "" || daemon == "" {
 		return false
 	}
-	stateDir, err := DaemonStateDir()
+	// Read-only resolver: this ownership probe runs inside Preflight, which a
+	// --dry-run also exercises on a port collision — DaemonStateDir would
+	// MkdirAll the state directory on a first-run host as a dry-run side
+	// effect (bot PR #288 r23). A missing dir simply means no intent file →
+	// the read below fails → false (the normal collision error stands).
+	stateDir, err := daemonStateDirReadOnly()
 	if err != nil {
 		return false
 	}
@@ -1697,10 +1705,13 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 		return false
 	}
 	if matchedInternalPort {
-		// The internal listener belongs to the upstream child, not necessarily
-		// the mcphub daemon PID. Requiring the descriptor row plus a live
-		// supervisor IPC PID proves the owning daemon is up without assuming the
-		// child's image or direct parent shape.
+		owned, resolved := internalPortListenerChainsToWrapperPID(port, livePID)
+		if resolved {
+			return owned
+		}
+		// No usable port-owner or ancestry proof. Keep the documented downgrade:
+		// descriptor row + live supervisor wrapper PID is the best available
+		// identity signal on hosts where process lookup is unavailable.
 		return true
 	}
 	portPID, havePortPID := supervisorOwnedPortPID(port)
@@ -1708,6 +1719,39 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 		return false
 	}
 	return livePID == portPID
+}
+
+const internalPortParentWalkDepth = 3
+
+func internalPortListenerChainsToWrapperPID(port int, wrapperPID int) (owned bool, resolved bool) {
+	if wrapperPID <= 0 {
+		return false, true
+	}
+	listenerPID, havePortPID := supervisorOwnedPortPID(port)
+	if !havePortPID {
+		return false, false
+	}
+	if listenerPID == wrapperPID {
+		return true, true
+	}
+	if processNameAndParentByPID == nil {
+		return false, false
+	}
+	cur := listenerPID
+	for depth := 0; depth < internalPortParentWalkDepth; depth++ {
+		_, parentPID, ok := processNameAndParentByPID(cur)
+		if !ok {
+			return false, false
+		}
+		if parentPID == wrapperPID {
+			return true, true
+		}
+		if parentPID <= 0 || parentPID == cur {
+			return false, true
+		}
+		cur = parentPID
+	}
+	return false, true
 }
 
 func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool, bool) {
@@ -1734,16 +1778,19 @@ func supervisorIntentRowMatchesServerDaemon(row SupervisorDaemon, server, daemon
 	if server == "" || daemon == "" {
 		return false
 	}
-	parsedServer, parsedDaemon := ParseManagedTaskName(row.TaskName)
-	serverMatches := row.Server == server
-	if row.Server == "" {
-		serverMatches = parsedServer == server
+	// Both identity components are KNOWN here, so a blank-field legacy row is
+	// matched by the exact canonical task name — never by ParseManagedTaskName,
+	// whose last-hyphen split misattributes hyphenated daemon names
+	// (\mcp-local-hub-demo-alpha-beta parses as demo-alpha/beta and a v0.6
+	// global, having no scheduler-task fallback, then fails Preflight on its
+	// OWN port; bot PR #288 r26 — third member of the r19-F1/r20-F4 family).
+	if row.Server == "" || row.Daemon == "" {
+		want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemon)
+		if canonicalIntentTaskKey(row.TaskName) == want {
+			return true
+		}
 	}
-	daemonMatches := row.Daemon == daemon
-	if row.Daemon == "" {
-		daemonMatches = parsedDaemon == daemon
-	}
-	return serverMatches && daemonMatches
+	return row.Server == server && row.Daemon == daemon
 }
 
 func supervisorIntentDaemonTaskName(row SupervisorDaemon, server, daemon string) string {
@@ -1803,6 +1850,12 @@ func statusOwnedByCurrentUser(owner string) bool {
 // check fails as before.
 var processIdentityByPID func(pid int) (image, parentImage string, ok bool)
 
+// processNameAndParentByPID returns the process image basename plus parent PID
+// for callers that need a bounded ancestry walk rather than only the direct
+// parent image. Production is wired in processes.go next to processIdentityByPID;
+// tests supply fakes.
+var processNameAndParentByPID func(pid int) (image string, parentPID int, ok bool)
+
 const mcphubProcessImageName = "mcphub.exe"
 
 func isMcphubProcessImage(image string) bool {
@@ -1810,28 +1863,31 @@ func isMcphubProcessImage(image string) bool {
 }
 
 // mcphubPIDImageVerified probes the identity of pid. The identity gate is
-// BEST-EFFORT hardening, not a precondition: when the lookup surface is
-// structurally unavailable (nil seam, POSIX !ok — processIdentityByPID is
-// Windows wmic/CIM-backed), the caller must PROCEED with the kill rather than
-// refuse — the PIDs reaching these gates come from the supervisor's own IPC
-// snapshot (a trusted source), and refusing on a missing probe would break
-// stop --force on every host without the lookup (the exact silent-drop class
-// the r9 PID fallback closed). Only a POSITIVE foreign-image verdict refuses.
-func mcphubPIDImageVerified(pid int) (image, parentImage string, verified, lookupAvailable bool) {
+// BEST-EFFORT hardening only when the lookup surface is structurally
+// unavailable (nil seam, e.g. non-Windows hosts where no PID-image probe is
+// wired): the caller may proceed in that case to preserve stop --force on
+// hosts without the lookup. Once a probe is wired, however, an ok=false result
+// means verification was attempted and failed (lookup/parsing failure, exited
+// process, PID reuse race, etc.) and must fail closed rather than authorize a
+// kill without a positive mcphub image verdict.
+func mcphubPIDImageVerified(pid int) (image, parentImage string, verified, lookupAvailable, lookupOK bool) {
 	if processIdentityByPID == nil {
-		return "", "", false, false
+		return "", "", false, false, false
 	}
 	image, parentImage, ok := processIdentityByPID(pid)
 	if !ok {
-		return image, parentImage, false, false
+		return image, parentImage, false, true, false
 	}
-	return image, parentImage, isMcphubProcessImage(image), true
+	return image, parentImage, isMcphubProcessImage(image), true, true
 }
 
 func requireMcphubPIDImage(pid int) error {
-	image, parentImage, verified, lookupAvailable := mcphubPIDImageVerified(pid)
+	image, parentImage, verified, lookupAvailable, lookupOK := mcphubPIDImageVerified(pid)
 	if !lookupAvailable {
 		return nil // best-effort gate: no probe surface → proceed (see doc above)
+	}
+	if !lookupOK {
+		return fmt.Errorf("process identity lookup failed for pid %d", pid)
 	}
 	if !verified {
 		return fmt.Errorf("pid %d image %q parent %q is not %s", pid, image, parentImage, mcphubProcessImageName)
@@ -1840,9 +1896,12 @@ func requireMcphubPIDImage(pid int) error {
 }
 
 func requireMcphubPortOwnerPID(port, pid int) error {
-	image, parentImage, verified, lookupAvailable := mcphubPIDImageVerified(pid)
+	image, parentImage, verified, lookupAvailable, lookupOK := mcphubPIDImageVerified(pid)
 	if !lookupAvailable {
 		return nil // best-effort gate: no probe surface → proceed (see doc above)
+	}
+	if !lookupOK {
+		return fmt.Errorf("process identity lookup failed for port %d pid %d", port, pid)
 	}
 	if !verified {
 		return fmt.Errorf("port owned by foreign process: port %d pid %d image %q parent %q", port, pid, image, parentImage)
@@ -2666,6 +2725,7 @@ func portForTask(taskName string, ports map[string]map[string]int, wsByTask map[
 type RestartResult struct {
 	TaskName string `json:"task_name"`
 	Err      string `json:"error"`
+	Warning  string `json:"warning,omitempty"`
 	Code     string `json:"-"`
 }
 
@@ -2881,6 +2941,8 @@ var killByPortFn = killDaemonByPort
 
 var errPortKillUnsupported = errors.New("port kill unsupported: process lookup unavailable")
 
+const daemonPortReleasePollInterval = 200 * time.Millisecond
+
 type portKillOutcome int
 
 const (
@@ -2940,7 +3002,7 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 		if _, _, _, stillUp := lookupProcess(port); !stillUp {
 			return portKillKilled, nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(daemonPortReleasePollInterval)
 	}
 	return portKillNoListener, fmt.Errorf("port %d still bound after %s", port, timeout)
 }

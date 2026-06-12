@@ -121,6 +121,43 @@ func TestRunDaemonIntentCollapse_PreservesActiveStopsAndDropsExpired(t *testing.
 	}
 }
 
+func TestRunDaemonIntentCollapse_MintsSupervisorIntentForLegacyOnlyActiveStop(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+	now := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Minute)}
+	supPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	if _, err := os.Stat(supPath); !os.IsNotExist(err) {
+		t.Fatalf("test precondition: supervisor-intent.json must be absent, stat err=%v", err)
+	}
+	seedDaemonIntent(t, task, stop)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("legacy-only collapse panicked instead of minting supervisor-intent.json: %v", r)
+		}
+	}()
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if !res.Wrote {
+		t.Fatalf("legacy-only active stop should write a freshly minted supervisor intent; res=%+v", res)
+	}
+	got, err := ReadSupervisorIntent(supPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if got.Version != 1 {
+		t.Fatalf("minted supervisor intent Version = %d, want 1", got.Version)
+	}
+	if gotStop, ok := got.Stops[task]; !ok || gotStop.Desired != stop.Desired || gotStop.Reason != stop.Reason || !gotStop.UpdatedAt.Equal(stop.UpdatedAt) {
+		t.Fatalf("minted supervisor intent stops[%s] = %+v, ok=%v; want %+v", task, gotStop, ok, stop)
+	}
+}
+
 // Phase 4-E2 (was E1 "DoesNotDelete"): daemon-intent.json is now DELETED after
 // the merge migrates its active stops into the sub-block. This is the inverted
 // E2 contract — the file no longer remains on disk.
@@ -256,6 +293,40 @@ func TestCheckDaemonIntentCollapse_IsReadOnly(t *testing.T) {
 	}
 }
 
+func TestCheckDaemonIntentCollapse_DoesNotCreateDaemonIntentLock(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	supPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	daemonPath := filepath.Join(stateDir, intentFileLeaf)
+	lockPath := filepath.Join(stateDir, intentLockLeaf)
+
+	if err := WriteSupervisorIntent(supPath, &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	raw := []byte(`{"tasks":{"\\mcp-local-hub-paper-search-default":{"desired":"stopped","reason":"user-stop","updated_at":"2026-06-12T10:59:00Z"}}}`)
+	if err := os.WriteFile(daemonPath, raw, 0o600); err != nil {
+		t.Fatalf("seed daemon-intent.json: %v", err)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("test precondition: daemon-intent lock must be absent, stat err=%v", err)
+	}
+
+	res, err := CheckDaemonIntentCollapse(stateDir, now)
+	if err != nil {
+		t.Fatalf("CheckDaemonIntentCollapse: %v", err)
+	}
+	if got, ok := res.MergedStops[task]; !ok || got.Desired != IntentDesiredStopped {
+		t.Fatalf("--check merge verdict missing seeded active stop: got=%+v ok=%v res=%+v", got, ok, res)
+	}
+	if !res.Changed {
+		t.Fatalf("--check should report Changed=true for seeded active stop; res=%+v", res)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("--check created daemon-intent lock %s; stat err=%v", lockPath, err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The merge owner holds the daemon-intent flock across the WHOLE op.
 // ---------------------------------------------------------------------------
@@ -355,29 +426,35 @@ func TestRunDaemonIntentCollapse_MergesFullCurrentFileContent(t *testing.T) {
 	}
 }
 
-// A re-enabled daemon (stop cleared from daemon-intent.json) drops the stale
-// baseline so it is not left suppressed by a prior merge.
-func TestRunDaemonIntentCollapse_ClearedStopDropsBaseline(t *testing.T) {
+// A stale legacy daemon-intent.json can only add missing active stops after E2.
+// The supervisor-intent stops sub-block is authoritative for tasks it already
+// names, so an older running legacy entry must not delete the sub-block stop.
+func TestRunDaemonIntentCollapse_StaleLegacyRunningDoesNotDropSubBlockStop(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	defer SetDaemonStateRootForTest(stateDir)()
 	now := time.Now().UTC()
+	stoppedTask := `\mcp-local-hub-paper-search-default`
+	absentTask := `\mcp-local-hub-memory-default`
+	subBlockStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now,
+	}
 
-	// Pre-stage a supervisor-intent.json that ALREADY has a baseline stop for
-	// paper-search (as if a prior merge ran).
 	intent := &SupervisorIntentFile{
 		Version: 1,
 		Stops: map[string]DaemonIntent{
-			`\mcp-local-hub-paper-search-default`: {
-				Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now,
-			},
+			stoppedTask: subBlockStop,
 		},
 	}
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	// daemon-intent.json now says the daemon is RUNNING (operator re-enabled).
-	seedDaemonIntent(t, `\mcp-local-hub-paper-search-default`, DaemonIntent{
-		Desired: IntentDesiredRunning, Reason: IntentReasonInstall, UpdatedAt: now.Add(time.Minute),
+	seedDaemonIntent(t, stoppedTask, DaemonIntent{
+		Desired: IntentDesiredRunning, Reason: IntentReasonInstall, UpdatedAt: now.Add(-time.Hour),
+	})
+	seedDaemonIntent(t, absentTask, DaemonIntent{
+		Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(-time.Minute),
 	})
 
 	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
@@ -385,11 +462,58 @@ func TestRunDaemonIntentCollapse_ClearedStopDropsBaseline(t *testing.T) {
 		t.Fatalf("RunDaemonIntentCollapse: %v", err)
 	}
 	if !res.Changed {
-		t.Fatalf("expected a change (stale baseline stop should be dropped)")
+		t.Fatalf("expected a change for the absent active legacy stop")
 	}
 	stops := readSupervisorStopsFromDisk(t, stateDir)
-	if _, ok := stops[`\mcp-local-hub-paper-search-default`]; ok {
-		t.Fatalf("stale baseline stop not dropped after re-enable: %+v", stops)
+	if got, ok := stops[stoppedTask]; !ok || got != subBlockStop {
+		t.Fatalf("authoritative sub-block stop = (%+v,%v), want (%+v,true)", got, ok, subBlockStop)
+	}
+	if got, ok := stops[absentTask]; !ok || got.Desired != IntentDesiredStopped || got.Reason != IntentReasonUserDisabled {
+		t.Fatalf("absent active legacy stop = (%+v,%v), want added disabled stop", got, ok)
+	}
+	if len(res.Entries) != 1 ||
+		res.Entries[0].TaskName != absentTask ||
+		res.Entries[0].Action != MergeStopAdded {
+		t.Fatalf("collapse entries = %+v, want only add for absent legacy active stop", res.Entries)
+	}
+}
+
+func TestRunDaemonIntentCollapse_StaleLegacyRunningOnlyIsNoOp(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+	now := time.Now().UTC()
+	stoppedTask := `\mcp-local-hub-paper-search-default`
+	subBlockStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now,
+	}
+
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			stoppedTask: subBlockStop,
+		},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	seedDaemonIntent(t, stoppedTask, DaemonIntent{
+		Desired:   IntentDesiredRunning,
+		Reason:    IntentReasonInstall,
+		UpdatedAt: now.Add(-time.Hour),
+	})
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if res.Changed || res.Wrote || len(res.Entries) != 0 {
+		t.Fatalf("stale legacy running entry should be no-op; res=%+v", res)
+	}
+	stops := readSupervisorStopsFromDisk(t, stateDir)
+	if got, ok := stops[stoppedTask]; !ok || got != subBlockStop {
+		t.Fatalf("authoritative sub-block stop = (%+v,%v), want (%+v,true)", got, ok, subBlockStop)
 	}
 }
 

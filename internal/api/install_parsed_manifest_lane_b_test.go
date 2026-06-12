@@ -17,6 +17,20 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+// fakeMcphubIdentityForTest stubs processIdentityByPID to report every PID as
+// an mcphub.exe image. The PR #290 identity gate fails CLOSED when a wired
+// probe returns !ok, and on a Windows test host the production probe IS wired
+// — a real lookup of a synthetic test PID would refuse the kill and turn these
+// kill-path tests into probes of the host's process table.
+func fakeMcphubIdentityForTest(t *testing.T) {
+	t.Helper()
+	orig := processIdentityByPID
+	processIdentityByPID = func(int) (string, string, bool) {
+		return mcphubProcessImageName, mcphubProcessImageName, true
+	}
+	t.Cleanup(func() { processIdentityByPID = orig })
+}
+
 func assertSupervisorIntentFlockAvailableDuringIPCStatus(t *testing.T, stateDir string) {
 	t.Helper()
 	probe := flock.New(filepath.Join(stateDir, supervisorIntentFileLeaf) + supervisorIntentLockSuffix)
@@ -33,6 +47,7 @@ func assertSupervisorIntentFlockAvailableDuringIPCStatus(t *testing.T, stateDir 
 }
 
 func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudge(t *testing.T) {
+	fakeMcphubIdentityForTest(t)
 	stateDir := phaseFStateDir(t)
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 	seed := &SupervisorIntentFile{
@@ -89,6 +104,7 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 }
 
 func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing.T) {
+	fakeMcphubIdentityForTest(t)
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
 	installFakeScheduler(t, newInstallFakeScheduler())
@@ -122,12 +138,20 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 
 	var killedPorts []int
 	origForceKill := forceKillByPortFn
+	origLookup := lookupProcess
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		order = append(order, "kill-port")
 		killedPorts = append(killedPorts, port)
+		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
 		return portKillKilled, nil
 	}
-	t.Cleanup(func() { forceKillByPortFn = origForceKill })
+	lookupProcess = func(port int) (int, uint64, int64, bool) {
+		return 0, 0, 0, false
+	}
+	t.Cleanup(func() {
+		forceKillByPortFn = origForceKill
+		lookupProcess = origLookup
+	})
 
 	// Lane A inverted the kill preference: a captured supervisor-reported PID
 	// is killed FIRST (identity-gated, best-effort), and the port kill is only
@@ -176,6 +200,7 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 		{name: "hard nudge failure skips kill", nudgeErr: errors.New("synthetic reconcile scheduler-list timeout"), wantWarn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			fakeMcphubIdentityForTest(t)
 			stateDir := daemonIntentTestHelper(t)
 			preparePreflightBinaryChecks(t)
 			installFakeScheduler(t, newInstallFakeScheduler())
@@ -239,6 +264,79 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 				t.Fatalf("warning presence = %v, want %v; output:\n%s", hasWarn, tc.wantWarn, out)
 			}
 		})
+	}
+}
+
+func TestInstallPlanCore_GlobalInstall_HeldSupervisorLockAfterIPCFailureSkipsRemovedTargetKill(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	installFakeScheduler(t, newInstallFakeScheduler())
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+	const removedTask = `\mcp-local-hub-demo-beta`
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: removedTask, Server: "demo", Daemon: "beta", Command: "old", Port: 0},
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent: %v", err)
+	}
+
+	origStatus := supervisorIPCStatusFn
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+		return []DaemonStatus{{TaskName: removedTask, PID: 6201, State: "Running"}}, nil
+	}
+	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
+
+	var killedPIDs []int
+	origPID := stopForceKillPIDFn
+	stopForceKillPIDFn = func(pid int) error {
+		killedPIDs = append(killedPIDs, pid)
+		return nil
+	}
+	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+
+	origProbe := installSupervisorRunningProbeFn
+	installSupervisorRunningProbeFn = func(string) (bool, int, error) { return true, 4242, nil }
+	t.Cleanup(func() { installSupervisorRunningProbeFn = origProbe })
+
+	origStart := installAutostartOwnerStartFn
+	installAutostartOwnerStartFn = func() error {
+		t.Fatal("autostart owner start must not run when the supervisor lock is already held")
+		return nil
+	}
+	t.Cleanup(func() { installAutostartOwnerStartFn = origStart })
+
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, errSupervisorUnavailableForTest()
+	}))
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://example.invalid/mcp",
+	}
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+		t.Fatalf("installPlanCore: %v", err)
+	}
+
+	if len(killedPIDs) != 0 {
+		t.Fatalf("held supervisor lock after IPC failure killed removed PID(s) %v, want none", killedPIDs)
+	}
+	out := buf.String()
+	for _, want := range []string{"supervisor lock is held", "IPC is unreachable", "mcphub restart", "force kill removed supervisor targets skipped"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("install output missing %q; output:\n%s", want, out)
+		}
 	}
 }
 

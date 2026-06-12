@@ -93,7 +93,12 @@ func SerenaIdleShutdownThreshold(settingValue string) (time.Duration, bool) {
 // time.Now().UTC(). IsActiveStop(now) classifies the idle stop as ACTIVE (it
 // never TTL-expires), so the entry is SET when no operator stop blocks it.
 func (a *API) WriteSerenaIdleStop(taskName string, now time.Time) error {
-	return a.WriteStopIntentIdleGuarded(taskName, DaemonIntent{
+	_, err := a.WriteSerenaIdleStopResult(taskName, now)
+	return err
+}
+
+func (a *API) WriteSerenaIdleStopResult(taskName string, now time.Time) (bool, error) {
+	return a.WriteStopIntentIdleGuardedResult(taskName, DaemonIntent{
 		Desired:   IntentDesiredStopped,
 		Reason:    IntentReasonIdle,
 		UpdatedAt: now.UTC(),
@@ -528,18 +533,22 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 		defer a.clearSerenaWakeInFlight(taskKey)
 	}
 
-	// Nudge the supervisor to reconcile NOW. Best-effort: any reconcile error is
-	// non-fatal — the supervisor's 60s IntentWatcher poll is the backstop and the
-	// readiness probe below is the real success gate. (Mirrors the auto-register
-	// live-add nudge.) FIX-6d: the previous two-branch form gated on the error
-	// type and then discarded it in BOTH branches (dead condition). We instead
-	// leave a single best-effort diagnostic breadcrumb for the UNEXPECTED case —
-	// a reconcile error while the supervisor is reachable (NOT
-	// ErrSupervisorIPCUnavailable, which is the expected rollout-transition
-	// state) — so a recurring nudge failure is diagnosable instead of silently
-	// swallowed, without failing the wake.
-	if _, recErr := serenaWakeReconcileFn(ctx, true); recErr != nil &&
-		!errors.Is(recErr, ErrSupervisorIPCUnavailable) {
+	// Nudge the supervisor to reconcile NOW. A reachable-supervisor reconcile
+	// error stays best-effort: the supervisor's 60s IntentWatcher feeds stop
+	// deltas (installPlanCore documents that it does not discover new
+	// descriptors, but this wake only changed the stops sub-block), and the
+	// readiness probe below remains the success gate. ErrSupervisorIPCUnavailable
+	// is different: no live watcher can observe the just-cleared stop, so restore
+	// the idle directive before returning a retryable error.
+	if _, recErr := serenaWakeReconcileFn(ctx, true); recErr != nil {
+		if errors.Is(recErr, ErrSupervisorIPCUnavailable) {
+			if ownsInFlight {
+				if restoreErr := a.WriteStopIntentIdleGuarded(taskKey, prior, who, time.Now().UTC()); restoreErr != nil {
+					return fmt.Errorf("serena idle wake: supervisor IPC unavailable after clearing idle stop for %s; restore idle stop failed: %v: %w", taskName, restoreErr, recErr)
+				}
+			}
+			return fmt.Errorf("serena idle wake: supervisor IPC unavailable after clearing idle stop for %s: %w", taskName, recErr)
+		}
 		_ = LogHubMcpEvent("warn", "serena-idle-wake-reconcile-nudge-failed", map[string]any{
 			"task_name": taskName,
 			"err":       recErr.Error(),

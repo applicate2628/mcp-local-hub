@@ -322,6 +322,95 @@ func TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof(t *testing.T) 
 	}
 }
 
+func TestPortHeldBySupervisorIntentDaemonInternalPortRequiresWrapperAncestry(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	const (
+		externalPort = 33021
+		internalPort = externalPort + config.NativeHTTPInternalPortOffset
+		listenerPID  = 88021
+		uvxPID       = 88022
+		wrapperPID   = 77021
+		foreignPID   = 99021
+	)
+	const taskName = `\mcp-local-hub-demo-alpha`
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "demo",
+			Daemon:   "alpha",
+			Command:  "go",
+			Port:     externalPort,
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
+
+	origLookup := lookupProcess
+	origStatus := supervisorIPCStatusFn
+	origNameParent := processNameAndParentByPID
+	t.Cleanup(func() {
+		lookupProcess = origLookup
+		supervisorIPCStatusFn = origStatus
+		processNameAndParentByPID = origNameParent
+	})
+
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: wrapperPID, State: "Running"}}, nil
+	}
+	lookupProcess = func(p int) (int, uint64, int64, bool) {
+		if p == internalPort {
+			return listenerPID, 0, 0, true
+		}
+		return 0, 0, 0, false
+	}
+
+	processNameAndParentByPID = fakeProcessNameAndParent(map[int]struct {
+		image  string
+		parent int
+	}{
+		listenerPID: {image: "python.exe", parent: uvxPID},
+		uvxPID:      {image: "uvx.exe", parent: wrapperPID},
+		wrapperPID:  {image: "mcphub.exe", parent: 1},
+	})
+	if got := portHeldBySupervisorIntentDaemon(internalPort, "demo", "alpha"); !got {
+		t.Fatal("native-http internal listener whose parent chain reaches the supervisor wrapper PID = false, want true")
+	}
+
+	processNameAndParentByPID = fakeProcessNameAndParent(map[int]struct {
+		image  string
+		parent int
+	}{
+		listenerPID: {image: "python.exe", parent: uvxPID},
+		uvxPID:      {image: "uvx.exe", parent: foreignPID},
+		foreignPID:  {image: "node.exe", parent: 1},
+	})
+	if got := portHeldBySupervisorIntentDaemon(internalPort, "demo", "alpha"); got {
+		t.Fatal("native-http internal listener whose resolvable parent chain does not reach the wrapper PID = true, want false")
+	}
+
+	lookupProcess = nil
+	processNameAndParentByPID = nil
+	if got := portHeldBySupervisorIntentDaemon(internalPort, "demo", "alpha"); !got {
+		t.Fatal("native-http internal port with no port-owner lookup should keep the live-wrapper-PID downgrade; got false")
+	}
+}
+
+func fakeProcessNameAndParent(rows map[int]struct {
+	image  string
+	parent int
+}) func(int) (string, int, bool) {
+	return func(pid int) (string, int, bool) {
+		row, ok := rows[pid]
+		if !ok {
+			return "", 0, false
+		}
+		return row.image, row.parent, true
+	}
+}
+
 // TestParseNameParent pins the CSV parser used by both wmic and
 // PowerShell paths in procNameAndParent (bot r2 P2 closure). The parser
 // must accept both Windows shapes and reject malformed rows.

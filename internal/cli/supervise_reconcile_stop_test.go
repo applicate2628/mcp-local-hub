@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // TestClassifyDriftAction_TerminateDirectionSupervisorOwned covers the
@@ -73,7 +74,9 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 		{"sched running intent stopped", api.ReconcileSchedulerStateRunning, true, stopped, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
 		{"sched stopped intent running", api.ReconcileSchedulerStateStopped, true, running, api.StIdle, api.ReconcileActionPostEvIntentUpdate},
 		{"sched stopped intent running backoff", api.ReconcileSchedulerStateStopped, true, running, api.StBackoffWaiting, api.ReconcileActionNoOp},
-		{"sched stopped intent stopped", api.ReconcileSchedulerStateStopped, true, stopped, api.StRunning, api.ReconcileActionNoOp},
+		{"sched stopped intent stopped live", api.ReconcileSchedulerStateStopped, true, stopped, api.StRunning, api.ReconcileActionPostEvIntentUpdate},
+		{"sched stopped intent stopped idle", api.ReconcileSchedulerStateStopped, true, stopped, api.StIdle, api.ReconcileActionNoOp},
+		{"sched stopped intent stopped quarantined", api.ReconcileSchedulerStateStopped, true, stopped, api.StQuarantined, api.ReconcileActionNoOp},
 		// Spawn-direction quarantine-respect ALSO holds on the hasSched
 		// scheduler-stopped arm: a daemon that quarantined while still carrying
 		// a stale/residual scheduler-stopped row must NOT revive on every
@@ -89,6 +92,52 @@ func TestClassifyDriftAction_TerminateDirectionSupervisorOwned(t *testing.T) {
 					tc.schedState, tc.hasSched, tc.intentDesired, tc.smState, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestReconcileIPC_ResidualStoppedSchedulerStoppedIntentTerminatesLiveDaemon(t *testing.T) {
+	taskName := `\mcp-local-hub-time-default`
+	fx := newReconcileTestFixture(t, supervisorOwnedTimeIntentForReconcileTest(taskName))
+	seedStoppedDaemonIntentForReconcileTest(t, fx.deps.stateDir, taskName)
+
+	fx.ctrl.smStates.Store(taskName, api.StRunning)
+	installSchedulerListFake(t, []scheduler.TaskStatus{
+		{Name: taskName, State: "Ready"},
+	})
+
+	req := api.IPCRequest{ID: 44, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 1 || len(body.Drift) != 1 {
+		t.Fatalf("DriftCount=%d drift=%+v, want one residual scheduler-stopped row", body.DriftCount, body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.SchedulerState != api.ReconcileSchedulerStateStopped {
+		t.Fatalf("SchedulerState = %q, want %q", entry.SchedulerState, api.ReconcileSchedulerStateStopped)
+	}
+	if entry.IntentDesired != api.ReconcileIntentDesiredStopped {
+		t.Fatalf("IntentDesired = %q, want %q", entry.IntentDesired, api.ReconcileIntentDesiredStopped)
+	}
+	if entry.SMState != api.StRunning {
+		t.Fatalf("SMState = %q, want %q", entry.SMState, api.StRunning)
+	}
+	if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Fatalf("Action = %q, want %q for residual stopped scheduler row + live SM + stopped intent",
+			entry.Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected EvIntentUpdate post for residual stopped scheduler row")
 	}
 }
 

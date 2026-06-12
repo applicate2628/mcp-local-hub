@@ -31,6 +31,11 @@ const exitSetupStatePathRejected = 8
 // the override, the install is rejected.
 const exitSetupAuditRequiredButFailed = 11
 
+// exitSetupLivenessInstallFailed is returned when setup cannot install the
+// supervisor-liveness recovery task. Setup must fail closed here because the
+// legacy watchdog is removed only after this replacement exists.
+const exitSetupLivenessInstallFailed = 12
+
 // ---------------------------------------------------------------------------
 // Test seams (package-level fn vars).
 //
@@ -418,11 +423,11 @@ func runSetupLSPClientRouter(out io.Writer, rollback bool) error {
 //     --allow-elevated set, write the high-priority audit entry per
 //     §61; audit-write failure → forceExit(11). (The elevation gate now
 //     protects the liveness-task install.)
-//  3. Removes the leftover legacy `\mcp-local-hub-watchdog` task on
+//  3. Installs the supervisor-liveness scheduled task (Phase 3a). Failure
+//     fails closed before any legacy-watchdog removal.
+//  4. Removes the leftover legacy `\mcp-local-hub-watchdog` task on
 //     existing hosts (idempotent, non-fatal — Phase C). On clean hosts
 //     this is a no-op (scheduler.Delete returns nil for an absent task).
-//  4. Installs the supervisor-liveness scheduled task (Phase 3a). Failure
-//     is non-fatal: logged + continue.
 //  5. Registers the Windows EventLog source per §60. Failure is
 //     non-fatal: logged + continue.
 //  6. Prints the confirmation lines to stdout.
@@ -481,23 +486,14 @@ func runSetupWatchdog(out io.Writer, allowElevated bool) error {
 
 	a := api.NewAPI()
 
-	// 3. Remove the leftover legacy `\mcp-local-hub-watchdog` task on existing
-	// hosts (v0.6 spec §5 Phase C). The v0.6 supervisor owns daemon revival
-	// (Job-Object reaper + reconcile loop) and the liveness task below owns
-	// owner-death recovery, so the watchdog is a no-op vestige that fights the
-	// supervisor every 5 min. Idempotent + non-fatal: scheduler.Delete returns
-	// nil for an absent task, so on a clean host this is a silent no-op and a
-	// transient delete failure must not abort setup.
-	if rmErr := a.RemoveLegacyWatchdogTask(); rmErr != nil {
-		fmt.Fprintf(out, "⚠ legacy watchdog task removal failed (non-fatal; manual: schtasks /Delete /TN %s /F): %v\n", api.LegacyWatchdogTaskName, rmErr)
-	}
-
-	// 4. Install the supervisor-liveness scheduled task (v0.6 spec §15 P1-b /
+	// 3. Install the supervisor-liveness scheduled task (v0.6 spec §15 P1-b /
 	// §5.x Phase 3a). This is the sole maintenance-task install after Phase C
 	// dropped the watchdog: the liveness task relaunches the supervisor/GUI
 	// OWNER (`supervise --ensure-alive`, ~1-min) if it dies mid-session.
 	//
-	// Non-fatal: a failed liveness install must NOT abort setup. The next
+	// Fail-closed: a failed liveness install must abort setup before the
+	// legacy watchdog is removed, otherwise an existing host can be left with
+	// neither recovery mechanism while automation observes exit 0. The next
 	// `mcphub setup` re-attempts the idempotent ImportXML.
 	//
 	// SCOPING NOTE (PR #283 review P3-b): the liveness action's relaunch
@@ -513,11 +509,25 @@ func runSetupWatchdog(out io.Writer, allowElevated bool) error {
 	// target name + the schtasks error) so the inert state is operator-visible
 	// rather than silent.
 	if livenessErr := a.InstallLivenessTask(); livenessErr != nil {
-		fmt.Fprintf(out, "⚠ supervisor-liveness task install failed (non-fatal): %v\n", livenessErr)
+		fmt.Fprintf(out, "✗ supervisor-liveness task install failed: %v\n", livenessErr)
+		fmt.Fprintf(out, "  Recovery: rerun `mcphub setup`; if Task Scheduler still rejects the task, inspect it with `schtasks /Query /TN %s` and rerun setup after Scheduler is healthy.\n", api.LivenessTaskName)
+		return forceExit(exitSetupLivenessInstallFailed)
 	} else {
 		fmt.Fprintf(out, "✓ Installed scheduled task: %s (supervisor-liveness, cadence 1 min)\n", api.LivenessTaskName)
 		fmt.Fprintf(out, "  State directory: %s\n", stateDir)
 		fmt.Fprintf(out, "  Note: liveness recovery relaunches via the autostart task %s, which is installed by `mcphub install` / `mcphub autostart enable` — until then the relaunch is inert (no-op; recorded in supervisor-events.log).\n", autostart.WindowsTaskName)
+	}
+
+	// 4. Remove the leftover legacy `\mcp-local-hub-watchdog` task on existing
+	// hosts (v0.6 spec §5 Phase C). The v0.6 supervisor owns daemon revival
+	// (Job-Object reaper + reconcile loop) and the liveness task above owns
+	// owner-death recovery, so the watchdog is a no-op vestige that fights the
+	// supervisor every 5 min. Idempotent + non-fatal: scheduler.Delete returns
+	// nil for an absent task, so on a clean host this is a silent no-op and a
+	// transient delete failure must not abort setup after the replacement task
+	// was installed.
+	if rmErr := a.RemoveLegacyWatchdogTask(); rmErr != nil {
+		fmt.Fprintf(out, "⚠ legacy watchdog task removal failed (non-fatal; manual: schtasks /Delete /TN %s /F): %v\n", api.LegacyWatchdogTaskName, rmErr)
 	}
 
 	// 5. EventLog source registration (§60). Non-fatal: print + continue.

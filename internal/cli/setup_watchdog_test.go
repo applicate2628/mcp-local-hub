@@ -56,6 +56,8 @@ type setupFakeScheduler struct {
 	mu             sync.Mutex
 	deleteCalls    []string
 	importXMLCalls []setupImportXMLCall
+	order          []string
+	importXMLErr   error
 	listResult     []scheduler.TaskStatus
 	listErr        error
 }
@@ -65,6 +67,7 @@ func (f *setupFakeScheduler) Delete(name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleteCalls = append(f.deleteCalls, name)
+	f.order = append(f.order, "delete:"+name)
 	return nil
 }
 func (f *setupFakeScheduler) Run(string) error  { return errNotImplementedForSetupTest }
@@ -91,13 +94,22 @@ func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
 	cp := make([]byte, len(xml))
 	copy(cp, xml)
 	f.importXMLCalls = append(f.importXMLCalls, setupImportXMLCall{name: name, xml: cp})
-	return nil
+	f.order = append(f.order, "import:"+name)
+	return f.importXMLErr
 }
 func (f *setupFakeScheduler) deletes() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]string, len(f.deleteCalls))
 	copy(out, f.deleteCalls)
+	return out
+}
+
+func (f *setupFakeScheduler) operationOrder() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.order))
+	copy(out, f.order)
 	return out
 }
 
@@ -203,6 +215,58 @@ func TestSetup_DoesNotInstallWatchdog_InstallsLiveness(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), api.LivenessTaskName) {
 		t.Errorf("stdout missing liveness task name; got %q", out.String())
+	}
+}
+
+func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+	fakeSch.importXMLErr = errors.New("schtasks /Create /XML rejected liveness")
+
+	out := &bytes.Buffer{}
+	err := runSetupWatchdog(out, false)
+	if err == nil {
+		t.Fatal("runSetupWatchdog: want liveness install failure, got nil")
+	}
+	var fe interface {
+		ExitCode() int
+		IsMcphubForceExit() bool
+	}
+	if !errors.As(err, &fe) {
+		t.Fatalf("expected forceExitError; got %T (%v)", err, err)
+	}
+	if fe.ExitCode() != 12 {
+		t.Errorf("exit code = %d, want 12", fe.ExitCode())
+	}
+	if containsTask(fakeSch.deletes(), api.LegacyWatchdogTaskName) {
+		t.Errorf("legacy watchdog must NOT be deleted when liveness install fails; deletes=%v", fakeSch.deletes())
+	}
+	got := out.String()
+	for _, want := range []string{"supervisor-liveness task install failed", "mcphub setup", "schtasks /Create /XML"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout missing %q; got %q", want, got)
+		}
+	}
+}
+
+func TestSetup_InstallsLivenessBeforeRemovingLegacyWatchdog(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+
+	out := &bytes.Buffer{}
+	if err := runSetupWatchdog(out, false); err != nil {
+		t.Fatalf("runSetupWatchdog: %v", err)
+	}
+	want := []string{
+		"import:" + api.LivenessTaskName,
+		"delete:" + api.LegacyWatchdogTaskName,
+	}
+	got := fakeSch.operationOrder()
+	if len(got) < len(want) {
+		t.Fatalf("operation order = %v, want prefix %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("operation order = %v, want prefix %v", got, want)
+		}
 	}
 }
 
