@@ -118,6 +118,13 @@ func DaemonStateDir() (string, error) {
 	return daemonStateDir()
 }
 
+// DaemonStateDirReadOnly returns the per-user state directory path without
+// creating it. Read-only commands use this so a preview against a first-run or
+// missing state directory remains side-effect-free.
+func DaemonStateDirReadOnly() (string, error) {
+	return daemonStateDirReadOnly()
+}
+
 // OpenStateFile opens (or creates) `name` under the daemon state
 // directory for write. The file is created with 0600 perms on POSIX;
 // the post-open Chmod defends against umask drift. Returns

@@ -159,3 +159,20 @@ func TestIntentCollapseCmd_CheckEndToEndIsPureRead(t *testing.T) {
 		t.Fatalf("--check created %d pre-collapse-backup dirs; want 0: %v", len(backups), backups)
 	}
 }
+
+func TestIntentCollapseCmd_CheckDoesNotCreateStateDir(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "missing-state")
+	defer api.SetDaemonStateRootForTest(stateDir)()
+
+	cmd := newIntentCollapseCmdReal()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--check"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute --check against missing state dir: %v; output=%s", err, buf.String())
+	}
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("--check created state dir %s; stat err=%v", stateDir, err)
+	}
+}

@@ -535,7 +535,7 @@ func normalizeSchedulerState(raw string) string {
 //	sched=running   intent=running  → no_op (steady state)
 //	sched=running   intent=stopped  → post_ev_intent_update (terminate)
 //	sched=stopped   intent=running  → post_ev_intent_update (spawn), UNLESS SM=quarantined → needs_manual_review or SM=backoff-waiting → no_op
-//	sched=stopped   intent=stopped  → no_op (steady state)
+//	sched=stopped   intent=stopped  → post_ev_intent_update (terminate) when the SM state is live; no_op otherwise
 //	sched=<other>   *               → needs_manual_review (unknown scheduler state)
 //
 // No-legacy ownership (spec §0.2 — no compatibility, no migration, no old
@@ -608,6 +608,12 @@ func normalizeSchedulerState(raw string) string {
 // EvIntentUpdate(running) here would preempt the backoff timer on unrelated
 // applies and collapse the crash-loop delay, so both spawn arms classify
 // backoff no_op.
+//
+// Residual scheduler-stopped terminate direction mirrors sched=missing:
+// scheduler rows can linger in Stopped after ownership moved to the supervisor,
+// so a stopped intent plus a live SM row is still an active terminate request.
+// Settled SM states remain no_op because there is no live child or pending
+// supervisor action to cancel.
 func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
@@ -649,6 +655,9 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 			if smState == api.StBackoffWaiting {
 				return api.ReconcileActionNoOp
 			}
+			return api.ReconcileActionPostEvIntentUpdate
+		}
+		if intentDesired == api.ReconcileIntentDesiredStopped && smStateIsLive(smState) {
 			return api.ReconcileActionPostEvIntentUpdate
 		}
 		return api.ReconcileActionNoOp

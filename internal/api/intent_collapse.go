@@ -20,8 +20,8 @@
 //
 // Safety nets (spec §15 P1-c + §12 Phase 4):
 //   - a PURE --check / dry-run mode (DaemonIntentCollapseOpts.DryRun) that
-//     computes + returns the merge result WITHOUT touching disk, so an
-//     operator can preview the merge against the LIVE state-dir BEFORE
+//     computes + returns the merge result WITHOUT touching disk or lock files,
+//     so an operator can preview the merge against the LIVE state-dir BEFORE
 //     deploying E1;
 //   - a code-baked pre-merge backup to <state-dir>/pre-collapse-backup-<ts>/
 //     taken by the merge path itself (not a manual operator step) before
@@ -92,9 +92,10 @@ type MergeStopsEntry struct {
 
 // DaemonIntentCollapseOpts controls one merge invocation.
 type DaemonIntentCollapseOpts struct {
-	// DryRun is the --check mode: compute the merge result and return it
-	// WITHOUT taking the backup or writing supervisor-intent.json. A pure
-	// preview the operator runs on the live state-dir before deploy.
+	// DryRun is the --check mode: compute the merge result with plain unlocked
+	// reads and return it WITHOUT taking locks, backups, or writing
+	// supervisor-intent.json. It is advisory: a concurrent writer can race the
+	// check, while the real merge path below still takes the write locks.
 	DryRun bool
 	// Now is the reference clock threaded into IsActiveStop for TTL +
 	// clock-skew evaluation. Zero value → time.Now().UTC() (so production
@@ -239,9 +240,11 @@ func daemonIntentRecordsEqual(a, b DaemonIntent) bool {
 }
 
 // CheckDaemonIntentCollapse is the PURE --check / dry-run entry point. It
-// reads BOTH intent files from the state dir (under the daemon-intent flock
-// for a consistent snapshot) and returns the merge result WITHOUT writing.
-// Safe to run on the LIVE state-dir before deploying E1 (spec §15 P1-c (i)).
+// reads BOTH intent files from the state dir with plain read-only I/O and
+// returns the merge result WITHOUT writing, taking a flock, or creating a lock
+// file. Safe to run on the LIVE state-dir before deploying E1 (spec §15 P1-c
+// (i)), but advisory: a concurrent writer can race the unlocked read, while the
+// real merge path below remains the serialized authority.
 //
 // stateDir is the resolved per-user state directory (callers pass the same
 // value the supervisor resolved; tests pass a t.TempDir via the
@@ -319,6 +322,10 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	daemonIntentPath := filepath.Join(stateDir, intentFileLeaf)
 	daemonLockPath := filepath.Join(stateDir, intentLockLeaf)
 
+	if opts.DryRun {
+		return checkDaemonIntentCollapseUnlocked(supervisorIntentPath, daemonIntentPath, now)
+	}
+
 	// Acquire the daemon-intent flock for the WHOLE critical section (read →
 	// merge → write → DELETE). This is the load-bearing concurrency guarantee:
 	// it serializes against an OLD binary's legacy WriteDaemonIntent writer for
@@ -355,11 +362,6 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	}
 
 	result := mergeDaemonIntentStops(supervisorIntent, daemonIntent, now)
-
-	if opts.DryRun {
-		// --check: no backup, no write. Pure preview.
-		return result, nil
-	}
 
 	if !result.Changed {
 		// Idempotent no-op on the SUB-BLOCK: the stops sub-block already
@@ -456,6 +458,9 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	// supervisor intent (Daemons, MaintenanceTimers, StrictMode, runtime_spec
 	// rows) — including any concurrent edit that landed since the top-of-pass
 	// read — survives the merge.
+	if freshSupervisorIntent == nil {
+		freshSupervisorIntent = &SupervisorIntentFile{Version: 1}
+	}
 	freshSupervisorIntent.Stops = result.MergedStops
 	if err := writeSupervisorIntentLockHeld(supervisorIntentPath, freshSupervisorIntent); err != nil {
 		return DaemonIntentCollapseResult{}, fmt.Errorf("intent-collapse: write supervisor-intent.json: %w", err)
@@ -476,6 +481,18 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	}
 	result.DeletedLegacyFile = deleted
 	return result, nil
+}
+
+func checkDaemonIntentCollapseUnlocked(supervisorIntentPath, daemonIntentPath string, now time.Time) (DaemonIntentCollapseResult, error) {
+	supervisorIntent, _, err := readSupervisorIntentForMerge(supervisorIntentPath)
+	if err != nil {
+		return DaemonIntentCollapseResult{}, fmt.Errorf("intent-collapse: read supervisor-intent.json: %w", err)
+	}
+	daemonIntent, err := readDaemonIntentForMerge(daemonIntentPath)
+	if err != nil {
+		return DaemonIntentCollapseResult{}, err
+	}
+	return mergeDaemonIntentStops(supervisorIntent, daemonIntent, now), nil
 }
 
 // deleteLegacyDaemonIntentIfMerged performs the Phase 4-E2 destructive step:
@@ -564,11 +581,12 @@ func deleteLegacyDaemonIntentIfMerged(
 	return true, nil
 }
 
-// readDaemonIntentForMerge parses daemon-intent.json from raw bytes under the
-// caller's already-held flock (no second lock). Missing → nil (no overrides).
-// Corrupt → fail-closed error: a corrupt stop file must NOT silently merge to
-// "no stops" and un-suppress a stopped daemon. The caller holds the
-// daemon-intent flock, so this performs a lock-free read.
+// readDaemonIntentForMerge parses daemon-intent.json from raw bytes without
+// taking a lock. The write path calls it under the already-held daemon-intent
+// flock; the dry-run path calls it intentionally unlocked so --check stays
+// read-only. Missing → nil (no overrides). Corrupt → fail-closed error: a
+// corrupt stop file must NOT silently merge to "no stops" and un-suppress a
+// stopped daemon.
 func readDaemonIntentForMerge(path string) (*DaemonIntentFile, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

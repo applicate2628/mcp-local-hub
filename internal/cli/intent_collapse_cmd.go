@@ -35,10 +35,10 @@ import (
 // can be exercised without a populated state directory.
 var intentCollapseCheckFn = api.CheckDaemonIntentCollapse
 
-// intentCollapseStateDirFn is the package-private indirection for
-// api.DaemonStateDir so a test can point the command at a t.TempDir without
-// touching the real per-user state directory.
-var intentCollapseStateDirFn = api.DaemonStateDir
+// intentCollapseStateDirFn is the package-private indirection for the read-only
+// state-dir resolver so a test can point the command at a t.TempDir without
+// touching the real per-user state directory or creating a first-run dir.
+var intentCollapseStateDirFn = api.DaemonStateDirReadOnly
 
 // setIntentCollapseCheckFnForTest installs a test check closure. Returns an
 // uninstall function tests defer to restore production wiring.
