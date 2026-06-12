@@ -246,6 +246,20 @@ func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) (newl
 	return true, len(set)
 }
 
+// withWorkspaceCount runs fn with the CURRENT number of sessions bound to
+// wsKey while HOLDING the store lock, so a concurrent bindWorkspace cannot
+// interleave between the count read and whatever decision fn commits (the PR
+// #291 r5 seed-vs-bind race). fn must be short and must NOT call back into
+// this store (st.mu is held). Caller-side lock-order contract: callers may
+// hold serenaBackendPIDMu around this call (PID-mu OUTER, store-mu INNER);
+// nothing may acquire serenaBackendPIDMu while holding st.mu.
+func (st *routerSessionStore) withWorkspaceCount(wsKey string, fn func(boundCount int)) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.ensureInitLocked()
+	fn(len(st.idsByWS[wsKey]))
+}
+
 // sessionsForWorkspace returns a snapshot of every router session id currently
 // routed to wsKey (the §3 fail-loud enumerate-by-workspace primitive). The
 // returned slice is a copy taken under mu, so the caller can iterate + tear
@@ -745,28 +759,35 @@ func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.Works
 	if pid <= 0 {
 		return
 	}
-	// Re-validate sole-session ownership AT WRITE TIME (PR #291 bot r4): the
-	// caller's replaceStaleBaseline was decided at bind time, but the statusFn
-	// IPC read above can be slow — a second session may bind AND the daemon may
-	// restart during it, in which case writing the post-restart PID would mask
-	// the generation change for sessions still bound to the pre-restart daemon.
-	// The session-store read happens before serenaBackendPIDMu (no lock
-	// nesting, same ordering rule as the bind-time read); a bind landing
-	// between this re-check and the map write can only ADD a session — making
-	// the count >1 — and that racer's own seed re-checks again, so the stale
-	// overwrite cannot slip through.
-	if replaceStaleBaseline &&
-		len(s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey)) > 1 {
-		replaceStaleBaseline = false
-	}
+	// Re-validate sole-session ownership AT WRITE TIME, with the session-store
+	// lock HELD THROUGH the PID write (PR #291 bot r4 + r5): the caller's
+	// replaceStaleBaseline was decided at bind time, but the statusFn IPC read
+	// above can be slow — a second session may bind AND the daemon may restart
+	// during it, in which case writing the post-restart PID would mask the
+	// generation change for sessions still bound to the pre-restart daemon.
+	// The r5 follow-up: an out-of-lock re-check still left a window where a
+	// second bind landed between the count read and the map write, so the
+	// count read and the PID write now execute under ONE store-lock hold
+	// (withWorkspaceCount) — a concurrent bindWorkspace serializes either
+	// fully before (count becomes 2 → this seed preserves) or fully after
+	// (that racer's own seed re-checks and sees 2). Lock-order note: this
+	// nests serenaBackendPIDMu INSIDE routerSessionStore.mu... no — order is
+	// PID-mu OUTER, store-mu INNER (withWorkspaceCount acquires store.mu while
+	// we hold PID-mu). That is deadlock-free because no code path acquires
+	// serenaBackendPIDMu while holding the session-store lock (the seed and
+	// the reconcile both take their other session-store reads before locking
+	// the PID map) — keep it that way.
 	s.serenaBackendPIDMu.Lock()
-	if s.serenaBackendLastPID == nil {
-		s.serenaBackendLastPID = map[string]int{}
-	}
-	if _, exists := s.serenaBackendLastPID[ws.WorkspacePath]; !exists || replaceStaleBaseline {
-		s.serenaBackendLastPID[ws.WorkspacePath] = pid
-	}
-	s.serenaBackendPIDMu.Unlock()
+	defer s.serenaBackendPIDMu.Unlock()
+	s.serenaRouterSessions.withWorkspaceCount(ws.WorkspaceKey, func(boundCount int) {
+		replace := replaceStaleBaseline && boundCount <= 1
+		if s.serenaBackendLastPID == nil {
+			s.serenaBackendLastPID = map[string]int{}
+		}
+		if _, exists := s.serenaBackendLastPID[ws.WorkspacePath]; !exists || replace {
+			s.serenaBackendLastPID[ws.WorkspacePath] = pid
+		}
+	})
 }
 
 // handleSerenaBackendLossOnForwardFailure is the ALWAYS-ON FLOOR of the §3.x
