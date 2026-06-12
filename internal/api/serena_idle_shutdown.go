@@ -542,8 +542,10 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 	// the idle directive before returning a retryable error.
 	if _, recErr := serenaWakeReconcileFn(ctx, true); recErr != nil {
 		if errors.Is(recErr, ErrSupervisorIPCUnavailable) {
-			if restoreErr := a.WriteStopIntentIdleGuarded(taskKey, prior, who, time.Now().UTC()); restoreErr != nil {
-				return fmt.Errorf("serena idle wake: supervisor IPC unavailable after clearing idle stop for %s; restore idle stop failed: %v: %w", taskName, restoreErr, recErr)
+			if ownsInFlight {
+				if restoreErr := a.WriteStopIntentIdleGuarded(taskKey, prior, who, time.Now().UTC()); restoreErr != nil {
+					return fmt.Errorf("serena idle wake: supervisor IPC unavailable after clearing idle stop for %s; restore idle stop failed: %v: %w", taskName, restoreErr, recErr)
+				}
 			}
 			return fmt.Errorf("serena idle wake: supervisor IPC unavailable after clearing idle stop for %s: %w", taskName, recErr)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -676,6 +677,51 @@ func TestWakeIdleSerenaDaemon_IPCUnavailableRestoreDoesNotClobberOperatorStop(t 
 	}
 	if !foundRefusal {
 		t.Fatalf("restore did not use the idle-guarded writer; audit entries=%+v", captured)
+	}
+}
+
+func TestWakeIdleSerenaDaemon_FollowerIPCUnavailableDoesNotRestoreStaleIdleStop(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Now().UTC()
+	task := `\mcp-local-hub-serena-follower-race`
+	taskKey := canonicalIntentTaskKey(task)
+	a := NewAPI()
+	a.serenaWakeInFlightMu.Lock()
+	a.serenaWakeInFlight = map[string]bool{taskKey: true}
+	a.serenaWakeInFlightMu.Unlock()
+
+	withWakeSeams(t,
+		func(gotTask string) (DaemonIntent, error) {
+			if gotTask != taskKey {
+				t.Fatalf("readStop task = %q, want %q", gotTask, taskKey)
+			}
+			return DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonIdle, UpdatedAt: now}, nil
+		},
+		func(context.Context, bool) (ReconcileResponse, error) {
+			return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+		},
+		func(context.Context, string, int, time.Duration) error {
+			t.Fatal("readiness must not run when the supervisor IPC nudge is unavailable")
+			return nil
+		},
+	)
+
+	err := a.WakeIdleSerenaDaemon(context.Background(), task, 9303, "tester")
+	if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+		t.Fatalf("wake error = %v, want ErrSupervisorIPCUnavailable", err)
+	}
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	got, readErr := ReadSupervisorIntent(intentPath)
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
+			return
+		}
+		t.Fatalf("ReadSupervisorIntent(%s): %v", intentPath, readErr)
+	}
+	if _, ok := got.Stops[taskKey]; ok {
+		t.Fatalf("follower restored stale idle stop despite not owning the clear: %+v", got.Stops)
 	}
 }
 

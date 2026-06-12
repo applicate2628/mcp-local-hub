@@ -2329,7 +2329,7 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		order = append(order, "kill-port")
 		killPorts = append(killPorts, port)
-		return portKillLookupUnavailable, nil
+		return portKillNoListener, nil
 	}
 	t.Cleanup(func() { forceKillByPortFn = origForceKill })
 
@@ -2378,17 +2378,17 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			t.Fatalf("removed daemon %s survived merged intent: %+v", betaTask, written.Daemons)
 		}
 	}
-	// Lane A inverted the kill preference: the captured supervisor-reported
-	// PID (4244) is killed FIRST and the port path is never consulted when a
-	// live PID snapshot exists.
-	if len(killPorts) != 0 {
-		t.Fatalf("forceKillByPortFn ports = %v, want none (PID-first kill must not fall through to the port path)", killPorts)
+	// The captured supervisor-reported PID (4244) is killed first, then the
+	// descriptor port path is still consulted so the removal waits until the
+	// port is released before reporting success.
+	if len(killPorts) != 1 || killPorts[0] != 9322 {
+		t.Fatalf("forceKillByPortFn ports = %v, want [9322] after the PID kill", killPorts)
 	}
 	if len(killedPIDs) != 1 || killedPIDs[0] != 4244 {
 		t.Fatalf("PID kills = %v, want exactly [4244]", killedPIDs)
 	}
-	if len(order) != 3 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-pid" {
-		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-pid]", order)
+	if len(order) != 4 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-pid" || order[3] != "kill-port" {
+		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-pid kill-port]", order)
 	}
 	if _, ok := written.Stops[betaTask]; ok {
 		t.Fatalf("removed daemon %s retained a dangling stop entry: %+v", betaTask, written.Stops)

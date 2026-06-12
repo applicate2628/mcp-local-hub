@@ -1509,20 +1509,9 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 		keptTimers = append(keptTimers, tm)
 	}
 
-	var keptStops map[string]DaemonIntent
-	if len(prior.Stops) > 0 {
-		keptStops = make(map[string]DaemonIntent, len(prior.Stops))
-		for taskName, intent := range prior.Stops {
-			parsedServer, _ := ParseManagedTaskName(taskName)
-			if parsedServer == server {
-				changed = true
-				continue
-			}
-			keptStops[taskName] = intent
-		}
-		if len(keptStops) == 0 {
-			keptStops = nil // keep omitempty round-trip clean
-		}
+	keptStops := pruneStopsForRemovedSupervisorTargets(prior.Stops, removedDaemons)
+	if !stopsMapsEqual(prior.Stops, keptStops) {
+		changed = true
 	}
 
 	if !changed {

@@ -146,6 +146,84 @@ func TestRemoveServerFromSupervisorIntent_RemovesRowsTimerStops_PreservesSibling
 	}
 }
 
+func TestRemoveServerFromSupervisorIntent_PrunesAmbiguousStopsByRemovedTaskName(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("demo alpha-beta stop removed with exact descriptor", func(t *testing.T) {
+		stateDir := phaseFStateDir(t)
+		intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+		seed := &SupervisorIntentFile{
+			Version: 1,
+			Daemons: []SupervisorDaemon{
+				{TaskName: `\mcp-local-hub-demo-alpha-beta`, Server: "demo", Daemon: "alpha-beta", Command: "demo", Port: 33111},
+				{TaskName: `\mcp-local-hub-other-default`, Server: "other", Daemon: "default", Command: "other", Port: 33112},
+			},
+			Stops: map[string]DaemonIntent{
+				`\mcp-local-hub-demo-alpha-beta`: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+				`\mcp-local-hub-other-default`:   {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			},
+		}
+		if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+
+		changed, err := NewAPI().removeServerFromSupervisorIntent("demo")
+		if err != nil {
+			t.Fatalf("removeServerFromSupervisorIntent: %v", err)
+		}
+		if !changed {
+			t.Fatal("changed=false, want true")
+		}
+		got, err := ReadSupervisorIntent(intentPath)
+		if err != nil {
+			t.Fatalf("ReadSupervisorIntent: %v", err)
+		}
+		if _, ok := got.Stops[`\mcp-local-hub-demo-alpha-beta`]; ok {
+			t.Fatalf("ambiguous stop for removed demo/alpha-beta descriptor survived: %+v", got.Stops)
+		}
+		if _, ok := got.Stops[`\mcp-local-hub-other-default`]; !ok {
+			t.Fatalf("unrelated sibling stop was not preserved: %+v", got.Stops)
+		}
+	})
+
+	t.Run("demo-alpha beta stop survives demo uninstall when its row survives", func(t *testing.T) {
+		stateDir := phaseFStateDir(t)
+		intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+		seed := &SupervisorIntentFile{
+			Version: 1,
+			Daemons: []SupervisorDaemon{
+				{TaskName: `\mcp-local-hub-demo-default`, Server: "demo", Daemon: "default", Command: "demo", Port: 33113},
+				{TaskName: `\mcp-local-hub-demo-alpha-beta`, Server: "demo-alpha", Daemon: "beta", Command: "demo-alpha", Port: 33114},
+			},
+			Stops: map[string]DaemonIntent{
+				`\mcp-local-hub-demo-default`:    {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+				`\mcp-local-hub-demo-alpha-beta`: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			},
+		}
+		if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+
+		changed, err := NewAPI().removeServerFromSupervisorIntent("demo")
+		if err != nil {
+			t.Fatalf("removeServerFromSupervisorIntent: %v", err)
+		}
+		if !changed {
+			t.Fatal("changed=false, want true")
+		}
+		got, err := ReadSupervisorIntent(intentPath)
+		if err != nil {
+			t.Fatalf("ReadSupervisorIntent: %v", err)
+		}
+		if _, ok := got.Stops[`\mcp-local-hub-demo-default`]; ok {
+			t.Fatalf("demo/default stop survived uninstall: %+v", got.Stops)
+		}
+		if _, ok := got.Stops[`\mcp-local-hub-demo-alpha-beta`]; !ok {
+			t.Fatalf("demo-alpha/beta sibling stop was pruned during demo uninstall: %+v", got.Stops)
+		}
+	})
+}
+
 // TestRemoveServerFromSupervisorIntent_MissingFile_NoOp asserts that a host
 // with no supervisor-intent.json (e.g. a never-installed or remote-http-only
 // host) makes the cleanup a no-op, not an error.
@@ -762,14 +840,101 @@ func TestStopForceKillSupervisorOwned_PortlessFallsBackToPID(t *testing.T) {
 	}
 }
 
-// TestStopForceKillSupervisorOwned_UnsupportedPortKillFallsBackToPID covers the
-// POSIX supervisor-owned force path: descriptor ports exist, but the production
-// port lookup hook is absent, so the port kill cannot target a process and must
-// fall through to the IPC PID.
+func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testing.T) {
+	stateDir := phaseFStateDir(t)
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 33105},
+		},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	const (
+		supervisorPID = 43105
+		portOwnerPID  = 53105
+	)
+	origIdentity := processIdentityByPID
+	origStatus := supervisorIPCStatusFn
+	origPID := stopForceKillPIDFn
+	origForceKill := forceKillByPortFn
+	origLookup := lookupProcess
+	origTaskkill := taskkillProcessTreeByPIDFn
+	t.Cleanup(func() {
+		processIdentityByPID = origIdentity
+		supervisorIPCStatusFn = origStatus
+		stopForceKillPIDFn = origPID
+		forceKillByPortFn = origForceKill
+		lookupProcess = origLookup
+		taskkillProcessTreeByPIDFn = origTaskkill
+	})
+
+	processIdentityByPID = func(pid int) (string, string, bool) {
+		switch pid {
+		case supervisorPID, portOwnerPID:
+			return mcphubProcessImageName, mcphubProcessImageName, true
+		default:
+			t.Fatalf("processIdentityByPID pid = %d, want %d or %d", pid, supervisorPID, portOwnerPID)
+			return "", "", false
+		}
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: `\mcp-local-hub-time-default`, PID: supervisorPID, State: "Running"}}, nil
+	}
+	var killedPIDs []int
+	stopForceKillPIDFn = func(pid int) error {
+		killedPIDs = append(killedPIDs, pid)
+		return nil
+	}
+	var portLookups int
+	lookupProcess = func(port int) (int, uint64, int64, bool) {
+		portLookups++
+		if port != 33105 {
+			t.Fatalf("lookupProcess port = %d, want 33105", port)
+		}
+		if portLookups <= 2 {
+			return portOwnerPID, 0, 0, true
+		}
+		return 0, 0, 0, false
+	}
+	var taskkillPIDs []int
+	taskkillProcessTreeByPIDFn = func(pid int) error {
+		taskkillPIDs = append(taskkillPIDs, pid)
+		return nil
+	}
+	forceKillByPortFn = killDaemonByPortOutcome
+
+	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false, want true")
+	}
+	if len(results) != 1 || results[0].Err != "" {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+	if len(killedPIDs) != 1 || killedPIDs[0] != supervisorPID {
+		t.Fatalf("PID kills = %v, want [%d]", killedPIDs, supervisorPID)
+	}
+	if portLookups < 3 {
+		t.Fatalf("port release wait consulted lookupProcess %d times, want initial lookup plus release polling", portLookups)
+	}
+	if len(taskkillPIDs) != 1 || taskkillPIDs[0] != portOwnerPID {
+		t.Fatalf("port-path taskkill PIDs = %v, want [%d]", taskkillPIDs, portOwnerPID)
+	}
+}
+
+// TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsUnverifiedPIDKill
+// covers the POSIX supervisor-owned force path: descriptor ports exist, but the
+// production port lookup hook is absent, so a successful PID kill still cannot
+// prove that the descriptor port was released.
 //
-// Negative-control: keep killDaemonByPort returning nil when lookupProcess is
-// nil and this test records no PID kill.
-func TestStopForceKillSupervisorOwned_UnsupportedPortKillFallsBackToPID(t *testing.T) {
+// Negative-control: keep returning success after the PID kill and this test
+// observes an empty per-target Err despite no port-release proof.
+func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsUnverifiedPIDKill(t *testing.T) {
 	stateDir := phaseFStateDir(t)
 	intent := &SupervisorIntentFile{
 		Version: 1,
@@ -823,8 +988,11 @@ func TestStopForceKillSupervisorOwned_UnsupportedPortKillFallsBackToPID(t *testi
 	if len(killedPIDs) != 1 || killedPIDs[0] != 4243 {
 		t.Fatalf("PID-fallback kills = %v, want exactly [4243]", killedPIDs)
 	}
-	if len(results) != 1 || results[0].Err != "" {
+	if len(results) != 1 || results[0].Err == "" {
 		t.Fatalf("unexpected results: %+v", results)
+	}
+	if !strings.Contains(results[0].Err, "port kill unsupported") || !strings.Contains(results[0].Err, "pid path") {
+		t.Fatalf("unsupported port error = %q, want port failure with PID context", results[0].Err)
 	}
 }
 

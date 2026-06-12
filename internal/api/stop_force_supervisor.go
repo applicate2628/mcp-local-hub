@@ -96,23 +96,29 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 // refused by the port path's own identity gate.
 func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) RestartResult {
 	var pidKillErr error
+	var pidKillContext string
 	if pid, ok := pidByTask[strings.TrimPrefix(d.TaskName, `\`)]; ok && pid > 0 {
 		if err := requireMcphubPIDImage(pid); err != nil {
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
+			pidKillContext = pidKillErr.Error()
 		} else if err := stopForceKillPIDFn(pid); err != nil {
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
+			pidKillContext = pidKillErr.Error()
 			if !pidKillAlreadyGoneError(err) {
 				return RestartResult{TaskName: d.TaskName, Err: pidKillErr.Error()}
 			}
 		} else {
-			return RestartResult{TaskName: d.TaskName}
+			pidKillContext = fmt.Sprintf("force kill daemon by pid %d succeeded", pid)
+			if d.Port == 0 {
+				return RestartResult{TaskName: d.TaskName}
+			}
 		}
 	}
 	portKillUnsupported := false
 	if d.Port != 0 {
 		outcome, err := forceKillByPortFn(d.Port, 5*time.Second)
 		if err != nil {
-			return RestartResult{TaskName: d.TaskName, Err: appendPIDKillContext("force kill daemon by port: "+err.Error(), pidKillErr)}
+			return RestartResult{TaskName: d.TaskName, Err: appendPIDKillContext("force kill daemon by port: "+err.Error(), pidKillContext)}
 		}
 		if outcome == portKillKilled {
 			return RestartResult{TaskName: d.TaskName}
@@ -120,7 +126,7 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 		portKillUnsupported = outcome == portKillLookupUnavailable
 	}
 	if portKillUnsupported {
-		return RestartResult{TaskName: d.TaskName, Err: appendPIDKillContext("force kill daemon by port: "+errPortKillUnsupported.Error()+"; no usable PID fallback", pidKillErr)}
+		return RestartResult{TaskName: d.TaskName, Err: appendPIDKillContext("force kill daemon by port: "+errPortKillUnsupported.Error()+"; no usable port-release proof", pidKillContext)}
 	}
 	if d.Port == 0 && pidKillErr != nil {
 		return RestartResult{TaskName: d.TaskName, Err: pidKillErr.Error()}
@@ -131,11 +137,11 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 	return RestartResult{TaskName: d.TaskName}
 }
 
-func appendPIDKillContext(msg string, pidKillErr error) string {
-	if pidKillErr == nil {
+func appendPIDKillContext(msg string, pidKillContext string) string {
+	if pidKillContext == "" {
 		return msg
 	}
-	return msg + "; pid path: " + pidKillErr.Error()
+	return msg + "; pid path: " + pidKillContext
 }
 
 func pidKillAlreadyGoneError(err error) bool {

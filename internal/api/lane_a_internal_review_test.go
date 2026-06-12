@@ -176,7 +176,7 @@ func TestPreflight_AllowsSupervisorIntentNativeHTTPInternalPortAndRejectsRowless
 	}
 }
 
-func TestStopForcePrefersSupervisorPIDOverDescriptorPort(t *testing.T) {
+func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 	const taskName = `\mcp-local-hub-laneatest-default`
 
 	origIdent := processIdentityByPID
@@ -197,7 +197,7 @@ func TestStopForcePrefersSupervisorPIDOverDescriptorPort(t *testing.T) {
 	var portKills []int
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		portKills = append(portKills, port)
-		return portKillKilled, nil
+		return portKillNoListener, nil
 	}
 	var pidKills []int
 	stopForceKillPIDFn = func(pid int) error {
@@ -215,8 +215,8 @@ func TestStopForcePrefersSupervisorPIDOverDescriptorPort(t *testing.T) {
 	if len(pidKills) != 1 || pidKills[0] != 62001 {
 		t.Fatalf("PID kills = %v, want [62001]", pidKills)
 	}
-	if len(portKills) != 0 {
-		t.Fatalf("port kills = %v, want none when supervisor PID is live", portKills)
+	if len(portKills) != 1 || portKills[0] != 33002 {
+		t.Fatalf("port kills = %v, want [33002] to wait for descriptor-port release after PID kill", portKills)
 	}
 }
 
