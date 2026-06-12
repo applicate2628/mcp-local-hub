@@ -36,7 +36,7 @@ func withTempSerenaStateRoot(t *testing.T) {
 func newSerenaStoreSeedServer(t *testing.T, ws *api.WorkspaceEntry) (*Server, *InMemorySessionRouter) {
 	t.Helper()
 	sessions := NewInMemorySessionRouter()
-	s := &Server{}
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: &listerStubResolver{
 			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
@@ -46,6 +46,69 @@ func newSerenaStoreSeedServer(t *testing.T, ws *api.WorkspaceEntry) (*Server, *I
 		AuditFn:  func(string, string, map[string]any) error { return nil },
 	})
 	return s, sessions
+}
+
+func TestSerenaRouter_WorkspaceEmptyCallbackSkipsPIDCleanupWhenWorkspaceRebound(t *testing.T) {
+	const wsPath = "/proj/rebound-alpha"
+	const pid = 4321
+	ws := serenaWS("rebound-alpha", wsPath, 0)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, "sid-rebound", "daemon-rebound")
+	seedSerenaBackendBaseline(s, wsPath, pid)
+	s.rememberSerenaBackendWorkspacePath(ws)
+
+	s.handleSerenaRouterWorkspaceEmpty(ws.WorkspaceKey)
+
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
+		t.Fatalf("baseline after stale empty callback = (%d,%v), want (%d,true) for re-bound workspace", got, ok, pid)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, "sid-rebound")
+}
+
+func TestSerenaRouter_BackendLoss_IPCReconcileDropsUnboundStaleSnapshot(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+
+	const wsPath = "/proj/reconcile-unbound"
+	const pid = 7654
+	const sid = "sid-reconcile-unbound"
+	ws := serenaWS("reconcile-unbound", wsPath, 0)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-reconcile-unbound")
+	seedSerenaBackendBaseline(s, wsPath, pid)
+
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		s.coordinateBackendLossUnbind(sid, sessions)
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pid},
+		}, nil
+	}
+
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("reconcile after stale same-PID snapshot tore down %d sessions; want 0", n)
+	}
+	if got := s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey); len(got) != 0 {
+		t.Fatalf("workspace sessions after status-time unbind = %v, want empty", got)
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("reconcile resurrected baseline %d for unbound workspace; want absent", got)
+	}
+}
+
+func TestSerenaRouter_SetDepsDoesNotRewriteWorkspaceEmptyCallback(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	called := false
+	s.serenaRouterSessions.onWorkspaceEmpty = func(wsKey string) {
+		if wsKey == "alpha" {
+			called = true
+		}
+	}
+
+	s.SetSerenaRouterDeps(&serenaRouterDeps{AuditFn: func(string, string, map[string]any) error { return nil }})
+	s.serenaRouterSessions.notifyWorkspaceEmpty("alpha")
+
+	if !called {
+		t.Fatalf("SetSerenaRouterDeps rewrote the construction-owned onWorkspaceEmpty callback")
+	}
 }
 
 func seedBoundSerenaSession(s *Server, sessions *InMemorySessionRouter, ws *api.WorkspaceEntry, sid, daemonSessionID string) {
@@ -704,4 +767,69 @@ func TestSerenaRouter_IdleShutdownWakeReconcilesAndRehandshakes(t *testing.T) {
 	if wakeCalls != 1 {
 		t.Fatalf("WakeIdleFn calls = %d, want 1 request-path wake check", wakeCalls)
 	}
+}
+
+func TestSerenaRouter_IdleWakeNoRespawnReseedsToolCallBaseline(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	daemon := newFakeSerenaDaemon("tool-wake-reseed")
+	ts := newSafeSerenaHTTPTestServer(t, daemon.handler())
+	port := testServerPort(t, ts)
+
+	const wsPath = "/proj/tool-wake-reseed"
+	const pid = 2468
+	ws := serenaWS("tool-wake-reseed", wsPath, port)
+	sessions := NewInMemorySessionRouter()
+	wakeCalls := 0
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:        sessions,
+		UpstreamURLFn:   func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:         func(string, string, map[string]any) error { return nil },
+		UpstreamTimeout: 2 * time.Second,
+		WakeIdleFn: func(_ context.Context, taskName string, _ int, _ string) error {
+			wakeCalls++
+			allowed, err := api.NewAPI().ClearStopIntentIfReason(taskName, api.IntentReasonIdle, "test-tool-wake")
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				t.Fatalf("ClearStopIntentIfReason returned false for active idle stop")
+			}
+			return nil
+		},
+	}
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.SetSerenaRouterDeps(deps)
+	seedBoundSerenaSession(s, sessions, ws, "sid-live-through-tool-wake", "daemon-before-wake")
+	seedSerenaBackendBaseline(s, wsPath, pid)
+	seedSerenaBackendIdleMarker(s, wsPath, serenaBackendPostIdleGraceTicks)
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pid, Port: port},
+		}, nil
+	}
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("WriteSerenaIdleStop: %v", err)
+	}
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.py"})
+	rr := postSerena(t, s, body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("path-only tool wake status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if wakeCalls != 1 {
+		t.Fatalf("WakeIdleFn calls = %d, want 1", wakeCalls)
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
+		t.Fatalf("post-wake baseline = (%d,%v), want (%d,true)", got, ok, pid)
+	}
+	if ticks, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("post-wake idle marker = (%d,true), want absent", ticks)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, "sid-live-through-tool-wake")
 }

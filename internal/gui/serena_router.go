@@ -241,7 +241,6 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 // adapters from the live api.Registry. Calling with nil clears the
 // wiring (the route then emits 503).
 func (s *Server) SetSerenaRouterDeps(deps *serenaRouterDeps) {
-	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	s.serenaRouterDeps.Store(deps)
 }
 
@@ -762,6 +761,9 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		// handler. 30s covers clear + reconcile-nudge + the ~20s readiness probe.
 		wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		wakeErr := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-router-wake")
+		if wakeErr == nil && hadActiveIdleStop {
+			s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, ws)
+		}
 		wakeCancel()
 		if wakeErr != nil {
 			if !errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
@@ -778,8 +780,6 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			// ErrWakeRefusedOperatorStop: the daemon is deliberately stopped by
 			// the operator. Do NOT wake/spawn it; fall through to the forward,
 			// which fails loud against the down daemon (operator stop wins).
-		} else if hadActiveIdleStop {
-			s.dropSerenaBackendPIDTrackingForWorkspacePath(ws.WorkspacePath)
 		}
 	}
 

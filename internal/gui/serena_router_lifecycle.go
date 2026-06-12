@@ -944,7 +944,7 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 			continue
 		}
 		if hadActiveIdleStop {
-			s.dropSerenaBackendPIDTrackingForWorkspacePath(ws.WorkspacePath)
+			s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, ws)
 		}
 		if serenaToolsListPortLiveFn(wakeCtx, ws.Port) {
 			return

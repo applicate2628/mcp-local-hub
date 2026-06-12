@@ -288,6 +288,15 @@ func (st *routerSessionStore) sessionsForWorkspace(wsKey string) []string {
 	return ids
 }
 
+func (st *routerSessionStore) withWorkspaceCount(wsKey string) int {
+	if wsKey == "" {
+		return 0
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return len(st.idsByWS[wsKey])
+}
+
 // knownWorkspaceKeys returns a snapshot of every workspace key that has at
 // least one router session routed to it (the keys of idsByWS). The IPC
 // reconcile fallback uses it to scope its backend-loss check to exactly the
@@ -788,6 +797,50 @@ func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.Works
 	}
 }
 
+func serenaBackendLivePIDForWorkspace(ctx context.Context, wsPath string) int {
+	if wsPath == "" {
+		return 0
+	}
+	statusFn := serenaBackendStatusFn
+	if statusFn == nil {
+		return 0
+	}
+	rows, err := statusFn(ctx)
+	if err != nil {
+		return 0
+	}
+	for _, row := range rows {
+		if row.Workspace == wsPath && row.PID > 0 {
+			return row.PID
+		}
+	}
+	return 0
+}
+
+func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, ws *api.WorkspaceEntry) {
+	if s == nil || ws == nil || ws.WorkspacePath == "" {
+		return
+	}
+	pid := serenaBackendLivePIDForWorkspace(ctx, ws.WorkspacePath)
+	s.serenaBackendPIDMu.Lock()
+	defer s.serenaBackendPIDMu.Unlock()
+	if pid <= 0 {
+		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
+		return
+	}
+	if s.serenaBackendLastPID == nil {
+		s.serenaBackendLastPID = map[string]int{}
+	}
+	s.serenaBackendLastPID[ws.WorkspacePath] = pid
+	delete(s.serenaBackendIdlePaths, ws.WorkspacePath)
+	if ws.WorkspaceKey != "" {
+		if s.serenaBackendPathByKey == nil {
+			s.serenaBackendPathByKey = map[string]string{}
+		}
+		s.serenaBackendPathByKey[ws.WorkspaceKey] = ws.WorkspacePath
+	}
+}
+
 func (s *Server) rememberSerenaBackendWorkspacePath(ws *api.WorkspaceEntry) {
 	if ws == nil || ws.WorkspaceKey == "" || ws.WorkspacePath == "" {
 		return
@@ -805,6 +858,14 @@ func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePath(wsPath string) {
 		return
 	}
 	s.serenaBackendPIDMu.Lock()
+	s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath)
+	s.serenaBackendPIDMu.Unlock()
+}
+
+func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath string) {
+	if wsPath == "" {
+		return
+	}
 	delete(s.serenaBackendLastPID, wsPath)
 	delete(s.serenaBackendIdlePaths, wsPath)
 	for wsKey, path := range s.serenaBackendPathByKey {
@@ -812,7 +873,6 @@ func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePath(wsPath string) {
 			delete(s.serenaBackendPathByKey, wsKey)
 		}
 	}
-	s.serenaBackendPIDMu.Unlock()
 }
 
 // handleSerenaRouterWorkspaceEmpty receives the reverse-index key because the
@@ -824,12 +884,17 @@ func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
 		return
 	}
 	s.serenaBackendPIDMu.Lock()
-	wsPath := s.serenaBackendPathByKey[wsKey]
-	s.serenaBackendPIDMu.Unlock()
-	if wsPath != "" {
-		s.dropSerenaBackendPIDTrackingForWorkspacePath(wsPath)
+	if s.serenaRouterSessions.withWorkspaceCount(wsKey) != 0 {
+		s.serenaBackendPIDMu.Unlock()
 		return
 	}
+	wsPath := s.serenaBackendPathByKey[wsKey]
+	if wsPath != "" {
+		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath)
+		s.serenaBackendPIDMu.Unlock()
+		return
+	}
+	s.serenaBackendPIDMu.Unlock()
 	deps := s.serenaRouterDepsProd()
 	if deps == nil || deps.Resolver == nil {
 		return
@@ -842,7 +907,11 @@ func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
 		if ws == nil || ws.WorkspaceKey != wsKey {
 			continue
 		}
-		s.dropSerenaBackendPIDTrackingForWorkspacePath(ws.WorkspacePath)
+		s.serenaBackendPIDMu.Lock()
+		if s.serenaRouterSessions.withWorkspaceCount(wsKey) == 0 {
+			s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
+		}
+		s.serenaBackendPIDMu.Unlock()
 		return
 	}
 }
@@ -1178,6 +1247,40 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// dropped — a later reappearance is a first-observation baseline again, not
 	// a spurious loss. Transient Restarting rows carry the prior real PID
 	// (handled above) rather than their transient 0.
+	for path := range persisted {
+		wsKey := pathToKey[path]
+		if wsKey == "" {
+			for key, cachedPath := range s.serenaBackendPathByKey {
+				if cachedPath == path {
+					wsKey = key
+					break
+				}
+			}
+		}
+		// Reconcile snapshots knownWorkspaceKeys before reading supervisor
+		// status. The last session can unbind and delete its baseline while that
+		// read is in flight; persisting the stale snapshot here would resurrect
+		// the old PID across an unbound window and turn the next first bind into a
+		// false backend loss.
+		if wsKey == "" || s.serenaRouterSessions.withWorkspaceCount(wsKey) == 0 {
+			delete(persisted, path)
+			delete(persistedIdle, path)
+		}
+	}
+	for path := range persistedIdle {
+		wsKey := pathToKey[path]
+		if wsKey == "" {
+			for key, cachedPath := range s.serenaBackendPathByKey {
+				if cachedPath == path {
+					wsKey = key
+					break
+				}
+			}
+		}
+		if wsKey == "" || s.serenaRouterSessions.withWorkspaceCount(wsKey) == 0 {
+			delete(persistedIdle, path)
+		}
+	}
 	s.serenaBackendLastPID = persisted
 	s.serenaBackendIdlePaths = persistedIdle
 	s.serenaBackendPIDMu.Unlock()
