@@ -226,18 +226,21 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// EvIntentUpdate, but the controller reads the STALE cache and defaults the
 	// daemon back to running. The daemon-intent-read state therefore does NOT gate
 	// the refresh post-E2; only the missing-sole-source guard does.
+	cacheRefreshSupervisorIntent := updatedIntent
 	cacheRefreshDaemonIntent := updatedDaemonIntent
 	// Apply-mode missing-sole-source guard (PR #278 P2, this-PR P2-BLOCKER): in
 	// apply mode, a physically ABSENT supervisor-intent.json (the sole stop
-	// source after E2) yields an empty `updatedDaemonIntent` whose empty stops
-	// would clear the controller cache via applyReconcileDrift's Refresh. Force
-	// nil so the `!= nil` guard PRESERVES the prior daemonIntentCache instead of
-	// synthesizing an empty overlay — same fail-closed posture the watcher path
-	// applies on supFailed. Dry-run / orphan-report is unaffected: it never
-	// touches the cache, and the drift report below still computes against the
-	// empty intent (the deliberate missing-file tolerance for orphan detection).
+	// source after E2) yields synthetic empty descriptor + stop views. Force nil
+	// for BOTH apply cache-refresh sources so applyReconcileDrift preserves the
+	// prior supervisor descriptor cache and daemonIntentCache instead of
+	// orphaning live children or clearing operator stops. Dry-run / orphan-report
+	// is unaffected: it never touches the cache, and the drift report below still
+	// computes against the empty intent (the deliberate missing-file tolerance for
+	// orphan detection).
 	if args.Apply && supervisorIntentMissing {
+		cacheRefreshSupervisorIntent = nil
 		cacheRefreshDaemonIntent = nil
+		emitSupervisorIntentCacheRefreshSkipped(deps.events, intentPath)
 	}
 
 	// (3) Scheduler snapshot.
@@ -333,11 +336,11 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// needs_manual_review) never trigger SM events.
 	appliedCount := 0
 	if args.Apply {
-		// Pass cacheRefreshDaemonIntent (nil ONLY when the authoritative
+		// Pass the cache-refresh sources (nil ONLY when the authoritative
 		// supervisor-intent.json is physically absent under apply) rather than the
-		// always-non-nil unified file, so applyReconcileDrift's `!= nil` guard
-		// preserves the prior daemonIntentCache on a missing sole stop source.
-		appliedCount = applyReconcileDrift(deps, drift, updatedIntent, cacheRefreshDaemonIntent)
+		// always-non-nil synthetic empty files, so applyReconcileDrift's nil guards
+		// preserve the prior controller caches on a missing sole source.
+		appliedCount = applyReconcileDrift(deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
 	}
 
 	// (8) Audit emit. Failures are non-fatal (the response is still
@@ -738,17 +741,12 @@ func markOrphanedLSPStopIntentForReconcile(file *api.DaemonIntentFile, taskName 
 // drift entries are still reported in the response, but appliedCount
 // will be 0 because there's no event loop to post onto.
 //
-// daemonIntentCacheRefresh is the cache-refresh source, NOT the drift
-// overlay. After E2 the source is the supervisor-intent.json `stops` sub-block
-// (the sole stop authority). A nil value means "the authoritative sole stop
-// source — supervisor-intent.json — was physically absent under apply" → preserve
-// the existing daemonIntentCache. A non-nil value (the sub-block read
-// successfully) refreshes the cache. The nil-preserves invariant is the §3
-// fail-loud guard against a transient missing sole source silently un-stopping a
-// deliberately-stopped daemon (PR #278 P2 contract). It is NOT gated on the
-// vestigial daemon-intent.json read state — UnifiedStopsFile ignores that file,
-// so a stale daemon-intent.json read error must not block a fresh sub-block stop
-// from reaching the cache (PR #286 regression fix).
+// updatedIntent and daemonIntentCacheRefresh are cache-refresh sources, NOT the
+// drift overlay. Nil means "the authoritative supervisor-intent.json source was
+// physically absent under apply" and preserves the prior cache. Non-nil means
+// the source read successfully and refreshes the matching cache. Descriptor-cache
+// preservation keeps running children observable; daemonIntentCache preservation
+// keeps prior stop intents from being silently cleared.
 func applyReconcileDrift(
 	deps ipcDispatchDeps,
 	drift []api.DriftEntry,
@@ -762,7 +760,9 @@ func applyReconcileDrift(
 	if ctrl == nil {
 		return 0
 	}
-	ctrl.refreshSupervisorIntent(updatedIntent)
+	if updatedIntent != nil {
+		ctrl.refreshSupervisorIntent(updatedIntent)
+	}
 	if daemonIntentCacheRefresh != nil {
 		ctrl.daemonIntent.Refresh(daemonIntentCacheRefresh)
 	}
@@ -800,6 +800,21 @@ func emitReconcileDaemonIntentReadFailed(events *api.SupervisorEventLog, path st
 		Source:   api.SupervisorEventSourceIPC,
 		Event:    "daemon-intent-read-failed",
 		Body:     body,
+	})
+}
+
+func emitSupervisorIntentCacheRefreshSkipped(events *api.SupervisorEventLog, path string) {
+	if events == nil {
+		return
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityWarn,
+		Source:   api.SupervisorEventSourceIPC,
+		Event:    "supervisor-intent-cache-refresh-skipped",
+		Body: map[string]any{
+			"path":   path,
+			"reason": "supervisor-intent.json absent during apply; preserving previous controller caches",
+		},
 	})
 }
 

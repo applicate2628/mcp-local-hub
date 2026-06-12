@@ -746,13 +746,12 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// stop and trigger a respawn before forwarding. WakeIdleFn is a fast no-op
 	// when the daemon is already up (the steady-state hot path). On an OPERATOR
 	// stop (user-stop/user-disabled) the wake REFUSES
-	// (api.ErrWakeRefusedOperatorStop) and we proceed to the forward, which
-	// fails loud against the stopped daemon — honoring the operator stop (an
-	// idle wake must never resurrect a user-disabled daemon, spec §6). Any other
-	// wake error (respawn not ready in time) → 503 so the client retries while
-	// the supervisor brings the daemon up (the SAME retry the router already
-	// uses for not-yet-ready daemons). A nil WakeIdleFn (partially-wired
-	// routing) skips the wake entirely.
+	// (api.ErrWakeRefusedOperatorStop), which is terminal for this request: do
+	// not forward to a port that may now be rebound by a foreign process. Any
+	// other wake error (respawn not ready in time) → 503 so the client retries
+	// while the supervisor brings the daemon up (the SAME retry the router
+	// already uses for not-yet-ready daemons). A nil WakeIdleFn
+	// (partially-wired routing) skips the wake entirely.
 	if deps.WakeIdleFn != nil && ws.TaskName != "" {
 		// Detach from r.Context() cancellation (a client disconnect must not
 		// abort the supervisor nudge mid-flight, mirroring the auto-register
@@ -762,20 +761,26 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		wakeErr := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-router-wake")
 		wakeCancel()
 		if wakeErr != nil {
-			if !errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
-				_ = auditFn("warn", "serena-idle-wake-not-ready", map[string]any{
+			if errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
+				_ = auditFn("info", "serena-idle-wake-operator-stopped", map[string]any{
 					"workspace_key": ws.WorkspaceKey,
 					"task_name":     ws.TaskName,
 					"port":          ws.Port,
 					"err":           wakeErr.Error(),
 				})
 				writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
-					"serena daemon waking from idle; retry: "+wakeErr.Error(), nil)
+					"serena daemon stopped by operator stop; request not forwarded", nil)
 				return
 			}
-			// ErrWakeRefusedOperatorStop: the daemon is deliberately stopped by
-			// the operator. Do NOT wake/spawn it; fall through to the forward,
-			// which fails loud against the down daemon (operator stop wins).
+			_ = auditFn("warn", "serena-idle-wake-not-ready", map[string]any{
+				"workspace_key": ws.WorkspaceKey,
+				"task_name":     ws.TaskName,
+				"port":          ws.Port,
+				"err":           wakeErr.Error(),
+			})
+			writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+				"serena daemon waking from idle; retry: "+wakeErr.Error(), nil)
+			return
 		}
 	}
 

@@ -965,6 +965,13 @@ func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnMissingSupervisorIntent(t
 		t.Fatalf("daemon-intent cache desired = %q, want preserved %q after missing supervisor-intent.json",
 			got.Desired, api.IntentDesiredStopped)
 	}
+	if _, ok := fx.ctrl.intentCache.Lookup(taskName); !ok {
+		t.Fatalf("supervisor descriptor cache dropped %s after missing supervisor-intent.json; want previous descriptor preserved", taskName)
+	}
+	logRaw := readEventLogForTest(t, fx.deps.stateDir)
+	if !strings.Contains(logRaw, `"event":"supervisor-intent-cache-refresh-skipped"`) {
+		t.Fatalf("missing supervisor-intent cache-preserve audit event; log:\n%s", logRaw)
+	}
 }
 
 // TestReconcileIPC_HandlerTimeoutCancelsSchedulerList verifies the production

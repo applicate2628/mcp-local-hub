@@ -2564,6 +2564,97 @@ func TestUnregister_SupervisedRemovesIntentAndReconciles(t *testing.T) {
 	}
 }
 
+func TestUnregister_SupervisedReconcileFailureRestoresIntentAndAborts(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReconcile := registerSupervisorReconcileFn
+	reconcileCalls := 0
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		reconcileCalls++
+		if !apply {
+			t.Fatalf("supervised unregister called reconcile with apply=false")
+		}
+		return ReconcileResponse{}, errors.New("synthetic live supervisor apply failure")
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		t.Fatalf("forceKillByPortFn called for port %d after live-supervisor reconcile failure", port)
+		return portKillNoListener, nil
+	}
+
+	ws := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(ws)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	wsKey := WorkspaceKey(canonical)
+	entryName := "mcp-language-server-go-abcd"
+	entry := WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: canonical,
+		Language:      "go",
+		Backend:       "gopls-mcp",
+		Port:          9305,
+		TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "go"),
+		ClientEntries: map[string]string{"codex-cli": entryName},
+		Lifecycle:     LifecycleConfigured,
+	}
+	reg := NewRegistry(h.regPath)
+	if err := reg.PutLSP(entry); err != nil {
+		t.Fatalf("PutLSP: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	h.fakeClients.entries["codex-cli"][entryName] = "http://localhost:9305/mcp"
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	intentTask := LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")
+	writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			BuildSupervisorDaemonForLSP(entry, testCanonicalMcphubPathOverride),
+		},
+	})
+
+	_, err = mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("Unregister returned nil after live-supervisor reconcile failure")
+	}
+	if !strings.Contains(err.Error(), "retry") || !strings.Contains(err.Error(), "synthetic live supervisor apply failure") {
+		t.Fatalf("error = %v, want loud retry error preserving reconcile cause", err)
+	}
+	if reconcileCalls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", reconcileCalls)
+	}
+	reg = NewRegistry(h.regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 1 {
+		t.Fatalf("registry rows = %+v, want original row preserved", rows)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(intentTask); row == nil {
+		t.Fatalf("supervisor intent row was not restored after reconcile failure; rows=%+v", intent.Daemons)
+	}
+	if _, ok := h.fakeClients.entries["codex-cli"][entryName]; !ok {
+		t.Fatalf("client entry %s removed despite aborted unregister", entryName)
+	}
+	if len(h.fakeSch.deleteNames) != 0 {
+		t.Fatalf("scheduler deletes = %v, want none after aborted unregister", h.fakeSch.deleteNames)
+	}
+}
+
 func TestUnregister_SupervisedRemovesStopWithDescriptorAndAllowsRegisterAgain(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()

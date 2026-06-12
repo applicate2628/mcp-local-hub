@@ -58,9 +58,8 @@ var supervisorIPCStatusFn = DialSupervisorIPCStatus
 //     target is killed by its descriptor Port via the shared port-kill
 //     primitive; a target with no descriptor port, no port-owner lookup, or no
 //     current port listener falls back to a PID kill resolved from the
-//     supervisor IPC status.
-//     A target that is already not running (no port bound, no live PID) is a
-//     success row — the force-stop goal (daemon not running) already holds.
+//     supervisor IPC status. A portless target with no live PID is an error row:
+//     force-stop has no kill surface and cannot prove the daemon is gone.
 //
 // The returned handled set's task names let the caller skip these rows in
 // stopKillCore so a daemon is never double-killed (and a legacy row that
@@ -99,14 +98,20 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) RestartResult {
 	var pidKillErr error
 	var pidKillContext string
+	pidSeen := false
 	if pid, ok := pidByTask[strings.TrimPrefix(d.TaskName, `\`)]; ok && pid > 0 {
+		pidSeen = true
 		if err := requireMcphubPIDImage(pid); err != nil {
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
 			pidKillContext = pidKillErr.Error()
 		} else if err := stopForceKillPIDFn(pid); err != nil {
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
 			pidKillContext = pidKillErr.Error()
-			if !pidKillAlreadyGoneError(err) {
+			if pidKillAlreadyGoneError(err) {
+				if d.Port == 0 {
+					return RestartResult{TaskName: d.TaskName}
+				}
+			} else {
 				return RestartResult{TaskName: d.TaskName, Err: pidKillErr.Error()}
 			}
 		} else {
@@ -137,6 +142,9 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 	}
 	if d.Port == 0 && pidKillErr != nil {
 		return RestartResult{TaskName: d.TaskName, Err: pidKillErr.Error()}
+	}
+	if d.Port == 0 && !pidSeen {
+		return RestartResult{TaskName: d.TaskName, Err: "no kill surface: portless descriptor with no live supervisor PID; daemon may still be running; retry when the supervisor is reachable"}
 	}
 	// No targetable port listener and no live PID: the daemon is already not
 	// running from the caller's observable kill surfaces, so the force-stop goal

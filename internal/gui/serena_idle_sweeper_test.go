@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -477,16 +478,20 @@ func TestRouterForward_InFlightCounterAndRestamp(t *testing.T) {
 	}
 }
 
-// FALSIFICATION (spec §6): when the daemon has an operator stop, WakeIdleFn
-// returns ErrWakeRefusedOperatorStop. The handler must NOT 503 on that — it
-// falls through to the forward (which honors the operator stop by failing loud
-// against the down daemon). Here the forward reaches a live fake daemon so the
-// observable assertion is "did NOT 503 because of the refused wake".
-func TestRouterWake_OperatorStopRefused_FallsThroughToForward(t *testing.T) {
+// FALSIFICATION: when the daemon has an operator stop, WakeIdleFn returns
+// ErrWakeRefusedOperatorStop. The handler must treat that as terminal instead
+// of forwarding to whatever process happens to own the descriptor port.
+func TestRouterWake_OperatorStopRefused_ReturnsStopped503WithoutForward(t *testing.T) {
 	const wsPath = "/proj/disabled"
 	ws := serenaWS("disabled", wsPath, 9302)
 
 	daemon := newFakeSerenaDaemon("disabled")
+	var forwardCalls int
+	daemon.tool = func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+		forwardCalls++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[]}}`))
+	}
 	ts := httptest.NewServer(daemon.handler())
 	t.Cleanup(ts.Close)
 
@@ -504,14 +509,23 @@ func TestRouterWake_OperatorStopRefused_FallsThroughToForward(t *testing.T) {
 	sid := mintRouterSession(t, s, "2025-11-25")
 	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"})
 	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
-	// The refused wake must NOT itself produce a 503; the handler proceeds to
-	// the forward (which here hits a live fake daemon → 200). The point is that
-	// ErrWakeRefusedOperatorStop is NOT treated as a not-ready 503.
-	if rr.Code == http.StatusServiceUnavailable {
-		t.Fatalf("operator-stop-refused wake must not 503; the handler must fall through to the forward. body=%s", rr.Body.String())
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("operator-stop-refused wake status = %d, want 503; body=%s", rr.Code, rr.Body.String())
 	}
-	if rr.Code != http.StatusOK {
-		t.Fatalf("forward after refused wake status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	if forwardCalls != 0 {
+		t.Fatalf("operator-stop-refused wake forwarded to upstream %d time(s); want no forward", forwardCalls)
+	}
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode JSON-RPC error body: %v; body=%s", err, rr.Body.String())
+	}
+	if !strings.Contains(envelope.Error.Message, "operator stop") {
+		t.Fatalf("error message = %q, want operator stop named", envelope.Error.Message)
 	}
 }
 

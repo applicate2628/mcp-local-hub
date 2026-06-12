@@ -840,6 +840,56 @@ func TestStopForceKillSupervisorOwned_PortlessFallsBackToPID(t *testing.T) {
 	}
 }
 
+func TestStopForceKillSupervisorOwned_PortlessNoPIDReturnsError(t *testing.T) {
+	stateDir := phaseFStateDir(t)
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 0},
+		},
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	origStatus := supervisorIPCStatusFn
+	origPID := stopForceKillPIDFn
+	origForceKill := forceKillByPortFn
+	t.Cleanup(func() {
+		supervisorIPCStatusFn = origStatus
+		stopForceKillPIDFn = origPID
+		forceKillByPortFn = origForceKill
+	})
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: `\mcp-local-hub-time-default`, PID: 0, State: "Running"}}, nil
+	}
+	stopForceKillPIDFn = func(pid int) error {
+		t.Fatalf("stopForceKillPIDFn called with pid %d; no live PID was available", pid)
+		return nil
+	}
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		t.Fatalf("forceKillByPortFn called for portless descriptor port=%d", port)
+		return portKillNoListener, nil
+	}
+
+	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false, want true (a supervisor-owned target was in scope)")
+	}
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1; results=%+v", len(results), results)
+	}
+	if results[0].Err == "" {
+		t.Fatalf("portless descriptor with no live PID returned success; want no-kill-surface error row: %+v", results[0])
+	}
+	if !strings.Contains(results[0].Err, "no kill surface") || !strings.Contains(results[0].Err, "portless descriptor") {
+		t.Fatalf("result error = %q, want no kill surface / portless descriptor wording", results[0].Err)
+	}
+}
+
 func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testing.T) {
 	stateDir := phaseFStateDir(t)
 	intent := &SupervisorIntentFile{

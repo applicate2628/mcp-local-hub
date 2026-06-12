@@ -927,19 +927,26 @@ func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath str
 		for _, entry := range entries {
 			targetWSKey := entry.WorkspaceKey
 			intentTaskName := LSPIntentTaskNameForWorkspaceLanguage(targetWSKey, lang)
-			if _, supervisorManaged, err := a.removeLSPSupervisorIntent(targetWSKey, lang); err != nil {
+			if restoreSupervisorIntent, supervisorManaged, err := a.removeLSPSupervisorIntent(targetWSKey, lang); err != nil {
 				report.Warnings = append(report.Warnings,
 					fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
 				continue
 			} else if supervisorManaged {
 				ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
-				if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
+				_, err := registerSupervisorReconcileFn(ctx, true)
+				cancel()
+				if err != nil {
+					if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+						if restoreSupervisorIntent != nil {
+							restoreSupervisorIntent()
+						}
+						return report, fmt.Errorf("supervisor reconcile after removing %s failed while supervisor is alive; restored supervisor intent descriptor; retry unregister: %w", intentTaskName, err)
+					}
 					report.Warnings = append(report.Warnings,
 						fmt.Sprintf("supervisor reconcile after removing %s: %v", intentTaskName, err))
 				} else {
 					fmt.Fprintf(w, "✓ removed supervisor intent %s\n", intentTaskName)
 				}
-				cancel()
 			}
 			// 1. Kill any live proxy bound to this language's port BEFORE we
 			// Delete the scheduler task. sch.Delete removes the task record
