@@ -206,17 +206,15 @@ func waitPortReleasedAfterPIDKill(port, killedPID int, timeout time.Duration) (s
 		return fmt.Sprintf("port now owned by foreign process %q; not killing", image), nil
 	}
 
-	if err := taskkillProcessTreeByPIDFn(pid); err != nil {
-		return "", fmt.Errorf("force kill mcphub remnant pid %d on port %d: %w", pid, port, err)
-	}
-	deadline = time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, _, _, stillUp := lookupProcess(port); !stillUp {
-			return "", nil
-		}
-		time.Sleep(daemonPortReleasePollInterval)
-	}
-	return "", fmt.Errorf("port %d still bound after killing mcphub remnant pid %d (image %q parent %q)", port, pid, image, parentImage)
+	// A DIFFERENT mcphub PID on the port after our kill is the supervisor's
+	// auto-revival of the force-stopped daemon — the documented force-stop
+	// semantic (non-clean kill → restart policy respawns), NOT a remnant of
+	// the killed tree (an mcphub daemon's children are uvx/python/node
+	// wrappers, never another mcphub.exe). The 200ms poll can simply miss the
+	// brief unbound interval. Killing here would chase the freshly respawned
+	// daemon in a loop (bot PR #288 r30); report success with the revival
+	// noted instead.
+	return fmt.Sprintf("port re-bound by respawned mcphub pid %d (parent %q) after the force kill; supervisor auto-revival per restart policy", pid, parentImage), nil
 }
 
 func appendPIDKillContext(msg string, pidKillContext string) string {

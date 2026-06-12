@@ -571,7 +571,14 @@ func deleteLegacyDaemonIntentIfMerged(
 		}
 	}
 
-	// Step 4: confirmed — delete the file, then best-effort the sibling lock.
+	// Step 4: confirmed — delete the data file ONLY. The sibling .lock file is
+	// deliberately LEFT IN PLACE: on POSIX, unlinking a lock path while this
+	// process still holds the flock lets a concurrent legacy writer recreate
+	// the same path and acquire a DIFFERENT inode's lock — its WriteDaemonIntent
+	// then runs unserialized against this critical section and can recreate
+	// daemon-intent.json with a stop that never merges into the sub-block
+	// (bot PR #288 r30). A stale lock file is a few bytes of harmless debris;
+	// broken serialization is not.
 	if rmErr := os.Remove(daemonIntentPath); rmErr != nil {
 		if errors.Is(rmErr, os.ErrNotExist) {
 			// Raced to gone between stat + remove — treat as already deleted.
@@ -579,12 +586,6 @@ func deleteLegacyDaemonIntentIfMerged(
 		}
 		return false, fmt.Errorf("intent-collapse: delete daemon-intent.json: %w", rmErr)
 	}
-	// Best-effort .lock removal: a held flock on Windows cannot be unlinked,
-	// and a stale lock file is harmless (the next flock just re-creates/opens
-	// it), so a failure here is non-fatal — the destructive step (deleting the
-	// stop data) already committed.
-	daemonLockPath := filepath.Join(stateDir, intentLockLeaf)
-	_ = os.Remove(daemonLockPath)
 	return true, nil
 }
 
