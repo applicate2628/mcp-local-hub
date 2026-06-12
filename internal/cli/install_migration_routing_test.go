@@ -239,6 +239,74 @@ func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksMigratesToSupervisorIns
 	}
 }
 
+func TestRunLegacySchedulerUpgradeMigration_RestartsUnmatchedLegacyTasksAfterBinaryCopy(t *testing.T) {
+	resetUpgradeSeams(t)
+
+	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
+	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
+
+	var order []string
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		order = append(order, "stop-all")
+		return []api.RestartResult{
+			{TaskName: `\mcp-local-hub-memory-default`},
+			{TaskName: `\mcp-local-hub-lsp-abcd1234-python`},
+		}, nil
+	}
+	upgradeBootstrapFn = func(io.Writer) error {
+		order = append(order, "bootstrap")
+		return nil
+	}
+	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
+		t.Fatal("legacy migration must not call RestartAll; matched legacy tasks are migrated into supervisor intent")
+		return nil, nil
+	}
+	var restarted []string
+	upgradeRestartTasksFn = func(taskNames []string) ([]api.RestartResult, error) {
+		order = append(order, "restart-unmatched")
+		restarted = append(restarted, taskNames...)
+		return []api.RestartResult{{TaskName: taskNames[0]}}, nil
+	}
+	var installed []string
+	upgradeInstallServerFn = func(server string, w io.Writer) error {
+		order = append(order, "install:"+server)
+		installed = append(installed, server)
+		return nil
+	}
+
+	cmd := &cobra.Command{}
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	err := runLegacySchedulerUpgradeMigration(cmd, legacyUpgradeProbe{
+		servers:     []string{"memory"},
+		legacyTasks: []string{`mcp-local-hub-lsp-abcd1234-python`, `mcp-local-hub-memory-default`},
+		unmatched:   []string{`mcp-local-hub-lsp-abcd1234-python`},
+	})
+	if err != nil {
+		t.Fatalf("runLegacySchedulerUpgradeMigration: %v", err)
+	}
+	wantOrder := []string{"stop-all", "bootstrap", "restart-unmatched", "install:memory"}
+	if len(order) != len(wantOrder) {
+		t.Fatalf("order = %v, want %v", order, wantOrder)
+	}
+	for i := range wantOrder {
+		if order[i] != wantOrder[i] {
+			t.Fatalf("order = %v, want %v", order, wantOrder)
+		}
+	}
+	if len(restarted) != 1 || restarted[0] != `mcp-local-hub-lsp-abcd1234-python` {
+		t.Fatalf("restarted unmatched tasks = %v, want [mcp-local-hub-lsp-abcd1234-python]", restarted)
+	}
+	if len(installed) != 1 || installed[0] != "memory" {
+		t.Fatalf("installed servers = %v, want [memory]", installed)
+	}
+	if !strings.Contains(stderr.String(), "legacy scheduler tasks without matching shipped manifests were left for manual review") {
+		t.Fatalf("stderr missing unmatched warning; got %q", stderr.String())
+	}
+}
+
 // TestHasSupervisorIntent_AbsentReturnsFalseNoError pins the absent-file
 // contract under the deterministic state-dir override seam.
 func TestHasSupervisorIntent_AbsentReturnsFalseNoError(t *testing.T) {

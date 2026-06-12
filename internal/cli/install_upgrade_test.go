@@ -27,6 +27,7 @@ func resetUpgradeSeams(t *testing.T) {
 	origStop := upgradeStopAllFn
 	origBoot := upgradeBootstrapFn
 	origRestart := upgradeRestartAllFn
+	origRestartTasks := upgradeRestartTasksFn
 	origInstall := upgradeInstallServerFn
 	origExec := upgradeExecutableFn
 	origTarget := upgradeTargetPathFn
@@ -36,6 +37,7 @@ func resetUpgradeSeams(t *testing.T) {
 		upgradeStopAllFn = origStop
 		upgradeBootstrapFn = origBoot
 		upgradeRestartAllFn = origRestart
+		upgradeRestartTasksFn = origRestartTasks
 		upgradeInstallServerFn = origInstall
 		upgradeExecutableFn = origExec
 		upgradeTargetPathFn = origTarget
@@ -45,6 +47,7 @@ func resetUpgradeSeams(t *testing.T) {
 	upgradeStopAllFn = nil
 	upgradeBootstrapFn = nil
 	upgradeRestartAllFn = nil
+	upgradeRestartTasksFn = nil
 	upgradeInstallServerFn = nil
 	upgradeExecutableFn = nil
 	upgradeTargetPathFn = nil

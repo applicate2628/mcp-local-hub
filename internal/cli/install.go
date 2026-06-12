@@ -17,6 +17,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -605,6 +606,7 @@ var (
 	upgradeStopAllFn       func() ([]api.RestartResult, error)
 	upgradeBootstrapFn     func(io.Writer) error
 	upgradeRestartAllFn    func() ([]api.RestartResult, error)
+	upgradeRestartTasksFn  func([]string) ([]api.RestartResult, error)
 	upgradeInstallServerFn func(server string, w io.Writer) error
 	// upgradeExecutableFn / upgradeTargetPathFn carry the canonical-
 	// path comparison for the self-replace guard. Tests inject any
@@ -1117,6 +1119,32 @@ func upgradeRestartAll(a *api.API) ([]api.RestartResult, error) {
 	return a.RestartAll()
 }
 
+func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
+	if upgradeRestartTasksFn != nil {
+		return upgradeRestartTasksFn(taskNames)
+	}
+	if len(taskNames) == 0 {
+		return nil, nil
+	}
+	sch, err := scheduler.New()
+	if err != nil {
+		return nil, err
+	}
+	results := make([]api.RestartResult, 0, len(taskNames))
+	for _, taskName := range taskNames {
+		name := strings.TrimSpace(taskName)
+		if name == "" {
+			continue
+		}
+		if err := sch.Run(name); err != nil {
+			results = append(results, api.RestartResult{TaskName: name, Err: err.Error()})
+			continue
+		}
+		results = append(results, api.RestartResult{TaskName: name})
+	}
+	return results, nil
+}
+
 func upgradeInstallServer(server string, w io.Writer) error {
 	if upgradeInstallServerFn != nil {
 		return upgradeInstallServerFn(server, w)
@@ -1341,6 +1369,13 @@ func runLegacySchedulerUpgradeMigration(cmd *cobra.Command, probe legacyUpgradeP
 		return err
 	}
 
+	// Lock-safety verdict for the v0.4 scheduler migration route: this path
+	// still uses upgradeBootstrap's plain copy-only helper, not the v0.5
+	// rename-aside handoff. Any running legacy daemon can hold the canonical
+	// binary lock on Windows, including unmatched custom/workspace tasks. Stop
+	// the whole legacy scheduler fleet for the copy, then explicitly re-run the
+	// unmatched task names so only matched shipped manifests are absorbed into
+	// supervisor intent.
 	fmt.Fprintln(out, "Stopping legacy scheduler daemons...")
 	stopResults, err := upgradeStopAll(a)
 	if err != nil {
@@ -1364,6 +1399,26 @@ func runLegacySchedulerUpgradeMigration(cmd *cobra.Command, probe legacyUpgradeP
 	}
 
 	if len(probe.unmatched) > 0 {
+		fmt.Fprintln(out, "Restarting unmatched legacy scheduler daemons...")
+		restartResults, err := upgradeRestartTasks(probe.unmatched)
+		if err != nil {
+			return fmt.Errorf("restart unmatched legacy scheduler daemons after binary copy: %w", err)
+		}
+		var failed []string
+		for _, r := range restartResults {
+			if r.Err != "" {
+				failed = append(failed, r.TaskName)
+				fmt.Fprintf(errOut, "✗ restart unmatched %s: %s\n", r.TaskName, r.Err)
+			} else {
+				fmt.Fprintf(out, "✓ restarted unmatched %s\n", r.TaskName)
+			}
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf(
+				"%d unmatched legacy scheduler task(s) failed to restart after binary copy (%s); "+
+					"recovery: run `schtasks /Run /TN <task>` for each failed task, then rerun `mcphub install --upgrade` if migrated servers are still missing",
+				len(failed), strings.Join(failed, ", "))
+		}
 		fmt.Fprintf(errOut,
 			"⚠ legacy scheduler tasks without matching shipped manifests were left for manual review: %s\n",
 			strings.Join(probe.unmatched, ", "))
