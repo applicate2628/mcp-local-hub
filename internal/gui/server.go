@@ -550,6 +550,11 @@ type Server struct {
 	// stop followed by PID0/Stopped consumes the bounded grace before normal
 	// backend-loss teardown resumes. Guarded by serenaBackendPIDMu.
 	serenaBackendIdlePaths map[string]int
+	// serenaBackendPathByKey maps router reverse-index WorkspaceKey values to
+	// the WorkspacePath keys used by serenaBackendLastPID/IdlePaths. It lets
+	// last-unbind deletion avoid blockable resolver scans on hot teardown paths.
+	// Guarded by serenaBackendPIDMu.
+	serenaBackendPathByKey map[string]string
 
 	// v0.6 idle-shutdown (#6, spec §6) per-daemon LAST-ACTIVITY tracking.
 	// serenaActivityMu guards serenaLastActivity: WorkspaceKey -> the wall
@@ -599,6 +604,7 @@ func NewServer(cfg Config) *Server {
 		cfg.PID = os.Getpid()
 	}
 	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now()}
+	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the
 	// TTL+singleflight HealthSnapshot cache here so concurrent requests
 	// reuse the same cache; the healthBackend adapter below references

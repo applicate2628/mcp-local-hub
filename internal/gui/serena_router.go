@@ -241,6 +241,7 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 // adapters from the live api.Registry. Calling with nil clears the
 // wiring (the route then emits 503).
 func (s *Server) SetSerenaRouterDeps(deps *serenaRouterDeps) {
+	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	s.serenaRouterDeps.Store(deps)
 }
 
@@ -754,6 +755,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// uses for not-yet-ready daemons). A nil WakeIdleFn (partially-wired
 	// routing) skips the wake entirely.
 	if deps.WakeIdleFn != nil && ws.TaskName != "" {
+		hadActiveIdleStop := serenaTaskHasActiveIdleStop(ws.TaskName, time.Now())
 		// Detach from r.Context() cancellation (a client disconnect must not
 		// abort the supervisor nudge mid-flight, mirroring the auto-register
 		// posture) but BOUND the whole wake so a wedged respawn cannot hang the
@@ -776,6 +778,8 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			// ErrWakeRefusedOperatorStop: the daemon is deliberately stopped by
 			// the operator. Do NOT wake/spawn it; fall through to the forward,
 			// which fails loud against the down daemon (operator stop wins).
+		} else if hadActiveIdleStop {
+			s.dropSerenaBackendPIDTrackingForWorkspacePath(ws.WorkspacePath)
 		}
 	}
 
@@ -895,7 +899,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		sid := sessionID
 		sessionLive = func() bool { return s.serenaRouterSessions.known(sid) }
 	}
-	daemonSessionID, daemonProtocolVersion, freshDaemonHandshake, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
+	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
 	if hsErr != nil {
 		// Finding 4: the router session was DELETEd/swept during the handshake.
 		// resolveDaemonSession already best-effort-released the just-minted daemon
@@ -969,33 +973,8 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		// rebuild serenaBackendLastPID without this (not-yet-bound) workspace,
 		// dropping the just-seeded baseline (PR #288 r5 adversarial review).
 		//
-		// Stale-baseline replacement is decided by bindWorkspace's atomic
-		// (newlyBound, boundCount) pair PLUS the daemon-handshake freshness:
-		// the request that CREATED the workspace's first binding (newlyBound
-		// && boundCount == 1) is the first observer after an unbound window,
-		// and a request whose resolveDaemonSession performed a FRESH upstream
-		// handshake (daemon-session lookup missed — e.g. the idle sweeper
-		// unbound it before a wake) is talking to the CURRENT daemon
-		// generation, so its PID is the valid new baseline even though the
-		// surviving router session makes newlyBound false (PR #291 bot r2 —
-		// preserving the pre-idle PID there let the next reconcile tick tear
-		// down the just-woken live session when no idle tick had armed the
-		// grace marker). BOTH signals are gated on boundCount == 1: when
-		// OTHER sessions are still bound (count > 1), a new session's fresh
-		// handshake lands against the post-restart generation while those
-		// sessions are bound to the OLD one — replacing the baseline would
-		// hide the PID change from the reconcile and leave them zombies (PR
-		// #291 bot r3 P1), so the baseline is preserved and the tick tears
-		// the old generation down (the fresh session re-initializes — same
-		// collateral the pre-#291 semantics had). A cache-hit re-request
-		// (daemon-session lookup HIT) has freshDaemonHandshake == false and
-		// preserves the baseline so a backend restart is still detected (PR
-		// #291 — the overwrite masked restarts), and a RACING second
-		// first-request observes boundCount == 2 under the store lock (PR
-		// #291 bot P1 — a pre-bind sessions==0 snapshot let both racers
-		// qualify).
-		newlyBound, boundCount := s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
-		s.seedSerenaBackendPIDBaseline(r.Context(), ws, boundCount == 1 && (newlyBound || freshDaemonHandshake))
+		s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
+		s.seedSerenaBackendPIDBaseline(r.Context(), ws)
 	}
 
 	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO

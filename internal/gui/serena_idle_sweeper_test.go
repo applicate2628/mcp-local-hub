@@ -610,6 +610,60 @@ func TestRouterToolsList_AllIdle_WakesCandidateAndSucceeds(t *testing.T) {
 	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
 }
 
+func TestRouterToolsList_ConfirmedIdleWakeDeletesBaselineAndIdleMarker(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	daemon := newFakeSerenaDaemon("toolswake-baseline")
+	ts := newSafeSerenaHTTPTestServer(t, daemon.handler())
+	port := testServerPort(t, ts)
+
+	const wsPath = "/proj/toolswake-baseline"
+	ws := serenaWS("toolswake-baseline", wsPath, port)
+	wakeCalls := 0
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(_ context.Context, taskName string, _ int, _ string) error {
+			wakeCalls++
+			allowed, err := api.NewAPI().ClearStopIntentIfReason(taskName, api.IntentReasonIdle, "test-tools-list-wake")
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				t.Fatalf("tools/list wake did not clear active idle stop for %s", taskName)
+			}
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	seedSerenaBackendBaseline(s, wsPath, 1000)
+	seedSerenaBackendIdleMarker(s, wsPath, 2)
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list wake status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if wakeCalls != 1 {
+		t.Fatalf("WakeIdleFn calls = %d, want 1", wakeCalls)
+	}
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("tools/list confirmed idle wake left backend PID baseline for %q; want it deleted", wsPath)
+	}
+	if _, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("tools/list confirmed idle wake left backend idle marker for %q; want it deleted", wsPath)
+	}
+}
+
 // TestRouterToolsList_AllIdle_FirstWakeRefusedTriesNextCandidate covers the
 // multi-workspace pool case: a user-stopped row may refuse wake, but a later
 // merely-idle sibling can still be woken and satisfy tools/list.

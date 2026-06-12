@@ -2656,7 +2656,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickPIDChangeAfterBindTearsDo
 	}
 }
 
-func TestSerenaRouter_BackendLoss_SeedReplacesStaleBaselineForFirstBoundSession(t *testing.T) {
+func TestSerenaRouter_BackendLoss_SeedPreservesExistingBaselineForFirstBoundSession(t *testing.T) {
 	prevStatusFn := serenaBackendStatusFn
 	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
 
@@ -2700,14 +2700,14 @@ func TestSerenaRouter_BackendLoss_SeedReplacesStaleBaselineForFirstBoundSession(
 	s.serenaBackendPIDMu.Lock()
 	gotBaseline := s.serenaBackendLastPID[wsPath]
 	s.serenaBackendPIDMu.Unlock()
-	if gotBaseline != 2000 {
-		t.Errorf("seeded baseline = %d, want current PID 2000 for the first bound session after an unbound restart", gotBaseline)
+	if gotBaseline != 1000 {
+		t.Errorf("seeded baseline = %d, want preserved PID 1000 because seed only establishes missing baselines", gotBaseline)
 	}
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("reconcile tore down %d sessions after bind-time seed replaced the stale unbound baseline; want 0", n)
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("reconcile tore down %d sessions after preserved 1000 -> 2000 baseline; want 1", n)
 	}
-	if !s.serenaRouterSessions.known(sid) {
-		t.Errorf("first fresh session was torn down even though it was bound to the current backend generation")
+	if s.serenaRouterSessions.known(sid) {
+		t.Errorf("routerSessionStore STILL holds sid after preserved baseline detected a PID change; want it torn down")
 	}
 }
 
@@ -2815,7 +2815,7 @@ func TestSerenaRouter_BackendLoss_SeedPreservesBaselineWithExistingSessions(t *t
 		}, nil
 	}
 
-	s.seedSerenaBackendPIDBaseline(context.Background(), ws, false)
+	s.seedSerenaBackendPIDBaseline(context.Background(), ws)
 
 	s.serenaBackendPIDMu.Lock()
 	gotBaseline := s.serenaBackendLastPID[wsPath]

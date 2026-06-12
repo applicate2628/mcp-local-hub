@@ -63,11 +63,27 @@ func seedSerenaBackendBaseline(s *Server, wsPath string, pid int) {
 	s.serenaBackendLastPID = map[string]int{wsPath: pid}
 }
 
+func seedSerenaBackendIdleMarker(s *Server, wsPath string, ticks int) {
+	s.serenaBackendPIDMu.Lock()
+	defer s.serenaBackendPIDMu.Unlock()
+	if s.serenaBackendIdlePaths == nil {
+		s.serenaBackendIdlePaths = map[string]int{}
+	}
+	s.serenaBackendIdlePaths[wsPath] = ticks
+}
+
 func serenaBackendBaselineForTest(s *Server, wsPath string) (int, bool) {
 	s.serenaBackendPIDMu.Lock()
 	defer s.serenaBackendPIDMu.Unlock()
 	pid, ok := s.serenaBackendLastPID[wsPath]
 	return pid, ok
+}
+
+func serenaBackendIdleMarkerForTest(s *Server, wsPath string) (int, bool) {
+	s.serenaBackendPIDMu.Lock()
+	defer s.serenaBackendPIDMu.Unlock()
+	ticks, ok := s.serenaBackendIdlePaths[wsPath]
+	return ticks, ok
 }
 
 func assertSerenaSessionLive(t *testing.T, s *Server, sessions *InMemorySessionRouter, wsKey, sid string) {
@@ -93,6 +109,75 @@ func assertSerenaSessionGone(t *testing.T, s *Server, sessions *InMemorySessionR
 	}
 	if got := sessions.LookupSession(sid); got != nil {
 		t.Fatalf("sticky session %q survived backend loss: %+v", sid, got)
+	}
+}
+
+func TestSerenaRouter_BackendLoss_SeedNeverOverwritesExistingBaseline(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+
+	const wsPath = "/proj/establish-only"
+	ws := serenaWS("establish-only", wsPath, 9301)
+	s, _ := newSerenaStoreSeedServer(t, ws)
+	seedSerenaBackendBaseline(s, wsPath, 1000)
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 2000, Port: ws.Port},
+		}, nil
+	}
+
+	s.seedSerenaBackendPIDBaseline(context.Background(), ws)
+
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != 1000 {
+		t.Fatalf("seed overwrote existing baseline = (%d,%v), want (1000,true)", got, ok)
+	}
+}
+
+func TestSerenaRouter_BackendLoss_LastUnbindDropsBaselineAndIdleMarker(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const wsPath = "/proj/last-unbind"
+	const sid = "sid-last-unbind"
+	ws := serenaWS("last-unbind", wsPath, 9301)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-unbind")
+	seedSerenaBackendBaseline(s, wsPath, 1000)
+	seedSerenaBackendIdleMarker(s, wsPath, 2)
+
+	s.coordinateBackendLossUnbind(sid, sessions)
+
+	assertSerenaSessionGone(t, s, sessions, sid)
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("last unbind left backend PID baseline for %q; want it deleted", wsPath)
+	}
+	if _, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("last unbind left backend idle marker for %q; want it deleted", wsPath)
+	}
+}
+
+func TestSerenaRouter_BackendLoss_OneOfTwoUnbindKeepsBaselineAndIdleMarker(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const wsPath = "/proj/two-unbind"
+	ws := serenaWS("two-unbind", wsPath, 9302)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, "sid-a", "daemon-a")
+	seedBoundSerenaSession(s, sessions, ws, "sid-b", "daemon-b")
+	seedSerenaBackendBaseline(s, wsPath, 1000)
+	seedSerenaBackendIdleMarker(s, wsPath, 2)
+
+	s.coordinateBackendLossUnbind("sid-a", sessions)
+
+	assertSerenaSessionGone(t, s, sessions, "sid-a")
+	if got := s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey); len(got) != 1 || got[0] != "sid-b" {
+		t.Fatalf("workspace sessions after one unbind = %v, want [sid-b]", got)
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != 1000 {
+		t.Fatalf("one-of-two unbind baseline = (%d,%v), want (1000,true)", got, ok)
+	}
+	if got, ok := serenaBackendIdleMarkerForTest(s, wsPath); !ok || got != 2 {
+		t.Fatalf("one-of-two unbind idle marker = (%d,%v), want (2,true)", got, ok)
 	}
 }
 
@@ -301,6 +386,191 @@ func TestIdleSweeper_InvalidatesDaemonSessionOnlyAfterIdleStop(t *testing.T) {
 		t.Fatalf("daemon-session lookup after idle stop = %q; want miss and re-handshake", dsid)
 	}
 	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+}
+
+func TestSerenaRouter_BackendLoss_UnboundWindowRestartSeedsNewGeneration(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	daemon := newFakeSerenaDaemon("unbound-restart")
+	ts := newSafeSerenaHTTPTestServer(t, daemon.handler())
+	port := testServerPort(t, ts)
+
+	const wsPath = "/proj/unbound-restart"
+	const oldSID = "sid-before-unbound-window"
+	const pidA = 1000
+	const pidB = 2000
+	ws := serenaWS("unbound-restart", wsPath, port)
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:        sessions,
+		UpstreamURLFn:   func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:         func(string, string, map[string]any) error { return nil },
+		UpstreamTimeout: 2 * time.Second,
+	}
+	s := newSerenaTestServer(t, deps)
+	seedBoundSerenaSession(s, sessions, ws, oldSID, "daemon-before-unbound-window")
+	seedSerenaBackendBaseline(s, wsPath, pidA)
+
+	s.coordinateBackendLossUnbind(oldSID, sessions)
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("unbound window left stale backend PID baseline for %q; want it deleted before the next first bind", wsPath)
+	}
+
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: port},
+		}, nil
+	}
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.py"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("post-restart first bind status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidB {
+		t.Fatalf("post-unbound-window seed baseline = (%d,%v), want (%d,true)", got, ok, pidB)
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("reconcile after unbound-window restart tore down %d sessions; want 0", n)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+}
+
+func TestSerenaRouter_BackendLoss_FreshHandshakeDoesNotOverwriteExistingBaseline(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+
+	daemon := newFakeSerenaDaemon("fresh-handshake")
+	ts := newSafeSerenaHTTPTestServer(t, daemon.handler())
+	port := testServerPort(t, ts)
+
+	const wsPath = "/proj/fresh-handshake"
+	const pidA = 1000
+	const pidB = 2000
+	ws := serenaWS("fresh-handshake", wsPath, port)
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:        sessions,
+		UpstreamURLFn:   func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:         func(string, string, map[string]any) error { return nil },
+		UpstreamTimeout: 2 * time.Second,
+	}
+	s := newSerenaTestServer(t, deps)
+	seedSerenaBackendBaseline(s, wsPath, pidA)
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: port},
+		}, nil
+	}
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.py"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("fresh-handshake request status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidA {
+		t.Fatalf("fresh handshake overwrote existing baseline = (%d,%v), want (%d,true)", got, ok, pidA)
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+		t.Fatalf("reconcile after preserved %d -> %d baseline tore down %d sessions; want 1", pidA, pidB, n)
+	}
+	assertSerenaSessionGone(t, s, sessions, sid)
+}
+
+func TestSerenaRouter_BackendLoss_ConfirmedIdleWakeWithTwoSessionsLetsReconcileEstablishPID(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	daemon := newFakeSerenaDaemon("idle-two-sessions")
+	ts := newSafeSerenaHTTPTestServer(t, daemon.handler())
+	port := testServerPort(t, ts)
+
+	const wsPath = "/proj/idle-two-sessions"
+	const pidA = 1000
+	const pidB = 2000
+	ws := serenaWS("idle-two-sessions", wsPath, port)
+	sessions := NewInMemorySessionRouter()
+	wakeCalls := 0
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:        sessions,
+		UpstreamURLFn:   func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:         func(string, string, map[string]any) error { return nil },
+		UpstreamTimeout: 2 * time.Second,
+		WakeIdleFn: func(_ context.Context, taskName string, _ int, _ string) error {
+			wakeCalls++
+			allowed, err := api.NewAPI().ClearStopIntentIfReason(taskName, api.IntentReasonIdle, "test-wake")
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				t.Fatalf("wake did not clear active idle stop for %s", taskName)
+			}
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	seedBoundSerenaSession(s, sessions, ws, "sid-a", "daemon-before-idle-a")
+	seedBoundSerenaSession(s, sessions, ws, "sid-b", "daemon-before-idle-b")
+	seedSerenaBackendBaseline(s, wsPath, pidA)
+	seedSerenaBackendIdleMarker(s, wsPath, 2)
+	s.serenaDaemonSessions.unbindWorkspace(ws.WorkspaceKey)
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return nil, nil
+	}
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.py"})
+	if rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": "sid-a"}); rr.Code != http.StatusOK {
+		t.Fatalf("idle-wake request status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if wakeCalls != 1 {
+		t.Fatalf("WakeIdleFn calls = %d, want 1", wakeCalls)
+	}
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("confirmed idle wake left pre-idle PID baseline for %q; want it deleted before reconcile", wsPath)
+	}
+	if _, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("confirmed idle wake left idle marker for %q; want it deleted", wsPath)
+	}
+	if got := s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey); len(got) != 2 {
+		t.Fatalf("confirmed idle wake changed router session count = %d (%v), want 2", len(got), got)
+	}
+
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: port},
+		}, nil
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("first post-wake reconcile tore down %d sessions; want 0 and baseline establishment", n)
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidB {
+		t.Fatalf("post-wake reconcile baseline = (%d,%v), want (%d,true)", got, ok, pidB)
+	}
+	for _, sid := range []string{"sid-a", "sid-b"} {
+		if !s.serenaRouterSessions.known(sid) {
+			t.Fatalf("router session %q was torn down by confirmed idle wake", sid)
+		}
+		if got := sessions.LookupSession(sid); got == nil || got.WorkspaceKey != ws.WorkspaceKey {
+			t.Fatalf("sticky session %q = %+v, want workspace %q", sid, got, ws.WorkspaceKey)
+		}
+	}
+	if got := s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey); len(got) != 2 {
+		t.Fatalf("workspace sessions after post-wake reconcile = %v, want two sessions", got)
+	}
 }
 
 func newSafeSerenaHTTPTestServer(t *testing.T, h http.Handler) *httptest.Server {
