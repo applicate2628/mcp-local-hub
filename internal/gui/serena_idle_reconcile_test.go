@@ -338,7 +338,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcilePreservesIdleStoppedAndPostWakePID
 		return []api.DaemonStatus{row}, nil
 	}
 
-	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, now); err != nil {
 		t.Fatalf("seed idle stop: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcileIdleGraceExpiresWithoutRespawn(t *
 		return []api.DaemonStatus{row}, nil
 	}
 
-	now := time.Date(2026, 6, 11, 12, 30, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, now); err != nil {
 		t.Fatalf("seed idle stop: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestIdleSweeper_InvalidatesDaemonSessionOnlyAfterIdleStop(t *testing.T) {
 	s, sessions := newSerenaStoreSeedServer(t, ws)
 	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-session-before-idle")
 
-	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	serenaIdleThresholdFn = func() (time.Duration, bool) { return 30 * time.Minute, true }
 	serenaIdleStopFn = api.NewAPI().WriteSerenaIdleStopResult
 	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
@@ -647,7 +647,7 @@ func TestIdleSweeper_OperatorStopRefusalDoesNotRecordIdleStopSuccess(t *testing.
 	s, sessions := newSerenaStoreSeedServer(t, ws)
 	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-session-before-refused-idle")
 
-	now := time.Date(2026, 6, 11, 12, 15, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	if err := api.NewAPI().WriteStopIntent(ws.TaskName, api.DaemonIntent{
 		Desired:   api.IntentDesiredStopped,
 		Reason:    api.IntentReasonUserStop,
@@ -769,7 +769,7 @@ func TestSerenaRouter_IdleShutdownWakeReconcilesAndRehandshakes(t *testing.T) {
 	serenaIdleThresholdFn = func() (time.Duration, bool) { return 30 * time.Minute, true }
 	serenaIdleStopFn = api.NewAPI().WriteSerenaIdleStopResult
 
-	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-45*time.Minute))
 	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
 		t.Fatalf("idle sweep stopped %d daemons; want 1", n)
