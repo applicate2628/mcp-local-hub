@@ -848,6 +848,16 @@ func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, w
 	if pid <= 0 {
 		return
 	}
+	// Advance the drop-generation alongside the reseed (PR #291 bot r12): an
+	// in-flight reconcile that snapshotted the PRE-wake PID before its IPC
+	// status read would otherwise compare the woken PID against its stale
+	// snapshot, classify loss, and tear down the just-woken live sessions —
+	// the generation guard at the reconcile's persist/loss step recognizes
+	// this reseed exactly like a drop and discards the stale snapshot.
+	if s.serenaBackendDropGen == nil {
+		s.serenaBackendDropGen = map[string]uint64{}
+	}
+	s.serenaBackendDropGen[ws.WorkspacePath]++
 	if s.serenaBackendLastPID == nil {
 		s.serenaBackendLastPID = map[string]int{}
 	}
