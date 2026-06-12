@@ -678,11 +678,17 @@ func TestSerenaRouter_BackendLoss_ConfirmedIdleWakeWithTwoSessionsLetsReconcileE
 	if wakeCalls != 1 {
 		t.Fatalf("WakeIdleFn calls = %d, want 1", wakeCalls)
 	}
-	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
-		t.Fatalf("confirmed idle wake left pre-idle PID baseline for %q; want it deleted before reconcile", wsPath)
+	// PR #291 bot r11: with BOUND sessions and no observable live PID during
+	// the wake (status row absent — daemon still spawning), the reseed must
+	// PRESERVE the pre-idle baseline AND the idle marker; the reconcile's
+	// idle-grace rule then refreshes the baseline to the woken PID without a
+	// loss classification. (Dropping here would let a restart-before-next-
+	// reconcile masquerade as a first observation.)
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidA {
+		t.Fatalf("wake-with-unobservable-PID baseline = (%d,%v), want preserved (%d,true)", got, ok, pidA)
 	}
-	if _, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
-		t.Fatalf("confirmed idle wake left idle marker for %q; want it deleted", wsPath)
+	if _, ok := serenaBackendIdleMarkerForTest(s, wsPath); !ok {
+		t.Fatalf("wake-with-unobservable-PID idle marker missing; want preserved for the reconcile grace rule")
 	}
 	if got := s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey); len(got) != 2 {
 		t.Fatalf("confirmed idle wake changed router session count = %d (%v), want 2", len(got), got)

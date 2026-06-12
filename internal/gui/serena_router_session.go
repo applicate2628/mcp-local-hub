@@ -824,10 +824,6 @@ func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, w
 	pid := serenaBackendLivePIDForWorkspace(ctx, ws.WorkspacePath)
 	s.serenaBackendPIDMu.Lock()
 	defer s.serenaBackendPIDMu.Unlock()
-	if pid <= 0 {
-		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
-		return
-	}
 	// A wake can fire with ZERO bound router sessions (workspace-agnostic
 	// tools/list, path-only legacy tool call). Recording a baseline then would
 	// outlive the unbound window: a later restart while still unbound followed
@@ -840,6 +836,16 @@ func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, w
 	// baseline is re-established by that session's own seed.
 	if s.serenaRouterSessions.withWorkspaceCount(ws.WorkspaceKey) == 0 {
 		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
+		return
+	}
+	// BOUND workspace + no observable live PID (transient supervisor-status
+	// error, or the woken row has not reported a positive PID yet): PRESERVE
+	// the existing baseline + idle marker (PR #291 bot r11). Dropping here
+	// would turn a restart-before-next-reconcile into a first observation and
+	// let the still-bound stale sessions survive; the prior baseline keeps the
+	// generation change detectable, and the reconcile's idle-grace/refresh
+	// machinery replaces it once a real PID is observed.
+	if pid <= 0 {
 		return
 	}
 	if s.serenaBackendLastPID == nil {
