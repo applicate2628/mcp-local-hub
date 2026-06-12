@@ -828,6 +828,20 @@ func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, w
 		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
 		return
 	}
+	// A wake can fire with ZERO bound router sessions (workspace-agnostic
+	// tools/list, path-only legacy tool call). Recording a baseline then would
+	// outlive the unbound window: a later restart while still unbound followed
+	// by the first real session's establish-only seed keeps the stale PID and
+	// the next reconcile tears that fresh session down as false backend loss
+	// (PR #291 bot r9). With no bound sessions the baseline must stay ABSENT
+	// (the "unbound window starts fresh" invariant) — drop instead of seed.
+	// Lock order: PID-mu OUTER → store-mu INNER via withWorkspaceCount, the
+	// documented nesting. A bind racing this count read is benign: the dropped
+	// baseline is re-established by that session's own seed.
+	if s.serenaRouterSessions.withWorkspaceCount(ws.WorkspaceKey) == 0 {
+		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
+		return
+	}
 	if s.serenaBackendLastPID == nil {
 		s.serenaBackendLastPID = map[string]int{}
 	}

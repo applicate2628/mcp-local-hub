@@ -892,11 +892,36 @@ func TestRouterToolsList_ConfirmedWakeReseedsExistingBaseline(t *testing.T) {
 	if wakeCalls != 1 {
 		t.Fatalf("WakeIdleFn calls = %d, want 1", wakeCalls)
 	}
-	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
-		t.Fatalf("tools/list post-wake baseline = (%d,%v), want (%d,true)", got, ok, pid)
+	// No router session is bound to the workspace in this test, so the
+	// confirmed wake must DROP the baseline rather than reseed it (PR #291 bot
+	// r9 — a baseline recorded during an unbound window outlives a later
+	// restart and the first real session's establish-only seed then keeps the
+	// stale PID, producing a false backend-loss teardown).
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("tools/list post-wake baseline with no bound sessions = (%d,true), want absent", got)
 	}
 	if ticks, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
 		t.Fatalf("tools/list post-wake idle marker = (%d,true), want absent", ticks)
+	}
+
+	// BOUND variant: with a live router session indexed to the workspace the
+	// confirmed wake reseeds the baseline to the observed live PID.
+	sid := mintRouterSession(t, s, "2025-11-25")
+	s.serenaRouterSessions.bindWorkspace(sid, ws.WorkspaceKey)
+	seedSerenaBackendBaseline(s, wsPath, pid-1) // stale pre-wake value
+	seedSerenaBackendIdleMarker(s, wsPath, serenaBackendPostIdleGraceTicks)
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("WriteSerenaIdleStop (bound variant): %v", err)
+	}
+	s.wakeOneSerenaCandidateForToolsList(req, deps, []*api.WorkspaceEntry{ws}, deps.AuditFn)
+	if wakeCalls != 2 {
+		t.Fatalf("WakeIdleFn calls after bound-variant wake = %d, want 2", wakeCalls)
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
+		t.Fatalf("bound-variant post-wake baseline = (%d,%v), want (%d,true)", got, ok, pid)
+	}
+	if ticks, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("bound-variant post-wake idle marker = (%d,true), want absent", ticks)
 	}
 }
 
