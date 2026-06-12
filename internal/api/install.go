@@ -1585,13 +1585,10 @@ func checkSecretRefs(env map[string]string) error {
 //
 // v0.6 Phase F moved global daemons from per-daemon scheduler tasks to
 // supervisor-intent.json. Accept that supervisor-owned path first: the
-// intent must contain THIS server+daemon row with the same port; when
-// both supervisor IPC and the OS port-owner lookup are available, the
-// supervisor-reported live PID must equal the listener PID. If either
-// proof surface is unavailable, the same trust ladder used by the idle
-// wake readiness path downgrades to the intent-row match alone; the
-// alternative would make reinstalls fail on hosts/platforms without one
-// of those probes even though the supervisor descriptor is authoritative.
+// intent must contain THIS server+daemon row with the same port and
+// supervisor IPC must report a live PID for that exact task. When the OS
+// port-owner lookup is available, the listener PID must also match the
+// supervisor-reported live PID.
 //
 // Three-part identity gate (bot r1 P1 + r2 P1 closure on PR #180):
 // scheduler task name alone is not enough — a stale orphan / foreign
@@ -1667,9 +1664,15 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 //     this matches the best-effort identity-gate posture used elsewhere on
 //     hosts without process probes, and avoids breaking valid installs when the
 //     OS cannot expose ancestry.
-//   - External port: fail closed unless both proof surfaces are available and
-//     agree: the live listener PID from port-owner lookup must equal the live
-//     supervisor-reported PID for the matching task.
+//   - External port:
+//     1. Port-owner lookup available: require the live listener PID to equal
+//     the live supervisor-reported PID for the matching task.
+//     2. Port-owner lookup unavailable but supervisor IPC reachable and live:
+//     accept the matching descriptor row + live PID. Residual: a foreign
+//     process could hold the descriptor port while our daemon is alive on a
+//     different one, but that requires an external interference window; the
+//     supervisor's own port-conflict handling surfaces it at spawn.
+//     3. Supervisor IPC unreachable or no live task PID: fail closed.
 //
 // Callers reach this only after preflightPortInUse(port) is already true, so a
 // missing proof surface cannot mean "port is free"; it leaves the normal port
@@ -1716,6 +1719,14 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	}
 	portPID, havePortPID := supervisorOwnedPortPID(port)
 	if !havePortPID {
+		if lookupProcess == nil {
+			// POSIX and other no-probe hosts cannot bind the external listener to
+			// a PID here. The row already matched this task and supervisor IPC
+			// reported that exact task live, so accept the daemon-owned reinstall
+			// while leaving spawn-time port-conflict handling to catch external
+			// interference that appears after the supervisor's own bind attempt.
+			return true
+		}
 		return false
 	}
 	return livePID == portPID

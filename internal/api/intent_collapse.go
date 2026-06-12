@@ -191,7 +191,12 @@ func mergeDaemonIntentStops(
 			}
 			// Inactive legacy entries are stale tombstones after E2. The
 			// sub-block is authoritative for existing tasks, so an old
-			// Desired=running / expired daemon-intent entry is a no-op.
+			// Desired=running / expired daemon-intent entry is a no-op for
+			// the merged stops map, but the preview still reports the drop so
+			// operators can audit the legacy file entries E2 will discard.
+			entries = append(entries, MergeStopsEntry{
+				TaskName: key, Action: MergeStopDroppedExpired, Reason: di.Reason,
+			})
 		}
 	}
 
@@ -545,9 +550,11 @@ func deleteLegacyDaemonIntentIfMerged(
 	}
 
 	// Step 3: REFUSE the delete unless every ACTIVE stop in daemon-intent.json
-	// is present + identical in the sub-block. An inactive (expired/running)
-	// task is intentionally NOT required (the merge drops those), so it is not
-	// a blocker. This is the "never lose a stop" gate.
+	// is present in the sub-block as either the identical record or a strictly
+	// newer record. The newer case means the merge already kept the sub-block
+	// authority instead of downgrading it to stale legacy data. An inactive
+	// (expired/running) task is intentionally NOT required (the merge drops
+	// those), so it is not a blocker. This is the "never lose a stop" gate.
 	if daemonIntent != nil {
 		for taskName, di := range daemonIntent.Tasks {
 			active, _ := di.IsActiveStop(now)
@@ -556,7 +563,7 @@ func deleteLegacyDaemonIntentIfMerged(
 			}
 			key := canonicalIntentTaskKey(taskName)
 			got, ok := subBlock[key]
-			if !ok || !daemonIntentRecordsEqual(got, di) {
+			if !ok || !daemonIntentRecordMergedOrSuperseded(got, di) {
 				// An active stop is NOT durably in the sub-block yet — keep the
 				// file so the next boot re-merges it. Never delete here.
 				return false, nil
@@ -579,6 +586,10 @@ func deleteLegacyDaemonIntentIfMerged(
 	daemonLockPath := filepath.Join(stateDir, intentLockLeaf)
 	_ = os.Remove(daemonLockPath)
 	return true, nil
+}
+
+func daemonIntentRecordMergedOrSuperseded(subBlock, legacy DaemonIntent) bool {
+	return daemonIntentRecordsEqual(subBlock, legacy) || subBlock.UpdatedAt.After(legacy.UpdatedAt)
 }
 
 // readDaemonIntentForMerge parses daemon-intent.json from raw bytes without

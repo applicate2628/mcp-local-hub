@@ -265,8 +265,15 @@ func TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof(t *testing.T) 
 		return []DaemonStatus{{TaskName: taskName, PID: portPID, State: "Running"}}, nil
 	}
 	lookupProcess = nil
+	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); !got {
+		t.Fatal("intent row with unavailable port-owner lookup and live supervisor PID = false, want true")
+	}
+
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return nil, errors.New("supervisor IPC unavailable")
+	}
 	if got := portHeldBySupervisorIntentDaemon(port, "demo", "alpha"); got {
-		t.Fatal("intent row with unavailable port-owner lookup = true, want false")
+		t.Fatal("intent row with unavailable port-owner lookup and unreachable supervisor IPC = true, want false")
 	}
 
 	lookupProcess = func(p int) (int, uint64, int64, bool) {

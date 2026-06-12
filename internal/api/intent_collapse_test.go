@@ -327,6 +327,48 @@ func TestCheckDaemonIntentCollapse_DoesNotCreateDaemonIntentLock(t *testing.T) {
 	}
 }
 
+func TestCheckDaemonIntentCollapse_ReportsDroppedInactiveLegacyStops(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.UTC)
+	runningTask := `\mcp-local-hub-running-default`
+	expiredTask := `\mcp-local-hub-expired-default`
+
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	seedDaemonIntent(t, runningTask, DaemonIntent{
+		Desired:   IntentDesiredRunning,
+		Reason:    IntentReasonInstall,
+		UpdatedAt: now.Add(-time.Hour),
+	})
+	seedDaemonIntent(t, expiredTask, DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now.Add(-48 * time.Hour),
+	})
+
+	res, err := CheckDaemonIntentCollapse(stateDir, now)
+	if err != nil {
+		t.Fatalf("CheckDaemonIntentCollapse: %v", err)
+	}
+	if res.Changed || res.Wrote {
+		t.Fatalf("inactive legacy entries should not mutate the sub-block in --check; res=%+v", res)
+	}
+	want := []MergeStopsEntry{
+		{TaskName: expiredTask, Action: MergeStopDroppedExpired, Reason: IntentReasonUserStop},
+		{TaskName: runningTask, Action: MergeStopDroppedExpired, Reason: IntentReasonInstall},
+	}
+	if len(res.Entries) != len(want) {
+		t.Fatalf("--check entries = %+v, want %+v", res.Entries, want)
+	}
+	for i := range want {
+		if res.Entries[i] != want[i] {
+			t.Fatalf("--check entries[%d] = %+v, want %+v (all entries=%+v)", i, res.Entries[i], want[i], res.Entries)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The merge owner holds the daemon-intent flock across the WHOLE op.
 // ---------------------------------------------------------------------------
@@ -471,10 +513,17 @@ func TestRunDaemonIntentCollapse_StaleLegacyRunningDoesNotDropSubBlockStop(t *te
 	if got, ok := stops[absentTask]; !ok || got.Desired != IntentDesiredStopped || got.Reason != IntentReasonUserDisabled {
 		t.Fatalf("absent active legacy stop = (%+v,%v), want added disabled stop", got, ok)
 	}
-	if len(res.Entries) != 1 ||
-		res.Entries[0].TaskName != absentTask ||
-		res.Entries[0].Action != MergeStopAdded {
-		t.Fatalf("collapse entries = %+v, want only add for absent legacy active stop", res.Entries)
+	wantEntries := []MergeStopsEntry{
+		{TaskName: absentTask, Action: MergeStopAdded, Reason: IntentReasonUserDisabled},
+		{TaskName: stoppedTask, Action: MergeStopDroppedExpired, Reason: IntentReasonInstall},
+	}
+	if len(res.Entries) != len(wantEntries) {
+		t.Fatalf("collapse entries = %+v, want %+v", res.Entries, wantEntries)
+	}
+	for i := range wantEntries {
+		if res.Entries[i] != wantEntries[i] {
+			t.Fatalf("collapse entries[%d] = %+v, want %+v (all entries=%+v)", i, res.Entries[i], wantEntries[i], res.Entries)
+		}
 	}
 }
 
@@ -508,8 +557,11 @@ func TestRunDaemonIntentCollapse_StaleLegacyRunningOnlyIsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDaemonIntentCollapse: %v", err)
 	}
-	if res.Changed || res.Wrote || len(res.Entries) != 0 {
-		t.Fatalf("stale legacy running entry should be no-op; res=%+v", res)
+	if res.Changed || res.Wrote || len(res.Entries) != 1 {
+		t.Fatalf("stale legacy running entry should only report a drop decision; res=%+v", res)
+	}
+	if got := res.Entries[0]; got.TaskName != stoppedTask || got.Action != MergeStopDroppedExpired || got.Reason != IntentReasonInstall {
+		t.Fatalf("stale legacy running entry = %+v, want drop-expired for %s", got, stoppedTask)
 	}
 	stops := readSupervisorStopsFromDisk(t, stateDir)
 	if got, ok := stops[stoppedTask]; !ok || got != subBlockStop {
@@ -810,6 +862,78 @@ func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenFreshRereadAlreadyMerged
 	}
 	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; got.Reason != IntentReasonUserStop || !got.UpdatedAt.Equal(now) {
 		t.Fatalf("merged stop missing or mutated after cleanup: %+v", got)
+	}
+}
+
+func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenSubBlockStopIsNewer(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.UTC)
+	supPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	daemonPath := filepath.Join(stateDir, intentFileLeaf)
+	task := `\mcp-local-hub-paper-search-default`
+	legacyStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Hour)}
+	newerStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now}
+
+	if err := WriteSupervisorIntent(supPath, &SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			task: newerStop,
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	seedDaemonIntent(t, task, legacyStop)
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if res.Changed || res.Wrote {
+		t.Fatalf("newer sub-block stop should win without a rewrite; res=%+v", res)
+	}
+	if !res.DeletedLegacyFile {
+		t.Fatalf("older superseded daemon-intent.json should be deleted; res=%+v", res)
+	}
+	if _, err := os.Stat(daemonPath); !os.IsNotExist(err) {
+		t.Fatalf("daemon-intent.json survived newer sub-block cleanup; stat err=%v", err)
+	}
+	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; !daemonIntentRecordsEqual(got, newerStop) {
+		t.Fatalf("newer sub-block stop = %+v, want %+v", got, newerStop)
+	}
+}
+
+func TestDeleteLegacyDaemonIntentIfMerged_RefusesWhenLegacyStopIsNewerThanSubBlock(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.UTC)
+	supPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	daemonPath := filepath.Join(stateDir, intentFileLeaf)
+	task := `\mcp-local-hub-paper-search-default`
+	subBlockStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Hour)}
+	legacyStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now}
+
+	if err := WriteSupervisorIntent(supPath, &SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			task: subBlockStop,
+		},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	seedDaemonIntent(t, task, legacyStop)
+
+	deleted, err := deleteLegacyDaemonIntentIfMerged(stateDir, supPath, daemonPath, &DaemonIntentFile{
+		Tasks: map[string]DaemonIntent{task: legacyStop},
+	}, now)
+	if err != nil {
+		t.Fatalf("deleteLegacyDaemonIntentIfMerged: %v", err)
+	}
+	if deleted {
+		t.Fatal("deleteLegacyDaemonIntentIfMerged deleted a newer legacy stop before merge")
+	}
+	if _, err := os.Stat(daemonPath); err != nil {
+		t.Fatalf("daemon-intent.json should remain when legacy stop is newer; stat err=%v", err)
 	}
 }
 

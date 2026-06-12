@@ -21,16 +21,17 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"mcp-local-hub/internal/process"
 )
 
 // stopForceKillPIDFn is the test seam for the PID-kill fallback used when a
 // supervisor-owned descriptor carries no port (e.g. a degenerate or
-// not-yet-bound row) but the IPC status reports a live PID. Production:
-// process.BestEffortKillByPID. Mirrors killByPortFn's seam discipline so
-// the force-kill path is exercisable without touching real processes.
-var stopForceKillPIDFn = process.BestEffortKillByPID
+// not-yet-bound row) but the IPC status reports a live PID. Production uses the
+// strongest tree primitive per platform: Windows goes through the Lane A
+// taskkill /T primitive; POSIX goes through process.TreeKillByPID, which kills
+// the process group and falls back to a single PID only when the target is not a
+// group leader. Mirrors killByPortFn's seam discipline so the force-kill path is
+// exercisable without touching real processes.
+var stopForceKillPIDFn = stopForceKillSupervisorPIDTree
 
 // supervisorIPCStatusFn is the test seam for supervisor IPC status reads that
 // need the supervisor-owned live PID map. The force path uses it to recover a
