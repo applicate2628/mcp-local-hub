@@ -854,7 +854,6 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 
 	const (
 		supervisorPID = 43105
-		portOwnerPID  = 53105
 	)
 	origIdentity := processIdentityByPID
 	origStatus := supervisorIPCStatusFn
@@ -873,10 +872,10 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 
 	processIdentityByPID = func(pid int) (string, string, bool) {
 		switch pid {
-		case supervisorPID, portOwnerPID:
+		case supervisorPID:
 			return mcphubProcessImageName, mcphubProcessImageName, true
 		default:
-			t.Fatalf("processIdentityByPID pid = %d, want %d or %d", pid, supervisorPID, portOwnerPID)
+			t.Fatalf("processIdentityByPID pid = %d, want %d", pid, supervisorPID)
 			return "", "", false
 		}
 	}
@@ -895,7 +894,7 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 			t.Fatalf("lookupProcess port = %d, want 33105", port)
 		}
 		if portLookups <= 2 {
-			return portOwnerPID, 0, 0, true
+			return supervisorPID, 0, 0, true
 		}
 		return 0, 0, 0, false
 	}
@@ -904,7 +903,10 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 		taskkillPIDs = append(taskkillPIDs, pid)
 		return nil
 	}
-	forceKillByPortFn = killDaemonByPortOutcome
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
+		return portKillNoListener, nil
+	}
 
 	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
 	if err != nil {
@@ -922,8 +924,61 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 	if portLookups < 3 {
 		t.Fatalf("port release wait consulted lookupProcess %d times, want initial lookup plus release polling", portLookups)
 	}
-	if len(taskkillPIDs) != 1 || taskkillPIDs[0] != portOwnerPID {
-		t.Fatalf("port-path taskkill PIDs = %v, want [%d]", taskkillPIDs, portOwnerPID)
+	if len(taskkillPIDs) != 0 {
+		t.Fatalf("taskkill PIDs = %v, want none for wait-only release", taskkillPIDs)
+	}
+}
+
+func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *testing.T) {
+	const (
+		killedPID  = 43106
+		foreignPID = 53106
+		port       = 33106
+	)
+
+	origIdentity := processIdentityByPID
+	origForceKill := forceKillByPortFn
+	origLookup := lookupProcess
+	origTaskkill := taskkillProcessTreeByPIDFn
+	t.Cleanup(func() {
+		processIdentityByPID = origIdentity
+		forceKillByPortFn = origForceKill
+		lookupProcess = origLookup
+		taskkillProcessTreeByPIDFn = origTaskkill
+	})
+
+	processIdentityByPID = func(pid int) (string, string, bool) {
+		switch pid {
+		case killedPID:
+			return mcphubProcessImageName, mcphubProcessImageName, true
+		case foreignPID:
+			return "node.exe", "explorer.exe", true
+		default:
+			t.Fatalf("processIdentityByPID pid = %d, want %d or %d", pid, killedPID, foreignPID)
+			return "", "", false
+		}
+	}
+	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+		if gotPort != port {
+			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+		}
+		return foreignPID, 0, 0, true
+	}
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		t.Fatalf("forceKillByPortFn called for reused foreign port %d", port)
+		return portKillNoListener, nil
+	}
+	taskkillProcessTreeByPIDFn = func(pid int) error {
+		t.Fatalf("taskkillProcessTreeByPIDFn called for foreign pid %d", pid)
+		return nil
+	}
+
+	warnContext, err := waitPortReleasedAfterPIDKill(port, killedPID, 0)
+	if err != nil {
+		t.Fatalf("waitPortReleasedAfterPIDKill error = %v, want success for foreign port reuse", err)
+	}
+	if warnContext == "" || !strings.Contains(warnContext, "foreign process") || !strings.Contains(warnContext, "node.exe") {
+		t.Fatalf("warning context = %q, want foreign process node.exe context", warnContext)
 	}
 }
 

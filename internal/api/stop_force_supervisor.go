@@ -89,11 +89,12 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 
 // forceKillOneSupervisorTarget kills a single supervisor-owned descriptor.
 // A supervisor IPC PID snapshot is preferred when available because it was
-// captured from the supervisor-owned task identity. If that PID was recycled
-// into a foreign process, or if the PID kill races with process exit, the port
-// classifier still gets a chance to report the honest current state: unbound
-// means already stopped, an mcphub listener is killed, and a foreign listener is
-// refused by the port path's own identity gate.
+// captured from the supervisor-owned task identity. If that PID cannot be
+// trusted or cannot be killed, the port classifier still gets a chance to report
+// the honest current state. If the PID kill succeeds, the descriptor port is
+// never blindly killed: waitPortReleasedAfterPIDKill owns that release/reuse
+// table so a dropped descriptor cannot kill a foreign process that re-bound the
+// port after our daemon already died.
 func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) RestartResult {
 	var pidKillErr error
 	var pidKillContext string
@@ -112,6 +113,11 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 			if d.Port == 0 {
 				return RestartResult{TaskName: d.TaskName}
 			}
+			warnContext, err := waitPortReleasedAfterPIDKill(d.Port, pid, 5*time.Second)
+			if err != nil {
+				return RestartResult{TaskName: d.TaskName, Err: appendPIDKillContext("wait for port release after pid kill: "+err.Error(), pidKillContext)}
+			}
+			return RestartResult{TaskName: d.TaskName, Warning: warnContext}
 		}
 	}
 	portKillUnsupported := false
@@ -135,6 +141,73 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 	// running from the caller's observable kill surfaces, so the force-stop goal
 	// already holds. Success row (no Err).
 	return RestartResult{TaskName: d.TaskName}
+}
+
+// waitPortReleasedAfterPIDKill waits for a descriptor port after the trusted
+// supervisor-reported PID was killed successfully.
+//
+// Decision table for PID kill SUCCEEDED + d.Port != 0:
+//   - port becomes unbound before timeout → SUCCESS; the intended daemon is
+//     gone and no port owner needs killing.
+//   - timeout + same PID still reported → ERROR; that PID was already killed,
+//     so this is a process-table/port-lookup race and we must not switch to a
+//     blind port kill.
+//   - timeout + mcphub.exe listener → KILL that PID's tree through the existing
+//     identity-gated taskkill primitive, then require the port to release.
+//   - timeout + foreign listener image → SUCCESS with warning context
+//     ("port now owned by foreign process <image>; not killing"); the force-stop
+//     goal holds because our daemon PID died, and killing the re-user is the
+//     unsafe r21 over-correction this path must avoid.
+//   - lookup/identity proof unavailable → ERROR; without a release or identity
+//     proof, this path cannot honestly claim the descriptor port is safe.
+func waitPortReleasedAfterPIDKill(port, killedPID int, timeout time.Duration) (string, error) {
+	if port == 0 {
+		return "", nil
+	}
+	if lookupProcess == nil {
+		return "", fmt.Errorf("%w; no usable port-release proof", errPortKillUnsupported)
+	}
+
+	deadline := time.Now().Add(timeout)
+	var pid int
+	var ok bool
+	for {
+		pid, _, _, ok = lookupProcess(port)
+		if !ok {
+			return "", nil
+		}
+		if timeout <= 0 || !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(daemonPortReleasePollInterval)
+	}
+
+	if pid == killedPID {
+		return "", fmt.Errorf("port %d still bound to killed pid %d after %s", port, killedPID, timeout)
+	}
+
+	image, parentImage, verified, lookupAvailable, lookupOK := mcphubPIDImageVerified(pid)
+	if !lookupAvailable {
+		return "", fmt.Errorf("port %d still bound after %s; process identity lookup unavailable for pid %d", port, timeout, pid)
+	}
+	if !lookupOK {
+		return "", fmt.Errorf("port %d still bound after %s; process identity lookup failed for pid %d", port, timeout, pid)
+	}
+	if !verified {
+		return fmt.Sprintf("port now owned by foreign process %q; not killing", image), nil
+	}
+
+	if err := taskkillProcessTreeByPIDFn(pid); err != nil {
+		return "", fmt.Errorf("force kill mcphub remnant pid %d on port %d: %w", pid, port, err)
+	}
+	deadline = time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, _, _, stillUp := lookupProcess(port); !stillUp {
+			return "", nil
+		}
+		time.Sleep(daemonPortReleasePollInterval)
+	}
+	return "", fmt.Errorf("port %d still bound after killing mcphub remnant pid %d (image %q parent %q)", port, pid, image, parentImage)
 }
 
 func appendPIDKillContext(msg string, pidKillContext string) string {

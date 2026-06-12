@@ -68,9 +68,9 @@ var schedulerFactoryFn func() (scheduler.Scheduler, error)
 // production implementation; tests verify the audit-entry shape.
 var appendIntentAuditFn func(IntentAuditEntry) error
 
-// readDaemonIntentFn, when non-nil, replaces the intent-file read path
-// invoked by IntentStillRunning. daemon_intent.go owns the production
-// implementation; the seam unblocks unit tests.
+// readDaemonIntentFn, when non-nil, replaces the legacy daemon-intent.json read
+// path owned by daemon_intent.go. Post-E2 IntentStillRunning no longer consults
+// this as a stop source; boot collapse is the legitimate legacy-file consumer.
 var readDaemonIntentFn func(taskName string) (DaemonIntent, bool, error)
 
 // ---------------------------------------------------------------------------
@@ -190,13 +190,12 @@ func (a *API) RestartContext(ctx context.Context, server, daemonFilter string) (
 //   - intent.Desired = stopped + stale (past TTL)   → true
 //
 // Phase 4-E2 SOURCE: the supervisor-intent.json `stops` sub-block is the SOLE
-// authoritative stop source. It is consulted FIRST so a STALE leftover
-// daemon-intent.json can never override a real sub-block stop (the same
-// precedence flip UnifiedStopsFile encodes). The readDaemonIntentFn seam
-// (bound by daemon_intent.go's init() to ReadDaemonIntent over the
-// now-deleted daemon-intent.json; tests override it via installTestIntentReader)
-// is consulted ONLY as a fallback when the sub-block has no entry — in
-// production that path returns ok=false (file gone), so the sub-block decides.
+// authoritative stop source. Decision table:
+//   - sub-block has active stopped entry → false (suppressed)
+//   - sub-block has running/expired/missing entry → true (running permitted)
+//   - sub-block has no entry → true; never fall back to daemon-intent.json,
+//     because a stale/recreated legacy file must not override a deliberate
+//     clear/re-enable in the sole source.
 func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 	// Codex deep-sec PR #135 Finding 1: normalize the lookup key so a
 	// caller that passed the bare form still hits the canonical leading-
@@ -207,23 +206,6 @@ func (a *API) IntentStillRunning(taskName string, now time.Time) bool {
 	// degrades to the fallback below, then to "no recorded preference".
 	if stopIntent, found := lookupSupervisorStop(taskName); found {
 		active, _ := stopIntent.IsActiveStop(now)
-		return !active
-	}
-
-	// Fallback: the legacy daemon-intent.json reader seam. In production this
-	// returns ok=false (the file is deleted by the E2 boot-merge); tests
-	// override the seam to exercise the IsActiveStop predicate directly.
-	if readDaemonIntentFn == nil {
-		// Defensive: daemon_intent.go's init() should always have wired this.
-		return true
-	}
-	intent, ok, err := readDaemonIntentFn(taskName)
-	if err != nil {
-		// Read failure → no active stop directive (degrade to running).
-		return true
-	}
-	if ok {
-		active, _ := intent.IsActiveStop(now)
 		return !active
 	}
 	return true

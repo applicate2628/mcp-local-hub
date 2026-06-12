@@ -2717,6 +2717,7 @@ func portForTask(taskName string, ports map[string]map[string]int, wsByTask map[
 type RestartResult struct {
 	TaskName string `json:"task_name"`
 	Err      string `json:"error"`
+	Warning  string `json:"warning,omitempty"`
 	Code     string `json:"-"`
 }
 
@@ -2932,6 +2933,8 @@ var killByPortFn = killDaemonByPort
 
 var errPortKillUnsupported = errors.New("port kill unsupported: process lookup unavailable")
 
+const daemonPortReleasePollInterval = 200 * time.Millisecond
+
 type portKillOutcome int
 
 const (
@@ -2991,7 +2994,7 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 		if _, _, _, stillUp := lookupProcess(port); !stillUp {
 			return portKillKilled, nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(daemonPortReleasePollInterval)
 	}
 	return portKillNoListener, fmt.Errorf("port %d still bound after %s", port, timeout)
 }

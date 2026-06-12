@@ -2326,12 +2326,23 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 
 	var killPorts []int
 	origForceKill := forceKillByPortFn
+	origLookup := lookupProcess
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		order = append(order, "kill-port")
 		killPorts = append(killPorts, port)
+		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
 		return portKillNoListener, nil
 	}
-	t.Cleanup(func() { forceKillByPortFn = origForceKill })
+	lookupProcess = func(port int) (int, uint64, int64, bool) {
+		if port != 9322 {
+			t.Fatalf("lookupProcess port = %d, want 9322", port)
+		}
+		return 0, 0, 0, false
+	}
+	t.Cleanup(func() {
+		forceKillByPortFn = origForceKill
+		lookupProcess = origLookup
+	})
 
 	var killedPIDs []int
 	origPID := stopForceKillPIDFn
@@ -2378,17 +2389,17 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			t.Fatalf("removed daemon %s survived merged intent: %+v", betaTask, written.Daemons)
 		}
 	}
-	// The captured supervisor-reported PID (4244) is killed first, then the
-	// descriptor port path is still consulted so the removal waits until the
-	// port is released before reporting success.
-	if len(killPorts) != 1 || killPorts[0] != 9322 {
-		t.Fatalf("forceKillByPortFn ports = %v, want [9322] after the PID kill", killPorts)
+	// The captured supervisor-reported PID (4244) is killed first. The
+	// descriptor port is only polled for release; it must not fall through to a
+	// blind port kill because the removed row's port may already be reused.
+	if len(killPorts) != 0 {
+		t.Fatalf("forceKillByPortFn ports = %v, want none after the PID kill", killPorts)
 	}
 	if len(killedPIDs) != 1 || killedPIDs[0] != 4244 {
 		t.Fatalf("PID kills = %v, want exactly [4244]", killedPIDs)
 	}
-	if len(order) != 4 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-pid" || order[3] != "kill-port" {
-		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-pid kill-port]", order)
+	if len(order) != 3 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-pid" {
+		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-pid]", order)
 	}
 	if _, ok := written.Stops[betaTask]; ok {
 		t.Fatalf("removed daemon %s retained a dangling stop entry: %+v", betaTask, written.Stops)

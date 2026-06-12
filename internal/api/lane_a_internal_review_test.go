@@ -182,10 +182,12 @@ func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 	origIdent := processIdentityByPID
 	origForcePort := forceKillByPortFn
 	origPIDKill := stopForceKillPIDFn
+	origLookup := lookupProcess
 	t.Cleanup(func() {
 		processIdentityByPID = origIdent
 		forceKillByPortFn = origForcePort
 		stopForceKillPIDFn = origPIDKill
+		lookupProcess = origLookup
 	})
 
 	processIdentityByPID = func(pid int) (string, string, bool) {
@@ -197,7 +199,16 @@ func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 	var portKills []int
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		portKills = append(portKills, port)
+		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
 		return portKillNoListener, nil
+	}
+	var portLookups int
+	lookupProcess = func(port int) (int, uint64, int64, bool) {
+		portLookups++
+		if port != 33002 {
+			t.Fatalf("lookupProcess port = %d, want 33002", port)
+		}
+		return 0, 0, 0, false
 	}
 	var pidKills []int
 	stopForceKillPIDFn = func(pid int) error {
@@ -215,8 +226,11 @@ func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 	if len(pidKills) != 1 || pidKills[0] != 62001 {
 		t.Fatalf("PID kills = %v, want [62001]", pidKills)
 	}
-	if len(portKills) != 1 || portKills[0] != 33002 {
-		t.Fatalf("port kills = %v, want [33002] to wait for descriptor-port release after PID kill", portKills)
+	if portLookups == 0 {
+		t.Fatal("lookupProcess was not consulted to wait for descriptor-port release after PID kill")
+	}
+	if len(portKills) != 0 {
+		t.Fatalf("port kills = %v, want none after successful PID kill", portKills)
 	}
 }
 

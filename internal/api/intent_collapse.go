@@ -135,20 +135,18 @@ type DaemonIntentCollapseResult struct {
 // dry-run (--check) path and the real write path so the preview is byte-for-
 // byte what the write persists.
 //
-// Rules (spec §5.1-E):
-//   - start from the supervisor intent's existing `stops` sub-block (so a
-//     prior merge's baseline is preserved across re-runs);
-//   - for each daemon-intent.json task, re-evaluate IsActiveStop(now):
-//   - active   → carry the FULL DaemonIntent record (Desired, Reason,
-//     UpdatedAt) into the merged map, preserving TTL /
-//     clock-skew / reason semantics verbatim;
-//   - inactive → drop it (expired/stale/running), recorded as
-//     drop-expired ONLY when the prior baseline had it (a
-//     stop that just expired) — a never-active task produces
-//     no entry and no noise.
-//   - the legacy file is authoritative for the tasks it names: an entry that
-//     went inactive REMOVES the corresponding baseline stop so a re-enabled
-//     daemon is not left suppressed by a stale baseline.
+// Rules (spec §5.1-E): start from the supervisor intent's existing `stops`
+// sub-block, then evaluate each legacy daemon-intent.json task at `now`.
+//
+// Per-task decision table:
+//   - legacy ACTIVE + absent in sub-block → ADD the full legacy record.
+//   - legacy ACTIVE + sub-block record differs + legacy.UpdatedAt NEWER →
+//     UPDATE the sub-block record; the mixed-version legacy writer is the
+//     newer authority for this stop.
+//   - legacy ACTIVE + sub-block record NEWER-or-equal → KEEP the sub-block
+//     record; an old/different legacy file must not downgrade the sole source.
+//   - legacy INACTIVE/running → NO-OP; never remove or downgrade an existing
+//     sub-block stop from a stale legacy tombstone.
 func mergeDaemonIntentStops(
 	supervisorIntent *SupervisorIntentFile,
 	daemonIntentFile *DaemonIntentFile,
@@ -175,16 +173,17 @@ func mergeDaemonIntentStops(
 			// writers' canonical form (daemon_intent.go canonicalIntentTaskKey).
 			key := canonicalIntentTaskKey(taskName)
 			active, _ := di.IsActiveStop(now)
-			_, hadPrior := merged[key]
+			prior, hadPrior := merged[key]
 			if active {
-				// Post-E2 binaries write only the supervisor-intent stops
-				// sub-block. A leftover daemon-intent.json can add active
-				// stops the sub-block has not seen yet, but it must not
-				// overwrite or downgrade an existing sub-block entry.
 				if !hadPrior {
 					merged[key] = di
 					entries = append(entries, MergeStopsEntry{
 						TaskName: key, Action: MergeStopAdded, Reason: di.Reason,
+					})
+				} else if !daemonIntentRecordsEqual(prior, di) && di.UpdatedAt.After(prior.UpdatedAt) {
+					merged[key] = di
+					entries = append(entries, MergeStopsEntry{
+						TaskName: key, Action: MergeStopUpdated, Reason: di.Reason,
 					})
 				}
 				continue
@@ -228,11 +227,15 @@ func stopsMapsEqual(a, b map[string]DaemonIntent) bool {
 		if !ok {
 			return false
 		}
-		if av.Desired != bv.Desired || av.Reason != bv.Reason || !av.UpdatedAt.Equal(bv.UpdatedAt) {
+		if !daemonIntentRecordsEqual(av, bv) {
 			return false
 		}
 	}
 	return true
+}
+
+func daemonIntentRecordsEqual(a, b DaemonIntent) bool {
+	return a.Desired == b.Desired && a.Reason == b.Reason && a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
 // CheckDaemonIntentCollapse is the PURE --check / dry-run entry point. It
@@ -536,7 +539,7 @@ func deleteLegacyDaemonIntentIfMerged(
 			}
 			key := canonicalIntentTaskKey(taskName)
 			got, ok := subBlock[key]
-			if !ok || got.Desired != di.Desired || got.Reason != di.Reason || !got.UpdatedAt.Equal(di.UpdatedAt) {
+			if !ok || !daemonIntentRecordsEqual(got, di) {
 				// An active stop is NOT durably in the sub-block yet — keep the
 				// file so the next boot re-merges it. Never delete here.
 				return false, nil

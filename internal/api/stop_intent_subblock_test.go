@@ -31,7 +31,7 @@ func TestWriteStopIntent_LandsInSubBlock_NotDaemonIntentFile(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	defer SetDaemonStateRootForTest(stateDir)()
 
-	now := time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	task := `\mcp-local-hub-paper-search-default`
 	if err := NewAPI().WriteStopIntent(task, DaemonIntent{
 		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now,

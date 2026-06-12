@@ -130,6 +130,41 @@ func TestRunDaemonIntentCollapse_E2_DeletesWhenSubBlockAlreadyMerged(t *testing.
 	}
 }
 
+func TestRunDaemonIntentCollapse_E2_NewerActiveLegacyStopUpdatesSubBlockAndDeletes(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	oldStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-2 * time.Hour)}
+	newStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(-time.Minute)}
+
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version: 1,
+		Stops:   map[string]DaemonIntent{task: oldStop},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	seedDaemonIntent(t, task, newStop)
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if !res.Changed || !res.Wrote || !res.DeletedLegacyFile {
+		t.Fatalf("newer active legacy stop should update, write, and delete legacy file; res=%+v", res)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].TaskName != task || res.Entries[0].Action != MergeStopUpdated {
+		t.Fatalf("collapse entries = %+v, want one update for %s", res.Entries, task)
+	}
+	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; got.Desired != newStop.Desired || got.Reason != newStop.Reason || !got.UpdatedAt.Equal(newStop.UpdatedAt) {
+		t.Fatalf("updated sub-block stop = %+v, want %+v", got, newStop)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, intentFileLeaf)); !os.IsNotExist(statErr) {
+		t.Fatalf("daemon-intent.json should be deleted after exact updated record is persisted (err=%v)", statErr)
+	}
+}
+
 // REFUSE-DELETE safety: deleteLegacyDaemonIntentIfMerged must NOT delete when
 // an active stop in daemon-intent.json is NOT present in the sub-block (a stop
 // would be lost). This is the "never delete before the stops persist" gate.
