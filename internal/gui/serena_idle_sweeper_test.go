@@ -624,6 +624,60 @@ func TestRouterToolsList_AllIdle_WakesCandidateAndSucceeds(t *testing.T) {
 	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
 }
 
+func TestRouterToolsList_ConfirmedIdleWakeDeletesBaselineAndIdleMarker(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	daemon := newFakeSerenaDaemon("toolswake-baseline")
+	ts := newSafeSerenaHTTPTestServer(t, daemon.handler())
+	port := testServerPort(t, ts)
+
+	const wsPath = "/proj/toolswake-baseline"
+	ws := serenaWS("toolswake-baseline", wsPath, port)
+	wakeCalls := 0
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(_ context.Context, taskName string, _ int, _ string) error {
+			wakeCalls++
+			allowed, err := api.NewAPI().ClearStopIntentIfReason(taskName, api.IntentReasonIdle, "test-tools-list-wake")
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				t.Fatalf("tools/list wake did not clear active idle stop for %s", taskName)
+			}
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	seedSerenaBackendBaseline(s, wsPath, 1000)
+	seedSerenaBackendIdleMarker(s, wsPath, 2)
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	rr := postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/list wake status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if wakeCalls != 1 {
+		t.Fatalf("WakeIdleFn calls = %d, want 1", wakeCalls)
+	}
+	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("tools/list confirmed idle wake left backend PID baseline for %q; want it deleted", wsPath)
+	}
+	if _, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("tools/list confirmed idle wake left backend idle marker for %q; want it deleted", wsPath)
+	}
+}
+
 // TestRouterToolsList_AllIdle_FirstWakeRefusedTriesNextCandidate covers the
 // multi-workspace pool case: a user-stopped row may refuse wake, but a later
 // merely-idle sibling can still be woken and satisfy tools/list.
@@ -793,6 +847,96 @@ func TestRouterToolsList_NoOpWakeDeadPortTriesNextCandidate(t *testing.T) {
 		t.Fatalf("probed ports = %v, want %v", probedPorts, wantProbes)
 	}
 	assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+}
+
+func TestRouterToolsList_ConfirmedWakeReseedsExistingBaseline(t *testing.T) {
+	withTempSerenaStateRoot(t)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+	port := testServerPort(t, ts)
+	if port >= 9121 && port <= 9299 {
+		t.Skipf("httptest selected live mcphub port %d", port)
+	}
+
+	const wsPath = "/proj/tools-list-wake-reseed"
+	const pid = 3579
+	ws := serenaWS("tools-list-wake-reseed", wsPath, port)
+	wakeCalls := 0
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(_ context.Context, taskName string, _ int, _ string) error {
+			wakeCalls++
+			allowed, err := api.NewAPI().ClearStopIntentIfReason(taskName, api.IntentReasonIdle, "test-tools-list-wake")
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				t.Fatalf("ClearStopIntentIfReason returned false for active idle stop")
+			}
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	seedSerenaBackendBaseline(s, wsPath, pid)
+	seedSerenaBackendIdleMarker(s, wsPath, serenaBackendPostIdleGraceTicks)
+
+	prevStatusFn := serenaBackendStatusFn
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pid, Port: port},
+		}, nil
+	}
+	t.Cleanup(func() { serenaBackendStatusFn = prevStatusFn })
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("WriteSerenaIdleStop: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/serena/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	s.wakeOneSerenaCandidateForToolsList(req, deps, []*api.WorkspaceEntry{ws}, deps.AuditFn)
+
+	if wakeCalls != 1 {
+		t.Fatalf("WakeIdleFn calls = %d, want 1", wakeCalls)
+	}
+	// No router session is bound to the workspace in this test, so the
+	// confirmed wake must DROP the baseline rather than reseed it (PR #291 bot
+	// r9 — a baseline recorded during an unbound window outlives a later
+	// restart and the first real session's establish-only seed then keeps the
+	// stale PID, producing a false backend-loss teardown).
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("tools/list post-wake baseline with no bound sessions = (%d,true), want absent", got)
+	}
+	if ticks, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("tools/list post-wake idle marker = (%d,true), want absent", ticks)
+	}
+
+	// BOUND variant: with a live router session indexed to the workspace the
+	// confirmed wake reseeds the baseline to the observed live PID.
+	sid := mintRouterSession(t, s, "2025-11-25")
+	s.serenaRouterSessions.bindWorkspace(sid, ws.WorkspaceKey)
+	seedSerenaBackendBaseline(s, wsPath, pid-1) // stale pre-wake value
+	seedSerenaBackendIdleMarker(s, wsPath, serenaBackendPostIdleGraceTicks)
+	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+		t.Fatalf("WriteSerenaIdleStop (bound variant): %v", err)
+	}
+	s.wakeOneSerenaCandidateForToolsList(req, deps, []*api.WorkspaceEntry{ws}, deps.AuditFn)
+	if wakeCalls != 2 {
+		t.Fatalf("WakeIdleFn calls after bound-variant wake = %d, want 2", wakeCalls)
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
+		t.Fatalf("bound-variant post-wake baseline = (%d,%v), want (%d,true)", got, ok, pid)
+	}
+	if ticks, ok := serenaBackendIdleMarkerForTest(s, wsPath); ok {
+		t.Fatalf("bound-variant post-wake idle marker = (%d,true), want absent", ticks)
+	}
 }
 
 // A non-serena row (LSP workspace proxy) in the status is never idle-stopped by

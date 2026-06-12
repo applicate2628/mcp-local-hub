@@ -753,12 +753,16 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// already uses for not-yet-ready daemons). A nil WakeIdleFn
 	// (partially-wired routing) skips the wake entirely.
 	if deps.WakeIdleFn != nil && ws.TaskName != "" {
+		hadActiveIdleStop := serenaTaskHasActiveIdleStop(ws.TaskName, time.Now())
 		// Detach from r.Context() cancellation (a client disconnect must not
 		// abort the supervisor nudge mid-flight, mirroring the auto-register
 		// posture) but BOUND the whole wake so a wedged respawn cannot hang the
 		// handler. 30s covers clear + reconcile-nudge + the ~20s readiness probe.
 		wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		wakeErr := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-router-wake")
+		if wakeErr == nil && hadActiveIdleStop {
+			s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, ws)
+		}
 		wakeCancel()
 		if wakeErr != nil {
 			if errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
@@ -973,6 +977,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		// first left a window where a tick firing between seed and bind would
 		// rebuild serenaBackendLastPID without this (not-yet-bound) workspace,
 		// dropping the just-seeded baseline (PR #288 r5 adversarial review).
+		//
 		s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
 		s.seedSerenaBackendPIDBaseline(r.Context(), ws)
 	}

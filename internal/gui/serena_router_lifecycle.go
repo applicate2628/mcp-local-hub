@@ -929,6 +929,7 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 		if !isSerenaWorkspaceEntry(ws) {
 			continue
 		}
+		hadActiveIdleStop := serenaTaskHasActiveIdleStop(ws.TaskName, time.Now())
 		if err := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-tools-list-wake"); err != nil {
 			// Non-fatal: an operator-stop refusal or a not-ready respawn just
 			// means this candidate cannot answer yet. Try the next eligible
@@ -941,6 +942,9 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 				"err":           err.Error(),
 			})
 			continue
+		}
+		if hadActiveIdleStop {
+			s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, ws)
 		}
 		if serenaToolsListPortLiveFn(wakeCtx, ws.Port) {
 			return

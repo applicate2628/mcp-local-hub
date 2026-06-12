@@ -125,6 +125,11 @@ type routerSessionStore struct {
 	// bindings under mu (removeLocked drops both directions).
 	wsByID  map[string]string
 	idsByWS map[string]map[string]struct{}
+
+	// onWorkspaceEmpty is invoked after the last router session leaves a
+	// workspace. It must run after mu is released: the Server callback takes
+	// serenaBackendPIDMu, and the lock order forbids store-mu -> PID-mu nesting.
+	onWorkspaceEmpty func(wsKey string)
 }
 
 func (st *routerSessionStore) now() time.Time {
@@ -159,7 +164,7 @@ func (st *routerSessionStore) ensureInitLocked() {
 // index, keeping the two in lockstep. Idempotent — a missing id is a no-op.
 // Caller MUST hold mu. Every delete site (expire-on-read, unbind, sweep,
 // eviction) routes through here so the LRU never drifts from the map.
-func (st *routerSessionStore) removeLocked(clientSessionID string) {
+func (st *routerSessionStore) removeLocked(clientSessionID string) (emptiedWSKey string) {
 	if _, ok := st.bindings[clientSessionID]; ok {
 		delete(st.bindings, clientSessionID)
 	}
@@ -171,7 +176,7 @@ func (st *routerSessionStore) removeLocked(clientSessionID string) {
 	}
 	// §3 fail-loud: drop the workspace reverse-index entry in lockstep so a
 	// removed session can never be re-surfaced by workspace enumeration.
-	st.removeWorkspaceIndexLocked(clientSessionID)
+	return st.removeWorkspaceIndexLocked(clientSessionID)
 }
 
 // removeWorkspaceIndexLocked drops clientSessionID from both directions of
@@ -180,18 +185,20 @@ func (st *routerSessionStore) removeLocked(clientSessionID string) {
 // a missing id is a no-op. Caller MUST hold mu. It is split out of
 // removeLocked so bindWorkspace can re-home a session (drop the OLD workspace
 // edge before adding the new one) without touching bindings/lru.
-func (st *routerSessionStore) removeWorkspaceIndexLocked(clientSessionID string) {
+func (st *routerSessionStore) removeWorkspaceIndexLocked(clientSessionID string) (emptiedWSKey string) {
 	wsKey, ok := st.wsByID[clientSessionID]
 	if !ok {
-		return
+		return ""
 	}
 	delete(st.wsByID, clientSessionID)
 	if set, ok := st.idsByWS[wsKey]; ok {
 		delete(set, clientSessionID)
 		if len(set) == 0 {
 			delete(st.idsByWS, wsKey)
+			return wsKey
 		}
 	}
+	return ""
 }
 
 // bindWorkspace records that clientSessionID is routed to wsKey, updating the
@@ -210,22 +217,24 @@ func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) {
 		return
 	}
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	st.ensureInitLocked()
 	// Only index a session the store actually knows. A path-only/legacy caller
 	// with no router-minted session has no bindings entry; indexing it would
 	// leave an edge no expire/unbind path (which all route through removeLocked
 	// on a known id) would ever clean.
 	if _, known := st.bindings[clientSessionID]; !known {
+		st.mu.Unlock()
 		return
 	}
 	// Re-home: drop any prior workspace edge for this id before adding the new
 	// one, so a workspace switch does not leave the session listed under both.
+	emptiedWSKey := ""
 	if prior, ok := st.wsByID[clientSessionID]; ok {
 		if prior == wsKey {
+			st.mu.Unlock()
 			return
 		}
-		st.removeWorkspaceIndexLocked(clientSessionID)
+		emptiedWSKey = st.removeWorkspaceIndexLocked(clientSessionID)
 	}
 	st.wsByID[clientSessionID] = wsKey
 	set := st.idsByWS[wsKey]
@@ -234,6 +243,25 @@ func (st *routerSessionStore) bindWorkspace(clientSessionID, wsKey string) {
 		st.idsByWS[wsKey] = set
 	}
 	set[clientSessionID] = struct{}{}
+	st.mu.Unlock()
+	st.notifyWorkspaceEmpty(emptiedWSKey)
+}
+
+func (st *routerSessionStore) notifyWorkspaceEmpty(wsKeys ...string) {
+	if st.onWorkspaceEmpty == nil {
+		return
+	}
+	seen := map[string]struct{}{}
+	for _, wsKey := range wsKeys {
+		if wsKey == "" {
+			continue
+		}
+		if _, ok := seen[wsKey]; ok {
+			continue
+		}
+		seen[wsKey] = struct{}{}
+		st.onWorkspaceEmpty(wsKey)
+	}
 }
 
 // sessionsForWorkspace returns a snapshot of every router session id currently
@@ -258,6 +286,15 @@ func (st *routerSessionStore) sessionsForWorkspace(wsKey string) []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+func (st *routerSessionStore) withWorkspaceCount(wsKey string) int {
+	if wsKey == "" {
+		return 0
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return len(st.idsByWS[wsKey])
 }
 
 // knownWorkspaceKeys returns a snapshot of every workspace key that has at
@@ -292,17 +329,16 @@ func (st *routerSessionStore) knownWorkspaceKeys() []string {
 // AFTER the store lock is released. coordinateExpiredRouterSessionUnbind touches
 // OTHER stores, so it must NOT run under routerSessionStore.mu (lock-ordering /
 // deadlock risk) — the id is carried out instead.
-func (st *routerSessionStore) evictLRULocked() string {
+func (st *routerSessionStore) evictLRULocked() (evictedID string, emptiedWSKey string) {
 	if st.lru == nil {
-		return ""
+		return "", ""
 	}
 	back := st.lru.Back()
 	if back == nil {
-		return ""
+		return "", ""
 	}
 	id, _ := back.Value.(string)
-	st.removeLocked(id)
-	return id
+	return id, st.removeLocked(id)
 }
 
 // store records (clientSessionID -> negotiatedVersion), replacing any
@@ -334,7 +370,6 @@ func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) (
 		return ""
 	}
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	st.ensureInitLocked()
 	if el, ok := st.lruIndex[clientSessionID]; ok {
 		// Existing id: update in place + promote. No cap pressure (the entry
@@ -344,6 +379,7 @@ func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) (
 			lastSeen:          st.now(),
 		}
 		st.lru.MoveToFront(el)
+		st.mu.Unlock()
 		return ""
 	}
 	// New id: enforce the cap by evicting the eldest entry BEFORE inserting,
@@ -352,14 +388,17 @@ func (st *routerSessionStore) store(clientSessionID, negotiatedVersion string) (
 	// (the eldest id happening to equal clientSessionID) cannot occur here: this
 	// branch only runs when clientSessionID is NOT already in lruIndex, so it is
 	// not an LRU entry and cannot be the eviction victim.
+	emptiedWSKey := ""
 	if len(st.bindings) >= maxRouterSessions {
-		evictedID = st.evictLRULocked()
+		evictedID, emptiedWSKey = st.evictLRULocked()
 	}
 	st.bindings[clientSessionID] = &routerSessionBinding{
 		negotiatedVersion: negotiatedVersion,
 		lastSeen:          st.now(),
 	}
 	st.lruIndex[clientSessionID] = st.lru.PushFront(clientSessionID)
+	st.mu.Unlock()
+	st.notifyWorkspaceEmpty(emptiedWSKey)
 	return evictedID
 }
 
@@ -425,18 +464,22 @@ func (st *routerSessionStore) peekVersionState(clientSessionID string) (string, 
 		return "", routerSessionAbsent
 	}
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	b, ok := st.bindings[clientSessionID]
 	if !ok || b == nil {
+		st.mu.Unlock()
 		return "", routerSessionAbsent
 	}
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
 		// Expire-on-read: drop from BOTH the map and the LRU index so the cap
 		// accounting stays exact (P2 — removeLocked keeps the two in lockstep).
-		st.removeLocked(clientSessionID)
+		emptiedWSKey := st.removeLocked(clientSessionID)
+		st.mu.Unlock()
+		st.notifyWorkspaceEmpty(emptiedWSKey)
 		return "", routerSessionExpired
 	}
-	return b.negotiatedVersion, routerSessionLive
+	version := b.negotiatedVersion
+	st.mu.Unlock()
+	return version, routerSessionLive
 }
 
 // touch refreshes lastSeen for a live (non-idle-expired) binding so an
@@ -463,14 +506,16 @@ func (st *routerSessionStore) touch(clientSessionID string) bool {
 		return false
 	}
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	b, ok := st.bindings[clientSessionID]
 	if !ok || b == nil {
+		st.mu.Unlock()
 		return false
 	}
 	if st.now().Sub(b.lastSeen) > daemonSessionTTL {
 		// Expire-on-read: drop from BOTH the map and the LRU index (P2).
-		st.removeLocked(clientSessionID)
+		emptiedWSKey := st.removeLocked(clientSessionID)
+		st.mu.Unlock()
+		st.notifyWorkspaceEmpty(emptiedWSKey)
 		return false
 	}
 	b.lastSeen = st.now()
@@ -479,6 +524,7 @@ func (st *routerSessionStore) touch(clientSessionID string) bool {
 	if el, ok := st.lruIndex[clientSessionID]; ok && st.lru != nil {
 		st.lru.MoveToFront(el)
 	}
+	st.mu.Unlock()
 	return true
 }
 
@@ -513,9 +559,10 @@ func (st *routerSessionStore) unbind(clientSessionID string) {
 		return
 	}
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	// P2: removeLocked drops from BOTH the map and the LRU index in lockstep.
-	st.removeLocked(clientSessionID)
+	emptiedWSKey := st.removeLocked(clientSessionID)
+	st.mu.Unlock()
+	st.notifyWorkspaceEmpty(emptiedWSKey)
 }
 
 // cleanup drops bindings idle longer than ttl before now and returns the
@@ -535,18 +582,22 @@ func (st *routerSessionStore) cleanup(now time.Time, ttl time.Duration) int {
 // binding (the desync this finding closes). Returns nil when nothing expired.
 func (st *routerSessionStore) cleanupExpired(now time.Time, ttl time.Duration) []string {
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	cutoff := now.Add(-ttl)
 	var expired []string
+	var emptiedWSKeys []string
 	for id, b := range st.bindings {
 		if b == nil || !b.lastSeen.After(cutoff) {
 			// P2: removeLocked drops from BOTH the map and the LRU index.
 			// Deleting the current key from the map being ranged is safe in Go;
 			// removeLocked only also touches the sibling LRU list/index.
-			st.removeLocked(id)
+			if emptiedWSKey := st.removeLocked(id); emptiedWSKey != "" {
+				emptiedWSKeys = append(emptiedWSKeys, emptiedWSKey)
+			}
 			expired = append(expired, id)
 		}
 	}
+	st.mu.Unlock()
+	st.notifyWorkspaceEmpty(emptiedWSKeys...)
 	return expired
 }
 
@@ -712,6 +763,7 @@ func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.Works
 	if ws == nil || ws.WorkspacePath == "" {
 		return
 	}
+	s.rememberSerenaBackendWorkspacePath(ws)
 	statusFn := serenaBackendStatusFn
 	if statusFn == nil {
 		return
@@ -735,21 +787,167 @@ func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.Works
 	if pid <= 0 {
 		return
 	}
-	// Snapshot the reverse index before taking serenaBackendPIDMu so this path
-	// never nests the router-session lock inside the PID lock. seed runs after
-	// bindWorkspace, so count <= 1 means this session is the first observer of a
-	// fresh generation after an unbound window and may replace a stale baseline.
-	// The gap before the PID lock is benign: a racing second bind observes count
-	// >1 in its own seed and therefore keeps the established live-session baseline.
-	boundSessionCount := len(s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey))
 	s.serenaBackendPIDMu.Lock()
+	defer s.serenaBackendPIDMu.Unlock()
 	if s.serenaBackendLastPID == nil {
 		s.serenaBackendLastPID = map[string]int{}
 	}
-	if _, exists := s.serenaBackendLastPID[ws.WorkspacePath]; !exists || boundSessionCount <= 1 {
+	if _, exists := s.serenaBackendLastPID[ws.WorkspacePath]; !exists {
 		s.serenaBackendLastPID[ws.WorkspacePath] = pid
 	}
+}
+
+func serenaBackendLivePIDForWorkspace(ctx context.Context, wsPath string) int {
+	if wsPath == "" {
+		return 0
+	}
+	statusFn := serenaBackendStatusFn
+	if statusFn == nil {
+		return 0
+	}
+	rows, err := statusFn(ctx)
+	if err != nil {
+		return 0
+	}
+	for _, row := range rows {
+		if row.Workspace == wsPath && row.PID > 0 {
+			return row.PID
+		}
+	}
+	return 0
+}
+
+func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, ws *api.WorkspaceEntry) {
+	if s == nil || ws == nil || ws.WorkspacePath == "" {
+		return
+	}
+	pid := serenaBackendLivePIDForWorkspace(ctx, ws.WorkspacePath)
+	s.serenaBackendPIDMu.Lock()
+	defer s.serenaBackendPIDMu.Unlock()
+	// A wake can fire with ZERO bound router sessions (workspace-agnostic
+	// tools/list, path-only legacy tool call). Recording a baseline then would
+	// outlive the unbound window: a later restart while still unbound followed
+	// by the first real session's establish-only seed keeps the stale PID and
+	// the next reconcile tears that fresh session down as false backend loss
+	// (PR #291 bot r9). With no bound sessions the baseline must stay ABSENT
+	// (the "unbound window starts fresh" invariant) — drop instead of seed.
+	// Lock order: PID-mu OUTER → store-mu INNER via withWorkspaceCount, the
+	// documented nesting. A bind racing this count read is benign: the dropped
+	// baseline is re-established by that session's own seed.
+	if s.serenaRouterSessions.withWorkspaceCount(ws.WorkspaceKey) == 0 {
+		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
+		return
+	}
+	// BOUND workspace + no observable live PID (transient supervisor-status
+	// error, or the woken row has not reported a positive PID yet): PRESERVE
+	// the existing baseline + idle marker (PR #291 bot r11). Dropping here
+	// would turn a restart-before-next-reconcile into a first observation and
+	// let the still-bound stale sessions survive; the prior baseline keeps the
+	// generation change detectable, and the reconcile's idle-grace/refresh
+	// machinery replaces it once a real PID is observed.
+	if pid <= 0 {
+		return
+	}
+	// Advance the drop-generation alongside the reseed (PR #291 bot r12): an
+	// in-flight reconcile that snapshotted the PRE-wake PID before its IPC
+	// status read would otherwise compare the woken PID against its stale
+	// snapshot, classify loss, and tear down the just-woken live sessions —
+	// the generation guard at the reconcile's persist/loss step recognizes
+	// this reseed exactly like a drop and discards the stale snapshot.
+	if s.serenaBackendDropGen == nil {
+		s.serenaBackendDropGen = map[string]uint64{}
+	}
+	s.serenaBackendDropGen[ws.WorkspacePath]++
+	if s.serenaBackendLastPID == nil {
+		s.serenaBackendLastPID = map[string]int{}
+	}
+	s.serenaBackendLastPID[ws.WorkspacePath] = pid
+	delete(s.serenaBackendIdlePaths, ws.WorkspacePath)
+	if ws.WorkspaceKey != "" {
+		if s.serenaBackendPathByKey == nil {
+			s.serenaBackendPathByKey = map[string]string{}
+		}
+		s.serenaBackendPathByKey[ws.WorkspaceKey] = ws.WorkspacePath
+	}
+}
+
+func (s *Server) rememberSerenaBackendWorkspacePath(ws *api.WorkspaceEntry) {
+	if ws == nil || ws.WorkspaceKey == "" || ws.WorkspacePath == "" {
+		return
+	}
+	s.serenaBackendPIDMu.Lock()
+	if s.serenaBackendPathByKey == nil {
+		s.serenaBackendPathByKey = map[string]string{}
+	}
+	s.serenaBackendPathByKey[ws.WorkspaceKey] = ws.WorkspacePath
 	s.serenaBackendPIDMu.Unlock()
+}
+
+func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePath(wsPath string) {
+	if wsPath == "" {
+		return
+	}
+	s.serenaBackendPIDMu.Lock()
+	s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath)
+	s.serenaBackendPIDMu.Unlock()
+}
+
+func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath string) {
+	if wsPath == "" {
+		return
+	}
+	if s.serenaBackendDropGen == nil {
+		s.serenaBackendDropGen = map[string]uint64{}
+	}
+	s.serenaBackendDropGen[wsPath]++
+	delete(s.serenaBackendLastPID, wsPath)
+	delete(s.serenaBackendIdlePaths, wsPath)
+	for wsKey, path := range s.serenaBackendPathByKey {
+		if path == wsPath {
+			delete(s.serenaBackendPathByKey, wsKey)
+		}
+	}
+}
+
+// handleSerenaRouterWorkspaceEmpty receives the reverse-index key because the
+// store does not know workspace paths. The PID maps are path-keyed, so Server
+// first uses its non-blocking key->path cache; only cache misses fall back to
+// the resolver's workspaceLister view.
+func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
+	if wsKey == "" {
+		return
+	}
+	s.serenaBackendPIDMu.Lock()
+	if s.serenaRouterSessions.withWorkspaceCount(wsKey) != 0 {
+		s.serenaBackendPIDMu.Unlock()
+		return
+	}
+	wsPath := s.serenaBackendPathByKey[wsKey]
+	if wsPath != "" {
+		s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath)
+		s.serenaBackendPIDMu.Unlock()
+		return
+	}
+	s.serenaBackendPIDMu.Unlock()
+	deps := s.serenaRouterDepsProd()
+	if deps == nil || deps.Resolver == nil {
+		return
+	}
+	lister, ok := deps.Resolver.(workspaceLister)
+	if !ok {
+		return
+	}
+	for _, ws := range lister.ListWorkspaces() {
+		if ws == nil || ws.WorkspaceKey != wsKey {
+			continue
+		}
+		s.serenaBackendPIDMu.Lock()
+		if s.serenaRouterSessions.withWorkspaceCount(wsKey) == 0 {
+			s.dropSerenaBackendPIDTrackingForWorkspacePathLocked(ws.WorkspacePath)
+		}
+		s.serenaBackendPIDMu.Unlock()
+		return
+	}
 }
 
 // handleSerenaBackendLossOnForwardFailure is the ALWAYS-ON FLOOR of the §3.x
@@ -879,6 +1077,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		if _, want := knownSet[ws.WorkspaceKey]; !want {
 			continue
 		}
+		s.rememberSerenaBackendWorkspacePath(ws)
 		pathToKey[ws.WorkspacePath] = ws.WorkspaceKey
 		pathToTaskName[ws.WorkspacePath] = ws.TaskName
 		wantPaths[ws.WorkspacePath] = struct{}{}
@@ -886,6 +1085,21 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	if len(wantPaths) == 0 {
 		return 0
 	}
+
+	s.serenaBackendPIDMu.Lock()
+	prior := make(map[string]int, len(wantPaths))
+	priorIdle := make(map[string]int, len(wantPaths))
+	dropGenAtSnapshot := make(map[string]uint64, len(wantPaths))
+	for path := range wantPaths {
+		if pid, ok := s.serenaBackendLastPID[path]; ok {
+			prior[path] = pid
+		}
+		if ticks, ok := s.serenaBackendIdlePaths[path]; ok {
+			priorIdle[path] = ticks
+		}
+		dropGenAtSnapshot[path] = s.serenaBackendDropGen[path]
+	}
+	s.serenaBackendPIDMu.Unlock()
 
 	rows, err := statusFn(ctx)
 	if err != nil {
@@ -965,15 +1179,6 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		}
 	}
 
-	s.serenaBackendPIDMu.Lock()
-	prior := s.serenaBackendLastPID
-	if prior == nil {
-		prior = map[string]int{}
-	}
-	priorIdle := s.serenaBackendIdlePaths
-	if priorIdle == nil {
-		priorIdle = map[string]int{}
-	}
 	// persisted is the snapshot the next tick compares against. It starts as the
 	// fresh per-PATH PIDs; transient Restarting rows carry the prior real PID
 	// forward (below) instead of persisting their 0.
@@ -982,7 +1187,10 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		persisted[path] = pid
 	}
 	persistedIdle := make(map[string]int, len(wantPaths))
-	var lost []string // workspace KEYS whose backend was lost this tick
+	lostByPath := make(map[string]string, len(wantPaths))
+	markLost := func(path string) {
+		lostByPath[path] = pathToKey[path]
+	}
 	for path := range wantPaths {
 		newPID, present := fresh[path]
 		oldPID, hadPrior := prior[path]
@@ -1016,12 +1224,12 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			// for absent rows, a genuinely absent row means the descriptor was
 			// removed, not that startup/backoff is transiently rowless.
 			if !present {
-				lost = append(lost, pathToKey[path])
+				markLost(path)
 				delete(persisted, path)
 				continue
 			}
 			if deadNow {
-				lost = append(lost, pathToKey[path])
+				markLost(path)
 				delete(persisted, path)
 			}
 			continue
@@ -1051,7 +1259,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 					continue
 				}
 			}
-			lost = append(lost, pathToKey[path])
+			markLost(path)
 			delete(persisted, path)
 			continue
 		}
@@ -1060,7 +1268,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		// is absent in BOTH ticks (oldPID present but daemon never running, e.g.
 		// PID 0 both times) is not a change.
 		if !present {
-			lost = append(lost, pathToKey[path])
+			markLost(path)
 			continue
 		}
 		if newPID != oldPID {
@@ -1074,7 +1282,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 				persisted[path] = newPID
 				continue
 			}
-			lost = append(lost, pathToKey[path])
+			markLost(path)
 		}
 	}
 	// Persist the snapshot (only the router-relevant workspaces) so the next
@@ -1082,12 +1290,76 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// dropped — a later reappearance is a first-observation baseline again, not
 	// a spurious loss. Transient Restarting rows carry the prior real PID
 	// (handled above) rather than their transient 0.
+	s.serenaBackendPIDMu.Lock()
+	skippedByDropGeneration := map[string]struct{}{}
+	dropGenerationAdvanced := func(path string) bool {
+		return s.serenaBackendDropGen[path] != dropGenAtSnapshot[path]
+	}
+	for path := range persisted {
+		if dropGenerationAdvanced(path) {
+			skippedByDropGeneration[path] = struct{}{}
+			delete(persisted, path)
+			delete(persistedIdle, path)
+			continue
+		}
+		wsKey := pathToKey[path]
+		if wsKey == "" {
+			for key, cachedPath := range s.serenaBackendPathByKey {
+				if cachedPath == path {
+					wsKey = key
+					break
+				}
+			}
+		}
+		// Reconcile snapshots knownWorkspaceKeys before reading supervisor
+		// status. The last session can unbind and delete its baseline while that
+		// read is in flight; persisting the stale snapshot here would resurrect
+		// the old PID across an unbound window and turn the next first bind into a
+		// false backend loss.
+		if wsKey == "" || s.serenaRouterSessions.withWorkspaceCount(wsKey) == 0 {
+			delete(persisted, path)
+			delete(persistedIdle, path)
+		}
+	}
+	for path := range persistedIdle {
+		if dropGenerationAdvanced(path) {
+			skippedByDropGeneration[path] = struct{}{}
+			delete(persistedIdle, path)
+			continue
+		}
+		wsKey := pathToKey[path]
+		if wsKey == "" {
+			for key, cachedPath := range s.serenaBackendPathByKey {
+				if cachedPath == path {
+					wsKey = key
+					break
+				}
+			}
+		}
+		if wsKey == "" || s.serenaRouterSessions.withWorkspaceCount(wsKey) == 0 {
+			delete(persistedIdle, path)
+		}
+	}
+	for path := range lostByPath {
+		if dropGenerationAdvanced(path) {
+			skippedByDropGeneration[path] = struct{}{}
+			delete(lostByPath, path)
+		}
+	}
+	for path := range skippedByDropGeneration {
+		if pid, ok := s.serenaBackendLastPID[path]; ok {
+			persisted[path] = pid
+		}
+		if ticks, ok := s.serenaBackendIdlePaths[path]; ok {
+			persistedIdle[path] = ticks
+		}
+	}
 	s.serenaBackendLastPID = persisted
 	s.serenaBackendIdlePaths = persistedIdle
 	s.serenaBackendPIDMu.Unlock()
 
 	total := 0
-	for _, wsKey := range lost {
+	for _, wsKey := range lostByPath {
 		if wsKey == "" {
 			continue
 		}
