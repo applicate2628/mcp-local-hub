@@ -479,6 +479,70 @@ func TestReconcileIPC_ApplyTerminatesRunningOrphanedLSPDescriptor(t *testing.T) 
 	}
 }
 
+func TestReconcileIPC_ApplyTerminatesBackoffOrphanedLSPDescriptor(t *testing.T) {
+	descriptor := api.BuildSupervisorDaemonForLSP(api.WorkspaceEntry{
+		WorkspaceKey:  "deadbeef",
+		WorkspacePath: t.TempDir(),
+		Language:      "go",
+		Port:          33063,
+	}, "mcphub")
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{descriptor},
+	}
+	fx := newReconcileTestFixture(t, intent)
+	fx.ctrl.smStates.Store(descriptor.TaskName, api.StBackoffWaiting)
+
+	regRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", regRoot)
+	t.Setenv("XDG_STATE_HOME", regRoot)
+	installSchedulerListFake(t, nil)
+
+	req := api.IPCRequest{
+		ID:   45,
+		Cmd:  "reconcile",
+		Args: map[string]any{"apply": true},
+	}
+	conn := newFakeIPCConn()
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	_, body := decodeReconcileResponse(t, conn)
+	if body.DriftCount != 1 || len(body.Drift) != 1 {
+		t.Fatalf("DriftCount=%d drift=%+v, want exactly one terminate-direction entry", body.DriftCount, body.Drift)
+	}
+	entry := body.Drift[0]
+	if entry.TaskName != descriptor.TaskName {
+		t.Errorf("TaskName = %q, want %q", entry.TaskName, descriptor.TaskName)
+	}
+	if entry.IntentDesired != api.ReconcileIntentDesiredStopped {
+		t.Errorf("IntentDesired = %q, want %q (backoff orphan must be reported as terminate-direction drift)",
+			entry.IntentDesired, api.ReconcileIntentDesiredStopped)
+	}
+	if entry.SMState != api.StBackoffWaiting {
+		t.Errorf("SMState = %q, want %q", entry.SMState, api.StBackoffWaiting)
+	}
+	if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Errorf("Action = %q, want %q (backoff orphan must be driven through the terminate path)",
+			entry.Action, api.ReconcileActionPostEvIntentUpdate)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+	if got := fx.ctrl.daemonIntent.Lookup(descriptor.TaskName).Desired; got != api.IntentDesiredStopped {
+		t.Fatalf("controller daemon-intent cache for orphan = %q, want %q before EvIntentUpdate dispatch",
+			got, api.IntentDesiredStopped)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != descriptor.TaskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, descriptor.TaskName)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("expected EvIntentUpdate post for backoff orphan LSP descriptor")
+	}
+}
+
 func TestReconcileIPC_LSPRegistryReadFailureLeavesDescriptorAlone(t *testing.T) {
 	descriptor := api.BuildSupervisorDaemonForLSP(api.WorkspaceEntry{
 		WorkspaceKey:  "deadbeef",

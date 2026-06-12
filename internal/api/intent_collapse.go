@@ -175,33 +175,23 @@ func mergeDaemonIntentStops(
 			// writers' canonical form (daemon_intent.go canonicalIntentTaskKey).
 			key := canonicalIntentTaskKey(taskName)
 			active, _ := di.IsActiveStop(now)
-			prior, hadPrior := merged[key]
+			_, hadPrior := merged[key]
 			if active {
-				switch {
-				case !hadPrior:
+				// Post-E2 binaries write only the supervisor-intent stops
+				// sub-block. A leftover daemon-intent.json can add active
+				// stops the sub-block has not seen yet, but it must not
+				// overwrite or downgrade an existing sub-block entry.
+				if !hadPrior {
 					merged[key] = di
 					entries = append(entries, MergeStopsEntry{
 						TaskName: key, Action: MergeStopAdded, Reason: di.Reason,
 					})
-				case prior != di:
-					merged[key] = di
-					entries = append(entries, MergeStopsEntry{
-						TaskName: key, Action: MergeStopUpdated, Reason: di.Reason,
-					})
-					// equal record → no-op, no entry (idempotent re-run)
 				}
 				continue
 			}
-			// Inactive in daemon-intent.json: the legacy file is authoritative,
-			// so an expired/stale/running task must NOT remain suppressed by a
-			// stale baseline. Drop it from the merged set (recorded only when
-			// the baseline actually had it).
-			if hadPrior {
-				delete(merged, key)
-				entries = append(entries, MergeStopsEntry{
-					TaskName: key, Action: MergeStopDroppedExpired, Reason: di.Reason,
-				})
-			}
+			// Inactive legacy entries are stale tombstones after E2. The
+			// sub-block is authoritative for existing tasks, so an old
+			// Desired=running / expired daemon-intent entry is a no-op.
 		}
 	}
 

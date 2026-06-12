@@ -93,7 +93,12 @@ func SerenaIdleShutdownThreshold(settingValue string) (time.Duration, bool) {
 // time.Now().UTC(). IsActiveStop(now) classifies the idle stop as ACTIVE (it
 // never TTL-expires), so the entry is SET when no operator stop blocks it.
 func (a *API) WriteSerenaIdleStop(taskName string, now time.Time) error {
-	return a.WriteStopIntentIdleGuarded(taskName, DaemonIntent{
+	_, err := a.WriteSerenaIdleStopResult(taskName, now)
+	return err
+}
+
+func (a *API) WriteSerenaIdleStopResult(taskName string, now time.Time) (bool, error) {
+	return a.WriteStopIntentIdleGuardedResult(taskName, DaemonIntent{
 		Desired:   IntentDesiredStopped,
 		Reason:    IntentReasonIdle,
 		UpdatedAt: now.UTC(),

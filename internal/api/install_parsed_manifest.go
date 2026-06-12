@@ -1194,12 +1194,13 @@ func daemonPortForLegacySchedulerTask(m *config.ServerManifest, taskName string)
 	if m == nil {
 		return 0
 	}
-	server, daemon := ParseManagedTaskName(taskName)
-	if server != m.Name || daemon == "" {
+	name := strings.TrimPrefix(taskName, "\\")
+	if name == "" {
 		return 0
 	}
+	const prefix = "mcp-local-hub-"
 	for _, d := range m.Daemons {
-		if d.Name == daemon {
+		if name == prefix+m.Name+"-"+d.Name {
 			return d.Port
 		}
 	}

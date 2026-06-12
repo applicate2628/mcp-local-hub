@@ -292,7 +292,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			isLSPWorkspaceProxyDescriptor(d) &&
 			!api.LSPRegistryRowBacksDescriptor(d) {
 			emitOrphanedLSPDescriptorSkipped(deps.events, d)
-			if smState == api.StRunning {
+			if smStateIsLiveForOrphanStop(smState) {
 				intentDesired = api.ReconcileIntentDesiredStopped
 				action = api.ReconcileActionPostEvIntentUpdate
 				if args.Apply {
@@ -668,6 +668,19 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 // timer), StExiting→clear queued_action (cancels a pending respawn).
 // StIdle and StQuarantined are settled — see classifyDriftAction.
 func smStateIsLive(s api.SMState) bool {
+	switch s {
+	case api.StSpawning, api.StRunning, api.StExiting, api.StBackoffWaiting:
+		return true
+	}
+	return false
+}
+
+// smStateIsLiveForOrphanStop is the explicit state set where an orphaned LSP
+// descriptor must be driven through EvIntentUpdate(stopped). These states all
+// have api.Transition rows for stopped intent that either terminate a child,
+// queue/cancel a stop, or cancel a respawn timer. StIdle and StQuarantined stay
+// excluded so never-spawned/terminal orphans remain manual-review only.
+func smStateIsLiveForOrphanStop(s api.SMState) bool {
 	switch s {
 	case api.StSpawning, api.StRunning, api.StExiting, api.StBackoffWaiting:
 		return true

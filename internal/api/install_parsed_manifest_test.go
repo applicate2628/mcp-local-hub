@@ -2536,6 +2536,47 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		}
 	})
 
+	t.Run("hyphenated daemon name uses exact manifest match for port kill", func(t *testing.T) {
+		daemonIntentTestHelper(t)
+		f := newInstallFakeScheduler()
+		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-vscode-css`}}
+		installFakeScheduler(t, f)
+
+		origLookup := lookupProcess
+		lookupProcess = nil
+		t.Cleanup(func() { lookupProcess = origLookup })
+
+		var killed []int
+		origKill := forceKillByPortFn
+		forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+			if len(f.deleteNames) == 0 {
+				t.Errorf("forceKillByPortFn called before deleting the legacy scheduler task")
+			}
+			killed = append(killed, port)
+			return portKillKilled, nil
+		}
+		t.Cleanup(func() { forceKillByPortFn = origKill })
+
+		m := &config.ServerManifest{
+			Name:      "demo",
+			Kind:      config.KindGlobal,
+			Transport: config.TransportStdioBridge,
+			Command:   "go",
+			Daemons: []config.DaemonSpec{
+				{Name: "vscode-css", Port: 33017},
+			},
+		}
+		var buf bytes.Buffer
+		cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
+
+		if len(f.deleteNames) != 1 || f.deleteNames[0] != "mcp-local-hub-demo-vscode-css" {
+			t.Fatalf("deleted legacy tasks = %v, want [mcp-local-hub-demo-vscode-css]", f.deleteNames)
+		}
+		if len(killed) != 1 || killed[0] != 33017 {
+			t.Fatalf("forceKillByPortFn ports = %v, want hyphenated daemon port [33017]", killed)
+		}
+	})
+
 	t.Run("zero port deletes task but skips kill with warning", func(t *testing.T) {
 		daemonIntentTestHelper(t)
 		f := newInstallFakeScheduler()

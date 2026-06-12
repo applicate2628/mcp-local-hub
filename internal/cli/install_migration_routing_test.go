@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // resetUpgradeRoutingSeams clears the test-only upgrade-routing seam so each
@@ -155,6 +157,10 @@ func TestDispatchUpgradeReal_FreshInstallFallsBackToLegacyUpgrade(t *testing.T) 
 
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
+	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		return &upgradeRoutingFakeScheduler{}, nil
+	})
+	t.Cleanup(restoreScheduler)
 	// No supervisor-intent.json seeded → fresh-install branch.
 
 	var v5Invoked bool
@@ -176,6 +182,60 @@ func TestDispatchUpgradeReal_FreshInstallFallsBackToLegacyUpgrade(t *testing.T) 
 	}
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("fresh install must fall through to the legacy runInstallUpgrade body (sentinel from its first seam); got %v", err)
+	}
+}
+
+func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksMigratesToSupervisorInstall(t *testing.T) {
+	resetUpgradeRoutingSeams(t)
+	resetUpgradeSeams(t)
+
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		return &upgradeRoutingFakeScheduler{
+			tasks: []scheduler.TaskStatus{{Name: `\mcp-local-hub-memory-default`, State: "Running"}},
+		}, nil
+	})
+	t.Cleanup(restoreScheduler)
+	// No supervisor-intent.json seeded, but legacy daemon-shaped scheduler task exists.
+
+	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
+	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
+	var stopped bool
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		stopped = true
+		return []api.RestartResult{{TaskName: `\mcp-local-hub-memory-default`}}, nil
+	}
+	var bootstrapped bool
+	upgradeBootstrapFn = func(io.Writer) error {
+		bootstrapped = true
+		return nil
+	}
+	var restarted bool
+	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
+		restarted = true
+		return nil, nil
+	}
+	var installed []string
+	upgradeInstallServerFn = func(server string, w io.Writer) error {
+		installed = append(installed, server)
+		return nil
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := dispatchUpgradeReal(cmd); err != nil {
+		t.Fatalf("dispatchUpgradeReal: %v", err)
+	}
+	if !stopped || !bootstrapped {
+		t.Fatalf("legacy migration did not run binary-swap prerequisites: stopped=%v bootstrapped=%v", stopped, bootstrapped)
+	}
+	if restarted {
+		t.Fatalf("legacy v0.4 tasks were silently restarted instead of materializing supervisor intent")
+	}
+	if len(installed) != 1 || installed[0] != "memory" {
+		t.Fatalf("materialized installs = %v, want [memory]", installed)
 	}
 }
 
@@ -218,6 +278,32 @@ func TestHasSupervisorIntent_RegularFileReturnsTrue(t *testing.T) {
 		t.Fatalf("hasSupervisorIntent = false, want true (regular file present)")
 	}
 }
+
+type upgradeRoutingFakeScheduler struct {
+	tasks []scheduler.TaskStatus
+}
+
+func (f *upgradeRoutingFakeScheduler) Create(scheduler.TaskSpec) error { return nil }
+func (f *upgradeRoutingFakeScheduler) Delete(string) error             { return nil }
+func (f *upgradeRoutingFakeScheduler) Run(string) error                { return nil }
+func (f *upgradeRoutingFakeScheduler) Stop(string) error               { return nil }
+func (f *upgradeRoutingFakeScheduler) Status(string) (scheduler.TaskStatus, error) {
+	return scheduler.TaskStatus{}, scheduler.ErrTaskNotFound
+}
+func (f *upgradeRoutingFakeScheduler) List(prefix string) ([]scheduler.TaskStatus, error) {
+	out := make([]scheduler.TaskStatus, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		name := strings.TrimPrefix(task.Name, `\`)
+		if prefix == "" || strings.HasPrefix(name, prefix) {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
+func (f *upgradeRoutingFakeScheduler) ExportXML(string) ([]byte, error) {
+	return nil, scheduler.ErrTaskNotFound
+}
+func (f *upgradeRoutingFakeScheduler) ImportXML(string, []byte) error { return nil }
 
 // TestHasSupervisorIntent_DirectoryReturnsError pins the round-4 fix:
 // a directory named supervisor-intent.json under the state-dir is a

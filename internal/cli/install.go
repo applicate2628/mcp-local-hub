@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -601,9 +602,10 @@ func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
 // nil → fall through to the real implementations (a.StopAll, Bootstrap,
 // a.RestartAll). Tests assign fakes inside the test setup.
 var (
-	upgradeStopAllFn    func() ([]api.RestartResult, error)
-	upgradeBootstrapFn  func(io.Writer) error
-	upgradeRestartAllFn func() ([]api.RestartResult, error)
+	upgradeStopAllFn       func() ([]api.RestartResult, error)
+	upgradeBootstrapFn     func(io.Writer) error
+	upgradeRestartAllFn    func() ([]api.RestartResult, error)
+	upgradeInstallServerFn func(server string, w io.Writer) error
 	// upgradeExecutableFn / upgradeTargetPathFn carry the canonical-
 	// path comparison for the self-replace guard. Tests inject any
 	// path pair to drive the refusal branch without filesystem state.
@@ -1115,6 +1117,13 @@ func upgradeRestartAll(a *api.API) ([]api.RestartResult, error) {
 	return a.RestartAll()
 }
 
+func upgradeInstallServer(server string, w io.Writer) error {
+	if upgradeInstallServerFn != nil {
+		return upgradeInstallServerFn(server, w)
+	}
+	return api.NewAPI().Install(api.InstallOpts{Server: server, Writer: w})
+}
+
 // ---------------------------------------------------------------------------
 // `mcphub install --upgrade` routing (v0.6 Phase F).
 //
@@ -1199,9 +1208,10 @@ func hasSupervisorIntent() (bool, error) {
 
 // dispatchUpgradeReal implements the production routing branch. It asks
 // api.DaemonStateDir + os.Stat about supervisor-intent.json, then dispatches
-// to one of two sinks:
+// to one of three sinks:
 //
 //   - cli.RunInstallUpgrade (v0.5.x → v0.5.x cold-restart upgrade)
+//   - binary-copy + per-server install materialization (v0.4 scheduler-only)
 //   - runInstallUpgrade legacy body (fresh install)
 //
 // Any state-probe failure short-circuits with the wrapped error so the
@@ -1214,9 +1224,160 @@ func dispatchUpgradeReal(cmd *cobra.Command) error {
 	if supervisorPresent {
 		return runV5UpgradeReal(cmd)
 	}
+	legacyProbe, err := probeLegacySchedulerUpgradeServers(api.NewAPI())
+	if err != nil {
+		return fmt.Errorf("upgrade routing: probe legacy scheduler tasks: %w", err)
+	}
+	if len(legacyProbe.legacyTasks) > 0 {
+		if len(legacyProbe.servers) == 0 {
+			return fmt.Errorf(
+				"legacy v0.4 scheduler daemon tasks exist but none match a shipped manifest; refusing to silently restart the deleted legacy task model. "+
+					"Run `mcphub setup`, then `mcphub install --server <server>` for each installed server. Legacy tasks: %s",
+				strings.Join(legacyProbe.legacyTasks, ", "))
+		}
+		return runLegacySchedulerUpgradeMigration(cmd, legacyProbe)
+	}
 	// Fresh install: no supervisor state on disk. Fall through to the legacy
 	// runInstallUpgrade body so first-time copy + restart still works.
 	return runInstallUpgrade(cmd)
+}
+
+type legacyUpgradeProbe struct {
+	servers     []string
+	legacyTasks []string
+	unmatched   []string
+}
+
+func probeLegacySchedulerUpgradeServers(a *api.API) (legacyUpgradeProbe, error) {
+	tasks, err := a.ListManagedTasks()
+	if err != nil {
+		if api.SchedulerUnavailableError(err) {
+			return legacyUpgradeProbe{}, nil
+		}
+		return legacyUpgradeProbe{}, err
+	}
+
+	scheduledTasks := make(map[string]bool, len(tasks))
+	legacyTasks := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		name := strings.TrimPrefix(task.Name, "\\")
+		if !legacyUpgradeTaskLooksDaemon(name) {
+			continue
+		}
+		scheduledTasks[name] = true
+		legacyTasks = append(legacyTasks, name)
+	}
+	sort.Strings(legacyTasks)
+	if len(legacyTasks) == 0 {
+		return legacyUpgradeProbe{}, nil
+	}
+
+	manifestNames, err := a.ManifestList()
+	if err != nil {
+		return legacyUpgradeProbe{}, err
+	}
+	servers := map[string]struct{}{}
+	matchedTasks := map[string]struct{}{}
+	const prefix = "mcp-local-hub-"
+	for _, name := range manifestNames {
+		raw, err := a.ManifestGet(name)
+		if err != nil {
+			return legacyUpgradeProbe{}, fmt.Errorf("read manifest %s: %w", name, err)
+		}
+		m, err := config.ParseManifest(strings.NewReader(raw))
+		if err != nil {
+			return legacyUpgradeProbe{}, fmt.Errorf("parse manifest %s: %w", name, err)
+		}
+		if m == nil || m.Kind != config.KindGlobal {
+			continue
+		}
+		for _, d := range m.Daemons {
+			taskName := prefix + m.Name + "-" + d.Name
+			if scheduledTasks[taskName] {
+				servers[m.Name] = struct{}{}
+				matchedTasks[taskName] = struct{}{}
+			}
+		}
+	}
+
+	out := legacyUpgradeProbe{
+		servers:     make([]string, 0, len(servers)),
+		legacyTasks: legacyTasks,
+	}
+	for server := range servers {
+		out.servers = append(out.servers, server)
+	}
+	sort.Strings(out.servers)
+	for _, taskName := range legacyTasks {
+		if _, ok := matchedTasks[taskName]; !ok {
+			out.unmatched = append(out.unmatched, taskName)
+		}
+	}
+	return out, nil
+}
+
+func legacyUpgradeTaskLooksDaemon(name string) bool {
+	const prefix = "mcp-local-hub-"
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(name, prefix)
+	if rest == "" ||
+		rest == "liveness" ||
+		rest == "watchdog" ||
+		rest == "supervisor" ||
+		strings.HasSuffix(rest, "-weekly-refresh") {
+		return false
+	}
+	return strings.Contains(rest, "-")
+}
+
+func runLegacySchedulerUpgradeMigration(cmd *cobra.Command, probe legacyUpgradeProbe) error {
+	a := api.NewAPI()
+	out := cmd.OutOrStdout()
+	errOut := cmd.ErrOrStderr()
+
+	if _, _, err := runInstallUpgradePreflightGuards(cmd); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(out, "Stopping legacy scheduler daemons...")
+	stopResults, err := upgradeStopAll(a)
+	if err != nil {
+		return fmt.Errorf("stop legacy scheduler daemons: %w", err)
+	}
+	for _, r := range stopResults {
+		if r.Err != "" {
+			fmt.Fprintf(errOut, "⚠ stop %s: %s\n", r.TaskName, r.Err)
+		} else {
+			fmt.Fprintf(out, "✓ stopped %s\n", r.TaskName)
+		}
+	}
+
+	fmt.Fprintln(out, "Copying new binary...")
+	if err := upgradeBootstrap(out); err != nil {
+		return fmt.Errorf(
+			"bootstrap (binary copy) failed after legacy daemons were stopped: %w; "+
+				"recovery: re-run `mcphub install --upgrade` (idempotent), "+
+				"or run `mcphub setup` then `mcphub install --server <server>` for each legacy server",
+			err)
+	}
+
+	if len(probe.unmatched) > 0 {
+		fmt.Fprintf(errOut,
+			"⚠ legacy scheduler tasks without matching shipped manifests were left for manual review: %s\n",
+			strings.Join(probe.unmatched, ", "))
+	}
+	fmt.Fprintln(out, "Materializing supervisor intent for legacy servers...")
+	for _, server := range probe.servers {
+		if err := upgradeInstallServer(server, out); err != nil {
+			return fmt.Errorf(
+				"install migrated server %s: %w; recovery: run `mcphub setup`, then `mcphub install --server %s`",
+				server, err, server)
+		}
+		fmt.Fprintf(out, "✓ installed %s into supervisor intent\n", server)
+	}
+	return nil
 }
 
 // runV5UpgradeReal wires the rename-aside + IPC handoff path through

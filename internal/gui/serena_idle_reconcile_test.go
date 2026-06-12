@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -285,7 +286,7 @@ func TestIdleSweeper_InvalidatesDaemonSessionOnlyAfterIdleStop(t *testing.T) {
 
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	serenaIdleThresholdFn = func() (time.Duration, bool) { return 30 * time.Minute, true }
-	serenaIdleStopFn = api.NewAPI().WriteSerenaIdleStop
+	serenaIdleStopFn = api.NewAPI().WriteSerenaIdleStopResult
 	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
 		return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
 	}
@@ -301,6 +302,59 @@ func TestIdleSweeper_InvalidatesDaemonSessionOnlyAfterIdleStop(t *testing.T) {
 		t.Fatalf("daemon-session lookup after idle stop = %q; want miss and re-handshake", dsid)
 	}
 	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+}
+
+func TestIdleSweeper_OperatorStopRefusalDoesNotRecordIdleStopSuccess(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const wsPath = "/proj/idle-operator-stop"
+	const sid = "sid-idle-operator-stop"
+	ws := serenaWS("idle-operator-stop", wsPath, 9302)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-session-before-refused-idle")
+
+	now := time.Date(2026, 6, 11, 12, 15, 0, 0, time.UTC)
+	if err := api.NewAPI().WriteStopIntent(ws.TaskName, api.DaemonIntent{
+		Desired:   api.IntentDesiredStopped,
+		Reason:    api.IntentReasonUserStop,
+		UpdatedAt: now.Add(-time.Minute),
+	}, "operator"); err != nil {
+		t.Fatalf("seed operator stop: %v", err)
+	}
+	serenaIdleThresholdFn = func() (time.Duration, bool) { return 30 * time.Minute, true }
+	serenaIdleStopFn = api.NewAPI().WriteSerenaIdleStopResult
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+	}
+	lastActive := now.Add(-45 * time.Minute)
+	s.recordSerenaActivity(ws.WorkspaceKey, lastActive)
+
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
+		t.Fatalf("idle sweeper stopped %d daemons; want 0 when operator stop refuses idle overwrite", n)
+	}
+	if got, ok := s.lastSerenaActivity(ws.WorkspaceKey); !ok || !got.Equal(lastActive) {
+		t.Fatalf("activity baseline after refused idle stop = (%s,%v), want (%s,true)", got, ok, lastActive)
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
+		t.Fatalf("daemon-session binding was unbound even though idle stop write was refused")
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+
+	events, err := api.RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("RecentHubMcpEvents: %v", err)
+	}
+	var sawSkip bool
+	for _, ev := range events {
+		if event, _ := ev["event"].(string); strings.Contains(event, "skipped-operator-stop-active") {
+			sawSkip = true
+			break
+		}
+	}
+	if !sawSkip {
+		t.Fatalf("hub-mcp events missing skipped-operator-stop-active after refused idle stop: %+v", events)
+	}
 }
 
 func newSafeSerenaHTTPTestServer(t *testing.T, h http.Handler) *httptest.Server {
@@ -380,7 +434,7 @@ func TestSerenaRouter_IdleShutdownWakeReconcilesAndRehandshakes(t *testing.T) {
 		return []api.DaemonStatus{statusRow}, nil
 	}
 	serenaIdleThresholdFn = func() (time.Duration, bool) { return 30 * time.Minute, true }
-	serenaIdleStopFn = api.NewAPI().WriteSerenaIdleStop
+	serenaIdleStopFn = api.NewAPI().WriteSerenaIdleStopResult
 
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-45*time.Minute))

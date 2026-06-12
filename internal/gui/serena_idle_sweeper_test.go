@@ -21,9 +21,9 @@ func withIdleSweeperSeams(t *testing.T, threshold time.Duration, enabled bool, s
 	origThresh, origStop, origStatus := serenaIdleThresholdFn, serenaIdleStopFn, serenaBackendStatusFn
 	captured := &[]string{}
 	serenaIdleThresholdFn = func() (time.Duration, bool) { return threshold, enabled }
-	serenaIdleStopFn = func(taskName string, _ time.Time) error {
+	serenaIdleStopFn = func(taskName string, _ time.Time) (bool, error) {
 		*captured = append(*captured, taskName)
-		return nil
+		return true, nil
 	}
 	serenaBackendStatusFn = status
 	t.Cleanup(func() {
