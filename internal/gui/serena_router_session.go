@@ -745,6 +745,20 @@ func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.Works
 	if pid <= 0 {
 		return
 	}
+	// Re-validate sole-session ownership AT WRITE TIME (PR #291 bot r4): the
+	// caller's replaceStaleBaseline was decided at bind time, but the statusFn
+	// IPC read above can be slow — a second session may bind AND the daemon may
+	// restart during it, in which case writing the post-restart PID would mask
+	// the generation change for sessions still bound to the pre-restart daemon.
+	// The session-store read happens before serenaBackendPIDMu (no lock
+	// nesting, same ordering rule as the bind-time read); a bind landing
+	// between this re-check and the map write can only ADD a session — making
+	// the count >1 — and that racer's own seed re-checks again, so the stale
+	// overwrite cannot slip through.
+	if replaceStaleBaseline &&
+		len(s.serenaRouterSessions.sessionsForWorkspace(ws.WorkspaceKey)) > 1 {
+		replaceStaleBaseline = false
+	}
 	s.serenaBackendPIDMu.Lock()
 	if s.serenaBackendLastPID == nil {
 		s.serenaBackendLastPID = map[string]int{}
