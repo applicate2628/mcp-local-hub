@@ -1778,16 +1778,19 @@ func supervisorIntentRowMatchesServerDaemon(row SupervisorDaemon, server, daemon
 	if server == "" || daemon == "" {
 		return false
 	}
-	parsedServer, parsedDaemon := ParseManagedTaskName(row.TaskName)
-	serverMatches := row.Server == server
-	if row.Server == "" {
-		serverMatches = parsedServer == server
+	// Both identity components are KNOWN here, so a blank-field legacy row is
+	// matched by the exact canonical task name — never by ParseManagedTaskName,
+	// whose last-hyphen split misattributes hyphenated daemon names
+	// (\mcp-local-hub-demo-alpha-beta parses as demo-alpha/beta and a v0.6
+	// global, having no scheduler-task fallback, then fails Preflight on its
+	// OWN port; bot PR #288 r26 — third member of the r19-F1/r20-F4 family).
+	if row.Server == "" || row.Daemon == "" {
+		want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemon)
+		if canonicalIntentTaskKey(row.TaskName) == want {
+			return true
+		}
 	}
-	daemonMatches := row.Daemon == daemon
-	if row.Daemon == "" {
-		daemonMatches = parsedDaemon == daemon
-	}
-	return serverMatches && daemonMatches
+	return row.Server == server && row.Daemon == daemon
 }
 
 func supervisorIntentDaemonTaskName(row SupervisorDaemon, server, daemon string) string {
