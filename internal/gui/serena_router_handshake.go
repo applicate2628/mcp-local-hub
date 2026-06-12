@@ -876,13 +876,13 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	clientProtocolVersion string,
 	upstreamTimeout time.Duration,
 	sessionLive func() bool,
-) (daemonSessionID string, daemonProtocolVersion string, err error) {
+) (daemonSessionID string, daemonProtocolVersion string, freshHandshake bool, err error) {
 	if ws == nil {
-		return "", "", fmt.Errorf("resolveDaemonSession: nil workspace")
+		return "", "", false, fmt.Errorf("resolveDaemonSession: nil workspace")
 	}
 	if clientSessionID != "" {
 		if dsid, dpv, ok := st.lookup(clientSessionID, ws.WorkspaceKey); ok {
-			return dsid, dpv, nil
+			return dsid, dpv, false, nil
 		}
 		proceed, inFlight := st.reserveSlot(clientSessionID)
 		if !proceed {
@@ -891,9 +891,9 @@ func (st *daemonSessionStore) resolveDaemonSession(
 				// id is already in flight — reject this duplicate so it does not mint a
 				// second upstream session. The client retries; the retry hits the
 				// completed binding via lookup.
-				return "", "", errDaemonSessionHandshakeInFlight
+				return "", "", false, errDaemonSessionHandshakeInFlight
 			}
-			return "", "", errDaemonSessionStoreFull
+			return "", "", false, errDaemonSessionStoreFull
 		}
 	}
 	reserved := clientSessionID != ""
@@ -905,7 +905,7 @@ func (st *daemonSessionStore) resolveDaemonSession(
 		if reserved {
 			st.releaseReservation(clientSessionID)
 		}
-		return "", "", err
+		return "", "", false, err
 	}
 	// Finding 4: re-check the router session is STILL live before storing. The
 	// handshake above is the slow upstream work; a DELETE/sweep can have
@@ -921,7 +921,7 @@ func (st *daemonSessionStore) resolveDaemonSession(
 		if dsid != "" {
 			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
 		}
-		return "", "", errRouterSessionTerminated
+		return "", "", false, errRouterSessionTerminated
 	}
 	// Only record a mapping when BOTH a client session id and a daemon
 	// session id exist. A sessionless daemon (empty dsid) needs no
@@ -943,7 +943,7 @@ func (st *daemonSessionStore) resolveDaemonSession(
 				st.releaseReservation(clientSessionID)
 			}
 			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
-			return "", "", errDaemonSessionStoreFull
+			return "", "", false, errDaemonSessionStoreFull
 		}
 	}
 	// bot PR #251 r2 P2: release the reservation on EVERY success / sessionless
@@ -957,5 +957,5 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	if reserved {
 		st.releaseReservation(clientSessionID)
 	}
-	return dsid, dpv, nil
+	return dsid, dpv, true, nil
 }

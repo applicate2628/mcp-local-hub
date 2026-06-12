@@ -895,7 +895,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		sid := sessionID
 		sessionLive = func() bool { return s.serenaRouterSessions.known(sid) }
 	}
-	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
+	daemonSessionID, daemonProtocolVersion, freshDaemonHandshake, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
 	if hsErr != nil {
 		// Finding 4: the router session was DELETEd/swept during the handshake.
 		// resolveDaemonSession already best-effort-released the just-minted daemon
@@ -970,16 +970,25 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		// dropping the just-seeded baseline (PR #288 r5 adversarial review).
 		//
 		// Stale-baseline replacement is decided by bindWorkspace's atomic
-		// (newlyBound, boundCount) pair: only the request that CREATED the
-		// workspace's first binding (newlyBound && boundCount == 1) is the
-		// first observer after an unbound window and may replace the
-		// baseline. A cache-hit re-request of an already-bound session has
-		// newlyBound == false (PR #291 — the overwrite masked daemon
-		// restarts), and a RACING second first-request observes boundCount
-		// == 2 under the store lock and preserves the baseline (PR #291 bot
-		// P1 — a pre-bind sessions==0 snapshot let both racers qualify).
+		// (newlyBound, boundCount) pair PLUS the daemon-handshake freshness:
+		// the request that CREATED the workspace's first binding (newlyBound
+		// && boundCount == 1) is the first observer after an unbound window,
+		// and a request whose resolveDaemonSession performed a FRESH upstream
+		// handshake (daemon-session lookup missed — e.g. the idle sweeper
+		// unbound it before a wake) is talking to the CURRENT daemon
+		// generation, so its PID is the valid new baseline even though the
+		// surviving router session makes newlyBound false (PR #291 bot r2 —
+		// preserving the pre-idle PID there let the next reconcile tick tear
+		// down the just-woken live session when no idle tick had armed the
+		// grace marker). A cache-hit re-request (daemon-session lookup HIT)
+		// has freshDaemonHandshake == false and preserves the baseline so a
+		// backend restart is still detected (PR #291 — the overwrite masked
+		// restarts), and a RACING second first-request observes boundCount ==
+		// 2 under the store lock (PR #291 bot P1 — a pre-bind sessions==0
+		// snapshot let both racers qualify); racing fresh handshakes both
+		// seed the same current-generation PID (benign).
 		newlyBound, boundCount := s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
-		s.seedSerenaBackendPIDBaseline(r.Context(), ws, newlyBound && boundCount == 1)
+		s.seedSerenaBackendPIDBaseline(r.Context(), ws, (newlyBound && boundCount == 1) || freshDaemonHandshake)
 	}
 
 	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO
