@@ -980,15 +980,22 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		// surviving router session makes newlyBound false (PR #291 bot r2 —
 		// preserving the pre-idle PID there let the next reconcile tick tear
 		// down the just-woken live session when no idle tick had armed the
-		// grace marker). A cache-hit re-request (daemon-session lookup HIT)
-		// has freshDaemonHandshake == false and preserves the baseline so a
-		// backend restart is still detected (PR #291 — the overwrite masked
-		// restarts), and a RACING second first-request observes boundCount ==
-		// 2 under the store lock (PR #291 bot P1 — a pre-bind sessions==0
-		// snapshot let both racers qualify); racing fresh handshakes both
-		// seed the same current-generation PID (benign).
+		// grace marker). BOTH signals are gated on boundCount == 1: when
+		// OTHER sessions are still bound (count > 1), a new session's fresh
+		// handshake lands against the post-restart generation while those
+		// sessions are bound to the OLD one — replacing the baseline would
+		// hide the PID change from the reconcile and leave them zombies (PR
+		// #291 bot r3 P1), so the baseline is preserved and the tick tears
+		// the old generation down (the fresh session re-initializes — same
+		// collateral the pre-#291 semantics had). A cache-hit re-request
+		// (daemon-session lookup HIT) has freshDaemonHandshake == false and
+		// preserves the baseline so a backend restart is still detected (PR
+		// #291 — the overwrite masked restarts), and a RACING second
+		// first-request observes boundCount == 2 under the store lock (PR
+		// #291 bot P1 — a pre-bind sessions==0 snapshot let both racers
+		// qualify).
 		newlyBound, boundCount := s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
-		s.seedSerenaBackendPIDBaseline(r.Context(), ws, (newlyBound && boundCount == 1) || freshDaemonHandshake)
+		s.seedSerenaBackendPIDBaseline(r.Context(), ws, boundCount == 1 && (newlyBound || freshDaemonHandshake))
 	}
 
 	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO
