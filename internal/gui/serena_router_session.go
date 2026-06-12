@@ -880,6 +880,10 @@ func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath strin
 	if wsPath == "" {
 		return
 	}
+	if s.serenaBackendDropGen == nil {
+		s.serenaBackendDropGen = map[string]uint64{}
+	}
+	s.serenaBackendDropGen[wsPath]++
 	delete(s.serenaBackendLastPID, wsPath)
 	delete(s.serenaBackendIdlePaths, wsPath)
 	for wsKey, path := range s.serenaBackendPathByKey {
@@ -1066,6 +1070,21 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		return 0
 	}
 
+	s.serenaBackendPIDMu.Lock()
+	prior := make(map[string]int, len(wantPaths))
+	priorIdle := make(map[string]int, len(wantPaths))
+	dropGenAtSnapshot := make(map[string]uint64, len(wantPaths))
+	for path := range wantPaths {
+		if pid, ok := s.serenaBackendLastPID[path]; ok {
+			prior[path] = pid
+		}
+		if ticks, ok := s.serenaBackendIdlePaths[path]; ok {
+			priorIdle[path] = ticks
+		}
+		dropGenAtSnapshot[path] = s.serenaBackendDropGen[path]
+	}
+	s.serenaBackendPIDMu.Unlock()
+
 	rows, err := statusFn(ctx)
 	if err != nil {
 		// IPC unavailable / transient: do NOT tear down sessions on a status
@@ -1144,15 +1163,6 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		}
 	}
 
-	s.serenaBackendPIDMu.Lock()
-	prior := s.serenaBackendLastPID
-	if prior == nil {
-		prior = map[string]int{}
-	}
-	priorIdle := s.serenaBackendIdlePaths
-	if priorIdle == nil {
-		priorIdle = map[string]int{}
-	}
 	// persisted is the snapshot the next tick compares against. It starts as the
 	// fresh per-PATH PIDs; transient Restarting rows carry the prior real PID
 	// forward (below) instead of persisting their 0.
@@ -1161,7 +1171,10 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		persisted[path] = pid
 	}
 	persistedIdle := make(map[string]int, len(wantPaths))
-	var lost []string // workspace KEYS whose backend was lost this tick
+	lostByPath := make(map[string]string, len(wantPaths))
+	markLost := func(path string) {
+		lostByPath[path] = pathToKey[path]
+	}
 	for path := range wantPaths {
 		newPID, present := fresh[path]
 		oldPID, hadPrior := prior[path]
@@ -1195,12 +1208,12 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			// for absent rows, a genuinely absent row means the descriptor was
 			// removed, not that startup/backoff is transiently rowless.
 			if !present {
-				lost = append(lost, pathToKey[path])
+				markLost(path)
 				delete(persisted, path)
 				continue
 			}
 			if deadNow {
-				lost = append(lost, pathToKey[path])
+				markLost(path)
 				delete(persisted, path)
 			}
 			continue
@@ -1230,7 +1243,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 					continue
 				}
 			}
-			lost = append(lost, pathToKey[path])
+			markLost(path)
 			delete(persisted, path)
 			continue
 		}
@@ -1239,7 +1252,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		// is absent in BOTH ticks (oldPID present but daemon never running, e.g.
 		// PID 0 both times) is not a change.
 		if !present {
-			lost = append(lost, pathToKey[path])
+			markLost(path)
 			continue
 		}
 		if newPID != oldPID {
@@ -1253,7 +1266,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 				persisted[path] = newPID
 				continue
 			}
-			lost = append(lost, pathToKey[path])
+			markLost(path)
 		}
 	}
 	// Persist the snapshot (only the router-relevant workspaces) so the next
@@ -1261,7 +1274,18 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// dropped — a later reappearance is a first-observation baseline again, not
 	// a spurious loss. Transient Restarting rows carry the prior real PID
 	// (handled above) rather than their transient 0.
+	s.serenaBackendPIDMu.Lock()
+	skippedByDropGeneration := map[string]struct{}{}
+	dropGenerationAdvanced := func(path string) bool {
+		return s.serenaBackendDropGen[path] != dropGenAtSnapshot[path]
+	}
 	for path := range persisted {
+		if dropGenerationAdvanced(path) {
+			skippedByDropGeneration[path] = struct{}{}
+			delete(persisted, path)
+			delete(persistedIdle, path)
+			continue
+		}
 		wsKey := pathToKey[path]
 		if wsKey == "" {
 			for key, cachedPath := range s.serenaBackendPathByKey {
@@ -1282,6 +1306,11 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		}
 	}
 	for path := range persistedIdle {
+		if dropGenerationAdvanced(path) {
+			skippedByDropGeneration[path] = struct{}{}
+			delete(persistedIdle, path)
+			continue
+		}
 		wsKey := pathToKey[path]
 		if wsKey == "" {
 			for key, cachedPath := range s.serenaBackendPathByKey {
@@ -1295,12 +1324,26 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			delete(persistedIdle, path)
 		}
 	}
+	for path := range lostByPath {
+		if dropGenerationAdvanced(path) {
+			skippedByDropGeneration[path] = struct{}{}
+			delete(lostByPath, path)
+		}
+	}
+	for path := range skippedByDropGeneration {
+		if pid, ok := s.serenaBackendLastPID[path]; ok {
+			persisted[path] = pid
+		}
+		if ticks, ok := s.serenaBackendIdlePaths[path]; ok {
+			persistedIdle[path] = ticks
+		}
+	}
 	s.serenaBackendLastPID = persisted
 	s.serenaBackendIdlePaths = persistedIdle
 	s.serenaBackendPIDMu.Unlock()
 
 	total := 0
-	for _, wsKey := range lost {
+	for _, wsKey := range lostByPath {
 		if wsKey == "" {
 			continue
 		}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,6 +94,80 @@ func TestSerenaRouter_BackendLoss_IPCReconcileDropsUnboundStaleSnapshot(t *testi
 	if got, ok := serenaBackendBaselineForTest(s, wsPath); ok {
 		t.Fatalf("reconcile resurrected baseline %d for unbound workspace; want absent", got)
 	}
+}
+
+func TestSerenaRouter_BackendLoss_IPCReconcileSkipsStalePersistAfterDropAndRebind(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+
+	const wsPath = "/proj/reconcile-drop-generation"
+	const oldSID = "sid-drop-generation-old"
+	const newSID = "sid-drop-generation-new"
+	const pidA = 7654
+	const pidB = 8765
+	ws := serenaWS("reconcile-drop-generation", wsPath, 0)
+	s, sessions := newSerenaStoreSeedServer(t, ws)
+	seedBoundSerenaSession(s, sessions, ws, oldSID, "daemon-drop-generation-old")
+	seedSerenaBackendBaseline(s, wsPath, pidA)
+	s.rememberSerenaBackendWorkspacePath(ws)
+
+	statusStarted := make(chan struct{})
+	releaseStatus := make(chan struct{})
+	reconcileDone := make(chan int, 1)
+	var statusCalls int32
+	serenaBackendStatusFn = func(ctx context.Context) ([]api.DaemonStatus, error) {
+		if atomic.AddInt32(&statusCalls, 1) == 1 {
+			close(statusStarted)
+			select {
+			case <-releaseStatus:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			return []api.DaemonStatus{
+				{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidA},
+			}, nil
+		}
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB},
+		}, nil
+	}
+
+	go func() {
+		reconcileDone <- s.ReconcileSerenaBackendLossViaIPC(context.Background())
+	}()
+
+	select {
+	case <-statusStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcile status read did not start")
+	}
+
+	s.coordinateBackendLossUnbind(oldSID, sessions)
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); ok {
+		t.Fatalf("last unbind left baseline %d; want dropped baseline before fresh seed", got)
+	}
+	seedBoundSerenaSession(s, sessions, ws, newSID, "daemon-drop-generation-new")
+	s.seedSerenaBackendPIDBaseline(context.Background(), ws)
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidB {
+		t.Fatalf("fresh seed baseline = (%d,%v), want (%d,true)", got, ok, pidB)
+	}
+
+	close(releaseStatus)
+	select {
+	case n := <-reconcileDone:
+		if n != 0 {
+			t.Fatalf("stale reconcile tore down %d sessions after drop/rebind; want 0", n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcile did not finish after status release")
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidB {
+		t.Fatalf("stale reconcile persisted baseline = (%d,%v), want fresh PID %d", got, ok, pidB)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, newSID)
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("follow-up reconcile after fresh PID tore down %d sessions; want 0", n)
+	}
+	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, newSID)
 }
 
 func TestSerenaRouter_SetDepsDoesNotRewriteWorkspaceEmptyCallback(t *testing.T) {
