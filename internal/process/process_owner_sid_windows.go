@@ -88,44 +88,62 @@ func processOwnerUserSID(pid int) (*windows.SID, error) {
 // SAME user SID as the current mcphub process. It is the Windows owner-SID arm
 // of the operator-facing kill gates (SEC-F3).
 //
-// Tri-state contract, FAIL CLOSED:
+// Tri-state contract:
 //
-//   - (true,  nil) — target owner SID == current process owner SID. The common
-//     single-user case: the daemon/GUI being killed belongs to the same user
-//     running mcphub, so the kill proceeds exactly as before.
-//   - (false, nil) — target owner SID DIFFERS from the current user. A
-//     different-owner process: the caller MUST refuse the kill.
-//   - (false, err) — the target's token could not be opened or queried (or the
-//     current process SID could not be resolved). The owner is UNVERIFIABLE, so
-//     the caller MUST refuse the kill (never kill a process whose owner cannot
-//     be proven to match).
+//   - (true,  nil) — MATCH. Target owner SID == current process owner SID. The
+//     common single-user case: the daemon/GUI being killed belongs to the same
+//     user running mcphub, so the kill proceeds exactly as before.
+//   - (false, nil) — PROVEN MISMATCH (benign). BOTH SIDs were read successfully
+//     and they differ — a different-owner process. This is NOT an error: it is a
+//     verified fact that the target belongs to another user. The caller MUST
+//     refuse (skip) the kill, but the refusal is a normal, expected outcome —
+//     e.g. a stale supervisor.lock sidecar pointing at ANOTHER user's
+//     mcphub-shaped supervisor must let `install --upgrade` SKIP the foreign
+//     process and proceed, not ABORT. (#301-1.)
+//   - (false, err) — UNVERIFIABLE (fail-closed). The current process SID could
+//     not be resolved, OR the target's token could not be opened/queried
+//     (OpenProcess / OpenProcessToken / GetTokenUser / SID copy failed). The
+//     owner is UNKNOWN, so the caller MUST refuse the kill AND treat the
+//     non-nil error as a hard force-kill FAILURE (never kill a process whose
+//     owner cannot be proven to match; never proceed past a process we cannot
+//     identify).
 //
-// Callers treat both (false, nil) and (false, err) as "do not kill"; the error
-// is propagated for diagnostics.
+// Callers treat both (false, nil) and (false, err) as "do not kill", but the
+// two cases diverge on whether the surrounding flow may continue: (false, nil)
+// is a benign skip, (false, err) is a propagated failure.
 func ProcessOwnerSIDMatchesCurrent(pid int) (bool, error) {
 	cur, err := currentProcessUserSID()
 	if err != nil {
+		// UNVERIFIABLE: cannot resolve our own SID → fail closed.
 		return false, err
 	}
 	target, err := processOwnerUserSID(pid)
 	if err != nil {
+		// UNVERIFIABLE: cannot open/query the target token → fail closed.
 		return false, err
 	}
-	if !target.Equals(cur) {
-		return false, fmt.Errorf("process: PID %d owner SID %s does not match current user SID %s",
-			pid, sidStringOrUnresolved(target), sidStringOrUnresolved(cur))
-	}
-	return true, nil
+	return sidsMatchResult(cur, target)
 }
 
-// sidStringOrUnresolved renders a SID for diagnostics, tolerating a nil or
-// unconvertible SID without panicking.
-func sidStringOrUnresolved(sid *windows.SID) string {
-	if sid == nil {
-		return "<nil-sid>"
+// sidsMatchResult is the pure comparison core extracted from
+// ProcessOwnerSIDMatchesCurrent so the proven-mismatch contract can be
+// unit-tested without exercising the OpenProcess / token syscalls (#301-1).
+//
+// Both arguments are SIDs that were already read successfully. The result is
+// therefore the two VERIFIED outcomes only:
+//
+//   - (true,  nil) — the SIDs are equal (match).
+//   - (false, nil) — the SIDs differ. This is a PROVEN mismatch, NOT an error:
+//     a benign identity-difference the caller safely SKIPs. Returning an error
+//     here would force the Windows reaper to treat a known different-owner
+//     process as a force-kill FAILURE and abort install --upgrade against a
+//     stale foreign supervisor.lock sidecar, instead of skipping it.
+//
+// The UNVERIFIABLE (false, err) case never originates here — it is the syscall
+// wrapper's job to fail closed when a token cannot be read.
+func sidsMatchResult(cur, target *windows.SID) (bool, error) {
+	if !target.Equals(cur) {
+		return false, nil
 	}
-	if s := sid.String(); s != "" {
-		return s
-	}
-	return "<unresolved-sid>"
+	return true, nil
 }

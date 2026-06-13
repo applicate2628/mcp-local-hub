@@ -479,18 +479,114 @@ func operatorRequiresSingleUserHome() bool {
 // supervisor restart is expected). Short-lived install/gui/cli
 // invocations read fresh each run. No file-watcher, no per-write read.
 //
-// Safe-default-on-error: if the intent file is missing (fresh install
-// before any intent exists), unreadable, the state dir is unresolvable,
-// or the read-side parent-dir gate refuses it, the cached intent value
-// is FALSE — i.e. env-only behavior, exactly the pre-SEC-F2 posture.
-// Strict-from-intent is fail-closed-to-relax: a read error can only
-// LOSE the strict bit, never spuriously assert it.
+// Safe-default-on-error (#301-2 refinement): the posture now depends on
+// WHY the intent read failed —
+//
+//   - ABSENT intent (missing file = fresh install before any intent
+//     exists) OR unresolvable state dir → cached value FALSE, i.e.
+//     env-only behavior (the pre-SEC-F2 posture). Relax is correct when
+//     there is no enforcing intent yet.
+//   - READ FAILURE on an EXISTING intent (decode error, permission
+//     denied, read-side parent-dir gate refusal) → cached value TRUE
+//     (fail-closed-to-STRICT). A read failure on the gate-controlling
+//     file must NOT silently disable the security gate; strict is the
+//     safe-secure failure mode.
+//
+// Before #301-2, ANY read error relaxed (fail-open-to-relax), which
+// silently disabled the strict gate if the EXISTING intent became
+// unreadable. That was the security hole this refinement closes.
 func OperatorRequiresSingleUserHome() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(RequireSingleUserHomeEnv))) {
 	case "1", "true":
 		return true
 	}
+	// #301-3 strict-mode-mutation deadlock fix: when a strict-mode
+	// enable/disable is mid-flight writing the gate-controlling
+	// supervisor-intent.json itself, the cached intent.strict_mode value
+	// must NOT govern that very write — otherwise an OLD strict_mode=true
+	// would refuse the disabling write (and a broadened parent would
+	// strand the operator in strict mode forever). During the bounded
+	// mutation-write window the gate consults ENV ONLY, skipping the
+	// intent cache. The bypass is scoped to the intent write (see
+	// BeginStrictModeMutationGateBypass) and is always cleared via defer.
+	if strictModeMutationGateBypassActive() {
+		return false
+	}
 	return strictModeFromIntentCached()
+}
+
+// strictModeMutationGateBypass is a process-level reentrancy-counted guard.
+// While its depth > 0, OperatorRequiresSingleUserHome consults ONLY the
+// MCPHUB_REQUIRE_SINGLE_USER_HOME env var and ignores the cached
+// supervisor-intent.json strict_mode bit.
+//
+// It exists for exactly one caller class: the `mcphub strict-mode
+// {enable,disable}` mutation, which writes the authoritative
+// gate-controlling strict_mode value. That write must not be governed by the
+// value it is replacing (SEC-F2 made intent.strict_mode authoritative for ALL
+// secure state-file writes, which would otherwise self-gate the disabling
+// write on a broadened parent — #301-3). A reentrancy counter (not a bool)
+// keeps nested Begin/End pairs correct.
+var strictModeMutationGateBypass struct {
+	mu    sync.Mutex
+	depth int
+}
+
+// strictModeMutationGateBypassActive reports whether a strict-mode mutation
+// write window is currently open in this process.
+func strictModeMutationGateBypassActive() bool {
+	strictModeMutationGateBypass.mu.Lock()
+	defer strictModeMutationGateBypass.mu.Unlock()
+	return strictModeMutationGateBypass.depth > 0
+}
+
+// BeginStrictModeMutationGateBypass opens a strict-mode-mutation write window:
+// for its duration OperatorRequiresSingleUserHome consults the env var ONLY,
+// ignoring the cached supervisor-intent.json strict_mode bit. EVERY call MUST
+// be paired with exactly one EndStrictModeMutationGateBypass, always via defer
+// so a panic or early return cannot leak the bypass. Reentrant: nested
+// Begin/End pairs increment/decrement a depth counter, and the gate stays
+// bypassed until the OUTERMOST End.
+//
+// Scope discipline (#301-3): wrap ONLY the supervisor-intent.json write
+// step(s) of `mcphub strict-mode enable|disable`, never a whole command.
+// A NON-mutation secure write that happens to run while the window is open
+// would also see the bypass, so callers must keep the window as narrow as the
+// intent write itself.
+func BeginStrictModeMutationGateBypass() {
+	strictModeMutationGateBypass.mu.Lock()
+	defer strictModeMutationGateBypass.mu.Unlock()
+	strictModeMutationGateBypass.depth++
+}
+
+// EndStrictModeMutationGateBypass closes one strict-mode-mutation write window
+// opened by BeginStrictModeMutationGateBypass. Safe to call when depth is
+// already 0 (clamps at 0) so a defensive double-End cannot drive the counter
+// negative.
+func EndStrictModeMutationGateBypass() {
+	strictModeMutationGateBypass.mu.Lock()
+	defer strictModeMutationGateBypass.mu.Unlock()
+	if strictModeMutationGateBypass.depth > 0 {
+		strictModeMutationGateBypass.depth--
+	}
+}
+
+// WithStrictModeMutationGateBypass runs fn with the strict-mode-mutation gate
+// bypass active, guaranteeing the window is closed even if fn panics. This is
+// the preferred entry point for the strict-mode CLI's intent-write step.
+func WithStrictModeMutationGateBypass(fn func() error) error {
+	BeginStrictModeMutationGateBypass()
+	defer EndStrictModeMutationGateBypass()
+	return fn()
+}
+
+// resetStrictModeMutationGateBypassForTest force-clears the bypass depth so a
+// leaked Begin (e.g. from a failed test) cannot bleed into later tests in the
+// same process. Test-only.
+func resetStrictModeMutationGateBypassForTest() {
+	strictModeMutationGateBypass.mu.Lock()
+	defer strictModeMutationGateBypass.mu.Unlock()
+	strictModeMutationGateBypass.depth = 0
 }
 
 // strictModeIntentCache holds the lazily-resolved
@@ -510,8 +606,11 @@ var strictModeIntentCache struct {
 
 // strictModeFromIntentCached returns the cached
 // supervisor-intent.json `strict_mode` value, resolving it on first
-// use. ANY failure to read/resolve the intent caches FALSE (safe
-// default: env-only behavior, the pre-SEC-F2 posture).
+// use. The resolution rule is fail-closed-secure (#301-2): an ABSENT
+// intent or unresolvable state dir caches FALSE (env-only behavior, the
+// pre-SEC-F2 posture), but a READ FAILURE on an EXISTING intent
+// (decode/permission/parent-gate refusal) caches TRUE — see
+// readStrictModeFromIntentBestEffort for the full case split.
 func strictModeFromIntentCached() bool {
 	strictModeIntentCache.mu.Lock()
 	defer strictModeIntentCache.mu.Unlock()
@@ -523,12 +622,31 @@ func strictModeFromIntentCached() bool {
 }
 
 // readStrictModeFromIntentBestEffort reads supervisor-intent.json once
-// and returns its `strict_mode` bit. On ANY error (state dir
-// unresolvable, file absent, unreadable, read-side parent-dir gate
-// refusal, decode failure) it returns false — strict-from-intent is
-// fail-closed-to-relax, never fail-open-to-strict. This is the safe
-// default that preserves today's env-only posture when no enforcing
-// intent exists.
+// and returns its `strict_mode` bit. It distinguishes an ABSENT intent
+// (fresh install — relax is correct) from a READ FAILURE on an existing
+// intent (decode/permission/parent-gate refusal — strict is the safe-
+// secure failure mode). #301-2 P2:
+//
+//   - DefaultSupervisorIntentPath() error (state dir unresolvable) →
+//     false. The path can't even be formed, so there is no enforcing
+//     intent to honor; fall back to env-only behavior (unknown/fresh).
+//   - ReadSupervisorIntent returns os.ErrNotExist (file absent) → false.
+//     A missing intent file is a fresh install before any `strict-mode
+//     enable` ever ran; relax is correct and is today's posture.
+//   - ReadSupervisorIntent returns ANY OTHER error (decode failure,
+//     permission denied, read-side parent-dir gate refusal) → TRUE.
+//     The intent file EXISTS but could not be read. Silently relaxing
+//     here would DISABLE the strict gate exactly when an attacker (or a
+//     corp ACL change) made the gate-controlling file unreadable — a
+//     fail-OPEN security hole. We fail CLOSED to strict instead: a read
+//     failure on an existing intent must never silently weaken the
+//     security gate.
+//   - intent == nil (no error, no file content) → false.
+//
+// Caching note: this is called once per process behind
+// strictModeFromIntentCached, so a transient read error caches STRICT
+// for the process lifetime. That is the intended fail-closed-secure
+// posture — the next process retries the read.
 //
 // Calls api.DefaultSupervisorIntentPath + api.ReadSupervisorIntent
 // (same package). Honors the daemonStateRootOverride test seam through
@@ -537,10 +655,23 @@ func strictModeFromIntentCached() bool {
 func readStrictModeFromIntentBestEffort() bool {
 	path, err := DefaultSupervisorIntentPath()
 	if err != nil {
+		// State dir unresolvable: no path to an enforcing intent at all.
+		// Unknown/fresh → env-only behavior (unchanged pre-#301-2 posture).
 		return false
 	}
 	intent, err := ReadSupervisorIntent(path)
-	if err != nil || intent == nil {
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Missing file = fresh install before any strict-mode enable →
+			// relax is correct.
+			return false
+		}
+		// Existing intent that could not be read (decode/permission/
+		// parent-gate refusal): fail CLOSED to strict. A read failure on an
+		// existing gate-controlling file must not silently disable the gate.
+		return true
+	}
+	if intent == nil {
 		return false
 	}
 	return intent.StrictMode
