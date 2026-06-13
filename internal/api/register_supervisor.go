@@ -329,9 +329,19 @@ func (a *API) registerOneLanguageSupervised(
 	if err != nil {
 		return WorkspaceEntry{}, err
 	}
-	supervisorSpawnRequested := false
+	// reconcileAttempted gates the rollback kill-by-port. The spawn TRIGGER is
+	// not proxy readiness — it is the
+	// stop being cleared (writeRegisterRunningIntentForTask makes the daemon
+	// spawn-desired) PLUS the reconcile nudge (registerSupervisorReconcileFn).
+	// A reconcile that SPAWNS the daemon and THEN errors returns before any
+	// post-readiness flag is set, so gating the kill on a late flag would skip
+	// the kill and leave restoreIntent()'s descriptor removal to orphan a live
+	// daemon on the port. Flip this true once the stop is cleared and the
+	// reconcile is about to fire; killByPort is a no-op when nothing is bound, so
+	// killing on a reconcile that never actually spawned is harmless.
+	reconcileAttempted := false
 	*rollback = append(*rollback, func() {
-		if supervisorSpawnRequested && port > 0 {
+		if reconcileAttempted && port > 0 {
 			_ = killByPortFn(port, 5*time.Second)
 		}
 		restoreIntent()
@@ -341,10 +351,12 @@ func (a *API) registerOneLanguageSupervised(
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
 	defer cancel()
+	// Stop is cleared (above) — the daemon is now spawn-desired. From here the
+	// reconcile can bind the port, so the rollback must own a port kill.
+	reconcileAttempted = true
 	if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
 	}
-	supervisorSpawnRequested = true
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
 	}
@@ -400,7 +412,17 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	desired.Daemons = append(kept, descriptor)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	priorStop, hadPriorStop := desired.Stops[descriptor.TaskName]
+	// Capture any prior stop tombstone for this task through both the canonical
+	// and bare key forms — a stop keyed under the bare (legacy/external/migrated)
+	// form would be missed by a raw canonical-only index, so the rollback closure
+	// below would restore the descriptor WITHOUT the tombstone and revive a
+	// deliberately-stopped daemon. Mirrors removeSupervisorIntentDescriptorForTask.
+	// Capture any prior stop tombstone for this task through both the canonical
+	// and bare key forms — a stop keyed under the bare (legacy/external/migrated)
+	// form would be missed by a raw canonical-only index, so the rollback closure
+	// below would restore the descriptor WITHOUT the tombstone and revive a
+	// deliberately-stopped daemon. Mirrors removeSupervisorIntentDescriptorForTask.
+	priorStop, hadPriorStop := supervisorStopForTask(desired.Stops, descriptor.TaskName)
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
 		return nil, fmt.Errorf("write supervisor-intent LSP row %s: %w", descriptor.TaskName, err)
 	}

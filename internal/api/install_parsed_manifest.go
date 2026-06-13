@@ -922,7 +922,59 @@ func nudgeSupervisorReconcileAfterGlobalInstall(ctx context.Context, w io.Writer
 }
 
 func nudgeSupervisorReconcileAfterRemovedTargets(ctx context.Context) supervisorReconcileNudgeResult {
-	return nudgeSupervisorReconcileApply(ctx)
+	return demoteIPCUnavailableWhenOwnerAlive(nudgeSupervisorReconcileApply(ctx))
+}
+
+// demoteIPCUnavailableWhenOwnerAlive guards the removed-target force-kill path
+// against a live-but-wedged supervisor. nudgeSupervisorReconcileApply maps an
+// unreachable IPC endpoint to supervisorReconcileNudgeIPCUnavailable, which
+// allowsRemovedTargetKill() treats as kill-OK on the assumption that an
+// unreachable endpoint means no supervisor is spawning the child. That
+// assumption only holds when NO process owns supervisor.lock: a supervisor that
+// is ALIVE (holds the lock) but whose IPC listener is wedged still tracks the
+// child in memory and its reaper will respawn / quarantine a child we force-kill
+// here. So on IPC-unavailable we run the SAME flock-authoritative live-owner
+// probe the global-install nudge uses (startAutostartOwnerAfterUnavailableSupervisor):
+//   - lock owner ALIVE + IPC unreachable → demote to supervisorReconcileNudgeFailed
+//     (allowsRemovedTargetKill() == false), so the kill is skipped and the
+//     operator gets a retry hint instead of a respawn fight.
+//   - NO live owner (or any probe error) → keep IPCUnavailable; the kill is safe
+//     because nothing will respawn the now-descriptorless child.
+//
+// Unlike the global-install nudge this never STARTS the autostart owner: the
+// removed-target / uninstall path is terminating a daemon, not bringing a fresh
+// descriptor online, so there is no owner to start here.
+func demoteIPCUnavailableWhenOwnerAlive(result supervisorReconcileNudgeResult) supervisorReconcileNudgeResult {
+	if result.status != supervisorReconcileNudgeIPCUnavailable {
+		return result
+	}
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		// Cannot resolve the state dir → cannot probe the lock owner. Fail
+		// closed against the kill: a live wedged supervisor is the dangerous
+		// case, so treat the unknown as owner-alive and skip the kill.
+		return supervisorReconcileNudgeResult{
+			status: supervisorReconcileNudgeFailed,
+			err:    fmt.Errorf("resolve state dir before removed-target owner probe: %w (original: %v)", err, result.err),
+		}
+	}
+	running, pid, probeErr := installSupervisorRunningProbeFn(stateDir)
+	if probeErr != nil {
+		// Probe failed → unknown owner liveness. Fail closed against the kill.
+		return supervisorReconcileNudgeResult{
+			status: supervisorReconcileNudgeFailed,
+			err:    fmt.Errorf("probe supervisor before removed-target kill: %w (original: %v)", probeErr, result.err),
+		}
+	}
+	if running {
+		return supervisorReconcileNudgeResult{
+			status: supervisorReconcileNudgeFailed,
+			err:    fmt.Errorf("supervisor lock is held by pid=%d but IPC is unreachable; removed-target force-kill skipped (a live supervisor still tracks the child): %w", pid, result.err),
+		}
+	}
+	// No live owner — IPC really is unavailable because no supervisor is
+	// running; the kill is safe because nothing will respawn the child.
+	return result
 }
 
 func startAutostartOwnerAfterUnavailableSupervisor(w io.Writer, ipcErr error) supervisorReconcileNudgeResult {
@@ -1629,9 +1681,13 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 // Best-effort: an unreachable supervisor (ErrSupervisorIPCUnavailable) means
 // nothing is currently spawning the daemon, so there is nothing to nudge; any
 // other reconcile error is non-fatal to the uninstall. Uses the same
-// supervisorReconcileApplyFn seam as stopSupervisorOwnedDaemons.
+// supervisorReconcileApplyFn seam as stopSupervisorOwnedDaemons. On
+// IPC-unavailable it runs the same live-owner probe as the manifest-install
+// removed-target nudge (demoteIPCUnavailableWhenOwnerAlive): a live-but-wedged
+// supervisor still tracks the daemon, so the removed-target force-kill must be
+// skipped rather than fight the reaper.
 func nudgeSupervisorReconcileAfterUninstall(ctx context.Context) supervisorReconcileNudgeResult {
-	return nudgeSupervisorReconcileApply(ctx)
+	return demoteIPCUnavailableWhenOwnerAlive(nudgeSupervisorReconcileApply(ctx))
 }
 
 // removeServerFromSupervisorIntentBestEffort is the uninstall-side wrapper

@@ -38,6 +38,26 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 		}
 		rowServer := strings.TrimSpace(d.Server)
 		rowDaemon := strings.TrimSpace(d.Daemon)
+		// Both identity components KNOWN + blank descriptor fields: match by the
+		// EXACT canonical task name, never by ParseManagedTaskName. The last-hyphen
+		// split misattributes hyphenated daemon names — \mcp-local-hub-demo-alpha-beta
+		// (server demo, daemon alpha-beta) parses as server demo-alpha / daemon beta,
+		// so the (server,daemonFilter) filter below would skip the real target or
+		// hit the wrong one. Mirrors supervisorIntentRowMatchesServerDaemon
+		// (install.go — bot PR #288 r26, third member of the r19-F1/r20-F4 family).
+		if server != "" && daemonFilter != "" && (rowServer == "" || rowDaemon == "") {
+			want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemonFilter)
+			if canonicalIntentTaskKey(d.TaskName) != want {
+				continue
+			}
+			d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
+			targets = append(targets, d)
+			continue
+		}
+		// Populated-field rows, and the single-arg (server-only / unfiltered)
+		// callers, keep the existing identity-derivation + filter. ParseManagedTaskName
+		// only runs when at least one filter side is empty, so a hyphenated-daemon
+		// mis-split can no longer reject the exact target above.
 		if rowServer == "" || rowDaemon == "" {
 			parsedServer, parsedDaemon := ParseManagedTaskName(d.TaskName)
 			if rowServer == "" {
