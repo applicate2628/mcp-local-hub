@@ -816,6 +816,13 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		ctx:                 loopCtx,
 		failureWindow:       respawnFailureWindow,
 		quarantineThreshold: respawnQuarantineThreshold,
+		// reapFollowupDelay bounds how long an orphaned daemon lingers after its
+		// descriptor is removed from a then-STABLE intent before the self-driven
+		// follow-up tick forces the still-absent confirmation + terminate
+		// (finding 1: the two refreshSupervisorIntent call sites only fire on an
+		// intent CHANGE, so without this the confirming refresh might never
+		// arrive). reapAfterFunc stays nil so armReapFollowup uses time.AfterFunc.
+		reapFollowupDelay: reapFollowupDefaultDelay,
 	}
 	ctrl.intentCache.Refresh(intent)
 	// Phase 4-E2: feed the stop predicate from the UNIFIED stops source.
