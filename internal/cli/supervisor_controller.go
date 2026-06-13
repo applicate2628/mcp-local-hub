@@ -1074,7 +1074,8 @@ func (c *supervisorController) executeSideEffect(
 		if c.terminate == nil {
 			return nil
 		}
-		termErr := c.terminate(*d)
+		terminateDescriptor := descriptorForTerminateSideEffect(d, ev)
+		termErr := c.terminate(*terminateDescriptor)
 		// Synthesize ONLY when ALL of:
 		//   (a) the task is foreign (not own-spawned, no own cmd.Wait — else
 		//       we double-emit against the real exit event), AND
@@ -1108,6 +1109,16 @@ func (c *supervisorController) executeSideEffect(
 		return nil
 	}
 	return nil
+}
+
+func descriptorForTerminateSideEffect(d *api.SupervisorDaemon, ev api.LoopEvent) *api.SupervisorDaemon {
+	if d == nil || ev.Kind != api.EvManualRestart || ev.Body == nil {
+		return d
+	}
+	if oldDescriptor, ok := ev.Body[reconcileManualRestartTerminateDescriptorBodyKey].(*api.SupervisorDaemon); ok && oldDescriptor != nil {
+		return oldDescriptor
+	}
+	return d
 }
 
 // synthesizeForeignChildExit posts the follow-up EvChildExit for a
