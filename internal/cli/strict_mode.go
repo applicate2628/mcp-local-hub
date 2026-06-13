@@ -352,6 +352,14 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		writeFn = api.WriteSupervisorIntent
 	}
 	if err := writeFn(deps.IntentPath, newIntent); err != nil {
+		// Step 1 failed before any strict-mode state was changed. The
+		// in-progress breadcrumb only exists to cover a partial mutation
+		// window, so remove it here; otherwise a transient initial intent
+		// write failure would wedge future invocations behind --recover even
+		// though there is no drift to reconcile.
+		if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+			return fmt.Errorf("strict-mode: step 1 (intent write): %w (cleanup in-progress breadcrumb failed: %v)", err, rmErr)
+		}
 		return fmt.Errorf("strict-mode: step 1 (intent write): %w", err)
 	}
 
