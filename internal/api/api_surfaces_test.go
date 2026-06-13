@@ -133,7 +133,10 @@ func installTestAuditFn(t *testing.T, capture *[]IntentAuditEntry, retErr error)
 // live supervisor-intent.json.
 func installTestIntentReader(t *testing.T, fn func(taskName string) (DaemonIntent, bool, error)) {
 	t.Helper()
-	restoreRoot := SetDaemonStateRootForTest(t.TempDir())
+	// pr301 r5 Finding 1: hardened state root so the absent-intent strict verdict
+	// resolves relax=FALSE (mirrors production's owner-only %LOCALAPPDATA%); a
+	// plain t.TempDir() on a broadened test host would resolve strict=TRUE.
+	restoreRoot := SetDaemonStateRootForTest(hardenedTempDir(t))
 	t.Cleanup(restoreRoot)
 	orig := readDaemonIntentFn
 	readDaemonIntentFn = fn
@@ -142,7 +145,10 @@ func installTestIntentReader(t *testing.T, fn func(taskName string) (DaemonInten
 
 func installTestSupervisorStops(t *testing.T, stops map[string]DaemonIntent) {
 	t.Helper()
-	restoreRoot := SetDaemonStateRootForTest(t.TempDir())
+	// pr301 r5 Finding 1: hardened state root (this helper does a GATED
+	// WriteSupervisorIntent seed below, which would refuse a broadened parent
+	// once the absent-intent verdict resolves strict). See installTestIntentReader.
+	restoreRoot := SetDaemonStateRootForTest(hardenedTempDir(t))
 	t.Cleanup(restoreRoot)
 	if stops == nil {
 		return

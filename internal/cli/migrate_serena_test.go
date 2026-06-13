@@ -16,6 +16,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/config"
 )
 
@@ -38,10 +39,20 @@ import (
 func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	t.Helper()
 	root := t.TempDir()
-	stateDir = filepath.Join(root, "state")
+	// Hardened (single-user-safe) supervisor state dir, mirroring production's
+	// owner-only %LOCALAPPDATA%, so the migrate's gated WriteStateFileAtomic
+	// stays on the relax path. This was added in pr301 r5 when an absent intent
+	// on a delete-capable dir resolved strict=TRUE (so a plain t.TempDir() on a
+	// broadened RAM-disk / 0755-$TMPDIR host made the gated write refuse). pr301
+	// r9 reverted that absent-strict over-reach (an absent intent now relaxes
+	// regardless of broadening), so the hardened root is REDUNDANT for the
+	// strict verdict — retained as the correct production-mirroring posture.
+	// manifestDir/home stay plain (they are not gated by the supervisor
+	// state-file pipeline).
+	stateDir = apitest.HardenedTempDir(t)
 	manifestDir = filepath.Join(root, "manifests")
 	home := filepath.Join(root, "home")
-	for _, d := range []string{stateDir, manifestDir, home} {
+	for _, d := range []string{manifestDir, home} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
@@ -56,6 +67,23 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// takes precedence over the resolver in BOTH build variants.
 	restoreStateRoot := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restoreStateRoot)
+
+	// Reset the process-global strict-mode-intent cache so each test resolves
+	// fresh against its OWN (hardened) state dir rather than inheriting a value
+	// pinned by whichever test ran first. This matters because
+	// OperatorRequiresSingleUserHome lazily caches the supervisor-intent
+	// strict_mode bit once per process: without this reset, the first test that
+	// resolves it against a PRESENT supervisor-intent.json carrying
+	// strict_mode=true (the operator's real one on a strict host, or a sibling
+	// test's) would — via the pr301 r10 GATE-FREE read — cache strict=TRUE for
+	// the whole binary, and the migrate's broadened-parent WriteStateFileAtomic
+	// would then wrongly refuse. These tests exercise the interlock/cutover, NOT
+	// strict-mode posture. (pr301 r9 reverted the absent-on-delete-capable-dir →
+	// strict over-reach and r10 removed the present-unreadable → strict gated
+	// read; this cache reset now guards only the present-strict_mode=true
+	// gate-free pollution path.)
+	api.ResetStrictModeIntentCacheForTest()
+	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
 
 	// The registry (api.DefaultRegistryPath) resolves from LOCALAPPDATA
 	// (Windows) / XDG_STATE_HOME (POSIX); ensureCanonicalMcphubPresent +
@@ -3185,6 +3213,7 @@ func TestMigrateSerena_Interlock_AcquireFailsLoud_WhenForeignHolderWonTheWindow(
 //     concurrent acquire would SUCCEED → the gap is open.
 //   - FIXED code (acquire immediately after the reap): the migrate ALREADY holds
 //     the lock here → the concurrent acquire FAILS → the gap is closed.
+//
 // The test asserts the concurrent acquire FAILS, so a regression that moves the
 // acquire back past the post-reap work breaks it.
 func TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap(t *testing.T) {

@@ -178,6 +178,7 @@ func TestPreflight_AllowsSupervisorIntentNativeHTTPInternalPortAndRejectsRowless
 
 func TestStopForceUsesSupervisorPIDThenWaitsOnDescriptorPort(t *testing.T) {
 	const taskName = `\mcp-local-hub-laneatest-default`
+	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the PID/port path.
 
 	origIdent := processIdentityByPID
 	origForcePort := forceKillByPortFn
@@ -366,6 +367,7 @@ func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
 	const bareTask = "mcp-local-hub-laneatest-default"
 	const pid = 62201
 	const port = 33007
+	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the already-gone short-circuit.
 
 	origLookup := lookupProcess
 	origIdent := processIdentityByPID
@@ -455,6 +457,7 @@ func TestStopForcePortKillRejectsForeignProcessOwner(t *testing.T) {
 
 func TestStopForcePortKillAllowsMcphubProcessOwner(t *testing.T) {
 	const port = 33004
+	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the mcphub-owner port-kill path.
 
 	origLookup := lookupProcess
 	origIdent := processIdentityByPID

@@ -160,6 +160,13 @@ var killPIDViaTaskkillFn = killPIDViaTaskkill
 // the identity axes.
 var supervisorReapInstallDirFn = defaultSupervisorReapInstallDir
 
+// reapOwnerSIDMatchesCurrentFn is the test seam for the SEC-F3 owner-SID arm
+// (Gate 5) of the kill-target identity gate. Production delegates to the single
+// shared owner-SID helper process.ProcessOwnerSIDMatchesCurrent so the SID
+// logic has one owner across api + cli + gui. Tests inject same-SID /
+// different-SID / unverifiable verdicts without touching real process tokens.
+var reapOwnerSIDMatchesCurrentFn = process.ProcessOwnerSIDMatchesCurrent
+
 func defaultSupervisorReapInstallDir() string {
 	exe := canonicalMcphubPath()
 	if exe == "" {
@@ -195,14 +202,23 @@ func defaultSupervisorReapInstallDir() string {
 //	Gate 4 (executable path)  — ExecutablePath under the mcphub install dir,
 //	                           anchoring against a same-user attacker who spoofs
 //	                           name+argv from another directory.
+//	Gate 5 (owner SID)        — SEC-F3: the target's owner SID must equal the
+//	                           current user's SID. A different-owner supervisor
+//	                           (a multi-user host where an admin-token mcphub
+//	                           could otherwise taskkill another user's
+//	                           supervisor) is refused; an unverifiable owner
+//	                           propagates as a reap failure. Mirrors the POSIX
+//	                           reaper's UID gate (supervise_reaper_posix.go).
 //
 // Tri-state return:
 //
 //	(true,  nil) — proven live supervisor → kill.
-//	(false, nil) — PROVEN not the supervisor → benign no-op.
-//	(false, err) — UNPROVABLE: a transient lookup error means the reaper cannot
-//	               prove the supervisor is gone, so it must propagate as a reap
-//	               FAILURE rather than silently report success.
+//	(false, nil) — PROVEN not the supervisor (or a different-owner SID) → benign
+//	               no-op.
+//	(false, err) — UNPROVABLE: a transient lookup error OR an unverifiable owner
+//	               SID means the reaper cannot prove the supervisor is gone, so
+//	               it must propagate as a reap FAILURE rather than silently
+//	               report success.
 func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string) (bool, error) {
 	if pid <= 0 {
 		return false, nil
@@ -247,6 +263,32 @@ func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string) (bool
 		if !supervisorPathHasPrefix(absExe, absInstall) {
 			return false, nil
 		}
+	}
+	// Gate 5 (SEC-F3 owner SID): refuse to taskkill a supervisor owned by a
+	// DIFFERENT user even when its image/argv/creation-time/path all match.
+	//   - SID matches              → proceed (fall through to the live verdict).
+	//   - proven different-owner    → benign no-op (false, nil): not OUR
+	//     supervisor to reap, so treat it like an identity mismatch.
+	//   - target GONE (pr301 r4 Finding 2): the supervisor exited between Gate
+	//     1's identity probe and this gate's OpenProcess (a TOCTOU window). The
+	//     SID gate returns ErrProcessAlreadyExited. Treat it as a benign no-op
+	//     (false, nil) — IDENTICAL to Gate 1's ErrProcessNotFound branch above:
+	//     a gone supervisor is "nothing to reap", so the reaper reports success
+	//     by skipping it rather than ABORTING install --upgrade.
+	//   - owner unverifiable (err)  → propagate as a reap failure (false, err),
+	//     consistent with the transient-probe-error contract above.
+	// Error-first: resolve the already-dead sentinel BEFORE the generic error
+	// path so a gone target is never misread as an unverifiable live one.
+	match, sidErr := reapOwnerSIDMatchesCurrentFn(pid)
+	if sidErr != nil {
+		if errors.Is(sidErr, process.ErrProcessAlreadyExited) {
+			// Supervisor vanished mid-gate — nothing to reap, benign no-op.
+			return false, nil
+		}
+		return false, fmt.Errorf("supervisor kill-target owner-SID gate failed for PID %d: %w", pid, sidErr)
+	}
+	if !match {
+		return false, nil
 	}
 	return true, nil
 }

@@ -272,7 +272,18 @@ func RunStrictMode(args []string, deps StrictModeDeps) error {
 	}
 
 	// Acquire migration.lock + --once.lock in spec order; LIFO release.
-	locks, err := api.AcquireStateDirLocks(deps.StateDir)
+	//
+	// #301-3: AcquireStateDirLocks writes a lock OWNER SIDECAR
+	// (migration.lock.owner.json / --once.lock.owner.json) through the same
+	// hardened state-file pipeline as supervisor-intent.json. On a broadened
+	// parent with a stale strict_mode=true intent, that sidecar write would be
+	// refused by the SEC-F2 intent-derived gate (the FIRST
+	// OperatorRequiresSingleUserHome call in a fresh `strict-mode disable`
+	// process resolves the cache to strict here) → exit 9 BEFORE the mutation
+	// could even start. The lock-sidecar writes are part of the strict-mode
+	// mutation, so they run inside the env-only mutation-gate bypass too. The
+	// window is the lock-acquire call only.
+	locks, err := acquireStrictModeStateLocks(deps.StateDir)
 	if err != nil {
 		// Both ErrStateDirMigrationLockHeld and ErrStateDirOnceLockHeld
 		// surface as STRICT_MODE_BUSY per spec Q8.
@@ -281,6 +292,26 @@ func RunStrictMode(args []string, deps StrictModeDeps) error {
 	defer locks.Release()
 
 	return runStrictModeUnderLocks(desired, deps)
+}
+
+// acquireStrictModeStateLocks acquires the universal state-dir locks for a
+// strict-mode mutation with the #301-3 mutation-gate bypass active for the
+// duration of the acquire. The lock owner-sidecar write goes through the
+// secure state-file pipeline; without the bypass, a stale strict_mode=true
+// intent on a broadened parent would refuse the sidecar write and strand the
+// operator before the mutation begins. The bypass covers ONLY the acquire and
+// is always cleared via WithStrictModeMutationGateBypass's defer.
+func acquireStrictModeStateLocks(stateDir string) (*api.StateDirLockSet, error) {
+	var locks *api.StateDirLockSet
+	err := api.WithStrictModeMutationGateBypass(func() error {
+		l, e := api.AcquireStateDirLocks(stateDir)
+		if e != nil {
+			return e
+		}
+		locks = l
+		return nil
+	})
+	return locks, err
 }
 
 // runStrictModeUnderLocks performs the two-resource mutation with the
@@ -347,10 +378,9 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		newIntent.MaintenanceTimers = original.MaintenanceTimers
 		newIntent.Stops = original.Stops
 	}
-	writeFn := deps.WriteIntentFn
-	if writeFn == nil {
-		writeFn = api.WriteSupervisorIntent
-	}
+	// #301-3: intent writes run inside the env-only mutation-gate bypass so the
+	// OLD intent.strict_mode cannot self-gate the write of the NEW value.
+	writeFn := resolveStrictModeIntentWriteFn(deps)
 	if err := writeFn(deps.IntentPath, newIntent); err != nil {
 		// A step-1 write error is only safe to treat as pre-mutation if a
 		// best-effort re-read proves strict_mode is still at its original value.
@@ -439,11 +469,53 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	return nil
 }
 
+// resolveStrictModeIntentWriteFn returns the supervisor-intent.json writer
+// the strict-mode mutation uses, wrapped so every intent write runs inside the
+// env-only mutation-gate bypass (#301-3).
+//
+// Why the wrap: SEC-F2 made the cached intent.strict_mode=true authoritative
+// for ALL secure state-file writes, including this very intent write. On a
+// broadened parent dir, the OLD strict_mode=true would refuse the NEW
+// (disabling) intent write through the parent-dir gate, stranding the operator
+// in strict mode exactly when they run the documented recovery path. The intent
+// write is the authoritative gate-controlling value itself, so for the duration
+// of the write the gate must consult the env var ONLY. The bypass window is the
+// single write call and is always cleared by WithStrictModeMutationGateBypass's
+// defer.
+//
+// The bypass is deliberately scoped to the intent write, NOT the whole command:
+// the autostart shim Enable call, the operator prompt, and any unrelated
+// secure write outside this wrapper stay governed by the full env+intent gate.
+func resolveStrictModeIntentWriteFn(deps StrictModeDeps) func(string, *api.SupervisorIntentFile) error {
+	inner := deps.WriteIntentFn
+	if inner == nil {
+		inner = api.WriteSupervisorIntent
+	}
+	return func(path string, intent *api.SupervisorIntentFile) error {
+		return api.WithStrictModeMutationGateBypass(func() error {
+			return inner(path, intent)
+		})
+	}
+}
+
 // writeStrictModeBreadcrumb writes the breadcrumb through
 // WriteStateFileAtomic to keep the same fsync + atomic-rename guarantees
 // the supervisor-intent.json write uses.
+//
+// #301-3: the breadcrumb is written to the SAME state dir as
+// supervisor-intent.json and so is governed by the SAME parent-dir gate.
+// SEC-F2 made the cached intent.strict_mode=true authoritative for ALL
+// secure state-file writes; on a broadened parent that would refuse this
+// breadcrumb write BEFORE the disabling intent write ever runs, stranding
+// the operator. The breadcrumb is part of the strict-mode mutation itself
+// (it is only ever written by enable/disable/--recover), so its write runs
+// inside the env-only mutation-gate bypass too. The window is the single
+// write call and is always cleared by WithStrictModeMutationGateBypass's
+// defer.
 func writeStrictModeBreadcrumb(path string, bc *strictModeBreadcrumb) error {
-	return api.WriteStateFileAtomic(path, bc)
+	return api.WithStrictModeMutationGateBypass(func() error {
+		return api.WriteStateFileAtomic(path, bc)
+	})
 }
 
 // stderrOrDefault returns deps.Stderr if non-nil, else os.Stderr.
@@ -492,8 +564,11 @@ func RunStrictModeRecover(deps StrictModeDeps) error {
 	}
 
 	// Acquire migration.lock + --once.lock (same refuse-if-held →
-	// exit 9 behavior).
-	locks, err := api.AcquireStateDirLocks(deps.StateDir)
+	// exit 9 behavior). #301-3: under the mutation-gate bypass so the
+	// lock-owner-sidecar write is not refused by a stale strict intent on a
+	// broadened parent (this is the recovery path; it MUST run on the very
+	// hosts whose parent ACL just changed).
+	locks, err := acquireStrictModeStateLocks(deps.StateDir)
 	if err != nil {
 		return &forceExitError{code: ExitStrictModeBusy}
 	}
@@ -594,10 +669,10 @@ func reconcileBothResources(target bool, deps StrictModeDeps) error {
 		// E2 stops sub-block — preserve, same as the step-1 writer above.
 		newIntent.Stops = preserved.Stops
 	}
-	writeFn := deps.WriteIntentFn
-	if writeFn == nil {
-		writeFn = api.WriteSupervisorIntent
-	}
+	// #301-3: --recover also writes the gate-controlling intent; run it inside
+	// the env-only mutation-gate bypass so a broadened parent + stale strict
+	// intent cannot refuse the reconcile write.
+	writeFn := resolveStrictModeIntentWriteFn(deps)
 	if err := writeFn(deps.IntentPath, newIntent); err != nil {
 		return fmt.Errorf("intent write: %w", err)
 	}

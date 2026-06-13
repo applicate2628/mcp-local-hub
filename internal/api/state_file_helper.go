@@ -153,7 +153,7 @@ func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
 		return err
 	}
 	if operatorRequiresSingleUserHome() {
-		return fmt.Errorf("state-file secure write %s: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+		return fmt.Errorf("state-file secure write %s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 			path, err, RequireSingleUserHomeEnv)
 	}
 

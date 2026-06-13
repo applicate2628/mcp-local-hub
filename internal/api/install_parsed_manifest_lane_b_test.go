@@ -22,6 +22,20 @@ import (
 // probe returns !ok, and on a Windows test host the production probe IS wired
 // — a real lookup of a synthetic test PID would refuse the kill and turn these
 // kill-path tests into probes of the host's process table.
+//
+// It ALSO stubs the SEC-F3 owner-SID arm (processOwnerSIDMatchesCurrentFn) to
+// report every PID as an owned, current-user process. These kill-path tests use
+// synthetic PIDs (4101/5101/6201/...) that do not refer to a live process; on a
+// Windows test host the production owner-SID probe IS wired, and OpenProcess on
+// a non-existent PID fails with ERROR_INVALID_PARAMETER, which the r4 classifier
+// maps to the canonical process.ErrProcessAlreadyExited "already gone" sentinel.
+// The r5 stop-force sentinel handling (Finding 2) then treats the synthetic PID
+// as already-gone and SKIPS stopForceKillPIDFn — defeating the kill-assertion.
+// Stubbing the seam to (true, nil) mirrors stop_force_supervisor_windows_test.go
+// and force_kill_test.go so the owner-SID arm passes for a synthetic PID and the
+// kill fires, which is exactly what the fixture's tests intend. The kill is still
+// gated by ownership scope UPSTREAM of this arm, so a PID the scope logic declines
+// to kill (e.g. the SparesHyphenSibling negative control) is still not killed.
 func fakeMcphubIdentityForTest(t *testing.T) {
 	t.Helper()
 	orig := processIdentityByPID
@@ -29,6 +43,10 @@ func fakeMcphubIdentityForTest(t *testing.T) {
 		return mcphubProcessImageName, mcphubProcessImageName, true
 	}
 	t.Cleanup(func() { processIdentityByPID = orig })
+
+	origSID := processOwnerSIDMatchesCurrentFn
+	processOwnerSIDMatchesCurrentFn = func(int) (bool, error) { return true, nil }
+	t.Cleanup(func() { processOwnerSIDMatchesCurrentFn = origSID })
 }
 
 func assertSupervisorIntentFlockAvailableDuringIPCStatus(t *testing.T, stateDir string) {

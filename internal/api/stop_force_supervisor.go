@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // stopForceKillPIDFn is the test seam for the PID-kill fallback used when a
@@ -111,6 +113,21 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 	if pid, ok := pidByTask[strings.TrimPrefix(d.TaskName, `\`)]; ok && pid > 0 {
 		pidSeen = true
 		if err := requireMcphubPIDImage(pid); err != nil {
+			if errors.Is(err, process.ErrProcessAlreadyExited) {
+				// pr301 r5 Finding 2: the descriptor PID exited between the
+				// supervisor IPC PID snapshot and the owner-SID gate's
+				// OpenProcess (a TOCTOU window). The owner-SID arm surfaces the
+				// canonical ErrProcessAlreadyExited sentinel. A GONE PID is the
+				// force-stop SUCCESS condition, NOT an unverifiable-owner
+				// failure — return clean success UNCONDITIONALLY (regardless of
+				// d.Port), identical to the already-gone branch in the
+				// stopForceKillPIDFn arm below. Falling through to the
+				// fail-closed pidKillErr path would report a FAILED row for an
+				// already-dead daemon — worst for a PORTLESS supervisor-owned
+				// descriptor (no port fallback at all), which is exactly the
+				// case the bot flagged.
+				return RestartResult{TaskName: d.TaskName}
+			}
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
 			pidKillContext = pidKillErr.Error()
 		} else if err := stopForceKillPIDFn(pid); err != nil {

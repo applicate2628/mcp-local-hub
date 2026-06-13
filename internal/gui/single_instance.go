@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"mcp-local-hub/internal/process"
 )
 
 // ErrSingleInstanceBusy is returned by AcquireSingleInstance when another
@@ -200,7 +202,7 @@ func (c VerdictClass) String() string {
 // (currently darwin). KillRecordedHolder reads it to short-circuit
 // to a macOS-specific KillRefused message instead of cascading
 // through the image/argv/start-time gates with empty fields and
-// emitting "image '' is not an mcphub binary" (Codex iter-3 P2 #2).
+// emitting "image ” is not an mcphub binary" (Codex iter-3 P2 #2).
 type Verdict struct {
 	Class    VerdictClass `json:"class"`
 	PID      int          `json:"pid"`
@@ -678,6 +680,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	// shared three-part gate (image basename + argv[1]==gui + start
 	// time ≤ pidport mtime) so future code paths cannot weaken the
 	// production gate by skipping opts.Expected.
+	//
+	// holderGoneAtRecheck records that the recheck observed a genuinely
+	// dead PID (idErr==nil && !Alive). pr301 r7 Finding 2 (P2 #717): the
+	// gone case must skip BOTH the gate re-run AND the kill — see the
+	// guarded block below.
+	holderGoneAtRecheck := false
 	if !v.macOSUnsupported && !v.archUnsupported {
 		idNow, idErr := processID(v.PID)
 		if idErr != nil && !errors.Is(idErr, errMacOSProbeUnsupported) && !errors.Is(idErr, errWindowsArchUnsupported) {
@@ -690,55 +698,97 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 			return nil, v, fmt.Errorf("kill refused: pre-kill identity probe failed")
 		}
 		if idErr == nil {
-			// Build a fresh Verdict carrying just the identity
-			// fields the gate consults, then re-run the shared
-			// gate so any future widening of the gate logic
-			// applies here automatically.
-			vNow := Verdict{
-				PID:           v.PID,
-				PIDAlive:      idNow.Alive,
-				PIDImage:      idNow.ImagePath,
-				pidCmdlineRaw: idNow.Cmdline,
-				PIDStart:      idNow.StartTime,
-				Mtime:         v.Mtime,
-			}
-			if len(idNow.Cmdline) >= 2 {
-				vNow.PIDSubcommand = idNow.Cmdline[1]
-			}
-			if refused, diagnose, hint, errReason := checkIdentityGateInternal(vNow); refused {
-				v.Class = VerdictKillRefused
-				v.Diagnose = "pre-kill recheck: " + diagnose
-				v.Hint = hint
-				return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
+			// pr301 r6 (bot Finding, second gate): an already-GONE
+			// holder must reach the recovery path, NOT be refused on
+			// empty identity. processID of a dead PID returns
+			// Alive=false with empty ImagePath/Cmdline/StartTime (and
+			// idErr==nil) on both Windows and Linux. If we re-ran the
+			// shared gate on that empty Verdict, matchBasename("")
+			// would trip the image arm → VerdictKillRefused, stranding
+			// the operator on a stuck lock whose holder is already
+			// dead. But a dead holder's exit is exactly what releases
+			// the flock, so the kill the recheck guards is moot.
+			//
+			// This keys strictly on !idNow.Alive, NOT on empty
+			// identity: a LIVE-but-unverifiable holder (Denied=true on
+			// EPERM/ACCESS_DENIED) reports Alive=true with empty
+			// ImagePath, so it STILL falls through to the gate re-run
+			// below and STILL refuses on the image arm (fail closed —
+			// SEC-F3 preserved). Only a genuinely-dead PID skips here.
+			if idNow.Alive {
+				// Build a fresh Verdict carrying just the identity
+				// fields the gate consults, then re-run the shared
+				// gate so any future widening of the gate logic
+				// applies here automatically. A live holder whose
+				// identity does NOT match (image/argv/start-time/owner
+				// mismatch) must still be refused.
+				vNow := Verdict{
+					PID:           v.PID,
+					PIDAlive:      idNow.Alive,
+					PIDImage:      idNow.ImagePath,
+					pidCmdlineRaw: idNow.Cmdline,
+					PIDStart:      idNow.StartTime,
+					Mtime:         v.Mtime,
+				}
+				if len(idNow.Cmdline) >= 2 {
+					vNow.PIDSubcommand = idNow.Cmdline[1]
+				}
+				if refused, diagnose, hint, errReason := checkIdentityGateInternal(vNow); refused {
+					v.Class = VerdictKillRefused
+					v.Diagnose = "pre-kill recheck: " + diagnose
+					v.Hint = hint
+					return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
+				}
+			} else {
+				// pr301 r7 Finding 2 (P2 #717): the holder is genuinely
+				// gone. The r6 fix skipped only the gate re-run and then
+				// FELL THROUGH to kill(v.PID) below — but there is no
+				// validated target to kill, and a PID REUSED between this
+				// recheck and the kill (or a transient probe that
+				// classified the holder not-Alive) could be terminated
+				// WITHOUT the image/argv/start-time/owner gate we just
+				// skipped. Mark the holder gone so the kill+wait block is
+				// bypassed entirely and we go STRAIGHT to the acquire-poll
+				// recovery path: the holder's exit is exactly what releases
+				// the flock, so there is nothing to kill — only a lock to
+				// reacquire.
+				holderGoneAtRecheck = true
 			}
 		}
 	}
-	//
-	// killProcessOverride is the test seam for the kill helper.
-	// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
-	// killProcess with a no-op so the test doesn't actually
-	// SIGKILL/TerminateProcess any real process. Production code
-	// path is unchanged when this is nil.
-	kill := killProcess
-	if killProcessOverride != nil {
-		kill = killProcessOverride
-	}
-	if err := kill(v.PID); err != nil {
-		// Codex iter-12 P2 #1: if the recorded PID exited between
-		// probe and kill, Linux returns ESRCH and Windows fails
-		// OpenProcess. The process exit is exactly what releases the
-		// flock — fall through to acquire-poll instead of returning
-		// VerdictKillFailed and forcing a rerun. processID's alive
-		// telemetry confirms the PID is gone before we proceed.
-		if id, idErr := processID(v.PID); idErr == nil && !id.Alive {
-			// PID is genuinely gone; proceed to acquire-poll. The
-			// loop below will succeed quickly when the kernel
-			// finishes releasing the flock.
-		} else {
-			v.Class = VerdictKillFailed
-			v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
-			v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
-			return nil, v, err
+
+	// Kill the (still-live, gate-passed) holder. SKIPPED when the recheck
+	// observed a genuinely-dead PID (holderGoneAtRecheck): killing a gone
+	// PID is at best a no-op and at worst terminates a reused PID without
+	// the identity gate (pr301 r7 Finding 2). The acquire-poll below is the
+	// recovery path for the already-gone case.
+	if !holderGoneAtRecheck {
+		// killProcessOverride is the test seam for the kill helper.
+		// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
+		// killProcess with a no-op so the test doesn't actually
+		// SIGKILL/TerminateProcess any real process. Production code
+		// path is unchanged when this is nil.
+		kill := killProcess
+		if killProcessOverride != nil {
+			kill = killProcessOverride
+		}
+		if err := kill(v.PID); err != nil {
+			// Codex iter-12 P2 #1: if the recorded PID exited between
+			// probe and kill, Linux returns ESRCH and Windows fails
+			// OpenProcess. The process exit is exactly what releases the
+			// flock — fall through to acquire-poll instead of returning
+			// VerdictKillFailed and forcing a rerun. processID's alive
+			// telemetry confirms the PID is gone before we proceed.
+			if id, idErr := processID(v.PID); idErr == nil && !id.Alive {
+				// PID is genuinely gone; proceed to acquire-poll. The
+				// loop below will succeed quickly when the kernel
+				// finishes releasing the flock.
+			} else {
+				v.Class = VerdictKillFailed
+				v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
+				v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
+				return nil, v, err
+			}
 		}
 	}
 
@@ -924,6 +974,38 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 			fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339)),
 			"Identity-gate (start-time) failed; the PID has been recycled to a different process.",
 			"start-time gate"
+	}
+	// SEC-F3 owner-SID gate (additional, fail-closed): refuse to kill a flock
+	// holder owned by a DIFFERENT user SID even when image/argv/start-time all
+	// match, mirroring the POSIX reaper's UID gate. A different-owner SID OR an
+	// unverifiable owner (token open/query failure) refuses the kill. On
+	// non-Windows the seam default is a no-op (true, nil), so this arm never
+	// changes the Linux/macOS gate verdict.
+	if match, err := processOwnerSIDMatchesCurrentFn(v.PID); err != nil {
+		if errors.Is(err, process.ErrProcessAlreadyExited) {
+			// pr301 r5 Finding 3: the flock holder exited between the
+			// image/argv/start-time identity probe and the owner-SID gate's
+			// OpenProcess (a TOCTOU window). The owner-SID arm surfaces the
+			// canonical ErrProcessAlreadyExited sentinel. A GONE holder is NOT
+			// an unverifiable-owner failure — its exit is exactly what releases
+			// the flock, so the kill the gate guards is moot. Do NOT refuse:
+			// return refused=false so KillRecordedHolder reaches the
+			// kill+acquire-poll recovery path (which handles an already-dead PID
+			// gracefully — kill() of a gone PID falls through to the
+			// flock-release acquire-poll and yields VerdictKilledRecovered).
+			// Converting this to VerdictKillRefused would strand the operator on
+			// a stuck lock whose holder is already gone.
+			return false, "", "", ""
+		}
+		return true,
+			fmt.Sprintf("recorded PID %d owner could not be verified: %v", v.PID, err),
+			"Identity-gate (owner SID) could not verify the process owner; refusing the kill. Identify and kill the actual flock holder via OS tools.",
+			"owner-SID gate"
+	} else if !match {
+		return true,
+			fmt.Sprintf("recorded PID %d is owned by a different user; refusing to kill", v.PID),
+			"Identity-gate (owner SID) failed; the recorded PID belongs to a different user. mcphub will not terminate another user's process.",
+			"owner-SID gate"
 	}
 	return false, "", "", ""
 }

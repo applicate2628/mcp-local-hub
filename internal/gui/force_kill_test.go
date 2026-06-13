@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Task 13: HTTP wrappers around C1's Probe + KillRecordedHolder.
@@ -133,6 +134,60 @@ func TestForceKill_Recovered_200(t *testing.T) {
 	}
 	if v.Class != VerdictKilledRecovered {
 		t.Errorf("Class = %v, want VerdictKilledRecovered", v.Class)
+	}
+}
+
+// TestCheckIdentityGate_OwnerSIDArm is the SEC-F3 falsifying test for the GUI
+// `mcphub gui --force --kill` identity gate. It builds a Verdict that passes the
+// image / argv / start-time arms, then drives ONLY the owner-SID arm through the
+// processOwnerSIDMatchesCurrentFn seam:
+//
+//   - same-SID    → gate does not refuse (kill may proceed) — single-user case.
+//   - different   → gate REFUSES with the owner-SID reason. Pre-fix the gate had
+//     no owner check and would authorize killing another user's
+//     GUI process.
+//   - unverifiable → gate REFUSES (fail closed).
+//
+// No real flock, kill, or process token is touched — the seam is faked.
+func TestCheckIdentityGate_OwnerSIDArm(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS short-circuits the gate before the owner-SID arm")
+	}
+
+	orig := processOwnerSIDMatchesCurrentFn
+	t.Cleanup(func() { processOwnerSIDMatchesCurrentFn = orig })
+
+	// A Verdict that passes image + argv + start-time so only the SID arm decides.
+	v := Verdict{
+		PID:           4242,
+		PIDImage:      mcphubBinaryNameForTest(),
+		pidCmdlineRaw: []string{mcphubBinaryNameForTest(), "gui"},
+		PIDStart:      time.Unix(1000, 0),
+		Mtime:         time.Unix(2000, 0),
+	}
+
+	// Same owner SID → no refusal.
+	processOwnerSIDMatchesCurrentFn = func(int) (bool, error) { return true, nil }
+	if refused, reason := CheckIdentityGate(v); refused {
+		t.Fatalf("same-owner SID must NOT refuse the gate; refused with %q", reason)
+	}
+
+	// Different owner SID → refusal naming the owner-SID gate.
+	processOwnerSIDMatchesCurrentFn = func(int) (bool, error) { return false, nil }
+	refused, reason := CheckIdentityGate(v)
+	if !refused {
+		t.Fatal("different-owner SID must REFUSE the gate; got refused=false")
+	}
+	if !strings.Contains(reason, "different user") {
+		t.Fatalf("refusal reason must name the different-user owner; got %q", reason)
+	}
+
+	// Unverifiable owner SID → refusal (fail closed).
+	processOwnerSIDMatchesCurrentFn = func(int) (bool, error) {
+		return false, errors.New("OpenProcessToken: access denied")
+	}
+	if refused, _ := CheckIdentityGate(v); !refused {
+		t.Fatal("unverifiable owner SID must REFUSE the gate (fail closed); got refused=false")
 	}
 }
 

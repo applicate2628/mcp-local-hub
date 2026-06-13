@@ -151,6 +151,29 @@ func SetDaemonStateRootForTest(root string) (restore func()) {
 	}
 }
 
+// ResetStrictModeIntentCacheForTest clears the lazy supervisor-intent.json
+// strict_mode cache from a CROSS-PACKAGE test (e.g. internal/cli). The
+// in-package equivalent resetStrictModeIntentCacheForTest is unreachable from
+// other packages; this exported wrapper bridges that gap with the same
+// testing.Testing() production guard as SetDaemonStateRootForTest. Production
+// callers never invoke it (the cache value is fixed for the process lifetime).
+func ResetStrictModeIntentCacheForTest() {
+	if !testing.Testing() {
+		panic("api.ResetStrictModeIntentCacheForTest called outside a test binary — test-only hook")
+	}
+	resetStrictModeIntentCacheForTest()
+}
+
+// ResetStrictModeMutationGateBypassForTest force-clears the #301-3 strict-mode
+// mutation-gate bypass depth from a cross-package test so a leaked Begin cannot
+// bleed across tests. Same production guard as the other test hooks.
+func ResetStrictModeMutationGateBypassForTest() {
+	if !testing.Testing() {
+		panic("api.ResetStrictModeMutationGateBypassForTest called outside a test binary — test-only hook")
+	}
+	resetStrictModeMutationGateBypassForTest()
+}
+
 // resetSerenaStopReadCache clears the FIX-5 hot-path stop-read cache. Used by
 // the state-root test hook so tests do not see a stale cached stop sub-block
 // across state-dir switches.
