@@ -115,6 +115,22 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 // cache, a NON-mutation secure state-file write is STILL refused. This proves
 // the #301-3 bypass is scoped to the strict-mode mutation's own writes, not a
 // process-wide relaxation that would re-open the SEC-F2 hole.
+//
+// SELF-HEAL HAZARD (pr301 r3 Finding 1): the negative-control write target's
+// PARENT must be a directory that DaemonStateDir()'s ensureStateRoot chmod
+// can NEVER reach. On POSIX, resolving the strict-mode cache routes through
+// DefaultSupervisorIntentPath → DaemonStateDir → ensureStateRoot(<state-root>),
+// whose POSIX leg runs os.Chmod(<state-root>, 0o700). If the write target sat
+// DIRECTLY under the state root (its parent == the state root), that chmod
+// would heal the broadened bits back to 0700 BEFORE the write gate ran — the
+// gate would then pass, the write would succeed, and the negative control
+// would FALSELY fail on Linux while no longer exercising the broadened-parent
+// scenario at all. We therefore point the write at a path inside a CHILD
+// subdir of the state root and broaden that CHILD: ensureStateRoot chmods only
+// the root, never its children, so the child stays broadened at write time.
+// (On Windows ensureStateRoot is MkdirAll-only — it never touches DACLs — so
+// the root would survive too, but the child structure keeps both platforms on
+// one code path.)
 func TestStrictModeDisable_BroadenedParent_NonMutationWriteStillRefused(t *testing.T) {
 	dir := broadenedParentForGate(t)
 	t.Setenv(api.AllowUnhardenedStateReadEnv, "1")
@@ -132,9 +148,43 @@ func TestStrictModeDisable_BroadenedParent_NonMutationWriteStillRefused(t *testi
 		t.Fatal("precondition: seeded intent strict_mode=true must make the gate strict; got relaxed")
 	}
 
-	// A NON-mutation state-file write to an UNRELATED path, with NO bypass
-	// window open, must be refused by the strict (intent-derived) gate.
-	unrelated := filepath.Join(dir, "unrelated-state.json")
+	// Build a CHILD subdir under the state root and broaden IT (not the root).
+	// ensureStateRoot only ever chmods the state root, so a broadened child
+	// survives every DaemonStateDir() resolution that the gate triggers.
+	childParent := filepath.Join(dir, "broadened-child")
+	if err := os.MkdirAll(childParent, 0o700); err != nil {
+		t.Fatalf("mkdir broadened-child: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(childParent, 0o777); err != nil {
+			t.Fatalf("chmod broadened-child: %v", err)
+		}
+	}
+
+	// PROVE the negative control genuinely faces a broadened parent at write
+	// time: re-resolve the strict cache (the exact chain whose ensureStateRoot
+	// chmod the self-heal hazard rides on) and then assert the child parent is
+	// STILL broadened. On POSIX we check the mode bits directly; on Windows the
+	// child inherits the broadened temp-dir DACL that the write gate rejects,
+	// which the actual write-refusal assertion below verifies.
+	api.ResetStrictModeIntentCacheForTest()
+	_ = api.OperatorRequiresSingleUserHome() // drives ensureStateRoot(<root>) chmod
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(childParent)
+		if statErr != nil {
+			t.Fatalf("stat broadened-child after cache resolution: %v", statErr)
+		}
+		if info.Mode().Perm()&0o022 == 0 {
+			t.Fatalf("self-heal hazard: the broadened child parent (mode %#o) was healed before the "+
+				"negative-control write — the test would no longer exercise a broadened parent",
+				info.Mode().Perm())
+		}
+	}
+
+	// A NON-mutation state-file write INSIDE the broadened CHILD parent, with
+	// NO bypass window open, must be refused by the strict (intent-derived)
+	// gate. The child parent's broadened bits/ACE are what the gate rejects.
+	unrelated := filepath.Join(childParent, "unrelated-state.json")
 	err := api.WriteStateFileAtomic(unrelated, map[string]any{"not": "a strict-mode mutation"})
 	if !errors.Is(err, api.ErrSecureWriteParentInsecure) {
 		t.Fatalf("negative control: a non-mutation secure write on a broadened parent with intent "+

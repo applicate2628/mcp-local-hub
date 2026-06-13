@@ -634,13 +634,24 @@ func strictModeFromIntentCached() bool {
 //     A missing intent file is a fresh install before any `strict-mode
 //     enable` ever ran; relax is correct and is today's posture.
 //   - ReadSupervisorIntent returns ANY OTHER error (decode failure,
-//     permission denied, read-side parent-dir gate refusal) → TRUE.
-//     The intent file EXISTS but could not be read. Silently relaxing
-//     here would DISABLE the strict gate exactly when an attacker (or a
-//     corp ACL change) made the gate-controlling file unreadable — a
-//     fail-OPEN security hole. We fail CLOSED to strict instead: a read
-//     failure on an existing intent must never silently weaken the
-//     security gate.
+//     permission denied, read-side parent-dir gate refusal) → first
+//     DISAMBIGUATE absent-vs-unreadable with a gate-free os.Lstat probe
+//     (pr301 r3 Finding 2). ReadSupervisorIntent runs the read-side
+//     parent-DACL gate BEFORE os.ReadFile, so on a Windows host whose
+//     state dir inherited a non-allowlisted write ACE a genuinely ABSENT
+//     intent surfaces as a parent-gate error, NOT os.ErrNotExist. Failing
+//     closed to strict on that error would mis-classify a fresh install on
+//     a broadened home as strict, contradicting the documented missing-
+//     intent → default-relax polarity. os.Lstat does NOT run the read-side
+//     parent gate, so it disambiguates: a path that os.Lstat reports as
+//     not-existing is genuinely ABSENT → false (relax, the fresh-install
+//     posture); a path os.Lstat reports as EXISTING (regular file, symlink,
+//     anything) is present-but-unreadable → fail CLOSED to TRUE, because
+//     silently relaxing when an attacker or a corp ACL change made the
+//     gate-controlling file unreadable would be a fail-OPEN hole. os.Lstat
+//     (not os.Stat) is deliberate: an attacker-planted symlink whose target
+//     is missing must read as PRESENT (the entry exists), not be laundered
+//     into the absent/relax branch.
 //   - intent == nil (no error, no file content) → false.
 //
 // Caching note: this is called once per process behind
@@ -666,9 +677,20 @@ func readStrictModeFromIntentBestEffort() bool {
 			// relax is correct.
 			return false
 		}
-		// Existing intent that could not be read (decode/permission/
-		// parent-gate refusal): fail CLOSED to strict. A read failure on an
-		// existing gate-controlling file must not silently disable the gate.
+		// Non-ENOENT read error. ReadSupervisorIntent runs the read-side
+		// parent-DACL gate BEFORE os.ReadFile, so on a broadened-parent host
+		// a genuinely absent intent surfaces here as a parent-gate error
+		// rather than os.ErrNotExist (pr301 r3 Finding 2). Disambiguate with
+		// a gate-free os.Lstat probe: if the path truly does not exist, the
+		// intent is ABSENT (fresh install) → relax. os.Lstat (not os.Stat)
+		// keeps an attacker-planted dangling symlink classified as PRESENT.
+		if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
+			return false
+		}
+		// The intent file EXISTS but could not be read (decode/permission/
+		// parent-gate refusal on a present file): fail CLOSED to strict. A
+		// read failure on an existing gate-controlling file must not silently
+		// disable the gate.
 		return true
 	}
 	if intent == nil {
