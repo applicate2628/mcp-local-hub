@@ -651,6 +651,22 @@ func TestSupervisorController_RemovedIntentClearsStateSoReregisterSpawns(t *test
 		t.Fatalf("seed tracker persist: %v", err)
 	}
 
+	// The reap lifecycle now runs ON the event loop (pr302 r3 serialization):
+	// applyReconcileDrift -> refreshSupervisorIntent POSTS evReapScan, the on-loop
+	// handler does the reap. Start the loop + register the handler, and add a
+	// barrier so each applyReconcileDrift is fully drained before assertions.
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go loop.Run(ctx)
+	sync := func() {
+		done := make(chan struct{})
+		loop.Post(api.LoopEvent{Kind: evReapBarrier, Body: map[string]any{reapBarrierResultBodyKey: done}})
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("loop sync timed out")
+		}
+	}
+
 	deps := ipcDispatchDeps{controllerProvider: func() *supervisorController { return ctrl }}
 
 	// Tick 1: first removal refresh only MARKS the live task pendingReap (the
@@ -658,6 +674,7 @@ func TestSupervisorController_RemovedIntentClearsStateSoReregisterSpawns(t *test
 	// tracker entry are deliberately PRESERVED so a re-add can absorb the blip,
 	// and NO terminate fires yet.
 	applyReconcileDrift(deps, nil, emptyIntent, nil)
+	sync()
 	if st, ok := ctrl.GetSMState(descriptor.TaskName); !ok || st != api.StRunning {
 		t.Fatalf("after tick-1 removal, SM state = %v (ok=%v); want StRunning preserved across the verification window", st, ok)
 	}
@@ -668,6 +685,7 @@ func TestSupervisorController_RemovedIntentClearsStateSoReregisterSpawns(t *test
 	// Tick 2: still absent → confirmed removal → SM-aware terminate fires and
 	// bookkeeping clears (clearRemovedTaskRuntime).
 	applyReconcileDrift(deps, nil, emptyIntent, nil)
+	sync()
 	if got := terminateCalls.Load(); got != 1 {
 		t.Fatalf("tick-2 confirmed removal must terminate the orphaned child exactly once; terminate calls = %d", got)
 	}
@@ -689,13 +707,17 @@ func TestSupervisorController_RemovedIntentClearsStateSoReregisterSpawns(t *test
 	}
 
 	ctrl.intentCache.Refresh(intent)
-	ctrl.handleLoopEvent(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: descriptor.TaskName})
+	loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: descriptor.TaskName})
+	sync()
 	if got := spawnCalls.Load(); got != 1 {
 		t.Fatalf("re-register EvIntentUpdate spawn calls = %d, want 1", got)
 	}
+	// Under the real running loop a successful spawn PostSelfs EvHealthOK, which
+	// advances StSpawning -> StRunning. The invariant is "the re-register spawned
+	// it and it is live", not the exact intermediate state.
 	st, _ := ctrl.GetSMState(descriptor.TaskName)
-	if st != api.StSpawning {
-		t.Fatalf("state after re-register EvIntentUpdate = %s, want %s", st, api.StSpawning)
+	if st != api.StSpawning && st != api.StRunning {
+		t.Fatalf("state after re-register EvIntentUpdate = %s, want StSpawning or StRunning", st)
 	}
 }
 

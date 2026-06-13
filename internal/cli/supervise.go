@@ -81,6 +81,28 @@ var reaperFn = ReapStaleTransients
 // stuck-StSpawning bug on commit 2d67031).
 var errSpawnPreChild = errors.New("supervise: spawn failed before child created")
 
+// errTerminateTargetGone marks a TerminateFunc error whose underlying cause
+// proves the targeted process is ALREADY GONE even though terminate returned a
+// non-nil error (Codex pr302 r3 finding F). The production TerminateFunc returns
+// an error on two such "gone" paths:
+//
+//   - no running PID recorded for the task — the tracker has no live PID, e.g.
+//     an install-time kill of a foreign warm-start PID already succeeded with no
+//     later EvChildExit. The process is gone; there is nothing left to kill.
+//
+//   - the kill SUCCEEDED (MarkTerminated ran) but a downstream persist of
+//     supervisor-state.json failed. The process IS dead; only the disk write
+//     errored.
+//
+// The orphan reap uses errors.Is(err, errTerminateTargetGone) to classify these
+// as CONFIRMED-DEAD (clear the reap bookkeeping) instead of "process may still be
+// alive" (preserve + retry forever). Without this distinction a no-PID or
+// persist-failure terminate would loop the reap forever, and a later
+// re-registration would leave a stale StRunning-no-PID that ignores EvStart.
+// Genuine "process may still be alive" errors (PID-state query failure, verify
+// failure, kill failure) are NOT wrapped — those still preserve for retry.
+var errTerminateTargetGone = errors.New("supervise: terminate target already gone")
+
 // setReaperFnForTest installs a test reaper function. Returns an
 // "uninstall" function tests defer to restore the production wiring
 // before the next test runs. Production code paths never invoke this
@@ -823,6 +845,14 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// intent CHANGE, so without this the confirming refresh might never
 		// arrive). reapAfterFunc stays nil so armReapFollowup uses time.AfterFunc.
 		reapFollowupDelay: reapFollowupDefaultDelay,
+		// reapIntentReader gives the on-loop follow-up handler a FRESH on-disk read
+		// of supervisor-intent.json (Codex pr302 r3 finding A). The intentCache only
+		// refreshes on the 60s IntentWatcher poll, so a cache-only follow-up could
+		// terminate a daemon that was removed then re-added on disk within the
+		// window; the fresh read sees the re-add and cancels the reap.
+		reapIntentReader: func() (*api.SupervisorIntentFile, error) {
+			return api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+		},
 	}
 	ctrl.intentCache.Refresh(intent)
 	// Phase 4-E2: feed the stop predicate from the UNIFIED stops source.
@@ -2185,7 +2215,11 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			}
 		}
 		if pid <= 0 {
-			err := fmt.Errorf("no running PID recorded for task %q", d.TaskName)
+			// No live PID recorded — the process is already gone (nothing to kill).
+			// Wrap with errTerminateTargetGone so the orphan reap classifies this as
+			// confirmed-dead and clears its bookkeeping instead of retrying forever
+			// against a non-existent PID (Codex pr302 r3 finding F, case a).
+			err := fmt.Errorf("%w: no running PID recorded for task %q", errTerminateTargetGone, d.TaskName)
 			emitDaemonTerminateFailed(events, d, pid, err)
 			return err
 		}
@@ -2273,8 +2307,15 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			return err
 		}
 		if err := finishProductionTerminate(proof, d, events); err != nil {
-			emitDaemonTerminateFailed(events, d, pid, err)
-			return err
+			// The kill request was issued (productionTerminatePIDWithIdentityFn
+			// returned nil above); finishProductionTerminate is the POST-kill
+			// teardown (wait/verify-gone on POSIX, no-op on Windows). A failure
+			// here means the process is, as far as the kill path knows, GONE but the
+			// teardown bookkeeping errored. Wrap as gone so the reap clears rather
+			// than looping (Codex pr302 r3 finding F, case b).
+			wrapped := fmt.Errorf("%w: post-kill teardown failed: %v", errTerminateTargetGone, err)
+			emitDaemonTerminateFailed(events, d, pid, wrapped)
+			return wrapped
 		}
 
 		tracker.MarkTerminated(d.TaskName)
@@ -2288,7 +2329,11 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			},
 		})
 		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {
-			return err
+			// The process IS dead (MarkTerminated ran); only the supervisor-state.json
+			// persist failed. Wrap as gone so the reap classifies it confirmed-dead
+			// and clears bookkeeping — the orphan is reaped, only the disk write
+			// errored (Codex pr302 r3 finding F, case b).
+			return fmt.Errorf("%w: post-terminate persist failed: %v", errTerminateTargetGone, err)
 		}
 		return nil
 	}

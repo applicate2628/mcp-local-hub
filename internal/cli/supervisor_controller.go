@@ -127,32 +127,91 @@ type supervisorController struct {
 	// is confirmed-and-terminated, when the descriptor re-appears, or when the
 	// task settles to a non-live SM state. Subsumes findings 3/4/5.
 	reapShadow sync.Map // taskName -> *api.SupervisorDaemon (descriptor kept routable during the pendingReap window)
-	// reapFollowupArmed records, per task, that a bounded follow-up timer is
-	// already pending for the task's pendingReap resolution, so a second
-	// mark within the same window does not arm a duplicate timer.
-	reapFollowupArmed sync.Map // taskName -> bool
-	events            *api.SupervisorEventLog
-	graceful          *gracefulCounter
-	daemonIntent      *daemonIntentCache
+	// reapFollowupArmed records, per task, the GENERATION of the bounded follow-up
+	// timer currently armed for the task's pendingReap resolution. A second mark
+	// within the same window does not arm a duplicate timer (the entry is already
+	// present), and the recorded generation lets a fired EvReapFollowup event
+	// detect that it is STALE — its generation no longer matches the live
+	// pendingReap generation, e.g. after a remove→reappear→remove-again for the
+	// same task armed a fresh timer (Codex pr302 r3 finding C). Mutated ONLY on
+	// the event-loop goroutine (markPendingReap / arm / disarm all run inside loop
+	// handlers now), so no lock is needed beyond the sync.Map's own.
+	reapFollowupArmed sync.Map // taskName -> int (generation of the armed timer)
+	// reapTimers holds the live timer handle per task so disarmReapFollowup can
+	// Stop() it — a bare armed-flag clear left the underlying time.AfterFunc
+	// running, and a stale fire during a SECOND verification window for the same
+	// task could confirm/terminate the second removal early (Codex pr302 r3
+	// finding C). Stopping the timer on disarm AND generation-tagging the fired
+	// event together close the stale-timer window. Mutated ONLY on the event loop.
+	reapTimers sync.Map // taskName -> reapTimer
+	// reapGeneration is the monotonic per-task generation assigned to each NEW
+	// pendingReap window. Bumped (on the event loop) every time a task is freshly
+	// marked pendingReap; the value is copied into reapFollowupArmed when the
+	// timer arms and into the posted EvReapFollowup body. A fired follow-up whose
+	// body generation != the live pendingReap generation is a stale no-op (finding
+	// C). Mutated ONLY on the event loop.
+	reapGeneration sync.Map // taskName -> int
+	// reapDeferredTimerDue records, per task, that a StBackoffWaiting daemon's
+	// armed backoff timer FIRED an EvTimerDue while the task was pendingReap and
+	// the controller SUPPRESSED the respawn it would otherwise have driven (Codex
+	// pr302 r3 finding E: respawning a removed backoff daemon during the
+	// verification window binds a port the user just removed — a transient orphan
+	// / port-collision). The marker lets the controller REPLAY that single dropped
+	// EvTimerDue if the removal turns out to be a replace-in-place BLIP (the
+	// descriptor reappears), so a blip'd backoff daemon is NOT stranded (the
+	// anti-stranding invariant of the original finding 5). It is consumed (replay
+	// + delete) on reappear and dropped on confirmed removal / clear. Mutated ONLY
+	// on the event loop.
+	reapDeferredTimerDue sync.Map // taskName -> bool
+	// reapDeferredStop records, per task, that the orphan reap drove a StSpawning
+	// daemon to a deferred queued_action=stop (the terminate is applied later on
+	// the spawn-completion event). If the descriptor then REAPPEARS before the
+	// spawn completes (replace-in-place), the cancel path must also clear that
+	// reap-originated queued stop — otherwise the next EvHealthOK terminates the
+	// just-re-added daemon the operator wants RUNNING (Codex pr302 r3 finding D).
+	// The marker distinguishes a REAP-set stop (safe to clear on reappear) from an
+	// operator-set stop (must be honored), so the cancel never silently drops a
+	// genuine operator stop. Set in reapRemovedDaemon's StSpawning branch; consumed
+	// (clear stop + delete marker) on reappear; dropped on confirmed clear. Mutated
+	// ONLY on the event loop.
+	reapDeferredStop sync.Map // taskName -> bool
+	events           *api.SupervisorEventLog
+	graceful         *gracefulCounter
+	daemonIntent     *daemonIntentCache
 
 	// reapFollowupDelay is the bounded delay before a marked-but-unconfirmed
-	// pendingReap is forcibly re-evaluated against the CURRENT intent cache,
+	// pendingReap is forcibly re-evaluated against a FRESH on-disk intent read,
 	// independent of any further intent-file mtime change. The two
 	// refreshSupervisorIntent call sites (the 60s IntentWatcher onChange and
 	// applyReconcileDrift) only fire on an intent CHANGE; in the common
 	// uninstall/remove case intent then stays STABLE, so the confirming second
 	// refresh would NEVER arrive and the orphan would never be terminated
 	// (finding 1). When a pendingReap is marked, the controller arms a timer of
-	// this duration that drives resolvePendingReapsAgainstCurrentIntent, so the
-	// terminate fires within a bounded window even if intent mtime never
-	// changes again. Defaults to reapFollowupDefaultDelay; tests shrink it (or
-	// inject reapAfterFunc) for deterministic, real-clock-free assertions.
+	// this duration that POSTS an EvReapFollowup event onto the loop, where the
+	// handler re-reads intent FROM DISK and resolves only that task's reap, so the
+	// terminate fires within a bounded window even if intent mtime never changes
+	// again. Defaults to reapFollowupDefaultDelay; tests shrink it (or inject
+	// reapAfterFunc) for deterministic, real-clock-free assertions.
 	reapFollowupDelay time.Duration
 	// reapAfterFunc is the injectable timer seam used to arm the follow-up
 	// resolution. Defaults to time.AfterFunc (production). Tests install a
 	// controllable fake so the follow-up tick fires synchronously under a fake
-	// clock instead of waiting on the wall clock.
+	// clock instead of waiting on the wall clock. The callback the controller
+	// passes does NOT mutate controller state directly anymore — it only POSTS an
+	// EvReapFollowup event onto the event loop, so the actual resolution runs
+	// serialized in handleLoopEvent (Codex pr302 r3 findings A/B/C/H/I).
 	reapAfterFunc func(d time.Duration, f func()) reapTimer
+	// reapIntentReader is the injectable fresh-from-disk intent reader the
+	// follow-up handler uses to re-confirm a pendingReap's absence against the
+	// CURRENT on-disk supervisor-intent.json rather than the possibly-stale
+	// intentCache snapshot (Codex pr302 r3 finding A: the cache only refreshes on
+	// the 60s IntentWatcher poll, so after a remove→re-add-on-disk within the
+	// window the cache stays empty up to 60s and a cache-only follow-up would
+	// terminate a live re-declared daemon). Defaults to reading
+	// <dir(statePath)>/supervisor-intent.json via api.ReadSupervisorIntent; tests
+	// inject a fake. A nil reader (or a read error) means the follow-up falls back
+	// to the intentCache snapshot — strictly no worse than the pre-fix behavior.
+	reapIntentReader func() (*api.SupervisorIntentFile, error)
 
 	// spawn is the production SpawnFunc closure constructed in
 	// runSupervise. executeSideEffect calls it when the SM transition
@@ -190,6 +249,53 @@ type supervisorController struct {
 }
 
 const idleRespawnResultBodyKey = "idle_respawn_result"
+
+// Controller-internal reap lifecycle events. These are api.SMEvent VALUES (so
+// they fit LoopEvent.Kind) but are NOT rows in api.Transition's table — they are
+// intercepted at the top of handleLoopEvent and dispatched to the reap handlers,
+// never passed to api.Transition. Routing the whole reap lifecycle through the
+// FIFO event loop is the class fix for Codex pr302 r3 findings A/B/C/H/I: the
+// off-loop IntentWatcher / IPC-apply / follow-up-timer goroutines only DETECT a
+// change and POST one of these events; ALL mutation of smStates / reapShadow /
+// pendingReap / queuedActions / tracker and the terminate decision then run on
+// the single loop goroutine, where they are naturally serialized against the
+// EvChildExit / EvHealthOK / EvTimerDue handlers they used to race.
+const (
+	// evReapScan is posted by refreshSupervisorIntent (off the loop) AFTER it has
+	// atomically swapped the intent-descriptor cache. The on-loop handler diffs
+	// the previous-vs-next task-name sets carried in the event body, marks newly-
+	// disappeared live tasks pendingReap (tick 1), and resolves any pendingReap
+	// that is now confirmed-absent across the verification window (tick 2). This
+	// replaces the body of the old off-loop refreshSupervisorIntent reap.
+	evReapScan api.SMEvent = "reap-scan"
+	// evReapFollowup is posted by the bounded follow-up timer (finding 1). The
+	// on-loop handler re-reads intent FROM DISK (finding A), scopes the resolution
+	// to ONLY the event's own task (finding B), and no-ops when the event's
+	// generation no longer matches the live pendingReap generation (finding C).
+	evReapFollowup api.SMEvent = "reap-followup"
+	// evReapBarrier is a TEST-ONLY synchronization event. handleLoopEvent signals
+	// the result channel in its body and returns; a test posts it after driving
+	// reap events and blocks on the channel, so when the channel fires every
+	// previously-posted event (FIFO) has been fully processed on the loop
+	// goroutine. Production never posts it. It is the deterministic barrier that
+	// lets the orphan-reap tests run against a REAL concurrent loop (so `-race`
+	// exercises the off-loop→on-loop serialization) while keeping assertions
+	// race-free: the loop's writes happen-before the barrier signal, which
+	// happens-before the test goroutine's post-barrier reads.
+	evReapBarrier api.SMEvent = "reap-barrier"
+)
+
+// reapBarrierResultBodyKey carries the chan struct{} a test waits on for the
+// evReapBarrier synchronization event.
+const reapBarrierResultBodyKey = "reap_barrier_result"
+
+// Reap event body keys.
+const (
+	reapScanPreviousNamesBodyKey  = "reap_previous_names"
+	reapScanNextNamesBodyKey      = "reap_next_names"
+	reapScanCapturedBodyKey       = "reap_captured_descriptors"
+	reapFollowupGenerationBodyKey = "reap_followup_generation"
+)
 
 // supervisorCleanExitBodyKey flags an EvChildExit that corresponds to a
 // CLEAN child exit (exit code 0, no Wait error). runCrashEventBridge sets
@@ -404,51 +510,126 @@ func (c *supervisorController) refreshSupervisorIntent(updated *api.SupervisorIn
 	if c == nil || c.intentCache == nil {
 		return
 	}
+	// DETECT (off the loop): snapshot the previous + next task-name sets and
+	// capture the OLD descriptor for every disappearing task BEFORE swapping the
+	// cache (IntentCache.Lookup returns pointers into the soon-to-be-replaced
+	// snapshot slice, so we copy each descriptor value out). All three reads are
+	// against the atomic.Value cache snapshot — safe off the loop.
 	previous := c.intentCache.TaskNames()
-
-	// Resolve confirmed reaps BEFORE swapping the cache: a task that was
-	// pendingReap from the PREVIOUS refresh and is STILL absent in `updated`
-	// has cleared the verification window. We must read its descriptor +
-	// terminate it while the OLD cache snapshot is still live (the captured
-	// pendingReap descriptor is the authoritative source, but reading under
-	// the old cache keeps the lookup paths identical). nextNames is computed
-	// from `updated` directly so the still-absent check does not depend on
-	// the cache having been swapped yet.
 	nextNames := taskNameSetFromIntent(updated)
+	captured := map[string]*api.SupervisorDaemon{}
+	for taskName := range previous {
+		if _, stillPresent := nextNames[taskName]; stillPresent {
+			continue
+		}
+		if d, ok := c.intentCache.Lookup(taskName); ok && d != nil {
+			cp := *d // copy out of the pre-refresh snapshot slice
+			captured[taskName] = &cp
+		}
+	}
+
+	// Swap the cache now that all pre-refresh descriptor reads are done. The
+	// atomic.Value swap is the only off-loop mutation refreshSupervisorIntent
+	// performs; it is safe because the loop reads the cache through the same
+	// atomic.Value.
+	c.intentCache.Refresh(updated)
+
+	// Skip the reap scan entirely when this refresh has NO reap-relevant change:
+	// nothing disappeared this tick (len(captured)==0) AND there is no existing
+	// pendingReap whose resolution a fresh intent could affect. This keeps a
+	// steady-state refresh (the common case — the descriptor set is unchanged) a
+	// pure cache swap with no event posted, so callers that inspect the FIRST
+	// posted event (apply-mode reconcile drift) still see their EvIntentUpdate
+	// rather than a noise evReapScan. The hasPendingReap read is a racy decision-
+	// only check against the on-loop-owned map; a missed pendingReap entry is
+	// harmless because its bounded follow-up timer (which re-reads disk) is the
+	// guaranteed backstop for both confirmation and reappear-cancel.
+	if len(captured) == 0 && !c.hasPendingReap() {
+		return
+	}
+
+	// POST (onto the loop): the on-loop handleReapScan does ALL reap decisions +
+	// mutations (mark pendingReap / resolve confirmed / drive terminate /
+	// clearRemovedTaskRuntime), serialized against the EvChildExit / EvHealthOK /
+	// EvTimerDue handlers it used to race when this body ran on the watcher / IPC
+	// goroutine (Codex pr302 r3 findings A/B/C/H/I — the class fix). When the
+	// event loop is absent (unit-test fixtures that drive the controller
+	// synchronously and never start Run) we fall back to running the scan inline
+	// so those tests keep their deterministic single-goroutine semantics.
+	if c.eventLoop == nil {
+		c.handleReapScan(previous, nextNames, captured)
+		return
+	}
+	c.eventLoop.Post(api.LoopEvent{
+		Kind: evReapScan,
+		Body: map[string]any{
+			reapScanPreviousNamesBodyKey: previous,
+			reapScanNextNamesBodyKey:     nextNames,
+			reapScanCapturedBodyKey:      captured,
+		},
+	})
+}
+
+// hasPendingReap reports whether any pendingReap entry currently exists. It is a
+// racy, decision-only read against the on-loop-owned pendingReap map (used to
+// decide whether refreshSupervisorIntent needs to post an evReapScan); a missed
+// entry is harmless because the per-task follow-up timer is the guaranteed
+// backstop.
+func (c *supervisorController) hasPendingReap() bool {
+	found := false
+	c.pendingReap.Range(func(_, _ any) bool {
+		found = true
+		return false // stop at the first entry
+	})
+	return found
+}
+
+// handleReapScan is the ON-LOOP reap reconciler. It runs inside handleLoopEvent
+// (single loop goroutine) so every mutation it makes to smStates / reapShadow /
+// pendingReap / queuedActions / tracker and every terminate it drives is
+// serialized against the other SM event handlers (Codex pr302 r3 findings
+// A/B/C/H/I). It performs the two reap arms the old off-loop body did:
+//
+//  1. resolve EVERY existing pendingReap against the just-swapped intent
+//     (reappeared → cancel; settled → clear; still-absent-and-live → terminate),
+//     and
+//  2. mark NEW disappearances (live tasks absent in `next` that are not already
+//     pendingReap) as tick-1 candidates.
+//
+// `captured` carries the OLD descriptor for each disappeared task (copied out of
+// the pre-swap cache by the off-loop caller) so a NEW mark has the TaskName +
+// Command the SM-aware terminate needs even though the cache no longer holds the
+// row.
+func (c *supervisorController) handleReapScan(previous, next map[string]struct{}, captured map[string]*api.SupervisorDaemon) {
+	if c == nil {
+		return
+	}
+	// Arm 1: resolve existing pendingReap candidates against the new intent.
 	var confirmedReaps []*api.SupervisorDaemon
 	c.pendingReap.Range(func(key, value any) bool {
 		taskName, _ := key.(string)
 		if taskName == "" {
 			return true
 		}
-		if _, present := nextNames[taskName]; present {
-			// Re-appeared (replace-in-place completed) — drop the mark + shadow,
-			// no terminate. The verification window absorbed the blip. The
-			// descriptor is back in intentCache after the swap below, so any
-			// in-flight event now routes against the real row; the shadow is no
-			// longer needed.
-			//
-			// Finding 3/4/5 reappear-window reconciliation: keeping the
-			// descriptor routable in the shadow across the whole window means a
-			// child that EXITED during the gap already drove the normal
-			// EvChildExit path (StRunning->StBackoffWaiting), a backoff
-			// EvTimerDue already routed, and a StSpawning queued stop already
-			// completed — all against the shadow. So on reappear there is no
-			// dropped exit to reconcile: the SM state is already correct and the
-			// reconcile below (cache swap) simply restores the real descriptor.
+		if _, present := next[taskName]; present {
+			// Re-appeared (replace-in-place completed) — replay any deferred
+			// backoff timer (finding E) so a reappeared StBackoffWaiting daemon is
+			// not stranded, clear any reap-originated queued stop (finding D) so the
+			// spawn-completion event does not terminate the re-added daemon, then
+			// drop the mark + shadow. The intentCache was already swapped to
+			// `updated` by the off-loop caller before this handler ran, so the
+			// descriptor is routable for the replayed EvTimerDue. In-flight events
+			// already routed via the shadow.
+			c.replayDeferredBackoffTimerIfPending(taskName)
+			c.clearReapDeferredStopIfPending(taskName)
 			c.cancelPendingReap(taskName)
 			c.emitReapEvent("debug", "orphan-reap-candidate-reappeared", taskName,
 				"removed descriptor re-appeared within the verification window (replace-in-place); reap canceled, in-flight events already routed via the reaping shadow")
 			return true
 		}
-		// Still absent across the window. Re-check the SM state is still LIVE
-		// (a self-driven StExiting/StIdle transition since the mark — e.g. the
-		// child already exited and was reaped by its own cmd.Wait, OR a
-		// shadow-routed in-flight event (EvChildExit / queued-stop completion)
-		// already drove the SM to a settled state — means there is nothing left
-		// to terminate). The descriptor is still gone from intent, so this is a
-		// CONFIRMED removal that merely terminated on its own: full-clear the
-		// stale runtime bookkeeping (findings 3/4/5 settle path).
+		// Still absent. If the SM settled to a non-live state since the mark
+		// (its own cmd.Wait reaped it, or a shadow-routed in-flight event drove
+		// it to idle), there is nothing left to terminate — clear bookkeeping.
 		if !c.smStateIsReapable(taskName) {
 			c.clearRemovedTaskRuntime(taskName)
 			c.emitReapEvent("debug", "orphan-reap-candidate-settled", taskName,
@@ -461,48 +642,33 @@ func (c *supervisorController) refreshSupervisorIntent(updated *api.SupervisorIn
 		return true
 	})
 
-	// Capture the OLD descriptor for any task disappearing in THIS refresh
-	// that is currently LIVE and not already pendingReap — it becomes a NEW
-	// pendingReap candidate (tick 1 of the window). Captured BEFORE the cache
-	// swap because IntentCache.Lookup returns pointers into the soon-to-be-
-	// replaced snapshot slice; we copy the descriptor value so the captured
-	// pointer outlives the swap.
+	// Arm 2: mark new disappearances (tick 1 of the verification window).
 	for taskName := range previous {
-		if _, stillPresent := nextNames[taskName]; stillPresent {
+		if _, stillPresent := next[taskName]; stillPresent {
 			continue
 		}
 		if _, already := c.pendingReap.Load(taskName); already {
-			// Handled above (either confirmed or re-appeared); skip.
-			continue
+			continue // handled by Arm 1
 		}
 		if !c.smStateIsReapable(taskName) {
-			// Not a live daemon (StIdle/StQuarantined or untracked) — nothing
-			// to terminate. Just clear bookkeeping as before.
+			// Not a live daemon (StIdle/StQuarantined or untracked) — nothing to
+			// terminate. Clear bookkeeping as before.
 			c.clearRemovedTaskRuntime(taskName)
 			continue
 		}
-		if d, ok := c.intentCache.Lookup(taskName); ok && d != nil {
-			captured := *d // copy out of the pre-refresh snapshot slice
-			c.markPendingReap(taskName, &captured)
+		if d, ok := captured[taskName]; ok && d != nil {
+			c.markPendingReap(taskName, d)
 			c.emitReapEvent("info", "orphan-reap-candidate-marked", taskName,
 				"descriptor disappeared from intent while the daemon is live; awaiting still-absent confirmation across one refresh window before terminating (transient-absence/replace-in-place guard); descriptor kept routable via the reaping shadow + bounded follow-up tick armed")
 		} else {
-			// No descriptor available to terminate through (cache miss). Fall
-			// back to the prior bookkeeping-only clear; the synchronous
-			// install-time kill or a cold-restart reaper remains the backstop.
+			// No descriptor captured (cache miss at detect time). Fall back to the
+			// prior bookkeeping-only clear; the synchronous install-time kill or a
+			// cold-restart reaper remains the backstop.
 			c.clearRemovedTaskRuntime(taskName)
 		}
 	}
 
-	// Swap the cache now that all pre-refresh descriptor reads are done.
-	c.intentCache.Refresh(updated)
-
-	// Drive the confirmed reaps through the SM-aware terminate. Done AFTER the
-	// cache swap so a terminate cannot observe a stale descriptor for a
-	// DIFFERENT (still-present) task. resolveConfirmedReap clears bookkeeping
-	// ONLY on a confirmed-dead terminate; a terminate FAILURE preserves the
-	// SM/tracker entry + pendingReap + shadow and re-arms the follow-up tick
-	// (finding 2).
+	// Drive the confirmed reaps through the SM-aware terminate.
 	for _, d := range confirmedReaps {
 		c.resolveConfirmedReap(d)
 	}
@@ -515,10 +681,22 @@ func (c *supervisorController) refreshSupervisorIntent(updated *api.SupervisorIn
 // then arms the bounded follow-up tick that guarantees the reap resolves even
 // if no further intent-file change ever arrives (finding 1). Idempotent: a
 // second mark within the same window does not re-arm a duplicate timer.
+//
+// MUST run on the event loop (called only from handleReapScan / the reap
+// handlers): it bumps the per-task reap generation and arms a generation-tagged
+// follow-up timer, both of which assume single-writer access (findings A/B/C).
 func (c *supervisorController) markPendingReap(taskName string, captured *api.SupervisorDaemon) {
 	taskName = canonicalSupervisorTaskName(taskName)
 	c.pendingReap.Store(taskName, captured)
 	c.reapShadow.Store(taskName, captured)
+	// Open a FRESH reap-generation window for this disappearance, then Stop any
+	// stale timer still registered from a previous window for the same task
+	// before arming a new generation-tagged timer. This is what lets a
+	// remove→reappear→remove-again sequence for the same task NOT have the first
+	// removal's timer confirm/terminate the second removal early (finding C).
+	c.bumpReapGeneration(taskName)
+	c.stopReapTimer(taskName)
+	c.reapFollowupArmed.Delete(taskName) // force a fresh arm at the new generation
 	c.armReapFollowup(taskName)
 }
 
@@ -537,13 +715,14 @@ func (c *supervisorController) cancelPendingReap(taskName string) {
 // resolveConfirmedReap drives the SM-aware terminate for a confirmed orphan and
 // reconciles bookkeeping based on the terminate OUTCOME:
 //
-//   - confirmed-dead (terminate returned nil — the production TerminateFunc
-//     returns nil only when the targeted PID is gone: already-dead, identity-
-//     mismatch/reuse, or confirmed-terminated): clear the SM/tracker entry +
-//     pendingReap + shadow + follow-up timer. The orphan is gone.
+//   - confirmed-dead (the targeted PID is gone — terminate returned nil, OR
+//     terminate failed but the failure proves the process is already gone:
+//     no-running-PID / post-kill-persist-failure — see reapRemovedDaemon's
+//     terminate-outcome classification for finding F): clear the SM/tracker
+//     entry + pendingReap + shadow + follow-up timer. The orphan is gone.
 //
-//   - terminate FAILED (non-nil — PID query/permission/escalation error; the
-//     process may still be alive): PRESERVE the SM/tracker entry, the
+//   - terminate FAILED while the process may still be ALIVE (PID query /
+//     permission / escalation error): PRESERVE the SM/tracker entry, the
 //     pendingReap marker, and the shadow, and RE-ARM the follow-up tick so a
 //     later tick retries the terminate. Clearing here would lose the recorded
 //     PID, and since the descriptor is already gone from intent the liveness
@@ -556,6 +735,8 @@ func (c *supervisorController) cancelPendingReap(taskName string) {
 // later on the spawn-completion event), so its entry + queued stop + shadow
 // survive until that event applies the stop (finding 4). The shadow keeps the
 // spawn-completion event routable.
+//
+// MUST run on the event loop (called from handleReapScan / handleReapFollowup).
 func (c *supervisorController) resolveConfirmedReap(d *api.SupervisorDaemon) {
 	if d == nil {
 		return
@@ -580,17 +761,155 @@ func (c *supervisorController) resolveConfirmedReap(d *api.SupervisorDaemon) {
 		// the next tick rather than losing the supervisor handle (finding 2).
 		c.armReapFollowup(taskName)
 		c.emitReapEvent("warn", "orphan-reap-terminate-failed", taskName,
-			"SM-aware terminate of the orphaned child FAILED; preserving SM/tracker state + pendingReap so a later follow-up tick retries (clearing here would orphan a possibly-live process with no supervisor handle)")
+			"SM-aware terminate of the orphaned child FAILED (process may still be alive); preserving SM/tracker state + pendingReap so a later follow-up tick retries (clearing here would orphan a possibly-live process with no supervisor handle)")
 	}
 }
 
+// handleReapFollowup is the ON-LOOP follow-up resolver for a SINGLE task's
+// pendingReap. It is posted by the bounded follow-up timer (finding 1) and runs
+// serialized inside handleLoopEvent, so it never races the SM event handlers
+// (findings H/I). It closes three follow-up-specific findings:
+//
+//   - Finding A: it re-reads intent FROM DISK (reapIntentReader), not the
+//     possibly-stale intentCache. The cache only refreshes on the 60s
+//     IntentWatcher poll, so after a remove→re-add-on-disk within the window the
+//     cache stays empty for up to 60s; a cache-only follow-up would terminate a
+//     live re-declared daemon. The fresh disk read sees the re-add and cancels.
+//
+//   - Finding B: it resolves ONLY `taskName`, never sibling pendingReap entries.
+//     A task A's timer can no longer confirm+terminate a task B that is merely
+//     momentarily absent without B's own verification window.
+//
+//   - Finding C: it no-ops when `generation` no longer matches the task's live
+//     reap generation — a stale timer from a previous remove→reappear→remove
+//     cycle for the same task cannot confirm/terminate the SECOND removal early.
+func (c *supervisorController) handleReapFollowup(taskName string, generation int) {
+	if c == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+
+	// Finding C: stale-generation guard. If the live reap generation for this
+	// task no longer matches the generation this timer was armed for, a newer
+	// pendingReap window (or no window) owns the task now — this fire is stale.
+	curGen, hasGen := c.reapGeneration.Load(taskName)
+	if !hasGen {
+		return // already resolved/cleared; nothing to do
+	}
+	if g, ok := curGen.(int); !ok || g != generation {
+		c.emitReapEvent("debug", "orphan-reap-followup-stale", taskName,
+			"follow-up timer fired with a generation that no longer matches the live pendingReap window (remove→reappear→remove or already-resolved); ignoring so it cannot confirm a later removal early")
+		return
+	}
+
+	// Still the owning generation. Re-load the captured descriptor.
+	v, still := c.pendingReap.Load(taskName)
+	if !still {
+		return // resolved between arm and fire (a real intent-change scan handled it)
+	}
+	d, _ := v.(*api.SupervisorDaemon)
+	if d == nil {
+		return
+	}
+
+	// Finding A: confirm absence against a FRESH on-disk read, not the cache.
+	fresh, freshOK := c.freshIntentForReap()
+	present := c.taskPresentInFreshIntent(taskName, fresh, freshOK)
+	if present {
+		// Re-appeared on disk since the mark — cancel, no terminate. The
+		// intentCache may not yet reflect the re-add (the 60s IntentWatcher
+		// hasn't polled), so REFRESH it from the authoritative fresh read FIRST,
+		// then replay any deferred backoff timer (finding E) so a re-driven
+		// EvTimerDue routes against the now-cached descriptor instead of
+		// orphan-dropping. cancelPendingReap then drops the shadow/marker.
+		if freshOK && fresh != nil && c.intentCache != nil {
+			c.intentCache.Refresh(fresh)
+		}
+		c.replayDeferredBackoffTimerIfPending(taskName)
+		c.clearReapDeferredStopIfPending(taskName)
+		c.cancelPendingReap(taskName)
+		c.emitReapEvent("debug", "orphan-reap-candidate-reappeared", taskName,
+			"removed descriptor re-appeared on disk by the follow-up tick (fresh read); reap canceled, deferred backoff timer (if any) replayed against the refreshed descriptor")
+		return
+	}
+	// Still absent on disk. If the SM settled on its own since the mark, clear.
+	if !c.smStateIsReapable(taskName) {
+		c.clearRemovedTaskRuntime(taskName)
+		c.emitReapEvent("debug", "orphan-reap-candidate-settled", taskName,
+			"removed descriptor settled to a non-live SM state by the follow-up tick (in-flight event routed via the shadow); stale runtime bookkeeping cleared, no terminate needed")
+		return
+	}
+	// Confirmed orphan — drive the SM-aware terminate for THIS task only.
+	c.resolveConfirmedReap(d)
+}
+
+// freshIntentForReap performs the injectable fresh on-disk supervisor-intent.json
+// read (finding A). Returns (intent, true) on a successful read, (nil, false)
+// when no reader is wired or the read errored — callers fall back to the
+// intentCache snapshot in that case.
+func (c *supervisorController) freshIntentForReap() (*api.SupervisorIntentFile, bool) {
+	if c.reapIntentReader == nil {
+		return nil, false
+	}
+	intent, err := c.reapIntentReader()
+	if err != nil {
+		return nil, false
+	}
+	return intent, true
+}
+
+// taskPresentInFreshIntent reports whether `taskName` is declared in the FRESH
+// on-disk intent read (finding A). On a read FAILURE (freshOK=false) it falls
+// back to the intentCache snapshot — strictly no worse than the pre-fix
+// cache-only behavior — rather than assuming absence, so a transient read glitch
+// never causes a spurious terminate.
+func (c *supervisorController) taskPresentInFreshIntent(taskName string, fresh *api.SupervisorIntentFile, freshOK bool) bool {
+	taskName = canonicalSupervisorTaskName(taskName)
+	if freshOK {
+		names := taskNameSetFromIntent(fresh)
+		_, present := names[taskName]
+		return present
+	}
+	if c.intentCache != nil {
+		if _, ok := c.intentCache.Lookup(taskName); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// replayDeferredBackoffTimerIfPending re-posts the single EvTimerDue that was
+// SUPPRESSED for a removed StBackoffWaiting daemon (finding E) when its removal
+// turns out to be a replace-in-place BLIP. Without the replay the one backoff
+// timer that already fired during the window is lost and the reappeared daemon
+// is stranded in backoff forever (the IntentWatcher posts no EvIntentUpdate for
+// an unchanged-Desired re-add, and does not run Reconcile). The descriptor MUST
+// be routable (in intentCache or the still-present shadow) when this runs — the
+// callers refresh the cache / call this before cancelPendingReap drops the
+// shadow. Uses PostSelf so the replayed EvTimerDue lands on the loop ahead of
+// pre-queued external events. MUST run on the event loop.
+func (c *supervisorController) replayDeferredBackoffTimerIfPending(taskName string) {
+	taskName = canonicalSupervisorTaskName(taskName)
+	if _, deferred := c.reapDeferredTimerDue.LoadAndDelete(taskName); !deferred {
+		return
+	}
+	if c.eventLoop == nil {
+		// Synchronous test fixtures: drive it inline.
+		c.handleLoopEvent(api.LoopEvent{Kind: api.EvTimerDue, TaskName: taskName})
+		return
+	}
+	if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvTimerDue, TaskName: taskName}) {
+		c.emitSelfChannelSaturated(taskName, "EvTimerDue")
+	}
+	c.emitReapEvent("debug", "orphan-reap-backoff-timer-replayed", taskName,
+		"replace-in-place reappear: replaying the backoff timer that was suppressed during the reap window so the reappeared daemon is not stranded (finding E anti-stranding)")
+}
+
 // resolvePendingReapsAgainstCurrentIntent re-evaluates EVERY pendingReap
-// candidate against the CURRENT (already-swapped) intent cache, independent of
-// any intent-file change. It is driven by the bounded follow-up tick armed in
-// markPendingReap so the reap completes even when intent then stays STABLE and
-// the IntentWatcher never fires again (finding 1). The logic mirrors the
-// pendingReap.Range arm of refreshSupervisorIntent but reads presence from the
-// live cache (the authoritative latest snapshot) instead of an `updated` file.
+// candidate against the CURRENT (already-swapped) intent cache. It is retained
+// for the rare callers that want a full cache-based sweep on the loop (it is no
+// longer the follow-up timer's path — that is handleReapFollowup, scoped to one
+// task + a fresh disk read). MUST run on the event loop.
 func (c *supervisorController) resolvePendingReapsAgainstCurrentIntent() {
 	if c == nil || c.intentCache == nil {
 		return
@@ -603,16 +922,17 @@ func (c *supervisorController) resolvePendingReapsAgainstCurrentIntent() {
 			return true
 		}
 		if _, here := present[taskName]; here {
-			// Re-appeared since the mark — cancel, no terminate.
+			c.replayDeferredBackoffTimerIfPending(taskName)
+			c.clearReapDeferredStopIfPending(taskName)
 			c.cancelPendingReap(taskName)
 			c.emitReapEvent("debug", "orphan-reap-candidate-reappeared", taskName,
-				"removed descriptor re-appeared by the follow-up tick; reap canceled")
+				"removed descriptor re-appeared by the cache sweep; reap canceled")
 			return true
 		}
 		if !c.smStateIsReapable(taskName) {
 			c.clearRemovedTaskRuntime(taskName)
 			c.emitReapEvent("debug", "orphan-reap-candidate-settled", taskName,
-				"removed descriptor settled to a non-live SM state by the follow-up tick (in-flight event routed via the shadow); stale runtime bookkeeping cleared, no terminate needed")
+				"removed descriptor settled to a non-live SM state by the cache sweep; stale runtime bookkeeping cleared, no terminate needed")
 			return true
 		}
 		if d, ok := value.(*api.SupervisorDaemon); ok && d != nil {
@@ -629,18 +949,28 @@ func (c *supervisorController) resolvePendingReapsAgainstCurrentIntent() {
 // task. It is the guaranteed second tick (finding 1): the two
 // refreshSupervisorIntent call sites only fire on an intent CHANGE, so in the
 // common uninstall/remove case (intent then stable) the confirming refresh
-// would never arrive. The timer drives resolvePendingReapsAgainstCurrentIntent
-// after reapFollowupDelay so the terminate fires within a bounded delay even if
-// intent mtime never changes again. Idempotent: a duplicate arm while one is
-// already pending is a no-op (the in-flight timer covers the window). On fire,
-// the timer clears its armed flag and resolves; if the task is still
-// pendingReap (e.g. a preserved terminate-failure), resolveConfirmedReap re-
-// arms via this same method.
+// would never arrive. The timer POSTS an EvReapFollowup event onto the loop;
+// the on-loop handleReapFollowup re-reads intent from disk and resolves the
+// task. Idempotent: a duplicate arm while one is already pending for the SAME
+// generation is a no-op; a fresh pendingReap generation always arms a new timer.
+//
+// MUST run on the event loop. The timer is generation-tagged (finding C): the
+// armed generation is recorded in reapFollowupArmed and posted in the event
+// body, and disarmReapFollowup Stops the live handle so a canceled/confirmed
+// reap's old timer cannot fire against a later window for the same task.
 func (c *supervisorController) armReapFollowup(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
-	if _, loaded := c.reapFollowupArmed.LoadOrStore(taskName, true); loaded {
-		return // a timer is already pending for this task
+	generation := c.currentReapGeneration(taskName)
+	if existing, loaded := c.reapFollowupArmed.Load(taskName); loaded {
+		if g, ok := existing.(int); ok && g == generation {
+			return // a timer for the current generation is already pending
+		}
+		// A timer for a STALE generation is still registered (should be rare —
+		// markPendingReap bumps the generation, and disarm Stops the old timer).
+		// Stop it before arming the new one so it cannot fire against this window.
+		c.stopReapTimer(taskName)
 	}
+	c.reapFollowupArmed.Store(taskName, generation)
 	delay := c.reapFollowupDelay
 	if delay <= 0 {
 		delay = reapFollowupDefaultDelay
@@ -649,26 +979,75 @@ func (c *supervisorController) armReapFollowup(taskName string) {
 	if after == nil {
 		after = func(d time.Duration, f func()) reapTimer { return time.AfterFunc(d, f) }
 	}
-	after(delay, func() {
-		// Clear the armed flag FIRST so resolveConfirmedReap's re-arm (on a
-		// preserved terminate-failure / deferred stop) takes effect.
-		c.reapFollowupArmed.Delete(taskName)
-		// Skip work if the candidate was already resolved between the timer
-		// arming and firing (a real intent-change refresh confirmed/canceled
-		// it). Range is cheap; resolvePendingReaps is a no-op when empty.
-		if _, still := c.pendingReap.Load(taskName); !still {
+	// The timer callback runs on the timer goroutine and does NOTHING but POST
+	// an EvReapFollowup onto the loop; ALL resolution runs in handleReapFollowup
+	// on the loop goroutine (findings A/B/C/H/I). When the event loop is absent
+	// (synchronous unit-test fixtures), invoke the handler inline so those tests
+	// keep deterministic single-goroutine semantics.
+	timer := after(delay, func() {
+		if c.eventLoop == nil {
+			c.handleReapFollowup(taskName, generation)
 			return
 		}
-		c.resolvePendingReapsAgainstCurrentIntent()
+		c.eventLoop.Post(api.LoopEvent{
+			Kind:     evReapFollowup,
+			TaskName: taskName,
+			Body: map[string]any{
+				reapFollowupGenerationBodyKey: generation,
+			},
+		})
 	})
+	c.reapTimers.Store(taskName, timer)
 }
 
-// disarmReapFollowup clears the armed flag for a task whose reap was canceled or
-// confirmed-dead. A still-pending timer that later fires becomes a cheap no-op
-// (pendingReap.Load misses), so we do not need to Stop a concrete timer handle;
-// dropping the flag is sufficient and avoids tracking per-task timer pointers.
+// currentReapGeneration returns the task's current reap generation, defaulting
+// to 0 when none is recorded. MUST run on the event loop.
+func (c *supervisorController) currentReapGeneration(taskName string) int {
+	if v, ok := c.reapGeneration.Load(taskName); ok {
+		if g, ok := v.(int); ok {
+			return g
+		}
+	}
+	return 0
+}
+
+// bumpReapGeneration advances the task's reap generation and returns the new
+// value. Called by markPendingReap when a FRESH pendingReap window opens for the
+// task (a brand-new disappearance), so each window's follow-up timer carries a
+// distinct generation and a stale timer from a previous window is detectable
+// (finding C). MUST run on the event loop.
+func (c *supervisorController) bumpReapGeneration(taskName string) int {
+	next := c.currentReapGeneration(taskName) + 1
+	c.reapGeneration.Store(taskName, next)
+	return next
+}
+
+// disarmReapFollowup clears the armed record for a task whose reap was canceled
+// or confirmed-dead, AND Stops the live timer handle so its callback never fires
+// against a LATER window for the same task (finding C — a bare flag clear left
+// the underlying time.AfterFunc running). It deliberately does NOT delete
+// reapGeneration: the generation must stay MONOTONIC per task so a subsequent
+// remove→reappear→remove-again opens a STRICTLY GREATER generation (bumpReapGeneration
+// reads the current value + 1), letting the stale-timer guard in handleReapFollowup
+// distinguish the first window's late timer from the second window. A still-pending
+// timer that fires after disarm is neutralized by BOTH the generation guard and
+// the pendingReap.Load miss. MUST run on the event loop.
 func (c *supervisorController) disarmReapFollowup(taskName string) {
-	c.reapFollowupArmed.Delete(canonicalSupervisorTaskName(taskName))
+	taskName = canonicalSupervisorTaskName(taskName)
+	c.reapFollowupArmed.Delete(taskName)
+	c.stopReapTimer(taskName)
+}
+
+// stopReapTimer Stops + drops the live follow-up timer handle for a task, if
+// any. Stop is best-effort: a timer that has already fired (its post is in
+// flight) is additionally neutralized by the generation guard in
+// handleReapFollowup. MUST run on the event loop.
+func (c *supervisorController) stopReapTimer(taskName string) {
+	if v, ok := c.reapTimers.LoadAndDelete(taskName); ok {
+		if t, ok := v.(reapTimer); ok && t != nil {
+			t.Stop()
+		}
+	}
 }
 
 // taskNameSetFromIntent returns the canonical task-name set declared by an
@@ -842,17 +1221,24 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 	sideErr := c.executeSideEffect(side, newState, d, api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: taskName})
 	switch newState {
 	case api.StExiting:
-		if sideErr != nil {
-			// Terminate FAILED — the targeted PID may still be alive. Roll the
-			// SM state (and the queued action we just wrote) BACK to the
-			// pre-transition LIVE state so a later follow-up tick re-drives the
-			// FULL terminate from StRunning rather than getting stuck at
-			// StExiting, where reapRemovedDaemon's own StExiting short-circuit
-			// (which assumes a real EvChildExit will finish the exit) would defer
-			// forever — no real exit is coming for a failed terminate. Preserving
-			// the live state is the honest reflection of reality (the daemon is,
-			// as far as we know, still running) and is what makes the retry
-			// actually re-issue the kill (finding 2).
+		// Finding F: a non-nil terminate error does NOT always mean "process may
+		// still be alive". The production TerminateFunc returns errTerminateTargetGone
+		// when the targeted process is ALREADY GONE (no running PID recorded; or the
+		// kill succeeded but a post-kill teardown / persist failed). Those are
+		// CONFIRMED-DEAD — clearing is correct; preserving + retrying forever would
+		// loop and leave a later re-registration stuck at stale StRunning-no-PID.
+		// Only a GENUINELY-uncertain error (PID-state query / verify / kill failure,
+		// NOT wrapped with errTerminateTargetGone) is preserved for retry (finding 2).
+		if sideErr != nil && !errors.Is(sideErr, errTerminateTargetGone) {
+			// Terminate FAILED while the process may still be alive. Roll the SM
+			// state (and the queued action we just wrote) BACK to the pre-transition
+			// LIVE state so a later follow-up tick re-drives the FULL terminate from
+			// StRunning rather than getting stuck at StExiting, where
+			// reapRemovedDaemon's own StExiting short-circuit (which assumes a real
+			// EvChildExit will finish the exit) would defer forever — no real exit is
+			// coming for a failed terminate. Preserving the live state is the honest
+			// reflection of reality (the daemon is, as far as we know, still running)
+			// and is what makes the retry actually re-issue the kill (finding 2).
 			c.smStates.Store(taskName, currentState)
 			if v, ok := c.queuedActions.Load(taskName); ok {
 				if qa, ok := v.(string); ok && qa == "" {
@@ -864,11 +1250,63 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 			}
 			return reapTerminateFailed
 		}
+		// sideErr == nil (clean terminate) OR errTerminateTargetGone (already gone):
+		// the orphan is confirmed dead.
+		//
+		// Finding G: for an OWN-spawned daemon whose cmd.Wait reaper is still
+		// outstanding, the terminate killed the child but the reaper goroutine will
+		// STILL run its MarkExited + persist + post the real EvChildExit. If we
+		// clearRemovedTaskRuntime (tracker.Remove + drop shadow) RIGHT NOW, that
+		// later MarkExited resurrects a stale idle tracker row (the removal is not
+		// durable) AND the real EvChildExit orphan-drops against the now-missing
+		// shadow. So DEFER: keep the shadow + pendingReap so the real EvChildExit
+		// routes via the shadow (StExiting + EvChildExit -> StIdle), settling the
+		// task to a non-reapable state; the follow-up tick then clears the
+		// bookkeeping AFTER the reaper's MarkExited has run, so the clear is durable.
+		// errTerminateTargetGone implies no live reaper is coming (no-PID / already
+		// gone), so that path is NOT deferred. A foreign warm-start PID (not
+		// own-spawned, reaper not outstanding) is also not deferred — it has no
+		// cmd.Wait and is synthesized/cleared immediately as before.
+		if sideErr == nil {
+			_, owned := c.ownSpawned.Load(taskName)
+			_, reaperPending := c.reaperOutstanding.Load(taskName)
+			if owned || reaperPending {
+				c.emitReapEvent("debug", "orphan-reap-await-own-reaper", taskName,
+					"own-spawned daemon terminated; deferring the tracker/shadow clear until the daemon's own cmd.Wait reaper posts the real EvChildExit, so a late MarkExited cannot resurrect a stale idle row and the exit is not orphan-dropped (finding G)")
+				return reapDeferred
+			}
+		}
+		// Confirmed dead with no own reaper outstanding — clear bookkeeping now.
 		return reapTerminatedDead
 	case api.StSpawning:
+		// The reap set queued_action=stop on a still-spawning daemon (the terminate
+		// is deferred to the spawn-completion event). Mark it REAP-originated so a
+		// replace-in-place reappear before the spawn completes can clear the stop
+		// and NOT terminate the re-added daemon (finding D).
+		c.reapDeferredStop.Store(taskName, true)
 		return reapDeferred
 	default:
 		return reapTerminatedDead
+	}
+}
+
+// clearReapDeferredStopIfPending clears a REAP-originated queued_action=stop when
+// a removed-while-StSpawning daemon REAPPEARS before its spawn completes (finding
+// D). Without this, the queued stop the reap set survives the cancel and the next
+// EvHealthOK drives the re-added daemon (which the operator wants RUNNING) to
+// StExiting -> terminate. It only clears a stop the REAP set (the marker), never
+// an operator-set stop. MUST run on the event loop.
+func (c *supervisorController) clearReapDeferredStopIfPending(taskName string) {
+	taskName = canonicalSupervisorTaskName(taskName)
+	if _, deferred := c.reapDeferredStop.LoadAndDelete(taskName); !deferred {
+		return
+	}
+	if v, ok := c.queuedActions.Load(taskName); ok {
+		if qa, ok := v.(string); ok && qa == "stop" {
+			c.queuedActions.Store(taskName, "")
+			c.emitReapEvent("debug", "orphan-reap-deferred-stop-cleared", taskName,
+				"removed-while-spawning daemon re-appeared before its spawn completed; clearing the reap-originated queued_action=stop so the spawn-completion event does NOT terminate the re-added daemon (finding D)")
+		}
 	}
 }
 
@@ -905,6 +1343,17 @@ func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	// no-op (pendingReap.Load misses).
 	c.reapShadow.Delete(taskName)
 	c.disarmReapFollowup(taskName)
+	// Drop any suppressed-backoff-timer marker (finding E): the reap is done, so
+	// there is no blip to replay the timer against. A confirmed removal that
+	// suppressed a backoff EvTimerDue during the window drove StBackoffWaiting ->
+	// StIdle ("cancel timer") in reapRemovedDaemon, so the suppressed timer is
+	// correctly abandoned here rather than leaked into a future window.
+	c.reapDeferredTimerDue.Delete(taskName)
+	// Drop the reap-originated deferred-stop marker (finding D): a confirmed
+	// removal that deferred a StSpawning stop is being cleared (the stop was
+	// applied by the spawn-completion event, or the task is gone), so the marker
+	// must not leak into a later re-registration window.
+	c.reapDeferredStop.Delete(taskName)
 	// Drop the own-spawned marker: a re-registered task with the same name
 	// must be reclassified from scratch so a stale "owned" entry does not
 	// suppress a later genuinely-foreign-PID synthesize.
@@ -1217,6 +1666,30 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	if c == nil {
 		return
 	}
+	// Controller-internal reap lifecycle events are intercepted HERE — before any
+	// of the api.Transition dispatch below — and routed to the reap handlers. They
+	// are NOT rows in the SM table; running their mutations on this single loop
+	// goroutine is the class fix for Codex pr302 r3 findings A/B/C/H/I (the
+	// off-loop watcher / IPC / follow-up-timer goroutines now only DETECT + POST).
+	switch ev.Kind {
+	case evReapScan:
+		prev, _ := ev.Body[reapScanPreviousNamesBodyKey].(map[string]struct{})
+		next, _ := ev.Body[reapScanNextNamesBodyKey].(map[string]struct{})
+		captured, _ := ev.Body[reapScanCapturedBodyKey].(map[string]*api.SupervisorDaemon)
+		c.handleReapScan(prev, next, captured)
+		return
+	case evReapFollowup:
+		generation, _ := ev.Body[reapFollowupGenerationBodyKey].(int)
+		c.handleReapFollowup(ev.TaskName, generation)
+		return
+	case evReapBarrier:
+		// TEST-ONLY: signal the waiting test goroutine that the loop has drained
+		// up to and including this event.
+		if ch, ok := ev.Body[reapBarrierResultBodyKey].(chan struct{}); ok {
+			close(ch)
+		}
+		return
+	}
 	// Any EvChildExit reaching the controller is an observation that the
 	// task's real own reaper (if it had one) has fired its exit — clear
 	// the reaperOutstanding marker so a subsequent terminate is free to
@@ -1271,6 +1744,25 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	if v, ok := c.smStates.Load(ev.TaskName); ok {
 		if s, ok := v.(api.SMState); ok {
 			currentState = s
+		}
+	}
+	// Finding E: SUPPRESS the respawn a StBackoffWaiting daemon's backoff timer
+	// would otherwise drive while the task is in the pendingReap window. A
+	// backoff-waiting task has NO live child; spawning the OLD descriptor during
+	// the verification window binds a port the user just removed (a transient
+	// orphan / port-collision with a replacement daemon). We record that the
+	// timer FIRED (reapDeferredTimerDue) and return WITHOUT transitioning, so the
+	// task stays StBackoffWaiting. If the removal turns out to be a replace-in-
+	// place BLIP, the reappear path REPLAYS this dropped EvTimerDue so the daemon
+	// is not stranded (the anti-stranding invariant of the original finding 5);
+	// if the removal is confirmed, the reap drives StBackoffWaiting +
+	// EvIntentUpdate(stopped) -> StIdle ("cancel timer") and clears the marker.
+	if ev.Kind == api.EvTimerDue && currentState == api.StBackoffWaiting {
+		if _, pending := c.pendingReap.Load(ev.TaskName); pending {
+			c.reapDeferredTimerDue.Store(ev.TaskName, true)
+			c.emitReapEvent("debug", "orphan-reap-backoff-timer-deferred", ev.TaskName,
+				"a removed StBackoffWaiting daemon's backoff timer fired during the reap window; suppressing the respawn (finding E) and remembering the timer so a replace-in-place reappear can replay it without stranding the daemon")
+			return
 		}
 	}
 	// Deliberate-shutdown contract: a CLEAN child exit (exit 0, no wait
