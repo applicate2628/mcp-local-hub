@@ -346,22 +346,11 @@ func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
 	})
 }
 
-// TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess pins the bot PR #288
-// r35-1 (site 2) fix: when the trusted PID kill reports the process ALREADY GONE
-// ("already gone"/"no such process"/etc), the daemon is confirmed dead, so the
-// force-stop goal already holds and the already-gone branch returns clean success
-// UNCONDITIONALLY — regardless of d.Port — WITHOUT consulting the port classifier.
-//
-// This inverts the prior entrenching assertion (the old
-// TestStopForcePIDKillErrorFallsThroughToPortClassifier), which required the
-// already-gone case with d.Port != 0 to fall through to the port classifier
-// (portLookups > 0). That fall-through was exactly the POSIX bug: on non-Windows
-// lookupProcess is nil, so killDaemonByPortOutcome returns portKillLookupUnavailable
-// and the caller turned a confirmed-dead daemon into a "no usable port-release
-// proof" FAILED row. The identity-refusal fall-through (a PID that was NEVER
-// killed) is a DISTINCT, still-correct case covered by
-// TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier above.
-func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
+// TestStopForceAlreadyGonePIDKillFallsThroughToPortClassifier verifies that an
+// already-gone PID kill result is not unconditional success when a descriptor
+// port exists. The port classifier must still prove that the port has no
+// listener (or otherwise handle/report it) before the row can be successful.
+func TestStopForceAlreadyGonePIDKillFallsThroughToPortClassifier(t *testing.T) {
 	const taskName = `\mcp-local-hub-laneatest-default`
 	const bareTask = "mcp-local-hub-laneatest-default"
 	const pid = 62201
@@ -378,8 +367,12 @@ func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
 		stopForceKillPIDFn = origPIDKill
 	})
 
+	var portLookups int
 	forceKillByPortFn = func(p int, _ time.Duration) (portKillOutcome, error) {
-		t.Fatalf("forceKillByPortFn called for port %d after an already-gone PID kill; the daemon is confirmed dead", p)
+		portLookups++
+		if p != port {
+			t.Fatalf("forceKillByPortFn port = %d, want %d", p, port)
+		}
 		return portKillNoListener, nil
 	}
 	processIdentityByPID = func(gotPID int) (string, string, bool) {
@@ -394,12 +387,8 @@ func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
 		}
 		return errors.New("synthetic stale PID already gone")
 	}
-	var portLookups int
 	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
-		portLookups++
-		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
-		}
+		t.Fatalf("lookupProcess called directly for port %d; want forceKillByPortFn seam", gotPort)
 		return 0, 0, 0, false
 	}
 
@@ -408,10 +397,10 @@ func TestStopForceAlreadyGonePIDKillShortCircuitsToSuccess(t *testing.T) {
 		map[string]int{bareTask: pid},
 	)
 	if result.Err != "" {
-		t.Fatalf("forceKillOneSupervisorTarget error = %q, want clean success after an already-gone PID kill (confirmed dead)", result.Err)
+		t.Fatalf("forceKillOneSupervisorTarget error = %q, want clean success when the port classifier reports no listener", result.Err)
 	}
-	if portLookups != 0 {
-		t.Fatalf("port classifier consulted %d times after an already-gone PID kill; want 0 — already-gone short-circuits to success before the port path", portLookups)
+	if portLookups != 1 {
+		t.Fatalf("port classifier consulted %d times after an already-gone PID kill; want 1", portLookups)
 	}
 }
 

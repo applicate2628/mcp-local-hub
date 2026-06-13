@@ -23,6 +23,10 @@ func TestStartWithJob_SetsParentDeathSignal(t *testing.T) {
 	if cmd.SysProcAttr.Pdeathsig != syscall.SIGKILL {
 		t.Fatalf("Pdeathsig=%v, want SIGKILL", cmd.SysProcAttr.Pdeathsig)
 	}
+
+	if !cmd.SysProcAttr.Setpgid {
+		t.Fatal("StartWithJob must set SysProcAttr.Setpgid on Linux so TreeKillByPID reaches daemon descendants")
+	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("wait child: %v", err)
 	}

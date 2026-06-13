@@ -1032,21 +1032,12 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 	}
 }
 
-// TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning
+// TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsUnverifiedPIDKill
 // covers the POSIX supervisor-owned force path: descriptor ports exist, but the
-// Windows-only port lookup hook is structurally absent (lookupProcess == nil on
-// non-Windows). A SUCCESSFUL trusted PID/tree kill IS the proof the daemon is
-// gone, so the force-stop goal is achieved: the per-target row must be SUCCESS
-// (empty Err) carrying a warning that notes the port-release proof was
-// unavailable on this platform but the trusted kill succeeded (bot PR #288
-// r35-1, site 1). The pre-fix code demanded a port-release proof it could not
-// supply and turned the success into a FAILED stop — this test inverts that
-// entrenching assertion.
-//
-// Negative-control (now matched by the assertions): keep returning success after
-// the PID kill and this test observes an empty per-target Err despite no
-// port-release proof.
-func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning(t *testing.T) {
+// Windows-only port lookup hook is structurally absent. A successful PID kill is
+// not enough to prove the descriptor port was released, so the per-target row
+// must fail closed rather than reporting success with only a warning.
+func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsUnverifiedPIDKill(t *testing.T) {
 	stateDir := phaseFStateDir(t)
 	intent := &SupervisorIntentFile{
 		Version: 1,
@@ -1103,14 +1094,14 @@ func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnver
 	if len(results) != 1 {
 		t.Fatalf("unexpected results: %+v", results)
 	}
-	if results[0].Err != "" {
-		t.Fatalf("results[0].Err = %q, want empty — a successful trusted PID kill IS the proof on a host with no port-owner lookup", results[0].Err)
+	if results[0].Err == "" {
+		t.Fatal("results[0].Err is empty, want failure when POSIX port-release proof is unavailable after PID kill")
 	}
-	if results[0].Warning == "" {
-		t.Fatalf("results[0].Warning = %q, want a non-empty warning noting the trusted kill succeeded without a port-release proof", results[0].Warning)
+	if !strings.Contains(results[0].Err, "port-release proof unavailable") {
+		t.Fatalf("results[0].Err = %q, want unavailable port-release proof", results[0].Err)
 	}
-	if !strings.Contains(results[0].Warning, "trusted PID/tree kill succeeded") {
-		t.Fatalf("results[0].Warning = %q, want it to note the trusted PID/tree kill succeeded", results[0].Warning)
+	if results[0].Warning != "" {
+		t.Fatalf("results[0].Warning = %q, want empty warning on failed unverified stop", results[0].Warning)
 	}
 }
 

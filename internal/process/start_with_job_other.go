@@ -25,6 +25,7 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 		return 0, errors.New("StartWithJob: nil cmd")
 	}
 	SetParentDeathSignal(cmd)
+	NewProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
