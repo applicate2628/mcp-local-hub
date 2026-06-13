@@ -102,6 +102,44 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_SparesHyphenSibling(t *
 	}
 }
 
+func TestCleanupLegacySchedulerTasksForSupervisorInstall_ReclaimsOwnHyphenatedDaemonDespiteAvailableLongerManifest(t *testing.T) {
+	daemonIntentTestHelper(t)
+	// demo-alpha is merely available in the manifest catalog. The task below is
+	// declared by demo itself (daemon alpha-beta), so the catalog entry must not
+	// make cleanup preserve the stale demo task.
+	seedInstalledServerManifests(t, "demo", "demo-alpha")
+
+	f := newInstallFakeScheduler()
+	f.listSeed = []scheduler.TaskStatus{
+		{Name: `\mcp-local-hub-demo-alpha-beta`},
+	}
+	installFakeScheduler(t, f)
+
+	origLookup := lookupProcess
+	lookupProcess = nil
+	t.Cleanup(func() { lookupProcess = origLookup })
+
+	origKill := forceKillByPortFn
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		return portKillNoListener, nil
+	}
+	t.Cleanup(func() { forceKillByPortFn = origKill })
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "alpha-beta", Port: 9314}},
+	}
+	var buf bytes.Buffer
+	cleanupLegacySchedulerTasksForSupervisorInstall(m, "", &buf)
+
+	if !sliceContainsBare(f.deleteNames, "mcp-local-hub-demo-alpha-beta") {
+		t.Fatalf("cleanup preserved demo's own hyphenated-daemon task because demo-alpha was available; deleteNames=%v", f.deleteNames)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // FIX 2 — legacySchedulerTasksForSupervisorInstallDryRun must MIRROR FIX 1: the
 // dry-run preview must not claim it will delete a hyphen sibling FIX 1 spares.
@@ -145,6 +183,32 @@ func TestLegacySchedulerTasksDryRun_SparesHyphenSibling(t *testing.T) {
 	}
 	if _, ok := listed["mcp-local-hub-demo-alpha"]; !ok {
 		t.Fatalf("dry-run preview omitted demo's own task \\mcp-local-hub-demo-alpha; preview=%v", preview)
+	}
+}
+
+func TestLegacySchedulerTasksDryRun_ReclaimsOwnHyphenatedDaemonDespiteAvailableLongerManifest(t *testing.T) {
+	daemonIntentTestHelper(t)
+	seedInstalledServerManifests(t, "demo", "demo-alpha")
+
+	f := newInstallFakeScheduler()
+	f.listSeed = []scheduler.TaskStatus{
+		{Name: `\mcp-local-hub-demo-alpha-beta`},
+	}
+	installFakeScheduler(t, f)
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "alpha-beta", Port: 9314}},
+	}
+	preview, err := legacySchedulerTasksForSupervisorInstallDryRun(m, "")
+	if err != nil {
+		t.Fatalf("legacySchedulerTasksForSupervisorInstallDryRun: %v", err)
+	}
+	if !sliceContainsBare(preview, "mcp-local-hub-demo-alpha-beta") {
+		t.Fatalf("dry-run preserved demo's own hyphenated-daemon task because demo-alpha was available; preview=%v", preview)
 	}
 }
 

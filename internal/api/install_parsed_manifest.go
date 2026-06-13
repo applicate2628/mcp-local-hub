@@ -843,6 +843,10 @@ func legacySchedulerTasksForSupervisorInstallDryRun(m *config.ServerManifest, da
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
+		if manifestDeclaresSchedulerTask(m, task.Name) {
+			out = append(out, name)
+			continue
+		}
 		if !blankServerRowOwnedByLongestInstalledPrefix(task.Name, m.Name, installed) {
 			continue
 		}
@@ -1275,6 +1279,16 @@ func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, d
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
+		// Exact manifest task ownership beats the longest-prefix fallback. The
+		// fallback's sibling protection is for ambiguous legacy rows; it must not
+		// preserve a stale task for this manifest just because a longer-prefix
+		// manifest is available in the catalog.
+		if manifestDeclaresSchedulerTask(m, task.Name) {
+			if deleteLegacySchedulerTaskBestEffort(sch, name, w) {
+				killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
+			}
+			continue
+		}
 		// Skip a hyphen-sibling's task: only delete tasks this server is the
 		// longest installed prefix of (mirrors the supervisor-intent ownership
 		// arm at supervisorIntentRowOwnedByScope's Arm 2).
@@ -1287,6 +1301,22 @@ func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, d
 			killLegacySchedulerTaskDaemonByPortBestEffort(name, daemonPortForLegacySchedulerTask(m, name), w)
 		}
 	}
+}
+
+func manifestDeclaresSchedulerTask(m *config.ServerManifest, taskName string) bool {
+	if m == nil || m.Name == "" {
+		return false
+	}
+	canonical := canonicalIntentTaskKey(taskName)
+	for _, d := range m.Daemons {
+		if d.Name == "" {
+			continue
+		}
+		if canonical == canonicalIntentTaskKey("mcp-local-hub-"+m.Name+"-"+d.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func deleteLegacySchedulerTaskBestEffort(sch interface{ Delete(string) error }, name string, w io.Writer) bool {
