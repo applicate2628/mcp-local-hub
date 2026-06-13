@@ -29,8 +29,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -242,6 +244,31 @@ func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testin
 	}
 	got := out.String()
 	for _, want := range []string{"supervisor-liveness task install failed", "mcphub setup", "schtasks /Create /XML"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout missing %q; got %q", want, got)
+		}
+	}
+}
+
+func TestSetup_NonWindowsLivenessNotImplementedContinues(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ErrNotImplemented liveness installs must fail closed on Windows")
+	}
+	_, fakeSch := setupWatchdogTestHelper(t)
+	fakeSch.importXMLErr = fmt.Errorf("linux scheduler backend: %w", scheduler.ErrNotImplemented)
+
+	out := &bytes.Buffer{}
+	if err := runSetupWatchdog(out, false); err != nil {
+		t.Fatalf("runSetupWatchdog: %v", err)
+	}
+	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness ImportXML calls = %d, want 1", got)
+	}
+	if !containsTask(fakeSch.deletes(), api.LegacyWatchdogTaskName) {
+		t.Errorf("expected legacy watchdog cleanup after POSIX liveness skip; got %v", fakeSch.deletes())
+	}
+	got := out.String()
+	for _, want := range []string{"supervisor-liveness task skipped", "Windows-only capability"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stdout missing %q; got %q", want, got)
 		}

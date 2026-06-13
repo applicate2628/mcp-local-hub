@@ -13,6 +13,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // ---------------------------------------------------------------------------
@@ -509,9 +510,13 @@ func runSetupWatchdog(out io.Writer, allowElevated bool) error {
 	// target name + the schtasks error) so the inert state is operator-visible
 	// rather than silent.
 	if livenessErr := a.InstallLivenessTask(); livenessErr != nil {
-		fmt.Fprintf(out, "✗ supervisor-liveness task install failed: %v\n", livenessErr)
-		fmt.Fprintf(out, "  Recovery: rerun `mcphub setup`; if Task Scheduler still rejects the task, inspect it with `schtasks /Query /TN %s` and rerun setup after Scheduler is healthy.\n", api.LivenessTaskName)
-		return forceExit(exitSetupLivenessInstallFailed)
+		if runtime.GOOS != "windows" && errors.Is(livenessErr, scheduler.ErrNotImplemented) {
+			fmt.Fprintf(out, "⚠ supervisor-liveness task skipped: %v (Windows-only capability)\n", livenessErr)
+		} else {
+			fmt.Fprintf(out, "✗ supervisor-liveness task install failed: %v\n", livenessErr)
+			fmt.Fprintf(out, "  Recovery: rerun `mcphub setup`; if Task Scheduler still rejects the task, inspect it with `schtasks /Query /TN %s` and rerun setup after Scheduler is healthy.\n", api.LivenessTaskName)
+			return forceExit(exitSetupLivenessInstallFailed)
+		}
 	} else {
 		fmt.Fprintf(out, "✓ Installed scheduled task: %s (supervisor-liveness, cadence 1 min)\n", api.LivenessTaskName)
 		fmt.Fprintf(out, "  State directory: %s\n", stateDir)
