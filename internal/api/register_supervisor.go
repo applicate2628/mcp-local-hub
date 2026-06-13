@@ -492,8 +492,55 @@ func (a *API) RemoveSerenaSupervisorIntentForWorkspace(workspacePath string) (bo
 			}
 			return true, fmt.Errorf("supervisor reconcile after removing %s failed while supervisor is alive; restored supervisor intent descriptor; retry unregister: %w", taskName, err)
 		}
+		// ErrSupervisorIPCUnavailable does NOT by itself mean the teardown is
+		// durable. The error fires for BOTH "no supervisor at all" (benign — the
+		// on-disk descriptor removal is final, nothing respawns the daemon) AND
+		// "a supervisor holds supervisor.lock but its IPC listener is wedged"
+		// (dangerous — that live supervisor still has the now-removed descriptor
+		// in memory, so its reaper keeps or respawns the orphaned Serena daemon,
+		// while the caller proceeds to delete the registry row; on retry there is
+		// no row left to drive the paired teardown). Probe the flock-authoritative
+		// lock owner to tell the two apart — the SAME live-owner probe seam
+		// demoteIPCUnavailableWhenOwnerAlive uses on the removed-target kill path.
+		// Unlike the install nudge we do NOT start the autostart owner here: this
+		// is a teardown, not a bring-up, so there is no owner to start.
+		if alive, pid, probeErr := serenaSupervisorOwnerAliveOnIPCUnavailable(); probeErr != nil || alive {
+			if restoreSupervisorIntent != nil {
+				restoreSupervisorIntent()
+			}
+			if probeErr != nil {
+				// Cannot resolve / probe the lock owner → unknown liveness. A live
+				// wedged supervisor is the dangerous case, so fail closed: restore
+				// the descriptor and make the caller retry rather than orphan a daemon.
+				return true, fmt.Errorf("supervisor reconcile after removing %s reported IPC unavailable and the lock-owner probe failed (%v); restored supervisor intent descriptor; resolve the supervisor state then retry unregister: %w", taskName, probeErr, err)
+			}
+			return true, fmt.Errorf("supervisor reconcile after removing %s reported IPC unavailable but supervisor lock owner pid=%d is alive (IPC wedged); the live supervisor still tracks the daemon, so restored supervisor intent descriptor; run `mcphub restart` or kill the wedged process, then retry unregister: %w", taskName, pid, err)
+		}
+		// No live lock owner: IPC really is unavailable because no supervisor is
+		// running. The on-disk removal is durable and nothing will respawn the
+		// daemon, so the teardown succeeded.
 	}
 	return true, nil
+}
+
+// serenaSupervisorOwnerAliveOnIPCUnavailable probes the flock-authoritative
+// supervisor lock owner so RemoveSerenaSupervisorIntentForWorkspace can demote a
+// reconcile ErrSupervisorIPCUnavailable into a failed teardown when a live but
+// wedged supervisor still owns the removed descriptor in memory. It reuses the
+// SAME installSupervisorRunningProbeFn + DaemonStateDir() seam as
+// demoteIPCUnavailableWhenOwnerAlive (install_parsed_manifest.go). A non-nil
+// probeErr means the owner liveness is unknown; callers MUST fail closed
+// (treat as alive) on probeErr.
+func serenaSupervisorOwnerAliveOnIPCUnavailable() (alive bool, pid int, probeErr error) {
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return false, 0, fmt.Errorf("resolve state dir before serena-teardown owner probe: %w", err)
+	}
+	running, ownerPID, err := installSupervisorRunningProbeFn(stateDir)
+	if err != nil {
+		return false, 0, fmt.Errorf("probe supervisor before serena teardown: %w", err)
+	}
+	return running, ownerPID, nil
 }
 
 func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), bool, error) {
