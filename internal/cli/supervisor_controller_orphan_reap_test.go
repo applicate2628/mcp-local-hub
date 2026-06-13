@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -66,6 +67,11 @@ type reapTestHarness struct {
 	// its own goroutine.
 	followupMu       sync.Mutex
 	pendingFollowups []func()
+	// eventsPath is the JSONL supervisor-events.log path the harness opened, so a
+	// test can read it (via readSupervisorEventsLog) to assert which lifecycle
+	// events fired/did-not-fire — e.g. the pr302 r9 bare-own-spawned reap test
+	// asserts NO daemon-foreign-exit-synthesized row was written.
+	eventsPath string
 }
 
 func newReapTestHarness(t *testing.T) *reapTestHarness {
@@ -94,6 +100,7 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
 		spawnCalls:     &spawnCalls,
 		terminateCalls: &terminateCalls,
 		terminatedPIDs: terminatedPIDs,
+		eventsPath:     eventsPath,
 	}
 	h.ctrl = &supervisorController{
 		intentCache:  newIntentCache(),
@@ -2292,5 +2299,136 @@ func TestSupervisorController_OrphanReap_R8_BareKeyBackoffRemovedDoesNotRespawnO
 	}
 	if _, ok := h.ctrl.smStates.Load(bare.TaskName); ok {
 		t.Fatalf("r8: the bare EvTimerDue must not create a parallel bare smStates row")
+	}
+}
+
+// (R9 single-key-space sweep) TestSupervisorController_OrphanReap_R9_BareKeyStillRunningReapNoForeignSynthesize
+// is the falsifier for the ONE guard the r8 sweep missed: executeSideEffect's StExiting
+// synthesize-guard (supervisor_controller.go ~2927-2929) read ownSpawned / reaperOutstanding
+// by the RAW d.TaskName instead of the canonical-aware loadReapMarkerCanonical. The reap
+// path (reapRemovedDaemon) fires the terminate via executeSideEffect passing the RAW captured
+// descriptor — for a LEGACY bare-key intent row d.TaskName is the BARE form, while r8 stored
+// the spawn-time ownSpawned / reaperOutstanding markers under the CANONICAL key. So for a bare
+// OWN-spawned daemon the guard read owned=false + reaperPending=false.
+//
+// When the reap terminate of a STILL-StRunning own-spawned daemon returns nil (the Windows
+// path — finishProductionTerminate's no-op-nil persist-success contract; the harness terminate
+// fake mirrors it by returning nil), the buggy guard satisfied
+// `termErr == nil && !owned && !reaperPending` and FIRED synthesizeForeignChildExit — emitting
+// a daemon-foreign-exit-synthesized event AND self-posting a spurious EvChildExit that RACES
+// the daemon's REAL cmd.Wait reaper exit (the Conc-F3 double-emit the guard's own comment warns
+// against). The two guards on the same reap path then DISAGREED: reapRemovedDaemon's own
+// canonical-aware owned/reaperPending check (supervisor_controller.go ~1839-1840) saw owned=true
+// and deferred, while executeSideEffect's guard saw owned=false and synthesized.
+//
+// CRITICAL contrast with the two r8 tests above: both r8 tests move the SM OFF StRunning via a
+// real EvChildExit (crash -> StBackoffWaiting) BEFORE any reap terminate would fire StExiting,
+// so they never exercise the StRunning -> StExiting own-spawned terminate where this guard lives.
+// This test KEEPS the bare own-spawned daemon at StRunning when the reap terminate fires, so the
+// StExiting transition (and its synthesize-guard) runs directly off the live own-spawned state.
+//
+// Asserts (post-fix): the canonical-aware guard reads owned=true -> synthesizeForeignChildExit is
+// SUPPRESSED -> NO daemon-foreign-exit-synthesized event and NO spurious respawn. Pre-fix (revert
+// the 2927-2928 loads to the raw d.TaskName) this FAILS at the no-synthesize assertion.
+func TestSupervisorController_OrphanReap_R9_BareKeyStillRunningReapNoForeignSynthesize(t *testing.T) {
+	h := newReapTestHarness(t)
+	// Legacy bare-key own-spawned descriptor (no leading backslash), exactly as a
+	// hand-written / pre-canonicalization intent row appears on disk.
+	bare := reapTestDescriptor()
+	bare.TaskName = "mcp-local-hub-lsp-deadbeef-go" // no leading "\"
+	canonical := canonicalSupervisorTaskName(bare.TaskName)
+
+	h.ctrl.intentCache.Refresh(intentWith(bare))
+	h.setFreshIntent(intentWith(bare))
+
+	// Phase 1 — SPAWN the bare own-spawned daemon through the REAL loop. EvStart (bare) ->
+	// StSpawning -> spawn fake -> PostSelf EvHealthOK -> StRunning. executeSideEffect's
+	// spawn-success branch records ownSpawned + reaperOutstanding under the CANONICALIZED
+	// d.TaskName (the single-key-space invariant). A real reaper is now (notionally) live, so
+	// reaperOutstanding stays set until a real EvChildExit is observed.
+	h.postEvent(api.LoopEvent{Kind: api.EvStart, TaskName: bare.TaskName})
+	h.tracker.MarkSpawned(bare.TaskName, 90201, time.Now().UTC())
+
+	if st, ok := h.ctrl.GetSMState(canonical); !ok || st != api.StRunning {
+		t.Fatalf("r9: the bare own-spawned daemon must reach StRunning under the canonical key; got state=%v ok=%v", st, ok)
+	}
+	if !h.ctrl.loadReapMarkerCanonical(&h.ctrl.ownSpawned, canonical) {
+		t.Fatalf("r9: spawn must record ownSpawned (canonical) for the own-spawned daemon")
+	}
+	if !h.ctrl.loadReapMarkerCanonical(&h.ctrl.reaperOutstanding, canonical) {
+		t.Fatalf("r9: spawn must record reaperOutstanding (canonical) for the own-spawned daemon")
+	}
+
+	// Phase 2 — REMOVE from intent (tick 1). The daemon is marked pendingReap but NOT
+	// terminated (verification window). We deliberately do NOT post the real EvChildExit, so
+	// the SM stays at StRunning — this is the state the two r8 tests never hold when the reap
+	// terminate fires.
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(canonical); !ok {
+		t.Fatalf("r9: a removed bare-key live daemon must be marked pendingReap (canonical)")
+	}
+	if st, ok := h.ctrl.GetSMState(canonical); !ok || st != api.StRunning {
+		t.Fatalf("r9: tick-1 must PRESERVE StRunning across the verification window; got state=%v ok=%v", st, ok)
+	}
+	if got := h.terminateCalls.Load(); got != 0 {
+		t.Fatalf("r9: tick-1 must NOT terminate (verification window); terminate calls = %d", got)
+	}
+
+	spawnsBefore := h.spawnCalls.Load()
+
+	// Phase 3 — CONFIRM removal (tick 2 still absent). The reap drives StRunning +
+	// EvIntentUpdate(stopped) -> StExiting and fires the terminate THROUGH executeSideEffect
+	// with the RAW captured descriptor (bare d.TaskName). The harness terminate fake returns
+	// nil (the Windows confirmed-terminated contract) and marks the tracker exited, so inside
+	// executeSideEffect's StExiting branch termErr == nil and the synthesize-guard is reached.
+	//
+	// Because the daemon is OWN-spawned with reaperOutstanding STILL set (no real EvChildExit
+	// was observed), reapRemovedDaemon's own canonical-aware owned/reaperPending check defers
+	// (Finding G), keeping the shadow + pendingReap for the real exit. The post-fix
+	// executeSideEffect guard, now also canonical-aware, agrees: owned=true -> the synthesize
+	// is SUPPRESSED. Pre-fix, the guard's raw Load(bare) missed the canonical markers ->
+	// owned=false + reaperPending=false -> synthesizeForeignChildExit fired.
+	h.refresh(emptyReapIntent())
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("r9: tick-2 confirmed removal must terminate the still-StRunning own-spawned orphan exactly once; terminate calls = %d", got)
+	}
+	select {
+	case pid := <-h.terminatedPIDs:
+		if pid != 90201 {
+			t.Fatalf("r9: reap terminated the wrong PID: got %d, want 90201 (the own-spawned child)", pid)
+		}
+	default:
+		t.Fatalf("r9: reap terminate did not record a target PID")
+	}
+
+	// PRIMARY assertion — the synthesize-guard must NOT have fired synthesizeForeignChildExit
+	// for the own-spawned daemon: no daemon-foreign-exit-synthesized event was written. PRE-fix
+	// (raw Load(bare) in the guard) this event IS present (owned read false), so this assertion
+	// is the RED-before / GREEN-after falsifier the finding targets.
+	logBody, err := readSupervisorEventsLog(h.eventsPath)
+	if err != nil {
+		t.Fatalf("r9: read supervisor events log: %v", err)
+	}
+	if strings.Contains(logBody, "daemon-foreign-exit-synthesized") {
+		t.Fatalf("r9: executeSideEffect synthesize-guard WRONGLY synthesized a foreign EvChildExit for a bare OWN-spawned daemon (a daemon-foreign-exit-synthesized event fired) — its raw d.TaskName marker load missed the canonical ownSpawned/reaperOutstanding markers, racing the real cmd.Wait reaper exit (Conc-F3 double-emit). The guard must use loadReapMarkerCanonical so it agrees with reapRemovedDaemon's own canonical-aware owned check (finding 4 sweep, pr302 r9)")
+	}
+
+	// SECONDARY assertion — no spurious respawn leaked from a synthesized exit (the StExiting
+	// queued_action is "" on the reap-stop path, so a synthetic exit would not by itself respawn,
+	// but assert spawn-count stability as a belt-and-suspenders that the spurious self-post did
+	// not perturb the SM into any spawn).
+	if got := h.spawnCalls.Load(); got != spawnsBefore {
+		t.Fatalf("r9: the reap of a still-running own-spawned daemon must not trigger any respawn; spawn calls went %d -> %d", spawnsBefore, got)
+	}
+
+	// The own-spawned reaperOutstanding marker MUST still be set (no real EvChildExit observed),
+	// proving the deferral path held and the synthesize was correctly suppressed rather than the
+	// real-exit clear having run.
+	if !h.ctrl.loadReapMarkerCanonical(&h.ctrl.reaperOutstanding, canonical) {
+		t.Fatalf("r9: reaperOutstanding (canonical) must remain set — no real EvChildExit was observed, so the reap must defer to it, not synthesize over it")
+	}
+	// No parallel BARE marker rows were created by the reap path.
+	if _, ok := h.ctrl.ownSpawned.Load(bare.TaskName); ok {
+		t.Fatalf("r9: the reap path must not create a parallel BARE ownSpawned row")
 	}
 }

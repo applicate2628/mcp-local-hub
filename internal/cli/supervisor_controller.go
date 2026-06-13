@@ -1295,7 +1295,15 @@ func (c *supervisorController) taskPresentInFreshIntent(taskName string, fresh *
 		return present
 	}
 	if c.intentCache != nil {
-		if _, ok := c.intentCache.Lookup(taskName); ok {
+		// LookupCanonical (not strict Lookup) so a legacy bare-keyed cache
+		// descriptor is found by the canonical query — taskName was canonicalized
+		// at the top of this function, so a strict Lookup(canonical) would MISS a
+		// bare-keyed remnant, the exact split-key-space class r8 closed elsewhere.
+		// This freshOK=false branch is unreachable from the sole caller
+		// (handleReapFollowup guards it before the call), so this changes no live
+		// behavior; it only keeps the single-key-space invariant consistent for any
+		// future caller (pr302 r9 sweep).
+		if _, ok := c.intentCache.LookupCanonical(taskName); ok {
 			return true
 		}
 	}
@@ -2925,8 +2933,21 @@ func (c *supervisorController) executeSideEffect(
 		//       never while the live daemon is still running. On a terminate
 		//       failure we leave the entry for the next liveness sweep /
 		//       retry rather than respawning over a possibly-live process.
-		_, owned := c.ownSpawned.Load(d.TaskName)
-		_, reaperPending := c.reaperOutstanding.Load(d.TaskName)
+		// The marker lookups go through loadReapMarkerCanonical so a legacy
+		// bare-key daemon's markers (stored under the canonical key at spawn
+		// time after the r8 handleLoopEvent canonicalization, but possibly under
+		// the bare key on a pre-r8 remnant) are still seen when this guard is
+		// reached via reapRemovedDaemon's terminate, which passes the RAW
+		// captured descriptor (d.TaskName is BARE for a legacy bare-key intent
+		// row). A strict Load(d.TaskName) here would miss the canonical-stored
+		// own-spawned/reaper markers for a bare daemon, read owned=false +
+		// reaperPending=false, and synthesize a spurious EvChildExit that races
+		// the daemon's REAL cmd.Wait reaper exit — double-emit (Conc-F3). This
+		// keeps the synthesize-guard in agreement with reapRemovedDaemon's own
+		// canonical-aware owned/reaperPending check (1839-1840) on the same reap
+		// path for a bare own-spawned daemon (finding 4 sweep, pr302 r9).
+		owned := c.loadReapMarkerCanonical(&c.ownSpawned, d.TaskName)
+		reaperPending := c.loadReapMarkerCanonical(&c.reaperOutstanding, d.TaskName)
 		if termErr == nil && !owned && !reaperPending {
 			c.synthesizeForeignChildExit(d, ev)
 		}
