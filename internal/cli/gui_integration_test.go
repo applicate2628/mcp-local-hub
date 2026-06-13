@@ -132,11 +132,28 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 		_ = os.RemoveAll(pidportDir)
 	})
 
-	// Give the first instance up to 5s to bind. Cold `go run` compile
-	// of cmd/mcphub can exceed 2s on a first invocation; 5s stays well
-	// under the test's 30s timeout and leaves margin for the second
-	// instance's own compile + handshake.
-	time.Sleep(5 * time.Second)
+	// Wait for the first instance to BIND, proven by its pidport file
+	// appearing in MCPHUB_GUI_TEST_PIDPORT_DIR (written when it acquires the
+	// single-instance lock + binds the port). Poll up to 25s instead of a
+	// fixed sleep: the prior fixed 5s flaked because the test_state_path_env
+	// build tag forces `go run` to compile a SEPARATE (uncached) cmd/mcphub
+	// binary whose cold compile can exceed 5s on a cold cache (PR #300 r2).
+	// The poll early-exits the instant the pidport appears — warm-cache runs
+	// still finish in ~1-2s, only the cold-compile case pays the longer
+	// ceiling, and the 25s worst case sits well under the 5m suite timeout.
+	pidportReady := false
+	for i := 0; i < 125; i++ {
+		if entries, derr := os.ReadDir(pidportDir); derr == nil && len(entries) > 0 {
+			pidportReady = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !pidportReady {
+		// Proceed anyway: the second-instance handshake assertion below
+		// produces a clearer failure than a bare timeout here would.
+		t.Logf("first instance pidport not observed in %s after 25s; proceeding", pidportDir)
+	}
 
 	second := exec.Command(exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--no-browser", "--no-tray")...)
 	second.Dir = root
