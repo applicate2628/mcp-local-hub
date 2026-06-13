@@ -405,6 +405,106 @@ func TestPortHeldBySupervisorIntentDaemonInternalPortRequiresWrapperAncestry(t *
 	}
 }
 
+func TestPreflight_ExternalPortDoesNotMatchSupervisorIntentInternalPort(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+
+	const (
+		externalPort = 33031
+		internalPort = externalPort + config.NativeHTTPInternalPortOffset
+		listenerPID  = 88031
+		wrapperPID   = 77031
+	)
+	const taskName = `\mcp-local-hub-demo-alpha`
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "demo",
+			Daemon:   "alpha",
+			Command:  "go",
+			Port:     externalPort,
+			RuntimeSpec: &DaemonRuntimeSpec{
+				SpecVersion:  DaemonRuntimeSpecVersion,
+				ExternalPort: externalPort,
+				UpstreamPort: internalPort,
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
+
+	origPortInUse := preflightPortInUse
+	origLookup := lookupProcess
+	origIdent := processIdentityByPID
+	origSched := schedulerStatusForOwnPort
+	origStatus := supervisorIPCStatusFn
+	origNameParent := processNameAndParentByPID
+	t.Cleanup(func() {
+		preflightPortInUse = origPortInUse
+		lookupProcess = origLookup
+		processIdentityByPID = origIdent
+		schedulerStatusForOwnPort = origSched
+		supervisorIPCStatusFn = origStatus
+		processNameAndParentByPID = origNameParent
+	})
+
+	preflightPortInUse = func(port int) bool { return port == internalPort }
+	lookupProcess = func(port int) (int, uint64, int64, bool) {
+		if port == internalPort {
+			return listenerPID, 0, 0, true
+		}
+		return 0, 0, 0, false
+	}
+	processIdentityByPID = func(pid int) (string, string, bool) {
+		if pid == listenerPID {
+			return "python.exe", "mcphub.exe", true
+		}
+		return "", "", false
+	}
+	schedulerStatusForOwnPort = func(string) (scheduler.TaskStatus, error) {
+		return scheduler.TaskStatus{}, scheduler.ErrTaskNotFound
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: wrapperPID, State: "Running"}}, nil
+	}
+	processNameAndParentByPID = fakeProcessNameAndParent(map[int]struct {
+		image  string
+		parent int
+	}{
+		listenerPID: {image: "python.exe", parent: wrapperPID},
+		wrapperPID:  {image: "mcphub.exe", parent: 1},
+	})
+
+	movedExternalPort := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "alpha", Port: internalPort}},
+	}
+	err := Preflight(movedExternalPort, "alpha")
+	if err == nil {
+		t.Fatal("Preflight accepted an external-port collision by matching a prior descriptor's internal port; want collision")
+	}
+	if !strings.Contains(err.Error(), "port 43031 already in use") {
+		t.Fatalf("Preflight error = %v, want external-port collision", err)
+	}
+
+	unchangedExternalPort := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "alpha", Port: externalPort}},
+	}
+	if err := Preflight(unchangedExternalPort, "alpha"); err != nil {
+		t.Fatalf("Preflight should still accept the matching internal port for the unchanged descriptor: %v", err)
+	}
+}
+
 func fakeProcessNameAndParent(rows map[int]struct {
 	image  string
 	parent int

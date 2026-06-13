@@ -995,7 +995,7 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	// supervisor to reconcile so the now-descriptorless daemon is terminated
 	// promptly instead of being respawned forever. Best-effort: a cleanup
 	// failure is a warning, never a hard error — uninstall is idempotent.
-	a.removeServerFromSupervisorIntentBestEffort(m.Name, report)
+	a.removeServerFromSupervisorIntentBestEffortForManifest(m, report)
 	// Remove client entries — but ONLY entries that are unambiguously
 	// hub-managed. PR #94's check was too permissive: it treated any
 	// loopback HTTP URL as hub-managed, so a user's own MCP server
@@ -1519,14 +1519,14 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			// daemon already holds this port" (idempotent reinstall;
 			// tolerate and continue) from "a foreign process stole
 			// the port we need" (real collision; fail loud).
-			if !portHeldByOurDaemon(d.Port, m.Name, d.Name) {
+			if !portHeldByOurDaemonForPortArm(d.Port, m.Name, d.Name, false) {
 				return fmt.Errorf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name)
 			}
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
 			if preflightPortInUse(internal) {
-				if !portHeldByOurDaemon(internal, m.Name, d.Name) {
+				if !portHeldByOurDaemonForPortArm(internal, m.Name, d.Name, true) {
 					return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
 						internal, m.Name, d.Name, d.Port, config.NativeHTTPInternalPortOffset)
 				}
@@ -1612,7 +1612,11 @@ func checkSecretRefs(env map[string]string) error {
 // lookup, and scheduler.New().Status respectively. Tests assign
 // fakes for each.
 func portHeldByOurDaemon(port int, server, daemon string) bool {
-	if portHeldBySupervisorIntentDaemon(port, server, daemon) {
+	return portHeldByOurDaemonForPortArm(port, server, daemon, true)
+}
+
+func portHeldByOurDaemonForPortArm(port int, server, daemon string, allowSupervisorInternalPortMatch bool) bool {
+	if portHeldBySupervisorIntentDaemonForPortArm(port, server, daemon, allowSupervisorInternalPortMatch) {
 		return true
 	}
 	if lookupProcess == nil {
@@ -1678,6 +1682,10 @@ func portHeldByOurDaemon(port int, server, daemon string) bool {
 // missing proof surface cannot mean "port is free"; it leaves the normal port
 // collision error in place.
 func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
+	return portHeldBySupervisorIntentDaemonForPortArm(port, server, daemon, true)
+}
+
+func portHeldBySupervisorIntentDaemonForPortArm(port int, server, daemon string, allowInternalPortMatch bool) bool {
 	if port == 0 || server == "" || daemon == "" {
 		return false
 	}
@@ -1694,7 +1702,7 @@ func portHeldBySupervisorIntentDaemon(port int, server, daemon string) bool {
 	if err != nil || intent == nil {
 		return false
 	}
-	row, matchedInternalPort, ok := supervisorIntentDaemonForPort(intent, port, server, daemon)
+	row, matchedInternalPort, ok := supervisorIntentDaemonForPort(intent, port, server, daemon, allowInternalPortMatch)
 	if !ok {
 		return false
 	}
@@ -1765,15 +1773,18 @@ func internalPortListenerChainsToWrapperPID(port int, wrapperPID int) (owned boo
 	return false, true
 }
 
-func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string) (SupervisorDaemon, bool, bool) {
+func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, server, daemon string, allowInternalPortMatch bool) (SupervisorDaemon, bool, bool) {
 	if intent == nil {
 		return SupervisorDaemon{}, false, false
 	}
 	for _, row := range intent.Daemons {
 		matchedExternalPort := row.Port == port
-		matchedInternalPort := row.Port > 0 && row.Port+config.NativeHTTPInternalPortOffset == port
-		if row.RuntimeSpec != nil && row.RuntimeSpec.UpstreamPort == port {
-			matchedInternalPort = true
+		var matchedInternalPort bool
+		if allowInternalPortMatch {
+			matchedInternalPort = row.Port > 0 && row.Port+config.NativeHTTPInternalPortOffset == port
+			if row.RuntimeSpec != nil && row.RuntimeSpec.UpstreamPort == port {
+				matchedInternalPort = true
+			}
 		}
 		if !matchedExternalPort && !matchedInternalPort {
 			continue

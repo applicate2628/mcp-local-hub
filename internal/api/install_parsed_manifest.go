@@ -256,7 +256,8 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// preliminary superset: the lock-held merge below recomputes the
 	// authoritative removed set, and any row that appeared after this pre-read
 	// simply has no captured PID and falls back to the port classifier.
-	preCaptureTargets, err := preliminarySupervisorTargetsForServer(intentPath, m.Name)
+	ownershipScope := supervisorIntentOwnershipScopeForManifest(m, opts.Workspaces, "")
+	preCaptureTargets, err := preliminarySupervisorTargetsForServerScope(intentPath, m.Name, ownershipScope)
 	if err != nil {
 		return "", err
 	}
@@ -297,7 +298,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	if err != nil {
 		return "", err
 	}
-	removedSupervisorTargetsAfterInstall := removedSupervisorTargetsForServerMerge(priorIntent, desiredIntent, m.Name)
+	removedSupervisorTargetsAfterInstall := removedSupervisorTargetsForServerMergeScope(priorIntent, desiredIntent, m.Name, ownershipScope)
 	desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
 
 	// Required-workspace pre-commit guard (bot PR #253 r6 P2). A caller that
@@ -536,12 +537,13 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			return fmt.Errorf("resolve state dir: %w", err)
 		}
 		intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+		ownershipScope := supervisorIntentOwnershipScopeForManifest(m, nil, "")
 		if daemonFilter == "" {
 			// Pre-capture a superset before the intent flock. The locked merge
 			// below recomputes the authoritative removed targets; rows that were
 			// not present in this pre-read have no captured PID and use the port
 			// path after the reconcile nudge.
-			preCaptureTargets, err := preliminarySupervisorTargetsForServer(intentPath, m.Name)
+			preCaptureTargets, err := preliminarySupervisorTargetsForServerScope(intentPath, m.Name, ownershipScope)
 			if err != nil {
 				return err
 			}
@@ -585,12 +587,12 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			if err != nil {
 				return err
 			}
-			removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
+			removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstallScope(priorIntent, desiredIntent, m.Name, daemonFilter, ownershipScope)
 			desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
 			intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
-				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifacts(priorIntent, m.Name))
+				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifactsScope(priorIntent, m.Name, ownershipScope))
 			nudgeAfterInstall = len(plan.SupervisorIntent) > 0 ||
-				(daemonFilter == "" && supervisorIntentHasServerDaemonRows(priorIntent, m.Name))
+				(daemonFilter == "" && supervisorIntentHasServerDaemonRowsScope(priorIntent, m.Name, ownershipScope))
 			if len(plan.SupervisorIntent) > 0 {
 				ensureAutostartAfterInstall = true
 				autostartStrictMode = desiredIntent.StrictMode
@@ -605,7 +607,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			// legacy-to-dynamic-pool`), and a whole-file check made EVERY global
 			// install fail on such hosts (live-host fetch install, 2026-06-12).
 			for _, d := range desiredIntent.Daemons {
-				if d.RuntimeSpec != nil && supervisorIntentRowOwnedBy(d, m.Name) {
+				if d.RuntimeSpec != nil && supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
 					return fmt.Errorf("installPlanCore: global manifest %q unexpectedly produced a runtime_spec-bearing supervisor-intent row; global installs must not carry runtime_spec (that path is InstallParsedManifest's)", m.Name)
 				}
 			}
@@ -747,7 +749,8 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 	}
 	var removed []SupervisorDaemon
 	if mergeErr == nil && priorExisted {
-		removed = removedSupervisorTargetsForFullInstall(priorIntent, desiredIntent, m.Name, daemonFilter)
+		ownershipScope := supervisorIntentOwnershipScopeForManifest(m, nil, "")
+		removed = removedSupervisorTargetsForFullInstallScope(priorIntent, desiredIntent, m.Name, daemonFilter, ownershipScope)
 	}
 	legacyTasks, legacyErr := legacySchedulerTasksForSupervisorInstallDryRun(m, daemonFilter)
 
@@ -960,11 +963,15 @@ func warnNoRunningSupervisor(w io.Writer) {
 }
 
 func supervisorIntentHasServerDaemonRows(intent *SupervisorIntentFile, server string) bool {
+	return supervisorIntentHasServerDaemonRowsScope(intent, server, nil)
+}
+
+func supervisorIntentHasServerDaemonRowsScope(intent *SupervisorIntentFile, server string, scope *supervisorIntentOwnershipScope) bool {
 	if intent == nil {
 		return false
 	}
 	for _, d := range intent.Daemons {
-		if supervisorIntentRowOwnedBy(d, server) {
+		if supervisorIntentRowOwnedByScope(d, server, scope) {
 			return true
 		}
 	}
@@ -972,7 +979,11 @@ func supervisorIntentHasServerDaemonRows(intent *SupervisorIntentFile, server st
 }
 
 func supervisorIntentHasServerLifecycleArtifacts(intent *SupervisorIntentFile, server string) bool {
-	if supervisorIntentHasServerDaemonRows(intent, server) {
+	return supervisorIntentHasServerLifecycleArtifactsScope(intent, server, nil)
+}
+
+func supervisorIntentHasServerLifecycleArtifactsScope(intent *SupervisorIntentFile, server string, scope *supervisorIntentOwnershipScope) bool {
+	if supervisorIntentHasServerDaemonRowsScope(intent, server, scope) {
 		return true
 	}
 	if intent == nil {
@@ -987,26 +998,34 @@ func supervisorIntentHasServerLifecycleArtifacts(intent *SupervisorIntentFile, s
 }
 
 func removedSupervisorTargetsForFullInstall(prior, merged *SupervisorIntentFile, server, daemonFilter string) []SupervisorDaemon {
+	return removedSupervisorTargetsForFullInstallScope(prior, merged, server, daemonFilter, nil)
+}
+
+func removedSupervisorTargetsForFullInstallScope(prior, merged *SupervisorIntentFile, server, daemonFilter string, scope *supervisorIntentOwnershipScope) []SupervisorDaemon {
 	if daemonFilter != "" {
 		return nil
 	}
-	return removedSupervisorTargetsForServerMerge(prior, merged, server)
+	return removedSupervisorTargetsForServerMergeScope(prior, merged, server, scope)
 }
 
 func removedSupervisorTargetsForServerMerge(prior, merged *SupervisorIntentFile, server string) []SupervisorDaemon {
+	return removedSupervisorTargetsForServerMergeScope(prior, merged, server, nil)
+}
+
+func removedSupervisorTargetsForServerMergeScope(prior, merged *SupervisorIntentFile, server string, scope *supervisorIntentOwnershipScope) []SupervisorDaemon {
 	if prior == nil || merged == nil || server == "" {
 		return nil
 	}
 	freshTasks := make(map[string]struct{})
 	for _, d := range merged.Daemons {
-		if supervisorIntentRowOwnedBy(d, server) {
+		if supervisorIntentRowOwnedByScope(d, server, scope) {
 			freshTasks[canonicalIntentTaskKey(d.TaskName)] = struct{}{}
 		}
 	}
 
 	var removed []SupervisorDaemon
 	for _, d := range prior.Daemons {
-		if !supervisorIntentRowOwnedBy(d, server) {
+		if !supervisorIntentRowOwnedByScope(d, server, scope) {
 			continue
 		}
 		if _, replaced := freshTasks[canonicalIntentTaskKey(d.TaskName)]; replaced {
@@ -1039,6 +1058,10 @@ func pruneStopsForRemovedSupervisorTargets(stops map[string]DaemonIntent, remove
 }
 
 func preliminarySupervisorTargetsForServer(intentPath, server string) ([]SupervisorDaemon, error) {
+	return preliminarySupervisorTargetsForServerScope(intentPath, server, nil)
+}
+
+func preliminarySupervisorTargetsForServerScope(intentPath, server string, scope *supervisorIntentOwnershipScope) ([]SupervisorDaemon, error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return nil, err
@@ -1048,7 +1071,7 @@ func preliminarySupervisorTargetsForServer(intentPath, server string) ([]Supervi
 	}
 	targets := make([]SupervisorDaemon, 0, len(prior.Daemons))
 	for _, d := range prior.Daemons {
-		if supervisorIntentRowOwnedBy(d, server) {
+		if supervisorIntentRowOwnedByScope(d, server, scope) {
 			targets = append(targets, d)
 		}
 	}
@@ -1307,6 +1330,7 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 	if err != nil {
 		return nil, nil, false, err
 	}
+	ownershipScope := supervisorIntentOwnershipScopeForManifest(m, workspaces, "")
 
 	// On a filtered install, the fresh row supervisorDaemonsFromPlan
 	// materializes is keyed by this canonical task name. A prior row that
@@ -1337,7 +1361,7 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		// re-derives ownership from the task name via ParseManagedTaskName so
 		// a blank-Server row keyed to this server is dropped for replacement.
 		if daemonFilter == "" {
-			if supervisorIntentRowOwnedBy(d, m.Name) {
+			if supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
 				continue // replaced below
 			}
 			kept = append(kept, d)
@@ -1371,22 +1395,77 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 	return merged, prior, existed, nil
 }
 
+type supervisorIntentOwnershipScope struct {
+	taskNames  map[string]struct{}
+	daemonKeys map[string]struct{}
+}
+
+func (s *supervisorIntentOwnershipScope) addTaskName(taskName string) {
+	if s.taskNames == nil {
+		s.taskNames = make(map[string]struct{})
+	}
+	s.taskNames[canonicalIntentTaskKey(taskName)] = struct{}{}
+}
+
+func (s *supervisorIntentOwnershipScope) addDaemonKey(daemon string) {
+	if daemon == "" {
+		return
+	}
+	if s.daemonKeys == nil {
+		s.daemonKeys = make(map[string]struct{})
+	}
+	s.daemonKeys[daemon] = struct{}{}
+}
+
+func supervisorIntentOwnershipScopeForManifest(m *config.ServerManifest, workspaces []WorkspaceEntry, daemonFilter string) *supervisorIntentOwnershipScope {
+	scope := &supervisorIntentOwnershipScope{}
+	if m == nil || m.Name == "" {
+		return scope
+	}
+	if m.Kind != config.KindWorkspaceScoped {
+		for _, d := range m.Daemons {
+			if daemonFilter != "" && d.Name != daemonFilter {
+				continue
+			}
+			if d.Name == "" {
+				continue
+			}
+			scope.addTaskName("mcp-local-hub-" + m.Name + "-" + d.Name)
+			scope.addDaemonKey(d.Name)
+		}
+	}
+	if m.DaemonTemplate != nil {
+		for _, ws := range workspaces {
+			if ws.WorkspacePath == "" {
+				continue
+			}
+			scope.addTaskName(SerenaTaskNameForWorkspace(ws.WorkspacePath))
+			daemonKey := string(ws.WorkspaceKey)
+			if daemonKey == "" {
+				daemonKey = string(WorkspaceKey(ws.WorkspacePath))
+			}
+			scope.addDaemonKey(daemonKey)
+		}
+	}
+	return scope
+}
+
 // supervisorIntentRowOwnedBy reports whether a supervisor-intent daemon row
-// belongs to the named server. It matches on the populated Server field
-// first, then falls back to a manifest-server prefix match for a legacy /
-// older-writer row with a BLANK Server. The task grammar
-// `mcp-local-hub-<server>-<daemon>` is ambiguous when both server and daemon
-// may contain hyphens, so ParseManagedTaskName's last-hyphen split misclassifies
-// common daemon names like alpha-beta as part of the server. The prefix fallback
-// strictly improves that case because callers already know the manifest server
-// name. Residual ambiguity remains for blank-Server rows whose actual server
-// name prefix-collides with this manifest server (for example demo vs demo-x);
-// a task name alone cannot disambiguate that without a manifest registry.
-// Shared by the full-install
-// replace loop (buildMergedSupervisorIntent) and the uninstall cleanup
-// (removeServerFromSupervisorIntent) so both drop blank-Server rows
-// consistently (bot PR #288 F1 + F4).
+// belongs to the named server when the caller has only the server string. It
+// matches on the populated Server field first, then falls back to the legacy
+// prefix match for a BLANK Server row. Residual: that fallback can still claim
+// prefix-colliding blank-Server sibling rows; install/uninstall paths that have
+// manifest or workspace context must call supervisorIntentRowOwnedByScope.
 func supervisorIntentRowOwnedBy(d SupervisorDaemon, server string) bool {
+	return supervisorIntentRowOwnedByScope(d, server, nil)
+}
+
+// supervisorIntentRowOwnedByScope is the manifest-aware ownership predicate.
+// Populated Server rows remain exact. Blank-Server rows match by exact
+// manifest-derived task membership; when a legacy row has a populated Daemon
+// field, that daemon must also be in the manifest/workspace set so
+// demo/alpha-beta cannot claim demo-alpha/beta solely by task-prefix shape.
+func supervisorIntentRowOwnedByScope(d SupervisorDaemon, server string, scope *supervisorIntentOwnershipScope) bool {
 	if server == "" {
 		return false
 	}
@@ -1395,6 +1474,17 @@ func supervisorIntentRowOwnedBy(d SupervisorDaemon, server string) bool {
 	}
 	if d.Server != "" {
 		return false
+	}
+	if scope != nil {
+		if _, ok := scope.taskNames[canonicalIntentTaskKey(d.TaskName)]; !ok {
+			return false
+		}
+		if d.Daemon != "" && len(scope.daemonKeys) > 0 {
+			if _, ok := scope.daemonKeys[d.Daemon]; !ok {
+				return false
+			}
+		}
+		return true
 	}
 	prefix := canonicalIntentTaskKey("mcp-local-hub-" + server + "-")
 	return strings.HasPrefix(canonicalIntentTaskKey(d.TaskName), prefix)
@@ -1443,11 +1533,11 @@ func maintenanceTimerOwnedBy(tm MaintenanceTimer, server string) bool {
 // anything so the caller can skip the reconcile nudge when there was nothing
 // to remove.
 func (a *API) removeServerFromSupervisorIntent(server string) (changed bool, err error) {
-	changed, _, _, err = a.removeServerFromSupervisorIntentCore(context.Background(), server, false)
+	changed, _, _, err = a.removeServerFromSupervisorIntentCore(context.Background(), server, nil, false)
 	return changed, err
 }
 
-func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server string, captureLivePIDs bool) (changed bool, removedDaemons []SupervisorDaemon, removedPIDByTask map[string]int, err error) {
+func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server string, ownershipScope *supervisorIntentOwnershipScope, captureLivePIDs bool) (changed bool, removedDaemons []SupervisorDaemon, removedPIDByTask map[string]int, err error) {
 	if server == "" {
 		return false, nil, nil, fmt.Errorf("removeServerFromSupervisorIntent: empty server")
 	}
@@ -1462,7 +1552,7 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 		// below recomputes the authoritative removed rows; rows that appear after
 		// this pre-read have no captured PID and fall back to their descriptor
 		// port after the reconcile nudge.
-		preCaptureTargets, err := preliminarySupervisorTargetsForServer(intentPath, server)
+		preCaptureTargets, err := preliminarySupervisorTargetsForServerScope(intentPath, server, ownershipScope)
 		if err != nil {
 			return false, nil, nil, err
 		}
@@ -1492,7 +1582,7 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 
 	keptDaemons := make([]SupervisorDaemon, 0, len(prior.Daemons))
 	for _, d := range prior.Daemons {
-		if supervisorIntentRowOwnedBy(d, server) {
+		if supervisorIntentRowOwnedByScope(d, server, ownershipScope) {
 			changed = true
 			removedDaemons = append(removedDaemons, d)
 			continue
@@ -1554,7 +1644,21 @@ func nudgeSupervisorReconcileAfterUninstall(ctx context.Context) supervisorRecon
 // aborts the uninstall — uninstall is idempotent and must complete the
 // scheduler-task + client-entry removal regardless (bot PR #288 F1).
 func (a *API) removeServerFromSupervisorIntentBestEffort(server string, report *UninstallReport) {
-	changed, removedTargets, removedPIDByTask, err := a.removeServerFromSupervisorIntentCore(context.Background(), server, true)
+	a.removeServerFromSupervisorIntentBestEffortScope(server, nil, report)
+}
+
+func (a *API) removeServerFromSupervisorIntentBestEffortForManifest(m *config.ServerManifest, report *UninstallReport) {
+	server := ""
+	var ownershipScope *supervisorIntentOwnershipScope
+	if m != nil {
+		server = m.Name
+		ownershipScope = supervisorIntentOwnershipScopeForManifest(m, nil, "")
+	}
+	a.removeServerFromSupervisorIntentBestEffortScope(server, ownershipScope, report)
+}
+
+func (a *API) removeServerFromSupervisorIntentBestEffortScope(server string, ownershipScope *supervisorIntentOwnershipScope, report *UninstallReport) {
+	changed, removedTargets, removedPIDByTask, err := a.removeServerFromSupervisorIntentCore(context.Background(), server, ownershipScope, true)
 	if err != nil {
 		if report != nil {
 			report.TaskDeleteWarns = append(report.TaskDeleteWarns,

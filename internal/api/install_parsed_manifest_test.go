@@ -3052,3 +3052,62 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerHyphenatedDaemonRowN
 		t.Errorf("sibling other/alpha-beta not preserved verbatim: %+v", otherRows[0])
 	}
 }
+
+// TestBuildMergedSupervisorIntent_FullInstall_BlankServerPrefixSiblingPreserved
+// is the PR #288 r31 F1 regression: a blank-Server legacy row must not be
+// claimed merely because its task name starts with this server's prefix. The
+// row below belongs to server demo-alpha / daemon beta; a full reinstall of
+// server demo / daemon alpha must replace only demo's exact descriptor.
+//
+// Negative-control: the old prefix fallback
+// strings.HasPrefix(taskName, "mcp-local-hub-"+server+"-") drops the
+// demo-alpha/beta row during a demo reinstall.
+func TestBuildMergedSupervisorIntent_FullInstall_BlankServerPrefixSiblingPreserved(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha`, Command: "stale-demo-alpha", Port: 33121},
+			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Daemon: "beta", Command: "preserve-demo-alpha-beta", Port: 33122},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 33123},
+		},
+	}
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
+	}
+
+	byTask := make(map[string][]SupervisorDaemon)
+	for _, d := range merged.Daemons {
+		byTask[canonicalIntentTaskKey(d.TaskName)] = append(byTask[canonicalIntentTaskKey(d.TaskName)], d)
+	}
+	demoRows := byTask[`\mcp-local-hub-demo-alpha`]
+	if len(demoRows) != 1 {
+		t.Fatalf("demo/alpha rows = %d, want exactly 1 fresh row; rows=%+v", len(demoRows), merged.Daemons)
+	}
+	if got := demoRows[0]; got.Server != "demo" || got.Daemon != "alpha" || got.Command == "stale-demo-alpha" || got.Port != 33123 {
+		t.Errorf("demo/alpha row was not refreshed from manifest: %+v", got)
+	}
+
+	siblingRows := byTask[`\mcp-local-hub-demo-alpha-beta`]
+	if len(siblingRows) != 1 {
+		t.Fatalf("demo-alpha/beta sibling rows = %d, want exactly 1 preserved row; rows=%+v", len(siblingRows), merged.Daemons)
+	}
+	if got := siblingRows[0]; got.Command != "preserve-demo-alpha-beta" || got.Port != 33122 || got.Daemon != "beta" {
+		t.Errorf("demo-alpha/beta sibling row mutated or replaced: %+v", got)
+	}
+}
