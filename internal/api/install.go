@@ -1671,11 +1671,9 @@ func portHeldByOurDaemonForPortArm(port int, server, daemon string, allowSupervi
 //   - External port:
 //     1. Port-owner lookup available: require the live listener PID to equal
 //     the live supervisor-reported PID for the matching task.
-//     2. Port-owner lookup unavailable but supervisor IPC reachable and live:
-//     accept the matching descriptor row + live PID. Residual: a foreign
-//     process could hold the descriptor port while our daemon is alive on a
-//     different one, but that requires an external interference window; the
-//     supervisor's own port-conflict handling surfaces it at spawn.
+//     2. Port-owner lookup unavailable: fail closed. Supervisor IPC can prove
+//     the descriptor task is live, but it cannot prove that the live task owns
+//     the already-occupied client-facing port.
 //     3. Supervisor IPC unreachable or no live task PID: fail closed.
 //
 // Callers reach this only after preflightPortInUse(port) is already true, so a
@@ -1727,14 +1725,6 @@ func portHeldBySupervisorIntentDaemonForPortArm(port int, server, daemon string,
 	}
 	portPID, havePortPID := supervisorOwnedPortPID(port)
 	if !havePortPID {
-		if lookupProcess == nil {
-			// POSIX and other no-probe hosts cannot bind the external listener to
-			// a PID here. The row already matched this task and supervisor IPC
-			// reported that exact task live, so accept the daemon-owned reinstall
-			// while leaving spawn-time port-conflict handling to catch external
-			// interference that appears after the supervisor's own bind attempt.
-			return true
-		}
 		return false
 	}
 	return livePID == portPID
