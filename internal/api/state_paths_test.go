@@ -55,7 +55,12 @@ func installKnownFolderStub(t *testing.T, fn func() (string, error)) {
 func isolateStateDir(t *testing.T) string {
 	t.Helper()
 	statePathsHelper(t)
-	dir := t.TempDir()
+	// pr301 r5 Finding 1: harden the redirected STATE ROOT (not any broadened
+	// write target a test may build separately) so the new absent-intent strict
+	// verdict resolves relax=FALSE on this root, mirroring production's owner-only
+	// %LOCALAPPDATA%. Relax-lane tests that point a SEPARATE broadened dir at the
+	// write gate are unaffected — only the intent-read root is hardened here.
+	dir := hardenedTempDir(t)
 	daemonStateRootOverride = dir
 	return dir
 }

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"mcp-local-hub/internal/process"
 )
 
 // ErrSingleInstanceBusy is returned by AcquireSingleInstance when another
@@ -932,6 +934,21 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 	// non-Windows the seam default is a no-op (true, nil), so this arm never
 	// changes the Linux/macOS gate verdict.
 	if match, err := processOwnerSIDMatchesCurrentFn(v.PID); err != nil {
+		if errors.Is(err, process.ErrProcessAlreadyExited) {
+			// pr301 r5 Finding 3: the flock holder exited between the
+			// image/argv/start-time identity probe and the owner-SID gate's
+			// OpenProcess (a TOCTOU window). The owner-SID arm surfaces the
+			// canonical ErrProcessAlreadyExited sentinel. A GONE holder is NOT
+			// an unverifiable-owner failure — its exit is exactly what releases
+			// the flock, so the kill the gate guards is moot. Do NOT refuse:
+			// return refused=false so KillRecordedHolder reaches the
+			// kill+acquire-poll recovery path (which handles an already-dead PID
+			// gracefully — kill() of a gone PID falls through to the
+			// flock-release acquire-poll and yields VerdictKilledRecovered).
+			// Converting this to VerdictKillRefused would strand the operator on
+			// a stuck lock whose holder is already gone.
+			return false, "", "", ""
+		}
 		return true,
 			fmt.Sprintf("recorded PID %d owner could not be verified: %v", v.PID, err),
 			"Identity-gate (owner SID) could not verify the process owner; refusing the kill. Identify and kill the actual flock holder via OS tools.",

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,29 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+// seedStrictIntentRaw writes a strict_mode=true supervisor-intent.json directly
+// via os.WriteFile, bypassing the secure-write operator gate.
+//
+// pr301 r5 Finding 1: api.WriteSupervisorIntent routes through the secure-write
+// pipeline, which consults OperatorRequiresSingleUserHome → the strict-mode
+// intent cache. On a broadened parent with NO intent file yet, the new
+// absent-intent strict verdict resolves strict=TRUE, so a gated seed write on a
+// broadened parent now refuses ITSELF (a chicken-and-egg: the file the cache
+// reads does not exist until the write lands). Seeding is fixture setup, not the
+// unit under test, so a raw write is the correct gate-free path. The test then
+// resets the cache so the next resolution reads the now-PRESENT strict=true
+// intent — exactly the deadlock condition these tests exercise.
+func seedStrictIntentRaw(t *testing.T, intentPath string) {
+	t.Helper()
+	raw, err := json.Marshal(&api.SupervisorIntentFile{Version: 1, StrictMode: true})
+	if err != nil {
+		t.Fatalf("marshal seed intent: %v", err)
+	}
+	if err := os.WriteFile(intentPath, raw, 0o600); err != nil {
+		t.Fatalf("seed strict intent (raw): %v", err)
+	}
+}
 
 // #301-3 (P2) end-to-end deadlock regression: `mcphub strict-mode disable` must
 // SUCCEED in writing strict_mode=false even when (a) the parent dir is broadened
@@ -69,10 +93,10 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 	t.Cleanup(api.ResetStrictModeMutationGateBypassForTest)
 
 	intentPath := filepath.Join(dir, "supervisor-intent.json")
-	// Seed intent strict_mode=true (the to-be-disabled state).
-	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{Version: 1, StrictMode: true}); err != nil {
-		t.Fatalf("seed strict intent: %v", err)
-	}
+	// Seed intent strict_mode=true (the to-be-disabled state) via a gate-free raw
+	// write — a gated WriteSupervisorIntent would now self-refuse on this
+	// broadened parent (pr301 r5 Finding 1; see seedStrictIntentRaw).
+	seedStrictIntentRaw(t, intentPath)
 	// Force the gate cache to resolve strict=true from the seeded file, so the
 	// (un-bypassed) gate WOULD refuse a write — this is the deadlock condition.
 	api.ResetStrictModeIntentCacheForTest()
@@ -140,9 +164,9 @@ func TestStrictModeDisable_BroadenedParent_NonMutationWriteStillRefused(t *testi
 	t.Cleanup(api.ResetStrictModeMutationGateBypassForTest)
 
 	intentPath := filepath.Join(dir, "supervisor-intent.json")
-	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{Version: 1, StrictMode: true}); err != nil {
-		t.Fatalf("seed strict intent: %v", err)
-	}
+	// Gate-free raw seed (pr301 r5 Finding 1; see seedStrictIntentRaw): a gated
+	// write would self-refuse on this broadened parent.
+	seedStrictIntentRaw(t, intentPath)
 	api.ResetStrictModeIntentCacheForTest()
 	if !api.OperatorRequiresSingleUserHome() {
 		t.Fatal("precondition: seeded intent strict_mode=true must make the gate strict; got relaxed")

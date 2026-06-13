@@ -3241,6 +3241,18 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 		return portKillNoListener, nil
 	}
 	if err := requireMcphubPortOwnerPID(port, pid); err != nil {
+		if errors.Is(err, process.ErrProcessAlreadyExited) {
+			// pr301 r5 Finding 2: the PID owning this port exited between
+			// lookupProcess and the owner-SID gate's OpenProcess (a TOCTOU
+			// window). The owner-SID arm surfaces the canonical
+			// ErrProcessAlreadyExited sentinel. A gone port owner is the
+			// already-released SUCCESS condition — there is nothing left to
+			// taskkill — so return the benign no-listener outcome (nil error),
+			// identical to the !ok no-listener branch above. Treating it as a
+			// portKillIdentityMismatch FAILURE would report a failed kill for a
+			// daemon that is already gone.
+			return portKillNoListener, nil
+		}
 		return portKillIdentityMismatch, err
 	}
 	if err := taskkillProcessTreeByPIDFn(pid); err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/config"
 )
 
@@ -38,10 +39,21 @@ import (
 func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	t.Helper()
 	root := t.TempDir()
-	stateDir = filepath.Join(root, "state")
+	// pr301 r5 Finding 1: the supervisor state dir must be SINGLE-USER-SAFE.
+	// On a broadened test host (a RAM disk granting Authenticated Users
+	// write/delete, or a 0755 POSIX $TMPDIR) a plain t.TempDir() subdir is
+	// delete-capable, so the new absent-intent strict verdict
+	// (readStrictModeFromIntentBestEffort → absentIntentStrictVerdict) would
+	// resolve strict=TRUE and the migrate's WriteStateFileAtomic would refuse
+	// the broadened parent. apitest.HardenedTempDir applies the same
+	// owner-only DACL/mode the production secure-write pipeline expects, so the
+	// state dir passes checkStateDirParentWriteSafe and the absent intent
+	// relaxes as a genuine fresh install. manifestDir/home stay plain (they are
+	// not gated by the supervisor state-file pipeline).
+	stateDir = apitest.HardenedTempDir(t)
 	manifestDir = filepath.Join(root, "manifests")
 	home := filepath.Join(root, "home")
-	for _, d := range []string{stateDir, manifestDir, home} {
+	for _, d := range []string{manifestDir, home} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
@@ -56,6 +68,22 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// takes precedence over the resolver in BOTH build variants.
 	restoreStateRoot := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restoreStateRoot)
+
+	// pr301 r5 Finding 1 fixture interaction: t.TempDir() on a broadened host
+	// (e.g. a RAM disk granting Authenticated Users write/delete) is
+	// delete-capable, so the new absent-intent strict verdict
+	// (readStrictModeFromIntentBestEffort → absentIntentStrictVerdict) caches
+	// strict=TRUE the first time OperatorRequiresSingleUserHome resolves it here —
+	// which then refuses the broadened-parent WriteStateFileAtomic the migrate
+	// performs. These tests exercise the interlock/cutover, NOT strict-mode
+	// posture. The verdict keys on the STATE DIR's delete-capability, and the
+	// read-relax env var deliberately does NOT bypass it (a deletion on a
+	// delete-capable dir must still fail closed), so the fixture must make the
+	// state dir genuinely single-user-safe. Reset the process-global intent cache
+	// so each test resolves fresh against its own state dir (the cache is
+	// otherwise pinned by whichever test ran first).
+	api.ResetStrictModeIntentCacheForTest()
+	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
 
 	// The registry (api.DefaultRegistryPath) resolves from LOCALAPPDATA
 	// (Windows) / XDG_STATE_HOME (POSIX); ensureCanonicalMcphubPresent +
@@ -3185,6 +3213,7 @@ func TestMigrateSerena_Interlock_AcquireFailsLoud_WhenForeignHolderWonTheWindow(
 //     concurrent acquire would SUCCEED → the gap is open.
 //   - FIXED code (acquire immediately after the reap): the migrate ALREADY holds
 //     the lock here → the concurrent acquire FAILS → the gap is closed.
+//
 // The test asserts the concurrent acquire FAILS, so a regression that moves the
 // acquire back past the post-reap work breaks it.
 func TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap(t *testing.T) {
