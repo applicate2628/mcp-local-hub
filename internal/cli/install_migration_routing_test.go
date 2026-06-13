@@ -76,10 +76,10 @@ func TestDispatchUpgradeReal_RoutesToV5UpgradeWhenIntentPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DaemonStateDir: %v", err)
 	}
-	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	if err := os.WriteFile(intentPath, []byte("{}"), 0o600); err != nil {
-		t.Fatalf("write intent: %v", err)
-	}
+	// A daemon-bearing intent (≥1 descriptor row) is what makes the routing
+	// discriminator classify the host as a real v0.5 supervisor (bot r32 P2).
+	// A bare `{}` / stops-only file routes as "no v0.5 supervisor" now.
+	seedDaemonBearingIntent(t, stateDir)
 
 	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
 	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
@@ -96,7 +96,31 @@ func TestDispatchUpgradeReal_RoutesToV5UpgradeWhenIntentPresent(t *testing.T) {
 		t.Fatalf("dispatchUpgradeReal: %v", err)
 	}
 	if !v5Invoked {
-		t.Fatal("supervisor-intent.json present → expected the v5 cold-restart upgrade path, but v5UpgradeFn was not invoked")
+		t.Fatal("supervisor-intent.json with ≥1 daemon row present → expected the v5 cold-restart upgrade path, but v5UpgradeFn was not invoked")
+	}
+}
+
+// seedDaemonBearingIntent writes a supervisor-intent.json carrying exactly one
+// long-lived daemon descriptor under the given state dir. The routing
+// discriminator (hasSupervisorIntent) classifies a host as a v0.5 supervisor
+// ONLY when at least one such row survives api.ReadSupervisorIntent's
+// one-shot/maintenance filtering (bot r32 P2), so tests that pin the v5 route
+// must seed a real descriptor rather than a bare `{}`.
+func seedDaemonBearingIntent(t *testing.T, stateDir string) {
+	t.Helper()
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-memory-default`,
+			Server:   "memory",
+			Daemon:   "default",
+			Command:  "mcphub",
+			Args:     []string{"daemon", "--server", "memory", "--daemon", "default"},
+			Port:     9128,
+		}},
+	}); err != nil {
+		t.Fatalf("seed daemon-bearing intent: %v", err)
 	}
 }
 
@@ -113,10 +137,10 @@ func TestDispatchUpgradeReal_SupervisorPathRunsUpgradeGuardsBeforeV5(t *testing.
 	if err != nil {
 		t.Fatalf("DaemonStateDir: %v", err)
 	}
-	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	if err := os.WriteFile(intentPath, []byte("{}"), 0o600); err != nil {
-		t.Fatalf("write intent: %v", err)
-	}
+	// Daemon-bearing intent so the routing discriminator classifies this host
+	// as a v0.5 supervisor (bot r32 P2); the test then asserts the dev-build
+	// guard fires before the v5 upgrade body.
+	seedDaemonBearingIntent(t, stateDir)
 
 	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
 	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
@@ -322,10 +346,73 @@ func TestHasSupervisorIntent_AbsentReturnsFalseNoError(t *testing.T) {
 	}
 }
 
-// TestHasSupervisorIntent_RegularFileReturnsTrue pins the happy-path
-// contract: a regular file named supervisor-intent.json under the
-// state-dir → (true, nil), regardless of file contents.
-func TestHasSupervisorIntent_RegularFileReturnsTrue(t *testing.T) {
+// TestHasSupervisorIntent_DaemonBearingReturnsTrue pins the v0.5-supervisor
+// contract (bot r32 P2): a regular supervisor-intent.json carrying ≥1 daemon
+// descriptor row → (true, nil). Mere file presence is no longer sufficient;
+// the file must name an actual supervisor-owned daemon.
+func TestHasSupervisorIntent_DaemonBearingReturnsTrue(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	seedDaemonBearingIntent(t, stateDir)
+
+	got, err := hasSupervisorIntent()
+	if err != nil {
+		t.Fatalf("hasSupervisorIntent err = %v, want nil", err)
+	}
+	if !got {
+		t.Fatalf("hasSupervisorIntent = false, want true (≥1 daemon row present)")
+	}
+}
+
+// TestHasSupervisorIntent_StopsOnlyReturnsFalse is the FIX 1 (bot r32 P2)
+// falsifying regression. A stops-only / descriptor-less supervisor-intent.json
+// (the shape a `mcphub ... stop` mints on a v0.4 scheduler-only host: a Stops
+// map, ZERO Daemons) must route as "no v0.5 supervisor" so the dispatcher runs
+// the legacy-scheduler migration instead of taking runV5UpgradeReal and
+// silently dropping the existing legacy scheduler tasks.
+//
+// Pre-fix this returned true (mere regular-file presence) → the dispatcher
+// took the v5 path and skipped probeLegacySchedulerUpgradeServers.
+func TestHasSupervisorIntent_StopsOnlyReturnsFalse(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{
+		Version: 1,
+		// No Daemons. Only a per-task operator-stop override, exactly what a
+		// stop writer mints on a scheduler-only host.
+		Stops: map[string]api.DaemonIntent{
+			`\mcp-local-hub-memory-default`: {
+				Desired: api.IntentDesiredStopped,
+				Reason:  api.IntentReasonUserStop,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed stops-only intent: %v", err)
+	}
+
+	got, err := hasSupervisorIntent()
+	if err != nil {
+		t.Fatalf("hasSupervisorIntent err = %v, want nil (stops-only file is readable)", err)
+	}
+	if got {
+		t.Fatalf("hasSupervisorIntent = true on a stops-only/descriptor-less intent; want false so the legacy-scheduler migration path runs (bot r32 P2)")
+	}
+}
+
+// TestHasSupervisorIntent_EmptyObjectReturnsFalse pins that a bare `{}`
+// (zero daemons, zero stops) also routes as "no v0.5 supervisor".
+func TestHasSupervisorIntent_EmptyObjectReturnsFalse(t *testing.T) {
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 
@@ -342,8 +429,37 @@ func TestHasSupervisorIntent_RegularFileReturnsTrue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hasSupervisorIntent err = %v, want nil", err)
 	}
-	if !got {
-		t.Fatalf("hasSupervisorIntent = false, want true (regular file present)")
+	if got {
+		t.Fatalf("hasSupervisorIntent = true on `{}`; want false (zero daemon rows)")
+	}
+}
+
+// TestHasSupervisorIntent_UnreadableReturnsError pins the fail-closed posture:
+// a corrupt (unparseable) supervisor-intent.json must surface a wrapped hard
+// error, NOT a silent false — the routing dispatcher then fails closed instead
+// of mis-routing on a file it could not read.
+func TestHasSupervisorIntent_UnreadableReturnsError(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if err := os.WriteFile(intentPath, []byte("not-valid-json{{{"), 0o600); err != nil {
+		t.Fatalf("write corrupt intent: %v", err)
+	}
+
+	got, err := hasSupervisorIntent()
+	if err == nil {
+		t.Fatalf("hasSupervisorIntent err = nil, want non-nil (corrupt JSON must fail closed)")
+	}
+	if got {
+		t.Fatalf("hasSupervisorIntent = true on corrupt JSON, want false")
+	}
+	if !strings.Contains(err.Error(), "supervisor-intent.json") {
+		t.Errorf("error must mention the offending path; got: %v", err)
 	}
 }
 

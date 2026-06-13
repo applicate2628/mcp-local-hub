@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -662,6 +663,178 @@ func TestWorkspaceUnregister_BackendSerenaRemovesSupervisorIntentDescriptorAndSt
 	}
 	if _, ok := intent.Stops[taskName]; ok {
 		t.Fatalf("serena supervisor-intent stop %q survived unregister: %+v", taskName, intent.Stops)
+	}
+}
+
+// stubSerenaSupervisorTeardown replaces the serena supervisor-descriptor
+// teardown seam for the duration of the test. The returned counter records how
+// many times it was invoked so callers can assert the teardown ran (or did not).
+func stubSerenaSupervisorTeardown(t *testing.T, fn func(workspacePath string) (bool, error)) *int {
+	t.Helper()
+	prev := removeSerenaSupervisorIntentFn
+	calls := 0
+	removeSerenaSupervisorIntentFn = func(workspacePath string) (bool, error) {
+		calls++
+		return fn(workspacePath)
+	}
+	t.Cleanup(func() { removeSerenaSupervisorIntentFn = prev })
+	return &calls
+}
+
+// TestWorkspaceUnregister_SerenaTeardownFailureKeepsRegistryRow is the FIX 2
+// (bot r32 P2) falsifying regression. When the serena supervisor-descriptor
+// teardown fails (a live-supervisor reconcile failure that RESTORES the
+// descriptor and returns a retry-asking error), the serena registry row must
+// STILL be present afterward — the row is the durable record that drives the
+// next retry's paired teardown, so deleting it would orphan the restored
+// descriptor.
+//
+// Pre-fix the row was deleted+saved BEFORE the teardown ran, so a teardown
+// error left descriptor-restored + row-gone — the orphan this test guards.
+func TestWorkspaceUnregister_SerenaTeardownFailureKeepsRegistryRow(t *testing.T) {
+	withStateDir(t)
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"go"})
+	wsKey := api.WorkspaceKey(ws)
+	taskName := api.SerenaTaskNameForWorkspace(ws)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: ws,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          0,
+		TaskName:      taskName,
+		Languages:     []string{"go"},
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	teardownErr := errors.New("simulated live-supervisor reconcile failure; descriptor restored, retry")
+	calls := stubSerenaSupervisorTeardown(t, func(string) (bool, error) {
+		return false, teardownErr
+	})
+
+	out, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "serena")
+	if err == nil {
+		t.Fatalf("unregister must surface the teardown error; got nil (output: %s)", out)
+	}
+	if !strings.Contains(err.Error(), "paired serena supervisor teardown") {
+		t.Errorf("error should name the paired teardown failure; got %v", err)
+	}
+	if *calls != 1 {
+		t.Errorf("teardown seam invoked %d times, want 1", *calls)
+	}
+
+	// The serena registry row MUST survive the teardown failure.
+	reg = api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+	if _, ok := reg.GetSerena(wsKey); !ok {
+		t.Fatalf("serena registry row was deleted despite teardown failure — the orphan FIX 2 prevents (bot r32 P2)")
+	}
+}
+
+// TestWorkspaceUnregister_SerenaTeardownSuccessRemovesRow is the FIX 2 negative
+// control: when the teardown SUCCEEDS, the serena registry row IS removed.
+func TestWorkspaceUnregister_SerenaTeardownSuccessRemovesRow(t *testing.T) {
+	withStateDir(t)
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"go"})
+	wsKey := api.WorkspaceKey(ws)
+	taskName := api.SerenaTaskNameForWorkspace(ws)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: ws,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          0,
+		TaskName:      taskName,
+		Languages:     []string{"go"},
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	calls := stubSerenaSupervisorTeardown(t, func(string) (bool, error) {
+		return true, nil
+	})
+
+	if _, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "serena"); err != nil {
+		t.Fatalf("unregister --backend serena: %v", err)
+	}
+	if *calls != 1 {
+		t.Errorf("teardown seam invoked %d times, want 1", *calls)
+	}
+
+	reg = api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+	if _, ok := reg.GetSerena(wsKey); ok {
+		t.Fatalf("serena registry row survived a successful teardown — want removed")
+	}
+}
+
+// TestWorkspaceUnregister_SerenaTeardownRunsBeforeRowDelete asserts the FIX 2
+// ordering invariant directly: at the moment the teardown seam fires, the
+// serena registry row is STILL on disk (the delete has not committed yet).
+func TestWorkspaceUnregister_SerenaTeardownRunsBeforeRowDelete(t *testing.T) {
+	withStateDir(t)
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"go"})
+	wsKey := api.WorkspaceKey(ws)
+	taskName := api.SerenaTaskNameForWorkspace(ws)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: ws,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          0,
+		TaskName:      taskName,
+		Languages:     []string{"go"},
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	var rowPresentAtTeardown bool
+	stubSerenaSupervisorTeardown(t, func(string) (bool, error) {
+		probe := api.NewRegistry(regPath)
+		if err := probe.Load(); err != nil {
+			t.Fatalf("probe load during teardown: %v", err)
+		}
+		_, rowPresentAtTeardown = probe.GetSerena(wsKey)
+		return true, nil
+	})
+
+	if _, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "serena"); err != nil {
+		t.Fatalf("unregister --backend serena: %v", err)
+	}
+	if !rowPresentAtTeardown {
+		t.Fatalf("serena registry row was already deleted when the teardown seam fired — FIX 2 requires teardown-before-delete (bot r32 P2)")
 	}
 }
 

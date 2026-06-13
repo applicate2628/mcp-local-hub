@@ -70,6 +70,20 @@ var unregisterLSPWorkspaceFn = func(workspacePath string, languages []string) (*
 	return api.NewAPI().Unregister(workspacePath, languages)
 }
 
+// removeSerenaSupervisorIntentFn is the test-injectable seam over the serena
+// supervisor-descriptor teardown. The production form is
+// (*api.API).RemoveSerenaSupervisorIntentForWorkspace, which on a LIVE
+// supervisor nudges a reconcile and — on a reconcile failure — RESTORES the
+// descriptor and returns a retry-asking error. The unregister flow runs this
+// teardown BEFORE committing the registry-row delete (bot r32 P2): the registry
+// row is the durable record that drives the paired teardown, so it must outlive
+// a failed teardown — otherwise a restored descriptor + a gone registry row
+// leaves an orphan that no retry can clean up. CLI tests stub this so they stay
+// hermetic and can drive the teardown-failure branch deterministically.
+var removeSerenaSupervisorIntentFn = func(workspacePath string) (bool, error) {
+	return api.NewAPI().RemoveSerenaSupervisorIntentForWorkspace(workspacePath)
+}
+
 // loadSerenaManifestFromDisk is the production manifest loader. It uses
 // the same MCPHUB_MANIFEST_DIR_OVERRIDE seam the api package honors, so
 // tests that set the override env get hermetic manifests.
@@ -404,8 +418,22 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 		}
 	}
 
-	// Phase 2: serena (sentinel) row removal under a fresh registry lock.
+	// Phase 2: serena (sentinel) row removal.
+	//
+	// Teardown-before-delete ordering (bot r32 P2). The supervisor-descriptor
+	// teardown (RemoveSerenaSupervisorIntentForWorkspace) runs FIRST; the
+	// registry-row delete commits ONLY after it succeeds. On a live-supervisor
+	// reconcile failure the teardown RESTORES the descriptor and returns a
+	// retry-asking error — so if we had already deleted+saved the registry row,
+	// the restored descriptor would be paired with a now-gone row: an orphan
+	// the supervisor keeps reconciling, and the retry sees no matching serena
+	// row so it never re-enters the paired teardown. Returning here WITHOUT
+	// touching the registry row keeps the durable record that drives the next
+	// retry's paired teardown intact.
 	if removeSerena {
+		if _, err := removeSerenaSupervisorIntentFn(canonical); err != nil {
+			return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, err)
+		}
 		reg := api.NewRegistry(regPath)
 		unlock, err := reg.Lock()
 		if err != nil {
@@ -425,9 +453,6 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 		}
 		unlock()
 		removed += n
-		if _, err := api.NewAPI().RemoveSerenaSupervisorIntentForWorkspace(canonical); err != nil {
-			return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, err)
-		}
 	}
 
 	// If the default marker pointed at this workspace AND we removed the

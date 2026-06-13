@@ -30,13 +30,23 @@ import (
 type fakeAutostartBackend struct {
 	enableCalls   []autostart.Options
 	disableCalls  int
-	failEnable    bool   // when true, Enable returns shimErr
-	shimErr       error  // err returned on shimFail path
-	currentStrict bool   // last successful StrictMode the shim was set to
-	installed     bool   // last successful Enable left the shim installed
+	failEnable    bool         // when true, Enable returns shimErr
+	shimErr       error        // err returned on shimFail path
+	currentStrict bool         // last successful StrictMode the shim was set to
+	installed     bool         // last successful Enable left the shim installed
+	onEnable      func() error // optional hook fired at the START of Enable (step 2)
 }
 
 func (f *fakeAutostartBackend) Enable(opts autostart.Options) error {
+	// onEnable fires at the moment step 2 begins — i.e. AFTER step 1 (intent
+	// write) and the in-progress breadcrumb write, BEFORE the shim flips. FIX 3
+	// tests observe the breadcrumb-on-disk state here to prove the in-progress
+	// marker is written in the step1→step2 window.
+	if f.onEnable != nil {
+		if err := f.onEnable(); err != nil {
+			return err
+		}
+	}
 	if f.failEnable {
 		return f.shimErr
 	}
@@ -304,6 +314,157 @@ func TestStrictModeEnable_RevertOfRevertFailure_BreadcrumbWritten(t *testing.T) 
 	}
 	if bc.TS == "" {
 		t.Error("breadcrumb missing ts")
+	}
+}
+
+// ============================================================================
+// FIX 3 (opus-3 F11) — forward-progress breadcrumb for the SIGKILL/power-loss
+// window between step 1 (intent write) and step 2 (shim Enable).
+// ============================================================================
+
+// TestStrictModeEnable_InProgressBreadcrumbWrittenBeforeStep2 is the FIX 3
+// falsifying regression. The in-progress breadcrumb must exist on disk at the
+// moment step 2 (shim Enable) begins — i.e. it was written in the step1→step2
+// window. If the process is SIGKILLed there, this marker is the only thing that
+// lets `mcphub strict-mode --recover` detect the posture drift.
+//
+// Pre-fix NO breadcrumb was written before step 1, so the marker is absent at
+// step 2 and the test fails.
+func TestStrictModeEnable_InProgressBreadcrumbWrittenBeforeStep2(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+
+	var bcAtStep2 *strictModeBreadcrumb
+	var intentStrictAtStep2 bool
+	tmp.backend.onEnable = func() error {
+		// Read the breadcrumb that should have been written BEFORE step 1.
+		raw, err := os.ReadFile(tmp.BreadcrumbPath())
+		if err != nil {
+			return nil // leave bcAtStep2 nil — the assertion below fails loudly
+		}
+		var bc strictModeBreadcrumb
+		if err := json.Unmarshal(raw, &bc); err != nil {
+			t.Errorf("breadcrumb at step 2 is not valid JSON: %v", err)
+			return nil
+		}
+		bcAtStep2 = &bc
+		// Also confirm step 1 already flipped intent to the desired value, so
+		// this really is the step1→step2 window.
+		if intent, ierr := api.ReadSupervisorIntent(tmp.IntentPath()); ierr == nil {
+			intentStrictAtStep2 = intent.StrictMode
+		}
+		return nil
+	}
+
+	if err := RunStrictMode([]string{"enable"}, tmp.Deps()); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+
+	if bcAtStep2 == nil {
+		t.Fatal("no in-progress breadcrumb on disk when step 2 began — FIX 3 requires it written before step 1 (opus-3 F11)")
+	}
+	if bcAtStep2.Phase != strictModeBreadcrumbPhaseInProgress {
+		t.Errorf("breadcrumb.phase = %q at step 2, want %q", bcAtStep2.Phase, strictModeBreadcrumbPhaseInProgress)
+	}
+	if !bcAtStep2.Intended {
+		t.Errorf("breadcrumb.intended = false at step 2, want true (enable)")
+	}
+	// ActualIntentState records the PRE-mutation value (false) so --recover
+	// branch B rolls back to it.
+	if bcAtStep2.ActualIntentState {
+		t.Errorf("breadcrumb.actual_intent_state = true at step 2, want false (pre-mutation value for rollback)")
+	}
+	if !intentStrictAtStep2 {
+		t.Errorf("intent was not flipped to desired before step 2 — window assumption broken")
+	}
+}
+
+// TestStrictModeEnable_InProgressBreadcrumbDeletedAfterSuccess pins the
+// clean-success tail: once both resources reach `desired`, the in-progress
+// breadcrumb is deleted so the next strict-mode invocation does not refuse on a
+// stale marker.
+func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterSuccess(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+
+	if err := RunStrictMode([]string{"enable"}, tmp.Deps()); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if _, err := os.Stat(tmp.BreadcrumbPath()); err == nil {
+		t.Fatal("in-progress breadcrumb survived a fully successful mutation — clean-success tail must delete it (FIX 3)")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+}
+
+// TestStrictModeEnable_InProgressBreadcrumbDeletedAfterRevert pins that the
+// revert-success path (step 2 fails, revert of step 1 succeeds) also deletes
+// the in-progress breadcrumb — there is no drift once both resources are back
+// at their original value, so a stale marker would force a spurious --recover.
+// This is the existing happy-revert contract (TestStrictModeEnable_RevertOnShimFailure
+// asserts the breadcrumb is absent) restated for the in-progress marker.
+func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterRevert(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.MakeShimWriteFail()
+
+	err := RunStrictMode([]string{"enable"}, tmp.Deps())
+	if err == nil {
+		t.Fatal("expected non-zero exit when shim write fails")
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr == nil {
+		t.Fatal("in-progress breadcrumb survived a successful revert — revert-success path must delete it (FIX 3)")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unexpected stat error: %v", statErr)
+	}
+}
+
+// TestStrictModeRecover_InProgressMarkerReconciles proves the --recover surface
+// consumes the in-progress marker left by a simulated SIGKILL in the step1→step2
+// window. The crash state: intent flipped to desired (true), shim still at
+// original (false). Branch B drives both back to the recorded pre-mutation
+// ActualIntentState (false), reconciling the drift; the breadcrumb is deleted.
+func TestStrictModeRecover_InProgressMarkerReconciles(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+
+	// Simulate the crash residue directly: an in-progress breadcrumb plus the
+	// post-step1 / pre-step2 on-disk state (intent=true, shim=false).
+	inProgress := strictModeBreadcrumb{
+		Intended:          true,  // operator ran `enable`
+		ActualIntentState: false, // pre-mutation value (rollback target)
+		ActualShimState:   false, // shim never flipped (step 2 never ran)
+		TS:                "2026-06-13T12:00:00Z",
+		Phase:             strictModeBreadcrumbPhaseInProgress,
+	}
+	raw, _ := json.MarshalIndent(inProgress, "", "  ")
+	if err := os.WriteFile(tmp.BreadcrumbPath(), raw, 0o600); err != nil {
+		t.Fatalf("seed in-progress breadcrumb: %v", err)
+	}
+	// Live state mirrors the crash: intent flipped to true, shim still false.
+	tmp.SeedInitialStrict(true)
+	tmp.backend.installed = true
+	tmp.backend.currentStrict = false
+
+	// Sanity: a normal enable/disable invocation must REFUSE while the
+	// in-progress marker is present (same refuse-if-held surface).
+	if refuseErr := RunStrictMode([]string{"disable"}, tmp.Deps()); refuseErr == nil {
+		t.Fatal("strict-mode must refuse while an in-progress breadcrumb is present; got nil")
+	} else if !strings.Contains(refuseErr.Error(), "--recover") {
+		t.Errorf("refusal should point at --recover; got %v", refuseErr)
+	}
+
+	deps := tmp.Deps()
+	deps.PromptOperator = func() (string, error) { return "B", nil }
+	if err := RunStrictModeRecover(deps); err != nil {
+		t.Fatalf("recover from in-progress marker: %v", err)
+	}
+	// Branch B reconciled both resources to actual_intent_state=false.
+	intent, _ := api.ReadSupervisorIntent(tmp.IntentPath())
+	if intent.StrictMode {
+		t.Errorf("intent.strict_mode = true after branch B recover, want false")
+	}
+	if tmp.backend.currentStrict {
+		t.Errorf("shim.strict_mode = true after branch B recover, want false")
+	}
+	if _, err := os.Stat(tmp.BreadcrumbPath()); err == nil {
+		t.Error("in-progress breadcrumb not deleted after successful recover")
 	}
 }
 

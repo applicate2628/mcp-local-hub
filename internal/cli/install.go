@@ -1188,9 +1188,21 @@ func dispatchUpgrade(cmd *cobra.Command) error {
 	return dispatchUpgradeReal(cmd)
 }
 
-// hasSupervisorIntent reports whether the v0.5.x supervisor-intent.json is
-// present in the state-dir. Present = v0.5.x machine (cold-restart upgrade
-// path); absent = fresh install (binary-copy fallback).
+// hasSupervisorIntent reports whether the state-dir's supervisor-intent.json
+// names an actual v0.5.x supervisor — i.e. carries at least one
+// supervisor-owned DAEMON DESCRIPTOR row (len(intent.Daemons) > 0 after the
+// existing one-shot/maintenance filtering in api.ReadSupervisorIntent).
+//
+//   - ≥1 daemon row     → v0.5.x machine (cold-restart upgrade path).
+//   - file absent        → fresh install (binary-copy fallback).
+//   - descriptor-less    → "no v0.5 supervisor". A stops-only / daemon-less
+//     intent file (e.g. a v0.4 scheduler-only host where someone ran a
+//     `mcphub ... stop`, minting a supervisor-intent.json that carries ONLY
+//     Stops and no Daemons) must NOT be treated as a v0.5 install. Routing it
+//     as v0.5 takes runV5UpgradeReal and SKIPS the legacy-scheduler migration,
+//     so existing legacy scheduler tasks are never materialized into
+//     supervisor intent (bot r32 P2). Returning false here routes such files
+//     down the legacy-scheduler probe instead.
 //
 // Returns (false, nil) on os.ErrNotExist for both the file and its parent
 // directory — both mean "no supervisor intent on disk" and the caller treats
@@ -1231,7 +1243,24 @@ func hasSupervisorIntent() (bool, error) {
 		// Same fail-closed rationale as the IsDir branch above.
 		return false, fmt.Errorf("hasSupervisorIntent: %s is not a regular file (mode %v)", path, info.Mode())
 	}
-	return true, nil
+	// Mere regular-file presence is NOT enough (bot r32 P2): a stops-only /
+	// descriptor-less file would otherwise route as a v0.5 install and skip
+	// the legacy-scheduler migration. Read the intent and require at least one
+	// daemon row. api.ReadSupervisorIntent strips legacy one-shot daemons
+	// first, so the count reflects real long-lived supervisor descriptors.
+	//
+	// A read error is a hard, wrapped, fail-closed error (NOT a silent false):
+	// the file the routing discriminator relied on is unreadable (corrupt
+	// JSON, EBUSY race, permission drift). Failing closed makes the dispatcher
+	// surface the real cause instead of silently mis-routing.
+	intent, err := api.ReadSupervisorIntent(path)
+	if err != nil {
+		return false, fmt.Errorf("hasSupervisorIntent: read %s: %w", path, err)
+	}
+	if intent == nil {
+		return false, fmt.Errorf("hasSupervisorIntent: %s decoded to nil (corrupt envelope)", path)
+	}
+	return len(intent.Daemons) > 0, nil
 }
 
 // dispatchUpgradeReal implements the production routing branch. It asks

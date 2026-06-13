@@ -59,6 +59,27 @@ const (
 	ExitStrictModeRevertFailed = 10
 )
 
+// Breadcrumb phase markers. Distinguish the two crash/torn shapes the
+// breadcrumb file (<state-dir>/strict-mode-mutation-incomplete.json) can hold:
+//
+//   - strictModeBreadcrumbPhaseTorn ("" — the legacy/default shape) is written
+//     on the HANDLED both-writes-failed branch: step 1 (intent) succeeded,
+//     step 2 (shim) failed, AND the revert of step 1 also failed.
+//   - strictModeBreadcrumbPhaseInProgress is written BEFORE step 1 and deleted
+//     AFTER step 2 succeeds. If the process is SIGKILLed / power-lost in the
+//     step1→step2 window (intent flipped, shim still original — a strict-mode
+//     posture DRIFT with NO handled-failure breadcrumb), this in-progress
+//     marker is what survives so `mcphub strict-mode --recover` can detect and
+//     reconcile the drift (opus-3 F11).
+//
+// Back-compat: the marker is `omitempty`, so every pre-existing both-failed
+// breadcrumb (which never set Phase) round-trips as the torn shape and the
+// refuse-if-held / --recover surface treats it exactly as before.
+const (
+	strictModeBreadcrumbPhaseTorn       = ""
+	strictModeBreadcrumbPhaseInProgress = "in-progress"
+)
+
 // strictModeBreadcrumb is the on-disk schema for
 // <state-dir>/strict-mode-mutation-incomplete.json. Written when revert
 // fails; read by --recover; deleted on successful reconcile.
@@ -103,6 +124,14 @@ type strictModeBreadcrumb struct {
 	// TS is the breadcrumb creation timestamp, UTC RFC3339Nano. Used
 	// by the operator to correlate with watchdog/intent-audit logs.
 	TS string `json:"ts"`
+
+	// Phase distinguishes the in-progress crash-window marker from the
+	// legacy both-failed (torn) shape. Empty (omitted) is the torn shape
+	// for back-compat with pre-F11 breadcrumbs; "in-progress" is written
+	// before step 1 and deleted after step 2 succeeds, so a value that
+	// survives means a SIGKILL/power-loss happened in the step1→step2
+	// window. See strictModeBreadcrumbPhase* constants.
+	Phase string `json:"phase,omitempty"`
 }
 
 // StrictModeDeps holds the injected dependencies the strict-mode CLI
@@ -277,6 +306,28 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// idempotent (atomic rename of identical bytes is a no-op
 	// observed by readers).
 
+	// Forward-progress breadcrumb for the SIGKILL/power-loss window
+	// (opus-3 F11). Write an IN-PROGRESS marker BEFORE step 1 and delete
+	// it after step 2 succeeds. If the process dies in the step1→step2
+	// window, intent ends up at `desired` while the shim stays at
+	// `originalStrict` — a posture DRIFT with no handled-failure
+	// breadcrumb. This marker is what `mcphub strict-mode --recover`
+	// detects so it can reconcile the drift. ActualIntentState records the
+	// pre-mutation value so --recover branch B (drive both to
+	// actual_intent_state) rolls back; branch A (drive both to intended)
+	// rolls forward — both branches drive intent + shim consistently and
+	// so overwrite whatever partial state the crash left.
+	inProgressBC := strictModeBreadcrumb{
+		Intended:          desired,
+		ActualIntentState: originalStrict,
+		ActualShimState:   originalStrict,
+		TS:                time.Now().UTC().Format(time.RFC3339Nano),
+		Phase:             strictModeBreadcrumbPhaseInProgress,
+	}
+	if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &inProgressBC); err != nil {
+		return fmt.Errorf("strict-mode: write in-progress breadcrumb: %w", err)
+	}
+
 	// Step 1: write intent with new strict_mode value.
 	newIntent := &api.SupervisorIntentFile{
 		Version:    1,
@@ -322,15 +373,18 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 			revertIntent.Stops = original.Stops
 		}
 		if revertErr := writeFn(deps.IntentPath, revertIntent); revertErr != nil {
-			// Both writes failed — write breadcrumb + exit 10.
+			// Both writes failed — overwrite the in-progress breadcrumb with
+			// the torn shape + exit 10. The Phase reverts to torn ("") so the
+			// --recover surface treats it as the handled both-failed case.
 			bc := strictModeBreadcrumb{
 				Intended:          desired,
-				ActualIntentState: desired, // step 1 succeeded, so intent IS at desired
+				ActualIntentState: desired,        // step 1 succeeded, so intent IS at desired
 				ActualShimState:   originalStrict, // step 2 failed, so shim stays at original
 				Step1Error:        "",
 				Step2Error:        err.Error(),
 				RevertError:       revertErr.Error(),
 				TS:                time.Now().UTC().Format(time.RFC3339Nano),
+				Phase:             strictModeBreadcrumbPhaseTorn,
 			}
 			if writeBCErr := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &bc); writeBCErr != nil {
 				// Truly catastrophic — can't even write the breadcrumb.
@@ -348,9 +402,27 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 			fmt.Fprintln(stderrOrDefault(deps), string(body))
 			return &forceExitError{code: ExitStrictModeRevertFailed}
 		}
-		// Revert succeeded — surface the step 2 error so the operator
-		// can investigate the underlying shim failure.
+		// Revert succeeded — both resources are back at their original
+		// strict-mode value, so there is no torn state and no drift: delete
+		// the in-progress breadcrumb (best-effort; a stale crumb would
+		// otherwise force the operator to --recover a non-existent drift).
+		// Surface the step 2 error so the operator can investigate the
+		// underlying shim failure.
+		if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+			fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after revert: %v\n", rmErr)
+		}
 		return fmt.Errorf("strict-mode: step 2 (autostart shim): %w (intent reverted to %v)", err, originalStrict)
+	}
+	// Clean success: both resources reached `desired`. Delete the
+	// in-progress breadcrumb so the next strict-mode invocation does not
+	// refuse-if-held on a stale marker. A failed delete is non-fatal (the
+	// mutation itself succeeded): the stale in-progress crumb is
+	// self-healing — branch A of --recover drives both resources to
+	// `intended`, which equals the value they already hold, an idempotent
+	// no-op. Match the --recover cleanup-failure precedent: warn, don't
+	// return an error that would misreport a successful mutation.
+	if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after success: %v\n", rmErr)
 	}
 	return nil
 }
