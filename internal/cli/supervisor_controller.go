@@ -1780,13 +1780,25 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 			// coming for a failed terminate. Preserving the live state is the honest
 			// reflection of reality (the daemon is, as far as we know, still running)
 			// and is what makes the retry actually re-issue the kill (finding 2).
-			c.smStates.Store(taskName, currentState)
-			if v, ok := c.queuedActions.Load(taskName); ok {
+			//
+			// pr302 r8 review finding 2: roll back under smKey — the SAME key the
+			// forward writes above (1738 smStates.Store(smKey), 1732/1734/1736
+			// queuedActions.Store(smKey)) used — NOT the canonical taskName. For a
+			// pre-fix LEGACY BARE daemon whose SM/queued rows live under the bare key,
+			// a canonical Store would leave smStates[bare]=StExiting STUCK and write a
+			// parallel smStates[canonical]=<live> — the split key space the function's
+			// own invariant (1640-1644) forbids and which would defeat the retry (the
+			// follow-up tick reads the bare-keyed StExiting and defers forever). With
+			// the single-key-space fix a NEW daemon's smKey == canonical, so this is a
+			// no-op for the common case and the correct symmetric rollback for the
+			// legacy bare-keyed remnant.
+			c.smStates.Store(smKey, currentState)
+			if v, ok := c.queuedActions.Load(smKey); ok {
 				if qa, ok := v.(string); ok && qa == "" {
 					// Clear the "queued_action=none" we wrote for the StExiting
 					// transition so the rolled-back live state starts the retry
 					// clean.
-					c.queuedActions.Delete(taskName)
+					c.queuedActions.Delete(smKey)
 				}
 			}
 			return reapTerminateFailed
@@ -2094,14 +2106,24 @@ func (c *supervisorController) lookupDescriptorWithShadow(taskName string) (*api
 	if c == nil {
 		return nil, false
 	}
+	// pr302 r8 single-key-space invariant: handleLoopEvent now calls this with the
+	// CANONICAL routeKey. The descriptor cache (IntentCache.daemonByTask) is keyed by the
+	// RAW on-disk d.TaskName, which for a LEGACY / hand-written intent row is the BARE
+	// form, so a plain Lookup(canonical) would MISS it — resolve via LookupCanonical
+	// (probes both key forms). The reapShadow is already CANONICAL-keyed (the reap
+	// detection side stores it under the canonical name), so a canonical Load hits; the
+	// toggled-form fallback below is defensive belt-and-suspenders for any pre-fix
+	// bare-keyed shadow that a cold-restart resume could carry.
 	if c.intentCache != nil {
-		if d, ok := c.intentCache.Lookup(taskName); ok {
+		if d, ok := c.intentCache.LookupCanonical(taskName); ok {
 			return d, true
 		}
 	}
-	if v, ok := c.reapShadow.Load(taskName); ok {
-		if d, ok := v.(*api.SupervisorDaemon); ok && d != nil {
-			return d, true
+	for _, key := range distinctTaskNameKeyForms(taskName) {
+		if v, ok := c.reapShadow.Load(key); ok {
+			if d, ok := v.(*api.SupervisorDaemon); ok && d != nil {
+				return d, true
+			}
 		}
 	}
 	return nil, false
@@ -2327,6 +2349,33 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		}
 		return
 	}
+	// pr302 r8 single-key-space invariant: canonicalize ev.TaskName ONCE at the SM
+	// ingestion boundary so the ENTIRE SM + reap + loop bookkeeping system (smStates /
+	// queuedActions / ownSpawned / reaperOutstanding / reapShadow / pendingReap /
+	// reapDeferred* maps + the tracker calls) operates in ONE canonical key space.
+	//
+	// Root of the bug CLASS the r6/r7 detection-side helpers only half-closed: the
+	// reap-DETECTION side (handleReapScan) keys CANONICAL (IntentCache.TaskNames()
+	// canonicalizes; pendingReap/reapShadow/markPendingReap store canonical), and
+	// hydrateControllerRunningStates already seeds smStates CANONICAL
+	// (supervise_liveness.go), but this loop USED to key off the RAW ev.TaskName —
+	// which for a LEGACY / hand-written intent row whose TaskName LACKS the leading
+	// backslash (and for the real in-flight EvChildExit runCrashEventBridge posts with
+	// the bare ev.Daemon.TaskName) is the BARE form. The two key spaces diverged and
+	// the reap wedged (orphan-dropped real exit, stuck StExiting, backoff respawning a
+	// removed descriptor). Canonicalizing here unifies them.
+	//
+	// Everything downstream (the api.Transition dispatch below, executeSideEffect, and
+	// handleBackoffWaiting) receives this canonicalized ev + the canonicalized
+	// descriptor copy resolved below, so their ev.TaskName / d.TaskName map writes
+	// become canonical with NO edits to executeSideEffect (kept byte-identical for the
+	// PR #303 rebase). The descriptor COPY keeps the spawn/terminate path correct: the
+	// production spawn fn uses d.Command + d.Args verbatim (not d.TaskName), the tracker
+	// + runningPIDs + overlay are all already canonical-keyed, and the serena-proxy
+	// --task-name lives in d.Args (re-checked by the child against its OWN on-disk
+	// descriptor), so the canonical TaskName on the in-memory copy changes no spawn arg.
+	routeKey := canonicalSupervisorTaskName(ev.TaskName)
+	ev.TaskName = routeKey
 	// Any EvChildExit reaching the controller is an observation that the
 	// task's real own reaper (if it had one) has fired its exit — clear
 	// the reaperOutstanding marker so a subsequent terminate is free to
@@ -2341,7 +2390,7 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	if ev.Kind == api.EvChildExit {
 		c.reaperOutstanding.Delete(ev.TaskName)
 	}
-	d, ok := c.lookupDescriptorWithShadow(ev.TaskName)
+	resolved, ok := c.lookupDescriptorWithShadow(ev.TaskName)
 	if !ok {
 		// Daemon dropped from intent OR not yet known (controller
 		// initial state, or a stale event posted by the cmd.Wait
@@ -2370,6 +2419,20 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		completeIdleRespawnEvent(ev, fmt.Errorf("task %s not found in controller intent cache", ev.TaskName))
 		return
 	}
+
+	// pr302 r8 single-key-space invariant: route the SM against a COPY of the resolved
+	// descriptor whose TaskName is the canonical routeKey. `resolved` points into the
+	// shared intentCache snapshot slice (or the reapShadow) — mutating its TaskName in
+	// place would corrupt the cache for every other reader — so copy first, then set the
+	// canonical TaskName. The copy flows into api.Transition's SMContext lookups,
+	// executeSideEffect, and handleBackoffWaiting, so EVERY d.TaskName-keyed map write
+	// downstream lands in the canonical key space WITHOUT editing executeSideEffect. The
+	// spawn/terminate path stays correct: the production spawn fn builds the child cmd
+	// from d.Command + d.Args (the serena-proxy --task-name lives in d.Args, unchanged
+	// by the copy), and the tracker / runningPIDs / overlay are already canonical-keyed.
+	dCopy := *resolved
+	dCopy.TaskName = routeKey
+	d := &dCopy
 
 	// Default to StIdle when the smStates map has no entry. The
 	// api.SMState type is a string and its zero value is the empty

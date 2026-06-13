@@ -2104,3 +2104,193 @@ func TestSupervisorController_OrphanReap_R7_BareKeySMStateReapsViaCanonicalCheck
 		t.Fatalf("finding 4: the reap terminate did not record a target PID")
 	}
 }
+
+// (R8 single-key-space) TestSupervisorController_OrphanReap_R8_BareKeyFullLifecycleNoOrphanDropNoParallelRow
+// is the FULL-LIFECYCLE falsifier for the key-canonicalization bug CLASS: a LEGACY
+// bare-TaskName own-spawned daemon driven through spawn -> remove-from-intent -> the
+// REAL in-flight EvChildExit (posted with the bare ev.TaskName, exactly as
+// runCrashEventBridge posts ev.Daemon.TaskName) -> reap, asserting the WHOLE class is
+// closed by the single canonical key space.
+//
+// Root the r6/r7 detection-side helpers only half-closed: the reap DETECTION side keyed
+// canonical (TaskNames()/pendingReap/reapShadow/markPendingReap), and
+// hydrateControllerRunningStates seeds smStates CANONICAL — but handleLoopEvent USED to
+// key off the RAW ev.TaskName. For a bare daemon the real EvChildExit (bare ev.TaskName)
+// hit smStates.Load(bare) → MISS the canonical-stored state → StIdle default → the SM
+// mis-routed (orphan-dropped against a canonical-keyed reapShadow, left a stale state,
+// and the backoff path could respawn the removed descriptor). r8 canonicalizes ev +
+// the descriptor at the loop boundary, so the whole SM/reap/loop system is ONE canonical
+// key space.
+//
+// This drives the REAL loop (no direct bare smStates seed): EvStart fires the spawn fake
+// through executeSideEffect, which records ownSpawned/reaperOutstanding/smStates under
+// the canonicalized d.TaskName. The asserts prove (1) no parallel bare row is ever
+// created, (2) the real bare EvChildExit is NOT orphan-dropped, (3) the SM settles
+// canonically, (4) no removed-descriptor respawn.
+func TestSupervisorController_OrphanReap_R8_BareKeyFullLifecycleNoOrphanDropNoParallelRow(t *testing.T) {
+	h := newReapTestHarness(t)
+	// Legacy bare-key descriptor: TaskName WITHOUT the leading backslash (a
+	// hand-written / pre-canonicalization intent row). IntentCache.Refresh keys
+	// daemonByTask by this RAW bare name.
+	bare := reapTestDescriptor()
+	bare.TaskName = "mcp-local-hub-lsp-deadbeef-go" // no leading "\"
+	canonical := canonicalSupervisorTaskName(bare.TaskName)
+
+	// Seed ONLY the descriptor cache (bare-keyed, as on-disk) + the fresh on-disk
+	// intent. Do NOT pre-seed smStates: the real loop must populate it, so the test
+	// proves the loop produces a CANONICAL key (not the pre-fix bare key).
+	h.ctrl.intentCache.Refresh(intentWith(bare))
+	h.setFreshIntent(intentWith(bare))
+
+	// Drive the daemon-intent so EvStart resolves Desired=running.
+	// (di.Lookup defaults to running when absent, so no explicit stop seed needed.)
+
+	// Phase 1 — SPAWN via the real loop. EvStart is posted with the BARE TaskName the
+	// reconciler/IPC would use for a bare descriptor; the fixed loop canonicalizes it.
+	// StIdle + EvStart -> StSpawning (create-process) -> spawn fake returns nil ->
+	// PostSelf EvHealthOK -> StSpawning + EvHealthOK -> StRunning. executeSideEffect
+	// records ownSpawned + reaperOutstanding under the canonicalized d.TaskName.
+	h.postEvent(api.LoopEvent{Kind: api.EvStart, TaskName: bare.TaskName})
+	// Mark the live PID as a real spawn would (the spawn fake does not touch the
+	// tracker). The tracker self-canonicalizes, so this lands canonical.
+	h.tracker.MarkSpawned(bare.TaskName, 88001, time.Now().UTC())
+
+	// Invariant assertions after spawn: ALL bookkeeping resolves to the CANONICAL key,
+	// and there is NO parallel BARE row anywhere.
+	if st, ok := h.ctrl.GetSMState(canonical); !ok || st != api.StRunning {
+		t.Fatalf("r8: a bare-key daemon spawned through the real loop must have its SM state under the CANONICAL key (StRunning); got state=%v ok=%v", st, ok)
+	}
+	if _, ok := h.ctrl.smStates.Load(bare.TaskName); ok {
+		t.Fatalf("r8: the loop must NOT create a parallel BARE smStates row — the single-key-space invariant requires canonical-only")
+	}
+	if !h.ctrl.loadReapMarkerCanonical(&h.ctrl.ownSpawned, canonical) {
+		t.Fatalf("r8: executeSideEffect must record ownSpawned for the spawned daemon (resolvable by canonical)")
+	}
+	if _, ok := h.ctrl.ownSpawned.Load(bare.TaskName); ok {
+		t.Fatalf("r8: ownSpawned must be stored under the canonical key, not a parallel bare row")
+	}
+	if _, ok := h.ctrl.reaperOutstanding.Load(canonical); !ok {
+		t.Fatalf("r8: reaperOutstanding must be recorded under the canonical key after spawn")
+	}
+
+	// Phase 2 — REMOVE the descriptor from intent (tick 1). The canonical removal
+	// candidate sees the canonical-keyed StRunning state as reapable and marks
+	// pendingReap (canonical), keeping the descriptor in the reaping shadow.
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(canonical); !ok {
+		t.Fatalf("r8: a removed bare-key live daemon must be marked pendingReap (canonical)")
+	}
+	if _, ok := h.ctrl.reapShadow.Load(canonical); !ok {
+		t.Fatalf("r8: the reaping shadow must keep the bare-key descriptor routable during the window")
+	}
+	if got := h.terminateCalls.Load(); got != 0 {
+		t.Fatalf("r8: tick-1 must not terminate (verification window); terminate calls = %d", got)
+	}
+
+	// Phase 3 — the REAL in-flight EvChildExit arrives, posted with the BARE TaskName
+	// exactly as runCrashEventBridge posts ev.Daemon.TaskName for a bare descriptor.
+	// PRE-fix this hit smStates.Load(bare) (miss → StIdle) AND reapShadow.Load(bare)
+	// (miss, since the shadow is canonical) → the event was ORPHAN-DROPPED, leaving the
+	// SM wedged at the canonical StRunning and the reaperOutstanding marker stranded.
+	// POST-fix the loop canonicalizes the bare ev → resolves the canonical StRunning +
+	// the canonical shadow descriptor → StRunning + EvChildExit routes normally
+	// (-> StBackoffWaiting, the crash/respawn path), and clears reaperOutstanding.
+	h.postEvent(api.LoopEvent{Kind: api.EvChildExit, TaskName: bare.TaskName})
+
+	// The reaperOutstanding marker MUST be cleared by the real exit (handleLoopEvent's
+	// EvChildExit pre-lookup clear), under the canonical key — proof the bare ev reached
+	// the canonical bookkeeping rather than being orphan-dropped.
+	if h.ctrl.loadReapMarkerCanonical(&h.ctrl.reaperOutstanding, canonical) {
+		t.Fatalf("r8: the real bare-key EvChildExit must CLEAR reaperOutstanding (canonical) — pre-fix the bare ev missed the canonical marker and the event was orphan-dropped, stranding it")
+	}
+	// The SM must have ADVANCED off StRunning (the exit was observed + routed), and must
+	// NOT have produced a parallel bare row.
+	st, ok := h.ctrl.GetSMState(canonical)
+	if !ok || st == api.StRunning {
+		t.Fatalf("r8: the real bare-key EvChildExit must route via the canonical state + shadow and advance the SM off StRunning (not be orphan-dropped leaving a stale StRunning); got state=%v ok=%v", st, ok)
+	}
+	if _, ok := h.ctrl.smStates.Load(bare.TaskName); ok {
+		t.Fatalf("r8: routing the real bare-key EvChildExit must NOT create a parallel bare smStates row")
+	}
+
+	// Phase 4 — the removal is confirmed (tick 2 still absent). The reap settles the
+	// task. Because the descriptor was removed, NO respawn of the removed descriptor may
+	// fire: the spawn fake was called EXACTLY ONCE (the original Phase-1 spawn).
+	h.refresh(emptyReapIntent())
+	if got := h.spawnCalls.Load(); got != 1 {
+		t.Fatalf("r8: the removed bare-key descriptor must NOT be respawned by the crash/backoff path during the reap; spawn calls = %d (want 1, the original spawn only)", got)
+	}
+}
+
+// (R8 single-key-space) TestSupervisorController_OrphanReap_R8_BareKeyBackoffRemovedDoesNotRespawnOldDescriptor
+// is the SEPARATE backoff falsifier: a bare-key daemon in StBackoffWaiting whose
+// descriptor is removed must NOT respawn the old descriptor when its backoff EvTimerDue
+// fires during the reap window (finding E), and the bare EvTimerDue must reach the
+// canonical pendingReap-suppression path rather than being mis-routed.
+//
+// PRE-fix: the EvTimerDue arrived bare; the finding-E suppression read
+// pendingReap.Load(bare) → MISS the canonical pendingReap mark → the suppression did NOT
+// fire → StBackoffWaiting + EvTimerDue drove a respawn of the REMOVED descriptor (an
+// orphan on a port the operator just freed). POST-fix the bare ev canonicalizes →
+// pendingReap.Load(canonical) HITS → the respawn is suppressed.
+func TestSupervisorController_OrphanReap_R8_BareKeyBackoffRemovedDoesNotRespawnOldDescriptor(t *testing.T) {
+	h := newReapTestHarness(t)
+	bare := reapTestDescriptor()
+	bare.TaskName = "mcp-local-hub-lsp-deadbeef-go"
+	canonical := canonicalSupervisorTaskName(bare.TaskName)
+
+	h.ctrl.intentCache.Refresh(intentWith(bare))
+	h.setFreshIntent(intentWith(bare))
+
+	// Establish StBackoffWaiting through the REAL loop (NOT a direct smStates seed, which
+	// would pin the key to one form and not discriminate pre/post fix). Spawn the daemon
+	// (EvStart -> StRunning), then deliver a CRASH (non-clean EvChildExit, exit_code != 0)
+	// which routes StRunning -> StBackoffWaiting and arms the backoff timer. Both the
+	// EvStart and the crash EvChildExit are posted with the BARE TaskName exactly as the
+	// reconciler / runCrashEventBridge post for a bare descriptor; whichever key the loop
+	// version uses, the state lands there.
+	h.postEvent(api.LoopEvent{Kind: api.EvStart, TaskName: bare.TaskName})
+	h.tracker.MarkSpawned(bare.TaskName, 89001, time.Now().UTC())
+	h.postEvent(api.LoopEvent{Kind: api.EvChildExit, TaskName: bare.TaskName, Body: map[string]any{"exit_code": 1}})
+	if st, ok := h.ctrl.GetSMState(canonical); !ok || st != api.StBackoffWaiting {
+		t.Fatalf("r8: a bare-key daemon crash through the real loop must land StBackoffWaiting under the canonical key; got state=%v ok=%v", st, ok)
+	}
+
+	// Remove the descriptor from intent (tick 1): the canonical removal candidate sees the
+	// canonical-keyed StBackoffWaiting state as reapable and marks pendingReap (canonical).
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(canonical); !ok {
+		t.Fatalf("r8: a removed bare-key StBackoffWaiting daemon must be marked pendingReap (canonical)")
+	}
+
+	spawnsBefore := h.spawnCalls.Load()
+
+	// The backoff timer fires its EvTimerDue with the BARE TaskName during the reap window
+	// (posted manually to avoid the real-clock backoff timer). The finding-E suppression
+	// MUST fire: the canonicalized ev resolves currentState=StBackoffWaiting AND
+	// pendingReap.Load(canonical) HITS, so the respawn of the REMOVED descriptor is
+	// suppressed and the timer is remembered under the canonical key.
+	//
+	// PRE-fix the bare EvTimerDue read smStates.Load(bare) → MISS the canonical-stored
+	// StBackoffWaiting → the finding-E guard (which requires currentState==StBackoffWaiting)
+	// did not engage, AND pendingReap.Load(bare) missed — so the suppression failed to
+	// record the deferred timer under the canonical key (and on the bare-state in-process
+	// path would have respawned the removed descriptor outright).
+	h.postEvent(api.LoopEvent{Kind: api.EvTimerDue, TaskName: bare.TaskName})
+
+	// PRIMARY assertion (the orphan the task names): the removed bare-key descriptor must
+	// NOT be respawned by its backoff EvTimerDue during the reap window.
+	if got := h.spawnCalls.Load(); got != spawnsBefore {
+		t.Fatalf("r8: finding-E suppression must prevent the removed bare-key descriptor's backoff EvTimerDue from respawning it; spawn calls went %d -> %d (a respawn of the removed descriptor = the orphan-on-freed-port bug)", spawnsBefore, got)
+	}
+	if _, ok := h.ctrl.reapDeferredTimerDue.Load(canonical); !ok {
+		t.Fatalf("r8: the suppressed bare-key EvTimerDue must be remembered under the canonical key (so a replace-in-place reappear can replay it without stranding)")
+	}
+	// Still StBackoffWaiting (no transition), and no parallel bare row.
+	if st, ok := h.ctrl.GetSMState(canonical); !ok || st != api.StBackoffWaiting {
+		t.Fatalf("r8: the suppressed EvTimerDue must leave the daemon StBackoffWaiting; got state=%v ok=%v", st, ok)
+	}
+	if _, ok := h.ctrl.smStates.Load(bare.TaskName); ok {
+		t.Fatalf("r8: the bare EvTimerDue must not create a parallel bare smStates row")
+	}
+}

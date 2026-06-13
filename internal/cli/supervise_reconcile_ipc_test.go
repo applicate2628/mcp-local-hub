@@ -1787,3 +1787,52 @@ func TestReconcileApply_SyncBarrierBoundedOnFullStoppedLoop(t *testing.T) {
 		t.Fatal("finding 3: refreshSupervisorIntentSync BLOCKED on a full/stopped loop — the barrier enqueue is not context-aware, so the documented timeout never bounds the path (the r6 blocking Post hangs the IPC handler forever)")
 	}
 }
+
+// TestReconcileIPC_R8_BareKeyDescriptorDriftResolvesViaLookupCanonical is the site-4
+// falsifier for the key-canonicalization bug CLASS: the descriptor-drift restart path
+// resolves the controller's cached descriptor by the CANONICAL taskName
+// (canonicalTaskNameForReconcile prepends "\"), but IntentCache.daemonByTask is keyed by
+// the RAW on-disk d.TaskName. For a LEGACY / hand-written intent row whose TaskName LACKS
+// the leading backslash, a strict Lookup(canonical) MISSES it, so
+// classifyDriftAction sees a nil cachedDescriptor and never detects a same-task-name
+// descriptor rewrite on the StRunning daemon — the stale child keeps serving the old
+// port/command after a manifest rewrite.
+//
+// PRE-fix lookupControllerCachedDescriptor called ctrl.intentCache.Lookup(taskName)
+// (strict). POST-fix it calls LookupCanonical, matching the canonical-aware resolution
+// the reap detection side uses, so the bare-keyed legacy descriptor is found.
+func TestReconcileIPC_R8_BareKeyDescriptorDriftResolvesViaLookupCanonical(t *testing.T) {
+	// Legacy bare-key descriptor: TaskName WITHOUT the leading backslash, keyed in the
+	// cache exactly as IntentCache.Refresh stores a hand-written intent row (by raw key).
+	bare := api.SupervisorDaemon{
+		TaskName: "mcp-local-hub-lsp-deadbeef-go", // no leading "\"
+		Server:   "mcp-language-server",
+		Daemon:   "lsp-deadbeef-go",
+		Command:  "mcphub",
+		Args:     []string{"daemon", "workspace-proxy"},
+	}
+	canonical := canonicalSupervisorTaskName(bare.TaskName)
+
+	fx := newReconcileTestFixture(t, &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{bare}})
+
+	// Precondition: a STRICT Lookup of the canonical name MISSES the bare-keyed
+	// descriptor (the exact pre-fix gap), but LookupCanonical resolves it.
+	if _, ok := fx.ctrl.intentCache.Lookup(canonical); ok {
+		t.Fatalf("precondition: a strict canonical Lookup of a bare-keyed legacy descriptor should MISS (the pre-fix drift-resolution gap)")
+	}
+	if _, ok := fx.ctrl.intentCache.LookupCanonical(canonical); !ok {
+		t.Fatalf("precondition: LookupCanonical must resolve a bare-keyed legacy descriptor by the canonical name")
+	}
+
+	// The drift caller passes the CANONICAL taskName (canonicalTaskNameForReconcile).
+	// Site-4 fix: lookupControllerCachedDescriptor must resolve the bare-keyed descriptor
+	// via LookupCanonical so classifyDriftAction can compare it against the freshly-read
+	// on-disk descriptor and detect a same-task-name rewrite.
+	got := lookupControllerCachedDescriptor(fx.deps, canonical)
+	if got == nil {
+		t.Fatalf("site 4: lookupControllerCachedDescriptor(canonical) must resolve a bare-keyed legacy descriptor (pre-fix strict Lookup returned nil → drift undetected → stale child keeps the old port/command)")
+	}
+	if got.TaskName != bare.TaskName {
+		t.Fatalf("site 4: resolved descriptor must be the bare-keyed legacy row; got TaskName=%q want %q", got.TaskName, bare.TaskName)
+	}
+}

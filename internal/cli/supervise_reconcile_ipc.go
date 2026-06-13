@@ -919,7 +919,14 @@ func lookupControllerCachedDescriptor(deps ipcDispatchDeps, taskName string) *ap
 	if ctrl == nil || ctrl.intentCache == nil {
 		return nil
 	}
-	d, _ := ctrl.intentCache.Lookup(taskName)
+	// pr302 r8 single-key-space invariant (review finding 4): the drift caller passes the
+	// CANONICAL taskName (canonicalTaskNameForReconcile), but IntentCache.daemonByTask is
+	// keyed by the RAW on-disk d.TaskName — a LEGACY / hand-written intent row stores the
+	// descriptor under its BARE TaskName, so a strict Lookup(canonical) MISSES it and the
+	// descriptor-drift restart would see no cached descriptor (no rewrite detected → the
+	// stale child keeps serving the old port/command). LookupCanonical probes both key
+	// forms, matching the canonical-aware resolution the reap detection side uses.
+	d, _ := ctrl.intentCache.LookupCanonical(taskName)
 	return d
 }
 
