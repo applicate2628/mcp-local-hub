@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"mcp-local-hub/internal/api/apitest"
@@ -51,51 +53,69 @@ func TestReadStrictModeFromIntent_DecodeError_FailsClosedToStrict(t *testing.T) 
 }
 
 // TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict is the
-// FALSIFYING CORE of pr301 r4 Finding 1. When DefaultSupervisorIntentPath()
-// itself returns an ERROR (the state dir cannot be resolved at all), the gate
-// must fail CLOSED to strict=TRUE. The resolver can refuse an EXISTING,
-// already-broadened state dir that may hold a supervisor-intent.json with
-// strict_mode=true; relaxing on a resolver error would silently DISABLE the
-// gate. Pre-r4 the path-resolution-error branch returned false (relax) — a
-// fail-OPEN hole this test pins shut.
+// FALSIFYING CORE of pr301 r4 Finding 1. When the state dir cannot be RESOLVED
+// at all (DaemonStateDirReadOnly returns an error), the gate must fail CLOSED to
+// strict=TRUE. A resolver error may be hiding an existing strict_mode=true intent
+// on a host we can no longer reach; relaxing on a resolver error would silently
+// DISABLE the gate. Pre-r4 the path-resolution-error branch returned false
+// (relax) — a fail-OPEN hole this test pins shut.
 //
-// The unresolvable path is engineered deterministically (no timing race): point
-// the daemonStateRootOverride seam at a REGULAR FILE. DaemonStateDir() →
-// ensureStateRoot() → os.MkdirAll(<that file>) fails with "not a directory" on
-// both POSIX and Windows, so DefaultSupervisorIntentPath() returns a non-nil
-// error and readStrictModeFromIntentBestEffort hits exactly the
-// path-resolution-error branch under test.
+// Engineering a GENUINE DaemonStateDirReadOnly error cross-platform (pr301 r9):
+// the daemonStateRootOverride seam short-circuits the resolver, so it CANNOT be
+// used to force a resolve error (a regular-file override returns verbatim with no
+// error, and on Windows the subsequent ReadFile/Lstat both report ErrNotExist —
+// the ABSENT-relax branch — so the old regular-file technique no longer pins the
+// resolver branch). Instead, clear the override and make the real resolver fail:
+//
+//   - Windows (test_state_path_env build): stub knownFolderResolverFn to error
+//     AND clear LOCALAPPDATA + USERPROFILE so resolveKnownFolderWithEnvFallback
+//     exhausts every fallback and returns errKnownFolderUnavailable.
+//   - POSIX: clear XDG_DATA_HOME + HOME so posixParentDir's os.UserHomeDir fails.
+//
+// statePathsHelper saves/restores the override + resolver (panic-safe).
 func TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict(t *testing.T) {
 	t.Setenv(AllowUnhardenedStateReadEnv, "1")
 
-	// Create a regular FILE and use its path as the state-root override. The
-	// later DaemonStateDir() resolution (os.MkdirAll on a file path) fails, so
-	// DefaultSupervisorIntentPath() returns an error.
-	notADir := filepath.Join(t.TempDir(), "state-root-is-a-file")
-	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
-		t.Fatalf("seed regular file at state-root path: %v", err)
-	}
-	t.Cleanup(SetDaemonStateRootForTest(notADir))
+	// Clear the override (statePathsHelper restores it) so the REAL resolver runs.
+	statePathsHelper(t)
+	daemonStateRootOverride = ""
 
-	// Precondition: confirm the resolver actually errors (so this test exercises
-	// the path-resolution-error branch, not some other relax/strict path).
-	if _, err := DefaultSupervisorIntentPath(); err == nil {
-		t.Fatal("precondition: DefaultSupervisorIntentPath() must return an error when " +
-			"the state-root override is a regular file; got nil (the unresolvable-path " +
-			"branch under test is not being exercised)")
+	if runtime.GOOS == "windows" {
+		// Force the KnownFolder resolver and BOTH env fallbacks to fail.
+		installKnownFolderStub(t, func() (string, error) {
+			return "", errors.New("stub: KnownFolder unavailable")
+		})
+		t.Setenv("LOCALAPPDATA", "")
+		t.Setenv("USERPROFILE", "")
+	} else {
+		// Force posixParentDir's os.UserHomeDir to fail.
+		t.Setenv("XDG_DATA_HOME", "")
+		t.Setenv("HOME", "")
+	}
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	// Precondition: the resolver must genuinely error (so this test exercises the
+	// path-resolution-error branch, not some other relax/strict path).
+	if dir, err := DaemonStateDirReadOnly(); err == nil {
+		t.Fatalf("precondition: DaemonStateDirReadOnly() must return an error when the resolver "+
+			"and all fallbacks fail; got dir=%q nil err (the unresolvable-path branch under test "+
+			"is not being exercised)", dir)
 	}
 
 	if got := readStrictModeFromIntentBestEffort(); !got {
 		t.Fatal("pr301 r4 Finding 1 regression: an UNRESOLVABLE supervisor-intent path " +
 			"must fail CLOSED to strict (return true) — a resolver error may be hiding an " +
-			"existing strict_mode=true intent on a broadened state dir; got false (the pre-r4 " +
-			"fail-open-to-relax that silently disables the gate on a path-resolution error)")
+			"existing strict_mode=true intent on a host we can no longer reach; got false (the " +
+			"pre-r4 fail-open-to-relax that silently disables the gate on a path-resolution error)")
 	}
 }
 
 // TestReadStrictModeFromIntent_Absent_Relaxes is the safe-default control:
 // a MISSING intent file (fresh install, never ran strict-mode enable) resolves
-// to relax (false). The absent path must stay env-only, unchanged by #301-2.
+// to relax (false). pr301 r9 reverted the r5/r6/r7 absent-on-delete-capable →
+// strict over-reach, so an absent intent relaxes regardless of the dir's
+// broadening (delete-capable absent-relax is covered by the sec301
+// windows/posix tests; here the dir is hardened, the simplest relax case).
 func TestReadStrictModeFromIntent_Absent_Relaxes(t *testing.T) {
 	t.Setenv(AllowUnhardenedStateReadEnv, "1")
 	stateDir := apitest.HardenedTempDir(t)
@@ -104,7 +124,7 @@ func TestReadStrictModeFromIntent_Absent_Relaxes(t *testing.T) {
 
 	if got := readStrictModeFromIntentBestEffort(); got {
 		t.Fatal("absent supervisor-intent.json (fresh install) must relax (return false); got true " +
-			"(#301-2 must not flip the ABSENT case to strict)")
+			"(the absent case must not flip to strict — pr301 r9 revert)")
 	}
 }
 

@@ -14,15 +14,19 @@ import (
 // seedStrictIntentRaw writes a strict_mode=true supervisor-intent.json directly
 // via os.WriteFile, bypassing the secure-write operator gate.
 //
-// pr301 r5 Finding 1: api.WriteSupervisorIntent routes through the secure-write
-// pipeline, which consults OperatorRequiresSingleUserHome → the strict-mode
-// intent cache. On a broadened parent with NO intent file yet, the new
-// absent-intent strict verdict resolves strict=TRUE, so a gated seed write on a
-// broadened parent now refuses ITSELF (a chicken-and-egg: the file the cache
-// reads does not exist until the write lands). Seeding is fixture setup, not the
-// unit under test, so a raw write is the correct gate-free path. The test then
-// resets the cache so the next resolution reads the now-PRESENT strict=true
-// intent — exactly the deadlock condition these tests exercise.
+// Seeding is fixture setup, not the unit under test, so a raw write is the
+// correct gate-free path: it deterministically lands the strict=true intent on
+// the broadened parent without depending on the secure-write relax lane (or on
+// any intent-cache resolution order). The test then resets the cache so the
+// next resolution reads the now-PRESENT strict=true intent — exactly the
+// #301-3 deadlock condition these tests exercise (a stale present strict_mode
+// must not self-gate the disabling write).
+//
+// (Historical note: pr301 r5/r6/r7 made an ABSENT intent on a delete-capable
+// broadened dir resolve strict, so a gated seed write self-refused — the
+// chicken-and-egg the raw seed sidestepped. pr301 r9 reverted absent → relax,
+// so that self-refusal no longer occurs; the raw seed is retained as the
+// simplest deterministic fixture path.)
 func seedStrictIntentRaw(t *testing.T, intentPath string) {
 	t.Helper()
 	raw, err := json.Marshal(&api.SupervisorIntentFile{Version: 1, StrictMode: true})

@@ -35,7 +35,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -481,26 +480,25 @@ func operatorRequiresSingleUserHome() bool {
 // invocations read fresh each run. No file-watcher, no per-write read.
 //
 // Safe-default-on-error: the posture depends on WHY the intent read
-// failed (#301-2 refinement, extended by pr301 r4 + r5) —
+// failed (#301-2 refinement + pr301 r4; the pr301 r5/r6/r7 absent-on-
+// delete-capable-dir → strict over-reach was REVERTED in pr301 r9) —
 //
-//   - UNRESOLVABLE state dir (DefaultSupervisorIntentPath errors) →
-//     cached value TRUE (fail-closed-to-STRICT; pr301 r4 Finding 1). A
-//     resolver error may be hiding an existing strict_mode=true intent on
-//     a broadened state dir; with no path to os.Lstat, strict is the only
-//     fail-secure verdict. (Finding 4: this line previously claimed FALSE,
-//     contradicting the r4 code — the comment is now correct.)
-//   - ABSENT intent (genuinely missing file) → CONDITIONAL on the state
-//     dir's delete-capability (pr301 r5 Finding 1):
-//     · state dir NOT delete-capable by a non-allowlisted principal
-//     (the read-side write-bits gate PASSES, e.g. a hardened or
-//     merely read-broadened solo-dev dir) → cached value FALSE
-//     (env-only relax). A fresh install with no enforcing intent yet.
-//     · state dir delete-capable by a non-allowlisted principal (the
-//     write-bits gate FAILS — FILE_DELETE_CHILD / write / DAC bits)
-//     → cached value TRUE (fail-closed-to-STRICT). An absent intent
-//     there is indistinguishable from an attacker-DELETED one, so
-//     relaxing would turn a deletion into a strict-mode bypass.
-//     See absentIntentStrictVerdict for the discriminator.
+//   - UNRESOLVABLE state dir (DaemonStateDirReadOnly errors) → cached
+//     value TRUE (fail-closed-to-STRICT; pr301 r4 Finding 1). A resolver
+//     error may be hiding an existing strict_mode=true intent on a host we
+//     can no longer reach; with no path to os.Lstat, strict is the only
+//     fail-secure verdict. The read-only resolver errors ONLY on a genuine
+//     resolve failure (no KnownFolder / no HOME), NOT on a merely broadened-
+//     but-resolvable dir, so this strict branch does not over-fire on a
+//     broadened state dir (pr301 r9).
+//   - ABSENT intent (genuinely missing file) → cached value FALSE
+//     (relax). An absent intent declares NO strict_mode, so it must NOT
+//     make the operator strict — the canonical CLAUDE.md posture (broadened
+//     state dir defaults to RELAX; STRICT is opt-in via the env var). The
+//     deletion-of-a-strict-intent bypass on a broadened delete-capable dir
+//     is a KNOWN, DOCUMENTED limitation whose mitigation is
+//     MCPHUB_REQUIRE_SINGLE_USER_HOME=1 (checked first, above); intent-file
+//     strict is best-effort by design.
 //   - READ FAILURE on an EXISTING intent (decode error, permission
 //     denied, read-side parent-dir gate refusal on a present file) →
 //     cached value TRUE (fail-closed-to-STRICT). A read failure on the
@@ -509,9 +507,9 @@ func operatorRequiresSingleUserHome() bool {
 //
 // Before #301-2, ANY read error relaxed (fail-open-to-relax), which
 // silently disabled the strict gate if the EXISTING intent became
-// unreadable. pr301 r4 closed the unresolvable-path hole; pr301 r5 closed
-// the deletion-on-broadened-dir hole. Strict is the failure mode for every
-// case EXCEPT a genuine absence on a dir an attacker cannot tamper with.
+// unreadable. pr301 r4 closed the unresolvable-path hole. Strict is the
+// failure mode for an UNREADABLE existing intent and an UNRESOLVABLE state
+// dir; a genuine ABSENCE relaxes (no strict_mode declared).
 func OperatorRequiresSingleUserHome() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(RequireSingleUserHomeEnv))) {
 	case "1", "true":
@@ -623,12 +621,13 @@ var strictModeIntentCache struct {
 
 // strictModeFromIntentCached returns the cached
 // supervisor-intent.json `strict_mode` value, resolving it on first
-// use. The resolution rule is fail-closed-secure: an ABSENT intent on a
-// NON-delete-capable state dir caches FALSE (env-only behavior, the
-// pre-SEC-F2 posture); an ABSENT intent on a delete-capable broadened dir
-// (pr301 r5 Finding 1), an unresolvable state dir (pr301 r4 Finding 1), or
-// a READ FAILURE on an EXISTING intent (decode/permission/parent-gate
-// refusal) all cache TRUE — see readStrictModeFromIntentBestEffort for the
+// use. The resolution rule: an ABSENT intent caches FALSE (env-only
+// behavior, the pre-SEC-F2 posture — an absent intent declares no
+// strict_mode, so it does not make the operator strict; pr301 r9 reverted
+// the r5/r6/r7 absent-on-delete-capable-dir → strict over-reach). An
+// unresolvable state dir (pr301 r4 Finding 1) and a READ FAILURE on an
+// EXISTING intent (decode/permission/parent-gate refusal) both cache TRUE
+// (fail-closed-secure) — see readStrictModeFromIntentBestEffort for the
 // full case split.
 func strictModeFromIntentCached() bool {
 	strictModeIntentCache.mu.Lock()
@@ -642,35 +641,39 @@ func strictModeFromIntentCached() bool {
 
 // readStrictModeFromIntentBestEffort reads supervisor-intent.json once
 // and returns its `strict_mode` bit. It distinguishes a GENUINELY ABSENT
-// intent on a tamper-safe dir (fresh install — relax is correct) from an
-// absent intent on a delete-capable dir (indistinguishable from an
-// attacker deletion — strict) and from a READ FAILURE on an existing
-// intent (decode/permission/parent-gate refusal — strict is the safe-
-// secure failure mode). #301-2 P2 + pr301 r4/r5:
+// intent (fresh install — relax is correct, the canon-aligned default) from
+// a READ FAILURE on an EXISTING intent (decode/permission/parent-gate
+// refusal — strict is the safe-secure failure mode) and from an UNRESOLVABLE
+// state dir (no path to even reach the intent — strict). #301-2 P2 +
+// pr301 r3/r4 (SEC-F2 scope; the pr301 r5/r6/r7 absent-on-broadened-dir →
+// strict over-reach was REVERTED in pr301 r9, see below):
 //
-//   - DefaultSupervisorIntentPath() error (state dir UNRESOLVABLE) →
-//     TRUE (fail-closed strict; pr301 r4 Finding 1). A path-resolution
-//     error is NOT proof of a fresh/absent intent: the resolver can refuse
-//     an EXISTING, already-broadened state dir (POSIX rejects a state dir
-//     whose parent is insecure / non-owner; Windows rejects an
-//     unresolvable known-folder), and that same dir may hold a
-//     supervisor-intent.json with strict_mode=true that this gate exists to
-//     honor. Relaxing on a resolver error would silently DISABLE the gate
-//     whenever the error happens to coincide with a strict intent we can no
-//     longer reach — a fail-OPEN hole. We cannot os.Lstat to disambiguate
-//     (we have no path), so the only safe verdict is strict. This is the
-//     env-only DISABLE path's concern only by name: strict-mode DISABLE
-//     does NOT consult this read (it gates on the env var, not the intent),
-//     so failing closed here cannot deadlock a disable.
-//   - ReadSupervisorIntent returns os.ErrNotExist (file absent) →
-//     absentIntentStrictVerdict(path) (pr301 r5 Finding 1): relax (false)
-//     when the state dir is NOT delete-capable by a non-allowlisted
-//     principal (genuine fresh install), strict (true) when it IS (an
-//     absent intent there is indistinguishable from an attacker deletion,
-//     which would otherwise be a strict-mode bypass). This branch is also
-//     reachable for a TRUE deletion when MCPHUB_ALLOW_UNHARDENED_STATE_READ
-//     skips the read-side gate, so gating it (not only the os.Lstat branch)
-//     is required.
+//   - DaemonStateDirReadOnly() error (state dir UNRESOLVABLE) → TRUE
+//     (fail-closed strict; pr301 r4 Finding 1). A path-resolution error is
+//     NOT proof of a fresh/absent intent: the resolver fails only on a
+//     genuine inability to RESOLVE the per-user state root (Windows
+//     KnownFolder API unavailable; POSIX has no resolvable HOME / unsupported
+//     GOOS), and that same host may hold a supervisor-intent.json with
+//     strict_mode=true that this gate exists to honor. Relaxing on a resolver
+//     error would silently DISABLE the gate whenever the error coincides with
+//     a strict intent we can no longer reach — a fail-OPEN hole. We cannot
+//     os.Lstat to disambiguate (we have no path), so strict is the only
+//     fail-secure verdict. NOTE this uses the READ-ONLY resolver
+//     (DaemonStateDirReadOnly), which runs NO parent-dir sanity check and NO
+//     chmod side effect — so a merely BROADENED-but-resolvable state dir does
+//     NOT error here and does NOT over-fire this strict branch; the branch
+//     fires only on a genuine resolve failure (the pr301 r9 narrowing of the
+//     r4 contract: a broadened dir with an absent intent must reach the
+//     relax branch below, not this strict branch).
+//   - ReadSupervisorIntent returns os.ErrNotExist (file absent) → FALSE
+//     (relax). An ABSENT intent declares NO strict_mode, so it must NOT make
+//     the operator strict. This is the documented canonical posture
+//     (CLAUDE.md "Hardened state-file writes"): a broadened state dir defaults
+//     to RELAX (the parent-dir gate rejects → the write pipeline re-runs with
+//     the gate disabled, file owner-only); STRICT is OPT-IN via the env var.
+//     SEC-F2's purpose is narrow: honor an EXPLICITLY-enabled strict_mode=true
+//     IN the intent file. See the relax branch below for the known
+//     deletion-bypass limitation and its mitigation.
 //   - ReadSupervisorIntent returns ANY OTHER error (decode failure,
 //     permission denied, read-side parent-dir gate refusal) → first
 //     DISAMBIGUATE absent-vs-unreadable with a gate-free os.Lstat probe
@@ -679,13 +682,12 @@ func strictModeFromIntentCached() bool {
 //     state dir inherited a non-allowlisted write ACE a genuinely ABSENT
 //     intent surfaces as a parent-gate error, NOT os.ErrNotExist. os.Lstat
 //     does NOT run the read-side parent gate, so it disambiguates: a path
-//     os.Lstat reports as not-existing is genuinely ABSENT →
-//     absentIntentStrictVerdict(path) (NOT an unconditional relax — pr301
-//     r5 Finding 1: a read-only-broadened dir relaxes, a delete-capable one
-//     fails closed); a path os.Lstat reports as EXISTING (regular file,
-//     symlink, anything) is present-but-unreadable → fail CLOSED to TRUE,
-//     because silently relaxing when an attacker or a corp ACL change made
-//     the gate-controlling file unreadable would be a fail-OPEN hole.
+//     os.Lstat reports as not-existing is genuinely ABSENT → relax (FALSE),
+//     the same canon-aligned verdict as the direct os.ErrNotExist branch
+//     above; a path os.Lstat reports as EXISTING (regular file, symlink,
+//     anything) is present-but-unreadable → fail CLOSED to TRUE, because
+//     silently relaxing when an attacker or a corp ACL change made the
+//     gate-controlling file unreadable would be a fail-OPEN hole.
 //     os.Lstat (not os.Stat) is deliberate: an attacker-planted symlink
 //     whose target is missing must read as PRESENT (the entry exists), not
 //     be laundered into the absent branch.
@@ -699,62 +701,64 @@ func strictModeFromIntentCached() bool {
 // Calls DaemonStateDirReadOnly + api.ReadSupervisorIntent (same package).
 // Honors the daemonStateRootOverride test seam through
 // DaemonStateDirReadOnly, so tests redirect the read into a temp state dir.
-//
-// pr301 r7 Finding 1 (P2 #704): the path is resolved through the READ-ONLY
-// state-dir resolver (DaemonStateDirReadOnly), NOT DefaultSupervisorIntentPath
-// → DaemonStateDir. The latter runs posixStateDir/ensureStateRoot, which
-// CHMODS the POSIX state dir back to 0700 as a side effect BEFORE the
-// absent-intent posture check runs. On a delete-capable (group/world-writable)
-// state dir whose supervisor-intent.json was DELETED, that self-heal would
-// reset the dir to 0700, so absentIntentStrictVerdict's
-// checkStateDirParentWriteSafe would then observe a now-SAFE dir and relax —
-// re-opening the exact deletion bypass pr301 r5 Finding 1 closed (the same
-// ensureStateRoot self-heal that bit the pr301 r3 test, now defeating the
-// production fix). The read-only resolver creates/chmods nothing, so the
-// posture check observes the ACTUAL pre-heal broadened state. On Windows
-// ensureStateRoot performs no DACL change, so the read-only switch is a no-op
-// there (both resolvers yield the same path with no side effect).
+// The read-only resolver is retained over DefaultSupervisorIntentPath →
+// DaemonStateDir deliberately: a posture/read path must never mutate the
+// state dir (DaemonStateDir's POSIX ensureStateRoot chmods it back to 0700),
+// and using the read-only resolver keeps the UNRESOLVABLE-strict branch above
+// narrow — it fires only on a genuine resolve failure, never on a merely
+// broadened-but-resolvable dir, so a broadened+absent dir relaxes as canon
+// requires.
 func readStrictModeFromIntentBestEffort() bool {
 	stateDir, err := DaemonStateDirReadOnly()
 	if err != nil {
 		// State dir UNRESOLVABLE. pr301 r4 Finding 1: fail CLOSED to strict.
-		// The resolver can REFUSE an EXISTING (already-broadened) state dir
-		// that holds a gate-controlling supervisor-intent.json with
-		// strict_mode=true; relaxing on the resolver error would silently
-		// disable the gate. With no path we cannot os.Lstat to disambiguate
-		// absent-vs-present, so strict is the only fail-secure verdict.
+		// The read-only resolver errors only on a genuine inability to resolve
+		// the per-user state root (no KnownFolder / no HOME), which may hide an
+		// existing strict_mode=true intent on a host we can no longer reach;
+		// relaxing on the resolver error would silently disable the gate. With
+		// no path we cannot os.Lstat to disambiguate absent-vs-present, so
+		// strict is the only fail-secure verdict. A merely broadened-but-
+		// resolvable dir does NOT reach here (the read-only resolver runs no
+		// sanity check) — it relaxes via the absent branch below.
 		return true
 	}
 	path := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 	intent, err := ReadSupervisorIntent(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// Missing file. A MISSING intent is EITHER a fresh install before
-			// any strict-mode enable (relax is correct) OR an attacker DELETED
-			// the gate-controlling intent on a broadened, delete-capable state
-			// dir (pr301 r5 Finding 1: relaxing on that absence turns the
-			// deletion into a strict-mode BYPASS). The verdict is decided by the
-			// state dir's own delete-capability — see absentIntentStrictVerdict.
+			// Missing file → relax (FALSE). An ABSENT intent declares NO
+			// strict_mode, so it must NOT make the operator strict (pr301 r9
+			// revert of the r5/r6/r7 absent-on-delete-capable-dir → strict
+			// over-reach). This is the canonical posture from CLAUDE.md
+			// "Hardened state-file writes": a broadened state dir defaults to
+			// RELAX; STRICT is opt-in via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
 			//
-			// This branch is also reachable on a delete-capable broadened dir
-			// when MCPHUB_ALLOW_UNHARDENED_STATE_READ=1 skips the read-side gate
-			// in ReadSupervisorIntent: os.ReadFile then surfaces a TRUE
-			// os.ErrNotExist for a genuinely-deleted file, so gating this branch
-			// (not only the os.Lstat branch below) is required (advisory REFINE).
-			return absentIntentStrictVerdict(path)
+			// KNOWN LIMITATION (intentional, by design): on a broadened,
+			// delete-capable state dir a co-resident principal could DELETE an
+			// existing strict_mode=true intent, and this absence would then
+			// relax — a deletion-driven strict→relax bypass. That is a
+			// documented, accepted limitation: intent-file strict is
+			// BEST-EFFORT, and the robust mitigation is the env var. CLAUDE.md
+			// already states operators on such hosts MUST set
+			// MCPHUB_REQUIRE_SINGLE_USER_HOME=1, which forces strict regardless
+			// of the intent file (checked first in OperatorRequiresSingleUserHome,
+			// before this read). Making an absent intent strict instead
+			// contradicts the canonical RELAX-by-default posture and breaks the
+			// fresh-install / broadened-solo-dev-home common case, so it was
+			// reverted.
+			return false
 		}
 		// Non-ENOENT read error. ReadSupervisorIntent runs the read-side
 		// parent-DACL gate BEFORE os.ReadFile, so on a broadened-parent host
 		// a genuinely absent intent surfaces here as a parent-gate error
 		// rather than os.ErrNotExist (pr301 r3 Finding 2). Disambiguate with
 		// a gate-free os.Lstat probe: if the path truly does not exist, the
-		// intent is ABSENT — but ABSENT does NOT unconditionally relax (pr301
-		// r5 Finding 1): on a delete-capable broadened dir an absent file is
-		// indistinguishable from an attacker-deleted one, so the verdict is
-		// decided by absentIntentStrictVerdict. os.Lstat (not os.Stat) keeps an
-		// attacker-planted dangling symlink classified as PRESENT.
+		// intent is ABSENT → relax (FALSE), the same canon-aligned verdict as
+		// the direct os.ErrNotExist branch (pr301 r9; see the known-limitation
+		// note above). os.Lstat (not os.Stat) keeps an attacker-planted
+		// dangling symlink classified as PRESENT.
 		if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
-			return absentIntentStrictVerdict(path)
+			return false
 		}
 		// The intent file EXISTS but could not be read (decode/permission/
 		// parent-gate refusal on a present file): fail CLOSED to strict. A
@@ -766,51 +770,6 @@ func readStrictModeFromIntentBestEffort() bool {
 		return false
 	}
 	return intent.StrictMode
-}
-
-// absentIntentStrictVerdict decides the strict-mode verdict for a GENUINELY
-// ABSENT supervisor-intent.json (pr301 r5 Finding 1). It returns true (strict)
-// when the state dir grants delete/write capability to a non-allowlisted
-// principal, and false (relax) otherwise.
-//
-// Rationale: strict mode exists to protect a BROADENED / write-capable state
-// dir. On such a dir, a co-resident non-allowlisted principal holding
-// FILE_DELETE_CHILD (Windows) or group/world write (POSIX) can DELETE the
-// gate-controlling supervisor-intent.json. If an absent intent always relaxed,
-// that deletion would silently flip strict→relax — a strict-mode BYPASS the bot
-// flagged. We cannot distinguish "fresh install, never wrote an intent" from
-// "attacker deleted the intent" by the absence alone, so on a delete-capable
-// dir the only fail-secure verdict is strict.
-//
-// Conversely, a dir that is merely READ-broadened (e.g. Authenticated Users
-// GENERIC_READ — the common solo-dev %LOCALAPPDATA% case inheriting Codex /
-// AppContainer ACEs) does NOT permit a non-allowlisted principal to delete the
-// intent, so an absent intent there is a genuine fresh install → relax. This
-// preserves the documented missing-intent → default-relax polarity for the
-// benign read-broadened case (pr301 r3 Finding 2) while closing the
-// deletion-bypass hole for the delete-capable case.
-//
-// The discriminator is checkStateDirParentWriteSafe(filepath.Dir(path)) — the
-// SAME write-capability predicate ReadSupervisorIntent already runs as its
-// read-side gate (it fails only on FILE_DELETE_CHILD / DELETE / WRITE_DAC /
-// WRITE_OWNER / write bits, per windowsDACLWriteOrAdminBits; POSIX rejects
-// 0o022). A gate ERROR (predicate non-nil) is treated as delete-capable → fail
-// closed to strict, because an unverifiable parent-dir posture is itself a
-// reason not to trust an absence on it.
-//
-// Operators who legitimately run on a delete-capable broadened dir and want
-// relax must tighten the parent DACL; the documented corp-policy posture
-// (CLAUDE.md "Hardened state-file writes") already says such hosts SHOULD be in
-// strict mode (and MCPHUB_REQUIRE_SINGLE_USER_HOME=1 forces it regardless).
-func absentIntentStrictVerdict(path string) bool {
-	if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
-		// Delete-capable (or unverifiable) state dir: an absent intent cannot be
-		// distinguished from an attacker-deleted one → fail closed to strict.
-		return true
-	}
-	// State dir is NOT delete-capable by a non-allowlisted principal: the absent
-	// intent is a genuine fresh install → relax (env-only behavior).
-	return false
 }
 
 // resetStrictModeIntentCacheForTest clears the lazy strict-mode-intent

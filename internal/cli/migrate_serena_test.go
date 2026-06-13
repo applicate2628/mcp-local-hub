@@ -39,17 +39,16 @@ import (
 func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	t.Helper()
 	root := t.TempDir()
-	// pr301 r5 Finding 1: the supervisor state dir must be SINGLE-USER-SAFE.
-	// On a broadened test host (a RAM disk granting Authenticated Users
-	// write/delete, or a 0755 POSIX $TMPDIR) a plain t.TempDir() subdir is
-	// delete-capable, so the new absent-intent strict verdict
-	// (readStrictModeFromIntentBestEffort → absentIntentStrictVerdict) would
-	// resolve strict=TRUE and the migrate's WriteStateFileAtomic would refuse
-	// the broadened parent. apitest.HardenedTempDir applies the same
-	// owner-only DACL/mode the production secure-write pipeline expects, so the
-	// state dir passes checkStateDirParentWriteSafe and the absent intent
-	// relaxes as a genuine fresh install. manifestDir/home stay plain (they are
-	// not gated by the supervisor state-file pipeline).
+	// Hardened (single-user-safe) supervisor state dir, mirroring production's
+	// owner-only %LOCALAPPDATA%, so the migrate's gated WriteStateFileAtomic
+	// stays on the relax path. This was added in pr301 r5 when an absent intent
+	// on a delete-capable dir resolved strict=TRUE (so a plain t.TempDir() on a
+	// broadened RAM-disk / 0755-$TMPDIR host made the gated write refuse). pr301
+	// r9 reverted that absent-strict over-reach (an absent intent now relaxes
+	// regardless of broadening), so the hardened root is REDUNDANT for the
+	// strict verdict — retained as the correct production-mirroring posture.
+	// manifestDir/home stay plain (they are not gated by the supervisor
+	// state-file pipeline).
 	stateDir = apitest.HardenedTempDir(t)
 	manifestDir = filepath.Join(root, "manifests")
 	home := filepath.Join(root, "home")
@@ -69,19 +68,19 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	restoreStateRoot := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restoreStateRoot)
 
-	// pr301 r5 Finding 1 fixture interaction: t.TempDir() on a broadened host
-	// (e.g. a RAM disk granting Authenticated Users write/delete) is
-	// delete-capable, so the new absent-intent strict verdict
-	// (readStrictModeFromIntentBestEffort → absentIntentStrictVerdict) caches
-	// strict=TRUE the first time OperatorRequiresSingleUserHome resolves it here —
-	// which then refuses the broadened-parent WriteStateFileAtomic the migrate
-	// performs. These tests exercise the interlock/cutover, NOT strict-mode
-	// posture. The verdict keys on the STATE DIR's delete-capability, and the
-	// read-relax env var deliberately does NOT bypass it (a deletion on a
-	// delete-capable dir must still fail closed), so the fixture must make the
-	// state dir genuinely single-user-safe. Reset the process-global intent cache
-	// so each test resolves fresh against its own state dir (the cache is
-	// otherwise pinned by whichever test ran first).
+	// Reset the process-global strict-mode-intent cache so each test resolves
+	// fresh against its OWN (hardened) state dir rather than inheriting a value
+	// pinned by whichever test ran first. This matters because
+	// OperatorRequiresSingleUserHome lazily caches the supervisor-intent
+	// strict_mode bit once per process: without this reset, the first test that
+	// resolves it against the operator's REAL (possibly broadened, present-but-
+	// gate-unreadable) %LOCALAPPDATA% would cache strict=TRUE for the whole
+	// binary (the r3 present-unreadable fail-closed behavior, retained), and the
+	// migrate's broadened-parent WriteStateFileAtomic would then wrongly refuse.
+	// These tests exercise the interlock/cutover, NOT strict-mode posture.
+	// (pr301 r9 reverted the separate absent-on-delete-capable-dir → strict
+	// over-reach; this cache reset guards the orthogonal present-unreadable
+	// pollution path.)
 	api.ResetStrictModeIntentCacheForTest()
 	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
 

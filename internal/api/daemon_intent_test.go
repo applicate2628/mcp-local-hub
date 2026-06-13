@@ -31,13 +31,14 @@ import (
 func daemonIntentTestHelper(t *testing.T) string {
 	t.Helper()
 	statePathsHelper(t)
-	// pr301 r5 Finding 1: the state root must be SINGLE-USER-SAFE so the new
-	// absent-intent strict verdict (readStrictModeFromIntentBestEffort →
-	// absentIntentStrictVerdict) resolves relax=FALSE, mirroring production's
-	// owner-only %LOCALAPPDATA%. A plain t.TempDir() on a broadened test host (a
-	// RAM disk granting Authenticated Users write/delete) is delete-capable, so
-	// it would resolve strict=TRUE and any gated state-file write here would
-	// refuse the broadened parent.
+	// Hardened (single-user-safe) state root, mirroring production's owner-only
+	// %LOCALAPPDATA%. This was added in pr301 r5 when an absent intent on a
+	// delete-capable dir resolved strict=TRUE (so a plain t.TempDir() on a
+	// broadened RAM-disk test host made gated state-file writes refuse). pr301
+	// r9 reverted that absent-strict over-reach (an absent intent now relaxes
+	// regardless of broadening), so the hardened root is now REDUNDANT for the
+	// strict verdict — retained because a single-user-safe root is the correct
+	// production-mirroring posture and keeps gated writes on the relax path.
 	root := hardenedTempDir(t)
 	daemonStateRootOverride = root
 
