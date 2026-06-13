@@ -92,9 +92,28 @@ type supervisorController struct {
 	// exit observation — the synthetic one fires only for foreign tasks
 	// that never had an entry here, so clearing it for them is a no-op).
 	reaperOutstanding sync.Map // taskName -> bool (real own reaper expected to post EvChildExit)
-	events            *api.SupervisorEventLog
-	graceful          *gracefulCounter
-	daemonIntent      *daemonIntentCache
+	// pendingReap records, per canonical task name, that the task DISAPPEARED
+	// from the freshly-read intent on the PREVIOUS refresh while its SM state
+	// was LIVE, but has not yet been confirmed-absent across the verification
+	// window. It is the transient-absence guard for the orphan-reap: a
+	// descriptor can be momentarily absent across two refresh ticks during an
+	// operator/install REPLACE-IN-PLACE (remove + re-add in separate intent
+	// writes). The single os.ReadFile + atomic temp+rename writer discipline
+	// (api.ReadSupervisorIntent / WriteStateFileAtomic under the
+	// supervisor-intent flock) guarantees each read sees a CONSISTENT complete
+	// snapshot — never a half-written file — so mid-write tearing is NOT the
+	// risk; the replace-in-place blip across ticks is. The reap therefore
+	// DETECTS an absence on tick N (marks pendingReap, captures the OLD
+	// descriptor needed by the SM-driven terminate), and only TERMINATES on
+	// tick N+1 if the task is STILL absent. A re-appearance between ticks drops
+	// the mark with no terminate, absorbing the blip. The stored value is the
+	// last-seen descriptor (*api.SupervisorDaemon) so the SM-aware terminate
+	// has the TaskName + Command it needs even though the cache no longer
+	// carries the row.
+	pendingReap  sync.Map // taskName -> *api.SupervisorDaemon (absent-once, awaiting still-absent confirmation)
+	events       *api.SupervisorEventLog
+	graceful     *gracefulCounter
+	daemonIntent *daemonIntentCache
 
 	// spawn is the production SpawnFunc closure constructed in
 	// runSupervise. executeSideEffect calls it when the SM transition
@@ -285,25 +304,286 @@ func (c *IntentCache) TaskNames() map[string]struct{} {
 	return out
 }
 
+// refreshSupervisorIntent atomically swaps the intent-descriptor cache to
+// `updated` and reconciles the controller's in-memory bookkeeping for any
+// task that DISAPPEARED from intent. It is the single owner of the
+// descriptor-disappearance ORPHAN REAP — the durable supervisor-side
+// backstop for the synchronous install/uninstall-time kill
+// (api.killRemovedSupervisorTargetsAfter*), which is conditional on the
+// reconcile-nudge succeeding and is skipped on nudge-failure or an install
+// process that crashes between the intent-write and the kill. When that
+// synchronous kill does not run, the running child is orphaned: it keeps
+// holding its TCP port until a full supervisor cold-restart or manual
+// taskkill (the prior design — supervise_reconcile.go's "Orphans are
+// intentionally NOT terminated here" — left this gap because the pure
+// Reconciler has no descriptor to fan a terminate through; here the
+// controller still holds the OLD descriptor in its pre-refresh cache, so it
+// CAN terminate).
+//
+// Only TWO call sites drive refreshSupervisorIntent — the 60s IntentWatcher
+// onChange (supervise.go) and the apply-mode reconcile IPC
+// (applyReconcileDrift) — and both already read the intent through the
+// flock-atomic api.ReadSupervisorIntent (single os.ReadFile against an
+// atomic temp+rename writer), so each `updated` is a CONSISTENT complete
+// snapshot, never a half-written file. Both call sites also pass a NON-nil
+// `updated` only on a successful read (the watcher nils it on read error and
+// skips the call; the reconcile handler fails closed upstream on a corrupt
+// read). So a disappearance observed here is a REAL on-disk removal, not a
+// torn read.
+//
+// TRANSIENT-ABSENCE GUARD (the safety that prevents reaping a live daemon):
+// a descriptor can still be MOMENTARILY absent across two refresh ticks when
+// an operator/install REPLACES it in place (remove + re-add landing in
+// separate intent writes). Reaping on the first observed absence would kill
+// a daemon the operator is merely re-writing. So the reap uses a one-tick
+// verification window: the FIRST refresh that observes a live task absent
+// only MARKS it pendingReap (capturing the OLD descriptor for the later
+// SM-driven terminate) and does NOT terminate. The terminate fires on the
+// NEXT refresh, and ONLY if the task is STILL absent AND STILL live. A task
+// that re-appears between ticks has its pendingReap mark dropped with no
+// terminate — the blip is absorbed.
 func (c *supervisorController) refreshSupervisorIntent(updated *api.SupervisorIntentFile) {
 	if c == nil || c.intentCache == nil {
 		return
 	}
 	previous := c.intentCache.TaskNames()
-	c.intentCache.Refresh(updated)
-	next := c.intentCache.TaskNames()
+
+	// Resolve confirmed reaps BEFORE swapping the cache: a task that was
+	// pendingReap from the PREVIOUS refresh and is STILL absent in `updated`
+	// has cleared the verification window. We must read its descriptor +
+	// terminate it while the OLD cache snapshot is still live (the captured
+	// pendingReap descriptor is the authoritative source, but reading under
+	// the old cache keeps the lookup paths identical). nextNames is computed
+	// from `updated` directly so the still-absent check does not depend on
+	// the cache having been swapped yet.
+	nextNames := taskNameSetFromIntent(updated)
+	var confirmedReaps []*api.SupervisorDaemon
+	c.pendingReap.Range(func(key, value any) bool {
+		taskName, _ := key.(string)
+		if taskName == "" {
+			return true
+		}
+		if _, present := nextNames[taskName]; present {
+			// Re-appeared (replace-in-place completed) — drop the mark, no
+			// terminate. The verification window absorbed the blip.
+			c.pendingReap.Delete(taskName)
+			c.emitReapEvent("debug", "orphan-reap-candidate-reappeared", taskName,
+				"removed descriptor re-appeared within the verification window (replace-in-place); reap canceled")
+			return true
+		}
+		// Still absent across the window. Re-check the SM state is still LIVE
+		// (a self-driven StExiting/StIdle transition since the mark — e.g. the
+		// child already exited and was reaped by its own cmd.Wait — means
+		// there is nothing left to terminate).
+		if !c.smStateIsReapable(taskName) {
+			c.pendingReap.Delete(taskName)
+			c.emitReapEvent("debug", "orphan-reap-candidate-settled", taskName,
+				"removed descriptor settled to a non-live SM state within the verification window; no terminate needed")
+			return true
+		}
+		if d, ok := value.(*api.SupervisorDaemon); ok && d != nil {
+			confirmedReaps = append(confirmedReaps, d)
+		}
+		c.pendingReap.Delete(taskName)
+		return true
+	})
+
+	// Capture the OLD descriptor for any task disappearing in THIS refresh
+	// that is currently LIVE and not already pendingReap — it becomes a NEW
+	// pendingReap candidate (tick 1 of the window). Captured BEFORE the cache
+	// swap because IntentCache.Lookup returns pointers into the soon-to-be-
+	// replaced snapshot slice; we copy the descriptor value so the captured
+	// pointer outlives the swap.
 	for taskName := range previous {
-		if _, stillPresent := next[taskName]; stillPresent {
+		if _, stillPresent := nextNames[taskName]; stillPresent {
 			continue
 		}
-		c.clearRemovedTaskRuntime(taskName)
+		if _, already := c.pendingReap.Load(taskName); already {
+			// Handled above (either confirmed or re-appeared); skip.
+			continue
+		}
+		if !c.smStateIsReapable(taskName) {
+			// Not a live daemon (StIdle/StQuarantined or untracked) — nothing
+			// to terminate. Just clear bookkeeping as before.
+			c.clearRemovedTaskRuntime(taskName)
+			continue
+		}
+		if d, ok := c.intentCache.Lookup(taskName); ok && d != nil {
+			captured := *d // copy out of the pre-refresh snapshot slice
+			c.pendingReap.Store(taskName, &captured)
+			c.emitReapEvent("info", "orphan-reap-candidate-marked", taskName,
+				"descriptor disappeared from intent while the daemon is live; awaiting still-absent confirmation across one refresh window before terminating (transient-absence/replace-in-place guard)")
+		} else {
+			// No descriptor available to terminate through (cache miss). Fall
+			// back to the prior bookkeeping-only clear; the synchronous
+			// install-time kill or a cold-restart reaper remains the backstop.
+			c.clearRemovedTaskRuntime(taskName)
+		}
 	}
+
+	// Swap the cache now that all pre-refresh descriptor reads are done.
+	c.intentCache.Refresh(updated)
+
+	// Drive the confirmed reaps through the SM-aware terminate, then clear
+	// their bookkeeping. Done AFTER the cache swap so a terminate cannot
+	// observe a stale descriptor for a DIFFERENT (still-present) task.
+	for _, d := range confirmedReaps {
+		c.reapRemovedDaemon(d)
+		c.clearRemovedTaskRuntime(d.TaskName)
+	}
+}
+
+// taskNameSetFromIntent returns the canonical task-name set declared by an
+// intent file, mirroring IntentCache.TaskNames but reading the raw file so
+// the still-absent check does not depend on the cache having been swapped.
+func taskNameSetFromIntent(intent *api.SupervisorIntentFile) map[string]struct{} {
+	out := map[string]struct{}{}
+	if intent == nil {
+		return out
+	}
+	for i := range intent.Daemons {
+		out[canonicalSupervisorTaskName(intent.Daemons[i].TaskName)] = struct{}{}
+	}
+	return out
+}
+
+// smStateIsReapable reports whether the controller's current SM state for the
+// task names a LIVE daemon the reap should terminate — StSpawning, StRunning,
+// StBackoffWaiting, or StExiting. StIdle and StQuarantined are settled (no
+// live child to terminate), and an untracked task (GetSMState ok=false) is
+// likewise not reapable. A task already at StExiting is included so a reap
+// confirmed against a still-terminating descriptor is idempotent, but
+// reapRemovedDaemon's own re-check below avoids double-driving a terminate.
+func (c *supervisorController) smStateIsReapable(taskName string) bool {
+	st, ok := c.GetSMState(taskName)
+	if !ok {
+		return false
+	}
+	switch st {
+	case api.StSpawning, api.StRunning, api.StBackoffWaiting, api.StExiting:
+		return true
+	}
+	return false
+}
+
+// reapRemovedDaemon drives the SM-aware terminate for a descriptor that
+// disappeared from intent and stayed absent across the verification window.
+// It reuses the EXISTING terminate side-effect path — the same
+// api.Transition row + executeSideEffect StExiting dispatch the operator-stop
+// (EvIntentUpdate stopped) path uses — rather than a raw kill, so the
+// audit trail (daemon-terminate-requested / daemon-terminated) and the
+// Job-Object teardown stay identical to an operator-initiated stop.
+//
+// The standard handleLoopEvent path cannot be reused here because the
+// descriptor has already been removed from intentCache, so handleLoopEvent's
+// intent-lookup would drop the event as an orphan. Instead we run the SM
+// transition explicitly against the CAPTURED OLD descriptor and dispatch its
+// side effect. The descriptor carries the TaskName + Command the production
+// TerminateFunc needs; the live PID it kills comes from the runtime tracker
+// keyed by TaskName (makeProductionTerminateFnWithStatePath), so the captured
+// (pre-removal) descriptor terminates the right child.
+func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) {
+	if c == nil || d == nil {
+		return
+	}
+	taskName := canonicalSupervisorTaskName(d.TaskName)
+
+	currentState, ok := c.GetSMState(taskName)
+	if !ok {
+		return
+	}
+	// Already terminating (StExiting) — a terminate is in flight; do not
+	// double-drive it. The deliberate-stop / manual-restart path already owns
+	// this child's exit, and the subsequent EvChildExit drives it to StIdle.
+	if currentState == api.StExiting {
+		return
+	}
+	if !c.smStateIsReapable(taskName) {
+		return
+	}
+
+	// Build the stopped-intent SMContext so api.Transition takes the
+	// terminate row for the current live state:
+	//   StRunning        + EvIntentUpdate(stopped) -> StExiting (issue terminate)
+	//   StSpawning       + EvIntentUpdate(stopped) -> StSpawning (queued_action=stop) then terminate on EvHealthOK/EvChildExit
+	//   StBackoffWaiting + EvIntentUpdate(stopped) -> StIdle (cancel pending respawn)
+	// A removed descriptor is, by definition, a stop request: the operator
+	// deleted it from intent.
+	smCtx := api.SMContext{
+		IntentDesired:      api.IntentDesiredStopped,
+		IntentIsActiveStop: true,
+	}
+	if c.graceful != nil {
+		smCtx.GracefulInProgress = c.graceful.InProgress()
+	}
+	if v, ok := c.queuedActions.Load(taskName); ok {
+		if qa, ok := v.(string); ok {
+			smCtx.QueuedAction = qa
+		}
+	}
+
+	newState, side, _, matched := api.Transition(currentState, api.EvIntentUpdate, smCtx)
+	if !matched {
+		// No terminate row for this state under stopped intent (e.g.
+		// StQuarantined was excluded by smStateIsReapable already, so this is
+		// defensive). Leave bookkeeping to the caller's clearRemovedTaskRuntime.
+		return
+	}
+
+	c.emitReapEvent("info", "orphan-reap-terminate", taskName,
+		"descriptor confirmed removed from intent across the verification window; driving SM-aware terminate so the orphaned child releases its port (supervisor-side backstop for a skipped install-time kill)")
+
+	// Mirror handleLoopEvent's queued-action write-back for the new side
+	// string so a StSpawning self-loop's queued_action=stop is preserved for
+	// the subsequent EvHealthOK/EvChildExit (consistency with the operator
+	// stop path).
+	switch {
+	case strings.Contains(side, "set queued_action=stop"):
+		c.queuedActions.Store(taskName, "stop")
+	case strings.Contains(side, "queued_action=respawn"):
+		c.queuedActions.Store(taskName, "respawn")
+	case strings.Contains(side, "queued_action=none"), strings.Contains(side, "clear queued_action"):
+		c.queuedActions.Store(taskName, "")
+	}
+	c.smStates.Store(taskName, newState)
+	if newState == api.StIdle && currentState != api.StIdle && c.tracker != nil {
+		c.tracker.MarkExited(taskName)
+	}
+	if c.tracker != nil && c.statePath != "" {
+		_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, taskName)
+	}
+
+	// Dispatch the side effect (the StExiting terminate fires c.terminate;
+	// the StIdle/StSpawning rows are no-ops at executeSideEffect for a reap).
+	_ = c.executeSideEffect(side, newState, d, api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: taskName})
+}
+
+// emitReapEvent logs a reconcile-source supervisor event for the orphan reap.
+// Best-effort; emit failures are swallowed (the reap proceeds regardless).
+func (c *supervisorController) emitReapEvent(severity, event, taskName, note string) {
+	if c == nil || c.events == nil {
+		return
+	}
+	_ = c.events.Emit(api.SupervisorEvent{
+		Severity: severity,
+		Source:   "reconcile",
+		Event:    event,
+		TaskName: taskName,
+		Body:     map[string]any{"note": note},
+	})
 }
 
 func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
 	c.smStates.Delete(taskName)
 	c.queuedActions.Delete(taskName)
+	// Drop any pending orphan-reap candidate: a removal that reaches the
+	// bookkeeping clear (either after a confirmed reap drove the terminate, or
+	// because the task was never reapable) must not leave a stale pendingReap
+	// entry that a later, unrelated refresh would re-evaluate. A re-registration
+	// under the same task name starts the reap window fresh from a present
+	// descriptor.
+	c.pendingReap.Delete(taskName)
 	// Drop the own-spawned marker: a re-registered task with the same name
 	// must be reclassified from scratch so a stale "owned" entry does not
 	// suppress a later genuinely-foreign-PID synthesize.
