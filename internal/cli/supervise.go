@@ -82,9 +82,9 @@ var reaperFn = ReapStaleTransients
 var errSpawnPreChild = errors.New("supervise: spawn failed before child created")
 
 // errTerminateTargetGone marks a TerminateFunc error whose underlying cause
-// proves the targeted process is ALREADY GONE even though terminate returned a
-// non-nil error (Codex pr302 r3 finding F). The production TerminateFunc returns
-// an error on two such "gone" paths:
+// PROVES the targeted process is ALREADY GONE even though terminate returned a
+// non-nil error (Codex pr302 r3 finding F, narrowed by r4 #2316). The production
+// TerminateFunc returns an error on exactly two such "gone" paths:
 //
 //   - no running PID recorded for the task — the tracker has no live PID, e.g.
 //     an install-time kill of a foreign warm-start PID already succeeded with no
@@ -96,11 +96,17 @@ var errSpawnPreChild = errors.New("supervise: spawn failed before child created"
 //
 // The orphan reap uses errors.Is(err, errTerminateTargetGone) to classify these
 // as CONFIRMED-DEAD (clear the reap bookkeeping) instead of "process may still be
-// alive" (preserve + retry forever). Without this distinction a no-PID or
-// persist-failure terminate would loop the reap forever, and a later
-// re-registration would leave a stale StRunning-no-PID that ignores EvStart.
-// Genuine "process may still be alive" errors (PID-state query failure, verify
-// failure, kill failure) are NOT wrapped — those still preserve for retry.
+// alive" (preserve + retry). Without this distinction a no-PID or persist-failure
+// terminate would loop the reap forever, and a later re-registration would leave a
+// stale StRunning-no-PID that ignores EvStart.
+//
+// CRUCIALLY (r4 #2316): a finishProductionTerminate error is NOT wrapped as gone.
+// On POSIX that function escalates SIGTERM→SIGKILL and errors only when it could
+// not confirm death (escalation abort on an unverifiable PID, or a SIGKILL send
+// failure) — the process MAY STILL BE ALIVE. Wrapping those as gone would clear the
+// supervisor handle for a daemon that ignored SIGTERM. Such "may still be alive"
+// errors (PID-state query failure, verify failure, kill failure, escalation abort,
+// SIGKILL send failure) are NOT wrapped — they preserve for retry.
 var errTerminateTargetGone = errors.New("supervise: terminate target already gone")
 
 // setReaperFnForTest installs a test reaper function. Returns an
@@ -909,8 +915,6 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 				},
 			})
 			updatedSupervisor = nil
-		} else {
-			ctrl.refreshSupervisorIntent(updatedSupervisor)
 		}
 
 		// Phase 4-E2: daemon-intent.json is deleted by the boot-merge and the
@@ -949,13 +953,24 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		// failure now keeps `previous` unconditionally (the sub-block is the
 		// sole source).
 		updatedDaemonIntent := resolveWatcherDaemonIntent(updatedSupervisor, rawDaemonIntent, readFailed, supErr != nil, previousDaemonIntent)
-		ctrl.daemonIntent.Refresh(updatedDaemonIntent)
+
+		// pr302 r4 root fix: route BOTH cache swaps through the single on-loop
+		// snapshot-application event. refreshSupervisorIntent no longer mutates a
+		// cache off the loop — it posts ONE evReapScan carrying the fresh descriptor
+		// snapshot AND the resolved stops, and handleReapScan swaps both caches
+		// atomically (shadow-before-swap) on the loop goroutine. The separate off-loop
+		// daemonIntent.Refresh is GONE: a stops swap racing ahead of the on-loop reap
+		// scan was part of the orphan-drop root. A nil updatedSupervisor (read failed)
+		// makes refreshSupervisorIntent a no-op, so the prior caches are preserved.
+		ctrl.refreshSupervisorIntent(updatedSupervisor, updatedDaemonIntent)
 
 		// Delta-only EvIntentUpdate posting. On a typical mtime
 		// bump where only one daemon's Desired flips, delta == 1;
 		// the rest of the intent file stays unchanged and no
 		// events post (closes the v6 sonnet "per-task storm"
-		// IMPORTANT finding).
+		// IMPORTANT finding). These post AFTER refreshSupervisorIntent, so the
+		// evReapScan (which swaps the stops cache) is ahead of them in the FIFO —
+		// the delta EvIntentUpdate sees the freshly-swapped stops cache.
 		delta := diffIntentSnapshots(previousDaemonIntent, updatedDaemonIntent)
 		for _, taskName := range delta {
 			loop.Post(api.LoopEvent{Kind: api.EvIntentUpdate, TaskName: taskName})
@@ -2307,15 +2322,21 @@ func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runn
 			return err
 		}
 		if err := finishProductionTerminate(proof, d, events); err != nil {
-			// The kill request was issued (productionTerminatePIDWithIdentityFn
-			// returned nil above); finishProductionTerminate is the POST-kill
-			// teardown (wait/verify-gone on POSIX, no-op on Windows). A failure
-			// here means the process is, as far as the kill path knows, GONE but the
-			// teardown bookkeeping errored. Wrap as gone so the reap clears rather
-			// than looping (Codex pr302 r3 finding F, case b).
-			wrapped := fmt.Errorf("%w: post-kill teardown failed: %v", errTerminateTargetGone, err)
-			emitDaemonTerminateFailed(events, d, pid, wrapped)
-			return wrapped
+			// #2316 (pr302 r4 correction of r3 finding F): finishProductionTerminate is
+			// NOT pure post-kill bookkeeping on POSIX. After SIGTERM it WAITS for the
+			// grace period and, if the process is STILL ALIVE, escalates to SIGKILL —
+			// returning an error ONLY when it could NOT confirm death: an escalation
+			// abort (identity verify failed → it refused to SIGKILL an unverifiable PID)
+			// or a SIGKILL send failure. In BOTH cases the targeted process MAY STILL BE
+			// ALIVE. The r3 code wrapped EVERY such error as errTerminateTargetGone,
+			// which made the orphan reap classify a still-alive daemon as confirmed-dead
+			// and clear the tracker/SM — losing the PID for a daemon that ignored SIGTERM
+			// or could not be escalated. So these errors must propagate as REAL terminate
+			// failures (→ reapTerminateFailed → preserve state + retry on the next tick).
+			// (On Windows finishProductionTerminate is a no-op returning nil, so this
+			// branch never fires there — the Job-Object close reaps the tree.)
+			emitDaemonTerminateFailed(events, d, pid, err)
+			return err
 		}
 
 		tracker.MarkTerminated(d.TaskName)

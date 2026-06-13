@@ -62,12 +62,33 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 
 	// Build the controller with a real EventLoop so apply-mode posts
 	// land where a handler can observe them. We register a recording
-	// handler INSTEAD of the real handleLoopEvent so we don't pull in
-	// spawn/terminate dependencies.
+	// handler INSTEAD of the real handleLoopEvent for the SM events so we
+	// don't pull in spawn/terminate dependencies — BUT the reap-lifecycle
+	// events (evReapScan / evReapFollowup) are dispatched to the REAL
+	// controller methods, exactly as production's handleLoopEvent does
+	// (pr302 r4: the cache swap now runs ON the loop inside handleReapScan,
+	// so a fixture that dropped evReapScan would never swap the caches and
+	// would not faithfully model the cache-refresh-before-EvIntentUpdate
+	// contract these tests assert). The reap-scan event is the cache-apply
+	// mechanism, NOT an SM event, so it is NOT recorded on postedCh /
+	// postedCount — keeping the "first/only posted SM event" assertions intact.
+	var ctrl *supervisorController
 	loop := api.NewEventLoop(32)
 	postedCh := make(chan api.LoopEvent, 64)
 	var postedCount atomic.Int32
 	loop.RegisterHandler(func(ev api.LoopEvent) {
+		switch ev.Kind {
+		case evReapScan:
+			prev, _ := ev.Body[reapScanPreviousNamesBodyKey].(map[string]struct{})
+			updated, _ := ev.Body[reapScanIntentBodyKey].(*api.SupervisorIntentFile)
+			stops, _ := ev.Body[reapScanStopsBodyKey].(*api.DaemonIntentFile)
+			ctrl.handleReapScan(prev, updated, stops)
+			return
+		case evReapFollowup:
+			generation, _ := ev.Body[reapFollowupGenerationBodyKey].(int)
+			ctrl.handleReapFollowup(ev.TaskName, generation)
+			return
+		}
 		postedCount.Add(1)
 		select {
 		case postedCh <- ev:
@@ -78,7 +99,7 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 	t.Cleanup(cancel)
 	go loop.Run(ctx)
 
-	ctrl := &supervisorController{
+	ctrl = &supervisorController{
 		intentCache:         newIntentCache(),
 		eventLoop:           loop,
 		events:              events,

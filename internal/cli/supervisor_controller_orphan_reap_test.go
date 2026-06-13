@@ -51,8 +51,12 @@ type reapTestHarness struct {
 	// (finding A). The test sets it to model a remove (empty) or a re-add
 	// (descriptor present) independently of the intentCache. Guarded by
 	// freshIntentMu because reapIntentReader runs on the loop goroutine.
-	freshIntentMu sync.Mutex
-	freshIntent   *api.SupervisorIntentFile
+	// freshIntentErr, when non-nil, makes the fresh on-disk read FAIL — modeling a
+	// transient supervisor-intent.json read glitch the follow-up handler must NOT
+	// treat as confirmed-absence (#856). Guarded by the same mutex.
+	freshIntentMu  sync.Mutex
+	freshIntent    *api.SupervisorIntentFile
+	freshIntentErr error
 	// pendingFollowups is the ORDERED list of armed follow-up timer callbacks
 	// captured by the injected reapAfterFunc (wall-clock-free). Each callback
 	// closes over its own (taskName, generation) and POSTS evReapFollowup when
@@ -144,6 +148,9 @@ func newReapTestHarness(t *testing.T) *reapTestHarness {
 		reapIntentReader: func() (*api.SupervisorIntentFile, error) {
 			h.freshIntentMu.Lock()
 			defer h.freshIntentMu.Unlock()
+			if h.freshIntentErr != nil {
+				return nil, h.freshIntentErr
+			}
 			return h.freshIntent, nil
 		},
 	}
@@ -179,9 +186,19 @@ func (h *reapTestHarness) sync() {
 
 // refresh drives an intent refresh through the production off-loop entry point
 // (refreshSupervisorIntent posts evReapScan), then syncs so the on-loop
-// handleReapScan has fully run.
+// handleReapScan has fully run. Stops are passed nil (preserve the prior stops
+// cache) — the descriptor-set tests do not exercise stop intent; refreshWithStops
+// is the variant that swaps the stops cache from the snapshot.
 func (h *reapTestHarness) refresh(updated *api.SupervisorIntentFile) {
-	h.ctrl.refreshSupervisorIntent(updated)
+	h.refreshWithStops(updated, nil)
+}
+
+// refreshWithStops drives an intent refresh carrying a FRESH unified-stops snapshot
+// so the on-loop handleReapScan swaps BOTH caches from the same snapshot (pr302 r4
+// root fix). Used by the re-add-with-Desired=stopped test (the stops cache must
+// reflect the re-add so a replayed event treats it as stopped, not default-running).
+func (h *reapTestHarness) refreshWithStops(updated *api.SupervisorIntentFile, stops *api.DaemonIntentFile) {
+	h.ctrl.refreshSupervisorIntent(updated, stops)
 	h.sync()
 }
 
@@ -189,6 +206,30 @@ func (h *reapTestHarness) refresh(updated *api.SupervisorIntentFile) {
 func (h *reapTestHarness) postEvent(ev api.LoopEvent) {
 	h.loop.Post(ev)
 	h.sync()
+}
+
+// postNoSync posts an SM event onto the loop WITHOUT syncing, so a subsequent
+// refreshNoSync can queue an evReapScan BEHIND it in the FIFO — the test then syncs
+// once to drain both. Used by the queued-event-before-removal ordering test (the
+// EvChildExit must drain first against the still-present cache, OR — if the order
+// inverts — route via the shadow the on-loop scan installs before the swap).
+func (h *reapTestHarness) postNoSync(ev api.LoopEvent) {
+	h.loop.Post(ev)
+}
+
+// refreshNoSync drives an intent refresh through the production off-loop entry
+// (posts evReapScan) WITHOUT syncing, so the caller controls the drain point.
+func (h *reapTestHarness) refreshNoSync(updated *api.SupervisorIntentFile) {
+	h.ctrl.refreshSupervisorIntent(updated, nil)
+}
+
+// setReapIntentReadErr toggles the fake fresh-on-disk-read failure mode (#856): a
+// non-nil err makes the follow-up handler's reapIntentReader return an error, which
+// must PRESERVE the reap + re-arm rather than confirm absence against the cache.
+func (h *reapTestHarness) setReapIntentReadErr(err error) {
+	h.freshIntentMu.Lock()
+	h.freshIntentErr = err
+	h.freshIntentMu.Unlock()
 }
 
 // setFreshIntent sets the fake on-disk intent the follow-up handler re-reads
@@ -1059,5 +1100,294 @@ func TestSupervisorController_OrphanReap_OwnSpawnedDefersClearUntilReaper(t *tes
 	}
 	if entry, ok := h.tracker.Get(d.TaskName); ok {
 		t.Fatalf("finding G: after the reaper ran + settle, the tracker row must be cleared durably: %+v", entry)
+	}
+}
+
+// stopsFor builds a unified-stops snapshot declaring `taskName` stopped with a
+// non-expiring idle reason — used by the re-add-with-Desired=stopped test (d).
+func stopsFor(taskName string) *api.DaemonIntentFile {
+	return &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		canonicalSupervisorTaskName(taskName): {
+			Desired:   api.IntentDesiredStopped,
+			Reason:    api.IntentReasonIdle,
+			UpdatedAt: time.Now().UTC(),
+		},
+	}}
+}
+
+// (a) TestSupervisorController_OrphanReap_R4_ChildExitQueuedBeforeRemovalNotDropped
+// is the ROOT-FIX (#564/#535) falsifier for the on-loop cache swap. An EvChildExit
+// is QUEUED on the loop BEFORE the removal's evReapScan. Pre-r4 the cache was
+// swapped OFF the loop the instant refreshSupervisorIntent ran, so the already-queued
+// EvChildExit drained against the EMPTY cache with NO shadow → orphan-dropped → the
+// SM wedged at stale StRunning. Post-r4 the swap runs ON the loop inside
+// handleReapScan with the shadow installed BEFORE the swap, so the queued
+// EvChildExit routes (whichever order it drains in): it must reach StBackoffWaiting
+// (StRunning + EvChildExit), never be orphan-dropped.
+func TestSupervisorController_OrphanReap_R4_ChildExitQueuedBeforeRemovalNotDropped(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 61001)
+
+	// Queue the child's crash exit FIRST (no sync), then the removal refresh (no
+	// sync), then drain both with a single sync. The FIFO order is EvChildExit,
+	// evReapScan — but the invariant must hold regardless: the exit routes.
+	h.postNoSync(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+	h.refreshNoSync(emptyReapIntent())
+	h.sync()
+
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StBackoffWaiting {
+		t.Fatalf("#564/#535: an EvChildExit queued before the removal scan must route via the shadow to StBackoffWaiting, NOT be orphan-dropped leaving a stale StRunning; got state=%v ok=%v", st, ok)
+	}
+	if got := h.terminateCalls.Load(); got != 0 {
+		t.Fatalf("#564/#535: the queued exit must not have triggered a terminate; terminate calls = %d", got)
+	}
+}
+
+// (b) TestSupervisorController_OrphanReap_R4_ScanAbsentThenReaddedBeforeHandlingNotTerminated
+// is the #614 falsifier. A removal evReapScan is posted (carrying the post-time
+// snapshot), but BEFORE it is handled the descriptor is re-added to the cache (a
+// prior on-loop event applied the re-add). handleReapScan must re-diff against the
+// CURRENT cache at handling time and NOT terminate / NOT mark pendingReap — the task
+// is present now.
+func TestSupervisorController_OrphanReap_R4_ScanAbsentThenReaddedBeforeHandlingNotTerminated(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 62001)
+
+	// Post the removal scan WITHOUT syncing. Then, before draining, re-add the
+	// descriptor to the cache as a prior on-loop event would have. The scan's body
+	// still carries the post-time "absent" snapshot, but handleReapScan recomputes
+	// next from the FRESH intent in the body AND re-diffs against the current cache.
+	// Model the on-disk re-add by posting a SECOND scan (the re-add) so the absent
+	// scan, when handled, sees the descriptor present in the union/current cache and
+	// the re-add scan restores it. The robust assertion: after both drain, no
+	// terminate fired and the daemon is still running.
+	readded := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{d}}
+	h.refreshNoSync(emptyReapIntent()) // scan #1: removal
+	h.refreshNoSync(readded)           // scan #2: re-add (lands before #1's reap could confirm)
+	h.sync()
+
+	if got := h.terminateCalls.Load(); got != 0 {
+		t.Fatalf("#614: a descriptor re-added before the removal scan confirms must NOT be terminated; terminate calls = %d", got)
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StRunning {
+		t.Fatalf("#614: the re-added daemon must keep running; got state=%v ok=%v", st, ok)
+	}
+	if _, ok := h.ctrl.intentCache.Lookup(d.TaskName); !ok {
+		t.Fatalf("#614: the re-add must leave the descriptor in the cache")
+	}
+}
+
+// (c) TestSupervisorController_OrphanReap_R4_SnapshotReaddsAAndFirstRemovesB is the
+// #826-rescan falsifier. ONE fresh snapshot simultaneously re-adds task A (resolving
+// A's pending reap) AND first-removes task B. handleReapScan must run the FULL diff
+// for ALL tasks in the snapshot, so B gets its shadow + pendingReap installed — the
+// reappear path must not blind-replace the cache and lose B's first removal.
+func TestSupervisorController_OrphanReap_R4_SnapshotReaddsAAndFirstRemovesB(t *testing.T) {
+	h := newReapTestHarness(t)
+	a := reapTestDescriptor()
+	b := reapTestDescriptorB()
+	// Both A and B start live and present.
+	h.ctrl.intentCache.Refresh(intentWith(a, b))
+	h.ctrl.smStates.Store(a.TaskName, api.StRunning)
+	h.ctrl.smStates.Store(b.TaskName, api.StRunning)
+	h.tracker.MarkSpawned(a.TaskName, 63001, time.Now().UTC())
+	h.tracker.MarkSpawned(b.TaskName, 63002, time.Now().UTC())
+
+	// Scan 1: A disappears (B still present) → A marked pendingReap.
+	h.refresh(intentWith(b))
+	if _, ok := h.ctrl.pendingReap.Load(a.TaskName); !ok {
+		t.Fatalf("scan-1 must mark A pendingReap")
+	}
+
+	// Scan 2: ONE snapshot re-adds A AND first-removes B. The reappear of A must NOT
+	// blind-replace the cache and lose B's first removal: B must get shadow +
+	// pendingReap installed in the same scan.
+	h.refresh(intentWith(a))
+
+	if _, ok := h.ctrl.pendingReap.Load(a.TaskName); ok {
+		t.Fatalf("#826-rescan: A's reappear must cancel A's pendingReap")
+	}
+	if _, ok := h.ctrl.pendingReap.Load(b.TaskName); !ok {
+		t.Fatalf("#826-rescan: the same snapshot that re-added A must FIRST-REMOVE B → B must be marked pendingReap (the reappear path must run the full diff, not blind-replace the cache)")
+	}
+	if _, ok := h.ctrl.reapShadow.Load(b.TaskName); !ok {
+		t.Fatalf("#826-rescan: B's first removal must install B's reaping shadow in the same scan")
+	}
+	if got := h.terminateCalls.Load(); got != 0 {
+		t.Fatalf("#826-rescan: neither A (reappeared) nor B (first removal, verification window) may terminate yet; terminate calls = %d", got)
+	}
+}
+
+// (d) TestSupervisorController_OrphanReap_R4_ReaddWithDesiredStoppedUpdatesStopsCache
+// is the #826/#829 falsifier. When a descriptor is re-added with Desired=stopped, the
+// stops cache must be swapped from the SAME fresh snapshot so a replayed
+// EvTimerDue/EvHealthOK treats it as stopped (not default-running). Pre-r4 the stops
+// cache was swapped on a SEPARATE off-loop path that could lag the reap scan.
+func TestSupervisorController_OrphanReap_R4_ReaddWithDesiredStoppedUpdatesStopsCache(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 64001)
+
+	// Scan 1: removed → pendingReap.
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); !ok {
+		t.Fatalf("scan-1 must mark pendingReap")
+	}
+
+	// Scan 2: re-added WITH Desired=stopped, carrying the matching stops snapshot. The
+	// on-loop handleReapScan swaps BOTH caches; the stops cache must now report the
+	// task stopped.
+	readded := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{d}}
+	h.refreshWithStops(readded, stopsFor(d.TaskName))
+
+	di := h.ctrl.daemonIntent.Lookup(d.TaskName)
+	if di.Desired != api.IntentDesiredStopped {
+		t.Fatalf("#826/#829: a re-add with Desired=stopped must update the stops cache from the same snapshot; cache desired=%q want %q", di.Desired, api.IntentDesiredStopped)
+	}
+	if stop, _ := di.IsActiveStop(time.Now().UTC()); !stop {
+		t.Fatalf("#826/#829: the swapped stops cache must report the re-added task as an active stop")
+	}
+}
+
+// (e) TestSupervisorController_OrphanReap_R4_FollowupFreshReadErrorPreservesReap is
+// the #856 falsifier. When the follow-up tick's fresh on-disk read FAILS, the reap
+// must NOT fall back to the (emptied) cache to confirm absence and terminate — it
+// must PRESERVE pendingReap + re-arm and retry. Pre-#856 a transient read glitch
+// confirmed absence against the emptied cache and terminated a possibly-re-declared
+// daemon.
+func TestSupervisorController_OrphanReap_R4_FollowupFreshReadErrorPreservesReap(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 65001)
+
+	// Remove → mark pendingReap, arm a follow-up.
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); !ok {
+		t.Fatalf("removal did not mark pendingReap")
+	}
+
+	// Make the follow-up's fresh on-disk read FAIL.
+	h.setReapIntentReadErr(errors.New("simulated transient supervisor-intent.json read error"))
+
+	if !h.fireReapFollowup() {
+		t.Fatalf("removal must arm a follow-up tick")
+	}
+	if got := h.terminateCalls.Load(); got != 0 {
+		t.Fatalf("#856: a follow-up fresh-read FAILURE must NOT confirm absence against the emptied cache and terminate; terminate calls = %d", got)
+	}
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); !ok {
+		t.Fatalf("#856: a follow-up fresh-read FAILURE must PRESERVE pendingReap for retry")
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StRunning {
+		t.Fatalf("#856: the daemon's SM state must be preserved across a transient read glitch; got state=%v ok=%v", st, ok)
+	}
+
+	// The retry: the read recovers and still shows the daemon gone → NOW it terminates.
+	h.setReapIntentReadErr(nil)
+	h.setFreshIntent(emptyReapIntent())
+	if !h.fireReapFollowup() {
+		t.Fatalf("#856: a fresh-read failure must keep a follow-up armed for the retry")
+	}
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("#856: the recovered retry tick must finally terminate the confirmed orphan exactly once; terminate calls = %d", got)
+	}
+}
+
+// (f) TestSupervisorController_OrphanReap_R4_FiredTimerTerminateFailureReArms is the
+// #966/#967 falsifier. After a follow-up timer FIRES and the terminate FAILS
+// (process may still be alive), resolveConfirmedReap calls armReapFollowup to retry.
+// Pre-#966/#967 the fired timer's armed-flag still held the same generation, so the
+// re-arm was a no-op and the transient terminate failure was NEVER retried. Post-fix
+// the fired-timer bookkeeping is cleared when the timer fires, so the retry actually
+// schedules a NEW follow-up timer.
+func TestSupervisorController_OrphanReap_R4_FiredTimerTerminateFailureReArms(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 66001)
+
+	// Remove → mark pendingReap (timer #1 armed).
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if h.pendingFollowupCount() != 1 {
+		t.Fatalf("removal must arm exactly one follow-up; armed=%d", h.pendingFollowupCount())
+	}
+
+	// Make the terminate FAIL (non-gone → reapTerminateFailed → must re-arm).
+	h.setTerminateErr(errors.New("simulated terminate failure (process may still be alive)"))
+
+	// Fire timer #1: confirms absence (fresh read empty), terminate fails. The fix
+	// must re-arm a NEW follow-up timer for the retry.
+	if !h.fireReapFollowup() {
+		t.Fatalf("timer #1 must be armed")
+	}
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("#966/#967: the fired timer must attempt the terminate once; terminate calls = %d", got)
+	}
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); !ok {
+		t.Fatalf("#966/#967: a failed terminate must preserve pendingReap")
+	}
+	if h.pendingFollowupCount() != 1 {
+		t.Fatalf("#966/#967: after a fired timer + terminate failure, a NEW retry timer must be armed (pre-fix the re-arm no-op'd and left 0); armed=%d", h.pendingFollowupCount())
+	}
+
+	// The retry timer fires with the terminate now succeeding → orphan reaped.
+	h.setTerminateErr(nil)
+	if !h.fireReapFollowup() {
+		t.Fatalf("#966/#967: the re-armed retry timer must be fireable")
+	}
+	if got := h.terminateCalls.Load(); got != 2 {
+		t.Fatalf("#966/#967: the retry must re-attempt the terminate; total terminate calls = %d, want 2", got)
+	}
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); ok {
+		t.Fatalf("#966/#967: the successful retry must clear pendingReap")
+	}
+}
+
+// (h) TestSupervisorController_OrphanReap_R4_OwnSpawnedReaddBeforeExitQueuesRespawn is
+// the #625 falsifier. An own-spawned daemon confirmed absent is driven StRunning →
+// StExiting (the terminate fires; the real cmd.Wait exit is awaited). If the
+// descriptor is RE-ADDED (declared running) before that exit, the cancel path must
+// QUEUE a respawn so the EvChildExit drives StExiting → StSpawning and the
+// re-declared daemon comes back RUNNING. Pre-#625 the cancel only cleared reap
+// markers; the EvChildExit went to StIdle (no respawn) and the daemon stayed stopped.
+func TestSupervisorController_OrphanReap_R4_OwnSpawnedReaddBeforeExitQueuesRespawn(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 67001)
+	// Own-spawned with a live reaper outstanding.
+	h.ctrl.ownSpawned.Store(d.TaskName, true)
+	h.ctrl.reaperOutstanding.Store(d.TaskName, true)
+
+	// Scan 1 + Scan 2: confirmed removal → terminate fires → StExiting. Because the
+	// task is own-spawned, the clear is DEFERRED (the real EvChildExit is awaited).
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("confirmed reap must terminate the own-spawned child once; terminate calls = %d", got)
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StExiting {
+		t.Fatalf("after the reap terminate the own-spawned daemon must be StExiting awaiting its real exit; got state=%v ok=%v", st, ok)
+	}
+
+	// The descriptor is RE-ADDED (declared running) BEFORE the real cmd.Wait exit.
+	readded := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{d}}
+	h.setFreshIntent(readded)
+	h.refresh(readded)
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); !ok || v.(string) != "respawn" {
+		t.Fatalf("#625: re-adding a running descriptor while the own-spawned daemon is mid-terminate must QUEUE a respawn (queued_action=respawn); got %v ok=%v", v, ok)
+	}
+
+	// The real cmd.Wait exit now arrives. With queued_action=respawn the SM drives
+	// StExiting → StSpawning (consume the queued respawn) → the daemon comes back.
+	spawnBefore := h.spawnCalls.Load()
+	h.postEvent(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+	if got := h.spawnCalls.Load(); got != spawnBefore+1 {
+		t.Fatalf("#625: the EvChildExit must consume the queued respawn and re-spawn the re-declared daemon exactly once; spawn delta = %d, want 1", got-spawnBefore)
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || (st != api.StSpawning && st != api.StRunning) {
+		t.Fatalf("#625: after the respawn the re-declared daemon must be live (StSpawning/StRunning), not stopped; got state=%v ok=%v", st, ok)
 	}
 }

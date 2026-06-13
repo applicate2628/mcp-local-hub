@@ -975,6 +975,13 @@ func applyReconcileDrift(
 	if ctrl == nil {
 		return 0
 	}
+	// (#303) Capture the OLD (pre-refresh) descriptor each StRunning command-drift
+	// restart will terminate against, BEFORE the cache refresh below rewrites the
+	// controller cache to the NEW descriptor. The eventual respawn uses the new
+	// descriptor; the terminate must still prove+kill the stale child against its
+	// old command identity, so the old descriptor rides in the EvManualRestart body.
+	// lookupControllerCachedDescriptor is canonical-aware (#302), so a legacy
+	// bare-key drift row is still resolved here.
 	manualRestartTerminateDescriptors := map[string]*api.SupervisorDaemon{}
 	for _, entry := range drift {
 		if entry.Action != reconcileActionPostEvManualRestart {
@@ -985,10 +992,24 @@ func applyReconcileDrift(
 			manualRestartTerminateDescriptors[entry.TaskName] = &copy
 		}
 	}
+	// pr302 r4 root fix: route BOTH cache swaps through the single on-loop
+	// snapshot-application event. refreshSupervisorIntent posts ONE evReapScan
+	// carrying the fresh descriptor snapshot AND the resolved stops; handleReapScan
+	// swaps both caches atomically on the loop (shadow-before-swap). The separate
+	// off-loop daemonIntent.Refresh is GONE. The evReapScan is posted BEFORE the
+	// drift EvIntentUpdate/EvManualRestart events below, so by FIFO the cache swap is
+	// processed first and the SM-driven respawn launches with the NEW descriptor
+	// (preserving the post-EvManualRestart "cache already holds the rewritten
+	// descriptor" invariant). A nil updatedIntent makes refreshSupervisorIntent a
+	// no-op, preserving the prior caches; daemonIntentCacheRefresh==nil means "no
+	// fresh stops source" and the stops cache is preserved.
 	if updatedIntent != nil {
-		ctrl.refreshSupervisorIntent(updatedIntent)
-	}
-	if daemonIntentCacheRefresh != nil {
+		ctrl.refreshSupervisorIntent(updatedIntent, daemonIntentCacheRefresh)
+	} else if daemonIntentCacheRefresh != nil {
+		// Descriptor source physically absent but a fresh stops source was read:
+		// refreshSupervisorIntent's nil-intent guard would skip the stops swap, so
+		// apply the stops refresh directly here (no descriptor change → no reap
+		// scan needed; this is a pure stops update with no orphan-drop exposure).
 		ctrl.daemonIntent.Refresh(daemonIntentCacheRefresh)
 	}
 	if ctrl.eventLoop == nil {
