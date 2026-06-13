@@ -1573,3 +1573,136 @@ func (s *reconcileContextSchedulerForTest) ExportXML(string) ([]byte, error) {
 	return nil, scheduler.ErrTaskNotFound
 }
 func (s *reconcileContextSchedulerForTest) ImportXML(string, []byte) error { return nil }
+
+// TestReconcileApply_CacheRefreshObservableBeforeReturn is the FINDING 1 falsifier
+// (Codex pr302 r6). It proves the reconcile-apply cache swap is OBSERVABLE before
+// applyReconcileDrift returns — i.e. the refresh runs SYNCHRONOUSLY relative to the
+// IPC handler's return path, not as a fire-and-forget async post.
+//
+// Pre-fix (r5): applyReconcileDrift called the ASYNC refreshSupervisorIntent, which
+// POSTED evReapScan and returned immediately, BEFORE the loop ran daemonIntent.Refresh.
+// An immediate observer (this test, and the existing TestReconcileIPC_ApplyTerminates*
+// tests, and a real back-to-back `mcphub status`) then read the STALE default-running
+// cache. This test makes that race DETERMINISTIC by gating the on-loop evReapScan
+// handler: while the gate is closed, the swap CANNOT have happened, so an async
+// applyReconcileDrift would have already returned with a stale cache.
+//
+// The falsifier structure:
+//   - the loop's evReapScan handler BLOCKS on a gate until the test opens it (and only
+//     THEN runs the swap + closes the barrier);
+//   - applyReconcileDrift runs on a separate goroutine; the test asserts it has NOT
+//     returned while the gate is closed (sync path BLOCKS on the barrier) — under the
+//     async r5 path it WOULD have returned here;
+//   - the test then opens the gate; the swap runs, the barrier signals, and
+//     applyReconcileDrift returns with the cache FRESH (Desired=stopped).
+func TestReconcileApply_CacheRefreshObservableBeforeReturn(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	events, err := api.OpenSupervisorEventLog(filepath.Join(tmpHome, "supervisor-events.log"))
+	if err != nil {
+		t.Fatalf("OpenSupervisorEventLog: %v", err)
+	}
+	t.Cleanup(func() { events.Close() })
+
+	taskName := `\mcp-local-hub-lsp-deadbeef-go`
+
+	var ctrl *supervisorController
+	loop := api.NewEventLoop(32)
+	gate := make(chan struct{})           // closed by the test to release the swap
+	scanEntered := make(chan struct{}, 1) // signals the handler reached the gate
+	loop.RegisterHandler(func(ev api.LoopEvent) {
+		switch ev.Kind {
+		case evReapScan:
+			// Signal that the scan handler is now waiting on the gate, then BLOCK
+			// until the test opens it. This models a busy/slow loop: until the gate
+			// opens, the cache swap has not run. An async apply would have returned
+			// already; the sync apply is still blocked on the barrier.
+			select {
+			case scanEntered <- struct{}{}:
+			default:
+			}
+			<-gate
+			prev, _ := ev.Body[reapScanPreviousNamesBodyKey].(map[string]struct{})
+			updated, _ := ev.Body[reapScanIntentBodyKey].(*api.SupervisorIntentFile)
+			stops, _ := ev.Body[reapScanStopsBodyKey].(*api.DaemonIntentFile)
+			ctrl.handleReapScan(prev, updated, stops)
+			if doneCh, ok := ev.Body[reapScanDoneBodyKey].(chan struct{}); ok && doneCh != nil {
+				close(doneCh)
+			}
+			return
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go loop.Run(ctx)
+
+	ctrl = &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+
+	deps := ipcDispatchDeps{
+		stateDir:           tmpHome,
+		events:             events,
+		controllerProvider: func() *supervisorController { return ctrl },
+	}
+
+	// The fresh stops snapshot the apply will swap in: the orphaned LSP descriptor
+	// marked stopped (exactly what markOrphanedLSPStopIntentForReconcile produces).
+	refreshSupervisor := &api.SupervisorIntentFile{Version: 1}
+	refreshStops := &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		taskName: {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUninstalled, UpdatedAt: time.Now().UTC()},
+	}}
+
+	// Pre-condition: the cache has NOT been refreshed yet — Desired is the
+	// default-running empty string.
+	if got := ctrl.daemonIntent.Lookup(taskName).Desired; got != "" {
+		t.Fatalf("precondition: cache should start empty (default-running); got %q", got)
+	}
+
+	applyReturned := make(chan struct{})
+	go func() {
+		// Single-entry drift so applyReconcileDrift posts the cache refresh (sync) and
+		// then one EvIntentUpdate. The refresh is the part under test.
+		drift := []api.DriftEntry{{TaskName: taskName, Action: api.ReconcileActionPostEvIntentUpdate}}
+		applyReconcileDrift(deps, drift, refreshSupervisor, refreshStops)
+		close(applyReturned)
+	}()
+
+	// Wait until the on-loop scan handler is parked on the gate.
+	select {
+	case <-scanEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("evReapScan handler never reached the gate (apply did not post the scan?)")
+	}
+
+	// THE FALSIFIER: while the gate is closed, the swap has NOT run. A SYNCHRONOUS
+	// applyReconcileDrift must STILL be blocked on the barrier; the ASYNC r5 path
+	// would have already returned here with a stale cache.
+	select {
+	case <-applyReturned:
+		t.Fatal("finding 1: applyReconcileDrift returned BEFORE the on-loop cache swap ran — the cache refresh is async/fire-and-forget, so an immediate observer reads the stale default-running cache (the r5 regression)")
+	case <-time.After(150 * time.Millisecond):
+		// Still blocked on the barrier — the synchronous contract holds.
+	}
+
+	// Release the swap. applyReconcileDrift's barrier now signals and it returns.
+	close(gate)
+	select {
+	case <-applyReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("applyReconcileDrift did not return after the swap completed")
+	}
+
+	// AND the cache is now FRESH — the swap is observable on the apply's return path.
+	if got := ctrl.daemonIntent.Lookup(taskName).Desired; got != api.IntentDesiredStopped {
+		t.Fatalf("finding 1: after applyReconcileDrift returns, the daemonIntent cache must reflect the swapped stops (Desired=stopped), not the stale default-running cache; got %q", got)
+	}
+	if stop, _ := ctrl.daemonIntent.Lookup(taskName).IsActiveStop(time.Now().UTC()); !stop {
+		t.Fatal("finding 1: the swapped stops cache must report the orphan as an active stop after the apply returns")
+	}
+}

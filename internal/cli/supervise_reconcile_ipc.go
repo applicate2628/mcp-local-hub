@@ -993,18 +993,27 @@ func applyReconcileDrift(
 		}
 	}
 	// pr302 r4 root fix: route BOTH cache swaps through the single on-loop
-	// snapshot-application event. refreshSupervisorIntent posts ONE evReapScan
-	// carrying the fresh descriptor snapshot AND the resolved stops; handleReapScan
-	// swaps both caches atomically on the loop (shadow-before-swap). The separate
-	// off-loop daemonIntent.Refresh is GONE. The evReapScan is posted BEFORE the
-	// drift EvIntentUpdate/EvManualRestart events below, so by FIFO the cache swap is
-	// processed first and the SM-driven respawn launches with the NEW descriptor
-	// (preserving the post-EvManualRestart "cache already holds the rewritten
-	// descriptor" invariant). A nil updatedIntent makes refreshSupervisorIntent a
-	// no-op, preserving the prior caches; daemonIntentCacheRefresh==nil means "no
-	// fresh stops source" and the stops cache is preserved.
+	// snapshot-application event. handleReapScan swaps both caches atomically on
+	// the loop (shadow-before-swap). The separate off-loop daemonIntent.Refresh is
+	// GONE. The evReapScan is posted BEFORE the drift EvIntentUpdate/EvManualRestart
+	// events below, so by FIFO the cache swap is processed first and the SM-driven
+	// respawn launches with the NEW descriptor (preserving the post-EvManualRestart
+	// "cache already holds the rewritten descriptor" invariant).
+	//
+	// pr302 r6 finding 1: use the SYNCHRONOUS variant. The r5 path used the ASYNC
+	// refreshSupervisorIntent, which POSTED evReapScan and returned BEFORE the loop
+	// ran daemonIntent.Refresh — so this handler's synchronous read of
+	// daemonIntent.Lookup (the reconcile-apply orphaned-LSP tests, and a real
+	// back-to-back `mcphub status`/reconcile) observed the stale default-running
+	// cache. refreshSupervisorIntentSync posts the SAME on-loop evReapScan but
+	// BLOCKS (off-loop, with a ctx + timeout guard) until the swap is applied, so
+	// the cache refresh is OBSERVABLE before applyReconcileDrift returns. The swap
+	// still runs ON the loop (no off-loop race with handleLoopEvent), and FIFO still
+	// keeps the scan ahead of the drift events posted below. A nil updatedIntent
+	// makes it a no-op, preserving the prior caches; daemonIntentCacheRefresh==nil
+	// means "no fresh stops source" and the stops cache is preserved.
 	if updatedIntent != nil {
-		ctrl.refreshSupervisorIntent(updatedIntent, daemonIntentCacheRefresh)
+		ctrl.refreshSupervisorIntentSync(updatedIntent, daemonIntentCacheRefresh)
 	} else if daemonIntentCacheRefresh != nil {
 		// Descriptor source physically absent but a fresh stops source was read:
 		// refreshSupervisorIntent's nil-intent guard would skip the stops swap, so

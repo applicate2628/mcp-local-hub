@@ -1621,3 +1621,244 @@ func TestSupervisorController_OrphanReap_R5_FollowupReappearIdleAfterReapPostsRe
 		t.Fatalf("#748: the reappear must cancel the pendingReap")
 	}
 }
+
+// (R6 finding 2) TestSupervisorController_OrphanReap_R6_FollowupReappearDoesNotConfirmSiblingPendingReap
+// is the HARD NEGATIVE CONTROL for finding 2 — separate snapshot-APPLY from
+// reap-CONFIRM, scope confirm to the timer's own task.
+//
+// r5 routed the follow-up REAPPEAR through the FULL handleReapScan, which ALSO
+// resolves EVERY pendingReap entry (its Arm-1 loop). So if A AND B are both
+// pendingReap (each one tick into its OWN verification window) and A's timer fires
+// AFTER A reappears while B is still absent, the full handleReapScan confirmed +
+// TERMINATED B on A's timer — before B's own verification window elapsed. That is
+// the old sibling-early-terminate bug (#662/#B) reintroduced.
+//
+// This test drives EXACTLY that: A and B both pendingReap; A re-appears on disk;
+// A's follow-up fires. With the APPLY/CONFIRM split, A's snapshot apply cancels A's
+// reap and KEEPS B's shadow + pendingReap intact, but B is NOT terminated — its
+// reap waits for B's OWN follow-up timer. The negative assertion (B not terminated,
+// B still pending) is the falsifier for the r5 regression.
+func TestSupervisorController_OrphanReap_R6_FollowupReappearDoesNotConfirmSiblingPendingReap(t *testing.T) {
+	h := newReapTestHarness(t)
+	a := reapTestDescriptor()
+	b := reapTestDescriptorB()
+	// Both A and B start live and present.
+	h.ctrl.intentCache.Refresh(intentWith(a, b))
+	h.ctrl.smStates.Store(a.TaskName, api.StRunning)
+	h.ctrl.smStates.Store(b.TaskName, api.StRunning)
+	h.tracker.MarkSpawned(a.TaskName, 81001, time.Now().UTC())
+	h.tracker.MarkSpawned(b.TaskName, 81002, time.Now().UTC())
+
+	// Scan 1: BOTH A and B disappear in the same refresh → BOTH marked pendingReap
+	// (each one tick into its OWN verification window). Two follow-up timers armed,
+	// FIFO order (A then B, by the map-range arm order — the test is robust either
+	// way because it identifies the fired task by its terminate, and here A's timer
+	// is irrelevant since A re-appears).
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(a.TaskName); !ok {
+		t.Fatalf("scan-1 must mark A pendingReap")
+	}
+	if _, ok := h.ctrl.pendingReap.Load(b.TaskName); !ok {
+		t.Fatalf("scan-1 must mark B pendingReap (B is in its OWN verification window)")
+	}
+
+	// A RE-APPEARS on disk (replace-in-place) but B stays ABSENT. The fresh on-disk
+	// read the follow-up tick performs returns intentWith(a) — A present, B absent.
+	h.setFreshIntent(intentWith(a))
+
+	// Fire A's follow-up timer. The FIFO arm order is non-deterministic across the
+	// two tasks; fire timers until A's reappear has been applied (A's pendingReap
+	// canceled). Crucially, after A's timer runs, B MUST still be pendingReap and
+	// NOT terminated — B's confirm belongs to B's OWN timer, which has NOT fired.
+	//
+	// To make the assertion precise about "A's timer must not terminate B", we fire
+	// EXACTLY ONE follow-up. Both timers are armed; if A's fires first it must cancel
+	// A and leave B; if B's fires first it would (correctly) confirm B (B is still
+	// absent on disk) — but that is B's OWN window resolving, NOT the regression.
+	// The regression is specifically "A's timer terminates B". So we assert the
+	// invariant that holds regardless of fire order: firing ONE timer terminates AT
+	// MOST ONE task, and if A's reappear was applied (A no longer pendingReap) then B
+	// must NOT have been terminated by that same tick.
+	if !h.fireReapFollowup() {
+		t.Fatalf("a follow-up timer must be armed")
+	}
+
+	aPending := func() bool { _, ok := h.ctrl.pendingReap.Load(a.TaskName); return ok }
+	bPending := func() bool { _, ok := h.ctrl.pendingReap.Load(b.TaskName); return ok }
+
+	if !aPending() {
+		// A's timer fired (A re-appeared → A's reap canceled). This is the finding-2
+		// scenario. B MUST be untouched by A's timer.
+		if got := h.terminateCalls.Load(); got != 0 {
+			t.Fatalf("finding 2: A's follow-up reappear must NOT confirm+terminate sibling B (B is in its own verification window); terminate calls = %d (the r5 full-handleReapScan regression terminated B on A's timer)", got)
+		}
+		if !bPending() {
+			t.Fatalf("finding 2: A's follow-up reappear must LEAVE B's pendingReap intact (B's reap waits for B's OWN timer); B's pendingReap was dropped")
+		}
+		if st, ok := h.ctrl.GetSMState(b.TaskName); !ok || st != api.StRunning {
+			t.Fatalf("finding 2: A's follow-up must not disturb B's SM state; got state=%v ok=%v", st, ok)
+		}
+		// A's snapshot apply must still keep B's shadow (so B's own timer can resolve).
+		if _, ok := h.ctrl.reapShadow.Load(b.TaskName); !ok {
+			t.Fatalf("finding 2: A's snapshot apply must PRESERVE B's reaping shadow so B's own follow-up can route + resolve")
+		}
+		// Now fire B's OWN follow-up timer — THAT confirms + terminates B exactly once.
+		if !h.fireReapFollowup() {
+			t.Fatalf("B's own follow-up timer must be armed")
+		}
+		if got := h.terminateCalls.Load(); got != 1 {
+			t.Fatalf("finding 2: B's OWN follow-up timer must confirm + terminate B exactly once; terminate calls = %d", got)
+		}
+		select {
+		case pid := <-h.terminatedPIDs:
+			if pid != 81002 {
+				t.Fatalf("finding 2: B's own timer must terminate B's PID (81002), got %d", pid)
+			}
+		default:
+			t.Fatalf("finding 2: B's own timer terminate did not record a PID")
+		}
+		return
+	}
+
+	// B's timer fired first (A still pending). That is B's OWN window resolving — B is
+	// still absent on disk, so B SHOULD be confirmed; this is NOT the regression. A's
+	// reap must survive untouched (it is still in its own window).
+	if !aPending() {
+		t.Fatalf("internal: A unexpectedly resolved")
+	}
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("B's own timer fired first; it must terminate exactly B once; terminate calls = %d", got)
+	}
+}
+
+// (R6 finding 3) TestSupervisorController_OrphanReap_R6_RemovedWhileExitingWithQueuedRespawnNotRelaunched
+// is the falsifier for finding 3 — clear a queued manual-restart respawn on confirmed
+// removal of a StExiting task.
+//
+// Setup: a RUNNING own-spawned daemon is MANUALLY RESTARTED — EvManualRestart drives
+// StRunning -> StExiting (issue terminate, queued_action=respawn). The terminate fires;
+// the daemon is now StExiting with queued_action=respawn awaiting its real EvChildExit
+// to drive StExiting -> StSpawning (the respawn). BEFORE that exit lands, the operator
+// REMOVES the descriptor from intent and it is confirmed-absent across the window.
+//
+// Pre-fix: reapRemovedDaemon's StExiting short-circuit returned reapDeferred WITHOUT
+// clearing queued_action=respawn. The real EvChildExit then routed via the reap shadow
+// and StExiting + queued_action=respawn -> StSpawning RELAUNCHED the removed descriptor
+// — re-orphaning exactly the daemon the reap exists to kill.
+//
+// Fixed: the StExiting short-circuit CLEARS the stale queued respawn so the real
+// EvChildExit drives StExiting -> StIdle (STOPPED, no respawn). This test asserts the
+// EvChildExit produces NO spawn and lands the daemon at StIdle.
+func TestSupervisorController_OrphanReap_R6_RemovedWhileExitingWithQueuedRespawnNotRelaunched(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 82001)
+	h.ctrl.ownSpawned.Store(d.TaskName, true)
+	h.ctrl.reaperOutstanding.Store(d.TaskName, true)
+
+	// Manual restart: StRunning + EvManualRestart -> StExiting (issue terminate,
+	// queued_action=respawn). The terminate fires once.
+	h.postEvent(api.LoopEvent{Kind: api.EvManualRestart, TaskName: d.TaskName})
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StExiting {
+		t.Fatalf("precondition: manual restart must drive the running daemon to StExiting; got state=%v ok=%v", st, ok)
+	}
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); !ok || v.(string) != "respawn" {
+		t.Fatalf("precondition: manual restart must queue queued_action=respawn; got %v ok=%v", v, ok)
+	}
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("precondition: manual restart must issue exactly one terminate; terminate calls = %d", got)
+	}
+
+	// Now the operator REMOVES the descriptor from intent. Scan 1 marks pendingReap
+	// (StExiting is reapable); scan 2 confirms absent → reapRemovedDaemon observes
+	// StExiting, defers (no double terminate) AND clears the stale queued_action=respawn.
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("the StExiting reap must NOT issue a second terminate (one is already in flight); terminate calls = %d", got)
+	}
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); ok {
+		if qa, _ := v.(string); qa == "respawn" {
+			t.Fatalf("finding 3: the confirmed removal of a StExiting+queued_action=respawn task must CLEAR the stale respawn; queued_action is still %q (the EvChildExit would relaunch the removed descriptor)", qa)
+		}
+	}
+
+	// The real EvChildExit arrives (routed via the reap shadow). With the queued
+	// respawn cleared, StExiting + EvChildExit -> StIdle (STOPPED) — NO spawn.
+	spawnBefore := h.spawnCalls.Load()
+	h.tracker.MarkExited(d.TaskName)
+	h.postEvent(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+	if got := h.spawnCalls.Load(); got != spawnBefore {
+		t.Fatalf("finding 3: a removed daemon must NOT be relaunched by a stale queued restart; spawn delta = %d, want 0 (the EvChildExit must drive STOPPED, not respawn)", got-spawnBefore)
+	}
+	// The exit settles the task to a non-live state; the reap bookkeeping then clears.
+	if st, ok := h.ctrl.GetSMState(d.TaskName); ok && st != api.StIdle {
+		t.Fatalf("finding 3: after the EvChildExit the removed daemon must be StIdle (settled), not relaunched; got state=%v", st)
+	}
+}
+
+// (R6 finding 4) TestSupervisorController_OrphanReap_R6_LegacyBareKeyDescriptorCapturedAndReaped
+// is the falsifier for finding 4 — capture the descriptor under BOTH the canonical
+// and the raw bare cache key.
+//
+// A LEGACY / hand-written supervisor-intent row carries a TaskName WITHOUT the leading
+// backslash (a bare "mcp-local-hub-..."). IntentCache.Refresh keys daemonByTask by the
+// RAW bare TaskName, but TaskNames() canonicalizes (prepends "\"). The reap removal
+// candidate name therefore comes through canonical ("\mcp-local-hub-..."), and a plain
+// Lookup(canonical) MISSES the bare-keyed descriptor — the capture falls into the
+// captured-miss bookkeeping-only clear and never terminates the orphan.
+//
+// Fixed: LookupCanonical probes BOTH key forms, so the bare-keyed legacy descriptor is
+// captured and the terminate backstop fires. This test seeds a bare-key descriptor,
+// removes it, and asserts the orphan is REAPED (terminate fires), not the clear-only path.
+func TestSupervisorController_OrphanReap_R6_LegacyBareKeyDescriptorCapturedAndReaped(t *testing.T) {
+	h := newReapTestHarness(t)
+	// Legacy bare-key descriptor: TaskName WITHOUT the leading backslash.
+	bare := reapTestDescriptor()
+	bare.TaskName = "mcp-local-hub-lsp-deadbeef-go" // no leading "\"
+	canonical := canonicalSupervisorTaskName(bare.TaskName)
+
+	// Seed the cache keyed by the RAW bare TaskName (exactly how Refresh stores a
+	// hand-written intent row).
+	h.ctrl.intentCache.Refresh(intentWith(bare))
+	// The SM state + tracker are keyed CANONICALLY (the controller canonicalizes at
+	// the SM boundary): markPendingReap / GetSMState / the reap all use canonical.
+	h.ctrl.smStates.Store(canonical, api.StRunning)
+	// The tracker is keyed by the descriptor's TaskName (bare) — the same key the
+	// terminate fn uses (tracker.Get(d.TaskName)), so the kill targets the right PID.
+	h.tracker.MarkSpawned(bare.TaskName, 83001, time.Now().UTC())
+	h.setFreshIntent(intentWith(bare))
+
+	// Sanity: a plain Lookup(canonical) MISSES the bare-keyed descriptor (this is the
+	// exact miss that broke the capture pre-fix), but LookupCanonical HITS it.
+	if _, ok := h.ctrl.intentCache.Lookup(canonical); ok {
+		t.Fatalf("precondition: a plain canonical Lookup of a bare-keyed legacy descriptor should MISS (the pre-fix capture bug)")
+	}
+	if _, ok := h.ctrl.intentCache.LookupCanonical(canonical); !ok {
+		t.Fatalf("precondition: LookupCanonical must resolve a bare-keyed legacy descriptor by the canonical name")
+	}
+
+	// Tick 1: descriptor removed → the canonical removal candidate must capture the
+	// bare-keyed descriptor and mark pendingReap (NOT fall into the captured-miss clear).
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(canonical); !ok {
+		t.Fatalf("finding 4: a removed legacy bare-key descriptor must be CAPTURED + marked pendingReap (canonical key), not cleared-only; the capture missed the bare-keyed descriptor")
+	}
+
+	// Tick 2: still absent → confirmed → SM-aware terminate fires (the backstop), NOT
+	// the clear-only path that would leave the orphan running.
+	h.refresh(emptyReapIntent())
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("finding 4: a confirmed-removed legacy bare-key orphan must be TERMINATED by the reap backstop exactly once; terminate calls = %d (the capture miss left it the clear-only path → orphan unreaped)", got)
+	}
+	select {
+	case pid := <-h.terminatedPIDs:
+		if pid != 83001 {
+			t.Fatalf("finding 4: the reap must terminate the bare-key daemon's PID (83001), got %d", pid)
+		}
+	default:
+		t.Fatalf("finding 4: the reap terminate did not record a target PID")
+	}
+}
