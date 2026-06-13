@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +105,118 @@ func TestUnregister_ReconcileFailureRestoresBareKeySupervisorStop(t *testing.T) 
 	}
 	if rows := reg.ListByWorkspaceLSP(wsKey); len(rows) != 1 || rows[0].Language != "go" {
 		t.Fatalf("registry rows after failed unregister = %+v, want original go row preserved", rows)
+	}
+}
+
+func TestRemoveSerenaSupervisorIntentForWorkspace_KillsLiveProxyBeforeDescriptorRemoval(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	workspace := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(workspace)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	descriptor := SupervisorDaemon{
+		TaskName:  SerenaTaskNameForWorkspace(canonical),
+		Server:    "serena",
+		Daemon:    WorkspaceKey(canonical),
+		Workspace: canonical,
+		Port:      9123,
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{descriptor},
+	}); err != nil {
+		t.Fatalf("WriteSupervisorIntent: %v", err)
+	}
+
+	origKill := forceKillByPortFn
+	origReconcile := registerSupervisorReconcileFn
+	var events []string
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		events = append(events, "kill")
+		if port != descriptor.Port {
+			t.Fatalf("forceKillByPortFn port=%d, want %d", port, descriptor.Port)
+		}
+		return portKillKilled, nil
+	}
+	registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		events = append(events, "reconcile")
+		return ReconcileResponse{}, nil
+	}
+	defer func() {
+		forceKillByPortFn = origKill
+		registerSupervisorReconcileFn = origReconcile
+	}()
+
+	removed, err := NewAPI().RemoveSerenaSupervisorIntentForWorkspace(canonical)
+	if err != nil {
+		t.Fatalf("RemoveSerenaSupervisorIntentForWorkspace: %v", err)
+	}
+	if !removed {
+		t.Fatal("RemoveSerenaSupervisorIntentForWorkspace removed=false")
+	}
+	if got, want := events, []string{"kill", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("events=%v, want %v", got, want)
+	}
+}
+
+func TestRemoveSerenaSupervisorIntentForWorkspace_KillFailurePreservesDescriptor(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	workspace := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(workspace)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	descriptor := SupervisorDaemon{
+		TaskName:  SerenaTaskNameForWorkspace(canonical),
+		Server:    "serena",
+		Daemon:    WorkspaceKey(canonical),
+		Workspace: canonical,
+		Port:      9124,
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{descriptor}}); err != nil {
+		t.Fatalf("WriteSupervisorIntent: %v", err)
+	}
+
+	origKill := forceKillByPortFn
+	origReconcile := registerSupervisorReconcileFn
+	forceKillByPortFn = func(int, time.Duration) (portKillOutcome, error) {
+		return portKillLookupUnavailable, errors.New("synthetic kill failure")
+	}
+	registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatal("reconcile must not run when live serena kill fails")
+		return ReconcileResponse{}, nil
+	}
+	defer func() {
+		forceKillByPortFn = origKill
+		registerSupervisorReconcileFn = origReconcile
+	}()
+
+	removed, err := NewAPI().RemoveSerenaSupervisorIntentForWorkspace(canonical)
+	if err == nil {
+		t.Fatal("RemoveSerenaSupervisorIntentForWorkspace returned nil error for kill failure")
+	}
+	if removed {
+		t.Fatal("RemoveSerenaSupervisorIntentForWorkspace removed=true after kill failure")
+	}
+	got, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if row := got.FindSupervisorDaemonByTaskName(descriptor.TaskName); row == nil {
+		t.Fatalf("descriptor %q was removed despite kill failure", descriptor.TaskName)
 	}
 }
 
