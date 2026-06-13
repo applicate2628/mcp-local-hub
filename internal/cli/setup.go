@@ -653,13 +653,30 @@ func shouldRemoveGlobalWatchdog(out io.Writer, serverBeingUninstalled string) bo
 		fmt.Fprintf(out, "⚠ watchdog gate: list failed (keeping watchdog installed): %v\n", err)
 		return false
 	}
+	// Resolve the installed-server catalog once for the longest-installed-prefix
+	// disambiguator (r37-1b). Best-effort: a read failure leaves the set empty,
+	// which the resolver treats as "no installed prefix" (ok=false) and we fall
+	// through to the defensive count below — never a wrong-owner key.
+	installed := map[string]struct{}{}
+	if names, mErr := a.ManifestList(); mErr == nil {
+		for _, n := range names {
+			installed[n] = struct{}{}
+		}
+	}
 	remaining := map[string]struct{}{}
 	for _, row := range rows {
 		if api.IsMaintenanceTaskName(row.Name) {
 			continue
 		}
-		srv := api.ServerFromTaskName(row.Name)
-		if srv == "" {
+		// api.ServerFromTaskName's last-hyphen split mis-attributes a
+		// hyphenated daemon name (\mcp-local-hub-demo-alpha-beta, real server
+		// "demo", daemon "alpha-beta" → "demo-alpha"). This is the last-server
+		// maintenance gate — a DECISION, not display — so resolve the true owner
+		// via the longest-installed-prefix rule so the gate keys on the real
+		// server. ok=false (no installed prefix — hub-wide / unparseable /
+		// orphan task) → the defensive count below keeps the watchdog installed.
+		srv, ok := api.ServerOwningTaskByLongestInstalledPrefix(row.Name, installed)
+		if !ok {
 			// Hub-wide / unparseable mcp-local-hub-* task that is not
 			// a maintenance task. Defensively count it as "still
 			// present" so we do not strip the watchdog while an

@@ -330,56 +330,48 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 
 // blankServerTaskOwnedByLongestInstalledPrefix decides whether a blank-field
 // supervisor-intent row whose canonical task name is `\mcp-local-hub-<X>` is
-// owned by `server` under the longest-installed-prefix disambiguator. It is the
-// config-env-side mirror of api.blankServerRowOwnedByLongestInstalledPrefix
-// (internal/api/install_parsed_manifest.go, r33-2) — kept in-package because the
-// api predicate is unexported.
+// owned by `server` under the longest-installed-prefix disambiguator. The
+// longest-installed-prefix scan now has a SINGLE owner —
+// api.ServerOwningTaskByLongestInstalledPrefix (r37-1) — and this config-env-side
+// predicate composes it, so the decision logic is no longer duplicated across
+// packages (r36 lane C reproduced it here when the api owner was still
+// unexported).
 //
-// One adaptation vs the api predicate: there the `server` argument is always the
-// manifest's OWN name (m.Name), so the caller has already proved `server` is an
-// installed server and the predicate only needs the longer-sibling check. Here
-// `server` is the OPERATOR's free-form selector, which may name a server that is
-// not installed at all (`demo-alpha/beta` against a row that is really
-// demo/alpha-beta). So when the catalog is non-empty we additionally require
-// `server` itself to be installed: otherwise both demo/alpha-beta AND
-// demo-alpha/beta (which rebuild the same canonical name) would claim the row.
-// When the catalog is EMPTY (read failed) the membership and sibling checks are
-// both vacuous and any prefix-matching row is claimed — the same safe
-// no-sibling-proof outcome as the api predicate.
+// One adaptation vs the api predicate's boolean form: there the `server` argument
+// is always the manifest's OWN name (m.Name), so the caller has already proved
+// `server` is an installed server and the predicate only needs the longer-sibling
+// check. Here `server` is the OPERATOR's free-form selector, which may name a
+// server that is not installed at all (`demo-alpha/beta` against a row that is
+// really demo/alpha-beta). When the catalog is non-empty we therefore require
+// `server` to BE the longest installed prefix (i.e. the row's true owner ==
+// server): an uninstalled selector, a foreign row, or a longer-sibling-owned row
+// all resolve to owner != server and are denied. When the catalog is EMPTY (read
+// failed) no sibling proof exists, so any prefix-matching row is claimed — the
+// same safe no-sibling-proof outcome as the api predicate.
 //
-// Returns true IFF `<X>` starts with `server+"-"`, AND (catalog empty OR `server`
-// is installed), AND no OTHER installed server name S (S != server,
-// len(S) > len(server)) is also a prefix of `<X>` in the same `S+"-"` form.
-// taskName is already canonical (NormalizeOverlayKey applied by the caller).
+// Returns true IFF, with a non-empty catalog, `server` is the longest installed
+// server-name prefix of `<X>` (server installed, `<X>` starts with `server+"-"`,
+// and no longer installed sibling prefixes it); OR, with an empty catalog, `<X>`
+// starts with `server+"-"`. taskName is already canonical (NormalizeOverlayKey
+// applied by the caller; the api owner re-applies the byte-identical
+// canonicalIntentTaskKey internally).
 func blankServerTaskOwnedByLongestInstalledPrefix(taskName, server string, installedServers map[string]struct{}) bool {
-	const taskPrefix = `\mcp-local-hub-`
-	canonical := daemon_env_overlay.NormalizeOverlayKey(taskName)
-	portion, ok := strings.CutPrefix(canonical, taskPrefix)
-	if !ok {
-		return false
-	}
-	// `<X>` must be `server-<daemon...>`: starts with server followed by a
-	// hyphen (a bare `server` with no daemon segment is degenerate and not a
-	// daemon row this prefix server should claim).
-	if !strings.HasPrefix(portion, server+"-") {
-		return false
-	}
 	if len(installedServers) > 0 {
-		if _, ok := installedServers[server]; !ok {
-			// The operator named a server that is not installed; a longer or
-			// shorter installed sibling owns the row, not this selector.
-			return false
-		}
+		// Non-empty catalog: the operator's selector owns the row iff it IS the
+		// row's true longest-installed-prefix owner. This single comparison
+		// folds in the membership check (an uninstalled selector cannot be the
+		// owner), the portion+prefix check (a non-prefix server is never the
+		// owner), and the longer-sibling check (a longer installed prefix is the
+		// owner instead) — all delegated to the single api owner.
+		owner, ok := api.ServerOwningTaskByLongestInstalledPrefix(taskName, installedServers)
+		return ok && owner == server
 	}
-	for s := range installedServers {
-		if s == server || len(s) <= len(server) {
-			continue
-		}
-		if strings.HasPrefix(portion, s+"-") {
-			// A longer installed server name is also a prefix — it owns the
-			// row, so `server` must not claim it.
-			return false
-		}
-	}
-	return true
+	// Empty catalog (read failed): no sibling proof exists, so claim any
+	// prefix-matching row. The api owner returns ok=false for an empty set, so
+	// mirror its portion+prefix check directly here. `<X>` must be
+	// `server-<daemon...>`: a bare `server` with no daemon segment is degenerate
+	// and not a daemon row this prefix server should claim.
+	const taskPrefix = `\mcp-local-hub-`
+	portion, found := strings.CutPrefix(daemon_env_overlay.NormalizeOverlayKey(taskName), taskPrefix)
+	return found && strings.HasPrefix(portion, server+"-")
 }

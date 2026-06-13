@@ -20,6 +20,100 @@ func makeInstalledSet(names ...string) map[string]struct{} {
 	return set
 }
 
+// TestServerOwningTaskByLongestInstalledPrefix is the pure unit test for the
+// r37-1 EXPORTED single-owner of the longest-installed-prefix scan. It returns
+// the OWNING server (the longest installed-server-name prefix), independent of
+// any candidate — the primitive the cli signals/maintenance gates and the
+// config-env dedup all compose. Every case is falsifying for a naive last-hyphen
+// split (api.ServerFromTaskName), which would return "demo-alpha" for the
+// hyphenated demo/alpha-beta row regardless of which servers are installed.
+func TestServerOwningTaskByLongestInstalledPrefix(t *testing.T) {
+	cases := []struct {
+		name      string
+		taskName  string
+		installed map[string]struct{}
+		wantOwner string
+		wantOK    bool
+	}{
+		{
+			// CORE r37-1: only demo installed → demo owns the hyphenated row,
+			// NOT "demo-alpha" (which a last-hyphen split would produce).
+			name:      "only demo installed → demo owns hyphenated row",
+			taskName:  `\mcp-local-hub-demo-alpha-beta`,
+			installed: makeInstalledSet("demo"),
+			wantOwner: "demo",
+			wantOK:    true,
+		},
+		{
+			// Longer installed sibling owns the row when both are installed.
+			name:      "demo+demo-alpha installed → demo-alpha (longest) owns",
+			taskName:  `\mcp-local-hub-demo-alpha-beta`,
+			installed: makeInstalledSet("demo", "demo-alpha"),
+			wantOwner: "demo-alpha",
+			wantOK:    true,
+		},
+		{
+			// Empty catalog → no installed name can be a prefix → ok=false.
+			name:      "empty catalog → no owner",
+			taskName:  `\mcp-local-hub-demo-alpha-beta`,
+			installed: nil,
+			wantOwner: "",
+			wantOK:    false,
+		},
+		{
+			// Foreign row: no installed server prefixes it → ok=false (the
+			// orphan/hub-wide fallback the cli callers preserve).
+			name:      "foreign row, no installed prefix → no owner",
+			taskName:  `\mcp-local-hub-zzz-x`,
+			installed: makeInstalledSet("demo", "demo-alpha"),
+			wantOwner: "",
+			wantOK:    false,
+		},
+		{
+			// Word-boundary: `demo` must NOT own `demonstration-x` (the prefix
+			// requires a trailing hyphen).
+			name:      "word-boundary: demonstration not owned by demo",
+			taskName:  `\mcp-local-hub-demonstration-x`,
+			installed: makeInstalledSet("demo"),
+			wantOwner: "",
+			wantOK:    false,
+		},
+		{
+			// Bare server portion with no daemon segment → degenerate, no owner.
+			name:      "bare server portion, no daemon → no owner",
+			taskName:  `\mcp-local-hub-demo`,
+			installed: makeInstalledSet("demo"),
+			wantOwner: "",
+			wantOK:    false,
+		},
+		{
+			// Non-canonical (no leading backslash) task name canonicalizes.
+			name:      "bare non-canonical task name canonicalizes",
+			taskName:  `mcp-local-hub-demo-alpha-beta`,
+			installed: makeInstalledSet("demo"),
+			wantOwner: "demo",
+			wantOK:    true,
+		},
+		{
+			// Not a hub task at all → ok=false.
+			name:      "non-hub task → no owner",
+			taskName:  `\some-other-task`,
+			installed: makeInstalledSet("demo"),
+			wantOwner: "",
+			wantOK:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			owner, ok := ServerOwningTaskByLongestInstalledPrefix(tc.taskName, tc.installed)
+			if owner != tc.wantOwner || ok != tc.wantOK {
+				t.Fatalf("ServerOwningTaskByLongestInstalledPrefix(%q, %v) = (%q, %v), want (%q, %v)",
+					tc.taskName, tc.installed, owner, ok, tc.wantOwner, tc.wantOK)
+			}
+		})
+	}
+}
+
 // TestBlankServerRowOwnedByLongestInstalledPrefix is the pure unit test for the
 // r33-2 disambiguator. It pins both directions of the r31-F1 ↔ r33-2 tension at
 // the predicate level.

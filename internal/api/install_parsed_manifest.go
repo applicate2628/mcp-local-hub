@@ -1663,6 +1663,49 @@ func supervisorIntentRowOwnedByScope(d SupervisorDaemon, server string, scope *s
 	return strings.HasPrefix(canonicalIntentTaskKey(d.TaskName), prefix)
 }
 
+// ServerOwningTaskByLongestInstalledPrefix returns the installed server name that
+// owns taskName under the longest-installed-prefix rule (the sibling-safe
+// disambiguator for blank-Server legacy rows: \mcp-local-hub-demo-alpha-beta is
+// owned by demo-alpha if installed, else by demo). ok=false when no installed
+// server name is a prefix of the task's <server>-... portion.
+//
+// This is the SINGLE owner of the longest-installed-prefix scan. The boolean
+// predicate blankServerRowOwnedByLongestInstalledPrefix below (and its cli-side
+// mirror) compose this function so the longer-sibling disambiguation has exactly
+// one implementation. The scan only considers a server name S a prefix when the
+// task portion starts with `S+"-"` (so `demo` does not match `demonstration-x`,
+// and a bare `\mcp-local-hub-demo` with no daemon segment yields ok=false), and
+// returns the LONGEST such installed S. An empty/nil installedServers set yields
+// ok=false (no installed name can be a prefix) — callers that want the safe
+// "claim-any" full-cleanup fallback handle ok=false explicitly.
+func ServerOwningTaskByLongestInstalledPrefix(taskName string, installedServers map[string]struct{}) (string, bool) {
+	const taskPrefix = `\mcp-local-hub-`
+	canonical := canonicalIntentTaskKey(taskName)
+	portion, ok := strings.CutPrefix(canonical, taskPrefix)
+	if !ok {
+		return "", false
+	}
+	owner := ""
+	for s := range installedServers {
+		if s == "" {
+			continue
+		}
+		// `<X>` must be `s-<daemon...>`: s followed by a hyphen (a bare `s`
+		// with no daemon segment is degenerate and not a daemon row this
+		// prefix server owns).
+		if !strings.HasPrefix(portion, s+"-") {
+			continue
+		}
+		if len(s) > len(owner) {
+			owner = s
+		}
+	}
+	if owner == "" {
+		return "", false
+	}
+	return owner, true
+}
+
 // blankServerRowOwnedByLongestInstalledPrefix decides whether a blank-Server
 // supervisor-intent row whose task name is `mcp-local-hub-<X>` is owned by
 // `server` under the longest-installed-prefix disambiguator (r33-2). It returns
@@ -1671,6 +1714,11 @@ func supervisorIntentRowOwnedByScope(d SupervisorDaemon, server string, scope *s
 // `S+"-"` form. installedServers may be empty (catalog read failed) — then the
 // sibling check is vacuous and any prefix-matching row is claimed, which is the
 // safe full-cleanup outcome (no sibling proof exists to defer to).
+//
+// The longer-installed-sibling scan is delegated to the single-owner
+// ServerOwningTaskByLongestInstalledPrefix; `server` itself need NOT be
+// installed (a removed/renamed daemon's prefix server may be absent from the
+// catalog), so the candidate-specific portion+prefix check stays local here.
 func blankServerRowOwnedByLongestInstalledPrefix(taskName, server string, installedServers map[string]struct{}) bool {
 	const taskPrefix = `\mcp-local-hub-`
 	canonical := canonicalIntentTaskKey(taskName)
@@ -1684,15 +1732,15 @@ func blankServerRowOwnedByLongestInstalledPrefix(taskName, server string, instal
 	if !strings.HasPrefix(portion, server+"-") {
 		return false
 	}
-	for s := range installedServers {
-		if s == server || len(s) <= len(server) {
-			continue
-		}
-		if strings.HasPrefix(portion, s+"-") {
-			// A longer installed server name is also a prefix — it owns the
-			// row, so `server` must not claim it (preserves r31-F1).
-			return false
-		}
+	// A strictly-LONGER installed server name that is also a prefix owns the
+	// row, so `server` must not claim it (preserves r31-F1). Because the owner
+	// returned is the LONGEST installed prefix, `len(owner) > len(server)`
+	// holds iff some installed prefix is strictly longer than `server`; an
+	// owner equal in length is `server` itself (a portion has exactly one
+	// prefix of any given length), and an empty catalog yields ok=false →
+	// claim (the safe no-sibling-proof fallback).
+	if owner, ok := ServerOwningTaskByLongestInstalledPrefix(taskName, installedServers); ok && len(owner) > len(server) {
+		return false
 	}
 	return true
 }
