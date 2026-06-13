@@ -1882,7 +1882,30 @@ func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, da
 			key = `\` + key
 		}
 		subBlockStop, ok := supervisorStops[key]
-		if !ok || subBlockStop.Desired != legacyStop.Desired || subBlockStop.Reason != legacyStop.Reason || !subBlockStop.UpdatedAt.Equal(legacyStop.UpdatedAt) {
+		if !ok {
+			// Sub-block key ABSENT → the legacy stop is not durably represented.
+			return true
+		}
+		// Mirror the authoritative collapse delete-gate in
+		// internal/api/intent_collapse.go:592-593
+		// (daemonIntentRecordMergedOrSuperseded): a sub-block record is
+		// "merged/superseded" — and therefore durable — when it EQUALS the
+		// legacy record OR carries an UpdatedAt strictly AFTER the legacy
+		// UpdatedAt. The collapse merge intentionally keeps the newer sub-block
+		// authority instead of downgrading it to stale legacy data, so a
+		// byte-equivalence check here would fail-close startup on EVERY boot
+		// once the sub-block legitimately supersedes the legacy stop (newer
+		// UpdatedAt, possibly different reason). The api predicate is unexported,
+		// so the equal-or-newer logic is replicated here (this file is the only
+		// permitted edit surface for this fix); intent_collapse.go remains the
+		// authority. Only treat the stop as UNMERGED — fail-closed — when the
+		// sub-block record is neither equal nor strictly newer (i.e. older /
+		// divergent-and-not-newer).
+		equal := subBlockStop.Desired == legacyStop.Desired &&
+			subBlockStop.Reason == legacyStop.Reason &&
+			subBlockStop.UpdatedAt.Equal(legacyStop.UpdatedAt)
+		mergedOrSuperseded := equal || subBlockStop.UpdatedAt.After(legacyStop.UpdatedAt)
+		if !mergedOrSuperseded {
 			return true
 		}
 	}
