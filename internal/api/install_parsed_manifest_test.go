@@ -3053,17 +3053,51 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerHyphenatedDaemonRowN
 	}
 }
 
+// seedInstalledServerManifests writes a minimal `<name>/manifest.yaml` for each
+// named server under a fresh temp manifest dir and points
+// MCPHUB_MANIFEST_DIR_OVERRIDE at it, so listManifestNamesEmbedFirst() (the
+// installed-server catalog the supervisor-intent ownership disambiguator
+// consults) returns EXACTLY those names — no leakage from the binary's embedded
+// shipped set. Returns the manifest dir.
+func seedInstalledServerManifests(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", dir)
+	for _, name := range names {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+			t.Fatalf("mkdir manifest %q: %v", name, err)
+		}
+		body := "name: " + name + "\nkind: global\ntransport: stdio-bridge\ncommand: go\n"
+		if err := os.WriteFile(filepath.Join(dir, name, "manifest.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatalf("write manifest %q: %v", name, err)
+		}
+	}
+	return dir
+}
+
 // TestBuildMergedSupervisorIntent_FullInstall_BlankServerPrefixSiblingPreserved
-// is the PR #288 r31 F1 regression: a blank-Server legacy row must not be
-// claimed merely because its task name starts with this server's prefix. The
-// row below belongs to server demo-alpha / daemon beta; a full reinstall of
-// server demo / daemon alpha must replace only demo's exact descriptor.
+// is the PR #288 r31 F1 regression, now reconciled with the r33-2 fix: a
+// blank-Server legacy row must not be claimed by a SHORTER prefix server when a
+// LONGER installed server name owns it. The row below belongs to server
+// demo-alpha / daemon beta; because demo-alpha is ALSO an installed server it is
+// the longest installed prefix of `\mcp-local-hub-demo-alpha-beta`, so a full
+// reinstall of server demo must replace only demo's exact descriptor and leave
+// the demo-alpha/beta row untouched.
 //
-// Negative-control: the old prefix fallback
-// strings.HasPrefix(taskName, "mcp-local-hub-"+server+"-") drops the
-// demo-alpha/beta row during a demo reinstall.
+// This is the r31-F1 side of the r31-F1 ↔ r33-2 tension: the
+// longest-installed-prefix disambiguator preserves the sibling ONLY because
+// demo-alpha is installed (seeded below). The companion r33-2 test
+// (...BlankServerStaleRowReclaimedWhenNoSibling) covers the opposite case where
+// no sibling is installed and the stale row IS reclaimed.
+//
+// Negative-control: drop scope.legacyPrefixFallback's longer-installed-prefix
+// guard (claim any prefix-matching blank-Server row) and demo wrongly claims
+// the demo-alpha/beta row during a demo reinstall.
 func TestBuildMergedSupervisorIntent_FullInstall_BlankServerPrefixSiblingPreserved(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
+	// demo AND demo-alpha are BOTH installed: demo-alpha is the longer prefix
+	// that owns \mcp-local-hub-demo-alpha-beta.
+	seedInstalledServerManifests(t, "demo", "demo-alpha")
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 
 	seed := &SupervisorIntentFile{
@@ -3109,5 +3143,81 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerPrefixSiblingPreserv
 	}
 	if got := siblingRows[0]; got.Command != "preserve-demo-alpha-beta" || got.Port != 33122 || got.Daemon != "beta" {
 		t.Errorf("demo-alpha/beta sibling row mutated or replaced: %+v", got)
+	}
+}
+
+// TestBuildMergedSupervisorIntent_FullInstall_BlankServerStaleRowReclaimedWhenNoSibling
+// is the bot PR #288 r33-2 fix: an UPGRADED host carries an OLDER blank-Server
+// row for a daemon that has since been RENAMED or REMOVED from the manifest.
+// Its task name is NOT in the current manifest's exact task set, so the
+// exact-only r31-F1 arm could not claim it and the stale descriptor survived a
+// full reinstall forever — the supervisor kept respawning an uninstalled daemon.
+//
+// Here only server `demo` is installed (no demo-* sibling). The blank-Server
+// row \mcp-local-hub-demo-oldname is a removed daemon. A full reinstall of demo
+// must RECLAIM (drop) the stale row because demo is the only installed prefix
+// that could own it.
+//
+// Negative-control (pre-fix): the exact-only arm leaves the stale demo-oldname
+// row in place because "oldname" is not in the current {alpha} manifest set,
+// producing TWO surviving rows (stale demo-oldname + fresh demo-alpha) instead
+// of the stale one being removed.
+func TestBuildMergedSupervisorIntent_FullInstall_BlankServerStaleRowReclaimedWhenNoSibling(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	// ONLY demo is installed — no demo-* sibling exists to own the stale row.
+	seedInstalledServerManifests(t, "demo", "other")
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			// Renamed/removed daemon: blank Server, task name keyed to demo, but
+			// "oldname" is no longer in demo's manifest.
+			{TaskName: `\mcp-local-hub-demo-oldname`, Command: "stale-removed-daemon", Port: 33131},
+			// Sibling server's row must survive untouched.
+			{TaskName: `\mcp-local-hub-other-d`, Server: "other", Daemon: "d", Command: "preserve-other", Port: 33133},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 33123},
+		},
+	}
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
+	}
+
+	byTask := make(map[string][]SupervisorDaemon)
+	for _, d := range merged.Daemons {
+		byTask[canonicalIntentTaskKey(d.TaskName)] = append(byTask[canonicalIntentTaskKey(d.TaskName)], d)
+	}
+	// CORE r33-2 assertion: the stale removed-daemon row is GONE.
+	if rows := byTask[`\mcp-local-hub-demo-oldname`]; len(rows) != 0 {
+		t.Fatalf("stale removed-daemon row \\mcp-local-hub-demo-oldname survived full reinstall (r33-2); rows=%+v", rows)
+	}
+	// The fresh manifest daemon is present.
+	freshRows := byTask[`\mcp-local-hub-demo-alpha`]
+	if len(freshRows) != 1 {
+		t.Fatalf("fresh demo/alpha rows = %d, want exactly 1; rows=%+v", len(freshRows), merged.Daemons)
+	}
+	if got := freshRows[0]; got.Server != "demo" || got.Daemon != "alpha" || got.Port != 33123 {
+		t.Errorf("fresh demo/alpha row malformed: %+v", got)
+	}
+	// Sibling server's row preserved verbatim.
+	siblingRows := byTask[`\mcp-local-hub-other-d`]
+	if len(siblingRows) != 1 {
+		t.Fatalf("sibling other/d rows = %d, want exactly 1 (preserved verbatim); rows=%+v", len(siblingRows), merged.Daemons)
+	}
+	if got := siblingRows[0]; got.Command != "preserve-other" || got.Port != 33133 {
+		t.Errorf("sibling other/d not preserved verbatim: %+v", got)
 	}
 }

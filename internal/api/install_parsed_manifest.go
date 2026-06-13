@@ -1450,6 +1450,34 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 type supervisorIntentOwnershipScope struct {
 	taskNames  map[string]struct{}
 	daemonKeys map[string]struct{}
+
+	// legacyPrefixFallback enables the sibling-safe legacy-prefix arm in
+	// supervisorIntentRowOwnedByScope for FULL-SERVER-cleanup callers (full
+	// reinstall replace + manifest-backed uninstall). It is set ONLY by
+	// supervisorIntentOwnershipScopeForManifest, whose callers are exactly
+	// those full-cleanup paths. A nil scope or a scope built any other way
+	// leaves it false, so additive / per-daemon paths never start claiming
+	// legacy sibling rows.
+	//
+	// r31-F1 ↔ r33-2 tension: the exact-name arm (taskNames) was added by
+	// r31-F1 so a blank-Server row `\mcp-local-hub-demo-alpha-beta` is NOT
+	// claimed by server `demo` when it belongs to server `demo-alpha` /
+	// daemon `beta`. But that exact-ONLY match has the opposite failure
+	// (bot r33-2): a blank-Server row for a daemon that was RENAMED or
+	// REMOVED from the manifest is no longer in taskNames, so a full
+	// reinstall / manifest uninstall of the server cannot claim it and the
+	// stale descriptor survives forever. The legacy-prefix fallback below
+	// reclaims those rows while staying sibling-safe via installedServers.
+	legacyPrefixFallback bool
+
+	// installedServers is the set of ALL currently-known server names
+	// (manifest catalog) when legacyPrefixFallback is enabled. The
+	// disambiguator claims a blank-Server prefix row for `server` ONLY when
+	// no OTHER installed server name is a LONGER prefix of the same task —
+	// so if both `demo` and `demo-alpha` are installed, `demo-alpha` (the
+	// longest matching installed prefix) owns `\mcp-local-hub-demo-alpha-beta`
+	// and `demo` must not claim it (preserving r31-F1).
+	installedServers map[string]struct{}
 }
 
 func (s *supervisorIntentOwnershipScope) addTaskName(taskName string) {
@@ -1469,10 +1497,37 @@ func (s *supervisorIntentOwnershipScope) addDaemonKey(daemon string) {
 	s.daemonKeys[daemon] = struct{}{}
 }
 
+func (s *supervisorIntentOwnershipScope) addInstalledServer(server string) {
+	if server == "" {
+		return
+	}
+	if s.installedServers == nil {
+		s.installedServers = make(map[string]struct{})
+	}
+	s.installedServers[server] = struct{}{}
+}
+
 func supervisorIntentOwnershipScopeForManifest(m *config.ServerManifest, workspaces []WorkspaceEntry, daemonFilter string) *supervisorIntentOwnershipScope {
 	scope := &supervisorIntentOwnershipScope{}
 	if m == nil || m.Name == "" {
 		return scope
+	}
+	// Every caller of this builder is a FULL-SERVER-cleanup path (full
+	// reinstall replace, global full install, dry-run preview, manifest-backed
+	// uninstall), so enable the sibling-safe legacy-prefix fallback and capture
+	// the installed-server catalog the disambiguator needs. The catalog read is
+	// best-effort: on a read failure the set is left empty, which makes the
+	// fallback claim any blank-Server prefix row for this server (no sibling
+	// proof available) — the same outcome as the pre-fix prefix match for the
+	// scope==nil residual, and strictly better than the exact-only arm that
+	// stranded the stale descriptor (r33-2). The owning server itself is NOT
+	// excluded here; supervisorIntentRowOwnedByScope only consults OTHER
+	// installed names (S != server) for the longer-prefix check.
+	scope.legacyPrefixFallback = true
+	if names, err := listManifestNamesEmbedFirst(); err == nil {
+		for _, n := range names {
+			scope.addInstalledServer(n)
+		}
 	}
 	if m.Kind != config.KindWorkspaceScoped {
 		for _, d := range m.Daemons {
@@ -1513,10 +1568,28 @@ func supervisorIntentRowOwnedBy(d SupervisorDaemon, server string) bool {
 }
 
 // supervisorIntentRowOwnedByScope is the manifest-aware ownership predicate.
-// Populated Server rows remain exact. Blank-Server rows match by exact
-// manifest-derived task membership; when a legacy row has a populated Daemon
-// field, that daemon must also be in the manifest/workspace set so
-// demo/alpha-beta cannot claim demo-alpha/beta solely by task-prefix shape.
+// Populated Server rows remain exact. Blank-Server rows are decided in two
+// arms:
+//
+//  1. EXACT (r31-F1, always on for a non-nil scope) — the row's canonical task
+//     name is in the current manifest's task set; when the row carries a
+//     populated Daemon field, that daemon must also be in the manifest/workspace
+//     set, so demo/alpha-beta cannot claim demo-alpha/beta solely by task-prefix
+//     shape.
+//
+//  2. LEGACY-PREFIX FALLBACK (r33-2, gated on scope.legacyPrefixFallback — set
+//     ONLY by supervisorIntentOwnershipScopeForManifest, i.e. the full-server-
+//     cleanup callers) — for a blank-Server row NOT in the exact set, claim it
+//     when `server` is the MOST-SPECIFIC (longest) INSTALLED-server prefix of
+//     the task's `mcp-local-hub-<X>` portion: `<X>` starts with `server+"-"`
+//     AND no OTHER installed server S (S != server, len(S) > len(server)) is
+//     also a prefix (`<X>` starts with `S+"-"`). This reclaims a renamed/removed
+//     daemon's stale descriptor on a full reinstall / manifest uninstall while
+//     keeping r31-F1's sibling preservation: if demo-alpha is ALSO installed it
+//     is the longer prefix and owns the row, so demo does not claim it.
+//
+// The scope==nil path keeps the documented legacy prefix residual (used by the
+// server-string-only assertion helper and the non-manifest uninstall wrapper).
 func supervisorIntentRowOwnedByScope(d SupervisorDaemon, server string, scope *supervisorIntentOwnershipScope) bool {
 	if server == "" {
 		return false
@@ -1528,18 +1601,57 @@ func supervisorIntentRowOwnedByScope(d SupervisorDaemon, server string, scope *s
 		return false
 	}
 	if scope != nil {
-		if _, ok := scope.taskNames[canonicalIntentTaskKey(d.TaskName)]; !ok {
-			return false
-		}
-		if d.Daemon != "" && len(scope.daemonKeys) > 0 {
-			if _, ok := scope.daemonKeys[d.Daemon]; !ok {
-				return false
+		// Arm 1 — exact manifest-derived task membership (r31-F1, precise).
+		if _, ok := scope.taskNames[canonicalIntentTaskKey(d.TaskName)]; ok {
+			if d.Daemon != "" && len(scope.daemonKeys) > 0 {
+				if _, ok := scope.daemonKeys[d.Daemon]; !ok {
+					return false
+				}
 			}
+			return true
 		}
-		return true
+		// Arm 2 — sibling-safe legacy-prefix fallback (r33-2, full-cleanup only).
+		if scope.legacyPrefixFallback {
+			return blankServerRowOwnedByLongestInstalledPrefix(d.TaskName, server, scope.installedServers)
+		}
+		return false
 	}
 	prefix := canonicalIntentTaskKey("mcp-local-hub-" + server + "-")
 	return strings.HasPrefix(canonicalIntentTaskKey(d.TaskName), prefix)
+}
+
+// blankServerRowOwnedByLongestInstalledPrefix decides whether a blank-Server
+// supervisor-intent row whose task name is `mcp-local-hub-<X>` is owned by
+// `server` under the longest-installed-prefix disambiguator (r33-2). It returns
+// true IFF `<X>` starts with `server+"-"` AND no OTHER installed server name S
+// (S != server, len(S) > len(server)) is also a prefix of `<X>` in the same
+// `S+"-"` form. installedServers may be empty (catalog read failed) — then the
+// sibling check is vacuous and any prefix-matching row is claimed, which is the
+// safe full-cleanup outcome (no sibling proof exists to defer to).
+func blankServerRowOwnedByLongestInstalledPrefix(taskName, server string, installedServers map[string]struct{}) bool {
+	const taskPrefix = `\mcp-local-hub-`
+	canonical := canonicalIntentTaskKey(taskName)
+	portion, ok := strings.CutPrefix(canonical, taskPrefix)
+	if !ok {
+		return false
+	}
+	// `<X>` must be `server-<daemon...>`: starts with server followed by a
+	// hyphen (a bare `server` with no daemon segment is degenerate and not a
+	// daemon row this prefix server should claim).
+	if !strings.HasPrefix(portion, server+"-") {
+		return false
+	}
+	for s := range installedServers {
+		if s == server || len(s) <= len(server) {
+			continue
+		}
+		if strings.HasPrefix(portion, s+"-") {
+			// A longer installed server name is also a prefix — it owns the
+			// row, so `server` must not claim it (preserves r31-F1).
+			return false
+		}
+	}
+	return true
 }
 
 // maintenanceTimerOwnedBy reports whether a MaintenanceTimer belongs to the
