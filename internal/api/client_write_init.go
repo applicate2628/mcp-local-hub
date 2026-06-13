@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"mcp-local-hub/internal/clients"
 )
@@ -68,7 +69,7 @@ func secureCreateClientConfigIfMissingWithOperatorOpt(path string, stub []byte) 
 		return false, err
 	}
 	if operatorRequiresSingleUserHome() {
-		return false, fmt.Errorf("%w; %s is set, so the strict parent-dir gate is enforced for init-stub creation (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+		return false, fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for init-stub creation (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 			err, RequireSingleUserHomeEnv)
 	}
 	// Default-relax lane: parent-dir gate rejected but operator did
@@ -140,6 +141,15 @@ func operatorAllowsUnhardenedStateRead() bool {
 // solo-developer Windows case as the common path and proceeds with
 // the symlink-refusing fallback when parent-dir is not single-user-
 // safe — see secureWriteWithOperatorOpt for rationale.
+//
+// SEC-F2: this env var is NO LONGER the only enforcement input. The
+// persisted supervisor-intent.json `strict_mode` bit — mutated by the
+// operator-facing `mcphub strict-mode {enable,disable}` command — is
+// now ALSO honored by OperatorRequiresSingleUserHome(). Before SEC-F2
+// the intent bit was inert for enforcement, so `strict-mode enable`
+// was a security false-promise (it claimed to activate the strict gate
+// but the gate read only this env var). The intent value is read once
+// per process (lazy cache) — see strictModeIntentCache below.
 const RequireSingleUserHomeEnv = "MCPHUB_REQUIRE_SINGLE_USER_HOME"
 
 // AllowClientConfigSymlinkEnv is the operator opt-in for resolving
@@ -297,7 +307,7 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 		return err
 	}
 	if operatorRequiresSingleUserHome() {
-		return fmt.Errorf("%w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+		return fmt.Errorf("%w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 			err, RequireSingleUserHomeEnv)
 	}
 	reason := "default-relax-on-solo-host"
@@ -442,10 +452,109 @@ func operatorRequiresSingleUserHome() bool {
 // "1"/"true" forms as the secure-write pipeline rather than
 // fail-opening on values the canonical reader treats as enabled.
 // Deep-sec PR #208 Lane C #2 closure.
+//
+// SEC-F2 (security false-promise fix): strict mode is now active when
+// EITHER input is true:
+//
+//   - the MCPHUB_REQUIRE_SINGLE_USER_HOME env var is "1"/"true" (read
+//     fresh on every call — cheap, so an env override still takes
+//     effect immediately within the same process), OR
+//   - the persisted supervisor-intent.json `strict_mode` bit is true
+//     (the operator ran `mcphub strict-mode enable`).
+//
+// Before this change the env var was the ONLY enforcement input, so an
+// operator who ran `strict-mode enable` on a multi-tenant host believed
+// the strict relax-on-rejection-DISABLED gate was active when it was
+// NOT — the relax lane still fired. The intent bit was inert. This
+// closes that gap so the operator-facing command actually enforces.
+//
+// Per-process / restart-propagation semantics: the intent value is
+// read exactly ONCE per process (lazy cache — strictModeIntentCache).
+// This is deliberate: the gate is called on EVERY secure state-file
+// write, so re-reading (and flock-contending on) supervisor-intent.json
+// per call would be a perf + lock-contention regression. A long-lived
+// supervisor therefore picks up a `strict-mode enable` change on its
+// NEXT restart — which is the documented propagation point anyway
+// (`strict-mode enable` already rewrites the autostart shim args, so a
+// supervisor restart is expected). Short-lived install/gui/cli
+// invocations read fresh each run. No file-watcher, no per-write read.
+//
+// Safe-default-on-error: if the intent file is missing (fresh install
+// before any intent exists), unreadable, the state dir is unresolvable,
+// or the read-side parent-dir gate refuses it, the cached intent value
+// is FALSE — i.e. env-only behavior, exactly the pre-SEC-F2 posture.
+// Strict-from-intent is fail-closed-to-relax: a read error can only
+// LOSE the strict bit, never spuriously assert it.
 func OperatorRequiresSingleUserHome() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(RequireSingleUserHomeEnv))) {
 	case "1", "true":
 		return true
 	}
-	return false
+	return strictModeFromIntentCached()
+}
+
+// strictModeIntentCache holds the lazily-resolved
+// supervisor-intent.json `strict_mode` bit. It is resolved exactly once
+// per process (the first OperatorRequiresSingleUserHome call whose env
+// var was NOT already truthy), then served from the cache on every
+// subsequent call. The mutex + `resolved` guard mirrors the established
+// internal/api cache convention (cf. serenaStopReadCache /
+// resetSerenaStopReadCache) rather than sync.Once specifically so the
+// test seam can clear `resolved` and force a fresh read without a
+// process restart.
+var strictModeIntentCache struct {
+	mu       sync.Mutex
+	resolved bool
+	strict   bool
+}
+
+// strictModeFromIntentCached returns the cached
+// supervisor-intent.json `strict_mode` value, resolving it on first
+// use. ANY failure to read/resolve the intent caches FALSE (safe
+// default: env-only behavior, the pre-SEC-F2 posture).
+func strictModeFromIntentCached() bool {
+	strictModeIntentCache.mu.Lock()
+	defer strictModeIntentCache.mu.Unlock()
+	if !strictModeIntentCache.resolved {
+		strictModeIntentCache.strict = readStrictModeFromIntentBestEffort()
+		strictModeIntentCache.resolved = true
+	}
+	return strictModeIntentCache.strict
+}
+
+// readStrictModeFromIntentBestEffort reads supervisor-intent.json once
+// and returns its `strict_mode` bit. On ANY error (state dir
+// unresolvable, file absent, unreadable, read-side parent-dir gate
+// refusal, decode failure) it returns false — strict-from-intent is
+// fail-closed-to-relax, never fail-open-to-strict. This is the safe
+// default that preserves today's env-only posture when no enforcing
+// intent exists.
+//
+// Calls api.DefaultSupervisorIntentPath + api.ReadSupervisorIntent
+// (same package). Honors the daemonStateRootOverride test seam through
+// DefaultSupervisorIntentPath, so tests redirect the read into a temp
+// state dir.
+func readStrictModeFromIntentBestEffort() bool {
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return false
+	}
+	intent, err := ReadSupervisorIntent(path)
+	if err != nil || intent == nil {
+		return false
+	}
+	return intent.StrictMode
+}
+
+// resetStrictModeIntentCacheForTest clears the lazy strict-mode-intent
+// cache so a single test process can exercise both intent=true and
+// intent=false without a process restart. Mirrors the
+// resetSerenaStopReadCache convention. Test-only — callers in
+// production never need it because the intent value is fixed for the
+// life of the process (see OperatorRequiresSingleUserHome semantics).
+func resetStrictModeIntentCacheForTest() {
+	strictModeIntentCache.mu.Lock()
+	defer strictModeIntentCache.mu.Unlock()
+	strictModeIntentCache.resolved = false
+	strictModeIntentCache.strict = false
 }

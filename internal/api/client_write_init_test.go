@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // TestSecureWriteWithOperatorOpt_DefaultRelaxOnGateFailure pins the
@@ -191,7 +193,22 @@ func TestOperatorAllowedUnhardenedClientWrite_AcceptsOneAndTrue(t *testing.T) {
 // AllowUnhardenedClientWrite env-var parsing contract for the
 // strict-mode opt-in introduced in v0.4.0. Anything other than
 // "1"/"true" (case-insensitive, trimmed) is false.
+//
+// SEC-F2: OperatorRequiresSingleUserHome now also consults the
+// persisted supervisor-intent.json strict_mode bit (lazy cache). This
+// test pins the ENV-VAR half of the contract in isolation, so it
+// redirects the state dir to an empty hardened temp dir (no intent
+// file present → strict-from-intent resolves FALSE) and resets the
+// lazy cache up front. The intent half is covered by
+// TestOperatorRequiresSingleUserHome_IntentStrictMode below.
 func TestOperatorRequiresSingleUserHome_AcceptsOneAndTrue(t *testing.T) {
+	// Empty state dir, no supervisor-intent.json → strict-from-intent
+	// is FALSE, so each case below is governed purely by the env var.
+	t.Cleanup(SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+	t.Setenv(AllowUnhardenedStateReadEnv, "1") // read-gate inert for the empty temp dir
+	resetStrictModeIntentCacheForTest()
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
 	cases := []struct {
 		val  string
 		want bool
@@ -240,7 +257,7 @@ func TestOperatorRequiresSingleUserHome_AcceptsOneAndTrue(t *testing.T) {
 // MkdirAll succeeds.
 func TestSecureWriteWithOperatorOpt_StrictRefusesPreexistingSymlink(t *testing.T) {
 	t.Setenv(AllowUnhardenedClientWriteEnv, "1") // legacy opt-in (path tested below)
-	t.Setenv(RequireSingleUserHomeEnv, "1")       // STRICT mode — preserve v0.4.0-v0.4.1 refuse behavior
+	t.Setenv(RequireSingleUserHomeEnv, "1")      // STRICT mode — preserve v0.4.0-v0.4.1 refuse behavior
 
 	root := t.TempDir()
 	realTarget := filepath.Join(root, "real-target")
