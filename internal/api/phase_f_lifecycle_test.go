@@ -1032,14 +1032,21 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 	}
 }
 
-// TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsUnverifiedPIDKill
+// TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning
 // covers the POSIX supervisor-owned force path: descriptor ports exist, but the
-// production port lookup hook is absent, so a successful PID kill still cannot
-// prove that the descriptor port was released.
+// Windows-only port lookup hook is structurally absent (lookupProcess == nil on
+// non-Windows). A SUCCESSFUL trusted PID/tree kill IS the proof the daemon is
+// gone, so the force-stop goal is achieved: the per-target row must be SUCCESS
+// (empty Err) carrying a warning that notes the port-release proof was
+// unavailable on this platform but the trusted kill succeeded (bot PR #288
+// r35-1, site 1). The pre-fix code demanded a port-release proof it could not
+// supply and turned the success into a FAILED stop — this test inverts that
+// entrenching assertion.
 //
-// Negative-control: keep returning success after the PID kill and this test
-// observes an empty per-target Err despite no port-release proof.
-func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsUnverifiedPIDKill(t *testing.T) {
+// Negative-control (now matched by the assertions): keep returning success after
+// the PID kill and this test observes an empty per-target Err despite no
+// port-release proof.
+func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning(t *testing.T) {
 	stateDir := phaseFStateDir(t)
 	intent := &SupervisorIntentFile{
 		Version: 1,
@@ -1093,11 +1100,17 @@ func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsUnverifiedPIDKil
 	if len(killedPIDs) != 1 || killedPIDs[0] != 4243 {
 		t.Fatalf("PID-fallback kills = %v, want exactly [4243]", killedPIDs)
 	}
-	if len(results) != 1 || results[0].Err == "" {
+	if len(results) != 1 {
 		t.Fatalf("unexpected results: %+v", results)
 	}
-	if !strings.Contains(results[0].Err, "port kill unsupported") || !strings.Contains(results[0].Err, "pid path") {
-		t.Fatalf("unsupported port error = %q, want port failure with PID context", results[0].Err)
+	if results[0].Err != "" {
+		t.Fatalf("results[0].Err = %q, want empty — a successful trusted PID kill IS the proof on a host with no port-owner lookup", results[0].Err)
+	}
+	if results[0].Warning == "" {
+		t.Fatalf("results[0].Warning = %q, want a non-empty warning noting the trusted kill succeeded without a port-release proof", results[0].Warning)
+	}
+	if !strings.Contains(results[0].Warning, "trusted PID/tree kill succeeded") {
+		t.Fatalf("results[0].Warning = %q, want it to note the trusted PID/tree kill succeeded", results[0].Warning)
 	}
 }
 

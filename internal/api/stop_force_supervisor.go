@@ -117,12 +117,21 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
 			pidKillContext = pidKillErr.Error()
 			if pidKillAlreadyGoneError(err) {
-				if d.Port == 0 {
-					return RestartResult{TaskName: d.TaskName}
-				}
-			} else {
-				return RestartResult{TaskName: d.TaskName, Err: pidKillErr.Error()}
+				// The trusted PID/tree kill reported the process already gone
+				// ("already gone"/"no such process"/etc): the daemon is CONFIRMED
+				// dead → the force-stop goal already holds. Return clean success
+				// UNCONDITIONALLY, regardless of d.Port. Falling through to the
+				// port path when d.Port != 0 broke POSIX (bot PR #288 r35-1,
+				// site 2): forceKillByPortFn → killDaemonByPortOutcome returns
+				// (portKillLookupUnavailable, nil) because lookupProcess is nil
+				// on non-Windows, which the caller turned into a "no usable
+				// port-release proof" FAILED row even though the daemon is
+				// already dead. Windows reports success here too (an already-gone
+				// daemon yields portKillNoListener), so unconditional success
+				// matches the platform-agnostic truth.
+				return RestartResult{TaskName: d.TaskName}
 			}
+			return RestartResult{TaskName: d.TaskName, Err: pidKillErr.Error()}
 		} else {
 			pidKillContext = fmt.Sprintf("force kill daemon by pid %d succeeded", pid)
 			if d.Port == 0 {
@@ -183,7 +192,17 @@ func waitPortReleasedAfterPIDKill(port, killedPID int, timeout time.Duration) (s
 		return "", nil
 	}
 	if lookupProcess == nil {
-		return "", fmt.Errorf("%w; no usable port-release proof", errPortKillUnsupported)
+		// POSIX (Linux beta / macOS preview): the Windows-only port-owner lookup
+		// hook is structurally nil (processes.go init only wires it when
+		// GOOS=="windows"). This branch is reached ONLY after the trusted
+		// supervisor-reported PID/tree kill (stopForceKillPIDFn → SIGKILL of the
+		// process group on POSIX) already SUCCEEDED, so the daemon group is dead
+		// and the force-stop goal is achieved. The trusted kill that already ran
+		// IS the proof; demanding a Windows-only port-release proof we cannot
+		// supply would convert that success into an operator-visible FAILED stop
+		// (bot PR #288 r35-1, site 1). Mirror the foreign-listener success case
+		// below: return a warning string with no error.
+		return fmt.Sprintf("killed pid %d; port-release proof unavailable on this platform (port-owner lookup not wired); trusted PID/tree kill succeeded", killedPID), nil
 	}
 
 	deadline := time.Now().Add(timeout)
