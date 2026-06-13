@@ -1528,15 +1528,28 @@ func supervisorIntentRowOwnedByScope(d SupervisorDaemon, server string, scope *s
 		return false
 	}
 	if scope != nil {
-		if _, ok := scope.taskNames[canonicalIntentTaskKey(d.TaskName)]; !ok {
-			return false
-		}
-		if d.Daemon != "" && len(scope.daemonKeys) > 0 {
-			if _, ok := scope.daemonKeys[d.Daemon]; !ok {
-				return false
+		taskKey := canonicalIntentTaskKey(d.TaskName)
+		if _, ok := scope.taskNames[taskKey]; ok {
+			if d.Daemon != "" && len(scope.daemonKeys) > 0 {
+				if _, ok := scope.daemonKeys[d.Daemon]; !ok {
+					return false
+				}
 			}
+			return true
 		}
-		return true
+
+		// Full manifest-backed cleanup must also retire stale legacy rows for
+		// daemons that were removed from the current manifest.  Those rows are
+		// absent from scope.taskNames by definition, but older writers may still
+		// have left a blank Server with either a populated Daemon or an
+		// unambiguous last-hyphen task split for this server.  Keep the match
+		// exact so a server such as demo does not claim the sibling row
+		// mcp-local-hub-demo-alpha-beta / Daemon=beta.
+		if d.Daemon != "" && taskKey == canonicalIntentTaskKey("mcp-local-hub-"+server+"-"+d.Daemon) {
+			return true
+		}
+		parsedServer, _ := ParseManagedTaskName(d.TaskName)
+		return parsedServer == server
 	}
 	prefix := canonicalIntentTaskKey("mcp-local-hub-" + server + "-")
 	return strings.HasPrefix(canonicalIntentTaskKey(d.TaskName), prefix)

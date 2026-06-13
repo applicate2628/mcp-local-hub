@@ -3111,3 +3111,107 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerPrefixSiblingPreserv
 		t.Errorf("demo-alpha/beta sibling row mutated or replaced: %+v", got)
 	}
 }
+
+// TestBuildMergedSupervisorIntent_FullInstall_RemovesStaleBlankServerDaemon
+// covers the manifest-scoped cleanup regression where full reinstall only
+// dropped blank-Server rows whose daemon still appeared in the current
+// manifest. A removed same-server daemon row must be retired so the supervisor
+// does not keep a stale descriptor alive forever.
+func TestBuildMergedSupervisorIntent_FullInstall_RemovesStaleBlankServerDaemon(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha`, Command: "stale-demo-alpha", Daemon: "alpha", Port: 33221},
+			{TaskName: `\mcp-local-hub-demo-gamma`, Command: "stale-removed-gamma", Daemon: "gamma", Port: 33222},
+			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Daemon: "beta", Command: "preserve-demo-alpha-beta", Port: 33223},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 33224},
+		},
+	}
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
+	}
+
+	byTask := make(map[string][]SupervisorDaemon)
+	for _, d := range merged.Daemons {
+		byTask[canonicalIntentTaskKey(d.TaskName)] = append(byTask[canonicalIntentTaskKey(d.TaskName)], d)
+	}
+	if rows := byTask[`\mcp-local-hub-demo-gamma`]; len(rows) != 0 {
+		t.Fatalf("removed daemon demo/gamma survived full reinstall: %+v", rows)
+	}
+	if rows := byTask[`\mcp-local-hub-demo-alpha`]; len(rows) != 1 || rows[0].Server != "demo" || rows[0].Daemon != "alpha" || rows[0].Port != 33224 || rows[0].Command == "stale-demo-alpha" {
+		t.Fatalf("demo/alpha was not replaced by the fresh manifest row: %+v", rows)
+	}
+	if rows := byTask[`\mcp-local-hub-demo-alpha-beta`]; len(rows) != 1 || rows[0].Command != "preserve-demo-alpha-beta" || rows[0].Daemon != "beta" {
+		t.Fatalf("prefix-colliding sibling row was not preserved: %+v", rows)
+	}
+}
+
+func TestRemoveServerFromSupervisorIntentCore_ManifestScopeRemovesStaleBlankServerDaemon(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha`, Command: "demo-alpha", Daemon: "alpha", Port: 33321},
+			{TaskName: `\mcp-local-hub-demo-gamma`, Command: "stale-removed-gamma", Daemon: "gamma", Port: 33322},
+			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Daemon: "beta", Command: "preserve-demo-alpha-beta", Port: 33323},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 33324},
+		},
+	}
+	scope := supervisorIntentOwnershipScopeForManifest(m, nil, "")
+	changed, removed, _, err := NewAPI().removeServerFromSupervisorIntentCore(context.Background(), m.Name, scope, false)
+	if err != nil {
+		t.Fatalf("removeServerFromSupervisorIntentCore: %v", err)
+	}
+	if !changed {
+		t.Fatal("removeServerFromSupervisorIntentCore changed=false, want true")
+	}
+
+	removedByTask := map[string]bool{}
+	for _, d := range removed {
+		removedByTask[canonicalIntentTaskKey(d.TaskName)] = true
+	}
+	if !removedByTask[`\mcp-local-hub-demo-alpha`] || !removedByTask[`\mcp-local-hub-demo-gamma`] {
+		t.Fatalf("removed tasks = %+v, want alpha and stale gamma removed", removed)
+	}
+	if removedByTask[`\mcp-local-hub-demo-alpha-beta`] {
+		t.Fatalf("prefix-colliding sibling was incorrectly removed: %+v", removed)
+	}
+
+	got, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if len(got.Daemons) != 1 || got.Daemons[0].TaskName != `\mcp-local-hub-demo-alpha-beta` || got.Daemons[0].Daemon != "beta" {
+		t.Fatalf("unexpected remaining daemon rows: %+v", got.Daemons)
+	}
+}
