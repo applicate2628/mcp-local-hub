@@ -10,8 +10,9 @@
 //     (internal/tray/state.go) and the GUI tray-state mirror
 //     (internal/cli/gui_tray_state.go).
 //   - isMaintenanceTaskName / IsMaintenanceTaskName: the hub-wide
-//     maintenance-task suffix classifier (`-watchdog` / `-liveness` /
-//     `-weekly-refresh`), consumed by the supervisor restart path
+//     maintenance-task classifier (`-watchdog` / `-weekly-refresh`
+//     suffix + the exact LivenessTaskName), consumed by the
+//     supervisor restart path
 //     (restart_supervisor.go), the supervisor status `is_maintenance`
 //     flag (internal/cli/supervise_status.go), the partial-uninstall gate
 //     (internal/cli/setup.go's shouldRemoveGlobalWatchdog), and the GUI
@@ -90,10 +91,11 @@ func IsRealFailure(lastResult int32) bool {
 // to keep these operationally-stable scheduled jobs out of per-server /
 // per-daemon recovery and gating logic.
 //
-// The match is suffix-based so all naming variants are covered:
-//   - hub-wide legacy watchdog: "\\mcp-local-hub-watchdog"
-//   - hub-wide supervisor-liveness task: "\\mcp-local-hub-liveness"
-//   - per-server / hub-wide weekly refresh:
+// The watchdog and weekly-refresh matches are suffix-based; the liveness
+// match is EXACT. Naming variants covered:
+//   - hub-wide legacy watchdog: "\\mcp-local-hub-watchdog" (suffix)
+//   - hub-wide supervisor-liveness task: "\\mcp-local-hub-liveness" (exact)
+//   - per-server / hub-wide weekly refresh (suffix):
 //     "\\mcp-local-hub-<server>-weekly-refresh",
 //     "\\mcp-local-hub-weekly-refresh".
 //
@@ -102,11 +104,30 @@ func IsRealFailure(lastResult int32) bool {
 // as maintenance: it must not be respawned as a daemon by the supervisor
 // reconcile, and it must not poison the last-server partial-uninstall
 // gate (ServerFromTaskName("...-watchdog") would otherwise return a
-// non-empty pseudo-server). The `-liveness` suffix was added in Phase 3a
-// (v0.6 spec §15 P1-b) for the same reasons.
+// non-empty pseudo-server). The `-weekly-refresh` suffix is deliberately
+// broad because a weekly-refresh job is BOTH hub-wide
+// ("\\mcp-local-hub-weekly-refresh") AND legitimately per-server
+// ("\\mcp-local-hub-<server>-weekly-refresh").
+//
+// The liveness task, by contrast, has exactly ONE canonical name —
+// LivenessTaskName ("\\mcp-local-hub-liveness"), the single hub-wide
+// supervisor-liveness recovery task (Phase 3a, v0.6 spec §15 P1-b). The
+// manifest schema does NOT reserve `liveness` as a daemon name, so a
+// legitimate server daemon literally named `liveness` produces the task
+// "\\mcp-local-hub-<server>-liveness", which also ends in `-liveness`. A
+// suffix match (the pre-r38 form `HasSuffix(name, "-liveness")`) wrongly
+// classified that real `<server>/liveness` daemon as hub maintenance,
+// making callers (selectSupervisorOwnedTargets, isHubDaemonSchedulerTaskName,
+// the GUI env-override gate, supervisorIntentManagedServerSignals) skip or
+// reject it. The exact-name check below matches BOTH the canonical
+// leading-backslash form and the bare form because callers arrive in both
+// shapes: isHubInfrastructureTaskName strips the leading backslash before
+// calling, while the supervisor restart path / GUI / status callers pass
+// the canonical form verbatim.
 func isMaintenanceTaskName(name string) bool {
 	return strings.HasSuffix(name, "-watchdog") ||
-		strings.HasSuffix(name, "-liveness") ||
+		name == LivenessTaskName ||
+		name == strings.TrimPrefix(LivenessTaskName, "\\") ||
 		strings.HasSuffix(name, "-weekly-refresh")
 }
 
