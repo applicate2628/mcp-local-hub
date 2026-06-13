@@ -746,6 +746,13 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 // where the constant lives, so the contract is unchanged.
 const reconcileActionPostEvManualRestart = "post_ev_manual_restart"
 
+// reconcileManualRestartTerminateDescriptorBodyKey carries the pre-refresh
+// descriptor that the currently-running child was spawned from. Descriptor-drift
+// apply refreshes the controller cache before posting EvManualRestart so the
+// eventual respawn uses the new descriptor; termination must still prove and
+// kill the stale child against its old command identity.
+const reconcileManualRestartTerminateDescriptorBodyKey = "terminate_descriptor"
+
 // supervisorDescriptorSpawnDrift reports whether two descriptors for the SAME
 // task differ on a field that AFFECTS the spawned child — the fields a respawn
 // would launch with differently. It deliberately ignores cosmetic / metadata
@@ -968,6 +975,16 @@ func applyReconcileDrift(
 	if ctrl == nil {
 		return 0
 	}
+	manualRestartTerminateDescriptors := map[string]*api.SupervisorDaemon{}
+	for _, entry := range drift {
+		if entry.Action != reconcileActionPostEvManualRestart {
+			continue
+		}
+		if d := lookupControllerCachedDescriptor(deps, entry.TaskName); d != nil {
+			copy := *d
+			manualRestartTerminateDescriptors[entry.TaskName] = &copy
+		}
+	}
 	if updatedIntent != nil {
 		ctrl.refreshSupervisorIntent(updatedIntent)
 	}
@@ -989,9 +1006,16 @@ func applyReconcileDrift(
 			// no_op / needs_manual_review never dispatch SM events.
 			continue
 		}
+		body := map[string]any(nil)
+		if kind == api.EvManualRestart {
+			if d := manualRestartTerminateDescriptors[entry.TaskName]; d != nil {
+				body = map[string]any{reconcileManualRestartTerminateDescriptorBodyKey: d}
+			}
+		}
 		ctrl.eventLoop.Post(api.LoopEvent{
 			Kind:     kind,
 			TaskName: entry.TaskName,
+			Body:     body,
 		})
 		applied++
 	}

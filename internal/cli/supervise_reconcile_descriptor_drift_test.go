@@ -236,6 +236,16 @@ func TestReconcileApply_RunningDescriptorDrift_PostsManualRestart(t *testing.T) 
 		if ev.TaskName != taskName {
 			t.Fatalf("posted event task_name = %q, want %q", ev.TaskName, taskName)
 		}
+		terminateDescriptor, ok := ev.Body[reconcileManualRestartTerminateDescriptorBodyKey].(*api.SupervisorDaemon)
+		if !ok || terminateDescriptor == nil {
+			t.Fatalf("EvManualRestart body missing old terminate descriptor: %#v", ev.Body)
+		}
+		if terminateDescriptor.Port != 9128 {
+			t.Fatalf("terminate descriptor port = %d, want old spawned port 9128", terminateDescriptor.Port)
+		}
+		if cached, ok := fx.ctrl.intentCache.Lookup(taskName); !ok || cached.Port != 9200 {
+			t.Fatalf("controller cache was not refreshed to new descriptor before event post: ok=%v cached=%+v", ok, cached)
+		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("expected an EvManualRestart post for the drifted StRunning daemon; got none")
 	}
