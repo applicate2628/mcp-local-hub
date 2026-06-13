@@ -451,6 +451,19 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate(t *testing.T) {
 			want:     false,
 			wantErr:  true,
 		},
+		{
+			// pr301 r4 Finding 2: the supervisor exited between Gate 1's identity
+			// probe and Gate 5's OpenProcess (TOCTOU). The SID gate returns
+			// ErrProcessAlreadyExited; the reaper must treat it as a benign no-op
+			// (false, nil) — nothing to reap — NOT a reap FAILURE that aborts
+			// install --upgrade. Pre-fix the SID gate returned a generic error for
+			// a dead PID and this case would set wantErr=true (the regression).
+			name:     "target vanished mid-gate (ErrProcessAlreadyExited) → benign no-op",
+			sidMatch: false,
+			sidErr:   process.ErrProcessAlreadyExited,
+			want:     false,
+			wantErr:  false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

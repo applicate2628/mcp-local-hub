@@ -50,6 +50,49 @@ func TestReadStrictModeFromIntent_DecodeError_FailsClosedToStrict(t *testing.T) 
 	}
 }
 
+// TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict is the
+// FALSIFYING CORE of pr301 r4 Finding 1. When DefaultSupervisorIntentPath()
+// itself returns an ERROR (the state dir cannot be resolved at all), the gate
+// must fail CLOSED to strict=TRUE. The resolver can refuse an EXISTING,
+// already-broadened state dir that may hold a supervisor-intent.json with
+// strict_mode=true; relaxing on a resolver error would silently DISABLE the
+// gate. Pre-r4 the path-resolution-error branch returned false (relax) — a
+// fail-OPEN hole this test pins shut.
+//
+// The unresolvable path is engineered deterministically (no timing race): point
+// the daemonStateRootOverride seam at a REGULAR FILE. DaemonStateDir() →
+// ensureStateRoot() → os.MkdirAll(<that file>) fails with "not a directory" on
+// both POSIX and Windows, so DefaultSupervisorIntentPath() returns a non-nil
+// error and readStrictModeFromIntentBestEffort hits exactly the
+// path-resolution-error branch under test.
+func TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict(t *testing.T) {
+	t.Setenv(AllowUnhardenedStateReadEnv, "1")
+
+	// Create a regular FILE and use its path as the state-root override. The
+	// later DaemonStateDir() resolution (os.MkdirAll on a file path) fails, so
+	// DefaultSupervisorIntentPath() returns an error.
+	notADir := filepath.Join(t.TempDir(), "state-root-is-a-file")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed regular file at state-root path: %v", err)
+	}
+	t.Cleanup(SetDaemonStateRootForTest(notADir))
+
+	// Precondition: confirm the resolver actually errors (so this test exercises
+	// the path-resolution-error branch, not some other relax/strict path).
+	if _, err := DefaultSupervisorIntentPath(); err == nil {
+		t.Fatal("precondition: DefaultSupervisorIntentPath() must return an error when " +
+			"the state-root override is a regular file; got nil (the unresolvable-path " +
+			"branch under test is not being exercised)")
+	}
+
+	if got := readStrictModeFromIntentBestEffort(); !got {
+		t.Fatal("pr301 r4 Finding 1 regression: an UNRESOLVABLE supervisor-intent path " +
+			"must fail CLOSED to strict (return true) — a resolver error may be hiding an " +
+			"existing strict_mode=true intent on a broadened state dir; got false (the pre-r4 " +
+			"fail-open-to-relax that silently disables the gate on a path-resolution error)")
+	}
+}
+
 // TestReadStrictModeFromIntent_Absent_Relaxes is the safe-default control:
 // a MISSING intent file (fresh install, never ran strict-mode enable) resolves
 // to relax (false). The absent path must stay env-only, unchanged by #301-2.

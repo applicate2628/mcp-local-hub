@@ -627,9 +627,20 @@ func strictModeFromIntentCached() bool {
 // intent (decode/permission/parent-gate refusal — strict is the safe-
 // secure failure mode). #301-2 P2:
 //
-//   - DefaultSupervisorIntentPath() error (state dir unresolvable) →
-//     false. The path can't even be formed, so there is no enforcing
-//     intent to honor; fall back to env-only behavior (unknown/fresh).
+//   - DefaultSupervisorIntentPath() error (state dir UNRESOLVABLE) →
+//     TRUE (fail-closed strict; pr301 r4 Finding 1). A path-resolution
+//     error is NOT proof of a fresh/absent intent: the resolver can refuse
+//     an EXISTING, already-broadened state dir (POSIX rejects a state dir
+//     whose parent is insecure / non-owner; Windows rejects an
+//     unresolvable known-folder), and that same dir may hold a
+//     supervisor-intent.json with strict_mode=true that this gate exists to
+//     honor. Relaxing on a resolver error would silently DISABLE the gate
+//     whenever the error happens to coincide with a strict intent we can no
+//     longer reach — a fail-OPEN hole. We cannot os.Lstat to disambiguate
+//     (we have no path), so the only safe verdict is strict. This is the
+//     env-only DISABLE path's concern only by name: strict-mode DISABLE
+//     does NOT consult this read (it gates on the env var, not the intent),
+//     so failing closed here cannot deadlock a disable.
 //   - ReadSupervisorIntent returns os.ErrNotExist (file absent) → false.
 //     A missing intent file is a fresh install before any `strict-mode
 //     enable` ever ran; relax is correct and is today's posture.
@@ -666,9 +677,13 @@ func strictModeFromIntentCached() bool {
 func readStrictModeFromIntentBestEffort() bool {
 	path, err := DefaultSupervisorIntentPath()
 	if err != nil {
-		// State dir unresolvable: no path to an enforcing intent at all.
-		// Unknown/fresh → env-only behavior (unchanged pre-#301-2 posture).
-		return false
+		// State dir UNRESOLVABLE. pr301 r4 Finding 1: fail CLOSED to strict.
+		// The resolver can REFUSE an EXISTING (already-broadened) state dir
+		// that holds a gate-controlling supervisor-intent.json with
+		// strict_mode=true; relaxing on the resolver error would silently
+		// disable the gate. With no path we cannot os.Lstat to disambiguate
+		// absent-vs-present, so strict is the only fail-secure verdict.
+		return true
 	}
 	intent, err := ReadSupervisorIntent(path)
 	if err != nil {

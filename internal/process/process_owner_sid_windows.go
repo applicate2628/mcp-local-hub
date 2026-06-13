@@ -17,6 +17,7 @@
 package process
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -56,12 +57,29 @@ func currentProcessUserSID() (*windows.SID, error) {
 // Opens the target with PROCESS_QUERY_LIMITED_INFORMATION (the least-privilege
 // access that still permits OpenProcessToken; works without admin in the common
 // same-user case), opens its token with TOKEN_QUERY, and reads TokenUser.
+//
+// pr301 r4 Finding 2 (TOCTOU): the operator-facing kill gates verify a target's
+// image/argv/start-time identity FIRST, then call this gate. A process that
+// passed that earlier probe can EXIT before this OpenProcess runs. A dead PID
+// makes OpenProcess fail with ERROR_INVALID_PARAMETER (and, more rarely,
+// ERROR_NOT_FOUND). That is NOT an "unverifiable owner" condition — the target
+// is simply GONE — so it is mapped to the package-canonical ErrProcessAlreadyExited
+// sentinel (same mapping pid_identity_windows.go / pid_alive_windows.go /
+// best_effort_kill_windows.go already apply to OpenProcess on a dead PID). The
+// caller treats a gone target as a benign already-dead no-op (the kill it was
+// about to perform is moot), NOT as a hard force-kill failure. Any OTHER
+// OpenProcess error (e.g. ERROR_ACCESS_DENIED on a LIVE process whose token we
+// may not open) stays a wrapped error → the caller fails closed and refuses to
+// kill a live process whose owner it cannot verify.
 func processOwnerUserSID(pid int) (*windows.SID, error) {
 	if pid <= 0 {
 		return nil, fmt.Errorf("process: invalid PID %d", pid)
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
+		if openProcessErrIsProcessGone(err) {
+			return nil, fmt.Errorf("process: OpenProcess(PID %d): %w", pid, ErrProcessAlreadyExited)
+		}
 		return nil, fmt.Errorf("process: OpenProcess(PID %d): %w", pid, err)
 	}
 	defer windows.CloseHandle(h)
@@ -84,6 +102,23 @@ func processOwnerUserSID(pid int) (*windows.SID, error) {
 	return sid, nil
 }
 
+// openProcessErrIsProcessGone reports whether an OpenProcess failure means the
+// target PID no longer refers to a live process (it exited / was never there),
+// as opposed to a permission/transient failure on a still-live process.
+//
+// ERROR_INVALID_PARAMETER is the canonical "PID does not refer to a live
+// process" code Windows returns from OpenProcess (the same mapping
+// pid_alive_windows.go, pid_identity_windows.go, and best_effort_kill_windows.go
+// already use). ERROR_NOT_FOUND is included defensively for the rarer kernel
+// path where a just-exited PID surfaces as "element not found". ACCESS_DENIED is
+// deliberately EXCLUDED: it indicates a LIVE process whose token we may not open
+// (e.g. a different-integrity-level or different-owner process), which must stay
+// a fail-closed "unverifiable" error, never a "gone" verdict.
+func openProcessErrIsProcessGone(err error) bool {
+	return errors.Is(err, windows.ERROR_INVALID_PARAMETER) ||
+		errors.Is(err, windows.ERROR_NOT_FOUND)
+}
+
 // ProcessOwnerSIDMatchesCurrent reports whether the target PID is owned by the
 // SAME user SID as the current mcphub process. It is the Windows owner-SID arm
 // of the operator-facing kill gates (SEC-F3).
@@ -100,17 +135,32 @@ func processOwnerUserSID(pid int) (*windows.SID, error) {
 //     e.g. a stale supervisor.lock sidecar pointing at ANOTHER user's
 //     mcphub-shaped supervisor must let `install --upgrade` SKIP the foreign
 //     process and proceed, not ABORT. (#301-1.)
+//   - (false, ErrProcessAlreadyExited) — TARGET GONE (benign already-dead).
+//     pr301 r4 Finding 2: the target PID exited between the caller's earlier
+//     image/argv/start-time identity probe and this gate's OpenProcess (a
+//     TOCTOU window the operator-facing kill paths necessarily have). The kill
+//     this gate was guarding is moot — there is nothing left to kill — so the
+//     caller treats it as a benign already-dead no-op (errors.Is(err,
+//     ErrProcessAlreadyExited)), exactly like the pre-existing already-exited
+//     handling elsewhere on the force-kill path. It is NOT a hard failure: a
+//     gone process is not a live process whose owner we failed to verify.
 //   - (false, err) — UNVERIFIABLE (fail-closed). The current process SID could
-//     not be resolved, OR the target's token could not be opened/queried
-//     (OpenProcess / OpenProcessToken / GetTokenUser / SID copy failed). The
-//     owner is UNKNOWN, so the caller MUST refuse the kill AND treat the
-//     non-nil error as a hard force-kill FAILURE (never kill a process whose
-//     owner cannot be proven to match; never proceed past a process we cannot
+//     not be resolved, OR the target is LIVE but its token could not be
+//     opened/queried (ACCESS_DENIED on OpenProcess, or OpenProcessToken /
+//     GetTokenUser / SID copy failed). The owner is UNKNOWN on a process that
+//     still exists, so the caller MUST refuse the kill AND treat the non-nil
+//     error as a hard force-kill FAILURE (never kill a process whose owner
+//     cannot be proven to match; never proceed past a process we cannot
 //     identify).
 //
-// Callers treat both (false, nil) and (false, err) as "do not kill", but the
-// two cases diverge on whether the surrounding flow may continue: (false, nil)
-// is a benign skip, (false, err) is a propagated failure.
+// Callers treat (false, nil), (false, ErrProcessAlreadyExited), and the generic
+// (false, err) all as "do not kill THIS process", but they diverge on whether
+// the surrounding flow may CONTINUE: (false, nil) is a benign different-owner
+// skip; (false, ErrProcessAlreadyExited) is a benign already-dead skip (the kill
+// succeeded by virtue of the target being gone); the generic (false, err) is a
+// propagated failure on a live-but-unverifiable target. Error-first branching
+// (errors.Is on ErrProcessAlreadyExited BEFORE inspecting the bool) keeps the
+// already-dead case from being misread as a proven different-owner.
 func ProcessOwnerSIDMatchesCurrent(pid int) (bool, error) {
 	cur, err := currentProcessUserSID()
 	if err != nil {
@@ -119,7 +169,9 @@ func ProcessOwnerSIDMatchesCurrent(pid int) (bool, error) {
 	}
 	target, err := processOwnerUserSID(pid)
 	if err != nil {
-		// UNVERIFIABLE: cannot open/query the target token → fail closed.
+		// Either TARGET GONE (ErrProcessAlreadyExited, benign already-dead) or
+		// UNVERIFIABLE on a live target (fail closed). The sentinel is preserved
+		// in the wrapped chain so the caller's errors.Is branch resolves it.
 		return false, err
 	}
 	return sidsMatchResult(cur, target)

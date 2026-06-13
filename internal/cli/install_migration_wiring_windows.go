@@ -269,10 +269,22 @@ func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string) (bool
 	//   - SID matches              → proceed (fall through to the live verdict).
 	//   - proven different-owner    → benign no-op (false, nil): not OUR
 	//     supervisor to reap, so treat it like an identity mismatch.
+	//   - target GONE (pr301 r4 Finding 2): the supervisor exited between Gate
+	//     1's identity probe and this gate's OpenProcess (a TOCTOU window). The
+	//     SID gate returns ErrProcessAlreadyExited. Treat it as a benign no-op
+	//     (false, nil) — IDENTICAL to Gate 1's ErrProcessNotFound branch above:
+	//     a gone supervisor is "nothing to reap", so the reaper reports success
+	//     by skipping it rather than ABORTING install --upgrade.
 	//   - owner unverifiable (err)  → propagate as a reap failure (false, err),
 	//     consistent with the transient-probe-error contract above.
+	// Error-first: resolve the already-dead sentinel BEFORE the generic error
+	// path so a gone target is never misread as an unverifiable live one.
 	match, sidErr := reapOwnerSIDMatchesCurrentFn(pid)
 	if sidErr != nil {
+		if errors.Is(sidErr, process.ErrProcessAlreadyExited) {
+			// Supervisor vanished mid-gate — nothing to reap, benign no-op.
+			return false, nil
+		}
 		return false, fmt.Errorf("supervisor kill-target owner-SID gate failed for PID %d: %w", pid, sidErr)
 	}
 	if !match {
