@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/gui"
 )
 
 // repoRoot locates the module root by walking up from the test's CWD
@@ -132,18 +134,31 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 		_ = os.RemoveAll(pidportDir)
 	})
 
-	// Wait for the first instance to BIND, proven by its pidport file
-	// appearing in MCPHUB_GUI_TEST_PIDPORT_DIR (written when it acquires the
-	// single-instance lock + binds the port). Poll up to 25s instead of a
+	// Wait for the first instance to actually BIND its port, proven by the
+	// gui.pidport file PARSING to a NON-ZERO port. Poll up to 25s instead of a
 	// fixed sleep: the prior fixed 5s flaked because the test_state_path_env
 	// build tag forces `go run` to compile a SEPARATE (uncached) cmd/mcphub
 	// binary whose cold compile can exceed 5s on a cold cache (PR #300 r2).
-	// The poll early-exits the instant the pidport appears — warm-cache runs
-	// still finish in ~1-2s, only the cold-compile case pays the longer
+	// The poll early-exits the instant a non-zero port appears — warm-cache
+	// runs still finish in ~1-2s, only the cold-compile case pays the longer
 	// ceiling, and the 25s worst case sits well under the 5m suite timeout.
+	//
+	// WHY NON-ZERO PORT, NOT len(entries)>0 (PR #300 r3 Finding 2): the first
+	// instance runs with `--port 0`, and AcquireSingleInstanceAt
+	// (single_instance.go:57, called via gui.go:213) writes gui.pidport with
+	// the REQUESTED port — 0 — AND creates the adjacent gui.pidport.lock BEFORE
+	// startGuiServer binds and rewrites the file with the OS-assigned bound port
+	// (gui.go:526, WritePidport, after <-ready). A bare "any entry exists" check
+	// returns true the instant the .lock / port-0 pidport appears, so the second
+	// instance could launch while the first is still unbound; its
+	// TryActivateIncumbent(..., 2s) handshake then probes port 0 / an unbound
+	// port and times out — the exact flake this poll exists to kill. Parsing the
+	// pidport and requiring port != 0 waits for the post-bind rewrite, so the
+	// handshake always reaches a live listener.
+	pidportFile := filepath.Join(pidportDir, "gui.pidport")
 	pidportReady := false
 	for i := 0; i < 125; i++ {
-		if entries, derr := os.ReadDir(pidportDir); derr == nil && len(entries) > 0 {
+		if _, port, rerr := gui.ReadPidport(pidportFile); rerr == nil && port != 0 {
 			pidportReady = true
 			break
 		}
@@ -152,7 +167,7 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	if !pidportReady {
 		// Proceed anyway: the second-instance handshake assertion below
 		// produces a clearer failure than a bare timeout here would.
-		t.Logf("first instance pidport not observed in %s after 25s; proceeding", pidportDir)
+		t.Logf("first instance pidport not observed with a non-zero bound port in %s after 25s; proceeding", pidportDir)
 	}
 
 	second := exec.Command(exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--no-browser", "--no-tray")...)
@@ -206,10 +221,29 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	// existence + the process-level byte-identity of the real
 	// supervisor-intent.json (verified out-of-band in the PR) together prove
 	// the subprocess stayed off the live fleet.
+	//
+	// WHY POLL, NOT A SINGLE STAT (PR #300 r3 Finding 3): startGuiServer writes
+	// the pidport and serves /api/ping (gui.go:526-529, on <-ready) BEFORE the
+	// later "GUI owns supervisor lifecycle" block calls ensureSupervisorRunning
+	// -> api.DaemonStateDir() (which MkdirAll's the override leaf). So the
+	// second-instance handshake above can complete while the first instance has
+	// not yet reached the supervisor-setup block, leaving the override leaf not
+	// yet created. A single os.Stat here would then fire the live-fleet warning
+	// even though the redirect is correct (a false failure). Poll up to ~15s for
+	// the leaf to appear; only treat its absence as a leak if it never appears
+	// within the window. 15s sits well under the 5m suite timeout.
 	stateLeaf := childStateDirOverrideLeaf(childState)
-	if info, statErr := os.Stat(stateLeaf); statErr != nil || !info.IsDir() {
-		t.Fatalf("isolation proof failed: child mcphub api.DaemonStateDir() did not create its redirected override dir %q (stat err: %v)\n"+
+	leafReady := false
+	for i := 0; i < 75; i++ {
+		if info, statErr := os.Stat(stateLeaf); statErr == nil && info.IsDir() {
+			leafReady = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !leafReady {
+		t.Fatalf("isolation proof failed: child mcphub api.DaemonStateDir() did not create its redirected override dir %q within 15s\n"+
 			"This means the subprocess resolved the REAL per-user state dir instead of the temp override — "+
-			"the live-fleet hazard is NOT closed.\nsecond-instance output:\n%s", stateLeaf, statErr, out2)
+			"the live-fleet hazard is NOT closed.\nsecond-instance output:\n%s", stateLeaf, out2)
 	}
 }
