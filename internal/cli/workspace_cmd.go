@@ -356,8 +356,10 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	//     later spawn the now-unbacked proxy → "not registered" exit 1 →
 	//     restart-backoff → quarantine. (*api.API).Unregister acquires its OWN
 	//     registry lock, so we must NOT hold the lock across that call.
-	//   - The serena (sentinel) row has no supervisor-intent LSP descriptor to
-	//     pair, so it is removed directly via RemoveByBackend("serena").
+	//   - The serena (sentinel) row owns a per-workspace supervisor-intent
+	//     descriptor keyed by api.SerenaTaskNameForWorkspace(canonical). The
+	//     registry row is removed directly via RemoveByBackend("serena"), then
+	//     the descriptor teardown nudges a running supervisor to reconcile.
 	lspLangs, removeSerena, err := classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend)
 	if err != nil {
 		return err
@@ -423,6 +425,9 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 		}
 		unlock()
 		removed += n
+		if _, err := api.NewAPI().RemoveSerenaSupervisorIntentForWorkspace(canonical); err != nil {
+			return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, err)
+		}
 	}
 
 	// If the default marker pointed at this workspace AND we removed the

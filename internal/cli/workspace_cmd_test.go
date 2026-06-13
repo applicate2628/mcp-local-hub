@@ -593,6 +593,78 @@ func TestWorkspaceUnregister_BackendSerenaRemovesOnlySerena(t *testing.T) {
 	}
 }
 
+func TestWorkspaceUnregister_BackendSerenaRemovesSupervisorIntentDescriptorAndStop(t *testing.T) {
+	withStateDir(t)
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"go"})
+	wsKey := api.WorkspaceKey(ws)
+	taskName := api.SerenaTaskNameForWorkspace(ws)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  wsKey,
+		WorkspacePath: ws,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          0,
+		TaskName:      taskName,
+		Languages:     []string{"go"},
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+	intentPath, err := api.DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:  taskName,
+			Server:    "serena",
+			Daemon:    wsKey,
+			Workspace: ws,
+			Port:      0,
+		}},
+		Stops: map[string]api.DaemonIntent{
+			taskName: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteSupervisorIntent: %v", err)
+	}
+
+	if _, err := runWorkspaceCmd(t, "unregister", ws, "--backend", "serena"); err != nil {
+		t.Fatalf("unregister --backend serena: %v", err)
+	}
+
+	reg = api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load registry: %v", err)
+	}
+	if _, ok := reg.GetSerena(wsKey); ok {
+		t.Fatalf("serena registry row survived unregister")
+	}
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+		t.Fatalf("serena supervisor-intent descriptor %q survived unregister: %+v", taskName, row)
+	}
+	if _, ok := intent.Stops[taskName]; ok {
+		t.Fatalf("serena supervisor-intent stop %q survived unregister: %+v", taskName, intent.Stops)
+	}
+}
+
 func TestWorkspaceUnregister_BackendAllRemovesEverything(t *testing.T) {
 	regPath, ws, wsKey := seedTwoBackends(t)
 	gotLangs := withStubbedLSPUnregister(t)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -445,6 +446,35 @@ func lspSupervisorIntentDescriptorExists(wsKey, lang string) (bool, error) {
 }
 
 func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error) {
+	return a.removeSupervisorIntentDescriptorForTask(LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang))
+}
+
+// RemoveSerenaSupervisorIntentForWorkspace removes the supervisor-owned Serena
+// per-workspace descriptor that pairs with a removed Serena registry row and
+// nudges a running supervisor to reconcile immediately. A live-supervisor
+// reconcile failure restores the descriptor and any matching stop tombstone so
+// the failed unregister is reversible.
+func (a *API) RemoveSerenaSupervisorIntentForWorkspace(workspacePath string) (bool, error) {
+	taskName := SerenaTaskNameForWorkspace(workspacePath)
+	restoreSupervisorIntent, removed, err := a.removeSupervisorIntentDescriptorForTask(taskName)
+	if err != nil || !removed {
+		return removed, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
+	_, err = registerSupervisorReconcileFn(ctx, true)
+	cancel()
+	if err != nil {
+		if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+			if restoreSupervisorIntent != nil {
+				restoreSupervisorIntent()
+			}
+			return true, fmt.Errorf("supervisor reconcile after removing %s failed while supervisor is alive; restored supervisor intent descriptor; retry unregister: %w", taskName, err)
+		}
+	}
+	return true, nil
+}
+
+func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), bool, error) {
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve supervisor-intent path: %w", err)
@@ -460,7 +490,6 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 		return nil, false, err
 	}
 	desired := cloneSupervisorIntentFile(prior)
-	taskName := LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang)
 	kept := desired.Daemons[:0]
 	removed := false
 	var removedDescriptor SupervisorDaemon
@@ -475,7 +504,7 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 	if !removed {
 		return func() {}, false, nil
 	}
-	priorStop, hadPriorStop := desired.Stops[taskName]
+	priorStop, hadPriorStop := supervisorStopForTask(desired.Stops, taskName)
 	desired.Daemons = kept
 	// Descriptor removal owns the matching stop tombstone too: this mirrors the
 	// install prune invariant that row removed => its stop entry goes with it.
@@ -492,6 +521,22 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 	return func() {
 		upsertSupervisorIntentDescriptorAndStop(intentPath, removedDescriptor, priorStop, hadPriorStop)
 	}, true, nil
+}
+
+func supervisorStopForTask(stops map[string]DaemonIntent, taskName string) (DaemonIntent, bool) {
+	if len(stops) == 0 {
+		return DaemonIntent{}, false
+	}
+	canonicalTaskName := canonicalIntentTaskKey(taskName)
+	if stop, ok := stops[canonicalTaskName]; ok {
+		return stop, true
+	}
+	if bareTaskName := strings.TrimPrefix(canonicalTaskName, `\`); bareTaskName != canonicalTaskName {
+		if stop, ok := stops[bareTaskName]; ok {
+			return stop, true
+		}
+	}
+	return DaemonIntent{}, false
 }
 
 func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorDaemon, stop DaemonIntent, restoreStop bool) {
