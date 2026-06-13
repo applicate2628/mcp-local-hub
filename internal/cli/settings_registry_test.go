@@ -229,7 +229,115 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // runtime hook, not a build tag, so it takes effect in the DEFAULT untagged
 // `go test ./...` build that CI runs — and is absent from release binaries,
 // which never call it (codex bot PR #264 P2). POSIX is a no-op.
+//
+// FLEET-SAFETY (2026-06-13 incident): a `go test ./internal/cli/` run executed
+// a real `mcphub stop --all` against the LIVE fleet — a Migration-path test
+// reached the real api.(*API).StopAll() with no per-test state-dir isolation,
+// so it resolved the developer's real %LOCALAPPDATA%\mcp-local-hub and stopped
+// all 22 daemons. The pre-incident TestMain isolated only the IPC pipe, NOT the
+// daemon state dir, so any test that reached real state code (forgot its own
+// SetDaemonStateRootForTest, was newly added, or fell through a preflight guard
+// that doesn't abort on the host OS) hit the live state directory.
+//
+// To make it STRUCTURALLY IMPOSSIBLE for any internal/cli test to touch the
+// real state dir, install a PROCESS-GLOBAL daemonStateRootOverride pointing at a
+// throwaway temp dir for the whole `go test ./internal/cli/` process. This is a
+// default safety net, not a replacement for per-test isolation: per-test
+// SetDaemonStateRootForTest(t.TempDir()) calls still compose correctly because
+// SetDaemonStateRootForTest captures the LIVE override value on entry and
+// restores to it on exit — under this TestMain that captured value is the global
+// temp dir, so a per-test override + restore can never expose the real dir.
+//
+// os.Exit-safety: defers do NOT run after os.Exit, so the cleanup is run
+// explicitly after capturing m.Run()'s exit code.
+//
+// SUBPROCESS GAP + BELT-AND-SUSPENDERS (PR #300 r1 P1). The
+// SetDaemonStateRootForTest override above is an IN-MEMORY package variable:
+// it redirects state-dir resolution only inside THIS test process. A cli test
+// that spawns a fresh `mcphub` binary as an OS subprocess (gui_integration_test
+// `go run ./cmd/mcphub gui`, daemon_reliability_test built daemon) does NOT
+// inherit that variable — the child reaches api.DaemonStateDir() and would
+// resolve the REAL per-user %LOCALAPPDATA%\mcp-local-hub state + IPC pipe.
+//
+// As a default safety net for ANY such subprocess, also export the
+// state-relevant env vars pointing at the SAME global temp dir. A child that
+// inherits os.Environ() AND is built with the test_state_path_env tag (which
+// the subprocess tests now do — see subprocess_state_isolation_test.go) then
+// defaults to the temp dir even if a future test forgets to set them per-spawn.
+//
+// SURGICAL SCOPE: we set ONLY the mcphub-state-relevant vars (LOCALAPPDATA +
+// XDG_DATA_HOME + XDG_STATE_HOME). We deliberately do NOT clobber HOME /
+// USERPROFILE globally — those have broad side effects on other tests that read
+// them. These three are safe to default globally because every in-process cli
+// test that reads them (logBaseDir-touching daemon tests, withTempHome) sets
+// its OWN value via t.Setenv, which overrides this global default and is
+// auto-restored; tests that do NOT set them never read them in-process (the
+// production in-process daemonStateDir ignores LOCALAPPDATA / XDG_DATA_HOME and
+// uses the in-memory override). The only behavioral effect of the global
+// default is to route a forgotten subprocess (or a forgotten in-process
+// logBaseDir read) to the throwaway temp dir instead of the real fleet —
+// strictly safer.
+//
+// Restore is handled by t.Setenv-style manual save/restore here since TestMain
+// has no *testing.T: we snapshot the prior values and reinstate them before
+// os.Exit so a parent harness env is left untouched.
 func TestMain(m *testing.M) {
 	api.EnableSupervisorIPCTestPipeIsolation()
-	os.Exit(m.Run())
+
+	tmp, err := os.MkdirTemp("", "mcphub-cli-test-state-*")
+	if err != nil {
+		panic("internal/cli TestMain: create global test-state temp dir: " + err.Error())
+	}
+	restore := api.SetDaemonStateRootForTest(tmp)
+
+	// Default subprocess state-env safety net (see doc comment above).
+	// MCPHUB_STATE_DIR_OVERRIDE is the authoritative redirect: it routes the
+	// daemon state dir (env-fallback build, BEFORE the resolver) AND feeds the
+	// supervisor IPC test-pipe discriminator (EnableSupervisorIPCTestPipeIsolation
+	// derives the test pipe name from it — PR #300 r2 P2). Without it, a Windows
+	// in-process supervisor test that forgets its own MCPHUB_STATE_DIR_OVERRIDE
+	// would bind the PRODUCTION SID pipe \\.\pipe\mcphub-supervisor-<SID> and
+	// could collide with the live fleet's supervisor IPC even though its files
+	// were redirected. LOCALAPPDATA/XDG redirect the GUI pidport + log base dir.
+	restoreEnv := setEnvWithRestore(map[string]string{
+		"MCPHUB_STATE_DIR_OVERRIDE": tmp,
+		"LOCALAPPDATA":              tmp,
+		"XDG_DATA_HOME":             tmp,
+		"XDG_STATE_HOME":            tmp,
+	})
+
+	code := m.Run()
+
+	restoreEnv()
+	restore()
+	_ = os.RemoveAll(tmp)
+	os.Exit(code)
+}
+
+// setEnvWithRestore sets each key=value in the process environment and returns
+// a function that reinstates the prior values (unsetting keys that were not
+// previously present). Used by TestMain where no *testing.T is available for
+// t.Setenv. Restore is best-effort: os.Setenv/Unsetenv errors are ignored
+// because TestMain runs before any test and a failure here cannot meaningfully
+// be surfaced past os.Exit.
+func setEnvWithRestore(kv map[string]string) (restore func()) {
+	type prior struct {
+		val string
+		set bool
+	}
+	saved := make(map[string]prior, len(kv))
+	for k, v := range kv {
+		old, ok := os.LookupEnv(k)
+		saved[k] = prior{val: old, set: ok}
+		_ = os.Setenv(k, v)
+	}
+	return func() {
+		for k, p := range saved {
+			if p.set {
+				_ = os.Setenv(k, p.val)
+			} else {
+				_ = os.Unsetenv(k)
+			}
+		}
+	}
 }
