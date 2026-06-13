@@ -229,7 +229,39 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // runtime hook, not a build tag, so it takes effect in the DEFAULT untagged
 // `go test ./...` build that CI runs — and is absent from release binaries,
 // which never call it (codex bot PR #264 P2). POSIX is a no-op.
+//
+// FLEET-SAFETY (2026-06-13 incident): a `go test ./internal/cli/` run executed
+// a real `mcphub stop --all` against the LIVE fleet — a Migration-path test
+// reached the real api.(*API).StopAll() with no per-test state-dir isolation,
+// so it resolved the developer's real %LOCALAPPDATA%\mcp-local-hub and stopped
+// all 22 daemons. The pre-incident TestMain isolated only the IPC pipe, NOT the
+// daemon state dir, so any test that reached real state code (forgot its own
+// SetDaemonStateRootForTest, was newly added, or fell through a preflight guard
+// that doesn't abort on the host OS) hit the live state directory.
+//
+// To make it STRUCTURALLY IMPOSSIBLE for any internal/cli test to touch the
+// real state dir, install a PROCESS-GLOBAL daemonStateRootOverride pointing at a
+// throwaway temp dir for the whole `go test ./internal/cli/` process. This is a
+// default safety net, not a replacement for per-test isolation: per-test
+// SetDaemonStateRootForTest(t.TempDir()) calls still compose correctly because
+// SetDaemonStateRootForTest captures the LIVE override value on entry and
+// restores to it on exit — under this TestMain that captured value is the global
+// temp dir, so a per-test override + restore can never expose the real dir.
+//
+// os.Exit-safety: defers do NOT run after os.Exit, so the cleanup is run
+// explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
 	api.EnableSupervisorIPCTestPipeIsolation()
-	os.Exit(m.Run())
+
+	tmp, err := os.MkdirTemp("", "mcphub-cli-test-state-*")
+	if err != nil {
+		panic("internal/cli TestMain: create global test-state temp dir: " + err.Error())
+	}
+	restore := api.SetDaemonStateRootForTest(tmp)
+
+	code := m.Run()
+
+	restore()
+	_ = os.RemoveAll(tmp)
+	os.Exit(code)
 }
