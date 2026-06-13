@@ -65,19 +65,20 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	}
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
 
-	// FLEET-SAFETY (PR #300 r1 P1): the cli TestMain installs only an
+	// FLEET-SAFETY (PR #300 r1 P1 + r2 P1): the cli TestMain installs only an
 	// IN-MEMORY daemonStateRootOverride, which does NOT propagate to a
 	// subprocess. Without redirecting the child's own state-dir resolution,
 	// the `mcphub gui` child (and the `mcphub supervise` grandchild it spawns)
 	// would reach api.DaemonStateDir() and touch the REAL per-user
 	// %LOCALAPPDATA%\mcp-local-hub state + IPC pipe — exactly the live-fleet
 	// hazard the TestMain redirect was meant to remove. We therefore (1) build
-	// the child WITH the test_state_path_env tag so env-based redirection is
-	// honored even on Windows-production (KnownFolder ignores LOCALAPPDATA in
-	// the production build), and (2) point its state env at a per-test temp
-	// dir. Same manual-MkdirTemp rationale as pidportDir: the grandchild can
-	// outlive Cmd.Wait on Windows, so t.TempDir's cleanup would race its open
-	// handles.
+	// the child WITH the test_state_path_env tag so MCPHUB_STATE_DIR_OVERRIDE
+	// is honored BEFORE the platform resolver even on a real Windows host
+	// (where SHGetKnownFolderPath succeeds and the LOCALAPPDATA fallback would
+	// be inert — PR #300 r2 P1), and (2) point childStateEnv at a per-test
+	// temp dir. Same manual-MkdirTemp rationale as pidportDir: the grandchild
+	// can outlive Cmd.Wait on Windows, so t.TempDir's cleanup would race its
+	// open handles.
 	childState, err := os.MkdirTemp("", "gui-integration-state-*")
 	if err != nil {
 		t.Fatal(err)
@@ -157,18 +158,29 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 		t.Errorf("second instance output should confirm handshake (activated OR headless guidance); got: %s", out2)
 	}
 
-	// ISOLATION PROOF (PR #300 r1 P1): assert the child actually resolved the
-	// TEMP state dir and NEVER touched the real %LOCALAPPDATA%\mcp-local-hub.
+	// ISOLATION PROOF (PR #300 r1 P1 + r2 P2): assert the child's
+	// api.DaemonStateDir() actually resolved the TEMP override and NEVER
+	// touched the real %LOCALAPPDATA%\mcp-local-hub.
 	//
 	// The first `mcphub gui` child calls ensureSupervisorRunning, whose very
 	// first step is api.DaemonStateDir() (gui_supervisor_owner.go:89, before
 	// any probe), which calls ensureStateRoot -> os.MkdirAll(<stateDir>). With
-	// the env+tag redirect, <stateDir> is childStateLeaf(childState) =
-	// <childState>/mcp-local-hub, so the child MUST create that leaf. Existence
-	// of the redirected leaf is therefore conclusive proof the child resolved
-	// the TEMP path: if the redirect had failed, the child would have
-	// MkdirAll'd the REAL %LOCALAPPDATA%\mcp-local-hub instead and this temp
-	// leaf would never appear.
+	// the MCPHUB_STATE_DIR_OVERRIDE+tag redirect, <stateDir> is
+	// childStateDirOverrideLeaf(childState) = <childState>/supervisor-state, so
+	// the child MUST create exactly that dir.
+	//
+	// WHY THIS LEAF, NOT <childState>/mcp-local-hub (PR #300 r2 P2): the GUI
+	// command resolves gui.PidportPath() (gui.go:184), whose gui.AppDataDir
+	// (internal/gui/paths.go) MkdirAll's <LOCALAPPDATA>/mcp-local-hub =
+	// <childState>/mcp-local-hub from the LOCALAPPDATA env — INDEPENDENTLY of
+	// api.DaemonStateDir(). So checking <childState>/mcp-local-hub would pass
+	// even if daemonStateDir() resolved the REAL per-user path (the prior r1
+	// proof was therefore non-conclusive). The override leaf is a DISTINCT
+	// subdir created ONLY through api.DaemonStateDir()'s ensureStateRoot, so
+	// its existence is conclusive proof the SUPERVISOR STATE path (not the GUI
+	// pidport) was redirected. If the redirect had failed, the child would
+	// have MkdirAll'd the REAL %LOCALAPPDATA%\mcp-local-hub and this distinct
+	// override subdir would never appear.
 	//
 	// We assert ONLY existence, not non-emptiness: the supervise grandchild is
 	// killed during t.Cleanup (we Kill the go-run wrapper) and may not have
@@ -177,10 +189,10 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	// existence + the process-level byte-identity of the real
 	// supervisor-intent.json (verified out-of-band in the PR) together prove
 	// the subprocess stayed off the live fleet.
-	childLeaf := childStateLeaf(childState)
-	if info, statErr := os.Stat(childLeaf); statErr != nil || !info.IsDir() {
-		t.Fatalf("isolation proof failed: child mcphub did not create its redirected state dir %q (stat err: %v)\n"+
-			"This means the subprocess resolved the REAL per-user state dir instead of the temp dir — "+
-			"the live-fleet hazard is NOT closed.\nsecond-instance output:\n%s", childLeaf, statErr, out2)
+	stateLeaf := childStateDirOverrideLeaf(childState)
+	if info, statErr := os.Stat(stateLeaf); statErr != nil || !info.IsDir() {
+		t.Fatalf("isolation proof failed: child mcphub api.DaemonStateDir() did not create its redirected override dir %q (stat err: %v)\n"+
+			"This means the subprocess resolved the REAL per-user state dir instead of the temp override — "+
+			"the live-fleet hazard is NOT closed.\nsecond-instance output:\n%s", stateLeaf, statErr, out2)
 	}
 }

@@ -291,10 +291,19 @@ func TestMain(m *testing.M) {
 	restore := api.SetDaemonStateRootForTest(tmp)
 
 	// Default subprocess state-env safety net (see doc comment above).
+	// MCPHUB_STATE_DIR_OVERRIDE is the authoritative redirect: it routes the
+	// daemon state dir (env-fallback build, BEFORE the resolver) AND feeds the
+	// supervisor IPC test-pipe discriminator (EnableSupervisorIPCTestPipeIsolation
+	// derives the test pipe name from it — PR #300 r2 P2). Without it, a Windows
+	// in-process supervisor test that forgets its own MCPHUB_STATE_DIR_OVERRIDE
+	// would bind the PRODUCTION SID pipe \\.\pipe\mcphub-supervisor-<SID> and
+	// could collide with the live fleet's supervisor IPC even though its files
+	// were redirected. LOCALAPPDATA/XDG redirect the GUI pidport + log base dir.
 	restoreEnv := setEnvWithRestore(map[string]string{
-		"LOCALAPPDATA":   tmp,
-		"XDG_DATA_HOME":  tmp,
-		"XDG_STATE_HOME": tmp,
+		"MCPHUB_STATE_DIR_OVERRIDE": tmp,
+		"LOCALAPPDATA":              tmp,
+		"XDG_DATA_HOME":             tmp,
+		"XDG_STATE_HOME":            tmp,
 	})
 
 	code := m.Run()

@@ -64,17 +64,20 @@ func ensureMcphubBinary(t *testing.T) string {
 			mcphubBuildErr = fmt.Errorf("locate repo root: %w", err)
 			return
 		}
-		// FLEET-SAFETY (PR #300 r1 P1): build the reliability binary WITH the
-		// test_state_path_env tag so the subprocess honors env-based state-dir
-		// redirection. A production build resolves the Windows state dir via
-		// KnownFolder(FOLDERID_LocalAppData), which ignores LOCALAPPDATA — so
-		// the LOCALAPPDATA redirect on cmd.Env below would be inert on Windows
-		// without the tag, and a state-touching subcommand could reach the real
-		// %LOCALAPPDATA%\mcp-local-hub fleet. The tag compiles
-		// state_paths_envfallback.go, whose resolver honors LOCALAPPDATA
-		// (Windows) / XDG_DATA_HOME (Linux). The reliability scenarios
-		// (version / help / unknown-server daemon) are all
-		// regression-smoke-only and behave identically under the tag.
+		// FLEET-SAFETY (PR #300 r1 P1 + r2 P1): build the reliability binary
+		// WITH the test_state_path_env tag so the subprocess honors
+		// MCPHUB_STATE_DIR_OVERRIDE in daemonStateDir(). A production build
+		// resolves the Windows state dir via KnownFolder(FOLDERID_LocalAppData),
+		// which ignores ALL env vars — so without the tag the childStateEnv
+		// redirect on cmd.Env below would be inert on Windows, and a
+		// state-touching subcommand could reach the real %LOCALAPPDATA%\mcp-local-hub
+		// fleet. The tag compiles state_paths_envfallback.go, whose
+		// daemonStateDir honors MCPHUB_STATE_DIR_OVERRIDE BEFORE the resolver
+		// (Windows AND POSIX); childStateEnv also keeps LOCALAPPDATA/XDG set so
+		// the daemon log base dir (logBaseDir, LOCALAPPDATA-based) redirects
+		// too. The reliability scenarios (version / help / unknown-server
+		// daemon) are all regression-smoke-only and behave identically under
+		// the tag.
 		cmd := exec.Command("go", "build", "-tags", "test_state_path_env", "-o", binPath, "./cmd/mcphub")
 		cmd.Dir = repoRoot
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -158,16 +161,17 @@ func TestReliability_DaemonCmdUnknownServerExitsNonZeroQuickly(t *testing.T) {
 		"--server", "definitely-no-such-server",
 		"--daemon", "x",
 	)
-	// FLEET-SAFETY (PR #300 r1 P1): redirect the child's daemon state dir AND
-	// log base dir to the test-controlled tempdir so neither the real
+	// FLEET-SAFETY (PR #300 r1 P1 + r2 P1): redirect the child's daemon state
+	// dir AND log base dir to the test-controlled tempdir so neither the real
 	// %LOCALAPPDATA%\mcp-local-hub state nor its logs are touched. childStateEnv
-	// sets LOCALAPPDATA (Windows state + logs, env-fallback build only),
+	// sets MCPHUB_STATE_DIR_OVERRIDE (daemon state dir, BEFORE the resolver, on
+	// every GOOS), LOCALAPPDATA (Windows GUI pidport + log base dir),
 	// XDG_DATA_HOME (Linux state dir), and XDG_STATE_HOME (POSIX log base dir),
-	// all pointed at tmpHome. The binary is built with the test_state_path_env
-	// tag (ensureMcphubBinary) so these env vars actually redirect resolution
-	// on Windows-production. (Pre-fix this set only LOCALAPPDATA + XDG_STATE_HOME
-	// against a production build — inert on Windows because KnownFolder ignores
-	// LOCALAPPDATA, so a state-reaching subcommand could touch the live fleet.)
+	// all rooted at tmpHome. The binary is built with the test_state_path_env
+	// tag (ensureMcphubBinary) so MCPHUB_STATE_DIR_OVERRIDE actually redirects
+	// daemonStateDir on Windows-production. The launch-failure log below lands
+	// under <tmpHome>/mcp-local-hub/logs (logBaseDir, LOCALAPPDATA-based), which
+	// stays redirected by the LOCALAPPDATA assignment.
 	cmd.Env = append(os.Environ(), childStateEnv(tmpHome)...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {

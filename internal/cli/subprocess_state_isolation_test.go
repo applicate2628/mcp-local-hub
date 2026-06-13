@@ -24,59 +24,84 @@ import "path/filepath"
 //   - A `go run ./cmd/mcphub` child WITHOUT -tags test_state_path_env is a
 //     PRODUCTION build. On Windows production, daemonStateDir() resolves the
 //     state root via windows.KnownFolderPath(FOLDERID_LocalAppData), which
-//     does NOT read the LOCALAPPDATA env var. So NO env var can redirect a
-//     production Windows child — setting LOCALAPPDATA on cmd.Env is inert.
+//     does NOT read ANY env var. So NO env var can redirect a production
+//     Windows child — its daemon state dir is the real
+//     %LOCALAPPDATA%\mcp-local-hub regardless of cmd.Env.
 //   - The -tags test_state_path_env build compiles state_paths_envfallback.go
-//     instead, whose resolveKnownFolderWithEnvFallback() honors LOCALAPPDATA
-//     (then USERPROFILE\AppData\Local) on Windows.
-//   - On POSIX both build variants resolve via posixStateDir() ->
-//     posixParentDir(), which on Linux honors XDG_DATA_HOME (NOT
-//     XDG_STATE_HOME — that var only redirects the daemon *log* base dir in
-//     daemon.go:logBaseDir). macOS production ignores env entirely
-//     (~/Library/Application Support via $HOME), so on darwin the only env
-//     lever is HOME; we deliberately do NOT clobber HOME (broad side effects),
-//     and the darwin subprocess tests are skipped/unaffected in practice.
+//     instead. THAT variant honors MCPHUB_STATE_DIR_OVERRIDE BEFORE the
+//     platform resolver (state_paths_envfallback.go daemonStateDir), so a
+//     tagged child inheriting that env redirects its daemon state dir to the
+//     override on Windows AND POSIX. (The older LOCALAPPDATA → USERPROFILE
+//     chain in that file fires ONLY on resolver FAILURE, which never happens
+//     on a real Windows host where SHGetKnownFolderPath succeeds — so
+//     LOCALAPPDATA alone is INERT for the daemon state dir on a real host;
+//     PR #300 r2 P1.)
+//   - On POSIX both build variants resolve the daemon state dir via
+//     posixStateDir() -> posixParentDir(), which on Linux honors
+//     XDG_DATA_HOME (NOT XDG_STATE_HOME — that var only redirects the daemon
+//     *log* base dir in daemon.go:logBaseDir). macOS production ignores env
+//     for the state dir entirely (~/Library/Application Support via $HOME);
+//     we deliberately do NOT clobber HOME (broad side effects), and the
+//     MCPHUB_STATE_DIR_OVERRIDE short-circuit (env-fallback build) covers the
+//     daemon state dir on darwin too without touching HOME.
+//
+// SEPARATE consumer of LOCALAPPDATA: the GUI single-instance pidport path
+// (gui.AppDataDir / PidportPath, internal/gui/paths.go) and the daemon log
+// base dir (logBaseDir) BOTH read LOCALAPPDATA directly (NOT via
+// daemonStateDir), so they redirect under the env-fallback AND production
+// build. This is why LOCALAPPDATA must STILL be set (for logs + pidport) even
+// though the daemon state dir now redirects via MCPHUB_STATE_DIR_OVERRIDE.
 //
 // THE ISOLATION RECIPE both subprocess tests must apply:
 //  1. Build the child WITH the env-fallback tag (goRunArgsWithTestTag /
-//     the -tags flag on go build) so the child honors env-based redirection.
+//     the -tags flag on go build) so the child honors MCPHUB_STATE_DIR_OVERRIDE
+//     in daemonStateDir.
 //  2. Set the child's state env to a per-test temp dir on cmd.Env
-//     (childStateEnv): LOCALAPPDATA (Windows) + XDG_DATA_HOME (Linux state
-//     dir) + XDG_STATE_HOME (daemon log base dir). Setting all three keeps
-//     the test platform-portable.
+//     (childStateEnv): MCPHUB_STATE_DIR_OVERRIDE (daemon state dir + supervisor
+//     IPC pipe discriminator, the authoritative redirect on every GOOS),
+//     LOCALAPPDATA (Windows GUI pidport + log base dir), XDG_DATA_HOME (Linux
+//     daemon state dir belt-and-suspenders), XDG_STATE_HOME (POSIX log base
+//     dir).
 //
 // A grandchild matters too: the gui child spawns `mcphub supervise` as
 // os.Executable() (the same env-fallback-tagged temp binary `go run` built)
 // and inherits the gui child's full environment, so the grandchild resolves
-// the same temp state dir. One env+tag treatment on the gui spawn covers the
-// whole subtree.
+// the same temp state dir AND the same test IPC pipe. One env+tag treatment on
+// the gui spawn covers the whole subtree.
 
-// childStateEnv returns the env-var assignments that redirect a
-// test_state_path_env-tagged `mcphub` child's daemon state dir (and daemon
-// log base dir) to the per-test temp dir `tmp`, on Windows AND POSIX. Append
-// the result to os.Environ() when building a subprocess's cmd.Env.
+// childStateDirOverrideLeaf returns the daemon-state-dir leaf a child
+// redirected via childStateEnv(tmp) resolves through api.DaemonStateDir().
+// This is a DISTINCT subdir of `tmp` (NOT <tmp>/mcp-local-hub) so existence
+// of this dir is CONCLUSIVE proof the child's daemonStateDir() honored
+// MCPHUB_STATE_DIR_OVERRIDE — the GUI pidport path (gui.AppDataDir) and the
+// log base dir create <tmp>/mcp-local-hub from LOCALAPPDATA and would mask a
+// shared leaf, so we keep the daemon-state-dir override on its own subdir to
+// keep the proof unambiguous (PR #300 r2 P2).
+func childStateDirOverrideLeaf(tmp string) string {
+	return filepath.Join(tmp, "supervisor-state")
+}
+
+// childStateEnv returns the env-var assignments that fence a
+// test_state_path_env-tagged `mcphub` child off the live fleet, on Windows
+// AND POSIX. Append the result to os.Environ() when building a subprocess's
+// cmd.Env.
 //
-//   - LOCALAPPDATA   -> Windows daemonStateDir() (env-fallback build only) and
-//     logBaseDir().
-//   - XDG_DATA_HOME  -> Linux daemonStateDir() (posixParentDir).
+//   - MCPHUB_STATE_DIR_OVERRIDE -> daemonStateDir() (env-fallback build,
+//     BEFORE the platform resolver) on EVERY GOOS, AND the supervisor IPC
+//     test-pipe discriminator (EnableSupervisorIPCTestPipeIsolation /
+//     SupervisorIPCAddress) so state dir + IPC pipe redirect together. Points
+//     at a DISTINCT subdir (childStateDirOverrideLeaf) so the daemon-state-dir
+//     proof is unambiguous vs the LOCALAPPDATA-derived <tmp>/mcp-local-hub.
+//   - LOCALAPPDATA   -> Windows GUI pidport (gui.AppDataDir) + logBaseDir().
+//   - XDG_DATA_HOME  -> Linux daemonStateDir() (posixParentDir) belt-and-suspenders.
 //   - XDG_STATE_HOME -> POSIX logBaseDir() (daemon log destination).
-//
-// All three point at the same `tmp` so the child's resolved
-// <tmp>/mcp-local-hub leaf is stable and assertable across platforms.
 func childStateEnv(tmp string) []string {
 	return []string{
+		"MCPHUB_STATE_DIR_OVERRIDE=" + childStateDirOverrideLeaf(tmp),
 		"LOCALAPPDATA=" + tmp,
 		"XDG_DATA_HOME=" + tmp,
 		"XDG_STATE_HOME=" + tmp,
 	}
-}
-
-// childStateLeaf returns the per-user state leaf path a child redirected via
-// childStateEnv(tmp) resolves to (<tmp>/mcp-local-hub). Tests assert the
-// child created its pidport/state UNDER this leaf — proving the subprocess
-// used the temp dir and never touched the real %LOCALAPPDATA%\mcp-local-hub.
-func childStateLeaf(tmp string) string {
-	return filepath.Join(tmp, "mcp-local-hub")
 }
 
 // goRunArgsWithTestTag builds the argv for `go run` with the
