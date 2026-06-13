@@ -229,6 +229,27 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 		}
 	}
 
+	// installedServers is resolved lazily (only for a blank-field
+	// daemonSelector decision) so the common selector paths never pay the
+	// catalog read. It carries the longest-installed-prefix disambiguator's
+	// reference set; a read failure leaves it empty, which the predicate
+	// treats as "no sibling proof exists" (claim any prefix-matching row).
+	var installedServers map[string]struct{}
+	installedServersResolved := false
+	ensureInstalledServers := func() map[string]struct{} {
+		if installedServersResolved {
+			return installedServers
+		}
+		installedServersResolved = true
+		installedServers = map[string]struct{}{}
+		if names, err := api.NewAPI().ManifestList(); err == nil {
+			for _, n := range names {
+				installedServers[n] = struct{}{}
+			}
+		}
+		return installedServers
+	}
+
 	var out []configEnvTarget
 	for _, d := range intent.Daemons {
 		taskName := daemon_env_overlay.NormalizeOverlayKey(d.TaskName)
@@ -265,7 +286,37 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 				out = append(out, target)
 			}
 		case daemonSelector != "":
-			if server == serverSelector && daemon == daemonSelector {
+			// Both identity components are KNOWN here (server/daemon selector).
+			//
+			// A populated-field row carries its true split, so the precise field
+			// compare is exact and correct (unchanged path).
+			//
+			// A blank-field row (Server=="" || Daemon=="") derived its (server,
+			// daemon) via api.ParseManagedTaskName, whose last-hyphen split
+			// misattributes hyphenated daemon names: \mcp-local-hub-demo-alpha-beta
+			// (real server "demo", daemon "alpha-beta") parses as demo-alpha/beta.
+			// A field compare would MISS the real demo/alpha-beta row and let
+			// demo-alpha/beta wrongly claim it. Reconstruction alone can't fix it
+			// either — both demo/alpha-beta and demo-alpha/beta rebuild the SAME
+			// canonical name \mcp-local-hub-demo-alpha-beta, so a bare want-compare
+			// would let either selector claim the row.
+			//
+			// Mirror the landed sibling family's authoritative disambiguator
+			// api.blankServerRowOwnedByLongestInstalledPrefix
+			// (internal/api/install_parsed_manifest.go, r33-2): the blank-field
+			// row's true server is the LONGEST installed-server-name prefix of its
+			// canonical task portion. demo/alpha-beta claims the row iff "demo" is
+			// the longest installed prefix (demo-alpha not installed); demo-alpha/beta
+			// claims it iff "demo-alpha" is installed. The reconstructed-name match
+			// (taskName == want) AND the longest-prefix ownership of serverSelector
+			// must BOTH hold. installedServers empty (catalog read failed) → no
+			// sibling proof, any prefix-matching row is claimed (safe outcome).
+			if d.Server == "" || d.Daemon == "" {
+				want := daemon_env_overlay.NormalizeOverlayKey("mcp-local-hub-" + serverSelector + "-" + daemonSelector)
+				if taskName == want && blankServerTaskOwnedByLongestInstalledPrefix(taskName, serverSelector, ensureInstalledServers()) {
+					out = append(out, target)
+				}
+			} else if server == serverSelector && daemon == daemonSelector {
 				out = append(out, target)
 			}
 		default:
@@ -275,4 +326,60 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 		}
 	}
 	return out, nil
+}
+
+// blankServerTaskOwnedByLongestInstalledPrefix decides whether a blank-field
+// supervisor-intent row whose canonical task name is `\mcp-local-hub-<X>` is
+// owned by `server` under the longest-installed-prefix disambiguator. It is the
+// config-env-side mirror of api.blankServerRowOwnedByLongestInstalledPrefix
+// (internal/api/install_parsed_manifest.go, r33-2) — kept in-package because the
+// api predicate is unexported.
+//
+// One adaptation vs the api predicate: there the `server` argument is always the
+// manifest's OWN name (m.Name), so the caller has already proved `server` is an
+// installed server and the predicate only needs the longer-sibling check. Here
+// `server` is the OPERATOR's free-form selector, which may name a server that is
+// not installed at all (`demo-alpha/beta` against a row that is really
+// demo/alpha-beta). So when the catalog is non-empty we additionally require
+// `server` itself to be installed: otherwise both demo/alpha-beta AND
+// demo-alpha/beta (which rebuild the same canonical name) would claim the row.
+// When the catalog is EMPTY (read failed) the membership and sibling checks are
+// both vacuous and any prefix-matching row is claimed — the same safe
+// no-sibling-proof outcome as the api predicate.
+//
+// Returns true IFF `<X>` starts with `server+"-"`, AND (catalog empty OR `server`
+// is installed), AND no OTHER installed server name S (S != server,
+// len(S) > len(server)) is also a prefix of `<X>` in the same `S+"-"` form.
+// taskName is already canonical (NormalizeOverlayKey applied by the caller).
+func blankServerTaskOwnedByLongestInstalledPrefix(taskName, server string, installedServers map[string]struct{}) bool {
+	const taskPrefix = `\mcp-local-hub-`
+	canonical := daemon_env_overlay.NormalizeOverlayKey(taskName)
+	portion, ok := strings.CutPrefix(canonical, taskPrefix)
+	if !ok {
+		return false
+	}
+	// `<X>` must be `server-<daemon...>`: starts with server followed by a
+	// hyphen (a bare `server` with no daemon segment is degenerate and not a
+	// daemon row this prefix server should claim).
+	if !strings.HasPrefix(portion, server+"-") {
+		return false
+	}
+	if len(installedServers) > 0 {
+		if _, ok := installedServers[server]; !ok {
+			// The operator named a server that is not installed; a longer or
+			// shorter installed sibling owns the row, not this selector.
+			return false
+		}
+	}
+	for s := range installedServers {
+		if s == server || len(s) <= len(server) {
+			continue
+		}
+		if strings.HasPrefix(portion, s+"-") {
+			// A longer installed server name is also a prefix — it owns the
+			// row, so `server` must not claim it.
+			return false
+		}
+	}
+	return true
 }
