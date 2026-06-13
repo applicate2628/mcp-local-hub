@@ -853,7 +853,34 @@ func (s *Server) handleToolsList(
 	// across daemons, so one live daemon is enough for fetchToolsListFromAnyDaemon
 	// to answer. A nil WakeIdleFn (partially-wired routing) skips the wake
 	// (back-compat). The wake is bounded + detached, mirroring the tool-call wake.
-	s.wakeOneSerenaCandidateForToolsList(r, deps, entries, auditFn)
+	//
+	// r37-2 P2: the wake returns the set of candidates whose wake was REFUSED with
+	// ErrWakeRefusedOperatorStop (an operator deliberately stopped that serena
+	// daemon). That refusal is TERMINAL for the candidate — mirroring the
+	// tool-call path's terminal handling (serena_router.go: an operator-stop
+	// refusal must NOT forward to a port that may now be rebound by a foreign
+	// process). EXCLUDE those candidates from the fetch loop below so an
+	// operator-stopped serena port is never probed — otherwise a foreign service
+	// that rebound the freed registry port could answer tools/list and the router
+	// would accept + CACHE a FOREIGN tool catalog (a correctness + trust-boundary
+	// defect). A merely-transient wake error (respawn not ready yet) is NOT
+	// terminal — those candidates stay eligible so the existing wake-as-an-
+	// optimization posture is preserved (a not-ready daemon may have come up by
+	// the time the fetch loop reaches it, or another live daemon answers).
+	operatorStopped := s.wakeOneSerenaCandidateForToolsList(r, deps, entries, auditFn)
+	fetchEntries := excludeOperatorStoppedSerenaCandidates(entries, operatorStopped)
+	if len(fetchEntries) == 0 {
+		// Every candidate was operator-stopped: there is no eligible daemon to
+		// probe (probing the freed ports could accept a foreign catalog). Fail
+		// loud + retryable, the same honest signal the no-daemon-answered path
+		// uses, rather than fabricating a tool list or probing a stopped port.
+		_ = auditFn("info", "serena-tools-list-all-operator-stopped", map[string]any{
+			"workspace_count": len(entries),
+		})
+		writeJSONRPCError(w, tb.ID, jsonrpcInternalError,
+			"serena tools/list: every registered workspace daemon is stopped by an operator stop; start one with `mcphub start` (or the GUI) and retry")
+		return
+	}
 
 	// Proxy one tools/list to the first live daemon. On a per-daemon
 	// failure, try the next so a single dead daemon does not blank the
@@ -863,7 +890,7 @@ func (s *Server) handleToolsList(
 	// G treats as advisory for a known session). fetchToolsListFromAnyDaemon
 	// also DELETEs each one-shot upstream daemon session after the proxy so
 	// it does not leak until the daemon's idle expiry (P2 finding C).
-	result, upstreamErr, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), entries, body, httpClient, upstreamURLFn, auditFn, negotiatedVersion, deps.UpstreamTimeout)
+	result, upstreamErr, ferr := s.fetchToolsListFromAnyDaemon(r.Context(), fetchEntries, body, httpClient, upstreamURLFn, auditFn, negotiatedVersion, deps.UpstreamTimeout)
 	if ferr != nil {
 		_ = auditFn("warn", "serena-tools-list-fetch-failed", map[string]any{
 			"err":             ferr.Error(),
@@ -899,27 +926,43 @@ func (s *Server) handleToolsList(
 // without it, a tools/list against an all-idle pool can never wake a daemon and
 // fails permanently. It is best-effort and intentionally narrow:
 //
-//   - nil WakeIdleFn → no-op (partially-wired routing, back-compat).
+//   - nil WakeIdleFn → no-op (partially-wired routing, back-compat); returns nil.
 //   - tries SERENA candidates with a non-empty TaskName + Port (the wake needs
 //     both). LSP rows are skipped — the serena tools/list pool is serena-only.
 //     One live daemon is enough (shared static catalog).
 //   - bounded (30s, covering clear + reconcile-nudge + readiness) and detached
 //     from r.Context() (a client disconnect must not abort the supervisor
 //     nudge mid-flight), mirroring the tool-call wake posture.
-//   - an operator-stop refusal (ErrWakeRefusedOperatorStop) or any other wake
-//     error is NON-FATAL here: the fetch loop below still runs and either finds
-//     another live daemon or returns the honest retryable "no daemon answered"
-//     error. Waking is an OPTIMIZATION that turns a permanent failure into a
-//     retryable one; it never gates the tools/list response on its own.
+//
+// It distinguishes two wake-error classes (r37-2 P2), mirroring the tool-call
+// path's terminal handling (serena_router.go):
+//
+//   - ErrWakeRefusedOperatorStop (an operator deliberately stopped that serena
+//     daemon) is TERMINAL for that candidate. The candidate's TaskName is added
+//     to the returned set so handleToolsList EXCLUDES it from the fetch loop —
+//     its registry port must NEVER be probed, because once the operator stopped
+//     the daemon a FOREIGN local service could rebind the freed port and the
+//     router would otherwise accept + cache that foreign tool catalog (a
+//     correctness + trust-boundary defect). The wake loop still CONTINUES to the
+//     next eligible candidate (a merely-idle sibling can still be woken).
+//   - any OTHER wake error (respawn not ready in time) is NON-TERMINAL: the
+//     candidate stays eligible for the fetch loop (it may have come up by then,
+//     or a sibling answers). Waking is an OPTIMIZATION that turns a permanent
+//     failure into a retryable one; a transient wake error never excludes the
+//     candidate nor gates the tools/list response on its own.
+//
+// The returned map is keyed by TaskName (the same key handleToolsList filters
+// entries on); it is nil when no candidate was operator-stop-refused.
 func (s *Server) wakeOneSerenaCandidateForToolsList(
 	r *http.Request,
 	deps *serenaRouterDeps,
 	entries []*api.WorkspaceEntry,
 	auditFn func(level, event string, fields map[string]any) error,
-) {
+) map[string]struct{} {
 	if s == nil || deps == nil || deps.WakeIdleFn == nil {
-		return
+		return nil
 	}
+	var operatorStopped map[string]struct{}
 	wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 	defer wakeCancel()
 	for _, ws := range entries {
@@ -931,10 +974,28 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 		}
 		hadActiveIdleStop := serenaTaskHasActiveIdleStop(ws.TaskName, time.Now())
 		if err := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-tools-list-wake"); err != nil {
-			// Non-fatal: an operator-stop refusal or a not-ready respawn just
-			// means this candidate cannot answer yet. Try the next eligible
-			// workspace inside the same bounded wake budget; if none wake, the
-			// fetch loop below still returns the honest pool failure.
+			// r37-2 P2: classify the wake error. An operator-stop refusal is
+			// TERMINAL — record the TaskName so handleToolsList excludes this
+			// candidate from the fetch loop (its freed port must never be probed,
+			// or a foreign rebind could poison the cached catalog). The tool-call
+			// path applies the same terminal exclusion (serena_router.go). A
+			// transient (not-ready) wake error is NON-terminal: leave the
+			// candidate eligible so the fetch loop can still try it (back-compat
+			// optimization posture). Either way, CONTINUE to the next candidate so
+			// a wakeable idle sibling can still satisfy this tools/list.
+			if errors.Is(err, api.ErrWakeRefusedOperatorStop) {
+				if operatorStopped == nil {
+					operatorStopped = make(map[string]struct{})
+				}
+				operatorStopped[ws.TaskName] = struct{}{}
+				_ = auditFn("info", "serena-tools-list-wake-operator-stopped", map[string]any{
+					"workspace_key": ws.WorkspaceKey,
+					"task_name":     ws.TaskName,
+					"port":          ws.Port,
+					"err":           err.Error(),
+				})
+				continue
+			}
 			_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
 				"workspace_key": ws.WorkspaceKey,
 				"task_name":     ws.TaskName,
@@ -947,7 +1008,7 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 			s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, ws)
 		}
 		if serenaToolsListPortLiveFn(wakeCtx, ws.Port) {
-			return
+			return operatorStopped
 		}
 		_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
 			"workspace_key": ws.WorkspaceKey,
@@ -956,6 +1017,32 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 			"err":           "wake returned nil but candidate port is not accepting TCP connections",
 		})
 	}
+	return operatorStopped
+}
+
+// excludeOperatorStoppedSerenaCandidates returns the subset of entries whose
+// TaskName is NOT in operatorStopped (r37-2 P2). It is the filter handleToolsList
+// applies to the candidate pool before fetchToolsListFromAnyDaemon so an
+// operator-stopped serena daemon's registry port is never probed for a
+// tools/list catalog — a foreign service that rebound that freed port could
+// otherwise have its tool list accepted + cached. When operatorStopped is empty
+// the original slice is returned unchanged (the common no-operator-stop path
+// allocates nothing). Entries with an empty TaskName (never a wake candidate,
+// so never operator-stop-refused) are always retained.
+func excludeOperatorStoppedSerenaCandidates(entries []*api.WorkspaceEntry, operatorStopped map[string]struct{}) []*api.WorkspaceEntry {
+	if len(operatorStopped) == 0 {
+		return entries
+	}
+	out := make([]*api.WorkspaceEntry, 0, len(entries))
+	for _, ws := range entries {
+		if ws != nil && ws.TaskName != "" {
+			if _, stopped := operatorStopped[ws.TaskName]; stopped {
+				continue
+			}
+		}
+		out = append(out, ws)
+	}
+	return out
 }
 
 // isClientToolsListError classifies an upstream tools/list JSON-RPC error
