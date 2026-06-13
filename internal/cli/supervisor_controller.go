@@ -732,23 +732,39 @@ func (c *supervisorController) handleReapScan(previous map[string]struct{}, upda
 }
 
 // queueRespawnOnReapCancelIfNeeded ensures a re-declared daemon comes back RUNNING
-// when its in-flight reap kill is canceled (#625). When an own-spawned daemon is
-// confirmed absent, reapRemovedDaemon moves StRunning → StExiting (queued_action=
-// none) and the real cmd.Wait exit later drives StExiting → StIdle (consuming NO
-// respawn). If the descriptor is re-added BEFORE that exit, simply clearing the
-// reap markers leaves the daemon stopped — the watcher posts no EvStart for a
-// descriptor ADDITION (only Desired-flip deltas), and the SM at StExiting with no
-// queued action settles to idle. So when the task is mid-terminate (StExiting) for
-// a re-added descriptor that intent declares RUNNING, set queued_action=respawn so
-// the EvChildExit drives StExiting → StSpawning (the respawn). MUST run on the loop.
+// when its in-flight reap kill is canceled. It handles the TWO post-reap states a
+// re-added own-spawned daemon can be in when the reappear is observed:
+//
+//   - StExiting (#625): the terminate has fired but the real cmd.Wait exit has NOT
+//     yet landed. reapRemovedDaemon moved StRunning → StExiting (queued_action=
+//     none); without intervention the EvChildExit drives StExiting → StIdle
+//     (consuming NO respawn — the watcher posts no EvStart for a descriptor
+//     ADDITION, only Desired-flip deltas). So set queued_action=respawn and the
+//     EvChildExit drives StExiting → StSpawning (the respawn).
+//
+//   - StIdle (#748): the reap killed the own-spawned child and its REAL EvChildExit
+//     was already processed (StExiting → StIdle) BEFORE the descriptor re-appeared,
+//     so the task is idle but pendingReap is still set (the deferred-clear follow-up
+//     had not yet run). queued_action is meaningless at StIdle — the SM consumes no
+//     queued respawn there — and the watcher posts no EvStart for the addition, so
+//     the re-declared daemon would stay stopped until a manual restart. Post an
+//     EvStart so StIdle + EvStart drives StIdle → StSpawning. The reap-cancel path
+//     is the ONLY deliverer of this EvStart (the IntentWatcher does not emit one
+//     for a pure descriptor re-add).
+//
+// In both cases the re-added descriptor must be declared RUNNING for a respawn to be
+// correct; a re-add that is Desired=stopped should stay stopped. Read the
+// just-swapped stops cache (handleReapScan swapped BOTH caches before this runs).
+// MUST run on the event loop.
 func (c *supervisorController) queueRespawnOnReapCancelIfNeeded(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
 	st, ok := c.GetSMState(taskName)
-	if !ok || st != api.StExiting {
-		// Only a mid-terminate task needs a queued respawn to come back; StRunning /
-		// StBackoffWaiting / StSpawning re-adds are handled by the shadow + replay /
-		// deferred-stop clear paths (the daemon was never driven toward exit, or its
-		// own EvChildExit/EvTimerDue will route normally).
+	if !ok || (st != api.StExiting && st != api.StIdle) {
+		// Only a mid-terminate (StExiting) or already-exited (StIdle) own-spawned
+		// re-add needs a respawn nudge to come back; StRunning / StBackoffWaiting /
+		// StSpawning re-adds are handled by the shadow + replay / deferred-stop clear
+		// paths (the daemon was never driven toward exit, or its own
+		// EvChildExit/EvTimerDue will route normally).
 		return
 	}
 	// The re-added descriptor must be declared RUNNING for a respawn to be correct;
@@ -758,9 +774,32 @@ func (c *supervisorController) queueRespawnOnReapCancelIfNeeded(taskName string)
 	if stop, _ := di.IsActiveStop(time.Now().UTC()); stop {
 		return
 	}
-	c.queuedActions.Store(taskName, "respawn")
-	c.emitReapEvent("info", "orphan-reap-cancel-respawn-queued", taskName,
-		"an own-spawned daemon being terminated by an in-flight reap was re-declared running before its exit; queuing a respawn (queued_action=respawn) so the EvChildExit drives StExiting -> StSpawning and the re-declared daemon comes back running (#625)")
+	if st == api.StExiting {
+		// Mid-terminate: queue the respawn so the awaited EvChildExit drives
+		// StExiting → StSpawning (#625).
+		c.queuedActions.Store(taskName, "respawn")
+		c.emitReapEvent("info", "orphan-reap-cancel-respawn-queued", taskName,
+			"an own-spawned daemon being terminated by an in-flight reap was re-declared running before its exit; queuing a respawn (queued_action=respawn) so the EvChildExit drives StExiting -> StSpawning and the re-declared daemon comes back running (#625)")
+		return
+	}
+	// StIdle (#748): the killed own-spawned child's EvChildExit already settled the
+	// task to idle before the re-add was observed. queued_action does nothing at
+	// StIdle and the watcher emits no EvStart for a descriptor addition, so POST one
+	// here — StIdle + EvStart (intent running) → StSpawning. Use PostSelf so the
+	// EvStart lands on the loop ahead of pre-queued external events; fall back to an
+	// inline dispatch in the synchronous (no event loop) unit-test fixtures.
+	if c.eventLoop == nil {
+		c.emitReapEvent("info", "orphan-reap-cancel-idle-respawn-posted", taskName,
+			"an own-spawned daemon whose reap-kill exit had already settled it to StIdle was re-declared running; posting EvStart so StIdle -> StSpawning and the re-declared daemon comes back running (the watcher posts no EvStart for a descriptor re-add) (#748)")
+		c.handleLoopEvent(api.LoopEvent{Kind: api.EvStart, TaskName: taskName})
+		return
+	}
+	if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvStart, TaskName: taskName}) {
+		c.emitSelfChannelSaturated(taskName, "EvStart")
+		return
+	}
+	c.emitReapEvent("info", "orphan-reap-cancel-idle-respawn-posted", taskName,
+		"an own-spawned daemon whose reap-kill exit had already settled it to StIdle was re-declared running; posting EvStart so StIdle -> StSpawning and the re-declared daemon comes back running (the watcher posts no EvStart for a descriptor re-add) (#748)")
 }
 
 // markPendingReap records a newly-detected orphan-reap candidate: it stores
@@ -932,20 +971,40 @@ func (c *supervisorController) handleReapFollowup(taskName string, generation in
 	}
 	present := c.taskPresentInFreshIntent(taskName, fresh, freshOK)
 	if present {
-		// Re-appeared on disk since the mark — cancel, no terminate. The
-		// intentCache may not yet reflect the re-add (the 60s IntentWatcher
-		// hasn't polled), so REFRESH it from the authoritative fresh read FIRST,
-		// then replay any deferred backoff timer (finding E) so a re-driven
-		// EvTimerDue routes against the now-cached descriptor instead of
-		// orphan-dropping. cancelPendingReap then drops the shadow/marker.
-		if freshOK && fresh != nil && c.intentCache != nil {
-			c.intentCache.Refresh(fresh)
+		// Re-appeared on disk since the mark — apply the WHOLE fresh snapshot through
+		// the SAME on-loop atomic applier handleReapScan instead of a raw
+		// intentCache.Refresh + ad-hoc cancel (#946/#942/#748: the follow-up must NOT
+		// duplicate a WEAKER version of the snapshot applier). handleReapScan, fed the
+		// fresh descriptor set AND its unified stops sub-block:
+		//
+		//   - installs a reap shadow + pendingReap for any SIBLING task that was ALSO
+		//     removed on disk in this same fresh snapshot (relative to the current
+		//     cache) — a raw Refresh(fresh) would silently drop such a sibling from the
+		//     cache with NO shadow, so the later watcher pass would diff from a cache
+		//     already missing it and never mark/terminate it → orphaned daemon (#942);
+		//
+		//   - swaps BOTH the descriptor cache AND the stops cache from the same fresh
+		//     snapshot, so a re-add carrying Desired=stopped suppresses a replayed
+		//     EvTimerDue/EvHealthOK correctly (#946 stops half);
+		//
+		//   - resolves THIS task's pendingReap via its Arm-1 reappear path, which
+		//     queues a respawn for an own-spawned daemon mid-terminate (StExiting,
+		//     #625) OR already-settled-to-idle (StIdle, #748 — its kill exit landed
+		//     before the re-add), replays any deferred backoff timer (finding E),
+		//     clears any reap-originated queued stop (finding D), then cancels the
+		//     reap. The pre-#946 follow-up branch called none of queueRespawn / the
+		//     stops swap / the sibling-shadow install, so it MISSED all three.
+		//
+		// `previous` is the current cache name-set: handleReapScan unions it with the
+		// live cache to widen the universe of first-removals it considers; the
+		// authoritative diff is recomputed against the fresh snapshot inside.
+		previous := map[string]struct{}{}
+		if c.intentCache != nil {
+			previous = c.intentCache.TaskNames()
 		}
-		c.replayDeferredBackoffTimerIfPending(taskName)
-		c.clearReapDeferredStopIfPending(taskName)
-		c.cancelPendingReap(taskName)
+		c.handleReapScan(previous, fresh, fresh.StopsAsDaemonIntentFile())
 		c.emitReapEvent("debug", "orphan-reap-candidate-reappeared", taskName,
-			"removed descriptor re-appeared on disk by the follow-up tick (fresh read); reap canceled, deferred backoff timer (if any) replayed against the refreshed descriptor")
+			"removed descriptor re-appeared on disk by the follow-up tick (fresh read); applied the whole fresh snapshot through handleReapScan (single atomic applier) so the reap is canceled with respawn-on-reappear, the stops cache is refreshed, and any sibling removed in the same snapshot gets its own shadow + pendingReap")
 		return
 	}
 	// Still absent on disk. If the SM settled on its own since the mark, clear.

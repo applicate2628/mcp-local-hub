@@ -1391,3 +1391,233 @@ func TestSupervisorController_OrphanReap_R4_OwnSpawnedReaddBeforeExitQueuesRespa
 		t.Fatalf("#625: after the respawn the re-declared daemon must be live (StSpawning/StRunning), not stopped; got state=%v ok=%v", st, ok)
 	}
 }
+
+// =====================================================================
+// pr302 r5 — single-snapshot-applier: the FOLLOW-UP reappear path must
+// mirror handleReapScan (it no longer runs a weaker raw-Refresh+cancel).
+// =====================================================================
+
+// (F1a) TestSupervisorController_OrphanReap_R5_FollowupReappearOwnSpawnedExitingQueuesRespawn
+// is the #946 falsifier for the FOLLOW-UP (timer) reappear path. An own-spawned
+// daemon confirmed absent is driven StRunning → StExiting (the terminate fired; the
+// real cmd.Wait exit is awaited). If the descriptor is RE-ADDED (declared running) on
+// disk and the reappear is observed by the FOLLOW-UP TICK (not a scan), the follow-up
+// must route the fresh snapshot through handleReapScan so queueRespawnOnReapCancelIfNeeded
+// fires and queues a respawn — exactly as the scan path does (#625).
+//
+// Pre-r5 the follow-up's reappear branch did a raw intentCache.Refresh(fresh) + ad-hoc
+// cancelPendingReap and called NEITHER queueRespawnOnReapCancelIfNeeded NOR the stops
+// swap, so the pending EvChildExit drove StExiting → StIdle (NO respawn) and the
+// re-declared daemon stayed stopped. This test fires the reappear via the follow-up tick
+// and asserts queued_action=respawn, then that the EvChildExit re-spawns the daemon.
+func TestSupervisorController_OrphanReap_R5_FollowupReappearOwnSpawnedExitingQueuesRespawn(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 71001)
+	h.ctrl.ownSpawned.Store(d.TaskName, true)
+	h.ctrl.reaperOutstanding.Store(d.TaskName, true)
+
+	// Scan 1 + Scan 2: confirmed removal → terminate fires → StExiting (own-spawned,
+	// clear deferred until the real exit). The follow-up tick stays armed.
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("confirmed reap must terminate the own-spawned child once; terminate calls = %d", got)
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StExiting {
+		t.Fatalf("after the reap terminate the own-spawned daemon must be StExiting awaiting its real exit; got state=%v ok=%v", st, ok)
+	}
+
+	// The descriptor is RE-ADDED (declared running) on disk BEFORE the real exit. The
+	// reappear is observed by the FOLLOW-UP TICK (not a scan): the cache is still empty
+	// (no IntentWatcher poll), so a cache-only / raw-Refresh follow-up would miss the
+	// respawn. Routed through handleReapScan, the StExiting reappear queues a respawn.
+	readded := intentWith(d)
+	h.setFreshIntent(readded)
+	if !h.fireReapFollowup() {
+		t.Fatalf("the deferred own-spawned reap must keep a follow-up armed")
+	}
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); !ok || v.(string) != "respawn" {
+		t.Fatalf("#946 (F1a): a FOLLOW-UP-observed reappear of a mid-terminate own-spawned daemon must route through handleReapScan and QUEUE a respawn (queued_action=respawn); got %v ok=%v", v, ok)
+	}
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("#946 (F1a): the reappear must NOT terminate again; terminate calls = %d", got)
+	}
+
+	// The real cmd.Wait exit arrives → StExiting + queued respawn → StSpawning → live.
+	spawnBefore := h.spawnCalls.Load()
+	h.tracker.MarkExited(d.TaskName)
+	h.postEvent(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+	if got := h.spawnCalls.Load(); got != spawnBefore+1 {
+		t.Fatalf("#946 (F1a): the EvChildExit must consume the queued respawn and re-spawn the re-declared daemon exactly once; spawn delta = %d, want 1", got-spawnBefore)
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st == api.StIdle {
+		t.Fatalf("#946 (F1a): after the respawn the re-declared daemon must be live (NOT StIdle); got state=%v ok=%v", st, ok)
+	}
+}
+
+// (F1b) TestSupervisorController_OrphanReap_R5_FollowupReappearDesiredStoppedRefreshesStopsCache
+// is the #946 stops-half falsifier for the FOLLOW-UP reappear path. When the follow-up
+// observes the task re-added WITH Desired=stopped, the stops cache must be swapped from
+// the SAME fresh snapshot (via handleReapScan's both-cache swap) so the daemon STAYS
+// stopped and no respawn is queued.
+//
+// Pre-r5 the follow-up did a raw intentCache.Refresh(fresh) that swapped ONLY the
+// descriptor cache, never the stops cache, so a replayed timer/health event would treat
+// the re-add as default-running. This test re-adds with Desired=stopped via the follow-up
+// tick and asserts the stops cache now reports the task stopped + NO respawn queued.
+func TestSupervisorController_OrphanReap_R5_FollowupReappearDesiredStoppedRefreshesStopsCache(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 72001)
+	h.ctrl.ownSpawned.Store(d.TaskName, true)
+	h.ctrl.reaperOutstanding.Store(d.TaskName, true)
+
+	// Scan 1 + Scan 2: confirmed removal → terminate → StExiting (deferred).
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StExiting {
+		t.Fatalf("precondition: own-spawned reap must reach StExiting; got state=%v ok=%v", st, ok)
+	}
+
+	// Re-added WITH Desired=stopped, observed by the follow-up tick. The fresh on-disk
+	// intent carries the matching stops sub-block (fresh.Stops), which handleReapScan
+	// swaps into the stops cache.
+	readded := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{d},
+		Stops: map[string]api.DaemonIntent{
+			canonicalSupervisorTaskName(d.TaskName): {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonIdle,
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	h.setFreshIntent(readded)
+	if !h.fireReapFollowup() {
+		t.Fatalf("the deferred own-spawned reap must keep a follow-up armed")
+	}
+
+	di := h.ctrl.daemonIntent.Lookup(d.TaskName)
+	if di.Desired != api.IntentDesiredStopped {
+		t.Fatalf("#946 (F1b): a FOLLOW-UP-observed re-add with Desired=stopped must swap the stops cache from the SAME fresh snapshot; cache desired=%q want %q", di.Desired, api.IntentDesiredStopped)
+	}
+	if stop, _ := di.IsActiveStop(time.Now().UTC()); !stop {
+		t.Fatalf("#946 (F1b): the swapped stops cache must report the re-added task as an active stop")
+	}
+	// A Desired=stopped re-add must NOT queue a respawn — it should stay stopped.
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); ok && v.(string) == "respawn" {
+		t.Fatalf("#946 (F1b): a Desired=stopped re-add must NOT queue a respawn; queued_action=%q", v)
+	}
+}
+
+// (F2) TestSupervisorController_OrphanReap_R5_FollowupReappearReaddsAFirstRemovesBInstallsSiblingShadow
+// is the #942 falsifier for the FOLLOW-UP reappear path. A's follow-up fires and its
+// FRESH on-disk read shows A re-added AND a DIFFERENT live task B removed in the SAME
+// snapshot. Routing the fresh snapshot through handleReapScan installs B's shadow +
+// pendingReap; a raw intentCache.Refresh(fresh) would drop B from the cache WITHOUT a
+// shadow, so the later watcher pass would diff from a cache already missing B and never
+// terminate it → orphaned daemon.
+func TestSupervisorController_OrphanReap_R5_FollowupReappearReaddsAFirstRemovesBInstallsSiblingShadow(t *testing.T) {
+	h := newReapTestHarness(t)
+	a := reapTestDescriptor()
+	b := reapTestDescriptorB()
+	// Both A and B start live and present.
+	h.ctrl.intentCache.Refresh(intentWith(a, b))
+	h.ctrl.smStates.Store(a.TaskName, api.StRunning)
+	h.ctrl.smStates.Store(b.TaskName, api.StRunning)
+	h.tracker.MarkSpawned(a.TaskName, 73001, time.Now().UTC())
+	h.tracker.MarkSpawned(b.TaskName, 73002, time.Now().UTC())
+
+	// Scan 1: A disappears (B still present) → A marked pendingReap, A's follow-up armed.
+	h.setFreshIntent(intentWith(b))
+	h.refresh(intentWith(b))
+	if _, ok := h.ctrl.pendingReap.Load(a.TaskName); !ok {
+		t.Fatalf("scan-1 must mark A pendingReap")
+	}
+
+	// A's FOLLOW-UP fires and its fresh on-disk read shows ONE snapshot that re-adds A
+	// AND first-removes B. The reappear of A must NOT blind-replace the cache and lose
+	// B's first removal: routed through handleReapScan, B gets shadow + pendingReap.
+	h.setFreshIntent(intentWith(a))
+	if !h.fireReapFollowup() {
+		t.Fatalf("A's removal must arm a follow-up tick")
+	}
+
+	if _, ok := h.ctrl.pendingReap.Load(a.TaskName); ok {
+		t.Fatalf("#942 (F2): A's follow-up reappear must cancel A's pendingReap")
+	}
+	if _, ok := h.ctrl.pendingReap.Load(b.TaskName); !ok {
+		t.Fatalf("#942 (F2): the fresh snapshot that re-added A also first-removed B → B must be marked pendingReap by the follow-up routing through handleReapScan (a raw Refresh would have orphaned B)")
+	}
+	if _, ok := h.ctrl.reapShadow.Load(b.TaskName); !ok {
+		t.Fatalf("#942 (F2): B's first removal must install B's reaping shadow in the same follow-up scan")
+	}
+	if got := h.terminateCalls.Load(); got != 0 {
+		t.Fatalf("#942 (F2): neither A (reappeared) nor B (first removal, verification window) may terminate yet; terminate calls = %d", got)
+	}
+}
+
+// (F3) TestSupervisorController_OrphanReap_R5_FollowupReappearIdleAfterReapPostsRespawn
+// is the #748 falsifier. A confirmed reap kills an own-spawned daemon; its REAL
+// EvChildExit is processed (StExiting → StIdle) BEFORE the descriptor is re-added. The
+// task is now StIdle but pendingReap is still set (the deferred-clear follow-up had not
+// run). When the re-add (declared running) is then observed, the reap-cancel path must
+// POST an EvStart so StIdle → StSpawning — the watcher posts NO EvStart for a descriptor
+// addition, so without this the re-declared daemon stays stopped until a manual restart.
+//
+// Pre-#748 the reappear handling early-returned at StIdle (queueRespawnOnReapCancelIfNeeded
+// only handled StExiting) and cancelPendingReap dropped the only bookkeeping, leaving the
+// re-declared running daemon permanently stopped. This test drives the idle-after-reap
+// state, re-adds running, fires the follow-up, and asserts a respawn actually fires.
+func TestSupervisorController_OrphanReap_R5_FollowupReappearIdleAfterReapPostsRespawn(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 74001)
+	h.ctrl.ownSpawned.Store(d.TaskName, true)
+	h.ctrl.reaperOutstanding.Store(d.TaskName, true)
+
+	// Scan 1 + Scan 2: confirmed removal → terminate → StExiting (own-spawned deferred).
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StExiting {
+		t.Fatalf("precondition: own-spawned reap must reach StExiting; got state=%v ok=%v", st, ok)
+	}
+
+	// The REAL own-spawned EvChildExit arrives BEFORE the re-add: StExiting + EvChildExit
+	// (no queued respawn) → StIdle. pendingReap SURVIVES (own-spawned deferred-clear).
+	h.tracker.MarkExited(d.TaskName)
+	h.postEvent(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StIdle {
+		t.Fatalf("the reap-kill exit must settle the own-spawned daemon to StIdle; got state=%v ok=%v", st, ok)
+	}
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); !ok {
+		t.Fatalf("precondition (#748): pendingReap must SURVIVE the deferred own-spawned exit until the follow-up resolves it")
+	}
+
+	// NOW the descriptor is re-added (declared running) on disk, observed by the
+	// follow-up tick. StIdle + pendingReap + re-added-running → the reap-cancel path
+	// must POST EvStart so the daemon respawns (the watcher delivers no EvStart here).
+	spawnBefore := h.spawnCalls.Load()
+	readded := intentWith(d)
+	h.setFreshIntent(readded)
+	if !h.fireReapFollowup() {
+		t.Fatalf("the deferred own-spawned reap must keep a follow-up armed")
+	}
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("#748: the idle-after-reap reappear must NOT terminate again; terminate calls = %d", got)
+	}
+	if got := h.spawnCalls.Load(); got != spawnBefore+1 {
+		t.Fatalf("#748: an idle-after-reap re-add declared running must POST EvStart and re-spawn the re-declared daemon exactly once (pre-fix it stayed stopped forever); spawn delta = %d, want 1", got-spawnBefore)
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st == api.StIdle {
+		t.Fatalf("#748: after the EvStart-driven respawn the re-declared daemon must be live (NOT StIdle); got state=%v ok=%v", st, ok)
+	}
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); ok {
+		t.Fatalf("#748: the reappear must cancel the pendingReap")
+	}
+}
