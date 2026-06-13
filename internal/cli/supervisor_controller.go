@@ -693,7 +693,24 @@ func (c *supervisorController) refreshSupervisorIntentSync(updated *api.Supervis
 	}
 	previous := c.intentCache.TaskNames()
 	done := make(chan struct{})
-	c.eventLoop.Post(api.LoopEvent{
+	parent := c.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	// pr302 r7 finding 3: bound BOTH the enqueue AND the done-wait with ONE
+	// deadline context. The r6 barrier started its timeout only AFTER
+	// eventLoop.Post returned, but Post is a BLOCKING send (api.EventLoop.Post:
+	// `l.ch <- e`). If reconcile --apply runs while the external buffer is FULL,
+	// or the loop stopped draining during shutdown, the plain Post would block
+	// HERE forever — the IPC handler never reached the timeout select below. The
+	// deadline context makes the enqueue itself bounded: PostCtx selects on
+	// {l.ch <- e, barrierCtx.Done()} so a full/stopped loop returns
+	// DeadlineExceeded (or Canceled on shutdown) instead of hanging. The same
+	// barrierCtx then bounds the done-wait, so the documented timeout caps the
+	// WHOLE path.
+	barrierCtx, cancel := context.WithTimeout(parent, reapScanBarrierTimeout)
+	defer cancel()
+	if err := c.eventLoop.PostCtx(barrierCtx, api.LoopEvent{
 		Kind: evReapScan,
 		Body: map[string]any{
 			reapScanPreviousNamesBodyKey: previous,
@@ -701,26 +718,31 @@ func (c *supervisorController) refreshSupervisorIntentSync(updated *api.Supervis
 			reapScanStopsBodyKey:         stops,
 			reapScanDoneBodyKey:          done,
 		},
-	})
-	ctx := c.ctx
-	if ctx == nil {
-		ctx = context.Background()
+	}); err != nil {
+		// The event could NOT be enqueued within the bound: the loop's buffer was
+		// full and stayed full (wedged loop) or the supervisor is shutting down.
+		// The scan did NOT run, so the cache swap did NOT happen — strictly no
+		// worse than a torn-down/wedged loop dropping the scan; the next 60s
+		// IntentWatcher poll re-applies the snapshot. Proceed with the apply; the
+		// synchronous read guarantee is forfeited this apply. CRITICAL: returning
+		// here cannot hang the IPC handler (the whole point of the bound).
+		c.emitReapEvent("warn", "reconcile-apply-cache-barrier-enqueue-timeout", "",
+			"the reconcile-apply cache-swap barrier could not be enqueued within the bound (the event loop buffer is full / the loop stopped draining); proceeding with the apply WITHOUT the on-loop swap this tick (the next intent-watcher poll re-applies the snapshot); the synchronous read guarantee is forfeited this apply")
+		return
 	}
-	timer := time.NewTimer(reapScanBarrierTimeout)
-	defer timer.Stop()
 	select {
 	case <-done:
 		// The on-loop handler finished applying the snapshot — both caches are
-		// swapped and observable now.
-	case <-ctx.Done():
-		// Supervisor shutting down; the swap may not have completed, but blocking
-		// past ctx cancellation would freeze the IPC handler against a torn-down
-		// loop. Proceed; the FIFO-ordered drift events behind the scan still drain
-		// correctly when/if the loop resumes.
-	case <-timer.C:
-		// The loop did not signal within the bound (wedged loop). Proceed; strictly
-		// no worse than the r5 async behavior. The drift events posted after this
-		// returns still drain behind the queued scan in FIFO order.
+		// swapped and observable now (SUCCESS path: the cache-swap-before-return
+		// guarantee the r6 barrier established is preserved).
+	case <-barrierCtx.Done():
+		// Either the supervisor is shutting down (parent canceled) or the loop did
+		// not signal within the bound (wedged loop). Blocking past this would freeze
+		// the IPC handler against a torn-down / wedged loop. Proceed; the
+		// FIFO-ordered drift events behind the scan still drain correctly when/if
+		// the loop resumes. The scan WAS enqueued (PostCtx returned nil), so the
+		// swap is queued ahead of the drift events in FIFO order and still applies
+		// — only the synchronous read guarantee is forfeited this apply.
 		c.emitReapEvent("warn", "reconcile-apply-cache-barrier-timeout", "",
 			"the reconcile-apply cache-swap barrier did not signal within the bound; proceeding with the apply (the cache swap is queued ahead of the drift events in FIFO, so it still applies, but the synchronous read guarantee is forfeited this apply)")
 	}
@@ -1466,6 +1488,73 @@ func taskNameSetFromIntent(intent *api.SupervisorIntentFile) map[string]struct{}
 	return out
 }
 
+// getSMStateCanonical resolves the controller's SM state for a task by BOTH the
+// canonical leading-backslash key AND the raw bare key (pr302 r7 finding 4 — the
+// SM-state mirror of LookupCanonical). The reap path canonicalizes the task name
+// at its boundary (reapRemovedDaemon / smStateIsReapable receive a canonical
+// "\foo"), but smStates is keyed by the RAW ev.TaskName the SM saw at spawn time
+// (handleLoopEvent stores under ev.TaskName, supervisor_controller.go:2341). A
+// daemon started by this supervisor from a LEGACY / hand-written intent row whose
+// TaskName LACKS the leading backslash therefore has its live StRunning state
+// stored under the BARE key, while smStateIsReapable(canonical) probes the
+// canonical key and MISSES it — taking the clear-only branch and never
+// terminating the removed child (exactly the orphan the reap exists to kill). This
+// getter tries the requested key first (the common canonical case), then the
+// toggled form (strip-or-add the leading "\"), so a canonical query resolves a
+// bare-keyed legacy SM state and vice versa. GetSMState itself keeps strict
+// exact-key semantics for callers that depend on it.
+func (c *supervisorController) getSMStateCanonical(taskName string) (api.SMState, bool) {
+	if st, ok := c.GetSMState(taskName); ok {
+		return st, true
+	}
+	if alt := toggleSupervisorTaskNameBackslash(taskName); alt != taskName {
+		if st, ok := c.GetSMState(alt); ok {
+			return st, true
+		}
+	}
+	return api.StIdle, false
+}
+
+// loadReapMarkerCanonical probes a controller bookkeeping sync.Map (ownSpawned /
+// reaperOutstanding) under BOTH the canonical and the raw bare key (pr302 r7
+// finding 4 sweep). Those markers are stored under the RAW descriptor / event
+// TaskName at spawn time (executeSideEffect's spawn-success branch stores under
+// d.TaskName, supervisor_controller.go:2578/2585), so a legacy bare-key daemon's
+// markers live under the bare key while the reap path looks them up under the
+// canonical name. Without the toggled probe, the F1 own-reaper deferral decision
+// (owned || reaperPending) would read FALSE for a legacy bare-key own-spawned
+// daemon and wrongly take the non-deferred clear path. Mirrors getSMStateCanonical
+// / LookupCanonical.
+func (c *supervisorController) loadReapMarkerCanonical(m *sync.Map, taskName string) bool {
+	if m == nil {
+		return false
+	}
+	if _, ok := m.Load(taskName); ok {
+		return true
+	}
+	if alt := toggleSupervisorTaskNameBackslash(taskName); alt != taskName {
+		if _, ok := m.Load(alt); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// toggleSupervisorTaskNameBackslash returns the OTHER backslash form of a task
+// name: a canonical "\foo" toggles to the bare "foo" and a bare "foo" toggles to
+// the canonical "\foo". Used by the canonical-aware reap-path lookups to probe a
+// legacy bare-keyed entry by a canonical query (and vice versa). The empty string
+// toggles to itself.
+func toggleSupervisorTaskNameBackslash(taskName string) string {
+	if taskName == "" {
+		return taskName
+	}
+	if strings.HasPrefix(taskName, `\`) {
+		return strings.TrimPrefix(taskName, `\`)
+	}
+	return `\` + taskName
+}
+
 // smStateIsReapable reports whether the controller's current SM state for the
 // task names a LIVE daemon the reap should terminate — StSpawning, StRunning,
 // StBackoffWaiting, or StExiting. StIdle and StQuarantined are settled (no
@@ -1473,8 +1562,12 @@ func taskNameSetFromIntent(intent *api.SupervisorIntentFile) map[string]struct{}
 // likewise not reapable. A task already at StExiting is included so a reap
 // confirmed against a still-terminating descriptor is idempotent, but
 // reapRemovedDaemon's own re-check below avoids double-driving a terminate.
+//
+// pr302 r7 finding 4: the lookup goes through getSMStateCanonical so a daemon
+// started under a LEGACY BARE TaskName (SM state stored under the bare key) is
+// still seen as reapable when the reap path queries it by the canonical name.
 func (c *supervisorController) smStateIsReapable(taskName string) bool {
-	st, ok := c.GetSMState(taskName)
+	st, ok := c.getSMStateCanonical(taskName)
 	if !ok {
 		return false
 	}
@@ -1537,9 +1630,29 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 	}
 	taskName := canonicalSupervisorTaskName(d.TaskName)
 
-	currentState, ok := c.GetSMState(taskName)
+	// pr302 r7 finding 4: resolve the SM state under BOTH the canonical and the raw
+	// bare key (getSMStateCanonical). A daemon STARTED by this supervisor under a
+	// LEGACY BARE TaskName has its SM/queued/tracker rows keyed by the BARE name
+	// (handleLoopEvent stores under the raw ev.TaskName), so a plain
+	// GetSMState(canonical) MISSES the live StRunning state and bails early to
+	// reapTerminatedDead — the terminate never fires and the orphan survives. `smKey`
+	// is the ACTUAL key the state lives under (canonical if present there, else the
+	// bare form); every smStates / queuedActions / tracker write below uses smKey so
+	// the reap mutates the EXISTING row instead of creating a parallel canonical entry
+	// that splits the key space. The terminate fn itself keys off the captured
+	// descriptor's raw d.TaskName (tracker.Get(d.TaskName)), so the kill already
+	// targets the right PID under either key form.
+	currentState, ok := c.getSMStateCanonical(taskName)
 	if !ok {
 		return reapTerminatedDead
+	}
+	smKey := taskName
+	if _, exact := c.GetSMState(taskName); !exact {
+		if alt := toggleSupervisorTaskNameBackslash(taskName); alt != taskName {
+			if _, altOK := c.GetSMState(alt); altOK {
+				smKey = alt
+			}
+		}
 	}
 	// Already terminating (StExiting) — a terminate is in flight; do not
 	// double-drive it. The subsequent EvChildExit (routed via the reaping shadow)
@@ -1564,9 +1677,9 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 		// relaunch. queued_action values other than "respawn" ("" / "none" / "stop")
 		// already drive StExiting -> StIdle on EvChildExit, so this clear is scoped to
 		// the respawn case to avoid disturbing an operator-set stop already pending.
-		if v, ok := c.queuedActions.Load(taskName); ok {
+		if v, ok := c.queuedActions.Load(smKey); ok {
 			if qa, ok := v.(string); ok && qa == "respawn" {
-				c.queuedActions.Store(taskName, "")
+				c.queuedActions.Store(smKey, "")
 				c.emitReapEvent("info", "orphan-reap-cleared-stale-respawn", taskName,
 					"descriptor confirmed removed while the daemon was StExiting with a queued manual-restart respawn; clearing the stale queued_action=respawn so the awaited EvChildExit drives StExiting -> StIdle (STOPPED) instead of StExiting -> StSpawning (which would relaunch the removed descriptor and re-orphan it) (finding 3)")
 			}
@@ -1591,7 +1704,7 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 	if c.graceful != nil {
 		smCtx.GracefulInProgress = c.graceful.InProgress()
 	}
-	if v, ok := c.queuedActions.Load(taskName); ok {
+	if v, ok := c.queuedActions.Load(smKey); ok {
 		if qa, ok := v.(string); ok {
 			smCtx.QueuedAction = qa
 		}
@@ -1611,21 +1724,23 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 	// Mirror handleLoopEvent's queued-action write-back for the new side
 	// string so a StSpawning self-loop's queued_action=stop is preserved for
 	// the subsequent EvHealthOK/EvChildExit (consistency with the operator
-	// stop path).
+	// stop path). Keyed by smKey (finding 4) so a legacy bare-key daemon's
+	// queued_action is written under the SAME key its SM state lives under,
+	// not a parallel canonical entry the spawn-completion event would never read.
 	switch {
 	case strings.Contains(side, "set queued_action=stop"):
-		c.queuedActions.Store(taskName, "stop")
+		c.queuedActions.Store(smKey, "stop")
 	case strings.Contains(side, "queued_action=respawn"):
-		c.queuedActions.Store(taskName, "respawn")
+		c.queuedActions.Store(smKey, "respawn")
 	case strings.Contains(side, "queued_action=none"), strings.Contains(side, "clear queued_action"):
-		c.queuedActions.Store(taskName, "")
+		c.queuedActions.Store(smKey, "")
 	}
-	c.smStates.Store(taskName, newState)
+	c.smStates.Store(smKey, newState)
 	if newState == api.StIdle && currentState != api.StIdle && c.tracker != nil {
-		c.tracker.MarkExited(taskName)
+		c.tracker.MarkExited(d.TaskName)
 	}
 	if c.tracker != nil && c.statePath != "" {
-		_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, taskName)
+		_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, d.TaskName)
 	}
 
 	// Dispatch the side effect and classify the outcome by the NEW state:
@@ -1689,18 +1804,35 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 		// routes via the shadow (StExiting + EvChildExit -> StIdle), settling the
 		// task to a non-reapable state; the follow-up tick then clears the
 		// bookkeeping AFTER the reaper's MarkExited has run, so the clear is durable.
-		// errTerminateTargetGone implies no live reaper is coming (no-PID / already
-		// gone), so that path is NOT deferred. A foreign warm-start PID (not
-		// own-spawned, reaper not outstanding) is also not deferred — it has no
-		// cmd.Wait and is synthesized/cleared immediately as before.
-		if sideErr == nil {
-			_, owned := c.ownSpawned.Load(taskName)
-			_, reaperPending := c.reaperOutstanding.Load(taskName)
-			if owned || reaperPending {
-				c.emitReapEvent("debug", "orphan-reap-await-own-reaper", taskName,
-					"own-spawned daemon terminated; deferring the tracker/shadow clear until the daemon's own cmd.Wait reaper posts the real EvChildExit, so a late MarkExited cannot resurrect a stale idle row and the exit is not orphan-dropped (finding G)")
-				return reapDeferred
+		//
+		// pr302 r7 finding 1: the deferral predicate is the OUTSTANDING OWN REAPER,
+		// NOT the terminate error being nil. errTerminateTargetGone fires on TWO
+		// production paths (makeProductionTerminateFnWithStatePath): case (a) no
+		// running PID recorded (supervise.go:2237) — no live reaper is coming, safe to
+		// clear; and case (b) the kill SUCCEEDED (MarkTerminated ran) but the
+		// supervisor-state.json persist FAILED (supervise.go:2357). In case (b), if
+		// this is an own-spawned daemon, its cmd.Wait reaper is STILL outstanding and
+		// will later run MarkExited + post the real EvChildExit. Clearing on the
+		// gone-error then races a re-add exactly as the nil case does: a late reaper
+		// can clear the NEW pid or recreate a stale idle tracker row. So defer whenever
+		// the own reaper is still outstanding, regardless of whether the terminate
+		// returned nil or a gone-error. reaperOutstanding is the authoritative signal —
+		// it is set at spawn and cleared ONLY when handleLoopEvent observes the real
+		// EvChildExit — so when it is still set a real exit IS coming and the clear must
+		// wait for it. A foreign warm-start PID (not own-spawned, no reaper outstanding)
+		// has no cmd.Wait, so it is NOT deferred — synthesized/cleared immediately as
+		// before. The marker lookups go through loadReapMarkerCanonical so a legacy
+		// bare-key daemon's markers (stored under the bare key at spawn time) are still
+		// seen when the reap path queries by the canonical name (finding 4 sweep).
+		owned := c.loadReapMarkerCanonical(&c.ownSpawned, taskName)
+		reaperPending := c.loadReapMarkerCanonical(&c.reaperOutstanding, taskName)
+		if owned || reaperPending {
+			note := "own-spawned daemon terminated; deferring the tracker/shadow clear until the daemon's own cmd.Wait reaper posts the real EvChildExit, so a late MarkExited cannot resurrect a stale idle row and the exit is not orphan-dropped (finding G)"
+			if sideErr != nil {
+				note = "own-spawned daemon terminate returned target-gone (kill succeeded but the state persist failed) while its cmd.Wait reaper is still outstanding; deferring the tracker/shadow clear until the real EvChildExit arrives so a late MarkExited cannot clear a re-added pid or recreate a stale idle row (finding 1)"
 			}
+			c.emitReapEvent("debug", "orphan-reap-await-own-reaper", taskName, note)
+			return reapDeferred
 		}
 		// Confirmed dead with no own reaper outstanding — clear bookkeeping now.
 		return reapTerminatedDead
@@ -1718,22 +1850,69 @@ func (c *supervisorController) reapRemovedDaemon(d *api.SupervisorDaemon) reapOu
 
 // clearReapDeferredStopIfPending clears a REAP-originated queued_action=stop when
 // a removed-while-StSpawning daemon REAPPEARS before its spawn completes (finding
-// D). Without this, the queued stop the reap set survives the cancel and the next
-// EvHealthOK drives the re-added daemon (which the operator wants RUNNING) to
-// StExiting -> terminate. It only clears a stop the REAP set (the marker), never
-// an operator-set stop. MUST run on the event loop.
+// D) — but ONLY when the re-added intent declares the daemon RUNNING (pr302 r7
+// finding 2). Without this, the queued stop the reap set survives the cancel and
+// the next EvHealthOK drives the re-added daemon to StExiting -> terminate. It only
+// clears a stop the REAP set (the marker), never an operator-set stop. MUST run on
+// the event loop, AFTER the caches have been swapped from the fresh snapshot
+// (applyReapSnapshot's step-3 swap precedes the reappear-arm reconcile), so the
+// just-swapped stops cache reflects the re-added intent.
+//
+// pr302 r7 finding 2 (regression fix): the re-add can carry Desired=stopped. In
+// that case the operator re-declared the daemon STOPPED, so the queued stop must be
+// PRESERVED — the StSpawning state machine does NOT consult IntentDesired on its
+// EvHealthOK transition (StSpawning + EvHealthOK is driven by queued_action alone),
+// so clearing the queued stop UNCONDITIONALLY (the r6 behavior) would let the child
+// reach StRunning even though the fresh intent says stopped. queueRespawnOnReapCancelIfNeeded
+// already gates its respawn on the SAME just-swapped stops cache via IsActiveStop;
+// this mirrors that predicate so the running-vs-stopped decision is consistent
+// across both reappear sub-paths. The reapDeferredStop MARKER is consumed
+// (LoadAndDelete) in either case — the reap window is closing regardless — so it
+// cannot leak into a later re-registration window; only the queued_action mutation
+// is gated on the re-add being running.
 func (c *supervisorController) clearReapDeferredStopIfPending(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
 	if _, deferred := c.reapDeferredStop.LoadAndDelete(taskName); !deferred {
 		return
 	}
-	if v, ok := c.queuedActions.Load(taskName); ok {
-		if qa, ok := v.(string); ok && qa == "stop" {
-			c.queuedActions.Store(taskName, "")
-			c.emitReapEvent("debug", "orphan-reap-deferred-stop-cleared", taskName,
-				"removed-while-spawning daemon re-appeared before its spawn completed; clearing the reap-originated queued_action=stop so the spawn-completion event does NOT terminate the re-added daemon (finding D)")
+	// The re-added intent must be RUNNING for the reap-originated stop to be
+	// cleared. Read the just-swapped stops cache (handleReapScan / applyReapSnapshot
+	// swapped it before this reappear-arm runs).
+	di := c.daemonIntent.Lookup(taskName)
+	if stop, _ := di.IsActiveStop(time.Now().UTC()); stop {
+		// Re-added WITH Desired=stopped: PRESERVE the queued stop so the
+		// spawn-completion EvHealthOK still drives the just-started child to
+		// stopped (StSpawning does not consult IntentDesired on that transition).
+		c.emitReapEvent("debug", "orphan-reap-deferred-stop-preserved", taskName,
+			"removed-while-spawning daemon re-appeared with Desired=stopped before its spawn completed; PRESERVING the reap-originated queued_action=stop so the spawn-completion EvHealthOK still drives the re-added child to stopped (the fresh intent says stopped, and StSpawning+EvHealthOK is driven by queued_action, not IntentDesired) (finding 2)")
+		return
+	}
+	// Probe the queued-action key under BOTH forms (finding 4 sweep): a legacy
+	// bare-key daemon's queued_action was written under the bare key by
+	// reapRemovedDaemon's smKey, so a canonical-only lookup would miss it and leave
+	// the stop in place — the spawn-completion event would then kill the re-added
+	// running daemon. For the common canonical daemon the bare probe finds nothing.
+	for _, key := range distinctTaskNameKeyForms(taskName) {
+		if v, ok := c.queuedActions.Load(key); ok {
+			if qa, ok := v.(string); ok && qa == "stop" {
+				c.queuedActions.Store(key, "")
+				c.emitReapEvent("debug", "orphan-reap-deferred-stop-cleared", taskName,
+					"removed-while-spawning daemon re-appeared RUNNING before its spawn completed; clearing the reap-originated queued_action=stop so the spawn-completion event does NOT terminate the re-added daemon (finding D)")
+			}
 		}
 	}
+}
+
+// distinctTaskNameKeyForms returns the task name plus its toggled-backslash form,
+// deduplicated (the empty string and any name that toggles to itself yields a
+// single-element slice). Used by the canonical-aware reap-path sweeps that must
+// touch a per-task map entry stored under either the canonical or the raw bare key.
+func distinctTaskNameKeyForms(taskName string) []string {
+	alt := toggleSupervisorTaskNameBackslash(taskName)
+	if alt == taskName {
+		return []string{taskName}
+	}
+	return []string{taskName, alt}
 }
 
 // emitReapEvent logs a reconcile-source supervisor event for the orphan reap.
@@ -1753,8 +1932,21 @@ func (c *supervisorController) emitReapEvent(severity, event, taskName, note str
 
 func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
+	// pr302 r7 finding 4 sweep: the per-task SM / queued / own-spawned maps and the
+	// tracker are keyed by the spawn-time TaskName, which for a LEGACY BARE daemon is
+	// the bare form (no leading backslash) — see reapRemovedDaemon's smKey. A
+	// canonical-only Delete would LEAK the bare-keyed rows. Delete BOTH key forms; for
+	// the common canonical-key daemon the bare-form delete is a no-op (no such entry).
+	// The reap-bookkeeping maps below (pendingReap / reapShadow / reapDeferred* /
+	// follow-up) are keyed canonically by the reap path itself, so they need only the
+	// canonical delete.
+	bareKey := toggleSupervisorTaskNameBackslash(taskName)
 	c.smStates.Delete(taskName)
 	c.queuedActions.Delete(taskName)
+	if bareKey != taskName {
+		c.smStates.Delete(bareKey)
+		c.queuedActions.Delete(bareKey)
+	}
 	// Drop any pending orphan-reap candidate: a removal that reaches the
 	// bookkeeping clear (either after a confirmed reap drove the terminate, or
 	// because the task was never reapable) must not leave a stale pendingReap
@@ -1797,10 +1989,22 @@ func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	// early clear before the orphan-drop), so genuine removal does not leak
 	// it and a subsequent foreign re-registration is still synthesizable.
 	c.ownSpawned.Delete(taskName)
+	if bareKey != taskName {
+		c.ownSpawned.Delete(bareKey)
+	}
 	if c.tracker != nil {
 		c.tracker.Remove(taskName)
+		if bareKey != taskName {
+			// A legacy bare-key daemon's tracker row is under the bare key (the
+			// spawn-time TaskName). Remove + persist that form too so the orphan's
+			// runtime row is durably cleared, not left stale under the bare key.
+			c.tracker.Remove(bareKey)
+		}
 		if c.statePath != "" {
 			_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, taskName)
+			if bareKey != taskName {
+				_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, bareKey)
+			}
 		}
 	}
 	if c.events != nil {

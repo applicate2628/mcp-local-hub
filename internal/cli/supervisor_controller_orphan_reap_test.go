@@ -1862,3 +1862,245 @@ func TestSupervisorController_OrphanReap_R6_LegacyBareKeyDescriptorCapturedAndRe
 		t.Fatalf("finding 4: the reap terminate did not record a target PID")
 	}
 }
+
+// (R7 finding 1) TestSupervisorController_OrphanReap_R7_TargetGoneWithOutstandingReaperDefers
+// is the falsifier for finding 1 — target-gone WITH an outstanding own reaper must
+// NOT clear the bookkeeping early.
+//
+// The production terminator wraps errTerminateTargetGone on TWO paths: (a) no running
+// PID recorded, and (b) the kill SUCCEEDED (MarkTerminated ran) but the
+// supervisor-state.json persist FAILED (supervise.go:2357). In case (b) for an
+// OWN-spawned daemon, the cmd.Wait reaper is STILL outstanding and will later run
+// MarkExited + post the real EvChildExit. The r6 code deferred the clear ONLY when the
+// terminate returned nil — so a target-gone (persist-failed) result took the immediate
+// reapTerminatedDead clear path, dropping the shadow/pendingReap/tracker while the
+// reaper is still live. If the descriptor is re-added/respawned before that late exit
+// arrives, the late reaper can clear the NEW pid or recreate a stale idle row.
+//
+// Fixed: the deferral predicate is the OUTSTANDING OWN REAPER, not sideErr==nil. With
+// the reaper still outstanding, a target-gone terminate DEFERS (keeps shadow +
+// pendingReap + tracker) until the real EvChildExit settles the task; the follow-up
+// then clears durably. This test makes the fake terminate return a target-gone error
+// (without MarkExited, modeling the persist-failed case where the row survives), with
+// the reaper outstanding, and asserts the bookkeeping is KEPT (deferred), not cleared.
+func TestSupervisorController_OrphanReap_R7_TargetGoneWithOutstandingReaperDefers(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StRunning, 84001)
+	// Own-spawned with a live cmd.Wait reaper outstanding (as executeSideEffect's
+	// spawn-success branch would have recorded).
+	h.ctrl.ownSpawned.Store(d.TaskName, true)
+	h.ctrl.reaperOutstanding.Store(d.TaskName, true)
+
+	// The terminate returns errTerminateTargetGone (the kill succeeded but the
+	// state persist failed — case b). The fake does NOT MarkExited on the error
+	// path, modeling that the supervisor's tracker row was not durably cleared and
+	// the real reaper is still pending.
+	h.setTerminateErr(fmt.Errorf("%w: post-terminate persist failed", errTerminateTargetGone))
+
+	// Tick 1 + Tick 2: confirmed removal → reap drives terminate, which returns the
+	// gone-error. Because the own reaper is still outstanding, the clear is DEFERRED.
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("confirmed reap must attempt terminate once; terminate calls = %d", got)
+	}
+	// Finding 1: with the own reaper still outstanding, a target-gone terminate must
+	// DEFER (keep the shadow + pendingReap + tracker) so the real EvChildExit routes
+	// via the surviving shadow and a late MarkExited cannot resurrect a stale row or
+	// clear a re-added pid. Pre-fix (sideErr != nil skipped the defer), all three of
+	// these were cleared immediately → the late reaper races a re-add.
+	if _, ok := h.ctrl.reapShadow.Load(d.TaskName); !ok {
+		t.Fatalf("finding 1: a target-gone terminate with an outstanding own reaper must KEEP the shadow until the real EvChildExit arrives, not drop it immediately")
+	}
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); !ok {
+		t.Fatalf("finding 1: a target-gone terminate with an outstanding own reaper must DEFER (keep pendingReap) until the reaper posts the real exit")
+	}
+	if _, ok := h.tracker.Get(d.TaskName); !ok {
+		t.Fatalf("finding 1: a target-gone terminate with an outstanding own reaper must NOT remove the tracker row before the reaper runs (a late MarkExited would resurrect it / clear a re-added pid)")
+	}
+
+	// The daemon's own reaper runs LAST: MarkExited (idle, pid 0) then posts the real
+	// EvChildExit, which routes via the surviving shadow (StExiting + EvChildExit ->
+	// StIdle). Clear the terminate-error so a subsequent confirm would behave normally.
+	h.setTerminateErr(nil)
+	h.tracker.MarkExited(d.TaskName)
+	h.postEvent(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName})
+
+	// A follow-up tick now confirms the task settled (StIdle, non-reapable) and clears
+	// the bookkeeping — AFTER the reaper's MarkExited ran, so the clear is durable.
+	h.setFreshIntent(emptyReapIntent())
+	if !h.fireReapFollowup() {
+		t.Fatalf("finding 1: a deferred target-gone reap must keep a follow-up armed to finish the clear")
+	}
+	if _, ok := h.ctrl.pendingReap.Load(d.TaskName); ok {
+		t.Fatalf("finding 1: after the real EvChildExit settled the task, the follow-up must clear pendingReap")
+	}
+	if _, ok := h.ctrl.reapShadow.Load(d.TaskName); ok {
+		t.Fatalf("finding 1: after settle the shadow must be dropped")
+	}
+	if entry, ok := h.tracker.Get(d.TaskName); ok {
+		t.Fatalf("finding 1: after the reaper ran + settle, the tracker row must be cleared durably: %+v", entry)
+	}
+}
+
+// (R7 finding 2) TestSupervisorController_OrphanReap_R7_SpawningReappearStoppedPreservesDeferredStop
+// is the REGRESSION falsifier for finding 2 — clearing the reap-deferred stop ONLY for
+// a RUNNING re-add.
+//
+// A daemon removed while StSpawning records queued_action=stop (the terminate is
+// deferred to the spawn-completion EvHealthOK). The r6 reappear path called
+// clearReapDeferredStopIfPending UNCONDITIONALLY. When the descriptor is re-added with
+// Desired=stopped, queueRespawnOnReapCancelIfNeeded correctly avoids a respawn, but the
+// unconditional clear removed the only signal StSpawning+EvHealthOK honors (the SM does
+// NOT consult IntentDesired on that transition) — so the child reached StRunning even
+// though the fresh intent said stopped.
+//
+// Fixed: the deferred stop is cleared ONLY when the re-added intent is RUNNING. A
+// Desired=stopped re-add PRESERVES the queued stop, so StSpawning+EvHealthOK still
+// drives the child to stopped. This test removes a StSpawning daemon, re-adds it WITH
+// Desired=stopped, and asserts the queued stop SURVIVES and the spawn-completion event
+// drives the child to StExiting/terminate (stopped), NOT StRunning.
+func TestSupervisorController_OrphanReap_R7_SpawningReappearStoppedPreservesDeferredStop(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StSpawning, 85001)
+
+	// Tick 1 + Tick 2: removed while StSpawning → reap drives StSpawning +
+	// EvIntentUpdate(stopped) → queued_action=stop (deferred), reap-originated marker set.
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); !ok || v.(string) != "stop" {
+		t.Fatalf("precondition: StSpawning reap must record queued_action=stop; got %v ok=%v", v, ok)
+	}
+	if _, ok := h.ctrl.reapDeferredStop.Load(d.TaskName); !ok {
+		t.Fatalf("precondition: StSpawning reap must mark the stop as reap-originated (finding D marker)")
+	}
+
+	// The descriptor REAPPEARS before the spawn completes, but with Desired=stopped:
+	// the operator re-declared it STOPPED. Carry the matching stops snapshot so the
+	// swapped stops cache reflects the re-add. The reap-originated queued stop must be
+	// PRESERVED (the re-add is stopped, not running).
+	readded := intentWith(d)
+	h.setFreshIntent(readded)
+	h.refreshWithStops(readded, stopsFor(d.TaskName))
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); !ok || v.(string) != "stop" {
+		t.Fatalf("finding 2: a reap-originated queued_action=stop must be PRESERVED when the descriptor reappears with Desired=stopped before the spawn completes; got %v ok=%v (the unconditional r6 clear let the stopped re-add reach StRunning)", v, ok)
+	}
+
+	// The spawn completes: EvHealthOK arrives. With the queued stop PRESERVED, the
+	// StSpawning daemon must NOT reach StRunning — the queued stop drives it toward
+	// stopped (StSpawning + EvHealthOK + queued_action=stop → StExiting → terminate).
+	termBefore := h.terminateCalls.Load()
+	h.postEvent(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+	if st, ok := h.ctrl.GetSMState(d.TaskName); ok && st == api.StRunning {
+		t.Fatalf("finding 2: a Desired=stopped re-add must NOT reach StRunning via the spawn-completion event; the preserved queued stop must drive it stopped, got state=%v", st)
+	}
+	if got := h.terminateCalls.Load(); got == termBefore {
+		t.Fatalf("finding 2: the preserved queued stop must drive the spawn-completion event to terminate the re-added (stopped) child; terminate delta = 0 (the child was left running)")
+	}
+}
+
+// (R7 finding 2 control) TestSupervisorController_OrphanReap_R7_SpawningReappearRunningClearsDeferredStop
+// is the RUNNING-re-add control for finding 2: a re-add WITHOUT Desired=stopped must
+// STILL clear the reap-originated queued stop (the original finding-D behavior) so the
+// spawn-completion event leaves the daemon RUNNING, not terminated. This guards against
+// the finding-2 fix over-correcting and breaking the running-re-add path.
+func TestSupervisorController_OrphanReap_R7_SpawningReappearRunningClearsDeferredStop(t *testing.T) {
+	h := newReapTestHarness(t)
+	d := reapTestDescriptor()
+	h.seedLiveDaemon(d, api.StSpawning, 86001)
+
+	// Removed while StSpawning → queued_action=stop (deferred), marker set.
+	h.setFreshIntent(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	h.refresh(emptyReapIntent())
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); !ok || v.(string) != "stop" {
+		t.Fatalf("precondition: StSpawning reap must record queued_action=stop; got %v ok=%v", v, ok)
+	}
+
+	// Re-added RUNNING (no stops snapshot → default-running). The reap-originated
+	// queued stop must be CLEARED so the re-added daemon comes back running.
+	readded := intentWith(d)
+	h.setFreshIntent(readded)
+	h.refresh(readded)
+	if v, ok := h.ctrl.queuedActions.Load(d.TaskName); ok && v.(string) == "stop" {
+		t.Fatalf("finding 2 control: a RUNNING re-add must CLEAR the reap-originated queued_action=stop (finding D); it survived as %q", v)
+	}
+
+	// The spawn completes: EvHealthOK → StRunning, NOT terminated.
+	termBefore := h.terminateCalls.Load()
+	h.postEvent(api.LoopEvent{Kind: api.EvHealthOK, TaskName: d.TaskName})
+	if got := h.terminateCalls.Load(); got != termBefore {
+		t.Fatalf("finding 2 control: a RUNNING re-add must NOT be terminated by the spawn-completion event; terminate delta = %d, want 0", got-termBefore)
+	}
+	if st, ok := h.ctrl.GetSMState(d.TaskName); !ok || st != api.StRunning {
+		t.Fatalf("finding 2 control: a RUNNING re-add must reach StRunning after EvHealthOK; got state=%v ok=%v", st, ok)
+	}
+}
+
+// (R7 finding 4) TestSupervisorController_OrphanReap_R7_BareKeySMStateReapsViaCanonicalCheck
+// is the falsifier for finding 4 — the SM-state reapable check must handle the BARE key.
+//
+// The r6 #643 fix added LookupCanonical for the descriptor CAPTURE, but smStateIsReapable
+// still queried smStates by the canonical key. A daemon STARTED by this supervisor under a
+// BARE TaskName has its SM state stored under the BARE key (handleLoopEvent stores under the
+// raw ev.TaskName), so smStateIsReapable(canonical) MISSED the live StRunning state, took the
+// clear-only branch, and never marked/terminated the removed child → orphan.
+//
+// Unlike the r6 bare-key test (which canonicalizes the smStates.Store, masking the gap), this
+// test stores the SM state under the BARE key exactly as the real spawn path does, then removes
+// the descriptor and asserts the reap MARKS + TERMINATES it (the canonical-aware getSMStateCanonical
+// resolves the bare-keyed state).
+func TestSupervisorController_OrphanReap_R7_BareKeySMStateReapsViaCanonicalCheck(t *testing.T) {
+	h := newReapTestHarness(t)
+	// Legacy bare-key descriptor: TaskName WITHOUT the leading backslash.
+	bare := reapTestDescriptor()
+	bare.TaskName = "mcp-local-hub-lsp-deadbeef-go" // no leading "\"
+	canonical := canonicalSupervisorTaskName(bare.TaskName)
+
+	// Seed the descriptor cache keyed by the RAW bare TaskName (how Refresh stores a
+	// hand-written intent row).
+	h.ctrl.intentCache.Refresh(intentWith(bare))
+	// CRUCIAL difference from the r6 test: store the SM state under the BARE key, exactly
+	// as the real spawn path does (handleLoopEvent stores under the raw ev.TaskName, which
+	// for a bare-TaskName daemon is bare). The tracker is keyed by the descriptor TaskName
+	// (bare), the same key the terminate fn uses.
+	h.ctrl.smStates.Store(bare.TaskName, api.StRunning)
+	h.tracker.MarkSpawned(bare.TaskName, 87001, time.Now().UTC())
+	h.setFreshIntent(intentWith(bare))
+
+	// Sanity: a canonical GetSMState MISSES the bare-keyed SM state (the exact gap that
+	// broke smStateIsReapable pre-fix), but the canonical-aware getter HITS it.
+	if _, ok := h.ctrl.GetSMState(canonical); ok {
+		t.Fatalf("precondition: a plain canonical GetSMState of a bare-keyed SM state should MISS (the pre-fix reapable gap)")
+	}
+	if !h.ctrl.smStateIsReapable(canonical) {
+		t.Fatalf("precondition: smStateIsReapable(canonical) must resolve a bare-keyed StRunning SM state (the finding-4 fix); it missed the bare key")
+	}
+
+	// Tick 1: descriptor removed → the canonical removal candidate must see the bare-keyed
+	// StRunning state as reapable and mark pendingReap (NOT fall into the clear-only branch).
+	h.refresh(emptyReapIntent())
+	if _, ok := h.ctrl.pendingReap.Load(canonical); !ok {
+		t.Fatalf("finding 4: a removed bare-key-SM-state daemon must be marked pendingReap (its bare-keyed StRunning state is reapable), not cleared-only")
+	}
+
+	// Tick 2: still absent → confirmed → SM-aware terminate fires (the backstop), NOT the
+	// clear-only path that would leave the orphan running.
+	h.refresh(emptyReapIntent())
+	if got := h.terminateCalls.Load(); got != 1 {
+		t.Fatalf("finding 4: a confirmed-removed bare-key-SM-state orphan must be TERMINATED by the reap backstop exactly once; terminate calls = %d (the canonical reapable check missed the bare key → clear-only → orphan unreaped)", got)
+	}
+	select {
+	case pid := <-h.terminatedPIDs:
+		if pid != 87001 {
+			t.Fatalf("finding 4: the reap must terminate the bare-key daemon's PID (87001), got %d", pid)
+		}
+	default:
+		t.Fatalf("finding 4: the reap terminate did not record a target PID")
+	}
+}

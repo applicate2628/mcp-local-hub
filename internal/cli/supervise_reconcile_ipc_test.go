@@ -1706,3 +1706,84 @@ func TestReconcileApply_CacheRefreshObservableBeforeReturn(t *testing.T) {
 		t.Fatal("finding 1: the swapped stops cache must report the orphan as an active stop after the apply returns")
 	}
 }
+
+// (R7 finding 3) TestReconcileApply_SyncBarrierBoundedOnFullStoppedLoop is the falsifier
+// for finding 3 — the sync barrier must NOT block forever on a full/stopped loop.
+//
+// refreshSupervisorIntentSync posts evReapScan then waits on a done-channel under a
+// ctx/timeout select. The r6 code called eventLoop.Post (a BLOCKING send: `l.ch <- e`)
+// BEFORE entering that select. If the external buffer is FULL and the loop is not
+// draining (a wedged loop, or shutdown drain stopped), Post blocked on the channel send
+// FOREVER — the IPC handler never reached the timeout select, so the documented bound
+// never applied and the handler hung indefinitely.
+//
+// Fixed: the enqueue goes through eventLoop.PostCtx, which selects on
+// {l.ch <- e, barrierCtx.Done()} under a deadline context. A full/stopped loop makes the
+// enqueue return DeadlineExceeded (or Canceled on shutdown) so the barrier returns within
+// the bound instead of hanging.
+//
+// This test fills the loop's buffer to capacity WITHOUT starting Run (so nothing ever
+// drains l.ch), points c.ctx at a SHORT-deadline context, and asserts
+// refreshSupervisorIntentSync RETURNS within the bound (does not block forever). Pre-fix
+// the blocking Post would hang here and the 2s watchdog would fire.
+func TestReconcileApply_SyncBarrierBoundedOnFullStoppedLoop(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	events, err := api.OpenSupervisorEventLog(filepath.Join(tmpHome, "supervisor-events.log"))
+	if err != nil {
+		t.Fatalf("OpenSupervisorEventLog: %v", err)
+	}
+	t.Cleanup(func() { events.Close() })
+
+	// A small-capacity loop whose Run is NEVER started, so nothing drains the main
+	// channel. NewEventLoop clamps capacity to a minimum of 16.
+	loop := api.NewEventLoop(16)
+
+	// Fill the main channel to capacity with best-effort TryPost so the next Post /
+	// PostCtx send cannot proceed (the loop is not draining).
+	for i := 0; i < 64; i++ {
+		if !loop.TryPost(api.LoopEvent{Kind: evReapBarrier}) {
+			break // buffer full
+		}
+	}
+	// Confirm the buffer is actually full now (a further TryPost must fail).
+	if loop.TryPost(api.LoopEvent{Kind: evReapBarrier}) {
+		t.Fatal("precondition: the loop buffer should be FULL (TryPost should fail) so the barrier enqueue must wait")
+	}
+
+	// A SHORT-deadline context so the bounded enqueue returns quickly rather than
+	// waiting the full 5s reapScanBarrierTimeout. context.WithTimeout(parent, 5s) takes
+	// the EARLIER of the parent deadline and the 5s, so this 80ms parent deadline wins.
+	deadlineCtx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	t.Cleanup(cancel)
+
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		ctx:                 deadlineCtx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+
+	updated := &api.SupervisorIntentFile{Version: 1}
+	stops := &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		`\mcp-local-hub-lsp-deadbeef-go`: {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUninstalled, UpdatedAt: time.Now().UTC()},
+	}}
+
+	returned := make(chan struct{})
+	go func() {
+		// Pre-fix: the blocking Post on a full/stopped loop hangs here forever.
+		// Post-fix: PostCtx returns DeadlineExceeded within ~80ms and the barrier
+		// returns.
+		ctrl.refreshSupervisorIntentSync(updated, stops)
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+		// Bounded — the barrier did not block forever on the full/stopped loop.
+	case <-time.After(2 * time.Second):
+		t.Fatal("finding 3: refreshSupervisorIntentSync BLOCKED on a full/stopped loop — the barrier enqueue is not context-aware, so the documented timeout never bounds the path (the r6 blocking Post hangs the IPC handler forever)")
+	}
+}

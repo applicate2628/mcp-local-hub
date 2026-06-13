@@ -100,6 +100,39 @@ func (l *EventLoop) TryPost(e LoopEvent) bool {
 	}
 }
 
+// PostCtx is a CONTEXT-AWARE blocking enqueue: it waits for a free slot on
+// the main channel like Post, but ABANDONS the wait when ctx is canceled
+// (returns context.Canceled / context.DeadlineExceeded). It is the bounded
+// variant external producers use when a wedged or stopped loop with a FULL
+// buffer would otherwise block Post FOREVER.
+//
+// The motivating case (Codex pr302 r6 finding 3): the reconcile-apply sync
+// barrier (supervisor_controller.refreshSupervisorIntentSync) posts an
+// evReapScan then waits on a done-channel under a ctx/timeout select. With
+// the plain blocking Post the timeout could never fire when the buffer was
+// already full — Post blocked on `l.ch <- e` BEFORE the caller reached its
+// select, so a full/stopped loop froze the IPC handler indefinitely. Routing
+// the enqueue through PostCtx makes the SAME ctx (a deadline-bounded context)
+// bound the enqueue too, so the documented timeout actually caps the path.
+//
+// On the SUCCESS path the enqueue still completes normally (the event lands
+// on the channel and the caller proceeds to wait for the done-barrier), so
+// the cache-swap-observable-before-return guarantee the r6 barrier
+// established is preserved — only the blocked path is bounded. Returns nil
+// when the event was enqueued, ctx.Err() when ctx fired first.
+func (l *EventLoop) PostCtx(ctx context.Context, e LoopEvent) error {
+	if ctx == nil {
+		l.ch <- e
+		return nil
+	}
+	select {
+	case l.ch <- e:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // PostSelf enqueues a handler-self-post on the priority channel.
 // Non-blocking by design - returns false if selfCh is full so the
 // caller can audit-log the drop. The loop priority-drains selfCh
