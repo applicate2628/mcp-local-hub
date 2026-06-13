@@ -457,6 +457,63 @@ func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure(t *testin
 	}
 }
 
+// TestStrictModeEnable_InProgressBreadcrumbKeptAfterLateStep1Error pins that
+// a write error returned after the intent file was published must not delete
+// the only recovery marker. The production atomic writer can fail during
+// post-rename close/re-open/verification, after strict_mode already changed.
+func TestStrictModeEnable_InProgressBreadcrumbKeptAfterLateStep1Error(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	deps := tmp.Deps()
+	deps.WriteIntentFn = func(path string, intent *api.SupervisorIntentFile) error {
+		if err := api.WriteSupervisorIntent(path, intent); err != nil {
+			return err
+		}
+		return errors.New("simulated late post-rename verification failure")
+	}
+
+	err := RunStrictMode([]string{"enable"}, deps)
+	if err == nil {
+		t.Fatal("expected late step 1 write failure")
+	}
+	if !strings.Contains(err.Error(), "simulated late post-rename verification failure") {
+		t.Fatalf("expected late write error to surface, got %v", err)
+	}
+	intent, readErr := api.ReadSupervisorIntent(tmp.IntentPath())
+	if readErr != nil {
+		t.Fatalf("read intent: %v", readErr)
+	}
+	if !intent.StrictMode {
+		t.Fatal("test setup did not publish strict_mode=true before returning late error")
+	}
+	if len(tmp.backend.enableCalls) != 0 {
+		t.Fatalf("shim enable called %d times even though step 1 returned an error", len(tmp.backend.enableCalls))
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr != nil {
+		t.Fatalf("in-progress breadcrumb missing after ambiguous late step 1 error: %v", statErr)
+	}
+
+	deps.WriteIntentFn = nil
+	deps.PromptOperator = func() (string, error) { return "B", nil }
+	if recoverErr := RunStrictModeRecover(deps); recoverErr != nil {
+		t.Fatalf("recover after late step 1 error: %v", recoverErr)
+	}
+	intent, readErr = api.ReadSupervisorIntent(tmp.IntentPath())
+	if readErr != nil {
+		t.Fatalf("read recovered intent: %v", readErr)
+	}
+	if intent.StrictMode {
+		t.Fatal("recover branch B did not roll intent back to original strict_mode=false")
+	}
+	if tmp.backend.currentStrict {
+		t.Fatal("recover branch B unexpectedly left shim strict_mode=true")
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr == nil {
+		t.Fatal("breadcrumb not deleted after successful recover")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unexpected breadcrumb stat error after recover: %v", statErr)
+	}
+}
+
 // TestStrictModeRecover_InProgressMarkerReconciles proves the --recover surface
 // consumes the in-progress marker left by a simulated SIGKILL in the step1→step2
 // window. The crash state: intent flipped to desired (true), shim still at
