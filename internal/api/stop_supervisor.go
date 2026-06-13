@@ -38,10 +38,13 @@ import (
 //
 //   - Action == post_ev_intent_update → plain success row (empty Err,
 //     empty Code): the SM was actually dispatched for this target.
-//   - any other Action (no_op, needs_manual_review) OR a missing drift
-//     entry → success-but-deferred row: empty Err (the intent is durable
-//     on disk) + Code = DeferredToIntentWatcherCode, so the row is not a
-//     failure but also does not falsely claim synchronous SM dispatch.
+//   - Action == no_op OR a missing drift entry → success-but-deferred
+//     row: empty Err (the intent is durable on disk) + Code =
+//     DeferredToIntentWatcherCode, so the row is not a failure but also
+//     does not falsely claim synchronous SM dispatch.
+//   - Action == needs_manual_review OR any unrecognized action → error
+//     row: applyReconcileDrift will not post EvIntentUpdate for the target,
+//     so Err must carry the operator-visible failure.
 //
 // A truly-dispatched row carries no Code: both the stop and the
 // refused-restart call sites dispatch through the SAME `reconcile --apply`,
@@ -49,15 +52,21 @@ import (
 // row (the restart path's RESPAWN_REFUSED_INTENT_STOPPED code lives only on
 // its OWN refusal/error rows, not on the reconcile-dispatched success row).
 func supervisorDispatchRowForTarget(taskName string, drift []DriftEntry) RestartResult {
-	if entry, ok := findDriftEntryForTask(taskName, drift); ok &&
-		entry.Action == ReconcileActionPostEvIntentUpdate {
-		// Truly dispatched through the SM this reconcile.
-		return RestartResult{TaskName: taskName}
+	if entry, ok := findDriftEntryForTask(taskName, drift); ok {
+		switch entry.Action {
+		case ReconcileActionPostEvIntentUpdate:
+			// Truly dispatched through the SM this reconcile.
+			return RestartResult{TaskName: taskName}
+		case ReconcileActionNoOp:
+			return RestartResult{TaskName: taskName, Code: DeferredToIntentWatcherCode}
+		case ReconcileActionNeedsManualReview:
+			return RestartResult{TaskName: taskName, Err: supervisorManualReviewStopError(taskName)}
+		default:
+			return RestartResult{TaskName: taskName, Err: supervisorUnhandledDriftActionStopError(taskName, entry.Action)}
+		}
 	}
-	// Not posted for this target (terminate classifies no_op /
-	// needs_manual_review, or no drift entry at all): durable on disk,
-	// IntentWatcher converges within ~60s. Surface that honestly via the
-	// typed Code; Err stays empty.
+	// No drift entry for this target: durable on disk, IntentWatcher converges
+	// within ~60s. Surface that honestly via the typed Code; Err stays empty.
 	return RestartResult{TaskName: taskName, Code: DeferredToIntentWatcherCode}
 }
 
@@ -100,13 +109,16 @@ func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) fun
 //   - No supervisor intent file, or no targets in scope → (nil, false,
 //     nil): nothing is supervisor-owned here, the legacy kill path owns
 //     the stop.
-//   - IPC unavailable (errors.Is ErrSupervisorIPCUnavailable) → direct
-//     descriptor kill rows with handled=true: the supervisor is down, so
-//     nothing will respawn a killed daemon, and fresh v0.6 supervisor-owned
-//     global daemons have no scheduler rows for the legacy path to find.
-//     Reuse the stop --force descriptor kill surface, but pass no live PID map
-//     because IPC is unavailable; descriptor Port remains the targetable kill
-//     surface and unsupported hosts fail loud per target.
+//   - IPC unavailable (errors.Is ErrSupervisorIPCUnavailable) + no live
+//     supervisor owner → direct descriptor kill rows with handled=true: the
+//     supervisor is down, so nothing will respawn a killed daemon, and fresh
+//     v0.6 supervisor-owned global daemons have no scheduler rows for the
+//     legacy path to find. Reuse the stop --force descriptor kill surface, but
+//     pass no live PID map because IPC is unavailable; descriptor Port remains
+//     the targetable kill surface and unsupported hosts fail loud per target.
+//   - IPC unavailable + live/undeterminable supervisor owner → per-target
+//     retryable error rows with handled=true: a live reaper can respawn a
+//     non-clean descriptor kill, so do not force-kill under it.
 //   - Reconcile reachable but failed → per-target error rows with
 //     handled=true: the supervisor is ALIVE but did not confirm the
 //     stop. Falling through to taskkill here would hand the reaper a
@@ -119,15 +131,16 @@ func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) fun
 //     so the supervisor posts EvIntentUpdate for a live regular global
 //     daemon (`daemon --server X --daemon Y`) exactly as it does for a
 //     proxy descriptor — that target's row is a plain success. The only
-//     edges that DON'T post are an already-idle/settled daemon (terminate
-//     classifies no_op) or a target with no drift entry. We therefore
-//     inspect THIS target's drift entry: a post_ev_intent_update entry →
-//     plain success row; anything else (or a missing entry) →
-//     success-but-deferred row (empty Err + Code =
-//     DeferredToIntentWatcherCode) so the row never FALSELY claims a
-//     synchronous SM dispatch that did not happen. The stop is durable
-//     either way (Desired=stopped is on disk); the only difference is
-//     whether convergence was synchronous or is the watcher's job.
+//     non-failure edges that DON'T post are an already-idle/settled daemon
+//     (terminate classifies no_op) or a target with no drift entry. We therefore
+//     inspect THIS target's drift entry: a post_ev_intent_update entry → plain
+//     success row; no_op/missing entry → success-but-deferred row (empty Err +
+//     Code = DeferredToIntentWatcherCode) so the row never FALSELY claims a
+//     synchronous SM dispatch that did not happen; needs_manual_review or an
+//     unsupported action → error row because the supervisor will not apply it.
+//     The stop is durable either way (Desired=stopped is on disk); the row
+//     distinguishes synchronous dispatch, watcher convergence, and operator
+//     intervention.
 //
 // PRECONDITION: the caller must have recorded Desired=stopped intent for
 // the targets (recordStopIntent) BEFORE calling — the reconcile reads the
@@ -145,6 +158,9 @@ func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string
 	resp, err := supervisorReconcileApplyFn(ctx, true)
 	if err != nil {
 		if errors.Is(err, ErrSupervisorIPCUnavailable) {
+			if rows, blocked := supervisorIPCUnavailableRetryRowsForLiveOwner(targets, err); blocked {
+				return rows, true, nil
+			}
 			results := make([]RestartResult, 0, len(targets))
 			for _, d := range targets {
 				results = append(results, forceKillOneSupervisorTarget(d, nil))
@@ -162,9 +178,10 @@ func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string
 	}
 	// Reconcile transport succeeded — but the response's per-target drift
 	// tells us which targets the supervisor actually posted EvIntentUpdate
-	// for (post_ev_intent_update drift entries) versus which converge only
-	// via the IntentWatcher (the no_op / needs_manual_review / missing-entry
-	// edges). Report each honestly.
+	// for (post_ev_intent_update drift entries) versus which converge only via
+	// the IntentWatcher (the no_op / missing-entry edges) or need operator
+	// intervention (needs_manual_review / unsupported actions). Report each
+	// honestly.
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {
 		results = append(results, supervisorDispatchRowForTarget(d.TaskName, resp.Drift))

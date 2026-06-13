@@ -18,6 +18,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -38,8 +39,9 @@ var stopForceKillPIDFn = stopForceKillSupervisorPIDTree
 // live PID when a descriptor has no port; the serena idle-wake readiness proof
 // uses it to bind the woken task to the supervisor-reported child PID before
 // trusting the daemon port. Production: DialSupervisorIPCStatus. In the force
-// path, an unreachable supervisor (ErrSupervisorIPCUnavailable) is non-fatal —
-// the port path already covers the common case.
+// path, an unreachable supervisor (ErrSupervisorIPCUnavailable) is non-fatal
+// only after the liveness probe confirms no live supervisor owner remains; a
+// live owner with broken IPC would respawn a non-clean descriptor kill.
 var supervisorIPCStatusFn = DialSupervisorIPCStatus
 
 // stopForceKillSupervisorOwned terminates the supervisor-owned daemons in
@@ -56,10 +58,13 @@ var supervisorIPCStatusFn = DialSupervisorIPCStatus
 //     stop (it still iterates the scheduler tasks for legacy rows).
 //   - Otherwise → one RestartResult row per target with handled=true. Each
 //     target is killed by its descriptor Port via the shared port-kill
-//     primitive; a target with no descriptor port, no port-owner lookup, or no
-//     current port listener falls back to a PID kill resolved from the
-//     supervisor IPC status. A portless target with no live PID is an error row:
-//     force-stop has no kill surface and cannot prove the daemon is gone.
+//     primitive, unless IPC is unavailable while the supervisor owner is still
+//     live/undeterminable. A live owner receives retryable error rows instead
+//     of a force kill because the supervisor reaper can respawn the child. A
+//     target with no descriptor port, no port-owner lookup, or no current port
+//     listener falls back to a PID kill resolved from the supervisor IPC status.
+//     A portless target with no live PID is an error row: force-stop has no kill
+//     surface and cannot prove the daemon is gone.
 //
 // The returned handled set's task names let the caller skip these rows in
 // stopKillCore so a daemon is never double-killed (and a legacy row that
@@ -75,10 +80,14 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 	}
 
 	// Best-effort IPC status, used only to recover a live PID for a target
-	// whose descriptor carries no port. An unreachable supervisor is fine —
-	// the port path covers the common case and a down supervisor means
-	// nothing will respawn a killed daemon anyway.
-	pidByTask := supervisorOwnedLivePIDs(ctx)
+	// whose descriptor carries no port. If IPC is unavailable, prove there is no
+	// live supervisor owner before falling back to descriptor force-kill.
+	pidByTask, reachable, statusErr := supervisorOwnedLivePIDsWithReachabilityErr(ctx)
+	if !reachable && errors.Is(statusErr, ErrSupervisorIPCUnavailable) {
+		if rows, blocked := supervisorIPCUnavailableRetryRowsForLiveOwner(targets, statusErr); blocked {
+			return rows, true, nil
+		}
+	}
 
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {
@@ -256,12 +265,17 @@ func supervisorOwnedLivePIDs(ctx context.Context) map[string]int {
 }
 
 func supervisorOwnedLivePIDsWithReachability(ctx context.Context) (map[string]int, bool) {
+	pids, reachable, _ := supervisorOwnedLivePIDsWithReachabilityErr(ctx)
+	return pids, reachable
+}
+
+func supervisorOwnedLivePIDsWithReachabilityErr(ctx context.Context) (map[string]int, bool, error) {
 	if supervisorIPCStatusFn == nil {
-		return map[string]int{}, false
+		return map[string]int{}, false, nil
 	}
 	rows, err := supervisorIPCStatusFn(ctx)
 	if err != nil {
-		return map[string]int{}, false
+		return map[string]int{}, false, err
 	}
 	out := make(map[string]int, len(rows))
 	for _, r := range rows {
@@ -269,5 +283,47 @@ func supervisorOwnedLivePIDsWithReachability(ctx context.Context) (map[string]in
 			out[strings.TrimPrefix(r.TaskName, `\`)] = r.PID
 		}
 	}
-	return out, true
+	return out, true, nil
+}
+
+func supervisorIPCUnavailableRetryRowsForLiveOwner(targets []SupervisorDaemon, ipcErr error) ([]RestartResult, bool) {
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return supervisorRetryRows(targets, fmt.Sprintf("supervisor IPC is unreachable and state dir could not be resolved before liveness probe: %v; stop not applied to avoid force-killing under a possibly live reaper; run `mcphub restart`, or kill the wedged process if restart cannot reach it", err)), true
+	}
+	running, pid, err := installSupervisorRunningProbeFn(stateDir)
+	if err != nil {
+		return supervisorRetryRows(targets, fmt.Sprintf("supervisor IPC is unreachable and supervisor liveness probe failed: %v; stop not applied to avoid force-killing under a possibly live reaper; run `mcphub restart`, or kill the wedged process if restart cannot reach it", err)), true
+	}
+	if !running {
+		return nil, false
+	}
+	return supervisorRetryRows(targets, supervisorLiveOwnerIPCUnavailableStopError(pid, ipcErr)), true
+}
+
+func supervisorRetryRows(targets []SupervisorDaemon, msg string) []RestartResult {
+	results := make([]RestartResult, 0, len(targets))
+	for _, d := range targets {
+		results = append(results, RestartResult{TaskName: d.TaskName, Err: msg})
+	}
+	return results
+}
+
+func supervisorManualReviewStopError(taskName string) string {
+	return fmt.Sprintf("supervisor flagged %s for manual review; stop not applied — inspect supervisor-events.log / mcphub status", taskName)
+}
+
+func supervisorUnhandledDriftActionStopError(taskName, action string) string {
+	return fmt.Sprintf("supervisor returned unsupported reconcile action %q for %s; stop not applied — inspect supervisor-events.log / mcphub status", action, taskName)
+}
+
+func supervisorLiveOwnerIPCUnavailableStopError(pid int, ipcErr error) string {
+	pidText := ""
+	if pid > 0 {
+		pidText = fmt.Sprintf(" pid=%d", pid)
+	}
+	if ipcErr != nil {
+		return fmt.Sprintf("supervisor lock owner%s is alive but IPC is unreachable: %v; stop not applied to avoid force-killing under a live reaper; run `mcphub restart`, or kill the wedged process if restart cannot reach it", pidText, ipcErr)
+	}
+	return fmt.Sprintf("supervisor lock owner%s is alive but IPC is unreachable; stop not applied to avoid force-killing under a live reaper; run `mcphub restart`, or kill the wedged process if restart cannot reach it", pidText)
 }
