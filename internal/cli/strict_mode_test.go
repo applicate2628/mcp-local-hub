@@ -416,6 +416,47 @@ func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterRevert(t *testing.T) {
 	}
 }
 
+// TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure pins that
+// a failure in the initial intent write does not leave an in-progress
+// breadcrumb behind. Since step 1 failed, neither resource changed; leaving the
+// marker would force a spurious --recover before future strict-mode attempts.
+func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	deps := tmp.Deps()
+	deps.WriteIntentFn = func(_ string, _ *api.SupervisorIntentFile) error {
+		return errors.New("simulated initial intent write failure")
+	}
+
+	err := RunStrictMode([]string{"enable"}, deps)
+	if err == nil {
+		t.Fatal("expected initial intent write failure")
+	}
+	if !strings.Contains(err.Error(), "simulated initial intent write failure") {
+		t.Fatalf("expected step 1 write error to surface, got %v", err)
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr == nil {
+		t.Fatal("in-progress breadcrumb survived a failed initial intent write")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unexpected stat error: %v", statErr)
+	}
+	intent, readErr := api.ReadSupervisorIntent(tmp.IntentPath())
+	if readErr != nil {
+		t.Fatalf("read intent: %v", readErr)
+	}
+	if intent.StrictMode {
+		t.Fatal("intent.strict_mode changed even though the initial write failed")
+	}
+	if len(tmp.backend.enableCalls) != 0 {
+		t.Fatalf("shim enable called %d times even though step 1 failed", len(tmp.backend.enableCalls))
+	}
+
+	// A subsequent invocation should reach the normal mutation path instead of
+	// refusing on a stale breadcrumb.
+	if retryErr := RunStrictMode([]string{"enable"}, tmp.Deps()); retryErr != nil {
+		t.Fatalf("retry after failed step 1 should not be blocked by stale breadcrumb: %v", retryErr)
+	}
+}
+
 // TestStrictModeRecover_InProgressMarkerReconciles proves the --recover surface
 // consumes the in-progress marker left by a simulated SIGKILL in the step1→step2
 // window. The crash state: intent flipped to desired (true), shim still at
