@@ -787,6 +787,7 @@ func TestStopForce_TerminatesSupervisorOwnedDaemon(t *testing.T) {
 // descriptor-port-less fallback: when a supervisor-owned descriptor has no
 // port, the force path resolves a live PID from the IPC status and kills it.
 func TestStopForceKillSupervisorOwned_PortlessFallsBackToPID(t *testing.T) {
+	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the portless PID fallback.
 	stateDir := phaseFStateDir(t)
 	intent := &SupervisorIntentFile{
 		Version: 1,
@@ -891,6 +892,7 @@ func TestStopForceKillSupervisorOwned_PortlessNoPIDReturnsError(t *testing.T) {
 }
 
 func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testing.T) {
+	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts PID-kill-then-port-release.
 	stateDir := phaseFStateDir(t)
 	intent := &SupervisorIntentFile{
 		Version: 1,
@@ -1047,6 +1049,7 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 // the PID kill and this test observes an empty per-target Err despite no
 // port-release proof.
 func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning(t *testing.T) {
+	pinOwnerSIDMatch(t) // SEC-F3: same-user owner; this test asserts the unsupported-port-kill warning path.
 	stateDir := phaseFStateDir(t)
 	intent := &SupervisorIntentFile{
 		Version: 1,

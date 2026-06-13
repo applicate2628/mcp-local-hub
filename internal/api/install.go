@@ -2046,6 +2046,28 @@ func requireMcphubPIDImage(pid int) error {
 	if !verified {
 		return fmt.Errorf("pid %d image %q parent %q is not %s", pid, image, parentImage, mcphubProcessImageName)
 	}
+	// SEC-F3 owner-SID arm (additional, fail-closed): a process owned by a
+	// DIFFERENT user SID must not be force-killed even when its image matches,
+	// mirroring the POSIX reaper's UID gate. Non-Windows is a no-op (true,nil).
+	if err := requireMcphubPIDOwnerSID(pid); err != nil {
+		return err
+	}
+	return nil
+}
+
+// requireMcphubPIDOwnerSID is the shared SEC-F3 owner-SID arm for the
+// stop-force kill gates. It returns nil only when the target PID is proven to
+// be owned by the current user; a different-owner SID OR an unverifiable owner
+// (token open/query failure) returns a non-nil error so the caller refuses the
+// kill (fail closed).
+func requireMcphubPIDOwnerSID(pid int) error {
+	match, err := processOwnerSIDMatchesCurrentFn(pid)
+	if err != nil {
+		return fmt.Errorf("owner-SID gate: pid %d ownership unverifiable: %w", pid, err)
+	}
+	if !match {
+		return fmt.Errorf("owner-SID gate: pid %d is owned by a different user; refusing to kill", pid)
+	}
 	return nil
 }
 
@@ -2059,6 +2081,12 @@ func requireMcphubPortOwnerPID(port, pid int) error {
 	}
 	if !verified {
 		return fmt.Errorf("port owned by foreign process: port %d pid %d image %q parent %q", port, pid, image, parentImage)
+	}
+	// SEC-F3 owner-SID arm (additional, fail-closed): refuse to taskkill the
+	// port owner if it belongs to a different user SID (or its owner cannot be
+	// verified). Non-Windows is a no-op (true,nil).
+	if err := requireMcphubPIDOwnerSID(pid); err != nil {
+		return fmt.Errorf("port %d: %w", port, err)
 	}
 	return nil
 }

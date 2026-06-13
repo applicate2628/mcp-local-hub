@@ -227,6 +227,19 @@ func swapSupervisorReapInstallDirForTest(t *testing.T, dir string) {
 	supervisorReapInstallDirFn = func() string { return dir }
 }
 
+// swapReapOwnerSIDForTest overrides the SEC-F3 owner-SID arm (Gate 5) of the
+// kill-target identity gate so tests can simulate same-SID / different-SID /
+// unverifiable verdicts WITHOUT opening any real process token. Default
+// production wiring would call process.ProcessOwnerSIDMatchesCurrent against the
+// (fake) test PID, which returns an error for a non-existent PID — so every
+// gate test that wants to reach a `true` verdict must install a same-SID pass.
+func swapReapOwnerSIDForTest(t *testing.T, match bool, err error) {
+	t.Helper()
+	orig := reapOwnerSIDMatchesCurrentFn
+	t.Cleanup(func() { reapOwnerSIDMatchesCurrentFn = orig })
+	reapOwnerSIDMatchesCurrentFn = func(int) (bool, error) { return match, err }
+}
+
 const liveSupervisorStartedAt = "2026-05-17T00:00:00Z"
 
 var (
@@ -377,6 +390,10 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			swapProcessLookupForTest(t, tc.ident, tc.err)
 			swapSupervisorReapInstallDirForTest(t, installDir)
+			// Gates 1-4 are under test here; pin Gate 5 (owner SID) to a
+			// same-SID pass so these cases assert the prior gate behavior
+			// without opening a real process token for the fake PID.
+			swapReapOwnerSIDForTest(t, true, nil)
 			got, err := supervisorPIDIsLiveMcphubSupervisor(pid, tc.startedAt)
 			if got != tc.want {
 				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor(%d) = %v; want %v (err=%v)", pid, got, tc.want, err)
@@ -392,6 +409,62 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 	}
 	if live, err := supervisorPIDIsLiveMcphubSupervisor(-1, liveSupervisorStartedAt); live || err != nil {
 		t.Fatalf("negative PID must be a benign no-op; got live=%v err=%v", live, err)
+	}
+}
+
+// TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate is the SEC-F3
+// falsifying test for Gate 5. With Gates 1-4 all passing (an mcphub.exe
+// supervise process created before the sidecar, under the install dir), the
+// owner-SID arm is the ONLY thing left to decide:
+//
+//   - same-SID    → the kill proceeds (true, nil)  — the single-user happy path.
+//   - different   → REFUSED as a benign no-op (false, nil) — pre-fix this would
+//     return (true, nil) and force-kill another user's supervisor.
+//   - unverifiable → propagated as a reap failure (false, err) — fail closed.
+func TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate(t *testing.T) {
+	const (
+		pid        = 4242
+		installDir = `C:\Users\dev\.local\bin`
+		exe        = `C:\Users\dev\.local\bin\mcphub.exe`
+	)
+	// An identity that passes Gates 1-4 cleanly, so only Gate 5 decides.
+	liveIdent := process.ProcessIdentity{
+		Basename:         "mcphub.exe",
+		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`,
+		ExecutablePath:   exe,
+		CreationDateUnix: liveSupervisorCreatedUnix,
+	}
+
+	cases := []struct {
+		name     string
+		sidMatch bool
+		sidErr   error
+		want     bool
+		wantErr  bool
+	}{
+		{name: "same owner SID → kill proceeds", sidMatch: true, want: true},
+		{name: "different owner SID → benign no-op (refused)", sidMatch: false, want: false},
+		{
+			name:     "unverifiable owner SID → reap failure",
+			sidMatch: false,
+			sidErr:   errors.New("OpenProcessToken: access denied"),
+			want:     false,
+			wantErr:  true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			swapProcessLookupForTest(t, liveIdent, nil)
+			swapSupervisorReapInstallDirForTest(t, installDir)
+			swapReapOwnerSIDForTest(t, tc.sidMatch, tc.sidErr)
+			got, err := supervisorPIDIsLiveMcphubSupervisor(pid, liveSupervisorStartedAt)
+			if got != tc.want {
+				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor owner-SID gate = %v; want %v (err=%v)", got, tc.want, err)
+			}
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor owner-SID gate err = %v; wantErr %v", err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -446,6 +519,9 @@ func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
 		CreationDateUnix: liveSupervisorCreatedUnix,
 	}, nil)
 	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	// Gate 5 (owner SID): same-user supervisor → pass, without opening a real
+	// token for the fake PID 4242.
+	swapReapOwnerSIDForTest(t, true, nil)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}

@@ -200,7 +200,7 @@ func (c VerdictClass) String() string {
 // (currently darwin). KillRecordedHolder reads it to short-circuit
 // to a macOS-specific KillRefused message instead of cascading
 // through the image/argv/start-time gates with empty fields and
-// emitting "image '' is not an mcphub binary" (Codex iter-3 P2 #2).
+// emitting "image ” is not an mcphub binary" (Codex iter-3 P2 #2).
 type Verdict struct {
 	Class    VerdictClass `json:"class"`
 	PID      int          `json:"pid"`
@@ -924,6 +924,23 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 			fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339)),
 			"Identity-gate (start-time) failed; the PID has been recycled to a different process.",
 			"start-time gate"
+	}
+	// SEC-F3 owner-SID gate (additional, fail-closed): refuse to kill a flock
+	// holder owned by a DIFFERENT user SID even when image/argv/start-time all
+	// match, mirroring the POSIX reaper's UID gate. A different-owner SID OR an
+	// unverifiable owner (token open/query failure) refuses the kill. On
+	// non-Windows the seam default is a no-op (true, nil), so this arm never
+	// changes the Linux/macOS gate verdict.
+	if match, err := processOwnerSIDMatchesCurrentFn(v.PID); err != nil {
+		return true,
+			fmt.Sprintf("recorded PID %d owner could not be verified: %v", v.PID, err),
+			"Identity-gate (owner SID) could not verify the process owner; refusing the kill. Identify and kill the actual flock holder via OS tools.",
+			"owner-SID gate"
+	} else if !match {
+		return true,
+			fmt.Sprintf("recorded PID %d is owned by a different user; refusing to kill", v.PID),
+			"Identity-gate (owner SID) failed; the recorded PID belongs to a different user. mcphub will not terminate another user's process.",
+			"owner-SID gate"
 	}
 	return false, "", "", ""
 }
