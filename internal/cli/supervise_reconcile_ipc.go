@@ -282,6 +282,27 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		intentDesired := computeIntentDesired(taskName, daemonIntentTasks, now)
 		schedState, hasSched := lookupSchedulerState(schedByTask, taskName)
 		smState := lookupControllerSMState(deps, taskName)
+		// The loop variable `d` is the FRESH on-disk descriptor (the NEW
+		// intent a global reinstall/upgrade just wrote). The controller's
+		// intentCache still holds the descriptor the live child was spawned
+		// WITH (the OLD intent) because applyReconcileDrift only refreshes
+		// that cache AFTER this loop completes (step 7 below). Capturing the
+		// cached descriptor HERE — before that refresh — lets the classifier
+		// detect a same-task-name descriptor rewrite (port/command/args/
+		// runtime_spec change) on a StRunning daemon and drive a restart so
+		// the child is respawned with the NEW descriptor instead of being
+		// classified as steady-state no_op. (Race note: the 60s IntentWatcher
+		// could in principle refresh the cache to the NEW descriptor before a
+		// reconcile fires, collapsing OLD==NEW and missing the restart; but
+		// the watcher posts respawns only for stop-intent deltas, not
+		// descriptor deltas — diffIntentSnapshots — so the install→reconcile
+		// path remains the authoritative corrective channel and the cache
+		// still holds OLD in that window.)
+		cachedDescriptor := lookupControllerCachedDescriptor(deps, taskName)
+		// `d` is a per-iteration copy of the slice element; take its address
+		// for the drift comparison. classifyDriftAction uses it synchronously
+		// within this iteration and never retains it, so the address is safe.
+		newDescriptor := &d
 		var action string
 
 		// Orphaned-LSP-descriptor handling mirrors the startup reconciler guard
@@ -305,7 +326,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 				action = api.ReconcileActionNeedsManualReview
 			}
 		} else {
-			action = classifyDriftAction(schedState, hasSched, intentDesired, smState)
+			action = classifyDriftAction(schedState, hasSched, intentDesired, smState, cachedDescriptor, newDescriptor)
 		}
 
 		drift = append(drift, api.DriftEntry{
@@ -617,13 +638,45 @@ func normalizeSchedulerState(raw string) string {
 // so a stopped intent plus a live SM row is still an active terminate request.
 // Settled SM states remain no_op because there is no live child or pending
 // supervisor action to cancel.
-func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState) string {
+//
+// Running-descriptor-drift restart direction (r38-2 P2): a StRunning daemon
+// is normally steady-state no_op (it is already at desired=running). But when
+// a global reinstall/upgrade REWRITES the SAME-task-name descriptor (changes
+// the daemon's port, command, args, or runtime_spec/upstream-port) while the
+// child is StRunning, the running child is still serving the OLD descriptor
+// (old port/command) even though install has already written the NEW
+// descriptor + client configs (clients now point at the new port/command that
+// was never started). cachedDescriptor is what the running child was spawned
+// with (the controller intentCache snapshot at classify time, BEFORE
+// applyReconcileDrift refreshes it); newDescriptor is the freshly-read on-disk
+// intent. When the two differ on a spawn-affecting field, classify a RESTART
+// (post_ev_manual_restart) so applyReconcileDrift drives StRunning -> StExiting
+// (issue terminate, queued_action=respawn) -> StSpawning, respawning the child
+// from the refreshed (NEW) descriptor — instead of leaving the stale child up.
+// Identical descriptors keep no_op (no churn on every apply). StBackoffWaiting
+// stays no_op (its timer owns the retry and already respawns from the refreshed
+// cache; preempting it would collapse the crash-loop delay) and StQuarantined
+// stays needs_manual_review (a descriptor change must not silently un-quarantine
+// — operator force/reset is required). Only the live StRunning child gets the
+// in-place restart. Drift compares ONLY spawn-affecting fields
+// (supervisorDescriptorSpawnDrift) — cosmetic fields (updated_at, manifest_hash)
+// do not trigger a needless restart.
+func classifyDriftAction(schedState string, hasSched bool, intentDesired string, smState api.SMState, cachedDescriptor, newDescriptor *api.SupervisorDaemon) string {
 	if !hasSched {
 		if intentDesired == api.ReconcileIntentDesiredRunning {
 			if smState == api.StQuarantined {
 				return api.ReconcileActionNeedsManualReview
 			}
-			if smState == api.StRunning || smState == api.StBackoffWaiting {
+			if smState == api.StRunning {
+				// Live child: restart it IFF the descriptor it was spawned
+				// with drifted from the freshly-read intent; otherwise it is
+				// genuinely steady-state.
+				if supervisorDescriptorSpawnDrift(cachedDescriptor, newDescriptor) {
+					return reconcileActionPostEvManualRestart
+				}
+				return api.ReconcileActionNoOp
+			}
+			if smState == api.StBackoffWaiting {
 				return api.ReconcileActionNoOp
 			}
 			return api.ReconcileActionPostEvIntentUpdate
@@ -637,6 +690,16 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 	case api.ReconcileSchedulerStateRunning:
 		if intentDesired == api.ReconcileIntentDesiredStopped {
 			return api.ReconcileActionPostEvIntentUpdate
+		}
+		// Same running-descriptor-drift restart as the !hasSched arm: a
+		// scheduler-running row that the controller is also driving as a live
+		// StRunning child must respawn with the rewritten descriptor rather
+		// than serve the stale one. Only the StRunning case (a controller-owned
+		// live child the SM can terminate+respawn) is eligible; other SM states
+		// under a scheduler-running row stay no_op (no live controller child to
+		// restart in place).
+		if smState == api.StRunning && supervisorDescriptorSpawnDrift(cachedDescriptor, newDescriptor) {
+			return reconcileActionPostEvManualRestart
 		}
 		return api.ReconcileActionNoOp
 	case api.ReconcileSchedulerStateStopped:
@@ -669,6 +732,121 @@ func classifyDriftAction(schedState string, hasSched bool, intentDesired string,
 		// the SM has no defined transition for it. Operator review.
 		return api.ReconcileActionNeedsManualReview
 	}
+}
+
+// reconcileActionPostEvManualRestart is the drift Action for a StRunning
+// daemon whose spawn-affecting descriptor was rewritten in place (a global
+// reinstall/upgrade changed the same task name's port/command/args/
+// runtime_spec). applyReconcileDrift posts EvManualRestart for it, driving
+// StRunning -> StExiting (terminate the stale child) -> StSpawning (respawn
+// from the refreshed NEW descriptor). Kept package-local: it is produced by
+// classifyDriftAction and consumed by applyReconcileDrift in THIS file, and
+// emitted verbatim on the DriftEntry.Action wire string alongside the
+// api.ReconcileAction* values — the wire value is a plain string regardless of
+// where the constant lives, so the contract is unchanged.
+const reconcileActionPostEvManualRestart = "post_ev_manual_restart"
+
+// supervisorDescriptorSpawnDrift reports whether two descriptors for the SAME
+// task differ on a field that AFFECTS the spawned child — the fields a respawn
+// would launch with differently. It deliberately ignores cosmetic / metadata
+// fields (UpdatedAt has no descriptor home; ManifestHash, Server, Daemon,
+// TaskName are identity/provenance, not spawn inputs) so a no-op apply does not
+// churn a restart.
+//
+// Compared spawn-affecting fields:
+//   - Command, Args                — the generic `mcphub daemon ...` launch line
+//   - Port                         — the client-facing bind port
+//   - Env                          — generic-path child environment
+//   - Workspace                    — workspace-scoped daemons key on this
+//   - RuntimeSpec.{ChildCommand,ChildArgs,EnvRefs,UpstreamPort,ExternalPort,
+//     WorkspacePath} — the materialized proxy-launch spec (a serena/LSP proxy
+//     re-reads NONE of the manifest at spawn, so a proxy descriptor rewrite is
+//     ENTIRELY captured by these spec fields)
+//
+// A nil old descriptor (no cached descriptor for this task — e.g. the
+// controller never spawned it / cache miss) returns false: with no recorded
+// spawned descriptor there is nothing to prove drift against, so we do NOT
+// fabricate a restart (the smState==StRunning gate already bounds this to a
+// live child, but a missing cache snapshot stays conservative no_op). A nil new
+// descriptor likewise returns false (no fresh intent to drift toward).
+func supervisorDescriptorSpawnDrift(oldDescriptor, newDescriptor *api.SupervisorDaemon) bool {
+	if oldDescriptor == nil || newDescriptor == nil {
+		return false
+	}
+	if oldDescriptor.Command != newDescriptor.Command {
+		return true
+	}
+	if !equalStringSliceForReconcile(oldDescriptor.Args, newDescriptor.Args) {
+		return true
+	}
+	if oldDescriptor.Port != newDescriptor.Port {
+		return true
+	}
+	if oldDescriptor.Workspace != newDescriptor.Workspace {
+		return true
+	}
+	if !equalStringMapForReconcile(oldDescriptor.Env, newDescriptor.Env) {
+		return true
+	}
+	return runtimeSpecSpawnDrift(oldDescriptor.RuntimeSpec, newDescriptor.RuntimeSpec)
+}
+
+// runtimeSpecSpawnDrift compares the spawn-affecting fields of two
+// DaemonRuntimeSpec pointers (the materialized proxy-launch spec). A
+// presence change (nil <-> non-nil) is itself drift — a descriptor that
+// gained or lost its runtime_spec spawns through a different launch path.
+func runtimeSpecSpawnDrift(oldSpec, newSpec *api.DaemonRuntimeSpec) bool {
+	if oldSpec == nil && newSpec == nil {
+		return false
+	}
+	if oldSpec == nil || newSpec == nil {
+		return true
+	}
+	if oldSpec.ChildCommand != newSpec.ChildCommand {
+		return true
+	}
+	if !equalStringSliceForReconcile(oldSpec.ChildArgs, newSpec.ChildArgs) {
+		return true
+	}
+	if oldSpec.UpstreamPort != newSpec.UpstreamPort {
+		return true
+	}
+	if oldSpec.ExternalPort != newSpec.ExternalPort {
+		return true
+	}
+	if oldSpec.WorkspacePath != newSpec.WorkspacePath {
+		return true
+	}
+	return !equalStringMapForReconcile(oldSpec.EnvRefs, newSpec.EnvRefs)
+}
+
+// equalStringSliceForReconcile reports element-wise slice equality. A nil and
+// an empty slice are treated as equal (both spawn the same empty arg list).
+func equalStringSliceForReconcile(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// equalStringMapForReconcile reports key/value map equality. A nil and an
+// empty map are treated as equal (both spawn the same empty environment).
+func equalStringMapForReconcile(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok || va != vb {
+			return false
+		}
+	}
+	return true
 }
 
 // smStateIsLive reports whether the SM state names a daemon the
@@ -717,6 +895,27 @@ func lookupControllerSMState(deps ipcDispatchDeps, taskName string) api.SMState 
 	return st
 }
 
+// lookupControllerCachedDescriptor returns the controller intentCache's
+// CURRENT snapshot descriptor for the task — i.e. the descriptor the live
+// child was spawned with — or nil when the controller / cache is absent or has
+// no entry. It MUST be called from the reconcile drift loop BEFORE
+// applyReconcileDrift refreshes the cache (step 7), so the returned descriptor
+// is the OLD (pre-rewrite) descriptor that the running daemon is actually
+// serving. classifyDriftAction compares it against the freshly-read on-disk
+// descriptor to detect a same-task-name descriptor rewrite on a StRunning
+// daemon. Mirrors the lookupControllerSMState reach-through pattern.
+func lookupControllerCachedDescriptor(deps ipcDispatchDeps, taskName string) *api.SupervisorDaemon {
+	if deps.controllerProvider == nil {
+		return nil
+	}
+	ctrl := deps.controllerProvider()
+	if ctrl == nil || ctrl.intentCache == nil {
+		return nil
+	}
+	d, _ := ctrl.intentCache.Lookup(taskName)
+	return d
+}
+
 func markOrphanedLSPStopIntentForReconcile(file *api.DaemonIntentFile, taskName string, now time.Time) {
 	if file == nil {
 		return
@@ -731,10 +930,19 @@ func markOrphanedLSPStopIntentForReconcile(file *api.DaemonIntentFile, taskName 
 	}
 }
 
-// applyReconcileDrift posts EvIntentUpdate per drift entry with
-// Action=post_ev_intent_update. Returns the count of events actually
-// posted. Entries with other actions are skipped (no_op and
-// needs_manual_review never dispatch SM events).
+// applyReconcileDrift dispatches one SM event per actionable drift entry and
+// returns the count of events actually posted:
+//
+//   - Action=post_ev_intent_update  → EvIntentUpdate (spawn/terminate per the
+//     refreshed intent).
+//   - Action=post_ev_manual_restart → EvManualRestart (terminate the stale
+//     live child + respawn from the NEW descriptor). The cache refresh below
+//     runs FIRST, so by the time EvManualRestart is posted the intentCache
+//     already holds the rewritten descriptor and the SM-driven respawn launches
+//     the child with the NEW port/command/args/runtime_spec.
+//
+// Entries with other actions are skipped (no_op and needs_manual_review never
+// dispatch SM events).
 //
 // When the controller is absent (rare — only in unit-test fixtures
 // that don't wire one) the function silently skips dispatch; the
@@ -771,11 +979,18 @@ func applyReconcileDrift(
 	}
 	applied := 0
 	for _, entry := range drift {
-		if entry.Action != api.ReconcileActionPostEvIntentUpdate {
+		var kind api.SMEvent
+		switch entry.Action {
+		case api.ReconcileActionPostEvIntentUpdate:
+			kind = api.EvIntentUpdate
+		case reconcileActionPostEvManualRestart:
+			kind = api.EvManualRestart
+		default:
+			// no_op / needs_manual_review never dispatch SM events.
 			continue
 		}
 		ctrl.eventLoop.Post(api.LoopEvent{
-			Kind:     api.EvIntentUpdate,
+			Kind:     kind,
 			TaskName: entry.TaskName,
 		})
 		applied++
