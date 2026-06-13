@@ -73,14 +73,15 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// pinned by whichever test ran first. This matters because
 	// OperatorRequiresSingleUserHome lazily caches the supervisor-intent
 	// strict_mode bit once per process: without this reset, the first test that
-	// resolves it against the operator's REAL (possibly broadened, present-but-
-	// gate-unreadable) %LOCALAPPDATA% would cache strict=TRUE for the whole
-	// binary (the r3 present-unreadable fail-closed behavior, retained), and the
-	// migrate's broadened-parent WriteStateFileAtomic would then wrongly refuse.
-	// These tests exercise the interlock/cutover, NOT strict-mode posture.
-	// (pr301 r9 reverted the separate absent-on-delete-capable-dir → strict
-	// over-reach; this cache reset guards the orthogonal present-unreadable
-	// pollution path.)
+	// resolves it against a PRESENT supervisor-intent.json carrying
+	// strict_mode=true (the operator's real one on a strict host, or a sibling
+	// test's) would — via the pr301 r10 GATE-FREE read — cache strict=TRUE for
+	// the whole binary, and the migrate's broadened-parent WriteStateFileAtomic
+	// would then wrongly refuse. These tests exercise the interlock/cutover, NOT
+	// strict-mode posture. (pr301 r9 reverted the absent-on-delete-capable-dir →
+	// strict over-reach and r10 removed the present-unreadable → strict gated
+	// read; this cache reset now guards only the present-strict_mode=true
+	// gate-free pollution path.)
 	api.ResetStrictModeIntentCacheForTest()
 	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
 

@@ -24,7 +24,8 @@ import (
 // (disabling) value on a broadened parent.
 
 // ---------------------------------------------------------------------------
-// #301-2: read-error → fail-closed-to-strict
+// #301-2 (pr301 r10): gate-free intent read → absent/read-error/parse-error/
+// unresolvable-path ALL relax; strict only for present+parseable+strict_mode=true
 // ---------------------------------------------------------------------------
 
 // TestReadStrictModeFromIntent_DecodeError_Relaxes pins the pr301 r10
