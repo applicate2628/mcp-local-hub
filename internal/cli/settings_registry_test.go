@@ -250,6 +250,37 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 //
 // os.Exit-safety: defers do NOT run after os.Exit, so the cleanup is run
 // explicitly after capturing m.Run()'s exit code.
+//
+// SUBPROCESS GAP + BELT-AND-SUSPENDERS (PR #300 r1 P1). The
+// SetDaemonStateRootForTest override above is an IN-MEMORY package variable:
+// it redirects state-dir resolution only inside THIS test process. A cli test
+// that spawns a fresh `mcphub` binary as an OS subprocess (gui_integration_test
+// `go run ./cmd/mcphub gui`, daemon_reliability_test built daemon) does NOT
+// inherit that variable — the child reaches api.DaemonStateDir() and would
+// resolve the REAL per-user %LOCALAPPDATA%\mcp-local-hub state + IPC pipe.
+//
+// As a default safety net for ANY such subprocess, also export the
+// state-relevant env vars pointing at the SAME global temp dir. A child that
+// inherits os.Environ() AND is built with the test_state_path_env tag (which
+// the subprocess tests now do — see subprocess_state_isolation_test.go) then
+// defaults to the temp dir even if a future test forgets to set them per-spawn.
+//
+// SURGICAL SCOPE: we set ONLY the mcphub-state-relevant vars (LOCALAPPDATA +
+// XDG_DATA_HOME + XDG_STATE_HOME). We deliberately do NOT clobber HOME /
+// USERPROFILE globally — those have broad side effects on other tests that read
+// them. These three are safe to default globally because every in-process cli
+// test that reads them (logBaseDir-touching daemon tests, withTempHome) sets
+// its OWN value via t.Setenv, which overrides this global default and is
+// auto-restored; tests that do NOT set them never read them in-process (the
+// production in-process daemonStateDir ignores LOCALAPPDATA / XDG_DATA_HOME and
+// uses the in-memory override). The only behavioral effect of the global
+// default is to route a forgotten subprocess (or a forgotten in-process
+// logBaseDir read) to the throwaway temp dir instead of the real fleet —
+// strictly safer.
+//
+// Restore is handled by t.Setenv-style manual save/restore here since TestMain
+// has no *testing.T: we snapshot the prior values and reinstate them before
+// os.Exit so a parent harness env is left untouched.
 func TestMain(m *testing.M) {
 	api.EnableSupervisorIPCTestPipeIsolation()
 
@@ -259,9 +290,45 @@ func TestMain(m *testing.M) {
 	}
 	restore := api.SetDaemonStateRootForTest(tmp)
 
+	// Default subprocess state-env safety net (see doc comment above).
+	restoreEnv := setEnvWithRestore(map[string]string{
+		"LOCALAPPDATA":   tmp,
+		"XDG_DATA_HOME":  tmp,
+		"XDG_STATE_HOME": tmp,
+	})
+
 	code := m.Run()
 
+	restoreEnv()
 	restore()
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)
+}
+
+// setEnvWithRestore sets each key=value in the process environment and returns
+// a function that reinstates the prior values (unsetting keys that were not
+// previously present). Used by TestMain where no *testing.T is available for
+// t.Setenv. Restore is best-effort: os.Setenv/Unsetenv errors are ignored
+// because TestMain runs before any test and a failure here cannot meaningfully
+// be surfaced past os.Exit.
+func setEnvWithRestore(kv map[string]string) (restore func()) {
+	type prior struct {
+		val string
+		set bool
+	}
+	saved := make(map[string]prior, len(kv))
+	for k, v := range kv {
+		old, ok := os.LookupEnv(k)
+		saved[k] = prior{val: old, set: ok}
+		_ = os.Setenv(k, v)
+	}
+	return func() {
+		for k, p := range saved {
+			if p.set {
+				_ = os.Setenv(k, p.val)
+			} else {
+				_ = os.Unsetenv(k)
+			}
+		}
+	}
 }

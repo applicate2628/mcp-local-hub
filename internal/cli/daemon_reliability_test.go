@@ -64,7 +64,18 @@ func ensureMcphubBinary(t *testing.T) string {
 			mcphubBuildErr = fmt.Errorf("locate repo root: %w", err)
 			return
 		}
-		cmd := exec.Command("go", "build", "-o", binPath, "./cmd/mcphub")
+		// FLEET-SAFETY (PR #300 r1 P1): build the reliability binary WITH the
+		// test_state_path_env tag so the subprocess honors env-based state-dir
+		// redirection. A production build resolves the Windows state dir via
+		// KnownFolder(FOLDERID_LocalAppData), which ignores LOCALAPPDATA — so
+		// the LOCALAPPDATA redirect on cmd.Env below would be inert on Windows
+		// without the tag, and a state-touching subcommand could reach the real
+		// %LOCALAPPDATA%\mcp-local-hub fleet. The tag compiles
+		// state_paths_envfallback.go, whose resolver honors LOCALAPPDATA
+		// (Windows) / XDG_DATA_HOME (Linux). The reliability scenarios
+		// (version / help / unknown-server daemon) are all
+		// regression-smoke-only and behave identically under the tag.
+		cmd := exec.Command("go", "build", "-tags", "test_state_path_env", "-o", binPath, "./cmd/mcphub")
 		cmd.Dir = repoRoot
 		if out, err := cmd.CombinedOutput(); err != nil {
 			mcphubBuildErr = fmt.Errorf("go build ./cmd/mcphub: %w\n%s", err, out)
@@ -147,12 +158,17 @@ func TestReliability_DaemonCmdUnknownServerExitsNonZeroQuickly(t *testing.T) {
 		"--server", "definitely-no-such-server",
 		"--daemon", "x",
 	)
-	// Redirect log destination to test-controlled tempdir so the
-	// real %LOCALAPPDATA% / $XDG_STATE_HOME isn't polluted.
-	cmd.Env = append(os.Environ(),
-		"LOCALAPPDATA="+tmpHome,
-		"XDG_STATE_HOME="+tmpHome,
-	)
+	// FLEET-SAFETY (PR #300 r1 P1): redirect the child's daemon state dir AND
+	// log base dir to the test-controlled tempdir so neither the real
+	// %LOCALAPPDATA%\mcp-local-hub state nor its logs are touched. childStateEnv
+	// sets LOCALAPPDATA (Windows state + logs, env-fallback build only),
+	// XDG_DATA_HOME (Linux state dir), and XDG_STATE_HOME (POSIX log base dir),
+	// all pointed at tmpHome. The binary is built with the test_state_path_env
+	// tag (ensureMcphubBinary) so these env vars actually redirect resolution
+	// on Windows-production. (Pre-fix this set only LOCALAPPDATA + XDG_STATE_HOME
+	// against a production build — inert on Windows because KnownFolder ignores
+	// LOCALAPPDATA, so a state-reaching subcommand could touch the live fleet.)
+	cmd.Env = append(os.Environ(), childStateEnv(tmpHome)...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected non-zero exit, got success. Output:\n%s", out)

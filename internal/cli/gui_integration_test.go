@@ -65,13 +65,41 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	}
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
 
+	// FLEET-SAFETY (PR #300 r1 P1): the cli TestMain installs only an
+	// IN-MEMORY daemonStateRootOverride, which does NOT propagate to a
+	// subprocess. Without redirecting the child's own state-dir resolution,
+	// the `mcphub gui` child (and the `mcphub supervise` grandchild it spawns)
+	// would reach api.DaemonStateDir() and touch the REAL per-user
+	// %LOCALAPPDATA%\mcp-local-hub state + IPC pipe — exactly the live-fleet
+	// hazard the TestMain redirect was meant to remove. We therefore (1) build
+	// the child WITH the test_state_path_env tag so env-based redirection is
+	// honored even on Windows-production (KnownFolder ignores LOCALAPPDATA in
+	// the production build), and (2) point its state env at a per-test temp
+	// dir. Same manual-MkdirTemp rationale as pidportDir: the grandchild can
+	// outlive Cmd.Wait on Windows, so t.TempDir's cleanup would race its open
+	// handles.
+	childState, err := os.MkdirTemp("", "gui-integration-state-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for i := 0; i < 20; i++ {
+			if err := os.RemoveAll(childState); err == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		_ = os.RemoveAll(childState)
+	})
+
 	exe, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := repoRoot(t)
-	first := exec.Command(exe, "run", "./cmd/mcphub", "gui", "--no-browser", "--no-tray", "--port", "0")
+	first := exec.Command(exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--no-browser", "--no-tray", "--port", "0")...)
 	first.Dir = root
+	first.Env = append(os.Environ(), childStateEnv(childState)...)
 	// Pipe child I/O into io.Discard and arm WaitDelay so Wait cannot
 	// hang on grandchild pipe handles surviving the go-run wrapper's
 	// death. `go run` builds a temp binary and execs it, so killing
@@ -109,8 +137,9 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	// instance's own compile + handshake.
 	time.Sleep(5 * time.Second)
 
-	second := exec.Command(exe, "run", "./cmd/mcphub", "gui", "--no-browser", "--no-tray")
+	second := exec.Command(exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--no-browser", "--no-tray")...)
 	second.Dir = root
+	second.Env = append(os.Environ(), childStateEnv(childState)...)
 	out, err := second.CombinedOutput()
 	if err != nil {
 		t.Fatalf("second instance failed: %v\noutput: %s", err, out)
@@ -126,5 +155,32 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 		strings.Contains(out2, "already running headless")
 	if !ok {
 		t.Errorf("second instance output should confirm handshake (activated OR headless guidance); got: %s", out2)
+	}
+
+	// ISOLATION PROOF (PR #300 r1 P1): assert the child actually resolved the
+	// TEMP state dir and NEVER touched the real %LOCALAPPDATA%\mcp-local-hub.
+	//
+	// The first `mcphub gui` child calls ensureSupervisorRunning, whose very
+	// first step is api.DaemonStateDir() (gui_supervisor_owner.go:89, before
+	// any probe), which calls ensureStateRoot -> os.MkdirAll(<stateDir>). With
+	// the env+tag redirect, <stateDir> is childStateLeaf(childState) =
+	// <childState>/mcp-local-hub, so the child MUST create that leaf. Existence
+	// of the redirected leaf is therefore conclusive proof the child resolved
+	// the TEMP path: if the redirect had failed, the child would have
+	// MkdirAll'd the REAL %LOCALAPPDATA%\mcp-local-hub instead and this temp
+	// leaf would never appear.
+	//
+	// We assert ONLY existence, not non-emptiness: the supervise grandchild is
+	// killed during t.Cleanup (we Kill the go-run wrapper) and may not have
+	// flushed supervisor-events.log / supervisor.lock yet, so requiring
+	// artifacts would test grandchild write-timing, not isolation. Leaf
+	// existence + the process-level byte-identity of the real
+	// supervisor-intent.json (verified out-of-band in the PR) together prove
+	// the subprocess stayed off the live fleet.
+	childLeaf := childStateLeaf(childState)
+	if info, statErr := os.Stat(childLeaf); statErr != nil || !info.IsDir() {
+		t.Fatalf("isolation proof failed: child mcphub did not create its redirected state dir %q (stat err: %v)\n"+
+			"This means the subprocess resolved the REAL per-user state dir instead of the temp dir — "+
+			"the live-fleet hazard is NOT closed.\nsecond-instance output:\n%s", childLeaf, statErr, out2)
 	}
 }
