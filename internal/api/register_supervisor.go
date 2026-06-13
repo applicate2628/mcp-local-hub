@@ -478,6 +478,16 @@ func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error
 // the failed unregister is reversible.
 func (a *API) RemoveSerenaSupervisorIntentForWorkspace(workspacePath string) (bool, error) {
 	taskName := SerenaTaskNameForWorkspace(workspacePath)
+	descriptor, found, err := supervisorIntentDescriptorForTask(taskName)
+	if err != nil || !found {
+		return false, err
+	}
+	if port := descriptor.Port; port != 0 && forceKillByPortFn != nil {
+		outcome, killErr := forceKillByPortFn(port, 5*time.Second)
+		if killErr != nil && outcome != portKillNoListener && outcome != portKillIdentityMismatch {
+			return false, fmt.Errorf("kill live serena proxy on port %d before removing %s: %w", port, taskName, killErr)
+		}
+	}
 	restoreSupervisorIntent, removed, err := a.removeSupervisorIntentDescriptorForTask(taskName)
 	if err != nil || !removed {
 		return removed, err
@@ -541,6 +551,31 @@ func serenaSupervisorOwnerAliveOnIPCUnavailable() (alive bool, pid int, probeErr
 		return false, 0, fmt.Errorf("probe supervisor before serena teardown: %w", err)
 	}
 	return running, ownerPID, nil
+}
+
+func supervisorIntentDescriptorForTask(taskName string) (SupervisorDaemon, bool, error) {
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return SupervisorDaemon{}, false, fmt.Errorf("resolve supervisor-intent path: %w", err)
+	}
+	lock := flock.New(intentPath + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return SupervisorDaemon{}, false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+	current, existed, err := readSupervisorIntentForMerge(intentPath)
+	if err != nil {
+		return SupervisorDaemon{}, false, err
+	}
+	if !existed || current == nil {
+		return SupervisorDaemon{}, false, nil
+	}
+	for _, daemon := range current.Daemons {
+		if daemon.TaskName == taskName {
+			return daemon, true, nil
+		}
+	}
+	return SupervisorDaemon{}, false, nil
 }
 
 func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), bool, error) {
