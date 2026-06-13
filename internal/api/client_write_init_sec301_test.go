@@ -27,45 +27,45 @@ import (
 // #301-2: read-error → fail-closed-to-strict
 // ---------------------------------------------------------------------------
 
-// TestReadStrictModeFromIntent_DecodeError_FailsClosedToStrict is the
-// FALSIFYING CORE of #301-2. An EXISTING supervisor-intent.json that cannot be
-// decoded (corrupt/truncated/attacker-clobbered) must resolve to strict=TRUE,
-// not relax. Pre-fix any read error returned false (relax), silently disabling
-// the gate.
-func TestReadStrictModeFromIntent_DecodeError_FailsClosedToStrict(t *testing.T) {
-	t.Setenv(AllowUnhardenedStateReadEnv, "1") // read-gate inert for the temp dir
+// TestReadStrictModeFromIntent_DecodeError_Relaxes pins the pr301 r10
+// behavior: an EXISTING but UNPARSEABLE supervisor-intent.json
+// (corrupt/truncated/attacker-clobbered) resolves to relax (false), not strict.
+// Intent-file strict is BEST-EFFORT and read gate-free — a body that cannot be
+// parsed declares no parseable strict_mode bit, so the env var is the robust
+// strict mitigation. This RE-POINTS the prior #301-2 decode→strict assertion
+// (which read through ReadSupervisorIntent's parent gate) to the gate-free
+// relax-on-parse-error verdict.
+func TestReadStrictModeFromIntent_DecodeError_Relaxes(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Cleanup(SetDaemonStateRootForTest(stateDir))
 
-	// Write a NON-JSON body to the intent path: the file EXISTS but
-	// ReadSupervisorIntent will fail at json.Unmarshal (a decode error, NOT
-	// os.ErrNotExist).
+	// Write a NON-JSON body to the intent path: the file EXISTS but the
+	// gate-free json.Unmarshal fails (a parse error, NOT os.ErrNotExist).
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 	if err := os.WriteFile(intentPath, []byte("this is not json {{{"), 0o600); err != nil {
 		t.Fatalf("write malformed intent: %v", err)
 	}
 
-	if got := readStrictModeFromIntentBestEffort(); !got {
-		t.Fatal("#301-2 regression: a decode error on an EXISTING supervisor-intent.json " +
-			"must fail CLOSED to strict (return true); got false (the pre-fix fail-open-to-relax " +
-			"that silently disables the gate when the gate-controlling file is unreadable)")
+	if got := readStrictModeFromIntentBestEffort(); got {
+		t.Fatal("pr301 r10: a parse error on an EXISTING supervisor-intent.json must RELAX " +
+			"(return false) — intent-file strict is best-effort, read gate-free; an unparseable " +
+			"body declares no strict_mode bit, and the robust strict path is " +
+			"MCPHUB_REQUIRE_SINGLE_USER_HOME=1; got true")
 	}
 }
 
-// TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict is the
-// FALSIFYING CORE of pr301 r4 Finding 1. When the state dir cannot be RESOLVED
-// at all (DaemonStateDirReadOnly returns an error), the gate must fail CLOSED to
-// strict=TRUE. A resolver error may be hiding an existing strict_mode=true intent
-// on a host we can no longer reach; relaxing on a resolver error would silently
-// DISABLE the gate. Pre-r4 the path-resolution-error branch returned false
-// (relax) — a fail-OPEN hole this test pins shut.
+// TestReadStrictModeFromIntent_PathUnresolvable_Relaxes pins the pr301 r10
+// behavior: when the state dir cannot be RESOLVED at all (DaemonStateDirReadOnly
+// returns an error), the intent read relaxes (returns false). Intent-file strict
+// is BEST-EFFORT — with no resolvable path the bit cannot be read, and the
+// robust strict path is the env var (MCPHUB_REQUIRE_SINGLE_USER_HOME=1, checked
+// in OperatorRequiresSingleUserHome BEFORE this read). This RE-POINTS the prior
+// pr301 r4 unresolvable→strict assertion to the best-effort-relax verdict.
 //
-// Engineering a GENUINE DaemonStateDirReadOnly error cross-platform (pr301 r9):
-// the daemonStateRootOverride seam short-circuits the resolver, so it CANNOT be
-// used to force a resolve error (a regular-file override returns verbatim with no
-// error, and on Windows the subsequent ReadFile/Lstat both report ErrNotExist —
-// the ABSENT-relax branch — so the old regular-file technique no longer pins the
-// resolver branch). Instead, clear the override and make the real resolver fail:
+// Engineering a GENUINE DaemonStateDirReadOnly error cross-platform: the
+// daemonStateRootOverride seam short-circuits the resolver, so it CANNOT be used
+// to force a resolve error. Instead, clear the override and make the real
+// resolver fail:
 //
 //   - Windows (test_state_path_env build): stub knownFolderResolverFn to error
 //     AND clear LOCALAPPDATA + USERPROFILE so resolveKnownFolderWithEnvFallback
@@ -73,9 +73,7 @@ func TestReadStrictModeFromIntent_DecodeError_FailsClosedToStrict(t *testing.T) 
 //   - POSIX: clear XDG_DATA_HOME + HOME so posixParentDir's os.UserHomeDir fails.
 //
 // statePathsHelper saves/restores the override + resolver (panic-safe).
-func TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict(t *testing.T) {
-	t.Setenv(AllowUnhardenedStateReadEnv, "1")
-
+func TestReadStrictModeFromIntent_PathUnresolvable_Relaxes(t *testing.T) {
 	// Clear the override (statePathsHelper restores it) so the REAL resolver runs.
 	statePathsHelper(t)
 	daemonStateRootOverride = ""
@@ -102,11 +100,11 @@ func TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict(t *testin
 			"is not being exercised)", dir)
 	}
 
-	if got := readStrictModeFromIntentBestEffort(); !got {
-		t.Fatal("pr301 r4 Finding 1 regression: an UNRESOLVABLE supervisor-intent path " +
-			"must fail CLOSED to strict (return true) — a resolver error may be hiding an " +
-			"existing strict_mode=true intent on a host we can no longer reach; got false (the " +
-			"pre-r4 fail-open-to-relax that silently disables the gate on a path-resolution error)")
+	if got := readStrictModeFromIntentBestEffort(); got {
+		t.Fatal("pr301 r10: an UNRESOLVABLE supervisor-intent path must RELAX (return false) — " +
+			"intent-file strict is best-effort and cannot be read with no resolvable path; the " +
+			"robust strict path is MCPHUB_REQUIRE_SINGLE_USER_HOME=1 (checked before this read); " +
+			"got true (the reverted pre-r10 unresolvable→strict over-reach)")
 	}
 }
 

@@ -1,28 +1,39 @@
 //go:build windows
 
 // client_write_init_sec301_windows_test.go — Windows-only regressions for
-// the absent-intent strict-mode verdict (pr301 r9: absent → RELAX).
+// the strict-mode-from-intent verdict on BROADENED state dirs (pr301 r10:
+// the strict_mode bit is read GATE-FREE).
 //
-// readStrictModeFromIntentBestEffort classifies a GENUINELY ABSENT
-// supervisor-intent.json as RELAX regardless of the state dir's broadening,
-// because an ABSENT intent declares NO strict_mode — it must not make the
-// operator strict. This is the canonical CLAUDE.md posture ("Hardened
-// state-file writes"): a broadened state dir defaults to RELAX; STRICT is
-// opt-in via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
+// pr301 r10 FLEET-SAFETY FIX. readStrictModeFromIntentBestEffort reads the
+// strict_mode bit with a GATE-FREE os.ReadFile (NOT through
+// ReadSupervisorIntent's parent-dir WRITE-protection gate). On a broadened
+// %LOCALAPPDATA% parent (write/delete-capable ACE — the common corp AND many
+// solo-dev cases) the pre-r10 gated read REJECTED, the present-but-unreadable
+// branch fired, and the verdict became strict=TRUE even when strict_mode was
+// FALSE on disk — driving a host whose strict_mode is actually false into the
+// STRICT refusal path so ALL client/state writes were refused (a live-fleet
+// break). The gate-free read fixes that: a broadened dir now yields
+// relax-via-intent unless strict_mode is EXPLICITLY true.
 //
-//   - state dir merely READ-broadened (Authenticated Users GENERIC_READ —
-//     the common solo-dev %LOCALAPPDATA% case) + intent absent → RELAX.
-//   - state dir WRITE/DELETE-capable broadened (Authenticated Users
-//     FILE_DELETE_CHILD) + intent absent → RELAX. The deletion-of-a-strict-
-//     intent bypass on such a dir is a KNOWN, DOCUMENTED limitation whose
-//     robust mitigation is the env var; intent-file strict is best-effort.
+// The canonical CLAUDE.md posture ("Hardened state-file writes"): a broadened
+// state dir defaults to RELAX; STRICT is opt-in via
+// MCPHUB_REQUIRE_SINGLE_USER_HOME=1. Verdicts on a broadened dir:
 //
-// pr301 history: r3 made absent → relax; r5/r6/r7 over-reached to make a
-// delete-capable absent dir → strict (a deletion-bypass guard); r9 REVERTED
-// that over-reach as canon-contradicting (an absent intent declares no
-// strict_mode, and the documented mitigation for the delete-capable host is
-// MCPHUB_REQUIRE_SINGLE_USER_HOME=1, not making an absence strict). Both the
-// delete-capable and read-broadened absent cases relax here.
+//   - intent ABSENT (read- OR delete-broadened) → RELAX (no strict_mode declared).
+//   - intent PRESENT + strict_mode=false (delete-broadened) → RELAX. THIS is
+//     the fleet-break the gate-free read fixes; pre-r10 it was strict=TRUE.
+//   - intent PRESENT + strict_mode=true (delete-broadened) → STRICT. SEC-F2's
+//     real purpose — honor the explicitly-enabled bit — still holds gate-free.
+//
+// A co-resident attacker on a delete-capable dir who tampers/deletes the bit
+// can only force RELAX (never strict) — the documented best-effort limitation
+// whose robust mitigation is MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
+//
+// pr301 history: r3 made absent → relax via a gated read + os.Lstat
+// disambiguation; r5/r6/r7 over-reached (delete-capable absent → strict);
+// r9 reverted that to absent → relax (still gated, still present→strict);
+// r10 makes the READ gate-free, so PRESENT strict_mode=false on a broadened
+// dir relaxes (the fleet-safety fix).
 
 package api
 
@@ -122,18 +133,16 @@ func TestReadStrictModeFromIntent_ReadBroadenedParentAbsentFile_Relaxes(t *testi
 	}
 }
 
-// TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_Relaxes pins the
-// direct os.ErrNotExist branch (read gate bypassed via
-// MCPHUB_ALLOW_UNHARDENED_STATE_READ=1) on a delete-capable dir: a genuinely
-// absent intent surfaces as a TRUE os.ErrNotExist, and that branch relaxes
-// (returns false), the same canon-aligned verdict as the os.Lstat branch.
-//
-// This REVERTS the pr301 r5 (REFINE) assertion that gated this branch to strict.
-// Both absent branches now relax (pr301 r9).
+// TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_Relaxes pins
+// that an ABSENT intent on a delete-capable dir relaxes (returns false). With
+// the gate-free read (pr301 r10) the strict_mode bit is read via a plain
+// os.ReadFile that returns os.ErrNotExist for the absent file regardless of the
+// MCPHUB_ALLOW_UNHARDENED_STATE_READ env var (that env var governs
+// ReadSupervisorIntent's gate, which the gate-free read no longer calls). The
+// env var is set here only to keep the historical scenario shape; the verdict
+// is relax either way.
 func TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_Relaxes(t *testing.T) {
 	t.Setenv(RequireSingleUserHomeEnv, "")
-	// Read gate BYPASSED: ReadSupervisorIntent skips checkStateDirParentWriteSafe,
-	// so os.ReadFile returns a TRUE os.ErrNotExist for the absent file.
 	t.Setenv(AllowUnhardenedStateReadEnv, "1")
 
 	stateRoot := filepath.Join(t.TempDir(), "envbypass-delete-capable-state-root")
@@ -146,19 +155,101 @@ func TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_Relaxes(t *te
 
 	// Deliberately write NO supervisor-intent.json — the intent is ABSENT.
 
-	// Precondition: with the read gate bypassed, ReadSupervisorIntent must return
-	// a TRUE os.ErrNotExist (so this test exercises the direct-ENOENT branch, not
-	// the os.Lstat branch).
+	if got := readStrictModeFromIntentBestEffort(); got {
+		t.Fatal("pr301 r10: an ABSENT intent on a DELETE-capable broadened dir must RELAX " +
+			"(return false) — an absent intent declares no strict_mode; got true")
+	}
+}
+
+// TestReadStrictModeFromIntent_DeleteCapableParentPresentStrictFalse_Relaxes is
+// the FLEET-SAFETY merge-blocker regression for pr301 r10 — it reproduces THIS
+// HOST exactly: a broadened, delete-capable state dir (FILE_DELETE_CHILD, which
+// ReadSupervisorIntent's parent WRITE gate REJECTS) + a PRESENT
+// supervisor-intent.json with strict_mode=FALSE + env unset. The verdict MUST be
+// RELAX (false).
+//
+// Pre-r10 this returned TRUE: the gated ReadSupervisorIntent rejected on the
+// broadened parent, the present-but-unreadable branch fired, and the gate became
+// strict=TRUE — so a host whose strict_mode is FALSE on disk was driven into the
+// STRICT refusal path and ALL client/state writes were refused (the live-fleet
+// break). The gate-free read fixes that: the file's OWN owner-only DACL is
+// readable, json.Unmarshal yields strict_mode=false, and the verdict relaxes.
+//
+// This is the test that would have caught the fleet-break before merge.
+func TestReadStrictModeFromIntent_DeleteCapableParentPresentStrictFalse_Relaxes(t *testing.T) {
+	// Read gate LIVE (do NOT set AllowUnhardenedStateReadEnv); env strict UNSET
+	// so only the intent governs — the exact posture of the broken host.
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowUnhardenedStateReadEnv, "")
+
+	stateRoot := filepath.Join(t.TempDir(), "present-strictfalse-delete-capable-state-root")
+	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
+		t.Fatalf("mkdir delete-capable state root: %v", err)
+	}
+	broadenParentForStateFileWriteCapableTest(t, stateRoot)
+	t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	// Write a PRESENT intent with strict_mode=false directly (the file's own
+	// DACL is irrelevant to the gate-free read's success; what the pre-r10 gated
+	// read tripped on was the PARENT dir's broadened ACL, not the file's).
 	intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
-	if _, err := ReadSupervisorIntent(intentPath); err == nil {
-		t.Fatal("precondition: ReadSupervisorIntent with the read gate bypassed must still error " +
-			"on an absent file (os.ErrNotExist); got nil")
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"strict_mode":false}`), 0o600); err != nil {
+		t.Fatalf("write present strict_mode=false intent: %v", err)
+	}
+
+	// Precondition: confirm the read-side WRITE gate actually REJECTS this dir —
+	// the exact condition that made the pre-r10 gated read fail closed to strict.
+	// If this ever started passing, the test would no longer reproduce the
+	// fleet-break shape.
+	if err := checkStateDirParentWriteSafe(stateRoot); err == nil {
+		t.Fatal("precondition: checkStateDirParentWriteSafe must reject a FILE_DELETE_CHILD " +
+			"state dir; got nil — the delete-capable ACE did not take, so the fleet-break shape " +
+			"is not reproduced")
 	}
 
 	if got := readStrictModeFromIntentBestEffort(); got {
-		t.Fatal("pr301 r9 revert regression: an ABSENT intent reaching the direct os.ErrNotExist " +
-			"branch (read gate bypassed via MCPHUB_ALLOW_UNHARDENED_STATE_READ=1) on a " +
-			"DELETE-capable dir must RELAX (return false) — an absent intent declares no " +
-			"strict_mode; got true (the reverted r5 REFINE absent-strict gating of this branch)")
+		t.Fatal("pr301 r10 FLEET-SAFETY regression: a PRESENT supervisor-intent.json with " +
+			"strict_mode=FALSE on a DELETE-capable broadened state dir (env unset) MUST RELAX " +
+			"(return false). got true — the pre-r10 gated read rejected on the broadened parent " +
+			"and forced strict=TRUE, which would REFUSE all client/state writes and break the " +
+			"live fleet on a host whose strict_mode is actually false")
+	}
+}
+
+// TestReadStrictModeFromIntent_DeleteCapableParentPresentStrictTrue_Strict pins
+// that SEC-F2's real purpose survives the gate-free read: a PRESENT intent with
+// strict_mode=TRUE on the SAME broadened delete-capable dir (env unset) must
+// resolve to STRICT (true). The operator who ran `mcphub strict-mode enable`
+// gets their explicitly-enabled strict posture honored even on a broadened
+// parent — the gate-free read does not weaken the honest strict case.
+func TestReadStrictModeFromIntent_DeleteCapableParentPresentStrictTrue_Strict(t *testing.T) {
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowUnhardenedStateReadEnv, "")
+
+	stateRoot := filepath.Join(t.TempDir(), "present-stricttrue-delete-capable-state-root")
+	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
+		t.Fatalf("mkdir delete-capable state root: %v", err)
+	}
+	broadenParentForStateFileWriteCapableTest(t, stateRoot)
+	t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"strict_mode":true}`), 0o600); err != nil {
+		t.Fatalf("write present strict_mode=true intent: %v", err)
+	}
+
+	// Precondition: the dir is genuinely delete-capable (the WRITE gate rejects).
+	if err := checkStateDirParentWriteSafe(stateRoot); err == nil {
+		t.Fatal("precondition: checkStateDirParentWriteSafe must reject a FILE_DELETE_CHILD " +
+			"state dir; got nil — the delete-capable ACE did not take")
+	}
+
+	if got := readStrictModeFromIntentBestEffort(); !got {
+		t.Fatal("pr301 r10: a PRESENT supervisor-intent.json with strict_mode=TRUE on a " +
+			"DELETE-capable broadened state dir MUST resolve to STRICT (return true) — the " +
+			"gate-free read honors the explicitly-enabled bit; SEC-F2's purpose must survive " +
+			"the read becoming gate-free. got false")
 	}
 }
