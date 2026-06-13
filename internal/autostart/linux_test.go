@@ -97,7 +97,7 @@ func TestLinuxBackend_EnableWritesUnit(t *testing.T) {
 		"After=default.target",
 		"[Service]",
 		"Type=simple",
-		"ExecStart=/usr/local/bin/mcphub supervise",
+		`ExecStart="/usr/local/bin/mcphub" supervise`,
 		"Restart=on-failure",
 		"RestartSec=5",
 		"[Install]",
@@ -129,9 +129,101 @@ func TestLinuxBackend_EnableStrictMode(t *testing.T) {
 		t.Fatalf("read unit: %v", err)
 	}
 	s := string(body)
-	if !strings.Contains(s, "ExecStart=/usr/local/bin/mcphub supervise --strict-mode") {
+	if !strings.Contains(s, `ExecStart="/usr/local/bin/mcphub" supervise --strict-mode`) {
 		t.Errorf("strict-mode Enable did not encode the flag\nbody:\n%s", s)
 	}
+}
+
+// TestRenderLinuxUnit_QuotesExecStartPathWithSpaces is the FIX 1 (bot r32 P3)
+// regression guard. systemd.service(5) splits an unquoted ExecStart command
+// line on whitespace, so a binary path containing a space
+// (e.g. `/home/me/My Apps/mcphub`) would be parsed as exec
+// `/home/me/My` with argv[1] `Apps/mcphub` — the unit cannot start. The fix
+// double-quotes the path so the first argv token is the full path and
+// ` supervise` stays OUTSIDE the quotes as a separate argument.
+//
+// Pre-fix (raw `"ExecStart=" + mcphubPath + " supervise"`) this test FAILS:
+// the line would be `ExecStart=/home/me/My Apps/mcphub supervise` with the path
+// unquoted.
+func TestRenderLinuxUnit_QuotesExecStartPathWithSpaces(t *testing.T) {
+	const spaced = "/home/me/My Apps/mcphub"
+
+	// Non-strict: path double-quoted, ` supervise` outside the quotes.
+	body := renderLinuxUnit(spaced, false)
+	wantNonStrict := `ExecStart="/home/me/My Apps/mcphub" supervise`
+	if !strings.Contains(body, wantNonStrict) {
+		t.Fatalf("non-strict ExecStart not quoted; want line containing %q\nbody:\n%s", wantNonStrict, body)
+	}
+	// ` supervise` must be OUTSIDE the closing quote: the closing quote of the
+	// path is immediately followed by ` supervise`, not engulfed by it.
+	execLine := extractExecStartLine(t, body)
+	if !strings.HasPrefix(execLine, `ExecStart="`+spaced+`"`) {
+		t.Fatalf("ExecStart path not wrapped in a single quoted token: %q", execLine)
+	}
+	if !strings.HasSuffix(execLine, `" supervise`) {
+		t.Fatalf("` supervise` not OUTSIDE the closing quote (it is a separate argv token): %q", execLine)
+	}
+	// The first argv token, when systemd unquotes it, is the full spaced path —
+	// there is exactly one `"`-delimited segment and it equals the path.
+	if first := firstSystemdToken(execLine); first != spaced {
+		t.Fatalf("first ExecStart argv token = %q, want the full path %q", first, spaced)
+	}
+
+	// Strict-mode: ` --strict-mode` appended AFTER ` supervise`, both outside quotes.
+	strictBody := renderLinuxUnit(spaced, true)
+	wantStrict := `ExecStart="/home/me/My Apps/mcphub" supervise --strict-mode`
+	if !strings.Contains(strictBody, wantStrict) {
+		t.Fatalf("strict ExecStart not quoted with flag; want line containing %q\nbody:\n%s", wantStrict, strictBody)
+	}
+
+	// Negative control: a space-free path still renders a working ExecStart.
+	// Quoting a space-free path is harmless — systemd unquotes it identically.
+	plainBody := renderLinuxUnit("/usr/local/bin/mcphub", false)
+	plainLine := extractExecStartLine(t, plainBody)
+	if !strings.HasPrefix(plainLine, "ExecStart=") {
+		t.Fatalf("space-free ExecStart line does not start with ExecStart=: %q", plainLine)
+	}
+	if !strings.Contains(plainLine, "/usr/local/bin/mcphub") || !strings.Contains(plainLine, " supervise") {
+		t.Fatalf("space-free ExecStart missing path or ` supervise`: %q", plainLine)
+	}
+}
+
+// extractExecStartLine returns the sole ExecStart= line from a rendered unit.
+func extractExecStartLine(t *testing.T, body string) string {
+	t.Helper()
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "ExecStart=") {
+			return line
+		}
+	}
+	t.Fatalf("no ExecStart= line in unit body:\n%s", body)
+	return ""
+}
+
+// firstSystemdToken extracts the first double-quoted argument value from an
+// ExecStart line (the executable path), reversing the `\"` / `\\` escapes
+// systemd would unescape. It assumes the path is quoted (the FIX 1 contract).
+func firstSystemdToken(execLine string) string {
+	rest := strings.TrimPrefix(execLine, "ExecStart=")
+	if len(rest) == 0 || rest[0] != '"' {
+		return ""
+	}
+	var b strings.Builder
+	i := 1
+	for i < len(rest) {
+		c := rest[i]
+		if c == '\\' && i+1 < len(rest) {
+			b.WriteByte(rest[i+1])
+			i += 2
+			continue
+		}
+		if c == '"' {
+			break
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return b.String()
 }
 
 func TestLinuxBackend_EnableRunsSystemctl(t *testing.T) {

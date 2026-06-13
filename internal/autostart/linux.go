@@ -95,7 +95,7 @@ func renderLinuxUnit(mcphubPath string, strictMode bool) string {
 		"",
 		"[Service]",
 		"Type=simple",
-		"ExecStart=" + mcphubPath + " supervise" + flag,
+		"ExecStart=" + quoteSystemdExecArg(mcphubPath) + " supervise" + flag,
 		"Restart=on-failure",
 		"RestartSec=5",
 		"",
@@ -103,6 +103,25 @@ func renderLinuxUnit(mcphubPath string, strictMode bool) string {
 		"WantedBy=default.target",
 		"",
 	}, "\n")
+}
+
+// quoteSystemdExecArg double-quotes the first ExecStart token so the systemd
+// command-line parser treats the whole path as ONE argument even when it
+// contains spaces (e.g. `/home/me/My Apps/mcphub`). Per systemd.service(5),
+// an unquoted ExecStart path with spaces is split on whitespace, so the kernel
+// of systemd would try to exec `/home/me/My` with `Apps/mcphub` as argv[1] and
+// the unit would fail to start. systemd honors a C-style double-quoted first
+// argument and unescapes `\"` and `\\` inside it.
+//
+// We escape backslashes FIRST (so a later `"` -> `\"` substitution does not
+// double-escape the backslash it introduces), then double-quotes. A path
+// containing a literal double-quote is pathological on POSIX but handled for
+// safety. Quoting a space-free path is harmless — systemd unquotes it back to
+// the identical token.
+func quoteSystemdExecArg(path string) string {
+	escaped := strings.ReplaceAll(path, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return `"` + escaped + `"`
 }
 
 // Enable writes the unit file and runs `systemctl --user daemon-reload`

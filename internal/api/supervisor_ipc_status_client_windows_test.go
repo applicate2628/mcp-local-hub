@@ -3,8 +3,6 @@
 package api
 
 import (
-	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -13,7 +11,22 @@ import (
 
 func startFakeSupervisorIPCStatusServer(t *testing.T, stateDir string, hello SupervisorLockOwner, handler func(IPCRequest) IPCResponse) func() {
 	t.Helper()
-	t.Setenv("USERNAME", fmt.Sprintf("mcphub-test-%d-%d", os.Getpid(), time.Now().UnixNano()))
+	// Route the pipe name through the per-test discriminator instead of the
+	// kernel SID. SupervisorIPCAddress (supervisor_ipc_address_windows.go)
+	// resolves the SID FIRST and only consults USERNAME on a SID-query
+	// failure; on a real Windows host the SID always resolves, so the old
+	// `t.Setenv("USERNAME", ...)` override was dead-ended by the PR #212 SID
+	// migration and every listening test bound the PRODUCTION pipe
+	// `\\.\pipe\mcphub-supervisor-<SID>`, colliding with the live running
+	// supervisor ("Access is denied"). The discriminator (installed by this
+	// package's TestMain via EnableSupervisorIPCTestPipeIsolation) keys off
+	// MCPHUB_STATE_DIR_OVERRIDE, so a unique temp dir here yields a unique
+	// `\\.\pipe\mcphub-supervisor-test-<hash>` for BOTH this listener and the
+	// client under test — they both call SupervisorIPCAddress and converge.
+	// The env var only steers the discriminator; the on-disk state path stays
+	// controlled by daemonStateRootOverride (set via withDaemonStateRootOverride),
+	// so the seeded supervisor.lock.owner.json is unaffected.
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
 	addr := SupervisorIPCAddress(stateDir)
 	ln, err := winio.ListenPipe(addr, &winio.PipeConfig{
 		MessageMode:      false,
