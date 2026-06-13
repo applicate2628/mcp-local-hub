@@ -539,6 +539,16 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	if regErr != nil {
 		regPath = ""
 	}
+	// Track every task name already seeded (scheduler tasks, then each merge
+	// below) so the supervised/registry/intent merges never double-emit a row.
+	// Bare-form key (leading "\" trimmed) so a scheduler-emitted "\mcp-..." row
+	// dedups against a registry/intent "mcp-..." entry. Declared OUT of the
+	// regPath block so the supervisor-intent merge below dedups even when the
+	// registry path can't be resolved.
+	seen := make(map[string]bool, len(result))
+	for i := range result {
+		seen[strings.TrimPrefix(result[i].TaskName, "\\")] = true
+	}
 	// Merge supervised/registry-backed LSP proxies that have NO scheduler task.
 	// The v0.5.x supervised path (register_supervisor.go) writes these as
 	// supervisor-intent children only, so sch.List never surfaces them — without
@@ -547,10 +557,6 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	// overlays Port/Language/Lifecycle and the alive-probe derives their State.
 	registryOnlyLive := map[string]bool{}
 	if regPath != "" {
-		seen := make(map[string]bool, len(result))
-		for i := range result {
-			seen[strings.TrimPrefix(result[i].TaskName, "\\")] = true
-		}
 		reg := NewRegistry(regPath)
 		if err := reg.Load(); err == nil {
 			for _, e := range reg.LSPEntries() {
@@ -570,6 +576,26 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 			}
 		}
 	}
+	// Merge Phase-F supervisor-only GLOBAL daemons that have NO scheduler task.
+	// In v0.6 every GLOBAL install uses SkipSchedulerTasks=true
+	// (install_parsed_manifest.go), so a newly installed/migrated global daemon
+	// (e.g. `fetch`) exists ONLY in supervisor-intent.json — statusSchedulerTasks
+	// never surfaces it, and the LSP merge above only covers workspace-scoped
+	// lazy-proxy rows. Without this seed the daemon DISAPPEARS from the
+	// --health / --force-materialize / ProbeHealth table even though bare
+	// `mcphub status` shows it (that path goes through the supervisor IPC seam).
+	//
+	// Best-effort + fail-open: a missing/unreadable intent file keeps the
+	// scheduler-only behavior. Maintenance descriptors (watchdog/liveness/
+	// weekly-refresh) are excluded — they are not probeable daemons — and any
+	// descriptor already represented by a scheduler/LSP row is deduped away.
+	// The per-row State is seeded "Ready" (the same neutral seed the scheduler
+	// path uses) so enrichStatusWithRegistry's alive-probe derives the real
+	// state: deriveState("Ready", alive) → "Running" when the port is bound,
+	// "Stopped" otherwise. The descriptor carries the authoritative Server/
+	// Daemon/Port, which enrichStatusWithRegistry preserves (the manifest-port
+	// lookup only overwrites when the manifest actually has a matching port).
+	mergeSupervisorOnlyDaemonRows(&result, seen)
 	enrichStatusWithRegistry(result, "", regPath)
 	finalizeRegistryOnlyWorkspaceStates(result, registryOnlyLive)
 	if opts.ProbeHealth {
@@ -579,6 +605,74 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 		forceMaterializeWorkspaceScoped(result, regPath)
 	}
 	return result, nil
+}
+
+// readSupervisorIntentForStatus loads the supervisor-intent.json descriptor
+// set used to seed Phase-F supervisor-only daemon rows. Best-effort: a
+// missing/unreadable intent file (no install yet, parent-dir gate rejection,
+// decode error) returns (nil, err) and the caller keeps the scheduler-only
+// behavior. Honors the daemonStateRootOverride state-dir test seam (via
+// DefaultSupervisorIntentPath → DaemonStateDir), so tests redirect the read to
+// a temp dir without env vars.
+func readSupervisorIntentForStatus() (*SupervisorIntentFile, error) {
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return nil, err
+	}
+	return ReadSupervisorIntent(path)
+}
+
+// mergeSupervisorOnlyDaemonRows appends a status row for every Phase-F
+// supervisor-only GLOBAL daemon — a descriptor present in
+// supervisor-intent.json with NO matching scheduler task (v0.6 global installs
+// use SkipSchedulerTasks=true) and not already merged from the registry LSP
+// path. Without this, such daemons (e.g. `fetch`) are invisible to the
+// StatusWithOpts health/force-materialize path even though bare
+// `mcphub status` (supervisor IPC seam) lists them.
+//
+// Dedup is by bare (leading-"\" trimmed) task name against the shared `seen`
+// set the caller already populated from the scheduler + LSP-merge rows, so a
+// daemon present in BOTH scheduler and intent appears exactly once.
+//
+// Excluded:
+//   - descriptors with an empty TaskName (cannot dedup or probe),
+//   - maintenance descriptors (watchdog/liveness/weekly-refresh) — not
+//     probeable daemons; IsMaintenanceTaskName is the single source of truth,
+//   - any descriptor already represented by a scheduler/LSP row.
+//
+// Seeded State is "Ready" (the neutral scheduler seed) so the downstream
+// enrichStatusWithRegistry alive-probe derives the real state from port
+// liveness. The descriptor's Server/Daemon/Port are carried onto the row;
+// enrichStatusWithRegistry re-derives Server/Daemon from the (global) task
+// name and only overwrites Port when the manifest actually has a matching
+// entry, so the descriptor's authoritative Port survives an embed miss.
+//
+// Best-effort + fail-open: a read error keeps the scheduler-only result.
+func mergeSupervisorOnlyDaemonRows(result *[]DaemonStatus, seen map[string]bool) {
+	intent, err := readSupervisorIntentForStatus()
+	if err != nil || intent == nil {
+		return
+	}
+	for _, d := range intent.Daemons {
+		if d.TaskName == "" {
+			continue
+		}
+		if IsMaintenanceTaskName(d.TaskName) {
+			continue
+		}
+		bare := strings.TrimPrefix(canonicalIntentTaskKey(d.TaskName), "\\")
+		if seen[bare] {
+			continue
+		}
+		seen[bare] = true
+		*result = append(*result, DaemonStatus{
+			TaskName: canonicalIntentTaskKey(d.TaskName),
+			Server:   d.Server,
+			Daemon:   d.Daemon,
+			Port:     d.Port,
+			State:    "Ready",
+		})
+	}
 }
 
 // forceMaterializeProbe is the hook StatusWithOpts uses when

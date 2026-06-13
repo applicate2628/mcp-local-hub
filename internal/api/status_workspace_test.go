@@ -151,6 +151,10 @@ func TestEnrichStatusWithRegistry_WorkspaceScoped(t *testing.T) {
 
 func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+	// Redirect the supervisor-intent read (the Phase-F supervisor-only seed in
+	// StatusWithOpts) to a fresh empty temp state dir so it never reads the
+	// host's live supervisor-intent.json. Absent file → no-op merge.
+	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
 
 	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
 	origRegPath := defaultRegistryPathFn
@@ -230,6 +234,8 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 
 func TestStatusWithOpts_RegistryOnlyWorkspaceRowsUsePortLivenessWithoutHealth(t *testing.T) {
 	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+	// Hermetic supervisor-intent read (see sibling test) — empty temp state dir.
+	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
 
 	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
 	origRegPath := defaultRegistryPathFn
@@ -299,6 +305,8 @@ func TestStatusWithOpts_RegistryOnlyWorkspaceRowsUsePortLivenessWithoutHealth(t 
 
 func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) {
 	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+	// Hermetic supervisor-intent read (see sibling test) — empty temp state dir.
+	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
 
 	live, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -389,6 +397,11 @@ func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) 
 }
 
 func TestStatusWithOpts_MergesRegistryRowsWhenSchedulerUnavailable(t *testing.T) {
+	// Hermetic supervisor-intent read (the Phase-F supervisor-only seed in
+	// StatusWithOpts) — empty temp state dir so it never reads the host's live
+	// supervisor-intent.json. Absent file → no-op merge.
+	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
+
 	origScheduler := statusSchedulerFactory
 	statusSchedulerFactory = func() (scheduler.Scheduler, error) {
 		return nil, fmt.Errorf("linux scheduler not yet implemented (Phase 0-1 is Windows-first): %w", scheduler.ErrNotImplemented)
