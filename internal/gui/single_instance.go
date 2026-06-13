@@ -692,26 +692,52 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 			return nil, v, fmt.Errorf("kill refused: pre-kill identity probe failed")
 		}
 		if idErr == nil {
-			// Build a fresh Verdict carrying just the identity
-			// fields the gate consults, then re-run the shared
-			// gate so any future widening of the gate logic
-			// applies here automatically.
-			vNow := Verdict{
-				PID:           v.PID,
-				PIDAlive:      idNow.Alive,
-				PIDImage:      idNow.ImagePath,
-				pidCmdlineRaw: idNow.Cmdline,
-				PIDStart:      idNow.StartTime,
-				Mtime:         v.Mtime,
-			}
-			if len(idNow.Cmdline) >= 2 {
-				vNow.PIDSubcommand = idNow.Cmdline[1]
-			}
-			if refused, diagnose, hint, errReason := checkIdentityGateInternal(vNow); refused {
-				v.Class = VerdictKillRefused
-				v.Diagnose = "pre-kill recheck: " + diagnose
-				v.Hint = hint
-				return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
+			// pr301 r6 (bot Finding, second gate): an already-GONE
+			// holder must reach the recovery path, NOT be refused on
+			// empty identity. processID of a dead PID returns
+			// Alive=false with empty ImagePath/Cmdline/StartTime (and
+			// idErr==nil) on both Windows and Linux. If we re-ran the
+			// shared gate on that empty Verdict, matchBasename("")
+			// would trip the image arm → VerdictKillRefused, stranding
+			// the operator on a stuck lock whose holder is already
+			// dead. But a dead holder's exit is exactly what releases
+			// the flock, so the kill the recheck guards is moot. Skip
+			// the gate re-run and fall through: killProcess of a gone
+			// PID falls into the line ~735 already-gone branch
+			// (processID confirms !Alive) → acquire-poll →
+			// VerdictKilledRecovered. This mirrors the kill-error
+			// already-gone semantics that path already uses.
+			//
+			// This keys strictly on !idNow.Alive, NOT on empty
+			// identity: a LIVE-but-unverifiable holder (Denied=true on
+			// EPERM/ACCESS_DENIED) reports Alive=true with empty
+			// ImagePath, so it STILL falls through to the gate re-run
+			// below and STILL refuses on the image arm (fail closed —
+			// SEC-F3 preserved). Only a genuinely-dead PID skips here.
+			if idNow.Alive {
+				// Build a fresh Verdict carrying just the identity
+				// fields the gate consults, then re-run the shared
+				// gate so any future widening of the gate logic
+				// applies here automatically. A live holder whose
+				// identity does NOT match (image/argv/start-time/owner
+				// mismatch) must still be refused.
+				vNow := Verdict{
+					PID:           v.PID,
+					PIDAlive:      idNow.Alive,
+					PIDImage:      idNow.ImagePath,
+					pidCmdlineRaw: idNow.Cmdline,
+					PIDStart:      idNow.StartTime,
+					Mtime:         v.Mtime,
+				}
+				if len(idNow.Cmdline) >= 2 {
+					vNow.PIDSubcommand = idNow.Cmdline[1]
+				}
+				if refused, diagnose, hint, errReason := checkIdentityGateInternal(vNow); refused {
+					v.Class = VerdictKillRefused
+					v.Diagnose = "pre-kill recheck: " + diagnose
+					v.Hint = hint
+					return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
+				}
 			}
 		}
 	}
