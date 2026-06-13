@@ -1145,11 +1145,56 @@ func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
 	return results, nil
 }
 
+// upgradeNoClientWriteSentinel is a single empty-string entry passed as
+// InstallOpts.ClientsInclude to materialize a server's supervisor-intent rows
+// WITHOUT rewriting any client config during the legacy-scheduler upgrade
+// migration.
+//
+// bot r33 P2 closure on PR #288: in the legacy migration path,
+// upgradeInstallServer is used ONLY to absorb matched legacy scheduler daemons
+// into supervisor intent AFTER the binary copy — it must NOT touch client
+// configs (the pre-v0.6 upgrade only stopped/copied/restarted daemons). An
+// empty/nil ClientsInclude makes api.installClientPredicate fall back to
+// clients.DefaultInstallClientNames() (claude-code, codex-cli, cursor), so the
+// migration would ADD/OVERWRITE those clients' entries even for an operator who
+// installed only an opt-in client or hand-customized those configs.
+//
+// installClientPredicate's contract (internal/api/install.go) is the in-scope
+// lever: when ClientsInclude is NON-empty it is used verbatim, and each entry
+// that trims to "" is silently dropped BEFORE the unknown-client check — the
+// same empty-entry tolerance parseInstallClientsFlag relies on. A single ""
+// entry therefore yields a non-empty slice (len 1 → not the default branch)
+// whose selected-client set is empty → zero ClientUpdates in the plan, while
+// the supervisor-intent / scheduler / daemon materialization (built
+// unconditionally before the client loop) still runs.
+//
+// Scope note: the cleanest fix would be a named api-side knob (e.g.
+// InstallOpts.SkipClientConfig bool); that change lives in internal/api which
+// is out of this lane's file scope, so this preserve-no-client-writes sentinel
+// is the in-scope equivalent. Tracked as a follow-up to replace the sentinel
+// with an explicit option.
+var upgradeNoClientWriteSentinel = []string{""}
+
+// upgradeServerInstallFn is a narrow test seam ONE level below
+// upgradeInstallServerFn: it intercepts the api.InstallOpts the production
+// upgradeInstallServer body constructs, so a test can assert the call site
+// passes the no-client-write sentinel (FIX 3, bot r33 P2 on PR #288) without
+// driving a real install. nil → the real api.NewAPI().Install.
+var upgradeServerInstallFn func(api.InstallOpts) error
+
 func upgradeInstallServer(server string, w io.Writer) error {
 	if upgradeInstallServerFn != nil {
 		return upgradeInstallServerFn(server, w)
 	}
-	return api.NewAPI().Install(api.InstallOpts{Server: server, Writer: w})
+	opts := api.InstallOpts{
+		Server:         server,
+		ClientsInclude: upgradeNoClientWriteSentinel,
+		Writer:         w,
+	}
+	if upgradeServerInstallFn != nil {
+		return upgradeServerInstallFn(opts)
+	}
+	return api.NewAPI().Install(opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -1376,6 +1421,22 @@ func probeLegacySchedulerUpgradeServers(a *api.API) (legacyUpgradeProbe, error) 
 func legacyUpgradeTaskLooksDaemon(name string) bool {
 	const prefix = "mcp-local-hub-"
 	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	// bot r33 P2 closure on PR #288: workspace-scoped LSP and serena
+	// per-workspace tasks ALSO match the `mcp-local-hub-<rest-with-hyphen>`
+	// shape below (`mcp-local-hub-lsp-<wsKey>-<lang>` and
+	// `mcp-local-hub-serena-<wsKey>`), so classifying them as migratable
+	// global daemons makes `legacyTasks` non-empty while `servers` stays
+	// empty on a workspace-only host — and dispatchUpgradeReal then ABORTS
+	// with "none match a shipped manifest" instead of doing the normal
+	// binary-copy/restart. Those tasks are NOT global daemons (they belong
+	// to the per-workspace `mcphub register` flow, not `mcphub install
+	// --server X`), so exclude them up-front. Reuse the canonical structural
+	// predicates from internal/api (both accept the bare, leading-backslash-
+	// stripped form this function receives) rather than re-deriving the
+	// task-name shapes here.
+	if api.IsLazyProxyTaskName(name) || api.IsSerenaTaskName(name) {
 		return false
 	}
 	rest := strings.TrimPrefix(name, prefix)

@@ -12,14 +12,33 @@ import (
 // that workflow behind `mcphub install --upgrade`. This alias makes
 // it surface alongside `install`, `restart`, `stop`, etc.
 //
-// The alias delegates to the same `runInstallUpgrade` function the
-// `--upgrade` flag uses, so the two entry points produce identical
-// behavior: stop every mcp-local-hub-* daemon, copy the running
-// binary over ~/.local/bin/mcphub.exe (bootstrap copy-only, skipping
-// PATH registration per bot r2 P1 on PR #181), restart daemons.
-// Self-replace guard, upgrade-specific recovery hints in error wraps,
-// and the dry-run / mutex protections all carry over identically
-// because the implementation is shared.
+// The alias routes through the SAME `dispatchUpgrade` entry the
+// `mcphub install --upgrade` flag uses (install.go), so the two entry
+// points produce identical behavior. dispatchUpgrade is the
+// machine-state dispatcher that picks the right sink based on what is
+// on disk:
+//
+//   - v0.5.x host (supervisor-intent.json with ≥1 daemon row) →
+//     the rename-aside + IPC-handoff cold-restart upgrade.
+//   - v0.4 scheduler-only host (legacy scheduler daemon tasks, no
+//     supervisor intent) → the legacy-scheduler upgrade migration.
+//   - fresh install (no supervisor state on disk) → the legacy
+//     binary-copy body (stop every mcp-local-hub-* daemon, copy the
+//     running binary over ~/.local/bin/mcphub.exe bootstrap copy-only
+//     skipping PATH registration per bot r2 P1 on PR #181, restart
+//     daemons).
+//
+// bot r33 P2 closure on PR #288: BEFORE this, the alias called
+// `runInstallUpgrade` directly — the LEGACY binary-copy body — so on
+// a live v0.5+ host with daemon rows it bypassed the dispatcher and
+// ran the stop/copy/restart path instead of the supervisor
+// rename-aside / IPC handoff, which could leave the running supervisor
+// on the old binary or holding the target lock. Routing through
+// dispatchUpgrade fixes the divergence so both documented entry points
+// behave identically. Self-replace guard, dev-build guard,
+// upgrade-specific recovery hints, and the GUI-lock preflight all
+// carry over identically because every sink reuses
+// runInstallUpgradePreflightGuards.
 //
 // Why an alias instead of a flag rename:
 //
@@ -62,7 +81,12 @@ Examples:
   ./mcphub install --upgrade
 
 This subcommand is a discoverability alias for ` + "`install --upgrade`" + `
-introduced in bug-bash A7. Both forms run the same code path.
+introduced in bug-bash A7. Both forms route through the same
+machine-state dispatcher (dispatchUpgrade), so they run the same code
+path: a v0.5+ host takes the supervisor rename-aside + IPC-handoff
+cold-restart, a v0.4 scheduler-only host takes the legacy-scheduler
+upgrade migration, and a fresh install falls back to the
+binary-copy + restart body described above.
 
 Limitations:
   - The GUI/tray process is NOT auto-stopped by upgrade (gap tracked
@@ -78,7 +102,14 @@ Limitations:
 
 See also: install, setup, restart, stop, watchdog.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInstallUpgrade(cmd)
+			// bot r33 P2 closure on PR #288: route the top-level
+			// `mcphub upgrade` alias through the SAME machine-state
+			// dispatcher the `install --upgrade` flag uses, NOT the
+			// legacy runInstallUpgrade body directly. The alias has none
+			// of install's flags (--server/--daemon/--all/...), so it
+			// needs no mutual-exclusivity guard before the call;
+			// dispatchUpgrade does not read those flags off cmd.
+			return dispatchUpgrade(cmd)
 		},
 	}
 }

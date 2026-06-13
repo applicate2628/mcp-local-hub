@@ -7,7 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/scheduler"
 )
 
 // TestUpgradeCmd_Registered pins that the top-level `mcphub upgrade`
@@ -35,50 +38,116 @@ func TestUpgradeCmd_Registered(t *testing.T) {
 	}
 }
 
-// TestUpgradeCmd_DelegatesToInstallUpgrade pins that running
-// `mcphub upgrade` invokes the same code path as `mcphub install
-// --upgrade` — verifies the self-replace guard fires identically
-// when the runtime conditions match, so we know the alias isn't
-// silently diverging from the install-flag variant.
-func TestUpgradeCmd_DelegatesToInstallUpgrade(t *testing.T) {
+// TestUpgradeCmd_RoutesThroughDispatchUpgrade is the FIX 1 (bot r33 P2,
+// PR #288) falsifying regression. The top-level `mcphub upgrade` alias MUST
+// route through the SAME machine-state dispatcher (dispatchUpgrade) the
+// `install --upgrade` flag uses — NOT call the legacy runInstallUpgrade body
+// directly.
+//
+// Pre-fix the alias's RunE was `return runInstallUpgrade(cmd)`, which bypasses
+// the dispatcher: on a v0.5+ host with daemon rows it ran the legacy
+// stop/copy/restart path instead of the supervisor rename-aside + IPC handoff.
+// With the seam injected, a pre-fix alias would never fire upgradeDispatcher;
+// this assertion catches that divergence.
+func TestUpgradeCmd_RoutesThroughDispatchUpgrade(t *testing.T) {
+	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
-	canonical := "C:\\Users\\u\\.local\\bin\\mcphub.exe"
-	upgradeExecutableFn = func() (string, error) { return canonical, nil }
-	upgradeTargetPathFn = func() (string, error) { return canonical, nil }
-	stopCalled := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		stopCalled = true
-		return nil, nil
+	var dispatched bool
+	upgradeDispatcher = func(cmd *cobra.Command) error {
+		dispatched = true
+		return nil
+	}
+	// If the alias regressed to calling runInstallUpgrade directly, it would
+	// resolve the current executable first via this seam. Fail loud if so.
+	upgradeExecutableFn = func() (string, error) {
+		t.Fatal("alias reached the legacy runInstallUpgrade body (resolved current executable) instead of routing through dispatchUpgrade")
+		return "", nil
 	}
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"upgrade"})
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	root.SetOut(stdout)
-	root.SetErr(stderr)
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
 	root.SilenceUsage = true
 	root.SilenceErrors = true
 
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("want self-replace guard error (same as `install --upgrade` from canonical path), got nil")
+	if err := root.Execute(); err != nil {
+		t.Fatalf("upgrade alias: %v", err)
 	}
-	if !strings.Contains(err.Error(), "refusing to --upgrade from the canonical binary") {
-		t.Errorf("expected self-replace guard error from runInstallUpgrade; got %q", err.Error())
-	}
-	if stopCalled {
-		t.Errorf("StopAll must NOT fire when self-replace guard catches; same invariant as install --upgrade")
+	if !dispatched {
+		t.Fatal("upgrade alias did not route through dispatchUpgrade (upgradeDispatcher seam never fired)")
 	}
 }
 
-// TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow pins that on the
-// non-canonical-path (good) case, the alias runs through StopAll →
-// Bootstrap → RestartAll just like `install --upgrade`. Uses fakes
-// so no real daemons are touched.
+// TestUpgradeCmd_AliasAndFlagShareDispatcher pins that BOTH documented entry
+// points — the `mcphub upgrade` alias and the `mcphub install --upgrade` flag —
+// route through the SAME dispatchUpgrade seam, so they cannot silently diverge
+// (FIX 1, bot r33 P2 on PR #288).
+func TestUpgradeCmd_AliasAndFlagShareDispatcher(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		exec func(root *cobra.Command) error
+	}{
+		{
+			name: "alias",
+			exec: func(root *cobra.Command) error {
+				root.SetArgs([]string{"upgrade"})
+				return root.Execute()
+			},
+		},
+		{
+			name: "install-flag",
+			exec: func(root *cobra.Command) error {
+				root.SetArgs([]string{"install", "--upgrade"})
+				return root.Execute()
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetUpgradeRoutingSeams(t)
+			resetUpgradeSeams(t)
+
+			var dispatched int
+			upgradeDispatcher = func(cmd *cobra.Command) error {
+				dispatched++
+				return nil
+			}
+
+			root := NewRootCmd()
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			root.SilenceUsage = true
+			root.SilenceErrors = true
+
+			if err := tc.exec(root); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if dispatched != 1 {
+				t.Fatalf("%s: dispatchUpgrade fired %d time(s), want exactly 1", tc.name, dispatched)
+			}
+		})
+	}
+}
+
+// TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow pins that on a
+// fresh-install host (no supervisor-intent.json, no legacy scheduler tasks),
+// the alias's dispatchUpgrade routing falls through to the legacy
+// runInstallUpgrade body and runs StopAll → Bootstrap → RestartAll, identical
+// to `install --upgrade`. Uses fakes so no real daemons are touched.
 func TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow(t *testing.T) {
+	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
+
+	// Fresh-install state: empty state-dir (no supervisor-intent.json) and an
+	// empty fake scheduler (no legacy daemon tasks) → dispatchUpgradeReal falls
+	// through to runInstallUpgrade.
+	root := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		return &upgradeRoutingFakeScheduler{}, nil
+	})
+	t.Cleanup(restoreScheduler)
 
 	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
 	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
@@ -96,14 +165,14 @@ func TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow(t *testing.T) {
 		return []api.RestartResult{{TaskName: "demo"}}, nil
 	}
 
-	root := NewRootCmd()
-	root.SetArgs([]string{"upgrade"})
-	root.SetOut(&bytes.Buffer{})
-	root.SetErr(&bytes.Buffer{})
-	root.SilenceUsage = true
-	root.SilenceErrors = true
+	rootCmd := NewRootCmd()
+	rootCmd.SetArgs([]string{"upgrade"})
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetErr(&bytes.Buffer{})
+	rootCmd.SilenceUsage = true
+	rootCmd.SilenceErrors = true
 
-	if err := root.Execute(); err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("upgrade alias: %v", err)
 	}
 	want := []string{"stop", "bootstrap", "restart"}
