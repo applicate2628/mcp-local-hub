@@ -1166,6 +1166,41 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 	return report, nil
 }
 
+// installedServerNameSet returns the set of currently-installed server
+// names (the manifest catalog the longest-installed-prefix disambiguator
+// consults). Best-effort by contract: on any catalog read error it returns
+// an EMPTY set. blankServerRowOwnedByLongestInstalledPrefix treats an empty
+// set as "no sibling proof exists", which makes it claim any prefix-matching
+// task — the documented safe full-cleanup fallback (r33-2). This is the
+// single source of `installedServers` threaded into the four hyphen-family
+// ownership guards (uninstall delete, full-reinstall prune, stop/restart
+// per-daemon gate, and the listTasksForServer scope filter).
+func installedServerNameSet() map[string]struct{} {
+	names, _ := listManifestNamesEmbedFirst()
+	out := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		out[n] = struct{}{}
+	}
+	return out
+}
+
+// taskOwnedByServerExactOrLongestPrefix reports whether a managed scheduler
+// task name belongs to `server` under the same disambiguation the
+// supervisor-intent ownership uses: an EXACT parsed-server match, OR (for a
+// blank/legacy daemon row) the longest-installed-prefix rule. Workspace
+// lazy-proxy tasks (`mcp-local-hub-lsp-<key>-<lang>`, no server slug in the
+// name) are NOT owned by any global server name and always return false here;
+// callers handle those via the dedicated workspace branch instead.
+func taskOwnedByServerExactOrLongestPrefix(taskName, server string, installedServers map[string]struct{}) bool {
+	if IsLazyProxyTaskName(taskName) {
+		return false
+	}
+	if parsedServer, _ := ParseManagedTaskName(taskName); parsedServer == server {
+		return true
+	}
+	return blankServerRowOwnedByLongestInstalledPrefix(canonicalIntentTaskKey(taskName), server, installedServers)
+}
+
 func uninstallSchedulerTasksForServer(server string) (scheduler.Scheduler, []scheduler.TaskStatus, error) {
 	sch, err := newScheduler()
 	if err != nil {
@@ -1182,7 +1217,20 @@ func uninstallSchedulerTasksForServer(server string) (scheduler.Scheduler, []sch
 		}
 		return nil, nil, err
 	}
-	return sch, tasks, nil
+	// FIX 1 (bot PR #288 hyphen-family): sch.List is a raw HasPrefix match, so
+	// uninstalling `demo` would otherwise sweep sibling `demo-alpha`'s task
+	// `\mcp-local-hub-demo-alpha-beta` and DELETE it. Filter to tasks this
+	// server actually owns under the longest-installed-prefix disambiguator
+	// (the helper expects the canonical leading-backslash form) so both DELETE
+	// callers (Uninstall, uninstallWithoutManifest) skip foreign tasks.
+	installed := installedServerNameSet()
+	owned := tasks[:0]
+	for _, t := range tasks {
+		if taskOwnedByServerExactOrLongestPrefix(t.Name, server, installed) {
+			owned = append(owned, t)
+		}
+	}
+	return sch, owned, nil
 }
 
 // BuildPlanOpts controls plan-time filtering.
@@ -2411,6 +2459,13 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 	if err != nil {
 		return nil, fmt.Errorf("list tasks for %s: %w", server, err)
 	}
+	// FIX 2 (bot PR #288 hyphen-family): `planned` holds only THIS server's own
+	// tasks, so a sibling's task (e.g. `\mcp-local-hub-demo-alpha-beta`, owned by
+	// installed server `demo-alpha`) is absent from `planned` and a raw-prefix
+	// prune of `demo` would DELETE it. Build the installed-server catalog once
+	// and skip any task a LONGER installed server name also prefixes — the
+	// longest-installed-prefix disambiguator owns it.
+	installed := installedServerNameSet()
 	var rollbacks []func()
 	for _, task := range existing {
 		// Windows Task Scheduler prefixes names with a leading backslash
@@ -2421,6 +2476,11 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 			continue
 		}
 		if _, keep := planned[name]; keep {
+			continue
+		}
+		// Ownership guard: only prune tasks `server` actually owns. A sibling
+		// task whose longest installed prefix is a DIFFERENT server survives.
+		if !taskOwnedByServerExactOrLongestPrefix(task.Name, server, installed) {
 			continue
 		}
 		// Snapshot XML for rollback. Best-effort: if the backend can't
@@ -2534,6 +2594,7 @@ func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]
 	}
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
+	installed := installedServerNameSet()
 	var results []RestartResult
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
@@ -2543,11 +2604,8 @@ func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]
 		if _, already := handledTasks[normalized]; already {
 			continue
 		}
-		if daemonFilter != "" {
-			wantSuffix := "-" + daemonFilter
-			if !strings.HasSuffix(normalized, wantSuffix) {
-				continue
-			}
+		if !taskMatchesServerDaemonGate(normalized, server, daemonFilter, installed) {
+			continue
 		}
 		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
@@ -2560,6 +2618,48 @@ func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
+}
+
+// taskMatchesServerDaemonGate is the exact-identity per-daemon gate shared by
+// the stopKillCore and Restart legacy scheduler loops (FIX 3, bot PR #288
+// hyphen-family). The previous gate was a bare
+// `strings.HasSuffix(normalized, "-"+daemonFilter)`, which matched sibling
+// tasks: `stop --server demo --daemon beta` matched
+// `\mcp-local-hub-demo-alpha-beta` (server demo-alpha / daemon beta) and killed
+// demo-alpha's REAL port.
+//
+// The gate distinguishes three cases:
+//
+//   - Workspace lazy-proxy tasks (`mcp-local-hub-lsp-<key>-<lang>`) carry no
+//     server slug, so ParseManagedTaskName would mis-split them. They keep the
+//     original suffix semantics: an empty daemonFilter targets every workspace
+//     proxy listTasksForServer surfaced (preserving `stop --server
+//     mcp-language-server`); a non-empty daemonFilter matches the proxy whose
+//     `lsp-<key>-<lang>` daemon segment equals it.
+//
+//   - A NON-EMPTY daemonFilter is matched by exact task-name reconstruction:
+//     the task must equal `mcp-local-hub-<server>-<daemonFilter>` verbatim. This
+//     is unambiguous even for hyphenated daemon names (`vscode-css`), where
+//     ParseManagedTaskName's greedy LastIndex('-') split would otherwise
+//     misattribute server/daemon. It rejects `mcp-local-hub-demo-alpha-beta`
+//     for (demo, beta) because the exact name is `mcp-local-hub-demo-beta`.
+//
+//   - An EMPTY daemonFilter (whole-server stop/restart) defers to the SAME
+//     longest-installed-prefix ownership used by listTasksForServer's scope
+//     filter, so the two layers agree: a sibling-owned task is excluded, a
+//     genuinely-owned (exact or longest-prefix) task is included.
+func taskMatchesServerDaemonGate(normalized, server, daemonFilter string, installedServers map[string]struct{}) bool {
+	if IsLazyProxyTaskName(normalized) {
+		if daemonFilter == "" {
+			return true
+		}
+		return strings.HasSuffix(normalized, "-"+daemonFilter)
+	}
+	if daemonFilter != "" {
+		want := strings.TrimPrefix(canonicalIntentTaskKey("mcp-local-hub-"+server+"-"+daemonFilter), `\`)
+		return strings.TrimPrefix(normalized, `\`) == want
+	}
+	return taskOwnedByServerExactOrLongestPrefix(normalized, server, installedServers)
 }
 
 // Restart kills the live daemons for one server (+ optional daemon
@@ -2598,6 +2698,7 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 	}
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
+	installed := installedServerNameSet()
 	for _, t := range tasks {
 		normalized := strings.TrimPrefix(t.Name, "\\")
 		if !isHubDaemonSchedulerTaskName(normalized) {
@@ -2606,11 +2707,8 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 		if _, already := handledTasks[normalized]; already {
 			continue
 		}
-		if daemonFilter != "" {
-			wantSuffix := "-" + daemonFilter
-			if !strings.HasSuffix(normalized, wantSuffix) {
-				continue
-			}
+		if !taskMatchesServerDaemonGate(normalized, server, daemonFilter, installed) {
+			continue
 		}
 		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
@@ -2664,6 +2762,23 @@ func listTasksForServer(sch scheduler.Scheduler, server string) ([]scheduler.Tas
 	if err != nil {
 		return nil, err
 	}
+	// FIX 4 (bot PR #288 hyphen-family): sch.List is a raw HasPrefix match, so
+	// `--server demo` over-captures sibling `demo-alpha`'s task
+	// `\mcp-local-hub-demo-alpha-beta`; portForTask would then resolve
+	// demo-alpha's REAL port and stop/restart would kill its live daemon. Filter
+	// the primary list to tasks `demo` actually owns (exact parsed-server match,
+	// or the longest-installed-prefix rule for a blank/legacy daemon row). The
+	// workspace lsp-* branch below is left UNTOUCHED — those proxy tasks carry no
+	// server slug in the name and are owned via the registry/workspace-path
+	// handling in portForTask, not by this server-name filter.
+	installed := installedServerNameSet()
+	owned := primary[:0]
+	for _, t := range primary {
+		if taskOwnedByServerExactOrLongestPrefix(t.Name, server, installed) {
+			owned = append(owned, t)
+		}
+	}
+	primary = owned
 	if !serverIsWorkspaceScoped(server) {
 		return primary, nil
 	}
