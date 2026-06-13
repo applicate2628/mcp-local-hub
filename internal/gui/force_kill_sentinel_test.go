@@ -187,6 +187,189 @@ func TestKillRecordedHolder_RaceDeadHolder_ReachesRecovery(t *testing.T) {
 	}
 }
 
+// TestKillRecordedHolder_RaceDeadHolder_DoesNotKill is the FALSIFYING CORE of
+// pr301 r7 Finding 2 (P2 #717). It drives the FULL KillRecordedHolder path with
+// an already-gone holder (same setup as the r6 RaceDeadHolder test) but adds the
+// assertion the r6 test omitted: killProcess must NOT be called in the gone case.
+//
+// The r6 fix skipped only the gate re-run when the final recheck saw !Alive, then
+// FELL THROUGH to kill(v.PID). With the holder already gone there is no validated
+// target — and a PID REUSED between the recheck and the kill (or a transient
+// not-Alive probe) could be terminated WITHOUT the image/argv/start-time/owner
+// gate that was just skipped. The r7 fix makes the gone case go STRAIGHT to the
+// acquire-poll recovery path: no gate re-run AND no kill.
+//
+// Assertions: (1) killProcess is NEVER invoked; (2) the verdict still reaches
+// VerdictKilledRecovered via acquire-poll (the holder's exit released the flock).
+func TestKillRecordedHolder_RaceDeadHolder_DoesNotKill(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS short-circuits before the recheck; --force --kill is blocked on darwin")
+	}
+
+	prevOwner := processOwnerSIDMatchesCurrentFn
+	t.Cleanup(func() { processOwnerSIDMatchesCurrentFn = prevOwner })
+	processOwnerSIDMatchesCurrentFn = func(int) (bool, error) { return true, nil } // same owner
+
+	// Stateful processID: call 1 (probeOnce) → alive valid mcphub-gui identity →
+	// VerdictLiveUnreachable (reaches the gate). Call 2+ (final recheck and the
+	// wait-for-exit loop) → the holder has exited: Alive=false (the production
+	// dead-PID shape on Windows/Linux). Returning !Alive on every subsequent
+	// call keeps the holder gone for the whole recovery window so the test is
+	// not sensitive to how many times processID is consulted downstream.
+	var processIDCalls atomic.Int32
+	prevProcessID := ProcessIDForTest()
+	t.Cleanup(func() { RestoreProcessID(prevProcessID) })
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		if processIDCalls.Add(1) == 1 {
+			return ProcessIdentity{
+				Alive:     true,
+				ImagePath: mcphubBinaryNameForTest(),
+				Cmdline:   []string{mcphubBinaryNameForTest(), "gui"},
+				StartTime: time.Now().Add(-1 * time.Hour),
+			}, nil
+		}
+		// Holder exited mid-window and stays gone: dead PID → Alive=false.
+		return ProcessIdentity{Alive: false}, nil
+	})
+
+	// Spy: the kill must NEVER fire when the recheck observed the holder gone.
+	// A reused PID terminated here would be killed without the identity gate —
+	// exactly the bug P2 #717 flags.
+	var killCalled atomic.Bool
+	prevKill := killProcessOverride
+	t.Cleanup(func() { killProcessOverride = prevKill })
+	killProcessOverride = func(pid int) error {
+		killCalled.Store(true)
+		return nil
+	}
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	const probablyClosedPort = 1 // ping fails → not Healthy
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate mtime so probe does NOT retry — single LiveUnreachable
+	// observation → deterministic processID call ordering.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Deliberately DO NOT pre-acquire the flock: the synthetic holder is
+	// already gone, so the lock is free and the acquire-poll must succeed.
+	opts := KillOpts{
+		KillExitBackoff:  5 * time.Millisecond,
+		KillExitDeadline: 1 * time.Second,
+		AcquireBackoff:   5 * time.Millisecond,
+		AcquireDeadline:  500 * time.Millisecond,
+	}
+	lock, v, err := KillRecordedHolder(context.Background(), pidport, opts)
+	if lock != nil {
+		defer lock.Release()
+	}
+
+	if killCalled.Load() {
+		t.Fatal("pr301 r7 Finding 2 regression: killProcess fired on an already-gone holder. " +
+			"The final recheck observed !Alive, so the kill must be SKIPPED entirely — falling " +
+			"through to kill(v.PID) can terminate a PID reused between the recheck and the kill " +
+			"WITHOUT the identity gate that was just skipped. The gone case must go straight to " +
+			"acquire-poll recovery.")
+	}
+	if v.Class != VerdictKilledRecovered {
+		t.Fatalf("an already-gone holder must still reach the acquire-poll recovery path "+
+			"(VerdictKilledRecovered) without killing anything; Class = %v, Diagnose=%q",
+			v.Class, v.Diagnose)
+	}
+	if err != nil {
+		t.Errorf("recovered (no-kill) path returned non-nil error: %v", err)
+	}
+	if lock == nil {
+		t.Errorf("VerdictKilledRecovered but lock is nil — caller has nothing to Release")
+	}
+}
+
+// TestKillRecordedHolder_LiveMatchedHolder_StillKills is the
+// SECURITY/BEHAVIOR-PRESERVATION control for pr301 r7 Finding 2. It proves the
+// gone-case kill-skip does NOT suppress the kill for a LIVE holder whose
+// identity MATCHES: such a holder must STILL be killed normally (killProcess
+// invoked) and the verdict reaches VerdictKilledRecovered after acquire-poll.
+//
+// Setup: probe sees a valid mcphub-gui identity (passes the first gate), and the
+// final recheck ALSO sees the same live, matching identity (Alive=true, gate
+// passes). The kill must fire on this live, gate-passed holder — the holderGone
+// skip must be keyed strictly on !Alive, not applied to a live match.
+func TestKillRecordedHolder_LiveMatchedHolder_StillKills(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS short-circuits before the recheck; --force --kill is blocked on darwin")
+	}
+
+	prevOwner := processOwnerSIDMatchesCurrentFn
+	t.Cleanup(func() { processOwnerSIDMatchesCurrentFn = prevOwner })
+	processOwnerSIDMatchesCurrentFn = func(int) (bool, error) { return true, nil } // same owner
+
+	// processID always reports a live, matching mcphub-gui identity at probe AND
+	// recheck. After the kill the wait-loop's processID must report !Alive so the
+	// recovery completes; flip to dead once the kill has been observed.
+	var killCalled atomic.Bool
+	prevProcessID := ProcessIDForTest()
+	t.Cleanup(func() { RestoreProcessID(prevProcessID) })
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		if killCalled.Load() {
+			// Post-kill: holder is gone so the wait-for-exit loop breaks and
+			// acquire-poll can succeed.
+			return ProcessIdentity{Alive: false}, nil
+		}
+		return ProcessIdentity{
+			Alive:     true,
+			ImagePath: mcphubBinaryNameForTest(),
+			Cmdline:   []string{mcphubBinaryNameForTest(), "gui"},
+			StartTime: time.Now().Add(-1 * time.Hour),
+		}, nil
+	})
+
+	prevKill := killProcessOverride
+	t.Cleanup(func() { killProcessOverride = prevKill })
+	killProcessOverride = func(pid int) error {
+		killCalled.Store(true)
+		return nil
+	}
+
+	dir := t.TempDir()
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	opts := KillOpts{
+		KillExitBackoff:  5 * time.Millisecond,
+		KillExitDeadline: 1 * time.Second,
+		AcquireBackoff:   5 * time.Millisecond,
+		AcquireDeadline:  500 * time.Millisecond,
+	}
+	lock, v, err := KillRecordedHolder(context.Background(), pidport, opts)
+	if lock != nil {
+		defer lock.Release()
+	}
+
+	if !killCalled.Load() {
+		t.Fatal("pr301 r7 Finding 2 over-reach guard: a LIVE holder whose identity MATCHES the " +
+			"gate must STILL be killed (killProcess invoked). The gone-case kill-skip must be " +
+			"keyed strictly on !Alive and must not suppress the kill for a live, gate-passed holder.")
+	}
+	if v.Class != VerdictKilledRecovered {
+		t.Fatalf("a live matched holder must be killed and recovered (VerdictKilledRecovered); "+
+			"Class = %v, Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if err != nil {
+		t.Errorf("live-matched kill+recover returned non-nil error: %v", err)
+	}
+}
+
 // TestKillRecordedHolder_LiveMismatchedHolder_StillRefusedAtRecheck is the
 // SECURITY-PRESERVATION control for pr301 r6. It proves the !Alive skip does NOT
 // weaken the live-holder refusal: a holder that is ALIVE at the final recheck

@@ -680,6 +680,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	// shared three-part gate (image basename + argv[1]==gui + start
 	// time ≤ pidport mtime) so future code paths cannot weaken the
 	// production gate by skipping opts.Expected.
+	//
+	// holderGoneAtRecheck records that the recheck observed a genuinely
+	// dead PID (idErr==nil && !Alive). pr301 r7 Finding 2 (P2 #717): the
+	// gone case must skip BOTH the gate re-run AND the kill — see the
+	// guarded block below.
+	holderGoneAtRecheck := false
 	if !v.macOSUnsupported && !v.archUnsupported {
 		idNow, idErr := processID(v.PID)
 		if idErr != nil && !errors.Is(idErr, errMacOSProbeUnsupported) && !errors.Is(idErr, errWindowsArchUnsupported) {
@@ -701,12 +707,7 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 			// would trip the image arm → VerdictKillRefused, stranding
 			// the operator on a stuck lock whose holder is already
 			// dead. But a dead holder's exit is exactly what releases
-			// the flock, so the kill the recheck guards is moot. Skip
-			// the gate re-run and fall through: killProcess of a gone
-			// PID falls into the line ~735 already-gone branch
-			// (processID confirms !Alive) → acquire-poll →
-			// VerdictKilledRecovered. This mirrors the kill-error
-			// already-gone semantics that path already uses.
+			// the flock, so the kill the recheck guards is moot.
 			//
 			// This keys strictly on !idNow.Alive, NOT on empty
 			// identity: a LIVE-but-unverifiable holder (Denied=true on
@@ -738,35 +739,56 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 					v.Hint = hint
 					return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
 				}
+			} else {
+				// pr301 r7 Finding 2 (P2 #717): the holder is genuinely
+				// gone. The r6 fix skipped only the gate re-run and then
+				// FELL THROUGH to kill(v.PID) below — but there is no
+				// validated target to kill, and a PID REUSED between this
+				// recheck and the kill (or a transient probe that
+				// classified the holder not-Alive) could be terminated
+				// WITHOUT the image/argv/start-time/owner gate we just
+				// skipped. Mark the holder gone so the kill+wait block is
+				// bypassed entirely and we go STRAIGHT to the acquire-poll
+				// recovery path: the holder's exit is exactly what releases
+				// the flock, so there is nothing to kill — only a lock to
+				// reacquire.
+				holderGoneAtRecheck = true
 			}
 		}
 	}
-	//
-	// killProcessOverride is the test seam for the kill helper.
-	// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
-	// killProcess with a no-op so the test doesn't actually
-	// SIGKILL/TerminateProcess any real process. Production code
-	// path is unchanged when this is nil.
-	kill := killProcess
-	if killProcessOverride != nil {
-		kill = killProcessOverride
-	}
-	if err := kill(v.PID); err != nil {
-		// Codex iter-12 P2 #1: if the recorded PID exited between
-		// probe and kill, Linux returns ESRCH and Windows fails
-		// OpenProcess. The process exit is exactly what releases the
-		// flock — fall through to acquire-poll instead of returning
-		// VerdictKillFailed and forcing a rerun. processID's alive
-		// telemetry confirms the PID is gone before we proceed.
-		if id, idErr := processID(v.PID); idErr == nil && !id.Alive {
-			// PID is genuinely gone; proceed to acquire-poll. The
-			// loop below will succeed quickly when the kernel
-			// finishes releasing the flock.
-		} else {
-			v.Class = VerdictKillFailed
-			v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
-			v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
-			return nil, v, err
+
+	// Kill the (still-live, gate-passed) holder. SKIPPED when the recheck
+	// observed a genuinely-dead PID (holderGoneAtRecheck): killing a gone
+	// PID is at best a no-op and at worst terminates a reused PID without
+	// the identity gate (pr301 r7 Finding 2). The acquire-poll below is the
+	// recovery path for the already-gone case.
+	if !holderGoneAtRecheck {
+		// killProcessOverride is the test seam for the kill helper.
+		// Lets the wait-for-exit unit test (Codex iter-9 P2 #2) replace
+		// killProcess with a no-op so the test doesn't actually
+		// SIGKILL/TerminateProcess any real process. Production code
+		// path is unchanged when this is nil.
+		kill := killProcess
+		if killProcessOverride != nil {
+			kill = killProcessOverride
+		}
+		if err := kill(v.PID); err != nil {
+			// Codex iter-12 P2 #1: if the recorded PID exited between
+			// probe and kill, Linux returns ESRCH and Windows fails
+			// OpenProcess. The process exit is exactly what releases the
+			// flock — fall through to acquire-poll instead of returning
+			// VerdictKillFailed and forcing a rerun. processID's alive
+			// telemetry confirms the PID is gone before we proceed.
+			if id, idErr := processID(v.PID); idErr == nil && !id.Alive {
+				// PID is genuinely gone; proceed to acquire-poll. The
+				// loop below will succeed quickly when the kernel
+				// finishes releasing the flock.
+			} else {
+				v.Class = VerdictKillFailed
+				v.Diagnose = fmt.Sprintf("kill PID %d failed: %v", v.PID, err)
+				v.Hint = "Permission denied or process already gone; rerun mcphub gui without --force to handshake."
+				return nil, v, err
+			}
 		}
 	}
 

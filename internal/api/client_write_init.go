@@ -696,12 +696,26 @@ func strictModeFromIntentCached() bool {
 // for the process lifetime. That is the intended fail-closed-secure
 // posture — the next process retries the read.
 //
-// Calls api.DefaultSupervisorIntentPath + api.ReadSupervisorIntent
-// (same package). Honors the daemonStateRootOverride test seam through
-// DefaultSupervisorIntentPath, so tests redirect the read into a temp
-// state dir.
+// Calls DaemonStateDirReadOnly + api.ReadSupervisorIntent (same package).
+// Honors the daemonStateRootOverride test seam through
+// DaemonStateDirReadOnly, so tests redirect the read into a temp state dir.
+//
+// pr301 r7 Finding 1 (P2 #704): the path is resolved through the READ-ONLY
+// state-dir resolver (DaemonStateDirReadOnly), NOT DefaultSupervisorIntentPath
+// → DaemonStateDir. The latter runs posixStateDir/ensureStateRoot, which
+// CHMODS the POSIX state dir back to 0700 as a side effect BEFORE the
+// absent-intent posture check runs. On a delete-capable (group/world-writable)
+// state dir whose supervisor-intent.json was DELETED, that self-heal would
+// reset the dir to 0700, so absentIntentStrictVerdict's
+// checkStateDirParentWriteSafe would then observe a now-SAFE dir and relax —
+// re-opening the exact deletion bypass pr301 r5 Finding 1 closed (the same
+// ensureStateRoot self-heal that bit the pr301 r3 test, now defeating the
+// production fix). The read-only resolver creates/chmods nothing, so the
+// posture check observes the ACTUAL pre-heal broadened state. On Windows
+// ensureStateRoot performs no DACL change, so the read-only switch is a no-op
+// there (both resolvers yield the same path with no side effect).
 func readStrictModeFromIntentBestEffort() bool {
-	path, err := DefaultSupervisorIntentPath()
+	stateDir, err := DaemonStateDirReadOnly()
 	if err != nil {
 		// State dir UNRESOLVABLE. pr301 r4 Finding 1: fail CLOSED to strict.
 		// The resolver can REFUSE an EXISTING (already-broadened) state dir
@@ -711,6 +725,7 @@ func readStrictModeFromIntentBestEffort() bool {
 		// absent-vs-present, so strict is the only fail-secure verdict.
 		return true
 	}
+	path := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 	intent, err := ReadSupervisorIntent(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
