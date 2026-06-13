@@ -31,6 +31,20 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 	if intent == nil || len(intent.Daemons) == 0 {
 		return nil
 	}
+	// r36-3: the installed-server catalog the server-only blank-row arm below
+	// consults to disambiguate a hyphen sibling. Read once. On a read failure
+	// the set is empty, which makes blankServerRowOwnedByLongestInstalledPrefix
+	// claim any prefix-matching blank row (no sibling proof) — the safe
+	// claim-any fallback. Built lazily-eligible only for the server-only case;
+	// computing it unconditionally is cheap (one embed-first list) and keeps the
+	// hot loop branch-free of repeated reads.
+	var installedServers map[string]struct{}
+	if names, err := listManifestNamesEmbedFirst(); err == nil {
+		installedServers = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			installedServers[n] = struct{}{}
+		}
+	}
 	var targets []SupervisorDaemon
 	for _, d := range intent.Daemons {
 		if isSupervisorRestartMaintenanceTask(d.TaskName) {
@@ -48,6 +62,25 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 		if server != "" && daemonFilter != "" && (rowServer == "" || rowDaemon == "") {
 			want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemonFilter)
 			if canonicalIntentTaskKey(d.TaskName) != want {
+				continue
+			}
+			d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
+			targets = append(targets, d)
+			continue
+		}
+		// r36-3 (bot r35-3): the SERVER-ONLY case (daemonFilter=="") with a
+		// blank-field row never had an exact-name arm — it fell straight to the
+		// ParseManagedTaskName last-hyphen split below, which for
+		// \mcp-local-hub-demo-alpha-beta derives rowServer="demo-alpha" and the
+		// `rowServer != server` filter then WRONGLY skips the real demo target.
+		// Decide ownership with the longest-installed-prefix disambiguator
+		// instead: claim the blank row for `server` only when no longer-installed
+		// hyphen sibling owns it (mirrors supervisorIntentRowOwnedByScope Arm 2).
+		// Kept ahead of the ParseManagedTaskName fallback so the lossy split never
+		// runs for this case; the both-args exact branch above and the
+		// populated-field path below are unchanged.
+		if server != "" && daemonFilter == "" && (rowServer == "" || rowDaemon == "") {
+			if !blankServerRowOwnedByLongestInstalledPrefix(d.TaskName, server, installedServers) {
 				continue
 			}
 			d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)

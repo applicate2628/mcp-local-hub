@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -32,7 +33,9 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	sch, err := scheduler.New()
+	// Route through the newScheduler seam (not scheduler.New directly) so the
+	// upgrade flow is testable without touching the real OS scheduler (r36-5).
+	sch, err := newScheduler()
 	if err != nil {
 		return nil, err
 	}
@@ -83,12 +86,23 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: "unparseable task name"})
 			continue
 		}
-		// Empty dir → loadManifestForServer uses embed-first resolution.
-		m, err := loadManifestForServer("", srv)
-		if err != nil {
-			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("manifest %s: %v", srv, err)})
+		// r36-5: parseTaskName's last-hyphen split is LOSSY for a hyphenated
+		// daemon — \mcp-local-hub-demo-alpha-beta (server demo, daemon
+		// alpha-beta) splits to server=demo-alpha / daemon=beta. The pre-fix
+		// code then Delete+Create'd the task with Args
+		// [daemon --server demo-alpha --daemon beta], which spawns the WRONG
+		// server/daemon when a sibling server demo-alpha is also installed.
+		// The task NAME is the authority: resolve (server, daemon) to the
+		// installed server whose manifest declares a daemon producing exactly
+		// t.Name. resolveSchedulerUpgradeServerDaemon returns the verified pair
+		// (and the loaded manifest) or an error when no installed manifest owns
+		// the task — better to skip than recreate with corrupt Args.
+		m, resolvedDaemon, rerr := resolveSchedulerUpgradeServerDaemon(t.Name, srv, dmn)
+		if rerr != nil {
+			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: rerr.Error()})
 			continue
 		}
+		dmn = resolvedDaemon
 		// Re-build the task spec with current exe path.
 		var args []string
 		if dmn == "weekly-refresh" {
@@ -137,6 +151,83 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		results = append(results, SchedulerUpgradeResult{TaskName: t.Name, NewCmd: canonicalPath})
 	}
 	return results, nil
+}
+
+// resolveSchedulerUpgradeServerDaemon resolves a per-server daemon task name to
+// the (manifest, daemon) pair that ACTUALLY owns it, treating the task name as
+// the authority rather than parseTaskName's lossy last-hyphen split (r36-5).
+//
+// hintServer/hintDaemon are parseTaskName's split candidate; they are used only
+// as a deterministic tie-break, never trusted blindly. The resolver scans every
+// installed server manifest and finds the (server, daemon) whose canonical task
+// name `mcp-local-hub-<server>-<daemon>` (or `mcp-local-hub-<server>-weekly-refresh`)
+// equals taskName EXACTLY. For \mcp-local-hub-demo-alpha-beta this returns
+// (demo, "alpha-beta") when demo's manifest declares daemon alpha-beta — even
+// though the lossy split says demo-alpha/beta — so the recreated task carries
+// the correct Args.
+//
+// Resolution:
+//   - exactly one installed manifest declares a daemon producing the task name
+//     → that pair (the common, unambiguous case).
+//   - the hint pair (parseTaskName split) round-trips to taskName AND is among
+//     the matches → prefer it (stable behavior for the non-hyphenated majority).
+//   - multiple matches, hint not among them → first by sorted server name
+//     (deterministic; a genuine cross-server daemon-name collision is degenerate
+//     and never occurs with real manifests).
+//   - zero matches → error (no installed manifest owns the task; better to skip
+//     than recreate with corrupt Args from the lossy split).
+func resolveSchedulerUpgradeServerDaemon(taskName, hintServer, hintDaemon string) (*config.ServerManifest, string, error) {
+	bare := strings.TrimPrefix(taskName, "\\")
+	const prefix = "mcp-local-hub-"
+
+	names, err := listManifestNamesEmbedFirst()
+	if err != nil {
+		return nil, "", fmt.Errorf("list installed manifests for %s: %v", taskName, err)
+	}
+	sort.Strings(names)
+
+	type match struct {
+		m      *config.ServerManifest
+		daemon string
+	}
+	var matches []match
+	for _, name := range names {
+		m, lerr := loadManifestForServer("", name)
+		if lerr != nil || m == nil {
+			continue
+		}
+		// Per-server daemon tasks: exact concatenation must equal the task name.
+		for _, d := range m.Daemons {
+			if d.Name == "" {
+				continue
+			}
+			if prefix+m.Name+"-"+d.Name == bare {
+				matches = append(matches, match{m: m, daemon: d.Name})
+			}
+		}
+		// Per-server weekly-refresh task: derived, not a manifest daemon.
+		if prefix+m.Name+"-weekly-refresh" == bare {
+			matches = append(matches, match{m: m, daemon: "weekly-refresh"})
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return nil, "", fmt.Errorf("no installed manifest owns task %s", taskName)
+	case 1:
+		return matches[0].m, matches[0].daemon, nil
+	default:
+		// Tie-break: prefer parseTaskName's hint pair when it round-trips to the
+		// exact task name AND is among the matches; otherwise the first sorted.
+		if hintServer != "" && prefix+hintServer+"-"+hintDaemon == bare {
+			for _, mt := range matches {
+				if mt.m.Name == hintServer && mt.daemon == hintDaemon {
+					return mt.m, mt.daemon, nil
+				}
+			}
+		}
+		return matches[0].m, matches[0].daemon, nil
+	}
 }
 
 // upgradeWorkspaceWeeklyRefreshTask rewrites the shared workspace

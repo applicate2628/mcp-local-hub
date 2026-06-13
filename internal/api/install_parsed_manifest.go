@@ -824,12 +824,29 @@ func legacySchedulerTasksForSupervisorInstallDryRun(m *config.ServerManifest, da
 		}
 		return nil, err
 	}
+	// r36-2: this dry-run preview MIRRORS cleanupLegacySchedulerTasksForSupervisorInstall's
+	// full-server arm; it must apply the SAME longest-installed-prefix filter so
+	// the preview never claims it will delete a hyphen-sibling's task the real
+	// cleanup now spares (otherwise the dry-run LIES). Read the installed catalog
+	// once; an empty set (read failure) claims any prefix-matching task, matching
+	// the real cleanup's fallback.
+	var installed map[string]struct{}
+	if names, lerr := listManifestNamesEmbedFirst(); lerr == nil {
+		installed = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			installed[n] = struct{}{}
+		}
+	}
 	out := make([]string, 0, len(tasks))
 	for _, task := range tasks {
 		name := strings.TrimPrefix(task.Name, `\`)
-		if strings.HasPrefix(name, prefix) {
-			out = append(out, name)
+		if !strings.HasPrefix(name, prefix) {
+			continue
 		}
+		if !blankServerRowOwnedByLongestInstalledPrefix(task.Name, m.Name, installed) {
+			continue
+		}
+		out = append(out, name)
 	}
 	return out, nil
 }
@@ -1233,9 +1250,35 @@ func cleanupLegacySchedulerTasksForSupervisorInstall(m *config.ServerManifest, d
 		}
 		return
 	}
+	// r36-2: List(prefix) returns every task whose name STARTS WITH
+	// "mcp-local-hub-<m.Name>-", which over-matches a hyphen-sibling server:
+	// installing `demo` lists `mcp-local-hub-demo-alpha-beta`, which is server
+	// demo-alpha's daemon `beta`, not a demo task. The pre-fix loop deleted it
+	// unconditionally — wiping a sibling's scheduler task on every demo install.
+	// (The KILL half was already exact-name port-guarded via
+	// daemonPortForLegacySchedulerTask returning 0 for a foreign name; only the
+	// DELETE was unguarded.) Gate each task through the longest-installed-prefix
+	// disambiguator so demo only deletes tasks it actually owns. The installed
+	// catalog is read once; on a read failure the set is empty, which makes the
+	// disambiguator claim any prefix-matching task (no sibling proof available) —
+	// the same outcome as the pre-fix unconditional delete, but only when the
+	// catalog is genuinely unreadable.
+	var installed map[string]struct{}
+	if names, lerr := listManifestNamesEmbedFirst(); lerr == nil {
+		installed = make(map[string]struct{}, len(names))
+		for _, n := range names {
+			installed[n] = struct{}{}
+		}
+	}
 	for _, task := range tasks {
 		name := strings.TrimPrefix(task.Name, "\\")
 		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		// Skip a hyphen-sibling's task: only delete tasks this server is the
+		// longest installed prefix of (mirrors the supervisor-intent ownership
+		// arm at supervisorIntentRowOwnedByScope's Arm 2).
+		if !blankServerRowOwnedByLongestInstalledPrefix(task.Name, m.Name, installed) {
 			continue
 		}
 		// Full installs only delete/kill tasks returned by List(prefix), so
@@ -1812,7 +1855,33 @@ func nudgeSupervisorReconcileAfterUninstall(ctx context.Context) supervisorRecon
 // aborts the uninstall — uninstall is idempotent and must complete the
 // scheduler-task + client-entry removal regardless (bot PR #288 F1).
 func (a *API) removeServerFromSupervisorIntentBestEffort(server string, report *UninstallReport) {
-	a.removeServerFromSupervisorIntentBestEffortScope(server, nil, report)
+	a.removeServerFromSupervisorIntentBestEffortScope(server, retiredManifestUninstallScope(), report)
+}
+
+// retiredManifestUninstallScope builds the sibling-safe ownership scope for the
+// no-manifest (retired-manifest) uninstall path. The manifest is gone, so there
+// are no taskNames/daemonKeys to seed Arm 1 — but ownership must still defer to a
+// longer-installed hyphen sibling, exactly as the manifest-backed uninstall does.
+//
+// r36-3: before this, the no-manifest path passed scope==nil, which routed
+// supervisorIntentRowOwnedByScope to the RAW HasPrefix residual. That raw prefix
+// match force-PRUNES + KILLS a hyphen-sibling's blank-Server row — e.g. retiring
+// `gdb` would mis-claim installed sibling `gdb-remote`'s row
+// \mcp-local-hub-gdb-remote-default. With taskNames empty, ownership now routes
+// through Arm 2 (legacy-prefix fallback), where
+// blankServerRowOwnedByLongestInstalledPrefix preserves the sibling. The
+// installed-server catalog read is best-effort: on a read failure the set is left
+// empty, which makes the fallback claim any blank-Server prefix row for this
+// server (no sibling proof available) — the same outcome as the prior scope==nil
+// residual, never worse.
+func retiredManifestUninstallScope() *supervisorIntentOwnershipScope {
+	scope := &supervisorIntentOwnershipScope{legacyPrefixFallback: true}
+	if names, err := listManifestNamesEmbedFirst(); err == nil {
+		for _, n := range names {
+			scope.addInstalledServer(n)
+		}
+	}
+	return scope
 }
 
 func (a *API) removeServerFromSupervisorIntentBestEffortForManifest(m *config.ServerManifest, report *UninstallReport) {
