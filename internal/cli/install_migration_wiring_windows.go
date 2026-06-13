@@ -25,7 +25,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -57,21 +56,11 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: resolve canonical target: %w", err)
 	}
-	currentUser, err := currentWindowsUsername()
-	if err != nil {
-		return fmt.Errorf("v0.5 upgrade: resolve current user: %w", err)
-	}
-	deps := &v5UpgradeDeps{
-		exePath:           exe,
-		newBinaryPath:     exe, // current exe IS the new image
-		supervisorLockDir: "",  // filled in below from state-dir
-		pipePath:          superviseIPCPipePath(currentUser),
-	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
 	}
-	deps.supervisorLockDir = filepath.Join(stateDir, "supervisor.lock")
+	deps := buildV5UpgradeDeps(exe, stateDir)
 
 	// Resolve expected daemon ports from supervisor-intent.json so the
 	// post-force-kill verification (codex-r2-c-p1-8 fix) can prove no
@@ -113,6 +102,35 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "v0.5 upgrade complete.")
 	return nil
+}
+
+// buildV5UpgradeDeps constructs the production v5UpgradeDeps for the
+// `mcphub install --upgrade` cold-restart flow.
+//
+// SEC-F1: the IPC dial path is the SID-based canonical resolver
+// api.SupervisorIPCAddress(stateDir) — the SAME pipe the supervisor LISTENS
+// on (supervise_pipe_windows.go → api.SupervisorIPCAddress) and the same pipe
+// the status/exit clients dial. The previous wiring built
+// `\\.\pipe\mcphub-supervisor-<USERNAME>` via superviseIPCPipePath, but the
+// listener keys the pipe NAME off the kernel-authoritative user SID
+// (S-1-5-21-…), not the USERNAME env var (PR #212 r3 SID-consistency
+// migration). USERNAME ≠ SID, so every quiesce-timers/exit{graceful} handshake
+// dialed a pipe no supervisor listened on, timed out, and fell through to the
+// force-kill fallback — bypassing the graceful drain and opening the
+// orphan-daemon window the quiesce path exists to avoid (it surfaced in the
+// field as "supervisor won't restart after install --upgrade; recovery needs
+// manual schtasks /Run").
+//
+// stateDir is passed through so the test-isolation discriminator
+// (api.EnableSupervisorIPCTestPipeIsolation) can redirect the dial onto a per-
+// test pipe; production ignores the arg and always derives the SID.
+func buildV5UpgradeDeps(exe, stateDir string) *v5UpgradeDeps {
+	return &v5UpgradeDeps{
+		exePath:           exe,
+		newBinaryPath:     exe, // current exe IS the new image
+		supervisorLockDir: filepath.Join(stateDir, "supervisor.lock"),
+		pipePath:          api.SupervisorIPCAddress(stateDir),
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -677,26 +695,10 @@ func readLine(conn net.Conn, max int) ([]byte, error) {
 // Misc helpers.
 // ---------------------------------------------------------------------------
 
-// currentWindowsUsername returns the bare username (no DOMAIN\ prefix).
-// Mirrors scheduler_windows.go's resolution.
-func currentWindowsUsername() (string, error) {
-	u, err := user.Current()
-	if err != nil {
-		return "", err
-	}
-	name := u.Username
-	if i := strings.LastIndex(name, "\\"); i >= 0 {
-		name = name[i+1:]
-	}
-	return name, nil
-}
-
-// superviseIPCPipePath returns the per-user named-pipe path the
-// supervisor listens on. Mirrors the convention recorded in
-// supervise_ipc_windows.go: `\\.\pipe\mcphub-supervisor-<USERNAME>`.
-func superviseIPCPipePath(username string) string {
-	return `\\.\pipe\mcphub-supervisor-` + username
-}
+// SEC-F1 removed the USERNAME-based superviseIPCPipePath + currentWindowsUsername
+// helpers. Every IPC dial in the upgrade/migrate flow now uses the SID-based
+// canonical resolver api.SupervisorIPCAddress (the path the supervisor LISTENS
+// on), closing the PR #212 r3 SID-consistency propagation gap.
 
 // readPreMigrationStrictMode reads strict_mode from supervisor-intent.json
 // if present. Returns false when the file is missing.

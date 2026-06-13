@@ -48,10 +48,6 @@ func migrateSerenaUpgradeDeps() (*v5UpgradeDeps, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve executable: %w", err)
 	}
-	currentUser, err := currentWindowsUsername()
-	if err != nil {
-		return nil, "", fmt.Errorf("resolve current user: %w", err)
-	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve state-dir: %w", err)
@@ -60,7 +56,10 @@ func migrateSerenaUpgradeDeps() (*v5UpgradeDeps, string, error) {
 		exePath:           exe,
 		newBinaryPath:     exe, // current exe IS the new image (no rename in the reap path)
 		supervisorLockDir: filepath.Join(stateDir, "supervisor.lock"),
-		pipePath:          superviseIPCPipePath(currentUser),
+		// SEC-F1: dial the SID-based pipe the supervisor LISTENS on, NOT the
+		// USERNAME-based one. See install_migration_wiring_windows.go for the
+		// full rationale (PR #212 r3 SID-consistency propagation gap).
+		pipePath: api.SupervisorIPCAddress(stateDir),
 	}
 	return deps, stateDir, nil
 }
@@ -185,11 +184,12 @@ func defaultMigrateSerenaSupervisorHealthy() (bool, error) {
 		return false, nil
 	}
 	// Running — now require reconcile-ready via a single IPC `status` probe.
-	currentUser, err := currentWindowsUsername()
-	if err != nil {
-		return false, fmt.Errorf("resolve current user for reconcile-ready probe: %w", err)
-	}
-	ready, err := probeReconcileReadyOnce(superviseIPCPipePath(currentUser))
+	// SEC-F1: probe the SID-based pipe the supervisor LISTENS on (the same
+	// path api.SupervisorIPCAddress resolves for the listener + status/exit
+	// clients), NOT the USERNAME-based superviseIPCPipePath. Dialing the
+	// USERNAME pipe here reached no listener, so a HEALTHY running supervisor
+	// was misreported as unhealthy → an unnecessary recovery restart.
+	ready, err := probeReconcileReadyOnce(api.SupervisorIPCAddress(stateDir))
 	if err != nil {
 		return false, fmt.Errorf("probe supervisor reconcile-ready: %w", err)
 	}
