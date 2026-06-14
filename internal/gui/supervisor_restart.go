@@ -342,12 +342,20 @@ func spawnDetachedSupervisor() (int, error) {
 	if resolved, lerr := filepath.EvalSymlinks(exe); lerr == nil {
 		exe = resolved
 	}
-	cmd := exec.Command(exe, "supervise")
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	configureDetached(cmd) // platform-specific (see _windows.go / _other.go)
-	if err := cmd.Start(); err != nil {
+	build := func() *exec.Cmd {
+		c := exec.Command(exe, "supervise")
+		c.Stdin = nil
+		c.Stdout = nil
+		c.Stderr = nil
+		configureDetached(c) // platform-specific (see _windows.go / _other.go)
+		return c
+	}
+	// §5-follow-up: route the manual-restart spawn through the breakaway-tolerant
+	// helper so it gains the same CREATE_BREAKAWAY_FROM_JOB orphan-escape +
+	// ERROR_ACCESS_DENIED flagless-retry the automatic (cli) spawn paths got — it
+	// is no longer the less-robust path on a locked-down host.
+	cmd, err := startDetachedSupervisorTolerant(build)
+	if err != nil {
 		return 0, fmt.Errorf("start supervisor: %w", err)
 	}
 	// Release the OS-side handle so the child outlives this process.
