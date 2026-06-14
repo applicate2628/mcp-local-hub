@@ -4,8 +4,9 @@
 
 Run one copy of each [Model Context Protocol](https://modelcontextprotocol.io) server on your workstation, shared across every MCP client that needs it — instead of each client spawning its own redundant stdio process. Install the binary (`mcphub`) once with `npm`, point your clients at the hub, and stop paying for the same server `N` times.
 
-<!-- HERO GIF (record): mcphub gui → Catalog 1-click install → client connects; show before/after process count -->
-<!-- caption: From dozens of duplicate MCP processes to one managed daemon each — a single install, every client routed through the hub. -->
+![mcp-local-hub — the GUI dashboard managing the live MCP fleet, and the Catalog with one-click install/uninstall](docs/assets/hero-gui.gif)
+
+<!-- TODO(hero): the GIF above is the GUI tour (the "after" — one managed fleet). A short terminal clip of the npm install + the before/after process-count drop can be stitched in front; recording scenario in .scratch/gif/approach-A-terminal-scenario.md. -->
 
 > [!WARNING]
 > Preview version: `mcp-local-hub` is actively under development. Interfaces,
