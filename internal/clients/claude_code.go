@@ -16,7 +16,7 @@ func NewClaudeCode() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &claudeCode{path: filepath.Join(home, ".claude.json")}, nil
+	return newLockingClient(&claudeCode{path: filepath.Join(home, ".claude.json")}), nil
 }
 
 type claudeCode struct {

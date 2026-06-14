@@ -85,7 +85,7 @@ func NewOpenClaw() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &openClawClient{path: defaultOpenClawConfigPath(home)}, nil
+	return newLockingClient(&openClawClient{path: defaultOpenClawConfigPath(home)}), nil
 }
 
 // defaultOpenClawConfigPath returns the default OpenClaw config path,

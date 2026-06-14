@@ -13,7 +13,7 @@ func NewVSCode() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &vscodeClient{path: path}, nil
+	return newLockingClient(&vscodeClient{path: path}), nil
 }
 
 type vscodeClient struct {

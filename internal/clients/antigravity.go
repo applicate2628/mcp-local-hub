@@ -44,7 +44,7 @@ func NewAntigravity() (Client, error) {
 		// so base readers/writers that reference urlField are never exercised.
 		urlField: "command",
 	}
-	return &antigravityClient{jsonMCPClient: base}, nil
+	return newLockingClient(&antigravityClient{jsonMCPClient: base}), nil
 }
 
 // antigravityClient overrides AddEntry/GetEntry to emit stdio-relay

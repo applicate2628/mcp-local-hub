@@ -106,69 +106,82 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 	keyPath := secrets.DefaultKeyPath()
 	vaultPath := secrets.DefaultVaultPath()
 
-	// Case 1: vault already opens cleanly → idempotent no-op.
-	if v, err := secrets.OpenVault(keyPath, vaultPath); err == nil {
-		// secrets.Vault holds no OS resources beyond its in-memory map; no Close needed.
-		_ = v
-		return SecretsInitResult{VaultState: "ok"}, nil
-	}
-
-	keyExists := fileExists(keyPath)
-	vaultExists := fileExists(vaultPath)
-
-	// Cases 3 and 4: pre-existing files we did not create. Refuse.
-	if keyExists || vaultExists {
-		return SecretsInitResult{}, &SecretsInitBlocked{
-			KeyExists:   keyExists,
-			VaultExists: vaultExists,
+	// Cross-process serialization: hold the vault flock for the whole
+	// classify → init → cleanup sequence so a concurrent CLI `secrets init`
+	// or `secrets set` cannot interleave with the create/refuse decision
+	// (vaultMutex only guards in-process callers). See secrets.WithVaultLock.
+	var result SecretsInitResult
+	lockErr := secrets.WithVaultLock(vaultPath, func() error {
+		// Case 1: vault already opens cleanly → idempotent no-op.
+		if v, err := secrets.OpenVault(keyPath, vaultPath); err == nil {
+			// secrets.Vault holds no OS resources beyond its in-memory map; no Close needed.
+			_ = v
+			result = SecretsInitResult{VaultState: "ok"}
+			return nil
 		}
-	}
 
-	// Case 2: both missing. Ensure parent dir exists (Codex memo-R8 P1:
-	// secrets.InitVault does not MkdirAll itself; CLI does it explicitly).
-	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
-		return SecretsInitResult{}, fmt.Errorf("create vault dir: %w", err)
-	}
+		keyExists := fileExists(keyPath)
+		vaultExists := fileExists(vaultPath)
 
-	if err := initVaultFn(keyPath, vaultPath); err != nil {
-		// Codex PR #18 P1 race fix: if initVaultFn refused because the
-		// target files already exist, a concurrent request just created
-		// them — we did NOT, and must NOT clean them up. Route to
-		// SECRETS_INIT_BLOCKED (cases 3/4 path) instead.
-		if initVaultRefused(err) {
-			return SecretsInitResult{}, &SecretsInitBlocked{
-				KeyExists:   fileExists(keyPath),
-				VaultExists: fileExists(vaultPath),
+		// Cases 3 and 4: pre-existing files we did not create. Refuse.
+		if keyExists || vaultExists {
+			return &SecretsInitBlocked{
+				KeyExists:   keyExists,
+				VaultExists: vaultExists,
 			}
 		}
-		// Genuine partial init we own. Clean up whatever InitVault may
-		// have created. Order: vault first (because the key file alone
-		// is benign; an orphan vault is the harder-to-explain artifact).
-		cleanupOK := true
-		var orphan string
-		if rmErr := os.Remove(vaultPath); rmErr != nil && !os.IsNotExist(rmErr) {
-			cleanupOK = false
-			orphan = vaultPath
+
+		// Case 2: both missing. Ensure parent dir exists (Codex memo-R8 P1:
+		// secrets.InitVault does not MkdirAll itself; CLI does it explicitly).
+		if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+			return fmt.Errorf("create vault dir: %w", err)
 		}
-		if rmErr := os.Remove(keyPath); rmErr != nil && !os.IsNotExist(rmErr) {
-			cleanupOK = false
-			if orphan == "" {
-				orphan = keyPath
+
+		if err := initVaultFn(keyPath, vaultPath); err != nil {
+			// Codex PR #18 P1 race fix: if initVaultFn refused because the
+			// target files already exist, a concurrent request just created
+			// them — we did NOT, and must NOT clean them up. Route to
+			// SECRETS_INIT_BLOCKED (cases 3/4 path) instead.
+			if initVaultRefused(err) {
+				return &SecretsInitBlocked{
+					KeyExists:   fileExists(keyPath),
+					VaultExists: fileExists(vaultPath),
+				}
 			}
-		}
-		if cleanupOK {
-			return SecretsInitResult{}, &SecretsInitFailed{
-				CleanupStatus: "ok",
+			// Genuine partial init we own. Clean up whatever InitVault may
+			// have created. Order: vault first (because the key file alone
+			// is benign; an orphan vault is the harder-to-explain artifact).
+			cleanupOK := true
+			var orphan string
+			if rmErr := os.Remove(vaultPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				cleanupOK = false
+				orphan = vaultPath
+			}
+			if rmErr := os.Remove(keyPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				cleanupOK = false
+				if orphan == "" {
+					orphan = keyPath
+				}
+			}
+			if cleanupOK {
+				return &SecretsInitFailed{
+					CleanupStatus: "ok",
+					Cause:         err,
+				}
+			}
+			return &SecretsInitFailed{
+				CleanupStatus: "failed",
+				OrphanPath:    orphan,
 				Cause:         err,
 			}
 		}
-		return SecretsInitResult{}, &SecretsInitFailed{
-			CleanupStatus: "failed",
-			OrphanPath:    orphan,
-			Cause:         err,
-		}
+		result = SecretsInitResult{VaultState: "ok"}
+		return nil
+	})
+	if lockErr != nil {
+		return SecretsInitResult{}, lockErr
 	}
-	return SecretsInitResult{VaultState: "ok"}, nil
+	return result, nil
 }
 
 // SecretsInitBlocked is the typed error for D2 cases 3 and 4 (pre-existing
@@ -234,17 +247,22 @@ func (a *API) SecretsSet(name, value string) error {
 	}
 	vaultMutex.Lock()
 	defer vaultMutex.Unlock()
-	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
-	if err != nil {
-		return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
-	}
-	if _, getErr := v.Get(name); getErr == nil {
-		return &SecretsOpError{Code: "SECRETS_KEY_EXISTS", Msg: fmt.Sprintf("secret %q already exists; use Rotate to update", name)}
-	}
-	if err := v.Set(name, value); err != nil {
-		return &SecretsOpError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
-	}
-	return nil
+	// Flock the OpenVault → Get → Set(save) RMW so a concurrent CLI/other-
+	// process vault write cannot lose this update (vaultMutex is in-process
+	// only). Tight critical section — no interactive work inside.
+	return secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+		v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+		if err != nil {
+			return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
+		}
+		if _, getErr := v.Get(name); getErr == nil {
+			return &SecretsOpError{Code: "SECRETS_KEY_EXISTS", Msg: fmt.Sprintf("secret %q already exists; use Rotate to update", name)}
+		}
+		if err := v.Set(name, value); err != nil {
+			return &SecretsOpError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
+		}
+		return nil
+	})
 }
 
 // SecretsOpError is the typed error returned by every coded Secrets API
@@ -380,25 +398,32 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
 	}
 
-	// Vault write phase — serialized. Lock released BEFORE the restart
-	// phase so a long restart loop does not block concurrent vault ops.
+	// Vault write phase — serialized. Both locks released BEFORE the restart
+	// phase so a long restart loop does not block concurrent vault ops. The
+	// flock (cross-process) is acquired inside vaultMutex (in-process) and
+	// released by WithVaultLock's defer when the closure returns; the manual
+	// vaultMutex.Unlock keeps the pre-existing "release before restart"
+	// contract for the in-process lock.
 	vaultMutex.Lock()
-	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
-	if err != nil {
+	if writeErr := secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+		v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+		if err != nil {
+			return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
+		}
+		if _, getErr := v.Get(name); getErr != nil {
+			return &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
+		}
+		if err := v.Set(name, value); err != nil {
+			return &SecretsOpError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
+		}
+		return nil
+	}); writeErr != nil {
 		vaultMutex.Unlock()
-		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
-	}
-	if _, getErr := v.Get(name); getErr != nil {
-		vaultMutex.Unlock()
-		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
-	}
-	if err := v.Set(name, value); err != nil {
-		vaultMutex.Unlock()
-		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_SET_FAILED", Msg: err.Error()}
+		return SecretsRotateResult{}, writeErr
 	}
 	vaultMutex.Unlock()
 	// Vault is committed. Restart phase is external orchestration that
-	// does not touch the vault, so vaultMutex is not held here.
+	// does not touch the vault, so neither lock is held here.
 
 	res := SecretsRotateResult{VaultUpdated: true, RestartResults: []RestartResult{}}
 	if !restart {
@@ -504,39 +529,46 @@ func (a *API) restartServersForKey(key string) ([]RestartResult, error) {
 func (a *API) SecretsDelete(name string, confirm bool) error {
 	vaultMutex.Lock()
 	defer vaultMutex.Unlock()
-	v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
-	if err != nil {
-		return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
-	}
-	if _, getErr := v.Get(name); getErr != nil {
-		return &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
-	}
-	if !confirm {
-		usage, manifestErrs, scanErr := ScanManifestEnv()
-		if scanErr != nil {
-			// Surface scan failure as an OpError so the handler can map it to
-			// a meaningful code instead of falling into the generic delete-
-			// failed catch-all (Codex Task-3 quality review).
-			return &SecretsOpError{Code: "SECRETS_LIST_FAILED", Msg: scanErr.Error()}
+	// Flock the OpenVault → Get → [scan] → Delete(save) RMW so a concurrent
+	// CLI/other-process vault write cannot lose this delete. The manifest
+	// scan in the no-confirm branch is bounded filesystem I/O (not vault
+	// I/O) and non-interactive, so holding the flock across it matches the
+	// pre-existing vaultMutex critical section.
+	return secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+		v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+		if err != nil {
+			return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
 		}
-		// Precedence per §5.5: scan-incomplete BEFORE refs.
-		if len(manifestErrs) > 0 {
-			return &SecretsDeleteError{
-				Code:           "SECRETS_USAGE_SCAN_INCOMPLETE",
-				Message:        fmt.Sprintf("manifest scan returned %d error(s); cannot verify refs", len(manifestErrs)),
-				ManifestErrors: manifestErrs,
+		if _, getErr := v.Get(name); getErr != nil {
+			return &SecretsOpError{Code: "SECRETS_KEY_NOT_FOUND", Msg: getErr.Error()}
+		}
+		if !confirm {
+			usage, manifestErrs, scanErr := ScanManifestEnv()
+			if scanErr != nil {
+				// Surface scan failure as an OpError so the handler can map it to
+				// a meaningful code instead of falling into the generic delete-
+				// failed catch-all (Codex Task-3 quality review).
+				return &SecretsOpError{Code: "SECRETS_LIST_FAILED", Msg: scanErr.Error()}
+			}
+			// Precedence per §5.5: scan-incomplete BEFORE refs.
+			if len(manifestErrs) > 0 {
+				return &SecretsDeleteError{
+					Code:           "SECRETS_USAGE_SCAN_INCOMPLETE",
+					Message:        fmt.Sprintf("manifest scan returned %d error(s); cannot verify refs", len(manifestErrs)),
+					ManifestErrors: manifestErrs,
+				}
+			}
+			if refs := usage[name]; len(refs) > 0 {
+				return &SecretsDeleteError{
+					Code:    "SECRETS_HAS_REFS",
+					Message: fmt.Sprintf("secret %q is referenced by %d manifest(s)", name, len(refs)),
+					UsedBy:  refs,
+				}
 			}
 		}
-		if refs := usage[name]; len(refs) > 0 {
-			return &SecretsDeleteError{
-				Code:    "SECRETS_HAS_REFS",
-				Message: fmt.Sprintf("secret %q is referenced by %d manifest(s)", name, len(refs)),
-				UsedBy:  refs,
-			}
+		if err := v.Delete(name); err != nil {
+			return &SecretsOpError{Code: "SECRETS_DELETE_FAILED", Msg: err.Error()}
 		}
-	}
-	if err := v.Delete(name); err != nil {
-		return &SecretsOpError{Code: "SECRETS_DELETE_FAILED", Msg: err.Error()}
-	}
-	return nil
+		return nil
+	})
 }

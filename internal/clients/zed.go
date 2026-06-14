@@ -58,7 +58,7 @@ func NewZed() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &zedClient{path: defaultZedConfigPath(home)}, nil
+	return newLockingClient(&zedClient{path: defaultZedConfigPath(home)}), nil
 }
 
 func defaultZedConfigPath(home string) string {

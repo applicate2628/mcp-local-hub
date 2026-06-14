@@ -14,7 +14,7 @@ func NewCodexCLI() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &codexCLI{path: filepath.Join(home, ".codex", "config.toml")}, nil
+	return newLockingClient(&codexCLI{path: filepath.Join(home, ".codex", "config.toml")}), nil
 }
 
 type codexCLI struct {

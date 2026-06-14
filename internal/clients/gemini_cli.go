@@ -27,7 +27,7 @@ func NewGeminiCLI() (Client, error) {
 		// invoked directly they stay consistent with the overridden methods.
 		urlField: "url",
 	}
-	return &geminiCLI{jsonMCPClient: base}, nil
+	return newLockingClient(&geminiCLI{jsonMCPClient: base}), nil
 }
 
 // geminiCLI overrides AddEntry and GetEntry to use Gemini CLI 0.38+'s HTTP
