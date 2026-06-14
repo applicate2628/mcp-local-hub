@@ -400,10 +400,10 @@ func TestApplyHubReconcileAddsBeforeRemoves(t *testing.T) {
 	}
 }
 
-
 func TestApplyHubReconcileReportsSkipListedClient(t *testing.T) {
 	plan := []ClientUpdatePlan{
 		{Client: "antigravity", Path: "fake", Action: ClientUpdateAddReplace, EntryName: "mcphub-hub", URL: "http://127.0.0.1:9180/clients/antigravity/mcp"},
+		{Client: "zed", Path: "fake", Action: ClientUpdateAddReplace, EntryName: "mcphub-hub", URL: "http://127.0.0.1:9180/clients/zed/mcp"},
 		{Client: "claude-code", Path: "fake", Action: ClientUpdateAddReplace, EntryName: "mcphub-hub", URL: "http://127.0.0.1:9180/clients/claude-code/mcp"},
 	}
 
@@ -415,8 +415,18 @@ func TestApplyHubReconcileReportsSkipListedClient(t *testing.T) {
 	if len(report.Failed) != 0 {
 		t.Fatalf("Failed = %+v, want empty", report.Failed)
 	}
-	if len(report.Skipped) != 1 || report.Skipped[0] != "antigravity" {
-		t.Fatalf("Skipped = %+v, want [antigravity]", report.Skipped)
+	wantSkipped := map[string]bool{"antigravity": true, "zed": true}
+	if len(report.Skipped) != len(wantSkipped) {
+		t.Fatalf("Skipped = %+v, want antigravity and zed", report.Skipped)
+	}
+	for _, client := range report.Skipped {
+		if !wantSkipped[client] {
+			t.Fatalf("Skipped = %+v, want only antigravity and zed", report.Skipped)
+		}
+		delete(wantSkipped, client)
+	}
+	if len(wantSkipped) != 0 {
+		t.Fatalf("Skipped = %+v, missing %+v", report.Skipped, wantSkipped)
 	}
 	if len(report.Succeeded) != 1 || report.Succeeded[0] != "claude-code" {
 		t.Fatalf("Succeeded = %+v, want [claude-code]", report.Succeeded)
