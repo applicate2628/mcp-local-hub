@@ -16,7 +16,7 @@ func NewQwenCLI() (Client, error) {
 		clientName: "qwen-cli",
 		urlField:   "httpUrl",
 	}
-	return &qwenCLI{jsonMCPClient: base}, nil
+	return newLockingClient(&qwenCLI{jsonMCPClient: base}), nil
 }
 
 type qwenCLI struct {
