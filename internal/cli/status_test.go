@@ -120,6 +120,36 @@ func TestPrintDefaultStatusTable_StableHeader(t *testing.T) {
 	}
 }
 
+// TestStatusDisplayName_StripsTerminalControls guards the human-readable table
+// path against terminal injection from attacker-controlled workspace basenames.
+func TestStatusDisplayName_StripsTerminalControls(t *testing.T) {
+	row := api.DaemonStatus{
+		TaskName:    "mcp-local-hub-serena-deadbeef",
+		DisplayName: "serena · owned\n\x1b]0;mcphub-poc-title\a",
+		State:       "Running",
+		Port:        9121,
+		NextRun:     "N/A",
+	}
+	got := statusDisplayName(row)
+	if strings.ContainsAny(got, "\n\r\t\a\x1b") {
+		t.Fatalf("statusDisplayName returned terminal controls: %q", got)
+	}
+	if !strings.Contains(got, "serena · owned") {
+		t.Fatalf("statusDisplayName sanitized unexpectedly: %q", got)
+	}
+
+	buf := &bytes.Buffer{}
+	c := newStatusCmdReal()
+	c.SetOut(buf)
+	if err := printDefaultStatusTable(c, []api.DaemonStatus{row}, false); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.ContainsAny(strings.TrimSuffix(out, "\n"), "\a\x1b") {
+		t.Fatalf("status table emitted terminal escape/control bytes: %q", out)
+	}
+}
+
 // TestRelativeStatusLastUsed_ZeroReturnsDash covers the zero-time path.
 func TestRelativeStatusLastUsed_ZeroReturnsDash(t *testing.T) {
 	if got := relativeStatusLastUsed(time.Time{}); got != "-" {
