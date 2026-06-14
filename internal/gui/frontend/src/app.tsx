@@ -43,7 +43,7 @@ const DEFAULT_SCREEN_CACHE_KEY = "mcphub.appearance.default_screen";
 // entry can't drop the router into an unknown screen and crash on
 // the switch fall-through.
 const VALID_DEFAULT_SCREENS = new Set([
-  "dashboard", "servers", "migration", "add-server",
+  "dashboard", "servers", "catalog", "migration", "add-server",
   "secrets", "logs", "capabilities", "settings", "about",
 ]);
 
@@ -79,6 +79,7 @@ import { FirstRunBanner } from "./components/FirstRunBanner";
 import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
 import { CapabilitiesScreen } from "./screens/Capabilities";
+import { CatalogScreen } from "./screens/Catalog";
 import { DashboardScreen } from "./screens/Dashboard";
 import { LogsScreen } from "./screens/Logs";
 import { MigrationScreen } from "./screens/Migration";
@@ -242,6 +243,9 @@ export function App() {
     case "servers":
       body = <ServersScreen />;
       break;
+    case "catalog":
+      body = <CatalogScreen />;
+      break;
     case "migration":
       body = <MigrationScreen />;
       break;
@@ -281,6 +285,7 @@ export function App() {
   const navLinks = (
     <nav>
       <a href="#/servers"    class={route.screen === "servers"    ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
+      <a href="#/catalog"    class={route.screen === "catalog"    ? "active" : ""} onClick={guardClick("catalog")}>Catalog</a>
       <a href="#/migration"  class={route.screen === "migration"  ? "active" : ""} onClick={guardClick("migration")}>Migration</a>
       <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
       <a href="#/secrets"    class={route.screen === "secrets"    ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
