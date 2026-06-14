@@ -1,6 +1,11 @@
 # mcp-local-hub
 
-Run one copy of each [Model Context Protocol](https://modelcontextprotocol.io) server on your workstation, shared across every MCP client that needs it — instead of each client spawning its own redundant stdio process.
+**One managed local hub for every MCP server you use — `N` duplicate processes per server collapse to `1` shared daemon.**
+
+Run one copy of each [Model Context Protocol](https://modelcontextprotocol.io) server on your workstation, shared across every MCP client that needs it — instead of each client spawning its own redundant stdio process. Install the binary (`mcphub`) once with `npm`, point your clients at the hub, and stop paying for the same server `N` times.
+
+<!-- HERO GIF (record): mcphub gui → Catalog 1-click install → client connects; show before/after process count -->
+<!-- caption: From dozens of duplicate MCP processes to one managed daemon each — a single install, every client routed through the hub. -->
 
 > [!WARNING]
 > Preview version: `mcp-local-hub` is actively under development. Interfaces,
@@ -9,9 +14,40 @@ Run one copy of each [Model Context Protocol](https://modelcontextprotocol.io) s
 > feature, server, client combination, or platform path is fully tested yet; use
 > dry-runs and backups before applying changes to important MCP client configs.
 
-## The problem
+## Install (npm)
 
-Every modern coding assistant (Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, Qwen Code CLI, Antigravity, Continue, ...) speaks MCP, and each client independently `exec`s whatever stdio servers you configure — `uvx serena`, `npx @modelcontextprotocol/server-memory`, `mcp-language-server`, and so on. If you use three assistants side-by-side on the same project, you get **three Serena processes**, **three gopls subprocesses**, **three separate memory stores**. Each per-session spawn re-downloads dependencies, re-indexes your code, and competes for RAM.
+The fastest path — the npm distribution is generally available. The npm
+**package** is `mcp-local-hub`; the **command** it installs is `mcphub`.
+
+```bash
+# 1. Install the binary globally (the command it installs is `mcphub`)
+npm install -g mcp-local-hub
+
+# 2. Put mcphub on your PATH and register state (idempotent)
+mcphub setup
+
+# 3. Open the GUI — install servers with one click, see every daemon's health
+mcphub gui
+```
+
+```bash
+# Or run once without installing:
+npx mcp-local-hub version
+```
+
+The meta package ships **no `postinstall` download script** (the top npm
+supply-chain attack vector) — npm installs only the platform binary that
+matches your `os`/`cpu` via an optional dependency, and a tiny Node shim execs
+it. Building from source is still supported for dev iteration — see
+[Building from source](#building-from-source) below.
+
+Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTALL.md).
+
+## Why mcphub — the problem and the cure
+
+**The problem.** Every modern coding assistant (Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, Qwen Code CLI, Antigravity, Continue, ...) speaks MCP, and each client independently `exec`s whatever stdio servers you configure — `uvx serena`, `npx @modelcontextprotocol/server-memory`, `mcp-language-server`, and so on. Run three assistants side-by-side on the same project and you get **three Serena processes**, **three gopls subprocesses**, **three separate memory stores**. Scale that across the editors, agents, and CLIs a working developer keeps open and you get **dozens of duplicate `node`/`python` processes** — each per-session spawn re-downloads dependencies, re-indexes your code, and eats RAM, all to do the same work the process next to it is already doing.
+
+**The cure.** `mcp-local-hub` is one managed local hub: install once, and every client routes through it. Each MCP server runs **once per OS user**, supervised, restarted on failure, and shared — so the process tail compresses from **`N` duplicate procs → `1` managed daemon each**.
 
 ## What this tool does
 
@@ -45,7 +81,10 @@ Stdio-only MCP servers (memory, time, sequential-thinking, wolfram, gdb, paper-s
 
 Antigravity's Cascade agent rejects loopback-HTTP MCP entries, so `mcp-local-hub` bridges it via a **stdio relay subprocess**: `mcphub relay` translates between stdio JSON-RPC and the shared HTTP daemon. Cascade sees a normal stdio command; the daemon stays shared.
 
-## Quick start
+## Building from source
+
+The npm install above is the fastest path. To build from source instead — for
+dev iteration or to embed your own version metadata:
 
 ```bash
 # 1. Build (embeds git commit + build date into the binary)
@@ -58,21 +97,24 @@ pwsh ./build.ps1
 
 # 2. Install to ~/.local/bin and register on user PATH (idempotent)
 ./mcphub.exe setup
-
-# 3. Install the MCP servers you want shared
-./mcphub.exe install --server serena       # default clients: Claude/Codex/Cursor
-./mcphub.exe install --all                 # all 10 servers, default clients
-
-# Optional client targeting
-./mcphub.exe install --server serena --clients qwen-cli,vscode
-./mcphub.exe install --server serena --all-clients
-
-# 4. Verify
-./mcphub.exe status
-claude mcp get serena    # shows: Status: ✓ Connected, Type: http
 ```
 
-Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTALL.md).
+Whether you installed via npm or built from source, the rest is identical — use
+the CLI to install the servers you want shared and verify they connect:
+
+```bash
+# Install the MCP servers you want shared
+mcphub install --server serena       # default clients: Claude/Codex/Cursor
+mcphub install --all                 # all 10 servers, default clients
+
+# Optional client targeting
+mcphub install --server serena --clients qwen-cli,vscode
+mcphub install --server serena --all-clients
+
+# Verify
+mcphub status
+claude mcp get serena    # shows: Status: ✓ Connected, Type: http
+```
 
 ## Ten shipped servers
 
