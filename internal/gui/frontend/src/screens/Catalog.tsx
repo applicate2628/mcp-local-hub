@@ -439,7 +439,10 @@ function MarketplaceSection({ entries }: { entries: MarketplaceEntry[] }) {
                 Generate a draft with{" "}
                 <code>mcphub marketplace generate {entry.id}</code>
               </p>
-              {entry.homepage && (
+              {/* homepage comes from an UNTRUSTED external registry — only
+                  render the link when it is an http(s) URL, so a hostile
+                  catalog cannot inject a javascript:/data: href. */}
+              {/^https?:\/\//i.test(entry.homepage) && (
                 <p class="catalog-marketplace-homepage">
                   <a
                     href={entry.homepage}

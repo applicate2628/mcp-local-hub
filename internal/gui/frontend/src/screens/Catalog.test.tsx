@@ -450,6 +450,26 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-install-filesystem")).toBeNull();
   });
 
+  it("does NOT render a homepage link when the marketplace homepage is not http(s) (untrusted-registry XSS guard)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace": () =>
+          jsonResponse(200, {
+            entries: [mpEntry("evil", "Evil", "x", [], "javascript:alert(1)")],
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-card-evil")).toBeTruthy();
+    });
+    // The hostile non-http(s) homepage must NOT produce a rendered link.
+    expect(screen.queryByTestId("catalog-marketplace-homepage-evil")).toBeNull();
+  });
+
   it("renders the marketplace empty notice when /api/marketplace is empty", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
