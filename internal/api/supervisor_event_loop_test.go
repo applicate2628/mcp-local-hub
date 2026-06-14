@@ -2,15 +2,28 @@ package api
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestEventLoop_OrderingFIFO(t *testing.T) {
 	loop := NewEventLoop(16)
+	// got is appended by the loop's handler goroutine and read by this
+	// test goroutine. Guard it with mu so the write/read pair has a
+	// happens-before barrier; without it `go test -race` flags a data
+	// race. snapshot() copies the slice under the lock for assertion.
+	var mu sync.Mutex
 	got := make([]string, 0, 3)
+	snapshot := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), got...)
+	}
 	loop.RegisterHandler(func(e LoopEvent) {
+		mu.Lock()
 		got = append(got, e.TaskName)
+		mu.Unlock()
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -21,8 +34,8 @@ func TestEventLoop_OrderingFIFO(t *testing.T) {
 	loop.Post(LoopEvent{Kind: EvChildExit, TaskName: "C"})
 
 	time.Sleep(50 * time.Millisecond)
-	if len(got) != 3 || got[0] != "A" || got[1] != "B" || got[2] != "C" {
-		t.Fatalf("FIFO order broken: %v", got)
+	if g := snapshot(); len(g) != 3 || g[0] != "A" || g[1] != "B" || g[2] != "C" {
+		t.Fatalf("FIFO order broken: %v", g)
 	}
 }
 
@@ -70,9 +83,21 @@ func TestEventLoop_PostSelfNonBlockingUntilSelfChFull(t *testing.T) {
 // (C3 priority channel ordering).
 func TestEventLoop_PriorityDrainsSelfBeforeMain(t *testing.T) {
 	loop := NewEventLoop(16)
+	// got is appended by the loop's handler goroutine and polled by this
+	// test goroutine. Guard it with mu so the write/read pair has a
+	// happens-before barrier; without it `go test -race` flags a data
+	// race. snapshot() copies the slice under the lock for assertion.
+	var mu sync.Mutex
 	got := make([]string, 0, 4)
+	snapshot := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), got...)
+	}
 	loop.RegisterHandler(func(e LoopEvent) {
+		mu.Lock()
 		got = append(got, e.TaskName)
+		mu.Unlock()
 	})
 
 	// Queue main-channel events FIRST while loop is not running.
@@ -89,15 +114,16 @@ func TestEventLoop_PriorityDrainsSelfBeforeMain(t *testing.T) {
 	go loop.Run(ctx)
 
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(got) < 4 {
+	for time.Now().Before(deadline) && len(snapshot()) < 4 {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(got) < 4 {
-		t.Fatalf("only %d/4 events drained: %v", len(got), got)
+	g := snapshot()
+	if len(g) < 4 {
+		t.Fatalf("only %d/4 events drained: %v", len(g), g)
 	}
 	// The first event drained MUST be "self-1" despite being posted
 	// after the main events. This is the priority-drain guarantee.
-	if got[0] != "self-1" {
-		t.Fatalf("priority drain failed: got order=%v; expected self-1 first", got)
+	if g[0] != "self-1" {
+		t.Fatalf("priority drain failed: got order=%v; expected self-1 first", g)
 	}
 }

@@ -97,6 +97,64 @@ jobs:
         # is worth it.
         run: go test -count=1 -timeout 5m ./...
 
+      - name: Test (env-fallback build tag)
+        # Plan v13 §43: the env-fallback state-path resolver lives behind
+        # the test_state_path_env build tag (state_paths_envfallback.go).
+        # The default-tag Test step above exercises the production
+        # fail-closed path; this step exercises the tagged env-fallback
+        # path so both variants stay green. Scoped to the packages whose
+        # tests depend on the tag (internal/api state-path tests +
+        # internal/cli subprocess-isolation tests) — matches the local
+        # pre-push command in CLAUDE.md Step 1.
+        run: go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
+
+      - name: Production binary symbol assertion
+        # Plan v13 §43/§50: a normal `go build` (no -tags) MUST exclude
+        # the env-fallback state-path resolver. The build-tag file split
+        # (state_paths_prod.go is //go:build !test_state_path_env,
+        # state_paths_envfallback.go is //go:build test_state_path_env)
+        # makes this a compile-time guarantee; this step is the
+        # defense-in-depth CI gate that catches any future erosion of the
+        # tag discipline. resolveKnownFolderWithEnvFallback is the symbol
+        # unique to the env-fallback variant (the production variant
+        # defines resolveKnownFolderProduction instead), so its presence
+        # in a no-tag build means a test-only path leaked into production.
+        # `shell: bash` keeps one script across the ubuntu + windows
+        # matrix (Git Bash ships on windows-latest); GOEXE handles the
+        # .exe suffix difference.
+        shell: bash
+        run: |
+          ext="$(go env GOEXE)"
+          bin="mcphub-prod${ext}"
+          go build -o "${bin}" ./cmd/mcphub
+          if go tool nm "${bin}" | grep -q 'resolveKnownFolderWithEnvFallback'; then
+            echo "FAIL: production binary contains the env-fallback symbol resolveKnownFolderWithEnvFallback (test-only state-path resolver leaked into a no-tag build)"
+            exit 1
+          fi
+          echo "OK: production binary excludes the test-only env-fallback state-path resolver"
+
+      - name: GUI bundle freshness
+        # The embedded GUI bundle (internal/gui/assets/{index.html,app.js,
+        # style.css}) is committed so `go build` works without Node. It
+        # can silently drift from the frontend source if a contributor
+        # edits internal/gui/frontend/ without re-running
+        # `go generate ./internal/gui/...`. Regenerate here and fail if
+        # the committed bundle differs from a fresh build. Gated to the
+        # ubuntu matrix leg only: the npm+vite build is the same on every
+        # OS, so running it once is enough, and a Windows leg would risk
+        # CRLF-only diff false-positives against the LF-committed assets.
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Regenerate + verify embedded GUI bundle
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          npm ci --prefix internal/gui/frontend
+          go generate ./internal/gui/...
+          git diff --exit-code internal/gui/assets/
+
   cross-compile:
     name: cross-compile (darwin)
     runs-on: ubuntu-latest
