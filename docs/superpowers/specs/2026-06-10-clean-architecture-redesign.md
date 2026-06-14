@@ -105,7 +105,7 @@ This roadmap supersedes the original 8-section sketch by adding the two owner-re
 | **F — drop scheduler/migration** (§5) | Global daemons → supervisor-intent; remove `install --rollback-to-legacy`, `internal/migration/`, `migrate-legacy` | future (v0.6-core) | E |
 | **§3 — connection robustness** | serena + LSP router fail loud at connection layer on backend loss (no zombie sessions) — **its OWN PR, 3-store teardown** (§15 P1-a; NOT folded into the STOP PR) | next | router layer (separate from A/B) |
 | **#6 — idle-shutdown** | serena pool daemons sleep after N idle min (GUI-configurable); `IntentReasonIdle` | future | E (unified intent) |
-| **#8a — test-port convention** (§2) | guard-grep (test tree too — §15 P2) + `pickFreeLocalPort(t)`/`:0`; the killed-live-daemon class | next (before C) | independent (no persistent files) |
+| **#8a — test-port convention** (§2) | guard-grep (test tree too — §15 P2) + `pickFreeLocalPort(t)`/`:0`; the killed-live-daemon class | **DONE** (PR #282/#283; AST guard `internal/api/port_kill_guard_test.go`, helper `install_test.go:559`) | independent (no persistent files) |
 | **#8b — config-centralization** (§2) | `configs/ports.yaml` becomes runtime port owner (reconcile stale data first); daemon ports auto-allocated 9150+; tier-A → GUI | future (after F) | feeds §10 port alloc |
 | **demigrate-serena-router** | demigrate recognizes `/serena/mcp` router shape as mcphub-managed-removable | next | independent |
 | **#4 — hash→name display** | Show `serena · <project>` not `serena-<8hex>` in CLI + Dashboard | next | independent (display-only) |
