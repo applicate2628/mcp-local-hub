@@ -166,6 +166,125 @@ func TestRunSetupLSPClientRouterRollback_ReportsRestoreResult(t *testing.T) {
 	}
 }
 
+// setupTrustedRootTestEnv redirects the daemon state dir to a fresh
+// per-test temp tree (0700, so the parent-DACL/mode read gate passes on
+// POSIX and Windows alike — same posture as the api-package
+// trustedRootsTestDir helper) and stubs the bootstrap + watchdog steps so
+// `mcphub setup` neither copies a binary nor touches Task Scheduler. It
+// returns the resolved store path so a test can load + assert the store
+// after the command runs. NEVER touches the real %LOCALAPPDATA% store.
+func setupTrustedRootTestEnv(t *testing.T) string {
+	t.Helper()
+
+	restore := api.SetDaemonStateRootForTest(t.TempDir())
+	t.Cleanup(restore)
+
+	origBootstrap := setupBootstrapFn
+	origWatchdog := setupWatchdogFn
+	origRouter := setupLSPClientRouterFn
+	t.Cleanup(func() {
+		setupBootstrapFn = origBootstrap
+		setupWatchdogFn = origWatchdog
+		setupLSPClientRouterFn = origRouter
+	})
+	setupBootstrapFn = func(io.Writer) error { return nil }
+	setupWatchdogFn = func(io.Writer, bool) error { return nil }
+	// Avoid touching real client configs / scanning the host.
+	setupLSPClientRouterFn = func(bool) (*api.LSPClientRouterReport, error) {
+		return &api.LSPClientRouterReport{}, nil
+	}
+
+	path, err := api.DefaultLSPTrustedRootsPath()
+	if err != nil {
+		t.Fatalf("resolve trusted-roots store path: %v", err)
+	}
+	return path
+}
+
+func runSetupCmd(t *testing.T, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	cmd := newSetupCmdReal()
+	var out, errBuf bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs(args)
+	err = cmd.Execute()
+	return out.String(), errBuf.String(), err
+}
+
+func TestSetupCommand_TrustedRootBlessesAbsolutePath(t *testing.T) {
+	storePath := setupTrustedRootTestEnv(t)
+
+	// A real directory so canonicalization (EvalSymlinks best-effort)
+	// resolves cleanly, matching a production workspace root.
+	root := t.TempDir()
+
+	stdout, _, err := runSetupCmd(t, "--trusted-root", root)
+	if err != nil {
+		t.Fatalf("setup --trusted-root %q: %v", root, err)
+	}
+	if !strings.Contains(stdout, "Blessed LSP trusted root") {
+		t.Fatalf("stdout missing bless confirmation; got %q", stdout)
+	}
+
+	f, err := api.LoadDefaultLSPTrustedRoots()
+	if err != nil {
+		t.Fatalf("reload trusted-roots store: %v", err)
+	}
+	if !f.LSPWorkspaceRootTrusted(root) {
+		t.Fatalf("root %q should be trusted after bless; store path %s, roots %v",
+			root, storePath, f.Roots)
+	}
+}
+
+func TestSetupCommand_TrustedRootRejectsRelativePath(t *testing.T) {
+	storePath := setupTrustedRootTestEnv(t)
+
+	_, _, err := runSetupCmd(t, "--trusted-root", "relative/path")
+	if err == nil {
+		t.Fatal("setup --trusted-root with a relative path must error")
+	}
+	if !strings.Contains(err.Error(), "LSP_TRUSTED_ROOTS_NOT_ABSOLUTE") {
+		t.Fatalf("error should carry LSP_TRUSTED_ROOTS_NOT_ABSOLUTE code; got %v", err)
+	}
+
+	// The pre-flight validation rejects BEFORE any store write — the store
+	// must not exist (no file created by a rejected command).
+	if _, statErr := os.Stat(storePath); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected relative-path command must not write the store; stat err = %v", statErr)
+	}
+}
+
+func TestSetupCommand_TrustedRootIdempotentRebless(t *testing.T) {
+	setupTrustedRootTestEnv(t)
+	root := t.TempDir()
+
+	// First bless.
+	if _, _, err := runSetupCmd(t, "--trusted-root", root); err != nil {
+		t.Fatalf("first bless: %v", err)
+	}
+	first, err := api.LoadDefaultLSPTrustedRoots()
+	if err != nil {
+		t.Fatalf("reload after first bless: %v", err)
+	}
+
+	// Re-bless the same root — must be a no-op success (no duplicate row,
+	// no error).
+	if _, _, err := runSetupCmd(t, "--trusted-root", root); err != nil {
+		t.Fatalf("idempotent re-bless: %v", err)
+	}
+	second, err := api.LoadDefaultLSPTrustedRoots()
+	if err != nil {
+		t.Fatalf("reload after re-bless: %v", err)
+	}
+	if len(second.Roots) != len(first.Roots) {
+		t.Fatalf("re-bless changed root count: first %v, second %v", first.Roots, second.Roots)
+	}
+	if !second.LSPWorkspaceRootTrusted(root) {
+		t.Fatalf("root %q should still be trusted after idempotent re-bless; roots %v", root, second.Roots)
+	}
+}
+
 func TestSetupCommand_ContinuesToWatchdogWhenLSPRouterWiringFails(t *testing.T) {
 	origBootstrap := setupBootstrapFn
 	origRouter := setupLSPClientRouterFn

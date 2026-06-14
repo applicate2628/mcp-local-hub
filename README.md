@@ -147,6 +147,7 @@ assistant installed on the workstation.
 | Command | What it does |
 |---|---|
 | `mcphub setup` | Install binary to `~/.local/bin` and register on user PATH (idempotent) |
+| `mcphub setup --trusted-root <abs-path>` | Same as `setup`, plus bless one or more ABSOLUTE workspace paths as LSP trusted roots (repeatable; idempotent) so the GUI LSP router auto-registers language servers under them without a manual GUI bless |
 | `mcphub install --server <name>` | Create scheduler tasks, write default client configs, start daemons |
 | `mcphub install --server <name> --clients <ids>` | Install only the named client bindings |
 | `mcphub install --server <name> --all-clients` | Install every client binding declared by the manifest |
@@ -205,6 +206,10 @@ assistant installed on the workstation.
 ### PATH-based install model
 
 Scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path. `mcphub setup` puts the binary there and registers the directory on user PATH (Windows: `HKCU\Environment\Path` + `WM_SETTINGCHANGE` broadcast; Linux/macOS: prints shell-rc line). Moving or rebuilding the binary later only requires re-running `mcphub setup` — scheduler tasks keep pointing at the canonical path and automatically use the new binary.
+
+### First-run onboarding
+
+A fresh install lands on an empty GUI. Two affordances smooth the first run: pass `mcphub setup --trusted-root <abs-path>` (repeatable) to bless your workspaces as LSP trusted roots up front — it writes the same `lsp-trusted-roots.json` store the GUI **Settings → Trusted Roots** panel writes, via the same hardened idempotent append, so the LSP router auto-registers language servers under those paths without a manual GUI bless. Independently, the GUI shows a dismissable **"Welcome to mcp-local-hub"** banner with a one-click link to the Add-server flow whenever no MCP servers are installed yet (it hides automatically once the first server appears).
 
 ### go:embed manifests
 

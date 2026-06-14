@@ -472,6 +472,31 @@ main { padding: var(--screen-padding); overflow: auto; }
   border-left-color: var(--danger);
 }
 
+/* === First-run onboarding banner (§14) === */
+/* Builds on the reusable .banner + .banner-info base above; only the
+   call-to-action row needs bespoke layout. */
+
+.first-run-banner-actions {
+  display: flex;
+  gap: var(--gap-sm, 8px);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.first-run-banner-cta {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 4px;
+  background: #4a90e2;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.first-run-banner-cta:hover {
+  background: #357abd;
+}
+
 /* === Inline link-styled button === */
 
 .linklike {

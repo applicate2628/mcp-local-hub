@@ -270,6 +270,7 @@ func bootstrapCopyOnly(w io.Writer) error {
 func newSetupCmdReal() *cobra.Command {
 	var allowElevated bool
 	var rollbackLSPRouter bool
+	var trustedRoots []string
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Install mcphub to ~/.local/bin, register PATH, install watchdog task",
@@ -301,6 +302,20 @@ What setup does:
      audit-degraded cascade can use eventlog.Notify (plan §60).
      Failure here is non-fatal — the cascade still has stderr/syslog
      fallbacks.
+  8. For each --trusted-root <abs-path> (repeatable), blesses that
+     workspace as an LSP trusted root in <state-dir>/lsp-trusted-roots.json
+     so the GUI LSP router auto-registers language servers under it without
+     a manual GUI bless. Each path must be ABSOLUTE (relative is rejected);
+     blessing is idempotent. Runs last, after the state dir is ensured.
+     Omitting the flag leaves the default flow unchanged.
+
+Trusted roots (first-run onboarding):
+  mcphub setup --trusted-root /abs/path/to/workspace blesses workspaces up
+  front so an operator scripting a fresh install does not have to open the
+  GUI Settings → Trusted Roots panel to authorize their first project. It
+  writes the same store (lsp-trusted-roots.json) the GUI panel and the
+  explicit-register auto-bless path write, via the same hardened idempotent
+  append.
 
 Rollback:
   mcphub setup --rollback-lsp-router restores the latest pre-router
@@ -322,6 +337,8 @@ Examples:
   mcphub setup                    # after pulling + rebuilding — replaces the canonical copy
   mcphub setup --rollback-lsp-router
   mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
+  mcphub setup --trusted-root D:\dev\myproj    # bless one LSP trusted root
+  mcphub setup --trusted-root D:\dev\a --trusted-root D:\dev\b  # bless several
 
 Caveats:
   - The shell that ran 'setup' won't see the updated PATH — close and
@@ -345,20 +362,75 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 			if rollbackLSPRouter {
 				return runSetupLSPClientRouter(cmd.OutOrStdout(), true)
 			}
+			// Validate --trusted-root paths BEFORE any mutation so a
+			// fat-fingered relative path fails the whole command up front
+			// rather than after bootstrap/watchdog side effects have landed.
+			if err := validateTrustedRootArgs(trustedRoots); err != nil {
+				return err
+			}
 			if err := runSetupBootstrap(cmd.OutOrStdout()); err != nil {
 				return err
 			}
 			if err := runSetupLSPClientRouter(cmd.OutOrStdout(), false); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: LSP router wiring failed (continuing to watchdog): %v\n", err)
 			}
-			return runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated)
+			if err := runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated); err != nil {
+				return err
+			}
+			// Bless any operator-supplied LSP trusted roots. Runs AFTER the
+			// watchdog step because that step is where the per-user state dir
+			// is ensured + sanity-checked (it returns exit 8 if the state dir
+			// is unreachable), so the store write below is guaranteed a valid
+			// state dir. Reuses the SAME hardened idempotent append the GUI
+			// POST /api/lsp/trusted-roots handler calls (api.BlessDefaultTrustedRoot).
+			return runSetupTrustedRoots(cmd.OutOrStdout(), trustedRoots)
 		},
 	}
 	c.Flags().BoolVar(&allowElevated, "allow-elevated", false,
 		"override plan §42 elevation refusal (records a high-priority audit entry; fail-closed if audit fails per §61)")
 	c.Flags().BoolVar(&rollbackLSPRouter, "rollback-lsp-router", false,
 		"restore/remove Phase 3 LSP router client entries from latest backups; skips bootstrap/watchdog setup")
+	c.Flags().StringArrayVar(&trustedRoots, "trusted-root", nil,
+		"bless an ABSOLUTE workspace path as an LSP trusted root (repeatable); same store the GUI Settings → Trusted Roots panel writes. Idempotent.")
 	return c
+}
+
+// validateTrustedRootArgs mirrors the GUI POST /api/lsp/trusted-roots
+// handler validation (internal/gui/lsp_trusted_roots_handler.go): each
+// supplied root must be non-empty and absolute. A relative or empty path
+// is rejected with the same LSP_TRUSTED_ROOTS_NOT_ABSOLUTE code the API
+// surfaces so the CLI and GUI reject identical input identically. Done as a
+// pre-flight pass so the command fails before bootstrap/watchdog mutate
+// anything.
+func validateTrustedRootArgs(roots []string) error {
+	for _, raw := range roots {
+		root := strings.TrimSpace(raw)
+		if root == "" {
+			return fmt.Errorf("--trusted-root: root is required (LSP_TRUSTED_ROOTS_INVALID)")
+		}
+		if !filepath.IsAbs(root) {
+			return fmt.Errorf("--trusted-root %q must be an absolute path (LSP_TRUSTED_ROOTS_NOT_ABSOLUTE)", root)
+		}
+	}
+	return nil
+}
+
+// runSetupTrustedRoots blesses each operator-supplied trusted root into the
+// default LSP trusted-roots store via api.BlessDefaultTrustedRoot — the SAME
+// canonical owner the GUI add-root handler uses, so the CLI never hand-rolls
+// a store write. Blessing is idempotent (an already-trusted root is a no-op
+// success), and one confirmation line is emitted per root. Callers must have
+// run validateTrustedRootArgs first; this function trusts its input is
+// non-empty + absolute.
+func runSetupTrustedRoots(out io.Writer, roots []string) error {
+	for _, raw := range roots {
+		root := strings.TrimSpace(raw)
+		if err := api.BlessDefaultTrustedRoot(root); err != nil {
+			return fmt.Errorf("bless trusted root %q: %w", root, err)
+		}
+		fmt.Fprintf(out, "✓ Blessed LSP trusted root: %s\n", root)
+	}
+	return nil
 }
 
 func runSetupBootstrap(out io.Writer) error {
