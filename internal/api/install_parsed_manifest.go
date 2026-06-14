@@ -529,6 +529,11 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	var autostartStrictMode bool
 	var removedSupervisorTargetsAfterInstall []SupervisorDaemon
 	var removedSupervisorPIDByTask map[string]int
+	// Captured under the intent flock from the authoritative committed
+	// desiredIntent.Daemons, filtered to THIS server's owned rows, so the
+	// best-effort daemon-installed audit emit below (after runLocked releases
+	// the lock) reflects exactly the descriptor rows this install committed.
+	var installedSupervisorRows []SupervisorDaemon
 	nudgeResult := supervisorReconcileNudgeResult{status: supervisorReconcileNudgeSucceeded}
 
 	if superviseGlobal {
@@ -664,6 +669,18 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			}); err != nil {
 				return err
 			}
+			// Capture THIS server's committed descriptor rows for the best-effort
+			// daemon-installed audit emit (after the lock releases). Only when an
+			// intent write actually happened — a daemonless full install
+			// (intentWriteNeeded==false) committed no descriptor rows, so nothing
+			// was installed to announce.
+			if intentWriteNeeded {
+				for _, d := range desiredIntent.Daemons {
+					if supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
+						installedSupervisorRows = append(installedSupervisorRows, d)
+					}
+				}
+			}
 			return nil
 		}
 		// Run the locked critical section; its deferred Unlock fires here, so the
@@ -672,6 +689,12 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 		if err := runLocked(); err != nil {
 			return err
 		}
+		// Best-effort: announce each committed daemon descriptor row to
+		// supervisor-events.log so an operator (and a future GUI lifecycle
+		// consumer) sees that a daemon was installed. Mirrors
+		// emitStaleWorkspaceSkippedEvent's channel discipline — a log failure
+		// never blocks or alters the install.
+		emitDaemonInstalledEvents(m.Name, installedSupervisorRows)
 		cleanupLegacySchedulerTasksForSupervisorInstall(m, daemonFilter, w)
 		if ensureAutostartAfterInstall {
 			ensureGlobalInstallAutostartOwner(w, autostartStrictMode)
@@ -2338,6 +2361,51 @@ func emitSpecBearingInstallAllowedUnderLockEvent(server, lockPath string) {
 			"bypass_rationale": "caller holds the gate's supervisor.lock (migrate/auto-register interlock); the held lock is the caller's own handle, not a foreign supervisor",
 		},
 	})
+}
+
+// emitDaemonInstalledEvents records one best-effort INFO row per committed
+// supervisor-intent daemon descriptor to supervisor-events.log so an operator
+// (and a future GUI lifecycle consumer) sees that a daemon was installed. It
+// is the install-side counterpart to the lifecycle-side daemon-spawned /
+// daemon-exited / daemon-quarantined rows: those describe a daemon's RUNTIME
+// transitions, this describes the moment its descriptor was written to intent.
+//
+// The Source is the same "install" string the sibling spec-bearing install
+// helpers use (no named constant exists; reconcile would mis-attribute the
+// row to the supervisor's reconcile loop, which is not what wrote it). Mirrors
+// emitStaleWorkspaceSkippedEvent's channel discipline: the log is opened once
+// for the whole batch and a log failure never blocks or alters the install —
+// every Emit return is intentionally discarded.
+func emitDaemonInstalledEvents(server string, rows []SupervisorDaemon) {
+	if len(rows) == 0 {
+		return
+	}
+	stateDir, sdErr := DaemonStateDir()
+	if sdErr != nil {
+		return
+	}
+	logger, openErr := OpenSupervisorEventLog(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if openErr != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	for _, d := range rows {
+		_ = logger.Emit(SupervisorEvent{
+			SchemaVersion: SupervisorEventSchemaVersion,
+			TS:            time.Now().UTC().Format(time.RFC3339Nano),
+			Severity:      SupervisorEventSeverityInfo,
+			Source:        "install",
+			Event:         "daemon-installed",
+			TaskName:      d.TaskName,
+			Body: map[string]any{
+				"server":    server,
+				"daemon":    d.Daemon,
+				"command":   d.Command,
+				"port":      d.Port,
+				"workspace": d.Workspace,
+			},
+		})
+	}
 }
 
 // supervisorDaemonsFromPlan derives the SupervisorDaemon descriptors for a

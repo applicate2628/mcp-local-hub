@@ -2890,6 +2890,10 @@ func (c *supervisorController) executeSideEffect(
 				TaskName: d.TaskName,
 				Body: map[string]any{
 					"reason": "EvTimerDue at or beyond quarantine threshold",
+					// workspace lets a future GUI serena-session-cleanup consumer
+					// key teardown by the dead daemon's workspace path (empty for
+					// global daemons). Sourced from the descriptor in scope here.
+					"workspace": d.Workspace,
 				},
 			})
 		}
@@ -3104,6 +3108,10 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 					"failures_in_30m": failures,
 					"reason":          "10+ failures in 30-min sliding window; respawn attempts suspended until supervisor restart",
 					"exit_code":       exitCode,
+					// workspace lets a future GUI serena-session-cleanup consumer
+					// key teardown by the dead daemon's workspace path (empty for
+					// global daemons). Sourced from the descriptor in scope here.
+					"workspace": d.Workspace,
 				},
 			})
 		}
