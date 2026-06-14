@@ -1,0 +1,42 @@
+{
+  "name": "mcphub",
+  "version": "0.4.5",
+  "description": "mcp-local-hub (mcphub): a local supervisor + router that compresses dozens of duplicate MCP (Model Context Protocol) server processes across parallel clients into one managed hub. Windows-GA; Linux-beta / macOS-preview for supervisor lifecycle.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "supervisor",
+    "cli"
+  ],
+  "homepage": "https://github.com/applicate2628/mcp-local-hub#readme",
+  "bugs": {
+    "url": "https://github.com/applicate2628/mcp-local-hub/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/applicate2628/mcp-local-hub.git",
+    "directory": "npm"
+  },
+  "license": "MPL-2.0",
+  "author": "Dmitry Denisenko (@applicate2628)",
+  "type": "commonjs",
+  "bin": {
+    "mcphub": "bin/cli.js"
+  },
+  "files": [
+    "bin/cli.js",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "@mcphub/win32-x64": "0.4.5",
+    "@mcphub/win32-arm64": "0.4.5",
+    "@mcphub/darwin-x64": "0.4.5",
+    "@mcphub/darwin-arm64": "0.4.5",
+    "@mcphub/linux-x64": "0.4.5",
+    "@mcphub/linux-arm64": "0.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

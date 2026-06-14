@@ -1,0 +1,29 @@
+{
+  "name": "@mcphub/win32-x64",
+  "version": "0.4.5",
+  "description": "mcphub binary for win32/x64 (Go windows/amd64) — GA (generally available). Platform sub-package of the \"mcphub\" meta package; not installed directly.",
+  "license": "MPL-2.0",
+  "author": "Dmitry Denisenko (@applicate2628)",
+  "homepage": "https://github.com/applicate2628/mcp-local-hub#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/applicate2628/mcp-local-hub.git",
+    "directory": "npm/packages/win32-x64"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "bin": {
+    "mcphub": "bin/mcphub.exe"
+  },
+  "files": [
+    "bin/mcphub.exe",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
