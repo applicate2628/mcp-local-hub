@@ -66,6 +66,11 @@ func newReconcileFakeClient(name string) *reconcileFakeClient {
 func (f *reconcileFakeClient) Name() string       { return f.name }
 func (f *reconcileFakeClient) ConfigPath() string { return "/fake/" + f.name }
 func (f *reconcileFakeClient) Exists() bool       { return f.exists }
+
+// IsRelayStdio mirrors the real per-name relay-stdio classification so a
+// fake constructed with name "antigravity"/"zed" behaves like the real
+// relay-stdio adapter (true) and every URL-native fake reports false.
+func (f *reconcileFakeClient) IsRelayStdio() bool { return clients.IsRelayStdio(f.name) }
 func (f *reconcileFakeClient) backupReturn() string {
 	if f.backupPath != "" {
 		return f.backupPath

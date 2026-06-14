@@ -54,6 +54,13 @@ type antigravityClient struct {
 	*jsonMCPClient
 }
 
+// IsRelayStdio reports true: Antigravity (Gemini Cascade) only accepts
+// stdio entries for localhost MCP, so AddEntry below requires relay context
+// (RelayExePath, plus RelayServer/RelayDaemon for the manifest-lookup form)
+// and rejects a URL-only entry. Overrides the embedded jsonMCPClient's
+// default false.
+func (a *antigravityClient) IsRelayStdio() bool { return true }
+
 func (a *antigravityClient) AddEntry(entry MCPEntry) error {
 	if entry.RelayExePath == "" {
 		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath (absolute path to mcphub.exe for the 'command' field)")

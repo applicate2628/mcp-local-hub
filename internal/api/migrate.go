@@ -155,13 +155,18 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 				RelayServer: server,
 				RelayDaemon: binding.Daemon,
 			}
-			if binding.Client == "antigravity" {
-				// Anchor at the canonical installed path, not at the
-				// running executable. Otherwise a migrate invoked from a
-				// dev checkout or %TEMP% build would persist a
-				// throwaway absolute path into Antigravity's config —
+			if clients.IsRelayStdio(binding.Client) {
+				// Relay-stdio adapters (antigravity, zed) spawn the
+				// stdio relay from an absolute mcphub path persisted
+				// into the client config, so AddEntry rejects an entry
+				// with no RelayExePath. Anchor at the canonical
+				// installed path, not at the running executable.
+				// Otherwise a migrate invoked from a dev checkout or
+				// %TEMP% build would persist a throwaway absolute path —
 				// the next time that path disappears (cleanup, rebuild)
-				// Antigravity's MCP entry is silently broken.
+				// the client's MCP entry is silently broken. The
+				// relay-stdio fact is owned by clients.IsRelayStdio so a
+				// new relay adapter is covered here automatically.
 				if canonical, err := canonicalMcphubPath(); err == nil {
 					entry.RelayExePath = canonical
 				}

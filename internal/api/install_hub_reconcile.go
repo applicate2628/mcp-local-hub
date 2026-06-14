@@ -163,7 +163,7 @@ func BuildHubReconcilePlan(
 	var plan []ClientUpdatePlan
 	if !opts.GateOn {
 		for _, client := range clients.SupportedClientNames() {
-			if hubReconcileSkipClients[client] {
+			if clients.IsRelayStdio(client) {
 				continue
 			}
 			path, err := clients.ConfigPathForName(client)
@@ -217,7 +217,7 @@ func BuildHubReconcilePlan(
 			// supported client at hub startup), so missing keys
 			// indicate genuine corruption or a stale token table.
 			tok := tokens.Tokens[client]
-			if tok == "" && !hubReconcileSkipClients[client] {
+			if tok == "" && !clients.IsRelayStdio(client) {
 				return nil, fmt.Errorf("gate-ON reconcile: missing per-client token for %q in hub-mcp-tokens.json — restart the hub (or rotate via `mcphub hub-mcp regenerate-token --client %s`) so EnsureHubTokens repopulates the table", client, client)
 			}
 			// AddReplace the aggregate FIRST so applier ordering
@@ -339,10 +339,10 @@ func ApplyHubReconcileInOrder(plan []ClientUpdatePlan) HubReconcileReport {
 
 	for _, client := range clientNames {
 		// codex bot phase5 r4 P2 closure on PR #160: surface
-		// antigravity (and any other skip-list client) in the
+		// antigravity (and any other relay-stdio client) in the
 		// report so operators see explicit "manual reinstall
 		// required" rather than silent omission.
-		if hubReconcileSkipClients[client] {
+		if clients.IsRelayStdio(client) {
 			report.Skipped = append(report.Skipped, client)
 			continue
 		}
@@ -440,13 +440,13 @@ func callApplyOpsForClient(client string, ops []ClientUpdatePlan) error {
 // relay-stdio adapters would reject. Keep these opt-in clients out of hub
 // reconcile entirely. Operators who installed one manually need to rerun
 // `mcphub install --server X --client <name>` after toggling the gate.
-var hubReconcileSkipClients = map[string]bool{
-	"antigravity": true,
-	"zed":         true,
-}
-
+//
+// The "is this adapter relay-stdio" fact is owned by clients.IsRelayStdio
+// (each adapter declares its own Client.IsRelayStdio truth); every gate in
+// this file consults that predicate so a future relay adapter is excluded
+// automatically without editing each site.
 func applyOpsForClient(client string, ops []ClientUpdatePlan) error {
-	if hubReconcileSkipClients[client] {
+	if clients.IsRelayStdio(client) {
 		return nil // surfaced as a "skipped" success in the report layer
 	}
 	if len(ops) == 0 {

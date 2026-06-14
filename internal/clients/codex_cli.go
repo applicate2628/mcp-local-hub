@@ -24,6 +24,9 @@ type codexCLI struct {
 func (c *codexCLI) Name() string       { return "codex-cli" }
 func (c *codexCLI) ConfigPath() string { return c.path }
 
+// IsRelayStdio reports false: codex-cli is a URL-native HTTP MCP client.
+func (c *codexCLI) IsRelayStdio() bool { return false }
+
 func (c *codexCLI) Exists() bool {
 	_, err := os.Stat(c.path)
 	return err == nil

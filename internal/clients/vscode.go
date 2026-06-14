@@ -23,6 +23,9 @@ type vscodeClient struct {
 func (v *vscodeClient) Name() string       { return "vscode" }
 func (v *vscodeClient) ConfigPath() string { return v.path }
 
+// IsRelayStdio reports false: vscode is a URL-native HTTP MCP client.
+func (v *vscodeClient) IsRelayStdio() bool { return false }
+
 func (v *vscodeClient) Exists() bool {
 	if _, err := os.Stat(v.path); err == nil {
 		return true

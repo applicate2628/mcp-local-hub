@@ -121,6 +121,9 @@ const (
 func (o *openClawClient) Name() string       { return "openclaw" }
 func (o *openClawClient) ConfigPath() string { return o.path }
 
+// IsRelayStdio reports false: openclaw is a URL-native HTTP MCP client.
+func (o *openClawClient) IsRelayStdio() bool { return false }
+
 // Exists treats OpenClaw as installed when EITHER the config file is present
 // OR its parent directory (~/.openclaw/) exists, mirroring the
 // cursor/vscode/kiro/opencode "directory means installed" heuristic so an

@@ -67,6 +67,12 @@ const defaultLegacySerenaPort = 9121
 //
 // Antigravity is in the set but takes the stdio-relay shape (relay → router)
 // rather than a direct URL, per the descriptor-proxy design §5.
+//
+// This fixed set excludes the other relay-stdio adapter (zed) by
+// construction — it mirrors only the legacy serena binding surface, which
+// predates zed. The relay-stdio classification itself is owned by
+// clients.IsRelayStdio (antigravity is correctly classified true there); the
+// per-client relay handling below keys off that shape, not off this list.
 func serenaReconcileClientSet() []string {
 	return []string{
 		"claude-code",

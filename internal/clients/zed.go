@@ -95,6 +95,11 @@ const contextServersKey = "context_servers"
 func (z *zedClient) Name() string       { return "zed" }
 func (z *zedClient) ConfigPath() string { return z.path }
 
+// IsRelayStdio reports true: Zed is treated as stdio-only for mcp-local-hub
+// (see NewZed doc), so AddEntry requires relay context (RelayExePath + the
+// relay forward target via RelayURL/URL) and rejects a URL-only entry.
+func (z *zedClient) IsRelayStdio() bool { return true }
+
 func (z *zedClient) Exists() bool {
 	if _, err := os.Stat(z.path); err == nil {
 		return true

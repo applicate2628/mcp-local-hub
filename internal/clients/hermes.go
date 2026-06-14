@@ -47,6 +47,9 @@ type hermes struct {
 func (h *hermes) Name() string       { return "hermes" }
 func (h *hermes) ConfigPath() string { return h.path }
 
+// IsRelayStdio reports false: hermes is a URL-native HTTP MCP client.
+func (h *hermes) IsRelayStdio() bool { return false }
+
 func (h *hermes) Exists() bool {
 	_, err := os.Stat(h.path)
 	return err == nil
