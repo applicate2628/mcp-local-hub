@@ -47,10 +47,10 @@ type supervisorOwner struct {
 	// monitor logs the unexpected exit to stderr with the captured
 	// stderr tail so the operator sees the actionable diagnostic
 	// instead of an empty Dashboard.
-	exitedCh        chan exitInfo
-	stderrBuf       *boundedBuffer
-	stderrSink      io.Writer
-	stopRequested   atomic.Bool // set by Stop before signaling exit; read by monitor to classify expected vs unexpected
+	exitedCh      chan exitInfo
+	stderrBuf     *boundedBuffer
+	stderrSink    io.Writer
+	stopRequested atomic.Bool // set by Stop before signaling exit; read by monitor to classify expected vs unexpected
 }
 
 // exitInfo carries the result of cmd.Wait into stop() (or the early-
@@ -154,6 +154,267 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 			return nil, ctx.Err()
 		case <-time.After(supervisorReadyPollInterval):
 		}
+	}
+}
+
+// spawnSupervisorFn is the package-level spawn seam the
+// supervisorManager calls to respawn a dead supervisor child. It
+// defaults to ensureSupervisorRunning (the verbatim spawn primitive —
+// the singleton flock makes a redundant spawn a safe no-op). Tests
+// swap it (with t.Cleanup restore) to inject a synthetic owner so the
+// respawn loop can be exercised without a real `mcphub supervise`
+// binary. Mirrors the supervisorMonitorStderr swap pattern.
+var spawnSupervisorFn = ensureSupervisorRunning
+
+// GUI-side supervisor-respawn bounded-restart-policy knobs. Named next
+// to supervisorReadyPollInterval / supervisorForceKillFallbackWindow so
+// they are visible and (via the supervisorManager fields seeded from
+// them) injectable for tests. The window/cap mirror the supervisor's
+// own sliding RestartHistory discipline at a lighter weight: an
+// in-memory ring, no new state file.
+const (
+	guiSupervisorRespawnBackoffBase    = 1 * time.Second
+	guiSupervisorRespawnBackoffCap     = 30 * time.Second
+	guiSupervisorRespawnWindowCapCount = 5
+	guiSupervisorRespawnWindow         = 5 * time.Minute
+)
+
+// supervisorManager owns the swappable "current live supervisor owner"
+// handle plus a bounded respawn loop for GUI-spawned supervisors.
+//
+// The GUI spawns its supervisor child exactly once at startup; before
+// this manager, an unexpected supervisor death under a live GUI was
+// permanently unrecoverable (startExitMonitor only LOGS the death; the
+// liveness task defers to the live GUI owner). The manager closes that
+// gap: it consumes the owner's existing buffered exitedCh and, on an
+// UNEXPECTED exit, respawns via spawnFn with exponential backoff under
+// a sliding-window cap.
+//
+// Concurrency: the install-vs-shutdown decision is a check-then-act, so
+// `current` and `shuttingDown` are guarded together under ONE mutex (a
+// bare atomic.Pointer cannot express the atomic "is shutdown latched?"
+// + "install new owner" decision without a TOCTOU window that would leak
+// an un-Stopped respawned supervisor). The respawn (monitor) goroutine
+// is the only writer of `current`; the shutdown defer and status path
+// are readers — all go through mu. The mutex is held only for O(1)
+// swap/flag operations, never across a spawn or a Wait.
+//
+// The manager NEVER calls proc.Wait(): the owner's own startExitMonitor
+// owns the sole proc.Wait() and publishes to exitedCh. The loop blocks
+// on <-owner.exitedCh, guaranteeing exactly one Wait owner and exactly
+// one exit consumer per live process.
+type supervisorManager struct {
+	mu           sync.Mutex // guards current + shuttingDown (the swap-vs-shutdown decision)
+	current      *supervisorOwner
+	shuttingDown bool
+
+	ctx        context.Context
+	bin        string
+	strictMode bool
+	waitFor    time.Duration
+
+	window  []time.Time // sliding respawn-timestamp ring (no new state file)
+	spawnFn func(context.Context, string, bool, time.Duration) (*supervisorOwner, error)
+
+	stderrSink io.Writer
+
+	// Test-injectable timing/cap (defaulted from the consts above) so a
+	// unit test shrinks the window deterministically large per the
+	// race-window-assertion discipline rather than relying on the
+	// natural 5-minute window.
+	backoffBase    time.Duration
+	backoffCap     time.Duration
+	windowCapCount int
+	windowDur      time.Duration
+}
+
+// newSupervisorManager builds a manager seeded with the first
+// GUI-spawned owner. The respawn loop is launched separately by the
+// caller (startGuiServer) and ONLY when first.Spawned()==true — an
+// adopted owner gets no loop, preserving the adopt contract.
+func newSupervisorManager(ctx context.Context, bin string, strict bool, waitFor time.Duration, first *supervisorOwner) *supervisorManager {
+	return &supervisorManager{
+		current:        first,
+		ctx:            ctx,
+		bin:            bin,
+		strictMode:     strict,
+		waitFor:        waitFor,
+		spawnFn:        spawnSupervisorFn,
+		stderrSink:     supervisorMonitorStderr,
+		backoffBase:    guiSupervisorRespawnBackoffBase,
+		backoffCap:     guiSupervisorRespawnBackoffCap,
+		windowCapCount: guiSupervisorRespawnWindowCapCount,
+		windowDur:      guiSupervisorRespawnWindow,
+	}
+}
+
+// currentOwner returns the live supervisor handle under the mutex. Used
+// by the shutdown defer and any status reader.
+func (m *supervisorManager) currentOwner() *supervisorOwner {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.current
+}
+
+// Stop latches shutdown and stops whatever owner is currently live. It
+// sets shuttingDown=true and snapshots current under mu BEFORE calling
+// that owner's Stop, so the respawn loop (which re-checks shuttingDown
+// under the SAME mu) can never install a fresh supervisor after this
+// returns: either the loop observes shuttingDown and Stops the orphan
+// it just spawned, or this snapshot already holds the installed new
+// owner and stops it here. supervisorOwner.Stop is sync.Once-guarded so
+// a double-stop across the two paths is impossible.
+func (m *supervisorManager) Stop(ctx context.Context, graceTimeoutMs int) error {
+	m.mu.Lock()
+	m.shuttingDown = true
+	victim := m.current
+	m.mu.Unlock()
+	if victim != nil {
+		return victim.Stop(ctx, graceTimeoutMs)
+	}
+	return nil
+}
+
+// runRespawnLoop is the ONE dedicated goroutine per GUI run that chains
+// supervisor owners. It blocks on the current owner's exitedCh (NOT
+// proc.Wait — startExitMonitor owns that), classifies the exit, and on
+// an UNEXPECTED exit respawns with bounded backoff under a sliding
+// window cap. It has exactly three exit points so it cannot leak past
+// startGuiServer's return:
+//
+//  1. shutdown latched / ctx cancelled / this owner's Stop ran → EXPECTED,
+//     re-publish the drained exit so a racing owner.Stop() still sees it,
+//     then return.
+//  2. respawn cap reached within the sliding window → durable warn +
+//     stderr shadow, then return (no thrash).
+//  3. ctx.Done() during the backoff sleep → return.
+//
+// Launched only when the seeded owner Spawned()==true.
+func (m *supervisorManager) runRespawnLoop(ctx context.Context) {
+	for {
+		cur := m.currentOwner()
+		if cur == nil {
+			return
+		}
+		// Bound the receive on ctx so the loop can never (1) block
+		// forever on an adopted owner's NIL exitedCh, nor (2) leak on the
+		// shutdown dual-consumer race where Stop() drains the cap-1
+		// channel's single buffered value first (Go delivers it to
+		// exactly one of {Stop, this loop}). ctx is cancelled on GUI
+		// shutdown, so this is the loop's guaranteed escape.
+		var ev exitInfo
+		var ok bool
+		select {
+		case ev, ok = <-cur.exitedCh:
+			if !ok {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+		// Classify under the lock. shuttingDown is the authoritative
+		// gate; ctx cancel and this owner's own stopRequested cover the
+		// windows where Stop ran on a specific owner before shutdown was
+		// observed here.
+		m.mu.Lock()
+		shutting := m.shuttingDown
+		m.mu.Unlock()
+		if shutting || ctx.Err() != nil || cur.stopRequested.Load() {
+			// EXPECTED exit. Re-publish the drained exitInfo back onto
+			// the buffered (cap-1) channel non-blocking so a concurrent
+			// or subsequent owner.Stop() still observes it on its fast
+			// path instead of waiting out its force-kill fallback.
+			select {
+			case cur.exitedCh <- ev:
+			default:
+			}
+			return
+		}
+
+		// UNEXPECTED exit: respawn with bounded backoff under a sliding
+		// window cap. The SPAWN itself is retried on transient errors —
+		// each attempt is its own window slot — so a persistently
+		// failing/wedged spawn TRIPS THE CAP and stops, instead of
+		// parking forever (a bare `continue` back to the top receive
+		// would re-block on the already-drained dead owner) or
+		// tight-looping. A ctx cancel during backoff/spawn returns.
+		var newOwner *supervisorOwner
+		for {
+			now := time.Now()
+			m.window = append(m.window, now)
+			pruned := m.window[:0]
+			for _, t := range m.window {
+				if now.Sub(t) <= m.windowDur {
+					pruned = append(pruned, t)
+				}
+			}
+			m.window = pruned
+			if len(m.window) > m.windowCapCount {
+				_ = api.LogHubMcpEvent("warn", "gui-supervisor-respawn-cap-reached", map[string]any{
+					"cap":      m.windowCapCount,
+					"window_s": int(m.windowDur.Seconds()),
+				})
+				fmt.Fprintf(m.stderrSink,
+					"warning: supervisor respawn cap reached (%d in %s); not respawning; check supervisor-events.log\n",
+					m.windowCapCount, m.windowDur)
+				return
+			}
+			// Exponential backoff indexed by the attempt count in the
+			// current window, capped. Cancellable via ctx.
+			backoff := m.backoffBase * time.Duration(1<<min(len(m.window)-1, 6))
+			if backoff > m.backoffCap {
+				backoff = m.backoffCap
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			o, err := m.spawnFn(m.ctx, m.bin, m.strictMode, m.waitFor)
+			if err != nil {
+				// Transient/wedged spawn failure: log + RETRY (the inner
+				// loop re-appends a window slot and re-checks the cap), so
+				// a chronic failure trips the cap rather than silently
+				// disabling GUI self-healing after a single error.
+				_ = api.LogHubMcpEvent("warn", "gui-supervisor-respawn-failed", map[string]any{
+					"error": err.Error(),
+				})
+				fmt.Fprintf(m.stderrSink, "warning: supervisor respawn attempt failed: %v\n", err)
+				continue
+			}
+			newOwner = o
+			break
+		}
+		_ = api.LogHubMcpEvent("info", "gui-supervisor-respawned-by-gui", map[string]any{
+			"pid": newOwner.Pid(),
+		})
+		// INSTALL under the lock. If shutdown won the race during the
+		// spawn, Stop the orphan ourselves and do NOT install it.
+		m.mu.Lock()
+		if m.shuttingDown {
+			m.mu.Unlock()
+			_ = newOwner.Stop(m.ctx, 5000)
+			return
+		}
+		m.current = newOwner
+		m.mu.Unlock()
+		// If the respawn ADOPTED an already-bound (foreign) supervisor
+		// instead of spawning a fresh GUI-owned one, ensureSupervisorRunning
+		// returned spawned=false with a nil exitedCh — the GUI does not
+		// own that supervisor's lifecycle and cannot monitor its exit
+		// (no proc, no exitedCh). A supervisor IS running, so the recovery
+		// goal is met: keep it installed for status/shutdown visibility
+		// (adopted Stop is a no-op) and END the loop. Re-monitoring a
+		// foreign supervisor would require polling — documented known
+		// limitation; the common case (GUI-owned supervisor died, no
+		// foreign one bound) spawns a fresh spawned=true owner and the
+		// loop continues normally.
+		if !newOwner.Spawned() {
+			_ = api.LogHubMcpEvent("info", "gui-supervisor-respawn-adopted-existing", map[string]any{})
+			return
+		}
+		// Loop continues, now consuming newOwner.exitedCh (its own
+		// startExitMonitor publishes there).
 	}
 }
 
