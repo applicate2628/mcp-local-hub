@@ -94,10 +94,10 @@ type HubReconcileFailure struct {
 // install path would have written (codex bot phase5 r1 P2 closure
 // on PR #160 — gate-OFF reconcile MUST honor non-default url_path).
 type reconcileBindingRef struct {
-	Server   string
-	Daemon   string
-	Port     int
-	URLPath  string // binding's url_path; empty defaults to "/mcp" per validateClientURLPath
+	Server  string
+	Daemon  string
+	Port    int
+	URLPath string // binding's url_path; empty defaults to "/mcp" per validateClientURLPath
 }
 
 func BuildHubReconcilePlan(
@@ -431,20 +431,18 @@ func callApplyOpsForClient(client string, ops []ClientUpdatePlan) error {
 // Idempotent: re-running with the same plan against a converged config
 // is a no-op (AddEntry replaces in place; RemoveEntry no-ops on a
 // missing entry).
-// codex bot phase5 r4 P2 closure on PR #160: the antigravity
-// adapter's AddEntry path requires RelayServer + RelayDaemon +
-// RelayExePath to be present in the MCPEntry (it composes a
-// stdio-relay command line that bridges Cascade to the shared
-// HTTP daemon). The hub reconcile planner has no relay context —
-// the aggregate "mcphub-hub" entry is a pure HTTP URL with auth
-// headers, which the antigravity adapter would reject. Per
-// Antigravity's "opt-in via --client antigravity" status
-// (DefaultInstallClientNames excludes it), skip antigravity in
-// the hub reconcile entirely. Operators who installed antigravity
-// manually need to rerun `mcphub install --server X --client
-// antigravity` after toggling the gate.
+// codex bot phase5 r4 P2 closure on PR #160: relay-stdio adapters
+// require relay context (for example RelayExePath and, for some clients,
+// RelayServer/RelayDaemon) to be present in the MCPEntry because they
+// compose a stdio-relay command line that bridges the client to the shared
+// HTTP daemon. The hub reconcile planner has no relay context — the
+// aggregate "mcphub-hub" entry is a pure HTTP URL with auth headers, which
+// relay-stdio adapters would reject. Keep these opt-in clients out of hub
+// reconcile entirely. Operators who installed one manually need to rerun
+// `mcphub install --server X --client <name>` after toggling the gate.
 var hubReconcileSkipClients = map[string]bool{
 	"antigravity": true,
+	"zed":         true,
 }
 
 func applyOpsForClient(client string, ops []ClientUpdatePlan) error {
