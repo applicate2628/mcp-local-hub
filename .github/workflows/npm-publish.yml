@@ -52,11 +52,14 @@ jobs:
       - name: Resolve version
         id: ver
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
+          if [ "$EVENT_NAME" = "push" ]; then
             V="${GITHUB_REF_NAME#v}"   # v0.5.0 -> 0.5.0
           else
-            V="${{ inputs.version }}"
+            V="$VERSION_INPUT"
           fi
           if ! printf '%s' "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::version '$V' is not semver"; exit 1
