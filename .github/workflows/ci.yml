@@ -15,9 +15,10 @@ name: CI
 #   1. Actions tab → "CI" workflow → "Run workflow" → pick branch.
 #   2. Or from CLI:  `gh workflow run ci.yml --ref <branch> -f reason=<why>`
 #
-# CI also runs automatically on pushes to master (post-merge sanity check
-# so a broken main is caught immediately), and on tag pushes (release
-# verification). Neither path adds noise during the normal review loop.
+# CI is MANUAL-ONLY — it does NOT auto-run on push, PR, merge, or tags
+# (owner decision 2026-06-14, to cap GitHub Actions minutes). A release
+# `v*` tag triggers ONLY npm-publish.yml, never this matrix. Trigger CI
+# yourself (Actions → "CI" → Run workflow) when you want a sweep.
 #
 # Job split:
 #   - build-and-test: ubuntu-latest + windows-latest. Each runs
@@ -44,13 +45,12 @@ on:
         required: false
         default: "manual"
 
-  # Run on master after merge to catch regressions in the main branch
-  # immediately. This is the safety net that makes the manual-only PR
-  # model OK — even if reviewers forget to manually run CI before merge,
-  # this catches a broken master within minutes.
-  push:
-    branches: [master]
-    tags: ["v*"]
+# NO auto-trigger. CI runs ONLY via manual workflow_dispatch (Actions tab →
+# "CI" → "Run workflow", or `gh workflow run ci.yml -f reason=<why>`). The
+# push-to-master and `v*`-tag triggers were REMOVED to cap GitHub Actions
+# minutes (owner decision 2026-06-14): every merge previously ran the full
+# cross-platform matrix, and a release `v*` tag double-ran CI alongside
+# npm-publish.yml. Run CI manually when you want a cross-platform sweep.
 
 # Cancel superseded runs on the same ref. Useful when triggering manually
 # multiple times on the same branch — the latest manual request wins.
