@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	"mcp-local-hub/internal/api"
 
@@ -189,9 +191,24 @@ func printDefaultStatusTable(cmd *cobra.Command, rows []api.DaemonStatus, probeH
 // --json` for ops/scripting that key on the canonical identifier.
 func statusDisplayName(r api.DaemonStatus) string {
 	if r.DisplayName != "" {
-		return r.DisplayName
+		return stripTerminalControls(r.DisplayName)
 	}
-	return r.TaskName
+	return stripTerminalControls(r.TaskName)
+}
+
+// stripTerminalControls removes terminal control characters from text that is
+// about to be rendered in the human-readable status tables. DisplayName can
+// include a workspace basename, and POSIX basenames may legally contain bytes
+// such as newlines, ESC, OSC, or BEL; printing those bytes verbatim would allow
+// a malicious workspace name to spoof rows or trigger terminal side effects.
+// JSON output remains unchanged because it is emitted through json.Encoder.
+func stripTerminalControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // printWorkspaceScopedTable renders the --workspace-scoped layout. Columns:
