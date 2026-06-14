@@ -85,3 +85,7 @@ coverage.out
 /smoke-*.png
 /a3-*.png
 /b1-*.png
+
+# Internal consolidated roadmap (carries paid-tier split — keep OUT of the public repo)
+work-items/ROADMAP.md
+work-items/roadmap-scan-*.md
