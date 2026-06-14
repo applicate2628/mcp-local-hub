@@ -599,6 +599,17 @@ func SupportedClientNames() []string {
 		"gemini-cli",
 		"qwen-cli",
 		"antigravity",
+		// Wave 2 (PR pending): 8 additional opt-in clients. Stable order
+		// after the original 7. None are added to DefaultInstallClientNames
+		// — every one stays opt-in.
+		"zed",
+		"kiro",
+		"windsurf",
+		"cline",
+		"kilocode",
+		"opencode",
+		"hermes",
+		"openclaw",
 	}
 }
 
@@ -631,6 +642,34 @@ func ConfigPathForName(name string) (string, error) {
 		return filepath.Join(home, ".qwen", "settings.json"), nil
 	case "antigravity":
 		return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), nil
+	case "zed":
+		// Mirrors defaultZedConfigPath (zed.go): %APPDATA%\Zed\settings.json
+		// on Windows, $XDG_CONFIG_HOME/zed or ~/.config/zed elsewhere.
+		return defaultZedConfigPath(home), nil
+	case "kiro":
+		// Mirrors NewKiro (kiro.go): ~/.kiro/settings/mcp.json.
+		return filepath.Join(home, ".kiro", "settings", "mcp.json"), nil
+	case "windsurf":
+		// Mirrors NewWindsurf (windsurf.go): ~/.codeium/windsurf/mcp_config.json.
+		return filepath.Join(home, ".codeium", "windsurf", "mcp_config.json"), nil
+	case "cline":
+		// Mirrors defaultClineConfigPath (cline.go): VS Code globalStorage
+		// under saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
+		return defaultClineConfigPath(home), nil
+	case "kilocode":
+		// Mirrors defaultKiloCodeConfigPath (kilocode.go): VS Code
+		// globalStorage under kilo-code.kilo-code/settings/mcp_settings.json.
+		return defaultKiloCodeConfigPath(home), nil
+	case "opencode":
+		// Mirrors defaultOpenCodeConfigPath (opencode.go):
+		// ~/.config/opencode/opencode.json on every OS ($XDG_CONFIG_HOME-aware).
+		return defaultOpenCodeConfigPath(home), nil
+	case "hermes":
+		// Mirrors NewHermes (hermes.go): ~/.hermes/config.yaml.
+		return filepath.Join(home, ".hermes", "config.yaml"), nil
+	case "openclaw":
+		// Mirrors defaultOpenClawConfigPath (openclaw.go): ~/.openclaw/openclaw.json.
+		return defaultOpenClawConfigPath(home), nil
 	default:
 		return "", fmt.Errorf("unknown client %q (expected %s)", name, strings.Join(SupportedClientNames(), " | "))
 	}
@@ -662,6 +701,8 @@ func AllClients() map[string]Client {
 	result := map[string]Client{}
 	for _, factory := range []func() (Client, error){
 		NewClaudeCode, NewCodexCLI, NewCursor, NewVSCode, NewGeminiCLI, NewQwenCLI, NewAntigravity,
+		// Wave 2 (PR pending): 8 additional opt-in clients.
+		NewZed, NewKiro, NewWindsurf, NewCline, NewKiloCode, NewOpenCode, NewHermes, NewOpenClaw,
 	} {
 		c, err := factory()
 		if err != nil {
