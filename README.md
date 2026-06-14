@@ -115,7 +115,8 @@ perftools.llvm_objdump(binary="./new_bin", project_root=".", function="hot_loop"
 ## Supported clients
 
 Default install targets are `claude-code`, `codex-cli`, and `cursor`.
-`vscode`, `gemini-cli`, `qwen-cli`, and `antigravity` are opt-in via
+`vscode`, `gemini-cli`, `qwen-cli`, `antigravity`, `zed`, `kiro`, `windsurf`,
+`cline`, `kilocode`, `opencode`, `hermes`, and `openclaw` are opt-in via
 `--clients ...` or `--all-clients`, so install does not silently mutate every
 assistant installed on the workstation.
 
@@ -128,6 +129,14 @@ assistant installed on the workstation.
 | Gemini CLI | Opt-in | 0.38.1 tested | `~/.gemini/settings.json` | HTTP (`type: "http"`) |
 | Qwen Code CLI | Opt-in | Preview; live smoke pending | `~/.qwen/settings.json` | HTTP (`httpUrl`) |
 | Antigravity IDE | Opt-in | v0.x tested | `~/.gemini/antigravity/mcp_config.json` | stdio relay -> HTTP |
+| Zed | Opt-in | Preview; built from upstream docs, live smoke pending | `~/.config/zed/settings.json` (`%APPDATA%\Zed\settings.json` on Windows) | stdio relay -> HTTP (`context_servers`) |
+| Kiro | Opt-in | Preview; built from upstream docs, live smoke pending | `~/.kiro/settings/mcp.json` | HTTP |
+| Windsurf | Opt-in | Preview; built from upstream docs, live smoke pending | `~/.codeium/windsurf/mcp_config.json` | HTTP (`serverUrl`) |
+| Cline | Opt-in | Preview; built from upstream docs, live smoke pending | VS Code globalStorage `…/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | HTTP (`type: "streamableHttp"`) |
+| Kilo Code | Opt-in | Preview; built from upstream docs, live smoke pending | VS Code globalStorage `…/kilo-code.kilo-code/settings/mcp_settings.json` | HTTP |
+| OpenCode | Opt-in | Preview; built from upstream docs, live smoke pending | `~/.config/opencode/opencode.json` | HTTP |
+| Hermes | Opt-in | Preview; built from upstream docs, live smoke pending | `~/.hermes/config.yaml` | HTTP |
+| OpenClaw | Opt-in | Preview; built from upstream docs, live smoke pending | `~/.openclaw/openclaw.json` | HTTP |
 
 **Antigravity note:** Cascade rejects loopback-HTTP MCP entries, so `mcp-local-hub` writes a **stdio relay** entry instead — `mcphub.exe relay --server <name> --daemon <d>`. Cascade spawns the relay as a normal stdio subprocess; the relay forwards JSON-RPC to the shared HTTP daemon. No extra server process per Antigravity session.
 
@@ -370,7 +379,7 @@ A surface-by-surface map of what this project actually does today, with explicit
 | Auto-start on logon — Linux | 🚧 Roadmap | systemd user units (F2) + `mcphub setup --server` with `loginctl enable-linger` (F3) tracked in backlog |
 | Auto-start on logon — macOS | 🚧 Roadmap | launchd auto-start is not currently tracked in the backlog F-tier; manual launch only |
 | Default client install | ⚠ Preview | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix |
-| Opt-in client install | ⚠ Preview | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay); manual smoke pending |
+| Opt-in client install | ⚠ Preview | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay), Zed (stdio-relay), Kiro, Windsurf, Cline, Kilo Code, OpenCode, Hermes, OpenClaw; built from upstream config docs, live smoke pending |
 | GUI dashboard (`mcphub gui`) | ⚠ Preview | Loopback-only; CSRF/DNS-rebind hardened (PR #51); manual GUI browser smoke pending |
 | GUI logs viewer (`/api/logs/:server`) | ⚠ Preview | SSE tail follow + filter + ERROR/WARN highlight + Open folder all shipped |
 | Workspace-scoped LSP lazy proxies | ⚠ Preview | `mcphub register` + per-language proxy; D3 manual multi-language smoke pending |
