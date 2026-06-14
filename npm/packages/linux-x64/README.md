@@ -1,4 +1,4 @@
-# @mcphub/linux-x64
+# mcphub-linux-x64
 
 Platform binary sub-package for [`mcphub`](https://www.npmjs.com/package/mcphub).
 

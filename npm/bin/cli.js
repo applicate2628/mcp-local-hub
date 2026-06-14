@@ -2,10 +2,10 @@
 // Platform-resolver shim for the `mcphub` npm meta package.
 //
 // The meta package ships ZERO binaries. Instead it declares one
-// `@mcphub/<platform>-<arch>` package per supported target in its
+// `mcphub-<platform>-<arch>` package per supported target in its
 // `optionalDependencies`. npm installs ONLY the sub-package whose `os`/`cpu`
 // fields match the host (esbuild / turbo / @swc pattern), so a Windows host
-// downloads only `@mcphub/win32-x64`, never the macOS or Linux binaries.
+// downloads only `mcphub-win32-x64`, never the macOS or Linux binaries.
 //
 // This shim is the `bin` entry point. It:
 //   1. maps `${process.platform}-${process.arch}` to the matching sub-package,
@@ -35,12 +35,12 @@ const { spawnSync } = require("node:child_process");
 // ACCEPTABLE fallback, not an error. We do not attempt to force-prefer the
 // arm64 build; we trust the package npm actually installed for this host.
 const PACKAGE_BY_PLATFORM = {
-  "win32-x64": "@mcphub/win32-x64",
-  "win32-arm64": "@mcphub/win32-arm64",
-  "darwin-x64": "@mcphub/darwin-x64",
-  "darwin-arm64": "@mcphub/darwin-arm64",
-  "linux-x64": "@mcphub/linux-x64",
-  "linux-arm64": "@mcphub/linux-arm64",
+  "win32-x64": "mcphub-win32-x64",
+  "win32-arm64": "mcphub-win32-arm64",
+  "darwin-x64": "mcphub-darwin-x64",
+  "darwin-arm64": "mcphub-darwin-arm64",
+  "linux-x64": "mcphub-linux-x64",
+  "linux-arm64": "mcphub-linux-arm64",
 };
 
 // The binary basename inside each sub-package. Windows targets carry the

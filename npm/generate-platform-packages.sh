@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Thin wrapper: regenerate the six @mcphub/<platform>-<arch> sub-packages.
+# Thin wrapper: regenerate the six mcphub-<platform>-<arch> sub-packages.
 #
 # The actual generation logic lives in generate-platform-packages.js (the
 # single source of truth for the GOOS/GOARCH -> Node os/cpu map). This wrapper
