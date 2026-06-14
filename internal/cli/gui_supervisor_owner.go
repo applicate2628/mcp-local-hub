@@ -201,8 +201,10 @@ const (
 // The GUI spawns its supervisor child exactly once at startup; before
 // this manager, an unexpected supervisor death under a live GUI was
 // permanently unrecoverable (startExitMonitor only LOGS the death; the
-// liveness task defers to the live GUI owner). The manager closes that
-// gap: it consumes the owner's existing buffered exitedCh and, on an
+// liveness task at the time DEFERRED to the live GUI owner — that defer
+// is gone, see supervise_ensure_alive.go §5 PART 2). This manager closes
+// the gap for a GUI-SPAWNED supervisor: it consumes the owner's existing
+// buffered exitedCh and, on an
 // UNEXPECTED exit, respawns via spawnFn with exponential backoff under
 // a sliding-window cap.
 //

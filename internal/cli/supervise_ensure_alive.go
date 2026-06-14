@@ -232,36 +232,37 @@ func setGUIOwnerAliveFnForTest(fn func() (bool, int)) func() {
 // (single_instance.go:499-504) does NOT re-set PIDAlive — so even a perfectly
 // healthy, ping-responding live GUI yields Verdict{Class:Healthy,
 // PIDAlive:false} there. Consequence: on macOS / Windows-non-amd64 this probe
-// returns (false, pid) for a LIVE healthy owner, so the live-GUI-owner
-// suppression in runEnsureAlive DEGRADES to the no-op relaunch path — the
-// relaunch fires but is inert (scheduler.New returns "not implemented" on
-// non-Windows), so the only effect is a misleading "liveness-relaunch-failed"
-// warn rather than the accurate live-GUI deferral. This is Windows-GA-posture
-// consistent: macOS is preview and Windows-non-amd64 is not a shipped target,
-// so suppression silently not engaging there is bounded (no focus-steal, no
-// false "relaunched owner"). On Windows amd64 (GA) and Linux (beta) PIDAlive
-// is observed correctly and suppression engages as designed.
+// returns (false, pid) for a LIVE healthy owner, so runEnsureAlive does NOT
+// take the standalone-supervisor RECOVERY path (§5 PART 2) and instead falls
+// through to the autostart (livenessRelaunchFn) path — which is inert there
+// (scheduler.New returns "not implemented" on non-Windows), so the only effect
+// is a misleading "liveness-relaunch-failed" warn rather than a real recovery.
+// This is Windows-GA-posture consistent: macOS is preview and Windows-non-amd64
+// is not a shipped target, so the degraded recovery there is bounded. On
+// Windows amd64 (GA) and Linux (beta) PIDAlive is observed correctly and the
+// standalone-recovery path engages as designed.
 //
 // alive=true → the recorded PID is observed alive → the supervisor-down state
-// is a dead-CHILD-under-live-OWNER topology the relaunch cannot recover.
+// is a dead-CHILD-under-live-OWNER topology; runEnsureAlive recovers it via the
+// standalone `mcphub supervise` spawn (§5 PART 2), leaving the GUI untouched.
 // alive=false → no observable live owner (DeadPID / Malformed / unresolvable
-// path, OR an unobservable-but-healthy owner on the probe-unsupported
-// platforms above) → treated as genuine OWNER death the relaunch handles.
+// path, OR an unobservable-but-healthy owner on the probe-unsupported platforms
+// above) → treated as genuine OWNER death; runEnsureAlive re-fires the autostart
+// GUI task to re-establish both the GUI owner and its supervisor.
 //
 // DELIBERATELY the bare PIDAlive bit, NOT Verdict.Class == VerdictHealthy
-// (PR #283 review P3-b, deferred). Keying on PIDAlive treats an
-// alive-but-unreachable owner (VerdictLiveUnreachable — alive PID, ping
-// failing, e.g. a GUI mid-restart) as a live owner, which preserves the P2
-// intent of suppressing the once-per-tick focus-steal whenever an owner
-// process exists at all. The alternative (key on VerdictHealthy) would
-// eliminate the narrow PID-recycle false-positive — where a recycled PID makes
-// a dead owner look alive and suppresses a needed relaunch — and would also
-// fix the macOS gap above (VerdictHealthy is a ping-only verdict that holds on
-// macOS), but at the cost of relaunching against a LiveUnreachable owner and
-// reintroducing the focus-steal the P2 fix removed. That polarity tradeoff is
-// a behavior change against the round-1 P2 design, not a clean nit, so it is
-// left as-is for this merge; the recycle window is narrow and self-heals on
-// the next tick once the recycled PID dies or the pidport is overwritten.
+// (PR #283 review P3-b). Keying on PIDAlive treats an alive-but-unreachable
+// owner (VerdictLiveUnreachable — alive PID, ping failing, e.g. a GUI
+// mid-restart) as a live owner, so a supervisor-down state there takes the
+// standalone-recovery path (recover the supervisor without disturbing the GUI)
+// rather than the autostart path. The narrow PID-recycle false-positive (a
+// recycled PID makes a dead owner look alive) at worst routes recovery through
+// the standalone spawn instead of the autostart task — the supervisor recovers
+// either way; only the GUI re-establishment differs — and self-heals on the
+// next tick once the recycled PID dies or the pidport is overwritten. Keying on
+// VerdictHealthy instead would also fix the macOS gap above (VerdictHealthy is a
+// ping-only verdict that holds on macOS), but that polarity change is deferred
+// as a separate decision, not folded into this fix.
 func probeGUIOwnerAlive() (bool, int) {
 	pidportPath, err := gui.PidportPath()
 	if err != nil {
@@ -336,8 +337,9 @@ func emitLivenessEvent(stateDir, severity, event, message string, body map[strin
 // (per the §11.10 fleet-wipe lesson — the action never touches the REAL
 // %LOCALAPPDATA% supervisor.lock when given a temp stateDir).
 //
-// out receives the one-line outcome (running / relaunched / deferred /
-// undeterminable) so a tick is observable in the scheduled-task last-run
+// out receives the one-line outcome (running / relaunched-standalone /
+// relaunched-autostart / relaunch-failed / undeterminable) so a tick is
+// observable in the scheduled-task last-run
 // record / a manual invocation. The failure/defer outcomes ALSO land in the
 // durable supervisor-events.log (Task Scheduler discards stdout). Returns nil
 // on EVERY branch — this is a best-effort recovery tick (exit 0), not a gate.

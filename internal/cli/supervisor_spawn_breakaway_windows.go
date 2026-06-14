@@ -48,6 +48,12 @@ func startSupervisorDetachedBreakaway(cmd *exec.Cmd, rebuild func() *exec.Cmd, o
 	if err == nil {
 		return cmd, nil
 	}
+	// ERROR_ACCESS_DENIED is the documented CreateProcess failure when the
+	// parent job lacks JOB_OBJECT_LIMIT_BREAKAWAY_OK. This errno match is
+	// precedent-verified (same windows.ERROR_ACCESS_DENIED idiom as the sibling
+	// syscall sites) — it is NOT exercised by a unit test because that requires
+	// constructing a real breakaway-rejecting parent Job; the live stability
+	// window + the locked-down-host field path cover it instead.
 	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 		return cmd, err
 	}

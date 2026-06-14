@@ -171,6 +171,45 @@ func TestEnsureAlive_FreeLock_LiveGUIOwner_RelaunchesStandalone(t *testing.T) {
 	assertSupervisorEvent(t, stateDir, "liveness-relaunched-supervisor-under-gui")
 }
 
+// TestEnsureAlive_FreeLock_LiveGUIOwner_StandaloneRelaunchFails covers the
+// failure branch of the §5 PART 2 standalone recovery: supervisor down + a live
+// GUI owner, but the detached `mcphub supervise` spawn fails. The action MUST
+// still return nil (exit 0 — best-effort tick), MUST NOT fall through to the
+// autostart task, MUST print a FAILED line, and MUST emit the durable
+// liveness-standalone-relaunch-failed warn so a chronic failure is operator-
+// visible despite Task Scheduler discarding stdout.
+func TestEnsureAlive_FreeLock_LiveGUIOwner_StandaloneRelaunchFails(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || running {
+		t.Fatalf("precondition: probe must report not-running; got running=%v err=%v", running, perr)
+	}
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int) { return true, 4242 })
+	defer restoreGUI()
+
+	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
+		return errors.New("synthetic standalone spawn failure")
+	})
+	defer restoreStandalone()
+	var autostartCalls int32
+	restoreAutostart := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&autostartCalls, 1)
+		return nil
+	})
+	defer restoreAutostart()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive must return nil even on relaunch failure; got %v", err)
+	}
+	if got := atomic.LoadInt32(&autostartCalls); got != 0 {
+		t.Errorf("autostart task must NOT fire when the standalone path is taken (live GUI); fired %d", got)
+	}
+	if !strings.Contains(out.String(), "FAILED") {
+		t.Errorf("output should report the standalone relaunch FAILED; got %q", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "liveness-standalone-relaunch-failed")
+}
+
 // TestEnsureAlive_ProbeError_NoRelaunch covers the fail-closed guard-precondition:
 // when the liveness probe itself cannot run (a state dir under a nonexistent
 // parent chain, so the flock file cannot be opened), liveness is UNDETERMINABLE
