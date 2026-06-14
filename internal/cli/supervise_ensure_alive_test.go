@@ -121,13 +121,15 @@ func TestEnsureAlive_FreeLock_RelaunchesOnce(t *testing.T) {
 	assertSupervisorEvent(t, stateDir, "liveness-relaunched-owner")
 }
 
-// TestEnsureAlive_FreeLock_LiveGUIOwner_DefersNoRelaunch covers the PR #283
-// review P2 topology: the supervisor is down (free flock) BUT a live GUI owner
-// still holds the single-instance lock. Re-firing the autostart task here would
-// short-circuit to activate-window without respawning the supervisor — a no-op
-// focus-steal. The action MUST suppress the relaunch, MUST NOT print a false
-// "relaunched owner", and MUST record an honest durable warn.
-func TestEnsureAlive_FreeLock_LiveGUIOwner_DefersNoRelaunch(t *testing.T) {
+// TestEnsureAlive_FreeLock_LiveGUIOwner_RelaunchesStandalone covers the §5
+// permanent-fix PART 2 topology: the supervisor is down (free flock) BUT a live
+// GUI owner still holds the single-instance lock (the dead-supervisor-child-
+// under-live-GUI-owner case that was previously a SUPPRESSED no-op deadlock).
+// The action MUST now recover the supervisor DIRECTLY via the GUI-independent
+// standalone relaunch (a detached `mcphub supervise`), MUST NOT fire the
+// autostart gui task (a no-op focus-steal under the live GUI), and MUST record
+// the recovery event.
+func TestEnsureAlive_FreeLock_LiveGUIOwner_RelaunchesStandalone(t *testing.T) {
 	stateDir := ensureAliveTestStateDir(t)
 
 	// No supervisor lock holder → supervisor reported down.
@@ -139,30 +141,34 @@ func TestEnsureAlive_FreeLock_LiveGUIOwner_DefersNoRelaunch(t *testing.T) {
 	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int) { return true, 4242 })
 	defer restoreGUI()
 
-	var relaunches int32
-	restoreSeam := setLivenessRelaunchFnForTest(func() error {
-		atomic.AddInt32(&relaunches, 1)
+	var standaloneCalls, autostartCalls int32
+	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
+		atomic.AddInt32(&standaloneCalls, 1)
 		return nil
 	})
-	defer restoreSeam()
+	defer restoreStandalone()
+	restoreAutostart := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&autostartCalls, 1)
+		return nil
+	})
+	defer restoreAutostart()
 
 	out := &bytes.Buffer{}
 	if err := runEnsureAlive(stateDir, out); err != nil {
 		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
 	}
-	if got := atomic.LoadInt32(&relaunches); got != 0 {
-		t.Errorf("relaunch seam fired %d times under a LIVE GUI owner; want 0 "+
-			"(re-firing the autostart task there is a no-op focus-steal, not a recovery)", got)
+	if got := atomic.LoadInt32(&standaloneCalls); got != 1 {
+		t.Errorf("standalone relaunch fired %d times under a live GUI owner; want 1 "+
+			"(direct GUI-independent supervisor recovery)", got)
 	}
-	if strings.Contains(out.String(), "relaunched owner") {
-		t.Errorf("must NOT print a false 'relaunched owner' under a live GUI owner; got %q", out.String())
+	if got := atomic.LoadInt32(&autostartCalls); got != 0 {
+		t.Errorf("autostart-task relaunch fired %d times under a live GUI owner; want 0 "+
+			"(that path is a no-op focus-steal there)", got)
 	}
-	if !strings.Contains(out.String(), "live GUI owner") || !strings.Contains(out.String(), "4242") {
-		t.Errorf("output should report the dead-supervisor-under-live-GUI deferral (with the owner pid); got %q", out.String())
+	if !strings.Contains(out.String(), "standalone supervisor") || !strings.Contains(out.String(), "4242") {
+		t.Errorf("output should report the standalone supervisor recovery (with the owner pid); got %q", out.String())
 	}
-	// Durable, honest diagnostic in supervisor-events.log instead of a false
-	// success — the operator can see the unrecovered state.
-	assertSupervisorEvent(t, stateDir, "liveness-supervisor-down-under-live-gui")
+	assertSupervisorEvent(t, stateDir, "liveness-relaunched-supervisor-under-gui")
 }
 
 // TestEnsureAlive_ProbeError_NoRelaunch covers the fail-closed guard-precondition:

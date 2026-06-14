@@ -14,37 +14,36 @@
 // only covers the gap the watchdog never did — the OWNER process itself dying
 // (architect TOPOLOGY CORRECTION, §15 P1-b).
 //
-// SCOPING LIMITATION (PR #283 review P2 / P3-a / P3-c — be honest about what
-// this tick can and cannot recover):
+// RECOVERY TOPOLOGY (§5 permanent fix PART 2 — BOTH death cases recover):
 //
-//   - The recovery vector is "re-fire the autostart task that launches the
-//     GUI owner". That WORKS when the OWNER process died: no live GUI holds
-//     the single-instance lock, so the relaunched `mcphub gui` reaches
-//     startGuiServer → ensureSupervisorRunning and re-establishes the
-//     supervisor.
-//   - It does NOT robustly recover a supervisor CHILD that died while its GUI
-//     OWNER is still alive (supervisor panic / OOM of just the supervisor PID /
-//     `taskkill /F /PID <supervisor>`). The supervisor is spawned DETACHED
+//   - GENUINE OWNER death (no live GUI holds the single-instance lock):
+//     re-fire the autostart task, so the relaunched `mcphub gui` reaches
+//     startGuiServer → ensureSupervisorRunning and re-establishes BOTH the
+//     GUI owner and its supervisor.
+//   - SUPERVISOR-CHILD death under a LIVE GUI owner (supervisor panic / OOM of
+//     just the supervisor PID / `taskkill /F /PID <supervisor>` / an
+//     inherited-Job cascade): the supervisor is spawned DETACHED
 //     (gui_supervisor_owner_windows.go), so it can die independently while the
-//     GUI keeps running and keeps holding the GUI single-instance lock. In that
-//     state a relaunched `mcphub gui` hits ErrSingleInstanceBusy →
-//     TryActivateIncumbent → returns WITHOUT reaching ensureSupervisorRunning,
-//     so the dead supervisor is never respawned by THIS tick — and it would
-//     also steal the user's GUI window to the foreground (/api/activate-window)
-//     once per tick. That gap is now closed on the GUI side: the GUI's
-//     supervisorManager (gui_supervisor_owner.go) respawns its dead supervisor
-//     child with a bounded backoff + sliding-window cap, so a supervisor-child
-//     death under a live GUI self-heals there. This liveness tick still
-//     correctly suppresses ITS OWN relaunch under a live GUI to avoid a no-op
-//     focus-steal (no behavior change to this task).
+//     GUI keeps running (and keeps serving its :9125 hub router). This tick
+//     recovers it DIRECTLY — spawn a detached standalone `mcphub supervise`
+//     (standaloneRelaunchFn), NOT the autostart GUI task (which under a live
+//     GUI would hit ErrSingleInstanceBusy → TryActivateIncumbent and recover
+//     nothing while stealing the GUI window). The supervisor singleton flock
+//     makes the spawn idempotent; the GUI's poller reconnects to the new
+//     supervisor via IPC.
 //
-// To stay HONEST and avoid the perpetual focus-steal, runEnsureAlive probes
-// the GUI single-instance owner BEFORE relaunching (guiOwnerAliveFn): if a live
-// GUI owner is present while the supervisor is down, the action does NOT fire
-// the relaunch and does NOT print a false "relaunched owner" — it records a
-// durable, operator-visible "supervisor down under a live GUI owner; this tick
-// cannot recover it" diagnostic instead. Only the genuine OWNER-death case
-// (no live GUI owner) takes the relaunch path.
+//   HISTORY: this second case was previously a SUPPRESSED no-op ("deferred to
+//   the GUI side"). Combined with the GUI only respawning supervisors it
+//   itself SPAWNED (never ADOPTED ones), the two recovery mechanisms deferred
+//   to each other into a PERMANENT deadlock — the §5 live churn. The GUI's own
+//   bounded supervisorManager respawn loop (gui_supervisor_owner.go) still
+//   self-heals a GUI-SPAWNED supervisor as a fast path; this tick is the
+//   authoritative backstop that covers the adopted-then-died and wedged-GUI
+//   cases the GUI loop cannot.
+//
+// runEnsureAlive probes the GUI single-instance owner (guiOwnerAliveFn) only to
+// CHOOSE the recovery method (standalone `supervise` vs the autostart gui task),
+// no longer to SUPPRESS recovery.
 //
 // Mechanism (architect-verified; NOT RestartOnFailure — that is the Win11
 // 24H2 force-kill bug the watchdog was built around, §15 P1-b):
@@ -55,19 +54,26 @@
 //   - probe error  → no-op, exit 0 (undeterminable ≠ dead; the next tick
 //     retries).
 //   - running=true → no-op, exit 0 (the common case).
-//   - running=false AND a live GUI owner is present → DEFER: do NOT relaunch
-//     (it would be a no-op focus-steal); record a durable warn; exit 0.
-//   - running=false AND no live GUI owner → relaunch the owner via the
-//     injectable relaunch seam, which re-fires the autostart task
-//     (`schtasks /Run /TN \mcp-local-hub-supervisor`). The GUI/supervisor
-//     singleton locks make the relaunch idempotent (no duplicate supervisor).
+//   - running=false AND a live GUI owner is present → recover the supervisor
+//     DIRECTLY (§5 permanent fix PART 2): spawn a detached standalone
+//     `mcphub supervise` via standaloneRelaunchFn. The supervisor singleton
+//     flock makes it idempotent; the GUI is left untouched and its poller
+//     reconnects to the new supervisor via IPC. (This REPLACES the old
+//     defer-to-GUI suppression, which was a permanent deadlock: liveness
+//     deferred to the GUI while the GUI never respawned an adopted supervisor.)
+//   - running=false AND no live GUI owner → genuine OWNER death; relaunch via
+//     the injectable relaunch seam, which re-fires the autostart task
+//     (`schtasks /Run /TN \mcp-local-hub-supervisor`) to re-establish the GUI
+//     owner + its supervisor. The GUI/supervisor singleton locks make the
+//     relaunch idempotent (no duplicate supervisor).
 //
 // ALL branches exit 0: this is a best-effort recovery tick, not a gate.
 //
 // OBSERVABILITY (PR #283 review P3-d): every non-trivial outcome — relaunch
-// success, relaunch FAILURE, and the dead-supervisor-under-live-GUI deferral —
-// is mirrored to a DURABLE sink (`supervisor-events.log`, severity warn for the
-// failure/deferral cases) in addition to the one-line `out` writer. Task
+// success and relaunch FAILURE on BOTH the autostart-task and the standalone
+// `supervise` paths — is mirrored to a DURABLE sink (`supervisor-events.log`,
+// severity warn for the failure cases) in addition to the one-line `out`
+// writer. Task
 // Scheduler discards the action's stdout/stderr, so without the durable log a
 // chronically-failing relaunch (e.g. the autostart task `\mcp-local-hub-supervisor`
 // was never installed by `mcphub autostart enable`) would be invisible: exit 0,
@@ -75,14 +81,15 @@
 // operational contract. The `out` writer's transient resolve-failure line still
 // goes to os.Stderr (runEnsureAliveFromState).
 //
-// LOG-CHURN NOTE (PR #283 review P3-c — accepted as-is for merge): while a
-// dead-supervisor-under-live-GUI condition persists, every ~1-min tick writes
-// one "liveness-supervisor-down-under-live-gui" warn to supervisor-events.log.
+// LOG-CHURN NOTE (PR #283 review P3-c): a dead supervisor is now RECOVERED on
+// the first tick (standalone relaunch when a GUI owner is alive, autostart task
+// otherwise), so the steady state emits no recurring warn. Only a PERSISTENTLY-
+// FAILING relaunch keeps writing one "liveness-standalone-relaunch-failed" (or
+// "liveness-relaunch-failed") warn per ~1-min tick to supervisor-events.log.
 // At ~300-400 bytes/entry that is ~0.5 MB/day, so the 10 MB log (single .log.1
 // backfile, 16 KB per-entry cap) rotates in ~2-3 weeks of continuous
-// unrecovered state. This is bounded by the existing rotation + size-cap
-// discipline and is NOT a volume regression (the pre-fix false-success line
-// produced the same cadence on the discarded stdout). De-duping per
+// relaunch-failure state. This is bounded by the existing rotation + size-cap
+// discipline. De-duping per
 // gui_owner_pid is intentionally NOT done here: every tick is a SEPARATE
 // one-shot process (supervise.go:226), so there is no in-process state that
 // survives across ticks to key the de-dup on, and persisting last-emitted
@@ -96,6 +103,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -119,6 +127,52 @@ import (
 // re-establish the GUI owner the autostart task is responsible for).
 var livenessRelaunchFn = relaunchSupervisorOwner
 
+// standaloneRelaunchFn is the GUI-INDEPENDENT relaunch SEAM (§5 permanent
+// fix PART 2). It is used when the supervisor is down BUT a live GUI owner
+// is present: instead of re-firing the autostart GUI task (a no-op
+// focus-steal under a live GUI — the old gap-B deadlock), it spawns a
+// detached standalone `mcphub supervise` DIRECTLY. The supervisor singleton
+// flock makes it idempotent (a racing duplicate exits cleanly via
+// supervise.go's singleton path); the GUI keeps serving its window + :9125
+// hub router, and its poller reconnects to the new supervisor via IPC.
+// Production callers MUST NOT reassign directly — setStandaloneRelaunchFnForTest
+// is the only allowed write path.
+var standaloneRelaunchFn = spawnStandaloneSupervisor
+
+// spawnStandaloneSupervisor starts `<this-binary> supervise` detached via
+// the PART 1 breakaway-tolerant helper and does NOT Wait — the supervisor
+// owns its own lifetime and the flock enforces the singleton. Plain
+// `supervise` (no --strict-mode): the supervisor seeds strict_mode from the
+// canonical supervisor-intent.json itself, so a recovery relaunch needs no
+// flag.
+func spawnStandaloneSupervisor() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("standalone supervisor relaunch: resolve executable: %w", err)
+	}
+	if resolved, lerr := filepath.EvalSymlinks(exe); lerr == nil {
+		exe = resolved
+	}
+	build := func() *exec.Cmd {
+		c := exec.Command(exe, "supervise")
+		c.Stdin = nil
+		c.Stdout = nil
+		c.Stderr = nil
+		configureSupervisorDetach(c)
+		return c
+	}
+	started, err := startSupervisorDetachedBreakaway(build(), build, func(degradeErr error) {
+		fmt.Fprintf(os.Stderr, "ensure-alive: standalone supervisor CREATE_BREAKAWAY_FROM_JOB rejected (parent job without BREAKAWAY_OK); spawned flagless: %v\n", degradeErr)
+	})
+	if err != nil {
+		return fmt.Errorf("standalone supervisor relaunch: spawn: %w", err)
+	}
+	if started.Process != nil {
+		_ = started.Process.Release()
+	}
+	return nil
+}
+
 // guiOwnerAliveFn is the injectable GUI-incumbent probe SEAM. It reports
 // whether a live `mcphub gui` process currently owns the GUI single-instance
 // (pidport) lock — i.e. an OWNER process is still alive even though the
@@ -140,6 +194,16 @@ func setLivenessRelaunchFnForTest(fn func() error) func() {
 	prev := livenessRelaunchFn
 	livenessRelaunchFn = fn
 	return func() { livenessRelaunchFn = prev }
+}
+
+// setStandaloneRelaunchFnForTest installs a test standalone-relaunch function
+// (the GUI-independent recovery path). Returns an "uninstall" function tests
+// defer to restore production wiring. Only supervise_ensure_alive_test.go
+// invokes this; the default spawns a real detached `mcphub supervise`.
+func setStandaloneRelaunchFnForTest(fn func() error) func() {
+	prev := standaloneRelaunchFn
+	standaloneRelaunchFn = fn
+	return func() { standaloneRelaunchFn = prev }
 }
 
 // setGUIOwnerAliveFnForTest installs a test GUI-incumbent probe. Returns an
@@ -293,23 +357,33 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 		return nil
 	}
 
-	// Supervisor is down. Before relaunching, distinguish the two topologies
-	// (PR #283 review P2): an OWNER death (no live GUI owner — the relaunch
-	// recovers it) vs a dead supervisor CHILD under a live GUI OWNER (the
-	// relaunch is a no-op focus-steal that cannot recover it).
+	// Supervisor is down. Distinguish the two topologies and recover BOTH
+	// (§5 permanent fix PART 2 — the dead-supervisor-under-live-GUI case is
+	// no longer a suppressed deadlock):
+	//   - live GUI owner present → the supervisor CHILD died but the GUI
+	//     owner (and its :9125 hub router) is fine. Recover the supervisor
+	//     DIRECTLY via a detached standalone `mcphub supervise` spawn.
+	//   - no live GUI owner → genuine OWNER death. Re-fire the autostart GUI
+	//     task to re-establish BOTH the GUI owner and its supervisor.
 	if guiAlive, guiPID := guiOwnerAliveFn(); guiAlive {
-		// Dead supervisor under a live GUI owner. Re-firing the autostart
-		// task here would short-circuit to activate-window (single-instance
-		// busy) WITHOUT respawning the supervisor — a perpetual once-per-tick
-		// foreground-window steal with zero recovery. Suppress the relaunch
-		// and record an HONEST durable diagnostic instead of a false
-		// "relaunched owner". GUI-side supervisor respawn is the proper fix
-		// (deferred — see the SCOPING LIMITATION in the file header).
-		fmt.Fprintf(out, "ensure-alive: supervisor not running BUT a live GUI owner (pid=%d) holds the single-instance lock; "+
-			"this tick cannot recover a supervisor-child death under a live GUI (relaunch suppressed to avoid a no-op focus-steal); no action\n", guiPID)
-		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
-			"liveness-supervisor-down-under-live-gui",
-			"supervisor down but a live GUI owner holds the single-instance lock; liveness cannot recover a supervisor-child death under a live GUI (relaunch suppressed); GUI-side supervisor respawn is deferred",
+		// Recover the supervisor WITHOUT touching the GUI. Re-firing the
+		// autostart task here would short-circuit to activate-window
+		// (single-instance busy) and recover nothing — the old gap-B
+		// deadlock. A direct standalone `mcphub supervise` spawn takes the
+		// singleton flock (idempotent against a racing duplicate) and the
+		// GUI's poller reconnects to it via IPC.
+		if relaunchErr := standaloneRelaunchFn(); relaunchErr != nil {
+			fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); standalone supervisor relaunch FAILED (will retry next tick): %v\n", guiPID, relaunchErr)
+			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+				"liveness-standalone-relaunch-failed",
+				"supervisor down under a live GUI owner; the GUI-independent standalone supervisor relaunch failed; will retry next tick",
+				map[string]any{"gui_owner_pid": guiPID, "error": relaunchErr.Error()})
+			return nil
+		}
+		fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); relaunched a detached standalone supervisor (GUI-independent recovery)\n", guiPID)
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
+			"liveness-relaunched-supervisor-under-gui",
+			"supervisor down while a live GUI owner held the single-instance lock; spawned a detached standalone supervisor to recover it without disturbing the GUI",
 			map[string]any{"gui_owner_pid": guiPID})
 		return nil
 	}
