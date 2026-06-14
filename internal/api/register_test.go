@@ -51,6 +51,22 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	dir := t.TempDir()
 	regPath := filepath.Join(dir, "workspaces.yaml")
 
+	// Redirect the daemon state root to an owner-only temp dir so any
+	// register path that writes supervisor-intent.json (via
+	// register_supervisor.go's DaemonStateDir()) lands in temp instead of
+	// the operator's REAL %LOCALAPPDATA%\mcp-local-hub\supervisor-intent.json.
+	// Without this, harness tests calling Register/RegisterLSP would take a
+	// flock on — and clobber — the live supervisor-intent.json, killing the
+	// running fleet (test-infra leak: api-tests-flock-contention). Mirrors
+	// the daemonStateRootOverride save/restore pattern in
+	// hub_mcp_state_test.go and the hardened-root posture of isolateStateDir
+	// (an owner-only root so the absent-intent strict verdict matches
+	// production). t.Cleanup restores it even if a test forgets defer
+	// h.restore() or panics.
+	prevStateRoot := daemonStateRootOverride
+	daemonStateRootOverride = hardenedTempDir(t)
+	t.Cleanup(func() { daemonStateRootOverride = prevStateRoot })
+
 	origSchedulerNew := testSchedulerFactory
 	origClientFactory := testClientFactory
 	origRegistryPath := testRegistryPathOverride

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -396,6 +397,18 @@ func TestInitClientConfig_StrictModeErrorMapsTo500(t *testing.T) {
 // the empty stub and reports Created=true. A second call returns
 // Created=false (idempotent no-op) without rewriting the file.
 func TestRealClientInitializer_HappyPath(t *testing.T) {
+	// Isolate the daemon state root FIRST. realClientInitializer.Init →
+	// adapter.InitEmpty → clients.CreateConfigFileIfMissing resolves to
+	// the api-side secure writer (swapped in by api.init()), which on the
+	// relax lane emits a client-write-unhardened-fallback audit row via
+	// LogHubMcpEvent → DaemonStateDir(). Without this redirect that row
+	// lands in the operator's REAL %LOCALAPPDATA%\mcp-local-hub\hub-mcp.log
+	// (test-hygiene leak; api-side sibling fixed in PR #264 via
+	// isolateStateDir). SetDaemonStateRootForTest is the exported,
+	// production-guarded (panics outside a test binary) cross-package
+	// equivalent of the api package's in-package daemonStateRootOverride.
+	t.Cleanup(api.SetDaemonStateRootForTest(t.TempDir()))
+
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
