@@ -29,12 +29,14 @@
 //     GUI keeps running and keeps holding the GUI single-instance lock. In that
 //     state a relaunched `mcphub gui` hits ErrSingleInstanceBusy →
 //     TryActivateIncumbent → returns WITHOUT reaching ensureSupervisorRunning,
-//     so the dead supervisor is never respawned — and it would also steal the
-//     user's GUI window to the foreground (/api/activate-window) once per tick.
-//     The GUI's own startExitMonitor (gui_supervisor_owner.go) only LOGS a
-//     supervisor-child death today; it does not respawn. A GUI-side
-//     supervisor-respawn loop is the proper fix and is deferred to a later
-//     phase.
+//     so the dead supervisor is never respawned by THIS tick — and it would
+//     also steal the user's GUI window to the foreground (/api/activate-window)
+//     once per tick. That gap is now closed on the GUI side: the GUI's
+//     supervisorManager (gui_supervisor_owner.go) respawns its dead supervisor
+//     child with a bounded backoff + sliding-window cap, so a supervisor-child
+//     death under a live GUI self-heals there. This liveness tick still
+//     correctly suppresses ITS OWN relaunch under a live GUI to avoid a no-op
+//     focus-steal (no behavior change to this task).
 //
 // To stay HONEST and avoid the perpetual focus-steal, runEnsureAlive probes
 // the GUI single-instance owner BEFORE relaunching (guiOwnerAliveFn): if a live

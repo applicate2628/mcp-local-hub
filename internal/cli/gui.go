@@ -566,14 +566,21 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	if binErr != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "warning: resolve mcphub binary for supervisor spawn: %v\n", binErr)
 	}
-	var supervisor *supervisorOwner
+	// The manager owns the swappable "current live supervisor owner"
+	// handle. For a GUI-SPAWNED supervisor it also runs a bounded
+	// respawn loop so an unexpected supervisor-child death under a live
+	// GUI self-heals (startExitMonitor only LOGS the death; the loop
+	// respawns it). An ADOPTED supervisor gets no manager and no loop —
+	// the GUI does not own its lifecycle, so Stop is a no-op there.
+	var manager *supervisorManager
 	if supervisorBin != "" {
-		var spawnErr error
-		supervisor, spawnErr = ensureSupervisorRunning(ctx, supervisorBin, strictMode, 15*time.Second)
+		supervisor, spawnErr := ensureSupervisorRunning(ctx, supervisorBin, strictMode, 15*time.Second)
 		if spawnErr != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "warning: supervisor: %v\n", spawnErr)
 		} else if supervisor.Spawned() {
 			fmt.Fprintf(cmd.OutOrStdout(), "supervisor: spawned PID %d (GUI owns lifecycle)\n", supervisor.Pid())
+			manager = newSupervisorManager(ctx, supervisorBin, strictMode, 15*time.Second, supervisor)
+			go manager.runRespawnLoop(ctx) // self-healing respawn ONLY for GUI-spawned owners
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "supervisor: adopted (running externally)")
 		}
@@ -584,13 +591,18 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	// return — supervisor stops before the single-instance lock is
 	// released, so the next gui invocation cannot race a still-
 	// shutting-down supervisor.
+	//
+	// manager.Stop latches shuttingDown + snapshots the CURRENT owner
+	// under one mutex, so it always stops the RESPAWNED handle (not a
+	// stale captured one) and the respawn loop can never install a fresh
+	// supervisor after this returns.
 	defer func() {
-		if supervisor == nil {
+		if manager == nil {
 			return
 		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := supervisor.Stop(shutdownCtx, 5000); err != nil {
+		if err := manager.Stop(shutdownCtx, 5000); err != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "supervisor shutdown: %v\n", err)
 		}
 	}()
