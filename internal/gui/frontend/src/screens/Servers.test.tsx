@@ -513,3 +513,74 @@ describe("ServersScreen — LSP matrix rows", () => {
     });
   });
 });
+
+// PR #306-wiring: the eight wave-2 opt-in clients are detection-gated as
+// matrix columns. A wave-2 client surfaces as a column header only when the
+// scan reports it present on the host; an undetected one adds no column.
+describe("ServersScreen — detection-gated wave-2 client columns", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  function headerLabels(): string[] {
+    return screen
+      .queryAllByRole("columnheader")
+      .map((th) => th.textContent?.trim() ?? "");
+  }
+
+  it("does NOT render a zed column on a host with no zed config", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanWith({ "claude-code": "ok" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+    // Core columns present, zed (and other wave-2) absent.
+    expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(true);
+    expect(headerLabels().some((t) => t.includes("zed"))).toBe(false);
+    expect(headerLabels().some((t) => t.includes("openclaw"))).toBe(false);
+  });
+
+  it("renders a zed column when scan detects zed (relay-stdio client)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(200, scanWith({ "claude-code": "ok", zed: "ok" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(headerLabels().some((t) => t.includes("zed"))).toBe(true);
+    });
+    // Other undetected wave-2 clients still absent.
+    expect(headerLabels().some((t) => t.includes("kiro"))).toBe(false);
+  });
+
+  it("renders multiple detected wave-2 columns (kiro http-direct + zed relay)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(
+            200,
+            scanWith({ "claude-code": "ok", zed: "ok", kiro: "missing-init-possible" }),
+          ),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(headerLabels().some((t) => t.includes("kiro"))).toBe(true);
+    });
+    expect(headerLabels().some((t) => t.includes("zed"))).toBe(true);
+  });
+});

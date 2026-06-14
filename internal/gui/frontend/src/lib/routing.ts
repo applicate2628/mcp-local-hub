@@ -23,12 +23,16 @@ export function isHubLoopback(endpoint: string): boolean {
   }
 }
 
-// KNOWN_CLIENTS enumerates every client column the Servers matrix
-// renders. Must stay in sync with Servers.tsx::CLIENTS so a manifested
-// server with no per-entry presence for, say, claude-code still emits a
-// cell with the right "available" / "not-installed" / "unsupported"
-// classification driven by `client_config_presence`.
-const KNOWN_CLIENTS = [
+// CORE_CLIENTS are the original seven client columns the Servers matrix
+// has always rendered. They are ALWAYS shown (even when not detected on
+// the host) so the matrix shape is stable and the per-column Initialize
+// affordance keeps working for an uninstalled-but-installable core client.
+//
+// Must stay in sync with the backend scan surface so a manifested server
+// with no per-entry presence for, say, claude-code still emits a cell with
+// the right "available" / "not-installed" / "unsupported" classification
+// driven by `client_config_presence`.
+export const CORE_CLIENTS = [
   "claude-code",
   "codex-cli",
   "cursor",
@@ -37,6 +41,74 @@ const KNOWN_CLIENTS = [
   "qwen-cli",
   "antigravity",
 ] as const;
+
+// WAVE2_CLIENTS are the eight opt-in adapters added in PR #306. With 15
+// total clients an always-visible matrix would be unusably wide, so these
+// are DETECTION-GATED: a wave-2 column appears only when that client is
+// actually present on the host (its config file or parent directory was
+// detected, or it already has a server entry). An uninstalled niche client
+// adds no column. See visibleClients() for the gating rule.
+export const WAVE2_CLIENTS = [
+  "zed",
+  "kiro",
+  "windsurf",
+  "cline",
+  "kilocode",
+  "opencode",
+  "hermes",
+  "openclaw",
+] as const;
+
+// ALL_CLIENTS is the full superset (core + wave-2) in stable order. Used
+// for membership tests and as the source order for visibleClients().
+export const ALL_CLIENTS = [...CORE_CLIENTS, ...WAVE2_CLIENTS] as const;
+
+// DETECTED_PRESENCE_STATES are the client_config_presence values that mean
+// "this client exists on the host in some inspectable form" — the config
+// file is present ("ok"), present-but-unwritable ("error"/"error-symlink"),
+// or absent-but-its-parent-directory-exists ("missing-init-possible" /
+// "missing-init-blocked-symlink"). The only non-detected state is plain
+// "missing" (neither file nor parent dir) or absence from the map entirely.
+const DETECTED_PRESENCE_STATES = new Set([
+  "ok",
+  "error",
+  "error-symlink",
+  "missing-init-possible",
+  "missing-init-blocked-symlink",
+]);
+
+// visibleClients returns the ordered list of client columns the matrix
+// should render for this scan: the seven CORE_CLIENTS unconditionally,
+// plus any WAVE2_CLIENTS that are DETECTED on the host. Detection is true
+// when the client's client_config_presence state is anything other than
+// plain "missing"/absent, OR when at least one scanned server entry already
+// references the client (covers a hand-edited config the presence probe
+// somehow missed, and keeps a row's existing binding visible).
+//
+// This keeps the common case (only a couple of editors installed) to a
+// narrow matrix while still surfacing every wave-2 client the operator
+// actually uses, with no always-15-columns overflow.
+export function visibleClients(scan: ScanResult | null | undefined): string[] {
+  const ccp = scan?.client_config_presence ?? {};
+  const referenced = new Set<string>();
+  for (const e of scan?.entries ?? []) {
+    for (const c of Object.keys(e.client_presence ?? {})) referenced.add(c);
+  }
+  const out: string[] = [...CORE_CLIENTS];
+  for (const c of WAVE2_CLIENTS) {
+    if (DETECTED_PRESENCE_STATES.has(ccp[c] ?? "") || referenced.has(c)) {
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+// KNOWN_CLIENTS is retained as the full superset for perClientRouting's
+// second-pass fill (it must classify every client that could carry a cell,
+// not just the visible ones, so a detected wave-2 client's routing is
+// computed even before the column-visibility decision). Column VISIBILITY
+// is decided by visibleClients(); routing classification covers all.
+const KNOWN_CLIENTS = ALL_CLIENTS;
 
 // perClientRouting maps a server's per-entry client_presence onto per-cell
 // routing tags. The cell's tag drives the checkbox visual (checked/

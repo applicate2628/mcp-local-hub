@@ -25,8 +25,21 @@ type ScanOpts struct {
 	GeminiConfigPath      string
 	QwenConfigPath        string
 	AntigravityConfigPath string
-	ManifestDir           string
-	WithProcessCount      bool // populate ScanEntry.ProcessCount via wmic
+	// Wave-2 opt-in clients (PR #306 added the adapters; this PR wires
+	// them into the scan/GUI surface). One config path per client,
+	// defaulted from clients.ConfigPathForName in Scan() and pointable
+	// at temp dirs by tests. Empty paths are skipped by ScanFrom exactly
+	// like the original seven.
+	ZedConfigPath      string
+	KiroConfigPath     string
+	WindsurfConfigPath string
+	ClineConfigPath    string
+	KiloCodeConfigPath string
+	OpenCodeConfigPath string
+	HermesConfigPath   string
+	OpenClawConfigPath string
+	ManifestDir        string
+	WithProcessCount   bool // populate ScanEntry.ProcessCount via wmic
 }
 
 // probeClientConfigPresence reports whether each known MCP client's
@@ -74,6 +87,16 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 		{"gemini-cli", opts.GeminiConfigPath},
 		{"qwen-cli", opts.QwenConfigPath},
 		{"antigravity", opts.AntigravityConfigPath},
+		// Wave-2 opt-in clients — same Lstat-first presence probe as the
+		// original seven (the loop body below is client-agnostic).
+		{"zed", opts.ZedConfigPath},
+		{"kiro", opts.KiroConfigPath},
+		{"windsurf", opts.WindsurfConfigPath},
+		{"cline", opts.ClineConfigPath},
+		{"kilocode", opts.KiloCodeConfigPath},
+		{"opencode", opts.OpenCodeConfigPath},
+		{"hermes", opts.HermesConfigPath},
+		{"openclaw", opts.OpenClawConfigPath},
 	}
 	for _, p := range pairs {
 		if p.path == "" {
@@ -302,6 +325,51 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	if opts.AntigravityConfigPath != "" && scanIfReadable("antigravity") {
 		if err := scanAntigravity(entries, opts.AntigravityConfigPath); err != nil {
 			return nil, fmt.Errorf("antigravity: %w", err)
+		}
+	}
+	// Wave-2 opt-in clients. Each scanner mirrors the shape its adapter
+	// writes (see internal/clients/<client>.go). The HTTP-direct clients
+	// reuse the generic per-client shaper; zed uses the relay-shape
+	// detector because, like antigravity, its hub entry is a `mcphub
+	// relay` stdio invocation rather than a loopback url.
+	if opts.ZedConfigPath != "" && scanIfReadable("zed") {
+		if err := scanZed(entries, opts.ZedConfigPath); err != nil {
+			return nil, fmt.Errorf("zed: %w", err)
+		}
+	}
+	if opts.KiroConfigPath != "" && scanIfReadable("kiro") {
+		if err := scanKiro(entries, opts.KiroConfigPath); err != nil {
+			return nil, fmt.Errorf("kiro: %w", err)
+		}
+	}
+	if opts.WindsurfConfigPath != "" && scanIfReadable("windsurf") {
+		if err := scanWindsurf(entries, opts.WindsurfConfigPath); err != nil {
+			return nil, fmt.Errorf("windsurf: %w", err)
+		}
+	}
+	if opts.ClineConfigPath != "" && scanIfReadable("cline") {
+		if err := scanCline(entries, opts.ClineConfigPath); err != nil {
+			return nil, fmt.Errorf("cline: %w", err)
+		}
+	}
+	if opts.KiloCodeConfigPath != "" && scanIfReadable("kilocode") {
+		if err := scanKiloCode(entries, opts.KiloCodeConfigPath); err != nil {
+			return nil, fmt.Errorf("kilocode: %w", err)
+		}
+	}
+	if opts.OpenCodeConfigPath != "" && scanIfReadable("opencode") {
+		if err := scanOpenCode(entries, opts.OpenCodeConfigPath); err != nil {
+			return nil, fmt.Errorf("opencode: %w", err)
+		}
+	}
+	if opts.HermesConfigPath != "" && scanIfReadable("hermes") {
+		if err := scanHermes(entries, opts.HermesConfigPath); err != nil {
+			return nil, fmt.Errorf("hermes: %w", err)
+		}
+	}
+	if opts.OpenClawConfigPath != "" && scanIfReadable("openclaw") {
+		if err := scanOpenClaw(entries, opts.OpenClawConfigPath); err != nil {
+			return nil, fmt.Errorf("openclaw: %w", err)
 		}
 	}
 
@@ -701,6 +769,209 @@ func shapeAntigravityEntry(raw map[string]any) ClientEntry {
 	return ClientEntry{Transport: "absent", Raw: raw}
 }
 
+// ---------------------------------------------------------------------------
+// Wave-2 opt-in client scanners (PR #306 adapters → scan/GUI surface).
+//
+// Each scanner reads the exact config shape its adapter writes
+// (internal/clients/<client>.go) and records a per-(server, client)
+// ClientEntry under the canonical client id. The shaper for each client
+// recognises that client's url key so classify() can tag a loopback hub
+// entry as "via-hub". zed is relay-stdio (like antigravity), so it reuses
+// the relay-shape detector.
+// ---------------------------------------------------------------------------
+
+// scanZed reads Zed's user settings.json. Unlike the JSON family, Zed nests
+// its MCP map under the top-level `context_servers` key and writes a
+// relay-stdio hub entry (`command`=mcphub binary, args[0]=="relay") — the
+// same shape antigravity uses. shapeAntigravityEntry already classifies the
+// relay shape, so it is reused verbatim here.
+func scanZed(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		ContextServers map[string]map[string]any `json:"context_servers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.ContextServers {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["zed"] = shapeAntigravityEntry(raw)
+	}
+	return nil
+}
+
+func scanKiro(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "kiro", shapeURLOrCommandEntry)
+}
+
+func scanWindsurf(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "windsurf", shapeWindsurfEntry)
+}
+
+func scanCline(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "cline", shapeURLOrCommandEntry)
+}
+
+func scanKiloCode(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "kilocode", shapeURLOrCommandEntry)
+}
+
+// scanMCPServersJSON is the shared body for the JSON-family clients whose
+// MCP map lives under the top-level `mcpServers` key (kiro, windsurf, cline,
+// kilocode). The per-client url-shape difference is captured by the shaper
+// callback, keeping the read/parse logic in one owner.
+func scanMCPServersJSON(entries map[string]*ScanEntry, path, client string, shaper func(map[string]any) ClientEntry) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.MCPServers {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence[client] = shaper(raw)
+	}
+	return nil
+}
+
+// scanOpenCode reads OpenCode's config. Its MCP map lives under the top-level
+// `mcp` key (not `mcpServers`) and a remote hub entry is
+// `{"type":"remote","url":...}`. The url key is the standard `url`, so the
+// generic url/command shaper recognises the loopback hub entry.
+func scanOpenCode(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		MCP map[string]map[string]any `json:"mcp"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.MCP {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["opencode"] = shapeURLOrCommandEntry(raw)
+	}
+	return nil
+}
+
+// scanHermes reads Hermes' ~/.hermes/config.yaml. Its MCP map lives under the
+// top-level YAML `mcp_servers` key and a hub entry carries a `url`. Hermes
+// reads many unrelated settings from the same file, so only the mcp_servers
+// section is consulted.
+func scanHermes(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `yaml:"mcp_servers"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.MCPServers {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["hermes"] = shapeURLOrCommandEntry(raw)
+	}
+	return nil
+}
+
+// scanOpenClaw reads OpenClaw's config. Its MCP map is NESTED two levels
+// under `mcp.servers` (not a single top-level key) and a hub entry carries a
+// `url`. The nested object is read defensively so a config missing the `mcp`
+// object or its `servers` child simply yields no entries.
+func scanOpenClaw(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		MCP struct {
+			Servers map[string]map[string]any `json:"servers"`
+		} `json:"mcp"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.MCP.Servers {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["openclaw"] = shapeURLOrCommandEntry(raw)
+	}
+	return nil
+}
+
+// shapeURLOrCommandEntry classifies a JSON-family entry whose remote endpoint
+// is under the standard `url` key (kiro, cline, kilocode, opencode, hermes,
+// openclaw). Mirrors shapeCursorEntry/shapeClaudeEntry: a `url` value →
+// http transport; otherwise a `command` value → stdio. classify() then
+// recognises a loopback `url` as the hub binding (IsHubHTTPURL).
+func shapeURLOrCommandEntry(raw map[string]any) ClientEntry {
+	if url, ok := raw["url"].(string); ok {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	cmd, _ := raw["command"].(string)
+	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+}
+
+// shapeWindsurfEntry classifies a Windsurf entry. Windsurf names the
+// remote-HTTP endpoint field `serverUrl` (its adapter writes that key); it
+// also accepts the standard `url`. Either loopback value is recognised by
+// classify() as the hub binding.
+func shapeWindsurfEntry(raw map[string]any) ClientEntry {
+	if url, ok := raw["serverUrl"].(string); ok {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	if url, ok := raw["url"].(string); ok {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	cmd, _ := raw["command"].(string)
+	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+}
+
 // readManifestNames returns the set of available server names.
 // Empty dir selects the production path (embedded manifests union
 // on-disk defaultManifestDir). A non-empty dir restricts to that
@@ -785,6 +1056,19 @@ func (a *API) Scan() (*ScanResult, error) {
 		GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
 		QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
 		AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+		// Wave-2 opt-in clients. Each path comes from the same
+		// clients.ConfigPathForName resolver the CLI/install side uses, so
+		// the scan surface and the write surface agree on the location.
+		// mustClientConfigPath returns "" on a resolver error, which
+		// ScanFrom skips — identical to the original-seven behavior.
+		ZedConfigPath:      mustClientConfigPath("zed"),
+		KiroConfigPath:     mustClientConfigPath("kiro"),
+		WindsurfConfigPath: mustClientConfigPath("windsurf"),
+		ClineConfigPath:    mustClientConfigPath("cline"),
+		KiloCodeConfigPath: mustClientConfigPath("kilocode"),
+		OpenCodeConfigPath: mustClientConfigPath("opencode"),
+		HermesConfigPath:   mustClientConfigPath("hermes"),
+		OpenClawConfigPath: mustClientConfigPath("openclaw"),
 		// Empty ManifestDir → ScanFrom uses the embed-first resolution
 		// path. The on-disk defaultManifestDir stays available as a
 		// secondary source for dev-checkout scenarios where a freshly-

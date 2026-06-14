@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isHubLoopback, perClientRouting, collectServers } from "./routing";
-import type { ScanResult } from "../types";
+import {
+  isHubLoopback,
+  perClientRouting,
+  collectServers,
+  visibleClients,
+  CORE_CLIENTS,
+  WAVE2_CLIENTS,
+} from "./routing";
+import type { ScanEntry, ScanResult } from "../types";
 
 describe("isHubLoopback", () => {
   it("accepts 127.0.0.1 URLs", () => {
@@ -236,5 +243,82 @@ describe("perClientRouting with client_config_presence", () => {
     // pipeline just won't follow it.
     const r = perClientRouting({}, { "claude-code": "missing-init-blocked-symlink" });
     expect(r["claude-code"]).not.toBe("config-error");
+  });
+});
+
+// PR #306-wiring: the 15-client matrix is too wide to show every column
+// always, so the eight wave-2 opt-in clients are detection-gated while the
+// seven core clients always render. visibleClients() decides the columns.
+describe("visibleClients (detection-gated wave-2 columns)", () => {
+  function scan(
+    presence: Record<string, string>,
+    entries: ScanEntry[] = [],
+  ): ScanResult {
+    return {
+      at: "",
+      entries,
+      client_config_presence: presence as ScanResult["client_config_presence"],
+    } as ScanResult;
+  }
+
+  it("always shows the seven core clients, even on a bare host", () => {
+    const cols = visibleClients(scan({}));
+    for (const c of CORE_CLIENTS) {
+      expect(cols).toContain(c);
+    }
+    // No wave-2 client detected → none appended → exactly the core set.
+    expect(cols).toHaveLength(CORE_CLIENTS.length);
+  });
+
+  it("hides an undetected wave-2 client (plain 'missing' or absent)", () => {
+    const cols = visibleClients(scan({ zed: "missing", kiro: "missing" }));
+    expect(cols).not.toContain("zed");
+    expect(cols).not.toContain("kiro");
+  });
+
+  it("shows a wave-2 client whose config file is present ('ok')", () => {
+    const cols = visibleClients(scan({ zed: "ok" }));
+    expect(cols).toContain("zed");
+    // Other wave-2 clients stay hidden.
+    expect(cols).not.toContain("kiro");
+  });
+
+  it("shows a wave-2 client whose parent dir exists ('missing-init-possible')", () => {
+    const cols = visibleClients(scan({ windsurf: "missing-init-possible" }));
+    expect(cols).toContain("windsurf");
+  });
+
+  it("shows a wave-2 client in an error state (config present but unreadable)", () => {
+    const cols = visibleClients(scan({ hermes: "error", openclaw: "error-symlink" }));
+    expect(cols).toContain("hermes");
+    expect(cols).toContain("openclaw");
+  });
+
+  it("shows a wave-2 client that already has a server entry, even if presence is absent", () => {
+    const entries: ScanEntry[] = [
+      {
+        name: "memory",
+        client_presence: { cline: { transport: "http", endpoint: "http://127.0.0.1:9123/mcp" } },
+      } as ScanEntry,
+    ];
+    const cols = visibleClients(scan({}, entries));
+    expect(cols).toContain("cline");
+  });
+
+  it("appends detected wave-2 clients after the core set in stable order", () => {
+    // Detect three wave-2 clients out of order; expect core-then-wave2 order
+    // (wave2 in WAVE2_CLIENTS declaration order, not presence-map order).
+    const cols = visibleClients(scan({ openclaw: "ok", zed: "ok", cline: "ok" }));
+    expect(cols.slice(0, CORE_CLIENTS.length)).toEqual([...CORE_CLIENTS]);
+    const tail = cols.slice(CORE_CLIENTS.length);
+    // Stable order = filtered WAVE2_CLIENTS order: zed < cline < openclaw.
+    expect(tail).toEqual(
+      WAVE2_CLIENTS.filter((c) => c === "zed" || c === "cline" || c === "openclaw"),
+    );
+  });
+
+  it("tolerates a null/undefined scan", () => {
+    expect(visibleClients(null)).toEqual([...CORE_CLIENTS]);
+    expect(visibleClients(undefined)).toEqual([...CORE_CLIENTS]);
   });
 });

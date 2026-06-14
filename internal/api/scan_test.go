@@ -237,6 +237,133 @@ url = "http://localhost:9123/mcp"
 	}
 }
 
+// TestScanCoversWave2Clients exercises the eight opt-in clients wired into
+// the scan surface (PR #306 added the adapters; this PR wired them into
+// /api/scan). Each config is written in the EXACT shape that client's
+// adapter (internal/clients/<client>.go) emits for a hub binding:
+//
+//   - zed:      context_servers.<name> relay-stdio (command=mcphub, args[0]=relay)
+//   - kiro:     mcpServers.<name>.url  (loopback hub URL)
+//   - windsurf: mcpServers.<name>.serverUrl (Windsurf's url key)
+//   - cline:    mcpServers.<name>.url
+//   - kilocode: mcpServers.<name>.url
+//   - opencode: mcp.<name>.{type:"remote", url}
+//   - hermes:   YAML mcp_servers.<name>.url
+//   - openclaw: NESTED mcp.servers.<name>.url
+//
+// The assertions confirm the per-client transport classification: zed →
+// "relay" (recognised like antigravity), every HTTP-direct client → "http".
+// classify() then maps both shapes to via-hub (covered by TestClassify).
+func TestScanCoversWave2Clients(t *testing.T) {
+	tmp := t.TempDir()
+
+	zedPath := filepath.Join(tmp, "zed-settings.json")
+	_ = os.WriteFile(zedPath, []byte(`{"context_servers":{"memory":{"command":"D:/dev/mcphub.exe","args":["relay","--url","http://localhost:9123/mcp"]}}}`), 0600)
+
+	kiroPath := filepath.Join(tmp, "kiro-mcp.json")
+	_ = os.WriteFile(kiroPath, []byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp","disabled":false}}}`), 0600)
+
+	windsurfPath := filepath.Join(tmp, "windsurf-mcp.json")
+	_ = os.WriteFile(windsurfPath, []byte(`{"mcpServers":{"memory":{"serverUrl":"http://localhost:9123/mcp"}}}`), 0600)
+
+	clinePath := filepath.Join(tmp, "cline-mcp.json")
+	_ = os.WriteFile(clinePath, []byte(`{"mcpServers":{"memory":{"type":"streamableHttp","url":"http://localhost:9123/mcp"}}}`), 0600)
+
+	kilocodePath := filepath.Join(tmp, "kilocode-mcp.json")
+	_ = os.WriteFile(kilocodePath, []byte(`{"mcpServers":{"memory":{"type":"streamable-http","url":"http://localhost:9123/mcp"}}}`), 0600)
+
+	opencodePath := filepath.Join(tmp, "opencode.json")
+	_ = os.WriteFile(opencodePath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0600)
+
+	hermesPath := filepath.Join(tmp, "hermes-config.yaml")
+	_ = os.WriteFile(hermesPath, []byte("mcp_servers:\n  memory:\n    url: http://localhost:9123/mcp\n"), 0600)
+
+	openclawPath := filepath.Join(tmp, "openclaw.json")
+	_ = os.WriteFile(openclawPath, []byte(`{"mcp":{"servers":{"memory":{"url":"http://localhost:9123/mcp","transport":"streamable-http","enabled":true}}}}`), 0600)
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		ZedConfigPath:      zedPath,
+		KiroConfigPath:     kiroPath,
+		WindsurfConfigPath: windsurfPath,
+		ClineConfigPath:    clinePath,
+		KiloCodeConfigPath: kilocodePath,
+		OpenCodeConfigPath: opencodePath,
+		HermesConfigPath:   hermesPath,
+		OpenClawConfigPath: openclawPath,
+		ManifestDir:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	var memEntry *ScanEntry
+	for i := range result.Entries {
+		if result.Entries[i].Name == "memory" {
+			memEntry = &result.Entries[i]
+		}
+	}
+	if memEntry == nil {
+		t.Fatal("no memory entry found")
+	}
+	// zed is relay-stdio (like antigravity), the rest are HTTP-direct.
+	if got := memEntry.ClientPresence["zed"].Transport; got != "relay" {
+		t.Errorf("zed.Transport: got %q, want relay", got)
+	}
+	for _, client := range []string{"kiro", "windsurf", "cline", "kilocode", "opencode", "hermes", "openclaw"} {
+		if got := memEntry.ClientPresence[client].Transport; got != "http" {
+			t.Errorf("%s.Transport: got %q, want http", client, got)
+		}
+		if got := memEntry.ClientPresence[client].Endpoint; got != "http://localhost:9123/mcp" {
+			t.Errorf("%s.Endpoint: got %q, want the loopback hub URL", client, got)
+		}
+	}
+	// End-to-end: every wave-2 client points at the hub → classify is via-hub.
+	if memEntry.Status != "via-hub" {
+		t.Errorf("memory Status with all-wave2-hub bindings: got %q, want via-hub", memEntry.Status)
+	}
+}
+
+// TestProbeClientConfigPresence_Wave2Clients confirms the eight wave-2
+// clients participate in the per-client presence probe the Servers matrix
+// uses to gate column visibility + the Initialize affordance. Mirrors
+// TestProbeClientConfigPresence_StateMachine for the new client ids.
+func TestProbeClientConfigPresence_Wave2Clients(t *testing.T) {
+	tmp := t.TempDir()
+
+	// zed: file present → ok.
+	zedPath := filepath.Join(tmp, "zed-settings.json")
+	if err := os.WriteFile(zedPath, []byte(`{"context_servers":{}}`), 0o600); err != nil {
+		t.Fatalf("write zed settings: %v", err)
+	}
+	// kiro: parent dir exists, file absent → missing-init-possible.
+	kiroParent := filepath.Join(tmp, ".kiro", "settings")
+	if err := os.MkdirAll(kiroParent, 0o755); err != nil {
+		t.Fatalf("mkdir kiro parent: %v", err)
+	}
+	kiroPath := filepath.Join(kiroParent, "mcp.json")
+	// hermes: parent dir absent → missing.
+	hermesPath := filepath.Join(tmp, "no-such-dir", "config.yaml")
+
+	out := probeClientConfigPresence(ScanOpts{
+		ZedConfigPath:    zedPath,
+		KiroConfigPath:   kiroPath,
+		HermesConfigPath: hermesPath,
+		// Other wave-2 paths intentionally omitted → absent from the map.
+	})
+	if got := out["zed"]; got != "ok" {
+		t.Errorf("zed (file present) = %q, want ok", got)
+	}
+	if got := out["kiro"]; got != "missing-init-possible" {
+		t.Errorf("kiro (parent dir present, file absent) = %q, want missing-init-possible", got)
+	}
+	if got := out["hermes"]; got != "missing" {
+		t.Errorf("hermes (parent dir absent) = %q, want missing", got)
+	}
+	if _, ok := out["windsurf"]; ok {
+		t.Errorf("windsurf should not appear when its path is empty; got %v", out["windsurf"])
+	}
+}
+
 // TestScanWithProcessCountPopulates verifies ScanFrom populates ProcessCount
 // when WithProcessCount is true. We don't assert an exact number (test runs
 // on real host), just that the field is either zero or positive and that the
@@ -359,11 +486,11 @@ func firstPerSessionServer(t *testing.T) string {
 // classification probeClientConfigPresence emits in v0.4.5+:
 //   - "ok"                     : file present on disk
 //   - "missing-init-possible"  : file absent but parent directory
-//                                exists (operator has the client
-//                                installed; GUI Initialize button is
-//                                offered)
+//     exists (operator has the client
+//     installed; GUI Initialize button is
+//     offered)
 //   - "missing"                : neither file nor parent dir exists
-//                                (client genuinely not installed)
+//     (client genuinely not installed)
 //
 // The frontend gates the per-column "Initialize" affordance on
 // state == "missing-init-possible", so this contract is part of the
@@ -389,9 +516,9 @@ func TestProbeClientConfigPresence_StateMachine(t *testing.T) {
 
 	// codex-cli: empty (not passed) — must be omitted from the result map.
 	out := probeClientConfigPresence(ScanOpts{
-		VSCodeConfigPath:  vscodePath,
-		CursorConfigPath:  cursorPath,
-		ClaudeConfigPath:  claudePath,
+		VSCodeConfigPath: vscodePath,
+		CursorConfigPath: cursorPath,
+		ClaudeConfigPath: claudePath,
 		// CodexConfigPath intentionally omitted.
 	})
 
