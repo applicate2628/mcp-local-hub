@@ -579,11 +579,18 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			fmt.Fprintf(cmd.OutOrStderr(), "warning: supervisor: %v\n", spawnErr)
 		} else if supervisor.Spawned() {
 			fmt.Fprintf(cmd.OutOrStdout(), "supervisor: spawned PID %d (GUI owns lifecycle)\n", supervisor.Pid())
-			manager = newSupervisorManager(ctx, supervisorBin, strictMode, 15*time.Second, supervisor)
-			go manager.runRespawnLoop(ctx) // self-healing respawn ONLY for GUI-spawned owners
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "supervisor: adopted (running externally)")
 		}
+		// The Spawned()-gated construct-and-arm decision is extracted into
+		// armSupervisorManager so the REAL wiring (manager constructed AND
+		// its respawn loop launched, seeded from the package-level
+		// spawnSupervisorFn) is unit-testable WITHOUT a real `mcphub
+		// supervise` binary — the seam-based newTestManager tests inject
+		// spawnFn directly and so never exercise this gate. A nil/adopted
+		// owner returns nil here (no manager, no loop), matching the
+		// adopt contract. §5 deploy-verification gap.
+		manager = armSupervisorManager(ctx, supervisor, supervisorBin, strictMode)
 	}
 	// This defer is registered after the lock.Release defer at the
 	// top of startGuiServer. Under Go's LIFO defer stack, this
