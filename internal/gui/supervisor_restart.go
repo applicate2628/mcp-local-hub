@@ -86,20 +86,29 @@ func (s *Server) supervisorRestartHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	// Step 1: Read supervisor.lock.owner.json to find the current
-	// supervisor PID. Sidecar absent = no live supervisor; skip kill.
-	pid, lockErr := readSupervisorLockOwnerPID(stateDir)
+	// supervisor PID + the start_time it was written for. Sidecar
+	// absent = no live supervisor; skip kill. The start_time is the
+	// anchor for the kill-target identity gate's PID-recycle defense
+	// (Step 2).
+	pid, startedAt, lockErr := readSupervisorLockOwner(stateDir)
 	if lockErr != nil {
 		resp.PerStepError["read_lock"] = lockErr.Error()
 		// Not fatal — we still try to spawn a fresh supervisor.
 	}
 	resp.KilledPID = pid
 
-	// Step 2: Kill if a PID was found. taskkill /PID <n> /F on
-	// Windows; SIGKILL on POSIX. Best-effort: if the kill fails the
-	// new spawn step might still recover (the supervisor's own
+	// Step 2: Kill if a PID was found, but ONLY after the three-part
+	// identity gate proves the recorded PID is still the live mcphub
+	// supervisor the sidecar names (image basename + argv 'supervise'
+	// + start-time precedes the sidecar's started_at). The owner
+	// sidecar is best-effort and SURVIVES a supervisor crash, so its
+	// PID can be REUSED by an unrelated OS process; killSupervisorProcess
+	// refuses (with a clear error) when the gate fails so a recycled PID
+	// is never killed. Best-effort otherwise: if the kill itself fails
+	// the new spawn step might still recover (the supervisor's own
 	// lock-acquire path detects stale lock owners by PID liveness).
 	if pid > 0 {
-		if killErr := killSupervisorProcess(pid); killErr != nil {
+		if killErr := killSupervisorProcess(pid, startedAt); killErr != nil {
 			resp.PerStepError["kill"] = killErr.Error()
 		} else {
 			resp.Killed = true
@@ -139,35 +148,77 @@ func (s *Server) supervisorRestartHandler(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// readSupervisorLockOwnerPID reads <state-dir>/supervisor.lock.owner.json
-// and returns the recorded PID. Empty/absent sidecar → (0, nil) so
-// the caller can skip the kill step without erroring.
-func readSupervisorLockOwnerPID(stateDir string) (int, error) {
+// readSupervisorLockOwner reads <state-dir>/supervisor.lock.owner.json
+// and returns the recorded PID + start_time. Empty/absent sidecar →
+// (0, "", nil) so the caller can skip the kill step without erroring.
+// The start_time (RFC3339Nano UTC, the same value AcquireSupervisorLock
+// writes) anchors the kill-target identity gate's PID-recycle defense.
+func readSupervisorLockOwner(stateDir string) (int, string, error) {
 	path := filepath.Join(stateDir, "supervisor.lock.owner.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
+			return 0, "", nil
 		}
-		return 0, fmt.Errorf("read %s: %w", path, err)
+		return 0, "", fmt.Errorf("read %s: %w", path, err)
 	}
 	var sidecar struct {
-		PID int `json:"pid"`
+		PID       int    `json:"pid"`
+		StartedAt string `json:"started_at"`
 	}
 	if jErr := json.Unmarshal(raw, &sidecar); jErr != nil {
-		return 0, fmt.Errorf("parse %s: %w", path, jErr)
+		return 0, "", fmt.Errorf("parse %s: %w", path, jErr)
 	}
-	return sidecar.PID, nil
+	return sidecar.PID, sidecar.StartedAt, nil
 }
 
-// killSupervisorProcess terminates the supervisor process by PID.
+// killSupervisorProcess terminates the supervisor process by PID, but
+// ONLY after the three-part kill-target identity gate proves the
+// recorded PID is still the live mcphub supervisor the sidecar names.
 // Windows: taskkill /PID <n> /F (force; no graceful path because the
 // supervisor's IPC may already be wedged — the post-mortem case).
 // POSIX: SIGKILL via os.Process.Kill().
-func killSupervisorProcess(pid int) error {
+//
+// Why the gate: supervisor.lock.owner.json is best-effort and SURVIVES
+// a supervisor crash (an OS-killed supervisor never tidies it). If that
+// crashed supervisor's PID is later REUSED by an unrelated OS process,
+// killing the sidecar PID blindly would `taskkill /F` (or SIGKILL) that
+// unrelated process. The reaper ForceKillSupervisor in the upgrade flow
+// (internal/cli/install_migration_wiring_windows.go) gates exactly this
+// way; this path is the GUI-side equivalent and must not be weaker.
+// If the gate refuses, killSupervisorProcess returns a clear error and
+// kills NOTHING, so a recycled PID is never terminated.
+func killSupervisorProcess(pid int, sidecarStartedAt string) error {
 	if pid <= 0 {
 		return fmt.Errorf("invalid pid %d", pid)
 	}
+	if eligible, err := supervisorKillTargetEligible(pid, sidecarStartedAt); err != nil {
+		// UNPROVABLE: a transient identity-probe error. We cannot prove
+		// the recorded PID is the supervisor, so we must NOT kill it.
+		return fmt.Errorf("kill-target identity gate could not verify PID %d: %w", pid, err)
+	} else if !eligible {
+		// PROVEN not the supervisor (recycled / different subcommand /
+		// foreign image / gone). Refuse with a clear error so the
+		// operator sees why nothing was killed; the per-step body
+		// surfaces it. A recycled PID is never killed.
+		return fmt.Errorf("kill-target identity gate refused PID %d: recorded supervisor.lock PID is not a live mcphub supervisor (PID recycled, exited, or owned by a different process); refusing to kill", pid)
+	}
+	return killSupervisorPIDFn(pid)
+}
+
+// killSupervisorPIDFn is the seam over the actual force-kill so the
+// identity-gate unit test can observe WHICH PID — if any — would be
+// killed WITHOUT ever shelling taskkill or signalling a real process
+// (the developer runs ~21 live production daemons under their
+// supervisor; CLAUDE.md). Production wires it to killSupervisorPID; the
+// test swaps it to record the call. It is reached ONLY after
+// supervisorKillTargetEligible has proven the target is the supervisor.
+var killSupervisorPIDFn = killSupervisorPID
+
+// killSupervisorPID force-kills the (already gate-verified) supervisor
+// PID. Windows: taskkill /PID <n> /F. POSIX: SIGKILL via
+// os.Process.Kill().
+func killSupervisorPID(pid int) error {
 	if runtime.GOOS == "windows" {
 		cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F")
 		out, err := cmd.CombinedOutput()
@@ -181,6 +232,83 @@ func killSupervisorProcess(pid int) error {
 		return fmt.Errorf("find proc %d: %w", pid, err)
 	}
 	return proc.Kill()
+}
+
+// supervisorKillTargetEligible is the three-part kill-target identity
+// gate. It mirrors the upgrade reaper's supervisorPIDIsLiveMcphubSupervisor
+// (internal/cli/install_migration_wiring_windows.go) using the gui
+// package's cross-platform processID probe so the SAME defense runs on
+// the GUI POST /api/supervisor/restart path.
+//
+// The three axes:
+//
+//	Gate 1 (image basename) — mcphub(.exe), via matchBasename (the same
+//	  per-OS helper the gui --force --kill gate uses).
+//	Gate 2 (argv token)     — argv[1] == "supervise" EXACTLY (token, not
+//	  substring). A recycled PID running any other subcommand is refused.
+//	Gate 3 (start-time)     — the process start time must PRECEDE (within
+//	  a 1s tolerance) the started_at the sidecar recorded. A PID whose
+//	  process began AFTER the sidecar write cannot be the supervisor the
+//	  sidecar was written for, so it is a reuse — refuse.
+//
+// Tri-state return:
+//
+//	(true,  nil) — proven live supervisor → kill.
+//	(false, nil) — PROVEN not the supervisor (dead PID, different image,
+//	  different subcommand, recycled-after-write, or a missing/unparseable
+//	  started_at that cannot anchor Gate 3) → benign refusal, kill nothing.
+//	(false, err) — UNPROVABLE: a transient probe error means the gate
+//	  cannot prove identity, so it propagates and the caller refuses the
+//	  kill rather than guessing.
+func supervisorKillTargetEligible(pid int, sidecarStartedAt string) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	id, err := processID(pid)
+	if err != nil {
+		// Transient / unsupported probe error. Cannot prove identity.
+		return false, err
+	}
+	defer id.Close()
+	// A dead PID (Alive=false) is PROVEN gone — nothing to reap.
+	if !id.Alive {
+		return false, nil
+	}
+	// Denied=true means the probe could not enumerate image/argv/start
+	// (privilege rejected). We cannot prove this is the supervisor →
+	// fail closed (refuse), matching the gui --force --kill posture of
+	// refusing take-over of a process it cannot identify.
+	if id.Denied {
+		return false, nil
+	}
+	// Gate 1: image basename is the mcphub binary.
+	if !matchBasename(id.ImagePath) {
+		return false, nil
+	}
+	// Gate 2: argv[1] is EXACTLY "supervise" (token, not substring).
+	if !cmdlineIsSupervise(id.Cmdline) {
+		return false, nil
+	}
+	// Gate 3: the process start time precedes the started_at the sidecar
+	// recorded. An empty/unparseable started_at cannot anchor this
+	// defense → fail closed (refuse).
+	recorded, perr := time.Parse(time.RFC3339Nano, strings.TrimSpace(sidecarStartedAt))
+	if perr != nil {
+		return false, nil
+	}
+	if !startTimeBeforeMtime(id.StartTime, recorded.UTC(), time.Second) {
+		return false, nil
+	}
+	return true, nil
+}
+
+// cmdlineIsSupervise reports whether argv[1] is exactly "supervise".
+// The supervisor analog of cmdlineIsGui — keyed on the precise cobra
+// subcommand token, not a substring, so a recycled PID running another
+// mcphub subcommand (or a foreign process whose argv coincidentally
+// contains "supervise") is refused.
+func cmdlineIsSupervise(argv []string) bool {
+	return len(argv) >= 2 && argv[1] == "supervise"
 }
 
 // waitForLockRelease polls supervisor.lock.owner.json until it
