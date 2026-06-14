@@ -381,7 +381,7 @@ A surface-by-surface map of what this project actually does today, with explicit
 | Run on Linux | 🚧 Roadmap | Ubuntu CI builds/tests; install/scheduler not implemented |
 | Run on macOS | 🚧 Roadmap | darwin cross-build only; scheduler + force-kill probe stubbed |
 | Auto-start on logon — Windows | ✅ Stable | Task Scheduler with restart-on-failure |
-| Auto-start on logon — Linux | 🚧 Roadmap | systemd user units (F2) + `mcphub setup --server` with `loginctl enable-linger` (F3) tracked in backlog |
+| Auto-start on logon — Linux | ⚠ Beta | systemd user units (F2) + `loginctl enable-linger` (F3) both implemented — `mcphub autostart enable` writes the `--user` unit, runs `systemctl --user enable --now`, then best-effort `enable-linger` so the supervisor survives logout; live-verify on a real systemd host pending |
 | Auto-start on logon — macOS | 🚧 Roadmap | launchd auto-start is not currently tracked in the backlog F-tier; manual launch only |
 | Default client install | ⚠ Preview | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix |
 | Opt-in client install | ⚠ Preview | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay), Zed (stdio-relay), Kiro, Windsurf, Cline, Kilo Code, OpenCode, Hermes, OpenClaw; built from upstream config docs, live smoke pending |
