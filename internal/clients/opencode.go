@@ -100,6 +100,9 @@ const openCodeMCPKey = "mcp"
 func (o *openCodeClient) Name() string       { return "opencode" }
 func (o *openCodeClient) ConfigPath() string { return o.path }
 
+// IsRelayStdio reports false: opencode is a URL-native HTTP MCP client.
+func (o *openCodeClient) IsRelayStdio() bool { return false }
+
 // Exists treats OpenCode as installed when EITHER the config file is
 // present OR its parent directory (~/.config/opencode/) exists, mirroring
 // the cursor/vscode/kiro "directory means installed" heuristic so an

@@ -26,6 +26,9 @@ type claudeCode struct {
 func (c *claudeCode) Name() string       { return "claude-code" }
 func (c *claudeCode) ConfigPath() string { return c.path }
 
+// IsRelayStdio reports false: claude-code is a URL-native HTTP MCP client.
+func (c *claudeCode) IsRelayStdio() bool { return false }
+
 func (c *claudeCode) Exists() bool {
 	_, err := os.Stat(c.path)
 	return err == nil

@@ -38,6 +38,11 @@ func newLSPRouterFakeClient(t *testing.T, name string, exists bool) *lspRouterFa
 func (f *lspRouterFakeClient) Name() string       { return f.name }
 func (f *lspRouterFakeClient) ConfigPath() string { return f.path }
 func (f *lspRouterFakeClient) Exists() bool       { return f.exists }
+
+// IsRelayStdio mirrors the real per-name relay-stdio classification so a
+// fake named "antigravity"/"zed" behaves like the real relay-stdio adapter
+// (true) and every URL-native fake reports false.
+func (f *lspRouterFakeClient) IsRelayStdio() bool { return clients.IsRelayStdio(f.name) }
 func (f *lspRouterFakeClient) InitEmpty() (bool, error) {
 	return false, nil
 }
@@ -600,4 +605,117 @@ func overrideLSPRouterRegistry(t *testing.T) func() {
 	prior := testRegistryPathOverride
 	testRegistryPathOverride = filepath.Join(t.TempDir(), "workspaces.yaml")
 	return func() { testRegistryPathOverride = prior }
+}
+
+// TestLSPRouterEntryRelayContextForRelayStdioClients pins the relay-stdio
+// predicate migration on the LSP-router entry-builder path. Both
+// lspRouterMCPEntryForClient and lspLegacyMCPEntryForClient must populate
+// RelayExePath for EVERY relay-stdio adapter (antigravity AND zed) and leave
+// it empty for URL-native adapters (claude-code as control). Before the
+// migration only antigravity was handled (`adapter.Name() == "antigravity"`),
+// so a zed LSP entry lacked RelayExePath and zed.AddEntry would reject it —
+// this test closes that latent gap. The relay forward target (RelayURL) must
+// also be the router/legacy URL so the relay takes its --url branch.
+func TestLSPRouterEntryRelayContextForRelayStdioClients(t *testing.T) {
+	const exe = `C:\abs\mcphub.exe` // absolute so the relay-stdio adapters accept it
+	const targetURL = "http://localhost:9201/lsp/go/mcp"
+	opts := LSPClientRouterOpts{McphubExePath: exe}
+
+	mkAdapter := func(name string, factory func() (clients.Client, error)) clients.Client {
+		t.Helper()
+		c, err := factory()
+		if err != nil {
+			t.Fatalf("construct %s adapter: %v", name, err)
+		}
+		return c
+	}
+
+	relayAdapters := map[string]clients.Client{
+		"antigravity": mkAdapter("antigravity", clients.NewAntigravity),
+		"zed":         mkAdapter("zed", clients.NewZed),
+	}
+
+	for name, adapter := range relayAdapters {
+		if !adapter.IsRelayStdio() {
+			t.Fatalf("%s adapter IsRelayStdio() = false, want true (test premise)", name)
+		}
+
+		// Router path: RelayURL set unconditionally, RelayExePath for relay clients.
+		entry, err := lspRouterMCPEntryForClient(opts, adapter, "mcp-language-server-go", targetURL)
+		if err != nil {
+			t.Fatalf("%s lspRouterMCPEntryForClient: %v", name, err)
+		}
+		if entry.RelayExePath != exe {
+			t.Errorf("%s router entry RelayExePath = %q, want %q (relay-stdio client must carry relay exe)", name, entry.RelayExePath, exe)
+		}
+		if entry.RelayURL != targetURL {
+			t.Errorf("%s router entry RelayURL = %q, want %q (relay forwards to target via --url branch)", name, entry.RelayURL, targetURL)
+		}
+		// Prove the built field set is SUFFICIENT for the relay-stdio
+		// adapter's AddEntry preconditions, purely in-memory (no disk I/O
+		// against a live config): RelayExePath must be a non-empty absolute
+		// path and a non-empty relay forward target (RelayURL or URL) must
+		// be present — exactly the gates antigravity.AddEntry / zed.AddEntry
+		// enforce before writing.
+		assertRelayEntryFieldsSufficient(t, name+" router", entry)
+
+		// Legacy path: RelayURL + RelayExePath for relay clients.
+		legacy, err := lspLegacyMCPEntryForClient(opts, adapter, "mcp-language-server-go", targetURL)
+		if err != nil {
+			t.Fatalf("%s lspLegacyMCPEntryForClient: %v", name, err)
+		}
+		if legacy.RelayExePath != exe {
+			t.Errorf("%s legacy entry RelayExePath = %q, want %q", name, legacy.RelayExePath, exe)
+		}
+		if legacy.RelayURL != targetURL {
+			t.Errorf("%s legacy entry RelayURL = %q, want %q", name, legacy.RelayURL, targetURL)
+		}
+		assertRelayEntryFieldsSufficient(t, name+" legacy", legacy)
+	}
+
+	// Control: a URL-native adapter gets NO relay context on either path.
+	urlNative := mkAdapter("claude-code", clients.NewClaudeCode)
+	if urlNative.IsRelayStdio() {
+		t.Fatalf("claude-code adapter IsRelayStdio() = true, want false (control premise)")
+	}
+	router, err := lspRouterMCPEntryForClient(opts, urlNative, "mcp-language-server-go", targetURL)
+	if err != nil {
+		t.Fatalf("claude-code lspRouterMCPEntryForClient: %v", err)
+	}
+	if router.RelayExePath != "" {
+		t.Errorf("claude-code router entry RelayExePath = %q, want empty (URL-native client needs no relay context)", router.RelayExePath)
+	}
+	if router.URL != targetURL {
+		t.Errorf("claude-code router entry URL = %q, want %q", router.URL, targetURL)
+	}
+	legacy, err := lspLegacyMCPEntryForClient(opts, urlNative, "mcp-language-server-go", targetURL)
+	if err != nil {
+		t.Fatalf("claude-code lspLegacyMCPEntryForClient: %v", err)
+	}
+	if legacy.RelayExePath != "" {
+		t.Errorf("claude-code legacy entry RelayExePath = %q, want empty", legacy.RelayExePath)
+	}
+}
+
+// assertRelayEntryFieldsSufficient checks, purely in-memory, that the
+// lsp-router-built MCPEntry carries the fields a relay-stdio adapter's
+// AddEntry requires before it will write the stdio-bridge entry:
+//
+//   - RelayExePath non-empty AND absolute (the `command` field), and
+//   - a non-empty relay forward target via RelayURL or URL (the `--url` arg).
+//
+// These are exactly the preconditions antigravity.AddEntry and zed.AddEntry
+// enforce (and reject on). Asserting them directly proves field-sufficiency
+// without invoking AddEntry against any config file — so the test never
+// reads or writes a live client config.
+func assertRelayEntryFieldsSufficient(t *testing.T, label string, entry clients.MCPEntry) {
+	t.Helper()
+	if entry.RelayExePath == "" {
+		t.Errorf("%s: RelayExePath empty — relay-stdio AddEntry requires it for the 'command' field", label)
+	} else if !filepath.IsAbs(entry.RelayExePath) {
+		t.Errorf("%s: RelayExePath %q not absolute — relay-stdio AddEntry rejects a relative command", label, entry.RelayExePath)
+	}
+	if entry.RelayURL == "" && entry.URL == "" {
+		t.Errorf("%s: both RelayURL and URL empty — relay-stdio AddEntry has no forward target to relay to", label)
+	}
 }

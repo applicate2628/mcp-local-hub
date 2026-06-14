@@ -19,6 +19,12 @@ type jsonMCPClient struct {
 func (j *jsonMCPClient) Name() string       { return j.clientName }
 func (j *jsonMCPClient) ConfigPath() string { return j.path }
 
+// IsRelayStdio reports false: the JSON-family adapters (and every adapter
+// that embeds jsonMCPClient without overriding this) are URL-native HTTP
+// clients. The relay-stdio adapters declare true on their own concrete
+// struct (Antigravity overrides this promoted method; Zed is standalone).
+func (j *jsonMCPClient) IsRelayStdio() bool { return false }
+
 func (j *jsonMCPClient) Exists() bool {
 	_, err := os.Stat(j.path)
 	return err == nil

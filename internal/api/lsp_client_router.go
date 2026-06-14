@@ -383,7 +383,12 @@ func lspRouterMCPEntryForClient(opts LSPClientRouterOpts, adapter clients.Client
 		URL:      targetURL,
 		RelayURL: targetURL,
 	}
-	if adapter.Name() != "antigravity" {
+	// Relay-stdio adapters (antigravity, zed) need RelayExePath so AddEntry
+	// can emit the `command`+`args` stdio-bridge entry. Both forward to
+	// RelayURL (already set above to targetURL), so the relay takes its
+	// --url branch and needs no RelayServer/RelayDaemon here. URL-native
+	// HTTP adapters consume the URL directly and need no relay context.
+	if !adapter.IsRelayStdio() {
 		return entry, nil
 	}
 	relayExe := opts.McphubExePath
@@ -403,7 +408,11 @@ func lspLegacyMCPEntryForClient(opts LSPClientRouterOpts, adapter clients.Client
 		Name: name,
 		URL:  targetURL,
 	}
-	if adapter.Name() != "antigravity" {
+	// Relay-stdio adapters (antigravity, zed) need RelayExePath + RelayURL
+	// so AddEntry emits the stdio-bridge `command`+`args` entry forwarding
+	// to targetURL via the relay --url branch (no RelayServer/RelayDaemon
+	// needed). URL-native HTTP adapters consume URL directly.
+	if !adapter.IsRelayStdio() {
 		return entry, nil
 	}
 	relayExe := opts.McphubExePath

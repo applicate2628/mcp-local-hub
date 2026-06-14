@@ -189,8 +189,8 @@ func TestBuildHubReconcilePlanRejectsReservedAggregateName(t *testing.T) {
 // without bindings, leaving a stale aggregate entry behind whenever
 // the operator uninstalled every server that bound to a particular
 // client (or whenever the manifest set changed between gate ON and
-// gate OFF). Antigravity is intentionally excluded
-// (hubReconcileSkipClients).
+// gate OFF). Relay-stdio clients (antigravity, zed) are intentionally
+// excluded — clients.IsRelayStdio is the single owner of that fact.
 func TestBuildHubReconcilePlanGateOffRemovesAggregateForAllSupportedClients(t *testing.T) {
 	// Only one manifest with one client binding — three other supported
 	// clients (vscode, gemini-cli, qwen-cli) have NO bindings in this set
@@ -221,13 +221,13 @@ func TestBuildHubReconcilePlanGateOffRemovesAggregateForAllSupportedClients(t *t
 		}
 	}
 
-	// Every supported client EXCEPT antigravity (skip-listed) must
-	// be present in gotRemove, regardless of whether it had a
-	// binding in `manifests`.
+	// Every supported client EXCEPT the relay-stdio adapters
+	// (antigravity, zed) must be present in gotRemove, regardless of
+	// whether it had a binding in `manifests`.
 	for _, c := range clients.SupportedClientNames() {
-		if hubReconcileSkipClients[c] {
+		if clients.IsRelayStdio(c) {
 			if gotRemove[c] {
-				t.Errorf("client %q is in hubReconcileSkipClients but got a Remove op — skip list ignored", c)
+				t.Errorf("client %q is relay-stdio (clients.IsRelayStdio) but got a Remove op — relay-stdio exclusion ignored", c)
 			}
 			continue
 		}

@@ -54,6 +54,21 @@ type Client interface {
 	// used in manifest client_bindings.
 	Name() string
 
+	// IsRelayStdio reports whether this adapter is a relay-stdio client —
+	// one whose AddEntry REQUIRES relay context (RelayExePath, and for the
+	// manifest-lookup form RelayServer/RelayDaemon) to build a stdio-bridge
+	// `command`+`args` entry, and which REJECTS a URL-only entry. The only
+	// such adapters are Antigravity and Zed; every URL-native HTTP adapter
+	// returns false.
+	//
+	// This is the single owner of the "is this adapter relay-stdio" fact.
+	// Call sites that previously hard-coded a name check (or a denylist map)
+	// must consult this predicate (or the package-level IsRelayStdio helper
+	// for name-only contexts) so a future relay adapter is classified
+	// correctly at every site without touching each one. Each adapter
+	// declares its own truth next to the rest of its implementation.
+	IsRelayStdio() bool
+
 	// ConfigPath returns the absolute path to the config file this client reads.
 	// Used for display, backup, and existence checks.
 	ConfigPath() string
@@ -711,6 +726,26 @@ func AllClients() map[string]Client {
 		result[c.Name()] = c
 	}
 	return result
+}
+
+// IsRelayStdio reports whether the supported client identified by name is a
+// relay-stdio adapter (its AddEntry requires relay context and rejects a
+// URL-only entry) — see Client.IsRelayStdio for the per-adapter contract.
+// This is the name-only entry point for call sites (e.g. the hub-reconcile
+// planner) that hold a client id string rather than a constructed adapter.
+//
+// It resolves name → adapter via AllClients() and returns that adapter's
+// IsRelayStdio() method, so the answer always derives from the adapter's own
+// declaration and a future relay adapter needs no edit here. Returns false
+// for an unknown name, or for a name whose adapter cannot be constructed on
+// the current host (e.g. UserHomeDir failure) — both are non-relay by the
+// same fail-safe rule AllClients() uses to drop unconstructable adapters.
+func IsRelayStdio(name string) bool {
+	c, ok := AllClients()[name]
+	if !ok {
+		return false
+	}
+	return c.IsRelayStdio()
 }
 
 // backupSuffixPrefix is the shared filename fragment that identifies every
