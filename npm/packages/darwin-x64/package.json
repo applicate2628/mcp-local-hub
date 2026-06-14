@@ -1,6 +1,6 @@
 {
   "name": "@applicate2628/mcp-local-hub-darwin-x64",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "mcphub binary for darwin/x64 (Go darwin/amd64) — best-effort (the CLI runs; supervisor lifecycle is Windows-GA / Linux-beta / macOS-preview). Platform sub-package of the \"mcp-local-hub\" meta package; not installed directly.",
   "license": "MPL-2.0",
   "author": "Dmitry Denisenko (@applicate2628)",
