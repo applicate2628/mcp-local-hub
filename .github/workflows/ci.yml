@@ -199,3 +199,58 @@ jobs:
           else
             echo "systemd-user unavailable in this runner image — skipping per Linux-beta policy"
           fi
+
+  # npm delivery version-sync gate (§13 Phases 1-2). Enforces that
+  # npm/package.json is the SINGLE version authority:
+  #   1. build.sh + build.ps1 carry the same version literal (no drift),
+  #   2. the six @mcphub/<platform>-<arch> sub-packages are exactly what the
+  #      generator emits (no hand-edit / missed regeneration),
+  #   3. a binary built with the synced ldflags reports that same version
+  #      (closes the version-skew gap: the runtime upgrade guard only rejects
+  #      version=="dev"/"" today, so semver drift would otherwise pass silently).
+  # This job does NOT publish anything — publishing (npm publish, token/OIDC,
+  # the release binary-injection job) is §13 Phase 3+ and deliberately absent.
+  npm-version-sync:
+    name: npm version-sync gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Version drift check (build.sh + build.ps1 vs npm/package.json)
+        run: node npm/sync-version.js --check
+
+      - name: Platform sub-packages are freshly generated
+        # Re-run the generator and fail if the committed sub-package
+        # package.json / README files differ from a fresh generation.
+        run: |
+          node npm/generate-platform-packages.js
+          git diff --exit-code npm/packages/
+
+      - name: Binary version matches the authority
+        # Build with the same ldflags shape build.sh injects (version read from
+        # the authority via --inject, which is a no-op when already in sync),
+        # then assert the artifact's `version` output equals the authority.
+        # No -H windowsgui on Linux; the console binary's output captures fine.
+        shell: bash
+        run: |
+          node npm/sync-version.js --inject
+          ver="$(node -p "require('./npm/package.json').version")"
+          commit="$(git rev-parse --short HEAD)"
+          go build -trimpath \
+            -ldflags "-X main.version=${ver} -X main.commit=${commit} -X main.buildDate=ci" \
+            -o mcphub-versioned ./cmd/mcphub
+          node npm/sync-version.js --assert-binary ./mcphub-versioned
+
+      - name: npm meta package packs cleanly
+        # Pack-only smoke (NOT publish): proves the meta package.json + bin
+        # shim produce a valid tarball with exactly the expected files.
+        run: |
+          cd npm
+          npm pack --dry-run

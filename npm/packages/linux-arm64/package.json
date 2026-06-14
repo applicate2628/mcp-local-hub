@@ -1,0 +1,29 @@
+{
+  "name": "@mcphub/linux-arm64",
+  "version": "0.4.5",
+  "description": "mcphub binary for linux/arm64 (Go linux/arm64) — best-effort (the CLI runs; supervisor lifecycle is Windows-GA / Linux-beta / macOS-preview). Platform sub-package of the \"mcphub\" meta package; not installed directly.",
+  "license": "MPL-2.0",
+  "author": "Dmitry Denisenko (@applicate2628)",
+  "homepage": "https://github.com/applicate2628/mcp-local-hub#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/applicate2628/mcp-local-hub.git",
+    "directory": "npm/packages/linux-arm64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "bin": {
+    "mcphub": "bin/mcphub"
+  },
+  "files": [
+    "bin/mcphub",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
