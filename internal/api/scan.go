@@ -632,7 +632,10 @@ func scanVSCode(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		Servers map[string]map[string]any `json:"servers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	// VS Code's settings.json is JSONC (comments + trailing commas), same as
+	// Zed — tolerate it (strict JSON parses byte-identically through the
+	// preprocessor, so this is behavior-preserving for a comment-free file).
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.Servers {
@@ -796,7 +799,13 @@ func scanZed(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		ContextServers map[string]map[string]any `json:"context_servers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	// Zed's settings.json is JSONC (allows // and /* */ comments + trailing
+	// commas), which strict encoding/json rejects with
+	// "invalid character '/' looking for beginning of value" — the failure
+	// that turned the whole Servers scan into a 500. Reuse the existing
+	// JSONC preprocessor (the VS Code import path's
+	// stripJSONCommentsAndTrailingCommas) so a real editor config parses.
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.ContextServers {
