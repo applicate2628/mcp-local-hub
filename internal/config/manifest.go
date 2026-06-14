@@ -46,7 +46,16 @@ const (
 
 // ServerManifest is the parsed form of a `servers/<name>/manifest.yaml` file.
 type ServerManifest struct {
-	Name             string            `yaml:"name"`
+	Name string `yaml:"name"`
+
+	// Description is a one-line human-readable summary of what the server
+	// does, surfaced in the GUI Catalog ("store") screen. ADDITIVE and
+	// OPTIONAL: manifests without it parse and validate unchanged
+	// (`omitempty` keeps it out of round-tripped YAML when empty), and
+	// Validate()/ValidateStrict() never require it. Free-form metadata,
+	// no enum or shape constraint.
+	Description string `yaml:"description,omitempty"`
+
 	Kind             string            `yaml:"kind"`
 	Transport        string            `yaml:"transport"`
 	Command          string            `yaml:"command"`
@@ -227,6 +236,41 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 		return nil, err
 	}
 	return &m, nil
+}
+
+// CatalogFields is the projection of a manifest used by the GUI Catalog
+// ("store") screen: just the display-relevant top-level scalars. It
+// deliberately does NOT carry the full ServerManifest so the catalog
+// surface stays decoupled from the spawn/validation fields.
+type CatalogFields struct {
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+	Kind        string `yaml:"kind" json:"kind"`
+}
+
+// ParseCatalogFields reads YAML from r and extracts only the catalog
+// display scalars (name/description/kind). Unlike ParseManifest it does
+// NOT expand ${ENV} tokens, resolve secret: refs, or run Validate() — a
+// catalog projection must succeed for every shipped manifest regardless
+// of whether the host has the manifest's env/secrets set (e.g. memory's
+// ${HOME} or wolfram's secret:wolfram_app_id). It also tolerates unknown
+// keys so it never breaks as the manifest schema grows. name is the only
+// required field; description/kind are returned empty when absent.
+func ParseCatalogFields(r io.Reader) (CatalogFields, error) {
+	raw, readErr := io.ReadAll(r)
+	if readErr != nil {
+		return CatalogFields{}, fmt.Errorf("read manifest: %w", readErr)
+	}
+	var c CatalogFields
+	// No KnownFields(true): the catalog projection intentionally ignores
+	// every field except these three, so unknown keys must not error.
+	if err := yaml.Unmarshal(raw, &c); err != nil {
+		return CatalogFields{}, fmt.Errorf("yaml decode (catalog fields): %w", err)
+	}
+	if strings.TrimSpace(c.Name) == "" {
+		return CatalogFields{}, fmt.Errorf("manifest: name is required")
+	}
+	return c, nil
 }
 
 // expandEnvCrossPlatform expands $VAR and ${VAR} tokens against the host

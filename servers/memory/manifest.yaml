@@ -1,4 +1,5 @@
 name: memory
+description: "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions."
 kind: global
 transport: stdio-bridge
 command: npx

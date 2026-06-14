@@ -1019,3 +1019,113 @@ daemon_template:
 		}
 	})
 }
+
+// TestParseManifest_DescriptionIsAdditiveOptional is the §10 v2a guard:
+// the new `description:` field must parse onto ServerManifest.Description,
+// AND its absence must not break parsing/validation — a pre-v2a manifest
+// (no description) parses and validates exactly as before.
+func TestParseManifest_DescriptionIsAdditiveOptional(t *testing.T) {
+	t.Run("present: parses onto Description", func(t *testing.T) {
+		yaml := `
+name: time
+description: "Time and timezone utilities — current time, conversions, and timezone-aware calculations."
+kind: global
+transport: stdio-bridge
+command: npx
+base_args: ["-y", "@mcpcentral/mcp-time@0.0.5"]
+daemons: [{name: default, port: 9128}]
+`
+		m, err := ParseManifest(strings.NewReader(yaml))
+		if err != nil {
+			t.Fatalf("ParseManifest with description: %v", err)
+		}
+		want := "Time and timezone utilities — current time, conversions, and timezone-aware calculations."
+		if m.Description != want {
+			t.Errorf("Description = %q, want %q", m.Description, want)
+		}
+	})
+
+	t.Run("absent: parses + validates unchanged (empty Description)", func(t *testing.T) {
+		yaml := `
+name: time
+kind: global
+transport: stdio-bridge
+command: npx
+base_args: ["-y", "@mcpcentral/mcp-time@0.0.5"]
+daemons: [{name: default, port: 9128}]
+`
+		m, err := ParseManifest(strings.NewReader(yaml))
+		if err != nil {
+			t.Fatalf("ParseManifest without description must still succeed: %v", err)
+		}
+		if m.Description != "" {
+			t.Errorf("Description should be empty when omitted, got %q", m.Description)
+		}
+		// Explicitly confirm Validate() does not require it.
+		if err := m.Validate(); err != nil {
+			t.Errorf("Validate() must not require description: %v", err)
+		}
+	})
+}
+
+// TestParseCatalogFields projects name/description/kind from manifest YAML
+// WITHOUT env expansion / secret resolution / Validate(), so it succeeds
+// for shipped manifests whose env or secrets are unset on the test host.
+func TestParseCatalogFields(t *testing.T) {
+	t.Run("projects name/description/kind", func(t *testing.T) {
+		yaml := `
+name: serena
+description: "Semantic code toolkit — LSP-backed symbol search."
+kind: global
+transport: native-http
+command: uvx
+`
+		c, err := ParseCatalogFields(strings.NewReader(yaml))
+		if err != nil {
+			t.Fatalf("ParseCatalogFields: %v", err)
+		}
+		if c.Name != "serena" {
+			t.Errorf("Name = %q, want serena", c.Name)
+		}
+		if c.Description != "Semantic code toolkit — LSP-backed symbol search." {
+			t.Errorf("Description = %q", c.Description)
+		}
+		if c.Kind != "global" {
+			t.Errorf("Kind = %q, want global", c.Kind)
+		}
+	})
+
+	t.Run("tolerates unset env/secret refs without expansion", func(t *testing.T) {
+		// memory's ${HOME} and wolfram's secret: refs would make a full
+		// ParseManifest fail on a host without them set; the catalog
+		// projection must NOT expand or validate, so it succeeds anyway.
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		yaml := `
+name: memory
+description: "Persistent knowledge-graph memory."
+kind: global
+transport: stdio-bridge
+command: npx
+base_args: ["-y", "@modelcontextprotocol/server-memory"]
+env:
+  MEMORY_FILE_PATH: "${HOME}/.local/share/mcp-memory/memory.jsonl"
+  API_KEY: "secret:some_key"
+daemons: [{name: default, port: 9123}]
+`
+		c, err := ParseCatalogFields(strings.NewReader(yaml))
+		if err != nil {
+			t.Fatalf("ParseCatalogFields must tolerate unset env/secret refs: %v", err)
+		}
+		if c.Name != "memory" || c.Description == "" || c.Kind != "global" {
+			t.Errorf("unexpected projection: %+v", c)
+		}
+	})
+
+	t.Run("rejects manifest with no name", func(t *testing.T) {
+		yaml := `description: "no name here"` + "\nkind: global\n"
+		if _, err := ParseCatalogFields(strings.NewReader(yaml)); err == nil {
+			t.Fatal("expected ParseCatalogFields to reject a manifest with no name")
+		}
+	})
+}

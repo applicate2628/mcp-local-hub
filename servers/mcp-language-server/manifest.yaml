@@ -1,4 +1,5 @@
 name: mcp-language-server
+description: "Language-server backend — definitions, references, diagnostics, hover, and rename across many languages."
 kind: workspace-scoped
 transport: stdio-bridge
 

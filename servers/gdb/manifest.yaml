@@ -1,4 +1,5 @@
 name: gdb
+description: "GDB debugger bridge — drive GDB sessions (breakpoints, stepping, inspection) over MCP."
 kind: global
 transport: stdio-bridge
 required_binaries: [gdb]

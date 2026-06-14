@@ -1,4 +1,5 @@
 name: serena
+description: "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase."
 kind: global
 transport: native-http
 command: uvx

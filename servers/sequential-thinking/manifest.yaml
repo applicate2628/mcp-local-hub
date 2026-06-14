@@ -1,4 +1,5 @@
 name: sequential-thinking
+description: "Structured step-by-step reasoning — decompose hard problems into revisable thought sequences."
 kind: global
 transport: stdio-bridge
 command: npx

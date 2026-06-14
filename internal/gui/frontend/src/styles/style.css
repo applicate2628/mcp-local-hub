@@ -142,6 +142,7 @@ main { padding: var(--screen-padding); overflow: auto; }
 
 /* --- Catalog screen (v1 GUI MCP Store) --- */
 .screen.catalog .catalog-intro { color: var(--text-muted); margin-bottom: var(--gap-xs); }
+.catalog-card-desc { color: var(--text-muted); font-size: 14px; margin: 0 0 var(--gap-sm); line-height: 1.4; }
 .catalog-card-actions { margin-top: var(--gap-sm); display: flex; align-items: center; gap: var(--gap-xs); }
 .catalog-card-actions button { padding: var(--button-padding-y) var(--button-padding-x); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
 .catalog-card-actions button:disabled { opacity: 0.5; cursor: not-allowed; }

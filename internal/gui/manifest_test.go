@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
 )
 
 // fakeManifestCreator and fakeManifestValidator are Server-local test doubles.
@@ -456,6 +457,17 @@ func (f *fakeManifestDeleter) ManifestDelete(name string) error {
 	return f.err
 }
 
+type fakeCatalogLister struct {
+	called bool
+	out    []config.CatalogFields
+	err    error
+}
+
+func (f *fakeCatalogLister) CatalogList() ([]config.CatalogFields, error) {
+	f.called = true
+	return f.out, f.err
+}
+
 // newManifestListDeleteTestServer wires only the list + delete subsets plus
 // the four create/validate/get/edit fakes the shared registerManifestRoutes
 // references at registration time. The create/validate/get/edit handlers are
@@ -470,6 +482,26 @@ func newManifestListDeleteTestServer(lister *fakeManifestLister, deleter *fakeMa
 		manifestEditor:    &fakeManifestEditor{},
 		manifestLister:    lister,
 		manifestDeleter:   deleter,
+		catalogLister:     &fakeCatalogLister{},
+	}
+	registerManifestRoutes(s)
+	return s
+}
+
+// newCatalogTestServer wires the catalog subset plus the create/validate/
+// get/edit/list/delete fakes the shared registerManifestRoutes references
+// at registration time (so a stray request can't nil-deref). Only the
+// /api/catalog handler is exercised here.
+func newCatalogTestServer(catalog *fakeCatalogLister) *Server {
+	s := &Server{
+		mux:               http.NewServeMux(),
+		manifestCreator:   &fakeManifestCreator{},
+		manifestValidator: &fakeManifestValidator{},
+		manifestGetter:    &fakeManifestGetter{},
+		manifestEditor:    &fakeManifestEditor{},
+		manifestLister:    &fakeManifestLister{},
+		manifestDeleter:   &fakeManifestDeleter{},
+		catalogLister:     catalog,
 	}
 	registerManifestRoutes(s)
 	return s
@@ -551,6 +583,98 @@ func TestManifestListHandler_BackendError_500Sanitized(t *testing.T) {
 	}
 	if !strings.Contains(body, "MANIFEST_LIST_FAILED") {
 		t.Errorf("body=%q missing MANIFEST_LIST_FAILED code", body)
+	}
+}
+
+// ---- GET /api/catalog (§10 v2a — Catalog descriptions) ----
+
+func TestCatalogHandler_ReturnsEnrichedEntries(t *testing.T) {
+	catalog := &fakeCatalogLister{out: []config.CatalogFields{
+		{Name: "serena", Description: "Semantic code toolkit.", Kind: "global"},
+		{Name: "mcp-language-server", Description: "Language-server backend.", Kind: "workspace-scoped"},
+	}}
+	s := newCatalogTestServer(catalog)
+	req := httptest.NewRequest(http.MethodGet, "/api/catalog", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	if !catalog.called {
+		t.Error("CatalogList was not called")
+	}
+	var body catalogListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.Catalog) != 2 {
+		t.Fatalf("catalog len = %d, want 2: %+v", len(body.Catalog), body.Catalog)
+	}
+	if body.Catalog[0].Name != "serena" || body.Catalog[0].Description != "Semantic code toolkit." || body.Catalog[0].Kind != "global" {
+		t.Errorf("entry[0] = %+v", body.Catalog[0])
+	}
+	if body.Catalog[1].Kind != "workspace-scoped" {
+		t.Errorf("entry[1].Kind = %q, want workspace-scoped", body.Catalog[1].Kind)
+	}
+}
+
+func TestCatalogHandler_EmptyIsNonNullArray_200(t *testing.T) {
+	// Empty set is 200 {"catalog":[]} (NOT 404) — "no servers yet" is normal.
+	s := newCatalogTestServer(&fakeCatalogLister{out: nil})
+	req := httptest.NewRequest(http.MethodGet, "/api/catalog", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"catalog":[]`) {
+		t.Errorf("empty catalog must serialize as []: %q", rec.Body.String())
+	}
+}
+
+func TestCatalogHandler_RejectsNonGET(t *testing.T) {
+	s := newCatalogTestServer(&fakeCatalogLister{})
+	req := httptest.NewRequest(http.MethodPost, "/api/catalog", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "GET" {
+		t.Errorf("Allow header = %q, want GET", got)
+	}
+}
+
+func TestCatalogHandler_RejectsCrossOrigin(t *testing.T) {
+	s := newCatalogTestServer(&fakeCatalogLister{})
+	req := httptest.NewRequest(http.MethodGet, "/api/catalog", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestCatalogHandler_BackendError_500Sanitized(t *testing.T) {
+	catalog := &fakeCatalogLister{err: errors.New("readdir /home/alice/.local/share/mcphub/servers: permission denied")}
+	s := newCatalogTestServer(catalog)
+	req := httptest.NewRequest(http.MethodGet, "/api/catalog", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "/home/alice") || strings.Contains(body, "permission denied") {
+		t.Errorf("body leaks filesystem path or raw error: %q", body)
+	}
+	if !strings.Contains(body, "CATALOG_LIST_FAILED") {
+		t.Errorf("body=%q missing CATALOG_LIST_FAILED code", body)
 	}
 }
 

@@ -42,6 +42,12 @@ const runningMemory: DaemonStatus = {
   state: "Running",
 };
 
+// Catalog entry builder — the GET /api/catalog row shape ({name,
+// description, kind}). Defaults keep each test terse; override per case.
+function entry(name: string, description = `desc for ${name}`, kind = "global") {
+  return { name, description, kind };
+}
+
 describe("CatalogScreen", () => {
   beforeEach(() => {
     cleanup();
@@ -52,11 +58,17 @@ describe("CatalogScreen", () => {
     cleanup();
   });
 
-  it("renders the server list from /api/manifests + /api/status", async () => {
+  it("renders the server list + descriptions from /api/catalog + /api/status", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/manifests": () =>
-          jsonResponse(200, { manifests: ["serena", "memory", "time"] }),
+        "/api/catalog": () =>
+          jsonResponse(200, {
+            catalog: [
+              entry("serena", "Semantic code toolkit — LSP-backed symbol search."),
+              entry("memory", "Persistent knowledge-graph memory across sessions."),
+              entry("time"),
+            ],
+          }),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
       }) as unknown as typeof fetch,
     );
@@ -68,13 +80,20 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-card-serena")).toBeTruthy();
     expect(screen.queryByTestId("catalog-card-memory")).toBeTruthy();
     expect(screen.queryByTestId("catalog-card-time")).toBeTruthy();
+    // The one-line description renders under each server name.
+    expect(screen.getByTestId("catalog-desc-serena").textContent).toContain(
+      "Semantic code toolkit",
+    );
+    expect(screen.getByTestId("catalog-desc-memory").textContent).toContain(
+      "Persistent knowledge-graph memory",
+    );
   });
 
   it("shows an installed badge for a server in /api/status and an Install button for one that isn't", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/manifests": () =>
-          jsonResponse(200, { manifests: ["memory", "time"] }),
+        "/api/catalog": () =>
+          jsonResponse(200, { catalog: [entry("memory"), entry("time")] }),
         // memory is running; time is not installed.
         "/api/status": () => jsonResponse(200, [runningMemory]),
       }) as unknown as typeof fetch,
@@ -99,7 +118,7 @@ describe("CatalogScreen", () => {
     const installCalls: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/manifests": () => jsonResponse(200, { manifests: ["time"] }),
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("time")] }),
         "/api/status": () => {
           statusCallCount += 1;
           // First load: time absent. After install: time running so the
@@ -141,7 +160,7 @@ describe("CatalogScreen", () => {
   it("shows an inline error and keeps the Install button when /api/install fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/manifests": () => jsonResponse(200, { manifests: ["time"] }),
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("time")] }),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/install": () =>
           jsonResponse(500, { error: "supervisor unavailable", code: "INSTALL_FAILED" }),
@@ -164,10 +183,10 @@ describe("CatalogScreen", () => {
     expect(retryBtn.disabled).toBe(false);
   });
 
-  it("renders the empty-state when /api/manifests returns an empty list", async () => {
+  it("renders the empty-state when /api/catalog returns an empty list", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/manifests": () => jsonResponse(200, { manifests: [] }),
+        "/api/catalog": () => jsonResponse(200, { catalog: [] }),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
       }) as unknown as typeof fetch,
     );
@@ -183,17 +202,17 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-cards")).toBeNull();
   });
 
-  it("renders an error banner when /api/manifests fails", async () => {
+  it("renders an error banner when /api/catalog fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/manifests": () =>
-          jsonResponse(500, { error: "internal error listing manifests", code: "MANIFEST_LIST_FAILED" }),
+        "/api/catalog": () =>
+          jsonResponse(500, { error: "internal error listing catalog", code: "CATALOG_LIST_FAILED" }),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
       }) as unknown as typeof fetch,
     );
 
     render(<CatalogScreen />);
     const banner = await screen.findByTestId("catalog-error");
-    expect(banner.textContent).toContain("internal error listing manifests");
+    expect(banner.textContent).toContain("internal error listing catalog");
   });
 });

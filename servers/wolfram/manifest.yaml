@@ -1,4 +1,5 @@
 name: wolfram
+description: "Wolfram Alpha — computational knowledge for math, science, units, and data queries."
 kind: global
 transport: stdio-bridge
 # wolframalpha-llm-mcp is a third-party Node-based server. Clone it into

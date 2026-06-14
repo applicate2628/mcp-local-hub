@@ -1,4 +1,5 @@
 name: paper-search-mcp
+description: "Academic paper search — query arXiv and other sources for research papers and abstracts."
 kind: global
 transport: stdio-bridge
 command: uvx

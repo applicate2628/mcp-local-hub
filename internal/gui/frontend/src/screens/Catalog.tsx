@@ -2,14 +2,26 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import type { DaemonStatus } from "../types";
 
-// Mirrors manifestListResponse in internal/gui/manifest.go — the GET
-// /api/manifests body shape ({ "manifests": ["serena", "memory", ...] }).
-// These are the supported/shipped server NAMES (embed-first union of the
+// Mirrors catalogEntry in internal/gui/manifest.go — one row of the GET
+// /api/catalog body. Each shipped server projects {name, description,
+// kind}; the Catalog ("store") screen renders the description as a
+// one-line summary under the server name. description/kind may be empty
+// strings for a manifest that omits them (the field is additive/optional
+// in the manifest schema).
+interface CatalogEntry {
+  name: string;
+  description: string;
+  kind: string;
+}
+
+// Mirrors catalogListResponse in internal/gui/manifest.go — the GET
+// /api/catalog body shape ({ "catalog": [{name, description, kind}, …] }).
+// These are the supported/shipped servers (embed-first union of the
 // installed servers/ dir and the embedded defaults). Empty set is a
 // normal first-run state the screen renders as a friendly empty card,
-// not an error (the backend returns 200 [] per its handler comment).
-interface ManifestListResponse {
-  manifests: string[];
+// not an error (the backend returns 200 {"catalog":[]} per its handler).
+interface CatalogListResponse {
+  catalog: CatalogEntry[];
 }
 
 // PerServerInstall tracks the install button lifecycle for one catalog
@@ -26,11 +38,13 @@ const IDLE: InstallState = { phase: "idle" };
 
 // CatalogScreen is the v1 slice of the "§10 GUI MCP Store": browse every
 // supported/shipped MCP server and install any with one click. It fetches
-// /api/manifests (the catalog) and /api/status (which servers are already
-// running) in parallel on mount, marks each row as installed or offers an
-// Install button, and POSTs /api/install?name=<server> on click.
+// /api/catalog (the enriched {name, description, kind} projection) and
+// /api/status (which servers are already running) in parallel on mount,
+// marks each row as installed or offers an Install button, renders the
+// per-server one-line description, and POSTs /api/install?name=<server>
+// on click.
 export function CatalogScreen() {
-  const [manifests, setManifests] = useState<string[] | null>(null);
+  const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // installedServers is the set of server names that already appear in
   // /api/status. The status array carries one row per daemon, so multiple
@@ -61,12 +75,12 @@ export function CatalogScreen() {
         // "array" guard rejects a null/object body). A server is
         // "installed" if any daemon row reports its name.
         const [list, status] = await Promise.all([
-          fetchOrThrow<ManifestListResponse>("/api/manifests", "object"),
+          fetchOrThrow<CatalogListResponse>("/api/catalog", "object"),
           fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
         ]);
         if (cancelled) return;
-        const names = Array.isArray(list.manifests) ? list.manifests : [];
-        setManifests(names);
+        const entries = Array.isArray(list.catalog) ? list.catalog : [];
+        setCatalog(entries);
         const installed = new Set<string>();
         for (const row of status) {
           if (row.server) installed.add(row.server);
@@ -130,7 +144,7 @@ export function CatalogScreen() {
     );
   }
 
-  if (!manifests) {
+  if (!catalog) {
     return (
       <section class="screen catalog">
         <h1>Catalog</h1>
@@ -139,7 +153,7 @@ export function CatalogScreen() {
     );
   }
 
-  if (manifests.length === 0) {
+  if (catalog.length === 0) {
     return (
       <section class="screen catalog">
         <h1>Catalog</h1>
@@ -157,7 +171,8 @@ export function CatalogScreen() {
         Browse the supported MCP servers and install any with one click.
       </p>
       <div class="cards" data-testid="catalog-cards">
-        {manifests.map((name) => {
+        {catalog.map((entry) => {
+          const name = entry.name;
           const state = installStates[name] ?? IDLE;
           // A row is "installed" if /api/status already reports it OR the
           // most recent install POST for this row returned 204.
@@ -165,6 +180,11 @@ export function CatalogScreen() {
           return (
             <div class="card catalog-card" key={name} data-testid={`catalog-card-${name}`}>
               <div class="card-title">{name}</div>
+              {entry.description && (
+                <p class="catalog-card-desc" data-testid={`catalog-desc-${name}`}>
+                  {entry.description}
+                </p>
+              )}
               <div class="catalog-card-actions">
                 {installed ? (
                   <span

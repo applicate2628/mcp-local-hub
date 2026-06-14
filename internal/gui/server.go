@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
 )
 
 // Config drives Server construction. Zero values are sensible defaults.
@@ -267,6 +268,13 @@ func (realManifestDeleter) ManifestDelete(name string) error {
 	return api.NewAPI().ManifestDelete(name)
 }
 
+// realCatalogLister is the production adapter for GET /api/catalog.
+type realCatalogLister struct{}
+
+func (realCatalogLister) CatalogList() ([]config.CatalogFields, error) {
+	return api.NewAPI().CatalogList()
+}
+
 // restarter is the narrow interface the /api/servers/:name/restart
 // handler needs. Per memo D9 (Codex R8 P1), it now returns the
 // per-task RestartResult slice (existing api.RestartResult{TaskName, Err}
@@ -465,6 +473,7 @@ type Server struct {
 	manifestEditor    manifestEditor
 	manifestLister    manifestLister
 	manifestDeleter   manifestDeleter
+	catalogLister     catalogLister
 	installer         installer
 	uninstaller       uninstaller
 	installBulk       installBulkAPI
@@ -650,6 +659,7 @@ func NewServer(cfg Config) *Server {
 	s.manifestEditor = realManifestEditor{}
 	s.manifestLister = realManifestLister{}
 	s.manifestDeleter = realManifestDeleter{}
+	s.catalogLister = realCatalogLister{}
 	s.installer = realInstaller{}
 	s.uninstaller = realUninstaller{}
 	s.installBulk = realInstallBulkAPI{}
