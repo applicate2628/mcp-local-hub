@@ -1,0 +1,123 @@
+# npm publish — §13 Phase 3-5: cross-build the 6 platform binaries, inject them
+# into the mcphub-<plat>-<arch> sub-packages, and publish all 7 packages
+# (6 platform + the `mcphub` meta) to the public npm registry with Sigstore
+# provenance. The meta's optionalDependencies pull the matching platform
+# package at `npm install -g mcphub` time (esbuild/turbo pattern; no postinstall).
+#
+# Triggers:
+#   - push a tag `vX.Y.Z` (or `vX.Y.Z-beta.N`) → real publish (prereleases go to
+#     the `beta` dist-tag, not `latest`).
+#   - workflow_dispatch → manual run; default dry_run=true validates the whole
+#     pipeline (build + pack) WITHOUT publishing. Run this once before the first
+#     real tag.
+#
+# Secrets: NPM_TOKEN (a granular "All packages — read and write" or classic
+# automation token from npmjs.com). id-token:write enables `npm publish
+# --provenance` (requires a public repo).
+name: npm publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.4.6-beta.0)'
+        required: true
+      dry_run:
+        description: 'Dry-run (build + npm pack, no publish)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write   # npm --provenance (Sigstore attestation)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            V="${GITHUB_REF_NAME#v}"   # v0.5.0 -> 0.5.0
+          else
+            V="${{ inputs.version }}"
+          fi
+          if ! printf '%s' "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::version '$V' is not semver"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Publishing version: $V"
+
+      - name: Set package versions + regenerate platform packages
+        shell: bash
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          node -e "const f='npm/package.json';const p=require('./'+f);p.version='$V';for(const k in p.optionalDependencies)p.optionalDependencies[k]='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          node npm/generate-platform-packages.js
+          node npm/sync-version.js --inject   # push $V into build.sh so the binary matches
+
+      - name: Cross-build the 6 platform binaries
+        shell: bash
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LD="-s -w -X main.version=$V -X main.commit=$COMMIT -X main.buildDate=$DATE"
+          build() { # $1=GOOS $2=GOARCH $3=dir $4=binname
+            echo "build $1/$2 -> npm/packages/$3/bin/$4"
+            GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$LD" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
+          }
+          build windows amd64 win32-x64    mcphub.exe
+          build windows arm64 win32-arm64  mcphub.exe
+          build darwin  amd64 darwin-x64   mcphub
+          build darwin  arm64 darwin-arm64 mcphub
+          build linux   amd64 linux-x64    mcphub
+          build linux   arm64 linux-arm64  mcphub
+          chmod +x npm/packages/darwin-*/bin/mcphub npm/packages/linux-*/bin/mcphub || true
+          ls -l npm/packages/*/bin/
+
+      - name: Assert built binary version matches package.json
+        shell: bash
+        run: |
+          # The runner is linux/amd64, so only the linux-x64 binary executes here;
+          # all 6 share the same -X main.version ldflag, so one assertion covers all.
+          node npm/sync-version.js --assert-binary npm/packages/linux-x64/bin/mcphub
+
+      - name: Publish platform packages, then the meta
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          DRY=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY="--dry-run"
+            echo "DRY-RUN: building + packing only, no publish."
+          fi
+          TAG=""
+          case "$V" in *-*) TAG="--tag beta";; esac   # prerelease -> beta dist-tag, never latest
+          # Platform packages FIRST so the meta's optionalDependencies resolve.
+          for d in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64; do
+            echo "::group::publish mcphub-$d"
+            ( cd "npm/packages/$d" && npm publish --provenance --access public $TAG $DRY )
+            echo "::endgroup::"
+          done
+          echo "::group::publish meta mcphub"
+          ( cd npm && npm publish --provenance --access public $TAG $DRY )
+          echo "::endgroup::"
