@@ -430,3 +430,253 @@ func TestManifestEditHandler_RejectsNonPOST_405(t *testing.T) {
 		t.Errorf("Allow header = %q, want POST", got)
 	}
 }
+
+// ---- GET /api/manifests + DELETE /api/manifest/:name ----
+
+type fakeManifestLister struct {
+	called bool
+	out    []string
+	err    error
+}
+
+func (f *fakeManifestLister) ManifestList() ([]string, error) {
+	f.called = true
+	return f.out, f.err
+}
+
+type fakeManifestDeleter struct {
+	called   bool
+	seenName string
+	err      error
+}
+
+func (f *fakeManifestDeleter) ManifestDelete(name string) error {
+	f.called = true
+	f.seenName = name
+	return f.err
+}
+
+// newManifestListDeleteTestServer wires only the list + delete subsets plus
+// the four create/validate/get/edit fakes the shared registerManifestRoutes
+// references at registration time. The create/validate/get/edit handlers are
+// never exercised here, but registerManifestRoutes runs all of them, so the
+// fields must be non-nil to avoid a nil dereference if a stray request hits.
+func newManifestListDeleteTestServer(lister *fakeManifestLister, deleter *fakeManifestDeleter) *Server {
+	s := &Server{
+		mux:               http.NewServeMux(),
+		manifestCreator:   &fakeManifestCreator{},
+		manifestValidator: &fakeManifestValidator{},
+		manifestGetter:    &fakeManifestGetter{},
+		manifestEditor:    &fakeManifestEditor{},
+		manifestLister:    lister,
+		manifestDeleter:   deleter,
+	}
+	registerManifestRoutes(s)
+	return s
+}
+
+func TestManifestListHandler_RejectsNonGET(t *testing.T) {
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, &fakeManifestDeleter{})
+	req := httptest.NewRequest(http.MethodPost, "/api/manifests", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "GET" {
+		t.Errorf("Allow header = %q, want GET", got)
+	}
+}
+
+func TestManifestListHandler_RejectsCrossOrigin(t *testing.T) {
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, &fakeManifestDeleter{})
+	req := httptest.NewRequest(http.MethodGet, "/api/manifests", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestManifestListHandler_ReturnsNames(t *testing.T) {
+	lister := &fakeManifestLister{out: []string{"memory", "time", "serena"}}
+	s := newManifestListDeleteTestServer(lister, &fakeManifestDeleter{})
+	req := httptest.NewRequest(http.MethodGet, "/api/manifests", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	var body manifestListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.Manifests) != 3 || body.Manifests[0] != "memory" {
+		t.Errorf("manifests = %v", body.Manifests)
+	}
+}
+
+func TestManifestListHandler_EmptyIsNonNullArray_200(t *testing.T) {
+	// Empty set is 200 [] (NOT 404) — "no manifests yet" is a normal state.
+	lister := &fakeManifestLister{out: nil}
+	s := newManifestListDeleteTestServer(lister, &fakeManifestDeleter{})
+	req := httptest.NewRequest(http.MethodGet, "/api/manifests", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"manifests":[]`) {
+		t.Errorf("empty list must serialize as []: %q", rec.Body.String())
+	}
+}
+
+func TestManifestListHandler_BackendError_500Sanitized(t *testing.T) {
+	lister := &fakeManifestLister{err: errors.New("readdir /home/alice/.local/share/mcphub/servers: permission denied")}
+	s := newManifestListDeleteTestServer(lister, &fakeManifestDeleter{})
+	req := httptest.NewRequest(http.MethodGet, "/api/manifests", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "/home/alice") || strings.Contains(body, "permission denied") {
+		t.Errorf("body leaks filesystem path or raw error: %q", body)
+	}
+	if !strings.Contains(body, "MANIFEST_LIST_FAILED") {
+		t.Errorf("body=%q missing MANIFEST_LIST_FAILED code", body)
+	}
+}
+
+func TestManifestDeleteHandler_RejectsNonDELETE(t *testing.T) {
+	deleter := &fakeManifestDeleter{}
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, deleter)
+	req := httptest.NewRequest(http.MethodGet, "/api/manifest/demo", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "DELETE" {
+		t.Errorf("Allow header = %q, want DELETE", got)
+	}
+	if deleter.called {
+		t.Error("deleter must NOT be called on a method-rejected request")
+	}
+}
+
+func TestManifestDeleteHandler_RejectsCrossOrigin(t *testing.T) {
+	deleter := &fakeManifestDeleter{}
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, deleter)
+	req := httptest.NewRequest(http.MethodDelete, "/api/manifest/demo", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if deleter.called {
+		t.Error("deleter must NOT be called on a CSRF-rejected request")
+	}
+}
+
+func TestManifestDeleteHandler_Success_204AndForwardsName(t *testing.T) {
+	deleter := &fakeManifestDeleter{}
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, deleter)
+	req := httptest.NewRequest(http.MethodDelete, "/api/manifest/demo", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204, body=%q", rec.Code, rec.Body.String())
+	}
+	if !deleter.called || deleter.seenName != "demo" {
+		t.Fatalf("deleter saw name=%q called=%v, want demo/true", deleter.seenName, deleter.called)
+	}
+}
+
+func TestManifestDeleteHandler_EmptyName_400(t *testing.T) {
+	deleter := &fakeManifestDeleter{}
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, deleter)
+	req := httptest.NewRequest(http.MethodDelete, "/api/manifest/", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if deleter.called {
+		t.Error("deleter must NOT be called when no name is given")
+	}
+}
+
+func TestManifestDeleteHandler_NotFound_404(t *testing.T) {
+	deleter := &fakeManifestDeleter{err: errors.New(`manifest "ghost" does not exist`)}
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, deleter)
+	req := httptest.NewRequest(http.MethodDelete, "/api/manifest/ghost", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "MANIFEST_NOT_FOUND") {
+		t.Errorf("body=%q missing MANIFEST_NOT_FOUND code", rec.Body.String())
+	}
+}
+
+func TestManifestDeleteHandler_BackendError_500Sanitized(t *testing.T) {
+	deleter := &fakeManifestDeleter{err: errors.New("remove /var/lib/mcphub/servers/demo: directory not empty")}
+	s := newManifestListDeleteTestServer(&fakeManifestLister{}, deleter)
+	req := httptest.NewRequest(http.MethodDelete, "/api/manifest/demo", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "/var/lib") || strings.Contains(body, "directory not empty") {
+		t.Errorf("body leaks filesystem path or raw error: %q", body)
+	}
+	if !strings.Contains(body, "MANIFEST_DELETE_FAILED") {
+		t.Errorf("body=%q missing MANIFEST_DELETE_FAILED code", body)
+	}
+}
+
+// Coexistence guard: the /api/manifest/ subtree DELETE handler must NOT
+// shadow the exact-path create/validate/get/edit handlers. A POST to
+// /api/manifest/create still routes to the create handler (which forwards
+// to the create fake), not the delete subtree (which would 405 on POST).
+func TestManifestDeleteSubtree_DoesNotShadowExactPaths(t *testing.T) {
+	create := &fakeManifestCreator{}
+	deleter := &fakeManifestDeleter{}
+	s := &Server{
+		mux:               http.NewServeMux(),
+		manifestCreator:   create,
+		manifestValidator: &fakeManifestValidator{},
+		manifestGetter:    &fakeManifestGetter{},
+		manifestEditor:    &fakeManifestEditor{},
+		manifestLister:    &fakeManifestLister{},
+		manifestDeleter:   deleter,
+	}
+	registerManifestRoutes(s)
+	rec := postJSON(t, s, "/api/manifest/create",
+		`{"name":"demo","yaml":"name: demo\nkind: global\n"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("POST /api/manifest/create status = %d, want 204 (exact path must win)", rec.Code)
+	}
+	if create.name != "demo" {
+		t.Error("create handler should have run (recorded name), not the delete subtree")
+	}
+	if deleter.called {
+		t.Error("delete subtree must NOT have intercepted POST /api/manifest/create")
+	}
+}
