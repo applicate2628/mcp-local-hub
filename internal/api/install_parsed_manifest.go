@@ -669,13 +669,18 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			}); err != nil {
 				return err
 			}
-			// Capture THIS server's committed descriptor rows for the best-effort
+			// Capture THIS install's committed descriptor rows for the best-effort
 			// daemon-installed audit emit (after the lock releases). Only when an
 			// intent write actually happened — a daemonless full install
 			// (intentWriteNeeded==false) committed no descriptor rows, so nothing
-			// was installed to announce.
+			// was installed to announce. A daemon-filtered install preserves sibling
+			// rows in desiredIntent; do not report those unchanged descriptors as
+			// freshly installed.
 			if intentWriteNeeded {
 				for _, d := range desiredIntent.Daemons {
+					if daemonFilter != "" && d.Daemon != daemonFilter {
+						continue
+					}
 					if supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
 						installedSupervisorRows = append(installedSupervisorRows, d)
 					}
