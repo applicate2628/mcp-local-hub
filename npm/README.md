@@ -1,9 +1,9 @@
-# mcphub (npm distribution)
+# mcp-local-hub (npm distribution)
 
-`mcphub` is the npm meta package for **mcp-local-hub** — a local supervisor +
-router that compresses dozens of duplicate MCP (Model Context Protocol) server
-processes spawned across parallel clients (editors, agents, CLIs) into one
-managed hub.
+`mcp-local-hub` is the npm meta package for **mcp-local-hub** — a local
+supervisor + router that compresses dozens of duplicate MCP (Model Context
+Protocol) server processes spawned across parallel clients (editors, agents,
+CLIs) into one managed hub.
 
 - Project: https://github.com/applicate2628/mcp-local-hub
 - License: MPL-2.0
@@ -12,14 +12,19 @@ managed hub.
 ## Install
 
 ```bash
-npm install -g mcphub
+npm install -g mcp-local-hub
+# the installed command is `mcphub`:
+mcphub version
 # or run without installing:
-npx mcphub version
+npx mcp-local-hub version
 ```
 
+> The npm **package** is `mcp-local-hub`; the **command** it installs is
+> `mcphub` (the package's `bin` entry). Install the package, run `mcphub`.
+
 The meta package ships **no binary itself**. It declares one
-`mcphub-<platform>-<arch>` package per supported target in its
-`optionalDependencies`, and npm installs **only** the sub-package whose
+`@applicate2628/mcp-local-hub-<platform>-<arch>` package per supported target
+in its `optionalDependencies`, and npm installs **only** the sub-package whose
 `os`/`cpu` match your host (the esbuild / turbo pattern). A small Node shim
 (`bin/cli.js`) then locates that platform binary and execs it, passing your
 arguments through and propagating its exit code.
@@ -57,17 +62,23 @@ fallback channel:
 
 ## How this directory is maintained
 
-- `package.json` — the meta package. Its `version` is the single version
-  authority; `npm/sync-version.js` propagates it into the Go build scripts.
+- `package.json` — the meta package (`mcp-local-hub`). Its `version` is the
+  single version authority; `npm/sync-version.js` propagates it into the Go
+  build scripts.
 - `bin/cli.js` — the platform-resolver shim (no runtime dependencies).
 - `generate-platform-packages.js` — regenerates the six
   `packages/<platform>-<arch>/` sub-packages from one GOOS/GOARCH→os/cpu map.
-  The sub-packages are generated artifacts; do not hand-edit them.
+  The sub-packages are generated artifacts (`@applicate2628/mcp-local-hub-*`);
+  do not hand-edit them.
 - Platform binaries are injected into each sub-package's `bin/` by the release
-  job at publish time (Phase 3+); they are **not** committed to git.
+  job at publish time; they are **not** committed to git.
 
-## Status
+## Why the platform packages are scoped
 
-This is **Phases 1–2** of the npm delivery work: the static package scaffold
-plus a CI version-sync gate. Actual publishing (`npm publish`, token/OIDC
-wiring, the release binary-injection job) is **Phase 3+** and not enabled here.
+The meta package is unscoped (`mcp-local-hub`) so the install command stays
+short. The six platform packages are scoped under `@applicate2628/` because a
+brand-new account publishing a family of near-identical unscoped names trips
+npm's spam-detection heuristic. Scoping them under the publisher's namespace
+clears that while keeping the user-facing install (`npm install -g
+mcp-local-hub`) and command (`mcphub`) unchanged. Users never type the scoped
+names — npm resolves them through `optionalDependencies`.
