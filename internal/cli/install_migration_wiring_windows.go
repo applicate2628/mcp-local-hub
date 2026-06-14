@@ -432,17 +432,32 @@ func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
 		if strictMode {
 			args = append(args, "--strict-mode")
 		}
-		cmd := exec.Command(exePath, args...)
-		cmd.SysProcAttr = &windows.SysProcAttr{
-			CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP,
+		// build constructs a fresh detached supervisor cmd so the
+		// breakaway-tolerant flagless retry (PART 1) can rebuild an
+		// equivalent one if the parent job forbids breakaway.
+		build := func() *exec.Cmd {
+			c := exec.Command(exePath, args...)
+			c.SysProcAttr = &windows.SysProcAttr{
+				CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP,
+			}
+			return c
 		}
-		if err := cmd.Start(); err != nil {
+		// PART 1 (§5 permanent fix): add CREATE_BREAKAWAY_FROM_JOB so the
+		// new supervisor escapes any KILL_ON_JOB_CLOSE job inherited from
+		// the install/migrate CLI's launcher. On a locked-down host that
+		// forbids breakaway it retries flagless rather than hard-failing
+		// the upgrade (a hard abort here leaves the binary swapped + the
+		// prior supervisor dead + nothing running — a worse regression).
+		started, err := startSupervisorDetachedBreakaway(build(), build, func(degradeErr error) {
+			fmt.Fprintf(os.Stderr, "install: supervisor spawn CREATE_BREAKAWAY_FROM_JOB rejected by parent job (no BREAKAWAY_OK); spawned flagless: %v\n", degradeErr)
+		})
+		if err != nil {
 			return fmt.Errorf("spawn supervisor: %w", err)
 		}
 		// Release the handle — the supervisor manages its own lifetime
 		// from here. Caller does NOT Wait().
-		if cmd.Process != nil {
-			_ = cmd.Process.Release()
+		if started.Process != nil {
+			_ = started.Process.Release()
 		}
 		return nil
 	}

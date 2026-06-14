@@ -42,6 +42,14 @@ type EventLoop struct {
 	ch       chan LoopEvent
 	selfCh   chan LoopEvent
 	handlers []func(LoopEvent)
+
+	// onPanic, when set via SetPanicHandler, is invoked if a handler
+	// panics during dispatch. It exists ONLY to make an otherwise-silent
+	// handler-panic death attributable (the supervisor process crashes on
+	// the loop goroutine with NO supervisor-exit event otherwise) — see
+	// dispatch. It must NOT swallow the panic; dispatch re-raises after
+	// calling it.
+	onPanic func(recovered any, e LoopEvent)
 }
 
 func NewEventLoop(capacity int) *EventLoop {
@@ -61,6 +69,40 @@ func NewEventLoop(capacity int) *EventLoop {
 
 func (l *EventLoop) RegisterHandler(h func(LoopEvent)) {
 	l.handlers = append(l.handlers, h)
+}
+
+// SetPanicHandler installs an observer invoked when a handler panics
+// during dispatch. The supervisor wires this to emit a durable
+// `supervisor-handler-panic` event BEFORE the process dies, so the
+// otherwise-silent loop-goroutine crash (no supervisor-exit event,
+// the exact gap behind the "supervisor died with no event" mystery)
+// becomes attributable. dispatch RE-RAISES the panic after calling the
+// observer — the death stays loud so the recovery layer respawns, and a
+// half-applied state-machine transition is never silently continued.
+//
+// Must be set before Run. Not safe to change concurrently with Run.
+func (l *EventLoop) SetPanicHandler(f func(recovered any, e LoopEvent)) {
+	l.onPanic = f
+}
+
+// dispatch fans one event to every handler. When a panic handler is
+// installed, a handler panic is observed via onPanic (best-effort) and
+// then RE-RAISED — never swallowed: swallowing mid-transition would
+// leave a daemon in a half-applied restart-policy state. With no panic
+// handler set the behavior is identical to a bare handler loop (the
+// panic propagates unchanged).
+func (l *EventLoop) dispatch(e LoopEvent) {
+	if l.onPanic != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				l.onPanic(r, e)
+				panic(r)
+			}
+		}()
+	}
+	for _, h := range l.handlers {
+		h(e)
+	}
 }
 
 // Post sends an event to the loop's main (external) channel. Buffered
@@ -170,9 +212,7 @@ func (l *EventLoop) Run(ctx context.Context) {
 		for {
 			select {
 			case e := <-l.selfCh:
-				for _, h := range l.handlers {
-					h(e)
-				}
+				l.dispatch(e)
 			default:
 				return
 			}
@@ -186,13 +226,9 @@ func (l *EventLoop) Run(ctx context.Context) {
 		case e := <-l.selfCh:
 			// selfCh fired between drainSelf and outer select; process
 			// it directly without entering ch.
-			for _, h := range l.handlers {
-				h(e)
-			}
+			l.dispatch(e)
 		case e := <-l.ch:
-			for _, h := range l.handlers {
-				h(e)
-			}
+			l.dispatch(e)
 		}
 	}
 }

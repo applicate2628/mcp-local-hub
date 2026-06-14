@@ -546,6 +546,31 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		})
 	})
 
+	// PART 2d: make an otherwise-silent handler-panic death attributable.
+	// A panic on any loop handler crashes the loop goroutine (Go runtime
+	// exit 2) bypassing every deferred Emit, so the supervisor dies with
+	// NO supervisor-exit event — the exact "supervisor died with no event"
+	// gap behind the §5 churn. The observer emits a durable
+	// `supervisor-handler-panic` (with the panicking event's kind/task +
+	// a bounded stack) BEFORE dispatch re-raises; the death stays loud so
+	// the recovery layer respawns, and no half-applied state-machine
+	// transition is silently continued.
+	loop.SetPanicHandler(func(r any, e api.LoopEvent) {
+		var buf [4096]byte
+		n := runtime.Stack(buf[:], false)
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "error",
+			Source:   "lifecycle",
+			Event:    "supervisor-handler-panic",
+			TaskName: e.TaskName,
+			Body: map[string]any{
+				"kind":      string(e.Kind),
+				"recovered": fmt.Sprint(r),
+				"stack":     string(buf[:n]),
+			},
+		})
+	})
+
 	go loop.Run(loopCtx)
 
 	// reconcileReady mirrors the spec §"Migration step 14:
