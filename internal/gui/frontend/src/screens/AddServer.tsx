@@ -17,6 +17,7 @@ import { AddSecretModal } from "../components/AddSecretModal";
 import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
+import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
 
 // MANIFEST_NAME_REGEX mirrors internal/api/manifest.go:23 validManifestName.
 // Live client-side regex check provides instant feedback; the backend still
@@ -34,15 +35,16 @@ const TRANSPORT_OPTIONS = [
   { value: "stdio-bridge", label: "stdio-bridge (daemon multiplexes stdio child)" },
   { value: "native-http", label: "native-http (upstream speaks HTTP directly)" },
 ] as const;
-const KNOWN_CLIENTS = [
-  "claude-code",
-  "codex-cli",
-  "cursor",
-  "vscode",
-  "gemini-cli",
-  "qwen-cli",
-  "antigravity",
-] as const;
+// KNOWN_CLIENTS is the full superset of client ids a GUI-authored manifest
+// may bind. It is the single source of truth shared with the Servers matrix /
+// scan routing (internal/gui/frontend/src/lib/routing.ts ALL_CLIENTS) and the
+// backend registry (internal/clients SupportedClientNames). The binding editor
+// exposes ALL of them — the original seven CORE_CLIENTS plus the eight opt-in
+// WAVE2_CLIENTS — so a new manifest can target zed/kiro/windsurf/cline/
+// kilocode/opencode/hermes/openclaw. The opt-in distinction is preserved in the
+// <select> UI via a separate "opt-in clients" optgroup (see BindingsList), but
+// every client is selectable.
+const KNOWN_CLIENTS = ALL_CLIENTS;
 
 // deepEqualForm compares two ManifestFormState instances structurally. Used
 // by the Q8 dirty check. JSON.stringify is defensible for this shape: all
@@ -1108,9 +1110,16 @@ function BindingsList(props: {
               onChange={(e) => onUpdate(absIdx, "client", (e.currentTarget as HTMLSelectElement).value)}
               disabled={readOnly}
             >
-              {KNOWN_CLIENTS.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
+              <optgroup label="Default clients">
+                {CORE_CLIENTS.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Opt-in clients">
+                {WAVE2_CLIENTS.map((c) => (
+                  <option key={c} value={c}>{c} (opt-in)</option>
+                ))}
+              </optgroup>
             </select>
             <input
               type="text"
@@ -1340,7 +1349,8 @@ function LanguagesSubsection(props: {
 }
 
 // BindingsMatrix renders a client × daemon matrix for servers with 4+ daemons.
-// Rows = KNOWN_CLIENTS, columns = daemons. Each cell holds a checkbox; when
+// Rows = KNOWN_CLIENTS (all 15: CORE_CLIENTS + opt-in WAVE2_CLIENTS, the
+// latter flagged with an "(opt-in)" tag), columns = daemons. Each cell holds a checkbox; when
 // checked, an inline url_path text input appears in the cell. Toggling a
 // checkbox adds or removes the corresponding BindingFormEntry via onToggle.
 function BindingsMatrix(props: {
@@ -1363,8 +1373,8 @@ function BindingsMatrix(props: {
       </thead>
       <tbody>
         {KNOWN_CLIENTS.map((c) => (
-          <tr key={c}>
-            <td>{c}</td>
+          <tr key={c} class={(WAVE2_CLIENTS as readonly string[]).includes(c) ? "binding-row-optin" : undefined}>
+            <td>{c}{(WAVE2_CLIENTS as readonly string[]).includes(c) ? <small class="optin-tag"> (opt-in)</small> : null}</td>
             {daemons.map((d) => {
               const absIdx = bindings.findIndex(
                 (b) => b.client === c && b.daemonId === d._id,

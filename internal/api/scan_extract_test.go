@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 )
 
@@ -198,8 +199,24 @@ func TestExtractManifestFromClient_NewJSONClients(t *testing.T) {
 			if m.Command != "npx" {
 				t.Errorf("Command = %q, want npx", m.Command)
 			}
-			if len(m.ClientBindings) != 7 {
-				t.Errorf("len(ClientBindings) = %d, want 7", len(m.ClientBindings))
+			// The draft binds one row per supported client, derived from the
+			// canonical registry (clients.SupportedClientNames) so the count
+			// tracks the adapters this build wires up — core + opt-in wave-2.
+			supported := clients.SupportedClientNames()
+			if len(m.ClientBindings) != len(supported) {
+				t.Errorf("len(ClientBindings) = %d, want %d (clients.SupportedClientNames)", len(m.ClientBindings), len(supported))
+			}
+			// Regression guard: a wave-2 opt-in client must be present, proving
+			// the draft no longer hardcodes only the seven core ids.
+			haveZed := false
+			for _, b := range m.ClientBindings {
+				if b.Client == "zed" {
+					haveZed = true
+					break
+				}
+			}
+			if !haveZed {
+				t.Errorf("draft client_bindings missing wave-2 client 'zed'; got %d bindings", len(m.ClientBindings))
 			}
 		})
 	}
