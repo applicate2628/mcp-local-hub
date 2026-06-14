@@ -617,7 +617,7 @@ func overrideLSPRouterRegistry(t *testing.T) func() {
 // this test closes that latent gap. The relay forward target (RelayURL) must
 // also be the router/legacy URL so the relay takes its --url branch.
 func TestLSPRouterEntryRelayContextForRelayStdioClients(t *testing.T) {
-	const exe = `C:\abs\mcphub.exe` // absolute so the relay-stdio adapters accept it
+	exe := filepath.Join(t.TempDir(), "mcphub.exe") // absolute on the host OS so the relay-stdio adapters accept it
 	const targetURL = "http://localhost:9201/lsp/go/mcp"
 	opts := LSPClientRouterOpts{McphubExePath: exe}
 
