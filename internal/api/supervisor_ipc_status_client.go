@@ -229,9 +229,15 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 	rows := make([]DaemonStatus, 0, len(result.Daemons))
 	for _, d := range result.Daemons {
 		rows = append(rows, DaemonStatus{
-			Server:        d.Server,
-			Daemon:        d.Daemon,
-			TaskName:      d.TaskName,
+			Server:   d.Server,
+			Daemon:   d.Daemon,
+			TaskName: d.TaskName,
+			// DisplayName: human-readable label via the single owner
+			// (ComputeDaemonDisplayName). The supervisor descriptor already
+			// carries the workspace ROOT path (d.Workspace) for serena/LSP
+			// rows, so the 8-hex hash never needs reversing. Empty for global
+			// daemons → CLI/GUI fall back to the plain task/server name.
+			DisplayName:   ComputeDaemonDisplayName(d.TaskName, d.Server, d.Daemon, d.Workspace),
 			State:         normalizeSupervisorIPCStatusState(d.State),
 			Port:          d.Port,
 			PID:           d.CurrentPID,

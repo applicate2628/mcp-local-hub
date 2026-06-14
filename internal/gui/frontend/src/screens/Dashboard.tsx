@@ -458,7 +458,16 @@ function Card(props: {
   const stopBtn = useActionButton(onStop);
 
   const cls = d.state === "Running" ? "card ok" : "card down";
-  const title = d.daemon && d.daemon !== "default" ? `${d.server} (${d.daemon})` : d.server;
+  // Prefer the backend-computed human-readable name ("serena · <project>",
+  // "<lang> @ <workspace>") when present; it replaces the hash-suffixed
+  // task name for workspace-scoped daemons. Global daemons carry no
+  // display_name, so the existing "<server> (<daemon>)" / "<server>"
+  // fallback is unchanged for them.
+  const title = d.display_name
+    ? d.display_name
+    : d.daemon && d.daemon !== "default"
+      ? `${d.server} (${d.daemon})`
+      : d.server;
 
   // Effective per-button state merges local click-driven state with
   // the parent's bulk-action state. Precedence (top wins):
