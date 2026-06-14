@@ -1349,16 +1349,14 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 		Daemons: []map[string]any{
 			{"name": "default", "port": port},
 		},
-		ClientBindings: []map[string]any{
-			{"client": "claude-code", "daemon": "default", "url_path": "/mcp"},
-			{"client": "codex-cli", "daemon": "default", "url_path": "/mcp"},
-			{"client": "cursor", "daemon": "default", "url_path": "/mcp"},
-			{"client": "vscode", "daemon": "default", "url_path": "/mcp"},
-			{"client": "gemini-cli", "daemon": "default", "url_path": "/mcp"},
-			{"client": "qwen-cli", "daemon": "default", "url_path": "/mcp"},
-			{"client": "antigravity", "daemon": "default", "url_path": "/mcp"},
-		},
-		WeeklyRefresh: false,
+		// Derive the draft client_bindings from the canonical client registry
+		// (clients.SupportedClientNames) so the preview never drifts from the
+		// adapters this build actually supports — the original seven plus the
+		// eight opt-in wave-2 clients. Previously these were hardcoded to the
+		// seven core ids, so a GUI-extracted draft silently omitted bindings
+		// for zed/kiro/windsurf/cline/kilocode/opencode/hermes/openclaw.
+		ClientBindings: draftClientBindings(),
+		WeeklyRefresh:  false,
 	}
 	out, err := yaml.Marshal(doc)
 	if err != nil {
@@ -1366,6 +1364,26 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 		return ""
 	}
 	return string(out)
+}
+
+// draftClientBindings returns one client_binding row per supported client,
+// derived from the canonical clients.SupportedClientNames() registry so the
+// extract-draft preview stays in lockstep with the adapters this build wires
+// up (core + opt-in wave-2). Each row targets the single "default" daemon at
+// url_path "/mcp" — the same shape the GUI binding editor emits. Deriving from
+// the registry (instead of a hardcoded list) means a future adapter addition
+// automatically appears in the draft with no second edit site to forget.
+func draftClientBindings() []map[string]any {
+	names := clients.SupportedClientNames()
+	bindings := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		bindings = append(bindings, map[string]any{
+			"client":   name,
+			"daemon":   "default",
+			"url_path": "/mcp",
+		})
+	}
+	return bindings
 }
 
 // lspLanguages enumerates the canonical language tokens recognised by

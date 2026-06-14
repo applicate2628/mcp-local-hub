@@ -6,6 +6,7 @@ import {
 } from "../../lib/settings-api";
 import type { BackupInfo } from "../../lib/settings-types";
 import { BACKUPS_COPY } from "./backups-copy";
+import { CORE_CLIENTS, WAVE2_CLIENTS } from "../../lib/routing";
 
 export type BackupsListProps = {
   // The keep_n value to preview against. -1 means "no preview yet".
@@ -18,15 +19,17 @@ export type BackupsListProps = {
   onClientCleaned?: (client: string) => void;
 };
 
-const CLIENT_ORDER = [
-  "claude-code",
-  "codex-cli",
-  "cursor",
-  "vscode",
-  "gemini-cli",
-  "qwen-cli",
-  "antigravity",
-];
+// CLIENT_ORDER seeds the always-visible group order. The seven CORE_CLIENTS
+// render unconditionally (stable group set, even with zero backups) — same
+// always-on posture the Servers matrix gives core columns. The eight opt-in
+// WAVE2_CLIENTS (zed/kiro/windsurf/cline/kilocode/opencode/hermes/openclaw)
+// are DETECTION-GATED: a wave-2 group appears only when that client actually
+// has backups on disk (see the grouping pass below), so an operator who never
+// installed a niche client sees no empty group for it. The shared client-list
+// constants live in internal/gui/frontend/src/lib/routing.ts (the single
+// source of truth also used by the matrix) — do not re-hardcode the list here.
+const CLIENT_ORDER: readonly string[] = CORE_CLIENTS;
+const WAVE2_ORDER: readonly string[] = WAVE2_CLIENTS;
 
 export function BackupsList({
   keepN,
@@ -105,7 +108,19 @@ export function BackupsList({
 
   const groups = useMemo(() => {
     const m = new Map<string, BackupInfo[]>();
+    // Seed the seven CORE_CLIENTS unconditionally so the core group set is
+    // stable even on a host with no backups for some of them.
     for (const c of CLIENT_ORDER) m.set(c, []);
+    // Detection-gate the eight opt-in WAVE2_CLIENTS: pre-seed a wave-2 group
+    // ONLY when that client actually has at least one backup row, and do so in
+    // the canonical WAVE2_ORDER (the data-driven insertion order below is not
+    // deterministic across /api/backups responses). A wave-2 client with zero
+    // backups adds no empty group. Any future/unknown client id still in the
+    // payload falls through to the per-row m.has() insert so it is never dropped.
+    const clientsWithBackups = new Set((backups ?? []).map((b) => b.client));
+    for (const c of WAVE2_ORDER) {
+      if (clientsWithBackups.has(c)) m.set(c, []);
+    }
     for (const b of backups ?? []) {
       if (!m.has(b.client)) m.set(b.client, []);
       m.get(b.client)!.push(b);

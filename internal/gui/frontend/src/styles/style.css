@@ -323,6 +323,13 @@ main { padding: var(--screen-padding); overflow: auto; }
   width: 100%;
   margin-top: 4px;
 }
+/* Opt-in (wave-2) client rows in the 4+-daemon binding matrix carry a muted
+   "(opt-in)" tag so the operator can tell the eight niche clients apart from
+   the seven default ones while still being able to bind any of them. */
+.screen.add-server .bindings-matrix .optin-tag {
+  color: var(--text-muted, #888);
+  font-weight: 400;
+}
 
 /* === Secrets screen styling (Phase 3B-II A3-a) === */
 

@@ -22,13 +22,34 @@ describe("BackupsList", () => {
   });
   afterEach(() => cleanup());
 
-  it("renders 7 client groups", async () => {
+  it("renders the 7 core client groups unconditionally (no wave-2 groups without backups)", async () => {
     const { findAllByText } = render(<BackupsList keepN={5} />);
     // Wait for load.
     await findAllByText(/claude-code/);
-    // Each client has its own <details><summary>.
+    // Each client has its own <details><summary>. The fixture only carries
+    // claude-code backups, so only the seven always-on CORE_CLIENTS render —
+    // the eight opt-in wave-2 clients are detection-gated and add no empty
+    // group when they have no backups on disk.
     const summaries = document.querySelectorAll(".backups-client-group summary");
     expect(summaries.length).toBe(7);
+  });
+
+  it("renders a wave-2 client group when it has backups (detection-gated)", async () => {
+    // zed (a wave-2 opt-in client) gains a group only because the payload
+    // carries a backup row for it; the other seven wave-2 clients still add
+    // no group. Total = 7 core + 1 detected wave-2 = 8.
+    vi.spyOn(api, "getBackups").mockResolvedValue([
+      ...fixture,
+      { client: "zed", path: "/zed/2026-05-01.bak", kind: "timestamped" as const,
+        mod_time: "2026-05-01T00:00:00Z", size_byte: 500 },
+    ]);
+    const { findAllByText } = render(<BackupsList keepN={5} />);
+    await findAllByText(/zed/);
+    const summaries = document.querySelectorAll(".backups-client-group summary");
+    expect(summaries.length).toBe(8);
+    // The wave-2 group sits AFTER the seven core groups (canonical order).
+    const labels = Array.from(summaries).map((s) => (s.textContent ?? "").trim());
+    expect(labels[7]).toContain("zed");
   });
 
   it("renders the locked group note (Codex copy §9.4)", async () => {
