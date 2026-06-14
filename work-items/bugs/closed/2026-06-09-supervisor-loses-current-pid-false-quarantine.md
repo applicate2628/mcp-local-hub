@@ -1,8 +1,12 @@
 # Supervisor loses current_pid for a live child → port-in-use respawn loop → false quarantine
 
-- **Status:** Layer A root cause CONFIRMED + fixed (branch
-  `fix/supervisor-liveness-identity-path`); Layer B (adopt-on-port) still open as
-  a separate defensive follow-up
+- **Status:** CLOSED (2026-06-14) — Layer A (the root-cause trigger) fixed and
+  merged (#270, commit `0ed5ced`); Layer B (adopt-on-port) adversarially
+  re-examined and determined NOT a residual of this defect (see Closure below).
+  Originally: Layer A root cause CONFIRMED + fixed (branch
+  `fix/supervisor-liveness-identity-path`); Layer B (adopt-on-port) was a
+  separate defensive follow-up.
+- **closed-on:** 2026-06-14
 - **Date:** 2026-06-09
 - **Severity:** P2 — operator-visible status lie + recovery risk (service currently still up via the orphan; goes truly down if the orphan dies or on the next supervisor restart without the fix)
 - **Found by:** live diagnosis of `time` showing GUI State = Quarantined while the MCP service still answered
@@ -142,3 +146,40 @@ sites only (no GUI-gate / intent-file changes). The earlier workaround (run the
 supervisor from `~/.local/bin` so it matches the daemons' install path) is now
 unnecessary once this branch ships — the supervisor may run from any path. Layer B
 (adopt-on-port) remains a separate defensive follow-up.
+
+## Closure (2026-06-14)
+
+CLOSED — adversarially re-verified (refute-default skeptic) as FULLY fixed at
+HEAD; residual hunted and not found.
+
+FIXED (Layer A, the root-cause trigger; #270, commit `0ed5ced`): the three
+daemon-identity sites now build the identity proof's `ExecutablePath` from the
+daemon's CONFIGURED command (`daemonExpectedIdentityExe(d.Command)`) instead of
+the supervisor's own `os.Executable()` / `canonicalMcphubPath()`. A dev-build
+supervisor running from a different binary than the `~/.local/bin` daemons no
+longer false-flags every live daemon `pid_identity_mismatch`. Sites:
+
+- `internal/cli/supervise_liveness.go:322` (liveness sweep,
+  `supervisorDaemonEntryLive`).
+- `internal/cli/supervise.go:2111` (terminate-proof path).
+- `internal/cli/supervise.go:2264` (`loadSupervisorCurrentRunning` startup scan,
+  incl. its inner port re-check).
+- Helper: `daemonExpectedIdentityExe` at `internal/cli/supervise_liveness.go:271-299`
+  (`filepath.Abs` + `EvalSymlinks` + `Clean`, `canonicalMcphubPath()` fallback
+  only for legacy rows whose `Command` is empty).
+
+This was the ROOT CAUSE of the "`mcphub status` paints live daemons Quarantined"
+status lie — with the identity path corrected, the spurious
+`pid_identity_mismatch` → restart-churn → lost-`current_pid` → port-fight →
+false-quarantine chain no longer fires. The adversarial search for a Layer-B
+residual (a different `current_pid==0` cause that would still trigger a port
+fight) did not find a live path that reaches the defect once Layer A removed the
+dominant trigger; the adopt-on-port follow-up is a defense-in-depth hardening,
+not an open residual of THIS bug, so it does not keep this doc open.
+
+Tests at HEAD (confirmed to exist and exercise the fix): 7 tests in
+`internal/cli/supervise_daemon_identity_exe_test.go`, headed by
+`TestDaemonExpectedIdentityExe_UsesCommandNotSupervisorPath` plus 6 more covering
+empty-command fallback, normalization, and the three-site identity wiring.
+
+Doc moved to `work-items/bugs/closed/` per repo convention.

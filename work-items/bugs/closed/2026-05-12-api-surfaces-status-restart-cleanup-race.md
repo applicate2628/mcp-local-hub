@@ -5,7 +5,8 @@ found-by: g4-phase3 backend engineer (race detector self-falsification pass)
 found-on: 2026-05-12
 project: mcp-local-hub
 context: adjacent-finding
-status: open
+status: closed
+closed-on: 2026-06-14
 related-pr: pending Phase 3 (feat/g4-phase3-resolver-sessions-aggregator)
 ---
 
@@ -66,3 +67,25 @@ goroutine read. Same shape as how Phase 3 uses
   `RestartContext` goroutine-spawn pattern
 - `internal/api/api_surfaces_test.go:104-112` — test helpers
 - `internal/api/api_surfaces_test.go:159, 196` — failing test cases
+
+## Closure (2026-06-14)
+
+CLOSED — adversarially re-verified (refute-default skeptic) as FULLY fixed at
+HEAD; residual hunted and not found.
+
+FIXED: both `StatusContext` and `RestartContext` snapshot the package
+function-pointer into a LOCAL variable BEFORE spawning the ctx-watch goroutine
+(`internal/api/api_surfaces.go:119` and `:160`), so the goroutine reads its own
+captured local rather than the package-level pointer that `t.Cleanup` restores.
+The happens-before hazard the race detector flagged is gone — the test's
+fn-pointer restore can no longer race the goroutine read because the goroutine
+never touches the package-level pointer. An adversarial sweep of the
+`api_surfaces` goroutine-spawn sites confirmed NO other goroutine in that file
+reads a package-level function pointer.
+
+Tests at HEAD (confirmed to exist and exercise the fix under `-race`):
+
+- `TestStatusContext_RespectsCtxCancellation` (`internal/api/api_surfaces_test.go:169`).
+- `TestRestartContext_RespectsCtxCancellation` (`internal/api/api_surfaces_test.go:207`).
+
+Doc moved to `work-items/bugs/closed/` per repo convention.

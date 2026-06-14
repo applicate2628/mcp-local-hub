@@ -1,6 +1,7 @@
 # Reconcile synchronous dispatch is proxy-only; quarantine-revive on running intent
 
-- **Status:** item (a) CLOSED (no-legacy ownership broadening landed); item (b) reconcile-side bystander revival CLOSED (spawn-direction quarantine-respect gate, PR #279); only the intent-CHANGE path remains as-designed
+- **Status:** CLOSED (2026-06-14) — item (a) CLOSED (no-legacy ownership broadening landed); item (b.1) reconcile-side bystander revival CLOSED (spawn-direction quarantine-respect gate, PR #279); item (b.2) intent-CHANGE path is intentional per spec (the SANCTIONED un-quarantine lever), not an open residual. Adversarially re-verified at HEAD (see Closure below).
+- **closed-on:** 2026-06-14
 - **Date:** 2026-06-10
 - **Severity:** P3 / design-boundary (no live data-loss; behavior is durable and converges)
 - **Context:** adjacent-finding
@@ -134,3 +135,39 @@ transition), not the reconcile classifier — the classifier no longer sees the
 intent-CHANGE bystander case because the bystander gate already covers the
 untouched-row path. No live bug today: the api-side force-gate caller discipline
 covers the restart-caller surface.
+
+## Closure (2026-06-14)
+
+CLOSED — adversarially re-verified (refute-default skeptic) as FULLY fixed at
+HEAD; residual hunted and not found.
+
+FIXED at HEAD:
+
+- The quarantine-respect gates return `ReconcileActionNeedsManualReview` rather
+  than posting an `EvIntentUpdate`
+  (`internal/cli/supervise_reconcile_ipc.go:667-668` and `:718-719`), so
+  apply-mode never revives a quarantined bystander.
+- The dispatch safety filter skips `needs_manual_review` entries
+  (`internal/cli/supervise_reconcile_ipc.go:1042-1044`), so a flagged row is
+  surfaced to the operator, not silently dispatched.
+- Item (b.2) — the `StQuarantined + EvIntentUpdate → StSpawning` transition on a
+  deliberate intent-CHANGE of the quarantined daemon ITSELF — is INTENTIONAL per
+  spec: it is the sanctioned un-quarantine lever (gated upstream by the api-side
+  QUARANTINED force-gate + `EvManualRestart`/`install --upgrade
+  --reset-failure-windows`). It is not an open residual; the only bug class
+  (UNINTENDED bystander revival on an unrelated stop/restart) is closed at (b.1).
+
+Tests at HEAD (confirmed to exist and exercise the fix):
+
+- `TestClassifyDriftAction_TerminateDirectionSupervisorOwned`
+  (`internal/cli/supervise_reconcile_stop_test.go:34`) — includes the
+  `running quarantined → needs_manual_review` row.
+- `TestReconcileIPC_QuarantinedBystanderNotRevivedOnStop`
+  (`internal/cli/supervise_reconcile_stop_test.go:294`) — two-row
+  `handleReconcile` proof: target terminate posted, quarantined bystander
+  `needs_manual_review`, `AppliedCount=1`.
+- `TestReconcileIPC_RegularGlobalDaemonDispatchedThroughSM`
+  (`internal/cli/supervise_reconcile_stop_test.go:592`) — the no-legacy
+  broadening that item (a) tracked.
+
+Doc moved to `work-items/bugs/closed/` per repo convention.

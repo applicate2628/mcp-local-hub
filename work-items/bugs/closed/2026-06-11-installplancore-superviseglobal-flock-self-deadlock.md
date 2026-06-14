@@ -5,7 +5,8 @@ found-by: Phase 4-F done-gate test (first exercise of the global supervisor-inte
 found-on: 2026-06-11
 project: mcp-local-hub
 context: adjacent-finding
-status: fixed
+status: closed
+closed-on: 2026-06-14
 related-pr: (Phase 4-F worktree — fix/serena-supervisor-robustness, branch worktree-agent-afb253946147c19eb)
 ---
 
@@ -73,3 +74,30 @@ This is a real production deadlock, not a test artifact: `(*API).Install` →
 `installPlanCore` reaches this exact branch for every global daemon manifest.
 The Phase 4-F done-gate test was the first code to exercise the global
 supervisor-intent install path, which is why it surfaced only now.
+
+## Closure (2026-06-14)
+
+CLOSED — adversarially re-verified (refute-default skeptic) as FULLY fixed at
+HEAD; residual hunted and not found.
+
+FIXED (commit `ab4ea23a`): the locked critical section is wrapped in a
+`runLocked` closure (`internal/api/install_parsed_manifest.go:564-668`) whose
+`defer lock.Unlock()` (line 577) fires at the CLOSURE's return (line 672) —
+still inside `installPlanCore` but BEFORE `recordInstallIntentPostSuccess` (line
+697) re-acquires the same `supervisor-intent.json.lock` leaf. The non-reentrant
+`gofrs/flock` `LockFileEx` self-deadlock is broken because the flock is released
+before the stop-subblock write re-takes it. All error paths return INSIDE the
+closure with the `defer` intact, so the lock is released on every exit path, not
+just the happy path. No behavior change to the locked critical section (same
+merge, same rollback scope, same flock window over exactly the
+read-merge-write).
+
+Tests at HEAD (confirmed to exist and exercise the fix — these were the 600s
+timeout repros, now passing):
+
+- `TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTask`
+  (`internal/api/install_parsed_manifest_test.go:1820`).
+- `TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated`
+  (`internal/api/install_parsed_manifest_test.go:2422`).
+
+Doc moved to `work-items/bugs/closed/` per repo convention.
