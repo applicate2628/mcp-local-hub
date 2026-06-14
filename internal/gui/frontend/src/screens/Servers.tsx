@@ -656,7 +656,7 @@ export function ServersScreen() {
         <div
           class={initMsg.kind === "error" ? "error" : ""}
           data-testid="init-client-msg"
-          style="margin:8px 0"
+          style="margin:var(--gap-xs) 0"
         >
           {initMsg.text}
         </div>
@@ -744,14 +744,14 @@ export function ServersScreen() {
 function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
   const { servers } = props;
   return (
-    <details class="other-mcp-entries" style="margin-top:24px">
+    <details class="other-mcp-entries" style="margin-top:var(--section-gap)">
       <summary>
         <strong>Other MCP entries ({servers.length})</strong>
         {" — "}
         legacy or third-party MCP servers detected in client configs;
         no mcphub manifest, so they can't be migrated through this matrix
       </summary>
-      <ul style="font-family:monospace; font-size:0.9em; margin-top:8px">
+      <ul style="font-family:monospace; font-size:0.9em; margin-top:var(--gap-xs)">
         {servers.map((s) => {
           const clientsWithEntry = Object.entries(s.routing)
             .filter(([, r]) => r === "via-hub" || r === "direct")
@@ -760,7 +760,7 @@ function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
             <li key={s.name}>
               <code>{s.name}</code>
               {clientsWithEntry.length > 0 && (
-                <span style="color:#666"> — in: {clientsWithEntry.join(", ")}</span>
+                <span style="color:var(--text-muted)"> — in: {clientsWithEntry.join(", ")}</span>
               )}
             </li>
           );
@@ -975,16 +975,16 @@ function LspMatrix(props: {
     onRegister,
   } = props;
   return (
-    <section class="lsp-matrix-section" data-testid="lsp-matrix-section" style="margin-top:24px">
+    <section class="lsp-matrix-section" data-testid="lsp-matrix-section">
       <h2>LSP daemons</h2>
-      <p class="lsp-matrix-intro" style="color:#555; margin-bottom:8px">
+      <p class="lsp-matrix-intro">
         Workspace-scoped language servers route through shared hub proxies.
       </p>
       {registerMsg && (
         <div
           class={registerMsg.kind === "error" ? "error" : ""}
           data-testid="lsp-register-msg"
-          style="margin:8px 0"
+          style="margin:var(--gap-xs) 0"
         >
           {registerMsg.text}
         </div>
@@ -1016,7 +1016,7 @@ function LspMatrix(props: {
                 <td>
                   <strong>{row.language}</strong>
                   {row.workspaceKey && (
-                    <span class="lsp-row-workspace" style="color:#555; font-size:0.9em; margin-left:6px">
+                    <span class="lsp-row-workspace">
                       ({row.workspaceKey})
                     </span>
                   )}
@@ -1024,7 +1024,6 @@ function LspMatrix(props: {
                     <span
                       class="lsp-row-ambiguous"
                       data-testid={`lsp-row-ambiguous-${row.language}`}
-                      style="color:#bf8700; font-size:0.85em; margin-left:6px"
                     >
                       (multi: {row.ambiguousOwners!.join(", ")})
                     </span>
@@ -1058,7 +1057,6 @@ function LspMatrix(props: {
                     <span
                       class="lsp-row-ambiguous-hint"
                       data-testid={`lsp-row-ambiguous-hint-${row.language}`}
-                      style="color:#bf8700; font-size:0.9em"
                     >
                       pick a workspace above to edit env
                     </span>
