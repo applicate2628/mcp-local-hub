@@ -75,6 +75,7 @@ function writeCachedDefaultScreen(v: string): void {
 if (typeof document !== "undefined") {
   document.documentElement.setAttribute("data-layout", readCachedLayout());
 }
+import { FirstRunBanner } from "./components/FirstRunBanner";
 import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
 import { CapabilitiesScreen } from "./screens/Capabilities";
@@ -299,6 +300,7 @@ export function App() {
           {navLinks}
         </header>
         <main id="screen-root">
+          <FirstRunBanner />
           {body}
         </main>
       </>
@@ -312,6 +314,7 @@ export function App() {
         {navLinks}
       </aside>
       <main id="screen-root">
+        <FirstRunBanner />
         {body}
       </main>
     </>
