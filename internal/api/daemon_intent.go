@@ -747,14 +747,33 @@ func isUTCInstant(raw []byte, taskName string) bool {
 // emits a "set-intent" audit entry with the pre-mutation Before
 // snapshot and the post-mutation After snapshot.
 //
-// Phase 4-E2: this is NO LONGER the live stop writer. The five production
-// stop writers (recordStopIntentAs / recordInstall/Restart/Uninstall/Register-
-// IntentForTask) now write the supervisor-intent.json `stops` sub-block via
-// WriteStopIntent (stop_intent_subblock.go). WriteDaemonIntent remains ONLY
-// to (a) write the legacy daemon-intent.json an OLD binary still owns during
-// the redeploy window, and (b) let the merge tests seed a daemon-intent.json
-// the boot-merge then migrates + deletes. Production code outside that
-// migration boundary must use WriteStopIntent.
+// Phase 4-E2: this is NO LONGER the live stop writer, and it has ZERO
+// production callers (verified: every call site is a *_test.go function or
+// the seedDaemonIntent merge-test helper). The five production stop writers
+// (recordStopIntentAs / recordInstall/Restart/Uninstall/RegisterIntentForTask)
+// write the supervisor-intent.json `stops` sub-block via WriteStopIntent
+// (stop_intent_subblock.go), which UnifiedStopsFile treats as the SOLE stop
+// authority (supervisor_intent.go ignores the daemon-intent.json argument).
+// So this binary never produces daemon-intent.json — the Phase E (collapse
+// dual-intent) write-side is COMPLETE.
+//
+// WriteDaemonIntent is RETAINED ON PURPOSE — it is NOT dead code — as the
+// test-and-migration-boundary surface for the boot-merge:
+//   - the boot-merge (RunDaemonIntentCollapse, intent_collapse.go) must
+//     consume a daemon-intent.json an OLD binary left behind during a redeploy;
+//     the merge tests seed that file via seedDaemonIntent → WriteDaemonIntent
+//     so the seeded bytes match what an old binary actually wrote (canonical
+//     key normalization + atomic temp+rename), preserving migration fidelity;
+//   - an OLD binary still running its pre-E2 path during the redeploy window
+//     writes daemon-intent.json through ITS OWN copy of this method and the
+//     same `daemon-intent.json.lock` flock — the merge holds that flock across
+//     its whole critical section so no such concurrent write is lost.
+//
+// Removing this method is NOT a safe Phase-E step: it would force the merge
+// tests to hand-roll daemon-intent.json bytes (losing the production-fidelity
+// guarantee that is the whole point of testing the migration) without removing
+// any production write (there is none). Production code outside that migration
+// boundary MUST use WriteStopIntent.
 //
 // Atomicity:
 //  1. Acquire gofrs/flock on the sibling `.lock` file.
@@ -863,6 +882,12 @@ func (a *API) WriteDaemonIntent(taskName string, intent DaemonIntent, who string
 // when the prior entry actually existed (Before != nil); a no-op
 // clear (entry missing or map empty) does NOT emit an audit entry
 // since there is nothing to record.
+//
+// Phase 4-E2: like WriteDaemonIntent, this has ZERO production callers
+// (every call site is a *_test.go function). The production re-enable /
+// stop-clear paths use ClearStopIntent (stop_intent_subblock.go) against the
+// supervisor-intent.json `stops` sub-block. It is RETAINED as the symmetric
+// test surface for the legacy daemon-intent.json clear contract, not removed.
 func (a *API) ClearDaemonIntent(taskName string, who string) error {
 	if len(who) > IdentityFieldByteCap {
 		return ErrEntryOversize

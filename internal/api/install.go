@@ -2859,10 +2859,14 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 		// Task 10 plan §65: AFTER /Run success, record Desired=running
 		// intent + restart audit entry. Failures are logged + tolerated.
 		// We pass `normalized` (no leading backslash) — the canonical
-		// task-key normalization in WriteDaemonIntent (Codex deep-sec
-		// PR #135 Finding 1) prepends "\" before storage so the entry
-		// lands under the same key the supervisor reconcile loop
+		// task-key normalization in WriteStopIntent (Codex deep-sec
+		// PR #135 Finding 1, carried forward to the Phase 4-E2 sub-block
+		// writer) prepends "\" before storage so the entry lands under the
+		// same key the supervisor reconcile loop
 		// (internal/cli/supervise_reconcile.go) indexes via row.TaskName.
+		// Phase 4-E2: recordRestartIntentForTask writes the
+		// supervisor-intent.json `stops` sub-block via WriteStopIntent, NOT
+		// the legacy daemon-intent.json — see install_intent.go.
 		a.recordRestartIntentForTask(normalized, nil)
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
