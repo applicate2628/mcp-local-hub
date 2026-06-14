@@ -11,6 +11,7 @@
 package autostart
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -66,11 +67,18 @@ func withFakeSystemctl(t *testing.T, fs *fakeSystemctl) string {
 
 	prevExec := systemctlFn
 	prevPath := unitPathFn
+	prevLoginctl := loginctlFn
 	systemctlFn = fs.Run
 	unitPathFn = func() (string, error) { return unitPath, nil }
+	// Stub loginctl so Enable's best-effort `loginctl enable-linger` (F3)
+	// never shells out to the REAL loginctl during a test (which would enable
+	// lingering for the CI user). Tests that assert the linger call override
+	// loginctlFn themselves AFTER this helper.
+	loginctlFn = func([]string) (string, string, error) { return "", "", nil }
 	t.Cleanup(func() {
 		systemctlFn = prevExec
 		unitPathFn = prevPath
+		loginctlFn = prevLoginctl
 	})
 	return unitPath
 }
@@ -248,6 +256,53 @@ func TestLinuxBackend_EnableRunsSystemctl(t *testing.T) {
 	}
 	if !strings.Contains(second, "enable") || !strings.Contains(second, "--now") || !strings.Contains(second, "mcphub-supervisor.service") {
 		t.Errorf("second systemctl call = %q, want enable --now mcphub-supervisor.service", second)
+	}
+}
+
+// TestLinuxBackend_EnableEnablesLinger asserts Enable runs `loginctl
+// enable-linger` (F3) after enabling the unit, so the supervisor survives
+// logout.
+func TestLinuxBackend_EnableEnablesLinger(t *testing.T) {
+	fs := newFakeSystemctl()
+	withFakeSystemctl(t, fs) // installs a no-op loginctl stub; we override it next
+	var lingerArgs []string
+	prev := loginctlFn
+	loginctlFn = func(args []string) (string, string, error) {
+		lingerArgs = append([]string{}, args...)
+		return "", "", nil
+	}
+	t.Cleanup(func() { loginctlFn = prev })
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := b.Enable(Options{MCPHubPath: "/usr/local/bin/mcphub"}); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if len(lingerArgs) == 0 || lingerArgs[0] != "enable-linger" {
+		t.Fatalf("expected `loginctl enable-linger ...` call, got %v", lingerArgs)
+	}
+}
+
+// TestLinuxBackend_EnableLingerFailureNonFatal asserts a linger failure
+// (missing loginctl / permission denied on a hardened host) does NOT fail
+// Enable — the unit is already enabled; linger is best-effort.
+func TestLinuxBackend_EnableLingerFailureNonFatal(t *testing.T) {
+	fs := newFakeSystemctl()
+	withFakeSystemctl(t, fs)
+	prev := loginctlFn
+	loginctlFn = func([]string) (string, string, error) {
+		return "", "Failed to enable linger: Access denied", errors.New("exit status 1")
+	}
+	t.Cleanup(func() { loginctlFn = prev })
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := b.Enable(Options{MCPHubPath: "/usr/local/bin/mcphub"}); err != nil {
+		t.Fatalf("Enable must not fail on a best-effort linger error: %v", err)
 	}
 }
 

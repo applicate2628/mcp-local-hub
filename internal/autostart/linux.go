@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 )
@@ -22,6 +23,11 @@ import (
 // realSystemctl, but autostart tests inject a recording fake. Returns
 // (stdout, stderr, err); err is nil for exit 0, non-nil otherwise.
 var systemctlFn = realSystemctl
+
+// loginctlFn is the test seam for `loginctl <args...>` (F3 linger
+// enablement). Production points at realLoginctl; tests inject a recording
+// fake. Returns (stdout, stderr, err); err is nil for exit 0.
+var loginctlFn = realLoginctl
 
 // unitPathFn is the test seam for the unit-file path. Production
 // resolves to `~/.config/systemd/user/mcphub-supervisor.service`.
@@ -53,6 +59,67 @@ func realSystemctl(args []string) (string, string, error) {
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	return stdout.String(), stderr.String(), runErr
+}
+
+// realLoginctl runs `loginctl <args...>` and returns its (stdout, stderr,
+// err). Mirrors realSystemctl. `loginctl` ships with systemd; absence (a
+// non-systemd host) surfaces as a non-nil err that enableLingerBestEffort
+// downgrades to a warning.
+func realLoginctl(args []string) (string, string, error) {
+	bin, err := exec.LookPath("loginctl")
+	if err != nil {
+		return "", "", fmt.Errorf("loginctl not on PATH: %w", err)
+	}
+	cmd := exec.Command(bin, args...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	return stdout.String(), stderr.String(), runErr
+}
+
+// enableLingerBestEffort runs `loginctl enable-linger <user>` (F3) so the
+// per-user systemd instance — and thus the mcphub supervisor `--user`
+// service — keeps running when the user is NOT logged in. WITHOUT lingering a
+// `--user` service is torn down at logout and only respawns at the next
+// interactive login, which defeats the autostart intent on a headless / SSH /
+// reboot-before-login host.
+//
+// Best-effort by design: enabling linger for one's OWN user succeeds without
+// root on most polkit-configured systems, but some hardened/minimal hosts
+// require root, and `loginctl` is absent on non-systemd hosts. Neither is
+// fatal to Enable — the systemd unit is already enabled; we warn + print the
+// one-line manual command and return so the autostart install still reports
+// success.
+func enableLingerBestEffort() {
+	uname := lingerUser()
+	args := []string{"enable-linger"}
+	if uname != "" {
+		args = append(args, uname)
+	}
+	if _, stderr, err := loginctlFn(args); err != nil {
+		hint := "loginctl enable-linger"
+		if uname != "" {
+			hint += " " + uname
+		}
+		detail := strings.TrimSpace(stderr)
+		if detail != "" {
+			detail = ": " + detail
+		}
+		fmt.Fprintf(os.Stderr,
+			"warning: could not enable systemd linger%s — the supervisor stops at logout until you run `%s` (may need sudo on hardened hosts).\n",
+			detail, hint)
+	}
+}
+
+// lingerUser resolves the current username for `loginctl enable-linger`.
+// Returns "" when it cannot be resolved (loginctl then defaults to the
+// caller's own user), so an unresolved name is never fatal.
+func lingerUser() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return strings.TrimSpace(os.Getenv("USER"))
 }
 
 // realUnitPath returns the canonical per-user systemd unit path:
@@ -124,8 +191,9 @@ func quoteSystemdExecArg(path string) string {
 	return `"` + escaped + `"`
 }
 
-// Enable writes the unit file and runs `systemctl --user daemon-reload`
-// followed by `systemctl --user enable --now mcphub-supervisor.service`.
+// Enable writes the unit file, runs `systemctl --user daemon-reload`
+// followed by `systemctl --user enable --now mcphub-supervisor.service`, then
+// best-effort `loginctl enable-linger` (F3) so the service survives logout.
 //
 // When systemctl is not on PATH (rare embedded distros, WSL1 without a
 // systemd userland), the unit is still written but the systemctl
@@ -161,6 +229,12 @@ func (l *linuxBackend) Enable(opts Options) error {
 		}
 		return fmt.Errorf("systemctl enable --now: %w", err)
 	}
+	// F3: enable lingering so the per-user systemd instance keeps the
+	// supervisor service running across logout / on a never-logged-in boot.
+	// Best-effort — a linger failure does NOT fail Enable (the unit is
+	// already enabled); enableLingerBestEffort warns + prints the manual
+	// command instead.
+	enableLingerBestEffort()
 	return nil
 }
 
