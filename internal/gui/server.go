@@ -275,6 +275,10 @@ func (realCatalogLister) CatalogList() ([]config.CatalogFields, error) {
 	return api.NewAPI().CatalogList()
 }
 
+// (realMarketplaceLister, the production adapter for GET /api/marketplace,
+// lives in marketplace.go alongside the marketplaceLister interface +
+// handler — §10 v2b read-only marketplace browse.)
+
 // restarter is the narrow interface the /api/servers/:name/restart
 // handler needs. Per memo D9 (Codex R8 P1), it now returns the
 // per-task RestartResult slice (existing api.RestartResult{TaskName, Err}
@@ -474,6 +478,7 @@ type Server struct {
 	manifestLister    manifestLister
 	manifestDeleter   manifestDeleter
 	catalogLister     catalogLister
+	marketplaceLister marketplaceLister
 	installer         installer
 	uninstaller       uninstaller
 	installBulk       installBulkAPI
@@ -660,6 +665,7 @@ func NewServer(cfg Config) *Server {
 	s.manifestLister = realManifestLister{}
 	s.manifestDeleter = realManifestDeleter{}
 	s.catalogLister = realCatalogLister{}
+	s.marketplaceLister = realMarketplaceLister{}
 	s.installer = realInstaller{}
 	s.uninstaller = realUninstaller{}
 	s.installBulk = realInstallBulkAPI{}
@@ -683,6 +689,7 @@ func NewServer(cfg Config) *Server {
 	registerDemigrateRoutes(s)
 	registerDismissRoutes(s)
 	registerManifestRoutes(s)
+	registerMarketplaceRoutes(s)
 	registerInstallRoutes(s)
 	registerServerRoutes(s)
 	registerEventsRoutes(s)
