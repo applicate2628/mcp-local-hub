@@ -480,23 +480,26 @@ func operatorRequiresSingleUserHome() bool {
 // supervisor restart is expected). Short-lived install/gui/cli
 // invocations read fresh each run. No file-watcher, no per-write read.
 //
-// Safe-default-on-error (pr301 r10 — intent strict is read GATE-FREE and is
-// BEST-EFFORT): intent-derived strict is TRUE only when the intent file is
-// PRESENT, gate-free-readable, parses, AND strict_mode==true. EVERY other
-// case relaxes —
+// Fail-closed-on-anomalous-read, relax-on-legit-absent (pr304 hybrid — intent
+// strict is read GATE-FREE): intent-derived strict is TRUE for a present
+// strict_mode==true intent OR for an ANOMALOUS read (a read error may hide a
+// strict intent); only a legit ABSENT intent and a parsed strict_mode=false
+// relax —
 //
-//   - UNRESOLVABLE state dir (DaemonStateDirReadOnly errors) → FALSE (relax).
-//     Intent-file strict is best-effort; with no resolvable path the bit
-//     cannot be read, and the robust strict path is the env var (checked
-//     first, above). (pr301 r10 RELAXES the prior r4 unresolvable→strict.)
-//   - ABSENT intent (missing file) → FALSE (relax). An absent intent declares
-//     NO strict_mode, so it must NOT make the operator strict — the canonical
-//     CLAUDE.md posture (broadened state dir defaults to RELAX; STRICT is
-//     opt-in via the env var).
-//   - READ error or JSON parse error on the gate-free read → FALSE (relax).
-//     A read/parse failure does not prove a strict intent; the robust strict
-//     path is the env var.
-//   - PRESENT + parseable + strict_mode==true → TRUE (honor the explicit bit).
+//   - UNRESOLVABLE state dir (DaemonStateDirReadOnly errors) → TRUE (strict).
+//     A path-resolution failure is anomalous (a normal host resolves fine);
+//     failing closed keeps an unresolvable resolver from silently disabling a
+//     persisted strict intent. The robust strict path remains the env var.
+//   - ABSENT intent (missing file, ErrNotExist on a resolvable path) → FALSE
+//     (relax). An absent intent declares NO strict_mode, so it must NOT make the
+//     operator strict — the canonical CLAUDE.md posture (broadened state dir
+//     defaults to RELAX; STRICT is opt-in via the env var). Keeps fresh-install
+//     on a broadened host working.
+//   - non-ENOENT READ error or JSON parse error on the gate-free read → TRUE
+//     (strict). A read/parse fault is anomalous and may hide a strict intent;
+//     failing closed prevents a silent strict downgrade.
+//   - PRESENT + parseable + strict_mode==true → TRUE (honor the explicit bit);
+//     strict_mode==false → FALSE (relax).
 //
 // The pre-r10 implementation read the bit through ReadSupervisorIntent, whose
 // parent-dir WRITE-protection gate rejected on a broadened parent and forced
@@ -618,13 +621,13 @@ var strictModeIntentCache struct {
 
 // strictModeFromIntentCached returns the cached
 // supervisor-intent.json `strict_mode` value, resolving it on first
-// use. The resolution rule (pr301 r10): intent-derived strict is TRUE only
-// when the intent file is PRESENT, gate-free-readable, parses, AND
-// strict_mode==true. EVERY other case (unresolvable state dir, absent intent,
-// read error, parse error) caches FALSE (relax) — intent-file strict is
-// BEST-EFFORT; the robust strict path is MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
-// See readStrictModeFromIntentBestEffort for the full case split and the
-// gate-free-read rationale.
+// use. The resolution rule (pr304 hybrid): intent-derived strict is TRUE when
+// the intent file is PRESENT, gate-free-readable, parses, AND strict_mode==true,
+// OR when the read fails in an ANOMALOUS way (unresolvable state dir, non-ENOENT
+// read error, parse error → fail closed to STRICT, since an error may hide a
+// strict intent). Only a legitimately ABSENT intent (ErrNotExist) and a parsed
+// strict_mode=false RELAX. See readStrictModeFromIntentBestEffort for the full
+// case split and the gate-free-read rationale.
 func strictModeFromIntentCached() bool {
 	strictModeIntentCache.mu.Lock()
 	defer strictModeIntentCache.mu.Unlock()
@@ -636,34 +639,40 @@ func strictModeFromIntentCached() bool {
 }
 
 // readStrictModeFromIntentBestEffort reads the supervisor-intent.json
-// `strict_mode` bit GATE-FREE and returns it. The rule is minimal and
-// fail-safe-to-RELAX: intent-derived strict is TRUE only when the intent file
-// is PRESENT, gate-free-readable, parses, AND strict_mode==true. EVERY other
-// case → FALSE (relax). pr301 r10 (SEC-F2 fleet-safety):
+// `strict_mode` bit GATE-FREE and returns it. The rule (pr304 hybrid):
+// fail-closed-to-STRICT on an ANOMALOUS read, RELAX on a legitimately ABSENT
+// intent or a parsed strict_mode=false:
 //
-//   - DaemonStateDirReadOnly() error (state dir UNRESOLVABLE) → FALSE (relax).
-//     Intent-file strict is BEST-EFFORT — the robust strict path is the env
-//     var (checked first, in OperatorRequiresSingleUserHome, before this read).
-//     If we cannot even resolve the per-user state root we cannot read the
-//     bit, and relaxing is the canon-aligned default: STRICT is opt-in via
-//     MCPHUB_REQUIRE_SINGLE_USER_HOME=1, which does not depend on this read.
-//     (This RELAXES the pre-r10 unresolvable→strict verdict: an unresolvable
-//     resolver is now best-effort-relax, not fail-closed-strict.)
+//   - DaemonStateDirReadOnly() error (state dir UNRESOLVABLE) → TRUE (strict).
+//     A path-resolution failure is anomalous (a normal host resolves the path
+//     fine, then reads or ErrNotExist's the file); we cannot read the bit or
+//     prove it absent/false, so failing closed keeps an unresolvable resolver
+//     from silently disabling a persisted strict intent. (Legit absent strict
+//     is the ErrNotExist branch below, on a RESOLVABLE path.)
 //
 //   - intent file ABSENT (os.ErrNotExist) → FALSE (relax). An ABSENT intent
 //     declares NO strict_mode, so it must NOT make the operator strict — the
 //     canonical CLAUDE.md "Hardened state-file writes" posture (a broadened
-//     state dir defaults to RELAX; STRICT is opt-in via the env var).
+//     state dir defaults to RELAX; STRICT is opt-in via the env var). This keeps
+//     fresh-install on a broadened host working; the deletion-of-a-strict-intent
+//     bypass is a documented best-effort limitation mitigated by the env var.
 //
-//   - other read error → FALSE (relax). Best-effort: a read failure on the
-//     gate-free read (e.g. permission-denied on the file's OWN DACL) does not
-//     prove a strict intent. The robust strict path is the env var.
+//   - other read error (non-ENOENT: permission-denied on the file's OWN DACL, a
+//     non-regular file, an I/O fault) → TRUE (strict). A read error is anomalous
+//     and does not prove the intent absent-or-false; failing closed keeps a read
+//     fault from silently disabling a persisted strict intent.
 //
-//   - JSON parse error → FALSE (relax), with a debug breadcrumb. A
-//     corrupt/truncated/attacker-clobbered intent does not declare a parseable
-//     strict_mode bit; the env var is the robust mitigation.
+//   - JSON parse error → TRUE (strict), with a debug breadcrumb. A present-but-
+//     corrupt intent may be a strict-enabled intent whose body was clobbered;
+//     relaxing on corruption would silently downgrade an operator-enabled posture.
 //
 //   - parsed → return intent.StrictMode verbatim (true → strict, false → relax).
+//
+// (pr304 took pr301 r10's gate-free read and flipped the ANOMALOUS-read cases
+// back to fail-closed-strict for the deletion/corruption threat, while KEEPING
+// r10's absent→relax so fresh-install-on-broadened and the canon default-relax
+// are preserved. The running fleet stays relaxed: a present strict_mode=false
+// intent reads gate-free and returns false — verified on the real host.)
 //
 // WHY GATE-FREE (the pr301 r10 fix): the pre-r10 implementation read the bit
 // via ReadSupervisorIntent, which runs the parent-dir WRITE-protection gate
@@ -699,10 +708,14 @@ func strictModeFromIntentCached() bool {
 func readStrictModeFromIntentBestEffort() bool {
 	stateDir, err := DaemonStateDirReadOnly()
 	if err != nil {
-		// State dir UNRESOLVABLE → relax (best-effort). The robust strict
-		// path is the env var (checked before this read); intent-file strict
-		// is best-effort and cannot be read with no resolvable path.
-		return false
+		// State dir UNRESOLVABLE → fail closed to STRICT (pr304 hybrid). A
+		// path-resolution failure is ANOMALOUS, not a legitimate "no strict
+		// declared" signal: we cannot read the bit or prove it absent/false,
+		// so failing closed keeps an unresolvable resolver from silently
+		// disabling a persisted strict intent. (A normal host resolves the
+		// path fine; the legit absent-intent case is the ErrNotExist branch
+		// below, which still RELAXES.)
+		return true
 	}
 	path := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 	// GATE-FREE read: deliberately os.ReadFile, NOT ReadSupervisorIntent. The
@@ -711,24 +724,40 @@ func readStrictModeFromIntentBestEffort() bool {
 	// strict_mode is actually false — the pr301 r10 fleet-safety regression.
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		// ABSENT (os.ErrNotExist) or any other read error → relax. An absent
-		// intent declares no strict_mode; a read error does not prove a strict
-		// intent. The robust strict path is the env var.
-		return false
+		if errors.Is(err, os.ErrNotExist) {
+			// ABSENT intent → RELAX (canon-aligned; pr301 r9/r10). An absent
+			// supervisor-intent.json declares NO strict_mode, so it must NOT
+			// make the operator strict — the canonical CLAUDE.md "Hardened
+			// state-file writes" posture (a broadened state dir defaults to
+			// RELAX; STRICT is opt-in via MCPHUB_REQUIRE_SINGLE_USER_HOME=1).
+			// This keeps fresh-install on a broadened host working and keeps
+			// the deletion-of-a-strict-intent bypass a documented best-effort
+			// limitation whose robust mitigation is that env var. (pr304
+			// proposed absent→strict here; rejected to avoid a fresh-install
+			// regression + the canon contradiction.)
+			return false
+		}
+		// Other read error (permission-denied on the file's OWN DACL, a
+		// non-regular file, an I/O fault) → fail closed to STRICT (pr304
+		// hybrid). A read error is anomalous and does not prove the intent is
+		// absent-or-false; failing closed keeps a read fault from silently
+		// disabling a persisted strict intent.
+		return true
 	}
 	var f SupervisorIntentFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		// Corrupt/unparseable intent → relax (best-effort). Emit a debug
-		// breadcrumb so an operator can correlate; the env var is the robust
-		// mitigation. Best-effort log — never let a log failure change the
-		// verdict.
+		// Corrupt/unparseable intent → fail closed to STRICT (pr304 hybrid). A
+		// present-but-corrupt supervisor-intent.json may be a strict-enabled
+		// intent whose body was truncated/clobbered; relaxing on corruption
+		// would silently downgrade an operator-enabled strict posture. Emit a
+		// debug breadcrumb — never let a log failure change the verdict.
 		if logErr := LogHubMcpEvent("debug", "strict-mode-intent-parse-failed", map[string]any{
 			"path": path,
 			"err":  err.Error(),
 		}); logErr != nil {
 			_ = logErr
 		}
-		return false
+		return true
 	}
 	return f.StrictMode
 }
