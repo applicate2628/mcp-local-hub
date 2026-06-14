@@ -1,5 +1,5 @@
 {
-  "name": "@mcphub/win32-x64",
+  "name": "mcphub-win32-x64",
   "version": "0.4.5",
   "description": "mcphub binary for win32/x64 (Go windows/amd64) — GA (generally available). Platform sub-package of the \"mcphub\" meta package; not installed directly.",
   "license": "MPL-2.0",

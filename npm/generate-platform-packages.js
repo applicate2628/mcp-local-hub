@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generator for the six `@mcphub/<platform>-<arch>` sub-packages.
+// Generator for the six `mcphub-<platform>-<arch>` sub-packages.
 //
 // The platform sub-packages are NEVER hand-edited. This generator emits each
 // `npm/packages/<platform>-<arch>/package.json` (+ a README and a .gitkeep)
@@ -55,7 +55,7 @@ function tierBlurb(tier) {
 
 function subPackageJson(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
-  const name = `@mcphub/${nodeOs}-${nodeCpu}`;
+  const name = `mcphub-${nodeOs}-${nodeCpu}`;
   const bin = binaryBasename(nodeOs);
   // Stable key order so output is deterministic across Node versions.
   return {
@@ -83,7 +83,7 @@ function subPackageJson(meta, target) {
 
 function subPackageReadme(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
-  const name = `@mcphub/${nodeOs}-${nodeCpu}`;
+  const name = `mcphub-${nodeOs}-${nodeCpu}`;
   const bin = binaryBasename(nodeOs);
   return (
     `# ${name}\n\n` +
@@ -127,7 +127,7 @@ function main() {
   // generate, all pinned to the meta version. Drift here is a packaging bug.
   const expectedDeps = {};
   for (const t of TARGETS) {
-    expectedDeps[`@mcphub/${t.nodeOs}-${t.nodeCpu}`] = meta.version;
+    expectedDeps[`mcphub-${t.nodeOs}-${t.nodeCpu}`] = meta.version;
   }
   const actualDeps = meta.optionalDependencies || {};
   const expectedKeys = Object.keys(expectedDeps).sort();

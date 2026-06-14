@@ -1,4 +1,4 @@
-# @mcphub/win32-x64
+# mcphub-win32-x64
 
 Platform binary sub-package for [`mcphub`](https://www.npmjs.com/package/mcphub).
 

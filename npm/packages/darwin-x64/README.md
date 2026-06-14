@@ -1,4 +1,4 @@
-# @mcphub/darwin-x64
+# mcphub-darwin-x64
 
 Platform binary sub-package for [`mcphub`](https://www.npmjs.com/package/mcphub).
 
