@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // TestMigrateReplacesStdioWithHTTPForOneClient verifies that a single-
@@ -240,5 +242,180 @@ weekly_refresh: false
 	// resolution mtime collision collapses fresh into oldest-kept).
 	if timestamped < 1 || timestamped > 2 {
 		t.Errorf("backups.keep_n=2 should leave 1-2 timestamped backups, got %d", timestamped)
+	}
+}
+
+// TestMigrateSetsRelayExePathForZed proves the migrate-path relay-context
+// gate (migrate.go ~line 158, `clients.IsRelayStdio(binding.Client)`) fires
+// for the zed client, not just antigravity. zed is a relay-stdio adapter:
+// its AddEntry rejects an entry whose RelayExePath is empty. Before the
+// 4th-site fix the gate was hardcoded to `binding.Client == "antigravity"`,
+// so a zed binding flowed through with RelayExePath unset and zed.AddEntry
+// rejected it — the row landed in report.Failed. This test asserts the
+// written zed config carries the canonical mcphub path as the relay
+// `command`, which can only happen if the gate set entry.RelayExePath for
+// the zed binding.
+//
+// Hermeticity / live-host safety: this host has a REAL Zed config at
+// %APPDATA%\Zed\settings.json. zed's adapter resolves its ConfigPath from
+// %APPDATA% (Windows) at adapter-construction time inside MigrateFrom's
+// allClients map — the ScanOpts.ZedConfigPath field is scan-only and is NOT
+// consumed by the write path (see migrate.go MigrateOpts doc). So we MUST
+// redirect every env path source zed could resolve from (HOME, USERPROFILE,
+// APPDATA, LOCALAPPDATA, XDG_CONFIG_HOME) to the test tmpdir BEFORE NewAPI()
+// / MigrateFrom, and pre-create the zed config under the redirected APPDATA
+// so adapter.Exists() returns true (migrate skips non-existent clients).
+// canonicalMcphubPath is overridden to a deterministic tmp path so the
+// asserted RelayExePath is stable, not host-dependent.
+func TestMigrateSetsRelayExePathForZed(t *testing.T) {
+	// %TEMP%-backed t.TempDir() fails the parent-dir DACL gate on Windows;
+	// install the test fallback so the adapter write succeeds (same as the
+	// single-client legacy-flow test above).
+	t.Cleanup(SetClientWriteFallbackForTest())
+
+	// LIVE-HOST HERMETICITY: the secure-write init-stub gate
+	// (client_write_init.go) consults strict mode, and strict mode is TRUE
+	// when the persisted supervisor-intent.json carries strict_mode=true —
+	// read through a process-lifetime lazy cache (strictModeFromIntentCached).
+	// On a host whose real supervisor-intent.json has strict_mode=true, that
+	// value would bleed into this test and make the strict parent-dir DACL
+	// gate refuse the zed config write on a %TEMP%-backed dir (whose parent
+	// grants Authenticated Users). Defeat it exactly like the strict-mode-
+	// sensitive tests do: redirect the state dir to an EMPTY hardened temp
+	// dir (no intent file → strict-from-intent resolves FALSE via the
+	// absent-intent relax branch), make the read-gate inert, reset the lazy
+	// cache up front + on cleanup, and pin the strict env var OFF.
+	t.Cleanup(SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+	t.Setenv(AllowUnhardenedStateReadEnv, "1")
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	resetStrictModeIntentCacheForTest()
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	// Host the redirected env tree under a HARDENED (owner-only, PROTECTED)
+	// dir so the zed config's parent (<tmp>/Zed) carries no Authenticated-
+	// Users ACE — the secure-write parent-dir gate then passes cleanly under
+	// both strict and relax postures, independent of host state.
+	tmp := apitest.HardenedTempDir(t)
+
+	// Redirect EVERY env path source zed (and the other adapters) could use,
+	// on both Windows (USERPROFILE/APPDATA/LOCALAPPDATA) and POSIX
+	// (HOME/XDG_CONFIG_HOME). zed's defaultZedConfigPath reads APPDATA first
+	// on Windows, then HOME; XDG_CONFIG_HOME/HOME on POSIX.
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("APPDATA", tmp)
+	t.Setenv("LOCALAPPDATA", tmp)
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	// Deterministic canonical mcphub path so RelayExePath is a stable
+	// asserted value, not whatever ~/.local/bin resolves to on this host.
+	canonicalMcphub := filepath.Join(tmp, "canonical", "mcphub.exe")
+	if err := os.MkdirAll(filepath.Dir(canonicalMcphub), 0o755); err != nil {
+		t.Fatalf("mkdir canonical dir: %v", err)
+	}
+	t.Cleanup(SetTestCanonicalMcphubPath(canonicalMcphub))
+
+	// Pre-create the zed config at the path zed resolves under the redirected
+	// APPDATA — %APPDATA%\Zed\settings.json, i.e. <tmp>/Zed/settings.json
+	// (defaultZedConfigPath, zed.go). Without this file, adapter.Exists()
+	// returns false and migrate skips zed quietly (no Applied, no Failed row).
+	zedConfigPath := filepath.Join(tmp, "Zed", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(zedConfigPath), 0o755); err != nil {
+		t.Fatalf("mkdir zed dir: %v", err)
+	}
+	if err := os.WriteFile(zedConfigPath, []byte("{\n  \"context_servers\": {}\n}\n"), 0o600); err != nil {
+		t.Fatalf("write zed seed config: %v", err)
+	}
+
+	// Fake manifest with a zed client binding.
+	manifestDir := filepath.Join(tmp, "servers")
+	if err := os.MkdirAll(filepath.Join(manifestDir, "memory"), 0o755); err != nil {
+		t.Fatalf("mkdir manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+		[]byte(`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9123
+client_bindings:
+  - client: zed
+    daemon: default
+    url_path: /mcp
+weekly_refresh: false
+`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	a := NewAPI()
+	report, err := a.MigrateFrom(MigrateOpts{
+		Servers:        []string{"memory"},
+		ClientsInclude: []string{"zed"},
+		ScanOpts: ScanOpts{
+			ManifestDir:   manifestDir,
+			ZedConfigPath: zedConfigPath, // scan-only field; harmless here.
+		},
+	})
+	if err != nil {
+		t.Fatalf("MigrateFrom: %v", err)
+	}
+	if report == nil {
+		t.Fatal("MigrateFrom returned nil report")
+	}
+
+	// zed must be in Applied, NOT Failed. A Failed row means the gate did not
+	// fire (RelayExePath empty → zed.AddEntry rejected) — the exact bug this
+	// 4th-site fix closes.
+	if len(report.Failed) != 0 {
+		t.Fatalf("zed migrate reported Failed rows (gate did not set RelayExePath?): %+v", report.Failed)
+	}
+	var zedApplied bool
+	for _, ap := range report.Applied {
+		if ap.Client == "zed" && ap.Server == "memory" {
+			zedApplied = true
+		}
+	}
+	if !zedApplied {
+		t.Fatalf("expected an Applied row for (memory, zed); got Applied=%+v", report.Applied)
+	}
+
+	// Read the written zed config; assert it carries the canonical mcphub
+	// path as the relay `command` under context_servers.memory. This is the
+	// RelayExePath proof — it is present iff the gate set entry.RelayExePath.
+	data, err := os.ReadFile(zedConfigPath)
+	if err != nil {
+		t.Fatalf("read zed config: %v", err)
+	}
+	var zedCfg struct {
+		ContextServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"context_servers"`
+	}
+	if err := json.Unmarshal(data, &zedCfg); err != nil {
+		t.Fatalf("unmarshal zed config %q: %v", string(data), err)
+	}
+	mem, ok := zedCfg.ContextServers["memory"]
+	if !ok {
+		t.Fatalf("zed config has no context_servers.memory entry: %s", data)
+	}
+	if mem.Command != canonicalMcphub {
+		t.Errorf("zed relay command (RelayExePath proof): got %q, want canonical %q", mem.Command, canonicalMcphub)
+	}
+	// The relay args must forward to the hub HTTP URL via `relay --url`.
+	wantURL := "http://localhost:9123/mcp"
+	var sawRelay, sawURL bool
+	for i, arg := range mem.Args {
+		if arg == "relay" {
+			sawRelay = true
+		}
+		if arg == "--url" && i+1 < len(mem.Args) && mem.Args[i+1] == wantURL {
+			sawURL = true
+		}
+	}
+	if !sawRelay || !sawURL {
+		t.Errorf("zed relay args: got %v, want [relay --url %s]", mem.Args, wantURL)
 	}
 }
