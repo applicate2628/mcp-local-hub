@@ -25,6 +25,17 @@ const path = require("node:path");
 // support tier. `goos`/`goarch` are the names build.sh / build.ps1 cross-
 // compile for; `nodeOs`/`nodeCpu` are what Node reports and what npm matches
 // against the sub-package `os`/`cpu` arrays at install time.
+const PACKAGE_SCOPE = "@applicate2628";
+
+// The platform sub-package name. The meta package (`mcp-local-hub`) is
+// UNSCOPED so the install command stays short; the six platform packages are
+// SCOPED under the publisher namespace so a brand-new account publishing a
+// family of near-identical names does not trip npm's spam-detection heuristic
+// (the esbuild / swc / turbo layout). Single source of truth for the shape.
+function platformPackageName(nodeOs, nodeCpu) {
+  return `${PACKAGE_SCOPE}/mcp-local-hub-${nodeOs}-${nodeCpu}`;
+}
+
 const TARGETS = [
   { nodeOs: "win32", nodeCpu: "x64", goos: "windows", goarch: "amd64", tier: "GA" },
   { nodeOs: "win32", nodeCpu: "arm64", goos: "windows", goarch: "arm64", tier: "best-effort" },
@@ -55,7 +66,7 @@ function tierBlurb(tier) {
 
 function subPackageJson(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
-  const name = `@applicate2628/mcp-local-hub-${nodeOs}-${nodeCpu}`;
+  const name = platformPackageName(nodeOs, nodeCpu);
   const bin = binaryBasename(nodeOs);
   // Stable key order so output is deterministic across Node versions.
   return {
@@ -73,6 +84,10 @@ function subPackageJson(meta, target) {
       url: meta.repository.url,
       directory: `npm/packages/${nodeOs}-${nodeCpu}`,
     },
+    // Scoped packages default to restricted (private) access; declare public
+    // so the sub-package is publishable-public on its own, not solely via the
+    // publish step's `--access public` flag (defense in depth).
+    publishConfig: { access: "public" },
     os: [nodeOs],
     cpu: [nodeCpu],
     bin: { mcphub: `bin/${bin}` },
@@ -83,7 +98,7 @@ function subPackageJson(meta, target) {
 
 function subPackageReadme(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
-  const name = `@applicate2628/mcp-local-hub-${nodeOs}-${nodeCpu}`;
+  const name = platformPackageName(nodeOs, nodeCpu);
   const bin = binaryBasename(nodeOs);
   return (
     `# ${name}\n\n` +
@@ -127,7 +142,7 @@ function main() {
   // generate, all pinned to the meta version. Drift here is a packaging bug.
   const expectedDeps = {};
   for (const t of TARGETS) {
-    expectedDeps[`@applicate2628/mcp-local-hub-${t.nodeOs}-${t.nodeCpu}`] = meta.version;
+    expectedDeps[platformPackageName(t.nodeOs, t.nodeCpu)] = meta.version;
   }
   const actualDeps = meta.optionalDependencies || {};
   const expectedKeys = Object.keys(expectedDeps).sort();

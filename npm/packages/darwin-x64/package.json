@@ -10,6 +10,9 @@
     "url": "git+https://github.com/applicate2628/mcp-local-hub.git",
     "directory": "npm/packages/darwin-x64"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "os": [
     "darwin"
   ],

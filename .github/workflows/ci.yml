@@ -203,8 +203,9 @@ jobs:
   # npm delivery version-sync gate (§13 Phases 1-2). Enforces that
   # npm/package.json is the SINGLE version authority:
   #   1. build.sh + build.ps1 carry the same version literal (no drift),
-  #   2. the six @mcphub/<platform>-<arch> sub-packages are exactly what the
-  #      generator emits (no hand-edit / missed regeneration),
+  #   2. the six @applicate2628/mcp-local-hub-<platform>-<arch> sub-packages
+  #      are exactly what the generator emits (no hand-edit / missed
+  #      regeneration),
   #   3. a binary built with the synced ldflags reports that same version
   #      (closes the version-skew gap: the runtime upgrade guard only rejects
   #      version=="dev"/"" today, so semver drift would otherwise pass silently).

@@ -1,8 +1,9 @@
 # npm publish — §13 Phase 3-5: cross-build the 6 platform binaries, inject them
-# into the mcphub-<plat>-<arch> sub-packages, and publish all 7 packages
-# (6 platform + the `mcphub` meta) to the public npm registry with Sigstore
-# provenance. The meta's optionalDependencies pull the matching platform
-# package at `npm install -g mcphub` time (esbuild/turbo pattern; no postinstall).
+# into the @applicate2628/mcp-local-hub-<plat>-<arch> sub-packages, and publish
+# all 7 packages (6 scoped platform + the `mcp-local-hub` meta) to the public
+# npm registry with Sigstore provenance. The meta's optionalDependencies pull
+# the matching platform package at `npm install -g mcp-local-hub` time
+# (esbuild/turbo pattern; no postinstall). The installed command is `mcphub`.
 #
 # Triggers:
 #   - push a tag `vX.Y.Z` (or `vX.Y.Z-beta.N`) → real publish (prereleases go to
@@ -11,9 +12,16 @@
 #     pipeline (build + pack) WITHOUT publishing. Run this once before the first
 #     real tag.
 #
-# Secrets: NPM_TOKEN (a granular "All packages — read and write" or classic
-# automation token from npmjs.com). id-token:write enables `npm publish
+# Secrets: NPM_TOKEN — an npm "Automation" classic token or a granular
+# "All packages — read and write" token (both bypass the 2FA OTP prompt that a
+# plain "Publish" token triggers in CI). id-token:write enables `npm publish
 # --provenance` (requires a public repo).
+#
+# SECURITY: untrusted / template values (inputs.version, github.event_name,
+# steps.ver.outputs.version, inputs.dry_run) are routed through `env:` blocks
+# and consumed as quoted shell variables — never expanded as `${{ }}` source
+# text directly inside a `run:` body (the GitHub Actions script-injection
+# class). The version is also semver-gated before any downstream use.
 name: npm publish
 
 on:
@@ -52,11 +60,14 @@ jobs:
       - name: Resolve version
         id: ver
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
+          if [ "$EVENT_NAME" = "push" ]; then
             V="${GITHUB_REF_NAME#v}"   # v0.5.0 -> 0.5.0
           else
-            V="${{ inputs.version }}"
+            V="$VERSION_INPUT"
           fi
           if ! printf '%s' "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::version '$V' is not semver"; exit 1
@@ -66,16 +77,20 @@ jobs:
 
       - name: Set package versions + regenerate platform packages
         shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          V="${{ steps.ver.outputs.version }}"
+          V="$VERSION"
           node -e "const f='npm/package.json';const p=require('./'+f);p.version='$V';for(const k in p.optionalDependencies)p.optionalDependencies[k]='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
           node npm/generate-platform-packages.js
           node npm/sync-version.js --inject   # push $V into build.sh so the binary matches
 
       - name: Cross-build the 6 platform binaries
         shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          V="${{ steps.ver.outputs.version }}"
+          V="$VERSION"
           COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           LD="-s -w -X main.version=$V -X main.commit=$COMMIT -X main.buildDate=$DATE"
@@ -103,10 +118,13 @@ jobs:
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          V="${{ steps.ver.outputs.version }}"
+          V="$VERSION"
           DRY=""
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" = "true" ]; then
             DRY="--dry-run"
             echo "DRY-RUN: building + packing only, no publish."
           fi
@@ -114,10 +132,10 @@ jobs:
           case "$V" in *-*) TAG="--tag beta";; esac   # prerelease -> beta dist-tag, never latest
           # Platform packages FIRST so the meta's optionalDependencies resolve.
           for d in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64; do
-            echo "::group::publish mcphub-$d"
+            echo "::group::publish @applicate2628/mcp-local-hub-$d"
             ( cd "npm/packages/$d" && npm publish --provenance --access public $TAG $DRY )
             echo "::endgroup::"
           done
-          echo "::group::publish meta mcphub"
+          echo "::group::publish meta mcp-local-hub"
           ( cd npm && npm publish --provenance --access public $TAG $DRY )
           echo "::endgroup::"
