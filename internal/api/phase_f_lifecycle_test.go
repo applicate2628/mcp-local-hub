@@ -493,6 +493,59 @@ func TestInstallPlanCore_GlobalFreshInstall_EmitsDaemonInstalledEvents(t *testin
 	}
 }
 
+// TestInstallPlanCore_FilteredGlobalInstall_EmitsOnlySelectedDaemonInstalled
+// asserts that daemon-installed audit rows describe only the descriptors changed
+// by the current install. A daemon-filtered install intentionally preserves
+// sibling rows from supervisor-intent.json; those preserved rows must not be
+// re-announced as freshly installed.
+func TestInstallPlanCore_FilteredGlobalInstall_EmitsOnlySelectedDaemonInstalled(t *testing.T) {
+	stateDir := phaseFStateDir(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}))
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha`, Server: "demo", Daemon: "alpha", Command: "preserve-alpha", Port: 9991},
+			{TaskName: `\mcp-local-hub-demo-beta`, Server: "demo", Daemon: "beta", Command: "preserve-beta", Port: 9992},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
+		t.Fatalf("seed supervisor-intent: %v", err)
+	}
+
+	m := globalTwoDaemonManifest()
+	plan, err := BuildPlan(m, "alpha")
+	if err != nil {
+		t.Fatalf("BuildPlan(filtered alpha): %v", err)
+	}
+	if got := len(plan.SupervisorIntent); got != 1 {
+		t.Fatalf("filtered plan SupervisorIntent rows = %d, want 1", got)
+	}
+
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "alpha", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(filtered alpha): %v", err)
+	}
+
+	logRaw, err := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read supervisor-events.log: %v", err)
+	}
+	logStr := string(logRaw)
+	if !strings.Contains(logStr, `"task_name":"\\mcp-local-hub-demo-alpha"`) {
+		t.Fatalf("daemon-installed event missing selected alpha row:\n%s", logStr)
+	}
+	if strings.Contains(logStr, `"task_name":"\\mcp-local-hub-demo-beta"`) || strings.Contains(logStr, `"command":"preserve-beta"`) {
+		t.Fatalf("daemon-installed event included untouched sibling beta row:\n%s", logStr)
+	}
+}
+
 // TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartFailurePrintsHint
 // asserts that when no supervisor is running and the immediate autostart owner
 // start fails, the install still completes and keeps the operator hint — the
