@@ -62,12 +62,33 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 
 	// Build the controller with a real EventLoop so apply-mode posts
 	// land where a handler can observe them. We register a recording
-	// handler INSTEAD of the real handleLoopEvent so we don't pull in
-	// spawn/terminate dependencies.
+	// handler INSTEAD of the real handleLoopEvent for the SM events so we
+	// don't pull in spawn/terminate dependencies — BUT the reap-lifecycle
+	// events (evReapScan / evReapFollowup) are dispatched to the REAL
+	// controller methods, exactly as production's handleLoopEvent does
+	// (pr302 r4: the cache swap now runs ON the loop inside handleReapScan,
+	// so a fixture that dropped evReapScan would never swap the caches and
+	// would not faithfully model the cache-refresh-before-EvIntentUpdate
+	// contract these tests assert). The reap-scan event is the cache-apply
+	// mechanism, NOT an SM event, so it is NOT recorded on postedCh /
+	// postedCount — keeping the "first/only posted SM event" assertions intact.
+	var ctrl *supervisorController
 	loop := api.NewEventLoop(32)
 	postedCh := make(chan api.LoopEvent, 64)
 	var postedCount atomic.Int32
 	loop.RegisterHandler(func(ev api.LoopEvent) {
+		switch ev.Kind {
+		case evReapScan:
+			prev, _ := ev.Body[reapScanPreviousNamesBodyKey].(map[string]struct{})
+			updated, _ := ev.Body[reapScanIntentBodyKey].(*api.SupervisorIntentFile)
+			stops, _ := ev.Body[reapScanStopsBodyKey].(*api.DaemonIntentFile)
+			ctrl.handleReapScan(prev, updated, stops)
+			return
+		case evReapFollowup:
+			generation, _ := ev.Body[reapFollowupGenerationBodyKey].(int)
+			ctrl.handleReapFollowup(ev.TaskName, generation)
+			return
+		}
 		postedCount.Add(1)
 		select {
 		case postedCh <- ev:
@@ -78,7 +99,7 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 	t.Cleanup(cancel)
 	go loop.Run(ctx)
 
-	ctrl := &supervisorController{
+	ctrl = &supervisorController{
 		intentCache:         newIntentCache(),
 		eventLoop:           loop,
 		events:              events,
@@ -1552,3 +1573,266 @@ func (s *reconcileContextSchedulerForTest) ExportXML(string) ([]byte, error) {
 	return nil, scheduler.ErrTaskNotFound
 }
 func (s *reconcileContextSchedulerForTest) ImportXML(string, []byte) error { return nil }
+
+// TestReconcileApply_CacheRefreshObservableBeforeReturn is the FINDING 1 falsifier
+// (Codex pr302 r6). It proves the reconcile-apply cache swap is OBSERVABLE before
+// applyReconcileDrift returns — i.e. the refresh runs SYNCHRONOUSLY relative to the
+// IPC handler's return path, not as a fire-and-forget async post.
+//
+// Pre-fix (r5): applyReconcileDrift called the ASYNC refreshSupervisorIntent, which
+// POSTED evReapScan and returned immediately, BEFORE the loop ran daemonIntent.Refresh.
+// An immediate observer (this test, and the existing TestReconcileIPC_ApplyTerminates*
+// tests, and a real back-to-back `mcphub status`) then read the STALE default-running
+// cache. This test makes that race DETERMINISTIC by gating the on-loop evReapScan
+// handler: while the gate is closed, the swap CANNOT have happened, so an async
+// applyReconcileDrift would have already returned with a stale cache.
+//
+// The falsifier structure:
+//   - the loop's evReapScan handler BLOCKS on a gate until the test opens it (and only
+//     THEN runs the swap + closes the barrier);
+//   - applyReconcileDrift runs on a separate goroutine; the test asserts it has NOT
+//     returned while the gate is closed (sync path BLOCKS on the barrier) — under the
+//     async r5 path it WOULD have returned here;
+//   - the test then opens the gate; the swap runs, the barrier signals, and
+//     applyReconcileDrift returns with the cache FRESH (Desired=stopped).
+func TestReconcileApply_CacheRefreshObservableBeforeReturn(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	events, err := api.OpenSupervisorEventLog(filepath.Join(tmpHome, "supervisor-events.log"))
+	if err != nil {
+		t.Fatalf("OpenSupervisorEventLog: %v", err)
+	}
+	t.Cleanup(func() { events.Close() })
+
+	taskName := `\mcp-local-hub-lsp-deadbeef-go`
+
+	var ctrl *supervisorController
+	loop := api.NewEventLoop(32)
+	gate := make(chan struct{})           // closed by the test to release the swap
+	scanEntered := make(chan struct{}, 1) // signals the handler reached the gate
+	loop.RegisterHandler(func(ev api.LoopEvent) {
+		switch ev.Kind {
+		case evReapScan:
+			// Signal that the scan handler is now waiting on the gate, then BLOCK
+			// until the test opens it. This models a busy/slow loop: until the gate
+			// opens, the cache swap has not run. An async apply would have returned
+			// already; the sync apply is still blocked on the barrier.
+			select {
+			case scanEntered <- struct{}{}:
+			default:
+			}
+			<-gate
+			prev, _ := ev.Body[reapScanPreviousNamesBodyKey].(map[string]struct{})
+			updated, _ := ev.Body[reapScanIntentBodyKey].(*api.SupervisorIntentFile)
+			stops, _ := ev.Body[reapScanStopsBodyKey].(*api.DaemonIntentFile)
+			ctrl.handleReapScan(prev, updated, stops)
+			if doneCh, ok := ev.Body[reapScanDoneBodyKey].(chan struct{}); ok && doneCh != nil {
+				close(doneCh)
+			}
+			return
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go loop.Run(ctx)
+
+	ctrl = &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+
+	deps := ipcDispatchDeps{
+		stateDir:           tmpHome,
+		events:             events,
+		controllerProvider: func() *supervisorController { return ctrl },
+	}
+
+	// The fresh stops snapshot the apply will swap in: the orphaned LSP descriptor
+	// marked stopped (exactly what markOrphanedLSPStopIntentForReconcile produces).
+	refreshSupervisor := &api.SupervisorIntentFile{Version: 1}
+	refreshStops := &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		taskName: {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUninstalled, UpdatedAt: time.Now().UTC()},
+	}}
+
+	// Pre-condition: the cache has NOT been refreshed yet — Desired is the
+	// default-running empty string.
+	if got := ctrl.daemonIntent.Lookup(taskName).Desired; got != "" {
+		t.Fatalf("precondition: cache should start empty (default-running); got %q", got)
+	}
+
+	applyReturned := make(chan struct{})
+	go func() {
+		// Single-entry drift so applyReconcileDrift posts the cache refresh (sync) and
+		// then one EvIntentUpdate. The refresh is the part under test.
+		drift := []api.DriftEntry{{TaskName: taskName, Action: api.ReconcileActionPostEvIntentUpdate}}
+		applyReconcileDrift(deps, drift, refreshSupervisor, refreshStops)
+		close(applyReturned)
+	}()
+
+	// Wait until the on-loop scan handler is parked on the gate.
+	select {
+	case <-scanEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("evReapScan handler never reached the gate (apply did not post the scan?)")
+	}
+
+	// THE FALSIFIER: while the gate is closed, the swap has NOT run. A SYNCHRONOUS
+	// applyReconcileDrift must STILL be blocked on the barrier; the ASYNC r5 path
+	// would have already returned here with a stale cache.
+	select {
+	case <-applyReturned:
+		t.Fatal("finding 1: applyReconcileDrift returned BEFORE the on-loop cache swap ran — the cache refresh is async/fire-and-forget, so an immediate observer reads the stale default-running cache (the r5 regression)")
+	case <-time.After(150 * time.Millisecond):
+		// Still blocked on the barrier — the synchronous contract holds.
+	}
+
+	// Release the swap. applyReconcileDrift's barrier now signals and it returns.
+	close(gate)
+	select {
+	case <-applyReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("applyReconcileDrift did not return after the swap completed")
+	}
+
+	// AND the cache is now FRESH — the swap is observable on the apply's return path.
+	if got := ctrl.daemonIntent.Lookup(taskName).Desired; got != api.IntentDesiredStopped {
+		t.Fatalf("finding 1: after applyReconcileDrift returns, the daemonIntent cache must reflect the swapped stops (Desired=stopped), not the stale default-running cache; got %q", got)
+	}
+	if stop, _ := ctrl.daemonIntent.Lookup(taskName).IsActiveStop(time.Now().UTC()); !stop {
+		t.Fatal("finding 1: the swapped stops cache must report the orphan as an active stop after the apply returns")
+	}
+}
+
+// (R7 finding 3) TestReconcileApply_SyncBarrierBoundedOnFullStoppedLoop is the falsifier
+// for finding 3 — the sync barrier must NOT block forever on a full/stopped loop.
+//
+// refreshSupervisorIntentSync posts evReapScan then waits on a done-channel under a
+// ctx/timeout select. The r6 code called eventLoop.Post (a BLOCKING send: `l.ch <- e`)
+// BEFORE entering that select. If the external buffer is FULL and the loop is not
+// draining (a wedged loop, or shutdown drain stopped), Post blocked on the channel send
+// FOREVER — the IPC handler never reached the timeout select, so the documented bound
+// never applied and the handler hung indefinitely.
+//
+// Fixed: the enqueue goes through eventLoop.PostCtx, which selects on
+// {l.ch <- e, barrierCtx.Done()} under a deadline context. A full/stopped loop makes the
+// enqueue return DeadlineExceeded (or Canceled on shutdown) so the barrier returns within
+// the bound instead of hanging.
+//
+// This test fills the loop's buffer to capacity WITHOUT starting Run (so nothing ever
+// drains l.ch), points c.ctx at a SHORT-deadline context, and asserts
+// refreshSupervisorIntentSync RETURNS within the bound (does not block forever). Pre-fix
+// the blocking Post would hang here and the 2s watchdog would fire.
+func TestReconcileApply_SyncBarrierBoundedOnFullStoppedLoop(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	events, err := api.OpenSupervisorEventLog(filepath.Join(tmpHome, "supervisor-events.log"))
+	if err != nil {
+		t.Fatalf("OpenSupervisorEventLog: %v", err)
+	}
+	t.Cleanup(func() { events.Close() })
+
+	// A small-capacity loop whose Run is NEVER started, so nothing drains the main
+	// channel. NewEventLoop clamps capacity to a minimum of 16.
+	loop := api.NewEventLoop(16)
+
+	// Fill the main channel to capacity with best-effort TryPost so the next Post /
+	// PostCtx send cannot proceed (the loop is not draining).
+	for i := 0; i < 64; i++ {
+		if !loop.TryPost(api.LoopEvent{Kind: evReapBarrier}) {
+			break // buffer full
+		}
+	}
+	// Confirm the buffer is actually full now (a further TryPost must fail).
+	if loop.TryPost(api.LoopEvent{Kind: evReapBarrier}) {
+		t.Fatal("precondition: the loop buffer should be FULL (TryPost should fail) so the barrier enqueue must wait")
+	}
+
+	// A SHORT-deadline context so the bounded enqueue returns quickly rather than
+	// waiting the full 5s reapScanBarrierTimeout. context.WithTimeout(parent, 5s) takes
+	// the EARLIER of the parent deadline and the 5s, so this 80ms parent deadline wins.
+	deadlineCtx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	t.Cleanup(cancel)
+
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		ctx:                 deadlineCtx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+
+	updated := &api.SupervisorIntentFile{Version: 1}
+	stops := &api.DaemonIntentFile{Tasks: map[string]api.DaemonIntent{
+		`\mcp-local-hub-lsp-deadbeef-go`: {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUninstalled, UpdatedAt: time.Now().UTC()},
+	}}
+
+	returned := make(chan struct{})
+	go func() {
+		// Pre-fix: the blocking Post on a full/stopped loop hangs here forever.
+		// Post-fix: PostCtx returns DeadlineExceeded within ~80ms and the barrier
+		// returns.
+		ctrl.refreshSupervisorIntentSync(updated, stops)
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+		// Bounded — the barrier did not block forever on the full/stopped loop.
+	case <-time.After(2 * time.Second):
+		t.Fatal("finding 3: refreshSupervisorIntentSync BLOCKED on a full/stopped loop — the barrier enqueue is not context-aware, so the documented timeout never bounds the path (the r6 blocking Post hangs the IPC handler forever)")
+	}
+}
+
+// TestReconcileIPC_R8_BareKeyDescriptorDriftResolvesViaLookupCanonical is the site-4
+// falsifier for the key-canonicalization bug CLASS: the descriptor-drift restart path
+// resolves the controller's cached descriptor by the CANONICAL taskName
+// (canonicalTaskNameForReconcile prepends "\"), but IntentCache.daemonByTask is keyed by
+// the RAW on-disk d.TaskName. For a LEGACY / hand-written intent row whose TaskName LACKS
+// the leading backslash, a strict Lookup(canonical) MISSES it, so
+// classifyDriftAction sees a nil cachedDescriptor and never detects a same-task-name
+// descriptor rewrite on the StRunning daemon — the stale child keeps serving the old
+// port/command after a manifest rewrite.
+//
+// PRE-fix lookupControllerCachedDescriptor called ctrl.intentCache.Lookup(taskName)
+// (strict). POST-fix it calls LookupCanonical, matching the canonical-aware resolution
+// the reap detection side uses, so the bare-keyed legacy descriptor is found.
+func TestReconcileIPC_R8_BareKeyDescriptorDriftResolvesViaLookupCanonical(t *testing.T) {
+	// Legacy bare-key descriptor: TaskName WITHOUT the leading backslash, keyed in the
+	// cache exactly as IntentCache.Refresh stores a hand-written intent row (by raw key).
+	bare := api.SupervisorDaemon{
+		TaskName: "mcp-local-hub-lsp-deadbeef-go", // no leading "\"
+		Server:   "mcp-language-server",
+		Daemon:   "lsp-deadbeef-go",
+		Command:  "mcphub",
+		Args:     []string{"daemon", "workspace-proxy"},
+	}
+	canonical := canonicalSupervisorTaskName(bare.TaskName)
+
+	fx := newReconcileTestFixture(t, &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{bare}})
+
+	// Precondition: a STRICT Lookup of the canonical name MISSES the bare-keyed
+	// descriptor (the exact pre-fix gap), but LookupCanonical resolves it.
+	if _, ok := fx.ctrl.intentCache.Lookup(canonical); ok {
+		t.Fatalf("precondition: a strict canonical Lookup of a bare-keyed legacy descriptor should MISS (the pre-fix drift-resolution gap)")
+	}
+	if _, ok := fx.ctrl.intentCache.LookupCanonical(canonical); !ok {
+		t.Fatalf("precondition: LookupCanonical must resolve a bare-keyed legacy descriptor by the canonical name")
+	}
+
+	// The drift caller passes the CANONICAL taskName (canonicalTaskNameForReconcile).
+	// Site-4 fix: lookupControllerCachedDescriptor must resolve the bare-keyed descriptor
+	// via LookupCanonical so classifyDriftAction can compare it against the freshly-read
+	// on-disk descriptor and detect a same-task-name rewrite.
+	got := lookupControllerCachedDescriptor(fx.deps, canonical)
+	if got == nil {
+		t.Fatalf("site 4: lookupControllerCachedDescriptor(canonical) must resolve a bare-keyed legacy descriptor (pre-fix strict Lookup returned nil → drift undetected → stale child keeps the old port/command)")
+	}
+	if got.TaskName != bare.TaskName {
+		t.Fatalf("site 4: resolved descriptor must be the bare-keyed legacy row; got TaskName=%q want %q", got.TaskName, bare.TaskName)
+	}
+}

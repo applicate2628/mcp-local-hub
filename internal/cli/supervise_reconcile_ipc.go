@@ -919,7 +919,14 @@ func lookupControllerCachedDescriptor(deps ipcDispatchDeps, taskName string) *ap
 	if ctrl == nil || ctrl.intentCache == nil {
 		return nil
 	}
-	d, _ := ctrl.intentCache.Lookup(taskName)
+	// pr302 r8 single-key-space invariant (review finding 4): the drift caller passes the
+	// CANONICAL taskName (canonicalTaskNameForReconcile), but IntentCache.daemonByTask is
+	// keyed by the RAW on-disk d.TaskName — a LEGACY / hand-written intent row stores the
+	// descriptor under its BARE TaskName, so a strict Lookup(canonical) MISSES it and the
+	// descriptor-drift restart would see no cached descriptor (no rewrite detected → the
+	// stale child keeps serving the old port/command). LookupCanonical probes both key
+	// forms, matching the canonical-aware resolution the reap detection side uses.
+	d, _ := ctrl.intentCache.LookupCanonical(taskName)
 	return d
 }
 
@@ -975,6 +982,13 @@ func applyReconcileDrift(
 	if ctrl == nil {
 		return 0
 	}
+	// (#303) Capture the OLD (pre-refresh) descriptor each StRunning command-drift
+	// restart will terminate against, BEFORE the cache refresh below rewrites the
+	// controller cache to the NEW descriptor. The eventual respawn uses the new
+	// descriptor; the terminate must still prove+kill the stale child against its
+	// old command identity, so the old descriptor rides in the EvManualRestart body.
+	// lookupControllerCachedDescriptor is canonical-aware (#302), so a legacy
+	// bare-key drift row is still resolved here.
 	manualRestartTerminateDescriptors := map[string]*api.SupervisorDaemon{}
 	for _, entry := range drift {
 		if entry.Action != reconcileActionPostEvManualRestart {
@@ -985,10 +999,33 @@ func applyReconcileDrift(
 			manualRestartTerminateDescriptors[entry.TaskName] = &copy
 		}
 	}
+	// pr302 r4 root fix: route BOTH cache swaps through the single on-loop
+	// snapshot-application event. handleReapScan swaps both caches atomically on
+	// the loop (shadow-before-swap). The separate off-loop daemonIntent.Refresh is
+	// GONE. The evReapScan is posted BEFORE the drift EvIntentUpdate/EvManualRestart
+	// events below, so by FIFO the cache swap is processed first and the SM-driven
+	// respawn launches with the NEW descriptor (preserving the post-EvManualRestart
+	// "cache already holds the rewritten descriptor" invariant).
+	//
+	// pr302 r6 finding 1: use the SYNCHRONOUS variant. The r5 path used the ASYNC
+	// refreshSupervisorIntent, which POSTED evReapScan and returned BEFORE the loop
+	// ran daemonIntent.Refresh — so this handler's synchronous read of
+	// daemonIntent.Lookup (the reconcile-apply orphaned-LSP tests, and a real
+	// back-to-back `mcphub status`/reconcile) observed the stale default-running
+	// cache. refreshSupervisorIntentSync posts the SAME on-loop evReapScan but
+	// BLOCKS (off-loop, with a ctx + timeout guard) until the swap is applied, so
+	// the cache refresh is OBSERVABLE before applyReconcileDrift returns. The swap
+	// still runs ON the loop (no off-loop race with handleLoopEvent), and FIFO still
+	// keeps the scan ahead of the drift events posted below. A nil updatedIntent
+	// makes it a no-op, preserving the prior caches; daemonIntentCacheRefresh==nil
+	// means "no fresh stops source" and the stops cache is preserved.
 	if updatedIntent != nil {
-		ctrl.refreshSupervisorIntent(updatedIntent)
-	}
-	if daemonIntentCacheRefresh != nil {
+		ctrl.refreshSupervisorIntentSync(updatedIntent, daemonIntentCacheRefresh)
+	} else if daemonIntentCacheRefresh != nil {
+		// Descriptor source physically absent but a fresh stops source was read:
+		// refreshSupervisorIntent's nil-intent guard would skip the stops swap, so
+		// apply the stops refresh directly here (no descriptor change → no reap
+		// scan needed; this is a pure stops update with no orphan-drop exposure).
 		ctrl.daemonIntent.Refresh(daemonIntentCacheRefresh)
 	}
 	if ctrl.eventLoop == nil {
