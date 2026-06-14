@@ -5,6 +5,13 @@
   --success: #1a7f37;
   --danger: #cf222e;
   --sidebar-bg: #f6f8fa;
+  /* Muted/secondary text. Promoted from a scattered inline literal to a
+     real token so the dozens of `var(--text-muted, #656d76)` reads across
+     the screens resolve to ONE owner. Value passes WCAG AA (4.5:1) for
+     small text on --bg: #5a636b = 6.12:1 vs white (the old #656d76 fallback
+     was 5.25:1 — still AA, but #5a636b adds headroom and replaces the
+     genuinely-failing #888/#666 inline muted shades that aliased here). */
+  --text-muted: #5a636b;
   /* Link colors: GitHub Primer light. WCAG AA (4.5:1) against --bg. */
   --link: #0969da;
   --link-hover: #0550ae;
@@ -17,6 +24,9 @@
   --success: #3fb950;
   --danger: #f85149;
   --sidebar-bg: #161b22;
+  /* Dark-theme muted: 7.45:1 vs --bg #0d1117 (AA pass). Mirrors the A4-a
+     --muted-color dark value so both token families agree. */
+  --text-muted: #9ca3af;
   /* Link colors: GitHub Primer dark. WCAG AA against --bg=#0d1117.
      Default browser blue (#0000EE) was the unreadable bug — reported
      against the Servers screen where every server name is an <a>. */
@@ -126,7 +136,7 @@ main { padding: var(--screen-padding); overflow: auto; }
 .servers-matrix .state-cell.state-down { color: var(--danger); }
 
 .card-actions { margin-top: var(--gap-sm); display: flex; gap: var(--gap-xs); }
-.card-actions button { flex: 1; padding: 6px; border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
+.card-actions button { flex: 1; padding: var(--button-padding-y) var(--button-padding-x); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
 .card-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .card-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 
@@ -183,11 +193,11 @@ main { padding: var(--screen-padding); overflow: auto; }
 .screen.add-server .accordion {
   border: 1px solid var(--border);
   border-radius: 6px;
-  margin-bottom: 8px;
+  margin-bottom: var(--gap-xs);
 }
 .screen.add-server .accordion-header {
   width: 100%;
-  padding: 10px 12px;
+  padding: var(--cell-padding-y) var(--cell-padding-x);
   background: var(--sidebar-bg);
   border: none;
   cursor: pointer;
@@ -203,7 +213,7 @@ main { padding: var(--screen-padding); overflow: auto; }
   text-align: center;
 }
 .screen.add-server .accordion-body {
-  padding: 10px 12px;
+  padding: var(--cell-padding-y) var(--cell-padding-x);
   border-top: 1px solid var(--border);
 }
 .screen.add-server .accordion .placeholder {
@@ -215,7 +225,7 @@ main { padding: var(--screen-padding); overflow: auto; }
   display: flex;
   gap: var(--gap-xs);
   align-items: center;
-  margin: 6px 0;
+  margin: var(--gap-xs) 0;
 }
 .screen.add-server .form-row label {
   min-width: 120px;
@@ -235,7 +245,7 @@ main { padding: var(--screen-padding); overflow: auto; }
 .screen.add-server .inline-error {
   color: var(--danger);
   font-size: 12px;
-  margin-left: 8px;
+  margin-left: var(--gap-xs);
 }
 .screen.add-server .toolbar {
   display: flex;
@@ -932,6 +942,7 @@ menu button[disabled] {
     --bg: #0d1117;
     --text: #c9d1d9;
     --border: #30363d;
+    --text-muted: #9ca3af;
   }
 }
 :root[data-density="compact"] {
@@ -1217,18 +1228,24 @@ menu button[disabled] {
 .workspace-selector-label { display: inline-flex; align-items: center; gap: 0.5rem; }
 .workspace-selector-label select { padding: 0.125rem 0.25rem; }
 .workspace-selector-path {
-  font-family: ui-monospace, monospace; color: #555; font-size: 0.875rem;
+  font-family: ui-monospace, monospace; color: var(--text-muted); font-size: 0.875rem;
   overflow: hidden; text-overflow: ellipsis; max-width: 50ch; white-space: nowrap;
 }
-.workspace-selector-empty-text { color: #888; font-style: italic; font-size: 0.875rem; }
+.workspace-selector-empty-text { color: var(--text-muted); font-style: italic; font-size: 0.875rem; }
 
-.lsp-matrix-section { border-top: 1px solid #ddd; padding-top: 1rem; }
+.lsp-matrix-section { border-top: 1px solid var(--border); padding-top: 1rem; margin-top: var(--section-gap); }
 .lsp-matrix-section h2 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+/* Intro copy + per-row workspace/ambiguity hints: moved off inline
+   styles onto classes so they pick up the density tokens and the
+   AA-compliant --text-muted / --warning-color values. */
+.lsp-matrix-intro { color: var(--text-muted); margin-bottom: var(--gap-xs); }
 .lsp-matrix { table-layout: auto; }
 .lsp-matrix th, .lsp-matrix td { padding: 0.25rem 0.5rem; }
 .lsp-row-open { background: #f5fafe; }
-.lsp-row-workspace { color: #555; font-size: 0.875rem; }
-.lsp-row-unregistered { color: #888; font-size: 0.875rem; }
+.lsp-row-workspace { color: var(--text-muted); font-size: 0.9em; margin-left: 6px; }
+.lsp-row-unregistered { color: var(--text-muted); font-size: 0.875rem; }
+.lsp-row-ambiguous { color: var(--warning-color); font-size: 0.85em; margin-left: 6px; }
+.lsp-row-ambiguous-hint { color: var(--warning-color); font-size: 0.9em; }
 .lsp-cell { vertical-align: middle; }
 .lsp-cell-empty { color: #aaa; }
 .lsp-chip {
@@ -1303,4 +1320,94 @@ menu button[disabled] {
   .daemon-env-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ============================================================
+ * §3.1 GUI polish — keyboard focus a11y + light micro-interactions
+ * Purely visual: no layout/logic change. Focus uses :focus-visible
+ * (keyboard-only) so mouse clicks don't draw an outline; transitions
+ * are short (.1–.15s) and limited to color/opacity so nothing janks.
+ * ============================================================ */
+
+/* --- Keyboard focus ring (WCAG 2.4.7 Focus Visible) ---
+ * Single consistent ring across every interactive surface. --focus
+ * matches the one pre-existing focus rule (.capability-section-header);
+ * #0969da = --link, 5.19:1 on white. :focus-visible keeps it
+ * keyboard-only so pointer interaction stays clean. */
+nav a:focus-visible,
+.matrix-col-init-btn:focus-visible,
+.servers-matrix a:focus-visible,
+.servers-matrix button:focus-visible,
+.servers-matrix input[type="checkbox"]:focus-visible,
+.dashboard-bulk-actions button:focus-visible,
+.card-actions button:focus-visible,
+.recovery-toggle:focus-visible,
+.dashboard-recovery button:focus-visible,
+.screen.add-server .accordion-header:focus-visible,
+.screen.add-server .toolbar button:focus-visible,
+.screen.add-server .form-row input:focus-visible,
+.screen.add-server .form-row select:focus-visible,
+.logs-filter:focus-visible,
+#logs-controls button:focus-visible,
+#logs-controls select:focus-visible,
+.screen.migration button:focus-visible,
+.workspace-selector select:focus-visible,
+.lsp-matrix button:focus-visible,
+.env-drawer button:focus-visible,
+.env-drawer textarea:focus-visible,
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus, #0969da);
+  outline-offset: 2px;
+}
+/* Checkbox cells sit flush in matrix borders — pull the ring inward a
+ * touch so it isn't clipped by the surrounding td border. */
+.servers-matrix input[type="checkbox"]:focus-visible,
+.lsp-matrix input[type="checkbox"]:focus-visible {
+  outline-offset: 1px;
+}
+
+/* --- Light micro-interactions ---
+ * Short color/opacity transitions on the interactive surfaces. Kept off
+ * the focus outline so the ring snaps in instantly for accessibility. */
+nav a,
+.dashboard-bulk-actions button,
+.card-actions button,
+.recovery-toggle,
+.dashboard-recovery button,
+.matrix-col-init-btn,
+.screen.add-server .accordion-header,
+.screen.add-server .toolbar button,
+.screen.migration button,
+#logs-controls button,
+.lsp-matrix button,
+.env-drawer button {
+  transition: background-color .12s ease, border-color .12s ease,
+              color .12s ease, opacity .12s ease;
+}
+/* Interactive table rows / accordion headers get a subtle hover cue
+ * where none existed before. */
+.servers-matrix tbody tr,
+.lsp-matrix tbody tr {
+  transition: background-color .12s ease;
+}
+.servers-matrix tbody tr:hover,
+.lsp-matrix tbody tr:hover {
+  background: var(--sidebar-bg);
+}
+.screen.add-server .accordion-header:hover {
+  background: var(--border);
+}
+/* Disabled controls ramp opacity instead of snapping, so the
+ * busy/disabled state reads as a transition rather than a flicker. */
+.dashboard-bulk-actions button:disabled,
+.card-actions button:disabled,
+.screen.add-server .toolbar button[disabled],
+.screen.migration button[disabled],
+.matrix-col-init-btn:disabled {
+  transition: opacity .12s ease;
 }

@@ -663,7 +663,7 @@ function RecoveryActions(props: {
     <div
       class={`dashboard-recovery dashboard-recovery-${props.context}`}
       data-testid="dashboard-recovery"
-      style="margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap"
+      style="margin: var(--gap-xs) 0; display: flex; gap: var(--gap-xs); align-items: center; flex-wrap: wrap"
     >
       <button
         type="button"
@@ -709,7 +709,7 @@ function RecoveryActions(props: {
     <div
       class="dashboard-recovery-summary"
       data-testid="dashboard-recovery-summary"
-      style="margin: 4px 0"
+      style="margin: var(--gap-xs) 0"
     >
       {/* Anchor element (plain <a>, no role override) so existing
           Dashboard tests that walk document.querySelectorAll("button")
@@ -727,7 +727,7 @@ function RecoveryActions(props: {
           ev.preventDefault();
           setExpanded((v) => !v);
         }}
-        style="cursor: pointer; color: #555; font-size: 0.9em; text-decoration: underline"
+        style="cursor: pointer; color: var(--text-muted); font-size: 0.9em; text-decoration: underline"
       >
         {expanded ? "▼ Ops actions" : "▶ Ops actions (cleanup, restart supervisor)"}
       </a>
