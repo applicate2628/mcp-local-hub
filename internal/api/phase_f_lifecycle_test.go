@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -422,6 +423,73 @@ func TestInstallPlanCore_GlobalFreshInstall_NudgesSupervisorReconcile(t *testing
 	}
 	if !gotApply.Load() {
 		t.Error("reconcile nudge dialed apply=false, want apply=true (a dry-run reconcile would not spawn the descriptor)")
+	}
+}
+
+// TestInstallPlanCore_GlobalFreshInstall_EmitsDaemonInstalledEvents asserts the
+// best-effort daemon-installed audit row: after a global install commits the
+// supervisor-intent descriptor rows, installPlanCore emits one
+// daemon-installed event per committed row to supervisor-events.log, keyed by
+// task_name and carrying {server,daemon,command,port,workspace} in the body.
+// This gives an operator (and a future GUI lifecycle consumer) a durable record
+// that a daemon was installed, parallel to the lifecycle-side
+// daemon-spawned/daemon-exited/daemon-quarantined rows.
+//
+// Negative-control: drop the emitDaemonInstalledEvents call in installPlanCore
+// and supervisor-events.log carries no daemon-installed row → this test fails.
+func TestInstallPlanCore_GlobalFreshInstall_EmitsDaemonInstalledEvents(t *testing.T) {
+	stateDir := phaseFStateDir(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+	installFakeAutostartBackend(t, &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped})
+
+	// The reconcile nudge is irrelevant to this assertion; stub it so the
+	// install completes without dialing a real supervisor.
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}))
+
+	m := globalTwoDaemonManifest() // server "demo", daemons alpha:9211 + beta:9212
+	plan, err := BuildPlan(m, "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore(global fresh install): %v", err)
+	}
+
+	logRaw, err := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read supervisor-events.log: %v", err)
+	}
+	logStr := string(logRaw)
+
+	if !strings.Contains(logStr, `"event":"daemon-installed"`) {
+		t.Fatalf("no daemon-installed event in supervisor-events.log:\n%s", logStr)
+	}
+	// Both committed descriptor rows must be announced, keyed by canonical
+	// leading-backslash task name (JSON-escaped backslashes).
+	for _, taskName := range []string{
+		`"task_name":"\\mcp-local-hub-demo-alpha"`,
+		`"task_name":"\\mcp-local-hub-demo-beta"`,
+	} {
+		if !strings.Contains(logStr, taskName) {
+			t.Errorf("daemon-installed event missing %s:\n%s", taskName, logStr)
+		}
+	}
+	// Body fields: server, daemon, port, and the workspace key (empty for a
+	// global daemon — the future GUI consumer keys teardown by it).
+	for _, frag := range []string{
+		`"server":"demo"`,
+		`"daemon":"alpha"`,
+		`"port":9211`,
+		`"workspace":""`,
+	} {
+		if !strings.Contains(logStr, frag) {
+			t.Errorf("daemon-installed body missing %s:\n%s", frag, logStr)
+		}
 	}
 }
 

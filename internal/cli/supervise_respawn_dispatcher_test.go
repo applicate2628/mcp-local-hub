@@ -202,9 +202,10 @@ func TestSupervisorController_HandleEvChildExit_TransitionsToQuarantinedAfterThr
 	}
 
 	descriptor := api.SupervisorDaemon{
-		TaskName: `\mcp-local-hub-test-default`,
-		Server:   "test",
-		Daemon:   "default",
+		TaskName:  `\mcp-local-hub-test-default`,
+		Server:    "test",
+		Daemon:    "default",
+		Workspace: `C:\ws\quarantine-target`,
 	}
 	intent := &api.SupervisorIntentFile{
 		Daemons: []api.SupervisorDaemon{descriptor},
@@ -255,6 +256,13 @@ func TestSupervisorController_HandleEvChildExit_TransitionsToQuarantinedAfterThr
 	}
 	if !strings.Contains(logStr, `"failures_in_30m":10`) {
 		t.Errorf("quarantine event missing correct failure count:\n%s", logStr)
+	}
+	// The daemon-quarantined Body must carry the descriptor's workspace path
+	// so a future GUI serena-session-cleanup consumer can key teardown by it
+	// (handleBackoffWaiting emit site). JSON-escaped backslashes in the
+	// canonical Windows path.
+	if !strings.Contains(logStr, `"workspace":"C:\\ws\\quarantine-target"`) {
+		t.Errorf("quarantine event missing workspace field:\n%s", logStr)
 	}
 
 	// Spawn must NOT have been invoked on the quarantine path -
