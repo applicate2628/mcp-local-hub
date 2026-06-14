@@ -9,8 +9,8 @@ import {
   type WorkspacePair,
 } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
-import { collectServers } from "../lib/routing";
-import { collectLspRows, type LspRow, LSP_KNOWN_CLIENTS, LSP_MANIFEST_SERVER } from "../lib/lsp-rows";
+import { collectServers, visibleClients } from "../lib/routing";
+import { collectLspRows, type LspRow, LSP_MANIFEST_SERVER } from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
 import { EnvDrawer } from "../components/EnvDrawer";
@@ -24,15 +24,11 @@ import type {
   Routing,
 } from "../types";
 
-const CLIENTS = [
-  "claude-code",
-  "codex-cli",
-  "cursor",
-  "vscode",
-  "gemini-cli",
-  "qwen-cli",
-  "antigravity",
-] as const;
+// The rendered client columns are no longer a fixed constant: they are
+// computed per-scan by visibleClients() so the seven core clients always
+// show while the eight wave-2 opt-in clients (PR #306) appear only when
+// detected on the host (detection-gated, see routing.ts::visibleClients).
+// The computed list is threaded through ServerRowView/CellView as a prop.
 
 // EMPTY_CLIENT_CONFIG_PRESENCE is a stable reference used when a scan
 // response omits client_config_presence (e.g. /api/scan mocks in
@@ -574,6 +570,11 @@ export function ServersScreen() {
   // entries fold into the same row and the matrix surfaces the union
   // (with coexistence rendering as dual badges per cell).
   const lspRows = collectLspRows(scanForLsp, workspaceEntries, selectedWorkspaceKey);
+  // Detection-gated client columns: the seven core clients always, plus any
+  // wave-2 opt-in client detected on this host. Derived from the live scan
+  // so an uninstalled niche client adds no column to the (otherwise wide)
+  // 15-client matrix.
+  const clientColumns = visibleClients(scanForLsp);
   const selectedWorkspace =
     selectedWorkspaceKey !== ALL_WORKSPACES_KEY
       ? workspaces.find((w) => w.workspace_key === selectedWorkspaceKey)
@@ -664,7 +665,7 @@ export function ServersScreen() {
         <thead>
           <tr>
             <th>Server</th>
-            {CLIENTS.map((c) => {
+            {clientColumns.map((c) => {
               const presence = clientConfigPresence[c];
               const canInit = presence === "missing-init-possible";
               const busy = initBusy[c] === true;
@@ -697,6 +698,7 @@ export function ServersScreen() {
             <ServerRowView
               key={server.name}
               server={server}
+              clients={clientColumns}
               status={statusByServer[server.name]}
               outcomes={outcomes.get(server.name)}
               applyGen={applyGen}
@@ -708,6 +710,7 @@ export function ServersScreen() {
       </table>
       <LspMatrix
         rows={lspRows}
+        clients={clientColumns}
         openDrawerFor={openDrawerFor}
         onOpenDrawer={(row) => setOpenDrawerFor(row)}
         targetWorkspacePath={lspRegisterWorkspacePath}
@@ -769,13 +772,14 @@ function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
 
 function ServerRowView(props: {
   server: ServerRow;
+  clients: readonly string[];
   status?: { state: string; port: number | null };
   outcomes?: Map<string, Outcome>;
   applyGen: number;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   applying: boolean;
 }) {
-  const { server, status, outcomes, onToggle, applying } = props;
+  const { server, clients, status, outcomes, onToggle, applying } = props;
   return (
     <tr>
       <td>
@@ -786,7 +790,7 @@ function ServerRowView(props: {
           {server.name}
         </a>
       </td>
-      {CLIENTS.map((client) => (
+      {clients.map((client) => (
         <CellView
           key={`${client}-${props.applyGen}`}
           server={server}
@@ -952,6 +956,7 @@ function CellView(props: {
 // rows (no workspace entry) render a "(register first)" hint instead.
 function LspMatrix(props: {
   rows: LspRow[];
+  clients: readonly string[];
   openDrawerFor: LspRow | null;
   onOpenDrawer: (row: LspRow) => void;
   targetWorkspacePath: string;
@@ -961,6 +966,7 @@ function LspMatrix(props: {
 }) {
   const {
     rows,
+    clients,
     openDrawerFor,
     onOpenDrawer,
     targetWorkspacePath,
@@ -987,7 +993,7 @@ function LspMatrix(props: {
         <thead>
           <tr>
             <th>Language</th>
-            {LSP_KNOWN_CLIENTS.map((c) => (
+            {clients.map((c) => (
               <th key={c}>{c}</th>
             ))}
             <th>Env</th>
@@ -1024,7 +1030,7 @@ function LspMatrix(props: {
                     </span>
                   )}
                 </td>
-                {LSP_KNOWN_CLIENTS.map((client) => (
+                {clients.map((client) => (
                   <LspCellView
                     key={client}
                     language={row.language}
