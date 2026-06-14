@@ -169,25 +169,29 @@ func setReconcileTerminateFnForTest(fn TerminateFunc) func() {
 	return func() { reconcileTerminateFn = prev }
 }
 
-// stateDirFunc returns the supervisor state directory.
+// stateDirFunc returns the supervisor state directory. It is a package var so
+// the internal/cli TestMain can reassign it to an env-reading TEST variant
+// (mirrors api.EnableSupervisorIPCTestPipeIsolation).
 //
-// Production lookup: `api.DaemonStateDir()` — the same Known-Folder /
-// XDG-resolved root every other state-bearing component uses (plan
-// §15-16). Tests can set `MCPHUB_STATE_DIR_OVERRIDE` to bypass the
-// platform resolver and direct supervisor state into `t.TempDir()`.
+// Production (productionStateDir) resolves ONLY via `api.DaemonStateDir()` — the
+// same Known-Folder / XDG-resolved root every other state-bearing component uses
+// (plan §15-16). It deliberately does NOT read `MCPHUB_STATE_DIR_OVERRIDE`: that
+// env is a TEST-ONLY seam, not an operator feature, so a release `mcphub
+// supervise` / `migrate serena` / `overlay *` must never be redirected by a
+// stray env left in a shell/profile (bug
+// 2026-06-03-cli-supervise-statedir-override-ungated). Pre-fix the env read
+// lived here ungated, so a shipped binary honored it at runtime.
 //
-// The env-var override lives at the CLI layer instead of inside
-// `api.DaemonStateDir()` because production builds compile WITHOUT
-// the `test_state_path_env` tag (plan §16 v9: env fallback is
-// excluded from shipped binaries via build-tag gating). Putting the
-// supervise-side test seam here keeps the production `api` surface
-// free of test-only env-var resolution while still letting fast
-// integration tests redirect `<state-dir>` without spinning up a
-// real Known-Folder probe.
-var stateDirFunc = func() (string, error) {
-	if override := os.Getenv("MCPHUB_STATE_DIR_OVERRIDE"); override != "" {
-		return override, nil
-	}
+// Tests get the env read back via the TestMain reassignment, so fast
+// integration tests still point `<state-dir>` at `t.TempDir()` via
+// MCPHUB_STATE_DIR_OVERRIDE without a real Known-Folder probe. The env-read
+// lives only in the _test.go reassignment and is therefore absent from the
+// shipped binary (a build tag was rejected: it would drop the seam from the
+// default untagged `go test ./...` CI run — the regression #264 fixed for the
+// IPC pipe).
+var stateDirFunc = productionStateDir
+
+func productionStateDir() (string, error) {
 	return api.DaemonStateDir()
 }
 
