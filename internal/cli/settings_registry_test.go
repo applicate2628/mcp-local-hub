@@ -284,6 +284,20 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 func TestMain(m *testing.M) {
 	api.EnableSupervisorIPCTestPipeIsolation()
 
+	// stateDirFunc ships env-free in production (productionStateDir →
+	// api.DaemonStateDir, NOT reading MCPHUB_STATE_DIR_OVERRIDE — bug
+	// 2026-06-03-cli-supervise-statedir-override-ungated). Restore the env read
+	// for the whole test package so per-test MCPHUB_STATE_DIR_OVERRIDE redirects
+	// still reach supervisor state. The env-read exists ONLY here (a _test.go),
+	// so it is absent from the production binary (mirrors
+	// EnableSupervisorIPCTestPipeIsolation).
+	stateDirFunc = func() (string, error) {
+		if override := os.Getenv("MCPHUB_STATE_DIR_OVERRIDE"); override != "" {
+			return override, nil
+		}
+		return api.DaemonStateDir()
+	}
+
 	tmp, err := os.MkdirTemp("", "mcphub-cli-test-state-*")
 	if err != nil {
 		panic("internal/cli TestMain: create global test-state temp dir: " + err.Error())
