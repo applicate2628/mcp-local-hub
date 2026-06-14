@@ -72,7 +72,7 @@ func NewKiloCode() (Client, error) {
 		// `type:"streamable-http"` discriminator the base does not write.
 		urlField: "url",
 	}
-	return &kiloCodeClient{jsonMCPClient: base}, nil
+	return newLockingClient(&kiloCodeClient{jsonMCPClient: base}), nil
 }
 
 // kiloCodeMCPType is Kilo Code's remote-HTTP transport discriminator.

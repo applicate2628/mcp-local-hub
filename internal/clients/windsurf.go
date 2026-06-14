@@ -52,7 +52,7 @@ func NewWindsurf() (Client, error) {
 		// run serverUrl-aware detection.
 		urlField: windsurfURLField,
 	}
-	return &windsurfClient{jsonMCPClient: base}, nil
+	return newLockingClient(&windsurfClient{jsonMCPClient: base}), nil
 }
 
 // windsurfURLField is Windsurf's remote-HTTP endpoint key. Single owner of the

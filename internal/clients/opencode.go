@@ -68,7 +68,7 @@ func NewOpenCode() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &openCodeClient{path: defaultOpenCodeConfigPath(home)}, nil
+	return newLockingClient(&openCodeClient{path: defaultOpenCodeConfigPath(home)}), nil
 }
 
 // defaultOpenCodeConfigPath returns the global OpenCode config path.

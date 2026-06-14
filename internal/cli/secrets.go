@@ -83,7 +83,12 @@ func newSecretsInitCmd() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
 				return fmt.Errorf("create secret dir: %w", err)
 			}
-			if err := secrets.InitVault(keyPath, vaultPath); err != nil {
+			// Flock so a concurrent GUI/api SecretsInit or set cannot
+			// interleave with this fresh-vault create (cross-process race;
+			// the api layer holds the same flock via secrets.WithVaultLock).
+			if err := secrets.WithVaultLock(vaultPath, func() error {
+				return secrets.InitVault(keyPath, vaultPath)
+			}); err != nil {
 				return err
 			}
 			cmd.Printf("✓ Wrote %s (private, never transfer via git)\n", keyPath)
@@ -130,11 +135,17 @@ environment after argument parsing.`,
 				}
 				value = v
 			}
-			v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
-			if err != nil {
-				return err
-			}
-			if err := v.Set(key, value); err != nil {
+			// Flock the OpenVault → Set(save) RMW (value was already obtained
+			// from the prompt/stdin above, so the locked section is tight and
+			// non-interactive). The api layer holds the same flock, so a GUI
+			// write and this CLI write cannot lose each other's update.
+			if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
+				v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+				if err != nil {
+					return err
+				}
+				return v.Set(key, value)
+			}); err != nil {
 				return err
 			}
 			cmd.Printf("✓ Stored %s\n", key)
@@ -203,11 +214,15 @@ func newSecretsDeleteCmd() *cobra.Command {
 		Short: "Remove a secret",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
-			if err != nil {
-				return err
-			}
-			if err := v.Delete(args[0]); err != nil {
+			// Flock the OpenVault → Delete(save) RMW (cross-process: the api
+			// layer holds the same flock via secrets.WithVaultLock).
+			if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
+				v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+				if err != nil {
+					return err
+				}
+				return v.Delete(args[0])
+			}); err != nil {
 				return err
 			}
 			cmd.Printf("✓ Deleted %s\n", args[0])
@@ -292,7 +307,15 @@ func newSecretsEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := v.ImportYAML(updated); err != nil {
+			// Flock ONLY the ImportYAML write — NOT the interactive editor
+			// run above — so a concurrent vault write does not block for the
+			// whole edit session. ImportYAML is a wholesale replace from the
+			// editor's output, so re-reading under lock is not needed (the
+			// operator's edit is authoritative). The api layer holds the same
+			// flock via secrets.WithVaultLock.
+			if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
+				return v.ImportYAML(updated)
+			}); err != nil {
 				return err
 			}
 			cmd.Println("✓ Re-encrypted secrets.age")
@@ -332,7 +355,13 @@ func newSecretsMigrateCmd() *cobra.Command {
 				line, _ := in.ReadString('\n')
 				line = strings.TrimSpace(strings.ToLower(line))
 				if line == "y" || line == "yes" {
-					if err := v.Set(cand.Key, cand.Value); err != nil {
+					// Flock each individual Set write (NOT the interactive
+					// y/N loop) so a concurrent vault write is not blocked
+					// across the prompts. The api layer holds the same flock
+					// via secrets.WithVaultLock.
+					if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
+						return v.Set(cand.Key, cand.Value)
+					}); err != nil {
 						return err
 					}
 					imported++

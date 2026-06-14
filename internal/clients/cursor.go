@@ -16,7 +16,7 @@ func NewCursor() (Client, error) {
 		clientName: "cursor",
 		urlField:   "url",
 	}
-	return &cursorClient{jsonMCPClient: base}, nil
+	return newLockingClient(&cursorClient{jsonMCPClient: base}), nil
 }
 
 type cursorClient struct {

@@ -70,7 +70,7 @@ func NewCline() (Client, error) {
 		// the restore guard) all key off this and need no override.
 		urlField: "url",
 	}
-	return &clineClient{jsonMCPClient: base}, nil
+	return newLockingClient(&clineClient{jsonMCPClient: base}), nil
 }
 
 // defaultClineConfigPath returns the cline_mcp_settings.json path for the

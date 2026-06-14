@@ -37,7 +37,7 @@ func NewHermes() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &hermes{path: filepath.Join(home, ".hermes", "config.yaml")}, nil
+	return newLockingClient(&hermes{path: filepath.Join(home, ".hermes", "config.yaml")}), nil
 }
 
 type hermes struct {

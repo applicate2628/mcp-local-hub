@@ -47,7 +47,7 @@ func NewKiro() (Client, error) {
 		// AddEntry/GetEntry override is needed.
 		urlField: "url",
 	}
-	return &kiroClient{jsonMCPClient: base}, nil
+	return newLockingClient(&kiroClient{jsonMCPClient: base}), nil
 }
 
 // kiroClient overrides only the filesystem-bootstrap methods (Exists,
