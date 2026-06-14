@@ -158,6 +158,41 @@ func (a *API) ManifestList() ([]string, error) {
 	return listManifestNamesEmbedFirst()
 }
 
+// CatalogList returns the catalog projection ({name, description, kind})
+// of every available server, sorted by name. It reuses the same
+// embed-first name set as ManifestList, then loads + projects each
+// manifest's display scalars via config.ParseCatalogFields.
+//
+// A manifest that fails to load or project is SKIPPED (logged at the
+// caller's discretion via the returned-from-ManifestList name still
+// appearing in ManifestList but not here) rather than failing the whole
+// catalog — a single malformed dev-added manifest must not blank the
+// store. The projection deliberately does NOT expand env / resolve
+// secrets / run Validate(), so it succeeds for shipped manifests whose
+// env (memory's ${HOME}) or secrets (wolfram) are unset on this host.
+func (a *API) CatalogList() ([]config.CatalogFields, error) {
+	names, err := listManifestNamesEmbedFirst()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]config.CatalogFields, 0, len(names))
+	for _, name := range names {
+		data, err := loadManifestYAMLEmbedFirst(name)
+		if err != nil {
+			// Skip an unreadable manifest; it still appears in the
+			// name-only ManifestList, so the catalog is a best-effort
+			// enrichment, never the source of truth for availability.
+			continue
+		}
+		fields, err := config.ParseCatalogFields(bytes.NewReader(data))
+		if err != nil {
+			continue
+		}
+		out = append(out, fields)
+	}
+	return out, nil
+}
+
 // ManifestListIn is the tempdir-capable form of ManifestList.
 func (a *API) ManifestListIn(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)

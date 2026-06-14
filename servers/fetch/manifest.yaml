@@ -7,6 +7,7 @@
 # the manifest so it survives resets and `mcphub install --server fetch` can always
 # re-materialize it.
 name: fetch
+description: "Fetch a web page and convert it to clean markdown for the model to read."
 kind: global
 command: uvx
 base_args:

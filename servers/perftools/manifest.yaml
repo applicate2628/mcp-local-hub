@@ -1,4 +1,5 @@
 name: perftools
+description: "Performance profiling tools — capture and inspect CPU/memory profiles."
 kind: global
 transport: stdio-bridge
 command: mcphub

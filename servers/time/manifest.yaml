@@ -1,4 +1,5 @@
 name: time
+description: "Time and timezone utilities — current time, conversions, and timezone-aware calculations."
 kind: global
 transport: stdio-bridge
 command: npx

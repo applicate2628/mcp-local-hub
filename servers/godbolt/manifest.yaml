@@ -1,4 +1,5 @@
 name: godbolt
+description: "Compiler Explorer (godbolt) — compile snippets and inspect generated assembly across compilers."
 kind: global
 transport: stdio-bridge
 command: mcphub

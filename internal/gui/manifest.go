@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
 )
 
 // manifestCreator / manifestValidator are the pin-point subsets of api.API
@@ -43,10 +44,39 @@ type manifestDeleter interface {
 	ManifestDelete(name string) error
 }
 
+// catalogLister is the pin-point subset of api.API backing GET
+// /api/catalog (§10 v2a — Catalog descriptions). Same Server-local
+// interface idiom as the other manifest subsets so manifest_test.go can
+// swap a fake without the whole API surface. It returns the enriched
+// {name, description, kind} projection rather than names-only, so the
+// Catalog ("store") screen can render a one-line summary per server
+// WITHOUT mutating the names-only GET /api/manifests contract (which
+// keeps its existing consumers — daemon_env, cleanup — unchanged).
+type catalogLister interface {
+	CatalogList() ([]config.CatalogFields, error)
+}
+
 type manifestListResponse struct {
 	// Manifests is always a JSON array — never null — so the frontend
 	// can map over it without a null guard. An empty set is 200 [].
 	Manifests []string `json:"manifests"`
+}
+
+// catalogEntry mirrors config.CatalogFields on the wire ({name,
+// description, kind}). Defined here (rather than serializing
+// config.CatalogFields directly) so the GUI HTTP contract owns its own
+// JSON shape and stays stable if the config struct grows internal
+// fields.
+type catalogEntry struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+}
+
+type catalogListResponse struct {
+	// Catalog is always a JSON array — never null — so the frontend can
+	// map over it without a null guard. An empty set is 200 {"catalog":[]}.
+	Catalog []catalogEntry `json:"catalog"`
 }
 
 type manifestCreateRequest struct {
@@ -206,6 +236,34 @@ func registerManifestRoutes(s *Server) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(manifestListResponse{Manifests: names})
+	}))
+	// GET /api/catalog — enriched {name, description, kind} projection of
+	// every available server (§10 v2a — Catalog descriptions). This is a
+	// NEW route, intentionally separate from the names-only GET
+	// /api/manifests so existing consumers of that route are untouched;
+	// the Catalog ("store") screen consumes this one to render a one-line
+	// summary per server. Empty set is 200 {"catalog":[]} (no 404) for the
+	// same "no servers yet is normal" reason the manifests route gives.
+	s.mux.HandleFunc("/api/catalog", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		fields, err := s.catalogLister.CatalogList()
+		if err != nil {
+			// CatalogList can wrap an *os.PathError from the disk-union
+			// read; sanitize like the other manifest handlers.
+			log.Printf("/api/catalog: %v", err)
+			writeAPIError(w, errors.New("internal error listing catalog"), http.StatusInternalServerError, "CATALOG_LIST_FAILED")
+			return
+		}
+		entries := make([]catalogEntry, 0, len(fields))
+		for _, f := range fields {
+			entries = append(entries, catalogEntry{Name: f.Name, Description: f.Description, Kind: f.Kind})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(catalogListResponse{Catalog: entries})
 	}))
 	// DELETE /api/manifest/:name — remove the named manifest directory.
 	// Registered as the /api/manifest/ subtree; the exact-path handlers
