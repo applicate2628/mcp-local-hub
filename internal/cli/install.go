@@ -49,7 +49,8 @@ What install does:
   4. Writes a timestamped backup for each client config it touches
   5. Patches each client's config per the manifest's client_bindings list:
      default clients are Claude Code, Codex CLI, and Cursor; Gemini CLI,
-     Qwen CLI, VS Code, and Antigravity are opt-in via --clients or --all-clients
+     Qwen CLI, VS Code, Antigravity, Zed, Kiro, Windsurf, Cline, Kilo Code,
+     OpenCode, Hermes, and OpenClaw are opt-in via --clients or --all-clients
 
 Examples:
   mcphub install --server serena               # default clients: claude-code,codex-cli,cursor
