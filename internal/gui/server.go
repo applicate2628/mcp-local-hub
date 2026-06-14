@@ -253,6 +253,20 @@ func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) 
 	return api.NewAPI().ManifestEditWithHash(name, yaml, expectedHash)
 }
 
+// realManifestLister is the production adapter for GET /api/manifests.
+type realManifestLister struct{}
+
+func (realManifestLister) ManifestList() ([]string, error) {
+	return api.NewAPI().ManifestList()
+}
+
+// realManifestDeleter is the production adapter for DELETE /api/manifest/:name.
+type realManifestDeleter struct{}
+
+func (realManifestDeleter) ManifestDelete(name string) error {
+	return api.NewAPI().ManifestDelete(name)
+}
+
 // restarter is the narrow interface the /api/servers/:name/restart
 // handler needs. Per memo D9 (Codex R8 P1), it now returns the
 // per-task RestartResult slice (existing api.RestartResult{TaskName, Err}
@@ -449,7 +463,11 @@ type Server struct {
 	manifestValidator manifestValidator
 	manifestGetter    manifestGetter
 	manifestEditor    manifestEditor
+	manifestLister    manifestLister
+	manifestDeleter   manifestDeleter
 	installer         installer
+	uninstaller       uninstaller
+	installBulk       installBulkAPI
 	restart           restarter
 	stop              stopper
 	logs              logsProvider
@@ -630,7 +648,11 @@ func NewServer(cfg Config) *Server {
 	s.manifestValidator = realManifestValidator{}
 	s.manifestGetter = realManifestGetter{}
 	s.manifestEditor = realManifestEditor{}
+	s.manifestLister = realManifestLister{}
+	s.manifestDeleter = realManifestDeleter{}
 	s.installer = realInstaller{}
+	s.uninstaller = realUninstaller{}
+	s.installBulk = realInstallBulkAPI{}
 	s.restart = realRestarter{}
 	s.stop = realStopper{}
 	s.logs = realLogs{}

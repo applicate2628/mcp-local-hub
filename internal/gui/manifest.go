@@ -31,6 +31,24 @@ type manifestEditor interface {
 	ManifestEditWithHash(name, yaml, expectedHash string) (newHash string, err error)
 }
 
+// manifestLister / manifestDeleter are the pin-point subsets of api.API
+// backing GET /api/manifests and DELETE /api/manifest/:name. Same
+// Server-local-interface idiom as the create/validate/get/edit subsets
+// above so manifest_test.go can swap fakes without the whole API surface.
+type manifestLister interface {
+	ManifestList() ([]string, error)
+}
+
+type manifestDeleter interface {
+	ManifestDelete(name string) error
+}
+
+type manifestListResponse struct {
+	// Manifests is always a JSON array — never null — so the frontend
+	// can map over it without a null guard. An empty set is 200 [].
+	Manifests []string `json:"manifests"`
+}
+
 type manifestCreateRequest struct {
 	Name string `json:"name"`
 	YAML string `json:"yaml"`
@@ -165,5 +183,66 @@ func registerManifestRoutes(s *Server) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(manifestEditResponse{Hash: newHash})
+	}))
+	// GET /api/manifests — sorted list of available server names. Empty
+	// set is 200 [] (no 404): "no manifests yet" is a normal state the
+	// frontend renders as an empty grid, not an error.
+	s.mux.HandleFunc("/api/manifests", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		names, err := s.manifestLister.ManifestList()
+		if err != nil {
+			// ManifestList can wrap an *os.PathError from the disk-union
+			// read; sanitize like the other manifest handlers.
+			log.Printf("/api/manifests: %v", err)
+			writeAPIError(w, errors.New("internal error listing manifests"), http.StatusInternalServerError, "MANIFEST_LIST_FAILED")
+			return
+		}
+		if names == nil {
+			names = []string{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(manifestListResponse{Manifests: names})
+	}))
+	// DELETE /api/manifest/:name — remove the named manifest directory.
+	// Registered as the /api/manifest/ subtree; the exact-path handlers
+	// (/create, /validate, /get, /edit) are more specific and take
+	// precedence in net/http.ServeMux, so this only receives :name
+	// suffixes that are not one of those reserved words.
+	//
+	// This does NOT uninstall the server (api.ManifestDelete is
+	// teardown-of-the-manifest-only — DELETE /api/install/:server is the
+	// uninstall path); the frontend orchestrates uninstall-then-delete.
+	s.mux.HandleFunc("/api/manifest/", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			w.Header().Set("Allow", "DELETE")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/manifest/"))
+		if name == "" || strings.Contains(name, "/") {
+			// Empty (DELETE /api/manifest/) or a nested path — neither is a
+			// valid bare :name. api.ManifestDelete's own checkManifestName
+			// would also reject these, but a 400 here is the clearer signal.
+			writeAPIError(w, fmt.Errorf("manifest name required"), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
+		if err := s.manifestDeleter.ManifestDelete(name); err != nil {
+			// api.ManifestDelete returns either a validation error (bad
+			// name — client's fault) or a does-not-exist / *os.PathError
+			// (leaks the manifest dir). Map the not-exist case to 404 with
+			// a stable message and sanitize everything else to a 500.
+			log.Printf("/api/manifest/ delete name=%q: %v", name, err)
+			if strings.Contains(err.Error(), "does not exist") {
+				writeAPIError(w, fmt.Errorf("manifest %q not found", name), http.StatusNotFound, "MANIFEST_NOT_FOUND")
+				return
+			}
+			writeAPIError(w, errors.New("internal error deleting manifest"), http.StatusInternalServerError, "MANIFEST_DELETE_FAILED")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}))
 }
