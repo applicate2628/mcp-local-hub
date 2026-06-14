@@ -1,9 +1,12 @@
 # GUI LSP router auto-registers a daemon for an attacker-chosen local path from untrusted MCP tool args
 
-- **Status:** FIXED on branch `security/lsp-trusted-root-gate` (trusted-root
+- **Status:** CLOSED (2026-06-14) — merged via the #272 trusted-root containment
+  gate; adversarially re-verified FULLY fixed at HEAD (see Closure below).
+  Originally FIXED on branch `security/lsp-trusted-root-gate` (trusted-root
   containment gate). Supersedes PR #269 (branch
   `codex/fix-lsp-router-vulnerability`), which removed auto-register entirely
   and was rejected by the operator for killing the out-of-the-box convenience.
+- **closed-on:** 2026-06-14
 - **Date:** 2026-06-09
 - **Severity:** P2 — resource exhaustion + arbitrary-local-path process spawn
   driven by untrusted MCP tool-call input. Localhost-scoped (the router only
@@ -172,3 +175,38 @@ registry is not subject to the gate.
 - **F9 / opus P3b** operator hand-adding `/` or a drive root re-opens whole-FS; a non-canonicalizable stored root is silently dropped — warn-on-load for depth-0 / un-canonicalizable roots.
 - **F10** package-level bless seam vars reassignable in-package (accepted test-seam pattern).
 - **opus P3a** refusal message says "not registered" even on store load error (fail-closed, imprecise diagnostics).
+
+## Closure (2026-06-14)
+
+CLOSED — adversarially re-verified (refute-default skeptic) as FULLY fixed at
+HEAD; residual hunted and not found.
+
+FIXED by the #272 trusted-root containment gate. The authorization boundary is
+the trusted-root containment check at `internal/gui/lsp_router.go:448`, not the
+common project-marker. `SetLSPRouterProduction` wires ONLY the read-only trust
+gate (`TrustedRootCheckFn` → `api.LSPWorkspaceRootTrusted`) plus
+`EnsureLSPRegistered` (the `AutoRegisterFn`); there is NO bless seam in
+`lspRouterDeps`, so blessing is structurally UNREACHABLE from the router path —
+re-opening the hole would require adding a bless call to a shared function a
+reviewer would catch. Bless happens only at the explicit-register sites
+(`mcphub register` CLI / GUI "Enable" / `/api/lsp/register`).
+
+Tests at HEAD (confirmed to exist and exercise the fix):
+
+- `TestLSPRouter_AutoRegisterPathDoesNotBless` (`internal/gui/lsp_router_test.go:505`)
+  — drives a trusted first-touch through the real handler under a redirected
+  state dir and asserts `lsp-trusted-roots.json` is never created by the router.
+- `TestLSPRouter_UntrustedMarkerWorkspaceRefused` /
+  `TestLSPRouter_TrustedRootAutoRegisters` /
+  `TestLSPRouter_TrustedRootGitOnlyWorkspaceRefusedByMarkerGuard`
+  (`internal/gui/lsp_router_test.go`).
+- The `TestLSPTrustedRoots_*` family (`internal/api/lsp_trusted_roots_test.go`):
+  absent-file-empty, bless→trust (exact + subdir), prefix-but-not-subdir refused,
+  unrelated refused, idempotent bless, operator-hand-added root trusted,
+  empty/nil fail-closed, Windows case-fold, stored-canonical.
+
+The deferred P3 hardening items (F2-F10, opus P3a/P3b) above are non-blocking
+follow-ups, not residual on the closed defect (each is fail-closed or
+localhost-throughput-only); they do not keep this bug open.
+
+Doc moved to `work-items/bugs/closed/` per repo convention.

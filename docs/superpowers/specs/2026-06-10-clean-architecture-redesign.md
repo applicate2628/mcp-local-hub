@@ -295,12 +295,12 @@ A→F legacy-removal, §3 connection-robustness, and feature bugs #4/#6/#8/demig
 
 ### 11.3 Daemon lifecycle / supervisor residuals (v0.5 mostly shipped)
 - STOP→failed→stuck→won't-restart — = §4 Phase A (live paper-search bug).
-- Supervisor loses `current_pid` → false quarantine (Layer B adopt-on-port) — OPEN. `bugs/2026-06-09-supervisor-loses-current-pid-false-quarantine.md` (Layer A fixed; Layer B follow-up open).
+- Supervisor loses `current_pid` → false quarantine — CLOSED 2026-06-14. `bugs/closed/2026-06-09-supervisor-loses-current-pid-false-quarantine.md` (Layer A root-cause fix landed #270 `0ed5ced` — daemon-identity uses `d.Command` not the supervisor's own exe; the Layer B adopt-on-port idea is defense-in-depth, not a residual of this bug, so the doc is closed). The adopt-on-port hardening, if wanted, is a separate follow-up.
 - Deep-sec P3/LOW residuals (Conc-F4/F5/F7, Reg-F2) — DEFERRED. `bugs/2026-06-09-supervisor-deep-sec-p3-residuals.md`.
 - `--strict-job-protection` flag; job-protection auto-remediation / metrics export / alerting — DEFERRED v0.5.x (CLAUDE.md Job Protection runbook).
 - Disjoint GUI-vs-daemon port ranges (DM-2 root cause) — OPEN (fixed properly by #8/§2).
 - Tray menu hangs after long uptime / state-event flood — OPEN (needs profiling + throttle/decouple).
-- api-surfaces status/restart/cleanup race — still-relevant-low. `bugs/2026-05-12-api-surfaces-status-restart-cleanup-race.md`.
+- api-surfaces status/restart/cleanup race — CLOSED 2026-06-14. `bugs/closed/2026-05-12-api-surfaces-status-restart-cleanup-race.md` (fn-pointer snapshotted into a local before the ctx-watch goroutine spawn at `api_surfaces.go:119,160`; race gone).
 - macOS containment / kqueue lifecycle watcher — DEFERRED to v0.6 (v0.5 ships macOS preview, process-group only).
 
 ### 11.4 Serena residuals (dynamic-pool shipped #246–#277)
@@ -313,7 +313,7 @@ A→F legacy-removal, §3 connection-robustness, and feature bugs #4/#6/#8/demig
 - #278 LSP-orphan reconcile guard + migrate-timeout — **MERGED** (2c7c343 on master).
 
 ### 11.5 LSP lane (Servers-matrix revamp; draft, partly shipped)
-- LSP router untrusted auto-register hardening — FIXED on `security/lsp-trusted-root-gate` (#272/#273); confirm merged. `bugs/2026-06-09-lsp-router-untrusted-auto-register.md`.
+- LSP router untrusted auto-register hardening — CLOSED 2026-06-14 (merged via #272 trusted-root containment gate). `bugs/closed/2026-06-09-lsp-router-untrusted-auto-register.md`.
 - Servers-matrix LSP-bridge + per-daemon env overlay — core shipped (#266/#268/#274); spec open questions remain (auto-discovery scope for non-LSP gdb/godbolt/perftools `required_binaries`; `lldb` empty required_binaries; `workspaces.yaml` missing/corrupt GUI warning banner).
 - Linux/macOS systemd/launchd PATH inheritance for LSP — OUT of scope.
 

@@ -5,7 +5,8 @@ found-by: qa-engineer
 found-in-phase: PR #134 final QA gate
 affected-surface: internal/api/install_intent_test.go:668
 context: standalone
-status: open
+status: closed
+closed-on: 2026-06-14
 ---
 
 ## Reproduction
@@ -52,3 +53,35 @@ t.Cleanup(func() { portInUseFn = prevPortInUse })
 ## Severity rationale
 
 Low: the test is correct in isolation and CI passes; this only affects local dev runs when mcphub is concurrently installed. Filed as known-flake post-merge follow-up per PR description.
+
+## Closure (2026-06-14)
+
+CLOSED — adversarially re-verified (refute-default skeptic) as FULLY fixed at
+HEAD; residual hunted and not found.
+
+FIXED by the `preflightPortInUse` seam (commit `5d91e42`) AND the v0.6
+supervisor-intent port-ownership recognition: `internal/api/install.go:1760-1797`
+checks supervisor-intent (line 1761) BEFORE the scheduler-task fallback, closing
+the residual the TRIAGE-2026-05-28 Rows 6+10 note flagged (a v0.5.0 supervisor
+child was not recognised as the legitimate port owner, so the gate could still
+fire a spurious port-9128 collision on supervisor hosts). With the
+supervisor-intent check ahead of the scheduler-task fallback, an own-daemon
+holding the port is recognised regardless of whether it is a scheduled task or a
+supervisor child.
+
+Tests at HEAD (confirmed to exist and exercise the fix):
+
+- `TestInstall_AuditFailsErrIdentityOversize_NoSchedulerMutation`
+  (`internal/api/install_intent_test.go:839`) — the originally-flaking test, now
+  port-seam-isolated.
+- `TestPreflight_AllowsSameSupervisorOwnedPortAndRejectsForeignIntentRow`
+  (`internal/api/install_own_port_test.go:146`).
+- `TestPortHeldBySupervisorIntentDaemonExternalRequiresPIDProof`
+  (`internal/api/install_own_port_test.go:235`).
+
+NOTE: this is the duplicate filing #6 of the port-9128 defect. The SEPARATE doc
+`2026-05-12-install-test-port-9128-collision.md` stays OPEN — it tracks a
+DIFFERENT residual (the audit-before-port-check ordering / Option-B preflight
+reorder, still deferred), not the supervisor-child recognition this doc tracked.
+
+Doc moved to `work-items/bugs/closed/` per repo convention.
