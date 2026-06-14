@@ -248,6 +248,36 @@ func newSupervisorManager(ctx context.Context, bin string, strict bool, waitFor 
 	}
 }
 
+// armSupervisorManager is the construct-and-arm seam startGuiServer calls
+// once it has obtained the seed supervisor owner from
+// ensureSupervisorRunning. It encodes the load-bearing wiring decision:
+//
+//   - nil owner (the spawn errored) or an ADOPTED owner (Spawned()==false,
+//     the GUI adopted an externally-managed supervisor) → return nil. No
+//     manager, no respawn loop — the GUI does not own that supervisor's
+//     lifecycle, so there is nothing to self-heal.
+//   - a GUI-SPAWNED owner (Spawned()==true) → construct the manager via
+//     newSupervisorManager (which seeds spawnFn from the package-level
+//     spawnSupervisorFn) AND launch its bounded respawn loop, so an
+//     unexpected supervisor-child death under a live GUI self-heals.
+//
+// This is extracted out of startGuiServer's inline body specifically so
+// the REAL wiring — manager constructed from a Spawned() owner with its
+// loop armed via the spawnSupervisorFn seam — is unit-testable without a
+// real `mcphub supervise` binary. The seam-based newTestManager tests
+// inject spawnFn directly and never reach this gate; the §5 deploy-
+// verification found the live respawn loop did not visibly fire, so the
+// gate itself needs a test that drives it through the production
+// newSupervisorManager + runRespawnLoop path.
+func armSupervisorManager(ctx context.Context, owner *supervisorOwner, bin string, strictMode bool) *supervisorManager {
+	if owner == nil || !owner.Spawned() {
+		return nil
+	}
+	manager := newSupervisorManager(ctx, bin, strictMode, 15*time.Second, owner)
+	go manager.runRespawnLoop(ctx) // self-healing respawn ONLY for GUI-spawned owners
+	return manager
+}
+
 // currentOwner returns the live supervisor handle under the mutex. Used
 // by the shutdown defer and any status reader.
 func (m *supervisorManager) currentOwner() *supervisorOwner {

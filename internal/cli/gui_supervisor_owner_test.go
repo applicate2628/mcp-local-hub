@@ -718,3 +718,155 @@ func TestGuiSupervisorManager_AdoptedNeverArmed(t *testing.T) {
 		t.Fatalf("manager.Stop on adopted owner returned %v; want nil", err)
 	}
 }
+
+// --- armSupervisorManager REAL-wiring integration tests (W1–W3) ---
+//
+// The T1–T5 manager tests above drive a manager built by newTestManager,
+// which INJECTS spawnFn directly. They never exercise the production
+// construct-and-arm path: startGuiServer obtains a seed owner from
+// ensureSupervisorRunning, then armSupervisorManager builds the manager
+// via newSupervisorManager — which reads the PACKAGE-LEVEL spawnSupervisorFn
+// seam — and launches runRespawnLoop. The §5 deploy-verification found the
+// live respawn loop did not visibly fire; these tests close that gap by
+// driving armSupervisorManager and asserting the loop is genuinely armed
+// THROUGH the real wiring (package seam, production newSupervisorManager,
+// production runRespawnLoop), only the `mcphub supervise` binary stubbed
+// via the spawnSupervisorFn swap.
+
+// TestArmSupervisorManager_SpawnedOwnerArmsRespawnLoopViaPackageSeam (W1):
+// a Spawned()==true seed owner makes armSupervisorManager (1) construct a
+// manager and (2) launch its respawn loop. A simulated supervisor-child
+// death then drives a respawn THROUGH the package-level spawnSupervisorFn
+// seam (NOT an injected spawnFn) and the manager's live handle swaps to
+// the respawned owner — proving newSupervisorManager wired spawnFn from
+// spawnSupervisorFn AND runRespawnLoop was started by armSupervisorManager.
+func TestArmSupervisorManager_SpawnedOwnerArmsRespawnLoopViaPackageSeam(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Swap the PACKAGE-LEVEL spawn seam (restored via t.Cleanup) so the
+	// respawn fires through the SAME path newSupervisorManager reads —
+	// no real `mcphub supervise` binary. This is the load-bearing
+	// difference from the newTestManager tests, which inject spawnFn.
+	origSpawnFn := spawnSupervisorFn
+	t.Cleanup(func() { spawnSupervisorFn = origSpawnFn })
+
+	respawned := newSyntheticOwner(true)
+	spawnedCh := make(chan struct{}, 1)
+	var calls atomic.Int32
+	spawnSupervisorFn = func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+		calls.Add(1)
+		select {
+		case spawnedCh <- struct{}{}:
+		default:
+		}
+		return respawned, nil
+	}
+
+	// Seed owner is GUI-spawned → armSupervisorManager must construct +
+	// arm. Capture the stderr sink swap too so respawn-loop warnings
+	// don't leak to the real os.Stderr during the test.
+	origSink := supervisorMonitorStderr
+	t.Cleanup(func() { supervisorMonitorStderr = origSink })
+	var sink safeBuffer
+	supervisorMonitorStderr = &sink
+
+	seed := newSyntheticOwner(true)
+	manager := armSupervisorManager(ctx, seed, "mcphub-test", false)
+	if manager == nil {
+		t.Fatal("armSupervisorManager returned nil for a Spawned() owner; want a constructed manager")
+	}
+	if manager.currentOwner() != seed {
+		t.Fatalf("manager.currentOwner() = %p; want the seed owner %p", manager.currentOwner(), seed)
+	}
+	// The manager MUST have been seeded from the package seam, not an
+	// injected one — assert the field identity so a future refactor that
+	// forgets to read spawnSupervisorFn is caught.
+	if manager.spawnFn == nil {
+		t.Fatal("manager.spawnFn is nil; newSupervisorManager did not seed it from spawnSupervisorFn")
+	}
+
+	// Fire the seed owner's UNEXPECTED death (stopRequested unset, not
+	// shutting down). The armed loop must respawn through the package seam.
+	seed.exitedCh <- exitInfo{exitErr: errors.New("supervisor died")}
+
+	// The production newSupervisorManager backoff base is 1s (the real
+	// first-attempt backoff). Give a generous 5s window so the genuine
+	// production timing is exercised, not a shrunk test cadence.
+	select {
+	case <-spawnedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("spawnSupervisorFn was not called within 5s after an unexpected exit; the respawn loop was NOT armed by armSupervisorManager (spawnFn calls=%d)", calls.Load())
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("spawnSupervisorFn call count = %d; want exactly 1", got)
+	}
+
+	// The live handle must swap to the respawned owner — proving the loop
+	// installed the package-seam result through the real runRespawnLoop.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if manager.currentOwner() == respawned {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("manager.currentOwner() did not swap to the respawned owner; still %p", manager.currentOwner())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Clean shutdown so the loop goroutine exits before the test ends.
+	// cancel() (deferred at the top) drives the loop's ctx.Done() escape;
+	// manager.Stop latches shuttingDown and stops the current owner. We do
+	// NOT assert Stop's return value here: the respawned synthetic owner is
+	// spawned=true with a nil proc, so its stop() returns the documented
+	// "no Process handle recorded" guard error (TestSupervisorOwner_
+	// StopNilProcReturnsError). The cleanup intent is loop termination, which
+	// the deferred cancel guarantees; Stop is best-effort latch-and-stop.
+	_ = manager.Stop(context.Background(), 5000)
+}
+
+// TestArmSupervisorManager_AdoptedOwnerReturnsNilNoLoop (W2): an adopted
+// (Spawned()==false) seed owner must make armSupervisorManager return nil
+// — no manager, no respawn loop. Even if the package seam WOULD spawn,
+// firing the adopted owner's exit produces zero calls because no loop is
+// consuming its exitedCh. This is the adopt-contract half of the §5 gate.
+func TestArmSupervisorManager_AdoptedOwnerReturnsNilNoLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	origSpawnFn := spawnSupervisorFn
+	t.Cleanup(func() { spawnSupervisorFn = origSpawnFn })
+	var calls atomic.Int32
+	spawnSupervisorFn = func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+		calls.Add(1)
+		return newSyntheticOwner(true), nil
+	}
+
+	adopted := newSyntheticOwner(false)
+	manager := armSupervisorManager(ctx, adopted, "mcphub-test", false)
+	if manager != nil {
+		t.Fatalf("armSupervisorManager returned a non-nil manager for an adopted owner; want nil (no manager, no loop)")
+	}
+
+	// Fire the adopted owner's exit — with no loop launched, nothing
+	// respawns through the seam.
+	adopted.exitedCh <- exitInfo{exitErr: errors.New("adopted died")}
+	time.Sleep(50 * time.Millisecond)
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("spawnSupervisorFn called %d times for adopted owner; want 0 (no loop armed)", got)
+	}
+}
+
+// TestArmSupervisorManager_NilOwnerReturnsNil (W3): a nil seed owner (the
+// ensureSupervisorRunning spawn errored) must make armSupervisorManager
+// return nil without panicking on the Spawned() nil-receiver call.
+func TestArmSupervisorManager_NilOwnerReturnsNil(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	manager := armSupervisorManager(ctx, nil, "mcphub-test", false)
+	if manager != nil {
+		t.Fatalf("armSupervisorManager(nil owner) = %p; want nil", manager)
+	}
+}
