@@ -212,6 +212,17 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 		}
 		rows[i].State = deriveState(rows[i].State, alive, rows[i].NextRun)
 	}
+
+	// Final pass: compute the display-only human-readable name now that
+	// Server/Daemon/Workspace are resolved. Covers every row (the
+	// Port==0 early-continue above skips only the alive-probe, not this).
+	// ComputeDaemonDisplayName is the single owner of the presentation
+	// rule; the supervisor-IPC row-builder calls the same helper so the
+	// two status surfaces never drift.
+	for i := range rows {
+		rows[i].DisplayName = ComputeDaemonDisplayName(
+			rows[i].TaskName, rows[i].Server, rows[i].Daemon, rows[i].Workspace)
+	}
 }
 
 // deriveState maps (raw scheduler task state, daemon port-listening?, NextRun text)

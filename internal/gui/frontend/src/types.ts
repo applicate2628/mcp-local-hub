@@ -37,6 +37,12 @@ export interface DaemonStatus {
   job_protection?: boolean | null;
   state: string;
   task_name?: string;
+  // Human-readable label computed server-side (api.ComputeDaemonDisplayName):
+  // "serena · <project>" for workspace serena, "<lang> @ <workspace>" for
+  // workspace LSP, absent/empty for global daemons. Display-only — task_name
+  // stays the canonical identity. Mirrors DaemonStatus.DisplayName
+  // (`json:"display_name,omitempty"`).
+  display_name?: string;
   is_maintenance?: boolean;
   is_workspace_scoped?: boolean;
 }
@@ -294,6 +300,9 @@ export interface DaemonsSection {
 export interface DaemonRow {
   server: string;
   daemon: string;
+  // Human-readable label projected from DaemonStatus.DisplayName; omitempty on
+  // the wire (empty for global daemons). Mirrors DaemonRow.DisplayName in Go.
+  display_name?: string;
   // health.go:72 Backend is `omitempty` — optional on the wire.
   backend?: string;
   pid: number;

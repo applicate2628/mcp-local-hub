@@ -15,16 +15,24 @@ type State struct {
 
 // DaemonStatus enriches the scheduler-task view with process stats.
 type DaemonStatus struct {
-	Server     string `json:"server"`
-	Daemon     string `json:"daemon"`
-	TaskName   string `json:"task_name"`
-	State      string `json:"state"` // "Running" | "Ready" | "Failed" | "Stopped"
-	Port       int    `json:"port"`
-	LastResult int32  `json:"last_result"`
-	NextRun    string `json:"next_run"` // backend-specific text (e.g. "Sunday, April 19, 2026 3:00:00 AM" on Windows; "N/A" when no trigger)
-	PID        int    `json:"pid,omitempty"`
-	RAMBytes   uint64 `json:"ram_bytes,omitempty"`
-	UptimeSec  int64  `json:"uptime_sec,omitempty"`
+	Server   string `json:"server"`
+	Daemon   string `json:"daemon"`
+	TaskName string `json:"task_name"`
+	// DisplayName is a human-readable label for the row, computed by
+	// ComputeDaemonDisplayName (the single owner of the presentation rule):
+	// "serena · <project>" for workspace serena, "<lang> @ <workspace>" for
+	// workspace LSP, empty for global daemons. DISPLAY-ONLY — task_name stays
+	// the canonical routing/identity key; CLI/GUI render this when non-empty
+	// and fall back to the plain name otherwise. Omitted from JSON when empty
+	// so `mcphub status --json` keeps the raw task_name available for ops.
+	DisplayName string `json:"display_name,omitempty"`
+	State       string `json:"state"` // "Running" | "Ready" | "Failed" | "Stopped"
+	Port        int    `json:"port"`
+	LastResult  int32  `json:"last_result"`
+	NextRun     string `json:"next_run"` // backend-specific text (e.g. "Sunday, April 19, 2026 3:00:00 AM" on Windows; "N/A" when no trigger)
+	PID         int    `json:"pid,omitempty"`
+	RAMBytes    uint64 `json:"ram_bytes,omitempty"`
+	UptimeSec   int64  `json:"uptime_sec,omitempty"`
 	// OrphanPID is the Windows post-create orphan PID when the
 	// supervisor's best-effort kill failed during spawn. Operator-
 	// visible via `mcphub status --json` and the GUI Dashboard for

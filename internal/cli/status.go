@@ -169,16 +169,29 @@ func printDefaultStatusTable(cmd *cobra.Command, rows []api.DaemonStatus, probeH
 		if r.PID > 0 {
 			pid = fmt.Sprintf("%d", r.PID)
 		}
+		name := statusDisplayName(r)
 		if probeHealth {
 			health := renderHealthCell(r)
 			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
-				r.TaskName, r.State, port, pid, ram, uptime, health, r.NextRun)
+				name, r.State, port, pid, ram, uptime, health, r.NextRun)
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
-				r.TaskName, r.State, port, pid, ram, uptime, r.NextRun)
+				name, r.State, port, pid, ram, uptime, r.NextRun)
 		}
 	}
 	return nil
+}
+
+// statusDisplayName returns the friendly human-readable name for the table's
+// NAME column: DaemonStatus.DisplayName when the backend resolved one
+// ("serena · <project>", "<lang> @ <workspace>"), else the raw task name.
+// The raw task_name always remains available verbatim via `mcphub status
+// --json` for ops/scripting that key on the canonical identifier.
+func statusDisplayName(r api.DaemonStatus) string {
+	if r.DisplayName != "" {
+		return r.DisplayName
+	}
+	return r.TaskName
 }
 
 // printWorkspaceScopedTable renders the --workspace-scoped layout. Columns:
@@ -203,13 +216,14 @@ func printWorkspaceScopedTable(cmd *cobra.Command, rows []api.DaemonStatus, prob
 		}
 		lastUsed := relativeStatusLastUsed(r.LastToolsCallAt)
 		lastErr := firstN(r.LastError, 40)
+		name := statusDisplayName(r)
 		if probeHealth {
 			health := renderHealthCell(r)
 			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
-				r.TaskName, r.State, port, lifecycle, lastUsed, health, lastErr)
+				name, r.State, port, lifecycle, lastUsed, health, lastErr)
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), headerFmt,
-				r.TaskName, r.State, port, lifecycle, lastUsed, lastErr)
+				name, r.State, port, lifecycle, lastUsed, lastErr)
 		}
 	}
 	return nil

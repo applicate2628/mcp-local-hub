@@ -106,6 +106,12 @@ type DaemonsSection struct {
 type DaemonRow struct {
 	Server string `json:"server"`
 	Daemon string `json:"daemon"`
+	// DisplayName is the human-readable label projected from the underlying
+	// DaemonStatus (see ComputeDaemonDisplayName). Empty for global daemons;
+	// "serena · <project>" / "<lang> @ <workspace>" for workspace-scoped rows.
+	// Omitted from JSON when empty so the /api/health wire shape is unchanged
+	// for global-daemon rows.
+	DisplayName string `json:"display_name,omitempty"`
 	// Backend is the workspace-scoped lazy-proxy backend kind
 	// ("mcp-language-server", "gopls-mcp", etc.); empty for global daemons.
 	// Required so computeCapabilitiesSection can rebuild a synthetic
@@ -464,14 +470,15 @@ func (a *API) computeDaemonsSection(ctx context.Context, nowMs int64, refresh bo
 		}
 		for _, r := range rows {
 			section.Items = append(section.Items, DaemonRow{
-				Server:    r.Server,
-				Daemon:    r.Daemon,
-				Backend:   r.Backend, // empty for global daemons; carries lazy-proxy kind for workspace-scoped rows
-				PID:       r.PID,
-				Port:      r.Port,
-				RAMBytes:  r.RAMBytes,
-				UptimeSec: r.UptimeSec,
-				State:     normalizeDaemonState(r.State),
+				Server:      r.Server,
+				Daemon:      r.Daemon,
+				DisplayName: r.DisplayName, // human-readable label; empty for global daemons
+				Backend:     r.Backend,     // empty for global daemons; carries lazy-proxy kind for workspace-scoped rows
+				PID:         r.PID,
+				Port:        r.Port,
+				RAMBytes:    r.RAMBytes,
+				UptimeSec:   r.UptimeSec,
+				State:       normalizeDaemonState(r.State),
 				// RestartCount + LastRestartAt: existing DaemonStatus
 				// doesn't currently expose them; default 0/nil. Future
 				// scheduler integration fills them.
@@ -991,6 +998,7 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 //     supervisor is actively recovering — failure-adjacent, not terminal),
 //   - "Quarantined" → "failed" (a quarantined crash-looped daemon IS a
 //     real failure a monitor on state=="failed" must keep seeing).
+//
 // "unknown" is reserved ONLY for genuinely-unrecognized/blank vocabulary
 // (e.g. "Disabled", "Queued", ""), preserving the fail-loud signal for
 // real failures while still fixing the original unmapped→failed false
