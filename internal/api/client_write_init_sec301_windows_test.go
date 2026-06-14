@@ -43,19 +43,12 @@ import (
 	"testing"
 )
 
-// TestReadStrictModeFromIntent_DeleteCapableParentAbsentFile_Relaxes pins the
-// canon-aligned verdict (pr301 r9 revert): an ABSENT supervisor-intent.json on
-// a DELETE-capable broadened state dir (FILE_DELETE_CHILD, so the read-side
-// write-bits gate checkStateDirParentWriteSafe REJECTS it) relaxes (returns
-// false). An absent intent declares no strict_mode, so it must not make the
-// operator strict; the deletion-of-a-strict-intent bypass on this dir shape is
-// a KNOWN limitation whose mitigation is MCPHUB_REQUIRE_SINGLE_USER_HOME=1, not
-// an absent-strict verdict.
-//
-// This REVERTS the pr301 r5/r6/r7 assertion (which expected strict on this exact
-// shape). The deletion-bypass concern is intentionally accepted as a documented
-// best-effort limitation (CLAUDE.md "Hardened state-file writes").
-func TestReadStrictModeFromIntent_DeleteCapableParentAbsentFile_Relaxes(t *testing.T) {
+// TestReadStrictModeFromIntent_DeleteCapableParentAbsentFile_FailsClosedToStrict
+// pins that an ABSENT supervisor-intent.json on a DELETE-capable broadened
+// state dir (FILE_DELETE_CHILD, so checkStateDirParentWriteSafe rejects it)
+// fails closed to strict. On this dir shape, absence is indistinguishable from
+// deletion of a previously-enabled strict intent.
+func TestReadStrictModeFromIntent_DeleteCapableParentAbsentFile_FailsClosedToStrict(t *testing.T) {
 	// Read gate LIVE: do NOT set AllowUnhardenedStateReadEnv. Env strict UNSET
 	// so only the intent governs.
 	t.Setenv(RequireSingleUserHomeEnv, "")
@@ -85,13 +78,10 @@ func TestReadStrictModeFromIntent_DeleteCapableParentAbsentFile_Relaxes(t *testi
 			"test is not exercised")
 	}
 
-	if got := readStrictModeFromIntentBestEffort(); got {
-		t.Fatal("pr301 r9 revert regression: an ABSENT supervisor-intent.json on a " +
-			"DELETE-capable broadened state dir must RELAX (return false) — an absent intent " +
-			"declares no strict_mode, so it must not make the operator strict; the deletion " +
-			"bypass on such a dir is a documented best-effort limitation whose mitigation is " +
-			"MCPHUB_REQUIRE_SINGLE_USER_HOME=1; got true (the reverted r5/r6/r7 absent-strict " +
-			"over-reach that contradicted the canonical RELAX-by-default posture)")
+	if got := readStrictModeFromIntentBestEffort(); !got {
+		t.Fatal("an ABSENT supervisor-intent.json on a DELETE-capable broadened state dir " +
+			"must fail closed to STRICT (return true), because absence is indistinguishable " +
+			"from deletion of a previously-enabled strict intent; got false")
 	}
 }
 
@@ -133,15 +123,12 @@ func TestReadStrictModeFromIntent_ReadBroadenedParentAbsentFile_Relaxes(t *testi
 	}
 }
 
-// TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_Relaxes pins
-// that an ABSENT intent on a delete-capable dir relaxes (returns false). With
-// the gate-free read (pr301 r10) the strict_mode bit is read via a plain
-// os.ReadFile that returns os.ErrNotExist for the absent file regardless of the
-// MCPHUB_ALLOW_UNHARDENED_STATE_READ env var (that env var governs
-// ReadSupervisorIntent's gate, which the gate-free read no longer calls). The
-// env var is set here only to keep the historical scenario shape; the verdict
-// is relax either way.
-func TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_Relaxes(t *testing.T) {
+// TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_FailsClosedToStrict
+// pins that MCPHUB_ALLOW_UNHARDENED_STATE_READ does not turn an ABSENT intent
+// on a delete-capable dir into relax. The gate-free read no longer calls
+// ReadSupervisorIntent, and the absent verdict still fails closed based on the
+// state dir posture.
+func TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_FailsClosedToStrict(t *testing.T) {
 	t.Setenv(RequireSingleUserHomeEnv, "")
 	t.Setenv(AllowUnhardenedStateReadEnv, "1")
 
@@ -155,9 +142,9 @@ func TestReadStrictModeFromIntent_EnvBypassTrueEnoentDeleteCapable_Relaxes(t *te
 
 	// Deliberately write NO supervisor-intent.json — the intent is ABSENT.
 
-	if got := readStrictModeFromIntentBestEffort(); got {
-		t.Fatal("pr301 r10: an ABSENT intent on a DELETE-capable broadened dir must RELAX " +
-			"(return false) — an absent intent declares no strict_mode; got true")
+	if got := readStrictModeFromIntentBestEffort(); !got {
+		t.Fatal("an ABSENT intent on a DELETE-capable broadened dir must fail closed to STRICT " +
+			"(return true), even when MCPHUB_ALLOW_UNHARDENED_STATE_READ is set; got false")
 	}
 }
 

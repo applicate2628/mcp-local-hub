@@ -24,19 +24,14 @@ import (
 // (disabling) value on a broadened parent.
 
 // ---------------------------------------------------------------------------
-// #301-2 (pr301 r10): gate-free intent read → absent/read-error/parse-error/
-// unresolvable-path ALL relax; strict only for present+parseable+strict_mode=true
+// #301-2: gate-free intent read with fail-closed failure handling
 // ---------------------------------------------------------------------------
 
-// TestReadStrictModeFromIntent_DecodeError_Relaxes pins the pr301 r10
-// behavior: an EXISTING but UNPARSEABLE supervisor-intent.json
-// (corrupt/truncated/attacker-clobbered) resolves to relax (false), not strict.
-// Intent-file strict is BEST-EFFORT and read gate-free — a body that cannot be
-// parsed declares no parseable strict_mode bit, so the env var is the robust
-// strict mitigation. This RE-POINTS the prior #301-2 decode→strict assertion
-// (which read through ReadSupervisorIntent's parent gate) to the gate-free
-// relax-on-parse-error verdict.
-func TestReadStrictModeFromIntent_DecodeError_Relaxes(t *testing.T) {
+// TestReadStrictModeFromIntent_DecodeError_FailsClosedToStrict pins that an
+// EXISTING but UNPARSEABLE supervisor-intent.json (corrupt/truncated/attacker-
+// clobbered) resolves to strict (true), not relax. A parse failure cannot prove
+// strict_mode=false, so it must not disable an operator-enabled strict posture.
+func TestReadStrictModeFromIntent_DecodeError_FailsClosedToStrict(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Cleanup(SetDaemonStateRootForTest(stateDir))
 
@@ -47,21 +42,16 @@ func TestReadStrictModeFromIntent_DecodeError_Relaxes(t *testing.T) {
 		t.Fatalf("write malformed intent: %v", err)
 	}
 
-	if got := readStrictModeFromIntentBestEffort(); got {
-		t.Fatal("pr301 r10: a parse error on an EXISTING supervisor-intent.json must RELAX " +
-			"(return false) — intent-file strict is best-effort, read gate-free; an unparseable " +
-			"body declares no strict_mode bit, and the robust strict path is " +
-			"MCPHUB_REQUIRE_SINGLE_USER_HOME=1; got true")
+	if got := readStrictModeFromIntentBestEffort(); !got {
+		t.Fatal("a parse error on an EXISTING supervisor-intent.json must fail closed to STRICT " +
+			"(return true) so corruption cannot disable an operator-enabled strict intent; got false")
 	}
 }
 
-// TestReadStrictModeFromIntent_PathUnresolvable_Relaxes pins the pr301 r10
-// behavior: when the state dir cannot be RESOLVED at all (DaemonStateDirReadOnly
-// returns an error), the intent read relaxes (returns false). Intent-file strict
-// is BEST-EFFORT — with no resolvable path the bit cannot be read, and the
-// robust strict path is the env var (MCPHUB_REQUIRE_SINGLE_USER_HOME=1, checked
-// in OperatorRequiresSingleUserHome BEFORE this read). This RE-POINTS the prior
-// pr301 r4 unresolvable→strict assertion to the best-effort-relax verdict.
+// TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict pins that
+// when the state dir cannot be RESOLVED at all (DaemonStateDirReadOnly returns
+// an error), the intent read fails closed to strict (true). With no resolvable
+// path, the reader cannot prove that the intent is absent or strict_mode=false.
 //
 // Engineering a GENUINE DaemonStateDirReadOnly error cross-platform: the
 // daemonStateRootOverride seam short-circuits the resolver, so it CANNOT be used
@@ -74,7 +64,7 @@ func TestReadStrictModeFromIntent_DecodeError_Relaxes(t *testing.T) {
 //   - POSIX: clear XDG_DATA_HOME + HOME so posixParentDir's os.UserHomeDir fails.
 //
 // statePathsHelper saves/restores the override + resolver (panic-safe).
-func TestReadStrictModeFromIntent_PathUnresolvable_Relaxes(t *testing.T) {
+func TestReadStrictModeFromIntent_PathUnresolvable_FailsClosedToStrict(t *testing.T) {
 	// Clear the override (statePathsHelper restores it) so the REAL resolver runs.
 	statePathsHelper(t)
 	daemonStateRootOverride = ""
@@ -101,11 +91,9 @@ func TestReadStrictModeFromIntent_PathUnresolvable_Relaxes(t *testing.T) {
 			"is not being exercised)", dir)
 	}
 
-	if got := readStrictModeFromIntentBestEffort(); got {
-		t.Fatal("pr301 r10: an UNRESOLVABLE supervisor-intent path must RELAX (return false) — " +
-			"intent-file strict is best-effort and cannot be read with no resolvable path; the " +
-			"robust strict path is MCPHUB_REQUIRE_SINGLE_USER_HOME=1 (checked before this read); " +
-			"got true (the reverted pre-r10 unresolvable→strict over-reach)")
+	if got := readStrictModeFromIntentBestEffort(); !got {
+		t.Fatal("an UNRESOLVABLE supervisor-intent path must fail closed to STRICT (return true) " +
+			"so path-resolution failures cannot disable persisted strict mode; got false")
 	}
 }
 

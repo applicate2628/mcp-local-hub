@@ -29,21 +29,16 @@ import (
 	"testing"
 )
 
-// TestReadStrictModeFromIntent_DeleteCapableStateDirAbsentFile_Relaxes_NotHealed
+// TestReadStrictModeFromIntent_DeleteCapableStateDirAbsentFile_FailsClosed_NotHealed
 // pins two properties on a group/world-writable (0o722, delete-capable) POSIX
 // state dir with an ABSENT supervisor-intent.json and the read gate LIVE:
 //
-//  1. RELAX (return false) — pr301 r9 revert: an absent intent declares no
-//     strict_mode, so it must not make the operator strict, even on a
-//     delete-capable dir (the deletion-of-a-strict-intent bypass on such a dir
-//     is a documented best-effort limitation whose mitigation is the env var);
-//     AND
+//  1. STRICT (return true) — absence on an insecure/delete-capable dir is
+//     indistinguishable from deletion of a previously-enabled strict intent, so
+//     the persisted strict-mode gate must fail closed; AND
 //  2. the read does NOT heal the dir to 0700 — the read-only resolver must
 //     leave the mode untouched (a read/posture path must never mutate state).
-//
-// Assertion 1 REVERTS the pr301 r5/r6/r7 strict assertion; assertion 2 is the
-// retained no-mutation invariant.
-func TestReadStrictModeFromIntent_DeleteCapableStateDirAbsentFile_Relaxes_NotHealed(t *testing.T) {
+func TestReadStrictModeFromIntent_DeleteCapableStateDirAbsentFile_FailsClosed_NotHealed(t *testing.T) {
 	// Read gate LIVE: do NOT set AllowUnhardenedStateReadEnv. Env strict
 	// UNSET so only the intent (and the dir posture) governs.
 	t.Setenv(RequireSingleUserHomeEnv, "")
@@ -83,14 +78,12 @@ func TestReadStrictModeFromIntent_DeleteCapableStateDirAbsentFile_Relaxes_NotHea
 
 	got := readStrictModeFromIntentBestEffort()
 
-	// Assertion 1 — relax (pr301 r9 revert).
-	if got {
-		t.Fatal("pr301 r9 revert regression: an ABSENT supervisor-intent.json on a " +
-			"DELETE-capable (0o722) POSIX state dir must RELAX (return false) — an absent " +
-			"intent declares no strict_mode, so it must not make the operator strict; the " +
-			"deletion bypass on such a dir is a documented best-effort limitation whose " +
-			"mitigation is MCPHUB_REQUIRE_SINGLE_USER_HOME=1; got true (the reverted r5/r6/r7 " +
-			"absent-strict over-reach)")
+	// Assertion 1 — strict: absence on an insecure/delete-capable dir may be
+	// deletion of a previously-enabled strict intent.
+	if !got {
+		t.Fatal("an ABSENT supervisor-intent.json on a DELETE-capable (0o722) POSIX state dir " +
+			"must fail closed to STRICT (return true), because absence is indistinguishable " +
+			"from deletion of a previously-enabled strict intent; got false")
 	}
 
 	// Assertion 2 — the read must NOT have healed the dir. The read-only
