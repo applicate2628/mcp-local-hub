@@ -1,5 +1,5 @@
 {
-  "name": "mcphub-darwin-arm64",
+  "name": "@applicate2628/mcphub-darwin-arm64",
   "version": "0.4.5",
   "description": "mcphub binary for darwin/arm64 (Go darwin/arm64) — best-effort (the CLI runs; supervisor lifecycle is Windows-GA / Linux-beta / macOS-preview). Platform sub-package of the \"mcphub\" meta package; not installed directly.",
   "license": "MPL-2.0",
@@ -9,6 +9,9 @@
     "type": "git",
     "url": "git+https://github.com/applicate2628/mcp-local-hub.git",
     "directory": "npm/packages/darwin-arm64"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "os": [
     "darwin"

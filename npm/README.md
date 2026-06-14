@@ -18,7 +18,7 @@ npx mcphub version
 ```
 
 The meta package ships **no binary itself**. It declares one
-`mcphub-<platform>-<arch>` package per supported target in its
+`@applicate2628/mcphub-<platform>-<arch>` package per supported target in its
 `optionalDependencies`, and npm installs **only** the sub-package whose
 `os`/`cpu` match your host (the esbuild / turbo pattern). A small Node shim
 (`bin/cli.js`) then locates that platform binary and execs it, passing your

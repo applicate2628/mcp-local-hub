@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generator for the six `mcphub-<platform>-<arch>` sub-packages.
+// Generator for the six `@applicate2628/mcphub-<platform>-<arch>` sub-packages.
 //
 // The platform sub-packages are NEVER hand-edited. This generator emits each
 // `npm/packages/<platform>-<arch>/package.json` (+ a README and a .gitkeep)
@@ -25,6 +25,12 @@ const path = require("node:path");
 // support tier. `goos`/`goarch` are the names build.sh / build.ps1 cross-
 // compile for; `nodeOs`/`nodeCpu` are what Node reports and what npm matches
 // against the sub-package `os`/`cpu` arrays at install time.
+const PACKAGE_SCOPE = "@applicate2628";
+
+function platformPackageName(nodeOs, nodeCpu) {
+  return `${PACKAGE_SCOPE}/mcphub-${nodeOs}-${nodeCpu}`;
+}
+
 const TARGETS = [
   { nodeOs: "win32", nodeCpu: "x64", goos: "windows", goarch: "amd64", tier: "GA" },
   { nodeOs: "win32", nodeCpu: "arm64", goos: "windows", goarch: "arm64", tier: "best-effort" },
@@ -55,7 +61,7 @@ function tierBlurb(tier) {
 
 function subPackageJson(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
-  const name = `mcphub-${nodeOs}-${nodeCpu}`;
+  const name = platformPackageName(nodeOs, nodeCpu);
   const bin = binaryBasename(nodeOs);
   // Stable key order so output is deterministic across Node versions.
   return {
@@ -73,6 +79,7 @@ function subPackageJson(meta, target) {
       url: meta.repository.url,
       directory: `npm/packages/${nodeOs}-${nodeCpu}`,
     },
+    publishConfig: { access: "public" },
     os: [nodeOs],
     cpu: [nodeCpu],
     bin: { mcphub: `bin/${bin}` },
@@ -83,7 +90,7 @@ function subPackageJson(meta, target) {
 
 function subPackageReadme(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
-  const name = `mcphub-${nodeOs}-${nodeCpu}`;
+  const name = platformPackageName(nodeOs, nodeCpu);
   const bin = binaryBasename(nodeOs);
   return (
     `# ${name}\n\n` +
@@ -127,7 +134,7 @@ function main() {
   // generate, all pinned to the meta version. Drift here is a packaging bug.
   const expectedDeps = {};
   for (const t of TARGETS) {
-    expectedDeps[`mcphub-${t.nodeOs}-${t.nodeCpu}`] = meta.version;
+    expectedDeps[platformPackageName(t.nodeOs, t.nodeCpu)] = meta.version;
   }
   const actualDeps = meta.optionalDependencies || {};
   const expectedKeys = Object.keys(expectedDeps).sort();
