@@ -9,10 +9,18 @@ import {
   type WorkspacePair,
 } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
-import { collectServers, visibleClients } from "../lib/routing";
+import { collectServers } from "../lib/routing";
+import {
+  effectiveVisibleClients,
+  loadColumnPrefs,
+  saveColumnPrefs,
+  clearColumnPrefs,
+  type ColumnPrefs,
+} from "../lib/matrix-columns";
 import { collectLspRows, type LspRow, LSP_MANIFEST_SERVER } from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
+import { MatrixColumnsMenu } from "../components/MatrixColumnsMenu";
 import { EnvDrawer } from "../components/EnvDrawer";
 import type {
   ClientConfigState,
@@ -28,7 +36,13 @@ import type {
 // computed per-scan by visibleClients() so the seven core clients always
 // show while the eight wave-2 opt-in clients (PR #306) appear only when
 // detected on the host (detection-gated, see routing.ts::visibleClients).
-// The computed list is threaded through ServerRowView/CellView as a prop.
+// On top of that auto-detected base the operator's manual show/hide
+// overrides (persisted in localStorage, see lib/matrix-columns.ts) are
+// folded in via effectiveVisibleClients() — the "Manage columns" popover
+// lets them pin an undetected column visible or hide a noisy one. This is
+// a pure VIEW filter: hidden columns simply don't render; apply/migrate/
+// demigrate logic is unchanged. The computed list is threaded through
+// ServerRowView/CellView as a prop.
 
 // EMPTY_CLIENT_CONFIG_PRESENCE is a stable reference used when a scan
 // response omits client_config_presence (e.g. /api/scan mocks in
@@ -149,6 +163,32 @@ export function ServersScreen() {
   // collectServers — keeping `scanForLsp` separate avoids re-deriving
   // collectServers on every minor refresh.
   const [scanForLsp, setScanForLsp] = useState<ScanResult | null>(null);
+
+  // Per-client matrix-column visibility overrides, persisted in
+  // localStorage (see lib/matrix-columns.ts). Initialized once from
+  // storage via the useState lazy initializer so a reload restores the
+  // operator's last show/hide choices on first paint. `true` = pin
+  // visible, `false` = hide; an absent client defers to auto-detection.
+  // This drives ONLY which columns render — a pure view filter.
+  const [columnPrefs, setColumnPrefs] = useState<ColumnPrefs>(() => loadColumnPrefs());
+
+  // Show or hide one client column. Updates the in-memory prefs AND
+  // persists immediately so the choice survives a reload; the matrix
+  // re-renders synchronously off the new state.
+  function toggleColumn(client: string, show: boolean) {
+    setColumnPrefs((prev) => {
+      const next = { ...prev, [client]: show };
+      saveColumnPrefs(next);
+      return next;
+    });
+  }
+
+  // Clear every override → revert to pure auto-detection. Wipes the
+  // persisted record too so a reload also starts clean.
+  function resetColumns() {
+    clearColumnPrefs();
+    setColumnPrefs({});
+  }
 
   // PR #208 deep-sec Lane A round 7 P2 closure: mountedRef guards
   // post-await setState calls inside initializeClient against the
@@ -570,11 +610,13 @@ export function ServersScreen() {
   // entries fold into the same row and the matrix surfaces the union
   // (with coexistence rendering as dual badges per cell).
   const lspRows = collectLspRows(scanForLsp, workspaceEntries, selectedWorkspaceKey);
-  // Detection-gated client columns: the seven core clients always, plus any
-  // wave-2 opt-in client detected on this host. Derived from the live scan
-  // so an uninstalled niche client adds no column to the (otherwise wide)
-  // 15-client matrix.
-  const clientColumns = visibleClients(scanForLsp);
+  // Effective client columns: the detection-gated base (seven core
+  // clients always, plus any wave-2 opt-in client detected on this host)
+  // with the operator's manual show/hide overrides folded in. Derived
+  // from the live scan + persisted prefs so an uninstalled niche client
+  // adds no column unless explicitly pinned, and a noisy detected column
+  // can be hidden. View filter only — see effectiveVisibleClients.
+  const clientColumns = effectiveVisibleClients(scanForLsp, columnPrefs);
   const selectedWorkspace =
     selectedWorkspaceKey !== ALL_WORKSPACES_KEY
       ? workspaces.find((w) => w.workspace_key === selectedWorkspaceKey)
@@ -661,6 +703,13 @@ export function ServersScreen() {
           {initMsg.text}
         </div>
       )}
+      <div class="matrix-columns-toolbar" style="margin:var(--gap-xs) 0">
+        <MatrixColumnsMenu
+          visible={clientColumns}
+          onToggle={toggleColumn}
+          onReset={resetColumns}
+        />
+      </div>
       <table class="servers-matrix">
         <thead>
           <tr>

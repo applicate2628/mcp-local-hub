@@ -14,7 +14,13 @@ import {
   screen,
 } from "@testing-library/preact";
 import { ServersScreen } from "./Servers";
+import { installMemoryLocalStorage } from "../lib/test-local-storage";
 import type { ScanResult, DaemonStatus } from "../types";
+
+// happy-dom 20.9.0's globalThis.localStorage is a bare object with no
+// Storage methods; the column-visibility feature persists through it, so
+// install a Map-backed shim for these tests.
+const ls = installMemoryLocalStorage();
 
 // happy-dom doesn't ship EventSource. ServersScreen subscribes to
 // /api/events for the tray rescan-clients event; the stub matches
@@ -582,5 +588,153 @@ describe("ServersScreen — detection-gated wave-2 client columns", () => {
       expect(headerLabels().some((t) => t.includes("kiro"))).toBe(true);
     });
     expect(headerLabels().some((t) => t.includes("zed"))).toBe(true);
+  });
+});
+
+// Manual column-visibility: the "Manage columns" popover lets the operator
+// override the detection-gated default — hide a noisy column or pin an
+// undetected one. Choices persist in localStorage and re-render the matrix
+// live. Pure view filter; apply/migrate logic untouched.
+describe("ServersScreen — manual column visibility", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    ls.reset();
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    cleanup();
+    ls.reset();
+  });
+
+  function headerLabels(): string[] {
+    return screen
+      .queryAllByRole("columnheader")
+      .map((th) => th.textContent?.trim() ?? "");
+  }
+
+  function bareScanRouter() {
+    return fetchRouter({
+      "/api/scan": () => jsonResponse(200, scanWith({ "claude-code": "ok" })),
+      "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+    }) as unknown as typeof fetch;
+  }
+
+  it("renders the Columns button labelled with the visible/total count", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
+    render(<ServersScreen />);
+    const btn = await screen.findByTestId("matrix-columns-button");
+    // Bare host: 7 core clients visible out of 15 total.
+    expect(btn.textContent).toContain("Columns (7/15)");
+  });
+
+  it("opens the popover with all 15 client checkboxes on click", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
+    render(<ServersScreen />);
+    const btn = await screen.findByTestId("matrix-columns-button");
+    expect(screen.queryByTestId("matrix-columns-popover")).toBeNull();
+    fireEvent.click(btn);
+    expect(screen.queryByTestId("matrix-columns-popover")).toBeTruthy();
+    // aria-expanded reflects state.
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    // A toggle exists for every known client (7 core + 8 wave-2 = 15).
+    for (const c of ["claude-code", "zed", "hermes", "openclaw"]) {
+      expect(screen.queryByTestId(`matrix-columns-toggle-${c}`)).toBeTruthy();
+    }
+  });
+
+  it("hiding a detected core column removes it from the matrix header and persists", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
+    render(<ServersScreen />);
+    const btn = await screen.findByTestId("matrix-columns-button");
+    expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(true);
+
+    fireEvent.click(btn);
+    const toggle = screen.getByTestId(
+      "matrix-columns-toggle-claude-code",
+    ) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle); // uncheck → hide
+
+    await waitFor(() => {
+      expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(false);
+    });
+    // Count drops to 6/15.
+    expect(btn.textContent).toContain("Columns (6/15)");
+    // Persisted to localStorage under the documented key.
+    const stored = JSON.parse(
+      localStorage.getItem("mcphub.servers.column-visibility") ?? "{}",
+    );
+    expect(stored["claude-code"]).toBe(false);
+  });
+
+  it("pinning an undetected wave-2 column adds it to the matrix header", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
+    render(<ServersScreen />);
+    const btn = await screen.findByTestId("matrix-columns-button");
+    // hermes is NOT detected on this bare host → no column.
+    expect(headerLabels().some((t) => t.includes("hermes"))).toBe(false);
+
+    fireEvent.click(btn);
+    const toggle = screen.getByTestId(
+      "matrix-columns-toggle-hermes",
+    ) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle); // check → pin visible
+
+    await waitFor(() => {
+      expect(headerLabels().some((t) => t.includes("hermes"))).toBe(true);
+    });
+  });
+
+  it("restores persisted overrides on next mount", async () => {
+    // Seed an override BEFORE first render: hide claude-code, pin kiro.
+    localStorage.setItem(
+      "mcphub.servers.column-visibility",
+      JSON.stringify({ "claude-code": false, kiro: true }),
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
+    render(<ServersScreen />);
+    await screen.findByTestId("matrix-columns-button");
+    await waitFor(() => {
+      expect(headerLabels().some((t) => t.includes("kiro"))).toBe(true);
+    });
+    expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(false);
+  });
+
+  it("Reset to auto clears overrides and reverts the matrix to detection default", async () => {
+    localStorage.setItem(
+      "mcphub.servers.column-visibility",
+      JSON.stringify({ "claude-code": false, kiro: true }),
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
+    render(<ServersScreen />);
+    const btn = await screen.findByTestId("matrix-columns-button");
+    await waitFor(() => {
+      expect(headerLabels().some((t) => t.includes("kiro"))).toBe(true);
+    });
+
+    fireEvent.click(btn);
+    fireEvent.click(screen.getByTestId("matrix-columns-reset"));
+
+    await waitFor(() => {
+      // claude-code back (auto-detected core), kiro gone (undetected).
+      expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(true);
+      expect(headerLabels().some((t) => t.includes("kiro"))).toBe(false);
+    });
+    // Persisted record removed.
+    expect(localStorage.getItem("mcphub.servers.column-visibility")).toBeNull();
+  });
+
+  it("Escape closes the popover", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
+    render(<ServersScreen />);
+    const btn = await screen.findByTestId("matrix-columns-button");
+    fireEvent.click(btn);
+    expect(screen.queryByTestId("matrix-columns-popover")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByTestId("matrix-columns-popover")).toBeNull();
+    });
   });
 });
