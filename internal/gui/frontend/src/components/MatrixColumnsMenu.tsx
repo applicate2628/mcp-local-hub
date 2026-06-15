@@ -65,21 +65,22 @@ export function MatrixColumnsMenu(props: MatrixColumnsMenuProps): preact.JSX.Ele
         aria-haspopup="true"
         aria-expanded={open}
         aria-controls={open ? popId : undefined}
+        title="Show or hide which MCP client columns appear in the matrix"
         onClick={() => setOpen((o) => !o)}
       >
-        Columns ({visibleSet.size}/{ALL_CLIENTS.length})
+        Clients ({visibleSet.size}/{ALL_CLIENTS.length})
       </button>
       {open ? (
         <div
           id={popId}
           data-testid="matrix-columns-popover"
           role="dialog"
-          aria-label="Manage matrix columns"
+          aria-label="Show or hide client columns"
           class="matrix-columns-popover absolute left-0 top-[calc(100%+6px)] z-50 w-max min-w-[16rem] max-w-[20rem] rounded-lg border border-app-border bg-app-card p-3 text-left text-sm text-app-text shadow-xl"
         >
           <div class="mb-2 flex items-center justify-between gap-2">
             <span class="flex items-center gap-1 font-semibold text-app-text">
-              Show columns
+              Show / hide clients
               <InfoTip
                 label="About hidden columns"
                 text="Hidden columns are a view filter only — they don't uninstall anything or change any client config. Toggling a column only changes what this matrix displays."
