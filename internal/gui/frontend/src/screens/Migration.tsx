@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow, postDismiss } from "../api";
 import { InfoTip } from "../components/InfoTip";
+import { ScanRefreshControls } from "../components/ScanRefreshControls";
+import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
 import type { ScanEntry, ScanResult } from "../types";
@@ -39,55 +41,76 @@ export function DiscoveryScreen() {
   const [migrateBusy, setMigrateBusy] = useState<boolean>(false);
   const didInitSelection = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // /api/scan is authoritative — its failure means we cannot render
-        // the screen. /api/dismissed is auxiliary — a transient
-        // permission/read error on gui-dismissed.json should degrade to
-        // "no dismissals known" rather than blanking the entire screen
-        // (which would also block Demigrate / Migrate selected for
-        // unaffected groups). (PR #4 Codex R2.)
-        const dismissedFallback: DismissedResponse = { unknown: [] };
-        const [s, d] = await Promise.all([
-          fetchOrThrow<ScanResult>("/api/scan", "object"),
-          fetchOrThrow<DismissedResponse>("/api/dismissed", "object").catch(
-            (err: unknown) => {
-              console.warn(
-                "Discovery: /api/dismissed failed, rendering without dismissal filter:",
-                err,
-              );
-              return dismissedFallback;
-            },
-          ),
-        ]);
-        if (!cancelled) {
-          setScan(s);
-          setDismissedUnknown(new Set(d.unknown ?? []));
-          setError(null);
-          const canMigrateNames = (s.entries ?? [])
-            .filter((e) => e.status === "can-migrate")
-            .map((e) => e.name);
-          const canMigrateSet = new Set(canMigrateNames);
-          setSelected((prev) => {
-            if (!didInitSelection.current) {
-              didInitSelection.current = true;
-              return new Set(canMigrateNames);
-            }
-            const next = new Set<string>();
-            prev.forEach((name) => {
-              if (canMigrateSet.has(name)) next.add(name);
-            });
-            return next;
-          });
+  // loadScan is the single fetch path for this screen. It is driven by
+  // three sources, all calling the SAME closure so the rendered baseline
+  // reconciles identically regardless of trigger:
+  //   - useAutoScan (initial mount fetch + 10s poll + on-visible refresh),
+  //   - the scanReloadToken effect (local Migrate/Demigrate/Dismiss
+  //     actions + SSE daemon-state / clients-rescan bumps),
+  //   - the "Rescan now" button (via useAutoScan.rescan).
+  // Discovery has NO edit/dirty state, so auto-refresh is never paused and
+  // a refetch can never clobber pending work — it just re-derives groups
+  // and prunes the `selected` set against the fresh can-migrate names.
+  const loadScan = useCallback(async () => {
+    try {
+      // /api/scan is authoritative — its failure means we cannot render
+      // the screen. /api/dismissed is auxiliary — a transient
+      // permission/read error on gui-dismissed.json should degrade to
+      // "no dismissals known" rather than blanking the entire screen
+      // (which would also block Demigrate / Migrate selected for
+      // unaffected groups). (PR #4 Codex R2.)
+      const dismissedFallback: DismissedResponse = { unknown: [] };
+      const [s, d] = await Promise.all([
+        fetchOrThrow<ScanResult>("/api/scan", "object"),
+        fetchOrThrow<DismissedResponse>("/api/dismissed", "object").catch(
+          (err: unknown) => {
+            console.warn(
+              "Discovery: /api/dismissed failed, rendering without dismissal filter:",
+              err,
+            );
+            return dismissedFallback;
+          },
+        ),
+      ]);
+      setScan(s);
+      setDismissedUnknown(new Set(d.unknown ?? []));
+      setError(null);
+      const canMigrateNames = (s.entries ?? [])
+        .filter((e) => e.status === "can-migrate")
+        .map((e) => e.name);
+      const canMigrateSet = new Set(canMigrateNames);
+      setSelected((prev) => {
+        if (!didInitSelection.current) {
+          didInitSelection.current = true;
+          return new Set(canMigrateNames);
         }
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [scanReloadToken]);
+        // Preserve the operator's current selection across a poll/refresh,
+        // dropping only names that are no longer can-migrate (already
+        // migrated out-of-band). This keeps an auto-refresh tick from
+        // re-checking everything the operator deliberately unchecked.
+        const next = new Set<string>();
+        prev.forEach((name) => {
+          if (canMigrateSet.has(name)) next.add(name);
+        });
+        return next;
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
+  // Auto-refresh: 10s poll while mounted, paused while the tab is hidden,
+  // immediate refresh on becoming visible again. Discovery is never
+  // edit-paused (no dirty state) so `paused` is a constant false.
+  const { rescan, agoSeconds } = useAutoScan(loadScan, false);
+
+  // scanReloadToken-driven refetch for local actions + SSE. useAutoScan
+  // already issues the initial mount fetch, so this effect skips token 0
+  // to avoid a redundant duplicate fetch on first paint.
+  useEffect(() => {
+    if (scanReloadToken === 0) return;
+    void loadScan();
+  }, [scanReloadToken, loadScan]);
 
   // SSE refresh: any out-of-band change (another GUI tab migrated, CLI
   // ran on this machine, user hand-edited .claude.json) should refresh
@@ -247,7 +270,10 @@ export function DiscoveryScreen() {
 
   return (
     <section class="screen migration discovery">
-      <h1>Discovery</h1>
+      <div class="screen-header-row">
+        <h1>Discovery</h1>
+        <ScanRefreshControls agoSeconds={agoSeconds} onRescan={rescan} />
+      </div>
       <p class="discovery-intro">
         Every MCP server found across all client configs. Servers routed
         through the hub are flagged separately from unmanaged and external
@@ -285,13 +311,6 @@ export function DiscoveryScreen() {
           />
         </div>
       )}
-      <button
-        type="button"
-        class="rescan"
-        onClick={() => setScanReloadToken((n) => n + 1)}
-      >
-        Rescan
-      </button>
     </section>
   );
 }

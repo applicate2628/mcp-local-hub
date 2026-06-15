@@ -738,3 +738,146 @@ describe("ServersScreen — manual column visibility", () => {
     });
   });
 });
+
+// Auto-refresh + Rescan control + dirty-state no-clobber. The matrix is
+// scan-driven; useAutoScan(loadScan, dirty.size > 0) polls /api/scan every
+// SCAN_POLL_MS while no edits are pending, and PAUSES while there are
+// unsaved dirty cells so a poll tick can't discard them.
+describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
+  // A manifested entry routed via-hub on claude-code → the matrix renders
+  // one interactive (checked) checkbox the operator can uncheck to make a
+  // pending "demigrate" dirty cell.
+  function viaHubScan(): ScanResult {
+    return {
+      at: "2026-06-15T00:00:00Z",
+      entries: [
+        {
+          name: "memory",
+          manifest_exists: true,
+          can_migrate: true,
+          status: "via-hub",
+          client_presence: {
+            "claude-code": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/memory",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "claude-code": "ok" },
+    };
+  }
+
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+    // Reset visibility to "visible" each test (a prior test may have left
+    // the redefined getter in place).
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  // SCAN_POLL_MS is 10_000 (see useAutoScan.ts). Hardcode here to avoid
+  // an import; if the const changes, this test must be updated alongside.
+  const POLL_MS = 10_000;
+
+  it("renders the Rescan control with an 'updated …' indicator", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, viaHubScan()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId("scan-rescan-btn")).toBeTruthy();
+    });
+    const ago = screen.getByTestId("scan-updated-ago");
+    expect(ago.textContent).toMatch(/updated|scanning/);
+  });
+
+  it("re-fetches /api/scan after SCAN_POLL_MS while no edits are pending", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return jsonResponse(200, viaHubScan());
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(scanCalls).toBeGreaterThanOrEqual(1));
+    const initial = scanCalls;
+
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    await vi.waitFor(() => expect(scanCalls).toBe(initial + 1));
+  });
+
+  it("Rescan now triggers an immediate /api/scan refetch", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return jsonResponse(200, viaHubScan());
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(screen.queryByTestId("scan-rescan-btn")).toBeTruthy());
+    const before = scanCalls;
+    fireEvent.click(screen.getByTestId("scan-rescan-btn"));
+    await vi.waitFor(() => expect(scanCalls).toBe(before + 1));
+  });
+
+  it("pauses auto-refresh and disables Rescan while a dirty cell is pending — and does NOT clobber the edit", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return jsonResponse(200, viaHubScan());
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+
+    // The via-hub memory/claude-code cell renders one checked, interactive
+    // checkbox. Uncheck it → pending "demigrate" dirty cell.
+    const box = await vi.waitFor(() => {
+      const inputs = document.querySelectorAll<HTMLInputElement>(
+        'table.servers-matrix tbody input[type="checkbox"]',
+      );
+      const checked = Array.from(inputs).find((i) => i.checked && !i.disabled);
+      if (!checked) throw new Error("no interactive checked cell yet");
+      return checked;
+    });
+    const scansAtEdit = scanCalls;
+    fireEvent.click(box);
+    expect(box.checked).toBe(false); // edit visible
+
+    // Apply button is now enabled (dirty.size > 0); the paused note + a
+    // disabled Rescan button appear.
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId("scan-paused-note")).toBeTruthy();
+    });
+    const rescanBtn = screen.getByTestId("scan-rescan-btn") as HTMLButtonElement;
+    expect(rescanBtn.disabled).toBe(true);
+
+    // Advance well past several poll periods — NO auto refetch fires while
+    // dirty, and the unchecked edit survives (not clobbered by a baseline
+    // reload).
+    await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+    expect(scanCalls).toBe(scansAtEdit); // paused → zero new scans
+    expect(box.checked).toBe(false); // edit preserved across the paused window
+  });
+});

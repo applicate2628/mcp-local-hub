@@ -130,6 +130,22 @@ main { padding: var(--screen-padding); overflow: auto; }
   font-weight: 500;
 }
 
+/* --- Scan auto-refresh controls (Discovery + Servers) --- */
+/* screen-header-row keeps the screen <h1> and its Rescan controls on one
+   baseline-aligned row; the controls push to the right edge. */
+.screen-header-row { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); flex-wrap: wrap; }
+.screen-header-row > h1 { margin: 0; }
+.scan-refresh-controls { display: inline-flex; align-items: center; gap: var(--gap-xs); flex-wrap: wrap; }
+.scan-refresh-controls .scan-rescan-btn {
+  padding: var(--button-padding-y) var(--button-padding-x);
+  border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text);
+  border-radius: 4px; cursor: pointer; font-size: 14px;
+}
+.scan-refresh-controls .scan-rescan-btn:hover:not(:disabled) { border-color: var(--accent, #8250df); }
+.scan-refresh-controls .scan-rescan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.scan-refresh-controls .scan-updated-ago { color: var(--text-muted); font-size: 13px; }
+.scan-refresh-controls .scan-paused-note { color: var(--warning, #bf8700); font-size: 13px; font-style: italic; }
+
 /* --- Servers matrix --- */
 .servers-matrix { border-collapse: collapse; width: 100%; max-width: 960px; }
 .servers-matrix th, .servers-matrix td { border: 1px solid var(--border); padding: var(--cell-padding-y) var(--cell-padding-x); text-align: left; }

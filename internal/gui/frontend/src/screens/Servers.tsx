@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
   fetchOrThrow,
   postInitClientConfig,
@@ -8,6 +8,8 @@ import {
   type WorkspaceEntryDTO,
   type WorkspacePair,
 } from "../api";
+import { ScanRefreshControls } from "../components/ScanRefreshControls";
+import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
 import { collectServers } from "../lib/routing";
 import {
@@ -228,63 +230,91 @@ export function ServersScreen() {
     "clients-rescan": () => setReloadToken((n) => n + 1),
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // /api/workspaces returns {workspaces, entries}. A registry
-        // load failure must NOT block the matrix render — the
-        // selector falls back to its empty-state placeholder and the
-        // LSP matrix surfaces the 9 placeholder rows. Catch isolation
-        // is bounded to the workspaces fetch only; /api/scan and
-        // /api/status errors continue to fail the whole effect.
-        const [scan, status, workspacesResp] = await Promise.all([
-          fetchOrThrow<ScanResult>("/api/scan", "object"),
-          fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
-          listWorkspaces().catch(() => ({ workspaces: [], entries: [] })),
-        ]);
-        if (cancelled) return;
-        if (scan.entries != null && !Array.isArray(scan.entries)) {
-          setError("/api/scan returned malformed entries");
-          return;
-        }
-        setServers(collectServers(scan));
-        setScanForLsp(scan);
-        setWorkspaces(workspacesResp.workspaces);
-        setWorkspaceEntries(workspacesResp.entries);
-        setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
-        // Clear any success banner once the authoritative refresh lands
-        // (the matrix has already redrawn with the new "ok" state).
-        // Error banners stay sticky so the operator sees the failure
-        // until they retry — refreshing should NOT mask a recent
-        // PARENT_MISSING / INIT_FAILED report.
-        setInitMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
-        setLspRegisterMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
-        const agg = aggregateStatus(status);
-        const flat: Record<string, { state: string; port: number | null }> = {};
-        for (const [name, a] of Object.entries(agg)) {
-          flat[name] = { state: a.state, port: a.port };
-        }
-        setStatusByServer(flat);
-        setError(null);
-        // PR #186 fix: clear the "Applied. Refreshing…" indicator
-        // once the authoritative reload completes. Pre-fix the
-        // string sat in applyMsg forever (set by applyChanges
-        // on success, never cleared) — user saw the spinner-like
-        // wording after every successful Apply with no way to
-        // know when the refresh was actually done. Failed-message
-        // strings ("Failed: N row(s); re-toggle and retry below.")
-        // must NOT be cleared here — they remain visible until
-        // the user starts a new Apply cycle.
-        setApplyMsg((msg) => (msg === "Applied. Refreshing…" ? "" : msg));
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+  // loadScan is the single fetch path for the matrix. It is driven by
+  // three sources, all calling the SAME closure so the rendered baseline
+  // reconciles identically regardless of trigger:
+  //   - useAutoScan (initial mount fetch + 10s poll + on-visible refresh),
+  //   - the reloadToken effect (Apply, Initialize, LSP register, SSE
+  //     clients-rescan bumps),
+  //   - the "Rescan now" button (via useAutoScan.rescan).
+  //
+  // CRITICAL — dirty-cell no-clobber: this refetch only replaces the
+  // authoritative scan BASELINE (server.routing, statusByServer, presence,
+  // workspaces). The operator's pending edits live in the SEPARATE `dirty`
+  // map, which this closure never touches. Auto-refresh is additionally
+  // PAUSED at the useAutoScan level while `dirty.size > 0` (see below), so
+  // a poll tick can't even fire mid-edit; and because each CellView's
+  // visible checkbox folds `dirty` over the baseline (effectiveChecked), a
+  // baseline-only refresh can never visually drop a pending toggle.
+  const loadScan = useCallback(async () => {
+    try {
+      // /api/workspaces returns {workspaces, entries}. A registry
+      // load failure must NOT block the matrix render — the
+      // selector falls back to its empty-state placeholder and the
+      // LSP matrix surfaces the 9 placeholder rows. Catch isolation
+      // is bounded to the workspaces fetch only; /api/scan and
+      // /api/status errors continue to fail the whole load.
+      const [scan, status, workspacesResp] = await Promise.all([
+        fetchOrThrow<ScanResult>("/api/scan", "object"),
+        fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
+        listWorkspaces().catch(() => ({ workspaces: [], entries: [] })),
+      ]);
+      if (scan.entries != null && !Array.isArray(scan.entries)) {
+        setError("/api/scan returned malformed entries");
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadToken]);
+      setServers(collectServers(scan));
+      setScanForLsp(scan);
+      setWorkspaces(workspacesResp.workspaces);
+      setWorkspaceEntries(workspacesResp.entries);
+      setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
+      // Clear any success banner once the authoritative refresh lands
+      // (the matrix has already redrawn with the new "ok" state).
+      // Error banners stay sticky so the operator sees the failure
+      // until they retry — refreshing should NOT mask a recent
+      // PARENT_MISSING / INIT_FAILED report.
+      setInitMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
+      setLspRegisterMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
+      const agg = aggregateStatus(status);
+      const flat: Record<string, { state: string; port: number | null }> = {};
+      for (const [name, a] of Object.entries(agg)) {
+        flat[name] = { state: a.state, port: a.port };
+      }
+      setStatusByServer(flat);
+      setError(null);
+      // PR #186 fix: clear the "Applied. Refreshing…" indicator
+      // once the authoritative reload completes. Pre-fix the
+      // string sat in applyMsg forever (set by applyChanges
+      // on success, never cleared) — user saw the spinner-like
+      // wording after every successful Apply with no way to
+      // know when the refresh was actually done. Failed-message
+      // strings ("Failed: N row(s); re-toggle and retry below.")
+      // must NOT be cleared here — they remain visible until
+      // the user starts a new Apply cycle.
+      setApplyMsg((msg) => (msg === "Applied. Refreshing…" ? "" : msg));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
+  // Auto-refresh: 10s poll while mounted, paused while the tab is hidden,
+  // immediate refresh on becoming visible again — AND paused while there
+  // are unsaved matrix edits (`dirty.size > 0`). The dirty pause is the
+  // no-clobber guarantee: an auto tick never fires mid-edit. The pause
+  // releases automatically once Apply/discard empties the dirty map.
+  const hasUnsavedEdits = dirty.size > 0;
+  const { rescan, agoSeconds } = useAutoScan(loadScan, hasUnsavedEdits);
+
+  // reloadToken-driven refetch for Apply / Initialize / LSP register / SSE.
+  // useAutoScan already issues the initial mount fetch, so this effect
+  // skips token 0 to avoid a redundant duplicate fetch on first paint.
+  // These triggers fire AFTER the dirty set has been pruned (Apply) or are
+  // operator-initiated (Initialize/register), so refetching here is safe
+  // even though the auto-poll is paused while dirty.
+  useEffect(() => {
+    if (reloadToken === 0) return;
+    void loadScan();
+  }, [reloadToken, loadScan]);
 
   async function initializeClient(client: string) {
     if (initBusy[client]) return;
@@ -722,7 +752,16 @@ export function ServersScreen() {
 
   return (
     <div>
-      <h1>Servers</h1>
+      <div class="screen-header-row">
+        <h1>Servers</h1>
+        <ScanRefreshControls
+          agoSeconds={agoSeconds}
+          onRescan={rescan}
+          paused={hasUnsavedEdits}
+          pauseReason="auto-refresh paused — unsaved changes"
+          disabledReason="Apply or discard your unsaved matrix changes before rescanning"
+        />
+      </div>
       <WorkspaceSelector
         workspaces={workspaces}
         selectedKey={selectedWorkspaceKey}
