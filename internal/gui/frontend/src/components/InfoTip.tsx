@@ -5,6 +5,13 @@ export type InfoTipProps = {
   text: string;
   /** Accessible label for the trigger button. */
   label?: string;
+  /**
+   * Optional test id forwarded to the trigger button. Lets callers that
+   * moved an inline prose block into this popover keep their coverage
+   * anchored on a stable selector (the prose is reachable by opening the
+   * popover or by reading the trigger's title attribute).
+   */
+  "data-testid"?: string;
 };
 
 // InfoTip — a small "ⓘ" affordance that reveals long help text in a floating
@@ -16,7 +23,11 @@ export type InfoTipProps = {
 // Escape, blur, mouseleave, or click-outside. Styling rides the app's design
 // tokens (var(--…)) re-exported to Tailwind via @theme, so it follows the live
 // light/dark palette.
-export function InfoTip({ text, label = "More info" }: InfoTipProps): preact.JSX.Element {
+export function InfoTip({
+  text,
+  label = "More info",
+  "data-testid": dataTestid,
+}: InfoTipProps): preact.JSX.Element {
   const [open, setOpen] = useState(false);
   const rawId = useId();
   const id = `infotip-${rawId.replace(/[:]/g, "")}`;
@@ -58,6 +69,11 @@ export function InfoTip({ text, label = "More info" }: InfoTipProps): preact.JSX
         aria-label={label}
         aria-expanded={open}
         aria-describedby={open ? id : undefined}
+        // Native tooltip mirror of the popover prose: keeps the help text
+        // reachable on a long-hover even before the popover paints, and gives
+        // moved-inline-description callers a stable text surface to assert.
+        title={text}
+        data-testid={dataTestid}
         onClick={() => setOpen((o) => !o)}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}

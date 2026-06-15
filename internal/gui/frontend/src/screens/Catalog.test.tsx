@@ -102,12 +102,19 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-card-serena")).toBeTruthy();
     expect(screen.queryByTestId("catalog-card-memory")).toBeTruthy();
     expect(screen.queryByTestId("catalog-card-time")).toBeTruthy();
-    // The one-line description renders under each server name.
-    expect(screen.getByTestId("catalog-desc-serena").textContent).toContain(
+    // The description now lives in an on-demand InfoTip (ⓘ) next to the
+    // card title — its prose is carried on the trigger's `title` attribute
+    // (and revealed in the popover on click), not as inline body text. The
+    // data-testid is preserved on the trigger so coverage stays anchored.
+    expect(screen.getByTestId("catalog-desc-serena").getAttribute("title")).toContain(
       "Semantic code toolkit",
     );
-    expect(screen.getByTestId("catalog-desc-memory").textContent).toContain(
+    expect(screen.getByTestId("catalog-desc-memory").getAttribute("title")).toContain(
       "Persistent knowledge-graph memory",
+    );
+    // The prose is NOT dumped inline under the title anymore (compact card).
+    expect(screen.getByTestId("catalog-desc-serena").textContent).not.toContain(
+      "Semantic code toolkit",
     );
   });
 
@@ -434,11 +441,13 @@ describe("CatalogScreen", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("catalog-marketplace-cards")).toBeTruthy();
     });
-    // Summary renders; the one-click "Add to hub" action replaces the old
-    // read-only Generate-CLI hint.
-    expect(screen.getByTestId("catalog-marketplace-summary-filesystem").textContent).toContain(
-      "Read/write files within allowed roots.",
-    );
+    // Summary now lives in an on-demand InfoTip (ⓘ) next to the entry name —
+    // its prose is on the trigger's `title` attribute, not inline body text.
+    // The one-click "Add to hub" action replaces the old read-only
+    // Generate-CLI hint.
+    expect(
+      screen.getByTestId("catalog-marketplace-summary-filesystem").getAttribute("title"),
+    ).toContain("Read/write files within allowed roots.");
     expect(screen.getByTestId("catalog-marketplace-hub-filesystem").textContent).toContain(
       "Add to hub",
     );
@@ -451,6 +460,48 @@ describe("CatalogScreen", () => {
     expect(homepage.getAttribute("target")).toBe("_blank");
     // A second entry renders too.
     expect(screen.queryByTestId("catalog-marketplace-card-git")).toBeTruthy();
+  });
+
+  it("a marketplace entry already running per /api/status shows Installed, no install affordance", async () => {
+    // `fetch` is a shipped hub daemon AND a marketplace catalog entry. When
+    // /api/status reports it running, the marketplace card must render an
+    // "Installed" badge instead of an install button — otherwise clicking
+    // install hits NAME_CONFLICT and absurdly offers to install "fetch-2".
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        // fetch is running; not-installed is not.
+        "/api/status": () =>
+          jsonResponse(200, [
+            { server: "fetch", daemon: "default", port: 9131, state: "Running" } as DaemonStatus,
+          ]),
+        "/api/marketplace": () =>
+          jsonResponse(200, {
+            entries: [
+              mpEntry("fetch", "Fetch", "Fetch a URL and convert to markdown.", [], "", "stdio"),
+              mpEntry("not-installed", "Not Installed", "Some other server.", [], "", "stdio"),
+            ],
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-cards")).toBeTruthy();
+    });
+    // fetch → Installed badge, NO install affordance (no "Add to hub" button,
+    // no direct toggle).
+    expect(screen.getByTestId("catalog-marketplace-installed-badge-fetch").textContent).toBe(
+      "installed",
+    );
+    expect(screen.queryByTestId("catalog-marketplace-hub-fetch")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-install-fetch")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-direct-toggle-fetch")).toBeNull();
+    // not-installed → install affordance present, NO Installed badge.
+    expect(screen.queryByTestId("catalog-marketplace-installed-badge-not-installed")).toBeNull();
+    expect(screen.getByTestId("catalog-marketplace-hub-not-installed").textContent).toContain(
+      "Add to hub",
+    );
   });
 
   it("a stdio entry shows HUB-ONLY (no Install-directly toggle)", async () => {

@@ -326,12 +326,20 @@ export function CatalogScreen() {
             const installed = installedServers.has(name) || state.phase === "installed";
             return (
               <div class="card catalog-card" key={name} data-testid={`catalog-card-${name}`}>
-                <div class="card-title">{name}</div>
-                {entry.description && (
-                  <p class="catalog-card-desc" data-testid={`catalog-desc-${name}`}>
-                    {entry.description}
-                  </p>
-                )}
+                <div class="card-title">
+                  <span>{name}</span>
+                  {entry.description && (
+                    <InfoTip
+                      label={`About ${name}`}
+                      text={entry.description}
+                      // The description text now lives in the InfoTip popover.
+                      // The data-testid is preserved on the trigger so coverage
+                      // can still assert the prose by reading the text prop's
+                      // rendered popover (open-on-click) without a layout shift.
+                      data-testid={`catalog-desc-${name}`}
+                    />
+                  )}
+                </div>
                 <div class="catalog-card-actions">
                   {installed ? (
                     <>
@@ -402,7 +410,7 @@ export function CatalogScreen() {
         </div>
       )}
 
-      <MarketplaceSection entries={marketplace} />
+      <MarketplaceSection entries={marketplace} installedServers={installedServers} />
     </section>
   );
 }
@@ -442,7 +450,17 @@ const MARKETPLACE_IDLE: MarketplaceInstallState = { phase: "idle" };
 // offer "Install directly" (a remote-URL write into a chosen client set). An
 // empty list (fetch/cache miss or genuinely empty registry) renders a muted
 // notice rather than nothing, so operators know the section exists.
-function MarketplaceSection({ entries }: { entries: MarketplaceEntry[] }) {
+function MarketplaceSection({
+  entries,
+  installedServers,
+}: {
+  entries: MarketplaceEntry[];
+  // Names of servers already running per /api/status (same Set the shipped
+  // store uses). A marketplace entry whose id OR name is in this set is
+  // already installed, so we render an "Installed" badge instead of an
+  // install affordance — never offer to install an already-running server.
+  installedServers: Set<string>;
+}) {
   // Per-row install lifecycle. A row absent from the map is "idle".
   const [states, setStates] = useState<Record<string, MarketplaceInstallState>>({});
   // mountedRef guards post-await setState against the "operator navigated away
@@ -514,6 +532,11 @@ function MarketplaceSection({ entries }: { entries: MarketplaceEntry[] }) {
             <MarketplaceCard
               key={entry.id}
               entry={entry}
+              // An entry is already installed if /api/status reports a daemon
+              // whose server name matches the entry id OR its display name
+              // (e.g. the shipped `fetch` hub daemon is also a catalog entry —
+              // we must not offer to install it as "fetch-2").
+              installed={installedServers.has(entry.id) || installedServers.has(entry.name)}
               state={states[entry.id] ?? MARKETPLACE_IDLE}
               onInstall={runInstall}
             />
@@ -530,10 +553,15 @@ function MarketplaceSection({ entries }: { entries: MarketplaceEntry[] }) {
 // multiselect state is local to the row.
 function MarketplaceCard({
   entry,
+  installed,
   state,
   onInstall,
 }: {
   entry: MarketplaceEntry;
+  // True when /api/status already reports this entry's server as running.
+  // Suppresses the install affordance in favour of an "Installed" badge so
+  // the GUI never offers to install an already-running server.
+  installed: boolean;
   state: MarketplaceInstallState;
   onInstall: (
     id: string,
@@ -561,15 +589,16 @@ function MarketplaceCard({
       class="card catalog-card catalog-marketplace-card"
       data-testid={`catalog-marketplace-card-${entry.id}`}
     >
-      <div class="card-title">{entry.name}</div>
-      {entry.summary && (
-        <p
-          class="catalog-card-desc"
-          data-testid={`catalog-marketplace-summary-${entry.id}`}
-        >
-          {entry.summary}
-        </p>
-      )}
+      <div class="card-title">
+        <span>{entry.name}</span>
+        {entry.summary && (
+          <InfoTip
+            label={`About ${entry.name}`}
+            text={entry.summary}
+            data-testid={`catalog-marketplace-summary-${entry.id}`}
+          />
+        )}
+      </div>
       {entry.categories.length > 0 && (
         <p class="catalog-marketplace-categories">
           {entry.categories.map((c) => (
@@ -580,8 +609,19 @@ function MarketplaceCard({
         </p>
       )}
 
-      {/* Install affordance. stdio → hub only; http → hub + direct. */}
-      {state.phase === "installed" ? (
+      {/* Install affordance. stdio → hub only; http → hub + direct.
+          But FIRST: a server already running per /api/status (e.g. the
+          shipped `fetch` daemon, which is also a catalog entry) shows an
+          "Installed" badge and NO install affordance — we must never offer
+          to re-install it (which would hit NAME_CONFLICT → suggest fetch-2). */}
+      {installed ? (
+        <span
+          class="lsp-chip lsp-chip-via-hub"
+          data-testid={`catalog-marketplace-installed-badge-${entry.id}`}
+        >
+          installed
+        </span>
+      ) : state.phase === "installed" ? (
         <p
           class="catalog-marketplace-status catalog-marketplace-status-ok"
           role="status"
