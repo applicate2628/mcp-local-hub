@@ -49,16 +49,19 @@ function entry(name: string, description = `desc for ${name}`, kind = "global") 
 }
 
 // Marketplace entry builder — the GET /api/marketplace row shape
-// ({id, name, summary, categories, homepage}). The read-only browse view
-// renders these in the Marketplace section below the shipped-server store.
+// ({id, name, summary, categories, homepage, transport}). The Store
+// install view renders these in the Marketplace section below the
+// shipped-server store. `transport` ("stdio" | "http") drives the
+// two-tier install affordance (stdio → hub only; http → hub + direct).
 function mpEntry(
   id: string,
   name = id,
   summary = `summary for ${id}`,
   categories: string[] = [],
   homepage = "",
+  transport = "stdio",
 ) {
-  return { id, name, summary, categories, homepage };
+  return { id, name, summary, categories, homepage, transport };
 }
 
 // Default empty-marketplace route so the shipped-server tests that don't
@@ -403,9 +406,9 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-uninstall-memory")).toBeTruthy();
   });
 
-  // ---- §10 v2b: read-only marketplace browse ----
+  // ---- §B #1 Store: marketplace one-click install ----
 
-  it("renders the marketplace section with entries from /api/marketplace", async () => {
+  it("renders the marketplace section with one-click install entries from /api/marketplace", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
@@ -419,6 +422,7 @@ describe("CatalogScreen", () => {
                 "Read/write files within allowed roots.",
                 ["files", "core"],
                 "https://example.com/fs",
+                "stdio",
               ),
               mpEntry("git", "Git", "Git repository tooling."),
             ],
@@ -430,12 +434,13 @@ describe("CatalogScreen", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("catalog-marketplace-cards")).toBeTruthy();
     });
-    // Summary renders; the Generate hint points at the CLI flow; no install.
+    // Summary renders; the one-click "Add to hub" action replaces the old
+    // read-only Generate-CLI hint.
     expect(screen.getByTestId("catalog-marketplace-summary-filesystem").textContent).toContain(
       "Read/write files within allowed roots.",
     );
-    expect(screen.getByTestId("catalog-marketplace-generate-filesystem").textContent).toContain(
-      "mcphub marketplace generate filesystem",
+    expect(screen.getByTestId("catalog-marketplace-hub-filesystem").textContent).toContain(
+      "Add to hub",
     );
     // Homepage link carries the safe external-link attrs.
     const homepage = screen.getByTestId(
@@ -446,8 +451,249 @@ describe("CatalogScreen", () => {
     expect(homepage.getAttribute("target")).toBe("_blank");
     // A second entry renders too.
     expect(screen.queryByTestId("catalog-marketplace-card-git")).toBeTruthy();
-    // There is NO install button on a marketplace card (read-only).
-    expect(screen.queryByTestId("catalog-install-filesystem")).toBeNull();
+  });
+
+  it("a stdio entry shows HUB-ONLY (no Install-directly toggle)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("git", "Git", "x", [], "", "stdio")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-hub-git")).toBeTruthy();
+    });
+    // Hub action present; direct-mode toggle ABSENT for a stdio entry (the
+    // two-tier rule — stdio installs only via the shared hub daemon).
+    expect(screen.getByTestId("catalog-marketplace-hub-git").textContent).toContain("Add to hub");
+    expect(screen.queryByTestId("catalog-marketplace-direct-toggle-git")).toBeNull();
+  });
+
+  it("an http entry shows BOTH hub + direct modes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("remote", "Remote", "x", [], "", "http")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-hub-remote")).toBeTruthy();
+    });
+    // Both modes are offered for an http entry.
+    expect(screen.queryByTestId("catalog-marketplace-hub-remote")).toBeTruthy();
+    expect(screen.queryByTestId("catalog-marketplace-direct-toggle-remote")).toBeTruthy();
+    // The client multiselect is collapsed until the toggle is clicked.
+    expect(screen.queryByTestId("catalog-marketplace-direct-panel-remote")).toBeNull();
+  });
+
+  it("direct toggle aria-controls only references the panel when expanded (no dangling ref)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("remote", "Remote", "x", [], "", "http")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    const toggle = await screen.findByTestId("catalog-marketplace-direct-toggle-remote");
+    // Collapsed: aria-expanded=false AND no aria-controls (the panel is not in the
+    // DOM, so a static aria-controls would dangle — review fix).
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-controls")).toBeNull();
+    // Expanded: aria-expanded=true AND aria-controls resolves to the rendered panel.
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const panelId = toggle.getAttribute("aria-controls");
+    expect(panelId).toBe("catalog-marketplace-direct-panel-remote");
+    expect(document.getElementById(panelId!)).toBeTruthy();
+  });
+
+  it("hub install POSTs {id, mode:'hub'} and reflects the 201 success", async () => {
+    const bodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/install": (init) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          return jsonResponse(201, { name: "git", port: 9201, mode: "hub" });
+        },
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("git", "Git", "x", [], "", "stdio")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    const hubBtn = await screen.findByTestId("catalog-marketplace-hub-git");
+    fireEvent.click(hubBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-installed-git")).toBeTruthy();
+    });
+    expect(screen.getByTestId("catalog-marketplace-installed-git").textContent).toContain("git");
+    expect(screen.getByTestId("catalog-marketplace-installed-git").textContent).toContain("9201");
+    // The POST body carried the id + hub mode.
+    expect(bodies[0]).toMatchObject({ id: "git", mode: "hub" });
+  });
+
+  it("hub install 409 NAME_CONFLICT offers a one-click suggested-name retry", async () => {
+    const bodies: unknown[] = [];
+    let installCall = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/install": (init) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          installCall += 1;
+          // First attempt: name conflict. Retry under the suggested name: 201.
+          return installCall === 1
+            ? jsonResponse(409, { error_code: "NAME_CONFLICT", suggested_name: "git-2" })
+            : jsonResponse(201, { name: "git-2", port: 9202, mode: "hub" });
+        },
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("git", "Git", "x", [], "", "stdio")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-hub-git"));
+
+    // The conflict surfaces the suggested name + a one-click retry button.
+    const retry = await screen.findByTestId("catalog-marketplace-conflict-retry-git");
+    expect(retry.textContent).toContain("git-2");
+    fireEvent.click(retry);
+
+    // Retry under the suggested name succeeds.
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-installed-git")).toBeTruthy();
+    });
+    expect(screen.getByTestId("catalog-marketplace-installed-git").textContent).toContain("git-2");
+    // Second POST carried name=git-2 (the suggested-name retry shape).
+    expect(bodies[1]).toMatchObject({ id: "git", mode: "hub", name: "git-2" });
+  });
+
+  it("direct mode: client multiselect + POST {mode:'direct', clients:[…]} shape", async () => {
+    const bodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/install": (init) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          return jsonResponse(200, {
+            clients_updated: ["claude-code", "cursor"],
+            clients_failed: [],
+            mode: "direct",
+          });
+        },
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("remote", "Remote", "x", [], "", "http")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    // Open the direct-mode panel.
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-direct-toggle-remote"));
+    const panel = await screen.findByTestId("catalog-marketplace-direct-panel-remote");
+    expect(panel).toBeTruthy();
+
+    // The Install button is disabled until at least one client is picked.
+    const installBtn = screen.getByTestId(
+      "catalog-marketplace-direct-install-remote",
+    ) as HTMLButtonElement;
+    expect(installBtn.disabled).toBe(true);
+
+    // Pick two clients, then install.
+    fireEvent.click(screen.getByTestId("catalog-marketplace-client-remote-claude-code"));
+    fireEvent.click(screen.getByTestId("catalog-marketplace-client-remote-cursor"));
+    await waitFor(() => {
+      expect((screen.getByTestId("catalog-marketplace-direct-install-remote") as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByTestId("catalog-marketplace-direct-install-remote"));
+
+    // The result lists the updated clients.
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-direct-result-remote")).toBeTruthy();
+    });
+    expect(screen.getByTestId("catalog-marketplace-direct-updated-remote").textContent).toContain(
+      "claude-code",
+    );
+    // The POST carried mode:direct + the selected client list.
+    expect(bodies[0]).toMatchObject({ id: "remote", mode: "direct" });
+    const sent = bodies[0] as { clients?: string[] };
+    expect(sent.clients).toEqual(expect.arrayContaining(["claude-code", "cursor"]));
+  });
+
+  it("direct mode 207 partial renders both updated + failed clients", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/install": () =>
+          jsonResponse(207, {
+            clients_updated: ["claude-code"],
+            clients_failed: [{ client: "vscode", error: "config file is a symlink" }],
+            mode: "direct",
+          }),
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("remote", "Remote", "x", [], "", "http")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-direct-toggle-remote"));
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-client-remote-claude-code"));
+    fireEvent.click(screen.getByTestId("catalog-marketplace-direct-install-remote"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-direct-failed-remote")).toBeTruthy();
+    });
+    expect(screen.getByTestId("catalog-marketplace-direct-updated-remote").textContent).toContain(
+      "claude-code",
+    );
+    expect(screen.getByTestId("catalog-marketplace-direct-failed-remote").textContent).toContain(
+      "vscode",
+    );
+    expect(screen.getByTestId("catalog-marketplace-direct-failed-remote").textContent).toContain(
+      "config file is a symlink",
+    );
+  });
+
+  it("surfaces an inline error when the install POST fails (e.g. 502 catalog unavailable)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/install": () =>
+          jsonResponse(502, { error: "marketplace catalog unavailable", code: "CATALOG_UNAVAILABLE" }),
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("git", "Git", "x", [], "", "stdio")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-hub-git"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-error-git")).toBeTruthy();
+    });
+    expect(screen.getByTestId("catalog-marketplace-error-git").textContent).toContain(
+      "marketplace catalog unavailable",
+    );
+    // The row survives: the hub button is present + re-enabled for a retry.
+    const hubBtn = screen.getByTestId("catalog-marketplace-hub-git") as HTMLButtonElement;
+    expect(hubBtn.disabled).toBe(false);
   });
 
   it("does NOT render a homepage link when the marketplace homepage is not http(s) (untrusted-registry XSS guard)", async () => {

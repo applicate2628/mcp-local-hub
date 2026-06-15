@@ -207,13 +207,49 @@ main { padding: var(--screen-padding); overflow: auto; }
 /* Search/filter input over the shipped-server cards (§10 v2b). */
 .catalog-search { margin: var(--gap-sm) 0 var(--gap-md); }
 .catalog-search input { width: 100%; max-width: 420px; padding: var(--button-padding-y) var(--button-padding-x); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; font-size: 14px; }
-/* Read-only marketplace browse section (§10 v2b). */
+/* Marketplace one-click install section (§B #1 Store, slice S3). */
 .catalog-marketplace { margin-top: var(--gap-lg, 32px); border-top: 1px solid var(--border); padding-top: var(--gap-md); }
 .catalog-marketplace h2 { margin: 0 0 var(--gap-xs); }
 .catalog-marketplace-categories { display: flex; flex-wrap: wrap; gap: var(--gap-xs); margin: var(--gap-xs) 0; }
-.catalog-marketplace-generate { color: var(--text-muted); font-size: 13px; margin: var(--gap-xs) 0; }
-.catalog-marketplace-generate code { font-family: monospace; }
 .catalog-marketplace-homepage { font-size: 13px; margin: var(--gap-xs) 0 0; }
+/* Install affordance + lifecycle. The buttons reuse the .btn-primary accent
+   convention from the Settings cards; the secondary "Install directly" toggle
+   keeps the base outline look. All colors ride theme tokens (light + dark). */
+.catalog-marketplace-install { margin-top: var(--gap-sm); }
+.catalog-marketplace-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-xs); }
+.catalog-marketplace-install button {
+  padding: var(--button-padding-y) var(--button-padding-x);
+  border: 1px solid var(--border); background: var(--card-surface); color: var(--text);
+  border-radius: 8px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease, opacity .12s ease;
+}
+.catalog-marketplace-install button:hover:not(:disabled) {
+  border-color: var(--link); background: color-mix(in srgb, var(--link) 8%, var(--card-surface));
+}
+.catalog-marketplace-install button:disabled { opacity: 0.5; cursor: not-allowed; }
+.catalog-marketplace-install button.btn-primary:not(:disabled) {
+  background: var(--link); border-color: var(--link); color: #ffffff;
+}
+.catalog-marketplace-install button.btn-primary:not(:disabled):hover {
+  background: var(--link-hover); border-color: var(--link-hover);
+}
+/* Direct-mode client multiselect panel. */
+.catalog-marketplace-direct-panel {
+  margin-top: var(--gap-sm); padding: var(--gap-sm);
+  border: 1px solid var(--border); border-radius: 8px; background: var(--sidebar-bg);
+}
+.catalog-marketplace-direct-label { margin: 0 0 var(--gap-xs); font-size: 13px; color: var(--text-muted); }
+.catalog-marketplace-clients { display: flex; flex-wrap: wrap; gap: var(--gap-xs) var(--gap-md); margin-bottom: var(--gap-sm); }
+.catalog-marketplace-client { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+/* Inline install status lines (success / partial / conflict). */
+.catalog-marketplace-status { margin: var(--gap-sm) 0 0; font-size: 13px; line-height: 1.4; }
+.catalog-marketplace-status p { margin: 0 0 var(--gap-xs); }
+.catalog-marketplace-status p:last-child { margin-bottom: 0; }
+.catalog-marketplace-status-ok { color: var(--success); }
+.catalog-marketplace-status-warn { color: var(--text); }
+.catalog-marketplace-status-warn button { margin-left: 0.25rem; }
+.catalog-marketplace-direct-failed { margin: var(--gap-xs) 0 0; padding-left: 1.2rem; color: var(--danger); }
+.catalog-marketplace-direct-failed li { margin: 2px 0; }
 
 /* --- Logs screen --- */
 #logs-controls { display: flex; gap: var(--gap-sm); align-items: center; margin-bottom: var(--gap-md); flex-wrap: wrap; }

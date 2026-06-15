@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { fetchOrThrow } from "../api";
+import { fetchOrThrow, installMarketplaceEntry } from "../api";
+import type { MarketplaceInstallResult } from "../api";
+import { CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
+import { InfoTip } from "../components/InfoTip";
 import type { DaemonStatus } from "../types";
 
 // Mirrors catalogEntry in internal/gui/manifest.go — one row of the GET
@@ -25,17 +28,25 @@ interface CatalogListResponse {
 }
 
 // Mirrors marketplaceEntry in internal/gui/marketplace.go — one row of the
-// GET /api/marketplace body. The marketplace browse is READ-ONLY: the
-// Catalog screen lists the curated registry entries with their summary +
-// a "Generate" hint pointing at the CLI flow (`mcphub marketplace generate
-// <id>`). It deliberately carries no install/transport fields because
-// stdio-wrapper generation is a CLI flow, not a GUI install.
+// GET /api/marketplace body. The Store one-click install (roadmap §B #1,
+// slice S3) installs a curated registry entry straight from the GUI. The
+// `transport` discriminator ("stdio" | "http") drives the two-tier install
+// rule the UI enforces so the operator never hits a backend 400:
+//
+//   stdio → HUB ONLY (one shared hub daemon every client routes to —
+//           the process-tail-compression path).
+//   http  → BOTH "Add to hub" AND "Install directly" (direct writes the
+//           remote URL straight into the chosen client configs, no daemon).
 interface MarketplaceEntry {
   id: string;
   name: string;
   summary: string;
   categories: string[];
   homepage: string;
+  // "stdio" | "http" — the install-mode discriminator. An older backend that
+  // omits it (or a hostile/partial body) reads as "" and falls back to the
+  // safe HUB-ONLY affordance.
+  transport: string;
 }
 
 // Mirrors marketplaceListResponse in internal/gui/marketplace.go — the GET
@@ -139,7 +150,14 @@ export function CatalogScreen() {
         try {
           const mp = await fetchOrThrow<MarketplaceListResponse>("/api/marketplace", "object");
           if (!cancelled) {
-            setMarketplace(Array.isArray(mp.entries) ? mp.entries : []);
+            // Normalize `transport` to a string so an older backend that omits
+            // it (or a partial body) reads as "" and falls back to the safe
+            // HUB-ONLY affordance rather than crashing the row.
+            const rows = (Array.isArray(mp.entries) ? mp.entries : []).map((e) => ({
+              ...e,
+              transport: typeof e.transport === "string" ? e.transport : "",
+            }));
+            setMarketplace(rows);
           }
         } catch {
           if (!cancelled) setMarketplace([]);
@@ -389,19 +407,102 @@ export function CatalogScreen() {
   );
 }
 
-// MarketplaceSection renders the read-only curated marketplace registry.
-// Each entry shows its name, summary, categories, and a "Generate" hint
-// linking to the CLI flow — there is NO in-GUI install because
-// stdio-wrapper generation is a `mcphub marketplace generate <id>` flow.
-// An empty list (fetch/cache miss or genuinely empty registry) renders a
-// muted notice rather than nothing, so operators know the section exists.
+// The supported direct-mode client list, mirroring the Servers matrix client
+// set (CORE_CLIENTS first, then the wave-2 opt-in adapters). Direct mode
+// writes the remote URL straight into each selected client config, so the
+// multiselect offers the same superset the rest of the GUI knows about.
+const DIRECT_CLIENTS: readonly string[] = [...CORE_CLIENTS, ...WAVE2_CLIENTS];
+
+// MarketplaceInstallState tracks the per-entry install lifecycle for one
+// marketplace row, mirroring the shipped-server PerServerInstall pattern
+// (idle → installing → installed → error), keyed per entry id in the parent
+// map. The richer terminal states carry the data the row renders inline:
+//   "installed"      → hub-mode 201 success (name + resolved port).
+//   "name-conflict"  → hub-mode 409: offer a one-click retry under suggestedName.
+//   "direct-result"  → direct-mode 200/207: per-client updated / failed split.
+//   "error"          → any unmodelled failure, rendered as an inline message.
+type MarketplaceInstallState =
+  | { phase: "idle" }
+  | { phase: "installing" }
+  | { phase: "installed"; name: string; port: number }
+  | { phase: "name-conflict"; suggestedName: string }
+  | {
+      phase: "direct-result";
+      partial: boolean;
+      clientsUpdated: string[];
+      clientsFailed: Array<{ client: string; error: string }>;
+    }
+  | { phase: "error"; message: string };
+
+const MARKETPLACE_IDLE: MarketplaceInstallState = { phase: "idle" };
+
+// MarketplaceSection renders the curated marketplace registry as a one-click
+// Store. Each entry installs straight from the GUI per the two-tier rule:
+// stdio entries get a single "Add to hub" action; http entries additionally
+// offer "Install directly" (a remote-URL write into a chosen client set). An
+// empty list (fetch/cache miss or genuinely empty registry) renders a muted
+// notice rather than nothing, so operators know the section exists.
 function MarketplaceSection({ entries }: { entries: MarketplaceEntry[] }) {
+  // Per-row install lifecycle. A row absent from the map is "idle".
+  const [states, setStates] = useState<Record<string, MarketplaceInstallState>>({});
+  // mountedRef guards post-await setState against the "operator navigated away
+  // mid-POST" race (mirrors the shipped-server install handlers above).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  function setState(id: string, next: MarketplaceInstallState) {
+    setStates((prev) => ({ ...prev, [id]: next }));
+  }
+
+  // runInstall is the shared POST driver for both hub + direct modes. `name`
+  // carries the suggested-name retry for the hub 409 path; `clients` is the
+  // direct-mode target list. It maps the discriminated api result onto the
+  // per-row terminal state.
+  async function runInstall(
+    id: string,
+    mode: "hub" | "direct",
+    opts: { name?: string; clients?: string[] } = {},
+  ) {
+    // Guard against double-fire while a POST is in flight for this row.
+    if (states[id]?.phase === "installing") return;
+    setState(id, { phase: "installing" });
+    try {
+      const result: MarketplaceInstallResult = await installMarketplaceEntry({
+        id,
+        mode,
+        name: opts.name,
+        clients: opts.clients,
+      });
+      if (!mountedRef.current) return;
+      if (result.kind === "hub-installed") {
+        setState(id, { phase: "installed", name: result.name, port: result.port });
+      } else if (result.kind === "name-conflict") {
+        setState(id, { phase: "name-conflict", suggestedName: result.suggestedName });
+      } else {
+        setState(id, {
+          phase: "direct-result",
+          partial: result.partial,
+          clientsUpdated: result.clientsUpdated,
+          clientsFailed: result.clientsFailed,
+        });
+      }
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setState(id, { phase: "error", message: (err as Error).message });
+    }
+  }
+
   return (
     <div class="catalog-marketplace" data-testid="catalog-marketplace">
       <h2>Marketplace</h2>
       <p class="catalog-intro">
-        Discover MCP servers from the curated registry. Generate a draft
-        manifest from the CLI, then review and install it.
+        Discover and install MCP servers from the curated registry with one
+        click.
       </p>
       {entries.length === 0 ? (
         <p class="empty-state" data-testid="catalog-marketplace-empty">
@@ -410,54 +511,228 @@ function MarketplaceSection({ entries }: { entries: MarketplaceEntry[] }) {
       ) : (
         <div class="cards" data-testid="catalog-marketplace-cards">
           {entries.map((entry) => (
-            <div
-              class="card catalog-card catalog-marketplace-card"
+            <MarketplaceCard
               key={entry.id}
-              data-testid={`catalog-marketplace-card-${entry.id}`}
-            >
-              <div class="card-title">{entry.name}</div>
-              {entry.summary && (
-                <p
-                  class="catalog-card-desc"
-                  data-testid={`catalog-marketplace-summary-${entry.id}`}
-                >
-                  {entry.summary}
-                </p>
-              )}
-              {entry.categories.length > 0 && (
-                <p class="catalog-marketplace-categories">
-                  {entry.categories.map((c) => (
-                    <span class="lsp-chip" key={c}>
-                      {c}
-                    </span>
-                  ))}
-                </p>
-              )}
-              <p
-                class="catalog-marketplace-generate"
-                data-testid={`catalog-marketplace-generate-${entry.id}`}
-              >
-                Generate a draft with{" "}
-                <code>mcphub marketplace generate {entry.id}</code>
-              </p>
-              {/* homepage comes from an UNTRUSTED external registry — only
-                  render the link when it is an http(s) URL, so a hostile
-                  catalog cannot inject a javascript:/data: href. */}
-              {/^https?:\/\//i.test(entry.homepage) && (
-                <p class="catalog-marketplace-homepage">
-                  <a
-                    href={entry.homepage}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    data-testid={`catalog-marketplace-homepage-${entry.id}`}
-                  >
-                    Homepage
-                  </a>
-                </p>
-              )}
-            </div>
+              entry={entry}
+              state={states[entry.id] ?? MARKETPLACE_IDLE}
+              onInstall={runInstall}
+            />
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// MarketplaceCard renders one marketplace entry: name, summary, categories,
+// the install affordance (per the two-tier transport rule), and the inline
+// install result/error. It is a leaf component so the direct-mode client
+// multiselect state is local to the row.
+function MarketplaceCard({
+  entry,
+  state,
+  onInstall,
+}: {
+  entry: MarketplaceEntry;
+  state: MarketplaceInstallState;
+  onInstall: (
+    id: string,
+    mode: "hub" | "direct",
+    opts?: { name?: string; clients?: string[] },
+  ) => void;
+}) {
+  const isHttp = entry.transport === "http";
+  const installing = state.phase === "installing";
+  // Direct-mode client multiselect open + selected set, local to this row.
+  const [directOpen, setDirectOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  function toggleClient(client: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(client)) next.delete(client);
+      else next.add(client);
+      return next;
+    });
+  }
+
+  return (
+    <div
+      class="card catalog-card catalog-marketplace-card"
+      data-testid={`catalog-marketplace-card-${entry.id}`}
+    >
+      <div class="card-title">{entry.name}</div>
+      {entry.summary && (
+        <p
+          class="catalog-card-desc"
+          data-testid={`catalog-marketplace-summary-${entry.id}`}
+        >
+          {entry.summary}
+        </p>
+      )}
+      {entry.categories.length > 0 && (
+        <p class="catalog-marketplace-categories">
+          {entry.categories.map((c) => (
+            <span class="lsp-chip" key={c}>
+              {c}
+            </span>
+          ))}
+        </p>
+      )}
+
+      {/* Install affordance. stdio → hub only; http → hub + direct. */}
+      {state.phase === "installed" ? (
+        <p
+          class="catalog-marketplace-status catalog-marketplace-status-ok"
+          role="status"
+          data-testid={`catalog-marketplace-installed-${entry.id}`}
+        >
+          Added to hub as <strong>{state.name}</strong>
+          {state.port > 0 ? ` on port ${state.port}.` : "."}
+        </p>
+      ) : (
+        <div class="catalog-marketplace-install" data-testid={`catalog-marketplace-install-${entry.id}`}>
+          <div class="catalog-marketplace-actions">
+            <button
+              type="button"
+              class="btn-primary"
+              data-testid={`catalog-marketplace-hub-${entry.id}`}
+              disabled={installing}
+              onClick={() => onInstall(entry.id, "hub")}
+            >
+              {installing ? "Installing…" : "Add to hub"}
+            </button>
+            <InfoTip
+              label="What is Add to hub?"
+              text="Runs the server once as a shared hub daemon that every client routes to — instead of each client spawning its own copy."
+            />
+            {isHttp && (
+              <button
+                type="button"
+                data-testid={`catalog-marketplace-direct-toggle-${entry.id}`}
+                aria-expanded={directOpen}
+                aria-controls={directOpen ? `catalog-marketplace-direct-panel-${entry.id}` : undefined}
+                disabled={installing}
+                onClick={() => setDirectOpen((o) => !o)}
+              >
+                Install directly
+              </button>
+            )}
+            {isHttp && (
+              <InfoTip
+                label="What is Install directly?"
+                text="Writes the remote URL straight into the client configs you pick — no hub daemon. Available for remote (http) servers only."
+              />
+            )}
+          </div>
+
+          {/* Direct-mode client multiselect — http entries only, revealed on
+              the "Install directly" toggle. */}
+          {isHttp && directOpen && (
+            <div
+              class="catalog-marketplace-direct-panel"
+              id={`catalog-marketplace-direct-panel-${entry.id}`}
+              data-testid={`catalog-marketplace-direct-panel-${entry.id}`}
+            >
+              <p class="catalog-marketplace-direct-label" id={`catalog-marketplace-direct-legend-${entry.id}`}>
+                Pick the clients to write this server into:
+              </p>
+              <div
+                class="catalog-marketplace-clients"
+                role="group"
+                aria-labelledby={`catalog-marketplace-direct-legend-${entry.id}`}
+              >
+                {DIRECT_CLIENTS.map((client) => (
+                  <label class="catalog-marketplace-client" key={client}>
+                    <input
+                      type="checkbox"
+                      data-testid={`catalog-marketplace-client-${entry.id}-${client}`}
+                      checked={selected.has(client)}
+                      disabled={installing}
+                      onChange={() => toggleClient(client)}
+                    />
+                    {client}
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                class="btn-primary"
+                data-testid={`catalog-marketplace-direct-install-${entry.id}`}
+                disabled={installing || selected.size === 0}
+                onClick={() => onInstall(entry.id, "direct", { clients: [...selected] })}
+              >
+                {installing ? "Installing…" : "Install into selected clients"}
+              </button>
+            </div>
+          )}
+
+          {/* 409 NAME_CONFLICT: offer a one-click retry under the suggested
+              name. */}
+          {state.phase === "name-conflict" && (
+            <div
+              class="catalog-marketplace-status catalog-marketplace-status-warn"
+              role="alert"
+              data-testid={`catalog-marketplace-conflict-${entry.id}`}
+            >
+              A server named <strong>{entry.id}</strong> already exists.{" "}
+              <button
+                type="button"
+                data-testid={`catalog-marketplace-conflict-retry-${entry.id}`}
+                onClick={() => onInstall(entry.id, "hub", { name: state.suggestedName })}
+              >
+                Install as {state.suggestedName}
+              </button>
+            </div>
+          )}
+
+          {/* Direct-mode result: per-client updated / failed split. 207 =
+              partial. */}
+          {state.phase === "direct-result" && (
+            <div
+              class={`catalog-marketplace-status ${state.partial ? "catalog-marketplace-status-warn" : "catalog-marketplace-status-ok"}`}
+              role="status"
+              data-testid={`catalog-marketplace-direct-result-${entry.id}`}
+            >
+              {state.clientsUpdated.length > 0 && (
+                <p data-testid={`catalog-marketplace-direct-updated-${entry.id}`}>
+                  Installed into: {state.clientsUpdated.join(", ")}.
+                </p>
+              )}
+              {state.clientsFailed.length > 0 && (
+                <ul class="catalog-marketplace-direct-failed" data-testid={`catalog-marketplace-direct-failed-${entry.id}`}>
+                  {state.clientsFailed.map((f) => (
+                    <li key={f.client}>
+                      <strong>{f.client}</strong>: {f.error}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {state.phase === "error" && (
+            <p class="error" data-testid={`catalog-marketplace-error-${entry.id}`}>
+              {state.message}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* homepage comes from an UNTRUSTED external registry — only render the
+          link when it is an http(s) URL, so a hostile catalog cannot inject a
+          javascript:/data: href. */}
+      {/^https?:\/\//i.test(entry.homepage) && (
+        <p class="catalog-marketplace-homepage">
+          <a
+            href={entry.homepage}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid={`catalog-marketplace-homepage-${entry.id}`}
+          >
+            Homepage
+          </a>
+        </p>
       )}
     </div>
   );

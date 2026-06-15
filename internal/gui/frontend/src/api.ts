@@ -615,3 +615,127 @@ export async function removeTrustedRoot(root: string): Promise<TrustedRootsRespo
     }),
   );
 }
+
+// ───────────────────────────────────────────────────────────────────
+// Marketplace one-click install (roadmap §B #1, frontend slice S3)
+//
+// POST /api/marketplace/install drives the Store "one-click install" UI.
+// It is intentionally a hand-rolled fetch (not fetchOrThrow) because the
+// success and conflict shapes differ across HTTP statuses the UI must
+// branch on, and fetchOrThrow's single-shape guard would collapse them:
+//
+//   mode "hub":    201 { name, port, mode } on success;
+//                  409 { error_code:"NAME_CONFLICT", suggested_name } on a
+//                      name collision (the UI offers a one-click retry under
+//                      suggested_name).
+//   mode "direct": 200 { clients_updated, clients_failed:[], mode } all-ok;
+//                  207 { clients_updated, clients_failed:[{client,error}],
+//                      mode } partial (some client writes failed).
+//
+// The handler is requireSameOrigin-guarded like the other mutating /api/*
+// routes; the fetch below is same-origin (relative path, default credentials)
+// so it satisfies the guard exactly as the other POST helpers do.
+// ───────────────────────────────────────────────────────────────────
+
+// MarketplaceInstallMode is the two-tier install lane. "hub" registers a
+// shared hub daemon every client routes to (the process-tail-compression
+// path, valid for every transport). "direct" writes the remote URL straight
+// into the chosen client configs with no hub daemon — http transport only.
+export type MarketplaceInstallMode = "hub" | "direct";
+
+// MarketplaceInstallRequest is the POST body. name/port are optional hub-mode
+// overrides (name carries the suggested-name retry); clients is the required
+// direct-mode target list.
+export interface MarketplaceInstallRequest {
+  id: string;
+  mode: MarketplaceInstallMode;
+  name?: string;
+  port?: number;
+  clients?: string[];
+}
+
+// The discriminated result the UI branches on. `kind` distinguishes the four
+// terminal outcomes the handler can return so the screen never has to re-read
+// HTTP status codes:
+//
+//   "hub-installed"  → 201: hub daemon created (name + resolved port).
+//   "name-conflict"  → 409: a server with this name exists; suggested_name is
+//                      the "-2" variant the UI offers as a one-click retry.
+//   "direct"         → 200/207: per-client updated / failed split. `partial`
+//                      is true on 207 (some client writes failed).
+export type MarketplaceInstallResult =
+  | { kind: "hub-installed"; name: string; port: number }
+  | { kind: "name-conflict"; suggestedName: string }
+  | {
+      kind: "direct";
+      partial: boolean;
+      clientsUpdated: string[];
+      clientsFailed: Array<{ client: string; error: string }>;
+    };
+
+// installMarketplaceEntry POSTs the install request and resolves to the
+// discriminated result above. It rejects (throws Error) only on a genuine
+// transport/HTTP failure that is NOT one of the modelled success/conflict
+// shapes — e.g. 400 BAD_ENTRY, 404 ENTRY_NOT_FOUND, 502 CATALOG_UNAVAILABLE,
+// 500 INSTALL_FAILED — surfacing the backend's {error, code} envelope so the
+// row can render an inline error. The 409 NAME_CONFLICT is modelled as a
+// RESULT (not a throw) because it is an expected, recoverable branch.
+export async function installMarketplaceEntry(
+  req: MarketplaceInstallRequest,
+): Promise<MarketplaceInstallResult> {
+  const resp = await fetch("/api/marketplace/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  // 409 NAME_CONFLICT is an expected, recoverable branch — surface the
+  // suggested name as a result, not an error.
+  if (resp.status === 409) {
+    let body: { error_code?: string; suggested_name?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error_code?: string; suggested_name?: string };
+    } catch {
+      // Non-JSON 409 body; fall through to a generic error.
+    }
+    if (body?.error_code === "NAME_CONFLICT" && body.suggested_name) {
+      return { kind: "name-conflict", suggestedName: body.suggested_name };
+    }
+    throw new Error(`/api/marketplace/install: name conflict (no suggested name)`);
+  }
+
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    const msg = body?.error ?? resp.statusText ?? "install failed";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/marketplace/install [${code}]: ${msg}`);
+  }
+
+  if (req.mode === "hub") {
+    // 201 hub success: { name, port, mode }.
+    const body = (await resp.json()) as { name?: string; port?: number };
+    return {
+      kind: "hub-installed",
+      name: body.name ?? req.name ?? req.id,
+      port: typeof body.port === "number" ? body.port : 0,
+    };
+  }
+
+  // Direct mode: 200 all-ok or 207 partial. Either way the body carries the
+  // per-client split; 207 is the only signal of partial failure.
+  const body = (await resp.json()) as {
+    clients_updated?: string[];
+    clients_failed?: Array<{ client: string; error: string }>;
+  };
+  return {
+    kind: "direct",
+    partial: resp.status === 207,
+    clientsUpdated: Array.isArray(body.clients_updated) ? body.clients_updated : [],
+    clientsFailed: Array.isArray(body.clients_failed) ? body.clients_failed : [],
+  };
+}

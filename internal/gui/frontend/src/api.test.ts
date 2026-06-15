@@ -219,3 +219,116 @@ describe("postManifestEdit", () => {
       .rejects.toThrow(/success response missing hash field/);
   });
 });
+
+import { installMarketplaceEntry } from "./api";
+
+describe("installMarketplaceEntry", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("maps a 201 hub success to kind:'hub-installed' with name + port", async () => {
+    const seen: { url?: string; body?: string } = {};
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      seen.url = url.toString();
+      seen.body = init?.body as string;
+      return {
+        ok: true,
+        status: 201,
+        statusText: "Created",
+        json: async () => ({ name: "git", port: 9201, mode: "hub" }),
+      } as unknown as Response;
+    });
+    const out = await installMarketplaceEntry({ id: "git", mode: "hub" });
+    expect(out).toEqual({ kind: "hub-installed", name: "git", port: 9201 });
+    expect(seen.url).toBe("/api/marketplace/install");
+    expect(JSON.parse(seen.body!)).toMatchObject({ id: "git", mode: "hub" });
+  });
+
+  it("maps a 409 NAME_CONFLICT to kind:'name-conflict' (not a throw)", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      statusText: "Conflict",
+      json: async () => ({ error_code: "NAME_CONFLICT", suggested_name: "git-2" }),
+    }) as unknown as Response);
+    const out = await installMarketplaceEntry({ id: "git", mode: "hub" });
+    expect(out).toEqual({ kind: "name-conflict", suggestedName: "git-2" });
+  });
+
+  it("carries the suggested name through on a hub retry", async () => {
+    const seen: { body?: string } = {};
+    globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      seen.body = init?.body as string;
+      return {
+        ok: true,
+        status: 201,
+        statusText: "Created",
+        json: async () => ({ name: "git-2", port: 9202, mode: "hub" }),
+      } as unknown as Response;
+    });
+    const out = await installMarketplaceEntry({ id: "git", mode: "hub", name: "git-2" });
+    expect(out).toEqual({ kind: "hub-installed", name: "git-2", port: 9202 });
+    expect(JSON.parse(seen.body!)).toMatchObject({ id: "git", mode: "hub", name: "git-2" });
+  });
+
+  it("maps a 200 direct all-ok to kind:'direct' with partial=false", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        clients_updated: ["claude-code", "cursor"],
+        clients_failed: [],
+        mode: "direct",
+      }),
+    }) as unknown as Response);
+    const out = await installMarketplaceEntry({
+      id: "remote",
+      mode: "direct",
+      clients: ["claude-code", "cursor"],
+    });
+    expect(out).toEqual({
+      kind: "direct",
+      partial: false,
+      clientsUpdated: ["claude-code", "cursor"],
+      clientsFailed: [],
+    });
+  });
+
+  it("maps a 207 direct partial to kind:'direct' with partial=true + failed list", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 207,
+      statusText: "Multi-Status",
+      json: async () => ({
+        clients_updated: ["claude-code"],
+        clients_failed: [{ client: "vscode", error: "symlink" }],
+        mode: "direct",
+      }),
+    }) as unknown as Response);
+    const out = await installMarketplaceEntry({
+      id: "remote",
+      mode: "direct",
+      clients: ["claude-code", "vscode"],
+    });
+    expect(out).toMatchObject({
+      kind: "direct",
+      partial: true,
+      clientsUpdated: ["claude-code"],
+      clientsFailed: [{ client: "vscode", error: "symlink" }],
+    });
+  });
+
+  it("throws the backend envelope on an unmodelled failure (502 CATALOG_UNAVAILABLE)", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      json: async () => ({ error: "marketplace catalog unavailable", code: "CATALOG_UNAVAILABLE" }),
+    }) as unknown as Response);
+    await expect(installMarketplaceEntry({ id: "git", mode: "hub" })).rejects.toThrow(
+      /marketplace catalog unavailable/,
+    );
+  });
+});
