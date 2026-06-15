@@ -176,6 +176,43 @@ func TestRegistry_LifecycleFieldsRoundtrip(t *testing.T) {
 	}
 }
 
+func TestRegistry_PutLastToolsCallAtPreservesLifecycleAndLastError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	reg := NewRegistry(path)
+	oldToolsCallAt := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	newToolsCallAt := oldToolsCallAt.Add(10 * time.Minute)
+	reg.Put(WorkspaceEntry{
+		WorkspaceKey:    "abcd1234",
+		WorkspacePath:   "/ws/foo",
+		Language:        SerenaLanguageSentinel,
+		Backend:         "serena",
+		Lifecycle:       LifecycleFailed,
+		LastError:       "diagnostic must remain",
+		LastToolsCallAt: oldToolsCallAt,
+		ClientEntries:   map[string]string{},
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+	if err := reg.PutLastToolsCallAt("abcd1234", SerenaLanguageSentinel, newToolsCallAt); err != nil {
+		t.Fatalf("PutLastToolsCallAt: %v", err)
+	}
+	gotReg := NewRegistry(path)
+	if err := gotReg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, ok := gotReg.Get("abcd1234", SerenaLanguageSentinel)
+	if !ok {
+		t.Fatal("entry missing")
+	}
+	if got.Lifecycle != LifecycleFailed || got.LastError != "diagnostic must remain" {
+		t.Fatalf("lifecycle/error = %q/%q, want preserved failed diagnostic", got.Lifecycle, got.LastError)
+	}
+	if !got.LastToolsCallAt.Equal(newToolsCallAt) {
+		t.Fatalf("LastToolsCallAt = %v, want %v", got.LastToolsCallAt, newToolsCallAt)
+	}
+}
+
 // TestRegistry_PutLifecycleNoOpOnMissingEntry guards against ghost-row
 // resurrection: after Unregister removes a (workspace_key, language) row,
 // a still-running proxy process MAY emit a late lifecycle write.

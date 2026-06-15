@@ -1033,6 +1033,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// next sweep right after a long call could idle a daemon that was busy until
 	// seconds ago).
 	s.enterSerenaForward(ws.WorkspaceKey)
+	upstreamReached := false
 	defer func() {
 		// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
 		// protection. The sweeper reads counter-then-activity unsynchronized;
@@ -1040,7 +1041,15 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		// is still the stale request-START stamp — a sweep tick landing there
 		// idle-stops a daemon that finished a >threshold call nanoseconds ago
 		// (focused re-review P3, both lenses).
-		s.recordSerenaActivity(ws.WorkspaceKey, time.Now())
+		now := time.Now()
+		s.recordSerenaActivity(ws.WorkspaceKey, now)
+		// Only make the activity restart-durable after the HTTP request reached
+		// the daemon. Wake refusals, request-build failures, and transport errors
+		// must not refresh durable idle-prune state or imply healthy daemon
+		// activity in status views.
+		if upstreamReached {
+			s.maybePersistSerenaActivity(ws.WorkspaceKey, now)
+		}
 		s.exitSerenaForward(ws.WorkspaceKey)
 	}()
 
@@ -1096,6 +1105,9 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upstreamResp, doErr := httpClient.Do(upstreamReq)
+	if doErr == nil {
+		upstreamReached = true
+	}
 	if doErr != nil {
 		if isTimeoutErr(doErr) {
 			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{

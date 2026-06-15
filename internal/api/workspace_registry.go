@@ -436,6 +436,33 @@ func (r *Registry) PutLifecycle(workspaceKey, language, state, lastError string)
 	return r.PutLifecycleWithTimestamps(workspaceKey, language, state, lastError, time.Time{}, time.Time{})
 }
 
+// PutLastToolsCallAt loads the registry under lock, updates only
+// LastToolsCallAt for (workspaceKey, language), and saves. It preserves
+// Lifecycle and LastError because callers may stamp successful activity without
+// implying a lifecycle transition or clearing a diagnostic. A zero timestamp is
+// a no-op, and a missing row is silently ignored to match PutLifecycle's
+// unregistered-late-write behavior.
+func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt time.Time) error {
+	if toolsCallAt.IsZero() {
+		return nil
+	}
+	unlock, err := r.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := r.Load(); err != nil {
+		return err
+	}
+	e, ok := r.Get(workspaceKey, language)
+	if !ok {
+		return nil
+	}
+	e.LastToolsCallAt = toolsCallAt.UTC()
+	r.Put(e)
+	return r.Save()
+}
+
 // PutLifecycleWithTimestamps is the richer variant used by the proxy at
 // materialization edges: state transition + timestamps in one atomic save.
 // Zero-valued materializedAt / toolsCallAt leave the existing stored values
