@@ -154,6 +154,19 @@ func (a *API) backupsCleanInImpl(dir, liveName string, keepN int, dryRun bool) (
 		}
 		if err := os.Remove(b.path); err == nil {
 			removed = append(removed, b.path)
+		} else {
+			// Do not silently drop a failed delete. A backup the user previewed
+			// as eligible but that os.Remove rejected (Windows sharing violation,
+			// ACL denial, file locked by AV/editor) would otherwise vanish from
+			// the reported "cleaned" count with no trace — the operator sees
+			// "cleaned: 5" and cannot tell 3 deletions failed. Emit a warn event
+			// so the failure is at least diagnosable. (Full per-file surfacing
+			// into the GUI response errors[] field is a tracked follow-up; it
+			// needs a signature change across BackupsClean/CleanIn/the backupsAPI
+			// interface + CLI callers, out of scope for this fix.)
+			_ = LogHubMcpEvent("warn", "backup-clean-remove-failed", map[string]any{
+				"path": b.path, "err": err.Error(),
+			})
 		}
 	}
 	return removed, nil
