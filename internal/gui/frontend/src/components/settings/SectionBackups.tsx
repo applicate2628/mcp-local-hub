@@ -3,6 +3,7 @@ import { putSetting, cleanBackups } from "../../lib/settings-api";
 import { ConfirmModal } from "../ConfirmModal";
 import { BackupsList } from "./BackupsList";
 import { BACKUPS_COPY } from "./backups-copy";
+import { InfoTip } from "../InfoTip";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionBackupsProps = {
@@ -12,7 +13,13 @@ export type SectionBackupsProps = {
 };
 
 export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBackupsProps): preact.JSX.Element {
-  if (snapshot.status !== "ok") return <section data-section="backups"><h2>Backups</h2></section>;
+  if (snapshot.status !== "ok") {
+    return (
+      <section data-section="backups" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
+        <h2 class="m-0 text-lg font-semibold text-app-text">Backups</h2>
+      </section>
+    );
+  }
   const def = snapshot.data.settings.find((s) => s.key === "backups.keep_n") as ConfigSettingDTO;
   const persisted = Number(def.value);
 
@@ -105,56 +112,68 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
   }
 
   return (
-    <section data-section="backups" class="settings-section">
-      <h2>Backups</h2>
-      <p class="settings-section-help">Manage backup retention for managed client configs.</p>
-
-      <div class="backups-slider-row">
-        <label for="backups-keep-n-slider" class="backups-slider-label">
-          {BACKUPS_COPY.sliderLabel}: <strong>{draft}</strong>
-        </label>
-        <input
-          id="backups-keep-n-slider"
-          type="range"
-          min={def.min ?? 0}
-          max={def.max ?? 50}
-          value={draft}
-          disabled={busy}
-          onInput={(e) => setDraft(Number((e.target as HTMLInputElement).value))}
+    <section data-section="backups" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
+      <header class="mb-2 flex items-center gap-1.5">
+        <h2 class="m-0 text-lg font-semibold text-app-text">Backups</h2>
+        <InfoTip
+          label="About this section"
+          text="Retention applies per client. Each client keeps its newest N timestamped backups; older timestamped copies become eligible for cleanup. Original (pre-migration) backups are never deleted."
         />
-        <small class="backups-helper-text">{BACKUPS_COPY.helperText}</small>
-        {err ? <small class="settings-field-error" role="alert">{err}</small> : null}
+      </header>
+      <p class="m-0 mb-4 text-sm text-app-muted">Manage backup retention for managed client configs.</p>
+
+      <div class="divide-y divide-app-border/60">
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <label for="backups-keep-n-slider" class="flex items-center gap-1.5 text-sm font-medium text-app-text">
+            {BACKUPS_COPY.sliderLabel}: <strong>{draft}</strong>
+          </label>
+          <div class="flex flex-col items-start gap-1 sm:items-end">
+            <input
+              id="backups-keep-n-slider"
+              type="range"
+              min={def.min ?? 0}
+              max={def.max ?? 50}
+              value={draft}
+              disabled={busy}
+              onInput={(e) => setDraft(Number((e.target as HTMLInputElement).value))}
+            />
+            <small class="text-xs text-app-muted">{BACKUPS_COPY.helperText}</small>
+            {err ? <small class="settings-field-error text-xs text-app-danger" role="alert">{err}</small> : null}
+          </div>
+        </div>
       </div>
 
-      <BackupsList
-        keepN={draft}
-        // Bug-bash B2 closure (#21): per-client clean fires its own
-        // refresh internally; this callback lets the parent (Settings)
-        // also re-fetch the global snapshot so the global eligible
-        // count + bulk preview stay consistent.
-        onClientCleaned={() => void snapshot.refresh()}
-      />
+      <div class="mt-5 border-t border-app-border/60 pt-4">
+        <BackupsList
+          keepN={draft}
+          // Bug-bash B2 closure (#21): per-client clean fires its own
+          // refresh internally; this callback lets the parent (Settings)
+          // also re-fetch the global snapshot so the global eligible
+          // count + bulk preview stay consistent.
+          onClientCleaned={() => void snapshot.refresh()}
+        />
 
-      <div class="backups-clean-row">
-        <button
-          type="button"
-          onClick={() => setConfirmOpen(true)}
-          data-testid="clean-now-button"
-        >
-          Clean now eligible backups
-        </button>
+        <div class="backups-clean-row mt-4">
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            data-testid="clean-now-button"
+          >
+            Clean now eligible backups
+          </button>
+        </div>
+
+        <ConfirmModal
+          open={confirmOpen}
+          title="Delete eligible backups?"
+          body={<>Originals are never cleaned.</>}
+          confirmLabel="Delete"
+          danger
+          onConfirm={doClean}
+          onCancel={() => setConfirmOpen(false)}
+        />
+        {cleanErr ? <p class="error-banner" role="alert">Clean-now failed: {cleanErr}</p> : null}
       </div>
-
-      <ConfirmModal
-        open={confirmOpen}
-        title="Delete eligible backups?"
-        body={<>Originals are never cleaned.</>}
-        confirmLabel="Delete"
-        danger
-        onConfirm={doClean}
-        onCancel={() => setConfirmOpen(false)}
-      />
-      {cleanErr ? <p class="error-banner" role="alert">Clean-now failed: {cleanErr}</p> : null}
 
       <div class="settings-section-footer">
         {banner ? <span class="save-banner ok">{banner}</span> : null}

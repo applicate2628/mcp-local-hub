@@ -23,6 +23,7 @@ import {
   type StopResult,
 } from "../../lib/settings-api";
 import { ConfirmModal } from "../ConfirmModal";
+import { InfoTip } from "../InfoTip";
 
 type ActionState =
   | { kind: "idle" }
@@ -53,21 +54,35 @@ function asError(e: unknown): string {
 
 export function SectionMaintenance(): preact.JSX.Element {
   return (
-    <section data-section="maintenance" class="settings-section">
-      <h2>Maintenance</h2>
-      <p class="settings-section-help">
-        Reclaim leftover processes from dead client sessions and stuck
-        instances. All actions default to a preview before any kill;
-        actual termination is gated by an explicit confirmation.
-      </p>
+    <section data-section="maintenance" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
+      <header class="mb-2 flex items-center gap-1.5">
+        <h2 class="m-0 text-lg font-semibold text-app-text">Maintenance</h2>
+        <InfoTip
+          label="About this section"
+          text="Reclaim leftover processes from dead client sessions and stuck instances. All actions default to a preview before any kill; actual termination is gated by an explicit confirmation."
+        />
+      </header>
+      <p class="m-0 mb-4 text-sm text-app-muted">Preview, then confirm — reclaim leftover processes and recover stuck instances.</p>
 
-      <CardOrphanMcpServers />
-      <CardOrphanLogWatchers />
-      <CardForceKillInstance />
-      <CardStopAllDaemons />
+      <div class="flex flex-col gap-4">
+        <CardOrphanMcpServers />
+        <CardOrphanLogWatchers />
+        <CardForceKillInstance />
+        <CardStopAllDaemons />
+      </div>
     </section>
   );
 }
+
+// Shared card chrome. The `.maintenance-card` class name is retained as a
+// structural hook; visual styling rides Tailwind utilities (the class itself
+// carries no CSS). data-card is preserved so the tests' card-scoping queries
+// keep matching.
+const CARD_CLASS =
+  "maintenance-card rounded-lg border border-app-border/70 bg-app-card/40 p-4";
+const CARD_TITLE_CLASS = "m-0 text-sm font-semibold text-app-text";
+const CARD_DESC_CLASS = "m-0 mt-1 text-sm leading-relaxed text-app-muted";
+const CARD_ACTIONS_CLASS = "maintenance-card-actions mt-3 flex flex-wrap gap-2";
 
 // --- Card 1: Orphan MCP server processes -----------------------------------
 
@@ -180,14 +195,14 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   const confirmOrphans = orphansSnapshot ?? [];
   const confirmCount = confirmOrphans.length;
   return (
-    <div data-card="orphan-mcp-servers" class="maintenance-card">
-      <h3>Orphan MCP server processes</h3>
-      <p>
+    <div data-card="orphan-mcp-servers" class={CARD_CLASS}>
+      <h3 class={CARD_TITLE_CLASS}>Orphan MCP server processes</h3>
+      <p class={CARD_DESC_CLASS}>
         Reclaim uvx/npx/python children left behind by dead client
         sessions (IDE restart, Ctrl-C didn't propagate). Wraps
         <code> mcphub cleanup --confirm</code>.
       </p>
-      <div class="maintenance-card-actions">
+      <div class={CARD_ACTIONS_CLASS}>
         <button onClick={preview} disabled={state.kind === "loading"}>
           Preview
         </button>
@@ -209,7 +224,7 @@ function CardOrphanMcpServers(): preact.JSX.Element {
         open={confirmOpen}
         title={`Clean ${confirmCount} orphan MCP process${confirmCount === 1 ? "" : "es"}?`}
         body={
-          <ul class="maintenance-confirm-list" data-testid="orphan-mcp-confirm-list">
+          <ul class="maintenance-confirm-list m-0 list-none space-y-1 p-0 text-sm" data-testid="orphan-mcp-confirm-list">
             {confirmOrphans.map((o) => (
               <li key={o.pid}>
                 <code>{cmdlineDisplayOf(o)}</code>
@@ -246,7 +261,7 @@ function cmdlineDisplayOf(o: OrphanProcess): string {
 
 function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Element {
   if (orphans.length === 0) {
-    return <p class="maintenance-empty">No orphan processes found.</p>;
+    return <p class="maintenance-empty mt-3 text-sm text-app-muted">No orphan processes found.</p>;
   }
   // Codex Cloud bot P2 on PR #131 commit 72757c6: per-row kill_err
   // was invisible in apply state, hiding revalidation skips
@@ -255,31 +270,31 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
   // whenever any row carries a non-empty kill_err.
   const showResult = orphans.some((o) => !!o.kill_err);
   return (
-    <table class="maintenance-table">
+    <table class="maintenance-table mt-3 w-full border-collapse text-sm">
       <thead>
-        <tr>
-          <th>PID</th>
-          <th>Server</th>
-          <th>Age</th>
-          <th>RAM (MB)</th>
-          <th>Cmd</th>
-          {showResult && <th>Result</th>}
+        <tr class="text-left text-app-muted">
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">PID</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Server</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Age</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">RAM (MB)</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Cmd</th>
+          {showResult && <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Result</th>}
         </tr>
       </thead>
       <tbody>
         {orphans.map((o) => (
-          <tr key={o.pid}>
-            <td>{o.pid}</td>
-            <td>{o.server}</td>
-            <td>{Math.round(o.age_sec)}s</td>
-            <td>{Math.round(o.ram_bytes / (1024 * 1024))}</td>
+          <tr key={o.pid} class="border-b border-app-border/50">
+            <td class="py-1.5 pr-4">{o.pid}</td>
+            <td class="py-1.5 pr-4">{o.server}</td>
+            <td class="py-1.5 pr-4">{Math.round(o.age_sec)}s</td>
+            <td class="py-1.5 pr-4">{Math.round(o.ram_bytes / (1024 * 1024))}</td>
             {/* Cleanup-6: render the redacted basename via cmdline_display.
                 Full cmdlines often carry workspace paths, username
                 segments, and possible API-keys-in-args; the wire now
                 hides the raw `cmdline` field (`json:"-"` server-side). */}
-            <td class="maintenance-cmd">{cmdlineDisplayOf(o)}</td>
+            <td class="maintenance-cmd py-1.5 pr-4 font-mono text-xs">{cmdlineDisplayOf(o)}</td>
             {showResult && (
-              <td class={o.kill_err ? "maintenance-error" : ""}>
+              <td class={`py-1.5 pr-4 ${o.kill_err ? "maintenance-error text-app-danger" : ""}`}>
                 {o.kill_err || "killed"}
               </td>
             )}
@@ -364,22 +379,23 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
       : "";
 
   return (
-    <div data-card="orphan-log-watchers" class="maintenance-card">
-      <h3>Orphan log watchers (tail / grep / bash)</h3>
-      <p>
+    <div data-card="orphan-log-watchers" class={CARD_CLASS}>
+      <h3 class={CARD_TITLE_CLASS}>Orphan log watchers (tail / grep / bash)</h3>
+      <p class={CARD_DESC_CLASS}>
         Reclaim <code>tail.exe</code> + <code>grep.exe</code> pipelines
         left behind by agent shell-snapshot launchers (Claude Code,
         codex CLI). See <code>scripts/cleanup-orphan-watchers.ps1</code>.
       </p>
-      <label class="maintenance-checkbox">
+      <label class="maintenance-checkbox mt-3 flex items-center gap-2 text-sm text-app-text">
         <input
           type="checkbox"
+          class="h-4 w-4 accent-app-accent"
           checked={includeLive}
           onChange={(e) => setIncludeLive((e.target as HTMLInputElement).checked)}
         />
         Include live-parent processes (CURRENT active sessions — kills them too)
       </label>
-      <div class="maintenance-card-actions">
+      <div class={CARD_ACTIONS_CLASS}>
         <button onClick={preview} disabled={state.kind === "loading"}>
           Preview
         </button>
@@ -416,12 +432,12 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
         title={`Clean ${killCount} orphan log watcher${killCount === 1 ? "" : "s"}?`}
         body={
           <>
-            <p>
+            <p class="m-0 mb-2 text-sm">
               {includeLive
                 ? "Includes live-parent processes — those are usually CURRENT active agent sessions and will be killed."
                 : "Only dead-parent watchers will be killed."}
             </p>
-            <ul class="maintenance-confirm-list" data-testid="orphan-log-watchers-confirm-list">
+            <ul class="maintenance-confirm-list m-0 list-none space-y-1 p-0 text-sm" data-testid="orphan-log-watchers-confirm-list">
               {(includeLive ? watchers : watchers.filter((w) => !w.parent_alive)).map((w) => (
                 <li key={w.pid}>
                   <code>{w.name}</code>{" "}PID {w.pid}
@@ -444,33 +460,33 @@ function WatchersTable(
   { watchers, includeLive }: { watchers: LogWatcher[]; includeLive: boolean },
 ): preact.JSX.Element {
   if (watchers.length === 0) {
-    return <p class="maintenance-empty">No orphan watchers found.</p>;
+    return <p class="maintenance-empty mt-3 text-sm text-app-muted">No orphan watchers found.</p>;
   }
   // Same Result column rule as OrphansTable — visible only when at
   // least one row has a non-empty kill_err.
   const showResult = watchers.some((w) => !!w.kill_err);
   return (
-    <table class="maintenance-table">
+    <table class="maintenance-table mt-3 w-full border-collapse text-sm">
       <thead>
-        <tr>
-          <th>PID</th>
-          <th>Parent</th>
-          <th>Name</th>
-          <th>Age</th>
-          <th>Cmd</th>
-          {showResult && <th>Result</th>}
+        <tr class="text-left text-app-muted">
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">PID</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Parent</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Name</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Age</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Cmd</th>
+          {showResult && <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Result</th>}
         </tr>
       </thead>
       <tbody>
         {watchers.map((w) => (
-          <tr key={w.pid}>
-            <td>{w.pid}</td>
-            <td>{w.parent_pid}{w.parent_alive ? " (alive)" : " (dead)"}</td>
-            <td>{w.name}</td>
-            <td>{w.age_sec > 0 ? `${Math.round(w.age_sec / 60)}m` : "?"}</td>
-            <td class="maintenance-cmd">{w.cmdline}</td>
+          <tr key={w.pid} class="border-b border-app-border/50">
+            <td class="py-1.5 pr-4">{w.pid}</td>
+            <td class="py-1.5 pr-4">{w.parent_pid}{w.parent_alive ? " (alive)" : " (dead)"}</td>
+            <td class="py-1.5 pr-4">{w.name}</td>
+            <td class="py-1.5 pr-4">{w.age_sec > 0 ? `${Math.round(w.age_sec / 60)}m` : "?"}</td>
+            <td class="maintenance-cmd py-1.5 pr-4 font-mono text-xs">{w.cmdline}</td>
             {showResult && (
-              <td class={w.kill_err ? "maintenance-error" : ""}>
+              <td class={`py-1.5 pr-4 ${w.kill_err ? "maintenance-error text-app-danger" : ""}`}>
                 {w.kill_err || (w.parent_alive && !includeLive ? "skipped (live parent)" : "killed")}
               </td>
             )}
@@ -510,14 +526,14 @@ function CardForceKillInstance(): preact.JSX.Element {
   }
 
   return (
-    <div data-card="force-kill-instance" class="maintenance-card">
-      <h3>Stuck mcphub instance</h3>
-      <p>
+    <div data-card="force-kill-instance" class={CARD_CLASS}>
+      <h3 class={CARD_TITLE_CLASS}>Stuck mcphub instance</h3>
+      <p class={CARD_DESC_CLASS}>
         Force-kill another mcphub gui that holds the single-instance
         lock. Equivalent to <code>mcphub gui --force --kill</code>.
         macOS not yet supported.
       </p>
-      <div class="maintenance-card-actions">
+      <div class={CARD_ACTIONS_CLASS}>
         <button onClick={diagnose} disabled={state.kind === "loading"}>
           Diagnose
         </button>
@@ -531,7 +547,7 @@ function CardForceKillInstance(): preact.JSX.Element {
       </div>
       <CardResult state={state} />
       {state.kind === "preview" && state.verdict !== undefined && (
-        <pre class="maintenance-pre">
+        <pre class="maintenance-pre mt-3 overflow-x-auto rounded-md border border-app-border bg-app-card/60 p-3 text-xs">
           {JSON.stringify(state.verdict, null, 2)}
         </pre>
       )}
@@ -539,7 +555,7 @@ function CardForceKillInstance(): preact.JSX.Element {
         open={confirmOpen}
         title="Force-kill the single-instance lock holder?"
         body={
-          <p>
+          <p class="m-0 text-sm">
             The 3-part identity gate (executable basename, argv[1]=gui,
             start-time precedes pidport mtime) will refuse if the
             recorded PID has been recycled to an unrelated process.
@@ -587,14 +603,14 @@ function CardStopAllDaemons(): preact.JSX.Element {
   }
 
   return (
-    <div data-card="stop-all-daemons" class="maintenance-card">
-      <h3>Stop all daemons</h3>
-      <p>
+    <div data-card="stop-all-daemons" class={CARD_CLASS}>
+      <h3 class={CARD_TITLE_CLASS}>Stop all daemons</h3>
+      <p class={CARD_DESC_CLASS}>
         Stop every running daemon. Use after multi-daemon zombie
         scenarios; pair with the orphan-MCP cleanup above for a full
         reset. Wraps the existing <code>/api/stop-all</code> endpoint.
       </p>
-      <div class="maintenance-card-actions">
+      <div class={CARD_ACTIONS_CLASS}>
         <button
           onClick={() => setConfirmOpen(true)}
           disabled={state.kind === "loading"}
@@ -611,7 +627,7 @@ function CardStopAllDaemons(): preact.JSX.Element {
         open={confirmOpen}
         title="Stop ALL running mcphub daemons?"
         body={
-          <p>
+          <p class="m-0 text-sm">
             Each daemon's subprocess tree will be tree-killed; clients
             reconnect on next request.
           </p>
@@ -631,21 +647,21 @@ function CardStopAllDaemons(): preact.JSX.Element {
 // table — Codex Cloud bot P2 review feedback.
 function StopResultsTable({ results }: { results: StopResult[] }): preact.JSX.Element {
   if (results.length === 0) {
-    return <p class="maintenance-empty">No daemons were running.</p>;
+    return <p class="maintenance-empty mt-3 text-sm text-app-muted">No daemons were running.</p>;
   }
   return (
-    <table class="maintenance-table">
+    <table class="maintenance-table mt-3 w-full border-collapse text-sm">
       <thead>
-        <tr>
-          <th>Daemon</th>
-          <th>Status</th>
+        <tr class="text-left text-app-muted">
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Daemon</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Status</th>
         </tr>
       </thead>
       <tbody>
         {results.map((sr) => (
-          <tr key={sr.task_name}>
-            <td>{sr.task_name}</td>
-            <td class={sr.error ? "maintenance-error" : ""}>
+          <tr key={sr.task_name} class="border-b border-app-border/50">
+            <td class="py-1.5 pr-4">{sr.task_name}</td>
+            <td class={`py-1.5 pr-4 ${sr.error ? "maintenance-error text-app-danger" : ""}`}>
               {sr.error ? `Failed: ${sr.error}` : "Stopped"}
             </td>
           </tr>
@@ -660,7 +676,7 @@ function StopResultsTable({ results }: { results: StopResult[] }): preact.JSX.El
 function CardResult({ state }: { state: ActionState }): preact.JSX.Element | null {
   switch (state.kind) {
     case "loading":
-      return <p class="maintenance-status">Working…</p>;
+      return <p class="maintenance-status mt-3 text-sm text-app-muted">Working…</p>;
     case "applied": {
       // Stop-All has its own per-daemon table below; render a banner
       // that distinguishes full success from partial failure (HTTP 207).
@@ -670,28 +686,28 @@ function CardResult({ state }: { state: ActionState }): preact.JSX.Element | nul
         const total = state.stopResults.length;
         const failed = state.skipped ?? 0;
         if (total === 0) {
-          return <p class="maintenance-status">Done. No daemons were running.</p>;
+          return <p class="maintenance-status mt-3 text-sm text-app-muted">Done. No daemons were running.</p>;
         }
         if (failed === 0) {
-          return <p class="maintenance-status">Stopped all {total} daemon{total === 1 ? "" : "s"}.</p>;
+          return <p class="maintenance-status mt-3 text-sm text-app-muted">Stopped all {total} daemon{total === 1 ? "" : "s"}.</p>;
         }
         return (
-          <p class="maintenance-status maintenance-error">
+          <p class="maintenance-status maintenance-error mt-3 text-sm text-app-danger">
             Partial: {total - failed} stopped, {failed} failed.
           </p>
         );
       }
       if (state.killed !== undefined || state.skipped !== undefined) {
         return (
-          <p class="maintenance-status">
+          <p class="maintenance-status mt-3 text-sm text-app-muted">
             Done. Killed {state.killed ?? 0}, skipped {state.skipped ?? 0}.
           </p>
         );
       }
-      return <p class="maintenance-status">Done.</p>;
+      return <p class="maintenance-status mt-3 text-sm text-app-muted">Done.</p>;
     }
     case "error":
-      return <p class="maintenance-status maintenance-error">Error: {state.error}</p>;
+      return <p class="maintenance-status maintenance-error mt-3 text-sm text-app-danger">Error: {state.error}</p>;
     default:
       return null;
   }

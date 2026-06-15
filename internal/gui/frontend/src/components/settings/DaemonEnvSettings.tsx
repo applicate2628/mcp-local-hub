@@ -194,84 +194,93 @@ export function DaemonEnvSettings({
 
   return (
     <div class="daemon-env-settings" data-testid="daemon-env-settings">
-      <h3>Server env overrides</h3>
-      <div class="settings-field-row">
-        <label class="settings-field-label" for="daemon-env-task">Daemon</label>
-        <select
-          id="daemon-env-task"
-          value={selected?.task_name ?? ""}
-          disabled={busy || rows.length === 0}
-          onChange={(e) => {
-            const task = (e.currentTarget as HTMLSelectElement).value;
-            // Same task re-selected → nothing to guard.
-            if (task === (selected?.task_name ?? "")) return;
-            // Unsaved edit on the current row → gate the switch behind a
-            // ConfirmModal instead of silently overwriting the draft. The
-            // <select> is controlled by selected?.task_name, so it visually
-            // reverts to the current daemon until the operator confirms.
-            if (envDirty) {
-              setPendingSwitchTask(task);
-              return;
-            }
-            performSwitch(task);
-          }}
-          data-testid="daemon-env-task"
-        >
-          {rows.length === 0 ? (
-            <option value="">No supervised daemons</option>
-          ) : (
-            rows.map((row) => (
-              <option key={row.task_name} value={row.task_name}>
-                {row.server}/{row.daemon}
-              </option>
-            ))
-          )}
-        </select>
-        {selected ? <small class="settings-field-help">{selected.task_name}</small> : null}
-      </div>
+      <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">Server env overrides</h3>
 
-      <div class="daemon-env-grid">
-        <label class="settings-field-row">
-          <span class="settings-field-label">Key</span>
-          <input
-            type="text"
-            value={key}
-            disabled={busy || !selected}
-            onInput={(e) => {
-              const next = (e.currentTarget as HTMLInputElement).value;
-              setKey(next);
-              setValue(selected?.env[next] ?? value);
+      <div class="daemon-env-body">
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <label class="text-sm font-medium text-app-text" for="daemon-env-task">Daemon</label>
+          <select
+            id="daemon-env-task"
+            class="field-ctl w-64 max-w-full"
+            value={selected?.task_name ?? ""}
+            disabled={busy || rows.length === 0}
+            onChange={(e) => {
+              const task = (e.currentTarget as HTMLSelectElement).value;
+              // Same task re-selected → nothing to guard.
+              if (task === (selected?.task_name ?? "")) return;
+              // Unsaved edit on the current row → gate the switch behind a
+              // ConfirmModal instead of silently overwriting the draft. The
+              // <select> is controlled by selected?.task_name, so it visually
+              // reverts to the current daemon until the operator confirms.
+              if (envDirty) {
+                setPendingSwitchTask(task);
+                return;
+              }
+              performSwitch(task);
             }}
-            data-testid="daemon-env-key"
-          />
-        </label>
-        <label class="settings-field-row">
-          <span class="settings-field-label">Value</span>
-          <input
-            type="text"
-            value={value}
-            disabled={busy || !selected}
-            onInput={(e) => setValue((e.currentTarget as HTMLInputElement).value)}
-            data-testid="daemon-env-value"
-          />
-        </label>
-      </div>
-
-      <div class="settings-section-footer daemon-env-actions">
-        {banner ? (
-          <span class={`save-banner ${banner.kind}`} role="status" data-testid="daemon-env-banner">
-            {banner.text}
-          </span>
+            data-testid="daemon-env-task"
+          >
+            {rows.length === 0 ? (
+              <option value="">No supervised daemons</option>
+            ) : (
+              rows.map((row) => (
+                <option key={row.task_name} value={row.task_name}>
+                  {row.server}/{row.daemon}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+        {selected ? (
+          <p class="daemon-env-taskname">{selected.task_name}</p>
         ) : null}
-        <button type="button" disabled={busy || !selected || !envDirty} onClick={() => void apply()} data-testid="daemon-env-apply">
-          Apply
-        </button>
-        <button type="button" disabled={busy} onClick={() => void refreshRows()} data-testid="daemon-env-refresh">
-          Refresh
-        </button>
-        <button type="button" disabled={busy || !selected} onClick={() => void restart()} data-testid="daemon-env-restart">
-          Restart
-        </button>
+
+        <div class="daemon-env-kv">
+          <label class="daemon-env-field">
+            <span class="text-sm font-medium text-app-text">Key</span>
+            <input
+              type="text"
+              class="field-ctl font-mono"
+              value={key}
+              disabled={busy || !selected}
+              onInput={(e) => {
+                const next = (e.currentTarget as HTMLInputElement).value;
+                setKey(next);
+                setValue(selected?.env[next] ?? value);
+              }}
+              data-testid="daemon-env-key"
+            />
+          </label>
+          <label class="daemon-env-field">
+            <span class="text-sm font-medium text-app-text">Value</span>
+            <input
+              type="text"
+              class="field-ctl font-mono"
+              value={value}
+              placeholder="value"
+              disabled={busy || !selected}
+              onInput={(e) => setValue((e.currentTarget as HTMLInputElement).value)}
+              data-testid="daemon-env-value"
+            />
+          </label>
+        </div>
+
+        <div class="daemon-env-actions">
+          {banner ? (
+            <span class={`save-banner ${banner.kind}`} role="status" data-testid="daemon-env-banner">
+              {banner.text}
+            </span>
+          ) : null}
+          <button type="button" disabled={busy || !selected || !envDirty} onClick={() => void apply()} data-testid="daemon-env-apply">
+            Apply
+          </button>
+          <button type="button" disabled={busy} onClick={() => void refreshRows()} data-testid="daemon-env-refresh">
+            Refresh
+          </button>
+          <button type="button" disabled={busy || !selected} onClick={() => void restart()} data-testid="daemon-env-restart">
+            Restart
+          </button>
+        </div>
       </div>
 
       <ConfirmModal

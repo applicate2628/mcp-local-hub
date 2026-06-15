@@ -1,3 +1,32 @@
+/* ── Tailwind v4 (utilities + theme ONLY) ──────────────────────────────────
+   Preflight (the base-reset) is intentionally OMITTED: this app already ships
+   a hand-tuned, token-based, theme-aware stylesheet across six other screens
+   plus 600+ tests that assume the browser defaults Preflight would reset.
+   Importing only the `theme` + `utilities` layers gives the Settings redesign
+   Tailwind's utility vocabulary without touching any existing screen. The
+   @theme block below re-exports the app's own design tokens as Tailwind color
+   tokens, so utilities like `text-app-muted` / `bg-app-surface` follow the
+   live light/dark palette (var() resolves at runtime against :root below). */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  --color-app-bg: var(--bg);
+  --color-app-surface: var(--sidebar-bg);
+  /* Card surface — ELEVATED above the page. In light it stays white (= --bg,
+     no change), in dark it is a touch lighter than the #0d1117 page so cards
+     read as raised panels instead of blending into the background (the dark
+     cards previously used --bg = the exact page color → flat/invisible). */
+  --color-app-card: var(--card-surface);
+  --color-app-text: var(--text);
+  --color-app-muted: var(--text-muted);
+  --color-app-border: var(--border);
+  --color-app-accent: var(--link);
+  --color-app-success: var(--success);
+  --color-app-danger: var(--danger);
+}
+
 :root {
   --bg: #ffffff;
   --text: #1f2328;
@@ -5,6 +34,9 @@
   --success: #1a7f37;
   --danger: #cf222e;
   --sidebar-bg: #f6f8fa;
+  /* Elevated card surface. Light: white (cards already read via border+shadow
+     on the near-white page — unchanged). See the dark override for the fix. */
+  --card-surface: #ffffff;
   /* Muted/secondary text. Promoted from a scattered inline literal to a
      real token so the dozens of `var(--text-muted, #656d76)` reads across
      the screens resolve to ONE owner. Value passes WCAG AA (4.5:1) for
@@ -24,6 +56,10 @@
   --success: #3fb950;
   --danger: #f85149;
   --sidebar-bg: #161b22;
+  /* Dark card surface — a step ABOVE the #0d1117 page so cards read as raised
+     panels (matches the sidebar surface). Fixes the flat/blended-into-the-page
+     dark cards: they previously used --bg = #0d1117 = the exact page color. */
+  --card-surface: #161b22;
   /* Dark-theme muted: 7.45:1 vs --bg #0d1117 (AA pass). Mirrors the A4-a
      --muted-color dark value so both token families agree. */
   --text-muted: #9ca3af;
@@ -1061,6 +1097,135 @@ menu button[disabled] {
 .settings-field-error {
   color: var(--error-color);
 }
+/* InfoTip popover — a subtle fade+slide on reveal; the one bit of motion in
+   Settings. Honors prefers-reduced-motion. Defined here (not a Tailwind
+   utility) because keyframes are cleaner as named CSS. */
+@keyframes infotip-in {
+  /* Y + opacity ONLY — the X-centering lives on the static .infotip-anchor
+     wrapper, never animated, so the popover can't drift in sideways. */
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.infotip-pop {
+  /* fill-mode:both → frame 0 is opacity:0, so any first-paint width-settle of
+     the w-max popover happens while it is invisible (no visible jump). */
+  animation: infotip-in 120ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .infotip-pop { animation: none; }
+}
+/* Settings redesign — a shadcn-style control primitive. Unlayered (beats the
+   per-context element rules) so the redesigned Settings inputs/selects share
+   one resting look; the existing global `input:focus-visible` outline still
+   owns the focus ring (no double indicator). */
+.field-ctl {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 14px;
+}
+.field-ctl:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* Settings content width cap — keeps label↔control proximate and line length
+   readable instead of stretching edge-to-edge on a wide window. Applies to all
+   sections (the redesign and the not-yet-redesigned ones both read better). */
+.settings-body { max-width: 880px; }
+
+/* Daemons card sub-sections (WeeklyMembershipTable + DaemonEnvSettings) had no
+   real spacing/formatting — the membership table fell back to default HTML
+   table styling and looked cramped. Give both a shared small-caps header and
+   proper rhythm; their card-separator border is owned by the JSX wrappers, so
+   neutralize the component's own double border. */
+.daemon-env-settings {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+.weekly-membership-table h3,
+.daemon-env-settings h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.weekly-membership-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+.weekly-membership-bulk {
+  display: flex;
+  gap: 0.5rem;
+}
+.weekly-membership-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.weekly-membership-grid th {
+  text-align: left;
+  padding: 0.4rem 1rem 0.4rem 0;
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.weekly-membership-grid td {
+  padding: 0.5rem 1rem 0.5rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.weekly-membership-grid tbody tr:last-child td {
+  border-bottom: none;
+}
+/* Env editor — the section read "скомканный" (crumpled): the daemon select +
+   its long resolved task-name were jammed inline, and the Key/Value grid +
+   action buttons had no rhythm. Rebuilt with a vertical flow, the task-name on
+   its own muted line, a balanced KV grid, and spaced controls. */
+.daemon-env-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.daemon-env-taskname {
+  margin: -0.35rem 0 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  word-break: break-all;
+  text-align: right;
+}
+.daemon-env-kv {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 0.75rem 1rem;
+  max-width: 560px;
+}
+.daemon-env-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.daemon-env-field input {
+  width: 100%;
+}
+.daemon-env-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.1rem;
+}
+@media (max-width: 600px) {
+  .daemon-env-kv { grid-template-columns: 1fr; }
+}
 .settings-field.has-error input,
 .settings-field.has-error select {
   border-color: var(--error-color);
@@ -1313,32 +1478,10 @@ menu button[disabled] {
 .env-drawer .info { color: #1b5e20; margin-top: 0.5rem; }
 .env-drawer .error { color: #b71c1c; margin-top: 0.5rem; }
 
-.daemon-env-settings {
-  border-top: 1px solid var(--border-color);
-  margin-top: 1rem;
-  padding-top: 1rem;
-}
-.daemon-env-settings h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-.daemon-env-grid {
-  display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(260px, 1fr);
-  gap: var(--gap-sm);
-}
-.daemon-env-grid input {
-  width: 100%;
-  font-family: ui-monospace, monospace;
-}
-.daemon-env-actions {
-  justify-content: flex-start;
-}
-@media (max-width: 720px) {
-  .daemon-env-grid {
-    grid-template-columns: 1fr;
-  }
-}
+/* (legacy .daemon-env-settings + .daemon-env-grid rules removed — the env
+   editor was rebuilt onto .daemon-env-body / .daemon-env-kv / .daemon-env-field.
+   The redesign block higher up (search ".daemon-env-body") is the intended one;
+   this stale duplicate used to win the cascade → wrong h3 font + doubled divider.) */
 
 /* ============================================================
  * §3.1 GUI polish — keyboard focus a11y + light micro-interactions

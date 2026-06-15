@@ -8,16 +8,13 @@ describe("BACKUPS_COPY (memo §9.4 verbatim Codex copy)", () => {
   it("sliderLabel matches memo exactly", () => {
     expect(BACKUPS_COPY.sliderLabel).toBe("Keep timestamped backups per client");
   });
-  it("helperText matches memo exactly", () => {
-    expect(BACKUPS_COPY.helperText).toBe("Preview only. No files are deleted from this screen.");
+  it("helperText matches the accurate Clean-deletes copy", () => {
+    expect(BACKUPS_COPY.helperText).toBe(
+      "Drag to set how many timestamped backups to keep per client. The Clean buttons below delete the older eligible ones; originals are never touched.",
+    );
   });
   it("rowBadge matches memo exactly", () => {
     expect(BACKUPS_COPY.rowBadge).toBe("Would be eligible for cleanup");
-  });
-  it("cleanTooltip matches memo exactly", () => {
-    expect(BACKUPS_COPY.cleanTooltip).toBe(
-      "Cleanup arrives in A4-b. This view only previews which timestamped backups cleanup would target.",
-    );
   });
   it("groupNote matches memo exactly", () => {
     expect(BACKUPS_COPY.groupNote).toBe(

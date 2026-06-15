@@ -31,6 +31,7 @@ import {
 } from "../../lib/api-daemons";
 import { WeeklyMembershipTable } from "./WeeklyMembershipTable";
 import { DaemonEnvSettings } from "./DaemonEnvSettings";
+import { InfoTip } from "../InfoTip";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionDaemonsProps = {
@@ -279,105 +280,134 @@ export function SectionDaemons({
   }
 
   return (
-    <section data-section="daemons" class="settings-section">
-      <h2>Daemons</h2>
-      <p class="settings-section-help">
-        Background daemon settings. One Save runs settings, schedule swap, and membership update in sequence;
-        if one step fails the banner names which prior steps committed and which remain dirty.
-      </p>
-
-      <div class="settings-field-row">
-        <label class="settings-field-label" for="daemons-weekly-schedule">Weekly schedule</label>
-        <input
-          id="daemons-weekly-schedule"
-          type="text"
-          value={schedValue}
-          disabled={busy}
-          onInput={(e) => {
-            setSchedValue((e.target as HTMLInputElement).value);
-            if (schedError) setSchedError(null);
-          }}
-          aria-invalid={schedError ? true : undefined}
-          aria-describedby={schedError ? "daemons-weekly-schedule-error" : undefined}
-          data-testid="daemons-weekly-schedule-input"
+    <section data-section="daemons" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
+      <header class="mb-2 flex items-center gap-1.5">
+        <h2 class="m-0 text-lg font-semibold text-app-text">Daemons</h2>
+        <InfoTip
+          label="About this section"
+          text="One Save runs settings, schedule swap, and membership update in sequence. If a step fails, the banner names which prior steps committed and which remain dirty."
         />
-        {sched?.help ? <small class="settings-field-help">{sched.help}</small> : null}
-        {schedError ? (
-          <small id="daemons-weekly-schedule-error" class="settings-field-error" role="alert">
-            {schedError}
-          </small>
-        ) : null}
-      </div>
+      </header>
+      <p class="m-0 mb-4 text-sm text-app-muted">Background scheduling, restart policy, and workspace cleanup.</p>
 
-      <div class="settings-field-row">
-        <label class="settings-field-label" for="daemons-retry-policy">Retry policy</label>
-        <select
-          id="daemons-retry-policy"
-          value={retryValue}
-          disabled={busy}
-          onChange={(e) => setRetryValue((e.target as HTMLSelectElement).value)}
-          data-testid="daemons-retry-policy-select"
-        >
-          {retryOptions.map((opt) => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-        {retry?.help ? <small class="settings-field-help">{retry.help}</small> : null}
-      </div>
+      <div class="divide-y divide-app-border/60">
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-weekly-schedule">
+            Weekly schedule
+            {sched?.help ? <InfoTip text={sched.help} /> : null}
+          </label>
+          <div class="flex flex-col items-start gap-1 sm:items-end">
+            <input
+              id="daemons-weekly-schedule"
+              type="text"
+              class="field-ctl w-56"
+              value={schedValue}
+              placeholder="weekly Sun 03:00"
+              disabled={busy}
+              onInput={(e) => {
+                setSchedValue((e.target as HTMLInputElement).value);
+                if (schedError) setSchedError(null);
+              }}
+              aria-invalid={schedError ? true : undefined}
+              aria-describedby={schedError ? "daemons-weekly-schedule-error" : undefined}
+              data-testid="daemons-weekly-schedule-input"
+            />
+            {schedError ? (
+              <small id="daemons-weekly-schedule-error" class="text-xs text-app-danger" role="alert">
+                {schedError}
+              </small>
+            ) : null}
+          </div>
+        </div>
 
-      <div class="settings-field-row">
-        <label class="settings-field-label" for="daemons-weekly-refresh-default">
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-retry-policy">
+            Retry policy
+            {retry?.help ? <InfoTip text={retry.help} /> : null}
+          </label>
+          <select
+            id="daemons-retry-policy"
+            class="field-ctl w-56"
+            value={retryValue}
+            disabled={busy}
+            onChange={(e) => setRetryValue((e.target as HTMLSelectElement).value)}
+            data-testid="daemons-retry-policy-select"
+          >
+            {retryOptions.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-weekly-refresh-default">
+            Enroll new workspaces in weekly refresh
+            {knob?.help ? <InfoTip text={knob.help} /> : null}
+          </label>
           <input
             id="daemons-weekly-refresh-default"
             type="checkbox"
+            class="h-4 w-4 accent-app-accent"
             checked={knobValue}
             disabled={busy}
             onChange={(e) => setKnobValue((e.target as HTMLInputElement).checked)}
             data-testid="daemons-weekly-refresh-default-checkbox"
           />
-          {" "}Default for new workspaces: enroll in weekly refresh
-        </label>
-        {knob?.help ? <small class="settings-field-help">{knob.help}</small> : null}
+        </div>
       </div>
 
-      <div class="settings-field-row">
-        <label class="settings-field-label" for="daemons-auto-prune-workspaces">
-          <input
-            id="daemons-auto-prune-workspaces"
-            type="checkbox"
-            checked={autoPruneValue}
-            disabled={busy}
-            onChange={(e) => setAutoPruneValue((e.target as HTMLInputElement).checked)}
-            data-testid="daemons-auto-prune-workspaces-checkbox"
-          />
-          {" "}Auto-prune dead workspace daemons (deleted dirs + agent worktrees)
-        </label>
-        {autoPrune?.help ? <small class="settings-field-help">{autoPrune.help}</small> : null}
+      <div class="mt-5">
+        <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">Auto-prune</h3>
+        <div class="divide-y divide-app-border/60">
+          <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+            <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-auto-prune-workspaces">
+              Auto-prune dead workspaces
+              {autoPrune?.help ? <InfoTip text={autoPrune.help} /> : null}
+            </label>
+            <input
+              id="daemons-auto-prune-workspaces"
+              type="checkbox"
+              class="h-4 w-4 accent-app-accent"
+              checked={autoPruneValue}
+              disabled={busy}
+              onChange={(e) => setAutoPruneValue((e.target as HTMLInputElement).checked)}
+              data-testid="daemons-auto-prune-workspaces-checkbox"
+            />
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+            <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-prune-idle-hours">
+              Auto-prune idle workspaces after
+              {pruneIdle?.help ? <InfoTip text={pruneIdle.help} /> : null}
+            </label>
+            <div class="flex items-center gap-2">
+              <input
+                id="daemons-prune-idle-hours"
+                type="number"
+                min={0}
+                class="field-ctl w-20"
+                value={pruneIdleValue}
+                disabled={busy}
+                onInput={(e) => setPruneIdleValue((e.target as HTMLInputElement).value)}
+                data-testid="daemons-prune-idle-hours-input"
+              />
+              <span class="text-sm text-app-muted">hours <span class="opacity-70">(0 = off)</span></span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="settings-field-row">
-        <label class="settings-field-label" for="daemons-prune-idle-hours">
-          Auto-prune idle workspace after (hours, 0 = off)
-        </label>
-        <input
-          id="daemons-prune-idle-hours"
-          type="number"
-          min={0}
-          value={pruneIdleValue}
-          disabled={busy}
-          onInput={(e) => setPruneIdleValue((e.target as HTMLInputElement).value)}
-          data-testid="daemons-prune-idle-hours-input"
+      <div class="mt-5 border-t border-app-border/60 pt-4">
+        <WeeklyMembershipTable
+          key={tableResetKey}
+          onDirtyChange={setTableDirty}
+          onDeltasChange={setTableDeltas}
         />
-        {pruneIdle?.help ? <small class="settings-field-help">{pruneIdle.help}</small> : null}
       </div>
 
-      <WeeklyMembershipTable
-        key={tableResetKey}
-        onDirtyChange={setTableDirty}
-        onDeltasChange={setTableDeltas}
-      />
-
-      <DaemonEnvSettings key={envResetKey} onDirtyChange={setEnvDirty} />
+      <div class="mt-5 border-t border-app-border/60 pt-4">
+        <DaemonEnvSettings key={envResetKey} onDirtyChange={setEnvDirty} />
+      </div>
 
       <div class="settings-section-footer">
         {banner ? (

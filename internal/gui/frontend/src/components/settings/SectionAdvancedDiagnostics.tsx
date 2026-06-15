@@ -32,6 +32,7 @@
 // whether the Kill button renders, not whether the kill is allowed.
 import { useState } from "preact/hooks";
 import { ConfirmModal } from "../ConfirmModal";
+import { InfoTip } from "../InfoTip";
 
 // Verdict mirrors the JSON-tagged fields of internal/gui.Verdict.
 // PIDCmdline is intentionally absent — encoding/json strips it via
@@ -174,11 +175,11 @@ export function SectionAdvancedDiagnostics(): preact.JSX.Element {
   const showKill = canKill(verdict);
 
   return (
-    <div class="diagnostics-block" data-section="advanced-diagnostics">
-      <h3>Diagnostics</h3>
-      <p class="settings-section-help">
-        Diagnose the single-instance lock. Read-only — does not kill anything.
-      </p>
+    <div data-section="advanced-diagnostics">
+      <header class="mb-2 flex items-center gap-1.5">
+        <h3 class="m-0 text-xs font-semibold uppercase tracking-wide text-app-muted">Diagnostics</h3>
+        <InfoTip text="Diagnose the single-instance lock. Read-only — does not kill anything." />
+      </header>
       <button
         type="button"
         onClick={() => void probe()}
@@ -188,11 +189,11 @@ export function SectionAdvancedDiagnostics(): preact.JSX.Element {
         {busy ? "Probing…" : "Diagnose lock state"}
       </button>
       {verdict ? (
-        <div class="verdict-strip" data-testid="verdict-strip">
-          <p>{classLabel(verdict)}</p>
-          <details>
-            <summary>Details</summary>
-            <ul>
+        <div class="mt-3 rounded-lg border border-app-border/60 p-3 text-sm text-app-text" data-testid="verdict-strip">
+          <p class="m-0">{classLabel(verdict)}</p>
+          <details class="mt-2">
+            <summary class="cursor-pointer text-xs text-app-muted">Details</summary>
+            <ul class="mt-1 list-disc pl-5 text-xs text-app-muted">
               <li>PID: {verdict.pid ?? "?"}</li>
               <li>Port: {verdict.port ?? "?"}</li>
               <li>Image: {verdict.pid_image ?? "?"}</li>
@@ -207,7 +208,7 @@ export function SectionAdvancedDiagnostics(): preact.JSX.Element {
       {showKill ? (
         <button
           type="button"
-          class="danger"
+          class="danger mt-3"
           onClick={() => setConfirmOpen(true)}
           data-testid="kill-button"
         >
@@ -215,7 +216,7 @@ export function SectionAdvancedDiagnostics(): preact.JSX.Element {
         </button>
       ) : null}
       {err ? (
-        <p class="error-banner" role="alert">
+        <p class="mt-2 text-sm text-app-danger" role="alert">
           {err}
         </p>
       ) : null}

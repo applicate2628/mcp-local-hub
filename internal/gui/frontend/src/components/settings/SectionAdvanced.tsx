@@ -1,7 +1,9 @@
 import { useEffect, useState } from "preact/hooks";
 import { postAction } from "../../lib/settings-api";
+import { restartSupervisor } from "../../api";
 import type { SettingsSnapshot } from "../../lib/settings-types";
 import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
+import { InfoTip } from "../InfoTip";
 
 export type SectionAdvancedProps = {
   snapshot: SettingsSnapshot;
@@ -113,62 +115,116 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
     }
   }
 
+  // "Restart supervisor now" — the corp-managed autorun toggle needs a
+  // supervisor restart for the new env value to reach the running
+  // supervisor (see relaxMsg above). This reuses the Dashboard's
+  // restartSupervisor() helper (POST /api/supervisor/restart) so operators
+  // don't have to leave the Settings screen.
+  const [supRestartBusy, setSupRestartBusy] = useState(false);
+  const [supRestartMsg, setSupRestartMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  async function restartSupervisorNow() {
+    if (supRestartBusy) return;
+    setSupRestartBusy(true);
+    setSupRestartMsg(null);
+    try {
+      const res = await restartSupervisor();
+      if (res.spawned) {
+        setSupRestartMsg({ kind: "ok", text: "Supervisor restart requested." });
+      } else {
+        const detail = res.per_step_error
+          ? Object.entries(res.per_step_error).map(([k, v]) => `${k}: ${v}`).join("; ")
+          : "supervisor did not respawn";
+        setSupRestartMsg({ kind: "error", text: `Restart incomplete: ${detail}` });
+      }
+    } catch (e: any) {
+      setSupRestartMsg({ kind: "error", text: e?.message ?? "Restart failed" });
+    } finally {
+      setSupRestartBusy(false);
+    }
+  }
+
+  const relaxIsError = relaxMsg !== null && (relaxMsg.includes("failed") || relaxMsg.includes("error"));
+
   return (
-    <section data-section="advanced" class="settings-section">
-      <h2>Advanced</h2>
-      <p class="settings-section-help">Power-user actions.</p>
-      <div class="advanced-actions">
-        <button type="button" onClick={() => void openFolder()} disabled={busy} data-test-id="open-folder">
-          Open app-data folder
-        </button>
-        <button type="button" onClick={() => void exportBundle()} disabled={busy} data-testid="export-bundle">
-          Export bundle
-        </button>
+    <section data-section="advanced" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
+      <header class="mb-2 flex items-center gap-1.5">
+        <h2 class="m-0 text-lg font-semibold text-app-text">Advanced</h2>
+      </header>
+      <p class="m-0 mb-4 text-sm text-app-muted">Power-user actions.</p>
+
+      <div class="divide-y divide-app-border/60">
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <span class="flex items-center gap-1.5 text-sm font-medium text-app-text">Open app-data folder</span>
+          <button type="button" onClick={() => void openFolder()} disabled={busy} data-test-id="open-folder">
+            Open app-data folder
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <span class="flex items-center gap-1.5 text-sm font-medium text-app-text">Export configuration bundle</span>
+          <button type="button" onClick={() => void exportBundle()} disabled={busy} data-testid="export-bundle">
+            Export bundle
+          </button>
+        </div>
       </div>
-      {err ? <p class="error-banner" role="alert">Could not open folder: {err}</p> : null}
+      {err ? <p class="mt-2 text-sm text-app-danger" role="alert">Could not open folder: {err}</p> : null}
 
-      <h3 style="margin-top: 16px">Autorun on corp-managed Windows</h3>
-      <p class="settings-section-help">
-        Required on corp-managed Windows hosts whose
-        <code>%LOCALAPPDATA%</code> inherits a Domain Users /
-        Authenticated Users ACE that you cannot remove. Without this,
-        mcphub's supervisor crashes at logon-trigger startup with
-        "insecure parent directory" and the Dashboard shows
-        "Failed to load" with no daemons. When enabled, mcphub writes
-        the user-scope <code>MCPHUB_ALLOW_UNHARDENED_STATE_READ=1</code>
-        env var to the Windows registry (HKCU\Environment);
-        Task-Scheduler-spawned mcphub processes inherit it at every
-        logon, so the autostart pipeline actually works. Leave off on
-        single-user dev machines where this isn't needed.
-      </p>
-      <label class="settings-toggle" style="display: inline-flex; align-items: center; gap: 6px">
-        <input
-          type="checkbox"
-          data-testid="state-relax-toggle"
-          disabled={!relaxSupported || relaxBusy || relaxEnabled === null}
-          checked={relaxEnabled === true}
-          onChange={(ev) => void toggleRelax((ev.currentTarget as HTMLInputElement).checked)}
-        />
-        <span>Autorun on corp-managed Windows (sets MCPHUB_ALLOW_UNHARDENED_STATE_READ)</span>
-      </label>
-      {!relaxSupported && (
-        <p class="settings-section-help" style="margin-top: 4px; color: #666">
-          (Not supported on this OS — set <code>MCPHUB_ALLOW_UNHARDENED_STATE_READ=1</code> in
-          your shell profile if needed.)
-        </p>
-      )}
-      {relaxMsg && (
-        <p
-          class={relaxMsg.includes("failed") || relaxMsg.includes("error") ? "error-banner" : "settings-section-help"}
-          data-testid="state-relax-msg"
-          role={relaxMsg.includes("failed") || relaxMsg.includes("error") ? "alert" : undefined}
-          style="margin-top: 4px"
-        >
-          {relaxMsg}
-        </p>
-      )}
+      <div class="mt-5">
+        <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">Autorun on corp-managed Windows</h3>
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+          <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="advanced-state-relax-toggle">
+            Autorun on corp-managed Windows (sets MCPHUB_ALLOW_UNHARDENED_STATE_READ)
+            <InfoTip text="Required on corp-managed Windows hosts whose %LOCALAPPDATA% inherits a Domain Users / Authenticated Users ACE that you cannot remove. Without this, mcphub's supervisor crashes at logon-trigger startup with 'insecure parent directory' and the Dashboard shows 'Failed to load' with no daemons. When enabled, mcphub writes the user-scope MCPHUB_ALLOW_UNHARDENED_STATE_READ=1 env var to the Windows registry (HKCU\\Environment); Task-Scheduler-spawned mcphub processes inherit it at every logon, so the autostart pipeline actually works. Leave off on single-user dev machines where this isn't needed." />
+          </label>
+          <input
+            id="advanced-state-relax-toggle"
+            type="checkbox"
+            class="h-4 w-4 accent-app-accent"
+            data-testid="state-relax-toggle"
+            disabled={!relaxSupported || relaxBusy || relaxEnabled === null}
+            checked={relaxEnabled === true}
+            onChange={(ev) => void toggleRelax((ev.currentTarget as HTMLInputElement).checked)}
+          />
+        </div>
+        {!relaxSupported && (
+          <p class="mt-1 text-xs text-app-muted">
+            (Not supported on this OS — set <code>MCPHUB_ALLOW_UNHARDENED_STATE_READ=1</code> in
+            your shell profile if needed.)
+          </p>
+        )}
+        {relaxMsg && (
+          <p
+            class={relaxIsError ? "mt-1 text-sm text-app-danger" : "mt-1 text-xs text-app-muted"}
+            data-testid="state-relax-msg"
+            role={relaxIsError ? "alert" : undefined}
+          >
+            {relaxMsg}
+          </p>
+        )}
+        <div class="mt-2 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void restartSupervisorNow()}
+            disabled={supRestartBusy}
+            data-testid="advanced-restart-supervisor"
+          >
+            {supRestartBusy ? "Restarting…" : "Restart supervisor now"}
+          </button>
+          {supRestartMsg && (
+            <span
+              class={supRestartMsg.kind === "error" ? "text-sm text-app-danger" : "text-xs text-app-muted"}
+              data-testid="advanced-restart-supervisor-msg"
+              role={supRestartMsg.kind === "error" ? "alert" : "status"}
+            >
+              {supRestartMsg.text}
+            </span>
+          )}
+        </div>
+      </div>
 
-      <SectionAdvancedDiagnostics />
+      <div class="mt-5 border-t border-app-border/60 pt-4">
+        <SectionAdvancedDiagnostics />
+      </div>
     </section>
   );
 }

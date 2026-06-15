@@ -4,10 +4,9 @@
 // component test that only checks rendering.
 export const BACKUPS_COPY = {
   sliderLabel: "Keep timestamped backups per client",
-  helperText:  "Preview only. No files are deleted from this screen.",
+  helperText:
+    "Drag to set how many timestamped backups to keep per client. The Clean buttons below delete the older eligible ones; originals are never touched.",
   rowBadge:    "Would be eligible for cleanup",
-  cleanTooltip:
-    "Cleanup arrives in A4-b. This view only previews which timestamped backups cleanup would target.",
   groupNote:
     "Original backups are never cleaned. Retention is calculated separately for each client.",
   previewFailureInline: "Preview unavailable",

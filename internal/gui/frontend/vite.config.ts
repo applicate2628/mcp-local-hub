@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import preact from "@preact/preset-vite";
+import tailwindcss from "@tailwindcss/vite";
 
 // Output layout is pinned so the existing Go embed + routes keep working:
 //   internal/gui/assets/index.html  ← served by Go at "/"
@@ -10,7 +11,7 @@ import preact from "@preact/preset-vite";
 // suffixes because this app is local-only (no CDN), so cache-busting is
 // unnecessary and stable filenames keep every rebuild a no-op in git.
 export default defineConfig({
-  plugins: [preact()],
+  plugins: [preact(), tailwindcss()],
   base: "/assets/",
   build: {
     outDir: "../assets",
