@@ -172,10 +172,11 @@ func registerMarketplaceRoutes(s *Server) {
 // projectMarketplaceEntries maps api.MarketplaceEntry values onto the
 // read-only browse wire shape shared by GET /api/marketplace and POST
 // /api/marketplace/refresh. It projects only {id, name, summary,
-// categories, homepage} — the install/transport/command fields stay
-// CLI-only — and normalizes a nil Categories to [] so the JSON is never
-// null (the frontend maps without a guard). The returned slice is always
-// non-nil so an empty catalog serializes as [], not null.
+// categories, homepage, transport} — the heavier install-only command
+// fields stay server-side — and normalizes a nil Categories to [] so
+// the JSON is never null (the frontend maps without a guard). The
+// returned slice is always non-nil so an empty catalog serializes as [],
+// not null.
 func projectMarketplaceEntries(entries []api.MarketplaceEntry) []marketplaceEntry {
 	rows := make([]marketplaceEntry, 0, len(entries))
 	for _, e := range entries {
@@ -189,6 +190,7 @@ func projectMarketplaceEntries(entries []api.MarketplaceEntry) []marketplaceEntr
 			Summary:    e.Summary,
 			Categories: cats,
 			Homepage:   e.Homepage,
+			Transport:  e.Transport,
 		})
 	}
 	return rows

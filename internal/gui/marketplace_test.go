@@ -245,9 +245,13 @@ func TestMarketplaceRefreshHandler_InvokesForceRefreshAndReturnsEntries(t *testi
 	if e0.Homepage != "https://example.com/filesystem" {
 		t.Errorf("entry[0].Homepage = %q", e0.Homepage)
 	}
-	// Install-only fields MUST NOT appear in the refreshed wire shape.
-	if strings.Contains(rec.Body.String(), "transport") ||
-		strings.Contains(rec.Body.String(), "command") ||
+	// `transport` is part of the refreshed wire shape too, matching GET
+	// /api/marketplace so one-click install decisions can use either response.
+	if e0.Transport != "stdio" {
+		t.Errorf("entry[0].Transport = %q, want stdio", e0.Transport)
+	}
+	// The heavier install-only fields MUST NOT appear in the refreshed wire shape.
+	if strings.Contains(rec.Body.String(), "command") ||
 		strings.Contains(rec.Body.String(), "server-filesystem") {
 		t.Errorf("refresh DTO leaked install fields: %q", rec.Body.String())
 	}
