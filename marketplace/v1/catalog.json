@@ -80,6 +80,18 @@
       "license": "MIT"
     },
     {
+      "id": "qt-docs",
+      "name": "Qt Documentation MCP server",
+      "summary": "Official Qt documentation lookup from The Qt Company — remote HTTP server. Useful for Qt/C++/QML development (Qt Widgets, Qt Quick, modules, classes).",
+      "homepage": "https://qt-docs-mcp.qt.io",
+      "readme_url": "https://qt-docs-mcp.qt.io",
+      "transport": "http",
+      "url": "https://qt-docs-mcp.qt.io/mcp",
+      "env": {},
+      "categories": ["docs", "remote", "qt"],
+      "license": "Qt"
+    },
+    {
       "id": "excalidraw",
       "name": "Excalidraw MCP server",
       "summary": "Create and manipulate Excalidraw diagrams programmatically — 26 tools for element CRUD, layout, scene awareness, export to PNG/SVG, and Mermaid conversion. Community implementation (yctimlin); the Excalidraw team's official excalidraw/excalidraw-mcp is not npm-published.",
