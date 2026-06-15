@@ -185,7 +185,7 @@ func TestValidate_Path_AcceptsValidNonEmpty(t *testing.T) {
 	def := findDef("appearance.default_home")
 	cases := []string{
 		"/home/user",
-		"C:\\Users\\dima",
+		"C:\\Users\\alice",
 		"/tmp/foo bar with spaces in middle",
 		"relative/path",
 		"./dot-prefix",

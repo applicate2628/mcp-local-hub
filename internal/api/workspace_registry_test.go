@@ -35,7 +35,7 @@ func TestRegistry_RoundtripWithEntries(t *testing.T) {
 	reg := NewRegistry(path)
 	reg.Put(WorkspaceEntry{
 		WorkspaceKey:  "3f2a8c91",
-		WorkspacePath: "c:/users/dima/projects/foo",
+		WorkspacePath: "c:/users/alice/projects/foo",
 		Language:      "python",
 		Backend:       "mcp-language-server",
 		Port:          9200,

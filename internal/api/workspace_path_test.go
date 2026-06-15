@@ -9,15 +9,15 @@ import (
 )
 
 func TestWorkspaceKey_Deterministic(t *testing.T) {
-	a := WorkspaceKey("C:/users/dima/projects/foo")
-	b := WorkspaceKey("C:/users/dima/projects/foo")
+	a := WorkspaceKey("C:/users/alice/projects/foo")
+	b := WorkspaceKey("C:/users/alice/projects/foo")
 	if a != b {
 		t.Errorf("key not deterministic: %q vs %q", a, b)
 	}
 	if len(a) != 8 {
 		t.Errorf("key len = %d, want 8 (hex)", len(a))
 	}
-	c := WorkspaceKey("C:/users/dima/projects/bar")
+	c := WorkspaceKey("C:/users/alice/projects/bar")
 	if a == c {
 		t.Error("keys for distinct paths should differ")
 	}

@@ -92,7 +92,7 @@ func TestRedactCmdlineForDisplay(t *testing.T) {
 	}{
 		{
 			name: "quoted Windows path with args",
-			in:   `"C:\Users\dima\AppData\Roaming\npm\node.exe" -y @modelcontextprotocol/server-memory`,
+			in:   `"C:\Users\alice\AppData\Roaming\npm\node.exe" -y @modelcontextprotocol/server-memory`,
 			want: "node.exe",
 		},
 		{
@@ -483,7 +483,7 @@ func TestOrphanProcessJSONOmitsRawCmdline(t *testing.T) {
 		ParentID:       1,
 		Server:         "memory",
 		RAMBytes:       100 * 1024 * 1024,
-		Cmdline:        `"C:\Users\dima\private\workspace\node.exe" --api-key=sk-leakable`,
+		Cmdline:        `"C:\Users\alice\private\workspace\node.exe" --api-key=sk-leakable`,
 		CmdlineDisplay: "node.exe",
 		AgeSec:         60,
 	}

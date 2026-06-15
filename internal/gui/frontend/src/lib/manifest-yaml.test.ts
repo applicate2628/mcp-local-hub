@@ -123,11 +123,11 @@ describe("toYAML", () => {
       ...base,
       name: "demo",
       command: "npx",
-      env: [{ key: "PATH", value: "C:\\Users\\dima_\\.local\\bin" }],
+      env: [{ key: "PATH", value: "C:\\Users\\alice\\.local\\bin" }],
     };
     const yaml = toYAML(state);
     // Single-quoted branch keeps the backslashes literal.
-    expect(yaml).toContain(`PATH: 'C:\\Users\\dima_\\.local\\bin'`);
+    expect(yaml).toContain(`PATH: 'C:\\Users\\alice\\.local\\bin'`);
     // Must NOT double-quote — that would let YAML interpret \U as a hex escape.
     expect(yaml).not.toMatch(/PATH: "C:\\\\Users/);
   });
