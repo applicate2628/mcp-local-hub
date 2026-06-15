@@ -881,3 +881,73 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
     expect(box.checked).toBe(false); // edit preserved across the paused window
   });
 });
+
+// Whole-row toggle: clicking the server-name row affordance flips EVERY
+// interactive cell in that row at once — the row analog of the column header
+// toggle, fed through the same flipCellGroup owner.
+describe("ServersScreen — whole-row toggle", () => {
+  // One manifested server with TWO interactive cells in mixed state:
+  // claude-code via-hub (checked) + codex-cli "available" (config ok, no
+  // entry → unchecked). The row is therefore NOT all-checked initially.
+  function mixedRowScan(): ScanResult {
+    return {
+      at: "2026-06-15T00:00:00Z",
+      entries: [
+        {
+          name: "memory",
+          manifest_exists: true,
+          can_migrate: true,
+          status: "via-hub",
+          client_presence: {
+            "claude-code": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/memory",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "claude-code": "ok", "codex-cli": "ok" },
+    };
+  }
+
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => cleanup());
+
+  const interactiveRowInputs = () =>
+    Array.from(
+      document.querySelectorAll<HTMLInputElement>(
+        'table.servers-matrix tbody tr input[type="checkbox"]:not(:disabled)',
+      ),
+    );
+
+  it("flips every interactive cell in the row on click, and back on a second click", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, mixedRowScan()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+
+    const rowToggle = await screen.findByTestId("matrix-row-toggle-memory");
+
+    // Two interactive cells; only the via-hub one is checked → not all-checked.
+    await vi.waitFor(() => expect(interactiveRowInputs().length).toBe(2));
+    expect(interactiveRowInputs().filter((i) => i.checked).length).toBe(1);
+
+    // Click row toggle → not-all-checked → flip every interactive cell ON.
+    fireEvent.click(rowToggle);
+    await vi.waitFor(() => expect(interactiveRowInputs().every((i) => i.checked)).toBe(true));
+    // Bulk edit is dirty → Apply enabled.
+    expect((screen.getByRole("button", { name: /Apply changes/ }) as HTMLButtonElement).disabled).toBe(false);
+
+    // Click again → all-checked → flip every interactive cell OFF.
+    fireEvent.click(rowToggle);
+    await vi.waitFor(() => expect(interactiveRowInputs().every((i) => !i.checked)).toBe(true));
+  });
+});

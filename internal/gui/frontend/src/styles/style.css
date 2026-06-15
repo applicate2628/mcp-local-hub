@@ -182,6 +182,26 @@ main { padding: var(--screen-padding); overflow: auto; }
   padding-bottom: var(--cell-padding-y);
 }
 .matrix-col-toggle:hover { text-decoration: underline; }
+/* Whole-row toggle: a compact enable-all/disable-all affordance in the
+   server-name cell, the row analog of .matrix-col-toggle. Sits inline
+   before the edit-server link; muted by default, success-tinted when the
+   whole row is already enabled so the operator reads row state at a glance. */
+.matrix-row-toggle {
+  display: inline-block;
+  margin-right: var(--gap-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.95em;
+  line-height: 1;
+}
+.matrix-row-toggle:hover { color: var(--accent); }
+.matrix-row-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.matrix-row-toggle--full { color: var(--success); }
 /* Feature 1 — whole-cell click target: the <label> fills the data cell so a
    click anywhere in the cell toggles the wrapped checkbox exactly once
    (native label semantics, no JS double-fire). Negative margins expand the
@@ -197,6 +217,102 @@ main { padding: var(--screen-padding); overflow: auto; }
 /* A disabled cell (no interactive checkbox) stays inert: default cursor and
    a native no-op on click (the wrapped input is disabled). */
 .servers-matrix td > .matrix-cell-label.disabled { cursor: default; }
+
+/* ── ToggleSwitch — shared polished on/off switch ────────────────────────────
+   A real <input type="checkbox"> visually hidden under a CSS track + knob.
+   The input keeps full form/a11y semantics + every existing selector; this
+   block is purely the skin. Tokens (--border, --link, --bg, --card-surface,
+   --success) flow from :root / [data-theme=dark] so it is light/dark aware.
+   Used by the Servers matrix cells (primary) and any future on/off control. */
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  /* Sizing knobs — change here, knob math derives from them. */
+  --tgl-w: 34px;
+  --tgl-h: 18px;
+  --tgl-pad: 2px;
+  --tgl-knob: calc(var(--tgl-h) - 2 * var(--tgl-pad));
+  width: var(--tgl-w);
+  height: var(--tgl-h);
+  vertical-align: middle;
+}
+/* The real input sits ON TOP of the track, transparent and full-size, so a
+   direct click/tap on the switch (or a label-click that forwards to it) hits
+   the input itself — keeps native toggling and fireEvent.click(input) working.
+   NOT display:none: that would drop it from the a11y tree + break clicks. */
+.toggle-switch-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+.toggle-switch-input:disabled { cursor: default; }
+/* Track — the pill background. */
+.toggle-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border);
+  transition: background-color .16s ease, border-color .16s ease;
+  pointer-events: none;
+}
+/* Knob — the sliding dot. Rests left (off); slides right when checked. */
+.toggle-switch-knob {
+  position: absolute;
+  top: 50%;
+  left: var(--tgl-pad);
+  width: var(--tgl-knob);
+  height: var(--tgl-knob);
+  border-radius: 50%;
+  background: var(--card-surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transform: translateY(-50%);
+  transition: transform .16s ease, background-color .16s ease, border-color .16s ease;
+}
+/* ON state — track fills with the accent/success, knob slides right + goes
+   white. Driven by :checked on the sibling input via the adjacency selector. */
+.toggle-switch-input:checked + .toggle-switch-track {
+  background: var(--success);
+  border-color: var(--success);
+}
+.toggle-switch-input:checked + .toggle-switch-track .toggle-switch-knob {
+  transform: translateY(-50%) translateX(calc(var(--tgl-w) - var(--tgl-knob) - 2 * var(--tgl-pad)));
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+/* Disabled — dim the whole control; no interaction. */
+.toggle-switch--disabled { opacity: 0.45; }
+/* Focus ring — keyboard-only, via :focus-visible on the real input. Rendered
+   on the TRACK so the ring hugs the visible pill, not the invisible input box.
+   Reuses the app-wide --focus token for one consistent indicator. */
+.toggle-switch-input:focus-visible + .toggle-switch-track {
+  outline: 2px solid var(--focus, #0969da);
+  outline-offset: 2px;
+}
+/* PENDING / unsaved-edit cue — an accent ring + accent-tinted off-track so a
+   dirty toggle reads visibly DIFFERENT from a clean one (replaces the implicit
+   "you just clicked it" signal the raw checkbox gave). Accent = --link, the
+   app's interactive accent. Kept distinct from the red retry-pending cell
+   outline (a failed Apply), so "edit queued" and "last Apply failed" stay
+   visually separable. */
+.toggle-switch--pending .toggle-switch-track {
+  box-shadow: 0 0 0 2px var(--link);
+}
+.toggle-switch--pending .toggle-switch-input:not(:checked) + .toggle-switch-track {
+  border-color: var(--link);
+}
+@media (prefers-reduced-motion: reduce) {
+  .toggle-switch-track,
+  .toggle-switch-knob { transition: none; }
+}
+
 .error { color: var(--danger); }
 
 /* --- Dashboard cards --- */

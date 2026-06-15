@@ -24,6 +24,7 @@ import { aggregateStatus, stateShape } from "../lib/status";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
 import { MatrixColumnsMenu } from "../components/MatrixColumnsMenu";
 import { EnvDrawer } from "../components/EnvDrawer";
+import { ToggleSwitch } from "../components/ToggleSwitch";
 import type {
   ClientConfigState,
   ClientEntry,
@@ -674,22 +675,32 @@ export function ServersScreen() {
     manifestedServers.filter((s) =>
       cellInteractive(s.routing[client] ?? "not-installed", applying),
     );
-  const toggleColumnCells = (client: string) => {
-    const targets = columnInteractiveServers(client);
-    if (targets.length === 0) return; // no-op: nothing toggleable in column
-    const allChecked = targets.every((s) => effectiveChecked(s, client));
+  // flipCellGroup is the SINGLE owner of the bulk enable-all/disable-all
+  // logic shared by the whole-column header toggle AND the whole-row
+  // server toggle: given a set of (server, client) cells, if ALL are
+  // currently checked set them all UNchecked, else set them all checked.
+  // Each flip routes through the SAME per-cell toggleCell path so
+  // migrate/demigrate semantics + the Apply queue stay identical to a
+  // manual per-cell toggle — there is no separate bulk apply path, and no
+  // duplicated flip logic between the column and row toggles.
+  const flipCellGroup = (cells: { server: ServerRow; client: string }[]) => {
+    if (cells.length === 0) return; // no-op: nothing toggleable in the group
+    const allChecked = cells.every(({ server, client }) => effectiveChecked(server, client));
     const next = !allChecked;
-    for (const s of targets) {
+    for (const { server, client } of cells) {
       // initialChecked is the authoritative scan baseline the dirty map
       // keys direction off of — pass it (NOT the effective state) so
       // toggleCell prunes/creates the dirty entry against the right axis.
-      const initialChecked = (s.routing[client] ?? "not-installed") === "via-hub";
+      const initialChecked = (server.routing[client] ?? "not-installed") === "via-hub";
       // Only fire when the cell's effective state actually changes, so an
       // already-correct cell isn't churned through the dirty map.
-      if (effectiveChecked(s, client) !== next) {
-        toggleCell(s.name, client, next, initialChecked);
+      if (effectiveChecked(server, client) !== next) {
+        toggleCell(server.name, client, next, initialChecked);
       }
     }
+  };
+  const toggleColumnCells = (client: string) => {
+    flipCellGroup(columnInteractiveServers(client).map((server) => ({ server, client })));
   };
 
   // v0.5.x Task 4.3 — LSP rows are always 9 (one per language). When
@@ -705,6 +716,18 @@ export function ServersScreen() {
   // adds no column unless explicitly pinned, and a noisy detected column
   // can be hidden. View filter only — see effectiveVisibleClients.
   const clientColumns = effectiveVisibleClients(scanForLsp, columnPrefs);
+  // Whole-row toggle: flip every applicable (toggleable, non-disabled)
+  // cell in ONE server's row at once — the row analog of the column
+  // header toggle, fed through the same flipCellGroup owner. Scoped to
+  // the currently-visible client columns so a hidden column is never
+  // silently mutated by a row toggle.
+  const rowInteractiveClients = (server: ServerRow): string[] =>
+    clientColumns.filter((client) =>
+      cellInteractive(server.routing[client] ?? "not-installed", applying),
+    );
+  const toggleRowCells = (server: ServerRow) => {
+    flipCellGroup(rowInteractiveClients(server).map((client) => ({ server, client })));
+  };
   const selectedWorkspace =
     selectedWorkspaceKey !== ALL_WORKSPACES_KEY
       ? workspaces.find((w) => w.workspace_key === selectedWorkspaceKey)
@@ -885,6 +908,7 @@ export function ServersScreen() {
               pending={dirty.get(server.name)}
               applyGen={applyGen}
               onToggle={toggleCell}
+              onRowToggle={toggleRowCells}
               applying={applying}
             />
           ))}
@@ -964,12 +988,50 @@ function ServerRowView(props: {
   pending?: Map<string, Direction>;
   applyGen: number;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
+  // Whole-row enable-all/disable-all for this server, the row analog of the
+  // column header toggle. Mutates only the parent dirty map via the shared
+  // flipCellGroup owner, so Apply semantics are identical to per-cell edits.
+  onRowToggle: (server: ServerRow) => void;
   applying: boolean;
 }) {
-  const { server, clients, status, outcomes, pending, onToggle, applying } = props;
+  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, applying } = props;
+  // Row-toggle affordance state: a cell is "checked" if a pending dirty
+  // edit says so, else the scan baseline (via-hub). rowInteractive uses the
+  // same cellInteractive gate as the per-cell checkbox + the column toggle,
+  // so the row toggle flips exactly the cells the operator could flip by
+  // hand. The toggle is only offered when the row has ≥1 toggleable cell.
+  const rowEffectiveChecked = (client: string): boolean => {
+    const p = pending?.get(client);
+    if (p) return p === "migrate";
+    return (server.routing[client] ?? "not-installed") === "via-hub";
+  };
+  const rowInteractive = clients.filter((c) =>
+    cellInteractive(server.routing[c] ?? "not-installed", applying),
+  );
+  const rowToggleable = rowInteractive.length > 0;
+  const rowAllChecked = rowToggleable && rowInteractive.every(rowEffectiveChecked);
   return (
     <tr>
       <td>
+        {rowToggleable && (
+          <span
+            class={`matrix-row-toggle${rowAllChecked ? " matrix-row-toggle--full" : ""}`}
+            data-testid={`matrix-row-toggle-${server.name}`}
+            role="button"
+            tabIndex={0}
+            aria-pressed={rowAllChecked}
+            title={`Toggle all visible clients for ${server.name}`}
+            onClick={() => onRowToggle(server)}
+            onKeyDown={(ev: KeyboardEvent) => {
+              if (ev.key === "Enter" || ev.key === " ") {
+                ev.preventDefault();
+                onRowToggle(server);
+              }
+            }}
+          >
+            ⇄
+          </span>
+        )}
         <a
           href={`#/edit-server?name=${encodeURIComponent(server.name)}`}
           data-action="edit-server"
@@ -1123,16 +1185,24 @@ function CellView(props: {
   return (
     <td class={retryPending ? "matrix-cell-retry-pending" : ""} data-retry-pending={retryPending ? "true" : undefined}>
       {/* Feature 1 — whole-cell click target: a <label> fills the cell so a
-          native label-click toggles the wrapped checkbox exactly once (no JS
+          native label-click toggles the wrapped control exactly once (no JS
           double-fire). When the cell is disabled the label carries the
           .disabled modifier (default cursor, no toggle — clicking a label
-          bound to a disabled control is a native no-op). The checkbox keeps
-          its existing onChange → onToggle path and title untouched. */}
+          bound to a disabled control is a native no-op).
+
+          The control is now a polished ToggleSwitch (shared component) instead
+          of a raw checkbox, but it is STILL a real <input type="checkbox"> at
+          its core — every existing selector (`input[type="checkbox"]`), the
+          `.checked`/`.disabled` mirrors, and the onChange → onToggle path are
+          unchanged. `pending` lights the unsaved-edit cue (accent ring/track)
+          so a dirty toggle still reads visibly different from a clean one,
+          mirroring what the raw-checkbox + retry-outline gave before. The
+          title carries the per-cell help text exactly as before. */}
       <label class={`matrix-cell-label${disabled ? " disabled" : ""}`}>
-        <input
-          type="checkbox"
+        <ToggleSwitch
           checked={checked}
           disabled={disabled}
+          pending={pendingDirection !== undefined}
           title={cellTitle}
           onChange={(ev) => {
             const next = (ev.currentTarget as HTMLInputElement).checked;

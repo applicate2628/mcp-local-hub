@@ -15,35 +15,57 @@ export type InfoTipProps = {
 };
 
 // InfoTip — a small "ⓘ" affordance that reveals long help text in a floating
-// popover ON DEMAND (hover for mouse, focus for keyboard, tap/click for touch)
-// instead of dumping a wall of muted prose inline under every field. Native
-// Preact + ARIA — deliberately NOT Radix/@material/shadcn: those are React +
-// Tailwind component libraries that would need a preact/compat shim with real
-// portal/ref/context risk; a tooltip is simple enough to own. Dismissal:
-// Escape, blur, mouseleave, or click-outside. Styling rides the app's design
-// tokens (var(--…)) re-exported to Tailwind via @theme, so it follows the live
-// light/dark palette.
+// popover ON DEMAND instead of dumping a wall of muted prose inline under
+// every field. Native Preact + ARIA — deliberately NOT Radix/@material/shadcn:
+// those are React + Tailwind component libraries that would need a
+// preact/compat shim with real portal/ref/context risk; a tooltip is simple
+// enough to own. Styling rides the app's design tokens (var(--…)) re-exported
+// to Tailwind via @theme, so it follows the live light/dark palette.
+//
+// Two open modes, ONE shared component (the "минимум дублирования" the user
+// asked for — fixing it here fixes every ⓘ across Catalog cards,
+// MatrixColumnsMenu, Migration, Settings, …):
+//
+//   - HOVER PREVIEW (mouse only): pointer over the trigger OR the popover
+//     opens it transiently; moving away closes it. A keyboard focus also
+//     previews. This is the cheap, ephemeral path.
+//   - CLICK PIN (the explicit ask): clicking the trigger TOGGLES a pinned
+//     state. closed → open-and-pinned; open → close. While pinned the
+//     popover stays up regardless of mouseleave/blur until: another trigger
+//     click, a click outside, or Escape.
+//
+// `pinned` is the authoritative latch; `hovering` is the transient preview.
+// The popover renders when EITHER is set, but only `pinned` survives a
+// mouseleave/blur — so a click both OPENS and CLOSES (the explicit
+// requirement), and a hover can't accidentally dismiss a pinned popover.
 export function InfoTip({
   text,
   label = "More info",
   "data-testid": dataTestid,
 }: InfoTipProps): preact.JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const open = pinned || hovering;
   const rawId = useId();
   const id = `infotip-${rawId.replace(/[:]/g, "")}`;
   const wrapRef = useRef<HTMLSpanElement>(null);
 
-  // Escape + click-outside close the popover. Only wired while open so we
-  // never leak global listeners. mousedown (not click) so the dismiss fires
-  // before a re-open click handler can re-toggle.
+  // Escape + click-outside DISMISS the pinned popover (and clear any hover
+  // preview). Only wired while pinned so we never leak global listeners for a
+  // mere hover. mousedown (not click) so the outside-dismiss fires before a
+  // re-open click handler on another trigger can re-toggle.
   useEffect(() => {
-    if (!open) return;
+    if (!pinned) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setPinned(false);
+        setHovering(false);
+      }
     }
     function onDoc(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
+        setPinned(false);
+        setHovering(false);
       }
     }
     document.addEventListener("keydown", onKey);
@@ -52,21 +74,26 @@ export function InfoTip({
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onDoc);
     };
-  }, [open]);
+  }, [pinned]);
 
   return (
     <span
       ref={wrapRef}
       class="infotip relative inline-flex items-center align-middle"
-      // Hover path (mouse): open while the pointer is over trigger OR popover
-      // (both live inside this wrapper), so moving onto the popover keeps it up.
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      // Hover PREVIEW (mouse): open while the pointer is over trigger OR
+      // popover (both live inside this wrapper), so moving onto the popover
+      // keeps it up. This only flips the transient `hovering` flag — a pinned
+      // popover is unaffected by the pointer leaving.
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
     >
       <button
         type="button"
         class="infotip-trigger inline-flex h-[15px] w-[15px] items-center justify-center rounded-full border border-app-border text-[10px] font-semibold leading-none text-app-muted transition-colors hover:border-app-accent hover:text-app-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent/50"
         aria-label={label}
+        // aria-expanded reflects the COMBINED open state (pinned or hovering)
+        // so assistive tech always sees whether the popover is currently
+        // visible, matching what a sighted user perceives.
         aria-expanded={open}
         aria-describedby={open ? id : undefined}
         // Native tooltip mirror of the popover prose: keeps the help text
@@ -74,9 +101,22 @@ export function InfoTip({
         // moved-inline-description callers a stable text surface to assert.
         title={text}
         data-testid={dataTestid}
-        onClick={() => setOpen((o) => !o)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        // CLICK toggles the PINNED latch — open→close, close→open. Clearing
+        // `hovering` on the close branch guarantees a click can actually close
+        // even while the pointer is still over the trigger (otherwise the
+        // hover preview would immediately re-open it).
+        onClick={() =>
+          setPinned((p) => {
+            const next = !p;
+            if (!next) setHovering(false);
+            return next;
+          })
+        }
+        // Keyboard PREVIEW: focus opens transiently; blur clears the preview
+        // but never the pin (Tab away from a pinned popover keeps it up until
+        // Escape / outside-click / re-click — matches mouse pin semantics).
+        onFocus={() => setHovering(true)}
+        onBlur={() => setHovering(false)}
       >
         i
       </button>
