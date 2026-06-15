@@ -89,3 +89,11 @@ coverage.out
 # Internal consolidated roadmap (carries paid-tier split — keep OUT of the public repo)
 work-items/ROADMAP.md
 work-items/roadmap-scan-*.md
+
+# Stray build/vet/test output redirects accidentally created in the repo root —
+# e.g. `go build > r:\Temp\build_out.txt` whose Windows path collapsed into a
+# literal repo-root filename (the ':' becomes a PUA glyph). Also a bare `> null`.
+*build_out.txt
+*vet_out.txt
+*test_out.txt
+/null
