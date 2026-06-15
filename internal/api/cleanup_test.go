@@ -18,7 +18,7 @@ func TestIsBroadLauncherToken(t *testing.T) {
 		"node.exe", "npx.cmd", "uvx.exe", "python.exe", "python3.exe",
 		// absolute paths (wmic on Windows often emits these)
 		`C:\Program Files\nodejs\node.exe`,
-		`C:\Users\dima_\AppData\Roaming\npm\npx.cmd`,
+		`C:\Users\alice\AppData\Roaming\npm\npx.cmd`,
 		`/usr/bin/python3`,
 		// quoted (PowerShell command-line style)
 		`'node'`, `"python"`,

@@ -18,7 +18,7 @@ func TestBuildCreateXML_Logon(t *testing.T) {
 		LogonTrigger:     true,
 		RestartOnFailure: true,
 	}
-	xml := buildCreateXML(spec, "dima_")
+	xml := buildCreateXML(spec, "alice")
 
 	if !strings.Contains(xml, "<LogonTrigger>") {
 		t.Error("expected <LogonTrigger> in XML")
@@ -72,7 +72,7 @@ func TestBuildCreateXML_Weekly(t *testing.T) {
 			MinuteLocal: 0,
 		},
 	}
-	xml := buildCreateXML(spec, "dima_")
+	xml := buildCreateXML(spec, "alice")
 	// Weekly recurrence must be inside <CalendarTrigger>, not a top-level
 	// <WeeklyTrigger> (Task Scheduler schema rule, rejected at schtasks /Create).
 	if !strings.Contains(xml, "<CalendarTrigger>") {
@@ -110,7 +110,7 @@ func TestBuildCreateXML_QuotesArgsWithSpaces(t *testing.T) {
 			"--language", "go",
 		},
 	}
-	xml := buildCreateXML(spec, "dima_")
+	xml := buildCreateXML(spec, "alice")
 	// The workspace path MUST be wrapped in quotes; unquoted would split
 	// into "C:\Users\Test" + "User\workspace" at argv time. xmlEscape will
 	// then re-encode the surrounding quote as &#34; inside the XML.
@@ -136,7 +136,7 @@ func TestBuildCreateXML_HandlesInternalQuotes(t *testing.T) {
 		Command: `C:\path\mcphub.exe`,
 		Args:    []string{"--label", `a"b`},
 	}
-	xml := buildCreateXML(spec, "dima_")
+	xml := buildCreateXML(spec, "alice")
 	if !strings.Contains(xml, `a\&#34;b`) {
 		t.Errorf("expected escaped internal quote `a\\&#34;b` in XML, got:\n%s", xml)
 	}
@@ -146,7 +146,7 @@ func TestBuildCreateXML_HandlesInternalQuotes(t *testing.T) {
 		Command: `C:\path\mcphub.exe`,
 		Args:    []string{"--label", `has "quoted" space`},
 	}
-	xml2 := buildCreateXML(spec2, "dima_")
+	xml2 := buildCreateXML(spec2, "alice")
 	if !strings.Contains(xml2, `&#34;has \&#34;quoted\&#34; space&#34;`) {
 		t.Errorf("expected both outer and internal quotes escaped, got:\n%s", xml2)
 	}
@@ -163,7 +163,7 @@ func TestBuildCreateXML_HandlesTrailingBackslash(t *testing.T) {
 		Command: `C:\path\mcphub.exe`,
 		Args:    []string{"--workspace", `C:\Users\Test User\ws\`},
 	}
-	xml := buildCreateXML(spec, "dima_")
+	xml := buildCreateXML(spec, "alice")
 	// With a trailing backslash the arg should end in `\\"` inside the
 	// command line, i.e. `&#34;...ws\\&#34;` in the XML-escaped form.
 	if !strings.Contains(xml, `ws\\&#34;`) {

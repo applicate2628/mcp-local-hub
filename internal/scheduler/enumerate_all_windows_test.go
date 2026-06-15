@@ -68,7 +68,7 @@ func fixtureTask(uri, userID string) string {
 // appear in the result. List() filters the second one out via
 // sameWindowsUser; EnumerateAllMcphubTasks() must NOT.
 func TestEnumerateAllMcphubTasks_ParsesMixedOwners(t *testing.T) {
-	stream := fixtureTask(`\mcp-local-hub-memory-claude`, `dima_`) +
+	stream := fixtureTask(`\mcp-local-hub-memory-claude`, `alice`) +
 		fixtureTask(`\mcp-local-hub-foo-claude`, `SomeOtherUser`)
 
 	tasks, err := parseEnumerateXML(stream)
@@ -88,8 +88,8 @@ func TestEnumerateAllMcphubTasks_ParsesMixedOwners(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected \\mcp-local-hub-memory-claude in result; got %+v", tasks)
 	}
-	if !strings.EqualFold(memory.Owner, `dima_`) {
-		t.Errorf("expected Owner=dima_ for memory-claude, got %q", memory.Owner)
+	if !strings.EqualFold(memory.Owner, `alice`) {
+		t.Errorf("expected Owner=alice for memory-claude, got %q", memory.Owner)
 	}
 
 	foo, ok := byName[`\mcp-local-hub-foo-claude`]
@@ -107,9 +107,9 @@ func TestEnumerateAllMcphubTasks_ParsesMixedOwners(t *testing.T) {
 // Windows / vendor tasks; the migration classifier only cares
 // about ours.
 func TestEnumerateAllMcphubTasks_FiltersByMcphubPrefix(t *testing.T) {
-	stream := fixtureTask(`\mcp-local-hub-memory-claude`, `dima_`) +
+	stream := fixtureTask(`\mcp-local-hub-memory-claude`, `alice`) +
 		fixtureTask(`\Microsoft\Windows\UpdateOrchestrator\Refresh`, `SYSTEM`) +
-		fixtureTask(`\unrelated-task`, `dima_`)
+		fixtureTask(`\unrelated-task`, `alice`)
 
 	tasks, err := parseEnumerateXML(stream)
 	if err != nil {
@@ -222,7 +222,7 @@ func TestEnumerateAllMcphubTasks_NoPanicOnNilInput(t *testing.T) {
 // caller may need to strip DOMAIN itself; the enumerator is
 // transport-only and preserves the raw schtasks string.
 func TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix(t *testing.T) {
-	stream := fixtureTask(`\mcp-local-hub-wolfram-codex`, `WORKGROUP\dima_`)
+	stream := fixtureTask(`\mcp-local-hub-wolfram-codex`, `WORKGROUP\alice`)
 	tasks, err := parseEnumerateXML(stream)
 	if err != nil {
 		t.Fatalf("parseEnumerateXML returned error: %v", err)
@@ -230,7 +230,7 @@ func TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix(t *testing.T) {
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(tasks))
 	}
-	if tasks[0].Owner != `WORKGROUP\dima_` {
+	if tasks[0].Owner != `WORKGROUP\alice` {
 		t.Errorf("expected raw DOMAIN-prefixed owner preserved, got %q", tasks[0].Owner)
 	}
 }
@@ -242,8 +242,8 @@ func TestEnumerateAllMcphubTasks_HandlesDOMAINPrefix(t *testing.T) {
 // possibly-missing trailing newline at end-of-stream, and (c) an
 // empty input.
 func TestSplitConcatenatedTaskXML(t *testing.T) {
-	a := fixtureTask(`\mcp-local-hub-a`, `dima_`)
-	b := fixtureTask(`\mcp-local-hub-b`, `dima_`)
+	a := fixtureTask(`\mcp-local-hub-a`, `alice`)
+	b := fixtureTask(`\mcp-local-hub-b`, `alice`)
 
 	tests := []struct {
 		name     string
@@ -273,7 +273,7 @@ func TestSplitConcatenatedTaskXML(t *testing.T) {
 func TestParseTasksAtomicAcceptsAttributedWrapper(t *testing.T) {
 	stream := `<?xml version="1.0" encoding="UTF-16"?>
 <Tasks xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-` + strings.TrimPrefix(fixtureTask(`\mcp-local-hub-memory-claude`, `dima_`), `<?xml version="1.0" encoding="UTF-16"?>
+` + strings.TrimPrefix(fixtureTask(`\mcp-local-hub-memory-claude`, `alice`), `<?xml version="1.0" encoding="UTF-16"?>
 `) + `</Tasks>`
 
 	tasks, err := parseEnumerateXML(stream)
@@ -294,7 +294,7 @@ func TestParseTasksAtomicAcceptsAttributedWrapper(t *testing.T) {
 // production schtasks call returns mixed-owner data (that would
 // require touching the live scheduler), but we CAN assert via fixture
 // composition that the parser does not silently drop non-current-user
-// entries. The "dima_" + "SomeOtherUser" fixture composition in
+// entries. The "alice" + "SomeOtherUser" fixture composition in
 // TestEnumerateAllMcphubTasks_ParsesMixedOwners already exercises
 // this, but this test pins the intent explicitly so a future refactor
 // that re-introduces a same-user filter at the parser layer fails

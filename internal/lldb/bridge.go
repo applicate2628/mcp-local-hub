@@ -8,7 +8,7 @@
 // no behavior drift between shapes.
 //
 // This file is the Go rewrite of the Python reference script at
-// C:\Users\dima_\.local\mcp-servers\lldb-bridge\bridge.py. Why this lives
+// C:\Users\alice\.local\mcp-servers\lldb-bridge\bridge.py. Why this lives
 // in mcphub (and as its own standalone binary) rather than as a Python
 // script: we ship one exe for the whole stack, so reusing it as the stdio
 // MCP command removes an extra install step and keeps upgrade semantics

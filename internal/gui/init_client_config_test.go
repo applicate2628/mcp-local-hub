@@ -36,7 +36,7 @@ func TestInitClientConfig_HappyPath(t *testing.T) {
 	fi := &fakeClientInitializer{
 		result: &InitClientConfigResult{
 			Client:  "vscode",
-			Path:    `C:\Users\dima_\AppData\Roaming\Code\User\mcp.json`,
+			Path:    `C:\Users\alice\AppData\Roaming\Code\User\mcp.json`,
 			Created: true,
 		},
 	}

@@ -22,7 +22,7 @@ import (
 // We build a Task Scheduler XML document per spec, pipe it to `schtasks /Create /XML`,
 // and parse the output of `/Query` for Status/List.
 type windowsScheduler struct {
-	username     string // e.g., "dima_"
+	username     string // e.g., "alice"
 	schtasksPath string
 }
 

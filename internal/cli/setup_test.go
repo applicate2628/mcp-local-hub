@@ -23,9 +23,9 @@ import (
 // the assertion).
 func TestDirOnPath(t *testing.T) {
 	sep := string(os.PathListSeparator)
-	target := `C:\Users\dima_\.local\bin`
+	target := `C:\Users\alice\.local\bin`
 	other1, other2 := `C:\Go\bin`, `C:\Windows`
-	mixedCaseEntry := `C:\Users\dima_/.local/bin`
+	mixedCaseEntry := `C:\Users\alice/.local/bin`
 	if runtime.GOOS != "windows" {
 		// POSIX-style entries: `:` is the separator, so absolute POSIX
 		// paths split cleanly. The function still needs to see a
