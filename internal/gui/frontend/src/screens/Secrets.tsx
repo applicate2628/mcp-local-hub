@@ -378,6 +378,7 @@ function SecretRowComponent(props: {
         </button>
         <button
           type="button"
+          class="danger"
           disabled={actionsDisabled}
           title={reservedTitle}
           onClick={() => props.onDelete(props.row.name)}

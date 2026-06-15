@@ -836,7 +836,7 @@ export function AddServerScreen(props: {
                       onInput={(e) => updateBaseArg(i, (e.currentTarget as HTMLInputElement).value)}
                       disabled={readOnly}
                     />
-                    <button type="button" onClick={() => deleteBaseArg(i)} disabled={readOnly} data-action="delete-base-arg">×</button>
+                    <button type="button" class="danger" onClick={() => deleteBaseArg(i)} disabled={readOnly} data-action="delete-base-arg">×</button>
                   </div>
                 ))}
                 <button type="button" onClick={addBaseArg} disabled={readOnly} data-action="add-base-arg">+ Add arg</button>
@@ -874,7 +874,7 @@ export function AddServerScreen(props: {
                     onRequestCreate={openCreateModal}
                     disabled={readOnly}
                   />
-                  <button type="button" onClick={() => deleteEnv(i)} disabled={readOnly} data-action="delete-env">×</button>
+                  <button type="button" class="danger" onClick={() => deleteEnv(i)} disabled={readOnly} data-action="delete-env">×</button>
                 </div>
               ))}
               <button type="button" onClick={addEnv} disabled={readOnly} data-action="add-env">+ Add environment variable</button>
@@ -902,7 +902,7 @@ export function AddServerScreen(props: {
                     disabled={readOnly}
                     data-field="daemon-port"
                   />
-                  <button type="button" onClick={() => deleteDaemon(i)} disabled={readOnly} data-action="delete-daemon">×</button>
+                  <button type="button" class="danger" onClick={() => deleteDaemon(i)} disabled={readOnly} data-action="delete-daemon">×</button>
                 </div>
               ))}
               <button type="button" onClick={addDaemon} disabled={readOnly} data-action="add-daemon">+ Add daemon</button>
@@ -1129,7 +1129,7 @@ function BindingsList(props: {
               onInput={(e) => onUpdate(absIdx, "url_path", (e.currentTarget as HTMLInputElement).value)}
               disabled={readOnly}
             />
-            <button type="button" onClick={() => onDelete(absIdx)} disabled={readOnly} data-action="delete-binding">×</button>
+            <button type="button" class="danger" onClick={() => onDelete(absIdx)} disabled={readOnly} data-action="delete-binding">×</button>
           </div>
         );
       })}
@@ -1165,6 +1165,7 @@ function RepeatableStringRows(props: {
           />
           <button
             type="button"
+            class="danger"
             onClick={() => onChange(value.filter((_, j) => j !== i))}
             disabled={disabled}
             data-action={`delete-${dataTestId ?? label}-row`}
@@ -1277,6 +1278,7 @@ function LanguagesSubsection(props: {
               />
               <button
                 type="button"
+                class="danger"
                 onClick={() => deleteLanguage(idx)}
                 disabled={disabled}
                 data-action="delete-language"

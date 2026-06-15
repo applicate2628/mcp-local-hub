@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow, postDismiss } from "../api";
+import { InfoTip } from "../components/InfoTip";
 import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
 import type { ScanEntry, ScanResult } from "../types";
@@ -401,7 +402,7 @@ function UnknownGroup(props: {
             </button>
             <button
               type="button"
-              class="dismiss"
+              class="dismiss danger"
               data-action="dismiss"
               onClick={() => props.onDismiss(e)}
             >
@@ -425,12 +426,13 @@ function PerSessionGroup(props: { entries: ScanEntry[] }) {
   }
   return (
     <section class="group group-per-session" data-group="per-session">
-      <h2>Per-session</h2>
-      <p class="info">
-        These entries are shareable per-session only (e.g. running IDE
-        integrations). They cannot be migrated into the hub and do not
-        support Demigrate.
-      </p>
+      <div class="group-heading">
+        <h2>Per-session</h2>
+        <InfoTip
+          label="About per-session entries"
+          text="These entries are shareable per-session only (e.g. running IDE integrations). They cannot be migrated into the hub and do not support Demigrate."
+        />
+      </div>
       <ul class="group-rows">
         {props.entries.map((e) => (
           <li key={e.name} data-server={e.name}>

@@ -348,6 +348,7 @@ export function CatalogScreen() {
                       ) : (
                         <button
                           type="button"
+                          class="danger"
                           data-testid={`catalog-uninstall-${name}`}
                           disabled={unstate.phase === "uninstalling"}
                           onClick={() => setConfirmUninstall(name)}
