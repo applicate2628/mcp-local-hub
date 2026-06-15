@@ -625,7 +625,7 @@ describe("ServersScreen — manual column visibility", () => {
     render(<ServersScreen />);
     const btn = await screen.findByTestId("matrix-columns-button");
     // Bare host: 7 core clients visible out of 15 total.
-    expect(btn.textContent).toContain("Columns (7/15)");
+    expect(btn.textContent).toContain("Clients (7/15)");
   });
 
   it("opens the popover with all 15 client checkboxes on click", async () => {
@@ -660,7 +660,7 @@ describe("ServersScreen — manual column visibility", () => {
       expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(false);
     });
     // Count drops to 6/15.
-    expect(btn.textContent).toContain("Columns (6/15)");
+    expect(btn.textContent).toContain("Clients (6/15)");
     // Persisted to localStorage under the documented key.
     const stored = JSON.parse(
       localStorage.getItem("mcphub.servers.column-visibility") ?? "{}",
