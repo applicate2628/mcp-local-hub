@@ -44,26 +44,8 @@ func synthesizeDirWithAuthUsersReadACE(t *testing.T, dir string) {
 		t.Fatalf("Authenticated Users sid: %v", err)
 	}
 	entries := []windows.EXPLICIT_ACCESS{
-		{
-			AccessPermissions: windows.GENERIC_ALL,
-			AccessMode:        windows.GRANT_ACCESS,
-			Inheritance:       windows.NO_INHERITANCE,
-			Trustee: windows.TRUSTEE{
-				TrusteeForm:  windows.TRUSTEE_IS_SID,
-				TrusteeType:  windows.TRUSTEE_IS_USER,
-				TrusteeValue: windows.TrusteeValueFromSID(currentSID),
-			},
-		},
-		{
-			AccessPermissions: windows.GENERIC_READ,
-			AccessMode:        windows.GRANT_ACCESS,
-			Inheritance:       windows.NO_INHERITANCE,
-			Trustee: windows.TRUSTEE{
-				TrusteeForm:  windows.TRUSTEE_IS_SID,
-				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
-				TrusteeValue: windows.TrusteeValueFromSID(authUsersSID),
-			},
-		},
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_READ),
 	}
 	dacl, err := windows.ACLFromEntries(entries, nil)
 	if err != nil {

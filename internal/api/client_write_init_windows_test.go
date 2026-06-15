@@ -382,20 +382,16 @@ func synthesizeDirWithInheritableAuthUsersReadACE(t *testing.T, dir string) {
 		t.Fatalf("Authenticated Users sid: %v", err)
 	}
 	entries := []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
 		{
-			AccessPermissions: windows.GENERIC_ALL,
-			AccessMode:        windows.GRANT_ACCESS,
-			Inheritance:       windows.NO_INHERITANCE,
-			Trustee: windows.TRUSTEE{
-				TrusteeForm:  windows.TRUSTEE_IS_SID,
-				TrusteeType:  windows.TRUSTEE_IS_USER,
-				TrusteeValue: windows.TrusteeValueFromSID(currentSID),
-			},
-		},
-		{
+			// NOT explicitAccessAllow: this ACE intentionally carries
+			// OBJECT_INHERIT_ACE (files created in dir inherit it),
+			// whereas the shared helper hardcodes NO_INHERITANCE. The
+			// inheritance flag is the contract under test here, so the
+			// entry stays open-coded.
 			AccessPermissions: windows.GENERIC_READ,
 			AccessMode:        windows.GRANT_ACCESS,
-			Inheritance:       windows.OBJECT_INHERIT_ACE, // files created in dir inherit this
+			Inheritance:       windows.OBJECT_INHERIT_ACE,
 			Trustee: windows.TRUSTEE{
 				TrusteeForm:  windows.TRUSTEE_IS_SID,
 				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,

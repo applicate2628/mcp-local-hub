@@ -65,26 +65,8 @@ func broadenParentForStateFileWriteCapableTest(t *testing.T, parent string) {
 	// WRITE_DAC, WRITE_OWNER, etc.) work equally; FILE_DELETE_CHILD
 	// is the most pointed example of namespace tamper rights.
 	entries := []windows.EXPLICIT_ACCESS{
-		{
-			AccessPermissions: windows.GENERIC_ALL,
-			AccessMode:        windows.GRANT_ACCESS,
-			Inheritance:       windows.NO_INHERITANCE,
-			Trustee: windows.TRUSTEE{
-				TrusteeForm:  windows.TRUSTEE_IS_SID,
-				TrusteeType:  windows.TRUSTEE_IS_USER,
-				TrusteeValue: windows.TrusteeValueFromSID(currentSID),
-			},
-		},
-		{
-			AccessPermissions: windows.ACCESS_MASK(windowsFileDeleteChild),
-			AccessMode:        windows.GRANT_ACCESS,
-			Inheritance:       windows.NO_INHERITANCE,
-			Trustee: windows.TRUSTEE{
-				TrusteeForm:  windows.TRUSTEE_IS_SID,
-				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
-				TrusteeValue: windows.TrusteeValueFromSID(authUsersSID),
-			},
-		},
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windowsFileDeleteChild),
 	}
 	dacl, err := windows.ACLFromEntries(entries, nil)
 	if err != nil {

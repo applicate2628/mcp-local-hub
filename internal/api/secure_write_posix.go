@@ -218,40 +218,62 @@ func refusePreexistingSymlink(dirFd int, name string) error {
 // timing. Windows leg already rejects any non-allowlist read access;
 // POSIX is now stricter to match.
 func verifyPosixParentDirFromFd(fd int) error {
-	var st unix.Stat_t
-	if err := unix.Fstat(fd, &st); err != nil {
-		return err
-	}
-	if int(st.Uid) != os.Getuid() {
-		return fmt.Errorf("parent owned by uid %d, want %d", st.Uid, os.Getuid())
-	}
-	// 0o077 = ANY group/world bit (read OR write OR execute). A parent
-	// must be 0700 or 0500 (read-only owner) — nothing weaker.
-	// unix.Stat_t.Mode is uint32 on Linux but uint16 on Darwin; widen
-	// to uint32 once and operate on the widened form so the mask
-	// expression typechecks under both build targets.
-	mode := uint32(st.Mode)
-	if mode&0o077 != 0 {
-		return fmt.Errorf("parent mode %#o exposes bits to group/world (require 0700-equivalent)", mode&0o777)
-	}
-	return nil
+	return verifyPosixOwnerAndModeFromFd(
+		fd,
+		func(uid, want int) error {
+			return fmt.Errorf("parent owned by uid %d, want %d", uid, want)
+		},
+		func(mode uint32) error {
+			// 0o077 = ANY group/world bit (read OR write OR execute). A
+			// parent must be 0700 or 0500 (read-only owner) — nothing
+			// weaker.
+			return fmt.Errorf("parent mode %#o exposes bits to group/world (require 0700-equivalent)", mode)
+		},
+	)
 }
 
 // verifyPosixFileFromFd stats the persisted file via the verify fd and
 // rejects any group/other-readable bits or non-owner uid.
 func verifyPosixFileFromFd(fd int) error {
+	return verifyPosixOwnerAndModeFromFd(
+		fd,
+		func(uid, want int) error {
+			return fmt.Errorf("file owned by uid %d, want %d", uid, want)
+		},
+		func(mode uint32) error {
+			return fmt.Errorf("file mode %#o is group- or other-accessible", mode)
+		},
+	)
+}
+
+// verifyPosixOwnerAndModeFromFd is the shared owner-uid + mode-bit gate
+// behind verifyPosixParentDirFromFd and verifyPosixFileFromFd. Both
+// the parent-dir check (step 2) and the post-rename file re-verify
+// (step 11) enforce the identical rule — owner is the current uid AND
+// no group/other permission bit (0o077) is set — and only diverged in
+// their diagnostic wording. Unifying them keeps the single 0o077 gate
+// in one place so a future tightening (e.g. a new exempt bit) cannot
+// drift between the two call sites.
+//
+// ownerErr is invoked with (st.Uid, os.Getuid()) and modeErr with
+// (mode & 0o777); each caller supplies a constant-format closure so the
+// operator-facing wording is byte-identical to the pre-dedup form and
+// `go vet`'s printf analyzer still sees a constant format string.
+//
+// unix.Stat_t.Mode is uint32 on Linux but uint16 on Darwin; widen to
+// uint32 once and operate on the widened form so the mask expression
+// typechecks under both build targets.
+func verifyPosixOwnerAndModeFromFd(fd int, ownerErr func(uid, want int) error, modeErr func(mode uint32) error) error {
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
 		return err
 	}
 	if int(st.Uid) != os.Getuid() {
-		return fmt.Errorf("file owned by uid %d, want %d", st.Uid, os.Getuid())
+		return ownerErr(int(st.Uid), os.Getuid())
 	}
-	// Mode is uint32 on Linux, uint16 on Darwin; widen once for the
-	// mask expression to typecheck on both.
 	mode := uint32(st.Mode)
 	if mode&0o077 != 0 {
-		return fmt.Errorf("file mode %#o is group- or other-accessible", mode&0o777)
+		return modeErr(mode & 0o777)
 	}
 	return nil
 }
