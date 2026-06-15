@@ -72,18 +72,26 @@ func (realMarketplaceLister) RefreshMarketplaceEntries(ctx context.Context) ([]a
 }
 
 // marketplaceEntry is the read-only wire shape for one marketplace catalog
-// row exposed to the Catalog screen. It projects only the fields the
-// browse view renders ({id, name, summary, categories, homepage}) — the
-// install/transport/command details stay CLI-only because stdio-wrapper
-// generation is a `mcphub marketplace generate <id>` flow, not a GUI
-// install. Defined here (not by serializing api.MarketplaceEntry) so the
-// GUI HTTP contract owns its own JSON shape.
+// row exposed to the Catalog screen. It projects the fields the browse view
+// renders ({id, name, summary, categories, homepage}) PLUS `transport` so
+// the one-click-install frontend can decide between hub mode (stdio entries
+// → a hub daemon) and direct mode (a client-native entry, no daemon) without
+// a second round-trip. The heavier install details (command/args/url/env)
+// are deliberately still omitted from the browse DTO — POST
+// /api/marketplace/install re-loads the FULL api.MarketplaceEntry by id
+// server-side, so they never need to cross the read wire. Defined here (not
+// by serializing api.MarketplaceEntry) so the GUI HTTP contract owns its own
+// JSON shape.
 type marketplaceEntry struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
 	Summary    string   `json:"summary"`
 	Categories []string `json:"categories"`
 	Homepage   string   `json:"homepage"`
+	// Transport is the catalog entry's transport discriminator ("stdio" or
+	// "http"). The frontend reads it to choose the install mode affordance;
+	// an unknown/empty value renders as a non-installable row.
+	Transport string `json:"transport"`
 }
 
 type marketplaceListResponse struct {

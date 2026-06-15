@@ -121,12 +121,17 @@ func TestMarketplaceHandler_ReturnsEntries(t *testing.T) {
 	if e0.Homepage != "https://example.com/filesystem" {
 		t.Errorf("entry[0].Homepage = %q", e0.Homepage)
 	}
-	// The install-only fields (transport/command/args) MUST NOT appear in
-	// the read-only browse wire shape — generation is a CLI flow.
-	if strings.Contains(rec.Body.String(), "transport") ||
-		strings.Contains(rec.Body.String(), "command") ||
+	// `transport` IS part of the browse wire shape now (the one-click-install
+	// frontend reads it to pick hub vs direct mode), so it must be present.
+	if e0.Transport != "stdio" {
+		t.Errorf("entry[0].Transport = %q, want stdio", e0.Transport)
+	}
+	// The HEAVIER install-only fields (command/args/url/env) MUST still NOT
+	// appear in the read-only browse wire shape — POST
+	// /api/marketplace/install re-loads the full entry server-side instead.
+	if strings.Contains(rec.Body.String(), "command") ||
 		strings.Contains(rec.Body.String(), "server-filesystem") {
-		t.Errorf("read-only DTO leaked install fields: %q", rec.Body.String())
+		t.Errorf("read-only DTO leaked heavy install fields: %q", rec.Body.String())
 	}
 }
 
