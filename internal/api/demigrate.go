@@ -289,17 +289,33 @@ func tryMarkerOrBackfillRemove(
 	restoredFrom *string,
 ) error {
 	managed, mErr := IsManagedEntry(binding.Client, server)
-	if !managed && mErr == nil && allowURLBackfill {
+	if !managed && mErr == nil && (allowURLBackfill || liveEntryHasHubURL(adapter, server)) {
 		// v0.4.x upgrade backfill: existing users have hub-form entries
 		// that were never marked (B4 marker introduced in PR #187 only
-		// marks fresh migrates). GATED on allowURLBackfill: when NO backup
-		// exists at all (current-codename set empty), the URL match is
-		// UNCORROBORATED — it could be a user's own localhost MCP server
-		// that coincidentally matches the manifest port/path, and deleting
-		// it would be data loss. With zero backups we require an ACTUAL
-		// marker (IsManagedEntry) and refuse URL-backfill alone. (bot PR
-		// #257 r2 P1/P2 — restores the fail-closed no-backup contract that
-		// removing the len(backups)==0 early-return reopened.)
+		// marks fresh migrates). Two corroboration sources for the URL
+		// backfill, either of which proves mcphub owns the entry:
+		//
+		//  1. allowURLBackfill — a backup file (current OR legacy codename)
+		//     exists, proving mcphub demonstrably ran on this host. (bot PR
+		//     #257 r2/r3.)
+		//
+		//  2. liveEntryHasHubURL — the live entry's URL is a hub loopback
+		//     URL (clients.IsHubHTTPURL). No operator manually points a
+		//     client at the hub's own loopback port: a hub URL is itself
+		//     ownership corroboration, so the no-backup http-from-start
+		//     via-hub case (an entry installed by mcphub directly into
+		//     hub-HTTP shape — e.g. `fetch` at http://localhost:9133/mcp —
+		//     with NO pre-hub stdio form ever captured, hence no backup)
+		//     can still RemoveEntry. The bug: unchecking such a cell and
+		//     Apply left the entry, so the matrix cell never unchecked.
+		//     Non-hub URLs (an operator's own remote MCP server) still fail
+		//     IsHubHTTPURL → still fail closed here. The actual deletion
+		//     decision below remains gated on the strict manifest match
+		//     (backfillMarkerIfEntryMatchesManifest + the default-branch
+		//     liveEntryMatchesManifestBinding re-check), so a hub URL whose
+		//     port/path does NOT match the manifest binding still fails
+		//     closed. (work-items/bugs/2026-05-15-demigrate-fallback-when-
+		//     no-pre-hub-form.md — fetch checkbox.)
 		if backfilled := backfillMarkerIfEntryMatchesManifest(adapter, server, binding, m); backfilled {
 			managed = true
 		}
@@ -339,6 +355,24 @@ func tryMarkerOrBackfillRemove(
 		*restoredFrom = "(no pre-hub form in any backup; marker confirmed mcphub-managed; removed entry from client config)"
 		return nil
 	}
+}
+
+// liveEntryHasHubURL reports whether the live client-config entry for
+// `server` exists and its URL points at the local hub
+// (clients.IsHubHTTPURL: http://localhost: / 127.0.0.1: / [::1]:). It is
+// the corroboration source that lets tryMarkerOrBackfillRemove proceed
+// with a URL backfill even on a host with NO backup of any codename: a
+// hub loopback URL is itself proof of mcphub ownership, because no
+// operator manually points a client at the hub's own loopback port. A
+// non-hub URL (an operator's own remote MCP server) returns false, so
+// the caller keeps failing closed for it. Any read error or missing
+// entry returns false (keep the conservative default).
+func liveEntryHasHubURL(adapter clients.Client, server string) bool {
+	live, err := adapter.GetEntry(server)
+	if err != nil || live == nil {
+		return false
+	}
+	return clients.IsHubHTTPURL(live.URL)
 }
 
 // tryLegacyPrefixRestore iterates this client's LEGACY-codename backups

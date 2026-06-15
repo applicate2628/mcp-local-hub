@@ -1015,17 +1015,34 @@ client_bindings:
 	}
 }
 
-func TestDemigrate_NoBackupReportsFailure(t *testing.T) {
+func TestDemigrate_NoBackupHubURLEntry_RemovedViaHubURLCorroboration(t *testing.T) {
+	// Bug: GUI Servers matrix — unchecking a via-hub server (e.g. `fetch`)
+	// that was added http-from-start (its client entry was written by mcphub
+	// DIRECTLY as a hub-HTTP URL, never migrated from a stdio form, so NO
+	// backup of any codename exists) + Apply did NOT uncheck the cell — the
+	// entry was never removed.
+	//
+	// Root cause: with zero backups, allowURLBackfill = len(backups)>0 ||
+	// sawLegacy = false, so the URL-backfill RemoveEntry was refused
+	// (fail-closed) even though the live entry's URL is a hub URL.
+	//
+	// Fix (user product-decision): a via-hub entry whose live URL satisfies
+	// clients.IsHubHTTPURL is PROVABLY hub-installed (no operator manually
+	// points a client at the hub's own loopback port), so demigrate may
+	// RemoveEntry even with NO backup. The hub URL IS the ownership
+	// corroboration. The strict manifest match still gates the actual
+	// deletion (port 9200 + /mcp below exactly matches the manifest), so a
+	// hub URL whose port/path does NOT match still fails closed.
+	//
+	// (This test was previously TestDemigrate_NoBackupReportsFailure, which
+	// asserted the pre-fix fail-closed behavior for exactly this scenario.
+	// That contract is what the fix deliberately changes. The complementary
+	// negative — a NON-hub URL with no backup still fails closed — is
+	// TestDemigrate_NoBackupNonHubURLEntry_FailsClosed below.)
 	tmp := t.TempDir()
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
-	// Initialize the managed-entries store so IsManagedEntry returns
-	// (false, nil) rather than erroring — this exercises the URL-backfill
-	// path that the no-backup fail-closed gate must block (bot PR #257 r2).
-	// The live URL below exactly matches the manifest (localhost:9200/mcp),
-	// so without the gate the backfill would confirm ownership and DELETE
-	// this potentially-user-owned entry on a machine that has no backup.
-	managedEntriesTestHelper(t)
+	managedEntriesTestHelper(t) // marker store init; marker file absent (pre-marker entry)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
@@ -1057,10 +1074,78 @@ client_bindings:
 	if err != nil {
 		t.Fatalf("Demigrate: %v", err)
 	}
-	if len(report.Failed) != 1 {
-		t.Errorf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (hub URL corroborates removal); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 {
+		t.Fatalf("expected 1 Restored (hub-URL entry removed), got %d: %+v", len(report.Restored), report.Restored)
+	}
+	// Live entry must be removed so a re-scan no longer classifies it via-hub.
+	live, _ := os.ReadFile(claudePath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers, _ := liveMap["mcpServers"].(map[string]any)
+	if _, present := servers["memory"]; present {
+		t.Errorf("hub-URL entry was NOT removed (matrix cell would stay checked); file = %s", live)
+	}
+}
+
+func TestDemigrate_NoBackupNonHubURLEntry_FailsClosed(t *testing.T) {
+	// Negative complement to
+	// TestDemigrate_NoBackupHubURLEntry_RemovedViaHubURLCorroboration: a
+	// NON-hub URL (an operator's own remote MCP server) with NO backup must
+	// STILL fail closed. The hub-URL corroboration only fires for
+	// clients.IsHubHTTPURL URLs; a remote https URL is NOT one, so demigrate
+	// keeps refusing to delete it (it might be a genuine user-configured
+	// server). Live config untouched.
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t)
+	claudePath := filepath.Join(tmp, ".claude.json")
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"memory":{"type":"http","url":"https://remote.example.com:9200/mcp"}}}`), 0600)
+
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "memory")
+	_ = os.MkdirAll(memDir, 0700)
+	_ = os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(
+		`name: memory
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0600)
+
+	a := NewAPI()
+	buf := &bytes.Buffer{}
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"memory"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   buf,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
 	}
 	if len(report.Restored) != 0 {
-		t.Errorf("expected 0 restored, got %d", len(report.Restored))
+		t.Fatalf("expected 0 restored (non-hub URL, no backup → fail closed); got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	lowerErr := strings.ToLower(report.Failed[0].Err)
+	if !strings.Contains(lowerErr, "managed-entries marker has no record") {
+		t.Errorf("failure should cite the marker-has-no-record reason; got %q", report.Failed[0].Err)
+	}
+	// Live entry must be preserved (potentially user-owned remote server).
+	live, _ := os.ReadFile(claudePath)
+	if !strings.Contains(string(live), `"memory"`) {
+		t.Errorf("non-hub-URL entry was deleted despite no corroboration (data-loss regression); file = %s", live)
 	}
 }
