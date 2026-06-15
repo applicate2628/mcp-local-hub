@@ -790,7 +790,13 @@ export function ServersScreen() {
                 <th key={c}>
                   <div class="matrix-col-header">
                     <span
-                      class={colToggleable ? "matrix-col-toggle" : undefined}
+                      class={
+                        colToggleable
+                          ? canInit
+                            ? "matrix-col-toggle"
+                            : "matrix-col-toggle matrix-col-toggle--full"
+                          : undefined
+                      }
                       data-testid={colToggleable ? `matrix-col-toggle-${c}` : undefined}
                       role={colToggleable ? "button" : undefined}
                       tabIndex={colToggleable ? 0 : undefined}

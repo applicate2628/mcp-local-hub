@@ -143,11 +143,28 @@ main { padding: var(--screen-padding); overflow: auto; }
 .matrix-col-header { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .matrix-col-init-btn { font-size: 0.8em; padding: 2px 6px; cursor: pointer; }
 .matrix-col-init-btn:disabled { cursor: progress; opacity: 0.6; }
-/* Feature 2 — whole-column toggle: the client-NAME span doubles as an
-   enable-all / disable-all control. Pointer + subtle underline-on-hover so
-   it reads as interactive without restyling the header. Only rendered with
-   this class when the column has at least one toggleable cell. */
-.matrix-col-toggle { cursor: pointer; }
+/* Feature 2 — whole-column toggle: the client-NAME element doubles as an
+   enable-all / disable-all control. It fills the header cell (block +
+   align-self:stretch + negative margins over the th padding, then re-padded)
+   so a click ANYWHERE in the header cell toggles the column — the same
+   whole-cell hit-area the body .matrix-cell-label gives the data cells, not
+   just the small name word. The Initialize button (when present) stays a
+   separate sibling below in the flex column. Only rendered with this class
+   when the column has at least one toggleable cell. */
+.matrix-col-toggle {
+  display: block;
+  align-self: stretch;
+  margin: calc(-1 * var(--cell-padding-y)) calc(-1 * var(--cell-padding-x)) 0;
+  padding: var(--cell-padding-y) var(--cell-padding-x) 2px;
+  cursor: pointer;
+}
+/* No Initialize button below → the toggle also fills the cell's bottom padding,
+   so the ENTIRE header cell is the hit area (the common, already-initialized
+   column case). With an Init button present the base rule leaves room for it. */
+.matrix-col-toggle--full {
+  margin-bottom: calc(-1 * var(--cell-padding-y));
+  padding-bottom: var(--cell-padding-y);
+}
 .matrix-col-toggle:hover { text-decoration: underline; }
 /* Feature 1 — whole-cell click target: the <label> fills the data cell so a
    click anywhere in the cell toggles the wrapped checkbox exactly once
