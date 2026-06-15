@@ -47,6 +47,7 @@ type Banner =
 const SCHEDULE_KEY = "daemons.weekly_schedule";
 const RETRY_KEY = "daemons.retry_policy";
 const KNOB_KEY = "daemons.weekly_refresh_default";
+const AUTO_PRUNE_KEY = "daemons.auto_prune_workspaces";
 const PRUNE_IDLE_KEY = "daemons.prune_idle_hours";
 
 export function SectionDaemons({
@@ -73,16 +74,19 @@ export function SectionDaemons({
   const sched = snapshot.data.settings.find((s) => s.key === SCHEDULE_KEY) as ConfigSettingDTO | undefined;
   const retry = snapshot.data.settings.find((s) => s.key === RETRY_KEY) as ConfigSettingDTO | undefined;
   const knob = snapshot.data.settings.find((s) => s.key === KNOB_KEY) as ConfigSettingDTO | undefined;
+  const autoPrune = snapshot.data.settings.find((s) => s.key === AUTO_PRUNE_KEY) as ConfigSettingDTO | undefined;
   const pruneIdle = snapshot.data.settings.find((s) => s.key === PRUNE_IDLE_KEY) as ConfigSettingDTO | undefined;
 
   const persistedSched = sched?.value ?? sched?.default ?? "";
   const persistedRetry = retry?.value ?? retry?.default ?? "";
   const persistedKnob = (knob?.value ?? knob?.default ?? "false") === "true";
+  const persistedAutoPrune = (autoPrune?.value ?? autoPrune?.default ?? "true") === "true";
   const persistedPruneIdle = pruneIdle?.value ?? pruneIdle?.default ?? "0";
 
   const [schedValue, setSchedValue] = useState<string>(persistedSched);
   const [retryValue, setRetryValue] = useState<string>(persistedRetry);
   const [knobValue, setKnobValue] = useState<boolean>(persistedKnob);
+  const [autoPruneValue, setAutoPruneValue] = useState<boolean>(persistedAutoPrune);
   const [pruneIdleValue, setPruneIdleValue] = useState<string>(persistedPruneIdle);
   const [tableDirty, setTableDirty] = useState(false);
   const [tableDeltas, setTableDeltas] = useState<MembershipDelta[]>([]);
@@ -101,13 +105,15 @@ export function SectionDaemons({
   useEffect(() => { setSchedValue(persistedSched); }, [persistedSched]);
   useEffect(() => { setRetryValue(persistedRetry); }, [persistedRetry]);
   useEffect(() => { setKnobValue(persistedKnob); }, [persistedKnob]);
+  useEffect(() => { setAutoPruneValue(persistedAutoPrune); }, [persistedAutoPrune]);
   useEffect(() => { setPruneIdleValue(persistedPruneIdle); }, [persistedPruneIdle]);
 
   const schedDirty = schedValue !== persistedSched;
   const retryDirty = retryValue !== persistedRetry;
   const knobDirty = knobValue !== persistedKnob;
+  const autoPruneDirty = autoPruneValue !== persistedAutoPrune;
   const pruneIdleDirty = pruneIdleValue !== persistedPruneIdle;
-  const sectionDirty = schedDirty || retryDirty || knobDirty || pruneIdleDirty || tableDirty;
+  const sectionDirty = schedDirty || retryDirty || knobDirty || autoPruneDirty || pruneIdleDirty || tableDirty;
   const dirty = sectionDirty || envDirty;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
@@ -118,6 +124,7 @@ export function SectionDaemons({
     setSchedValue(persistedSched);
     setRetryValue(persistedRetry);
     setKnobValue(persistedKnob);
+    setAutoPruneValue(persistedAutoPrune);
     setPruneIdleValue(persistedPruneIdle);
     setBanner(null);
     setSchedError(null);
@@ -150,6 +157,14 @@ export function SectionDaemons({
         op1Failure = `${humanKey(KNOB_KEY)}: ${errReason(e)}`;
       }
     }
+    if (op1Failure === null && autoPruneDirty) {
+      try {
+        await putSetting(AUTO_PRUNE_KEY, autoPruneValue ? "true" : "false");
+        committed.push(humanKey(AUTO_PRUNE_KEY));
+      } catch (e: any) {
+        op1Failure = `${humanKey(AUTO_PRUNE_KEY)}: ${errReason(e)}`;
+      }
+    }
     if (op1Failure === null && retryDirty) {
       try {
         await putSetting(RETRY_KEY, retryValue);
@@ -169,6 +184,7 @@ export function SectionDaemons({
     if (op1Failure !== null) {
       // Whatever didn't commit stays dirty.
       if (knobDirty && !committed.includes(humanKey(KNOB_KEY))) stillDirty.push(humanKey(KNOB_KEY));
+      if (autoPruneDirty && !committed.includes(humanKey(AUTO_PRUNE_KEY))) stillDirty.push(humanKey(AUTO_PRUNE_KEY));
       if (retryDirty && !committed.includes(humanKey(RETRY_KEY))) stillDirty.push(humanKey(RETRY_KEY));
       if (pruneIdleDirty && !committed.includes(humanKey(PRUNE_IDLE_KEY))) stillDirty.push(humanKey(PRUNE_IDLE_KEY));
       if (schedDirty) stillDirty.push("schedule");
@@ -325,6 +341,21 @@ export function SectionDaemons({
       </div>
 
       <div class="settings-field-row">
+        <label class="settings-field-label" for="daemons-auto-prune-workspaces">
+          <input
+            id="daemons-auto-prune-workspaces"
+            type="checkbox"
+            checked={autoPruneValue}
+            disabled={busy}
+            onChange={(e) => setAutoPruneValue((e.target as HTMLInputElement).checked)}
+            data-testid="daemons-auto-prune-workspaces-checkbox"
+          />
+          {" "}Auto-prune dead workspace daemons (deleted dirs + agent worktrees)
+        </label>
+        {autoPrune?.help ? <small class="settings-field-help">{autoPrune.help}</small> : null}
+      </div>
+
+      <div class="settings-field-row">
         <label class="settings-field-label" for="daemons-prune-idle-hours">
           Auto-prune idle workspace after (hours, 0 = off)
         </label>
@@ -379,6 +410,10 @@ function humanKey(key: string): string {
   switch (key) {
     case KNOB_KEY:
       return "weekly refresh default";
+    case AUTO_PRUNE_KEY:
+      return "auto-prune workspaces";
+    case PRUNE_IDLE_KEY:
+      return "idle-prune hours";
     case RETRY_KEY:
       return "retry policy";
     case SCHEDULE_KEY:

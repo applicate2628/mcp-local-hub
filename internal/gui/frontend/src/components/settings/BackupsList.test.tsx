@@ -135,7 +135,10 @@ describe("BackupsList", () => {
       const btn = (await findByTestId("clean-now-claude-code")) as HTMLButtonElement;
       await waitFor(() => expect(btn.disabled).toBe(false));
       fireEvent.click(btn);
-      await waitFor(() => expect(cleanSpy).toHaveBeenCalledWith("claude-code"));
+      // Bug #2 WYSIWYG: the clean must carry the live keepN (1 here) so it
+      // deletes exactly what the preview at keep_n=1 showed, not the persisted
+      // setting.
+      await waitFor(() => expect(cleanSpy).toHaveBeenCalledWith("claude-code", 1));
       await waitFor(() => expect(cleaned).toEqual(["claude-code"]));
     });
 

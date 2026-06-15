@@ -166,6 +166,24 @@ func (s *Server) backupsCleanHandler(w http.ResponseWriter, r *http.Request) {
 			keepN = n
 		}
 	}
+	// Explicit ?keep_n=N query param overrides the persisted setting. This is
+	// how the GUI's "Clean now" deletes exactly what its live preview showed:
+	// the preview (GET /api/backups/clean-preview?keep_n=N) and the clean both
+	// use the slider's DRAFT value, so the action is WYSIWYG even when the user
+	// hasn't pressed Save. Pre-fix the preview used the draft but the clean read
+	// the persisted setting, so dragging the slider without saving showed an
+	// eligible count the clean then refused to act on ("Clean X only (3)" →
+	// cleaned:0). Absent → persisted fallback above (backward compat for API
+	// callers). Invalid → 400; never silently fall back to a destructive default
+	// (destructive-default polarity discipline).
+	if q := r.URL.Query().Get("keep_n"); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 0 {
+			writeAPIError(w, fmt.Errorf("keep_n must be a non-negative integer"), http.StatusBadRequest, "BACKUPS_CLEAN_BAD_PARAM")
+			return
+		}
+		keepN = n
+	}
 	// Bug-bash B2 closure (#21): optional ?client=X narrows the prune
 	// to one client. Empty client preserves the legacy "clean every
 	// managed client" semantic so existing operator workflows keep

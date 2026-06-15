@@ -92,7 +92,10 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
   async function doClean() {
     setCleanErr(null);
     try {
-      await cleanBackups();
+      // Pass the live slider draft so the global "Clean now" deletes exactly
+      // what the preview eligible-badges showed at this keep_n — WYSIWYG even
+      // when keep_n hasn't been Saved (Bug #2).
+      await cleanBackups(draft);
       setConfirmOpen(false);
       await snapshot.refresh();
     } catch (e: any) {

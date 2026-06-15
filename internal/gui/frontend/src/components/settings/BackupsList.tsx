@@ -65,7 +65,12 @@ export function BackupsList({
       return next;
     });
     try {
-      await cleanBackupsForClient(client);
+      // Pass the live preview value (keepN) so the clean deletes exactly the
+      // rows the per-client "(N)" badge counted — WYSIWYG with the preview,
+      // independent of whether keep_n was Saved (Bug #2: pre-fix the clean read
+      // the persisted setting and silently pruned nothing when the unsaved
+      // slider diverged from it).
+      await cleanBackupsForClient(client, keepN);
       setRefreshTick((n) => n + 1);
       onClientCleaned(client);
     } catch (e: unknown) {

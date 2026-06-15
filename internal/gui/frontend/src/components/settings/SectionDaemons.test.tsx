@@ -15,6 +15,10 @@ const env: SettingsEnvelope = {
       default: "weekly Sun 03:00", value: "weekly Sun 03:00", deferred: false, help: "" },
     { key: "daemons.retry_policy", section: "daemons", type: "enum",
       default: "exponential", value: "exponential", enum: ["none","linear","exponential"], deferred: false, help: "" },
+    { key: "daemons.auto_prune_workspaces", section: "daemons", type: "bool",
+      default: "true", value: "true", deferred: false, help: "auto-prune help" },
+    { key: "daemons.prune_idle_hours", section: "daemons", type: "int",
+      default: "0", value: "0", min: 0, max: 8760, deferred: false, help: "idle help" },
   ],
 };
 const snap = (refresh = vi.fn(async () => {})): SettingsSnapshot =>
@@ -95,6 +99,21 @@ describe("SectionDaemons (editable, A4-b PR #1 / Task 11)", () => {
 
     const knob = (await findByTestId("daemons-weekly-refresh-default-checkbox")) as HTMLInputElement;
     fireEvent.click(knob);
+    await waitFor(() => expect(saveBtn.disabled).toBe(false));
+  });
+
+  it("renders the auto-prune master toggle (checked by default) and Save enables on toggle", async () => {
+    // Bug #1 (2026-06-15): the auto_prune_workspaces master gate was missing
+    // from the GUI — only the idle-hours sub-knob rendered, so the operator
+    // could not see or control "autoprune". The toggle defaults checked
+    // (registry default "true").
+    const { findByTestId } = render(<SectionDaemons snapshot={snap()} />);
+    const toggle = (await findByTestId("daemons-auto-prune-workspaces-checkbox")) as HTMLInputElement;
+    expect(toggle).toBeTruthy();
+    expect(toggle.checked).toBe(true);
+    const saveBtn = (await findByTestId("daemons-save")) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+    fireEvent.click(toggle);
     await waitFor(() => expect(saveBtn.disabled).toBe(false));
   });
 

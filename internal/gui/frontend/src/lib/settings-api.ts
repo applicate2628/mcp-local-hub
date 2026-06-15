@@ -71,8 +71,13 @@ export async function getBackupsCleanPreviewForClient(
   return (body.would_remove ?? []) as string[];
 }
 
-export async function cleanBackups(): Promise<{ cleaned: number }> {
-  const res = await fetch("/api/backups/clean", {
+// cleanBackups deletes eligible timestamped backups across ALL managed
+// clients. When keepN is provided it is sent as ?keep_n=N so the clean
+// honors the live slider draft (WYSIWYG with the preview) instead of the
+// persisted setting; omit it to fall back to the persisted backups.keep_n.
+export async function cleanBackups(keepN?: number): Promise<{ cleaned: number }> {
+  const qs = keepN != null ? `?keep_n=${encodeURIComponent(String(keepN))}` : "";
+  const res = await fetch(`/api/backups/clean${qs}`, {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -87,8 +92,13 @@ export async function cleanBackups(): Promise<{ cleaned: number }> {
 // for unknown client ids; jsonOrThrow surfaces that as a typed error.
 export async function cleanBackupsForClient(
   client: string,
+  keepN?: number,
 ): Promise<{ cleaned: number; client: string }> {
-  const qs = new URLSearchParams({ client });
+  const params: Record<string, string> = { client };
+  // Send the live slider draft so the per-client clean matches its preview
+  // (WYSIWYG). Omit to fall back to the persisted backups.keep_n.
+  if (keepN != null) params.keep_n = String(keepN);
+  const qs = new URLSearchParams(params);
   const res = await fetch(`/api/backups/clean?${qs.toString()}`, {
     method: "POST",
     credentials: "same-origin",

@@ -299,6 +299,73 @@ func TestBackupsClean_POST_PerClientHappyPath(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Bug #2 (2026-06-15): "очистка бэкапов не работает". The GUI preview used the
+// live slider DRAFT keep_n, but the clean POST sent no keep_n so the handler
+// fell back to the PERSISTED setting. Dragging the slider down without Save
+// showed "Clean X only (3)" but the clean then pruned nothing (persisted=5).
+// Fix: an explicit ?keep_n=N query overrides the persisted setting so the
+// clean is WYSIWYG with the preview. Absent → persisted; invalid → 400.
+// ---------------------------------------------------------------------------
+
+func TestBackupsClean_POST_KeepNQueryOverride_Bulk(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+	s, fb := newBackupsTestServer(t)
+	fb.cleaned = []string{"x.bak"}
+	// keep_n=2 in the query must reach the bulk Clean as 2, NOT the persisted
+	// registry-default 5.
+	req := httptest.NewRequest("POST", "/api/backups/clean?keep_n=2", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if fb.cleanN != 2 {
+		t.Errorf("bulk Clean keepN = %d, want 2 (query override, not persisted)", fb.cleanN)
+	}
+}
+
+func TestBackupsClean_POST_KeepNQueryOverride_PerClient(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+	s, fb := newBackupsTestServer(t)
+	fb.cleanInResult = []string{"y.bak"}
+	req := httptest.NewRequest("POST", "/api/backups/clean?client=cursor&keep_n=1", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if fb.cleanInClient != "cursor" {
+		t.Errorf("CleanInClient client = %q, want cursor", fb.cleanInClient)
+	}
+	if fb.cleanInN != 1 {
+		t.Errorf("CleanInClient keepN = %d, want 1 (query override)", fb.cleanInN)
+	}
+}
+
+func TestBackupsClean_POST_KeepNQueryInvalid_400(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+	for _, q := range []string{"keep_n=-1", "keep_n=abc"} {
+		s, fb := newBackupsTestServer(t)
+		req := httptest.NewRequest("POST", "/api/backups/clean?"+q, nil)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		rr := httptest.NewRecorder()
+		s.mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", q, rr.Code)
+		}
+		if !strings.Contains(rr.Body.String(), "BACKUPS_CLEAN_BAD_PARAM") {
+			t.Errorf("%s: body missing error code: %s", q, rr.Body.String())
+		}
+		// Invalid keep_n must NEVER fall through to a destructive default clean.
+		if fb.cleanN != 0 || fb.cleanInN != 0 {
+			t.Errorf("%s: clean fired despite invalid keep_n (cleanN=%d cleanInN=%d)", q, fb.cleanN, fb.cleanInN)
+		}
+	}
+}
+
 func TestBackupsClean_POST_PerClientUnknownClient_400(t *testing.T) {
 	s, _ := newBackupsTestServer(t)
 	// Bot r1 P2 closure (PR #183): unknown-client validation happens
