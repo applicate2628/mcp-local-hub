@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -414,6 +415,14 @@ func TestRouterWake_InvokedAndRecordsActivity(t *testing.T) {
 // counter is balanced back to zero AND last-activity is re-stamped. Drives the
 // REAL handler forward path with a fake daemon whose tool handler blocks.
 func TestRouterForward_InFlightCounterAndRestamp(t *testing.T) {
+	// Hermetic state: the successful-forward path now persists LastToolsCallAt
+	// to the registry. Redirect LOCALAPPDATA (Windows-authoritative, checked
+	// first by DefaultRegistryPath) + XDG_STATE_HOME so the persist never
+	// touches the developer's real registry (it is a no-op on the synthetic
+	// key today, but stays hermetic if a real row ever shares the key).
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
 	const wsPath = "/proj/forwardflight"
 	ws := serenaWS("forwardflight", wsPath, 9311)
 
@@ -482,8 +491,42 @@ func TestRouterForward_InFlightCounterAndRestamp(t *testing.T) {
 // ErrWakeRefusedOperatorStop. The handler must treat that as terminal instead
 // of forwarding to whatever process happens to own the descriptor port.
 func TestRouterWake_OperatorStopRefused_ReturnsStopped503WithoutForward(t *testing.T) {
+	// DefaultRegistryPath checks LOCALAPPDATA FIRST on Windows (the project's GA
+	// platform), falling through to XDG_STATE_HOME only when LOCALAPPDATA is
+	// empty — so redirecting only XDG_STATE_HOME is a no-op on Windows and this
+	// test would seed + Save into the developer's REAL registry. Redirect both.
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
 	const wsPath = "/proj/disabled"
 	ws := serenaWS("disabled", wsPath, 9302)
+	seedLastToolsCallAt := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:       ws.WorkspaceKey,
+		WorkspacePath:      ws.WorkspacePath,
+		Language:           api.SerenaLanguageSentinel,
+		Backend:            ws.Backend,
+		Port:               ws.Port,
+		TaskName:           ws.TaskName,
+		Lifecycle:          api.LifecycleFailed,
+		LastError:          "operator stopped diagnostic",
+		LastToolsCallAt:    seedLastToolsCallAt,
+		ClientEntries:      map[string]string{},
+		RegisteredVia:      "test",
+		RegisteredAt:       seedLastToolsCallAt,
+		WeeklyRefresh:      false,
+		LastMaterializedAt: seedLastToolsCallAt,
+	}); err != nil {
+		t.Fatalf("seed PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
 
 	daemon := newFakeSerenaDaemon("disabled")
 	var forwardCalls int
@@ -526,6 +569,20 @@ func TestRouterWake_OperatorStopRefused_ReturnsStopped503WithoutForward(t *testi
 	}
 	if !strings.Contains(envelope.Error.Message, "operator stop") {
 		t.Fatalf("error message = %q, want operator stop named", envelope.Error.Message)
+	}
+	gotReg := api.NewRegistry(regPath)
+	if err := gotReg.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+	got, ok := gotReg.Get(ws.WorkspaceKey, api.SerenaLanguageSentinel)
+	if !ok {
+		t.Fatal("seeded serena registry row missing")
+	}
+	if got.Lifecycle != api.LifecycleFailed || got.LastError != "operator stopped diagnostic" {
+		t.Fatalf("refused wake mutated lifecycle/error to lifecycle=%q last_error=%q", got.Lifecycle, got.LastError)
+	}
+	if !got.LastToolsCallAt.Equal(seedLastToolsCallAt) {
+		t.Fatalf("refused wake refreshed LastToolsCallAt to %v, want preserved %v", got.LastToolsCallAt, seedLastToolsCallAt)
 	}
 }
 

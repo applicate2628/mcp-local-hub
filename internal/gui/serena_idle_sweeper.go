@@ -73,11 +73,11 @@ func SetSerenaIdleShutdownFns(threshold func() (time.Duration, bool), stop func(
 	serenaIdleStopFn = stop
 }
 
-// recordSerenaActivity stamps wsKey's last-activity to now. Called from the
-// serena router handler on every forwarded /serena/mcp tool-call (the resolved
+// recordSerenaActivity stamps wsKey's in-memory last-activity to now. Called
+// from the serena router handler on /serena/mcp tool-calls (the resolved
 // workspace the call routes to), so the sweeper sees a fresh timestamp for any
-// daemon that is being used. Idempotent + cheap (one map write under a
-// dedicated mutex). An empty wsKey is ignored.
+// daemon that is being used or attempted. Idempotent + cheap (one map write
+// under a dedicated mutex). An empty wsKey is ignored.
 func (s *Server) recordSerenaActivity(wsKey string, now time.Time) {
 	if s == nil || wsKey == "" {
 		return
@@ -88,22 +88,16 @@ func (s *Server) recordSerenaActivity(wsKey string, now time.Time) {
 	}
 	s.serenaLastActivity[wsKey] = now
 	s.serenaActivityMu.Unlock()
-
-	// Phase 3: debounce-persist this activity to the @serena registry row's
-	// LastToolsCallAt so the idle-prune sweeper has a restart-durable signal
-	// (the in-memory map above is wiped on a GUI restart). Done after releasing
-	// the activity mutex so registry I/O never blocks the hot activity stamp.
-	s.maybePersistSerenaActivity(wsKey, now)
 }
 
-// serenaActivityPersistDebounce bounds how often recordSerenaActivity writes the
+// serenaActivityPersistDebounce bounds how often maybePersistSerenaActivity writes the
 // @serena row's LastToolsCallAt to the registry — at most one write per window
 // per workspace, mirroring the LSP lazy proxy's debounce.
 const serenaActivityPersistDebounce = 5 * time.Second
 
 // maybePersistSerenaActivity debounce-writes wsKey's @serena registry row
-// LastToolsCallAt. A silent no-op if the row was already unregistered (the
-// registry write fails closed on a missing row).
+// LastToolsCallAt after a request reaches the daemon. A silent no-op if the row
+// was already unregistered (the registry write fails closed on a missing row).
 func (s *Server) maybePersistSerenaActivity(wsKey string, now time.Time) {
 	s.serenaPersistMu.Lock()
 	if s.serenaLastPersist == nil {
@@ -121,10 +115,7 @@ func (s *Server) maybePersistSerenaActivity(wsKey string, now time.Time) {
 	if err != nil {
 		return
 	}
-	_ = api.NewRegistry(regPath).PutLifecycleWithTimestamps(
-		wsKey, api.SerenaLanguageSentinel, api.LifecycleActive, "",
-		time.Time{}, now.UTC(),
-	)
+	_ = api.NewRegistry(regPath).PutLastToolsCallAt(wsKey, api.SerenaLanguageSentinel, now.UTC())
 }
 
 // lastSerenaActivity returns wsKey's recorded last-activity time and whether
