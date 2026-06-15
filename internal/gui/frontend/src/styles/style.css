@@ -184,6 +184,10 @@ main { padding: var(--screen-padding); overflow: auto; }
 .error { color: var(--danger); }
 
 /* --- Dashboard cards --- */
+/* Calm (NOT red) startup-grace loading state — shown while the supervisor
+   is still binding its IPC, distinct from the .error degraded banner. */
+.dashboard-loading { color: var(--text-muted); font-style: italic; }
+.dashboard-loading-note { color: var(--text-muted); opacity: 0.85; }
 .dashboard-header { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); flex-wrap: wrap; }
 .dashboard-header h1 { margin: 0; }
 .dashboard-bulk-actions { display: flex; gap: var(--gap-sm); }

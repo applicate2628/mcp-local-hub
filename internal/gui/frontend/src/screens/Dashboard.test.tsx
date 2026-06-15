@@ -784,6 +784,17 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
 
     const { findByTestId, queryByText } = render(<DashboardScreen />);
 
+    // Startup grace: the FIRST 500 renders the calm Loading state, not the
+    // banner — the supervisor may simply be coming up. Advance past the
+    // grace (the 30s poll re-fires each tick; flush the pending status
+    // promise between advances) so failCount exceeds STARTUP_GRACE_POLLS
+    // and the PERSISTENT-down fail-loud banner takes over. The §3.1
+    // assertion below is unchanged — a persistent down MUST still surface
+    // the degraded banner; we just exercise it past the grace.
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+
     // The fail-loud banner shows the backend's degraded message verbatim
     // (fetchOrThrow prefixes the path, so the message is a substring).
     const banner = await findByTestId("dashboard-error");
@@ -796,6 +807,30 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
     // The recovery affordance must be present and prominent so the
     // operator can act on the "restart the hub" guidance.
     expect(queryByText("Restart supervisor")).not.toBeNull();
+  });
+
+  it("initial /api/status failure shows a calm Loading state, not the alarming banner", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        return Promise.resolve(
+          jsonResponse(500, {
+            error: "supervisor unreachable — restart the hub",
+            code: "STATUS_FAILED",
+          }),
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findByTestId, queryByTestId } = render(<DashboardScreen />);
+
+    // The first failure is inside the startup grace → calm Loading state,
+    // NOT the degraded banner. (Flush the initial /api/status promise.)
+    await vi.advanceTimersByTimeAsync(0);
+    const loading = await findByTestId("dashboard-loading");
+    expect(loading.textContent).toContain("Loading status…");
+    expect(queryByTestId("dashboard-error")).toBeNull();
   });
 
   it("does NOT render the degraded banner on the happy path (no false positive)", async () => {

@@ -61,6 +61,17 @@ type BulkOutcome = { action: BulkAction; state: "done" | "error" };
 export function DashboardScreen() {
   const [state, setState] = useState<Record<string, DaemonStatus>>({});
   const [error, setError] = useState<string | null>(null);
+  // Startup grace: at supervisor START the IPC isn't listening yet (~30s)
+  // so /api/status fails transiently — that's the supervisor still coming
+  // up, NOT a real failure. `hasEverLoaded` records whether we've ever
+  // seen real data (a successful /api/status OR a live SSE delta); until
+  // then a small number of failures (failCount <= STARTUP_GRACE_POLLS)
+  // renders a calm "Loading…" instead of the alarming degraded banner.
+  // A PERSISTENT down still surfaces the banner (the §3.1 fail-loud is
+  // preserved): once the grace is exceeded — or the dashboard had loaded
+  // and the supervisor THEN went down — the `if (error)` branch wins.
+  const [hasEverLoaded, setHasEverLoaded] = useState(false);
+  const [failCount, setFailCount] = useState(0);
   // reloadTrigger is bumped by RecoveryActions after a successful
   // cleanup/restart so /api/status refetches immediately instead of
   // waiting for the 30 s poll interval. Pure state-bump pattern —
@@ -101,8 +112,13 @@ export function DashboardScreen() {
         }
         setState(next);
         setError(null);
+        setHasEverLoaded(true);
+        setFailCount(0);
       } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+        if (!cancelled) {
+          setError((err as Error).message);
+          setFailCount((c) => c + 1);
+        }
       }
     }
     void loadStatus();
@@ -129,6 +145,10 @@ export function DashboardScreen() {
     // startup 500, even though /api/events is streaming fine.
     // (GitHub Codex PR #1 R1.)
     setError(null);
+    // A live delta means we have real data, so the startup grace is over:
+    // any subsequent /api/status failure is a real degradation, not the
+    // transient supervisor-startup window.
+    setHasEverLoaded(true);
     setState((prev) => {
       if (body.state === "Gone") {
         const next = { ...prev };
@@ -342,6 +362,23 @@ export function DashboardScreen() {
   }
   const runAll = () => fireBulk("restart");
   const stopAll = () => fireBulk("stop");
+
+  // Startup grace: while we've never loaded real data and only a few
+  // failures have happened, show a calm "Loading…" — the supervisor is
+  // still binding its IPC. Once the grace is exceeded (persistent down),
+  // or once we HAD loaded and the supervisor went down (hasEverLoaded),
+  // the `if (error)` fail-loud banner below wins.
+  const STARTUP_GRACE_POLLS = 2;
+  if (!hasEverLoaded && failCount <= STARTUP_GRACE_POLLS) {
+    return (
+      <div>
+        <h1>Dashboard</h1>
+        <p class="dashboard-loading" data-testid="dashboard-loading">
+          Loading status… <span class="dashboard-loading-note">the supervisor is starting</span>
+        </p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
