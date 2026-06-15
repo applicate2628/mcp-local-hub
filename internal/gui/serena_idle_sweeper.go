@@ -83,11 +83,48 @@ func (s *Server) recordSerenaActivity(wsKey string, now time.Time) {
 		return
 	}
 	s.serenaActivityMu.Lock()
-	defer s.serenaActivityMu.Unlock()
 	if s.serenaLastActivity == nil {
 		s.serenaLastActivity = make(map[string]time.Time)
 	}
 	s.serenaLastActivity[wsKey] = now
+	s.serenaActivityMu.Unlock()
+
+	// Phase 3: debounce-persist this activity to the @serena registry row's
+	// LastToolsCallAt so the idle-prune sweeper has a restart-durable signal
+	// (the in-memory map above is wiped on a GUI restart). Done after releasing
+	// the activity mutex so registry I/O never blocks the hot activity stamp.
+	s.maybePersistSerenaActivity(wsKey, now)
+}
+
+// serenaActivityPersistDebounce bounds how often recordSerenaActivity writes the
+// @serena row's LastToolsCallAt to the registry — at most one write per window
+// per workspace, mirroring the LSP lazy proxy's debounce.
+const serenaActivityPersistDebounce = 5 * time.Second
+
+// maybePersistSerenaActivity debounce-writes wsKey's @serena registry row
+// LastToolsCallAt. A silent no-op if the row was already unregistered (the
+// registry write fails closed on a missing row).
+func (s *Server) maybePersistSerenaActivity(wsKey string, now time.Time) {
+	s.serenaPersistMu.Lock()
+	if s.serenaLastPersist == nil {
+		s.serenaLastPersist = make(map[string]time.Time)
+	}
+	due := now.Sub(s.serenaLastPersist[wsKey]) >= serenaActivityPersistDebounce
+	if due {
+		s.serenaLastPersist[wsKey] = now
+	}
+	s.serenaPersistMu.Unlock()
+	if !due {
+		return
+	}
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		return
+	}
+	_ = api.NewRegistry(regPath).PutLifecycleWithTimestamps(
+		wsKey, api.SerenaLanguageSentinel, api.LifecycleActive, "",
+		time.Time{}, now.UTC(),
+	)
 }
 
 // lastSerenaActivity returns wsKey's recorded last-activity time and whether

@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -71,6 +72,27 @@ var pruneInFlightFn = func(s *Server, serenaKey string) bool {
 	return s.hasSerenaForwardInFlight(serenaKey)
 }
 
+// pruneIdleThresholdFn returns the Phase-3 idle-prune threshold; 0 disables
+// idle-prune (only the structural triggers run). Read each tick from the
+// daemons.prune_idle_hours setting. Test seam.
+var pruneIdleThresholdFn = defaultPruneIdleThreshold
+
+func defaultPruneIdleThreshold() time.Duration {
+	vals, err := api.NewAPI().SettingsList()
+	if err != nil {
+		return 0
+	}
+	v, ok := vals[api.PruneIdleHoursSettingKey]
+	if !ok {
+		return 0 // not set → the registry Default ("0") = off
+	}
+	h, err := strconv.Atoi(v)
+	if err != nil || h <= 0 {
+		return 0
+	}
+	return time.Duration(h) * time.Hour
+}
+
 // SweepPruneWorkspaces auto-prunes structurally-dead workspace daemons:
 // agent-worktree rows immediately, deleted-directory rows after 2 consecutive
 // ENOENT ticks (the in-memory pruneEnoentTicks grace absorbs a transient
@@ -90,9 +112,15 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 		return 0
 	}
 
+	idleThreshold := pruneIdleThresholdFn()
+
 	// One candidate per workspace PATH (a workspace carries a serena row + N LSP
-	// rows). Track the serena key for the in-flight guard.
-	type cand struct{ serenaKey string }
+	// rows). Track the serena key (for the in-flight guard) and the MOST-RECENT
+	// activity across the workspace's rows (for the idle predicate).
+	type cand struct {
+		serenaKey    string
+		lastActivity time.Time
+	}
 	byPath := map[string]*cand{}
 	for _, ws := range rows {
 		if ws == nil || ws.WorkspacePath == "" {
@@ -105,6 +133,9 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 		}
 		if ws.Language == api.SerenaLanguageSentinel {
 			c.serenaKey = ws.WorkspaceKey
+		}
+		if ws.LastToolsCallAt.After(c.lastActivity) {
+			c.lastActivity = ws.LastToolsCallAt
 		}
 	}
 	if len(byPath) == 0 {
@@ -131,6 +162,11 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 				continue // wait for a confirming second ENOENT tick.
 			}
 			reason = "deleted-dir"
+		case idleThreshold > 0 && !c.lastActivity.IsZero() && now.Sub(c.lastActivity) > idleThreshold:
+			// Phase 3 idle-prune: most-recent activity older than the threshold.
+			// NEVER on a zero timestamp (no activity signal → require structural
+			// evidence, not wall-clock-since-register).
+			reason = "idle"
 		default:
 			// Healthy, present, non-worktree → reset any stale ENOENT count.
 			s.pruneEnoentMu.Lock()

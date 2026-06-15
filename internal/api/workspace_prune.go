@@ -25,6 +25,12 @@ import (
 // tick so a toggle takes effect within ~60s with no restart.
 const AutoPruneWorkspacesSettingKey = "daemons.auto_prune_workspaces"
 
+// PruneIdleHoursSettingKey is the GUI-settable int (HOURS) that enables the
+// Phase-3 idle auto-prune. "0" = off (only the structural triggers run); >0 =
+// also prune a workspace whose most-recent activity is older than that many
+// hours. The sweeper reads it each tick.
+const PruneIdleHoursSettingKey = "daemons.prune_idle_hours"
+
 // agentWorktreeMarker is the path segment that identifies an ephemeral
 // agent worktree (e.g. ".claude/worktrees/agent-<id>"). Such worktrees are
 // created per agent session and are ephemeral by design, so a daemon

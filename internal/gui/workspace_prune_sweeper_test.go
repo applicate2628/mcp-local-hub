@@ -102,3 +102,74 @@ func TestSweepPruneWorkspaces(t *testing.T) {
 		}
 	})
 }
+
+func TestSweepPruneWorkspaces_Idle(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+	oe, orw, oif, oa, oidle := pruneEnabledFn, pruneWorkspaceRowsFn, pruneInFlightFn, pruneActionFn, pruneIdleThresholdFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneInFlightFn, pruneActionFn, pruneIdleThresholdFn = oe, orw, oif, oa, oidle
+	})
+
+	var pruned []string
+	pruneEnabledFn = func() bool { return true }
+	pruneInFlightFn = func(*Server, string) bool { return false }
+	pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+		pruned = append(pruned, path)
+		return &api.PruneReport{Workspace: path}, nil
+	}
+	pruneIdleThresholdFn = func() time.Duration { return 48 * time.Hour }
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	now := time.Now()
+	withActivity := func(path, key string, last time.Time) *api.WorkspaceEntry {
+		e := mkPruneEntry(path, key, "go")
+		e.LastToolsCallAt = last
+		return e
+	}
+
+	t.Run("idle past threshold pruned", func(t *testing.T) {
+		pruned = nil
+		idle := t.TempDir() // exists (not deleted) + not agent-worktree → reaches the idle case
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{withActivity(idle, "kidle", now.Add(-72*time.Hour))}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), now); n != 1 {
+			t.Fatalf("idle workspace must be pruned, got %d", n)
+		}
+		if len(pruned) != 1 || pruned[0] != idle {
+			t.Fatalf("want idle pruned, got %v", pruned)
+		}
+	})
+
+	t.Run("recently active kept", func(t *testing.T) {
+		pruned = nil
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{withActivity(t.TempDir(), "krecent", now.Add(-1*time.Hour))}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), now); n != 0 {
+			t.Fatalf("recently-active workspace must be kept, got %d (%v)", n, pruned)
+		}
+	})
+
+	t.Run("zero activity never idle-pruned", func(t *testing.T) {
+		pruned = nil
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{withActivity(t.TempDir(), "kzero", time.Time{})}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), now); n != 0 {
+			t.Fatalf("zero-activity workspace must NEVER be idle-pruned, got %d", n)
+		}
+	})
+
+	t.Run("threshold 0 disables idle-prune", func(t *testing.T) {
+		pruned = nil
+		pruneIdleThresholdFn = func() time.Duration { return 0 }
+		t.Cleanup(func() { pruneIdleThresholdFn = func() time.Duration { return 48 * time.Hour } })
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{withActivity(t.TempDir(), "koff", now.Add(-72*time.Hour))}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), now); n != 0 {
+			t.Fatalf("threshold 0 must disable idle-prune, got %d", n)
+		}
+	})
+}

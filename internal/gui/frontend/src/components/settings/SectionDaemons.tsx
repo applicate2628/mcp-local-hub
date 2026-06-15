@@ -47,6 +47,7 @@ type Banner =
 const SCHEDULE_KEY = "daemons.weekly_schedule";
 const RETRY_KEY = "daemons.retry_policy";
 const KNOB_KEY = "daemons.weekly_refresh_default";
+const PRUNE_IDLE_KEY = "daemons.prune_idle_hours";
 
 export function SectionDaemons({
   snapshot,
@@ -72,14 +73,17 @@ export function SectionDaemons({
   const sched = snapshot.data.settings.find((s) => s.key === SCHEDULE_KEY) as ConfigSettingDTO | undefined;
   const retry = snapshot.data.settings.find((s) => s.key === RETRY_KEY) as ConfigSettingDTO | undefined;
   const knob = snapshot.data.settings.find((s) => s.key === KNOB_KEY) as ConfigSettingDTO | undefined;
+  const pruneIdle = snapshot.data.settings.find((s) => s.key === PRUNE_IDLE_KEY) as ConfigSettingDTO | undefined;
 
   const persistedSched = sched?.value ?? sched?.default ?? "";
   const persistedRetry = retry?.value ?? retry?.default ?? "";
   const persistedKnob = (knob?.value ?? knob?.default ?? "false") === "true";
+  const persistedPruneIdle = pruneIdle?.value ?? pruneIdle?.default ?? "0";
 
   const [schedValue, setSchedValue] = useState<string>(persistedSched);
   const [retryValue, setRetryValue] = useState<string>(persistedRetry);
   const [knobValue, setKnobValue] = useState<boolean>(persistedKnob);
+  const [pruneIdleValue, setPruneIdleValue] = useState<string>(persistedPruneIdle);
   const [tableDirty, setTableDirty] = useState(false);
   const [tableDeltas, setTableDeltas] = useState<MembershipDelta[]>([]);
   const [tableResetKey, setTableResetKey] = useState(0);
@@ -97,11 +101,13 @@ export function SectionDaemons({
   useEffect(() => { setSchedValue(persistedSched); }, [persistedSched]);
   useEffect(() => { setRetryValue(persistedRetry); }, [persistedRetry]);
   useEffect(() => { setKnobValue(persistedKnob); }, [persistedKnob]);
+  useEffect(() => { setPruneIdleValue(persistedPruneIdle); }, [persistedPruneIdle]);
 
   const schedDirty = schedValue !== persistedSched;
   const retryDirty = retryValue !== persistedRetry;
   const knobDirty = knobValue !== persistedKnob;
-  const sectionDirty = schedDirty || retryDirty || knobDirty || tableDirty;
+  const pruneIdleDirty = pruneIdleValue !== persistedPruneIdle;
+  const sectionDirty = schedDirty || retryDirty || knobDirty || pruneIdleDirty || tableDirty;
   const dirty = sectionDirty || envDirty;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
@@ -112,6 +118,7 @@ export function SectionDaemons({
     setSchedValue(persistedSched);
     setRetryValue(persistedRetry);
     setKnobValue(persistedKnob);
+    setPruneIdleValue(persistedPruneIdle);
     setBanner(null);
     setSchedError(null);
     // Bump key → WeeklyMembershipTable remounts → edits map clears + re-fetch
@@ -151,10 +158,19 @@ export function SectionDaemons({
         op1Failure = `${humanKey(RETRY_KEY)}: ${errReason(e)}`;
       }
     }
+    if (op1Failure === null && pruneIdleDirty) {
+      try {
+        await putSetting(PRUNE_IDLE_KEY, pruneIdleValue);
+        committed.push(humanKey(PRUNE_IDLE_KEY));
+      } catch (e: any) {
+        op1Failure = `${humanKey(PRUNE_IDLE_KEY)}: ${errReason(e)}`;
+      }
+    }
     if (op1Failure !== null) {
       // Whatever didn't commit stays dirty.
       if (knobDirty && !committed.includes(humanKey(KNOB_KEY))) stillDirty.push(humanKey(KNOB_KEY));
       if (retryDirty && !committed.includes(humanKey(RETRY_KEY))) stillDirty.push(humanKey(RETRY_KEY));
+      if (pruneIdleDirty && !committed.includes(humanKey(PRUNE_IDLE_KEY))) stillDirty.push(humanKey(PRUNE_IDLE_KEY));
       if (schedDirty) stillDirty.push("schedule");
       if (tableDirty) stillDirty.push("membership");
       await refreshBestEffort();
@@ -306,6 +322,22 @@ export function SectionDaemons({
           {" "}Default for new workspaces: enroll in weekly refresh
         </label>
         {knob?.help ? <small class="settings-field-help">{knob.help}</small> : null}
+      </div>
+
+      <div class="settings-field-row">
+        <label class="settings-field-label" for="daemons-prune-idle-hours">
+          Auto-prune idle workspace after (hours, 0 = off)
+        </label>
+        <input
+          id="daemons-prune-idle-hours"
+          type="number"
+          min={0}
+          value={pruneIdleValue}
+          disabled={busy}
+          onInput={(e) => setPruneIdleValue((e.target as HTMLInputElement).value)}
+          data-testid="daemons-prune-idle-hours-input"
+        />
+        {pruneIdle?.help ? <small class="settings-field-help">{pruneIdle.help}</small> : null}
       </div>
 
       <WeeklyMembershipTable

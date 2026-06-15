@@ -610,6 +610,16 @@ type Server struct {
 	serenaActivityMu   sync.Mutex
 	serenaLastActivity map[string]time.Time
 
+	// serenaPersistMu guards serenaLastPersist: WorkspaceKey -> the last time we
+	// DEBOUNCE-WROTE the @serena row's LastToolsCallAt to the registry. The
+	// in-memory serenaLastActivity above is wiped on a GUI restart; persisting a
+	// debounced copy to the registry (Phase 3) gives the idle-prune sweeper a
+	// durable serena activity signal so a restart does not falsely read a serena
+	// workspace as idle. Mirrors the LSP lazy proxy's debounced LastToolsCallAt
+	// write (internal/daemon/lazy_proxy.go).
+	serenaPersistMu   sync.Mutex
+	serenaLastPersist map[string]time.Time
+
 	// guiProcessStart is the wall time this GUI process started (set once in
 	// NewServer). The idle sweeper's never-called fallback caps a daemon's
 	// idle-duration at time-since-GUI-start so a GUI RESTART cannot

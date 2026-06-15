@@ -136,6 +136,17 @@ var SettingsRegistry = []SettingDef{
 		// "false" disables the sweep entirely. Takes effect on the next sweep
 		// tick (~60s) — no restart.
 		Help: "Auto-remove daemon registrations for deleted workspaces and ephemeral agent worktrees. A pruned workspace re-registers on next open. Takes effect within ~60s; no restart."},
+	{Key: "daemons.prune_idle_hours", Section: "daemons", Type: TypeInt,
+		Default: "0", Min: intPtr(0), Max: intPtr(8760),
+		// Phase 3 idle auto-prune. 0 = OFF (only the structural agent-worktree +
+		// deleted-dir triggers run). >0 = ALSO auto-remove a workspace whose
+		// most-recent activity (the registry LastToolsCallAt across its serena +
+		// LSP rows) is older than this many HOURS. A workspace with NO recorded
+		// activity (zero timestamp) is NEVER idle-pruned — idle-prune needs a real
+		// activity signal, never wall-clock-since-register. Re-registers on next
+		// open (non-destructive); gated by auto_prune_workspaces; skips a
+		// workspace mid serena call. Read each sweep tick (~60s); no restart.
+		Help: "Also auto-remove a workspace daemon idle (no serena/LSP activity) for more than this many HOURS (0 = off). Re-registers on next open. Takes effect within ~60s; no restart."},
 	{Key: "daemons.retry_policy", Section: "daemons", Type: TypeEnum,
 		Default: "exponential", Enum: []string{"none", "linear", "exponential"},
 		// A4-b PR #2 runtime applier shipped: the watchdog --once
