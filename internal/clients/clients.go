@@ -801,6 +801,15 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 	return bakPath, nil
 }
 
+// copyFileTornWindowHook, when non-nil (tests only), is invoked AFTER the
+// destination file has been truncate-opened (so it exists on disk as zero
+// bytes) but BEFORE its content is copied in. It gives the b1 concurrency
+// regression test a deterministically large torn-write window: while the
+// hook blocks, a concurrent backup-READ that is NOT serialized against this
+// write would observe the destination as an empty/invalid file. Production
+// leaves it nil, so this is a zero-cost branch off the hot path.
+var copyFileTornWindowHook func(dst string)
+
 func copyFile(src, dst string, perm os.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -811,6 +820,9 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return err
+	}
+	if h := copyFileTornWindowHook; h != nil {
+		h(dst)
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		_ = out.Close()
@@ -892,7 +904,24 @@ func pruneOldTimestamped(livePath string, keepN int) {
 //
 // Returns an empty slice (not nil) when no backups exist. Returns
 // an error only on filesystem read errors.
+//
+// The directory enumeration runs under withConfigLock keyed on livePath, so
+// the backup-read SELECTION is serialized against the backup-WRITE path
+// (writeBackup, which adds a new timestamped file and prunes old ones under
+// the same lock via the lockingClient decorator). Without this, a concurrent
+// Backup/BackupKeep could expose a half-written or mid-pruned directory view
+// to the demigrate selection loop (b1 residual race).
 func BackupsNewestFirst(livePath, clientName string) ([]string, error) {
+	var out []string
+	err := withConfigReadLock(livePath, func() error {
+		var e error
+		out, e = backupsNewestFirstLocked(livePath, clientName)
+		return e
+	})
+	return out, err
+}
+
+func backupsNewestFirstLocked(livePath, _ string) ([]string, error) {
 	dir := filepath.Dir(livePath)
 	prefix := filepath.Base(livePath) + ".bak-mcp-local-hub-"
 	entries, err := os.ReadDir(dir)
@@ -1045,7 +1074,21 @@ func parseLegacyBackupTime(suffix string) time.Time {
 // so a user who upgraded across the codename rename recovers their true
 // pre-hub state instead of having the entry deleted — see
 // work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md.
-func LegacyBackupsNewestFirst(livePath, _ string) ([]string, error) {
+//
+// Like BackupsNewestFirst, the directory enumeration runs under
+// withConfigLock keyed on livePath so the legacy-backup selection is
+// serialized against concurrent backup writes (b1 residual race).
+func LegacyBackupsNewestFirst(livePath, clientName string) ([]string, error) {
+	var out []string
+	err := withConfigReadLock(livePath, func() error {
+		var e error
+		out, e = legacyBackupsNewestFirstLocked(livePath, clientName)
+		return e
+	})
+	return out, err
+}
+
+func legacyBackupsNewestFirstLocked(livePath, _ string) ([]string, error) {
 	dir := filepath.Dir(livePath)
 	base := filepath.Base(livePath)
 	bakPrefix := base + ".bak-"

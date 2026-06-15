@@ -2,6 +2,8 @@ package clients
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/gofrs/flock"
@@ -61,11 +63,37 @@ func withConfigLock(configPath string, fn func() error) error {
 	return fn()
 }
 
+// withConfigReadLock is the read-selection variant of withConfigLock used by
+// the backup-READ paths (LatestBackupPath / BackupsNewestFirst /
+// LegacyBackupsNewestFirst / the backup-file predicates). It serializes those
+// reads against the backup-WRITE path on the same key.
+//
+// Difference from withConfigLock: when configPath's parent directory does not
+// exist, the advisory flock cannot be created (its file lives in that missing
+// dir). A missing parent dir means there are no backup files AND no writer can
+// be mid-write (writeBackup's callers create the dir before writing), so there
+// is nothing to serialize against — run fn under the in-process mutex only and
+// let its own os.IsNotExist handling return the documented empty/absent result.
+// The in-process mutex is still taken so two goroutines in this process agree
+// on ordering even in the missing-dir case.
+func withConfigReadLock(configPath string, fn func() error) error {
+	if _, err := os.Stat(filepath.Dir(configPath)); err != nil && os.IsNotExist(err) {
+		mu := perPathMutex(configPath)
+		mu.Lock()
+		defer mu.Unlock()
+		return fn()
+	}
+	return withConfigLock(configPath, fn)
+}
+
 // lockingClient decorates a Client so every MUTATING method serializes its
 // read-modify-write of the underlying config file via withConfigLock. The
-// 10 read-only methods are NOT overridden — they pass through to the embedded
-// Client unchanged (they take no config-file write lock, matching the
-// pre-decorator behavior).
+// backup-READ selection/inspection methods (LatestBackupPath,
+// BackupContainsEntry, BackupEntryIsHubManaged) are ALSO serialized under the
+// same per-path lock so the demigrate selection cannot observe a backup
+// directory/file mid-write (b1). The remaining read-only methods (Name,
+// ConfigPath, Exists, GetEntry, AllStdioEntries, FindStdioLanguageServerEntries)
+// are NOT overridden — they pass through to the embedded Client unchanged.
 //
 // Re-entrancy safety: each override calls the CONCRETE adapter (l.Client),
 // whose own internal cross-method calls (e.g. cursor/vscode/qwen/zed
@@ -143,4 +171,51 @@ func (l *lockingClient) RestoreEntryFromBackupForRollback(backupPath, name strin
 	return withConfigLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RestoreEntryFromBackupForRollback(backupPath, name)
 	})
+}
+
+// The three backup-READ overrides below close the b1 residual race: the
+// backup-write path (Backup/BackupKeep/writeBackup) is already serialized by
+// the decorator, but the backup-read SELECTION + per-file inspection used by
+// the demigrate flow (LatestBackupPath to pick a path; BackupContainsEntry /
+// BackupEntryIsHubManaged to classify it) read the same backup directory and
+// files with no lock. Concurrent with a Backup/BackupKeep writer those reads
+// could observe a half-written timestamped backup or a mid-pruned directory
+// view, so the demigrate selection could pick (or classify) a torn file.
+//
+// Re-entrancy is safe: no locked WRITE method on this decorator calls these
+// read methods (each write override calls only the same-named concrete
+// method, whose body never re-enters the read selection), so wrapping them in
+// withConfigLock cannot self-deadlock on the same per-path mutex.
+
+func (l *lockingClient) LatestBackupPath() (path string, ok bool, err error) {
+	werr := withConfigReadLock(l.Client.ConfigPath(), func() error {
+		path, ok, err = l.Client.LatestBackupPath()
+		return err
+	})
+	if werr != nil && err == nil {
+		return "", false, werr
+	}
+	return path, ok, err
+}
+
+func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, err error) {
+	werr := withConfigReadLock(l.Client.ConfigPath(), func() error {
+		has, err = l.Client.BackupContainsEntry(backupPath, name)
+		return err
+	})
+	if werr != nil && err == nil {
+		return false, werr
+	}
+	return has, err
+}
+
+func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (managed bool, err error) {
+	werr := withConfigReadLock(l.Client.ConfigPath(), func() error {
+		managed, err = l.Client.BackupEntryIsHubManaged(backupPath, name)
+		return err
+	})
+	if werr != nil && err == nil {
+		return false, werr
+	}
+	return managed, err
 }
