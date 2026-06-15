@@ -221,6 +221,7 @@ export function LogsScreen() {
   return (
     <div>
       <h1>Logs</h1>
+      <div class="card">
       <div id="logs-controls">
         <select
           value={selected}
@@ -276,6 +277,7 @@ export function LogsScreen() {
       {openFolderError && (
         <p class="error" role="alert">Open folder failed: {openFolderError}</p>
       )}
+      </div>
       <pre id="logs-body" ref={preRef}>
         {notice
           ? notice

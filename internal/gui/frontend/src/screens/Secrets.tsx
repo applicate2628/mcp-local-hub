@@ -236,28 +236,30 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
 
   return (
     <div class="secrets-table">
-      <button type="button" onClick={() => { setPrefill(undefined); setAddOpen(true); }}>Add secret</button>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Used by</th>
-            <th>State</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {props.env.secrets.map((s) => (
-            <SecretRowComponent
-              key={s.name}
-              row={s}
-              onAddPrefill={(n) => { setPrefill(n); setAddOpen(true); }}
-              onRotate={(n) => setRotateName(n)}
-              onDelete={(n) => setDeleteName(n)}
-            />
-          ))}
-        </tbody>
-      </table>
+      <div class="card">
+        <button type="button" onClick={() => { setPrefill(undefined); setAddOpen(true); }}>Add secret</button>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Used by</th>
+              <th>State</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.env.secrets.map((s) => (
+              <SecretRowComponent
+                key={s.name}
+                row={s}
+                onAddPrefill={(n) => { setPrefill(n); setAddOpen(true); }}
+                onRotate={(n) => setRotateName(n)}
+                onDelete={(n) => setDeleteName(n)}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
       <AddSecretModal open={addOpen} prefillName={prefill} onClose={() => setAddOpen(false)} onSaved={() => props.refresh()} />
 
       {rotateName && (

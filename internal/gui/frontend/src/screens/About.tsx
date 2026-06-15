@@ -62,6 +62,7 @@ export function AboutScreen() {
     <section class="about-screen" data-testid="about-loaded">
       <h1>About mcp-local-hub</h1>
 
+      <div class="card">
       <dl class="about-meta">
         <dt>Version</dt>
         <dd data-testid="about-version">{v.version}</dd>
@@ -149,6 +150,7 @@ export function AboutScreen() {
           — manual smoke checklist for current GUI features
         </li>
       </ul>
+      </div>
     </section>
   );
 }

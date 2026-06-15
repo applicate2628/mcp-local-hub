@@ -768,8 +768,9 @@ export function AddServerScreen(props: {
           ))}
         </ul>
       )}
-      <div class="add-server-grid">
-        <div class="add-server-form">
+      <div class="card">
+        <div class="add-server-grid">
+          <div class="add-server-form">
           <AccordionSection title="Basics" open={true}>
             <div class="form-row">
               <label for="field-name">Name</label>
@@ -980,6 +981,7 @@ export function AddServerScreen(props: {
           <h2>YAML preview</h2>
           <pre data-testid="yaml-preview">{yamlPreview}</pre>
         </aside>
+        </div>
       </div>
       <AddSecretModal
         open={createModalState.open}

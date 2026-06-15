@@ -247,7 +247,7 @@ export function MigrationScreen() {
           to see it here.
         </p>
       ) : (
-        <>
+        <div class="card">
           <ViaHubGroup
             entries={groups.viaHub}
             actionBusy={actionBusy}
@@ -265,7 +265,7 @@ export function MigrationScreen() {
             onDismiss={runDismiss}
           />
           <PerSessionGroup entries={groups.perSession} />
-        </>
+        </div>
       )}
       <button
         type="button"
