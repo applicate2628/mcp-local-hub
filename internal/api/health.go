@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -446,7 +447,7 @@ func (a *API) computeDaemonsSection(ctx context.Context, nowMs int64, refresh bo
 		if fetchErr != nil {
 			section.Errors = append(section.Errors, SectionError{
 				Scope: "daemons",
-				Err:   fetchErr.Error(),
+				Err:   redactErrorDetail(fetchErr.Error()),
 			})
 			a.healthCache.mu.Lock()
 			a.healthCache.daemons = section
@@ -584,7 +585,7 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 		if fetchErr != nil {
 			section.Errors = append(section.Errors, SectionError{
 				Scope: "probes",
-				Err:   fetchErr.Error(),
+				Err:   redactErrorDetail(fetchErr.Error()),
 			})
 			a.healthCache.mu.Lock()
 			a.healthCache.probes = section
@@ -603,7 +604,15 @@ func (a *API) computeProbesSection(nowMs int64, refresh bool) (ProbesSection, er
 			if r.Health != nil {
 				pr.OK = r.Health.OK
 				pr.ToolCount = r.Health.ToolCount
-				pr.Err = r.Health.Err
+				// g3: ProbeRow.Err is rendered verbatim in the GUI probe-error
+				// pill; singleHealthProbe folds the daemon's own error message
+				// into it (install.go), which may carry a workspace path or
+				// token. Scrub on the wire; the raw probe Err stays available
+				// to non-GUI consumers of HealthProbe.Err upstream.
+				if r.Health.Err != "" {
+					fmt.Fprintf(os.Stderr, "health: probe error for %s/%s (raw, server-side only): %s\n", r.Server, r.Daemon, r.Health.Err)
+				}
+				pr.Err = redactErrorDetail(r.Health.Err)
 				pr.Source = r.Health.Source
 			} else {
 				pr.Err = "no probe (daemon not running or probe disabled)"
@@ -711,9 +720,12 @@ func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes Probe
 				Health:  &HealthProbe{OK: p.OK, ToolCount: p.ToolCount, Source: p.Source},
 			})
 			if rowErr != nil {
+				// g3: keep the raw detail server-side; the wire/DOM gets the
+				// path/token-scrubbed form.
+				fmt.Fprintf(os.Stderr, "health: capability fetch error for %s/%s (raw, server-side only): %v\n", p.Server, p.Daemon, rowErr)
 				section.Errors = append(section.Errors, SectionError{
 					Scope: "capability:" + p.Server + "/" + p.Daemon,
-					Err:   rowErr.Error(),
+					Err:   redactErrorDetail(rowErr.Error()),
 				})
 				continue
 			}
@@ -795,7 +807,7 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	resp, err := client.Do(req)
 	if err != nil {
-		return CapabilitySubSection{State: "error", Err: "initialize: " + err.Error()}
+		return CapabilitySubSection{State: "error", Err: "initialize: " + redactErrorDetail(err.Error())}
 	}
 	sessionID := resp.Header.Get("Mcp-Session-Id")
 	_ = resp.Body.Close()
@@ -812,12 +824,12 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 	}
 	resp2, err := client.Do(req2)
 	if err != nil {
-		return CapabilitySubSection{State: "error", Err: method + ": " + err.Error()}
+		return CapabilitySubSection{State: "error", Err: method + ": " + redactErrorDetail(err.Error())}
 	}
 	defer resp2.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
 	if err != nil {
-		return CapabilitySubSection{State: "error", Err: method + ": read: " + err.Error()}
+		return CapabilitySubSection{State: "error", Err: method + ": read: " + redactErrorDetail(err.Error())}
 	}
 	if len(raw) > maxHealthProbeResponseBytes {
 		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: response too large (> %d bytes)", method, maxHealthProbeResponseBytes)}
@@ -841,7 +853,14 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 		if errEnv.Error.Code == -32601 {
 			return CapabilitySubSection{State: "unsupported"}
 		}
-		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: %s", method, errEnv.Error.Message)}
+		// g3: the daemon's own MCP error message may embed a workspace path
+		// or token-like value (e.g. `stat C:\Users\<name>\secret\token.json`).
+		// The GUI renders Err verbatim, so scrub leak-prone substrings on the
+		// wire and keep the raw detail server-side only.
+		if errEnv.Error.Message != "" {
+			fmt.Fprintf(os.Stderr, "health: %s %s error (raw, server-side only): %s\n", d.Server+"/"+d.Daemon, method, errEnv.Error.Message)
+		}
+		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: %s", method, redactErrorDetail(errEnv.Error.Message))}
 	}
 
 	// Decode the kind-specific result list.
@@ -854,7 +873,7 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 			} `json:"result"`
 		}
 		if err := json.Unmarshal(payload, &p); err != nil {
-			return CapabilitySubSection{State: "error", Err: method + ": parse: " + err.Error()}
+			return CapabilitySubSection{State: "error", Err: method + ": parse: " + redactErrorDetail(err.Error())}
 		}
 		raws = p.Result.Tools
 	case "prompt":
@@ -864,7 +883,7 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 			} `json:"result"`
 		}
 		if err := json.Unmarshal(payload, &p); err != nil {
-			return CapabilitySubSection{State: "error", Err: method + ": parse: " + err.Error()}
+			return CapabilitySubSection{State: "error", Err: method + ": parse: " + redactErrorDetail(err.Error())}
 		}
 		raws = p.Result.Prompts
 	case "resource":
@@ -874,7 +893,7 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 			} `json:"result"`
 		}
 		if err := json.Unmarshal(payload, &p); err != nil {
-			return CapabilitySubSection{State: "error", Err: method + ": parse: " + err.Error()}
+			return CapabilitySubSection{State: "error", Err: method + ": parse: " + redactErrorDetail(err.Error())}
 		}
 		raws = p.Result.Resources
 	}
