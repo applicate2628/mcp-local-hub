@@ -20,6 +20,18 @@ import (
 // ram_bytes field rather than emitting a misleading 0.
 var rssByPID = process.ResidentSetSizeByPID
 
+// loopbackPortOwnersSnapshotFn takes a SINGLE OS port-owner snapshot
+// (one `netstat -ano` on Windows / one /proc/net/tcp read on Linux) mapping
+// every IPv4-loopback LISTENING port to its owning PID. supervisorStatusDaemons
+// takes ONE snapshot per refresh and resolves all daemons against it, instead
+// of one per-port netstat spawn per daemon (the cold /api/status hot path:
+// 15 running daemons used to fire 15 netstat spawns). Indirected through a
+// package var so status tests can inject a deterministic snapshot and assert
+// it is invoked EXACTLY ONCE regardless of daemon count. nil PortOwnerPID on
+// the global liveness probe (macOS / other POSIX) skips the snapshot entirely
+// and keeps the per-daemon PortLive TCP fallback.
+var loopbackPortOwnersSnapshotFn = api.LoopbackPortOwnersSnapshot
+
 func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]map[string]any, error) {
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	intent, err := api.ReadSupervisorIntent(intentPath)
@@ -34,6 +46,37 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 	}
 
 	daemonStates := tracker.Snapshot()
+
+	// Perf: take ONE OS port-owner snapshot for the whole refresh and resolve
+	// every daemon against it, instead of letting each daemon's liveness check
+	// spawn its own `netstat -ano` (15 running daemons → 15 spawns → ~730ms
+	// cold /api/status; same anti-pattern scan.go already fixed). Only when the
+	// global liveness probe HAS an OS-level port-owner lookup (Windows/Linux);
+	// when it is nil (macOS / other POSIX) we keep today's PortLive TCP fallback
+	// unchanged — no snapshot, no behavior change.
+	livenessProbe := supervisorLivenessProbeFns
+	if livenessProbe.PortOwnerPID != nil {
+		snapshot, snapErr := loopbackPortOwnersSnapshotFn()
+		// Replace the per-port netstat lookup with a closure that resolves from
+		// the single shared snapshot. Semantics match the per-port path EXACTLY:
+		//   - snapshot error → every port returns that err → the daemon is
+		//     classified port_owner_unverified (within bind grace → live), the
+		//     same fail-closed outcome as a per-port netstat failure;
+		//   - port in map → its owner PID (== tracked PID → live; != → mismatch;
+		//     == supervisor self → port_owner_self);
+		//   - port NOT in map → (0, false, nil) = port_unbound, exactly what a
+		//     per-port netstat finding nothing returns.
+		livenessProbe.PortOwnerPID = func(port int) (int, bool, error) {
+			if snapErr != nil {
+				return 0, false, snapErr
+			}
+			if pid, ok := snapshot[port]; ok {
+				return pid, true, nil
+			}
+			return 0, false, nil
+		}
+	}
+
 	rows := make([]map[string]any, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
 		taskName := canonicalSupervisorTaskName(d.TaskName)
@@ -80,12 +123,12 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		}
 		stalePID := 0
 		if ok && runtimeState.State == daemonRuntimeStateRunning {
-			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
+			live, reason := supervisorDaemonEntryLiveWithProbe(api.SupervisorDaemon{
 				TaskName: d.TaskName,
 				Server:   server,
 				Daemon:   daemon,
 				Port:     port,
-			}, runtimeState, time.Now().UTC())
+			}, runtimeState, time.Now().UTC(), livenessProbe)
 			// port_owner_unverified is a probe ERROR (e.g. netstat blocked),
 			// not a restart: the liveness sweep deliberately only observes it
 			// (no EvManualRestart), so the status must not report "Restarting"

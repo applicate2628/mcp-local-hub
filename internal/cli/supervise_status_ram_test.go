@@ -45,16 +45,23 @@ func runningStatusRow(t *testing.T) map[string]any {
 	tracker := NewDaemonRuntimeTracker()
 	tracker.MarkSpawned(taskName, livePID, time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC))
 
-	// Force "alive + owns its port": PIDAlive true, no identity proof, and the
-	// port-owner lookup returns the SAME pid so supervisorDaemonEntryLive
-	// returns live (row stays Running, current_pid retained — the RAM lookup
-	// only fires for a Running daemon with a non-zero current_pid).
+	// Force "alive + owns its port": PIDAlive true, no identity proof. The
+	// status path resolves port ownership via the SHARED snapshot (one OS query
+	// per refresh), not the probe's PortOwnerPID directly, so the snapshot below
+	// is what drives the row to Running; PortOwnerPID is still set non-nil so
+	// supervisorStatusDaemons takes the snapshot branch (Windows/Linux). Map the
+	// daemon's port to the SAME pid so the daemon owns its port → live (row
+	// stays Running, current_pid retained — the RAM lookup only fires for a
+	// Running daemon with a non-zero current_pid).
 	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
-		PIDAlive:    func(pid int) bool { return true },
-		PortLive:    func(port int) bool { return true },
+		PIDAlive:     func(pid int) bool { return true },
+		PortLive:     func(port int) bool { return true },
 		PortOwnerPID: func(port int) (int, bool, error) { return livePID, true, nil },
 	})
 	defer restore()
+	prevSnap := loopbackPortOwnersSnapshotFn
+	loopbackPortOwnersSnapshotFn = func() (map[int]int, error) { return map[int]int{9123: livePID}, nil }
+	defer func() { loopbackPortOwnersSnapshotFn = prevSnap }()
 
 	rows, err := supervisorStatusDaemons(stateDir, tracker)
 	if err != nil {

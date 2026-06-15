@@ -298,8 +298,18 @@ func daemonExpectedIdentityExe(command string) string {
 	return filepath.Clean(exe)
 }
 
+// supervisorDaemonEntryLive evaluates one daemon's liveness against the GLOBAL
+// liveness probe set (supervisorLivenessProbeFns). It is a thin wrapper over
+// supervisorDaemonEntryLiveWithProbe so callers that resolve every daemon
+// against a SHARED port-owner snapshot (supervisorStatusDaemons) can pass a
+// snapshot-backed probe instead, taking ONE OS port-owner query per refresh
+// rather than one per daemon — with zero behavior change for the wrapper's
+// existing callers (the liveness sweep).
 func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) (bool, string) {
-	probe := supervisorLivenessProbeFns
+	return supervisorDaemonEntryLiveWithProbe(d, entry, now, supervisorLivenessProbeFns)
+}
+
+func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time, probe supervisorLivenessProbe) (bool, string) {
 	if probe.PIDAlive == nil {
 		probe.PIDAlive = process.IsPidAlive
 	}

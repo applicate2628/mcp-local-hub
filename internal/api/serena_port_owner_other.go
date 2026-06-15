@@ -21,6 +21,14 @@ func loopbackPortOwnerPID(port int) (int, bool, error) {
 	return 0, false, errPortOwnerUnsupported
 }
 
+// loopbackPortOwnersSnapshot is the unsupported-POSIX fail-closed stub for the
+// batch owner lookup. Like loopbackPortOwnerPID it refuses rather than guess,
+// returning the same errPortOwnerUnsupported sentinel so a caller batching the
+// snapshot gets the identical fail-closed signal as the per-port path.
+func loopbackPortOwnersSnapshot() (map[int]int, error) {
+	return nil, errPortOwnerUnsupported
+}
+
 // guiImageForPID is the POSIX counterpart to the Windows image lookup. It is
 // unreachable in production because loopbackPortOwnerPID fails closed first,
 // but it is defined so the cross-platform build compiles and so the

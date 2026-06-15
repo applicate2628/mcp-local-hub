@@ -29,6 +29,156 @@ func loopbackPortOwnerPID(port int) (int, bool, error) {
 	return pid, true, nil
 }
 
+// loopbackPortOwnersSnapshot maps every IPv4 loopback LISTENING port to its
+// owning PID in ONE pass over /proc/net/tcp plus ONE walk of /proc — the batch
+// form of loopbackPortOwnerPID. A status refresh resolving N daemons reads the
+// socket tables once instead of N times.
+//
+// Per-port fidelity preserved:
+//   - port present, owner pid resolved → map[port] = pid (same as the per-port
+//     (pid, true, nil));
+//   - port whose socket inode is owned by a DIFFERENT UID (its /proc/<pid>/fd
+//     is permission-denied) → map[port] = 0, so the caller sees a found owner
+//     that mismatches the tracked daemon → port_owner_mismatch, exactly as the
+//     per-port pidForSocketInode returns (0, true, nil) for the squatted-port
+//     cross-user case (Codex bot #271 P2);
+//   - port with no resolvable owner and no permission signal → ABSENT from the
+//     map → caller treats it as port_unbound, matching the per-port
+//     (0, false, nil).
+//
+// A read failure of /proc/net/tcp or /proc is a genuine probe error and is
+// returned as (nil, err) so every port the caller asks about fails closed to
+// port_owner_unverified — never a restart.
+func loopbackPortOwnersSnapshot() (map[int]int, error) {
+	return loopbackPortOwnersSnapshotFromProcNet("/proc/net/tcp")
+}
+
+// loopbackPortOwnersSnapshotFromProcNet is the path-injectable core of
+// loopbackPortOwnersSnapshot (the procNetPath seam mirrors
+// loopbackTCPListenInodeFromProcNet so tests can feed a canned table).
+func loopbackPortOwnersSnapshotFromProcNet(procNetPath string) (map[int]int, error) {
+	portInodes, err := loopbackListenPortInodesFromProcNet(procNetPath)
+	if err != nil {
+		return nil, err
+	}
+	owners := map[int]int{}
+	if len(portInodes) == 0 {
+		return owners, nil
+	}
+	inodePIDs, sawPermissionError, err := pidsForSocketInodes(portInodes)
+	if err != nil {
+		return nil, err
+	}
+	for port, inode := range portInodes {
+		if pid, ok := inodePIDs[inode]; ok {
+			owners[port] = pid
+			continue
+		}
+		// Inode present in /proc/net/tcp but no readable /proc/<pid>/fd owns it.
+		// If we hit a permission wall while walking /proc, a DIFFERENT UID owns
+		// the socket (the supervisor can always read its own daemon's fds), so
+		// report a found-but-foreign owner (pid 0) → port_owner_mismatch, exactly
+		// like the per-port pidForSocketInode path. Without a permission signal
+		// the owner is simply unresolved → leave the port out of the map so the
+		// caller treats it as port_unbound.
+		if sawPermissionError {
+			owners[port] = 0
+		}
+	}
+	return owners, nil
+}
+
+// loopbackListenPortInodesFromProcNet reads /proc/net/tcp once and returns
+// port -> socket inode for every IPv4 loopback LISTENING (st == 0A) row.
+// Mirrors loopbackTCPListenInodeFromProcNet's per-row gate exactly. Rows whose
+// inode is empty/"0" are skipped (a listening socket without an inode is the
+// per-port error case; in batch form a skipped port reads as port_unbound,
+// which is the safe fail-closed direction and never drives a restart on its
+// own — see supervisorLivenessReasonNeedsRestart). A read failure is a probe
+// error.
+func loopbackListenPortInodesFromProcNet(path string) (map[int]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("loopbackPortOwnersSnapshot: read %s: %w", path, err)
+	}
+	out := map[int]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 10 || fields[0] == "sl" || fields[3] != "0A" {
+			continue
+		}
+		addr, gotPort, ok := strings.Cut(fields[1], ":")
+		if !ok || !isProcNetLoopbackAddress(addr) {
+			continue
+		}
+		port, err := strconv.ParseInt(gotPort, 16, 32)
+		if err != nil || port <= 0 {
+			continue
+		}
+		inode := fields[9]
+		if inode == "" || inode == "0" {
+			continue
+		}
+		if _, seen := out[int(port)]; !seen {
+			out[int(port)] = inode
+		}
+	}
+	return out, nil
+}
+
+// pidsForSocketInodes walks /proc ONCE and returns the subset of the requested
+// inodes that map to a readable /proc/<pid>/fd owner, plus whether any
+// permission error was seen while walking (so the caller can classify
+// unresolved inodes as foreign-owned). Batch form of pidForSocketInode.
+func pidsForSocketInodes(wantInodes map[int]string) (map[string]int, bool, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, false, fmt.Errorf("loopbackPortOwnersSnapshot: read /proc: %w", err)
+	}
+	want := map[string]struct{}{}
+	for _, inode := range wantInodes {
+		want["socket:["+inode+"]"] = struct{}{}
+	}
+	found := map[string]int{}
+	var sawPermissionError bool
+	for _, entry := range entries {
+		if len(found) == len(want) {
+			break
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		fds, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "fd"))
+		if err != nil {
+			if os.IsPermission(err) {
+				sawPermissionError = true
+			}
+			continue
+		}
+		for _, fd := range fds {
+			target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", fd.Name()))
+			if err != nil {
+				if os.IsPermission(err) {
+					sawPermissionError = true
+				}
+				continue
+			}
+			if _, ok := want[target]; ok {
+				// target is "socket:[<inode>]"; strip back to the bare inode key.
+				inode := strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]")
+				if _, already := found[inode]; !already {
+					found[inode] = pid
+				}
+			}
+		}
+	}
+	return found, sawPermissionError, nil
+}
+
 func loopbackTCPListenInode(port int) (string, bool, error) {
 	// Liveness is tied to the IPv4 127.0.0.1 listener ONLY: this repo writes
 	// client URLs as http://127.0.0.1:<port> and the proxy bind path uses

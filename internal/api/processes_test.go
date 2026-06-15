@@ -58,3 +58,77 @@ func TestNetstatLinePIDForLoopbackPort_DoesNotMatchNonLoopback(t *testing.T) {
 		t.Fatalf("expected no match for non-loopback, got pid %d", pid)
 	}
 }
+
+// TestNetstatLineLoopbackPortPID_BlobToMap drives the SHARED parser behind
+// LoopbackPortOwnersSnapshot's Windows path over a representative `netstat -ano`
+// blob and asserts only the IPv4-loopback LISTENING rows land in the
+// port -> pid map. ESTABLISHED rows, non-loopback (0.0.0.0 / LAN) rows, the
+// IPv6 [::1] loopback form, UDP rows, the header lines, and a zero-PID row are
+// all excluded — exactly the gate per-port loopbackPortOwnerPID applies. The
+// blob is parsed in-process; no real netstat is spawned. (This mirrors the
+// line loop inside loopbackPortOwnersSnapshot on Windows so the cross-platform
+// test still covers the Windows parsing contract.)
+func TestNetstatLineLoopbackPortPID_BlobToMap(t *testing.T) {
+	blob := `
+Active Connections
+
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    127.0.0.1:9121         0.0.0.0:0              LISTENING       1234
+  TCP    127.0.0.1:9123         0.0.0.0:0              LISTENING       5678
+  TCP    127.0.0.1:9200         127.0.0.1:54321       ESTABLISHED     9999
+  TCP    0.0.0.0:9300           0.0.0.0:0              LISTENING       4242
+  TCP    192.168.1.10:9400      0.0.0.0:0              LISTENING       4343
+  TCP    [::1]:9500             [::]:0                 LISTENING       4444
+  TCP    127.0.0.1:9600         0.0.0.0:0              LISTENING       0
+  UDP    127.0.0.1:9700         *:*                                    4545
+  TCP    127.0.0.1:91210        0.0.0.0:0              LISTENING       7777
+`
+	owners := map[int]int{}
+	for line := range strings.SplitSeq(blob, "\n") {
+		if port, pid, ok := netstatLineLoopbackPortPID(line); ok {
+			if _, seen := owners[port]; !seen {
+				owners[port] = pid
+			}
+		}
+	}
+
+	want := map[int]int{
+		9121:  1234, // v4 loopback LISTENING
+		9123:  5678, // v4 loopback LISTENING
+		91210: 7777, // a different port that merely shares a prefix with 9121
+	}
+	if len(owners) != len(want) {
+		t.Fatalf("map has %d entries, want %d: %v", len(owners), len(want), owners)
+	}
+	for port, wantPID := range want {
+		if got, ok := owners[port]; !ok || got != wantPID {
+			t.Fatalf("owners[%d] = (%d, %v), want (%d, true)", port, got, ok, wantPID)
+		}
+	}
+	// Spot-check the explicit exclusions so a future parser regression that
+	// admits any of them fails here loudly.
+	for _, excluded := range []int{9200, 9300, 9400, 9500, 9600, 9700} {
+		if _, ok := owners[excluded]; ok {
+			t.Fatalf("port %d must be excluded but is present: %v", excluded, owners)
+		}
+	}
+}
+
+// TestNetstatLineLoopbackPortPID_FirstRowWins asserts that when two LISTENING
+// rows report the same loopback port (netstat can surface duplicates), the
+// FIRST row's PID wins — matching loopbackPortOwnerPID, which returns the first
+// matching line, and matching the snapshot builder's first-write-wins guard.
+func TestNetstatLineLoopbackPortPID_FirstRowWins(t *testing.T) {
+	blob := "  TCP    127.0.0.1:9121  0.0.0.0:0  LISTENING  1111\n  TCP    127.0.0.1:9121  0.0.0.0:0  LISTENING  2222\n"
+	owners := map[int]int{}
+	for line := range strings.SplitSeq(blob, "\n") {
+		if port, pid, ok := netstatLineLoopbackPortPID(line); ok {
+			if _, seen := owners[port]; !seen {
+				owners[port] = pid
+			}
+		}
+	}
+	if owners[9121] != 1111 {
+		t.Fatalf("owners[9121] = %d, want first-row 1111", owners[9121])
+	}
+}

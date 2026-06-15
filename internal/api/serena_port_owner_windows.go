@@ -56,6 +56,37 @@ func loopbackPortOwnerPID(port int) (int, bool, error) {
 	return 0, false, nil
 }
 
+// loopbackPortOwnersSnapshot runs `netstat -ano` ONCE and maps every IPv4
+// loopback LISTENING port to its owning PID. This is the batch form of
+// loopbackPortOwnerPID: a status refresh that resolves N daemons takes ONE
+// netstat spawn here instead of N per-port spawns. The exact same per-line
+// gate is applied via the shared netstatLineLoopbackPortPID parser, so a port
+// present in this map resolves identically to a per-port loopbackPortOwnerPID
+// call (LISTENING + exact 127.0.0.1:<port> + non-zero PID). A port ABSENT from
+// the map is the snapshot equivalent of loopbackPortOwnerPID returning
+// (0, false, nil) — nothing LISTENING owns it.
+//
+// If two LISTENING rows report the same loopback port (should not happen for a
+// single bound socket, but netstat can surface duplicates), the FIRST row
+// wins — matching loopbackPortOwnerPID, which returns the first matching line.
+func loopbackPortOwnersSnapshot() (map[int]int, error) {
+	cmd := exec.Command("netstat", "-ano")
+	process.NoConsole(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("loopbackPortOwnersSnapshot: netstat -ano failed: %w", err)
+	}
+	owners := map[int]int{}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if p, pid, ok := netstatLineLoopbackPortPID(line); ok {
+			if _, seen := owners[p]; !seen {
+				owners[p] = pid
+			}
+		}
+	}
+	return owners, nil
+}
+
 // guiImageForPID returns the image basename of a process. It is the second
 // half of the OS-level identity proof: after loopbackPortOwnerPID confirms
 // the recorded PID owns the loopback socket, this confirms that PID's image

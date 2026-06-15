@@ -248,22 +248,55 @@ func splitCSVLine(line string) []string {
 	return out
 }
 
-// netstatLinePIDForLoopbackPort extracts the PID from a single `netstat -ano`
-// line only when the line represents a LISTENING socket on exactly
-// 127.0.0.1:<port>. Returns (pid, true) on a strict match.
-func netstatLinePIDForLoopbackPort(line string, port int) (int, bool) {
-	if !strings.Contains(line, "LISTENING") || port <= 0 {
-		return 0, false
+// netstatLineLoopbackPortPID parses a single `netstat -ano` line and, when it
+// represents a LISTENING socket on the IPv4 loopback 127.0.0.1:<port>, returns
+// that (port, pid). It is the SHARED low-level parser behind both the
+// single-port matcher (netstatLinePIDForLoopbackPort) and the all-ports
+// snapshot (LoopbackPortOwnersSnapshot) so the LISTENING-state + exact
+// v4-loopback-address + non-zero-PID gate is defined exactly ONCE.
+//
+// Strictness preserved verbatim from the old single-port matcher:
+//   - line must contain "LISTENING" (state gate);
+//   - fields[1] must be exactly the v4 loopback form 127.0.0.1:<port> — the
+//     "127.0.0.1:" prefix is required, so 0.0.0.0:<port> and the IPv6
+//     [::1]:<port> form never match;
+//   - the trailing field must parse to a non-zero PID.
+//
+// Returns (port, pid, true) only when all three hold.
+func netstatLineLoopbackPortPID(line string) (int, int, bool) {
+	if !strings.Contains(line, "LISTENING") {
+		return 0, 0, false
 	}
 	fields := strings.Fields(line)
 	if len(fields) < 2 {
-		return 0, false
+		return 0, 0, false
 	}
-	if fields[1] != fmt.Sprintf("127.0.0.1:%d", port) {
-		return 0, false
+	const loopbackPrefix = "127.0.0.1:"
+	portStr, ok := strings.CutPrefix(fields[1], loopbackPrefix)
+	if !ok {
+		return 0, 0, false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 {
+		return 0, 0, false
 	}
 	pid, err := strconv.Atoi(fields[len(fields)-1])
 	if err != nil || pid == 0 {
+		return 0, 0, false
+	}
+	return port, pid, true
+}
+
+// netstatLinePIDForLoopbackPort extracts the PID from a single `netstat -ano`
+// line only when the line represents a LISTENING socket on exactly
+// 127.0.0.1:<port>. Returns (pid, true) on a strict match. Thin filter over
+// the shared netstatLineLoopbackPortPID parser.
+func netstatLinePIDForLoopbackPort(line string, port int) (int, bool) {
+	if port <= 0 {
+		return 0, false
+	}
+	gotPort, pid, ok := netstatLineLoopbackPortPID(line)
+	if !ok || gotPort != port {
 		return 0, false
 	}
 	return pid, true
