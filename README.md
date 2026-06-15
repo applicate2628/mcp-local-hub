@@ -246,125 +246,24 @@ assistant installed on the workstation.
 
 ## Architecture highlights
 
-### PATH-based install model
+- **PATH-based install model** — scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path; `mcphub setup` puts the binary there and registers it on user PATH.
+- **First-run onboarding** — `mcphub setup --trusted-root` blesses LSP trusted roots up front; the GUI shows a dismissable welcome banner until the first server is installed.
+- **go:embed manifests** — all 10 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory.
+- **Dual-entry pattern** — embedded Go servers expose a `NewCommand()` factory imported by both the standalone binary and the hub subcommand; one code path, two shipping shapes.
+- **Native Go stdio-host with child-exit detection** — one subprocess per daemon, multiplexed across concurrent HTTP clients, with child-exit detection feeding Task Scheduler's restart policy.
 
-Scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path. `mcphub setup` puts the binary there and registers the directory on user PATH (Windows: `HKCU\Environment\Path` + `WM_SETTINGCHANGE` broadcast; Linux/macOS: prints shell-rc line). Moving or rebuilding the binary later only requires re-running `mcphub setup` — scheduler tasks keep pointing at the canonical path and automatically use the new binary.
-
-### First-run onboarding
-
-A fresh install lands on an empty GUI. Two affordances smooth the first run: pass `mcphub setup --trusted-root <abs-path>` (repeatable) to bless your workspaces as LSP trusted roots up front — it writes the same `lsp-trusted-roots.json` store the GUI **Settings → Trusted Roots** panel writes, via the same hardened idempotent append, so the LSP router auto-registers language servers under those paths without a manual GUI bless. Independently, the GUI shows a dismissable **"Welcome to mcp-local-hub"** banner with a one-click link to the Add-server flow whenever no MCP servers are installed yet (it hides automatically once the first server appears).
-
-### go:embed manifests
-
-All 10 server manifests are baked into the binary via `//go:embed */manifest.yaml`. Daemons load their config from the embedded FS, not from disk, so `~/.local/bin/mcphub.exe` works without a sibling `servers/` directory.
-
-### Dual-entry pattern
-
-Embedded Go servers (godbolt, lldb-bridge, perftools) expose a `NewCommand() *cobra.Command` factory that's imported from two places — `cmd/<name>/main.go` (standalone binary) and `internal/cli/root.go` (hub subcommand). Same code path, zero duplication, two shipping shapes.
-
-### Native Go stdio-host with child-exit detection
-
-Stdio-bridge daemons run external stdio servers (npx/uvx/node/python) via a Go host (`internal/daemon/host.go`) that:
-
-1. Spawns one subprocess per daemon (not per HTTP client)
-2. Multiplexes concurrent HTTP clients by rewriting JSON-RPC `id` to an internal atomic counter, then routes responses back via a pending-request map
-3. Caches the `initialize` response — first client's result is replayed for all subsequent clients with their own `id` substituted
-4. Broadcasts server-initiated notifications (no `id`) to all active SSE subscribers via GET /mcp
-5. **Detects child-process exit** via a dedicated `cmd.Wait()` goroutine; propagates the signal up so the daemon exits non-zero and Task Scheduler's `RestartOnFailure` (3 retries, 1min spacing) auto-recovers from npx/uvx children that die mid-session
+See [docs/architecture-highlights.md](docs/architecture-highlights.md) for the full prose on each highlight, and [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for supervisor / lifecycle depth.
 
 ## Supervisor architecture (v0.5.0)
 
-### Overview
-
-v0.5.0 replaces the v0.4.x model of N-scheduled-tasks-per-daemon with a single
+v0.5.0 replaces the v0.4.x N-scheduled-tasks-per-daemon model with a single
 long-lived `mcphub supervise` parent process per user that owns every MCP
-daemon as a child process under an OS-appropriate lifecycle primitive (Windows
-Job Object, Linux `PR_SET_PDEATHSIG` or systemd user service, macOS process
-group + kqueue + LaunchAgent). The supervisor observes child exits in real
-time, applies a persisted restart-policy state machine with sliding 30-min
-failure windows, and exposes a local-only owner-bound IPC for control
-commands. The remaining Task Scheduler / autostart entry is the per-user
-autostart shim that re-starts the supervisor on logon.
+daemon under an OS-appropriate lifecycle primitive, observes child exits in
+real time, and applies a persisted restart-policy state machine.
 
-Release scope: **Windows GA**, **Linux beta**, **macOS preview**. POSIX has
-no v0.4.x to migrate from (v0.4.x shipped Windows-only) — Linux beta starts
-fresh, skipping the migration journal entirely. macOS preview is build-only
-Go cross-compile, no automated tests. v0.5.x stabilizes Linux to GA + macOS
-CI lane; v0.6 promotes macOS only if a real containment primitive becomes
-available.
-
-### New commands
-
-| Command | What it does |
-|---|---|
-| `mcphub supervise` | The long-lived supervisor process. Idempotent via `supervisor.lock`. Hosts FIFO event loop, reconcile driver, IPC listener, child-exit reaper. |
-| `mcphub strict-mode enable` / `disable` | Canonical mutation of `supervisor-intent.strict_mode`. Universal lock order: `migration.lock` BEFORE `--once.lock`. Two-resource atomic write (intent file + autostart shim args) with revert-on-failure. |
-| `mcphub strict-mode --recover` | Reconciles after a `STRICT_MODE_REVERT_FAILED` (exit 10) breadcrumb. Prompts operator to drive both intent + shim either to the `intended` value or to `actual_intent_state`. |
-| `mcphub autostart enable` / `disable` / `status` | Per-OS autostart shim. Windows: Task Scheduler `LogonTrigger`. Linux managed: systemd user service. Linux unmanaged + macOS: per-OS user-space shim. |
-| `mcphub install --upgrade` | Cold-restart upgrade flow. Rename-aside binary replacement (Windows `MoveFileExW`) + atomic rename (POSIX). Issues IPC `quiesce-timers` then `exit{graceful}`; force-kills supervisor with `taskkill /F /T /PID` on timeout; explicitly starts new supervisor. |
-| `mcphub install --rollback-to-legacy` | Reverses migration. Translates supervisor-state quarantined entries to `daemon-intent.json` `chronic-failure`; uninstalls supervisor shim; re-registers every v0.4.x `legacy-tasks/<task>.xml` via `schtasks /Create /XML /F`; runs each task and waits up to 60s for the expected port to bind. Unbound ports captured in `rollback-warnings.json`; rollback exits 0 with warnings. |
-
-### State files
-
-All under `<state-dir>` (per-user `%LOCALAPPDATA%\mcp-local-hub\` on Windows;
-`$XDG_STATE_HOME/mcp-local-hub` or `~/.local/state/mcp-local-hub` on POSIX):
-
-```text
-<state-dir>/
-  supervisor-intent.json              # NEW: daemon descriptors + maintenance timers + strict_mode (canonical)
-  supervisor-state.json               # NEW: per-daemon runtime state, restart_history (30-min sliding window), transient_pids, maintenance_fired_at
-  supervisor-events.log               # NEW: JSONL audit trail (envelope: schema_version, ts, severity, source, event, task_name, body); 16 KB per-entry cap; 10 MB rotation → .log.1
-  supervisor.lock                     # NEW: supervisor singleton lock + sidecar with {pid, start_time}
-  migration-journal-<UTC-ts>/         # NEW: per-install migration journal (retain 5 newest after `committed`)
-  daemon-intent.json                  # preserved exactly (byte-symmetric for rollback)
-  managed-entries.json                # preserved exactly
-  watchdog-state.json                 # preserved unchanged (v0.4.x watchdog diagnostics)
-```
-
-### Migration from v0.4.x
-
-`mcphub install --upgrade` runs a two-phase journaled migration on Windows
-v0.4.x hosts:
-
-1. Enumerates every `mcp-local-hub-*` Task Scheduler task via
-   `scheduler.EnumerateAllMcphubTasks()` (regardless of Run As).
-2. Renders a canonical-template-snapshot via a v0.4.x-pinned template
-   renderer (`internal/migration/v04x_template_defaults.go`) and classifies
-   each task's XML as default-match, known-deviation, or hard-deviation.
-   Hard deviations abort unless `--discard-scheduler-customizations` is set.
-3. Resolves each daemon's PID via `lookupProcessIdentity(port)` (PowerShell
-   `Get-CimInstance Win32_Process` with `wmic.exe` fallback for pre-24H2
-   hosts), then 4-gate ownership check (image basename, CommandLine, start
-   time pre-migration.lock, ExecutablePath under install-dir).
-4. `taskkill /F /T /PID` each ownership-verified daemon, drops the
-   `pre-os-mutating` marker on first kill.
-5. Unregisters each legacy task, installs the supervisor autostart shim,
-   explicitly starts the supervisor, waits for reconcile-ready via IPC
-   `status` within 30s. On timeout: auto-rollback.
-
-Migration is journaled at every state transition (`prepared` →
-`pre-os-mutating` → `os-mutating-complete` → `committed`). The journal
-retains forward-progress for crash-resume and rollback evidence.
-
-`mcphub install --rollback-to-legacy` reverses migration from any
-`committed` or `pre-os-mutating` marker by re-registering preserved
-`legacy-tasks/<task>.xml` and translating supervisor quarantined entries
-back to `daemon-intent.json` `chronic-failure`. Token-mismatch pre-flight
-catches "rollback caller token is less privileged than supervisor process"
-early (exit 13).
-
-### Per-OS behavior matrix
-
-| OS / mode | Job Object support | Restart policy | Autostart backend | Cold-start reaper |
-|---|---|---|---|---|
-| **Windows** | Yes — `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` + `PROC_THREAD_ATTRIBUTE_JOB_LIST` at create-time | Supervisor in-process state machine, persisted to `supervisor-state.json` | Task Scheduler `LogonTrigger` (one entry: the autostart shim) | Not needed (Job Object reaps every child on supervisor exit) |
-| **Linux managed** | n/a (cgroup-based via systemd) | Supervisor in-process + systemd `Restart=on-failure` for supervisor itself | systemd user service with `KillMode=control-group` | Not needed (cgroup termination is atomic) |
-| **Linux unmanaged** | n/a | Supervisor in-process; `PR_SET_PDEATHSIG` direct-child containment (double-fork OUT OF SCOPE) | None (manual `mcphub supervise &`) | Yes — supervisor sweeps stale `mcphub.exe daemon` children on start, 2-3s settling between reaps for TCP TIME_WAIT |
-| **macOS managed** | n/a | Supervisor in-process + LaunchAgent `KeepAlive` for supervisor itself | LaunchAgent (restart-after-exit only; NOT containment) | Yes — same as Linux unmanaged |
-| **macOS unmanaged** | n/a | Supervisor in-process; process group + kqueue `EVFILT_PROC NOTE_EXIT` observation (NOT containment) | None | Yes — same as Linux unmanaged |
-
-Full design + invariants live in
-[`docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md`](docs/superpowers/specs/2026-05-16-v0.5.0-supervisor-architecture.md).
+Full details — overview, new commands, state files, migration from v0.4.x, and
+the per-OS behavior matrix — are in
+[docs/supervisor-architecture.md](docs/supervisor-architecture.md).
 
 ## Current status
 
