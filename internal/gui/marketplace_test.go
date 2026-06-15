@@ -27,6 +27,21 @@ func (f *fakeMarketplaceLister) MarketplaceEntries(_ context.Context) ([]api.Mar
 	return f.entries, f.err
 }
 
+// fakeMarketplaceRefresher is a Server-local test double for the
+// marketplaceRefresher interface backing POST /api/marketplace/refresh.
+// It records the call and returns the canned entries/err so the
+// force-refresh handler is exercised without a live network fetch.
+type fakeMarketplaceRefresher struct {
+	called  bool
+	entries []api.MarketplaceEntry
+	err     error
+}
+
+func (f *fakeMarketplaceRefresher) RefreshMarketplaceEntries(_ context.Context) ([]api.MarketplaceEntry, error) {
+	f.called = true
+	return f.entries, f.err
+}
+
 // newMarketplaceTestServer wires only the marketplaceLister subset. Unlike
 // the catalog handler (registered inside the shared registerManifestRoutes),
 // registerMarketplaceRoutes touches ONLY s.marketplaceLister, so no other
@@ -35,6 +50,26 @@ func newMarketplaceTestServer(m *fakeMarketplaceLister) *Server {
 	s := &Server{mux: http.NewServeMux(), marketplaceLister: m}
 	registerMarketplaceRoutes(s)
 	return s
+}
+
+// newMarketplaceRefreshTestServer wires only the marketplaceRefresher subset.
+// registerMarketplaceRoutes also wires GET /api/marketplace (which reads
+// s.marketplaceLister), so a fake lister is supplied to avoid a nil-deref —
+// but the POST /api/marketplace/refresh handler under test touches ONLY
+// s.marketplaceRefresher.
+func newMarketplaceRefreshTestServer(r *fakeMarketplaceRefresher) *Server {
+	s := &Server{mux: http.NewServeMux(), marketplaceLister: &fakeMarketplaceLister{}, marketplaceRefresher: r}
+	registerMarketplaceRoutes(s)
+	return s
+}
+
+func postMarketplaceRefresh(t *testing.T, s *Server, origin string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/marketplace/refresh", nil)
+	req.Header.Set("Sec-Fetch-Site", origin)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	return rec
 }
 
 func getMarketplace(t *testing.T, s *Server, origin string) *httptest.ResponseRecorder {
@@ -159,6 +194,108 @@ func TestMarketplaceHandler_RejectsNonGET(t *testing.T) {
 func TestMarketplaceHandler_RejectsCrossOrigin(t *testing.T) {
 	s := newMarketplaceTestServer(&fakeMarketplaceLister{})
 	rec := getMarketplace(t, s, "cross-site")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestMarketplaceRefreshHandler_InvokesForceRefreshAndReturnsEntries(t *testing.T) {
+	r := &fakeMarketplaceRefresher{entries: []api.MarketplaceEntry{
+		{
+			ID:         "filesystem",
+			Name:       "Filesystem",
+			Summary:    "Read/write files within allowed roots.",
+			Categories: []string{"files", "core"},
+			Homepage:   "https://example.com/filesystem",
+			// Install-only fields MUST NOT leak into the refreshed browse DTO.
+			Transport: "stdio",
+			Command:   "npx",
+			Args:      []string{"-y", "@modelcontextprotocol/server-filesystem"},
+		},
+		{ID: "git", Name: "Git", Summary: "Git repository tooling.", Transport: "stdio", Command: "uvx"},
+	}}
+	s := newMarketplaceRefreshTestServer(r)
+	rec := postMarketplaceRefresh(t, s, "same-origin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	if !r.called {
+		t.Error("RefreshMarketplaceEntries (force-refresh path) was not invoked")
+	}
+	// Identical body shape to GET /api/marketplace.
+	var body marketplaceListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.Entries) != 2 {
+		t.Fatalf("entries len = %d, want 2: %+v", len(body.Entries), body.Entries)
+	}
+	e0 := body.Entries[0]
+	if e0.ID != "filesystem" || e0.Name != "Filesystem" || e0.Summary != "Read/write files within allowed roots." {
+		t.Errorf("entry[0] = %+v", e0)
+	}
+	if len(e0.Categories) != 2 || e0.Categories[0] != "files" {
+		t.Errorf("entry[0].Categories = %v", e0.Categories)
+	}
+	if e0.Homepage != "https://example.com/filesystem" {
+		t.Errorf("entry[0].Homepage = %q", e0.Homepage)
+	}
+	// Install-only fields MUST NOT appear in the refreshed wire shape.
+	if strings.Contains(rec.Body.String(), "transport") ||
+		strings.Contains(rec.Body.String(), "command") ||
+		strings.Contains(rec.Body.String(), "server-filesystem") {
+		t.Errorf("refresh DTO leaked install fields: %q", rec.Body.String())
+	}
+}
+
+func TestMarketplaceRefreshHandler_NilCategoriesNormalizedToArray(t *testing.T) {
+	r := &fakeMarketplaceRefresher{entries: []api.MarketplaceEntry{
+		{ID: "time", Name: "Time", Summary: "Clock + timezone helpers.", Categories: nil},
+	}}
+	s := newMarketplaceRefreshTestServer(r)
+	rec := postMarketplaceRefresh(t, s, "same-origin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"categories":[]`) {
+		t.Errorf("nil categories must serialize as []: %q", rec.Body.String())
+	}
+}
+
+func TestMarketplaceRefreshHandler_RefreshError500(t *testing.T) {
+	// POST /api/marketplace/refresh is an explicit operator-triggered
+	// force-refresh; unlike the best-effort GET, a force-refresh failure
+	// is surfaced as an error so the operator knows the re-fetch did not
+	// happen (the cache was NOT updated).
+	r := &fakeMarketplaceRefresher{err: errors.New("fetch catalog: dial tcp: i/o timeout")}
+	s := newMarketplaceRefreshTestServer(r)
+	rec := postMarketplaceRefresh(t, s, "same-origin")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%q", rec.Code, rec.Body.String())
+	}
+	// The raw error MUST NOT leak into the body.
+	if strings.Contains(rec.Body.String(), "i/o timeout") {
+		t.Errorf("body leaks refresh error: %q", rec.Body.String())
+	}
+}
+
+func TestMarketplaceRefreshHandler_RejectsNonPOST(t *testing.T) {
+	s := newMarketplaceRefreshTestServer(&fakeMarketplaceRefresher{})
+	req := httptest.NewRequest(http.MethodGet, "/api/marketplace/refresh", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "POST" {
+		t.Errorf("Allow header = %q, want POST", got)
+	}
+}
+
+func TestMarketplaceRefreshHandler_RejectsCrossOrigin(t *testing.T) {
+	s := newMarketplaceRefreshTestServer(&fakeMarketplaceRefresher{})
+	rec := postMarketplaceRefresh(t, s, "cross-site")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}

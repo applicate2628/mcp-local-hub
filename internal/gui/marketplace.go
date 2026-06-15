@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -39,6 +40,31 @@ type realMarketplaceLister struct{}
 
 func (realMarketplaceLister) MarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, error) {
 	cat, _, err := api.LoadMarketplaceCatalog(ctx, defaultMarketplaceRegistryURL)
+	if err != nil {
+		return nil, err
+	}
+	return cat.Entries, nil
+}
+
+// marketplaceRefresher is the pin-point subset backing POST
+// /api/marketplace/refresh (roadmap §B). It triggers the SAME
+// force-refresh the CLI `mcphub marketplace refresh` runs — an
+// unconditional GET that bypasses the 24h TTL + ETag and rewrites the
+// cache — then returns the refreshed entries. The interface seam lets
+// marketplace_test.go exercise the handler without a live network
+// fetch, the same idiom as marketplaceLister.
+type marketplaceRefresher interface {
+	RefreshMarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, error)
+}
+
+// RefreshMarketplaceEntries reuses api.RefreshMarketplaceCatalog — the
+// exact force-refresh code path the CLI `refresh` subcommand calls
+// (internal/cli/marketplace.go newMarketplaceRefreshCmd →
+// api.RefreshMarketplaceCatalogWithClient). It is implemented on the
+// same realMarketplaceLister adapter so production wires one struct for
+// both the GET (cached) and POST (force-refresh) marketplace routes.
+func (realMarketplaceLister) RefreshMarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, error) {
+	cat, err := api.RefreshMarketplaceCatalog(ctx, defaultMarketplaceRegistryURL)
 	if err != nil {
 		return nil, err
 	}
@@ -96,21 +122,66 @@ func registerMarketplaceRoutes(s *Server) {
 			log.Printf("/api/marketplace: %v", err)
 			entries = nil
 		}
-		rows := make([]marketplaceEntry, 0, len(entries))
-		for _, e := range entries {
-			cats := e.Categories
-			if cats == nil {
-				cats = []string{}
-			}
-			rows = append(rows, marketplaceEntry{
-				ID:         e.ID,
-				Name:       e.Name,
-				Summary:    e.Summary,
-				Categories: cats,
-				Homepage:   e.Homepage,
-			})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(marketplaceListResponse{Entries: projectMarketplaceEntries(entries)})
+	}))
+
+	// POST /api/marketplace/refresh (roadmap §B) forces an unconditional
+	// re-fetch of the catalog (bypassing the 24h TTL + ETag, rewriting the
+	// cache) — the SAME force-refresh the CLI `mcphub marketplace refresh`
+	// runs — then returns the refreshed entries in the SAME body shape as
+	// GET /api/marketplace. It is a mutating route (it rewrites the cache),
+	// so it carries the same requireSameOrigin guard as the other mutating
+	// /api/* routes and only accepts POST.
+	//
+	// Unlike the best-effort GET (which degrades to an empty array on a
+	// fetch miss), this route is an EXPLICIT operator-triggered re-fetch:
+	// a refresh failure is surfaced as 500 so the operator knows the cache
+	// was NOT updated, rather than silently serving an empty list.
+	s.mux.HandleFunc("/api/marketplace/refresh", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Bound the upstream fetch so a slow/hung registry can't stall the
+		// request goroutine indefinitely.
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		entries, err := s.marketplaceRefresher.RefreshMarketplaceEntries(ctx)
+		if err != nil {
+			// Log the raw error server-side; return a sanitized envelope so
+			// the upstream fetch/network detail does not leak into the body.
+			log.Printf("/api/marketplace/refresh: %v", err)
+			writeAPIError(w, errors.New("marketplace refresh failed"), http.StatusInternalServerError, "MARKETPLACE_REFRESH_FAILED")
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(marketplaceListResponse{Entries: rows})
+		_ = json.NewEncoder(w).Encode(marketplaceListResponse{Entries: projectMarketplaceEntries(entries)})
 	}))
+}
+
+// projectMarketplaceEntries maps api.MarketplaceEntry values onto the
+// read-only browse wire shape shared by GET /api/marketplace and POST
+// /api/marketplace/refresh. It projects only {id, name, summary,
+// categories, homepage} — the install/transport/command fields stay
+// CLI-only — and normalizes a nil Categories to [] so the JSON is never
+// null (the frontend maps without a guard). The returned slice is always
+// non-nil so an empty catalog serializes as [], not null.
+func projectMarketplaceEntries(entries []api.MarketplaceEntry) []marketplaceEntry {
+	rows := make([]marketplaceEntry, 0, len(entries))
+	for _, e := range entries {
+		cats := e.Categories
+		if cats == nil {
+			cats = []string{}
+		}
+		rows = append(rows, marketplaceEntry{
+			ID:         e.ID,
+			Name:       e.Name,
+			Summary:    e.Summary,
+			Categories: cats,
+			Homepage:   e.Homepage,
+		})
+	}
+	return rows
 }

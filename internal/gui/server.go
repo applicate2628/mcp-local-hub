@@ -463,36 +463,37 @@ type Server struct {
 	// caching machinery. Other handlers still use the per-request
 	// api.NewAPI() pattern (out of scope for this task; can adopt later
 	// if their workloads benefit).
-	api               *api.API
-	onActivateWindow  func() error
-	scanner           scanner
-	status            statusProvider
-	health            healthBackend
-	migrator          migrator
-	demigrater        demigrater
-	dismisser         dismisser
-	manifestCreator   manifestCreator
-	manifestValidator manifestValidator
-	manifestGetter    manifestGetter
-	manifestEditor    manifestEditor
-	manifestLister    manifestLister
-	manifestDeleter   manifestDeleter
-	catalogLister     catalogLister
-	marketplaceLister marketplaceLister
-	installer         installer
-	uninstaller       uninstaller
-	installBulk       installBulkAPI
-	restart           restarter
-	stop              stopper
-	logs              logsProvider
-	extractor         extractor
-	events            *Broadcaster
-	secrets           secretsAPI
-	settings          settingsAPI
-	backups           backupsAPI
-	cleanup           cleanupAPI
-	clientInit        clientInitializer
-	lspRegistrar      lspRegistrar
+	api                  *api.API
+	onActivateWindow     func() error
+	scanner              scanner
+	status               statusProvider
+	health               healthBackend
+	migrator             migrator
+	demigrater           demigrater
+	dismisser            dismisser
+	manifestCreator      manifestCreator
+	manifestValidator    manifestValidator
+	manifestGetter       manifestGetter
+	manifestEditor       manifestEditor
+	manifestLister       manifestLister
+	manifestDeleter      manifestDeleter
+	catalogLister        catalogLister
+	marketplaceLister    marketplaceLister
+	marketplaceRefresher marketplaceRefresher
+	installer            installer
+	uninstaller          uninstaller
+	installBulk          installBulkAPI
+	restart              restarter
+	stop                 stopper
+	logs                 logsProvider
+	extractor            extractor
+	events               *Broadcaster
+	secrets              secretsAPI
+	settings             settingsAPI
+	backups              backupsAPI
+	cleanup              cleanupAPI
+	clientInit           clientInitializer
+	lspRegistrar         lspRegistrar
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
@@ -689,6 +690,7 @@ func NewServer(cfg Config) *Server {
 	s.manifestDeleter = realManifestDeleter{}
 	s.catalogLister = realCatalogLister{}
 	s.marketplaceLister = realMarketplaceLister{}
+	s.marketplaceRefresher = realMarketplaceLister{}
 	s.installer = realInstaller{}
 	s.uninstaller = realUninstaller{}
 	s.installBulk = realInstallBulkAPI{}
