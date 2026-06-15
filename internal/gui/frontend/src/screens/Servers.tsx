@@ -84,6 +84,23 @@ type DirtyMap = Map<string, Map<string, Direction>>;
 type Outcome = "succeeded" | "failed" | "gated";
 type OutcomeMap = Map<string, Map<string, Outcome>>;
 
+// cellInteractive is the SINGLE source of truth for whether a matrix data
+// cell exposes a live, toggleable checkbox. CellView's `disabled` derivation
+// and the whole-column header toggle both consume it so the two can never
+// drift: a cell the header toggle would flip must be exactly a cell the
+// operator could flip by clicking its checkbox.
+//
+// Interactive routing states are "via-hub", "direct", and "available"
+// (see perClientRouting doc in lib/routing.ts). Everything else
+// ("not-installed", "unsupported", "config-error", "config-error-symlink",
+// and an undefined/absent client key → treated as "not-installed") is a
+// disabled, non-toggleable cell. The `applying` guard is folded in so an
+// in-flight Apply freezes both the per-cell checkbox AND the column toggle.
+function cellInteractive(routing: Routing, applying: boolean): boolean {
+  if (applying) return false;
+  return routing === "via-hub" || routing === "direct" || routing === "available";
+}
+
 export function ServersScreen() {
   const [servers, setServers] = useState<ServerRow[] | null>(null);
   const [statusByServer, setStatusByServer] = useState<Record<string, { state: string; port: number | null }>>({});
@@ -604,6 +621,47 @@ export function ServersScreen() {
   );
   const otherServers = servers.filter((s) => !s.manifested && !dirty.has(s.name));
 
+  // effectiveChecked computes a cell's CURRENT visual state: a pending
+  // dirty edit overrides the authoritative scan baseline (a queued
+  // "migrate" means the operator already checked it; "demigrate" means
+  // they unchecked it). Used by both the per-cell visual sync and the
+  // column-toggle's all-checked computation so the header toggle reflects
+  // unsaved edits, not just the last scan.
+  const effectiveChecked = (server: ServerRow, client: string): boolean => {
+    const pending = dirty.get(server.name)?.get(client);
+    if (pending) return pending === "migrate";
+    return (server.routing[client] ?? "not-installed") === "via-hub";
+  };
+
+  // Whole-column toggle (Feature 2): flip every applicable (toggleable,
+  // non-disabled) cell in one client's column at once. Computes the
+  // column's effective state across only the interactive cells — if ALL
+  // are currently checked, set them all UNchecked; otherwise set them all
+  // checked. Each flip routes through the SAME per-cell onToggle path
+  // (toggleCell) so migrate/demigrate semantics + the Apply queue stay
+  // identical to manual per-cell toggles — no separate apply path.
+  const columnInteractiveServers = (client: string): ServerRow[] =>
+    manifestedServers.filter((s) =>
+      cellInteractive(s.routing[client] ?? "not-installed", applying),
+    );
+  const toggleColumnCells = (client: string) => {
+    const targets = columnInteractiveServers(client);
+    if (targets.length === 0) return; // no-op: nothing toggleable in column
+    const allChecked = targets.every((s) => effectiveChecked(s, client));
+    const next = !allChecked;
+    for (const s of targets) {
+      // initialChecked is the authoritative scan baseline the dirty map
+      // keys direction off of — pass it (NOT the effective state) so
+      // toggleCell prunes/creates the dirty entry against the right axis.
+      const initialChecked = (s.routing[client] ?? "not-installed") === "via-hub";
+      // Only fire when the cell's effective state actually changes, so an
+      // already-correct cell isn't churned through the dirty map.
+      if (effectiveChecked(s, client) !== next) {
+        toggleCell(s.name, client, next, initialChecked);
+      }
+    }
+  };
+
   // v0.5.x Task 4.3 — LSP rows are always 9 (one per language). When
   // a workspace is selected, the helper scopes each row's task_name +
   // presence to that workspace's entries; otherwise every workspace's
@@ -718,10 +776,39 @@ export function ServersScreen() {
               const presence = clientConfigPresence[c];
               const canInit = presence === "missing-init-possible";
               const busy = initBusy[c] === true;
+              // Whole-column toggle (Feature 2): the client-NAME span doubles
+              // as a clickable enable-all / disable-all control for that
+              // column. It is only interactive when the column has at least
+              // one toggleable cell; otherwise it renders as plain inert
+              // text (no pointer, no role) so an all-disabled column shows no
+              // misleading affordance. Kept as a <span> (NOT a <button>) so
+              // the existing `.matrix-col-header > span` header assertions
+              // and the client-name text content stay intact; the Initialize
+              // button remains a separate sibling control.
+              const colToggleable = columnInteractiveServers(c).length > 0;
               return (
                 <th key={c}>
                   <div class="matrix-col-header">
-                    <span>{c}</span>
+                    <span
+                      class={colToggleable ? "matrix-col-toggle" : undefined}
+                      data-testid={colToggleable ? `matrix-col-toggle-${c}` : undefined}
+                      role={colToggleable ? "button" : undefined}
+                      tabIndex={colToggleable ? 0 : undefined}
+                      title={colToggleable ? `Toggle all ${c} cells` : undefined}
+                      onClick={colToggleable ? () => toggleColumnCells(c) : undefined}
+                      onKeyDown={
+                        colToggleable
+                          ? (ev: KeyboardEvent) => {
+                              if (ev.key === "Enter" || ev.key === " ") {
+                                ev.preventDefault();
+                                toggleColumnCells(c);
+                              }
+                            }
+                          : undefined
+                      }
+                    >
+                      {c}
+                    </span>
                     {canInit && (
                       <button
                         type="button"
@@ -750,6 +837,7 @@ export function ServersScreen() {
               clients={clientColumns}
               status={statusByServer[server.name]}
               outcomes={outcomes.get(server.name)}
+              pending={dirty.get(server.name)}
               applyGen={applyGen}
               onToggle={toggleCell}
               applying={applying}
@@ -824,11 +912,16 @@ function ServerRowView(props: {
   clients: readonly string[];
   status?: { state: string; port: number | null };
   outcomes?: Map<string, Outcome>;
+  // Per-server dirty direction map (client → "migrate" | "demigrate").
+  // Threaded so each CellView's visual `checked` can reflect a pending
+  // dirty edit — necessary for the whole-column toggle to visually flip
+  // cells it queues, not just the cell the operator clicked directly.
+  pending?: Map<string, Direction>;
   applyGen: number;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   applying: boolean;
 }) {
-  const { server, clients, status, outcomes, onToggle, applying } = props;
+  const { server, clients, status, outcomes, pending, onToggle, applying } = props;
   return (
     <tr>
       <td>
@@ -845,6 +938,7 @@ function ServerRowView(props: {
           server={server}
           client={client}
           lastOutcome={outcomes?.get(client)}
+          pendingDirection={pending?.get(client)}
           onToggle={onToggle}
           applying={applying}
         />
@@ -868,22 +962,36 @@ function CellView(props: {
   server: ServerRow;
   client: string;
   lastOutcome?: Outcome;
+  // Pending dirty direction for THIS cell (from the parent's dirty map).
+  // When present it overrides the scan baseline for the visual checkbox:
+  // "migrate" → checked, "demigrate" → unchecked. This lets the
+  // whole-column header toggle (which only mutates the parent dirty map)
+  // visually flip cells it queues, not merely the one the operator
+  // clicked directly. A direct per-cell click also flows through dirty,
+  // so the same path keeps the visual honest in every case.
+  pendingDirection?: Direction;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   applying: boolean;
 }) {
-  const { server, client, lastOutcome, onToggle, applying } = props;
+  const { server, client, lastOutcome, pendingDirection, onToggle, applying } = props;
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
   const initialChecked = routing === "via-hub";
-  const [checked, setChecked] = useState(initialChecked);
-  // Keep local `checked` in sync with the authoritative initialChecked
-  // when routing actually changes (a scan reload moving a cell from
-  // direct→via-hub, an external config change, etc.). Deps `[initialChecked]`
-  // means unrelated parent re-renders do not stomp an in-progress user edit.
+  // effectiveChecked folds a pending dirty edit over the scan baseline so a
+  // column toggle (or any out-of-band dirty mutation) is reflected visually.
+  const effectiveChecked = pendingDirection
+    ? pendingDirection === "migrate"
+    : initialChecked;
+  const [checked, setChecked] = useState(effectiveChecked);
+  // Keep local `checked` in sync with effectiveChecked. It changes when the
+  // authoritative scan moves the cell (direct→via-hub after a reload), OR
+  // when the parent dirty map flips this cell out-of-band (the whole-column
+  // toggle). Deps `[effectiveChecked]` means unrelated parent re-renders do
+  // not stomp the value, but a genuine baseline/dirty change does re-sync.
   useEffect(() => {
-    setChecked(initialChecked);
-  }, [initialChecked]);
+    setChecked(effectiveChecked);
+  }, [effectiveChecked]);
   // Disable when cell is meaningless:
   //  - "unsupported"   : this client cannot route this server via the hub
   //  - "not-installed" : this client's config file does not exist on disk
@@ -969,17 +1077,25 @@ function CellView(props: {
   const hasLegacyConflict = Boolean(server.legacyConflict?.[client]);
   return (
     <td class={retryPending ? "matrix-cell-retry-pending" : ""} data-retry-pending={retryPending ? "true" : undefined}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        title={cellTitle}
-        onChange={(ev) => {
-          const next = (ev.currentTarget as HTMLInputElement).checked;
-          setChecked(next);
-          onToggle(server.name, client, next, initialChecked);
-        }}
-      />
+      {/* Feature 1 — whole-cell click target: a <label> fills the cell so a
+          native label-click toggles the wrapped checkbox exactly once (no JS
+          double-fire). When the cell is disabled the label carries the
+          .disabled modifier (default cursor, no toggle — clicking a label
+          bound to a disabled control is a native no-op). The checkbox keeps
+          its existing onChange → onToggle path and title untouched. */}
+      <label class={`matrix-cell-label${disabled ? " disabled" : ""}`}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          title={cellTitle}
+          onChange={(ev) => {
+            const next = (ev.currentTarget as HTMLInputElement).checked;
+            setChecked(next);
+            onToggle(server.name, client, next, initialChecked);
+          }}
+        />
+      </label>
       {hasLegacyConflict && (
         <span
           class="matrix-cell-legacy-chip"

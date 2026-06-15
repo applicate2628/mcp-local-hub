@@ -143,6 +143,27 @@ main { padding: var(--screen-padding); overflow: auto; }
 .matrix-col-header { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .matrix-col-init-btn { font-size: 0.8em; padding: 2px 6px; cursor: pointer; }
 .matrix-col-init-btn:disabled { cursor: progress; opacity: 0.6; }
+/* Feature 2 — whole-column toggle: the client-NAME span doubles as an
+   enable-all / disable-all control. Pointer + subtle underline-on-hover so
+   it reads as interactive without restyling the header. Only rendered with
+   this class when the column has at least one toggleable cell. */
+.matrix-col-toggle { cursor: pointer; }
+.matrix-col-toggle:hover { text-decoration: underline; }
+/* Feature 1 — whole-cell click target: the <label> fills the data cell so a
+   click anywhere in the cell toggles the wrapped checkbox exactly once
+   (native label semantics, no JS double-fire). Negative margins expand the
+   label over the td's own padding (then re-apply matching padding) so the
+   entire visible cell — not just the small checkbox — is the hit area,
+   without disturbing the Server/Port/State/LSP cells. */
+.servers-matrix td > .matrix-cell-label {
+  display: block;
+  margin: calc(-1 * var(--cell-padding-y)) calc(-1 * var(--cell-padding-x));
+  padding: var(--cell-padding-y) var(--cell-padding-x);
+  cursor: pointer;
+}
+/* A disabled cell (no interactive checkbox) stays inert: default cursor and
+   a native no-op on click (the wrapped input is disabled). */
+.servers-matrix td > .matrix-cell-label.disabled { cursor: default; }
 .error { color: var(--danger); }
 
 /* --- Dashboard cards --- */
