@@ -23,14 +23,14 @@ func TestRedactErrorDetail(t *testing.T) {
 	}{
 		{
 			name:     "windows user path in daemon error message",
-			in:       `tools/list: stat C:\Users\dima_\secret\token.json: no such file`,
-			wantNot:  []string{`C:\Users\dima_`, `secret`, `token.json`},
+			in:       `tools/list: stat C:\Users\alice\secret\token.json: no such file`,
+			wantNot:  []string{`C:\Users\alice`, `secret`, `token.json`},
 			wantHave: []string{"tools/list", "<redacted-path>"},
 		},
 		{
 			name:     "posix home path in error",
-			in:       `initialize: open /home/dima/.config/creds/api.key: permission denied`,
-			wantNot:  []string{"/home/dima/.config/creds/api.key"},
+			in:       `initialize: open /home/alice/.config/creds/api.key: permission denied`,
+			wantNot:  []string{"/home/alice/.config/creds/api.key"},
 			wantHave: []string{"initialize", "<redacted-path>", "permission denied"},
 		},
 		{
