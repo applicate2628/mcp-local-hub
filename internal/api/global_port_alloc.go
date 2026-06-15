@@ -4,20 +4,30 @@ import "fmt"
 
 // globalDaemonBandStart / globalDaemonBandEnd is the hub daemon port band a
 // single-daemon global server installed via the marketplace one-click flow
-// draws from. It follows the repo port-map convention recorded in
-// serena_dynamic_pool.go: globals historically 9121–9149, serena dynamic
-// pool 9150–9199, and 9200–9299 for hub-allocated single-daemon globals
-// (the same band servers/mcp-language-server/manifest.yaml declares and
-// configs/ports.yaml reserves under workspace_scoped). Named constants —
-// not a bare 9200 literal — keep this aligned with the §8a live-band guard
-// convention (a port value that reaches a kill/listen sink must trace back
-// to a band declaration, never a magic number sprinkled at the call site).
+// draws from. It is carved ABOVE every pre-existing band so the marketplace
+// allocator can never collide with another allocator's range:
+//
+//	9121–9149  hand-assigned globals (configs/ports.yaml)
+//	9150–9199  serena dynamic pool (serena_dynamic_pool.go)
+//	9200–9299  workspace-scoped LSP daemon port_pool
+//	           (servers/mcp-language-server/manifest.yaml) — a DYNAMIC pool the
+//	           marketplace allocator must NOT share: scanning installed
+//	           daemons' declared ports does not see a pool slot that is
+//	           intended-but-currently-unbound, so an overlap here could hand a
+//	           marketplace daemon a port the LSP pool later binds.
+//	9300–9399  marketplace single-daemon globals (THIS band) — disjoint from
+//	           all of the above, so the two allocators never contend.
+//
+// Named constants — not a bare 9300 literal — keep this aligned with the §8a
+// live-band guard convention (a port value that reaches a kill/listen sink
+// must trace back to a band declaration, never a magic number sprinkled at
+// the call site).
 //
 // NEVER 9125: that is the GUI's own port and is deliberately OUTSIDE this
 // band, so a marketplace install can never collide with the GUI listener.
 const (
-	globalDaemonBandStart = 9200
-	globalDaemonBandEnd   = 9299
+	globalDaemonBandStart = 9300
+	globalDaemonBandEnd   = 9399
 )
 
 // PortInGlobalDaemonBand reports whether port falls inside the hub

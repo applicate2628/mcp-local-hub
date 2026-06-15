@@ -229,6 +229,21 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 // handleMarketplaceDirectInstall writes the client-native entry into each
 // selected client config — no manifest, no daemon, no supervisor row.
 func (s *Server) handleMarketplaceDirectInstall(w http.ResponseWriter, req *marketplaceInstallRequest, entry *api.MarketplaceEntry) {
+	// Direct mode writes the server straight into client configs with no hub
+	// daemon. Only http (remote-URL) entries have ONE client-native shape every
+	// adapter owns (via AddEntry). A stdio entry's native shape varies per
+	// client — mcpServers (claude/cursor), servers (vscode), context_servers
+	// (zed), mcp (opencode), mcp_servers (hermes), TOML (codex) — so a single
+	// hardcoded direct-stdio write would silently land in the wrong key for
+	// several clients (batch-2 review finding). Until the clients adapter
+	// interface grows a per-client stdio writer, direct mode is http-only;
+	// stdio servers install correctly via hub mode (one shared daemon every
+	// client routes to). Fail loud so the frontend can gate the toggle.
+	if entry.Transport != "http" {
+		writeAPIError(w, fmt.Errorf("direct-mode install supports http servers only (this entry is transport=%q) — use hub mode for stdio servers", entry.Transport), http.StatusBadRequest, "DIRECT_MODE_UNSUPPORTED_TRANSPORT")
+		return
+	}
+
 	clientNames := make([]string, 0, len(req.Clients))
 	for _, c := range req.Clients {
 		if c = strings.TrimSpace(c); c != "" {

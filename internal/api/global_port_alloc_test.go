@@ -41,7 +41,7 @@ func TestAllocateSingleGlobalPort_SkipsTakenPorts(t *testing.T) {
 func TestAllocateSingleGlobalPort_SkipsOSBoundPorts(t *testing.T) {
 	origAvail := portAvailable
 	defer func() { portAvailable = origAvail }()
-	// 9200/9201 bound by an unrelated process; first OS-free is 9202.
+	// band-start/+1 bound by an unrelated process; first OS-free is band-start+2.
 	portAvailable = func(port int) bool { return port >= globalDaemonBandStart+2 }
 	got, err := AllocateSingleGlobalPort(nil)
 	if err != nil {
@@ -86,5 +86,31 @@ func TestPortInGlobalDaemonBand(t *testing.T) {
 		if got := PortInGlobalDaemonBand(c.port); got != c.want {
 			t.Errorf("PortInGlobalDaemonBand(%d) = %v, want %v", c.port, got, c.want)
 		}
+	}
+}
+
+// TestGlobalDaemonBandDisjointFromOtherAllocators pins the invariant that the
+// marketplace single-daemon band does NOT overlap any other allocator's range
+// — specifically the workspace-scoped LSP daemon port_pool (9200–9299), the
+// serena dynamic pool (9150–9199), or the GUI port (9125). A shared band would
+// let the marketplace allocator hand out a port another allocator later binds
+// (the batch-2 review finding this band move fixes). The band is carved ABOVE
+// the LSP pool ceiling, so band-start must clear 9299.
+func TestGlobalDaemonBandDisjointFromOtherAllocators(t *testing.T) {
+	const lspPoolEnd = 9299 // servers/mcp-language-server/manifest.yaml port_pool ceiling
+	const serenaPoolEnd = 9199
+	const guiPort = 9125
+	if globalDaemonBandStart <= lspPoolEnd {
+		t.Errorf("marketplace band start %d overlaps the LSP workspace pool (≤%d) — collision risk",
+			globalDaemonBandStart, lspPoolEnd)
+	}
+	if globalDaemonBandStart <= serenaPoolEnd {
+		t.Errorf("marketplace band start %d overlaps the serena pool (≤%d)", globalDaemonBandStart, serenaPoolEnd)
+	}
+	if PortInGlobalDaemonBand(guiPort) {
+		t.Errorf("GUI port %d must never fall inside the marketplace band", guiPort)
+	}
+	if globalDaemonBandEnd < globalDaemonBandStart {
+		t.Errorf("band end %d precedes band start %d", globalDaemonBandEnd, globalDaemonBandStart)
 	}
 }

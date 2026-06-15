@@ -6,13 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/clients"
 )
 
 // ---- fakes for the four marketplace-install seams ----
@@ -375,10 +372,12 @@ func TestMarketplaceInstall_DirectHTTP_WritesToClients(t *testing.T) {
 }
 
 func TestMarketplaceInstall_DirectPartialFailure_207(t *testing.T) {
-	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("filesystem"), found: true}
+	// Direct mode is http-only; the 207 partial-write path is transport-agnostic.
+	httpE := &api.MarketplaceEntry{ID: "filesystem", Transport: "http", URL: "https://example.com/mcp"}
+	loader := &fakeMarketplaceEntryLoader{entry: httpE, found: true}
 	writer := &fakeDirectClientWriter{
 		updated: []string{"claude-code"},
-		failed:  []directFailure{{Client: "codex-cli", Error: "TOML stdio unsupported"}},
+		failed:  []directFailure{{Client: "codex-cli", Error: "client config not writable"}},
 	}
 	s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{}, &fakeServerNamePresence{}, writer, &fakeManifestCreator{}, &fakeInstaller{})
 
@@ -396,7 +395,8 @@ func TestMarketplaceInstall_DirectPartialFailure_207(t *testing.T) {
 }
 
 func TestMarketplaceInstall_DirectNoClients_400(t *testing.T) {
-	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("filesystem"), found: true}
+	httpE := &api.MarketplaceEntry{ID: "filesystem", Transport: "http", URL: "https://example.com/mcp"}
+	loader := &fakeMarketplaceEntryLoader{entry: httpE, found: true}
 	writer := &fakeDirectClientWriter{}
 	s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{}, &fakeServerNamePresence{}, writer, &fakeManifestCreator{}, &fakeInstaller{})
 
@@ -406,6 +406,25 @@ func TestMarketplaceInstall_DirectNoClients_400(t *testing.T) {
 	}
 	if writer.called {
 		t.Error("direct writer must NOT be called with no clients")
+	}
+}
+
+// TestMarketplaceInstall_DirectStdio_400 pins the batch-2 review fix: direct
+// mode is http-only, so a stdio catalog entry is rejected with 400 BEFORE any
+// client write (stdio's native shape varies per client — mcpServers/servers/
+// context_servers/mcp/mcp_servers/TOML — so a single hardcoded direct write
+// would silently land in the wrong key). stdio servers install via hub mode.
+func TestMarketplaceInstall_DirectStdio_400(t *testing.T) {
+	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("filesystem"), found: true}
+	writer := &fakeDirectClientWriter{}
+	s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{}, &fakeServerNamePresence{}, writer, &fakeManifestCreator{}, &fakeInstaller{})
+
+	rec := postInstall(t, s, `{"id":"filesystem","mode":"direct","clients":["claude-code"]}`, "same-origin")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (direct-mode stdio unsupported), body=%q", rec.Code, rec.Body.String())
+	}
+	if writer.called {
+		t.Error("direct writer must NOT be called for a stdio entry (rejected before write)")
 	}
 }
 
@@ -479,89 +498,5 @@ func TestMarketplaceInstall_MissingID_400(t *testing.T) {
 	rec := postInstall(t, s, `{"id":"  ","mode":"hub"}`, "same-origin")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-}
-
-// ---- direct-write helper (integration on a t.TempDir JSON config) ----
-//
-// Exercises the real writeStdioJSONEntry against a temp client config file so
-// the SecureWriteClientConfig pipeline shape (JSON mcpServers upsert) is
-// verified without touching any real client config. http-transport direct
-// writes go through the adapter AddEntry and are covered by the clients
-// package's own adapter tests; here we pin the stdio JSON shape this slice adds.
-
-func TestWriteStdioJSONEntry_FreshFile(t *testing.T) {
-	// Route clients.WriteConfigFile to a plain temp writer (production swaps it
-	// to SecureWriteClientConfig in api.init(); here we want the file written
-	// under t.TempDir without the DACL gate).
-	orig := clients.WriteConfigFile
-	t.Cleanup(func() { clients.WriteConfigFile = orig })
-	clients.WriteConfigFile = func(path string, contents []byte) error {
-		return os.WriteFile(path, contents, 0o600)
-	}
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "mcp.json")
-	entry := &api.MarketplaceEntry{
-		ID:        "filesystem",
-		Transport: "stdio",
-		Command:   "npx",
-		Args:      []string{"-y", "@modelcontextprotocol/server-filesystem"},
-		Env:       map[string]string{"ROOT": "/data"},
-	}
-	if err := writeStdioJSONEntry(path, entry); err != nil {
-		t.Fatalf("writeStdioJSONEntry: %v", err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	servers, _ := doc["mcpServers"].(map[string]any)
-	got, _ := servers["filesystem"].(map[string]any)
-	if got["command"] != "npx" || got["type"] != "stdio" {
-		t.Errorf("stdio entry = %+v", got)
-	}
-}
-
-func TestWriteStdioJSONEntry_PreservesExistingEntries(t *testing.T) {
-	orig := clients.WriteConfigFile
-	t.Cleanup(func() { clients.WriteConfigFile = orig })
-	clients.WriteConfigFile = func(path string, contents []byte) error {
-		return os.WriteFile(path, contents, 0o600)
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "mcp.json")
-	if err := os.WriteFile(path, []byte(`{"mcpServers":{"existing":{"type":"http","url":"http://x/mcp"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	entry := &api.MarketplaceEntry{ID: "git", Transport: "stdio", Command: "uvx"}
-	if err := writeStdioJSONEntry(path, entry); err != nil {
-		t.Fatalf("writeStdioJSONEntry: %v", err)
-	}
-	raw, _ := os.ReadFile(path)
-	var doc map[string]any
-	_ = json.Unmarshal(raw, &doc)
-	servers, _ := doc["mcpServers"].(map[string]any)
-	if _, ok := servers["existing"]; !ok {
-		t.Error("pre-existing entry was clobbered")
-	}
-	if _, ok := servers["git"]; !ok {
-		t.Error("new stdio entry not added")
-	}
-}
-
-func TestWriteStdioJSONEntry_RejectsNonJSON(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-	if err := os.WriteFile(path, []byte("[mcp_servers]\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	entry := &api.MarketplaceEntry{ID: "git", Transport: "stdio", Command: "uvx"}
-	if err := writeStdioJSONEntry(path, entry); err == nil {
-		t.Fatal("expected a fail-closed error writing stdio into a non-JSON config")
 	}
 }
