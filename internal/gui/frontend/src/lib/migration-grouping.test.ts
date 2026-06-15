@@ -30,7 +30,40 @@ describe("groupMigrationEntries", () => {
     };
     const g = groupMigrationEntries(scan, new Set());
     expect(g.viaHub.map(e => e.name)).toEqual(["real"]);
-    expect(g.canMigrate.length + g.unknown.length + g.perSession.length).toBe(0);
+    expect(g.canMigrate.length + g.unknown.length + g.external.length + g.perSession.length).toBe(0);
+  });
+
+  it("surfaces status='external' in the external bucket (real remote MCP, not dropped)", () => {
+    const scan: ScanResult = {
+      at: "2026-04-23T00:00:00Z",
+      entries: [
+        {name: "context7", status: "external", managed: false, client_presence: {"claude-code": {transport: "http", endpoint: "https://mcp.context7.com/mcp"}}},
+        {name: "qt-docs", status: "external", managed: false, client_presence: {"cursor": {transport: "http", endpoint: "https://qt.io/mcp"}}},
+        {name: "memory", status: "via-hub", managed: true, client_presence: {"claude-code": {transport: "http", endpoint: "http://localhost:9200/mcp"}}},
+      ],
+    };
+    const g = groupMigrationEntries(scan, new Set());
+    expect(g.external.map(e => e.name)).toEqual(["context7", "qt-docs"]);
+    // Managed flag rides through on the entry for badge rendering.
+    expect(g.viaHub[0].managed).toBe(true);
+    expect(g.external[0].managed).toBe(false);
+  });
+
+  it("dismiss-filters external like unknown, parking both in the dismissed bucket", () => {
+    const scan: ScanResult = {
+      at: "2026-04-23T00:00:00Z",
+      entries: [
+        {name: "ext-noisy", status: "external", client_presence: {"claude-code": {transport: "http", endpoint: "https://noisy.example.com/mcp"}}},
+        {name: "ext-kept", status: "external", client_presence: {"claude-code": {transport: "http", endpoint: "https://kept.example.com/mcp"}}},
+        {name: "stdio-dismissed", status: "unknown", client_presence: {"codex-cli": {transport: "stdio", endpoint: "uvx"}}},
+      ],
+    };
+    const dismissed = new Set<string>(["ext-noisy", "stdio-dismissed"]);
+    const g = groupMigrationEntries(scan, dismissed);
+    expect(g.external.map(e => e.name)).toEqual(["ext-kept"]);
+    expect(g.unknown.map(e => e.name)).toEqual([]);
+    // Dismissed entries are NOT lost — they go to the collapsed section.
+    expect(g.dismissed.map(e => e.name)).toEqual(["ext-noisy", "stdio-dismissed"]);
   });
 
   it("drops entries without a status (defensive: malformed backend response)", () => {

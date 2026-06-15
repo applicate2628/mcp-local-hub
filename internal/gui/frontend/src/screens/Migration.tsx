@@ -13,15 +13,22 @@ interface DismissedResponse {
   unknown: string[];
 }
 
-// MigrationScreen is the §5.2 Migration view: scan-driven grouping of
-// MCP server entries across all managed clients, with per-group
-// actions (Demigrate in Task 6; Migrate selected + Dismiss + gated
-// Create-manifest in Task 7; Per-session readonly in Task 8). This
-// scaffolding ships h1, parallel /api/scan + /api/dismissed fetches,
-// groupMigrationEntries wiring with the dismissed-unknowns filter,
-// empty-state copy, and the per-group scaffolding component so the
-// route + router are testable end-to-end before the action handlers land.
-export function MigrationScreen() {
+// DiscoveryScreen (formerly MigrationScreen) is the comprehensive
+// "see ALL MCP servers" view: a scan-driven grouping of every MCP
+// server entry across all managed clients, with hub-managed servers
+// flagged separately from unmanaged / external remotes. Groups:
+//   - "Managed by hub" (via-hub, badged via the Managed flag) — Demigrate.
+//   - "Ready to migrate" (can-migrate) — Migrate-selected.
+//   - "Unmanaged / External" (unknown stdio + external remote http) —
+//     Create-manifest (unknown) / read-only (external) + Dismiss.
+//   - "Per-session" (read-only info).
+//   - A collapsed, expandable "Dismissed" section so dismissed entries
+//     are parked, not lost.
+//
+// The export is still named MigrationScreen-compatible via the alias at
+// the bottom of the file so the route key `migration` in app.tsx keeps
+// working unchanged; the user-facing label is "Discovery".
+export function DiscoveryScreen() {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [dismissedUnknown, setDismissedUnknown] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +55,7 @@ export function MigrationScreen() {
           fetchOrThrow<DismissedResponse>("/api/dismissed", "object").catch(
             (err: unknown) => {
               console.warn(
-                "Migration: /api/dismissed failed, rendering without dismissal filter:",
+                "Discovery: /api/dismissed failed, rendering without dismissal filter:",
                 err,
               );
               return dismissedFallback;
@@ -92,7 +99,7 @@ export function MigrationScreen() {
   useEventSource("/api/events", {
     "daemon-state": () => setScanReloadToken((n) => n + 1),
     // Tray "Rescan client configs" → backend publishes clients-rescan
-    // → every open Servers/Migration screen re-fetches. The UI side
+    // → every open Servers/Discovery screen re-fetches. The UI side
     // is a thin re-trigger of the existing reload mechanism so the
     // tray click and a manual refresh share one code path.
     "clients-rescan": () => setScanReloadToken((n) => n + 1),
@@ -121,13 +128,13 @@ export function MigrationScreen() {
           failed?: { server: string; client: string; err: string }[];
         };
         const rows = body.failed ?? [];
-        // Demigrate at the Migration screen targets one server, so
+        // Demigrate at the Discovery screen targets one server, so
         // every failed row is the same server — render the client
         // names + error messages on separate lines.
         const detail = rows.map((r) => `${r.client}: ${r.err}`).join("\n");
         // Bot r1 P2 closure on PR #182: even on partial failure, the
         // backend MAY have restored some rows (report.restored). Reload
-        // scan state so the Migration screen reflects that — leaving
+        // scan state so the Discovery screen reflects that — leaving
         // successful rows in stale "can-migrate" view encourages a
         // double-action against already-restored clients.
         setScanReloadToken((n) => n + 1);
@@ -211,20 +218,20 @@ export function MigrationScreen() {
 
   const groups: MigrationGroups = scan
     ? groupMigrationEntries(scan, dismissedUnknown)
-    : { viaHub: [], canMigrate: [], unknown: [], perSession: [] };
+    : { viaHub: [], canMigrate: [], unknown: [], external: [], perSession: [], dismissed: [] };
 
   if (error) {
     return (
-      <section class="screen migration">
-        <h1>Migration</h1>
+      <section class="screen migration discovery">
+        <h1>Discovery</h1>
         <p class="error">{error}</p>
       </section>
     );
   }
   if (scan == null) {
     return (
-      <section class="screen migration">
-        <h1>Migration</h1>
+      <section class="screen migration discovery">
+        <h1>Discovery</h1>
         <p>Loading…</p>
       </section>
     );
@@ -234,11 +241,18 @@ export function MigrationScreen() {
     groups.viaHub.length +
     groups.canMigrate.length +
     groups.unknown.length +
-    groups.perSession.length;
+    groups.external.length +
+    groups.perSession.length +
+    groups.dismissed.length;
 
   return (
-    <section class="screen migration">
-      <h1>Migration</h1>
+    <section class="screen migration discovery">
+      <h1>Discovery</h1>
+      <p class="discovery-intro">
+        Every MCP server found across all client configs. Servers routed
+        through the hub are flagged separately from unmanaged and external
+        remotes.
+      </p>
       {actionError && <p class="error action-error">{actionError}</p>}
       {totalRows === 0 ? (
         <p class="empty-state">
@@ -248,23 +262,27 @@ export function MigrationScreen() {
         </p>
       ) : (
         <div class="card">
-          <ViaHubGroup
+          <ManagedByHubGroup
             entries={groups.viaHub}
             actionBusy={actionBusy}
             onDemigrate={runDemigrate}
           />
-          <CanMigrateGroup
+          <ReadyToMigrateGroup
             entries={groups.canMigrate}
             selected={selected}
             onToggle={toggleSelected}
             onMigrateSelected={runMigrateSelected}
             migrateBusy={migrateBusy}
           />
-          <UnknownGroup
-            entries={groups.unknown}
+          <UnmanagedExternalGroup
+            unknownEntries={groups.unknown}
+            externalEntries={groups.external}
             onDismiss={runDismiss}
           />
           <PerSessionGroup entries={groups.perSession} />
+          <DismissedGroup
+            entries={groups.dismissed}
+          />
         </div>
       )}
       <button
@@ -278,7 +296,7 @@ export function MigrationScreen() {
   );
 }
 
-function ViaHubGroup(props: {
+function ManagedByHubGroup(props: {
   entries: ScanEntry[];
   actionBusy: string | null;
   onDemigrate: (server: string) => void;
@@ -286,18 +304,26 @@ function ViaHubGroup(props: {
   if (props.entries.length === 0) {
     return (
       <section class="group group-via-hub" data-group="via-hub">
-        <h2>Via hub</h2>
+        <h2>Managed by hub</h2>
         <p class="empty">No hub-routed entries yet.</p>
       </section>
     );
   }
   return (
     <section class="group group-via-hub" data-group="via-hub">
-      <h2>Via hub</h2>
+      <h2>Managed by hub</h2>
       <ul class="group-rows">
         {props.entries.map((e) => (
           <li key={e.name} data-server={e.name}>
             <span class="server-name">{e.name}</span>
+            {/* Badge driven by the backend Managed flag (Status==="via-hub").
+                Rendered only when the flag is actually true so an older
+                fixture without the field doesn't show a misleading badge. */}
+            {e.managed && (
+              <span class="badge badge-managed" data-testid={`managed-badge-${e.name}`}>
+                Managed by hub
+              </span>
+            )}
             <a
               href={`#/edit-server?name=${encodeURIComponent(e.name)}`}
               data-action="edit-manifest"
@@ -318,7 +344,7 @@ function ViaHubGroup(props: {
   );
 }
 
-function CanMigrateGroup(props: {
+function ReadyToMigrateGroup(props: {
   entries: ScanEntry[];
   selected: Set<string>;
   onToggle: (name: string, next: boolean) => void;
@@ -328,7 +354,7 @@ function CanMigrateGroup(props: {
   if (props.entries.length === 0) {
     return (
       <section class="group group-can-migrate" data-group="can-migrate">
-        <h2>Can migrate</h2>
+        <h2>Ready to migrate</h2>
         <p class="empty">No stdio entries with matching manifests.</p>
       </section>
     );
@@ -336,7 +362,7 @@ function CanMigrateGroup(props: {
   const selectedInGroup = props.entries.filter((e) => props.selected.has(e.name)).length;
   return (
     <section class="group group-can-migrate" data-group="can-migrate">
-      <h2>Can migrate</h2>
+      <h2>Ready to migrate</h2>
       <ul class="group-rows">
         {props.entries.map((e) => (
           <li key={e.name} data-server={e.name}>
@@ -367,50 +393,90 @@ function CanMigrateGroup(props: {
   );
 }
 
-function UnknownGroup(props: {
-  entries: ScanEntry[];
+// UnmanagedExternalGroup renders the two "unmanaged" buckets together:
+//   - unknown: stdio entries with no manifest — operator can Create
+//     manifest to adopt them into the hub, or Dismiss.
+//   - external: real external remote MCP servers (non-hub http). These
+//     are read-only (no Create-manifest — they're remote, not stdio) but
+//     CAN be Dismissed to park a noisy remote.
+function UnmanagedExternalGroup(props: {
+  unknownEntries: ScanEntry[];
+  externalEntries: ScanEntry[];
   onDismiss: (entry: ScanEntry) => void;
 }) {
-  if (props.entries.length === 0) {
+  const total = props.unknownEntries.length + props.externalEntries.length;
+  if (total === 0) {
     return (
-      <section class="group group-unknown" data-group="unknown">
-        <h2>Unknown</h2>
-        <p class="empty">No unknown stdio entries.</p>
+      <section class="group group-unmanaged" data-group="unmanaged">
+        <h2>Unmanaged / External</h2>
+        <p class="empty">No unmanaged or external MCP servers.</p>
       </section>
     );
   }
   return (
-    <section class="group group-unknown" data-group="unknown">
-      <h2>Unknown</h2>
-      <ul class="group-rows">
-        {props.entries.map((e) => (
-          <li key={e.name} data-server={e.name}>
-            <span class="server-name">{e.name}</span>
-            <button
-              type="button"
-              class="create-manifest"
-              data-action="create-manifest"
-              onClick={() => {
-                const client = firstClientFor(e);
-                const url = client
-                  ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
-                  : `#/add-server?server=${encodeURIComponent(e.name)}`;
-                window.location.hash = url;
-              }}
-            >
-              Create manifest
-            </button>
-            <button
-              type="button"
-              class="dismiss danger"
-              data-action="dismiss"
-              onClick={() => props.onDismiss(e)}
-            >
-              Dismiss
-            </button>
-          </li>
-        ))}
-      </ul>
+    <section class="group group-unmanaged" data-group="unmanaged">
+      <div class="group-heading">
+        <h2>Unmanaged / External</h2>
+        <InfoTip
+          label="About unmanaged / external entries"
+          text="Unknown stdio entries (no mcphub manifest) can be adopted with Create manifest. External remotes are real off-host MCP servers (e.g. context7, qt-docs) routed directly by the client — they are shown read-only so you can see every MCP server, not just hub-managed ones. Dismiss parks an entry in the collapsed Dismissed section below."
+        />
+      </div>
+      {props.unknownEntries.length > 0 && (
+        <ul class="group-rows group-rows-unknown" data-subgroup="unknown">
+          {props.unknownEntries.map((e) => (
+            <li key={e.name} data-server={e.name}>
+              <span class="server-name">{e.name}</span>
+              <span class="badge badge-unknown">Unknown stdio</span>
+              <button
+                type="button"
+                class="create-manifest"
+                data-action="create-manifest"
+                onClick={() => {
+                  const client = firstClientFor(e);
+                  const url = client
+                    ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
+                    : `#/add-server?server=${encodeURIComponent(e.name)}`;
+                  window.location.hash = url;
+                }}
+              >
+                Create manifest
+              </button>
+              <button
+                type="button"
+                class="dismiss danger"
+                data-action="dismiss"
+                onClick={() => props.onDismiss(e)}
+              >
+                Dismiss
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {props.externalEntries.length > 0 && (
+        <ul class="group-rows group-rows-external" data-subgroup="external">
+          {props.externalEntries.map((e) => (
+            <li key={e.name} data-server={e.name}>
+              <span class="server-name">{e.name}</span>
+              <span class="badge badge-external" data-testid={`external-badge-${e.name}`}>
+                External remote
+              </span>
+              <span class="external-endpoint" title={externalEndpointFor(e)}>
+                {externalEndpointFor(e)}
+              </span>
+              <button
+                type="button"
+                class="dismiss danger"
+                data-action="dismiss"
+                onClick={() => props.onDismiss(e)}
+              >
+                Dismiss
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -444,6 +510,38 @@ function PerSessionGroup(props: { entries: ScanEntry[] }) {
   );
 }
 
+// DismissedGroup is a COLLAPSED, expandable section so dismissed entries
+// are visible-on-demand rather than dropped. STOP hiding dismissed
+// entirely (prior behavior): the operator can expand to see what was
+// parked. Re-instating a dismissed entry is a future affordance; for now
+// expansion is read-only visibility.
+function DismissedGroup(props: { entries: ScanEntry[] }) {
+  if (props.entries.length === 0) {
+    // Render nothing when there are no dismissed entries — an empty
+    // <details> would be noise.
+    return null;
+  }
+  return (
+    <details class="group group-dismissed" data-group="dismissed">
+      <summary>
+        <strong>Dismissed ({props.entries.length})</strong>
+        {" — "}
+        entries you hid from the live list; expand to review
+      </summary>
+      <ul class="group-rows">
+        {props.entries.map((e) => (
+          <li key={e.name} data-server={e.name}>
+            <span class="server-name">{e.name}</span>
+            <span class="badge badge-dismissed">
+              {e.status === "external" ? "External remote" : "Unknown stdio"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 // firstClientFor picks a sensible client name to extract from for a given
 // Unknown scan entry. The stdio entry may live in any one client's config
 // (typically the user had the server set up in Claude Code first). We pick
@@ -456,3 +554,19 @@ function firstClientFor(entry: { client_presence?: Record<string, { transport?: 
   }
   return "";
 }
+
+// externalEndpointFor returns a display string for an external remote's
+// URL — the first http endpoint found in its client_presence. Read-only
+// display so the operator can identify the remote at a glance.
+function externalEndpointFor(entry: ScanEntry): string {
+  const presence = entry.client_presence ?? {};
+  for (const info of Object.values(presence)) {
+    if (info?.transport === "http" && info?.endpoint) return info.endpoint;
+  }
+  return "";
+}
+
+// Back-compat alias: app.tsx imports MigrationScreen and the route key is
+// still `migration`. The screen's user-facing identity is "Discovery"; the
+// symbol name keeps the import wiring stable.
+export const MigrationScreen = DiscoveryScreen;

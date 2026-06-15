@@ -1,30 +1,49 @@
 import type { ScanResult, ScanEntry } from "../types";
 
-// MigrationGroups is the 4-bucket shape the Migration screen renders.
-// Names mirror the backend classifier (internal/api/scan.go:classify):
+// Discovery (formerly "Migration") grouping. Buckets mirror the backend
+// classifier (internal/api/scan.go:classify):
 //   - viaHub: entries already routed through the hub (HTTP url pointing
-//     at localhost). Readonly display; Demigrate roll-back action only.
+//     at localhost, or the antigravity/zed relay shape). Read-only display;
+//     Demigrate roll-back action only. Carry Managed=true.
 //   - canMigrate: stdio entries whose server name matches a manifest
 //     in servers/. Pre-checked with Migrate-selected batch action.
 //   - unknown: stdio entries with no matching manifest. "Create
-//     manifest" button (DISABLED until A2 ships) and "Dismiss".
+//     manifest" button and "Dismiss".
+//   - external: client-present NON-hub remote HTTP entries — real external
+//     remote MCP servers (e.g. context7 -> mcp.context7.com, qt-docs ->
+//     qt.io). They are NOT hub-managed and NOT migrate candidates; they are
+//     surfaced read-only so the operator sees ALL MCP servers, not just the
+//     hub-managed ones. PRE-FIX these hit the backend "not-installed" branch
+//     and were dropped by the default case below — that was the user's
+//     "скан не видит все" (scan doesn't see everything) report.
 //   - perSession: entries classified as not-shareable by nature
-//     (currently: internal/api/scan.go:perSessionServers). Readonly info.
-// An entry classified as "not-installed" (no client has it — scan saw
-// the name via a manifest but no config references it) is dropped
-// entirely — it has nothing to migrate/demigrate/dismiss.
+//     (currently: internal/api/scan.go:perSessionServers). Read-only info.
+// An entry classified as "not-installed" (NO client references it — scan
+// saw the name only via a manifest) is dropped from these actionable
+// groups — it has nothing to migrate/demigrate/dismiss/display.
 //
-// Dismissed entries are provided by a separate `/api/dismissed` GET
-// (see Task 3). The grouping helper filters them out of the Unknown
-// group ONLY — never from via-hub / can-migrate / per-session, even
-// if the same name appears in dismissedUnknown. This keeps dismissal
-// scoped to the Migration screen while /api/scan stays shared with
-// Servers and other consumers.
+// Dismiss rule (documented consistent choice): both `unknown` AND `external`
+// are dismiss-filterable. They are the two "unmanaged" buckets the Discovery
+// screen groups together under "Unmanaged / External", and an operator who
+// dismisses a noisy external remote (or unknown stdio entry) expects it gone
+// from the live list and parked in the collapsed "Dismissed" section. The
+// hub-owned groups (via-hub / can-migrate / per-session) are NEVER
+// dismiss-filtered — dismissal is a Discovery-screen view concern and
+// /api/scan stays shared with the Servers matrix and other consumers.
+//
+// dismissedUnknown is provided by a separate `/api/dismissed` GET; the
+// helper ALSO returns the filtered-out entries in `dismissed` so the
+// screen can render a collapsed "Dismissed" section instead of losing them.
 export interface MigrationGroups {
   viaHub: ScanEntry[];
   canMigrate: ScanEntry[];
   unknown: ScanEntry[];
+  external: ScanEntry[];
   perSession: ScanEntry[];
+  // Entries hidden from `unknown`/`external` because they appear in
+  // dismissedUnknown. Surfaced so the Discovery screen can show a
+  // collapsed, expandable "Dismissed" section rather than dropping them.
+  dismissed: ScanEntry[];
 }
 
 function byName(a: ScanEntry, b: ScanEntry): number {
@@ -39,7 +58,9 @@ export function groupMigrationEntries(
     viaHub: [],
     canMigrate: [],
     unknown: [],
+    external: [],
     perSession: [],
+    dismissed: [],
   };
   const entries = scan.entries ?? [];
   for (const entry of entries) {
@@ -51,21 +72,35 @@ export function groupMigrationEntries(
         groups.canMigrate.push(entry);
         break;
       case "unknown":
-        if (dismissedUnknown.has(entry.name)) continue;
+        if (dismissedUnknown.has(entry.name)) {
+          groups.dismissed.push(entry);
+          continue;
+        }
         groups.unknown.push(entry);
+        break;
+      case "external":
+        // Real external remote MCP (non-hub http). Dismiss-filtered like
+        // unknown (see header) so a noisy remote can be parked.
+        if (dismissedUnknown.has(entry.name)) {
+          groups.dismissed.push(entry);
+          continue;
+        }
+        groups.external.push(entry);
         break;
       case "per-session":
         groups.perSession.push(entry);
         break;
       default:
         // "not-installed" and malformed/missing status: drop. These
-        // have nothing actionable in Migration.
+        // have nothing actionable in Discovery.
         break;
     }
   }
   groups.viaHub.sort(byName);
   groups.canMigrate.sort(byName);
   groups.unknown.sort(byName);
+  groups.external.sort(byName);
   groups.perSession.sort(byName);
+  groups.dismissed.sort(byName);
   return groups;
 }

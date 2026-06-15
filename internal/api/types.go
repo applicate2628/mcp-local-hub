@@ -145,12 +145,20 @@ type HealthProbe struct {
 // ScanEntry is one row in the unified "across all clients" view.
 type ScanEntry struct {
 	Name           string                 `json:"name"`
-	Status         string                 `json:"status"` // "via-hub" | "can-migrate" | "unknown" | "per-session" | "not-installed"
+	Status         string                 `json:"status"` // "via-hub" | "can-migrate" | "unknown" | "per-session" | "external" | "not-installed"
 	ClientPresence map[string]ClientEntry `json:"client_presence"`
 	LegacyConflict map[string]ClientEntry `json:"legacy_conflict,omitempty"`
 	ManifestExists bool                   `json:"manifest_exists"`
 	CanMigrate     bool                   `json:"can_migrate"`
-	ProcessCount   int                    `json:"process_count,omitempty"`
+	// Managed reports whether this server is currently ROUTED THROUGH THE
+	// HUB (Status == "via-hub"). It is the explicit, classifier-derived
+	// flag the Discovery view badges "Managed by hub" against, instead of
+	// re-deriving hub-routing from Status in the frontend. Mirrored as TS
+	// ScanEntry.managed. Always emitted (no omitempty) so a false value is
+	// an explicit "not hub-managed" signal rather than an absent field the
+	// UI would have to treat as unknown.
+	Managed      bool `json:"managed"`
+	ProcessCount int  `json:"process_count,omitempty"`
 }
 
 // ClientEntry captures the shape of how one MCP server is configured inside

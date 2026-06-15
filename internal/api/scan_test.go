@@ -71,6 +71,121 @@ func TestScanClassifiesEntries(t *testing.T) {
 	}
 }
 
+// TestScanExternalAndManagedFlag pins the Discovery-view contract end to
+// end through ScanFrom:
+//   - a client-present non-hub remote HTTP entry classifies as "external"
+//     (NOT "not-installed") with Managed=false, so it surfaces instead of
+//     vanishing;
+//   - a hub-routed entry carries Managed=true;
+//   - a manifest-only server with zero client presence stays "not-installed"
+//     with Managed=false (the matrix-row-must-not-vanish row).
+func TestScanExternalAndManagedFlag(t *testing.T) {
+	// Redirect live-state lookups (DefaultRegistryPath consults LOCALAPPDATA
+	// first) at a temp dir so the test never reads or mutates the operator's
+	// real registry/state. The registry Load is best-effort, but redirect
+	// it anyway per the live-state-safety discipline.
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+
+	tmp := t.TempDir()
+
+	claudeCfg := map[string]any{
+		"mcpServers": map[string]any{
+			// Hub-routed → via-hub, Managed=true.
+			"memory": map[string]any{"type": "http", "url": "http://localhost:9123/mcp"},
+			// Real external remote (non-hub http) → external, Managed=false.
+			"context7": map[string]any{"type": "http", "url": "https://mcp.context7.com/mcp"},
+			// Second external remote in a different client below.
+		},
+	}
+	claudePath := filepath.Join(tmp, ".claude.json")
+	b, _ := json.Marshal(claudeCfg)
+	if err := os.WriteFile(claudePath, b, 0600); err != nil {
+		t.Fatalf("write claude cfg: %v", err)
+	}
+
+	cursorCfg := map[string]any{
+		"mcpServers": map[string]any{
+			// Same external remote, different client — still external.
+			"qt-docs": map[string]any{"url": "https://qt.io/mcp"},
+		},
+	}
+	cursorPath := filepath.Join(tmp, ".cursor-mcp.json")
+	cb, _ := json.Marshal(cursorCfg)
+	if err := os.WriteFile(cursorPath, cb, 0600); err != nil {
+		t.Fatalf("write cursor cfg: %v", err)
+	}
+
+	// Manifest dir: memory (manifest-known) + a "ghost" manifest with no
+	// client presence (must stay not-installed, not vanish).
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(filepath.Join(manifestDir, "memory"), 0755)
+	_ = os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+		[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+	_ = os.MkdirAll(filepath.Join(manifestDir, "ghost"), 0755)
+	_ = os.WriteFile(filepath.Join(manifestDir, "ghost", "manifest.yaml"),
+		[]byte("name: ghost\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9131\n"), 0644)
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		ClaudeConfigPath: claudePath,
+		CursorConfigPath: cursorPath,
+		ManifestDir:      manifestDir,
+	})
+	if err != nil {
+		t.Fatalf("ScanFrom: %v", err)
+	}
+
+	byName := map[string]ScanEntry{}
+	for _, e := range result.Entries {
+		byName[e.Name] = e
+	}
+
+	// memory → via-hub, Managed=true.
+	if got := byName["memory"].Status; got != "via-hub" {
+		t.Errorf("memory.Status: got %q, want via-hub", got)
+	}
+	if !byName["memory"].Managed {
+		t.Errorf("memory.Managed: got false, want true (hub-routed)")
+	}
+
+	// context7 → external, Managed=false. Must NOT be not-installed (the bug).
+	c7, ok := byName["context7"]
+	if !ok {
+		t.Fatalf("context7 missing from scan entirely (the vanishing bug): %+v", byName)
+	}
+	if c7.Status != "external" {
+		t.Errorf("context7.Status: got %q, want external", c7.Status)
+	}
+	if c7.Managed {
+		t.Errorf("context7.Managed: got true, want false (unmanaged external remote)")
+	}
+
+	// qt-docs (cursor) → external, Managed=false.
+	qt, ok := byName["qt-docs"]
+	if !ok {
+		t.Fatalf("qt-docs missing from scan (the vanishing bug)")
+	}
+	if qt.Status != "external" {
+		t.Errorf("qt-docs.Status: got %q, want external", qt.Status)
+	}
+	if qt.Managed {
+		t.Errorf("qt-docs.Managed: got true, want false")
+	}
+
+	// ghost (manifest-only, no presence) → not-installed, Managed=false.
+	ghost, ok := byName["ghost"]
+	if !ok {
+		t.Fatalf("ghost (manifest-only) missing — matrix-row-must-not-vanish broke")
+	}
+	if ghost.Status != "not-installed" {
+		t.Errorf("ghost.Status: got %q, want not-installed (manifest-only, no presence)", ghost.Status)
+	}
+	if ghost.Managed {
+		t.Errorf("ghost.Managed: got true, want false")
+	}
+}
+
 // TestResolveManifestDaemonPort_EmbedFirst pins the port-lookup helper
 // the supervisor status seam uses to enrich Port=0 supervisor-intent
 // rows. PR #211 and earlier wrote supervisor-intent.json with Port=0
@@ -458,6 +573,42 @@ func TestClassify(t *testing.T) {
 			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe"}, "claude-code": {Transport: "stdio", Endpoint: "npx"}}},
 			serverName: "serena",
 			want:       "can-migrate",
+		},
+		{
+			// Discovery view: a client-present non-hub remote HTTP entry (a real
+			// external remote MCP — e.g. context7 -> mcp.context7.com) used to
+			// hit the final "not-installed" branch and the screen DROPPED it.
+			// Now it classifies as "external" so it surfaces.
+			name:       "http + non-hub remote URL -> external",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "https://mcp.context7.com/mcp"}}},
+			serverName: "context7",
+			want:       "external",
+		},
+		{
+			// Multiple clients, all pointing at the same external remote, still
+			// external (no hub, no stdio anywhere).
+			name:       "http + non-hub remote in two clients -> external",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "https://qt.io/mcp"}, "cursor": {Transport: "http", Endpoint: "https://qt.io/mcp"}}},
+			serverName: "qt-docs",
+			want:       "external",
+		},
+		{
+			// Hub + external in the same row: hub wins (it's still hub-routed,
+			// the external entry is in a different client). via-hub keeps its
+			// richer status; the external branch is ordered after hub/stdio.
+			name:       "hub + non-hub remote -> via-hub (hub wins over external)",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9200/mcp"}, "cursor": {Transport: "http", Endpoint: "https://mcp.context7.com/mcp"}}},
+			serverName: "memory",
+			want:       "via-hub",
+		},
+		{
+			// Manifest-only-no-presence (empty ClientPresence) stays
+			// "not-installed" — the matrix-row-must-not-vanish pass relies on
+			// this. The external branch must NOT capture an empty-presence row.
+			name:       "empty client presence -> not-installed (manifest-only row)",
+			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{}},
+			serverName: "memory",
+			want:       "not-installed",
 		},
 	}
 	for _, tc := range cases {

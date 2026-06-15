@@ -12,7 +12,7 @@ test.describe("shell", () => {
     // Settings is now 8th and About is 9th.
     await expect(links).toHaveCount(9);
     await expect(links.nth(0)).toHaveText("Servers");
-    await expect(links.nth(1)).toHaveText("Migration");
+    await expect(links.nth(1)).toHaveText("Discovery");
     await expect(links.nth(2)).toHaveText("Add server");
     await expect(links.nth(3)).toHaveText("Secrets");
     await expect(links.nth(4)).toHaveText("Dashboard");
@@ -30,9 +30,9 @@ test.describe("shell", () => {
     await page.locator(".sidebar nav a", { hasText: "Servers" }).click();
     await expect(page.locator(".sidebar nav a", { hasText: "Servers" })).toHaveClass(/active/);
     await expect(page.locator("h1")).toHaveText("Servers");
-    await page.locator(".sidebar nav a", { hasText: "Migration" }).click();
-    await expect(page.locator(".sidebar nav a", { hasText: "Migration" })).toHaveClass(/active/);
-    await expect(page.locator("h1")).toHaveText("Migration");
+    await page.locator(".sidebar nav a", { hasText: "Discovery" }).click();
+    await expect(page.locator(".sidebar nav a", { hasText: "Discovery" })).toHaveClass(/active/);
+    await expect(page.locator("h1")).toHaveText("Discovery");
     await page.locator(".sidebar nav a", { hasText: "Add server" }).click();
     await expect(page.locator(".sidebar nav a", { hasText: "Add server" })).toHaveClass(/active/);
     await expect(page.locator("h1")).toHaveText("Add server");

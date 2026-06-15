@@ -2,10 +2,10 @@ import { test, expect } from "../fixtures/hub";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-test.describe("Migration screen", () => {
+test.describe("Discovery screen", () => {
   test("renders h1 + empty-state copy on fresh tmp home", async ({ page, hub }) => {
     await page.goto(`${hub.url}/#/migration`);
-    await expect(page.locator("h1")).toHaveText("Migration");
+    await expect(page.locator("h1")).toHaveText("Discovery");
     await expect(page.locator(".empty-state")).toContainText("No MCP servers found");
   });
 
@@ -22,11 +22,11 @@ test.describe("Migration screen", () => {
     await expect(page.locator('[data-group]')).toHaveCount(0);
   });
 
-  test("hashchange from Servers to Migration swaps h1", async ({ page, hub }) => {
+  test("hashchange from Servers to Discovery swaps h1", async ({ page, hub }) => {
     await page.goto(`${hub.url}/#/servers`);
     await expect(page.locator("h1")).toHaveText("Servers");
-    await page.locator(".sidebar nav a", { hasText: "Migration" }).click();
-    await expect(page.locator("h1")).toHaveText("Migration");
+    await page.locator(".sidebar nav a", { hasText: "Discovery" }).click();
+    await expect(page.locator("h1")).toHaveText("Discovery");
   });
 
   test("POST /api/dismiss → GET /api/dismissed → on-disk JSON all agree", async ({
@@ -55,7 +55,7 @@ test.describe("Migration screen", () => {
     expect(parsed.unknown).toContain("synthetic-dismissed-e2e");
 
     // GET /api/dismissed should return what we just wrote. This is
-    // the endpoint Migration screen consumes in Task 5.
+    // the endpoint the Discovery screen consumes in Task 5.
     const list = await page.request.get(`${hub.url}/api/dismissed`);
     expect(list.status()).toBe(200);
     const listBody = (await list.json()) as { unknown: string[] };

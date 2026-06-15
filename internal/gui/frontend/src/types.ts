@@ -117,6 +117,14 @@ export interface ScanEntry {
   // /api/migrate errors. Mirror backend ScanEntry.CanMigrate so
   // collectServers can gate the fallback to migratable rows only.
   can_migrate?: boolean;
+  // Discovery view: explicit hub-routed flag mirroring backend
+  // ScanEntry.Managed (`json:"managed"`). True iff Status === "via-hub".
+  // The Discovery screen badges "Managed by hub" against this flag rather
+  // than re-deriving hub-routing from `status` in TS, keeping the
+  // managed/unmanaged distinction owned by the Go classifier. Always
+  // emitted by the backend (no omitempty); optional here only for older
+  // mocks/fixtures that predate the field.
+  managed?: boolean;
   // Servers-matrix revamp (Task 3.1 + 3.5): side-channel surfacing
   // per-client legacy/stdio entries that co-exist with a hub binding
   // for the same server. Mirrors api.ScanEntry.LegacyConflict

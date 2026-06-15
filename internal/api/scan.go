@@ -382,6 +382,11 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		e.ManifestExists = manifestNames[name]
 		e.CanMigrate = e.ManifestExists && !perSessionServers[name]
 		e.Status = classify(e, name, manifestNames)
+		// Managed is the explicit hub-routed flag — set true iff the
+		// classifier landed on "via-hub". Keeping it derived from Status (one
+		// owner) avoids a second hub-detection path drifting out of sync with
+		// classify().
+		e.Managed = e.Status == "via-hub"
 	}
 	// Pass over manifest names to ensure servers with no client
 	// presence still appear in the matrix. Without this, a wholesale
@@ -402,6 +407,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			ClientPresence: map[string]ClientEntry{},
 		}
 		e.Status = classify(e, name, manifestNames)
+		e.Managed = e.Status == "via-hub" // always false here (empty presence), kept for symmetry with the main loop.
 		entries[name] = e
 	}
 
@@ -1021,9 +1027,25 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool) string {
 	}
 	hasHub := false
 	hasStdio := false
+	// hasRemoteExternal: at least one client routes this server through a
+	// NON-hub remote HTTP endpoint (a real external remote MCP — e.g.
+	// context7 -> mcp.context7.com, qt-docs -> qt.io). These are http
+	// transport whose URL is NOT a hub loopback (IsHubHTTPURL is false).
+	// Pre-fix such an entry, having neither hub nor stdio presence, hit the
+	// final "not-installed" branch and the Discovery (ex-Migration) screen
+	// DROPPED it (migration-grouping.ts default case), so the operator's
+	// real external remotes vanished from "see ALL MCP servers". We now
+	// classify them as "external" so they surface under the Unmanaged /
+	// External group while staying read-only (not hub-managed, not a
+	// migrate candidate).
+	hasRemoteExternal := false
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
 			hasHub = true
+		}
+		if c.Transport == "http" && !clients.IsHubHTTPURL(c.Endpoint) {
+			// Non-hub remote HTTP endpoint = a genuine external remote MCP.
+			hasRemoteExternal = true
 		}
 		if c.Transport == "relay" {
 			// Antigravity's hub-routed shape: the hub rewrites Antigravity
@@ -1047,6 +1069,19 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool) string {
 	if hasStdio {
 		return "unknown"
 	}
+	// A client-present non-hub remote with no stdio presence is a real
+	// external MCP server — surface it (not "not-installed"). Ordered AFTER
+	// the hub/stdio branches so a hub-routed or migratable entry keeps its
+	// richer status; only an entry whose ONLY presence is a non-hub remote
+	// reaches here.
+	if hasRemoteExternal {
+		return "external"
+	}
+	// "not-installed" is now reserved for rows with ZERO actionable client
+	// presence — chiefly the manifest-only pass in ScanFrom (a server known
+	// via a manifest but referenced by no client config), so the matrix row
+	// does not vanish. Such rows have an empty ClientPresence and thus set
+	// none of the flags above.
 	return "not-installed"
 }
 
@@ -1663,5 +1698,16 @@ func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
 			continue
 		}
 		delete(entries, name)
+	}
+
+	// Re-sync Managed against the FINAL Status. Pass 1 above can promote an
+	// LSP-bridge row to Status == "via-hub" (line ~1592) AFTER ScanFrom's
+	// main loop already set Managed from the pre-LSP classify() result, so
+	// without this pass an LSP hub row would carry Status "via-hub" but
+	// Managed false. Keeping Managed strictly derived from the final Status
+	// (one owner) is the invariant the Discovery view's "Managed by hub"
+	// badge relies on.
+	for _, e := range entries {
+		e.Managed = e.Status == "via-hub"
 	}
 }
