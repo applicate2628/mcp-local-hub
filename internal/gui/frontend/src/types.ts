@@ -35,6 +35,18 @@ export interface DaemonStatus {
   // a daemon running without orphan-protection can accumulate
   // orphans on supervisor crash with no steady-state warning.
   job_protection?: boolean | null;
+  // Process uptime in seconds, derived server-side from the supervisor's
+  // started_at (api.supervisorIPCUptimeSec). Mirrors DaemonStatus.UptimeSec
+  // (`json:"uptime_sec,omitempty"`). 0/absent for a just-spawned or
+  // non-running daemon; the Dashboard renders a humanized "Uptime: 2h 14m"
+  // only when > 0. Display-only — the client humanizes the seconds value.
+  uptime_sec?: number;
+  // Resident set size (working-set bytes) of the daemon's live process,
+  // looked up server-side by current_pid for Running daemons. Mirrors
+  // DaemonStatus.RAMBytes (`json:"ram_bytes,omitempty"`). 0/absent when RAM
+  // could not be determined (non-Windows host, port-stale/Idle daemon, PID
+  // recycled); the Dashboard renders "RAM: 48 MB" only when > 0.
+  ram_bytes?: number;
   state: string;
   task_name?: string;
   // Human-readable label computed server-side (api.ComputeDaemonDisplayName):

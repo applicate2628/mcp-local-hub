@@ -124,6 +124,14 @@ type supervisorIPCStatusDaemon struct {
 	CurrentPID    int      `json:"current_pid"`
 	StartedAt     string   `json:"started_at"`
 	IsMaintenance bool     `json:"is_maintenance"`
+	// RAMBytes is the daemon's resident set size (working-set bytes),
+	// looked up by the supervisor from the live current_pid for Running
+	// daemons (internal/cli/supervise_status.go). Zero/omitted when RAM
+	// could not be determined (non-Windows host, port-stale/Idle daemon,
+	// PID recycled). Without this field json.Unmarshal would silently
+	// drop the ram_bytes the producer emits before it reached the
+	// DaemonStatus consumer — mirroring the OrphanPID/StalePID precedent.
+	RAMBytes uint64 `json:"ram_bytes,omitempty"`
 	// OrphanPID surfaces a Windows post-create orphan PID when the
 	// supervisor's best-effort kill failed; operator-visible via
 	// `mcphub status --json` and the GUI Dashboard for manual cleanup
@@ -255,6 +263,10 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			// while tests injected it). Uses time.Now() as the evaluation
 			// clock — the same wall clock the sweeper's last-activity uses.
 			UptimeSec:     supervisorIPCUptimeSec(d.StartedAt, time.Now()),
+			// RAMBytes is carried straight through from the supervisor's
+			// live per-pid lookup (the wire field). Zero means "unknown" —
+			// the GUI Dashboard omits the RAM row in that case.
+			RAMBytes:      d.RAMBytes,
 			IsMaintenance: d.IsMaintenance,
 		})
 	}

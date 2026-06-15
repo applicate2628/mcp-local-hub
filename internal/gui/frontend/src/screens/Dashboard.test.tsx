@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup, fireEvent } from "@testing-library/preact";
-import { DashboardScreen } from "./Dashboard";
+import { DashboardScreen, formatUptime, formatBytes } from "./Dashboard";
 import type { DaemonStatus } from "../types";
 
 // happy-dom does not ship EventSource. Dashboard's bulk-action UI state
@@ -807,5 +807,124 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
     });
     // The error banner must be absent when the supervisor is up.
     expect(queryByTestId("dashboard-error")).toBeNull();
+  });
+});
+
+// Roadmap §B: per-daemon expanded-card metrics. UPTIME is derived
+// server-side from the supervisor's started_at (DaemonStatus.uptime_sec);
+// RAM is the live working-set bytes looked up by current_pid
+// (DaemonStatus.ram_bytes). Both render as .card-kv rows alongside
+// Port/PID/State and are omitted when absent/zero.
+describe("formatUptime", () => {
+  it("humanizes seconds into the two-largest-unit form", () => {
+    expect(formatUptime(0)).toBe("");
+    expect(formatUptime(undefined)).toBe("");
+    expect(formatUptime(-5)).toBe("");
+    expect(formatUptime(47)).toBe("47s");
+    expect(formatUptime(60)).toBe("1m");
+    expect(formatUptime(90)).toBe("1m 30s");
+    expect(formatUptime(3600)).toBe("1h");
+    expect(formatUptime(2 * 3600 + 14 * 60)).toBe("2h 14m"); // the spec example
+    expect(formatUptime(86400)).toBe("1d");
+    expect(formatUptime(3 * 86400 + 5 * 3600)).toBe("3d 5h");
+  });
+});
+
+describe("formatBytes", () => {
+  it("humanizes byte counts in binary units", () => {
+    expect(formatBytes(0)).toBe("");
+    expect(formatBytes(undefined)).toBe("");
+    expect(formatBytes(-1)).toBe("");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(48 * 1024 * 1024)).toBe("48 MB"); // the spec example
+    expect(formatBytes(1024)).toBe("1 KB");
+    expect(formatBytes(Math.round(1.2 * 1024 * 1024 * 1024))).toBe("1.2 GB");
+  });
+});
+
+describe("DashboardScreen — expanded-card metrics (Uptime + RAM)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("renders Uptime and RAM rows when uptime_sec + ram_bytes are present", async () => {
+    const row: DaemonStatus = {
+      server: "memory",
+      daemon: "default",
+      port: 9123,
+      pid: 12345,
+      state: "Running",
+      uptime_sec: 2 * 3600 + 14 * 60, // 2h 14m
+      ram_bytes: 48 * 1024 * 1024, // 48 MB
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([row]));
+    const { findByTestId } = render(<DashboardScreen />);
+
+    const uptimeRow = await findByTestId("uptime-row");
+    expect(uptimeRow.textContent).toContain("Uptime");
+    expect(uptimeRow.textContent).toContain("2h 14m");
+
+    const ramRow = await findByTestId("ram-row");
+    expect(ramRow.textContent).toContain("RAM");
+    expect(ramRow.textContent).toContain("48 MB");
+  });
+
+  it("omits the Uptime row when uptime_sec is absent/zero", async () => {
+    const row: DaemonStatus = {
+      server: "memory",
+      daemon: "default",
+      port: 9123,
+      pid: 12345,
+      state: "Running",
+      ram_bytes: 10 * 1024 * 1024,
+      // no uptime_sec
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([row]));
+    const { findByTestId, queryByTestId } = render(<DashboardScreen />);
+    // RAM row present confirms the card rendered.
+    await findByTestId("ram-row");
+    expect(queryByTestId("uptime-row")).toBeNull();
+  });
+
+  it("omits the RAM row when ram_bytes is absent (non-Windows / lookup failed)", async () => {
+    const row: DaemonStatus = {
+      server: "memory",
+      daemon: "default",
+      port: 9123,
+      pid: 12345,
+      state: "Running",
+      uptime_sec: 300,
+      // no ram_bytes
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([row]));
+    const { findByTestId, queryByTestId } = render(<DashboardScreen />);
+    await findByTestId("uptime-row");
+    expect(queryByTestId("ram-row")).toBeNull();
+  });
+
+  it("does not add extra buttons (metric rows are non-interactive divs)", async () => {
+    const row: DaemonStatus = {
+      server: "memory",
+      daemon: "default",
+      port: 9123,
+      pid: 12345,
+      state: "Running",
+      uptime_sec: 300,
+      ram_bytes: 10 * 1024 * 1024,
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([row]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    // 2 bulk header + 2 per-card (Restart + Stop) — metric rows must NOT
+    // contribute buttons, so the long-standing count invariant holds.
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
   });
 });

@@ -9,7 +9,16 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
+
+// rssByPID resolves a process's resident set size (working-set bytes) by
+// PID. Defaults to the platform implementation (Windows reads it via
+// GetProcessMemoryInfo; other OSes return ok=false). Indirected through a
+// package var so status tests can inject a deterministic value without a
+// live process. ok=false means "RAM unknown" — the producer omits the
+// ram_bytes field rather than emitting a misleading 0.
+var rssByPID = process.ResidentSetSizeByPID
 
 func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]map[string]any, error) {
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
@@ -123,6 +132,19 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		// consultant strategic concern #1 on PR #241.
 		if runtimeState.JobProtection != nil {
 			row["job_protection"] = *runtimeState.JobProtection
+		}
+		// Per-daemon resident-set-size (RAM). Looked up by the live
+		// current_pid only when the daemon is actually Running — a
+		// port-stale daemon already had CurrentPID zeroed above (stateText
+		// flipped to "Restarting"), and an Idle/Stopped row has no live
+		// process to measure. rssByPID returns ok=false when RAM cannot be
+		// determined (non-Windows, PID recycled, OpenProcess denied); we
+		// omit ram_bytes in that case so the GUI renders no RAM row rather
+		// than a misleading "0 MB". Best-effort diagnostic — no error path.
+		if stateText == "Running" && runtimeState.CurrentPID > 0 {
+			if ram, okRAM := rssByPID(runtimeState.CurrentPID); okRAM && ram > 0 {
+				row["ram_bytes"] = ram
+			}
 		}
 		rows = append(rows, row)
 	}
