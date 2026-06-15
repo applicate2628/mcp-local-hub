@@ -1,8 +1,36 @@
 # B1 residual race: backup + live-client-config I/O in internal/clients lacks serialization
 
-**Status:** open (accepted residual for B1 — tracked for future fix)
+**Status:** FIXED (2026-06-15, commits #319 `config_lock.go` + `2c4ba62`) — verified 2026-06-16
 **Found during:** B1 design-memo rev 2 / R1 P2 review of 2026-04-24
 **Phase:** post-B1
+
+## RESOLUTION (fix candidate 3 — both in-process mutex + flock)
+
+`internal/clients/config_lock.go` `lockingClient` decorates every client so:
+- **Write/RMW paths** — `InitEmpty`, `Backup`, `BackupKeep`, `Restore`,
+  `AddEntry`, `RemoveEntry`, `RestoreEntryFromBackup`,
+  `RestoreEntryFromBackupForRollback` run under `withConfigLock` (per-config-path
+  in-process mutex + cross-process advisory flock). [#319]
+- **Backup-READ selection paths** — `LatestBackupPath`, `BackupContainsEntry`,
+  `BackupEntryIsHubManaged` run under `withConfigReadLock` (same key, tolerates a
+  missing backup dir). [`2c4ba62`]
+- `AllClients()` returns `*lockingClient` for every client (the concrete adapter's
+  internal cross-method calls bypass the decorator, so no self-deadlock).
+
+Covers BOTH exposure classes from this doc: multi-tab same-process (in-process
+mutex) AND CLI+GUI interleave across processes (flock).
+
+**Named tests (all PASS under `-race`, verified 2026-06-16):**
+- `TestConfigLock_ConcurrentAddRemoveBackup_NeverTearsFile` — the two-goroutine
+  unit test this doc asked for.
+- `TestConfigLock_FlockSerializesAcrossProcesses` — the cross-process integration
+  test this doc asked for.
+- `TestConfigLock_BackupReadDuringWrite_NeverSelectsTornFile` — read-race guard.
+- `TestAllClientsAreLockWrapped` — regression guard (no adapter bypasses the lock).
+
+---
+
+### Original report (historical)
 
 ## Summary
 
