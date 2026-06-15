@@ -1136,6 +1136,50 @@ menu button[disabled] {
    sections (the redesign and the not-yet-redesigned ones both read better). */
 .settings-body { max-width: 880px; }
 
+/* Settings buttons — ONE coherent style for every button inside a settings
+   card (section[data-section]), replacing the browser-default look. Base = a
+   clean outline/secondary button; add .btn-primary (accent-filled, for the
+   main Save/Apply action) or .btn-danger (destructive Clean/Delete/Force-kill).
+   The ⓘ InfoTip trigger is excluded — it keeps its own pill style. Theme-aware
+   via tokens (sits on --card-surface so it reads on the elevated card). */
+section[data-section] button:not(.infotip-trigger) {
+  border: 1px solid var(--border);
+  background: var(--card-surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+section[data-section] button:not(.infotip-trigger):hover:not(:disabled) {
+  border-color: var(--link);
+  background: color-mix(in srgb, var(--link) 8%, var(--card-surface));
+}
+section[data-section] button:not(.infotip-trigger):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+section[data-section] button.btn-primary:not(:disabled) {
+  background: var(--link);
+  border-color: var(--link);
+  color: #ffffff;
+}
+section[data-section] button.btn-primary:not(:disabled):hover {
+  background: var(--link-hover);
+  border-color: var(--link-hover);
+}
+section[data-section] button.btn-danger:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+section[data-section] button.btn-danger:not(:disabled):hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--card-surface));
+  border-color: var(--danger);
+}
+
 /* Daemons card sub-sections (WeeklyMembershipTable + DaemonEnvSettings) had no
    real spacing/formatting — the membership table fell back to default HTML
    table styling and looked cramped. Give both a shared small-caps header and

@@ -210,6 +210,7 @@ function CardOrphanMcpServers(): preact.JSX.Element {
           <button
             onClick={openConfirm}
             disabled={false}
+            class="btn-danger"
             data-testid="orphan-mcp-clean-button"
           >
             Clean ({state.orphans.length})
@@ -404,6 +405,7 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
             onClick={openConfirm}
             disabled={killCount === 0}
             title={noKillReason}
+            class="btn-danger"
             data-testid="orphan-log-watchers-clean-button"
           >
             Clean ({killCount})
@@ -540,6 +542,7 @@ function CardForceKillInstance(): preact.JSX.Element {
         <button
           onClick={() => setConfirmOpen(true)}
           disabled={state.kind === "loading"}
+          class="btn-danger"
           data-testid="force-kill-button"
         >
           Force-kill
@@ -614,6 +617,7 @@ function CardStopAllDaemons(): preact.JSX.Element {
         <button
           onClick={() => setConfirmOpen(true)}
           disabled={state.kind === "loading"}
+          class="btn-danger"
           data-testid="stop-all-button"
         >
           Stop all

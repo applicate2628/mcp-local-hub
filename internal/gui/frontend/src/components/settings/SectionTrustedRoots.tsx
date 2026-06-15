@@ -156,7 +156,7 @@ export function SectionTrustedRoots(): preact.JSX.Element {
                     <code class="trusted-roots-path text-sm text-app-text">{root}</code>
                     <button
                       type="button"
-                      class="danger"
+                      class="danger btn-danger"
                       disabled={busy}
                       data-testid="trusted-roots-remove"
                       onClick={() => setPendingRemove(root)}
@@ -197,6 +197,7 @@ export function SectionTrustedRoots(): preact.JSX.Element {
                 />
                 <button
                   type="button"
+                  class="btn-primary"
                   disabled={!canAdd}
                   data-testid="trusted-roots-add-button"
                   onClick={() => void add()}

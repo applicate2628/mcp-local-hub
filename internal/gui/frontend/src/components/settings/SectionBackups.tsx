@@ -156,6 +156,7 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
         <div class="backups-clean-row mt-4">
           <button
             type="button"
+            class="btn-danger"
             onClick={() => setConfirmOpen(true)}
             data-testid="clean-now-button"
           >
@@ -177,7 +178,7 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
 
       <div class="settings-section-footer">
         {banner ? <span class="save-banner ok">{banner}</span> : null}
-        <button type="button" disabled={!dirty || busy} onClick={() => void save()}>
+        <button type="button" class="btn-primary" disabled={!dirty || busy} onClick={() => void save()}>
           {busy ? "Saving…" : "Save"}
         </button>
         <button type="button" disabled={!dirty || busy} onClick={onReset}>Reset</button>

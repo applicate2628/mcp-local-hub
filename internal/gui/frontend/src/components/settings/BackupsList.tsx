@@ -206,6 +206,7 @@ export function BackupsList({
             <div class="backups-client-actions">
               <button
                 type="button"
+                class="btn-danger"
                 disabled={cleanDisabled}
                 data-testid={`clean-now-${client}`}
                 onClick={() => void cleanThisClient(client)}

@@ -164,7 +164,7 @@ export function SectionFooter({ flow }: { flow: ReturnType<typeof useSectionSave
   return (
     <div class="settings-section-footer">
       {flow.banner ? <span class={`save-banner ${flow.banner.kind}`}>{flow.banner.text}</span> : null}
-      <button type="button" disabled={!flow.dirty || flow.busy} onClick={() => void flow.save()}>
+      <button type="button" class="btn-primary" disabled={!flow.dirty || flow.busy} onClick={() => void flow.save()}>
         {flow.busy ? "Saving…" : "Save"}
       </button>
       <button type="button" disabled={!flow.dirty || flow.busy} onClick={flow.reset}>Reset</button>

@@ -271,7 +271,7 @@ export function DaemonEnvSettings({
               {banner.text}
             </span>
           ) : null}
-          <button type="button" disabled={busy || !selected || !envDirty} onClick={() => void apply()} data-testid="daemon-env-apply">
+          <button type="button" class="btn-primary" disabled={busy || !selected || !envDirty} onClick={() => void apply()} data-testid="daemon-env-apply">
             Apply
           </button>
           <button type="button" disabled={busy} onClick={() => void refreshRows()} data-testid="daemon-env-refresh">

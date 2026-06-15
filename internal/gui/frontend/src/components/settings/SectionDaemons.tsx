@@ -57,16 +57,16 @@ export function SectionDaemons({
 }: SectionDaemonsProps): preact.JSX.Element {
   if (snapshot.status === "loading") {
     return (
-      <section data-section="daemons" class="settings-section">
-        <h2>Daemons</h2>
+      <section data-section="daemons" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
+        <h2 class="m-0 mb-2 text-lg font-semibold text-app-text">Daemons</h2>
         <p>Loading…</p>
       </section>
     );
   }
   if (snapshot.status === "error") {
     return (
-      <section data-section="daemons" class="settings-section">
-        <h2>Daemons</h2>
+      <section data-section="daemons" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
+        <h2 class="m-0 mb-2 text-lg font-semibold text-app-text">Daemons</h2>
         <p class="error-banner">Schedule unavailable.</p>
       </section>
     );
@@ -417,6 +417,7 @@ export function SectionDaemons({
         ) : null}
         <button
           type="button"
+          class="btn-primary"
           disabled={!sectionDirty || busy}
           onClick={() => void save()}
           data-testid="daemons-save"

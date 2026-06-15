@@ -208,7 +208,7 @@ export function SectionAdvancedDiagnostics(): preact.JSX.Element {
       {showKill ? (
         <button
           type="button"
-          class="danger mt-3"
+          class="btn-danger mt-3"
           onClick={() => setConfirmOpen(true)}
           data-testid="kill-button"
         >
