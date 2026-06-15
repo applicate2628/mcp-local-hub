@@ -124,6 +124,18 @@ var SettingsRegistry = []SettingDef{
 		// entirely (daemons stay running until an explicit operator stop).
 		// Takes effect on the next sweep tick (~60s) — no restart required.
 		Help: "Sleep an idle serena pool daemon after this much inactivity; the next request wakes it. Default is 'off' to avoid releasing daemon ports unless explicitly enabled. Takes effect within ~60s; no restart."},
+	{Key: "daemons.auto_prune_workspaces", Section: "daemons", Type: TypeBool,
+		Default: "true",
+		// Workspace-daemon auto-prune (Phase 1). The 60s in-GUI prune sweeper
+		// reads this each tick: when enabled it auto-removes serena + per-LSP
+		// daemon rows whose workspace is structurally dead — an ephemeral
+		// `.claude/worktrees/agent-*` worktree (pruned immediately, ephemeral by
+		// design) or a workspace directory that has been deleted (pruned after 2
+		// consecutive ENOENT ticks to absorb a transient unmount). A pruned
+		// workspace re-registers on next open, so prune is non-destructive.
+		// "false" disables the sweep entirely. Takes effect on the next sweep
+		// tick (~60s) — no restart.
+		Help: "Auto-remove daemon registrations for deleted workspaces and ephemeral agent worktrees. A pruned workspace re-registers on next open. Takes effect within ~60s; no restart."},
 	{Key: "daemons.retry_policy", Section: "daemons", Type: TypeEnum,
 		Default: "exponential", Enum: []string{"none", "linear", "exponential"},
 		// A4-b PR #2 runtime applier shipped: the watchdog --once

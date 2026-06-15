@@ -632,6 +632,19 @@ type Server struct {
 	serenaInFlightMu sync.Mutex
 	serenaInFlight   map[string]int
 
+	// pruneEnoentMu guards pruneEnoentTicks: WorkspaceKey -> number of
+	// CONSECUTIVE prune-sweep ticks that observed the workspace directory as
+	// definitively gone (ENOENT). The workspace-daemon auto-prune sweeper
+	// (workspace_prune_sweeper.go) prunes a deleted-dir registration only after
+	// it crosses the 2-consecutive-tick threshold, absorbing a transient
+	// unmount; the counter resets to 0 (entry pruned) the moment the directory
+	// reappears or the row is removed. In-memory only — NOT persisted (Phase 1
+	// adds no new persisted state); a GUI restart resets the counters, which is
+	// safe (a still-deleted dir simply re-accrues two ticks before pruning).
+	// Agent-worktree hits do NOT use this counter (they prune immediately).
+	pruneEnoentMu    sync.Mutex
+	pruneEnoentTicks map[string]int
+
 	// LSP router dependencies for /lsp/<language>/mcp. This route is
 	// intentionally separate from the Serena router because LSP workspace
 	// proxies are sessionless upstreams and need no daemon-session handshake.
@@ -644,7 +657,7 @@ func NewServer(cfg Config) *Server {
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now()}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now(), pruneEnoentTicks: map[string]int{}}
 	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the
 	// TTL+singleflight HealthSnapshot cache here so concurrent requests

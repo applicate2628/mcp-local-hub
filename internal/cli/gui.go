@@ -409,6 +409,14 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		// cadences differ (60s vs 30s) and their concerns are orthogonal
 		// (idle-stop vs backend-loss teardown); both exit on ctx cancel.
 		go runSerenaIdleShutdownTicker(ctx, s, 60*time.Second)
+
+		// Phase-1 workspace-daemon auto-prune (#prune): a separate 60s in-GUI
+		// sweeper that auto-removes daemons whose workspace is structurally dead —
+		// an ephemeral .claude/worktrees/agent-* worktree, or a deleted directory —
+		// so the per-workspace serena+LSP daemon set stops growing without bound.
+		// Gated by daemons.auto_prune_workspaces (default on); skips a workspace
+		// mid serena call; non-destructive (re-registers on next open).
+		go runWorkspacePruneTicker(ctx, s, 60*time.Second)
 	} else {
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
@@ -862,6 +870,32 @@ func runSerenaIdleShutdownTicker(ctx context.Context, s *gui.Server, interval ti
 			}
 			tickCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			_ = s.SweepIdleSerenaDaemons(tickCtx, now)
+			cancel()
+		}
+	}
+}
+
+// runWorkspacePruneTicker is the Phase-1 workspace-daemon auto-prune driver.
+// Every `interval` (60s in production) it calls s.SweepPruneWorkspaces, which
+// auto-removes daemons whose workspace is structurally dead (an ephemeral
+// .claude/worktrees/agent-* worktree, or a deleted directory) so the per-
+// workspace serena+LSP daemon set stops growing without bound. Gated by
+// daemons.auto_prune_workspaces (default on) and skips any workspace mid serena
+// call; prune is non-destructive (re-registers on next open). Owned by the GUI
+// server lifecycle; exits when ctx is cancelled. s may be nil in tests.
+func runWorkspacePruneTicker(ctx context.Context, s *gui.Server, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			if s == nil {
+				continue
+			}
+			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			_ = s.SweepPruneWorkspaces(tickCtx, now)
 			cancel()
 		}
 	}

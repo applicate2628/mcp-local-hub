@@ -383,10 +383,13 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			canonical, wsKey, backend)
 	}
 
-	removed := 0
-	// Phase 1: paired LSP teardown. Unregister errors loud only on a hard
-	// failure; a missing supervisor (no live IPC) is downgraded to a warning
-	// inside Unregister, so this works whether or not a supervisor is running.
+	// The two mutation phases run through api.PruneWorkspacePhases — the SHARED
+	// two-phase sequencer that also backs the GUI auto-prune sweeper — so the
+	// LSP-then-serena ordering + the bot-r32-P2 teardown-before-delete invariant
+	// live in ONE owner (no logic duplication). The CLI keeps its own classify
+	// (above), output, default-marker clearing (below), and test-injectable seams
+	// (unregisterLSPWorkspaceFn / removeSerenaSupervisorIntentFn) by passing them
+	// as the teardown closures here.
 	//
 	// Phase-split atomicity tradeoff (deep-sec P3-a). The classify (above) and
 	// the two mutation phases run under SEPARATE registry locks — they have to,
@@ -399,61 +402,42 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	// single-lock RemoveByBackend("all") did. This is a SAFE, fail-loud,
 	// RETRYABLE outcome — not corruption: the serena row simply remains and a
 	// re-run of the same command removes it (classify will then see only the
-	// serena row in scope). We intentionally do NOT reorder Phase 2 ahead of this
-	// error return: removing the serena row while the paired LSP teardown failed
-	// would leave the LSP descriptor/row mismatch UNreported and half-applied,
-	// which is worse than a clean retryable error. The window is a same-user race
-	// only (the registry is a per-user 0600 boundary), so the operator who hit it
-	// is the one who can re-run.
-	if len(lspLangs) > 0 {
-		report, uerr := unregisterLSPWorkspaceFn(rawPath, lspLangs)
-		if uerr != nil {
-			return fmt.Errorf("paired LSP teardown for workspace %s: %w", canonical, uerr)
-		}
-		if report != nil {
-			removed += len(report.Removed)
-			for _, warn := range report.Warnings {
-				fmt.Fprintf(cmd.OutOrStderr(), "warning: %s\n", warn)
+	// serena row in scope). The window is a same-user race only (the registry is
+	// a per-user 0600 boundary), so the operator who hit it is the one who can
+	// re-run.
+	report := &api.PruneReport{Workspace: canonical, WorkspaceKey: wsKey}
+	td := api.PruneWorkspaceTeardown{
+		// The CLI seam takes the operator-supplied rawPath (not the resolved
+		// canonical) so api.Unregister can compute its own legacy-key fallback.
+		LSPUnregister:      func(_ string, langs []string) (*api.UnregisterReport, error) { return unregisterLSPWorkspaceFn(rawPath, langs) },
+		RemoveSerenaIntent: removeSerenaSupervisorIntentFn,
+		DeleteSerenaRow: func() (int, error) {
+			reg := api.NewRegistry(regPath)
+			unlock, err := reg.Lock()
+			if err != nil {
+				return 0, err
 			}
-		}
+			defer unlock()
+			if err := reg.Load(); err != nil {
+				return 0, err
+			}
+			n := reg.RemoveByBackend(wsKey, "serena")
+			if legacyWSKey != wsKey {
+				n += reg.RemoveByBackend(legacyWSKey, "serena")
+			}
+			if err := reg.Save(); err != nil {
+				return 0, err
+			}
+			return n, nil
+		},
 	}
-
-	// Phase 2: serena (sentinel) row removal.
-	//
-	// Teardown-before-delete ordering (bot r32 P2). The supervisor-descriptor
-	// teardown (RemoveSerenaSupervisorIntentForWorkspace) runs FIRST; the
-	// registry-row delete commits ONLY after it succeeds. On a live-supervisor
-	// reconcile failure the teardown RESTORES the descriptor and returns a
-	// retry-asking error — so if we had already deleted+saved the registry row,
-	// the restored descriptor would be paired with a now-gone row: an orphan
-	// the supervisor keeps reconciling, and the retry sees no matching serena
-	// row so it never re-enters the paired teardown. Returning here WITHOUT
-	// touching the registry row keeps the durable record that drives the next
-	// retry's paired teardown intact.
-	if removeSerena {
-		if _, err := removeSerenaSupervisorIntentFn(canonical); err != nil {
-			return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, err)
-		}
-		reg := api.NewRegistry(regPath)
-		unlock, err := reg.Lock()
-		if err != nil {
-			return err
-		}
-		if err := reg.Load(); err != nil {
-			unlock()
-			return err
-		}
-		n := reg.RemoveByBackend(wsKey, "serena")
-		if legacyWSKey != wsKey {
-			n += reg.RemoveByBackend(legacyWSKey, "serena")
-		}
-		if err := reg.Save(); err != nil {
-			unlock()
-			return err
-		}
-		unlock()
-		removed += n
+	if err := api.PruneWorkspacePhases(rawPath, canonical, lspLangs, len(lspLangs) > 0, removeSerena, td, report); err != nil {
+		return err
 	}
+	for _, warn := range report.Warnings {
+		fmt.Fprintf(cmd.OutOrStderr(), "warning: %s\n", warn)
+	}
+	removed := len(report.LSPRemoved) + report.SerenaRemoved
 
 	// If the default marker pointed at this workspace AND we removed the
 	// serena row (or --backend all), clear the marker. Otherwise stale
