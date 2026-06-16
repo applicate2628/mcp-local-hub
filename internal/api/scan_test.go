@@ -396,6 +396,14 @@ func TestScanCoversWave2Clients(t *testing.T) {
 	openclawPath := filepath.Join(tmp, "openclaw.json")
 	_ = os.WriteFile(openclawPath, []byte(`{"mcp":{"servers":{"memory":{"url":"http://localhost:9123/mcp","transport":"streamable-http","enabled":true}}}}`), 0600)
 
+	// Manifest fixture so the PORT-AWARE via-hub gate can recognise the
+	// loopback bindings (port 9123 must match memory's manifest daemon
+	// port). Without a manifest, every loopback entry classifies external.
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(filepath.Join(manifestDir, "memory"), 0755)
+	_ = os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+		[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+
 	a := NewAPI()
 	result, err := a.ScanFrom(ScanOpts{
 		ZedConfigPath:      zedPath,
@@ -406,7 +414,7 @@ func TestScanCoversWave2Clients(t *testing.T) {
 		OpenCodeConfigPath: opencodePath,
 		HermesConfigPath:   hermesPath,
 		OpenClawConfigPath: openclawPath,
-		ManifestDir:        t.TempDir(),
+		ManifestDir:        manifestDir,
 	})
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -524,25 +532,75 @@ func TestClassify(t *testing.T) {
 		name       string
 		entry      *ScanEntry
 		serverName string
-		want       string
+		// daemonPorts is the manifest daemon-port set for serverName, as
+		// ScanFrom would pass it to classify(). The port-aware via-hub gate
+		// (security review) requires a loopback entry's URL port to match one
+		// of these; non-loopback cases can leave it nil.
+		daemonPorts []int
+		want        string
 	}{
 		{
-			name:       "per-session takes precedence",
-			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"x": {Transport: "http", Endpoint: "http://localhost:9100/mcp"}}},
-			serverName: firstPerSessionServer(t),
-			want:       "per-session",
+			name:        "per-session takes precedence",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"x": {Transport: "http", Endpoint: "http://localhost:9100/mcp"}}},
+			serverName:  firstPerSessionServer(t),
+			daemonPorts: []int{9100},
+			want:        "per-session",
 		},
 		{
-			name:       "http + localhost -> via-hub",
-			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9200/mcp"}}},
-			serverName: "memory",
-			want:       "via-hub",
+			name:        "http + localhost + matching port -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9200/mcp"}}},
+			serverName:  "memory",
+			daemonPorts: []int{9200},
+			want:        "via-hub",
 		},
 		{
-			name:       "http + 127.0.0.1 -> via-hub (Codex R1)",
-			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9200/mcp"}}},
-			serverName: "memory",
-			want:       "via-hub",
+			name:        "http + 127.0.0.1 + matching port -> via-hub (Codex R1)",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9200/mcp"}}},
+			serverName:  "memory",
+			daemonPorts: []int{9200},
+			want:        "via-hub",
+		},
+		{
+			// PORT-AWARE FIX (security review): a loopback-http entry whose
+			// URL port does NOT match any of this server's manifest daemon
+			// ports is a stale/foreign binding (e.g. fetch pointed at 9121,
+			// serena's port, when fetch's own daemon is 9133). It must NOT
+			// show as a deceptive green via-hub cell — classify as an
+			// external/unmanaged remote so it surfaces read-only.
+			name:        "http + loopback + NON-matching port -> external (stale-port)",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9121/mcp"}}},
+			serverName:  "fetch",
+			daemonPorts: []int{9133},
+			want:        "external",
+		},
+		{
+			// A loopback entry for a server with NO manifest daemon ports
+			// (manifest absent / no daemons) cannot match any port → external,
+			// never via-hub. This is the operator's-own-local-server case the
+			// security review flagged: it must not be mislabeled hub-managed.
+			name:        "http + loopback + no manifest ports -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:7777/mcp"}}},
+			serverName:  "my-own-local-server",
+			daemonPorts: nil,
+			want:        "external",
+		},
+		{
+			// Multi-daemon manifest: a loopback entry matching the SECOND
+			// declared daemon port still counts as via-hub.
+			name:        "http + loopback + matches second daemon port -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9302/mcp"}}},
+			serverName:  "multi",
+			daemonPorts: []int{9301, 9302},
+			want:        "via-hub",
+		},
+		{
+			// Loopback with no explicit port (defaults to 80) cannot be a
+			// daemon binding → external, not via-hub.
+			name:        "http + loopback + no explicit port -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost/mcp"}}},
+			serverName:  "memory",
+			daemonPorts: []int{9200},
+			want:        "external",
 		},
 		{
 			name:       "relay transport -> via-hub (Codex R1)",
@@ -596,10 +654,11 @@ func TestClassify(t *testing.T) {
 			// Hub + external in the same row: hub wins (it's still hub-routed,
 			// the external entry is in a different client). via-hub keeps its
 			// richer status; the external branch is ordered after hub/stdio.
-			name:       "hub + non-hub remote -> via-hub (hub wins over external)",
-			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9200/mcp"}, "cursor": {Transport: "http", Endpoint: "https://mcp.context7.com/mcp"}}},
-			serverName: "memory",
-			want:       "via-hub",
+			name:        "hub + non-hub remote -> via-hub (hub wins over external)",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://localhost:9200/mcp"}, "cursor": {Transport: "http", Endpoint: "https://mcp.context7.com/mcp"}}},
+			serverName:  "memory",
+			daemonPorts: []int{9200},
+			want:        "via-hub",
 		},
 		{
 			// Manifest-only-no-presence (empty ClientPresence) stays
@@ -613,7 +672,7 @@ func TestClassify(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classify(tc.entry, tc.serverName, manifests)
+			got := classify(tc.entry, tc.serverName, manifests, tc.daemonPorts)
 			if got != tc.want {
 				t.Fatalf("classify(%q) = %q, want %q", tc.serverName, got, tc.want)
 			}

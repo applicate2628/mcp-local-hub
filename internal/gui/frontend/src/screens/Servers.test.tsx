@@ -756,6 +756,9 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
           manifest_exists: true,
           can_migrate: true,
           status: "via-hub",
+          // Port-aware via-hub: the loopback cell at :9200 is only "via-hub"
+          // when 9200 is a declared daemon port for this server.
+          daemon_ports: [9200],
           client_presence: {
             "claude-code": {
               transport: "http",
@@ -898,6 +901,9 @@ describe("ServersScreen — whole-row toggle", () => {
           manifest_exists: true,
           can_migrate: true,
           status: "via-hub",
+          // Port-aware via-hub: 9200 must be a declared daemon port for the
+          // loopback claude-code cell to render checked/via-hub.
+          daemon_ports: [9200],
           client_presence: {
             "claude-code": {
               transport: "http",

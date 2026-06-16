@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -381,7 +383,14 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		e.Name = name
 		e.ManifestExists = manifestNames[name]
 		e.CanMigrate = e.ManifestExists && !perSessionServers[name]
-		e.Status = classify(e, name, manifestNames)
+		// Port-aware via-hub: a loopback-http entry is only "via-hub" when
+		// its URL port matches one of THIS server's manifest daemon ports.
+		// Load the set once per row and expose it on the entry so the
+		// frontend matrix can mirror the same port-match rule (a stale-port
+		// loopback entry that backend classifies "external" must not render
+		// as a green via-hub cell).
+		e.DaemonPorts = manifestDaemonPorts(opts.ManifestDir, name)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts)
 		// Managed is the explicit hub-routed flag — set true iff the
 		// classifier landed on "via-hub". Keeping it derived from Status (one
 		// owner) avoids a second hub-detection path drifting out of sync with
@@ -406,7 +415,8 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			CanMigrate:     !perSessionServers[name],
 			ClientPresence: map[string]ClientEntry{},
 		}
-		e.Status = classify(e, name, manifestNames)
+		e.DaemonPorts = manifestDaemonPorts(opts.ManifestDir, name)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts)
 		e.Managed = e.Status == "via-hub" // always false here (empty presence), kept for symmetry with the main loop.
 		entries[name] = e
 	}
@@ -1021,7 +1031,78 @@ func readManifestNames(dir string) (map[string]bool, error) {
 	return names, nil
 }
 
-func classify(e *ScanEntry, name string, manifestNames map[string]bool) string {
+// manifestDaemonPorts returns the set of daemon ports declared by the
+// server's manifest. Empty dir → embed-first production path; a non-empty
+// dir reads only that directory (test fixtures). Returns nil on any
+// load/parse error (missing manifest, unknown server) so callers treat
+// "no known ports" as "no loopback entry can match" → such an entry
+// classifies external, not via-hub. The returned set drives the
+// port-aware via-hub gate in classify() and is surfaced on
+// ScanEntry.DaemonPorts so the frontend matrix mirrors the same rule.
+func manifestDaemonPorts(dir, name string) []int {
+	m, err := loadManifestForServer(dir, name)
+	if err != nil || m == nil {
+		return nil
+	}
+	var ports []int
+	seen := map[int]bool{}
+	for _, d := range m.Daemons {
+		if d.Port > 0 && !seen[d.Port] {
+			seen[d.Port] = true
+			ports = append(ports, d.Port)
+		}
+	}
+	return ports
+}
+
+// loopbackEntryPort parses the TCP port out of a hub-shaped loopback URL
+// (`http://localhost:<port>/...`, `http://127.0.0.1:<port>/...`,
+// `http://[::1]:<port>/...`). Returns (port, true) only when the endpoint
+// IsHubHTTPURL AND a numeric port is present. A loopback URL with no
+// explicit port (would default to 80) yields (0, false) — that cannot be
+// a hub daemon binding, so it is treated as a non-matching loopback (→
+// external), never via-hub. Callers MUST gate on IsHubHTTPURL before
+// trusting a true result for hub classification.
+func loopbackEntryPort(endpoint string) (int, bool) {
+	if !clients.IsHubHTTPURL(endpoint) {
+		return 0, false
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return 0, false
+	}
+	portStr := u.Port()
+	if portStr == "" {
+		return 0, false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 {
+		return 0, false
+	}
+	return port, true
+}
+
+// loopbackPortMatchesDaemon reports whether a hub-shaped loopback endpoint
+// targets one of THIS server's manifest daemon ports. This is the
+// load-bearing port-aware gate: a loopback-http entry is "via-hub" only
+// when its URL port matches a declared daemon port. A loopback entry at a
+// non-matching port (stale migration pointing at another server's daemon,
+// or no manifest at all) is NOT hub-managed for this server — it is an
+// external/unmanaged remote.
+func loopbackPortMatchesDaemon(endpoint string, daemonPorts []int) bool {
+	port, ok := loopbackEntryPort(endpoint)
+	if !ok {
+		return false
+	}
+	for _, p := range daemonPorts {
+		if p == port {
+			return true
+		}
+	}
+	return false
+}
+
+func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPorts []int) string {
 	if perSessionServers[name] {
 		return "per-session"
 	}
@@ -1038,10 +1119,30 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool) string {
 	// classify them as "external" so they surface under the Unmanaged /
 	// External group while staying read-only (not hub-managed, not a
 	// migrate candidate).
+	//
+	// Port-aware via-hub (security review): a loopback-http entry counts as
+	// hub-managed ONLY when its URL port matches one of THIS server's
+	// manifest daemon ports. IsHubHTTPURL is a pure loopback-SHAPE test
+	// (no port check) — so a stale-port entry like fetch at
+	// http://localhost:9121/mcp (when fetch's daemon is 9133 and 9121 is
+	// serena's port) was wrongly shown as a clean green "via-hub" cell that
+	// the matrix would offer to overwrite/remove. A loopback entry whose
+	// port does NOT match any of the server's daemon ports is treated
+	// exactly like a non-loopback remote https entry → "external"
+	// (unmanaged remote), so it surfaces read-only in the Unmanaged /
+	// External group instead of masquerading as a correct migration.
 	hasRemoteExternal := false
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
-			hasHub = true
+			if loopbackPortMatchesDaemon(c.Endpoint, daemonPorts) {
+				hasHub = true
+			} else {
+				// Loopback shape but wrong/absent port for this server's
+				// daemons (stale migration, or operator's own local server).
+				// Not hub-managed — classify as an external remote so it
+				// surfaces read-only rather than as a deceptive green cell.
+				hasRemoteExternal = true
+			}
 		}
 		if c.Transport == "http" && !clients.IsHubHTTPURL(c.Endpoint) {
 			// Non-hub remote HTTP endpoint = a genuine external remote MCP.

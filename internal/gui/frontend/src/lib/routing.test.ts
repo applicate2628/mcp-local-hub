@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isHubLoopback,
+  loopbackEntryPort,
+  loopbackPortMatchesDaemon,
   perClientRouting,
   collectServers,
   visibleClients,
@@ -33,14 +35,72 @@ describe("isHubLoopback", () => {
   });
 });
 
+describe("loopbackEntryPort", () => {
+  it("extracts the port from a loopback hub URL", () => {
+    expect(loopbackEntryPort("http://127.0.0.1:9133/mcp")).toBe(9133);
+    expect(loopbackEntryPort("http://localhost:9123/mcp")).toBe(9123);
+    expect(loopbackEntryPort("http://[::1]:9128/mcp")).toBe(9128);
+  });
+  it("returns null for a loopback URL with no explicit port", () => {
+    expect(loopbackEntryPort("http://localhost/mcp")).toBeNull();
+  });
+  it("returns null for a non-loopback URL", () => {
+    expect(loopbackEntryPort("https://mcp.context7.com:443/mcp")).toBeNull();
+  });
+  it("returns null for an unparseable endpoint", () => {
+    expect(loopbackEntryPort("stdio:///memory")).toBeNull();
+    expect(loopbackEntryPort("")).toBeNull();
+  });
+});
+
+describe("loopbackPortMatchesDaemon", () => {
+  it("matches when the loopback port is a declared daemon port", () => {
+    expect(loopbackPortMatchesDaemon("http://localhost:9133/mcp", [9133])).toBe(true);
+    expect(loopbackPortMatchesDaemon("http://localhost:9302/mcp", [9301, 9302])).toBe(true);
+  });
+  it("does NOT match a stale/foreign port", () => {
+    // fetch pointed at serena's 9121 when fetch's daemon is 9133.
+    expect(loopbackPortMatchesDaemon("http://localhost:9121/mcp", [9133])).toBe(false);
+  });
+  it("does NOT match when there are no daemon ports", () => {
+    expect(loopbackPortMatchesDaemon("http://localhost:9133/mcp", [])).toBe(false);
+  });
+  it("does NOT match a non-loopback URL even on port collision", () => {
+    expect(loopbackPortMatchesDaemon("https://evil.com:9133/mcp", [9133])).toBe(false);
+  });
+});
+
 describe("perClientRouting", () => {
-  it("tags hub loopback http as via-hub", () => {
-    const r = perClientRouting({
-      "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" },
-    });
+  it("tags hub loopback http at a MATCHING daemon port as via-hub", () => {
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" } },
+      {},
+      true,
+      [9100],
+    );
     expect(r["claude-code"]).toBe("via-hub");
   });
-  it("tags relay transport as via-hub", () => {
+  it("tags hub loopback http at a NON-matching (stale) port as direct", () => {
+    // PORT-AWARE FIX (security review): loopback shape alone is not enough.
+    // A stale-port loopback entry must NOT render as a green via-hub cell.
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://localhost:9121/mcp" } },
+      {},
+      true,
+      [9133],
+    );
+    expect(r["claude-code"]).toBe("direct");
+  });
+  it("tags loopback http as direct when the server has no daemon ports", () => {
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://localhost:7777/mcp" } },
+      {},
+      true,
+      [],
+    );
+    expect(r["claude-code"]).toBe("direct");
+  });
+  it("tags relay transport as via-hub (port check does not apply to relay)", () => {
     const r = perClientRouting({ "codex-cli": { transport: "relay" } });
     expect(r["codex-cli"]).toBe("via-hub");
   });
@@ -80,7 +140,7 @@ describe("collectServers", () => {
     const out = collectServers({ at: "", entries: null });
     expect(out).toEqual([]);
   });
-  it("derives routing from client_presence", () => {
+  it("derives routing from client_presence (port matches daemon)", () => {
     const scan: ScanResult = {
       at: "",
       entries: [
@@ -89,11 +149,37 @@ describe("collectServers", () => {
           client_presence: {
             "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" },
           },
+          daemon_ports: [9100],
         },
       ],
     };
     const out = collectServers(scan);
     expect(out[0].routing["claude-code"]).toBe("via-hub");
+  });
+
+  // PORT-AWARE FIX (security review): collectServers threads
+  // ScanEntry.daemon_ports into perClientRouting so a stale-port loopback
+  // entry renders "direct" (unmanaged), matching the backend status —
+  // not a deceptive green via-hub cell.
+  it("renders a stale-port loopback cell as direct, not via-hub", () => {
+    const scan: ScanResult = {
+      at: "",
+      entries: [
+        {
+          name: "fetch",
+          client_presence: {
+            // points at serena's 9121, but fetch's daemon is 9133
+            "gemini-cli": { transport: "http", endpoint: "http://localhost:9121/mcp" },
+            // correctly migrated cell at fetch's own daemon port
+            "qwen-cli": { transport: "http", endpoint: "http://localhost:9133/mcp" },
+          },
+          daemon_ports: [9133],
+        },
+      ],
+    };
+    const out = collectServers(scan);
+    expect(out[0].routing["gemini-cli"]).toBe("direct");
+    expect(out[0].routing["qwen-cli"]).toBe("via-hub");
   });
 
   // Bug-bash A3 (#11/#12): each ServerRow carries a `manifested` flag
@@ -154,6 +240,8 @@ describe("perClientRouting with client_config_presence", () => {
     const r = perClientRouting(
       { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" } },
       { "claude-code": "ok" },
+      true,
+      [9100],
     );
     expect(r["claude-code"]).toBe("via-hub");
   });

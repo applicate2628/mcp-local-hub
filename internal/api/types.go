@@ -157,8 +157,15 @@ type ScanEntry struct {
 	// ScanEntry.managed. Always emitted (no omitempty) so a false value is
 	// an explicit "not hub-managed" signal rather than an absent field the
 	// UI would have to treat as unknown.
-	Managed      bool `json:"managed"`
-	ProcessCount int  `json:"process_count,omitempty"`
+	Managed bool `json:"managed"`
+	// DaemonPorts lists the loopback TCP ports declared by this server's
+	// manifest daemons. It is the data the frontend matrix needs to mirror
+	// the backend's PORT-AWARE via-hub rule: a loopback-http client entry
+	// is "via-hub" only when its URL port matches one of these. Empty/
+	// absent when no manifest exists (so any loopback entry is unmanaged
+	// for this server). Mirrored as TS ScanEntry.daemon_ports.
+	DaemonPorts  []int `json:"daemon_ports,omitempty"`
+	ProcessCount int   `json:"process_count,omitempty"`
 }
 
 // ClientEntry captures the shape of how one MCP server is configured inside

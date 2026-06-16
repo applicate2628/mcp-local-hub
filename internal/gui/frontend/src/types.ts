@@ -131,6 +131,15 @@ export interface ScanEntry {
   // (`json:"legacy_conflict,omitempty"`). Consumed by Task 4.3 for
   // dual-badge rendering in the matrix; populated by routing helper.
   legacy_conflict?: Record<string, ClientEntry>;
+  // PORT-AWARE via-hub: the loopback TCP ports declared by this server's
+  // manifest daemons. Mirrors api.ScanEntry.DaemonPorts
+  // (`json:"daemon_ports,omitempty"`). perClientRouting requires a
+  // loopback-http cell's URL port to be a member of this set before
+  // tagging it "via-hub" — a stale-port loopback entry (e.g. fetch
+  // pointed at serena's 9121 when fetch's daemon is 9133) must NOT render
+  // as a green hub cell. Absent/empty (no manifest) → no loopback entry
+  // can match → such a cell falls to "direct" (unmanaged).
+  daemon_ports?: number[];
 }
 
 export interface ClientPresence {
