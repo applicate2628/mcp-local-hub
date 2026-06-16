@@ -106,7 +106,7 @@ func captureSetvarsEnv(setvars string) ([]string, bool) {
 	}
 	batPath := bat.Name()
 	defer os.Remove(batPath)
-	content := "@echo off\r\nset \"NoDefaultCurrentDirectoryInExePath=\"\r\ncall \"" + setvars + "\" --force > NUL 2>&1\r\nset\r\n"
+	content := setvarsCaptureBatchContent(setvars)
 	if _, err := bat.WriteString(content); err != nil {
 		_ = bat.Close()
 		return nil, false
@@ -125,6 +125,25 @@ func captureSetvarsEnv(setvars string) ([]string, bool) {
 		return nil, false
 	}
 	return env, true
+}
+
+// setvarsCaptureBatchContent builds the temp .bat body for the capture. The
+// `if errorlevel 1 exit /b %errorlevel%` guard is LOAD-BEARING (incorporated
+// from PR #346's vcvars fix): without it, a FAILING `call setvars` would still
+// fall through to the unconditional `set`, so cmd.Output() would succeed and
+// dump the UNCHANGED (NoDef-cleared) parent environment — captureSetvarsEnv
+// would then return (parentEnv, true), wrongly reporting a successful oneAPI
+// capture and DEFEATING the caller's fallback chain (which only triggers on a
+// (nil,false) capture result). Exiting non-zero before `set` surfaces the
+// failure to cmd.Output() so the capture correctly returns (nil, false). See
+// the NoDefaultCurrentDirectoryInExePath note in captureSetvarsEnv for why the
+// var is cleared first.
+func setvarsCaptureBatchContent(setvars string) string {
+	return "@echo off\r\n" +
+		"set \"NoDefaultCurrentDirectoryInExePath=\"\r\n" +
+		"call \"" + setvars + "\" --force > NUL 2>&1\r\n" +
+		"if errorlevel 1 exit /b %errorlevel%\r\n" +
+		"set\r\n"
 }
 
 // parseSetDump parses the output of cmd's `set` command — one KEY=VALUE per

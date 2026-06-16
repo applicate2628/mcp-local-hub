@@ -7,6 +7,34 @@ import (
 	"testing"
 )
 
+func TestSetvarsCaptureBatchContent_GuardsSetWithCallFailure(t *testing.T) {
+	content := setvarsCaptureBatchContent(`C:\Program Files (x86)\Intel\oneAPI\setvars.bat`)
+
+	call := `call "C:\Program Files (x86)\Intel\oneAPI\setvars.bat" --force > NUL 2>&1`
+	noDefClear := `set "NoDefaultCurrentDirectoryInExePath="`
+	guard := "if errorlevel 1 exit /b %errorlevel%"
+
+	if !strings.Contains(content, call) {
+		t.Fatalf("batch missing quoted --force setvars call %q: %q", call, content)
+	}
+	if !strings.Contains(content, noDefClear) {
+		t.Fatalf("batch missing NoDefaultCurrentDirectoryInExePath clear: %q", content)
+	}
+	guardIndex := strings.Index(content, guard)
+	dumpIndex := strings.LastIndex(content, "set")
+	if guardIndex < 0 {
+		t.Fatalf("batch missing failure guard %q: %q", guard, content)
+	}
+	// The guard must run AFTER the call and BEFORE the final `set` dump, so a
+	// failing setvars exits non-zero instead of dumping the unchanged env.
+	if guardIndex < strings.Index(content, call) {
+		t.Fatalf("guard must follow the setvars call: %q", content)
+	}
+	if guardIndex > dumpIndex {
+		t.Fatalf("failure guard must precede the set dump: %q", content)
+	}
+}
+
 func TestParseSetDump_ParsesKeyValueLines(t *testing.T) {
 	dump := "INCLUDE=C:\\VS\\include\r\n" +
 		"LIB=C:\\VS\\lib;C:\\SDK\\lib\r\n" +

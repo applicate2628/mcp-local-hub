@@ -234,6 +234,28 @@ func TestPrependOneAPIToPath_NoDirsReturnsCopy(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Unsafe opt-in gate (PR #345) — run_in_oneapi_env is registered only after
+// an explicit operator opt-in.
+// ---------------------------------------------------------------------------
+
+func TestOneAPIRunEnabledRequiresExplicitUnsafeOptIn(t *testing.T) {
+	t.Setenv(enableUnsafeOneAPIRunEnv, "")
+	if oneAPIRunEnabled() {
+		t.Fatal("oneapi-run should be disabled without explicit unsafe opt-in")
+	}
+
+	t.Setenv(enableUnsafeOneAPIRunEnv, "0")
+	if oneAPIRunEnabled() {
+		t.Fatal("oneapi-run should be disabled for non-1 opt-in values")
+	}
+
+	t.Setenv(enableUnsafeOneAPIRunEnv, "1")
+	if !oneAPIRunEnabled() {
+		t.Fatal("oneapi-run should be enabled when explicitly opted in with 1")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Run handler — trivial cross-platform command + timeout + arg validation.
 // ---------------------------------------------------------------------------
 

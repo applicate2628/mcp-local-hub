@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -55,9 +56,30 @@ type runResult struct {
 	TimedOut bool `json:"timed_out,omitempty"`
 }
 
-// registerTools attaches the single run_in_oneapi_env tool to the MCP
-// server. Called once from Run during startup.
+// enableUnsafeOneAPIRunEnv gates registration of run_in_oneapi_env. The tool
+// intentionally executes caller-supplied native commands, which is an unsafe
+// arbitrary-local-code-execution capability for broadly-configured MCP clients
+// unless an operator explicitly opts in. (Incorporated from PR #345.)
+const enableUnsafeOneAPIRunEnv = "MCP_LOCAL_HUB_ENABLE_UNSAFE_ONEAPI_RUN"
+
+// oneAPIRunEnabled reports whether the operator opted into exposing the
+// arbitrary-command execution tool, by setting enableUnsafeOneAPIRunEnv to
+// exactly "1". Any other value (unset, "0", "true", …) keeps it disabled —
+// secure by default.
+func oneAPIRunEnabled() bool {
+	return os.Getenv(enableUnsafeOneAPIRunEnv) == "1"
+}
+
+// registerTools attaches the run_in_oneapi_env tool to the MCP server, but
+// ONLY after an explicit unsafe opt-in (oneAPIRunEnabled). Called once from
+// Run during startup. When the opt-in is absent the daemon still runs and
+// serves the MCP protocol — it just exposes no tools, so a misconfigured
+// client cannot reach the arbitrary-command surface.
 func registerTools(rs *OneAPIRunServer) {
+	if !oneAPIRunEnabled() {
+		return
+	}
+
 	rs.server.AddTool(&mcp.Tool{
 		Name: "run_in_oneapi_env",
 		Description: "Run ANY native command under the fully-initialized Visual-Studio + Intel-oneAPI environment. " +
