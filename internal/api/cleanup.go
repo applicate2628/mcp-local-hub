@@ -70,14 +70,21 @@ func isOurOwnProcess(cmdline string) bool {
 // the process while keeping sensitive context off-wire and out of
 // browser dev-tools / screenshots.
 type OrphanProcess struct {
-	PID             int    `json:"pid"`
-	ParentID        int    `json:"parent_pid"`
-	Server          string `json:"server"` // inferred from matching manifest
-	RAMBytes        uint64 `json:"ram_bytes"`
-	Cmdline         string `json:"-"`               // server-side use only; redacted from wire
-	CmdlineDisplay  string `json:"cmdline_display"` // basename of executable for GUI display
-	AgeSec          int64  `json:"age_sec"`
-	KillErr         string `json:"kill_err,omitempty"`
+	PID            int    `json:"pid"`
+	ParentID       int    `json:"parent_pid"`
+	Server         string `json:"server"` // inferred from matching manifest
+	RAMBytes       uint64 `json:"ram_bytes"`
+	Cmdline        string `json:"-"`               // server-side use only; redacted from wire
+	CmdlineDisplay string `json:"cmdline_display"` // basename of executable for GUI display
+	AgeSec         int64  `json:"age_sec"`
+	KillErr        string `json:"kill_err,omitempty"`
+
+	// MatchSource explains why an AGGRESSIVE candidate was included:
+	// the ancestor basename that anchored the scope (e.g. "codex") for
+	// a --client run, or "root-pid <pid>" for a --root-pid run. Empty
+	// for the default safe sweep. It is a redacted basename / fixed
+	// label only — never a full cmdline — so it is wire-safe.
+	MatchSource string `json:"match_source,omitempty"`
 }
 
 // firstTokenBasename returns the basename (no directory prefix) of the
@@ -328,7 +335,81 @@ type CleanupOpts struct {
 	// so LIVE stdio children of currently-running clients are NOT
 	// killed by mistake.
 	ScanClientConfigs bool
+
+	// Aggressive (Phase H.1) opts INTO killing live-rooted MCP-stdio
+	// processes that the default safe sweep CORRECTLY refuses — the
+	// per-subagent stdio fan-out where a single live client (e.g.
+	// codex) spawns N internal subagents that each spawn their own
+	// stdio MCP children which never get reaped on subagent finish.
+	// The default sweep walks the ancestor chain and excludes anything
+	// rooted under a live client launcher (see parseOrphans); aggressive
+	// mode INVERTS that for ONE explicitly-named scope so the operator
+	// can reclaim the accumulation. It NEVER bypasses the mcphub.exe
+	// daemon ancestor guard (hub-managed processes are always spared)
+	// and it applies the dangerous-class deny-list below.
+	//
+	// REQUIRES exactly one scope: Client (a known launcher basename)
+	// OR RootPID. AggressiveCleanup rejects an aggressive run with
+	// neither (or both) set.
+	Aggressive bool
+
+	// Client narrows the aggressive sweep to processes whose ancestor
+	// chain contains this client-launcher basename (case-insensitive,
+	// .exe/.cmd/.bat/.ps1 stripped). Must be a recognized launcher in
+	// knownClientLauncherBasenames. Mutually exclusive with RootPID.
+	Client string
+
+	// RootPID narrows the aggressive sweep to descendants of this PID.
+	// Mutually exclusive with Client.
+	RootPID int
+
+	// IncludeClasses lists dangerous process classes the operator has
+	// explicitly opted to include in an aggressive kill (e.g. "chrome"
+	// for a Playwright cleanup). Each entry overrides one deny-list
+	// class; basenames are matched case-insensitively with the exe
+	// suffix stripped. Empty (the default) keeps every dangerous class
+	// excluded.
+	IncludeClasses []string
 }
+
+// aggressiveDenyClasses are process basenames excluded from an
+// aggressive kill BY DEFAULT even when they are descendants of the
+// scoped client / root PID (spec H.1): operator terminals
+// (cmd/conhost/pwsh/powershell) and Playwright browser sessions
+// (chrome) the operator may still be using. Override one class at a
+// time via CleanupOpts.IncludeClasses (CLI --include-class), which
+// emits a stderr warning. Stored as bare lowercase basenames (exe
+// suffix stripped) to pair with stripExtension + firstTokenBasename.
+var aggressiveDenyClasses = []string{
+	"cmd",
+	"conhost",
+	"pwsh",
+	"powershell",
+	"chrome",
+}
+
+// AggressiveDenyClasses returns a copy of the default dangerous-class
+// deny-list for the aggressive sweep. Exported so the CLI audit-event
+// builder can report which classes stayed excluded without duplicating
+// the list (single owner).
+func AggressiveDenyClasses() []string {
+	return slices.Clone(aggressiveDenyClasses)
+}
+
+// errAggressiveScopeRequired is returned by AggressiveCleanup when
+// --aggressive is set without exactly one of --client / --root-pid.
+// Spec H.1: "no implicit all-live-rooted mode".
+var errAggressiveScopeRequired = errors.New(
+	"cleanup --aggressive requires exactly one scope: --client <name> OR --root-pid <pid>",
+)
+
+// errAggressiveUnknownClient is returned when --client names a
+// launcher that is not in the recognized allowlist. An unrecognized
+// client would never match any ancestor and silently sweep nothing
+// (or worse, be a typo for a real one), so reject loudly.
+var errAggressiveUnknownClient = errors.New(
+	"cleanup --aggressive --client: unknown client launcher (recognized: claude, codex, gemini, qwen, cursor, code, cascade, antigravity)",
+)
 
 // knownClientLauncherBasenames is the allowlist of "this process
 // looks like an MCP client we recognize" exe basenames. A running
@@ -797,11 +878,22 @@ func isBroadLauncherToken(pattern string) bool {
 	return false
 }
 
-// parseOrphans reads `wmic process get CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize`
-// CSV output and returns processes whose CommandLine matches any of the given
-// patterns BUT whose parent is NOT an `mcp.exe daemon` process.
-//
-// Visible for unit tests so fixture CSVs can drive the logic without wmic.
+// procRow is one parsed process-snapshot row. Shared by parseOrphans
+// (default safe sweep) and parseAggressiveCandidates (the operator-
+// confirmed live-rooted sweep) so both consume the SAME well-tested
+// anchor-from-right CSV parse and identical byPID ancestor index.
+type procRow struct {
+	pid, ppid int
+	created   time.Time
+	cmdline   string
+	ram       uint64
+}
+
+// parseProcessRows reads the wmic/CIM CSV process snapshot
+// (`CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize`)
+// and returns the parsed rows plus an index by PID for ancestor walks.
+// It is the single owner of the CSV-shape parse logic that both the
+// default orphan sweep and the aggressive sweep rely on.
 //
 // Known limitation (codex deep-sec PR #143 round 4 finding Q2): the
 // bufio.Scanner below splits strictly on newline, so a CommandLine field
@@ -810,16 +902,10 @@ func isBroadLauncherToken(pattern string) bool {
 // CIM output never produces this shape in practice; rewriting the
 // parser to a state-machine CSV reader is deferred until a real-world
 // case appears.
-func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
+func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	type row struct {
-		pid, ppid int
-		created   time.Time
-		cmdline   string
-		ram       uint64
-	}
-	var rows []row
+	var rows []procRow
 	for s.Scan() {
 		line := s.Text()
 		if strings.HasPrefix(line, "Node,") || strings.TrimSpace(line) == "" {
@@ -866,14 +952,32 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 			// lookups for other rows.
 			continue
 		}
-		rows = append(rows, row{pid: pid, ppid: ppid, created: created, cmdline: cmdline, ram: ram})
+		rows = append(rows, procRow{pid: pid, ppid: ppid, created: created, cmdline: cmdline, ram: ram})
 	}
 
-	// Index by PID so we can inspect parent's cmdline.
-	byPID := map[int]row{}
+	// Index by PID so callers can inspect a parent's cmdline.
+	byPID := map[int]procRow{}
 	for _, r := range rows {
 		byPID[r.pid] = r
 	}
+	return rows, byPID
+}
+
+// parseOrphans reads `wmic process get CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize`
+// CSV output and returns processes whose CommandLine matches any of the given
+// patterns BUT whose parent is NOT an `mcp.exe daemon` process.
+//
+// Visible for unit tests so fixture CSVs can drive the logic without wmic.
+//
+// Known limitation (codex deep-sec PR #143 round 4 finding Q2): the
+// bufio.Scanner below splits strictly on newline, so a CommandLine field
+// that contains an embedded `\n` (rare; quotes around such fields would
+// normally protect them) would prematurely end the row. Real WMIC /
+// CIM output never produces this shape in practice; rewriting the
+// parser to a state-machine CSV reader is deferred until a real-world
+// case appears.
+func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
+	rows, byPID := parseProcessRows(r)
 
 	var out []OrphanProcess
 	for _, r := range rows {
@@ -971,4 +1075,189 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 		})
 	}
 	return out
+}
+
+// isAggressiveDenyClass reports whether cmdline's executable basename is
+// one of the dangerous classes excluded from an aggressive kill by
+// default, UNLESS that class appears in includeClasses (operator
+// override). cmdline is the candidate's OWN command line; classification
+// uses the same firstTokenBasename + stripExtension normalization as the
+// rest of the orphan detector so a quoted Windows path like
+// `"C:\...\chrome.exe" --type=renderer` resolves to "chrome".
+func isAggressiveDenyClass(cmdline string, includeClasses []string) bool {
+	base := strings.ToLower(stripExtension(firstTokenBasename(cmdline)))
+	if !slices.Contains(aggressiveDenyClasses, base) {
+		return false
+	}
+	for _, inc := range includeClasses {
+		if strings.ToLower(stripExtension(strings.TrimSpace(inc))) == base {
+			return false // operator opted this class back in
+		}
+	}
+	return true
+}
+
+// parseAggressiveCandidates is the inverse-of-safe sweep for Phase H.1.
+// It returns processes that ARE live-rooted under the requested scope
+// (clientBasename OR rootPID) and therefore CORRECTLY refused by the
+// default parseOrphans sweep — the per-subagent stdio fan-out the
+// operator explicitly wants to reclaim.
+//
+// Invariants it still upholds (no aggressive bypass):
+//   - mcphub.exe daemon descendants are ALWAYS spared (hub-managed).
+//   - our own binaries (isOurOwnProcess) are never candidates.
+//   - a process whose OWN cmdline is the scoping client launcher is not
+//     a candidate (we kill its leaked children, not the live client).
+//   - dangerous classes (cmd/conhost/pwsh/powershell/chrome) are
+//     excluded unless opted in via includeClasses.
+//
+// Each candidate carries MatchSource: the ancestor basename that
+// anchored the scope (--client) or "root-pid <pid>" (--root-pid).
+//
+// Exactly one of clientBasename / rootPID must be set; the caller
+// (AggressiveCleanup) enforces that before calling. clientBasename is
+// the already-normalized lowercase launcher basename.
+func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, includeClasses []string) []OrphanProcess {
+	rows, byPID := parseProcessRows(r)
+
+	var out []OrphanProcess
+	for _, r := range rows {
+		// Our own binaries are never aggressive targets.
+		if isOurOwnProcess(r.cmdline) {
+			continue
+		}
+		// The live client launcher itself is not a target — we reap
+		// its leaked stdio children, never the live session root.
+		if isKnownClientLauncher(r.cmdline) {
+			continue
+		}
+		// Dangerous-class deny-list (operator-overridable).
+		if isAggressiveDenyClass(r.cmdline, includeClasses) {
+			continue
+		}
+
+		// Walk the ancestor chain. The scope match is the FIRST
+		// recognized anchor; the mcphub-daemon guard takes priority so
+		// a child that is BOTH under the scoped client AND under a hub
+		// daemon (e.g. the operator routed a server through the hub but
+		// also has a stray client) is spared.
+		matchSource := ""
+		spared := false
+		for cur, depth := r.ppid, 0; depth < 16; depth++ {
+			parent, ok := byPID[cur]
+			if !ok {
+				break
+			}
+			pcmd := parent.cmdline
+			// Hub-managed processes are always spared — aggressive
+			// mode never bypasses this guard.
+			if strings.Contains(pcmd, "daemon") &&
+				(strings.Contains(pcmd, "mcphub.exe") || strings.Contains(pcmd, "mcp.exe")) {
+				spared = true
+				break
+			}
+			if rootPID != 0 {
+				if cur == rootPID {
+					matchSource = "root-pid " + strconv.Itoa(rootPID)
+					break
+				}
+			} else if clientBasename != "" {
+				if stripExtension(strings.ToLower(firstTokenBasename(pcmd))) == clientBasename {
+					matchSource = clientBasename
+					break
+				}
+			}
+			if parent.ppid == 0 || parent.ppid == cur {
+				break // reached the root or a self-loop
+			}
+			cur = parent.ppid
+		}
+		if spared || matchSource == "" {
+			continue // hub-managed, or not under the requested scope
+		}
+
+		age := int64(0)
+		if !r.created.IsZero() {
+			age = int64(time.Since(r.created).Seconds())
+		}
+		out = append(out, OrphanProcess{
+			PID:            r.pid,
+			ParentID:       r.ppid,
+			RAMBytes:       r.ram,
+			Cmdline:        r.cmdline,
+			CmdlineDisplay: redactCmdlineForDisplay(r.cmdline),
+			AgeSec:         age,
+			MatchSource:    matchSource,
+		})
+	}
+	return out
+}
+
+// AggressiveCleanup (Phase H.1) reports — and, when DryRun=false, kills
+// — the live-rooted MCP-stdio processes under the scope named by
+// opts.Client OR opts.RootPID. It is the operator-confirmed override for
+// the per-subagent stdio fan-out class that the default safe sweep
+// (CleanupOrphans) correctly refuses to touch.
+//
+// The caller is responsible for the dry-run/confirmation-token protocol
+// (the CLI layer binds a token to the previewed candidate snapshot);
+// this method is the pure scope-resolve + (optional) kill primitive.
+// Returns errAggressiveScopeRequired / errAggressiveUnknownClient on a
+// malformed scope so the CLI can surface a precise message.
+func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
+	// Exactly one scope. No implicit "all live-rooted" mode (spec H.1).
+	hasClient := strings.TrimSpace(opts.Client) != ""
+	hasRoot := opts.RootPID != 0
+	if hasClient == hasRoot {
+		return nil, errAggressiveScopeRequired
+	}
+	clientBasename := ""
+	if hasClient {
+		clientBasename = stripExtension(strings.ToLower(strings.TrimSpace(opts.Client)))
+		if !slices.Contains(knownClientLauncherBasenames, clientBasename) {
+			return nil, errAggressiveUnknownClient
+		}
+	}
+	if runtime.GOOS != "windows" {
+		// Process introspection below is Windows-specific. Return an
+		// empty result on other platforms so the flag contract stays
+		// usable (CLI prints "No aggressive candidates found.").
+		return nil, nil
+	}
+	if opts.MinAgeSec == 0 {
+		opts.MinAgeSec = 60
+	}
+
+	out, err := runProcessSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	candidates := parseAggressiveCandidates(
+		strings.NewReader(string(out)), clientBasename, opts.RootPID, opts.IncludeClasses)
+
+	// Age filter — same floor as the default sweep so a just-spawned
+	// in-flight child is not reaped mid-handshake.
+	filtered := candidates[:0]
+	for _, c := range candidates {
+		if c.AgeSec < opts.MinAgeSec {
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+
+	if !opts.DryRun {
+		for i := range filtered {
+			cmd := exec.Command("taskkill", "/PID", strconv.Itoa(filtered[i].PID), "/F")
+			process.NoConsole(cmd)
+			killOut, killErr := cmd.CombinedOutput()
+			if killErr != nil {
+				msg := strings.TrimSpace(string(killOut))
+				if msg == "" {
+					msg = killErr.Error()
+				}
+				filtered[i].KillErr = msg
+			}
+		}
+	}
+	return filtered, nil
 }

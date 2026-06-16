@@ -42,7 +42,10 @@ For install / per-client behaviour / troubleshooting see
 | `mcphub backups show <file>` | Diff a backup against the live config |
 | `mcphub rollback` | Restore the latest backup for every client |
 | `mcphub rollback --original` | Restore the pristine pre-hub sentinel |
-| `mcphub cleanup --dry-run` | List candidate orphan MCP server processes |
+| `mcphub cleanup --dry-run` | List candidate orphan MCP server processes (safe sweep) |
+| `mcphub cleanup aggressive --client <name>` | Preview live-rooted MCP-stdio processes under a client (codex/claude/...) + print a confirmation token |
+| `mcphub cleanup aggressive --client <name> --confirm-aggressive-token <token>` | Kill the previewed live-rooted candidates (token-bound to that exact set) |
+| `mcphub cleanup aggressive --root-pid <pid>` | Same, scoped to descendants of an explicit process id |
 
 ## Scheduler & secrets
 

@@ -124,6 +124,7 @@ See also: stop, restart, status, language-server cleanup.`,
 	c.Flags().Int64Var(&minAge, "min-age-sec", 60, "ignore processes younger than this (seconds)")
 	c.Flags().BoolVar(&scanClients, "scan-clients", false,
 		"A6: extract additional cmdline patterns from every installed client's stdio entries (reverse-lookup orphan detection)")
+	c.AddCommand(newCleanupAggressiveCmdReal())
 	return c
 }
 
