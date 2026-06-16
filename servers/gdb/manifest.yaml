@@ -3,38 +3,22 @@ description: "GDB debugger bridge — drive GDB sessions (breakpoints, stepping,
 kind: global
 transport: stdio-bridge
 required_binaries: [gdb]
-command: uv
+command: mcphub
 base_args:
-  - "run"
-  - "--directory"
-  - "${HOME}/.local/mcp-servers/GDB-MCP"
-  - "python"
-  - "-c"
-  # Inline launcher: installs a logging filter that drops GDB-MCP's
-  # cosmetic "LLDB Python module not available" warning before
-  # exec'ing server.py. GDB-MCP unconditionally `import lldb`s in
-  # modules/lldb/sessionManager.py; when bindings aren't available
-  # on the uv-managed Python venv (typical on Windows where lldb
-  # ships only inside MSYS2's python3.14 site-packages), the warning
-  # spams `[subproc stderr]` on every daemon start. Aggregation only:
-  # the filter is OUR code under mcphub MPL, GDB-MCP source is
-  # untouched (it stays GPL-3.0 in the user's clone). The matching
-  # LLDB capability is already served by mcphub's own native lldb
-  # daemon (servers/lldb + internal/lldb/bridge.go), so GDB-MCP's
-  # lldb-mode is redundant on this host regardless. v0.4.1 #B-lldb-noise.
-  #
-  # Filter mechanics: basicConfig FIRST so we own the root handler,
-  # then attach the filter to every handler. When GDB-MCP's
-  # server.py:14 calls basicConfig again it no-ops (per stdlib
-  # docs: "subsequent calls are a no-op once handlers exist"), so
-  # our filter is the only one in the chain when child loggers
-  # propagate their records upward.
-  - 'import logging;_F=type("_F",(logging.Filter,),{"filter":lambda self,r:"LLDB Python module not available" not in r.getMessage()});logging.basicConfig(level=logging.INFO);[_h.addFilter(_F()) for _h in logging.getLogger().handlers];import runpy;runpy.run_path("server.py", run_name="__main__")'
+  - "gdb-bridge"
 
-# GDB-MCP is a multi-debugger MCP server (gdb + lldb submodules) with built-in
-# session management (modules/gdb/sessionManager.py + modules/lldb/sessionManager.py).
-# Each client call includes a session_id; one daemon serves N concurrent debug
-# sessions. This is why it belongs on the hub instead of in perSessionServers.
+# Native Go GDB/MI bridge (internal/gdb), replacing the former external GDB-MCP
+# python server (`uv run … server.py`). GDB-MCP decided availability with a bare
+# `subprocess.run(['gdb','--version'])` that fails inside the console-less mcphub
+# daemon even when gdb is installed + on PATH, AND its lldb submodule needed lldb
+# python bindings absent from the uv venv. The native bridge spawns gdb by an
+# absolute path (toolchain.DefaultGdbPath) via Go exec — which works in the
+# console-less daemon — and drives it over GDB/MI. Tools: gdb_start / gdb_command
+# / gdb_terminate / gdb_list_sessions / debugger_status (the gdb_* names match
+# GDB-MCP so existing clients keep working). Session management is in-process:
+# each client call carries a session_id; one daemon serves N concurrent sessions.
+# LLDB is served by mcphub's own native lldb daemon (servers/lldb +
+# internal/lldb/bridge.go), so this server is gdb-only.
 
 daemons:
   - name: default

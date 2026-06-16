@@ -107,3 +107,51 @@ func TestDefaultLldbPath_BareFallback(t *testing.T) {
 		t.Errorf("DefaultLldbPath with no lldb in detected dir = %q, want bare %q", got, bare)
 	}
 }
+
+// gdbExeName returns the gdb binary name for the current platform.
+func gdbExeName() string {
+	if runtime.GOOS == "windows" {
+		return "gdb.exe"
+	}
+	return "gdb"
+}
+
+// TestDefaultGdbPath_AbsoluteWhenDetected returns an absolute gdb path when a
+// detected dir actually holds gdb. fakeDebugger writes exactly that gdb binary,
+// so the override dir qualifies as a detected debugger dir holding gdb.
+func TestDefaultGdbPath_AbsoluteWhenDetected(t *testing.T) {
+	dir := t.TempDir()
+	fakeDebugger(t, dir) // writes gdb / gdb.exe
+	t.Setenv(OverrideEnvVar, dir)
+
+	got := DefaultGdbPath()
+	want := filepath.Join(dir, gdbExeName())
+	if got != want {
+		t.Errorf("DefaultGdbPath = %q, want the detected absolute path %q", got, want)
+	}
+}
+
+// TestDefaultGdbPath_BareFallback: with the override pointing at a dir that has
+// lldb but NOT gdb, DefaultGdbPath falls back to the bare name (PATH resolution
+// at spawn) rather than returning a non-existent path.
+func TestDefaultGdbPath_BareFallback(t *testing.T) {
+	// Point MSYS2_ROOT at an empty dir so the Windows MSYS2 probe finds no real
+	// gdb; otherwise a dev host with msys2 gdb would (correctly) return that
+	// absolute path instead of the bare fallback this test exercises.
+	t.Setenv("MSYS2_ROOT", t.TempDir())
+	dir := t.TempDir()
+	// lldb only, no gdb — so the dir still qualifies as a debugger dir
+	// (DebuggerDirs accepts a dir holding lldb), but DefaultGdbPath finds no gdb.
+	lldbName := "lldb"
+	if runtime.GOOS == "windows" {
+		lldbName = "lldb.exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, lldbName), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write fake lldb: %v", err)
+	}
+	t.Setenv(OverrideEnvVar, dir)
+
+	if got := DefaultGdbPath(); got != gdbExeName() {
+		t.Errorf("DefaultGdbPath with no gdb in detected dir = %q, want bare %q", got, gdbExeName())
+	}
+}

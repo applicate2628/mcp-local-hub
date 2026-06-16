@@ -116,3 +116,25 @@ func DefaultLldbPath() string {
 	}
 	return exe
 }
+
+// DefaultGdbPath returns an absolute gdb path for the native gdb-bridge — the
+// first detected debugger dir's gdb. It is the gdb mirror of DefaultLldbPath and
+// exists for the same reason: the native gdb MCP daemon must spawn gdb by an
+// absolute path because an MCP daemon launched from the Task-Scheduler logon task
+// gets a reduced environment that can be missing the MSYS2 `…\ucrt64\bin` dir
+// where gdb lives. Falls back to the bare "gdb" / "gdb.exe" (system-PATH
+// resolution) only when nothing is detected, preserving the prior bare-name
+// behavior on POSIX hosts where gdb is already on the system PATH.
+func DefaultGdbPath() string {
+	exe := "gdb"
+	if runtime.GOOS == "windows" {
+		exe = "gdb.exe"
+	}
+	for _, dir := range DebuggerDirs() {
+		cand := filepath.Join(dir, exe)
+		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
+			return cand
+		}
+	}
+	return exe
+}

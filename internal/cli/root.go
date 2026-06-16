@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/drmemory"
+	"mcp-local-hub/internal/gdb"
 	"mcp-local-hub/internal/godbolt"
 	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/oneapirun"
@@ -62,6 +63,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newHubMcpCmd())
 	root.AddCommand(newMarketplaceCmd())
 	root.AddCommand(lldb.NewCommand())
+	root.AddCommand(gdb.NewCommand())
 	root.AddCommand(godbolt.NewCommand())
 	root.AddCommand(perftools.NewCommand())
 	root.AddCommand(oneapirun.NewCommand())
