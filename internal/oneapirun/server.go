@@ -31,6 +31,8 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/oneapi"
 )
 
 // OneAPIRunServer holds the MCP server instance plus the injectable
@@ -60,7 +62,7 @@ type OneAPIRunServer struct {
 // of truth for both entry points — keep runtime behavior here.
 func Run(ctx context.Context) error {
 	rs := &OneAPIRunServer{
-		captureVSEnv:  captureVSEnvCached,
+		captureVSEnv:  oneapi.SetvarsEnv,
 		oneAPIDLLDirs: detectOneAPIDLLDirs,
 	}
 

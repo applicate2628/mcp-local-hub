@@ -1,6 +1,6 @@
 //go:build windows
 
-package oneapirun
+package oneapi
 
 import (
 	"strings"
@@ -11,17 +11,17 @@ func TestParseSetDump_ParsesKeyValueLines(t *testing.T) {
 	dump := "INCLUDE=C:\\VS\\include\r\n" +
 		"LIB=C:\\VS\\lib;C:\\SDK\\lib\r\n" +
 		"PATH=C:\\VS\\bin;C:\\Windows\\System32\r\n" +
-		"VSCMD_ARG_TGT_ARCH=x64\r\n"
+		"MKLROOT=C:\\oneAPI\\mkl\\latest\r\n"
 	env := parseSetDump([]byte(dump))
 
 	if len(env) != 4 {
 		t.Fatalf("parsed %d entries, want 4: %v", len(env), env)
 	}
 	want := map[string]string{
-		"INCLUDE":            "C:\\VS\\include",
-		"LIB":                "C:\\VS\\lib;C:\\SDK\\lib",
-		"PATH":               "C:\\VS\\bin;C:\\Windows\\System32",
-		"VSCMD_ARG_TGT_ARCH": "x64",
+		"INCLUDE": "C:\\VS\\include",
+		"LIB":     "C:\\VS\\lib;C:\\SDK\\lib",
+		"PATH":    "C:\\VS\\bin;C:\\Windows\\System32",
+		"MKLROOT": "C:\\oneAPI\\mkl\\latest",
 	}
 	for _, e := range env {
 		k, v, _ := strings.Cut(e, "=")
@@ -32,8 +32,6 @@ func TestParseSetDump_ParsesKeyValueLines(t *testing.T) {
 }
 
 func TestParseSetDump_SkipsBlankAndKeyless(t *testing.T) {
-	// Blank lines, a line with no '=', and a line with an empty key are
-	// all skipped; valid lines survive.
 	dump := "A=1\r\n" +
 		"\r\n" +
 		"no-equals-here\r\n" +
@@ -49,8 +47,7 @@ func TestParseSetDump_SkipsBlankAndKeyless(t *testing.T) {
 }
 
 func TestParseSetDump_ValueWithEquals(t *testing.T) {
-	// A value legitimately containing '=' must keep everything after the
-	// FIRST '=' verbatim (only the first '=' splits key from value).
+	// A value legitimately containing '=' keeps everything after the FIRST '='.
 	dump := "WEIRD=a=b=c\r\n"
 	env := parseSetDump([]byte(dump))
 	if len(env) != 1 {

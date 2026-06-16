@@ -116,16 +116,24 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 	}, nil
 }
 
-// oneAPIRuntimeEnv returns the process environment with the Intel oneAPI
-// component DLL dirs prepended to PATH, so the instrumented target (and
-// Dr. Memory itself) can load the MKL / TBB / compiler runtime DLLs. An
-// icx-built exe otherwise dies with 0xC0000135 (DLL not found) almost
-// immediately, before any instrumentation runs. Returns os.Environ() unchanged
-// when no oneAPI install is present. Runtime-only (DLL dirs → PATH); drmemory
-// instruments a PREBUILT exe — it does not compile or link, so it needs
-// neither LIB nor INCLUDE (unlike the oneapi-run server, which captures the
-// full setvars.bat environment).
+// oneAPIRuntimeEnv returns the environment the instrumented target (and
+// Dr. Memory itself) runs under, so an icx-built target loads the oneAPI
+// runtime DLLs it links instead of dying with 0xC0000135 (DLL not found)
+// before instrumentation.
+//
+// It prefers the COMPLETE setvars.bat environment — the SAME env the oneapi-run
+// command runner uses — so the target's PATH covers EVERY oneAPI component dir
+// setvars adds (compiler redist, clang runtime, mpi, …), not just the
+// "<component>\latest\bin" dirs the fast DLLDirs enumeration covers. That
+// matters for a heavier target whose linked DLLs live outside those bin dirs.
+// When setvars can't be captured (no oneAPI install, or a non-Windows host) it
+// falls back to os.Environ() + the hand-enumerated DLLDirs on PATH (runtime
+// PATH only — drmemory instruments a PREBUILT exe, so it never needs LIB or
+// INCLUDE), and to a plain os.Environ() when there is no oneAPI at all.
 func oneAPIRuntimeEnv() []string {
+	if env, ok := oneapi.SetvarsEnv(); ok {
+		return env
+	}
 	root, ok := oneapi.DetectRoot()
 	if !ok {
 		return os.Environ()
