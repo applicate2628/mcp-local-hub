@@ -1,0 +1,44 @@
+name: oneapi-run
+description: "Run commands under the VS + Intel oneAPI environment (oneapi-run) — compile/run snippets with the oneAPI + Visual Studio toolchain active."
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - oneapi-run
+
+env: {}
+
+# oneAPI-run MCP server: runs commands under the combined Visual Studio +
+# Intel oneAPI environment (vcvars + setvars). Lives inside the mcphub
+# binary — one hub-managed daemon shared across all MCP clients via HTTP
+# multiplexing through the stdio-bridge transport. Mirrors the godbolt
+# global-daemon shape.
+
+daemons:
+  - name: default
+    port: 9134
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

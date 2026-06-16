@@ -32,4 +32,10 @@ global:
   - server: perftools
     daemon: default
     port: 9131
+  - server: oneapi-run
+    daemon: default
+    port: 9134
+  - server: drmemory
+    daemon: default
+    port: 9135
 workspace_scoped: []

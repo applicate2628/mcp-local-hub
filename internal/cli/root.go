@@ -3,8 +3,10 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	"mcp-local-hub/internal/drmemory"
 	"mcp-local-hub/internal/godbolt"
 	"mcp-local-hub/internal/lldb"
+	"mcp-local-hub/internal/oneapirun"
 	"mcp-local-hub/internal/perftools"
 )
 
@@ -61,6 +63,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(lldb.NewCommand())
 	root.AddCommand(godbolt.NewCommand())
 	root.AddCommand(perftools.NewCommand())
+	root.AddCommand(oneapirun.NewCommand())
+	root.AddCommand(drmemory.NewCommand())
 	return root
 }
 

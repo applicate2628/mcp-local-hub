@@ -1,0 +1,44 @@
+name: drmemory
+description: "Dr. Memory memory-error MCP server (drmemory) — run a target under Dr. Memory and report leaks, uninitialized reads, and invalid accesses."
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - drmemory
+
+env: {}
+
+# Dr. Memory MCP server: runs a target binary under Dr. Memory and parses
+# the resulting error report (leaks, uninitialized reads, invalid memory
+# accesses). Lives inside the mcphub binary — one hub-managed daemon
+# shared across all MCP clients via HTTP multiplexing through the
+# stdio-bridge transport. Mirrors the godbolt global-daemon shape.
+
+daemons:
+  - name: default
+    port: 9135
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
