@@ -122,6 +122,12 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	if err != nil {
 		return nil, fmt.Errorf("create vtune run dir: %w", err)
 	}
+	cleanupActive, err := hubtemp.MarkActive(runDir)
+	if err != nil {
+		_ = os.RemoveAll(runDir)
+		return nil, fmt.Errorf("mark vtune run dir active: %w", err)
+	}
+	defer cleanupActive()
 	// keep_result keeps the per-run result dir on disk and returns its path so
 	// vtune_report can re-report against it without re-profiling. The default
 	// (keepResult=false) deletes the whole run dir on return, as before.

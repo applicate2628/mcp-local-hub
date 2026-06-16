@@ -1,9 +1,11 @@
 package hubtemp
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestDir_WindowsUsesLocalAppData(t *testing.T) {
@@ -52,5 +54,46 @@ func TestDir_NonWindowsUsesTempDir(t *testing.T) {
 	}
 	if filepath.Base(got) != "drmemory" {
 		t.Errorf("Dir leaf = %q, want drmemory", filepath.Base(got))
+	}
+}
+
+func TestSweepStaleSkipsActiveMarkedDirectory(t *testing.T) {
+	base := t.TempDir()
+	active := filepath.Join(base, "run-active")
+	if err := os.Mkdir(active, 0o700); err != nil {
+		t.Fatalf("Mkdir active: %v", err)
+	}
+	cleanup, err := MarkActive(active)
+	if err != nil {
+		t.Fatalf("MarkActive: %v", err)
+	}
+	defer cleanup()
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(active, old, old); err != nil {
+		t.Fatalf("Chtimes active: %v", err)
+	}
+
+	SweepStale(base, "run-", time.Hour)
+
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active directory was swept: %v", err)
+	}
+}
+
+func TestSweepStaleRemovesUnmarkedStaleDirectory(t *testing.T) {
+	base := t.TempDir()
+	stale := filepath.Join(base, "run-stale")
+	if err := os.Mkdir(stale, 0o700); err != nil {
+		t.Fatalf("Mkdir stale: %v", err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("Chtimes stale: %v", err)
+	}
+
+	SweepStale(base, "run-", time.Hour)
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale directory still exists or unexpected stat error: %v", err)
 	}
 }
