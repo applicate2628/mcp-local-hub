@@ -770,6 +770,11 @@ func clientRegistry() []clientDescriptor {
 			configPath: func(home string) string { return filepath.Join(home, ".rovodev", "mcp.json") }},
 		{name: "tabnine-cli", factory: NewTabnineCLI,
 			configPath: func(home string) string { return filepath.Join(home, ".tabnine", "mcp_servers.json") }},
+		// skills-CLI vendor reconciliation TIER-2 (2026-06-17): vendors with a
+		// verified writable global config (object-map mcpServers, type:http).
+		{name: "warp", factory: NewWarp,
+			// Mirrors warp.go: ~/.warp/.mcp.json (note the leading dot on .mcp.json).
+			configPath: func(home string) string { return filepath.Join(home, ".warp", ".mcp.json") }},
 	}
 }
 
