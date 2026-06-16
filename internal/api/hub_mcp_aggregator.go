@@ -784,6 +784,14 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 	sessProto := s.ProtocolVersion
 	s.mu.Unlock()
 	if !hasSID {
+		// Follower woke after the first caller cleared stale, but no fresh sid
+		// is cached for this daemonKey (e.g. reinitDaemonSession hit a nil/empty
+		// InitSuccesses and skipped the write). Fall back to the caller's sid —
+		// (a)'s reactive self-heal backstops a stale dispatch — but log it so the
+		// silent degradation is observable (mirrors the reinit-failed debug above).
+		_ = LogHubMcpEvent("warn", "proactive-reinit-follower-no-fresh-sid", map[string]any{
+			"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
+		})
 		return daemonSID, daemonProto
 	}
 	if freshProto == "" {
