@@ -6,7 +6,7 @@
 // SCAN_POLL_MS while mounted and visible, and the "Rescan now" button
 // fires an immediate refetch.
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, fireEvent, screen } from "@testing-library/preact";
+import { render, cleanup, fireEvent, screen, act } from "@testing-library/preact";
 import { DiscoveryScreen } from "./Migration";
 import type { ScanResult } from "../types";
 
@@ -31,7 +31,7 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function fetchRouter(routes: Record<string, (init?: RequestInit) => Response>) {
+function fetchRouter(routes: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     for (const prefix of Object.keys(routes)) {
@@ -41,14 +41,22 @@ function fetchRouter(routes: Record<string, (init?: RequestInit) => Response>) {
   });
 }
 
-function scan(): ScanResult {
+function scan(name = "memory"): ScanResult {
   return {
     at: "2026-06-15T00:00:00Z",
     entries: [
-      { name: "memory", status: "can-migrate", manifest_exists: true, can_migrate: true, client_presence: {} },
+      { name, status: "can-migrate", manifest_exists: true, can_migrate: true, client_presence: {} },
     ],
     client_config_presence: {},
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
 }
 
 // SCAN_POLL_MS is 10_000 (see useAutoScan.ts).
@@ -119,6 +127,44 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     const before = scanCalls;
     fireEvent.click(screen.getByTestId("scan-rescan-btn"));
     await vi.waitFor(() => expect(scanCalls).toBe(before + 1));
+  });
+
+
+  it("ignores an older overlapping refresh that resolves after a newer one", async () => {
+    const older = deferred<Response>();
+    const newer = deferred<Response>();
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 1 ? older.promise : newer.promise;
+        },
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<DiscoveryScreen />);
+    await vi.waitFor(() => expect(scanCalls).toBe(1));
+
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    await vi.waitFor(() => expect(scanCalls).toBe(2));
+
+    await act(async () => {
+      newer.resolve(jsonResponse(200, scan("fresh-memory")));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+
+    await act(async () => {
+      older.resolve(jsonResponse(200, scan("stale-memory")));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(screen.queryByText("stale-memory")).toBeNull());
+    expect(screen.queryByText("fresh-memory")).toBeTruthy();
   });
 
   it("skips the poll tick while the tab is hidden", async () => {

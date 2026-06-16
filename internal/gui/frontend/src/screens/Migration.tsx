@@ -39,6 +39,10 @@ export function DiscoveryScreen() {
   const [scanReloadToken, setScanReloadToken] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [migrateBusy, setMigrateBusy] = useState<boolean>(false);
+  // Monotonic guard for scan refreshes. Auto-refresh, manual Rescan,
+  // reload-token effects, and SSE can overlap; only the newest request may
+  // publish state so a slow older response cannot replace fresher results.
+  const latestScanRequestRef = useRef(0);
   const didInitSelection = useRef(false);
 
   // loadScan is the single fetch path for this screen. It is driven by
@@ -52,6 +56,9 @@ export function DiscoveryScreen() {
   // a refetch can never clobber pending work — it just re-derives groups
   // and prunes the `selected` set against the fresh can-migrate names.
   const loadScan = useCallback(async () => {
+    const requestId = latestScanRequestRef.current + 1;
+    latestScanRequestRef.current = requestId;
+    const isLatest = () => latestScanRequestRef.current === requestId;
     try {
       // /api/scan is authoritative — its failure means we cannot render
       // the screen. /api/dismissed is auxiliary — a transient
@@ -72,6 +79,7 @@ export function DiscoveryScreen() {
           },
         ),
       ]);
+      if (!isLatest()) return;
       setScan(s);
       setDismissedUnknown(new Set(d.unknown ?? []));
       setError(null);
@@ -95,7 +103,7 @@ export function DiscoveryScreen() {
         return next;
       });
     } catch (err) {
-      setError((err as Error).message);
+      if (isLatest()) setError((err as Error).message);
     }
   }, []);
 

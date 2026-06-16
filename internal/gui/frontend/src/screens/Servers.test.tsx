@@ -12,6 +12,7 @@ import {
   cleanup,
   fireEvent,
   screen,
+  act,
 } from "@testing-library/preact";
 import { ServersScreen } from "./Servers";
 import { installMemoryLocalStorage } from "../lib/test-local-storage";
@@ -44,12 +45,12 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function scanWith(presence: Record<string, string>): ScanResult {
+function scanWith(presence: Record<string, string>, name = "memory"): ScanResult {
   return {
     at: "2026-05-16T00:00:00Z",
     entries: [
       {
-        name: "memory",
+        name,
         manifest_exists: true,
         can_migrate: true,
         client_presence: {},
@@ -63,7 +64,7 @@ function scanWith(presence: Record<string, string>): ScanResult {
 // based on the request URL. Lets tests describe the wire surface
 // declaratively instead of chaining mockResolvedValueOnce calls in a
 // brittle order.
-function fetchRouter(routes: Record<string, (init?: RequestInit) => Response>) {
+function fetchRouter(routes: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     for (const prefix of Object.keys(routes)) {
@@ -73,6 +74,14 @@ function fetchRouter(routes: Record<string, (init?: RequestInit) => Response>) {
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
 }
 
 describe("ServersScreen — Initialize button (v0.4.5)", () => {
@@ -747,12 +756,12 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
   // A manifested entry routed via-hub on claude-code → the matrix renders
   // one interactive (checked) checkbox the operator can uncheck to make a
   // pending "demigrate" dirty cell.
-  function viaHubScan(): ScanResult {
+  function viaHubScan(name = "memory"): ScanResult {
     return {
       at: "2026-06-15T00:00:00Z",
       entries: [
         {
-          name: "memory",
+          name,
           manifest_exists: true,
           can_migrate: true,
           status: "via-hub",
@@ -836,6 +845,44 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
     const before = scanCalls;
     fireEvent.click(screen.getByTestId("scan-rescan-btn"));
     await vi.waitFor(() => expect(scanCalls).toBe(before + 1));
+  });
+
+
+  it("ignores an older overlapping refresh that resolves after a newer one", async () => {
+    const olderScan = deferred<Response>();
+    const newerScan = deferred<Response>();
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 1 ? olderScan.promise : newerScan.promise;
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(scanCalls).toBe(1));
+
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+    await vi.waitFor(() => expect(scanCalls).toBe(2));
+
+    await act(async () => {
+      newerScan.resolve(jsonResponse(200, viaHubScan("fresh-memory")));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+
+    await act(async () => {
+      olderScan.resolve(jsonResponse(200, viaHubScan("stale-memory")));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(screen.queryByText("stale-memory")).toBeNull());
+    expect(screen.queryByText("fresh-memory")).toBeTruthy();
   });
 
   it("pauses auto-refresh and disables Rescan while a dirty cell is pending — and does NOT clobber the edit", async () => {
