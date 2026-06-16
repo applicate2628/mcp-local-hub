@@ -782,4 +782,112 @@ describe("CatalogScreen", () => {
     });
     expect(screen.queryByTestId("catalog-marketplace-cards")).toBeNull();
   });
+
+  // ---- §B: marketplace force-refresh button ----
+
+  it("renders a Refresh button in the marketplace section", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    const refreshBtn = (await screen.findByTestId(
+      "catalog-marketplace-refresh",
+    )) as HTMLButtonElement;
+    expect(refreshBtn.textContent).toBe("Refresh");
+    expect(refreshBtn.disabled).toBe(false);
+  });
+
+  it("clicking Refresh POSTs /api/marketplace/refresh and re-renders the returned entries", async () => {
+    // The router-prefix order matters: "/api/marketplace/refresh" must be a
+    // distinct key from "/api/marketplace" — fetchRouter matches the first
+    // prefix key in insertion order, so the refresh key precedes the GET key.
+    let marketplaceGetCount = 0;
+    const refreshCalls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/refresh": (init) => {
+          refreshCalls.push(init?.method ?? "");
+          // The force-refresh returns a NEW entry not present in the initial
+          // GET, proving the section re-rendered from the refresh body.
+          return jsonResponse(200, {
+            entries: [mpEntry("git", "Git", "Git tooling.", [], "", "stdio")],
+          });
+        },
+        "/api/marketplace": () => {
+          marketplaceGetCount += 1;
+          // Initial mount load: only `filesystem` is in the cache.
+          return jsonResponse(200, {
+            entries: [mpEntry("filesystem", "Filesystem", "Files.", [], "", "stdio")],
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+    const fetchSpy = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+
+    render(<CatalogScreen />);
+    // Initial state: only the cached `filesystem` entry.
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-card-filesystem")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("catalog-marketplace-card-git")).toBeNull();
+
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-refresh"));
+
+    // After the refresh, the section shows the NEW `git` entry and the old
+    // `filesystem` entry is gone (the refresh body wholly replaces the list).
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-card-git")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("catalog-marketplace-card-filesystem")).toBeNull();
+
+    // The button issued exactly one POST to the refresh route; the cached GET
+    // was NOT re-fetched (the refresh body is authoritative, no extra GET).
+    expect(refreshCalls).toEqual(["POST"]);
+    expect(marketplaceGetCount).toBe(1);
+    const calls = fetchSpy.mock.calls.map((c) =>
+      typeof c[0] === "string" ? c[0] : c[0]?.toString(),
+    );
+    expect(calls).toContain("/api/marketplace/refresh");
+  });
+
+  it("shows an inline error and keeps the Refresh button when /api/marketplace/refresh 500s", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/refresh": () =>
+          jsonResponse(500, {
+            error: "marketplace refresh failed",
+            code: "MARKETPLACE_REFRESH_FAILED",
+          }),
+        "/api/marketplace": () =>
+          jsonResponse(200, {
+            entries: [mpEntry("filesystem", "Filesystem", "Files.", [], "", "stdio")],
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-refresh"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-refresh-error")).toBeTruthy();
+    });
+    expect(screen.getByTestId("catalog-marketplace-refresh-error").textContent).toContain(
+      "marketplace refresh failed",
+    );
+    // The section survives: the original cached entry stays and the Refresh
+    // button is re-enabled for a retry.
+    expect(screen.queryByTestId("catalog-marketplace-card-filesystem")).toBeTruthy();
+    const retryBtn = screen.getByTestId("catalog-marketplace-refresh") as HTMLButtonElement;
+    expect(retryBtn.textContent).toBe("Refresh");
+    expect(retryBtn.disabled).toBe(false);
+  });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { fetchOrThrow, installMarketplaceEntry } from "../api";
+import { fetchOrThrow, installMarketplaceEntry, refreshMarketplace } from "../api";
 import type { MarketplaceInstallResult } from "../api";
 import { CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
 import { InfoTip } from "../components/InfoTip";
@@ -410,7 +410,11 @@ export function CatalogScreen() {
         </div>
       )}
 
-      <MarketplaceSection entries={marketplace} installedServers={installedServers} />
+      <MarketplaceSection
+        entries={marketplace}
+        installedServers={installedServers}
+        onRefreshed={setMarketplace}
+      />
     </section>
   );
 }
@@ -453,6 +457,7 @@ const MARKETPLACE_IDLE: MarketplaceInstallState = { phase: "idle" };
 function MarketplaceSection({
   entries,
   installedServers,
+  onRefreshed,
 }: {
   entries: MarketplaceEntry[];
   // Names of servers already running per /api/status (same Set the shipped
@@ -460,9 +465,20 @@ function MarketplaceSection({
   // already installed, so we render an "Installed" badge instead of an
   // install affordance — never offer to install an already-running server.
   installedServers: Set<string>;
+  // Called with the freshly-fetched entries after a successful force-refresh
+  // so the parent's marketplace state re-renders the section with the updated
+  // registry (the refresh bypasses the 24h TTL + ETag and rewrites the cache).
+  onRefreshed: (entries: MarketplaceEntry[]) => void;
 }) {
   // Per-row install lifecycle. A row absent from the map is "idle".
   const [states, setStates] = useState<Record<string, MarketplaceInstallState>>({});
+  // Force-refresh lifecycle for the "Refresh" button: "idle" → click →
+  // "refreshing" (button disabled, POST in flight) → "idle" on success (the
+  // parent re-renders with the new entries) or "error" with the inline
+  // message on a backend 500 (the cache was NOT updated).
+  const [refreshState, setRefreshState] = useState<
+    { phase: "idle" } | { phase: "refreshing" } | { phase: "error"; message: string }
+  >({ phase: "idle" });
   // mountedRef guards post-await setState against the "operator navigated away
   // mid-POST" race (mirrors the shipped-server install handlers above).
   const mountedRef = useRef(true);
@@ -472,6 +488,24 @@ function MarketplaceSection({
       mountedRef.current = false;
     };
   }, []);
+
+  async function runRefresh() {
+    // Guard against double-fire while a refresh POST is in flight.
+    if (refreshState.phase === "refreshing") return;
+    setRefreshState({ phase: "refreshing" });
+    try {
+      const rows = await refreshMarketplace();
+      if (!mountedRef.current) return;
+      // The api helper already normalizes `transport` to a string, so the
+      // entries are safe to hand straight to the parent (same shape the GET
+      // load path produces).
+      onRefreshed(rows);
+      setRefreshState({ phase: "idle" });
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setRefreshState({ phase: "error", message: (err as Error).message });
+    }
+  }
 
   function setState(id: string, next: MarketplaceInstallState) {
     setStates((prev) => ({ ...prev, [id]: next }));
@@ -517,11 +551,30 @@ function MarketplaceSection({
 
   return (
     <div class="catalog-marketplace" data-testid="catalog-marketplace">
-      <h2>Marketplace</h2>
+      <div class="catalog-marketplace-header">
+        <h2>Marketplace</h2>
+        <button
+          type="button"
+          data-testid="catalog-marketplace-refresh"
+          disabled={refreshState.phase === "refreshing"}
+          onClick={() => runRefresh()}
+        >
+          {refreshState.phase === "refreshing" ? "Refreshing…" : "Refresh"}
+        </button>
+        <InfoTip
+          label="What does Refresh do?"
+          text="Re-fetches the curated registry now, bypassing the 24-hour cache, so newly published servers appear without waiting."
+        />
+      </div>
       <p class="catalog-intro">
         Discover and install MCP servers from the curated registry with one
         click.
       </p>
+      {refreshState.phase === "error" && (
+        <p class="error" data-testid="catalog-marketplace-refresh-error">
+          {refreshState.message}
+        </p>
+      )}
       {entries.length === 0 ? (
         <p class="empty-state" data-testid="catalog-marketplace-empty">
           No marketplace entries available right now.

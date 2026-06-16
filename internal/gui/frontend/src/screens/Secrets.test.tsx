@@ -1,0 +1,122 @@
+// internal/gui/frontend/src/screens/Secrets.test.tsx
+//
+// Secrets screen — pins the `mcphub secrets edit` shell-out affordance
+// (roadmap "Secrets — shell-out to mcphub secrets edit").
+//
+// VERIFIED design decision (internal/cli/secrets.go:234-325): `mcphub
+// secrets edit` is an INTERACTIVE-TERMINAL-only command — it exports the
+// decrypted vault to a temp file, launches $EDITOR (or `notepad`) wired to
+// os.Stdin/os.Stdout/os.Stderr, and BLOCKS on the editor process until it
+// exits, then re-encrypts on save. The GUI backend has no controlling
+// terminal, so spawning it from an HTTP handler would be a broken, hung
+// spawn. The honest implementation is therefore an INSTRUCTIONAL CTA: show
+// the exact command and let the operator run it in their own terminal —
+// implemented by EditVaultBanner in Secrets.tsx. These tests assert that
+// instructional-CTA contract (the command text + clipboard copy), and that
+// no spawn/exec round-trip is issued.
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/preact";
+import { SecretsScreen } from "./Secrets";
+import type { SecretsEnvelope } from "../lib/secrets-api";
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+// A "missing" vault envelope keeps the screen on the NotInitView branch so
+// no extra /api/status fetch fires (InitKeyedView's running-daemon count).
+// EditVaultBanner renders regardless of vault_state, which is the surface
+// under test here.
+const missingVault: SecretsEnvelope = {
+  vault_state: "missing",
+  secrets: [],
+  manifest_errors: [],
+};
+
+// fetchRouter dispatches each fetch call to the matching response based on
+// the request URL prefix (same helper idiom as Catalog.test.tsx /
+// Servers.test.tsx).
+function fetchRouter(routes: Record<string, (init?: RequestInit) => Response>) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    for (const prefix of Object.keys(routes)) {
+      if (url.startsWith(prefix)) {
+        return routes[prefix](init);
+      }
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+}
+
+const EXPECTED_CMD = "mcphub secrets edit";
+
+describe("SecretsScreen — `mcphub secrets edit` instructional CTA", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders the exact `mcphub secrets edit` command in the edit-vault banner", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/secrets": () => jsonResponse(200, missingVault),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<SecretsScreen />);
+    const banner = await screen.findByTestId("edit-vault-banner");
+    // The banner instructs the operator to run the command in a terminal —
+    // the honest path for an interactive-terminal-only command — and shows
+    // the EXACT command string, not a spawn affordance.
+    expect(banner.textContent).toContain(EXPECTED_CMD);
+    expect(banner.textContent).toContain("in a terminal");
+    expect(banner.querySelector("code")?.textContent).toBe(EXPECTED_CMD);
+  });
+
+  it("copies the exact command to the clipboard and shows 'Copied' (no spawn round-trip)", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    // happy-dom does not provide navigator.clipboard by default; install a
+    // spec-shaped stub so the copy handler resolves.
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+
+    const fetchMock = fetchRouter({
+      "/api/secrets": () => jsonResponse(200, missingVault),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<SecretsScreen />);
+    await screen.findByTestId("edit-vault-banner");
+
+    const copyBtn = screen.getByRole("button", { name: /Copy command/i });
+    fireEvent.click(copyBtn);
+
+    // The button writes the EXACT command to the clipboard for the operator
+    // to paste into their own terminal — the instructional-CTA contract.
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(EXPECTED_CMD);
+    });
+    // Affordance feedback flips to "Copied".
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Copied/i })).toBeTruthy();
+    });
+
+    // The copy is purely client-side: only the initial /api/secrets snapshot
+    // load was issued. No spawn/exec POST (no /api/secrets/edit or similar)
+    // was fired — proving this is an instructional CTA, not a broken spawn.
+    const urls = (fetchMock.mock.calls as unknown[][]).map((c) =>
+      typeof c[0] === "string" ? (c[0] as string) : String(c[0]),
+    );
+    expect(urls.every((u) => u.startsWith("/api/secrets"))).toBe(true);
+    expect(urls.some((u) => u.includes("edit"))).toBe(false);
+  });
+});

@@ -739,3 +739,62 @@ export async function installMarketplaceEntry(
     clientsFailed: Array.isArray(body.clients_failed) ? body.clients_failed : [],
   };
 }
+
+// ───────────────────────────────────────────────────────────────────
+// Marketplace force-refresh (roadmap §B — Catalog "Refresh" button)
+//
+// POST /api/marketplace/refresh forces an unconditional re-fetch of the
+// curated registry (bypassing the 24h TTL + ETag, rewriting the cache) —
+// the SAME force-refresh the CLI `mcphub marketplace refresh` runs — and
+// returns the refreshed entries in the SAME body shape as GET
+// /api/marketplace ({ "entries": [{id, name, summary, …, transport}] }).
+//
+// Unlike the best-effort GET (which the backend degrades to an empty array
+// on a fetch miss), the refresh route is an EXPLICIT operator-triggered
+// re-fetch: the backend surfaces a refresh failure as 500
+// {error, code:"MARKETPLACE_REFRESH_FAILED"} so the operator knows the cache
+// was NOT updated. We therefore throw on non-2xx (surfacing the envelope)
+// rather than silently returning an empty list.
+//
+// The shape mirrors internal/gui/marketplace.go marketplaceEntry. `transport`
+// is normalized to a string so an older backend that omits it (or a partial
+// body) reads as "" and the caller falls back to the safe HUB-ONLY affordance,
+// matching the GET-path normalization in Catalog.tsx.
+// ───────────────────────────────────────────────────────────────────
+
+export interface MarketplaceCatalogEntry {
+  id: string;
+  name: string;
+  summary: string;
+  categories: string[];
+  homepage: string;
+  transport: string;
+}
+
+export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
+  const resp = await fetch("/api/marketplace/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    const msg = body?.error ?? resp.statusText ?? "refresh failed";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/marketplace/refresh [${code}]: ${msg}`);
+  }
+  const body = (await resp.json()) as { entries?: Array<Partial<MarketplaceCatalogEntry>> };
+  const rows = Array.isArray(body.entries) ? body.entries : [];
+  return rows.map((e) => ({
+    id: typeof e.id === "string" ? e.id : "",
+    name: typeof e.name === "string" ? e.name : "",
+    summary: typeof e.summary === "string" ? e.summary : "",
+    categories: Array.isArray(e.categories) ? e.categories : [],
+    homepage: typeof e.homepage === "string" ? e.homepage : "",
+    transport: typeof e.transport === "string" ? e.transport : "",
+  }));
+}
