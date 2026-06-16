@@ -101,6 +101,34 @@ func TestSweepStaleSkipsActiveMarkedDirectory(t *testing.T) {
 	}
 }
 
+func TestSweepStaleRemovesExpiredActiveMarkedDirectory(t *testing.T) {
+	base := t.TempDir()
+	stale := filepath.Join(base, "run-stale-active")
+	if err := os.Mkdir(stale, 0o700); err != nil {
+		t.Fatalf("Mkdir stale: %v", err)
+	}
+	cleanup, err := MarkActive(stale)
+	if err != nil {
+		t.Fatalf("MarkActive: %v", err)
+	}
+	defer cleanup()
+	oldDir := time.Now().Add(-2 * time.Hour)
+	oldMarker := time.Now().Add(-activeRunMarkerTTL - time.Hour)
+	if err := os.Chtimes(stale, oldDir, oldDir); err != nil {
+		t.Fatalf("Chtimes stale: %v", err)
+	}
+	marker := filepath.Join(stale, activeRunMarker)
+	if err := os.Chtimes(marker, oldMarker, oldMarker); err != nil {
+		t.Fatalf("Chtimes marker: %v", err)
+	}
+
+	SweepStale(base, "run-", time.Hour)
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("expired marked stale directory still exists or unexpected stat error: %v", err)
+	}
+}
+
 func TestSweepStaleRemovesUnmarkedStaleDirectory(t *testing.T) {
 	base := t.TempDir()
 	stale := filepath.Join(base, "run-stale")
