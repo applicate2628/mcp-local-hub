@@ -263,7 +263,7 @@ func (z *zedClient) RestoreEntryFromBackupForRollback(backupPath, name string) e
 // true (migrate rollback) it writes the backup bytes verbatim regardless
 // of shape.
 func (z *zedClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
-	backupData, err := readRawConfig(backupPath)
+	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
@@ -317,7 +317,7 @@ func (z *zedClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry
 }
 
 func (z *zedClient) BackupContainsEntry(backupPath, name string) (bool, error) {
-	data, err := readRawConfig(backupPath)
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
@@ -338,7 +338,7 @@ func (z *zedClient) BackupContainsEntry(backupPath, name string) (bool, error) {
 // invocation: command is the mcphub binary AND args[0] == "relay"). See
 // Client.BackupEntryIsHubManaged.
 func (z *zedClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
-	data, err := readRawConfig(backupPath)
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}

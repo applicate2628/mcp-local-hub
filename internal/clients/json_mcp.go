@@ -173,7 +173,7 @@ func (j *jsonMCPClient) RestoreEntryFromBackupForRollback(backupPath, name strin
 // Antigravity) with ErrBackupEntryAlreadyMigrated; when true (migrate
 // rollback) it writes the backup bytes verbatim regardless of shape.
 func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
-	backupData, err := readRawConfig(backupPath)
+	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
@@ -234,7 +234,7 @@ func (j *jsonMCPClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioE
 // has an mcpServers[name] entry. Inherited by both geminiCLI and
 // antigravityClient via struct embedding.
 func (j *jsonMCPClient) BackupContainsEntry(backupPath, name string) (bool, error) {
-	data, err := readRawConfig(backupPath)
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
@@ -273,7 +273,7 @@ func (j *jsonMCPClient) backupEntryMapIsHubManaged(rawMap map[string]any) bool {
 // embedding (the antigravity variant routes to the relay-shape branch
 // because its urlField is "command"). See Client.BackupEntryIsHubManaged.
 func (j *jsonMCPClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
-	data, err := readRawConfig(backupPath)
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}

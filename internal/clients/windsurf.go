@@ -168,7 +168,7 @@ func (w *windsurfClient) RestoreEntryFromBackupForRollback(backupPath, name stri
 // `serverUrl` and no `command`). Overrides the base predicate so it keys off
 // `serverUrl` instead of the base urlField routing.
 func (w *windsurfClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
-	data, err := readRawConfig(backupPath)
+	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
@@ -194,7 +194,7 @@ func (w *windsurfClient) BackupEntryIsHubManaged(backupPath, name string) (bool,
 // hub-managed shape with ErrBackupEntryAlreadyMigrated; when true (migrate
 // rollback) it writes the backup bytes verbatim regardless of shape.
 func (w *windsurfClient) restoreEntryFromBackupServerURL(backupPath, name string, allowHubEntry bool) error {
-	backupData, err := readRawConfig(backupPath)
+	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
