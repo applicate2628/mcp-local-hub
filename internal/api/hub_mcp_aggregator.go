@@ -635,6 +635,26 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 // the daemon's response id back to the client's id. Removes the
 // in-flight row via defer.
 func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage, ref canonicalToolRef, daemonSID, daemonProto string) ([]byte, error) {
+	// Hot-swap (b) event-driven proactive re-init: the DaemonRestartWatcher marks
+	// a daemon's port stale when it observes a per-port current_pid change (the
+	// daemon was restarted). If this port is stale, re-initialize the cached
+	// session BEFORE dispatching so the client never sees the stale-session
+	// failure that (a) recovers only reactively (one-call lag). On a re-init
+	// failure we keep the cached sid and fall through to (a)'s reactive path
+	// (logged for diagnosability). INVARIANT: the proactive path keys the stale
+	// mark + the InitSuccesses refresh on ref.Port (the route's port), which holds
+	// because a supervisor restart respawns onto the same configured port; a
+	// future port-CHANGING restart would re-key on the supervisor-reported port.
+	if sess.consumeStalePort(ref.Port) {
+		if sid, proto, _, ok := sess.reinitDaemonSession(ctx, ref); ok {
+			daemonSID, daemonProto = sid, proto
+		} else {
+			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
+				"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
+			})
+		}
+	}
+
 	// Build the rewritten body. params.name → RawName.
 	rewrittenParams, err := buildRewrittenParams(ref.RawName, paramsRaw)
 	if err != nil {
@@ -713,6 +733,46 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 // response; (nil, false) when the re-init or the retry itself failed (the caller
 // then returns the original -32000). Hard-capped at one attempt; never recurses.
 func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, inflightKey requestIDKey, params json.RawMessage) ([]byte, bool) {
+	sid, proto, port, ok := s.reinitDaemonSession(ctx, ref)
+	if !ok {
+		return nil, false // daemon still down → caller returns the original -32000
+	}
+	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
+
+	retryReqID, err := generateDaemonRequestID()
+	if err != nil {
+		return nil, false
+	}
+	// Update the in-flight row so a racing cancel targets the live retry, not
+	// the never-landed first attempt. Net count change is zero (the dispatch's
+	// defer RemoveInFlight still balances the original Insert).
+	s.RemoveInFlight(inflightKey)
+	s.InsertInFlight(inflightKey, inflightEntry{
+		DaemonRef:       daemonKey,
+		DaemonSessionID: sid,
+		DaemonProtocol:  proto,
+		DaemonRequestID: retryReqID,
+		StartedAt:       time.Now(),
+	})
+
+	retryRef := ref
+	retryRef.Port = port
+	body, callErr := postToolsCall(ctx, retryRef, sid, proto, retryReqID, params)
+	if callErr != nil {
+		return nil, false // hard count 1 — never retry again
+	}
+	return body, true
+}
+
+// reinitDaemonSession re-initializes the hub's MCP session to a daemon that was
+// restarted, refreshing the cached session id + negotiated proto under the
+// session mu (the same writer discipline AggregateInitialize uses). The
+// initialize is coalesced per (Server,Daemon) via singleflight so a mass restart
+// affecting many sessions/calls cannot trigger an init-storm. Returns the fresh
+// (sid, proto, port, true), or ("","",0,false) if the daemon is still
+// unreachable. SHARED by the (a) failure-driven self-heal (selfHealRetry) and the
+// (b) event-driven proactive re-init (the supervisor-state restart watcher).
+func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef) (string, string, int, bool) {
 	port := s.currentDaemonPort(ref)
 	daemonRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
 	// daemonKey MUST match resolveToolsCallRoute's key ({Server,Daemon,ref.Port})
@@ -731,7 +791,7 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 		return initResult{sid: sid, proto: negotiated}, nil
 	})
 	if initErr != nil {
-		return nil, false // daemon still down → caller returns the original -32000
+		return "", "", 0, false
 	}
 	res := v.(initResult)
 	proto := res.proto
@@ -748,30 +808,7 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 	}
 	s.DaemonProtoVer[daemonKey] = proto
 	s.mu.Unlock()
-
-	retryReqID, err := generateDaemonRequestID()
-	if err != nil {
-		return nil, false
-	}
-	// Update the in-flight row so a racing cancel targets the live retry, not
-	// the never-landed first attempt. Net count change is zero (the dispatch's
-	// defer RemoveInFlight still balances the original Insert).
-	s.RemoveInFlight(inflightKey)
-	s.InsertInFlight(inflightKey, inflightEntry{
-		DaemonRef:       daemonKey,
-		DaemonSessionID: res.sid,
-		DaemonProtocol:  proto,
-		DaemonRequestID: retryReqID,
-		StartedAt:       time.Now(),
-	})
-
-	retryRef := ref
-	retryRef.Port = port
-	body, callErr := postToolsCall(ctx, retryRef, res.sid, proto, retryReqID, params)
-	if callErr != nil {
-		return nil, false // hard count 1 — never retry again
-	}
-	return body, true
+	return res.sid, proto, port, true
 }
 
 // currentDaemonPort re-resolves the daemon's CURRENT port for (ref.Server,

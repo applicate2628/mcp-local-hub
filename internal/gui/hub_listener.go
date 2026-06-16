@@ -281,6 +281,18 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	}
 	comp.alive.Store(true)
 
+	// Hot-swap (b) event-driven proactive re-init: watch the supervisor's daemon
+	// state and mark a cached hub session stale the moment a daemon restart (a
+	// per-port current_pid change) is observed, so the NEXT tools/call re-inits
+	// BEFORE dispatching instead of failing first. Sourced off a.DaemonStatusSnapshot
+	// — the SAME cached + singleflight-collapsed status /api/status already polls
+	// (one fetch, two consumers; no redundant supervisor-IPC dial). Fire-and-forget
+	// on the listener ctx: it unwinds solely on ctx cancellation (hub stop /
+	// shutdown), so it needs no explicit join. (a)'s failure-driven self-heal
+	// remains the backstop for the window between a restart and the next
+	// observation (and for the astronomically-unlikely same-PID-recycle case).
+	go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(ctx)
+
 	go func() {
 		// Mark the listener dead on any exit path (clean shutdown via
 		// ErrServerClosed AND fatal accept-loop errors). The badge

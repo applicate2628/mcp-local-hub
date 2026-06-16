@@ -2184,3 +2184,54 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 		t.Errorf("inFlight=%d after self-heal want 0", got)
 	}
 }
+
+// TestAggregateToolsCall_ProactiveReinitOnStalePort is the hot-swap (b)
+// event-driven path: when the supervisor-state restart watcher marks a daemon's
+// port stale (a per-port current_pid change was observed), the NEXT tools/call
+// re-initializes the cached session BEFORE dispatching — so the client never
+// sees the stale-session failure that (a) recovers only reactively. The daemon
+// is UP the whole time; no failure is needed to trigger the proactive re-init.
+// The mark is consume-once: a second call must NOT re-init again.
+func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+		t.Fatal(err)
+	}
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	initBefore := d1.initCount.Load()
+	// Simulate the supervisor-state watcher observing a restart of d1's port.
+	sess.markStalePort(d1.port)
+
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	if !strings.Contains(string(body), "called=read") {
+		t.Errorf("proactive re-init call did not succeed; body=%s", string(body))
+	}
+	if d1.initCount.Load() <= initBefore {
+		t.Errorf("daemon was not proactively re-initialized; initCount %d -> %d", initBefore, d1.initCount.Load())
+	}
+	if d1.callCount.Load() != 1 {
+		t.Errorf("callCount=%d want 1 (no failure, single call)", d1.callCount.Load())
+	}
+	// Consume-once: a second call must NOT re-init again (mark cleared).
+	initAfterFirst := d1.initCount.Load()
+	if _, err := AggregateToolsCall(ctx, sess, json.RawMessage(`43`), params); err != nil {
+		t.Fatal(err)
+	}
+	if d1.initCount.Load() != initAfterFirst {
+		t.Errorf("stale mark not consumed: second call re-initialized again (initCount %d -> %d)", initAfterFirst, d1.initCount.Load())
+	}
+}

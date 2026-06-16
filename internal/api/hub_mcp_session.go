@@ -155,6 +155,38 @@ type hubSession struct {
 	// daemon restart that fails many in-flight tools/call at once cannot trigger
 	// an init-storm. Zero value is ready to use.
 	reinitGroup singleflight.Group
+	// staleDaemonPorts marks daemon ports whose cached MCP session is stale
+	// because the supervisor restarted the daemon (the hot-swap (b) event-driven
+	// path: the DaemonRestartWatcher sets these when it observes a per-port
+	// current_pid change). The next tools/call to such a port re-initializes
+	// BEFORE dispatching, so the client never sees the stale-session failure that
+	// (a) would otherwise recover reactively. keys: int port. value: struct{}.
+	staleDaemonPorts sync.Map
+}
+
+// markStalePort flags a daemon port's cached session as needing re-init (called
+// by HubSessionStore.MarkPortStale from the supervisor-state restart watcher).
+func (s *hubSession) markStalePort(port int) { s.staleDaemonPorts.Store(port, struct{}{}) }
+
+// consumeStalePort reports whether the port was stale-marked and clears the mark
+// (consume-once): the dispatch path re-inits exactly once per observed restart.
+func (s *hubSession) consumeStalePort(port int) bool {
+	_, ok := s.staleDaemonPorts.LoadAndDelete(port)
+	return ok
+}
+
+// MarkPortStale flags every live session's cached session for the daemon at the
+// given port as needing re-init. The hot-swap (b) DaemonRestartWatcher calls
+// this when a daemon's reported current_pid changes (a restart); the next
+// tools/call to that port re-initializes proactively (no client-visible
+// stale-session failure). Returns the number of sessions marked.
+func (st *HubSessionStore) MarkPortStale(port int) int {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	for _, sess := range st.sessions {
+		sess.markStalePort(port)
+	}
+	return len(st.sessions)
 }
 
 // InFlightCount returns the current in-flight count (atomic load).
