@@ -59,16 +59,68 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"mcp-local-hub/internal/buildinfo"
 )
+
+// daemonHTTPError is the error doDaemonPost returns when the daemon RECEIVED the
+// request but answered HTTP>=400 (as opposed to a transport failure where the
+// request never landed). The distinction is load-bearing for the hot-swap (a)
+// self-heal retry: an HTTP-level rejection means the daemon got the request and
+// a non-idempotent tool's side effect may already have run, so it must NOT be
+// retried (MCP tools/call has no idempotency key). Error() preserves the prior
+// "HTTP %d" string so existing error messages are unchanged.
+type daemonHTTPError struct {
+	code int
+	body []byte
+}
+
+func (e *daemonHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+
+// isRetriableTransportFailure reports whether err is a TRANSPORT-level failure
+// where the request demonstrably never reached the daemon — connection refused
+// or connection reset — and is therefore SAFE to retry against a freshly-
+// restarted daemon. It deliberately returns false for:
+//   - *daemonHTTPError (the daemon received the request; a side effect may have run),
+//   - timeouts / context deadline (ambiguous — the request may have landed),
+//   - any other error (conservative: never retry an unclassified failure).
+func isRetriableTransportFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *daemonHTTPError
+	if errors.As(err, &httpErr) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return false
+	}
+	// A DIAL-phase failure means the TCP connection was never established, so the
+	// request bytes were never sent — unambiguously safe to retry. This is the
+	// daemon-restarted / connection-refused case, detected PORTABLY via the dial
+	// OpError (errors.Is(err, syscall.ECONNREFUSED) is unreliable across Windows
+	// winsock WSAECONNREFUSED vs POSIX errno). A mid-stream reset is deliberately
+	// NOT retried: the request may have partially landed (double-exec risk).
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return true
+	}
+	return errors.Is(err, syscall.ECONNREFUSED)
+}
 
 // Concurrency + timing constants. Spec §"Concurrency + bounds".
 const (
@@ -632,11 +684,110 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	// requested one.
 	body, err := postToolsCall(subCtx, ref, daemonSID, daemonProto, daemonReqID, rewrittenParams)
 	if err != nil {
+		// Hot-swap (a) self-heal: ONLY on a transport failure (the daemon was
+		// restarted out from under the cached session — the request never
+		// landed, so it is safe to retry). An HTTP-level rejection is NOT
+		// retried (the daemon received it; a non-idempotent side effect may
+		// have run). No timer: the trigger is this failure, not a backoff.
+		if isRetriableTransportFailure(err) {
+			if retryBody, ok := sess.selfHealRetry(subCtx, ref, key, rewrittenParams); ok {
+				return rewriteResponseID(retryBody, clientReqID)
+			}
+		}
 		return buildJSONRPCError(clientReqID, -32000, "tools/call failed: "+err.Error(), nil)
 	}
 
 	// Rewrite the daemon's response id back to the client's id.
 	return rewriteResponseID(body, clientReqID)
+}
+
+// selfHealRetry is the hot-swap (a) failure-driven self-heal backstop. It runs
+// ONLY after a tools/call failed with a TRANSPORT error. It re-resolves the
+// daemon's current port from the resolver snapshot, re-initializes the daemon
+// session under per-daemonKey singleflight (so a mass restart cannot trigger an
+// init-storm), refreshes the cached session id under the same mu AggregateInitialize
+// uses, and retries the call ONCE in-place. NO timer: the trigger is the call
+// failure; the cadence is the client's own retries.
+//
+// Returns (retryBody, true) when the single retry completed with a daemon
+// response; (nil, false) when the re-init or the retry itself failed (the caller
+// then returns the original -32000). Hard-capped at one attempt; never recurses.
+func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, inflightKey requestIDKey, params json.RawMessage) ([]byte, bool) {
+	port := s.currentDaemonPort(ref)
+	daemonRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
+	// daemonKey MUST match resolveToolsCallRoute's key ({Server,Daemon,ref.Port})
+	// so the refreshed session id is found by the NEXT call's route lookup.
+	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
+
+	type initResult struct{ sid, proto string }
+	v, initErr, _ := s.reinitGroup.Do(ref.Server+"\x00"+ref.Daemon, func() (any, error) {
+		sid, negotiated, err := postInitialize(ctx, daemonRef, s.ProtocolVersion)
+		if err != nil {
+			return nil, err
+		}
+		// MCP lifecycle: notifications/initialized MUST precede further calls.
+		// Best-effort (matches AggregateInitialize).
+		_ = postInitialized(ctx, daemonRef, sid, negotiated)
+		return initResult{sid: sid, proto: negotiated}, nil
+	})
+	if initErr != nil {
+		return nil, false // daemon still down → caller returns the original -32000
+	}
+	res := v.(initResult)
+	proto := res.proto
+	if proto == "" {
+		proto = s.ProtocolVersion
+	}
+
+	s.mu.Lock()
+	if s.InitSuccesses != nil {
+		s.InitSuccesses[daemonKey] = res.sid
+	}
+	if s.DaemonProtoVer == nil {
+		s.DaemonProtoVer = map[canonicalDaemonRef]string{}
+	}
+	s.DaemonProtoVer[daemonKey] = proto
+	s.mu.Unlock()
+
+	retryReqID, err := generateDaemonRequestID()
+	if err != nil {
+		return nil, false
+	}
+	// Update the in-flight row so a racing cancel targets the live retry, not
+	// the never-landed first attempt. Net count change is zero (the dispatch's
+	// defer RemoveInFlight still balances the original Insert).
+	s.RemoveInFlight(inflightKey)
+	s.InsertInFlight(inflightKey, inflightEntry{
+		DaemonRef:       daemonKey,
+		DaemonSessionID: res.sid,
+		DaemonProtocol:  proto,
+		DaemonRequestID: retryReqID,
+		StartedAt:       time.Now(),
+	})
+
+	retryRef := ref
+	retryRef.Port = port
+	body, callErr := postToolsCall(ctx, retryRef, res.sid, proto, retryReqID, params)
+	if callErr != nil {
+		return nil, false // hard count 1 — never retry again
+	}
+	return body, true
+}
+
+// currentDaemonPort re-resolves the daemon's CURRENT port for (ref.Server,
+// ref.Daemon) from the live resolver snapshot — so a self-heal retry reaches a
+// daemon that came back on a NEW port. Falls back to the route's own port (the
+// common same-port restart case).
+func (s *hubSession) currentDaemonPort(ref canonicalToolRef) int {
+	snap := LoadResolverSnapshot()
+	if snap != nil {
+		for _, b := range snap.Bindings[s.Client] {
+			if b.Server == ref.Server && b.Daemon == ref.Daemon {
+				return b.Port
+			}
+		}
+	}
+	return ref.Port
 }
 
 // ForwardCancellation looks up clientReqID in sess.InFlightRequests
@@ -784,7 +935,10 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 		if len(raw) > maxAggregatorResponseBytes {
 			raw = raw[:maxAggregatorResponseBytes]
 		}
-		return raw, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+		// Typed error so callers (hot-swap (a) self-heal) can tell a
+		// received-but-rejected HTTP failure from a never-landed transport
+		// failure. Error() still renders "HTTP %d", so messages are unchanged.
+		return raw, resp.Header, &daemonHTTPError{code: resp.StatusCode, body: raw}
 	}
 
 	// Notification path: return IMMEDIATELY on 2xx without reading

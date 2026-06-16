@@ -229,3 +229,30 @@ func TestVtuneEnabledRequiresExplicitOptIn(t *testing.T) {
 		t.Fatal("vtune should be enabled with opt-in =1")
 	}
 }
+
+// TestCappedBufferBoundsInFlightStderr verifies the stderr writer used by
+// subprocesses enforces the VTune output cap during writes instead of allowing
+// an attacker-controlled child to grow memory until cmd.Run returns.
+func TestCappedBufferBoundsInFlightStderr(t *testing.T) {
+	buf := newCappedBuffer(32)
+	payload := strings.Repeat("x", 128)
+	n, err := buf.Write([]byte(payload))
+	if err != nil {
+		t.Fatalf("Write returned error: %v", err)
+	}
+	if n != len(payload) {
+		t.Fatalf("Write count = %d, want %d", n, len(payload))
+	}
+	got := buf.String()
+	if len(got) > 32 {
+		t.Fatalf("capped buffer length = %d, want <= 32", len(got))
+	}
+	if !strings.Contains(got, "[truncated]") {
+		t.Fatalf("capped buffer did not mark truncation: %q", got)
+	}
+
+	_, _ = buf.Write([]byte(strings.Repeat("y", 128)))
+	if got := buf.String(); len(got) > 32 {
+		t.Fatalf("capped buffer grew after further writes: len=%d body=%q", len(got), got)
+	}
+}

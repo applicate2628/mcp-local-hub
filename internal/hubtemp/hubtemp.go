@@ -16,6 +16,7 @@
 package hubtemp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,14 +26,21 @@ import (
 
 // Dir returns the hub-owned writable scratch directory for subdir. On Windows
 // it is %LOCALAPPDATA%\mcp-local-hub\<subdir> (falling back to
-// <home>\.mcphub\<subdir> when LOCALAPPDATA is empty). On non-Windows
-// os.TempDir() is already reliably writable, so <os.TempDir()>/<subdir> is
-// used. Returns ("", false) only when no base can be derived at all (no
-// LOCALAPPDATA and no home dir on Windows). The directory is NOT created;
-// callers MkdirAll (or MkdirTemp under it) as needed.
+// <home>\.mcphub\<subdir> when LOCALAPPDATA is empty). On non-Windows it
+// uses the current user's cache directory, not a predictable shared /tmp child,
+// so another local user cannot pre-create the hub scratch base and deny service.
+// Returns ("", false) only when no base can be derived at all. The directory is
+// NOT created; callers use EnsurePrivateDir (or MkdirTemp under a directory it
+// prepared) as needed.
 func Dir(subdir string) (string, bool) {
 	if runtime.GOOS != "windows" {
-		return filepath.Join(os.TempDir(), subdir), true
+		if cache, err := os.UserCacheDir(); err == nil && cache != "" {
+			return filepath.Join(cache, "mcp-local-hub", subdir), true
+		}
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, ".mcphub", subdir), true
+		}
+		return "", false
 	}
 	if la := os.Getenv("LOCALAPPDATA"); la != "" {
 		return filepath.Join(la, "mcp-local-hub", subdir), true
@@ -66,6 +74,33 @@ func MarkActive(dir string) (func(), error) {
 		return nil, closeErr
 	}
 	return func() { _ = os.Remove(marker) }, nil
+}
+
+// EnsurePrivateDir creates dir as an owner-only directory and verifies that the
+// current process can create a file inside it. The writability probe matters for
+// pre-existing directories: os.MkdirAll succeeds when a directory already
+// exists, even if it is owned by another local user and unusable by this
+// process.
+func EnsurePrivateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(dir, ".write-test-")
+	if err != nil {
+		return fmt.Errorf("verify writable %s: %w", dir, err)
+	}
+	name := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Remove(name); err != nil {
+		return err
+	}
+	return nil
 }
 
 // SweepStale best-effort-removes immediate sub-entries of dir whose name starts

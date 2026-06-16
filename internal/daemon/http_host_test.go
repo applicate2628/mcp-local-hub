@@ -570,6 +570,70 @@ func TestHTTPHost_WaitForReady_ReturnsImmediatelyWhenUpstreamReady(t *testing.T)
 	}
 }
 
+func TestHTTPHost_WaitForReady_HangingProbeBoundedByHealthTimeout(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(accepted)
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split listener address: %v", err)
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatalf("parse listener port: %v", err)
+	}
+
+	h, err := NewHTTPHost(HTTPHostConfig{
+		Command:       "true",
+		UpstreamPort:  portNum,
+		HealthTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewHTTPHost: %v", err)
+	}
+	h.httpClient = &http.Client{Timeout: 5 * time.Second}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	start := time.Now()
+	err = h.waitForReady(ctx)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("waitForReady unexpectedly succeeded against a hanging listener")
+	}
+	select {
+	case <-accepted:
+	default:
+		t.Fatal("waitForReady did not connect to the hanging listener")
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("waitForReady elapsed %v, want it bounded by HealthTimeout instead of caller/client timeout", elapsed)
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("waitForReady elapsed %v, want it to wait for HealthTimeout", elapsed)
+	}
+
+	listener.Close()
+	<-done
+}
+
 func parsePort(t *testing.T, urlStr string) int {
 	t.Helper()
 	_, port, err := net.SplitHostPort(strings.TrimPrefix(urlStr, "http://"))

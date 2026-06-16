@@ -254,16 +254,17 @@ func hubTempDir() (string, bool) {
 
 // withWritableTemp returns env with TEMP and TMP overridden (case-insensitive
 // replace-or-append) to a hub-owned writable directory, creating that
-// directory with os.MkdirAll first. It is BEST-EFFORT: if the directory
-// cannot be derived or created, env is returned unchanged so a failed temp
-// setup never blocks the run. The override (not merely a default-if-absent)
-// is deliberate — the inherited TEMP=r:\Temp must be REPLACED, not preserved.
+// directory with owner-only permissions and a writability probe first. It is
+// BEST-EFFORT: if the directory cannot be derived or created, env is returned
+// unchanged so a failed temp setup never blocks the run. The override (not
+// merely a default-if-absent) is deliberate — the inherited TEMP=r:\Temp must
+// be REPLACED, not preserved.
 func withWritableTemp(env []string) []string {
 	dir, ok := hubTempDir()
 	if !ok {
 		return env
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := hubtemp.EnsurePrivateDir(dir); err != nil {
 		// Best-effort: leave TEMP as-is rather than blocking the run.
 		return env
 	}

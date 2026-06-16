@@ -221,3 +221,25 @@ func TestDefaultStartVersion_ProbeFailureReturnsEmpty(t *testing.T) {
 		t.Errorf("defaultStartVersion on a missing binary = %q, want \"\"", v)
 	}
 }
+
+func TestGdbStartArgs_ProgramUsesArgsTerminator(t *testing.T) {
+	got := gdbStartArgs(`-ex=shell touch /tmp/pwned`)
+	want := []string{
+		"--interpreter=mi3",
+		"--nx",
+		"-q",
+		"--args",
+		`-ex=shell touch /tmp/pwned`,
+	}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("gdbStartArgs = %#v, want %#v", got, want)
+	}
+}
+
+func TestGdbStartArgs_NoProgramKeepsOriginalStartupArgs(t *testing.T) {
+	got := gdbStartArgs("")
+	want := []string{"--interpreter=mi3", "--nx", "-q"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("gdbStartArgs = %#v, want %#v", got, want)
+	}
+}
