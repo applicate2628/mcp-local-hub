@@ -99,7 +99,24 @@ func findSetvars() (string, bool) {
 // Returns (env, true) on success; (nil, false) when the temp file cannot be
 // written, the command fails to run, or its output has no parseable
 // KEY=VALUE lines.
+// batchUnsafeChars are the characters that could break out of the quoted
+// `call "<setvars>"` line the capture .bat embeds (setvars_windows: the path is
+// the env-controlled ONEAPI_ROOT + "\setvars.bat"). Inside a cmd double-quoted
+// string `&|<>^()` are LITERAL, so they are NOT listed — critically, `(` and
+// `)` must stay allowed because the DEFAULT 64-bit install path is
+// `C:\Program Files (x86)\Intel\oneAPI`. The listed chars inject even inside
+// quotes: `"` closes the quote (OS-illegal in a Windows name, but cheap to
+// reject), `%`/`!` are variable / delayed-expansion, and CR/LF would split the
+// .bat into extra lines. A genuine oneAPI path contains none of these, so
+// refusing one (→ the caller falls back to DLLDirs) is strictly safe
+// defense-in-depth in case a future code path feeds a setvars path that skipped
+// the fileExists gate.
+const batchUnsafeChars = "\"%!\r\n"
+
 func captureSetvarsEnv(setvars string) ([]string, bool) {
+	if strings.ContainsAny(setvars, batchUnsafeChars) {
+		return nil, false
+	}
 	bat, err := os.CreateTemp("", "mcphub-setvars-*.bat")
 	if err != nil {
 		return nil, false

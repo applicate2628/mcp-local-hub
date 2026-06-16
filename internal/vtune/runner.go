@@ -9,11 +9,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/hubtemp"
 	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
 )
+
+// waitDelayAfterKill bounds how long cmd.Wait blocks after the context deadline
+// kills vtune.exe / the profiled target, so a grandchild holding the pipe can't
+// hang Wait past the timeout (mirrors oneapirun / drmemory). Paired with
+// process.RunUnderKillJob, which reaps the grandchild via KILL_ON_JOB_CLOSE.
+const waitDelayAfterKill = 2 * time.Second
+
+// staleRunDirTTL bounds how long an abandoned per-run result dir may linger
+// before a later run sweeps it. Far above the default vtune timeout so a live
+// run's dir is never swept.
+const staleRunDirTTL = time.Hour
 
 // runOutput is the result of one VTune collect+report invocation: the
 // target's exit code (VTune forwards the profiled process's exit code from
@@ -68,9 +80,18 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	if !ok {
 		return nil, fmt.Errorf("derive vtune scratch dir")
 	}
-	if err := os.MkdirAll(base, 0o755); err != nil {
+	// 0o700: owner-only, so a co-resident user on a multi-tenant POSIX host
+	// cannot read another user's VTune result DB (function names, hot paths) or
+	// plant a symlink at the report path (the readReportFile Lstat guard is the
+	// second layer).
+	if err := os.MkdirAll(base, 0o700); err != nil {
 		return nil, fmt.Errorf("create vtune scratch base: %w", err)
 	}
+	// Reap result dirs abandoned by an abnormally-terminated prior run (timeout
+	// force-kill, daemon restart, reboot mid-run); they hold a full result DB
+	// (often 50-500 MB) so unbounded accumulation is real. Prefix-scoped to
+	// "run-", so any shared sibling is untouched.
+	hubtemp.SweepStale(base, "run-", staleRunDirTTL)
 	// runDir holds the per-run result dir + the report output files. VTune
 	// REQUIRES the result dir (-r) to be FRESH/nonexistent (it creates it), so
 	// we hand it a not-yet-created subpath of a freshly-made run dir.
@@ -173,13 +194,16 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 func runVTunePhase(ctx context.Context, exePath string, args []string, cwd string, env []string, stderr *bytes.Buffer) error {
 	cmd := exec.CommandContext(ctx, exePath, args...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	cmd.WaitDelay = waitDelayAfterKill
 	cmd.Env = env
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
 	cmd.Stderr = stderr
 	cmd.Stdout = nil
-	return cmd.Run()
+	// RunUnderKillJob reaps the profiled target's subtree on a timeout kill so a
+	// grandchild can't orphan + hold its pipe/port; WaitDelay bounds the Wait.
+	return process.RunUnderKillJob(cmd)
 }
 
 // vtuneEnv returns the environment VTune (and the profiled target) runs
@@ -198,7 +222,11 @@ func runVTunePhase(ctx context.Context, exePath string, args []string, cwd strin
 // or INCLUDE), and to a plain os.Environ() when there is no oneAPI at all.
 // Mirrors drmemory/runner.go's oneAPIRuntimeEnv.
 func vtuneEnv() []string {
-	if env, ok := oneapi.SetvarsEnv(); ok {
+	// RuntimeEnv is the full setvars PATH MINUS build-only keys (INCLUDE/LIB/…):
+	// VTune profiles a PREBUILT exe, so the target needs the runtime DLLs on PATH
+	// but never the build toolchain's search paths (least privilege for the
+	// arbitrary profiled target — it no longer sees the host's INCLUDE/LIB layout).
+	if env := oneapi.RuntimeEnv(); env != nil {
 		return env
 	}
 	root, ok := oneapi.DetectRoot()
@@ -267,6 +295,14 @@ func reportName(analysis string) string {
 // vtuneOutputCap. Returns "" when the file is absent (the report phase failed
 // before writing it) or unreadable.
 func readReportFile(path string) string {
+	// Lstat-guard before ReadFile: a co-resident TOCTOU attacker who planted a
+	// symlink at path (between VTune's write and this read, on a host where the
+	// scratch dir is not owner-only) would otherwise leak the symlink target's
+	// bytes into the structured result. Read only a real regular file the run
+	// itself wrote; 0o700 on the scratch base is the first layer.
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return ""
@@ -278,7 +314,9 @@ func readReportFile(path string) string {
 // else "" — so the structured result's report_path is empty when VTune never
 // wrote the CSV (a swallowed report failure the handler surfaces explicitly).
 func reportPathIfPresent(path string) string {
-	if isExecutableFile(path) {
+	// Lstat (not isExecutableFile, whose os.Stat follows symlinks): report only a
+	// real regular file the run wrote, never a symlink planted at the path.
+	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
 		return path
 	}
 	return ""

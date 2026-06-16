@@ -261,6 +261,43 @@ func EnvOverlay() []string {
 	return mergeEnv(os.Environ(), overlay)
 }
 
+// buildOnlyEnvKeys are environment variables that matter only at COMPILE/LINK
+// time — the header search path, the library search paths, and MSVC compiler
+// flag injection — and are never needed to RUN a prebuilt binary. RuntimeEnv
+// strips them (case-insensitively) so a target that is merely profiled /
+// instrumented does not receive the build toolchain's search paths.
+var buildOnlyEnvKeys = map[string]bool{
+	"INCLUDE": true, "LIB": true, "LIBPATH": true, "CL": true, "_CL_": true,
+	"__VSCMD_PREINIT_INCLUDE": true,
+}
+
+// RuntimeEnv returns the oneAPI RUNTIME environment for a PREBUILT target: the
+// complete setvars PATH (every component's runtime DLL dir — broader than the
+// hand-enumerated DLLDirs) with the build-only keys (INCLUDE / LIB / LIBPATH /
+// CL / …) stripped. A binary that is RUN (not compiled) needs its DLLs on PATH
+// but never the header/library search paths, so the runtime-only consumers
+// (vtune_profile, drmemory_run) use this to apply least privilege — the
+// arbitrary target no longer sees the build toolchain's INCLUDE/LIB layout.
+//
+// Returns nil when no oneAPI install is present (SetvarsEnv unavailable) so the
+// caller falls back to its own os.Environ()+DLLDirs-prepend path. Distinct from
+// EnvOverlay, which keeps the FULL build env for clang-tidy / iwyu (those DO
+// compile). This is the single owner of the runtime-env trim.
+func RuntimeEnv() []string {
+	full, ok := SetvarsEnv()
+	if !ok || len(full) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(full))
+	for _, e := range full {
+		if k, _, hasEq := strings.Cut(e, "="); hasEq && buildOnlyEnvKeys[strings.ToUpper(strings.TrimSpace(k))] {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // mergeEnv returns base with every overlay entry applied on top: an overlay
 // KEY=VALUE replaces the same-key entry in base (in place, preserving base
 // order) when present, else is appended. Env-key case-sensitivity is

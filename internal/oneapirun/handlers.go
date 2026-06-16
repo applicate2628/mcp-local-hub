@@ -224,7 +224,11 @@ func runCommand(ctx context.Context, command string, args []string, cwd string, 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	runErr := cmd.Run()
+	// RunUnderKillJob binds the command's whole subtree to a KILL_ON_JOB_CLOSE
+	// job so a grandchild that outlives the timeout-killed direct child (e.g.
+	// `cmd /c start ...`) is reaped instead of orphaning; WaitDelay above bounds
+	// the Wait, the job reaps the orphan.
+	runErr := process.RunUnderKillJob(cmd)
 	durationMs := time.Since(start).Milliseconds()
 
 	res := runResult{

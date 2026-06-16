@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 )
 
 // Dir returns the hub-owned writable scratch directory for subdir. On Windows
@@ -39,4 +41,37 @@ func Dir(subdir string) (string, bool) {
 		return filepath.Join(home, ".mcphub", subdir), true
 	}
 	return "", false
+}
+
+// SweepStale best-effort-removes immediate sub-entries of dir whose name starts
+// with prefix and whose mtime is older than ttl. It bounds the accumulation of
+// per-run scratch dirs (vtune result DBs, drmemory logdirs) that LEAK when a run
+// is killed mid-flight — a timeout force-kill, a daemon restart / supervisor
+// reconcile, or a host reboot during a run — so the normal per-run defer
+// os.RemoveAll is no longer the only cleanup path.
+//
+// Safe against a concurrent in-flight run: callers pass a ttl (1h) far above the
+// heavyweight tools' default run timeouts (10-20 min), so a normal run's <ttl-old
+// dir is never swept; only an abandoned dir left by an abnormally-terminated run
+// qualifies. On Windows os.RemoveAll fails on a dir whose files are still open by
+// a live run, so an in-use dir is protected regardless. Errors (in-use entry,
+// permission glitch) are ignored — a sweep that can't remove one entry must not
+// fail the run it is making room for. Non-matching siblings (e.g. a shared
+// "symcache" dir) are left untouched.
+func SweepStale(dir, prefix string, ttl time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-ttl)
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+	}
 }

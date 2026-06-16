@@ -9,11 +9,25 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/hubtemp"
 	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
 )
+
+// waitDelayAfterKill bounds how long cmd.Wait blocks AFTER the context deadline
+// kills the direct child, waiting for the target's stdout/stderr pipes to close.
+// Without it a killed target whose GRANDCHILD still holds the pipe hangs Wait
+// until the grandchild exits on its own, defeating timeout_sec (mirrors
+// oneapirun.waitDelayAfterKill). Paired with process.RunUnderKillJob, which then
+// reaps that grandchild via KILL_ON_JOB_CLOSE.
+const waitDelayAfterKill = 2 * time.Second
+
+// staleRunDirTTL bounds how long an abandoned per-run logdir may linger before a
+// later run sweeps it. Far above the default drmemory timeout (20 min) so a live
+// run's dir is never swept.
+const staleRunDirTTL = time.Hour
 
 // runOutput is the result of one Dr. Memory invocation: the target's
 // exit code (Dr. Memory forwards the instrumented process's exit code),
@@ -66,6 +80,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 
 	cmd := exec.CommandContext(ctx, exePath, cmdArgs...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	cmd.WaitDelay = waitDelayAfterKill
 	// The instrumented target (and Dr. Memory itself) must see the Intel
 	// oneAPI runtime DLL dirs on PATH, else an icx-built exe dies with
 	// 0xC0000135 (DLL not found) ~65 ms in, BEFORE instrumentation, and
@@ -83,7 +98,11 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 	cmd.Stdout = nil
 
 	exitCode := 0
-	runErr := cmd.Run()
+	// RunUnderKillJob binds the whole target subtree to a KILL_ON_JOB_CLOSE job
+	// so a grandchild that outlives the timeout-killed direct child is reaped
+	// instead of orphaning + holding its pipe/port. WaitDelay above bounds the
+	// Wait; the job reaps the orphan.
+	runErr := process.RunUnderKillJob(cmd)
 	if runErr != nil {
 		var ee *exec.ExitError
 		if errors.As(runErr, &ee) {
@@ -131,7 +150,11 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 // PATH only — drmemory instruments a PREBUILT exe, so it never needs LIB or
 // INCLUDE), and to a plain os.Environ() when there is no oneAPI at all.
 func oneAPIRuntimeEnv() []string {
-	if env, ok := oneapi.SetvarsEnv(); ok {
+	// RuntimeEnv is the full setvars PATH MINUS the build-only keys (INCLUDE /
+	// LIB / …): drmemory instruments a PREBUILT exe, so the target needs the
+	// runtime DLLs on PATH but never the build toolchain's search paths
+	// (least-privilege for the arbitrary instrumented target).
+	if env := oneapi.RuntimeEnv(); env != nil {
 		return env
 	}
 	root, ok := oneapi.DetectRoot()
@@ -153,9 +176,15 @@ func makeLogdir() (string, error) {
 	if !ok {
 		return os.MkdirTemp("", "drmemory-logs-")
 	}
-	if err := os.MkdirAll(base, 0o755); err != nil {
+	// 0o700: owner-only, so a co-resident user on a multi-tenant POSIX host
+	// can't read another user's Dr. Memory output (module paths, findings).
+	if err := os.MkdirAll(base, 0o700); err != nil {
 		return os.MkdirTemp("", "drmemory-logs-")
 	}
+	// Reap logdirs abandoned by an abnormally-terminated prior run (timeout
+	// force-kill, daemon restart, reboot mid-run) so they don't accumulate; the
+	// shared "symcache" sibling is left untouched (prefix-scoped to "logs-").
+	hubtemp.SweepStale(base, "logs-", staleRunDirTTL)
 	return os.MkdirTemp(base, "logs-")
 }
 
