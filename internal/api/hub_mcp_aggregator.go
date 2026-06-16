@@ -59,16 +59,58 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"mcp-local-hub/internal/buildinfo"
 )
+
+// daemonHTTPError is the error doDaemonPost returns when the daemon RECEIVED the
+// request but answered HTTP>=400 (as opposed to a transport failure where the
+// request never landed). The distinction is load-bearing for the hot-swap (a)
+// self-heal retry: an HTTP-level rejection means the daemon got the request and
+// a non-idempotent tool's side effect may already have run, so it must NOT be
+// retried (MCP tools/call has no idempotency key). Error() preserves the prior
+// "HTTP %d" string so existing error messages are unchanged.
+type daemonHTTPError struct {
+	code int
+	body []byte
+}
+
+func (e *daemonHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+
+// isRetriableTransportFailure reports whether err is a TRANSPORT-level failure
+// where the request demonstrably never reached the daemon — connection refused
+// or connection reset — and is therefore SAFE to retry against a freshly-
+// restarted daemon. It deliberately returns false for:
+//   - *daemonHTTPError (the daemon received the request; a side effect may have run),
+//   - timeouts / context deadline (ambiguous — the request may have landed),
+//   - any other error (conservative: never retry an unclassified failure).
+func isRetriableTransportFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *daemonHTTPError
+	if errors.As(err, &httpErr) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return false
+	}
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET)
+}
 
 // Concurrency + timing constants. Spec §"Concurrency + bounds".
 const (
@@ -784,7 +826,10 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 		if len(raw) > maxAggregatorResponseBytes {
 			raw = raw[:maxAggregatorResponseBytes]
 		}
-		return raw, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+		// Typed error so callers (hot-swap (a) self-heal) can tell a
+		// received-but-rejected HTTP failure from a never-landed transport
+		// failure. Error() still renders "HTTP %d", so messages are unchanged.
+		return raw, resp.Header, &daemonHTTPError{code: resp.StatusCode, body: raw}
 	}
 
 	// Notification path: return IMMEDIATELY on 2xx without reading
