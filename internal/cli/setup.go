@@ -271,6 +271,7 @@ func newSetupCmdReal() *cobra.Command {
 	var allowElevated bool
 	var rollbackLSPRouter bool
 	var trustedRoots []string
+	var installServer string
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Install mcphub to ~/.local/bin, register PATH, install watchdog task",
@@ -308,6 +309,14 @@ What setup does:
      a manual GUI bless. Each path must be ABSOLUTE (relative is rejected);
      blessing is idempotent. Runs last, after the state dir is ensured.
      Omitting the flag leaves the default flow unchanged.
+  9. If --server <name> is given, installs that one server headlessly via
+     the same code path as 'mcphub install --server <name>' (default
+     clients claude-code,codex-cli,cursor). No prompts — intended for
+     scripted/CI setup. The name is validated against the shipped manifest
+     set up front and the whole command fails loud (before any side effect)
+     if it is unknown. Runs last, after the binary is canonicalized and the
+     maintenance task is installed. Omitting the flag leaves the default
+     flow unchanged (setup installs no server).
 
 Trusted roots (first-run onboarding):
   mcphub setup --trusted-root /abs/path/to/workspace blesses workspaces up
@@ -339,6 +348,7 @@ Examples:
   mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
   mcphub setup --trusted-root D:\dev\myproj    # bless one LSP trusted root
   mcphub setup --trusted-root D:\dev\a --trusted-root D:\dev\b  # bless several
+  mcphub setup --server serena    # canonicalize binary + install serena headlessly (CI)
 
 Caveats:
   - The shell that ran 'setup' won't see the updated PATH — close and
@@ -368,6 +378,13 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 			if err := validateTrustedRootArgs(trustedRoots); err != nil {
 				return err
 			}
+			// Validate --server <name> against the shipped manifest set
+			// BEFORE any mutation too. A typo'd server name (mistyped in a CI
+			// script) must fail loud up front, not after the binary has been
+			// canonicalized and the maintenance task installed.
+			if err := validateSetupServerArg(installServer); err != nil {
+				return err
+			}
 			if err := runSetupBootstrap(cmd.OutOrStdout()); err != nil {
 				return err
 			}
@@ -383,7 +400,16 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 			// is unreachable), so the store write below is guaranteed a valid
 			// state dir. Reuses the SAME hardened idempotent append the GUI
 			// POST /api/lsp/trusted-roots handler calls (api.BlessDefaultTrustedRoot).
-			return runSetupTrustedRoots(cmd.OutOrStdout(), trustedRoots)
+			if err := runSetupTrustedRoots(cmd.OutOrStdout(), trustedRoots); err != nil {
+				return err
+			}
+			// Headless single-server install (scripted/CI). Runs LAST so the
+			// binary is already canonicalized at ~/.local/bin and the
+			// maintenance/liveness task exists before the server's daemons are
+			// materialized. Reuses the exact `mcphub install --server` code
+			// path (api.Install) so install logic is not reinvented here. A
+			// no-op when --server is empty.
+			return runSetupInstallServer(cmd.OutOrStdout(), installServer)
 		},
 	}
 	c.Flags().BoolVar(&allowElevated, "allow-elevated", false,
@@ -392,6 +418,8 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 		"restore/remove Phase 3 LSP router client entries from latest backups; skips bootstrap/watchdog setup")
 	c.Flags().StringArrayVar(&trustedRoots, "trusted-root", nil,
 		"bless an ABSOLUTE workspace path as an LSP trusted root (repeatable); same store the GUI Settings → Trusted Roots panel writes. Idempotent.")
+	c.Flags().StringVar(&installServer, "server", "",
+		"after canonicalizing the binary + installing the maintenance task, install this one server headlessly (no prompts) via the same path as `mcphub install --server <name>`. Validated against the shipped manifest set; unknown names fail loud before any side effect.")
 	return c
 }
 
@@ -431,6 +459,57 @@ func runSetupTrustedRoots(out io.Writer, roots []string) error {
 		fmt.Fprintf(out, "✓ Blessed LSP trusted root: %s\n", root)
 	}
 	return nil
+}
+
+// validateSetupServerArg checks that a non-empty --server value names a
+// server that actually has a shipped manifest, so a typo'd name in a CI
+// script fails loud BEFORE setup canonicalizes the binary / installs the
+// maintenance task. An empty value is a no-op success (the flag was not
+// supplied). The known set is api.ManifestList() — the same authoritative
+// embed-first source the install command resolves against, so a name that
+// passes here is guaranteed loadable by the downstream api.Install call.
+func validateSetupServerArg(server string) error {
+	name := strings.TrimSpace(server)
+	if name == "" {
+		return nil
+	}
+	names, err := api.NewAPI().ManifestList()
+	if err != nil {
+		return fmt.Errorf("--server: list available manifests: %w", err)
+	}
+	for _, known := range names {
+		if known == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("--server %q: unknown server (no shipped manifest); available: %s",
+		name, strings.Join(names, ", "))
+}
+
+// setupInstallServerFn is the test seam for the headless single-server
+// install step. Production leaves it nil and routes through api.Install
+// (the exact `mcphub install --server` code path). Tests set it so setup
+// coverage does not touch real client configs, the supervisor, or
+// scheduler tasks.
+var setupInstallServerFn func(server string, out io.Writer) error
+
+// runSetupInstallServer installs the named server headlessly via the same
+// api.Install path the `mcphub install --server` command uses, with the
+// default install clients (claude-code, codex-cli, cursor). A no-op when
+// server is empty. Callers MUST have run validateSetupServerArg first; this
+// function trusts the name is a known manifest.
+func runSetupInstallServer(out io.Writer, server string) error {
+	name := strings.TrimSpace(server)
+	if name == "" {
+		return nil
+	}
+	if setupInstallServerFn != nil {
+		return setupInstallServerFn(name, out)
+	}
+	return api.NewAPI().Install(api.InstallOpts{
+		Server: name,
+		Writer: out,
+	})
 }
 
 func runSetupBootstrap(out io.Writer) error {
