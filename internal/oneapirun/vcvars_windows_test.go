@@ -7,6 +7,28 @@ import (
 	"testing"
 )
 
+func TestVcvarsCaptureBatchContent_GuardsSetWithCallSuccess(t *testing.T) {
+	content := vcvarsCaptureBatchContent(`C:\Program Files\Microsoft Visual Studio\VC\Auxiliary\Build\vcvars64.bat`)
+
+	call := `call "C:\Program Files\Microsoft Visual Studio\VC\Auxiliary\Build\vcvars64.bat" > NUL 2>&1`
+	guard := "if errorlevel 1 exit /b %errorlevel%"
+	set := "set"
+	if !strings.Contains(content, call) {
+		t.Fatalf("batch content missing quoted vcvars call %q: %q", call, content)
+	}
+	guardIndex := strings.Index(content, guard)
+	setIndex := strings.LastIndex(content, set)
+	if guardIndex < 0 {
+		t.Fatalf("batch content missing failure guard %q: %q", guard, content)
+	}
+	if setIndex < 0 {
+		t.Fatalf("batch content missing set dump: %q", content)
+	}
+	if guardIndex > setIndex {
+		t.Fatalf("failure guard must run before set dump: %q", content)
+	}
+}
+
 func TestParseSetDump_ParsesKeyValueLines(t *testing.T) {
 	dump := "INCLUDE=C:\\VS\\include\r\n" +
 		"LIB=C:\\VS\\lib;C:\\SDK\\lib\r\n" +

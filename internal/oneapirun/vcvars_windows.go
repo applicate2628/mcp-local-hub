@@ -136,7 +136,7 @@ func findVcvarsViaProbe() (string, bool) {
 
 // captureVcvarsEnv runs vcvars64.bat and dumps the resulting environment.
 //
-// It writes a tiny temp .bat (`call "<vcvars>" >NUL 2>&1` then `set`) and runs
+// It writes a tiny temp .bat (`call "<vcvars>" >NUL 2>&1`, fail-fast check, then `set`) and runs
 // `cmd /c <tempbat>`, rather than an inline `cmd /c ""<vcvars>" ... && set"`.
 // The inline form is fragile: Go's exec.Command escapes the cmdLine argument
 // for the MS C-runtime, and cmd /c's own first/last-quote-stripping rule then
@@ -156,8 +156,10 @@ func captureVcvarsEnv(vcvars string) ([]string, bool) {
 	batPath := bat.Name()
 	defer os.Remove(batPath)
 	// CRLF so cmd parses the batch reliably; `call` so control returns to
-	// dump `set` after vcvars finishes; banner discarded to NUL.
-	content := "@echo off\r\ncall \"" + vcvars + "\" > NUL 2>&1\r\nset\r\n"
+	// dump `set` after vcvars finishes; banner discarded to NUL. If
+	// vcvars fails, exit before `set` so cmd.Output observes the failure
+	// instead of parsing the unchanged parent environment as success.
+	content := vcvarsCaptureBatchContent(vcvars)
 	if _, err := bat.WriteString(content); err != nil {
 		_ = bat.Close()
 		return nil, false
@@ -176,6 +178,13 @@ func captureVcvarsEnv(vcvars string) ([]string, bool) {
 		return nil, false
 	}
 	return env, true
+}
+
+func vcvarsCaptureBatchContent(vcvars string) string {
+	return "@echo off\r\n" +
+		"call \"" + vcvars + "\" > NUL 2>&1\r\n" +
+		"if errorlevel 1 exit /b %errorlevel%\r\n" +
+		"set\r\n"
 }
 
 // parseSetDump parses the output of cmd's `set` command — one KEY=VALUE
