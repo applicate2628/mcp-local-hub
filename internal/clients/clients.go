@@ -775,6 +775,13 @@ func clientRegistry() []clientDescriptor {
 		{name: "warp", factory: NewWarp,
 			// Mirrors warp.go: ~/.warp/.mcp.json (note the leading dot on .mcp.json).
 			configPath: func(home string) string { return filepath.Join(home, ".warp", ".mcp.json") }},
+		{name: "continue", factory: NewContinue,
+			// Mirrors continue.go: ~/.continue/config.yaml (yaml, mcpServers key).
+			configPath: func(home string) string { return filepath.Join(home, ".continue", "config.yaml") }},
+		{name: "goose", factory: NewGoose,
+			// Mirrors defaultGooseConfigPath (goose.go): ~/.config/goose/config.yaml
+			// (XDG_CONFIG_HOME-aware), yaml under an `extensions` key.
+			configPath: defaultGooseConfigPath},
 	}
 }
 
