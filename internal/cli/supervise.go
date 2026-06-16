@@ -42,6 +42,7 @@ import (
 	"mcp-local-hub/internal/api/daemon_env_overlay"
 	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/toolchain"
 )
 
 // reaperFn is a package-private test seam pointing at the Task 13.1
@@ -3050,6 +3051,37 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 						"dirs":   applied,
 					},
 				})
+			}
+		}
+
+		// Native-debugger PATH injection (operator-CRITICAL). The gdb/lldb MCP
+		// daemons resolve their debugger via a BARE PATH probe — GDB-MCP runs
+		// `gdb --version` and its availability gate ignores an explicit gdb_path
+		// until that passes — but a Task-Scheduler-launched supervisor hands
+		// daemons a REDUCED PATH that can lack the MSYS2 `…\ucrt64\bin` dir where
+		// gdb/lldb live, so the daemon reports "debugger not available" even
+		// though the binaries are installed and on the operator's own PATH.
+		// Prepend the filesystem-detected debugger toolchain dir(s) so a bare
+		// gdb/lldb resolves. INDEPENDENT of the oneAPI gate (fires on a
+		// non-oneAPI host too); same {gdb,lldb} target set. No-op when nothing is
+		// detected (POSIX with debuggers on PATH, or no MSYS2 install).
+		if defaultOneAPITargetServers[d.Server] {
+			if dbgDirs := toolchain.DebuggerDirs(); len(dbgDirs) > 0 {
+				merged, applied := injectOneAPIEnv(cmd.Env, dbgDirs)
+				cmd.Env = merged
+				if len(applied) > 0 && events != nil {
+					_ = events.Emit(api.SupervisorEvent{
+						Severity: api.SupervisorEventSeverityInfo,
+						Source:   "lifecycle",
+						Event:    "debugger-path-injected",
+						TaskName: d.TaskName,
+						Body: map[string]any{
+							"server": d.Server,
+							"daemon": d.Daemon,
+							"dirs":   applied,
+						},
+					})
+				}
 			}
 		}
 

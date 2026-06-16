@@ -37,11 +37,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"mcp-local-hub/internal/toolchain"
 )
 
 // Tunables kept explicit so future operators can justify changes without
@@ -77,14 +78,14 @@ func parseHostPort(s string) (string, int, error) {
 	return host, port, nil
 }
 
-// defaultLldbPath mirrors bridge.py's default for the ru-RU/MSYS2 dev host.
-// Keeping the same default means existing `.claude.json` entries migrate
-// to the hub without changing argv order.
+// defaultLldbPath resolves the lldb binary via the shared toolchain detector
+// (filesystem-probed MSYS2 sub-environments + the MCPHUB_DEBUGGER_TOOLCHAIN_DIR
+// override) instead of the previous hardcoded `C:\msys64\ucrt64\bin\lldb.exe`.
+// It still returns an absolute path on a standard MSYS2 host (so the spawn does
+// not depend on PATH), and falls back to a bare "lldb"/"lldb.exe" only when
+// nothing is detected — preserving the prior bare-name behavior on POSIX.
 func defaultLldbPath() string {
-	if runtime.GOOS == "windows" {
-		return `C:\msys64\ucrt64\bin\lldb.exe`
-	}
-	return "lldb"
+	return toolchain.DefaultLldbPath()
 }
 
 // runLldbBridge is the main bridge loop. It owns the spawned subprocess (if
