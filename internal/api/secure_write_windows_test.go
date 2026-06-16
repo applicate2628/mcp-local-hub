@@ -43,25 +43,13 @@ func synthesizeDirWithAuthUsersReadACE(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatalf("Authenticated Users sid: %v", err)
 	}
+	// Divergent fixture (current-user GA + Authenticated Users READ);
+	// not the allowlist triple. Only the apply boilerplate is shared.
 	entries := []windows.EXPLICIT_ACCESS{
 		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
 		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_READ),
 	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		t.Fatalf("ACLFromEntries: %v", err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		dir,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatalf("SetNamedSecurityInfo on parent dir: %v", err)
-	}
+	applyProtectedDACLFromEntries(t, dir, entries)
 }
 
 // TestSecureWriteClientConfigRejectsPermissiveParentDACL builds a

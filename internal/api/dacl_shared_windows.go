@@ -116,6 +116,63 @@ func BuildAllowlistSD() (*windows.SECURITY_DESCRIPTOR, error) {
 	return sd, nil
 }
 
+// allowlistSIDs returns the canonical 3-SID allowlist —
+// {current process user, LocalSystem (S-1-5-18), BuiltinAdministrators
+// (S-1-5-32-544)} — as a slice of *windows.SID, in that fixed order.
+//
+// This is the single owner of the allowlist triple. It is consumed in
+// two distinct shapes:
+//
+//   - verifyWindowsDACLFromHandleMasked (hub_mcp_state_dacl_windows.go)
+//     uses the SIDs directly as the ownerSIDAllowed / ACE-iterator
+//     allowlist.
+//   - allowlistExplicitAccess (below) wraps the same SIDs into
+//     EXPLICIT_ACCESS GRANT entries for the DACL-construction call
+//     sites (buildRestrictiveDACL + the allowlist test fixtures).
+//
+// Keeping both shapes derived from this one function guarantees the
+// verify side and the build side can never drift on which principals
+// are in the allowlist.
+func allowlistSIDs() (current, system, admin *windows.SID, err error) {
+	current, err = currentUserSID()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("current user sid: %w", err)
+	}
+	system, err = windows.StringToSid("S-1-5-18")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("system sid: %w", err)
+	}
+	admin, err = windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("admin sid: %w", err)
+	}
+	return current, system, admin, nil
+}
+
+// allowlistExplicitAccess returns the canonical 3-entry EXPLICIT_ACCESS
+// slice for the {current-user, LocalSystem, BuiltinAdministrators}
+// allowlist, each granting GENERIC_ALL with NO_INHERITANCE. The trustee
+// types match the long-standing inline form exactly (current=USER,
+// system=WELL_KNOWN_GROUP, admin=GROUP) so the resulting DACL is
+// byte-identical to what each call site previously open-coded.
+//
+// The trustee-type hints are ACLFromEntries build-time inputs only;
+// they do not survive into the persisted ACE format (which carries SID
+// identity + mask), and verifyWindowsDACLFromHandleMasked matches by
+// SID equality. They are preserved verbatim regardless, to keep this
+// extraction a pure no-op vs the prior inline slices.
+func allowlistExplicitAccess() ([]windows.EXPLICIT_ACCESS, error) {
+	current, system, admin, err := allowlistSIDs()
+	if err != nil {
+		return nil, err
+	}
+	return []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(current, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		explicitAccessAllow(system, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_ALL),
+		explicitAccessAllow(admin, windows.TRUSTEE_IS_GROUP, windows.GENERIC_ALL),
+	}, nil
+}
+
 // currentUserSIDString returns the current process token's user SID in
 // its textual (S-1-5-...) form, suitable for SDDL literal substitution.
 // Wraps the package-level currentUserSID (hub_mcp_state_dacl_windows.go)

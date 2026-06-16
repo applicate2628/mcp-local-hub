@@ -316,17 +316,9 @@ func verifyWindowsDACLFromHandleWriteOrAdmin(h windows.Handle) error {
 // the public verifiers above pin which access-bit mask flags an
 // ALLOW ACE as a violation.
 func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32) error {
-	currentSID, err := currentUserSID()
+	currentSID, systemSID, adminSID, err := allowlistSIDs()
 	if err != nil {
-		return fmt.Errorf("current user sid: %w", err)
-	}
-	systemSID, err := windows.StringToSid("S-1-5-18")
-	if err != nil {
-		return fmt.Errorf("system sid: %w", err)
-	}
-	adminSID, err := windows.StringToSid("S-1-5-32-544")
-	if err != nil {
-		return fmt.Errorf("admin sid: %w", err)
+		return err
 	}
 	allowlist := []*windows.SID{currentSID, systemSID, adminSID}
 

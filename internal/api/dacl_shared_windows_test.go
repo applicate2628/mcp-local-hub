@@ -9,6 +9,38 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// applyProtectedDACLFromEntries builds a DACL from the given
+// EXPLICIT_ACCESS entries and applies it to `target` as a PROTECTED
+// DACL (DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION)
+// via SetNamedSecurityInfo. It is the shared test-side boilerplate for
+// the ~6 Windows DACL fixtures that each used to open-code the
+// ACLFromEntries + SetNamedSecurityInfo pair.
+//
+// It is deliberately entries-agnostic: the caller supplies whichever
+// principal/mask/inheritance set the test needs (the allowlist triple
+// via allowlistExplicitAccess, or a divergent Authenticated-Users
+// fixture). PROTECTED is always applied because every call site needs
+// to strip %TEMP%-inherited Authenticated Users ACEs so the only DACL
+// under test is the one synthesized here.
+func applyProtectedDACLFromEntries(t *testing.T, target string, entries []windows.EXPLICIT_ACCESS) {
+	t.Helper()
+	dacl, err := windows.ACLFromEntries(entries, nil)
+	if err != nil {
+		t.Fatalf("ACLFromEntries: %v", err)
+	}
+	if err := windows.SetNamedSecurityInfo(
+		target,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		dacl,
+		nil,
+	); err != nil {
+		t.Fatalf("SetNamedSecurityInfo on %s: %v", target, err)
+	}
+}
+
 func TestBuildAllowlistSDDL_File(t *testing.T) {
 	sddl, err := BuildAllowlistSDDL(AllowlistMaskFile)
 	if err != nil {

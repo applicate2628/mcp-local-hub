@@ -64,25 +64,14 @@ func broadenParentForStateFileWriteCapableTest(t *testing.T, parent string) {
 	// windowsDACLWriteOrAdminBits (FILE_WRITE_DATA, DELETE,
 	// WRITE_DAC, WRITE_OWNER, etc.) work equally; FILE_DELETE_CHILD
 	// is the most pointed example of namespace tamper rights.
+	// Divergent fixture (current-user GA + Authenticated Users
+	// FILE_DELETE_CHILD); not the allowlist triple. Only the apply
+	// boilerplate is shared.
 	entries := []windows.EXPLICIT_ACCESS{
 		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
 		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windowsFileDeleteChild),
 	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		t.Fatalf("ACLFromEntries: %v", err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		parent,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatalf("SetNamedSecurityInfo on write-capable parent dir: %v", err)
-	}
+	applyProtectedDACLFromEntries(t, parent, entries)
 }
 
 // TestWriteStateFileAtomic_PostRenameDACLVerify pins falsifiable

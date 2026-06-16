@@ -20,8 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"golang.org/x/sys/windows"
 )
 
 // hardenedTempDir creates `<t.TempDir()>/hardened-parent` and applies
@@ -37,37 +35,10 @@ func hardenedTempDir(t *testing.T) string {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatalf("mkdir hardened parent: %v", err)
 	}
-	currentSID, err := currentUserSID()
+	entries, err := allowlistExplicitAccess()
 	if err != nil {
-		t.Fatalf("currentUserSID: %v", err)
+		t.Fatalf("allowlistExplicitAccess: %v", err)
 	}
-	systemSID, err := windows.StringToSid("S-1-5-18")
-	if err != nil {
-		t.Fatalf("system sid: %v", err)
-	}
-	adminSID, err := windows.StringToSid("S-1-5-32-544")
-	if err != nil {
-		t.Fatalf("admin sid: %v", err)
-	}
-	entries := []windows.EXPLICIT_ACCESS{
-		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
-		explicitAccessAllow(systemSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_ALL),
-		explicitAccessAllow(adminSID, windows.TRUSTEE_IS_GROUP, windows.GENERIC_ALL),
-	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		t.Fatalf("ACLFromEntries: %v", err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		dir,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatalf("SetNamedSecurityInfo on hardened parent: %v", err)
-	}
+	applyProtectedDACLFromEntries(t, dir, entries)
 	return dir
 }

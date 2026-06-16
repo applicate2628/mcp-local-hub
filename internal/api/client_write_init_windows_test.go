@@ -399,21 +399,7 @@ func synthesizeDirWithInheritableAuthUsersReadACE(t *testing.T, dir string) {
 			},
 		},
 	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		t.Fatalf("ACLFromEntries: %v", err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		dir,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatalf("SetNamedSecurityInfo on parent dir: %v", err)
-	}
+	applyProtectedDACLFromEntries(t, dir, entries)
 }
 
 // TestNtCreateRelative_CreateTimeSDOverridesParentInheritance pins

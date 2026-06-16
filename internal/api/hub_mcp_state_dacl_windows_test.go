@@ -48,25 +48,16 @@ func TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow(t *testing.T) {
 		t.Fatalf("Authenticated Users sid: %v", err)
 	}
 
+	// Divergent fixture: NOT the allowlist triple — current-user
+	// GENERIC_ALL plus a disallowed Authenticated Users GENERIC_READ
+	// ACE. Kept open-coded so the verifier's reject path is exercised;
+	// only the ACLFromEntries + SetNamedSecurityInfo apply boilerplate
+	// is shared.
 	entries := []windows.EXPLICIT_ACCESS{
 		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
 		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_READ),
 	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		t.Fatalf("ACLFromEntries: %v", err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		target,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatalf("SetNamedSecurityInfo: %v", err)
-	}
+	applyProtectedDACLFromEntries(t, target, entries)
 
 	err = VerifyHubMcpStateDACL(target)
 	if err == nil {
@@ -93,39 +84,11 @@ func TestVerifyHubMcpStateDACLAcceptsAllowlistOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	currentSID, err := currentUserSID()
+	entries, err := allowlistExplicitAccess()
 	if err != nil {
-		t.Fatalf("currentUserSID: %v", err)
+		t.Fatalf("allowlistExplicitAccess: %v", err)
 	}
-	systemSID, err := windows.StringToSid("S-1-5-18")
-	if err != nil {
-		t.Fatalf("system sid: %v", err)
-	}
-	adminSID, err := windows.StringToSid("S-1-5-32-544")
-	if err != nil {
-		t.Fatalf("admin sid: %v", err)
-	}
-
-	entries := []windows.EXPLICIT_ACCESS{
-		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
-		explicitAccessAllow(systemSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_ALL),
-		explicitAccessAllow(adminSID, windows.TRUSTEE_IS_GROUP, windows.GENERIC_ALL),
-	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		t.Fatalf("ACLFromEntries: %v", err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		target,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatalf("SetNamedSecurityInfo: %v", err)
-	}
+	applyProtectedDACLFromEntries(t, target, entries)
 
 	if err := VerifyHubMcpStateDACL(target); err != nil {
 		t.Errorf("VerifyHubMcpStateDACL must accept allowlist-only DACL; got %v", err)
@@ -138,38 +101,11 @@ func TestVerifyHubMcpStateDACLAcceptsAllowlistOnly(t *testing.T) {
 // the only signal under test is the parent-dir DACL gate.
 func applyAllowlistOnlyDACL(t *testing.T, target string) {
 	t.Helper()
-	currentSID, err := currentUserSID()
+	entries, err := allowlistExplicitAccess()
 	if err != nil {
-		t.Fatalf("currentUserSID: %v", err)
+		t.Fatalf("allowlistExplicitAccess: %v", err)
 	}
-	systemSID, err := windows.StringToSid("S-1-5-18")
-	if err != nil {
-		t.Fatalf("system sid: %v", err)
-	}
-	adminSID, err := windows.StringToSid("S-1-5-32-544")
-	if err != nil {
-		t.Fatalf("admin sid: %v", err)
-	}
-	entries := []windows.EXPLICIT_ACCESS{
-		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
-		explicitAccessAllow(systemSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_ALL),
-		explicitAccessAllow(adminSID, windows.TRUSTEE_IS_GROUP, windows.GENERIC_ALL),
-	}
-	dacl, err := windows.ACLFromEntries(entries, nil)
-	if err != nil {
-		t.Fatalf("ACLFromEntries: %v", err)
-	}
-	if err := windows.SetNamedSecurityInfo(
-		target,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		t.Fatalf("SetNamedSecurityInfo on file: %v", err)
-	}
+	applyProtectedDACLFromEntries(t, target, entries)
 }
 
 // TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL pins the

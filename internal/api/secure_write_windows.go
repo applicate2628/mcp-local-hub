@@ -529,22 +529,9 @@ func buildRestrictiveSecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) 
 // BuiltinAdministrators}-only DACL used by setRestrictiveDACL and
 // buildRestrictiveSecurityDescriptor.
 func buildRestrictiveDACL() (*windows.ACL, error) {
-	currentSID, err := currentUserSID()
+	entries, err := allowlistExplicitAccess()
 	if err != nil {
-		return nil, fmt.Errorf("current user sid: %w", err)
-	}
-	systemSID, err := windows.StringToSid("S-1-5-18")
-	if err != nil {
-		return nil, fmt.Errorf("system sid: %w", err)
-	}
-	adminSID, err := windows.StringToSid("S-1-5-32-544")
-	if err != nil {
-		return nil, fmt.Errorf("admin sid: %w", err)
-	}
-	entries := []windows.EXPLICIT_ACCESS{
-		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
-		explicitAccessAllow(systemSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_ALL),
-		explicitAccessAllow(adminSID, windows.TRUSTEE_IS_GROUP, windows.GENERIC_ALL),
+		return nil, err
 	}
 	dacl, err := windows.ACLFromEntries(entries, nil)
 	if err != nil {
