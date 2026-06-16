@@ -125,3 +125,55 @@ func TestSweepOldBinaries_KeepsRecentFiles(t *testing.T) {
 		t.Fatalf("recent binary was swept (should retain <7d): %v", err)
 	}
 }
+
+// TestSweepOldBinaries_CountCapTrimsRecentSurplus plants more recent (<7-day)
+// asides than renameAsideMaxKeep and verifies the count cap trims the OLDEST
+// surplus even though every file is within the age window — the burst-of-
+// same-day-deploys case the 7-day age rule alone never pruned.
+func TestSweepOldBinaries_CountCapTrimsRecentSurplus(t *testing.T) {
+	dir := t.TempDir()
+	targetName := "mcphub.exe"
+	if runtime.GOOS != "windows" {
+		targetName = "mcphub"
+	}
+	target := filepath.Join(dir, targetName)
+	if err := os.WriteFile(target, []byte("current"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plant renameAsideMaxKeep+2 recent asides with strictly-decreasing mtimes
+	// (index 0 newest). All are < 7 days old, so only the count cap can prune.
+	const planted = renameAsideMaxKeep + 2
+	paths := make([]string, planted)
+	for i := 0; i < planted; i++ {
+		p := target + ".old-recent" + string(rune('a'+i))
+		if err := os.WriteFile(p, []byte("aside"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// i hours ago → index 0 is newest, last index is oldest (still <7d).
+		mt := time.Now().Add(-time.Duration(i) * time.Hour)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+		paths[i] = p
+	}
+
+	if err := SweepOldBinaries(dir); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	// Newest renameAsideMaxKeep must remain; the oldest 2 surplus removed.
+	for i := 0; i < renameAsideMaxKeep; i++ {
+		if _, err := os.Stat(paths[i]); err != nil {
+			t.Fatalf("newest aside #%d was trimmed (should be kept): %v", i, err)
+		}
+	}
+	for i := renameAsideMaxKeep; i < planted; i++ {
+		if _, err := os.Stat(paths[i]); !os.IsNotExist(err) {
+			t.Fatalf("surplus aside #%d not trimmed by count cap: %v", i, err)
+		}
+	}
+	// The live binary is never an aside; it must survive.
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("current binary swept: %v", err)
+	}
+}

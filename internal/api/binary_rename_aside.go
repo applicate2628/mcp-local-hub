@@ -20,6 +20,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -27,9 +28,20 @@ import (
 // older entries are eligible for removal by SweepOldBinaries.
 const renameAsideRetention = 7 * 24 * time.Hour
 
-// SweepOldBinaries removes `<dir>/mcphub*.old-*` files whose mtime is
-// older than 7 days. Both Windows and POSIX patterns are checked on
-// every host so a tree that was cross-installed (rare; defensive) is
+// renameAsideMaxKeep bounds the COUNT of `.old-<ts>` aside files retained
+// regardless of age. The 7-day age rule alone never prunes a burst of
+// same-day upgrades — every aside is younger than the cutoff — so iterative
+// deploys accumulate unbounded (observed: 49 asides / ~1 GB after a single day
+// of dev redeploys). The newest renameAsideMaxKeep asides are kept as a
+// rollback chain; any beyond that are removed even when younger than the age
+// cutoff. A lone aged-out aside is still removed by the age rule (matching the
+// prior semantics — no unconditional keep-newest), so this only ADDS pruning.
+const renameAsideMaxKeep = 5
+
+// SweepOldBinaries removes `<dir>/mcphub*.old-*` aside files that are EITHER
+// older than renameAsideRetention (7 days) OR beyond the newest
+// renameAsideMaxKeep (the rollback chain). Both Windows and POSIX patterns are
+// checked on every host so a tree that was cross-installed (rare; defensive) is
 // still pruned.
 //
 // Per-file Remove failures are non-fatal — a still-mapped image, an
@@ -44,7 +56,13 @@ func SweepOldBinaries(dir string) error {
 		filepath.Join(dir, "mcphub.exe.old-*"),
 		filepath.Join(dir, "mcphub.old-*"),
 	}
-	cutoff := time.Now().Add(-renameAsideRetention)
+	// Collect every aside (across both patterns) with its mtime so the count
+	// cap can rank them newest-first independent of which pattern matched.
+	type aside struct {
+		path  string
+		mtime time.Time
+	}
+	var asides []aside
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
@@ -64,9 +82,17 @@ func SweepOldBinaries(dir string) error {
 				// it does. Skip.
 				continue
 			}
-			if info.ModTime().Before(cutoff) {
-				_ = os.Remove(m) // best-effort per spec
-			}
+			asides = append(asides, aside{path: m, mtime: info.ModTime()})
+		}
+	}
+	// Newest first, so indices >= renameAsideMaxKeep are the surplus to trim.
+	sort.Slice(asides, func(i, j int) bool {
+		return asides[i].mtime.After(asides[j].mtime)
+	})
+	cutoff := time.Now().Add(-renameAsideRetention)
+	for i, a := range asides {
+		if a.mtime.Before(cutoff) || i >= renameAsideMaxKeep {
+			_ = os.Remove(a.path) // best-effort per spec
 		}
 	}
 	return nil
