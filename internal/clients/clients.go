@@ -726,6 +726,50 @@ func clientRegistry() []clientDescriptor {
 		{name: "aider", factory: NewAider,
 			// Mirrors NewAider (aider.go): ~/.aider.conf.yml (relay-stdio client).
 			configPath: func(home string) string { return filepath.Join(home, ".aider.conf.yml") }},
+		// skills-CLI vendor reconciliation TIER-1 (2026-06-17): 19 more opt-in
+		// clients with a verified file-based mcpServers config. Each mirrors its
+		// adapter's ConfigPath derivation (default*ConfigPath helper or inline).
+		{name: "bob", factory: NewBob, configPath: defaultBobConfigPath},
+		{name: "codebuddy", factory: NewCodeBuddy, configPath: defaultCodeBuddyConfigPath},
+		{name: "command-code", factory: NewCommandCode, configPath: defaultCommandCodeConfigPath},
+		{name: "cortex", factory: NewCortex, configPath: defaultCortexConfigPath},
+		{name: "deepagents", factory: NewDeepAgents, configPath: defaultDeepAgentsConfigPath},
+		{name: "devin", factory: NewDevin, configPath: defaultDevinConfigPath},
+		{name: "droid", factory: NewDroid,
+			configPath: func(home string) string { return filepath.Join(home, ".factory", "mcp.json") }},
+		{name: "firebender", factory: NewFirebender,
+			configPath: func(home string) string { return filepath.Join(home, ".firebender", "firebender.json") }},
+		{name: "iflow-cli", factory: NewIFlowCLI,
+			configPath: func(home string) string { return filepath.Join(home, ".iflow", "settings.json") }},
+		{name: "junie", factory: NewJunie,
+			configPath: func(home string) string { return filepath.Join(home, ".junie", "mcp", "mcp.json") }},
+		{name: "kimi-code-cli", factory: NewKimiCodeCLI,
+			// Mirrors defaultKimiCodeCLIConfigPath: KIMI_CODE_HOME overrides ~/.kimi-code.
+			configPath: func(home string) string {
+				if h := os.Getenv("KIMI_CODE_HOME"); h != "" {
+					return filepath.Join(h, "mcp.json")
+				}
+				return filepath.Join(home, ".kimi-code", "mcp.json")
+			}},
+		{name: "kode", factory: NewKode,
+			configPath: func(home string) string { return filepath.Join(home, ".kode.json") }},
+		{name: "ona", factory: NewOna,
+			configPath: func(home string) string { return filepath.Join(home, ".ona", "mcp-config.json") }},
+		{name: "pi", factory: NewPi,
+			// pi is relay-stdio (.pi/agent/mcp.json takes a command, not a url).
+			configPath: func(home string) string { return filepath.Join(home, ".pi", "agent", "mcp.json") }},
+		{name: "qoder", factory: NewQoder,
+			configPath: func(home string) string { return filepath.Join(home, ".qoder", "mcp-settings.json") }},
+		{name: "qoder-cn", factory: NewQoderCN,
+			configPath: func(home string) string { return filepath.Join(home, ".qoder-cn.json") }},
+		{name: "roo", factory: NewRoo,
+			// Mirrors defaultRooConfigPath (roo.go): VS Code globalStorage
+			// rooveterinaryinc.roo-cline/settings/cline_mcp_settings.json (per-OS).
+			configPath: defaultRooConfigPath},
+		{name: "rovodev", factory: NewRovoDev,
+			configPath: func(home string) string { return filepath.Join(home, ".rovodev", "mcp.json") }},
+		{name: "tabnine-cli", factory: NewTabnineCLI,
+			configPath: func(home string) string { return filepath.Join(home, ".tabnine", "mcp_servers.json") }},
 	}
 }
 

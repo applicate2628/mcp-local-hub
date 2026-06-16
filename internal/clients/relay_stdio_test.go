@@ -14,6 +14,7 @@ var relayStdioClientNames = map[string]bool{
 	"antigravity": true,
 	"zed":         true,
 	"aider":       true,
+	"pi":          true,
 }
 
 // TestIsRelayStdioClassifiesEverySupportedClient asserts the relay-stdio
