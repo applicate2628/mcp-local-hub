@@ -105,103 +105,196 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 			report.Failed = append(report.Failed, FailedMigration{Server: server, Err: err.Error()})
 			continue
 		}
+		// Track which clients a manifest binding already covers for this
+		// server so the synthesized-binding pass below does not migrate a
+		// client twice.
+		boundClients := map[string]bool{}
 		for _, binding := range m.ClientBindings {
+			boundClients[binding.Client] = true
 			if !includedClient(binding.Client) {
 				continue
 			}
-			adapter := allClients[binding.Client]
+			migrateOneBinding(report, allClients, m, server, binding, opts.DryRun, keepN)
+		}
+		// Servers-matrix fix: the matrix renders a toggleable cell for
+		// EVERY detected client, not only the manifest's static
+		// client_bindings. A targeted client outside client_bindings was
+		// previously a silent no-op (the iteration above skipped it).
+		// Synthesize a binding for each such targeted client so Apply
+		// actually writes the hub-HTTP entry. The synthesized binding
+		// points at the server's primary daemon (the one named "default",
+		// else the first daemon) with the canonical /mcp path. Eligibility
+		// is gated to (a) a client explicitly named in ClientsInclude,
+		// (b) NOT already covered by a manifest binding, (c) a known
+		// adapter, (d) adapter.Exists() — so we never fabricate work for a
+		// client the host does not have. Same per-binding body as a real
+		// binding (DRY via migrateOneBinding).
+		for _, client := range opts.ClientsInclude {
+			if boundClients[client] {
+				continue
+			}
+			adapter := allClients[client]
 			if adapter == nil {
-				// No adapter constructed on this host (e.g. UserHomeDir failed);
-				// silently skip — a Failed row would add noise without a
-				// repairable cause the user can act on.
 				continue
 			}
-			daemonPort, ok := findDaemonPort(m, binding.Daemon)
+			// DryRun reports the intended write without checking Exists()
+			// (mirrors the real-binding path, which evaluates Exists()
+			// only after the DryRun short-circuit). Skip the Exists()
+			// gate here so DryRun stays a pure preview.
+			if !opts.DryRun && !adapter.Exists() {
+				continue
+			}
+			primaryDaemon, ok := primaryDaemonName(m)
 			if !ok {
+				// Manifest has no daemons at all — cannot synthesize a URL.
+				// Surface a Failed row so the operator sees why this
+				// targeted client produced nothing.
 				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client,
-					Err: fmt.Sprintf("manifest %s: binding references unknown daemon %q", server, binding.Daemon),
+					Server: server, Client: client,
+					Err: fmt.Sprintf("manifest %s: no daemons declared; cannot migrate non-binding client %q", server, client),
 				})
 				continue
 			}
-			urlPath := binding.URLPath
-			if urlPath == "" {
-				urlPath = "/mcp"
+			synth := config.ClientBinding{
+				Client:  client,
+				Daemon:  primaryDaemon,
+				URLPath: "/mcp",
 			}
-			url := fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath)
-
-			if opts.DryRun {
-				report.Applied = append(report.Applied, AppliedMigration{
-					Server: server, Client: binding.Client, URL: url,
-				})
-				continue
-			}
-
-			if !adapter.Exists() {
-				// Client not installed on this machine — nothing to migrate.
-				// Skip quietly: this mirrors Install's behavior for missing
-				// clients and keeps the report focused on actual attempts.
-				continue
-			}
-			if _, err := adapter.BackupKeep(keepN); err != nil {
-				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client, Err: err.Error(),
-				})
-				continue
-			}
-			entry := clients.MCPEntry{
-				Name:        server,
-				URL:         url,
-				RelayServer: server,
-				RelayDaemon: binding.Daemon,
-			}
-			if clients.IsRelayStdio(binding.Client) {
-				// Relay-stdio adapters (antigravity, zed) spawn the
-				// stdio relay from an absolute mcphub path persisted
-				// into the client config, so AddEntry rejects an entry
-				// with no RelayExePath. Anchor at the canonical
-				// installed path, not at the running executable.
-				// Otherwise a migrate invoked from a dev checkout or
-				// %TEMP% build would persist a throwaway absolute path —
-				// the next time that path disappears (cleanup, rebuild)
-				// the client's MCP entry is silently broken. The
-				// relay-stdio fact is owned by clients.IsRelayStdio so a
-				// new relay adapter is covered here automatically.
-				if canonical, err := canonicalMcphubPath(); err == nil {
-					entry.RelayExePath = canonical
-				}
-			}
-			if err := adapter.AddEntry(entry); err != nil {
-				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client, Err: err.Error(),
-				})
-				continue
-			}
-			// PR #187 (B4 ownership marker): record this (client,
-			// server) tuple in the managed-entries marker file so
-			// Demigrate can later distinguish entries mcphub
-			// installed from entries the user owned pre-mcphub.
-			// Best-effort: a marker-write failure must NOT roll back
-			// the successful AddEntry (operator's config is the
-			// load-bearing artifact; the marker is observability
-			// for the future demigrate path). The Failed slice
-			// stays empty for this row — we still report Applied —
-			// but the marker error is surfaced as a soft warning
-			// via the standard hub-mcp event log.
-			if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
-				_ = LogHubMcpEvent("warn", "managed-entries-record-failed", map[string]any{
-					"server": server,
-					"client": binding.Client,
-					"err":    recErr.Error(),
-					"note":   "demigrate fallback for this entry will fail-closed until the marker is repopulated by a subsequent migrate",
-				})
-			}
-			report.Applied = append(report.Applied, AppliedMigration{
-				Server: server, Client: binding.Client, URL: url,
-			})
+			migrateOneBinding(report, allClients, m, server, synth, opts.DryRun, keepN)
 		}
 	}
 	return report, nil
+}
+
+// migrateOneBinding performs the per-(server, client) migrate for a single
+// binding — real (from m.ClientBindings) or synthesized (for a targeted
+// non-binding client). It appends exactly one row to report.Applied (or
+// report.Failed), or none when the client is skipped (DryRun preview aside,
+// a missing adapter / non-existent client). Extracted so manifest-bound and
+// synthesized clients run identical logic (no duplication).
+//
+// The adapter's AddEntry overwrites any existing same-name entry wholesale
+// (map-key assignment on every adapter; see addentry_overwrites note in the
+// implementation report), so re-pointing a stale-port entry at the correct
+// current daemon port is a plain idempotent overwrite.
+func migrateOneBinding(
+	report *MigrateReport,
+	allClients map[string]clients.Client,
+	m *config.ServerManifest,
+	server string,
+	binding config.ClientBinding,
+	dryRun bool,
+	keepN int,
+) {
+	adapter := allClients[binding.Client]
+	if adapter == nil {
+		// No adapter constructed on this host (e.g. UserHomeDir failed);
+		// silently skip — a Failed row would add noise without a
+		// repairable cause the user can act on.
+		return
+	}
+	daemonPort, ok := findDaemonPort(m, binding.Daemon)
+	if !ok {
+		report.Failed = append(report.Failed, FailedMigration{
+			Server: server, Client: binding.Client,
+			Err: fmt.Sprintf("manifest %s: binding references unknown daemon %q", server, binding.Daemon),
+		})
+		return
+	}
+	urlPath := binding.URLPath
+	if urlPath == "" {
+		urlPath = "/mcp"
+	}
+	url := fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath)
+
+	if dryRun {
+		report.Applied = append(report.Applied, AppliedMigration{
+			Server: server, Client: binding.Client, URL: url,
+		})
+		return
+	}
+
+	if !adapter.Exists() {
+		// Client not installed on this machine — nothing to migrate.
+		// Skip quietly: this mirrors Install's behavior for missing
+		// clients and keeps the report focused on actual attempts.
+		return
+	}
+	if _, err := adapter.BackupKeep(keepN); err != nil {
+		report.Failed = append(report.Failed, FailedMigration{
+			Server: server, Client: binding.Client, Err: err.Error(),
+		})
+		return
+	}
+	entry := clients.MCPEntry{
+		Name:        server,
+		URL:         url,
+		RelayServer: server,
+		RelayDaemon: binding.Daemon,
+	}
+	if clients.IsRelayStdio(binding.Client) {
+		// Relay-stdio adapters (antigravity, zed) spawn the
+		// stdio relay from an absolute mcphub path persisted
+		// into the client config, so AddEntry rejects an entry
+		// with no RelayExePath. Anchor at the canonical
+		// installed path, not at the running executable.
+		// Otherwise a migrate invoked from a dev checkout or
+		// %TEMP% build would persist a throwaway absolute path —
+		// the next time that path disappears (cleanup, rebuild)
+		// the client's MCP entry is silently broken. The
+		// relay-stdio fact is owned by clients.IsRelayStdio so a
+		// new relay adapter is covered here automatically.
+		if canonical, err := canonicalMcphubPath(); err == nil {
+			entry.RelayExePath = canonical
+		}
+	}
+	if err := adapter.AddEntry(entry); err != nil {
+		report.Failed = append(report.Failed, FailedMigration{
+			Server: server, Client: binding.Client, Err: err.Error(),
+		})
+		return
+	}
+	// PR #187 (B4 ownership marker): record this (client,
+	// server) tuple in the managed-entries marker file so
+	// Demigrate can later distinguish entries mcphub
+	// installed from entries the user owned pre-mcphub.
+	// Best-effort: a marker-write failure must NOT roll back
+	// the successful AddEntry (operator's config is the
+	// load-bearing artifact; the marker is observability
+	// for the future demigrate path). The Failed slice
+	// stays empty for this row — we still report Applied —
+	// but the marker error is surfaced as a soft warning
+	// via the standard hub-mcp event log.
+	if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
+		_ = LogHubMcpEvent("warn", "managed-entries-record-failed", map[string]any{
+			"server": server,
+			"client": binding.Client,
+			"err":    recErr.Error(),
+			"note":   "demigrate fallback for this entry will fail-closed until the marker is repopulated by a subsequent migrate",
+		})
+	}
+	report.Applied = append(report.Applied, AppliedMigration{
+		Server: server, Client: binding.Client, URL: url,
+	})
+}
+
+// primaryDaemonName returns the name of the manifest's primary daemon — the
+// one named "default" if present, otherwise the first daemon in m.Daemons.
+// Returns ("", false) when the manifest declares no daemons (dynamic-pool
+// daemon_template manifests, or a malformed manifest), so callers can fail
+// closed rather than synthesize a URL against a non-existent daemon. Used to
+// derive the daemon for a synthesized binding when a targeted client is not
+// in the manifest's static client_bindings.
+func primaryDaemonName(m *config.ServerManifest) (string, bool) {
+	if len(m.Daemons) == 0 {
+		return "", false
+	}
+	for _, d := range m.Daemons {
+		if d.Name == "default" {
+			return d.Name, true
+		}
+	}
+	return m.Daemons[0].Name, true
 }
 
 // loadManifestForServer opens and parses servers/<name>/manifest.yaml.

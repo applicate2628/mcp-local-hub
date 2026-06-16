@@ -95,148 +95,207 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			})
 			continue
 		}
+		// Track which clients a manifest binding already covers for this
+		// server so the synthesized-binding pass below does not demigrate a
+		// client twice.
+		boundClients := map[string]bool{}
 		for _, binding := range m.ClientBindings {
+			boundClients[binding.Client] = true
 			if !includedClient(binding.Client) {
 				continue
 			}
-			adapter := allClients[binding.Client]
+			demigrateOneBinding(report, allClients, m, server, binding, opts.Writer)
+		}
+		// Servers-matrix fix (symmetry with MigrateFrom): the matrix
+		// renders a toggleable cell for EVERY detected client, not only
+		// the manifest's static client_bindings. Unchecking + Apply for a
+		// targeted client outside client_bindings was previously a silent
+		// no-op (the iteration above skipped it), so a stale hub-loopback
+		// entry on that client could never be removed. Synthesize a
+		// binding for each such targeted client and run the SAME
+		// per-binding demigrate body (DRY via demigrateOneBinding).
+		// Eligibility: (a) named in ClientsInclude, (b) NOT already
+		// covered by a manifest binding, (c) a known adapter, (d)
+		// adapter.Exists().
+		for _, client := range opts.ClientsInclude {
+			if boundClients[client] {
+				continue
+			}
+			adapter := allClients[client]
 			if adapter == nil {
 				continue
 			}
 			if !adapter.Exists() {
 				continue
 			}
-			// Iterate every mcp-local-hub backup newest-first.
-			// Rationale: the lexicographically-latest timestamped
-			// backup may hold the entry in hub-managed form (operator
-			// migrated, snapshot of post-migrate state), but an OLDER
-			// timestamped backup may hold the entry in its pre-hub
-			// direct/stdio form (the user-installed shape captured
-			// before the first migrate). Returning that older form is
-			// the correct rollback target. The post-revert single-
-			// backup check at this site was destructive when called
-			// through the marker+RemoveEntry helper — see
-			// work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md
-			// §"Failed attempt: PR #218".
-			//
-			// Iteration is bounded by the operator's BackupKeep
-			// retention setting (default 5 timestamped + 1 sentinel),
-			// so this loop is small for normal hosts.
-			backups, err := clients.BackupsNewestFirst(adapter.ConfigPath(), binding.Client)
-			if err != nil {
+			primaryDaemon, ok := primaryDaemonName(m)
+			if !ok {
 				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client, Err: err.Error(),
+					Server: server, Client: client,
+					Err: fmt.Sprintf("manifest %s: no daemons declared; cannot demigrate non-binding client %q", server, client),
 				})
 				continue
 			}
-			// Do NOT early-fail on an empty current-codename backup set: the
-			// legacy-prefix and RemoveEntry fallbacks below MUST still run.
-			// A cross-rename host may have ONLY a legacy mcp-sync/phase2
-			// backup (no `bak-mcp-local-hub-*` was ever written on this
-			// machine), or the entry was mcphub-installed-from-scratch with
-			// the managed-entries marker as the only ownership evidence. An
-			// empty set simply makes the restoreIfEligible loop a no-op
-			// (restoredFrom stays ""); tryLegacyPrefixRestore then
-			// tryMarkerOrBackfillRemove decide the outcome. (bot PR #257 P2)
-			latestBackupPath := ""
-			if len(backups) > 0 {
-				latestBackupPath = backups[0]
+			synth := config.ClientBinding{
+				Client:  client,
+				Daemon:  primaryDaemon,
+				URLPath: "/mcp",
 			}
-			// restoreIfEligible returns nil on success, or one of
-			// three error classes the iteration treats as "skip this
-			// backup, try older":
-			//
-			//   1. errBackupMissingEntry — sentinel backup does not
-			//      contain the entry (predates the server install).
-			//      Skip and keep searching older candidates.
-			//   2. clients.ErrBackupEntryAlreadyMigrated — backup
-			//      contains the entry in hub-managed form. No
-			//      pre-hub state to restore; skip.
-			//   3. backup-unreadable — bubble up as a hard error
-			//      (the OS-level read failed; not iteratable).
-			restoreIfEligible := func(path string) error {
-				has, err := adapter.BackupContainsEntry(path, server)
-				if err != nil {
-					return fmt.Errorf("backup %s unreadable: %w", path, err)
-				}
-				if !has {
-					if !strings.HasSuffix(path, ".bak-mcp-local-hub-original") {
-						return adapter.RestoreEntryFromBackup(path, server)
-					}
-					return errBackupMissingEntry
-				}
-				return adapter.RestoreEntryFromBackup(path, server)
-			}
-			restoredFrom := ""
-			var lastSkipReason error
-			for _, candidate := range backups {
-				rerr := restoreIfEligible(candidate)
-				if rerr == nil {
-					restoredFrom = candidate
-					err = nil
-					break
-				}
-				if errors.Is(rerr, clients.ErrBackupEntryAlreadyMigrated) ||
-					errors.Is(rerr, errBackupMissingEntry) {
-					lastSkipReason = rerr
-					continue
-				}
-				// Hard error (unreadable, malformed, etc.) — stop
-				// iteration; surface it as the failure cause.
-				err = rerr
-				break
-			}
-			// If iteration over every mcp-local-hub backup exhausted
-			// without a restore (all skipped via
-			// ErrBackupEntryAlreadyMigrated or errBackupMissingEntry),
-			// there is no pre-hub form among the current-codename
-			// backups. Before falling back to deletion, consult the
-			// LEGACY-codename backups (pre-rename mcp-sync, phase2,
-			// plain/underscore-date install artifacts). A user who
-			// upgraded across the April-2026 mcp-sync→mcp-local-hub
-			// rename may have their only pre-hub snapshot there — the
-			// originally-reported bug case. Restoring it is strictly
-			// better than deleting the entry.
-			sawLegacy := false
-			if restoredFrom == "" && err == nil {
-				sawLegacy, err = tryLegacyPrefixRestore(adapter, server, &restoredFrom)
-			}
-			// If neither current-codename nor legacy-codename backups
-			// hold a pre-hub form, fall back to marker+backfill+
-			// RemoveEntry — the ONLY case where deletion is safe is
-			// when positive ownership evidence proves mcphub installed
-			// the entry AND no backup (current OR legacy) captures a
-			// pre-hub shape (the entry genuinely never existed in
-			// pre-hub form). The two iterations above guarantee the
-			// "no pre-hub form available" precondition; the marker
-			// check guarantees the "mcphub installed it" precondition.
-			// allowURLBackfill = len(backups) > 0 || sawLegacy: a URL-backfill
-			// RemoveEntry is corroborated only when mcphub demonstrably ran on
-			// this host (a current OR legacy backup file exists). With ZERO
-			// backups of ANY codename the URL match is uncorroborated and must
-			// fail closed (bot PR #257 r2/r3).
-			if restoredFrom == "" && err == nil {
-				err = tryMarkerOrBackfillRemove(
-					adapter, binding, m, server,
-					fmt.Sprintf("no backup (of %d candidates, newest %s) contains %q in pre-hub form — last skip: %v",
-						len(backups), latestBackupPath, server, lastSkipReason),
-					len(backups) > 0 || sawLegacy,
-					&restoredFrom,
-				)
-			}
-			if err != nil {
-				report.Failed = append(report.Failed, FailedMigration{
-					Server: server, Client: binding.Client, Err: err.Error(),
-				})
-				continue
-			}
-			report.Restored = append(report.Restored, RestoredMigration{
-				Server: server, Client: binding.Client,
-			})
-			fmt.Fprintf(opts.Writer, "restored %s for %s from %s\n", server, binding.Client, restoredFrom)
+			demigrateOneBinding(report, allClients, m, server, synth, opts.Writer)
 		}
 	}
 	return report, nil
+}
+
+// demigrateOneBinding performs the per-(server, client) reverse-migration for
+// a single binding — real (from m.ClientBindings) or synthesized (for a
+// targeted non-binding client). It appends exactly one row to report.Restored
+// or report.Failed, or none when the client is skipped (missing adapter /
+// non-existent client). Extracted so manifest-bound and synthesized clients
+// run identical logic (no duplication).
+func demigrateOneBinding(
+	report *DemigrateReport,
+	allClients map[string]clients.Client,
+	m *config.ServerManifest,
+	server string,
+	binding config.ClientBinding,
+	writer io.Writer,
+) {
+	adapter := allClients[binding.Client]
+	if adapter == nil {
+		return
+	}
+	if !adapter.Exists() {
+		return
+	}
+	// Iterate every mcp-local-hub backup newest-first.
+	// Rationale: the lexicographically-latest timestamped
+	// backup may hold the entry in hub-managed form (operator
+	// migrated, snapshot of post-migrate state), but an OLDER
+	// timestamped backup may hold the entry in its pre-hub
+	// direct/stdio form (the user-installed shape captured
+	// before the first migrate). Returning that older form is
+	// the correct rollback target. The post-revert single-
+	// backup check at this site was destructive when called
+	// through the marker+RemoveEntry helper — see
+	// work-items/bugs/2026-05-15-demigrate-fallback-when-no-pre-hub-form.md
+	// §"Failed attempt: PR #218".
+	//
+	// Iteration is bounded by the operator's BackupKeep
+	// retention setting (default 5 timestamped + 1 sentinel),
+	// so this loop is small for normal hosts.
+	backups, err := clients.BackupsNewestFirst(adapter.ConfigPath(), binding.Client)
+	if err != nil {
+		report.Failed = append(report.Failed, FailedMigration{
+			Server: server, Client: binding.Client, Err: err.Error(),
+		})
+		return
+	}
+	// Do NOT early-fail on an empty current-codename backup set: the
+	// legacy-prefix and RemoveEntry fallbacks below MUST still run.
+	// A cross-rename host may have ONLY a legacy mcp-sync/phase2
+	// backup (no `bak-mcp-local-hub-*` was ever written on this
+	// machine), or the entry was mcphub-installed-from-scratch with
+	// the managed-entries marker as the only ownership evidence. An
+	// empty set simply makes the restoreIfEligible loop a no-op
+	// (restoredFrom stays ""); tryLegacyPrefixRestore then
+	// tryMarkerOrBackfillRemove decide the outcome. (bot PR #257 P2)
+	latestBackupPath := ""
+	if len(backups) > 0 {
+		latestBackupPath = backups[0]
+	}
+	// restoreIfEligible returns nil on success, or one of
+	// three error classes the iteration treats as "skip this
+	// backup, try older":
+	//
+	//   1. errBackupMissingEntry — sentinel backup does not
+	//      contain the entry (predates the server install).
+	//      Skip and keep searching older candidates.
+	//   2. clients.ErrBackupEntryAlreadyMigrated — backup
+	//      contains the entry in hub-managed form. No
+	//      pre-hub state to restore; skip.
+	//   3. backup-unreadable — bubble up as a hard error
+	//      (the OS-level read failed; not iteratable).
+	restoreIfEligible := func(path string) error {
+		has, err := adapter.BackupContainsEntry(path, server)
+		if err != nil {
+			return fmt.Errorf("backup %s unreadable: %w", path, err)
+		}
+		if !has {
+			if !strings.HasSuffix(path, ".bak-mcp-local-hub-original") {
+				return adapter.RestoreEntryFromBackup(path, server)
+			}
+			return errBackupMissingEntry
+		}
+		return adapter.RestoreEntryFromBackup(path, server)
+	}
+	restoredFrom := ""
+	var lastSkipReason error
+	for _, candidate := range backups {
+		rerr := restoreIfEligible(candidate)
+		if rerr == nil {
+			restoredFrom = candidate
+			err = nil
+			break
+		}
+		if errors.Is(rerr, clients.ErrBackupEntryAlreadyMigrated) ||
+			errors.Is(rerr, errBackupMissingEntry) {
+			lastSkipReason = rerr
+			continue
+		}
+		// Hard error (unreadable, malformed, etc.) — stop
+		// iteration; surface it as the failure cause.
+		err = rerr
+		break
+	}
+	// If iteration over every mcp-local-hub backup exhausted
+	// without a restore (all skipped via
+	// ErrBackupEntryAlreadyMigrated or errBackupMissingEntry),
+	// there is no pre-hub form among the current-codename
+	// backups. Before falling back to deletion, consult the
+	// LEGACY-codename backups (pre-rename mcp-sync, phase2,
+	// plain/underscore-date install artifacts). A user who
+	// upgraded across the April-2026 mcp-sync→mcp-local-hub
+	// rename may have their only pre-hub snapshot there — the
+	// originally-reported bug case. Restoring it is strictly
+	// better than deleting the entry.
+	sawLegacy := false
+	if restoredFrom == "" && err == nil {
+		sawLegacy, err = tryLegacyPrefixRestore(adapter, server, &restoredFrom)
+	}
+	// If neither current-codename nor legacy-codename backups
+	// hold a pre-hub form, fall back to marker+backfill+
+	// RemoveEntry — the ONLY case where deletion is safe is
+	// when positive ownership evidence proves mcphub installed
+	// the entry AND no backup (current OR legacy) captures a
+	// pre-hub shape (the entry genuinely never existed in
+	// pre-hub form). The two iterations above guarantee the
+	// "no pre-hub form available" precondition; the marker
+	// check guarantees the "mcphub installed it" precondition.
+	// allowURLBackfill = len(backups) > 0 || sawLegacy: a URL-backfill
+	// RemoveEntry is corroborated only when mcphub demonstrably ran on
+	// this host (a current OR legacy backup file exists). With ZERO
+	// backups of ANY codename the URL match is uncorroborated and must
+	// fail closed (bot PR #257 r2/r3).
+	if restoredFrom == "" && err == nil {
+		err = tryMarkerOrBackfillRemove(
+			adapter, binding, m, server,
+			fmt.Sprintf("no backup (of %d candidates, newest %s) contains %q in pre-hub form — last skip: %v",
+				len(backups), latestBackupPath, server, lastSkipReason),
+			len(backups) > 0 || sawLegacy,
+			&restoredFrom,
+		)
+	}
+	if err != nil {
+		report.Failed = append(report.Failed, FailedMigration{
+			Server: server, Client: binding.Client, Err: err.Error(),
+		})
+		return
+	}
+	report.Restored = append(report.Restored, RestoredMigration{
+		Server: server, Client: binding.Client,
+	})
+	fmt.Fprintf(writer, "restored %s for %s from %s\n", server, binding.Client, restoredFrom)
 }
 
 // tryMarkerOrBackfillRemove is the LAST-RESORT recovery path used by

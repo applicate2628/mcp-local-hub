@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1147,5 +1148,181 @@ client_bindings:
 	live, _ := os.ReadFile(claudePath)
 	if !strings.Contains(string(live), `"memory"`) {
 		t.Errorf("non-hub-URL entry was deleted despite no corroboration (data-loss regression); file = %s", live)
+	}
+}
+
+// seedGeminiForNonBinding redirects HOME/USERPROFILE to tmp and writes a
+// gemini-cli config (~/.gemini/settings.json) with the given body. Returns
+// the gemini config path. gemini-cli is the non-binding client used by the
+// synthesized-binding demigrate tests below (the manifests bind only
+// claude-code).
+func seedGeminiForNonBinding(t *testing.T, tmp, body string) string {
+	t.Helper()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	geminiDir := filepath.Join(tmp, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	geminiPath := filepath.Join(geminiDir, "settings.json")
+	if err := os.WriteFile(geminiPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return geminiPath
+}
+
+// writeNonBindingManifest writes a fetch manifest that binds ONLY
+// claude-code (so gemini-cli is a non-binding client) with one default
+// daemon on the given port.
+func writeNonBindingManifest(t *testing.T, port int) string {
+	t.Helper()
+	manifestDir := t.TempDir()
+	memDir := filepath.Join(manifestDir, "fetch")
+	if err := os.MkdirAll(memDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `name: fetch
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: ` + itoaPort(port) + `
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`
+	if err := os.WriteFile(filepath.Join(memDir, "manifest.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return manifestDir
+}
+
+func itoaPort(p int) string {
+	return strconv.Itoa(p)
+}
+
+// TestDemigrate_NonBindingClient_MarkerCorroborated_Removed proves PART 1
+// (demigrate-any-client) works through the UNCHANGED strict removal gate: a
+// client NOT in the manifest's client_bindings (gemini-cli here) holds a
+// hub-loopback entry whose port EXACTLY matches the current manifest daemon
+// (9133), AND the managed-entries marker records (gemini-cli, fetch) as
+// mcphub-installed. Demigrate targeted at gemini-cli synthesizes a binding
+// and removes the entry via the legitimate marker + exact-manifest-match
+// path — no stale-port relaxation involved. This is the safe replacement for
+// the removed stale-port-loopback test; it demonstrates the synthesized
+// binding routes through the strict, fail-closed-by-default gate.
+func TestDemigrate_NonBindingClient_MarkerCorroborated_Removed(t *testing.T) {
+	tmp := t.TempDir()
+	managedEntriesTestHelper(t) // marker store init
+	if err := RecordManagedEntry("gemini-cli", "fetch"); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+	// Exact-port hub-loopback entry (9133 == manifest daemon) so the strict
+	// liveEntryMatchesManifestBinding gate passes; removal proceeds via the
+	// marker, NOT via any port-mismatch relaxation.
+	geminiPath := seedGeminiForNonBinding(t, tmp,
+		`{"mcpServers":{"fetch":{"url":"http://localhost:9133/mcp","type":"http"}}}`)
+	manifestDir := writeNonBindingManifest(t, 9133)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:        []string{"fetch"},
+		ClientsInclude: []string{"gemini-cli"}, // non-binding target
+		ScanOpts:       ScanOpts{ManifestDir: manifestDir},
+		Writer:         io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("expected 0 failures (marker + exact-port match removable on non-binding client); got %+v", report.Failed)
+	}
+	if len(report.Restored) != 1 || report.Restored[0].Client != "gemini-cli" {
+		t.Fatalf("expected 1 Restored for gemini-cli; got %+v", report.Restored)
+	}
+	live, _ := os.ReadFile(geminiPath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers, _ := liveMap["mcpServers"].(map[string]any)
+	if _, present := servers["fetch"]; present {
+		t.Errorf("marker-corroborated entry was NOT removed on non-binding client; file = %s", live)
+	}
+}
+
+// TestDemigrate_NonBindingClient_NonHubURL_FailsClosed proves the deep-sec
+// invariant survives on the synthesized-binding path: an operator's own
+// remote https MCP server on a non-binding client is NEVER removed.
+func TestDemigrate_NonBindingClient_NonHubURL_FailsClosed(t *testing.T) {
+	tmp := t.TempDir()
+	managedEntriesTestHelper(t)
+	geminiPath := seedGeminiForNonBinding(t, tmp,
+		`{"mcpServers":{"fetch":{"url":"https://api.example.com/mcp","type":"http"}}}`)
+	manifestDir := writeNonBindingManifest(t, 9133)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:        []string{"fetch"},
+		ClientsInclude: []string{"gemini-cli"},
+		ScanOpts:       ScanOpts{ManifestDir: manifestDir},
+		Writer:         io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Fatalf("expected 0 restored (non-hub remote https → fail closed); got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	// Operator's remote MCP server must be preserved.
+	live, _ := os.ReadFile(geminiPath)
+	if !strings.Contains(string(live), "api.example.com") {
+		t.Errorf("non-hub remote https entry was deleted on non-binding client (data-loss); file = %s", live)
+	}
+}
+
+// TestDemigrate_NonBindingClient_StdioEntry_FailsClosed proves a stdio
+// (command-bearing) entry on a non-binding client is NEVER removed by the
+// synthesized-binding path. A stdio entry's GetEntry returns live.URL=="",
+// so IsHubHTTPURL is false → the hub-loopback relaxation does not fire, and
+// there is no backup/marker, so demigrate fails closed and leaves the
+// user-owned stdio entry intact.
+func TestDemigrate_NonBindingClient_StdioEntry_FailsClosed(t *testing.T) {
+	tmp := t.TempDir()
+	managedEntriesTestHelper(t)
+	geminiPath := seedGeminiForNonBinding(t, tmp,
+		`{"mcpServers":{"fetch":{"command":"npx","args":["-y","fetch-server"]}}}`)
+	manifestDir := writeNonBindingManifest(t, 9133)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:        []string{"fetch"},
+		ClientsInclude: []string{"gemini-cli"},
+		ScanOpts:       ScanOpts{ManifestDir: manifestDir},
+		Writer:         io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Fatalf("expected 0 restored (stdio entry is user-owned → fail closed); got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	// Stdio entry must be preserved verbatim.
+	live, _ := os.ReadFile(geminiPath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers, _ := liveMap["mcpServers"].(map[string]any)
+	entry, present := servers["fetch"].(map[string]any)
+	if !present {
+		t.Fatalf("stdio entry was DELETED on non-binding client (data-loss); file = %s", live)
+	}
+	if entry["command"] != "npx" {
+		t.Errorf("stdio entry command not preserved; got %+v", entry)
 	}
 }

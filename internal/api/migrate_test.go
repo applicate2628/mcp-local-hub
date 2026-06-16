@@ -419,3 +419,171 @@ weekly_refresh: false
 		t.Errorf("zed relay args: got %v, want [relay --url %s]", mem.Args, wantURL)
 	}
 }
+
+// TestMigrateNonBindingClientSynthesizesEntry proves the Servers-matrix
+// fix: a client that is NOT in the manifest's static client_bindings, but
+// is explicitly targeted via ClientsInclude, gets a synthesized binding so
+// Apply actually writes the hub-HTTP entry (previously a silent no-op).
+//
+// gemini-cli is the non-binding target — the manifest below binds only
+// claude-code. The synthesized binding points at the primary daemon
+// (named "default") with the canonical /mcp path, so gemini's config must
+// end up with http://localhost:<port>/mcp.
+func TestMigrateNonBindingClientSynthesizesEntry(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	// Pre-create gemini's config so adapter.Exists() returns true (migrate
+	// skips non-existent clients). gemini resolves ~/.gemini/settings.json.
+	geminiDir := filepath.Join(tmp, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0755); err != nil {
+		t.Fatalf("mkdir gemini: %v", err)
+	}
+	geminiPath := filepath.Join(geminiDir, "settings.json")
+	if err := os.WriteFile(geminiPath, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+		t.Fatalf("write gemini config: %v", err)
+	}
+
+	manifestDir := filepath.Join(tmp, "servers")
+	if err := os.MkdirAll(filepath.Join(manifestDir, "fetch"), 0755); err != nil {
+		t.Fatalf("mkdir manifest: %v", err)
+	}
+	// Manifest binds ONLY claude-code — gemini-cli is NOT a binding.
+	if err := os.WriteFile(filepath.Join(manifestDir, "fetch", "manifest.yaml"),
+		[]byte(`name: fetch
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9133
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+weekly_refresh: false
+`), 0644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	a := NewAPI()
+	report, err := a.MigrateFrom(MigrateOpts{
+		Servers:        []string{"fetch"},
+		ClientsInclude: []string{"gemini-cli"}, // non-binding target
+		ScanOpts:       ScanOpts{ManifestDir: manifestDir},
+	})
+	if err != nil {
+		t.Fatalf("MigrateFrom: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("unexpected failures: %+v", report.Failed)
+	}
+	var applied bool
+	for _, ap := range report.Applied {
+		if ap.Client == "gemini-cli" && ap.Server == "fetch" {
+			applied = true
+			if ap.URL != "http://localhost:9133/mcp" {
+				t.Errorf("synthesized URL = %q, want http://localhost:9133/mcp", ap.URL)
+			}
+		}
+	}
+	if !applied {
+		t.Fatalf("expected an Applied row for (fetch, gemini-cli); got Applied=%+v", report.Applied)
+	}
+
+	// Gemini config must now carry the hub-HTTP entry at the current port.
+	data, err := os.ReadFile(geminiPath)
+	if err != nil {
+		t.Fatalf("read gemini: %v", err)
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal gemini: %v", err)
+	}
+	mem, ok := cfg.MCPServers["fetch"]
+	if !ok {
+		t.Fatalf("gemini config has no fetch entry: %s", data)
+	}
+	if mem["url"] != "http://localhost:9133/mcp" {
+		t.Errorf("gemini fetch.url = %v, want http://localhost:9133/mcp", mem["url"])
+	}
+}
+
+// TestMigrateNonBindingClientOverwritesStalePortEntry proves the migrate
+// AddEntry overwrites a pre-existing stale-port hub entry on a targeted
+// non-binding client with the correct CURRENT manifest port. This is the
+// compounding-case fix: gemini had a leftover http://localhost:9121/mcp
+// (old unified-serena port); migrate must replace it with the current 9133.
+func TestMigrateNonBindingClientOverwritesStalePortEntry(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	geminiDir := filepath.Join(tmp, ".gemini")
+	if err := os.MkdirAll(geminiDir, 0755); err != nil {
+		t.Fatalf("mkdir gemini: %v", err)
+	}
+	geminiPath := filepath.Join(geminiDir, "settings.json")
+	// STALE entry at the OLD port 9121.
+	if err := os.WriteFile(geminiPath, []byte(
+		`{"mcpServers":{"fetch":{"url":"http://localhost:9121/mcp","type":"http"}}}`), 0600); err != nil {
+		t.Fatalf("write gemini config: %v", err)
+	}
+
+	manifestDir := filepath.Join(tmp, "servers")
+	if err := os.MkdirAll(filepath.Join(manifestDir, "fetch"), 0755); err != nil {
+		t.Fatalf("mkdir manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "fetch", "manifest.yaml"),
+		[]byte(`name: fetch
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9133
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+weekly_refresh: false
+`), 0644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	a := NewAPI()
+	report, err := a.MigrateFrom(MigrateOpts{
+		Servers:        []string{"fetch"},
+		ClientsInclude: []string{"gemini-cli"},
+		ScanOpts:       ScanOpts{ManifestDir: manifestDir},
+	})
+	if err != nil {
+		t.Fatalf("MigrateFrom: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("unexpected failures: %+v", report.Failed)
+	}
+
+	data, err := os.ReadFile(geminiPath)
+	if err != nil {
+		t.Fatalf("read gemini: %v", err)
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal gemini: %v", err)
+	}
+	mem := cfg.MCPServers["fetch"]
+	if mem["url"] != "http://localhost:9133/mcp" {
+		t.Errorf("stale-port entry was NOT overwritten: fetch.url = %v, want http://localhost:9133/mcp", mem["url"])
+	}
+	if strings.Contains(string(data), "9121") {
+		t.Errorf("stale port 9121 still present after overwrite; file = %s", data)
+	}
+}
