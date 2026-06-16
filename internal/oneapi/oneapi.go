@@ -47,6 +47,7 @@ package oneapi
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -227,6 +228,80 @@ func PrependEnvList(env []string, key string, dirs []string) []string {
 		out = append(out, key+"="+prefix)
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// Full-environment overlay (build-tool consumers: clang-tidy / iwyu).
+
+// EnvOverlay returns the LIVE process environment (os.Environ()) with the
+// captured oneAPI setvars environment merged ON TOP — the oneAPI build/run
+// vars (the complete PATH, plus INCLUDE / LIB / MKLROOT / CMPLR_ROOT / CPATH /
+// …) override or extend the live env. A child given this env both inherits the
+// current process environment AND resolves the oneAPI headers, link libs, and
+// runtime DLLs (so e.g. clang-tidy / iwyu analyzing oneAPI sources find mkl.h).
+//
+// Returns nil when no oneAPI install is present (SetvarsEnv yields nothing), so
+// the caller can leave cmd.Env unset and inherit os.Environ() unchanged. That
+// keeps non-oneAPI hosts byte-identical to the pre-overlay behavior (Go reads
+// the live env at Cmd.Start when cmd.Env is nil).
+//
+// Merging onto the LIVE os.Environ() — NOT returning the raw SetvarsEnv
+// snapshot — is load-bearing. SetvarsEnv captures ONCE per process (sync.Once);
+// handing a child that raw snapshot would DROP every env var set AFTER capture
+// (a test's t.Setenv, the test-state-path override, …). That naive
+// cmd.Env = SetvarsEnv() wiring is exactly what broke the perftools re-exec
+// helper tests: the test sets a mode sentinel via t.Setenv after the snapshot
+// was already cached, so the re-exec'd fake tool saw an empty mode. Overlaying
+// on the live env preserves those post-capture vars.
+func EnvOverlay() []string {
+	overlay, ok := SetvarsEnv()
+	if !ok || len(overlay) == 0 {
+		return nil
+	}
+	return mergeEnv(os.Environ(), overlay)
+}
+
+// mergeEnv returns base with every overlay entry applied on top: an overlay
+// KEY=VALUE replaces the same-key entry in base (in place, preserving base
+// order) when present, else is appended. Env-key case-sensitivity is
+// platform-correct — Windows keys are case-insensitive (PATH == Path), POSIX
+// keys are case-sensitive — so the same-key match folds case only on Windows.
+// Entries without '=' are ignored on the overlay side and preserved verbatim
+// on the base side. base is not mutated.
+func mergeEnv(base, overlay []string) []string {
+	out := make([]string, len(base))
+	copy(out, base)
+
+	idx := make(map[string]int, len(out))
+	for i, e := range out {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			idx[normalizeEnvKey(k)] = i
+		}
+	}
+	for _, e := range overlay {
+		k, _, ok := strings.Cut(e, "=")
+		if !ok {
+			continue
+		}
+		nk := normalizeEnvKey(k)
+		if i, exists := idx[nk]; exists {
+			out[i] = e // overlay wins over base for the same key
+			continue
+		}
+		idx[nk] = len(out)
+		out = append(out, e)
+	}
+	return out
+}
+
+// normalizeEnvKey folds an environment-variable key to its case-insensitive
+// form on Windows (where PATH and Path name the same variable) and leaves it
+// unchanged on POSIX (where they are distinct).
+func normalizeEnvKey(k string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(k)
+	}
+	return k
 }
 
 // ---------------------------------------------------------------------------

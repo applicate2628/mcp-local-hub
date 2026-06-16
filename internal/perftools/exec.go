@@ -8,6 +8,7 @@ import (
 	"math"
 	"os/exec"
 
+	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
 )
 
@@ -66,6 +67,15 @@ func runCapture(ctx context.Context, binPath, workingDir string, args []string) 
 func runCaptureLimited(ctx context.Context, binPath, workingDir string, args []string, stdoutLimit, stderrLimit int) (*captureResult, error) {
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	// Run the perf tool (clang-tidy / iwyu / llvm-objdump) under the Intel
+	// oneAPI build environment when an install is present, so the analyzers
+	// resolve oneAPI headers (mkl.h) + link libs. EnvOverlay returns nil on a
+	// non-oneAPI host → cmd.Env stays unset → the child inherits os.Environ()
+	// unchanged (byte-identical to the pre-overlay behavior). The first call on
+	// a oneAPI host pays setvars' one-time ~1-3 s capture (cached thereafter).
+	if env := oneapi.EnvOverlay(); env != nil {
+		cmd.Env = env
+	}
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
