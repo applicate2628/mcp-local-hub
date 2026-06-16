@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -18,6 +19,12 @@ import (
 // timeout_sec (or passes a non-positive value). Ten minutes matches the
 // "long build / ctest / ASan run" use cases this tool targets.
 const defaultTimeoutSec = 600
+
+// enableUnsafeOneAPIRunEnv gates registration of run_in_oneapi_env. The
+// tool intentionally executes caller-supplied native commands, which is an
+// unsafe capability for broadly configured MCP clients unless an operator
+// explicitly opts in.
+const enableUnsafeOneAPIRunEnv = "MCP_LOCAL_HUB_ENABLE_UNSAFE_ONEAPI_RUN"
 
 // waitDelayAfterKill bounds how long cmd.Run waits for the command's
 // stdout/stderr pipes to close AFTER the process is killed by the timeout,
@@ -55,9 +62,19 @@ type runResult struct {
 	TimedOut bool `json:"timed_out,omitempty"`
 }
 
-// registerTools attaches the single run_in_oneapi_env tool to the MCP
-// server. Called once from Run during startup.
+// oneAPIRunEnabled reports whether the admin opted into exposing the
+// arbitrary-command execution tool.
+func oneAPIRunEnabled() bool {
+	return os.Getenv(enableUnsafeOneAPIRunEnv) == "1"
+}
+
+// registerTools attaches the run_in_oneapi_env tool only after an explicit
+// unsafe opt-in. Called once from Run during startup.
 func registerTools(rs *OneAPIRunServer) {
+	if !oneAPIRunEnabled() {
+		return
+	}
+
 	rs.server.AddTool(&mcp.Tool{
 		Name: "run_in_oneapi_env",
 		Description: "Run ANY native command under the fully-initialized Visual-Studio + Intel-oneAPI environment. " +

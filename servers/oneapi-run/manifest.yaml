@@ -1,15 +1,18 @@
 name: oneapi-run
-description: "Run commands under the VS + Intel oneAPI environment (oneapi-run) — compile/run snippets with the oneAPI + Visual Studio toolchain active."
+description: "Run commands under the VS + Intel oneAPI environment (oneapi-run) — disabled unless MCP_LOCAL_HUB_ENABLE_UNSAFE_ONEAPI_RUN=1 is set."
 kind: global
 transport: stdio-bridge
 command: mcphub
 base_args:
   - oneapi-run
 
-env: {}
+env:
+  MCP_LOCAL_HUB_ENABLE_UNSAFE_ONEAPI_RUN: "0"
 
 # oneAPI-run MCP server: runs commands under the combined Visual Studio +
-# Intel oneAPI environment (vcvars + setvars). Lives inside the mcphub
+# Intel oneAPI environment (vcvars + setvars). The arbitrary-command tool is
+# not registered unless MCP_LOCAL_HUB_ENABLE_UNSAFE_ONEAPI_RUN=1 is set by an
+# operator who accepts the local-code-execution risk. Lives inside the mcphub
 # binary — one hub-managed daemon shared across all MCP clients via HTTP
 # multiplexing through the stdio-bridge transport. Mirrors the godbolt
 # global-daemon shape.
