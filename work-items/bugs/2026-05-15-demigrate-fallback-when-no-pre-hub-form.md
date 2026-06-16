@@ -269,6 +269,21 @@ deleted.
 
 ## Status
 
+**CLOSED — option (a) accepted 2026-06-16 (operator: "твое рекомендованное").**
+The decision below was resolved in favour of **(a): accept the residual
+fail-closed case as a safe tradeoff and close.** Demigrate succeeds whenever a
+pre-hub form exists OR mcphub ownership is provable; it fails closed ONLY for the
+vanishingly-rare pre-marker + all-backups-pruned case, where deleting without
+ownership proof is exactly the data-loss that PR #218 caused (7 user-direct
+entries deleted, reverted by PR #219). That residual has a manual workaround
+(edit the client config). No force-remove UI (option b) is added — it would put a
+destructive confirm affordance in the matrix for an edge case, and the safety of
+fail-closed outweighs the always-succeed mandate here. The code is unchanged
+(PR #257 `f144dea` already shipped the three-tier restore-or-prove-then-remove
+logic); this is a status/decision close only.
+
+--- historical (pre-decision) ---
+
 **OPEN (partially fixed)** — the originally-reported case is fixed, but the
 broad "должно работать всегда" mandate is NOT fully met.
 
