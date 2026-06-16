@@ -9,7 +9,7 @@ fails.
 | MCP server | Backed by | How it works |
 |---|---|---|
 | **`mcp__lldb`** (`servers/lldb`, `internal/lldb`) | LLDB's own built-in MCP server (`lldb -> protocol-server start MCP`) | mcphub's `lldb-bridge` is a thin stdio↔TCP proxy; it auto-spawns `lldb.exe` and exposes LLDB's full surface (`command`, `debugger_list`). The single `command` tool IS the full LLDB REPL. |
-| **`mcp__gdb`** (`servers/gdb`, `internal/gdb`) | gdb in GDB/MI mode (`gdb --interpreter=mi3`) | mcphub's native `gdb-bridge` drives gdb over MI in-process. Tools: `gdb_start`, `gdb_command` (run any MI or CLI command — `break`, `run`, `step`, `bt`, `info locals`, …), `gdb_terminate`, `gdb_list_sessions`, `debugger_status`. |
+| **`mcp__gdb`** (`servers/gdb`, `internal/gdb`) | gdb in GDB/MI mode (`gdb --interpreter=mi3`) | mcphub's native `gdb-bridge` drives gdb over MI in-process. Every session tool is registered under BOTH a `gdb_*` name AND a generic `debugger_*` alias (same handler): `gdb_start`/`debugger_start`, `gdb_command`/`debugger_command` (run any MI or CLI command — `break`, `run`, `step`, `bt`, `info locals`, …), `gdb_terminate`/`debugger_terminate`, `gdb_list_sessions`/`debugger_list_sessions`, `debugger_status`/`gdb_status`. So an agent calling the natural generic `debugger_start` works without knowing the gdb_-prefixed name (the external GDB-MCP this replaced exposed both families; the alias set restores that). |
 
 ## Which debugger for which build
 
@@ -69,6 +69,17 @@ mcp__lldb/command  command="bt"
 For a DWARF build (`icx -gdwarf-4`) lldb gives line-level breakpoints + locals
 with values; on the default PDB build it still resolves symbols, breakpoints, and
 backtraces.
+
+**lldb `command` — empty output means SUCCESS, not failure.** Many lldb commands
+print nothing on success (`settings set …`, `breakpoint delete …`, `target
+modules add …`, etc.). The `mcp__lldb/command` tool faithfully forwards lldb's
+own output, so it returns an empty result — the client renders it as "completed
+with no output". That is the command **succeeding silently**, NOT an error; only
+an explicit lldb `error:`/`warning:` line (or a tool-level error) indicates
+failure. The lldb bridge is a thin byte-level stdio↔TCP proxy to lldb's built-in
+MCP server, so it cannot (and deliberately does not) rewrite lldb's output. Run a
+follow-up query command (`settings show <key>`, `breakpoint list`, `frame
+variable`) if you need to confirm a silent command took effect.
 
 ### Linux
 

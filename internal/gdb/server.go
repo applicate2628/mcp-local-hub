@@ -79,95 +79,94 @@ func newServer() *GdbServer {
 	}
 }
 
-// registerTools attaches the five gdb tools. Called once from Run during
-// startup. Tool NAMES match GDB-MCP's gdb tool names (gdb_start / gdb_command /
-// gdb_terminate / gdb_list_sessions / debugger_status) so existing
-// mcp__gdb__* clients keep working after the manifest switches to this native
-// server.
+// registerTools attaches the gdb tools. Called once from Run during startup.
+//
+// Each session tool is registered under BOTH its gdb_* name AND a generic
+// debugger_* alias. The external GDB-MCP this server replaced exposed both
+// families (debugger_start / debugger_command / debugger_terminate /
+// debugger_list_sessions plus the gdb_* names), so agents — and clients holding
+// a cached GDB-MCP tool list — naturally call debugger_start. Registering the
+// aliases to the SAME handlers means those calls succeed instead of failing
+// "unknown tool debugger_start" (the regression that prompted this: the native
+// bridge had dropped the debugger_* family). debugger_status keeps its name (it
+// is already the canonical generic status tool; gdb_status is added as a
+// symmetric alias so an agent that prefixes everything with gdb_ also resolves).
 func registerTools(gs *GdbServer) {
-	gs.server.AddTool(&mcp.Tool{
-		Name: "gdb_start",
-		Description: "Start a new GDB debugging session. Spawns gdb in GDB/MI machine-interface mode " +
-			"(gdb --interpreter=mi3 --nx -q) by spawning the binary directly via Go exec — so it works " +
-			"inside the console-less mcphub daemon where the external python GDB-MCP server failed its " +
-			"availability probe. Returns JSON {session_id, gdb_path, version}; pass the session_id to " +
-			"gdb_command / gdb_terminate. Optional gdb_path overrides the auto-detected gdb binary.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"gdb_path": map[string]any{
-					"type":        "string",
-					"description": "Optional absolute path to the gdb binary. Defaults to the auto-detected toolchain gdb (MSYS2 ucrt64 on Windows, system gdb on POSIX).",
-				},
-				"program": map[string]any{
-					"type":        "string",
-					"description": "Optional path to the target program to load into the session (gdb's positional arg). You can also load it later with the 'file' command via gdb_command.",
-				},
+	startSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"gdb_path": map[string]any{
+				"type":        "string",
+				"description": "Optional absolute path to the gdb binary. Defaults to the auto-detected toolchain gdb (MSYS2 ucrt64 on Windows, system gdb on POSIX).",
+			},
+			"program": map[string]any{
+				"type":        "string",
+				"description": "Optional path to the target program to load into the session (gdb's positional arg). You can also load it later with the 'file' command.",
 			},
 		},
-	}, gs.startTool)
-
-	gs.server.AddTool(&mcp.Tool{
-		Name: "gdb_command",
-		Description: "Run a command in an existing GDB session and return its console output. Accepts both " +
-			"GDB/MI commands (e.g. -break-insert main, -exec-run, -exec-continue) and plain CLI commands " +
-			"(e.g. 'break main', 'info registers', 'backtrace') — gdb's MI interpreter accepts CLI commands " +
-			"and echoes their output on the console stream. For run/continue/step commands the call blocks " +
-			"until the inferior next stops (or a 30s deadline) and includes the stop reason/location. Returns " +
-			"the human-readable output text, or an error result if the session_id is unknown.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"session_id": map[string]any{
-					"type":        "string",
-					"description": "The session id returned by gdb_start (e.g. \"gdb-1\").",
-				},
-				"command": map[string]any{
-					"type":        "string",
-					"description": "The gdb command to run (MI or plain CLI).",
-				},
+	}
+	commandSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"session_id": map[string]any{
+				"type":        "string",
+				"description": "The session id returned by gdb_start/debugger_start (e.g. \"gdb-1\").",
 			},
-			"required": []string{"session_id", "command"},
-		},
-	}, gs.commandTool)
-
-	gs.server.AddTool(&mcp.Tool{
-		Name: "gdb_terminate",
-		Description: "Terminate a GDB session (sends -gdb-exit, then force-kills if it does not exit promptly) " +
-			"and remove it from the session registry. Returns a confirmation, or an error result if the " +
-			"session_id is unknown.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"session_id": map[string]any{
-					"type":        "string",
-					"description": "The session id to terminate.",
-				},
+			"command": map[string]any{
+				"type":        "string",
+				"description": "The gdb command to run (MI or plain CLI).",
 			},
-			"required": []string{"session_id"},
 		},
-	}, gs.terminateTool)
+		"required": []string{"session_id", "command"},
+	}
+	sessionIDSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"session_id": map[string]any{
+				"type":        "string",
+				"description": "The session id to terminate.",
+			},
+		},
+		"required": []string{"session_id"},
+	}
+	emptySchema := map[string]any{"type": "object", "properties": map[string]any{}}
 
-	gs.server.AddTool(&mcp.Tool{
-		Name:        "gdb_list_sessions",
-		Description: "List the ids of all active GDB sessions. Returns JSON {sessions: [\"gdb-1\", ...]}.",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, gs.listTool)
+	startDesc := "Start a new GDB debugging session. Spawns gdb in GDB/MI machine-interface mode " +
+		"(gdb --interpreter=mi3 --nx -q) by spawning the binary directly via Go exec — so it works " +
+		"inside the console-less mcphub daemon where the external python GDB-MCP server failed its " +
+		"availability probe. Returns JSON {session_id, gdb_path, version}; pass the session_id to " +
+		"gdb_command/debugger_command and gdb_terminate/debugger_terminate. Optional gdb_path " +
+		"overrides the auto-detected gdb binary; optional program loads a target."
+	commandDesc := "Run a command in an existing GDB session and return its console output. Accepts both " +
+		"GDB/MI commands (e.g. -break-insert main, -exec-run, -exec-continue) and plain CLI commands " +
+		"(e.g. 'break main', 'info registers', 'backtrace') — gdb's MI interpreter accepts CLI commands " +
+		"and echoes their output on the console stream. For run/continue/step commands the call blocks " +
+		"until the inferior next stops (or a 30s deadline) and includes the stop reason/location. Returns " +
+		"the human-readable output text, or an error result if the session_id is unknown."
+	terminateDesc := "Terminate a GDB session (sends -gdb-exit, then force-kills if it does not exit promptly) " +
+		"and remove it from the session registry. Returns a confirmation, or an error result if the " +
+		"session_id is unknown."
+	listDesc := "List the ids of all active GDB sessions. Returns JSON {sessions: [\"gdb-1\", ...]}."
+	statusDesc := "Report whether gdb is available and at what version. Resolves the toolchain gdb path " +
+		"and runs `<gdb> --version` via Go exec (which works in the console-less mcphub daemon, unlike " +
+		"the python subprocess probe in the external GDB-MCP server that reported gdb 'not available'). " +
+		"Returns JSON {available, gdb_path, version}."
 
-	gs.server.AddTool(&mcp.Tool{
-		Name: "debugger_status",
-		Description: "Report whether gdb is available and at what version. Resolves the toolchain gdb path " +
-			"and runs `<gdb> --version` via Go exec (which works in the console-less mcphub daemon, unlike " +
-			"the python subprocess probe in the external GDB-MCP server that reported gdb 'not available'). " +
-			"Returns JSON {available, gdb_path, version}.",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, gs.statusTool)
+	add := func(name, desc string, schema map[string]any, h mcp.ToolHandler) {
+		gs.server.AddTool(&mcp.Tool{Name: name, Description: desc, InputSchema: schema}, h)
+	}
+
+	// Canonical gdb_* names + generic debugger_* aliases share handlers.
+	add("gdb_start", startDesc, startSchema, gs.startTool)
+	add("debugger_start", "Alias of gdb_start. "+startDesc, startSchema, gs.startTool)
+	add("gdb_command", commandDesc, commandSchema, gs.commandTool)
+	add("debugger_command", "Alias of gdb_command. "+commandDesc, commandSchema, gs.commandTool)
+	add("gdb_terminate", terminateDesc, sessionIDSchema, gs.terminateTool)
+	add("debugger_terminate", "Alias of gdb_terminate. "+terminateDesc, sessionIDSchema, gs.terminateTool)
+	add("gdb_list_sessions", listDesc, emptySchema, gs.listTool)
+	add("debugger_list_sessions", "Alias of gdb_list_sessions. "+listDesc, emptySchema, gs.listTool)
+	add("debugger_status", statusDesc, emptySchema, gs.statusTool)
+	add("gdb_status", "Alias of debugger_status. "+statusDesc, emptySchema, gs.statusTool)
 }
 
 // startTool handles gdb_start: it resolves the gdb path (caller override or the
