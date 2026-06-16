@@ -51,6 +51,31 @@ func Dir(subdir string) (string, bool) {
 	return "", false
 }
 
+const activeRunMarker = ".mcp-local-hub-active"
+
+// MarkActive creates a marker inside a just-created per-run scratch directory so
+// a concurrent SweepStale does not remove it while the owning run is still in
+// flight. The returned cleanup function removes only that marker; callers may
+// still remove the whole directory separately when the run finishes.
+func MarkActive(dir string) (func(), error) {
+	marker := filepath.Join(dir, activeRunMarker)
+	f, err := os.OpenFile(marker, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	_, writeErr := f.WriteString(time.Now().UTC().Format(time.RFC3339Nano) + "\n")
+	closeErr := f.Close()
+	if writeErr != nil {
+		_ = os.Remove(marker)
+		return nil, writeErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(marker)
+		return nil, closeErr
+	}
+	return func() { _ = os.Remove(marker) }, nil
+}
+
 // EnsurePrivateDir creates dir as an owner-only directory and verifies that the
 // current process can create a file inside it. The writability probe matters for
 // pre-existing directories: os.MkdirAll succeeds when a directory already
@@ -85,14 +110,12 @@ func EnsurePrivateDir(dir string) error {
 // reconcile, or a host reboot during a run — so the normal per-run defer
 // os.RemoveAll is no longer the only cleanup path.
 //
-// Safe against a concurrent in-flight run: callers pass a ttl (1h) far above the
-// heavyweight tools' default run timeouts (10-20 min), so a normal run's <ttl-old
-// dir is never swept; only an abandoned dir left by an abnormally-terminated run
-// qualifies. On Windows os.RemoveAll fails on a dir whose files are still open by
-// a live run, so an in-use dir is protected regardless. Errors (in-use entry,
-// permission glitch) are ignored — a sweep that can't remove one entry must not
-// fail the run it is making room for. Non-matching siblings (e.g. a shared
-// "symcache" dir) are left untouched.
+// Active runs call MarkActive after creating their scratch dir. SweepStale skips
+// any directory carrying that marker, so request-controlled runs whose timeout
+// exceeds ttl are not removed solely because the top-level directory mtime is
+// old. Errors (in-use entry, permission glitch) are ignored — a sweep that can't
+// remove one entry must not fail the run it is making room for. Non-matching
+// siblings (e.g. a shared "symcache" dir) are left untouched.
 func SweepStale(dir, prefix string, ttl time.Duration) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -103,10 +126,14 @@ func SweepStale(dir, prefix string, ttl time.Duration) {
 		if !strings.HasPrefix(e.Name(), prefix) {
 			continue
 		}
+		path := filepath.Join(dir, e.Name())
+		if _, err := os.Lstat(filepath.Join(path, activeRunMarker)); err == nil {
+			continue
+		}
 		info, err := e.Info()
 		if err != nil || info.ModTime().After(cutoff) {
 			continue
 		}
-		_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+		_ = os.RemoveAll(path)
 	}
 }

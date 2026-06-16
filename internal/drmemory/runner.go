@@ -69,10 +69,11 @@ const drMemoryOutputCap = 512 * 1024
 // runs it, then locates results.txt under <tmp>\DrMemory-<exe>.<pid>.NNN\
 // and reads it back. The temp logdir is removed before returning.
 func defaultRun(ctx context.Context, exePath, target string, args []string, cwd string, light, checkUninit bool) (*runOutput, error) {
-	logdir, err := makeLogdir()
+	logdir, cleanupActive, err := makeLogdir()
 	if err != nil {
 		return nil, fmt.Errorf("create logdir: %w", err)
 	}
+	defer cleanupActive()
 	defer os.RemoveAll(logdir)
 
 	cmdArgs := buildDrMemoryArgs(logdir, symcacheDir(), target, args, light, checkUninit)
@@ -171,21 +172,32 @@ func oneAPIRuntimeEnv() []string {
 // returns the created directory; the caller os.RemoveAll's it after reading
 // results.txt. If the hub scratch base can't be derived or created, it falls
 // back to the OS temp dir so a run still proceeds rather than failing outright.
-func makeLogdir() (string, error) {
+func makeLogdir() (string, func(), error) {
 	base, ok := hubtemp.Dir("drmemory")
 	if !ok {
-		return os.MkdirTemp("", "drmemory-logs-")
+		logdir, err := os.MkdirTemp("", "drmemory-logs-")
+		return logdir, func() {}, err
 	}
 	// 0o700: owner-only, so a co-resident user on a multi-tenant POSIX host
 	// can't read another user's Dr. Memory output (module paths, findings).
 	if err := hubtemp.EnsurePrivateDir(base); err != nil {
-		return os.MkdirTemp("", "drmemory-logs-")
+		logdir, err := os.MkdirTemp("", "drmemory-logs-")
+		return logdir, func() {}, err
 	}
 	// Reap logdirs abandoned by an abnormally-terminated prior run (timeout
 	// force-kill, daemon restart, reboot mid-run) so they don't accumulate; the
 	// shared "symcache" sibling is left untouched (prefix-scoped to "logs-").
 	hubtemp.SweepStale(base, "logs-", staleRunDirTTL)
-	return os.MkdirTemp(base, "logs-")
+	logdir, err := os.MkdirTemp(base, "logs-")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanupActive, err := hubtemp.MarkActive(logdir)
+	if err != nil {
+		_ = os.RemoveAll(logdir)
+		return "", func() {}, err
+	}
+	return logdir, cleanupActive, nil
 }
 
 // formatCommandLine joins the drmemory.exe path and its argv into a single
