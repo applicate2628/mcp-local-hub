@@ -83,6 +83,64 @@ type reportFunc func(ctx context.Context, exePath, resultDir, analysis string) (
 // scanner. Matches the drmemory "tool body cap < scanner cap" convention.
 const vtuneOutputCap = 512 * 1024
 
+// cappedBuffer is an in-flight output limiter for stderr captured from VTune
+// subprocesses. It keeps at most cap bytes in memory and records truncation as
+// soon as a write would exceed the cap, instead of letting bytes.Buffer grow
+// until the process exits.
+type cappedBuffer struct {
+	bytes.Buffer
+	cap       int
+	truncated bool
+}
+
+func newCappedBuffer(cap int) *cappedBuffer {
+	return &cappedBuffer{cap: cap}
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.cap <= 0 {
+		b.truncated = b.truncated || len(p) > 0
+		return len(p), nil
+	}
+	if b.Len() < b.cap {
+		space := b.cap - b.Len()
+		if len(p) <= space {
+			_, _ = b.Buffer.Write(p)
+			return len(p), nil
+		}
+		_, _ = b.Buffer.Write(p[:space])
+	}
+	b.truncated = true
+	b.markTruncated()
+	return len(p), nil
+}
+
+func (b *cappedBuffer) String() string {
+	if b.truncated {
+		b.markTruncated()
+	}
+	return b.Buffer.String()
+}
+
+func (b *cappedBuffer) markTruncated() {
+	const marker = "\n…[truncated]"
+	if strings.HasSuffix(b.Buffer.String(), marker) {
+		return
+	}
+	if b.cap <= 0 {
+		return
+	}
+	if len(marker) >= b.cap {
+		b.Buffer.Truncate(0)
+		_, _ = b.Buffer.WriteString(marker[len(marker)-b.cap:])
+		return
+	}
+	if b.Len()+len(marker) > b.cap {
+		b.Buffer.Truncate(b.cap - len(marker))
+	}
+	_, _ = b.Buffer.WriteString(marker)
+}
+
 // defaultRun is the production runFunc. It runs VTune in two phases against a
 // FRESH per-run result dir:
 //
@@ -134,7 +192,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	summaryPath := filepath.Join(runDir, "summary.txt")
 
 	env := vtuneEnv()
-	var stderr bytes.Buffer
+	stderr := newCappedBuffer(vtuneOutputCap)
 	var cmdLines []string
 
 	// keptDir is the result-dir path surfaced to the caller only when
@@ -150,7 +208,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	cmdLines = append(cmdLines, formatCommandLine(exePath, collectArgs))
 
 	exitCode := 0
-	if err := runVTunePhase(ctx, exePath, collectArgs, cwd, env, &stderr); err != nil {
+	if err := runVTunePhase(ctx, exePath, collectArgs, cwd, env, stderr); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			// Non-zero collect exit means the profiled target (or VTune) exited
@@ -180,7 +238,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	}
 
 	// --- Phases 2 & 3: report (CSV table) + summary (human-readable text) ---
-	out, err := runReportPhases(ctx, exePath, resultDir, csvPath, summaryPath, analysis, cwd, env, &stderr, &cmdLines)
+	out, err := runReportPhases(ctx, exePath, resultDir, csvPath, summaryPath, analysis, cwd, env, stderr, &cmdLines)
 	out.ExitCode = exitCode
 	out.ResultDir = keptDir
 	return out, err
@@ -198,7 +256,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 // failure is folded into stderr and returned with a nil error, since a report
 // that fails to render is still a successful "we tried" result the caller
 // surfaces.
-func runReportPhases(ctx context.Context, exePath, resultDir, csvPath, summaryPath, analysis, cwd string, env []string, stderr *bytes.Buffer, cmdLines *[]string) (*runOutput, error) {
+func runReportPhases(ctx context.Context, exePath, resultDir, csvPath, summaryPath, analysis, cwd string, env []string, stderr *cappedBuffer, cmdLines *[]string) (*runOutput, error) {
 	// --- report (CSV table) -------------------------------------------------
 	reportArgs := buildReportArgs(reportName(analysis), resultDir, csvPath)
 	*cmdLines = append(*cmdLines, formatCommandLine(exePath, reportArgs))
@@ -271,10 +329,10 @@ func defaultReport(ctx context.Context, exePath, resultDir, analysis string) (*r
 	summaryPath := filepath.Join(outDir, "summary.txt")
 
 	env := vtuneEnv()
-	var stderr bytes.Buffer
+	stderr := newCappedBuffer(vtuneOutputCap)
 	var cmdLines []string
 
-	out, err := runReportPhases(ctx, exePath, resultDir, csvPath, summaryPath, analysis, "", env, &stderr, &cmdLines)
+	out, err := runReportPhases(ctx, exePath, resultDir, csvPath, summaryPath, analysis, "", env, stderr, &cmdLines)
 	// A re-report has no target exit code to forward, so ExitCode stays 0.
 	return out, err
 }
@@ -285,7 +343,7 @@ func defaultReport(ctx context.Context, exePath, resultDir, analysis string) (*r
 // -report-output file. The Intel oneAPI runtime env (env) is applied so an
 // icx-built / MKL-linked target loads its DLLs instead of dying with
 // 0xC0000135 (DLL not found) before profiling.
-func runVTunePhase(ctx context.Context, exePath string, args []string, cwd string, env []string, stderr *bytes.Buffer) error {
+func runVTunePhase(ctx context.Context, exePath string, args []string, cwd string, env []string, stderr *cappedBuffer) error {
 	cmd := exec.CommandContext(ctx, exePath, args...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
 	cmd.WaitDelay = waitDelayAfterKill
