@@ -70,17 +70,16 @@ func findSetvars() (string, bool) {
 // resulting environment via `env`. `source` (a bash builtin, hence `bash -c`
 // not `sh -c`) is required so the variables land in the shell that then runs
 // `env` — executing setvars.sh in a child would lose them. `--force` defeats
-// setvars' SETVARS_COMPLETED re-entry guard. The setvars path is single-quoted
-// inside the script (oneAPI's default POSIX roots — /opt/intel/oneapi,
-// ~/intel/oneapi — contain no single quotes). env output is the standard
+// setvars' SETVARS_COMPLETED re-entry guard. The setvars path is passed as a
+// positional argument and referenced as "$1" so unusual POSIX path characters
+// are not interpolated into shell source code. env output is the standard
 // newline-delimited KEY=VALUE form, parsed the same way the Windows `set` dump
 // is, for portability across GNU and BSD `env`.
 //
 // Returns (env, true) on success; (nil, false) when bash is unavailable, the
 // command fails, or its output has no parseable KEY=VALUE lines.
 func captureSetvarsEnv(setvars string) ([]string, bool) {
-	script := "source '" + setvars + "' --force >/dev/null 2>&1 && env"
-	cmd := exec.Command("bash", "-c", script)
+	cmd := exec.Command("bash", "-c", `source "$1" --force >/dev/null 2>&1 && env`, "bash", setvars)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, false
