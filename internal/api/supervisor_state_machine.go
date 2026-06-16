@@ -44,6 +44,15 @@ type SMContext struct {
 // Returns: newState, side-effect description (for logging), whether
 // the caller must persist before performing the side effect, whether
 // the transition matched any row (false = drop event with log).
+//
+// INVARIANT (Conc-F4, PR #268 deep-sec): EvTimerDue may issue a spawn
+// (create-process) ONLY from StBackoffWaiting. This is the single gate that
+// makes a stale post from the off-loop backoff-timer goroutine harmless from
+// every other state. Off-loop posters DETECT and POST; this table is the only
+// authoritative gate — they must not pre-judge SM state. Adding an EvTimerDue
+// spawn row to any other state would turn that latent race live; the guard is
+// TestStateMachineInvariant_TimerDueSpawnsOnlyFromBackoffWaiting, which goes RED
+// on exactly that edit.
 func Transition(state SMState, ev SMEvent, ctx SMContext) (newState SMState, side string, persistBefore bool, matched bool) {
 	switch state {
 	case StIdle:

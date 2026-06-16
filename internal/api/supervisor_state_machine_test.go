@@ -3,6 +3,7 @@ package api
 
 import (
 	"math/rand"
+	"strings"
 	"testing"
 )
 
@@ -106,4 +107,59 @@ func randomIntent(rng *rand.Rand) string {
 func randomQueuedAction(rng *rand.Rand) string {
 	all := []string{"", "respawn", "none"}
 	return all[rng.Intn(len(all))]
+}
+
+// TestStateMachineInvariant_TimerDueSpawnsOnlyFromBackoffWaiting is the Conc-F4
+// (PR #268 deep-sec P3) guard. The supervisor's backoff timer goroutine posts
+// EvTimerDue from OFF the event loop; the loop's api.Transition is the single
+// authoritative gate. The invariant — EvTimerDue may issue a spawn (a
+// create-process side effect) ONLY from StBackoffWaiting — is what makes a stale
+// timer fire harmless from every other state (the goroutine's own best-effort
+// smStates re-check is a perf early-out + observability emit, NOT the safety
+// property). This test goes RED the instant a future SM edit adds an EvTimerDue
+// spawn row to any other state — the exact change that would turn the latent
+// race live. Per the PR #268 principle: off-loop posters detect and post; the
+// loop's Transition is the only gate.
+//
+// The spawn signal is the create-process side effect, NOT newState==StSpawning:
+// a state with no EvTimerDue row falls through to the unmatched return (state,
+// "", false, false), so a StSpawning start trivially "stays" StSpawning via a
+// no-op drop — which is not a spawn.
+func TestStateMachineInvariant_TimerDueSpawnsOnlyFromBackoffWaiting(t *testing.T) {
+	spawns := func(side string, matched bool) bool {
+		return matched && strings.Contains(side, "create-process")
+	}
+	// A context that WOULD spawn if the state allowed it (running intent, no
+	// queued stop, well under the quarantine threshold). Proving non-spawn under
+	// THIS context shows the STATE blocks the spawn, not the context.
+	spawnEligible := SMContext{
+		IntentDesired:      "running",
+		IntentIsActiveStop: false,
+		Failures:           0,
+		QueuedAction:       "",
+		GracefulInProgress: false,
+	}
+	for _, st := range []SMState{StIdle, StSpawning, StRunning, StExiting, StQuarantined} {
+		_, side, _, matched := transition(st, EvTimerDue, spawnEligible)
+		if spawns(side, matched) {
+			t.Errorf("EvTimerDue from %s issued a spawn (side=%q) — only StBackoffWaiting may spawn on a timer; a stale off-loop timer post must never spawn from %s", st, side, st)
+		}
+	}
+	// StBackoffWaiting is the ONE state that may spawn on EvTimerDue.
+	if _, side, _, matched := transition(StBackoffWaiting, EvTimerDue, spawnEligible); !spawns(side, matched) {
+		t.Errorf("EvTimerDue from StBackoffWaiting (spawn-eligible) did not spawn (side=%q matched=%v); want a create-process transition", side, matched)
+	}
+	// Even from StBackoffWaiting the intent re-check still suppresses the spawn
+	// when a stop is queued / intent is stopped, or failures hit the quarantine
+	// threshold — so "spawn from backoff" is itself conditional, never blind.
+	stopQueued := spawnEligible
+	stopQueued.QueuedAction = "stop"
+	if _, side, _, matched := transition(StBackoffWaiting, EvTimerDue, stopQueued); spawns(side, matched) {
+		t.Errorf("EvTimerDue from StBackoffWaiting with queued stop spawned (side=%q); want suppressed (StIdle)", side)
+	}
+	atThreshold := spawnEligible
+	atThreshold.Failures = 10
+	if _, side, _, matched := transition(StBackoffWaiting, EvTimerDue, atThreshold); spawns(side, matched) {
+		t.Errorf("EvTimerDue from StBackoffWaiting at Failures=10 spawned (side=%q); want StQuarantined", side)
+	}
 }
