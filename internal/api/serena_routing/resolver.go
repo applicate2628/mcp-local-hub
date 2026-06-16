@@ -122,10 +122,26 @@ func (r *WorkspaceResolver) refresh() {
 
 	unlock, err := r.reg.Lock()
 	if err != nil {
+		// The registry file exists (stat succeeded) but its cross-process lock
+		// could not be acquired. This is NOT a transient missing-file case — it
+		// is a genuine error (lock contention, permission, or a stuck holder), so
+		// emit the same operator-visible diagnostic the stat-error path above
+		// uses rather than returning silently. We still preserve the cached
+		// snapshot (best-effort routing-availability posture, documented above)
+		// instead of flipping into an error state; the diagnostic just makes the
+		// degraded reload observable so an operator's workspaces.yaml edit not
+		// taking effect is not invisible.
+		fmt.Fprintf(os.Stderr, "serena_routing: lock registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
 		return
 	}
 	defer unlock()
 	if err := r.reg.Load(); err != nil {
+		// The registry file exists and was locked, but parsing/loading it failed
+		// (e.g. a malformed YAML after an operator hand-edit). Same fail-loud
+		// diagnostic as the lock-error and stat-error paths: surface the load
+		// failure so a stale cached view being served is operator-visible,
+		// while still preserving the prior snapshot for routing availability.
+		fmt.Fprintf(os.Stderr, "serena_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
 		return
 	}
 	entries := r.reg.SerenaEntries()
