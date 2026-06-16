@@ -194,6 +194,74 @@ func (f *stopAfterMaterializeLifecycle) Stop() error {
 	return nil
 }
 
+// recordingLifecycle / recordingEndpoint capture every (method, uri) tuple
+// that actually reaches the upstream backend via SendRequest. Used by the
+// didOpen/didClose refcount tests to assert exactly which notifications were
+// forwarded vs absorbed by the per-URI gate. Materialize/Stop counts are
+// tracked so reset-on-teardown behavior can be verified too.
+type recordingLifecycle struct {
+	mu               sync.Mutex
+	forwarded        []forwardedDoc
+	materializeCount atomic.Int32
+	stopCount        atomic.Int32
+	ep               *recordingEndpoint
+}
+
+type forwardedDoc struct {
+	method string
+	uri    string
+}
+
+func (f *recordingLifecycle) Kind() string { return "mcp-language-server" }
+
+func (f *recordingLifecycle) Materialize(ctx context.Context) (MCPEndpoint, error) {
+	f.materializeCount.Add(1)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ep == nil {
+		f.ep = &recordingEndpoint{parent: f}
+	}
+	return f.ep, nil
+}
+
+func (f *recordingLifecycle) Stop() error {
+	f.stopCount.Add(1)
+	f.mu.Lock()
+	f.ep = nil
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *recordingLifecycle) forwardedDocs() []forwardedDoc {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]forwardedDoc, len(f.forwarded))
+	copy(out, f.forwarded)
+	return out
+}
+
+type recordingEndpoint struct {
+	parent *recordingLifecycle
+	closed atomic.Bool
+}
+
+func (e *recordingEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
+	if e.closed.Load() {
+		return nil, errors.New("endpoint closed")
+	}
+	if req.Method == "textDocument/didOpen" || req.Method == "textDocument/didClose" {
+		e.parent.mu.Lock()
+		e.parent.forwarded = append(e.parent.forwarded, forwardedDoc{
+			method: req.Method,
+			uri:    docURIFromParams(req.Params),
+		})
+		e.parent.mu.Unlock()
+	}
+	return &JSONRPCResponse{Jsonrpc: "2.0", ID: req.ID, Result: json.RawMessage(`{"ok":true}`)}, nil
+}
+
+func (e *recordingEndpoint) Close() error { e.closed.Store(true); return nil }
+
 // --- helpers ---------------------------------------------------------------
 
 func newTestProxy(t *testing.T, kind string, f *fakeLifecycle) (*LazyProxy, string) {
@@ -238,6 +306,19 @@ func newTestProxyWithCfg(t *testing.T, kind string, f *fakeLifecycle, retryGap, 
 func postRPC(t *testing.T, h http.Handler, method string, id int) *httptest.ResponseRecorder {
 	t.Helper()
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":%q,"params":{}}`, id, method)
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+// postDocNotification fires a textDocument/didOpen|didClose notification (no
+// id) carrying params.textDocument.uri = uri, mirroring the LSP wire shape a
+// client/agent sends.
+func postDocNotification(t *testing.T, h http.Handler, method, uri string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"textDocument":{"uri":%q}}}`, method, uri)
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -1393,4 +1474,243 @@ func pickFreePort() (int, error) {
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
 	return port, nil
+}
+
+// newRecordingProxy builds a proxy wired to a recordingLifecycle so tests can
+// assert exactly which didOpen/didClose notifications reached upstream.
+func newRecordingProxy(t *testing.T) (*LazyProxy, *recordingLifecycle) {
+	t.Helper()
+	f := &recordingLifecycle{}
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/test/ws",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle:     "",
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey:        "abcd1234",
+		WorkspacePath:       "D:/test/ws",
+		Language:            "python",
+		BackendKind:         "mcp-language-server",
+		Port:                0,
+		Lifecycle:           f,
+		RegistryPath:        regPath,
+		InflightMinRetryGap: 10 * time.Millisecond,
+		ToolsCallDebounce:   100 * time.Millisecond,
+	})
+	return p, f
+}
+
+// TestLazyProxy_DidOpenMultiOpenSingleClose is the core multi-agent guard:
+// two agents open the SAME document, then both close it. Upstream must see
+// exactly ONE didOpen (first open) and ONE didClose (last close) — never a
+// duplicate open (LSP protocol violation) or a premature close that drops the
+// document while the second agent still has it open.
+func TestLazyProxy_DidOpenMultiOpenSingleClose(t *testing.T) {
+	p, f := newRecordingProxy(t)
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	// Agent A opens, then Agent B opens the same URI.
+	if rr := postDocNotification(t, h, "textDocument/didOpen", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("first didOpen code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := postDocNotification(t, h, "textDocument/didOpen", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("second didOpen code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	// Both agents close.
+	if rr := postDocNotification(t, h, "textDocument/didClose", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("first didClose code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := postDocNotification(t, h, "textDocument/didClose", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("second didClose code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+
+	got := f.forwardedDocs()
+	want := []forwardedDoc{
+		{method: "textDocument/didOpen", uri: uri},
+		{method: "textDocument/didClose", uri: uri},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("forwarded %d notifications, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("forwarded[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestLazyProxy_DidCloseAfterLastCloseReopensCleanly verifies that once the
+// refcount returns to zero, a subsequent didOpen for the same URI forwards
+// again (the document was genuinely closed upstream, so the reopen is a real
+// first-open).
+func TestLazyProxy_DidCloseAfterLastCloseReopensCleanly(t *testing.T) {
+	p, f := newRecordingProxy(t)
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	postDocNotification(t, h, "textDocument/didOpen", uri)  // 0->1 forward
+	postDocNotification(t, h, "textDocument/didClose", uri) // 1->0 forward
+	postDocNotification(t, h, "textDocument/didOpen", uri)  // 0->1 forward again
+
+	got := f.forwardedDocs()
+	want := []forwardedDoc{
+		{method: "textDocument/didOpen", uri: uri},
+		{method: "textDocument/didClose", uri: uri},
+		{method: "textDocument/didOpen", uri: uri},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("forwarded %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("forwarded[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestLazyProxy_DidCloseSingleOpenMultiClose guards the inverse: ONE open
+// followed by MULTIPLE closes (a buggy or duplicate-closing client) must
+// forward exactly one didOpen and one didClose. The extra close must be
+// absorbed and must NOT drive the refcount negative, because that would later
+// suppress a legitimate didClose for a real second open.
+func TestLazyProxy_DidCloseSingleOpenMultiClose(t *testing.T) {
+	p, f := newRecordingProxy(t)
+	h := p.Handler()
+	const uri = "file:///ws/bar.py"
+
+	postDocNotification(t, h, "textDocument/didOpen", uri)  // 0->1 forward
+	postDocNotification(t, h, "textDocument/didClose", uri) // 1->0 forward
+	// Spurious extra close — absorbed, count stays at 0 (not -1).
+	if rr := postDocNotification(t, h, "textDocument/didClose", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("extra didClose code=%d, want 202", rr.Code)
+	}
+
+	got := f.forwardedDocs()
+	want := []forwardedDoc{
+		{method: "textDocument/didOpen", uri: uri},
+		{method: "textDocument/didClose", uri: uri},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("forwarded %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("forwarded[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	// Prove the count did not go negative: a fresh open+close pair after the
+	// spurious close must still forward both halves.
+	postDocNotification(t, h, "textDocument/didOpen", uri)  // 0->1 forward
+	postDocNotification(t, h, "textDocument/didClose", uri) // 1->0 forward
+	got = f.forwardedDocs()
+	if len(got) != 4 {
+		t.Fatalf("after reopen/close, forwarded %d, want 4: %+v", len(got), got)
+	}
+	if got[2].method != "textDocument/didOpen" || got[3].method != "textDocument/didClose" {
+		t.Errorf("reopen pair not forwarded after spurious close: %+v", got[2:])
+	}
+}
+
+// TestLazyProxy_DidOpenDistinctURIsForwardIndependently verifies the gate is
+// per-URI: opens for different documents each forward, and closing one does
+// not affect the other's refcount.
+func TestLazyProxy_DidOpenDistinctURIsForwardIndependently(t *testing.T) {
+	p, f := newRecordingProxy(t)
+	h := p.Handler()
+	const uriA = "file:///ws/a.go"
+	const uriB = "file:///ws/b.go"
+
+	postDocNotification(t, h, "textDocument/didOpen", uriA) // A 0->1 forward
+	postDocNotification(t, h, "textDocument/didOpen", uriB) // B 0->1 forward
+	postDocNotification(t, h, "textDocument/didOpen", uriA) // A 1->2 absorb
+	postDocNotification(t, h, "textDocument/didClose", uriB) // B 1->0 forward
+
+	got := f.forwardedDocs()
+	want := []forwardedDoc{
+		{method: "textDocument/didOpen", uri: uriA},
+		{method: "textDocument/didOpen", uri: uriB},
+		{method: "textDocument/didClose", uri: uriB},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("forwarded %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("forwarded[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestLazyProxy_DidOpenMalformedURIAbsorbed verifies a didOpen/didClose with
+// no params.textDocument.uri is absorbed (202, no forward) rather than sent
+// upstream as an uncorrelatable request.
+func TestLazyProxy_DidOpenMalformedURIAbsorbed(t *testing.T) {
+	p, f := newRecordingProxy(t)
+	h := p.Handler()
+
+	// Empty params object — no textDocument.uri.
+	body := `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{}}`
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("malformed didOpen code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := f.forwardedDocs(); len(got) != 0 {
+		t.Errorf("malformed didOpen forwarded upstream: %+v", got)
+	}
+	if mc := f.materializeCount.Load(); mc != 0 {
+		t.Errorf("malformed didOpen materialized backend: count=%d", mc)
+	}
+}
+
+// TestLazyProxy_DocRefsResetOnBackendTeardown verifies the refcount map is
+// cleared when the backend is torn down. After a backend crash (onSendFailure
+// path) the next didOpen for a previously-open URI must forward again — the
+// fresh backend has no open documents, so a retained count would silently
+// suppress the reopen.
+func TestLazyProxy_DocRefsResetOnBackendTeardown(t *testing.T) {
+	p, f := newRecordingProxy(t)
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	// Open the document (0->1 forward).
+	postDocNotification(t, h, "textDocument/didOpen", uri)
+	if got := f.forwardedDocs(); len(got) != 1 {
+		t.Fatalf("setup didOpen not forwarded: %+v", got)
+	}
+
+	// Simulate a backend crash/teardown directly through the same path the
+	// proxy uses on a mid-stream failure. This resets docRefs.
+	p.onSendFailure(errors.New("backend subprocess exited"))
+
+	// Wait past the retry throttle so the next call re-materializes.
+	time.Sleep(20 * time.Millisecond)
+
+	// The same URI opens again. Because the refcount was reset, this is a
+	// genuine first-open against the fresh backend and MUST forward.
+	if rr := postDocNotification(t, h, "textDocument/didOpen", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("post-teardown didOpen code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	got := f.forwardedDocs()
+	if len(got) != 2 {
+		t.Fatalf("post-teardown didOpen not forwarded (stale refcount?): %+v", got)
+	}
+	if got[1].method != "textDocument/didOpen" || got[1].uri != uri {
+		t.Errorf("post-teardown forward = %+v, want didOpen %s", got[1], uri)
+	}
+	if mc := f.materializeCount.Load(); mc != 2 {
+		t.Errorf("materializeCount = %d, want 2 (initial + post-crash remat)", mc)
+	}
 }

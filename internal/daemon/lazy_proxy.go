@@ -105,6 +105,25 @@ type LazyProxy struct {
 
 	debounceMu         sync.Mutex
 	lastToolsCallWrite time.Time
+
+	// docRefs counts, per textDocument URI, how many client-side opens are
+	// outstanding against the shared upstream backend. One proxy serves
+	// every client/agent for its (workspace, language) tuple, so multiple
+	// agents can open the SAME document concurrently. The LSP server tracks
+	// a document once; a second didOpen for an already-open URI is a protocol
+	// violation, and a didClose from one agent while another still has the
+	// document open would drop it for everyone. This refcount forwards
+	// didOpen to upstream only on the first open of a URI (0->1) and didClose
+	// only on the last close (1->0); intermediate opens/closes are absorbed.
+	//
+	// Guarded by docRefsMu (a dedicated mutex, NOT p.mu, so document
+	// bookkeeping never contends with the materialization/reaper critical
+	// section). The map is reset to empty whenever the backend is torn down
+	// (Stop / onSendFailure / reapIdleBackend), because a fresh backend has
+	// no open documents — keeping stale counts would absorb the first didOpen
+	// after a restart and silently desynchronize the proxy from upstream.
+	docRefsMu sync.Mutex
+	docRefs   map[string]int
 }
 
 // NewLazyProxy constructs a proxy with defaulted InflightMinRetryGap (2s)
@@ -124,6 +143,7 @@ func NewLazyProxy(cfg LazyProxyConfig) *LazyProxy {
 		cfg:      cfg,
 		gate:     NewInflightGate(cfg.InflightMinRetryGap),
 		idleStop: make(chan struct{}),
+		docRefs:  make(map[string]int),
 	}
 	p.startIdleReaper()
 	return p
@@ -209,6 +229,7 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 	}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
+	p.resetDocRefs()
 	stopErr := p.cfg.Lifecycle.Stop()
 	if stopErr != nil {
 		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop: %v\n", stopErr)
@@ -318,6 +339,13 @@ func (p *LazyProxy) handleMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, fmt.Appendf(nil, `{"jsonrpc":"2.0","id":%s,"result":{}}`, string(id)))
 	case "tools/call":
 		p.handleToolsCall(w, r, &req)
+	case "textDocument/didOpen", "textDocument/didClose":
+		// Per-URI refcount gate: with one shared backend per (workspace,
+		// language) tuple, N agents can open the same document. Forward
+		// didOpen upstream only on the first open of a URI and didClose
+		// only on the last close so the LSP server never sees a duplicate
+		// open or a premature close. Notifications get 202 + empty body.
+		p.handleDocLifecycle(w, r, &req)
 	default:
 		// JSON-RPC 2.0 forbids responses to notifications (requests with
 		// no id, method prefix "notifications/"). Forwarding one through
@@ -426,6 +454,144 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		return
 	}
 	writeJSON(w, out)
+}
+
+// handleDocLifecycle gates textDocument/didOpen and textDocument/didClose
+// behind a per-URI refcount so a single shared backend never sees a duplicate
+// open (protocol violation) or a premature close (drops the document while
+// another agent still has it open). didOpen forwards to upstream only on the
+// first open of a URI (count 0->1); didClose forwards only on the last close
+// (count 1->0). Intermediate opens/closes are absorbed: the proxy answers 202
+// Accepted with an empty body and does not touch the backend.
+//
+// These are JSON-RPC notifications (no id, no response expected). On the
+// forwarding transition we still drive the request through the materialized
+// endpoint's SendRequest — the same channel handleForward already used for
+// these methods — so the wire contract with the backend is unchanged; only
+// WHEN we forward is gated by the refcount. SendRequest's response (if any)
+// is discarded: notifications carry no client-visible reply.
+func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, req *JSONRPCRequest) {
+	uri := docURIFromParams(req.Params)
+	if uri == "" {
+		// Malformed notification (no textDocument.uri). Without a URI there
+		// is nothing to refcount; absorb it rather than forward a request
+		// the backend cannot correlate. 202 keeps notification semantics.
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	isOpen := req.Method == "textDocument/didOpen"
+	forward := p.applyDocRef(uri, isOpen)
+	if !forward {
+		// Refcount absorbed this open/close — upstream already has the
+		// correct view of the document. No materialize, no forward.
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	ep, err := p.ensureMaterialized(r.Context())
+	if err != nil {
+		// Materialization failed: the upstream forward will not happen, so
+		// roll back the refcount transition we optimistically applied to
+		// keep the count consistent with what the backend actually saw.
+		p.rollbackDocRef(uri, isOpen)
+		code := rpcErrInternalError
+		if IsMissingBinaryErr(err) {
+			code = rpcErrMissingBinary
+		}
+		writeRPCError(w, req.ID, code, err.Error())
+		return
+	}
+	defer p.endBackendRequest()
+	if _, err := ep.SendRequest(r.Context(), req); err != nil {
+		// Client-cancel is not a backend failure — see handleToolsCall.
+		// The notification was not delivered, so roll back the transition.
+		p.rollbackDocRef(uri, isOpen)
+		if isClientCancelErr(r.Context(), err) {
+			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
+			return
+		}
+		p.onSendFailure(err)
+		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
+		return
+	}
+	// Notification delivered. JSON-RPC notifications take no response body.
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// applyDocRef records an open/close against uri and reports whether the
+// operation should be forwarded to the upstream backend. didOpen forwards on
+// the 0->1 transition; didClose forwards on the 1->0 transition. A didClose
+// against an already-zero count is absorbed and never drives the count
+// negative (a spurious or duplicate close from one agent must not affect the
+// document state another agent still depends on).
+func (p *LazyProxy) applyDocRef(uri string, open bool) bool {
+	p.docRefsMu.Lock()
+	defer p.docRefsMu.Unlock()
+	if open {
+		prev := p.docRefs[uri]
+		p.docRefs[uri] = prev + 1
+		return prev == 0
+	}
+	prev := p.docRefs[uri]
+	if prev <= 0 {
+		// Close with no recorded open — nothing upstream to release.
+		return false
+	}
+	if prev == 1 {
+		delete(p.docRefs, uri)
+		return true
+	}
+	p.docRefs[uri] = prev - 1
+	return false
+}
+
+// rollbackDocRef undoes the most recent applyDocRef transition for uri when
+// the corresponding upstream forward could not be delivered. It is the exact
+// inverse: a failed didOpen decrements (back toward 0), a failed didClose
+// re-increments (restoring the open the close was about to release).
+func (p *LazyProxy) rollbackDocRef(uri string, open bool) {
+	p.docRefsMu.Lock()
+	defer p.docRefsMu.Unlock()
+	if open {
+		if cur := p.docRefs[uri]; cur <= 1 {
+			delete(p.docRefs, uri)
+		} else {
+			p.docRefs[uri] = cur - 1
+		}
+		return
+	}
+	p.docRefs[uri] = p.docRefs[uri] + 1
+}
+
+// resetDocRefs clears all per-URI open counts. Called whenever the backend is
+// torn down (Stop / onSendFailure / reapIdleBackend): the fresh backend that
+// the next request materializes has no open documents, so any retained count
+// would wrongly absorb the first didOpen after the restart.
+func (p *LazyProxy) resetDocRefs() {
+	p.docRefsMu.Lock()
+	p.docRefs = make(map[string]int)
+	p.docRefsMu.Unlock()
+}
+
+// docURIFromParams extracts params.textDocument.uri from a didOpen/didClose
+// notification. Both DidOpenTextDocumentParams (textDocument is a
+// TextDocumentItem) and DidCloseTextDocumentParams (textDocument is a
+// TextDocumentIdentifier) carry the uri under textDocument.uri per the LSP
+// spec. Returns "" when params are absent or malformed.
+func docURIFromParams(params json.RawMessage) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var p struct {
+		TextDocument struct {
+			URI string `json:"uri"`
+		} `json:"textDocument"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return ""
+	}
+	return p.TextDocument.URI
 }
 
 // isClientCancelErr reports whether err is the consequence of the client's
@@ -673,6 +839,7 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	p.mu.Unlock()
 
 	_ = ep.Close()
+	p.resetDocRefs()
 	if err := p.cfg.Lifecycle.Stop(); err != nil {
 		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: idle lifecycle stop: %v\n", err)
 		_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
@@ -719,6 +886,7 @@ func (p *LazyProxy) onSendFailure(err error) {
 	}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
+	p.resetDocRefs()
 	// Tell the lifecycle impl to tear its subprocess down first — safe even
 	// if the child already exited on its own. This invalidates the impl's
 	// cached host so any concurrent Materialize that slips in after the
