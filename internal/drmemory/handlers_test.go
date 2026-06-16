@@ -355,3 +355,14 @@ var errFake = &fakeErr{}
 type fakeErr struct{}
 
 func (*fakeErr) Error() string { return "spawn failed: access denied" }
+
+func TestDrmemoryEnabledRequiresExplicitOptIn(t *testing.T) {
+	t.Setenv(enableUnsafeDrmemoryEnv, "")
+	if drmemoryEnabled() {
+		t.Fatal("drmemory should be disabled without explicit opt-in")
+	}
+	t.Setenv(enableUnsafeDrmemoryEnv, "1")
+	if !drmemoryEnabled() {
+		t.Fatal("drmemory should be enabled with opt-in =1")
+	}
+}

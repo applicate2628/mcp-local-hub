@@ -19,7 +19,22 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/unsafegate"
 )
+
+// enableUnsafeVtuneEnv gates registration of vtune_profile. The tool runs a
+// caller-supplied executable under VTune — the same arbitrary-local-code-
+// execution class as oneapi-run / drmemory (the client picks any exe and it
+// runs with the user's privileges), so it is secure-by-default and registered
+// only when the operator opts in by setting this to "1".
+const enableUnsafeVtuneEnv = "MCP_LOCAL_HUB_ENABLE_UNSAFE_VTUNE"
+
+// vtuneEnabled reports whether the operator opted in (enableUnsafeVtuneEnv ==
+// "1"). Thin wrapper over the shared unsafegate owner; pure, for tests.
+func vtuneEnabled() bool {
+	return unsafegate.Enabled(enableUnsafeVtuneEnv)
+}
 
 // VTuneServer holds the MCP server instance plus the two injectable seams
 // used by the profile handler:
@@ -60,9 +75,17 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-// registerTools attaches the vtune_profile tool. Called once from Run during
-// startup (and reused by any future tool additions).
+// registerTools attaches the vtune_profile tool, but ONLY after an explicit
+// unsafe opt-in. Called once from Run during startup. When the opt-in is
+// absent the daemon still serves MCP — it just exposes no tool
+// (unsafegate.RegisterAllowed logs WHY to stderr so the secure-default is
+// observable), so a misconfigured client cannot reach the arbitrary-exec
+// surface.
 func registerTools(vs *VTuneServer) {
+	if !unsafegate.RegisterAllowed(enableUnsafeVtuneEnv, "vtune") {
+		return
+	}
+
 	vs.server.AddTool(&mcp.Tool{
 		Name: "vtune_profile",
 		Description: "Profile a native executable under the Intel VTune Profiler and return its top CPU " +
@@ -91,7 +114,12 @@ func registerTools(vs *VTuneServer) {
 				"analysis_type": map[string]any{
 					"type": "string",
 					"description": "VTune analysis type. One of: hotspots (default), memory-access, threading, " +
-						"uarch-exploration, memory-consumption. Unknown values are rejected with a clear error.",
+						"uarch-exploration, memory-consumption. Unknown values are rejected with a clear error. " +
+						"hotspots and threading collect in USER MODE (no admin/SEP driver). memory-access, " +
+						"uarch-exploration and memory-consumption need the hardware sampling (SEP) driver / admin; " +
+						"without it the collect phase returns a structured error (exit_code, stderr) rather than data. " +
+						"The top_hotspots function table is rendered via VTune's universal 'hotspots' report for every " +
+						"type; analysis-specific metrics appear in the summary.",
 				},
 				"timeout_sec": map[string]any{
 					"type":        "integer",

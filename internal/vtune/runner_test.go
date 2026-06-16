@@ -75,15 +75,17 @@ func TestBuildReportArgs(t *testing.T) {
 }
 
 // TestKnownAnalysisTypes guards the allowlist: every type named in the tool
-// contract is accepted, and an obvious unknown is not. reportName maps each
-// accepted type to its report name (identity today).
+// contract is accepted, and an obvious unknown is not. reportName maps EVERY
+// accepted analysis type to the universal "hotspots" report name — VTune's
+// -report names are a fixed set that does NOT include the collect analysis
+// types, so the table report must be a real report name (verified live).
 func TestKnownAnalysisTypes(t *testing.T) {
 	for _, want := range []string{"hotspots", "memory-access", "threading", "uarch-exploration", "memory-consumption"} {
 		if !knownAnalysisTypes[want] {
 			t.Errorf("knownAnalysisTypes missing %q", want)
 		}
-		if reportName(want) != want {
-			t.Errorf("reportName(%q) = %q, want identity %q", want, reportName(want), want)
+		if got := reportName(want); got != "hotspots" {
+			t.Errorf("reportName(%q) = %q, want \"hotspots\" (a valid VTune -report name)", want, got)
 		}
 	}
 	if knownAnalysisTypes["gpu-hotspots"] {
@@ -182,5 +184,16 @@ func TestTruncate(t *testing.T) {
 	got := truncate(long, 10)
 	if len(got) <= 10 || !strings.Contains(got, "[truncated]") {
 		t.Errorf("truncate did not mark clipped output: %q", got)
+	}
+}
+
+func TestVtuneEnabledRequiresExplicitOptIn(t *testing.T) {
+	t.Setenv(enableUnsafeVtuneEnv, "")
+	if vtuneEnabled() {
+		t.Fatal("vtune should be disabled without explicit opt-in")
+	}
+	t.Setenv(enableUnsafeVtuneEnv, "1")
+	if !vtuneEnabled() {
+		t.Fatal("vtune should be enabled with opt-in =1")
 	}
 }

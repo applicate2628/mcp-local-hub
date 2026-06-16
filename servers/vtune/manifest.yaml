@@ -1,12 +1,21 @@
 name: vtune
-description: "Intel VTune Profiler MCP server (vtune) — profile a target exe under VTune and report top hotspots + a summary (hotspots / memory-access / threading / uarch-exploration / memory-consumption)."
+description: "Intel VTune Profiler MCP server (vtune) — profile a target exe under VTune and report top hotspots + a summary. DISABLED by default; set MCP_LOCAL_HUB_ENABLE_UNSAFE_VTUNE=1 to opt in (runs a caller-supplied executable)."
 kind: global
 transport: stdio-bridge
 command: mcphub
 base_args:
   - vtune
 
-env: {}
+# vtune_profile executes a caller-supplied target executable under VTune — the
+# same arbitrary-local-code-execution class as oneapi-run / drmemory (the client
+# picks any on-disk exe and it runs with the user's privileges). SECURE BY
+# DEFAULT: the tool is NOT registered unless the operator sets
+# MCP_LOCAL_HUB_ENABLE_UNSAFE_VTUNE=1. The committed default is "0"; an operator
+# who accepts the risk opts in per host (edit here, or override the daemon env
+# via the overlay). The daemon still runs when disabled, it just registers no
+# tool.
+env:
+  MCP_LOCAL_HUB_ENABLE_UNSAFE_VTUNE: "0"
 
 # VTune Profiler MCP server: runs a target binary under Intel VTune
 # (`-collect <type>` then `-report -format=csv`) and parses the top

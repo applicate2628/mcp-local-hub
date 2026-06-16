@@ -246,13 +246,21 @@ var knownAnalysisTypes = map[string]bool{
 const defaultAnalysisType = "hotspots"
 
 // reportName maps an analysis type to the VTune report name used in the
-// `-report <name>` phase. VTune's report name matches the analysis type for
-// the types we support (hotspots→hotspots, threading→threading, …), so this
-// is identity today; it exists as the single mapping owner so a future
-// analysis whose report name differs from its collect name is handled in one
-// place rather than scattered.
+// `-report <name>` CSV-table phase. CRITICAL: VTune's -report names are a
+// FIXED closed set (summary, hotspots, hw-events, callstacks, top-down,
+// gprof-cc, gpu-computing-tasks) — they are NOT the -collect analysis types.
+// `vtune -report memory-access` errors "Cannot find report `memory-access'"
+// (verified live), so an identity mapping silently produced an EMPTY
+// top_hotspots table for every analysis except "hotspots". "hotspots" is the
+// universal function-level table report and renders against ANY collect result
+// (verified live: `-report hotspots` on a threading collect yields a populated
+// CSV). So the structured function table always uses "hotspots"; the
+// analysis-specific metrics come through the separate hard-coded "summary"
+// report. analysis is accepted (and ignored) so this stays the single mapping
+// owner if a future analysis ever needs a different table report.
 func reportName(analysis string) string {
-	return analysis
+	_ = analysis
+	return "hotspots"
 }
 
 // readReportFile reads a VTune report output file, capping it at

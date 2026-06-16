@@ -124,7 +124,29 @@ func captureSetvarsEnv(setvars string) ([]string, bool) {
 	if len(env) == 0 {
 		return nil, false
 	}
-	return env, true
+	// The capture sub-cmd CLEARED NoDefaultCurrentDirectoryInExePath so setvars
+	// could initialize its components, so the dumped env lacks it. Re-assert it
+	// before the captured env is handed to a CHILD (run_in_oneapi_env command /
+	// drmemory + vtune target): otherwise the child would run with
+	// current-directory executable search RE-ENABLED — a CWD exe/DLL-planting
+	// hardening regression vs the supervisor's =1 default. (Security review F2.)
+	return withNoDefaultCurrentDir(env), true
+}
+
+// withNoDefaultCurrentDir returns env with NoDefaultCurrentDirectoryInExePath
+// forced to "1" (any existing entry dropped, case-insensitively, then re-added
+// — Windows env keys are case-insensitive). Restores the hardened "do not
+// search the current directory for executables" posture in the captured env.
+func withNoDefaultCurrentDir(env []string) []string {
+	const key = "NoDefaultCurrentDirectoryInExePath"
+	out := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if k, _, hasEq := strings.Cut(e, "="); hasEq && strings.EqualFold(k, key) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, key+"=1")
 }
 
 // setvarsCaptureBatchContent builds the temp .bat body for the capture. The

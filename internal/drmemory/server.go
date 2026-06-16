@@ -20,7 +20,22 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/unsafegate"
 )
+
+// enableUnsafeDrmemoryEnv gates registration of drmemory_run. The tool runs a
+// caller-supplied executable under Dr. Memory — the same arbitrary-local-code-
+// execution class as oneapi-run's run_in_oneapi_env (the client picks any exe
+// and it runs with the user's privileges), so it is secure-by-default and
+// registered only when the operator opts in by setting this to "1".
+const enableUnsafeDrmemoryEnv = "MCP_LOCAL_HUB_ENABLE_UNSAFE_DRMEMORY"
+
+// drmemoryEnabled reports whether the operator opted in (enableUnsafeDrmemoryEnv
+// == "1"). Thin wrapper over the shared unsafegate owner; pure, for tests.
+func drmemoryEnabled() bool {
+	return unsafegate.Enabled(enableUnsafeDrmemoryEnv)
+}
 
 // DrMemoryServer holds the MCP server instance plus the two injectable
 // seams used by the run handler:
@@ -61,9 +76,17 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-// registerTools attaches the drmemory_run tool. Called once from Run
-// during startup (and reused by any future tool additions).
+// registerTools attaches the drmemory_run tool, but ONLY after an explicit
+// unsafe opt-in. Called once from Run during startup. When the opt-in is
+// absent the daemon still serves MCP — it just exposes no tool
+// (unsafegate.RegisterAllowed logs WHY to stderr so the secure-default is
+// observable), so a misconfigured client cannot reach the arbitrary-exec
+// surface.
 func registerTools(ds *DrMemoryServer) {
+	if !unsafegate.RegisterAllowed(enableUnsafeDrmemoryEnv, "drmemory") {
+		return
+	}
+
 	ds.server.AddTool(&mcp.Tool{
 		Name: "drmemory_run",
 		Description: "Run a Windows executable under Dr. Memory (the DynamoRIO runtime memory checker) " +

@@ -31,7 +31,7 @@
 // supervisor's NoDefaultCurrentDirectoryInExePath=1 hardening because it
 // invokes each component vars.bat as a bare command via current-dir search;
 // oneapi-run's capture clears that var so setvars configures every component —
-// see internal/oneapirun/vcvars_windows.go. This direct enumeration is kept for
+// see internal/oneapi/setvars_windows.go. This direct enumeration is kept for
 // the speed/runtime-only consumers above, independent of that capture.)
 //
 // Platform scope: Windows-focused. On Linux / other platforms this is a

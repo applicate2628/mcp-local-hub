@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/unsafegate"
 )
 
 // defaultTimeoutSec is the run timeout applied when the caller omits
@@ -63,20 +63,20 @@ type runResult struct {
 const enableUnsafeOneAPIRunEnv = "MCP_LOCAL_HUB_ENABLE_UNSAFE_ONEAPI_RUN"
 
 // oneAPIRunEnabled reports whether the operator opted into exposing the
-// arbitrary-command execution tool, by setting enableUnsafeOneAPIRunEnv to
-// exactly "1". Any other value (unset, "0", "true", …) keeps it disabled —
-// secure by default.
+// arbitrary-command execution tool (enableUnsafeOneAPIRunEnv == "1"). Thin
+// wrapper over the shared unsafegate owner; pure, for tests.
 func oneAPIRunEnabled() bool {
-	return os.Getenv(enableUnsafeOneAPIRunEnv) == "1"
+	return unsafegate.Enabled(enableUnsafeOneAPIRunEnv)
 }
 
 // registerTools attaches the run_in_oneapi_env tool to the MCP server, but
-// ONLY after an explicit unsafe opt-in (oneAPIRunEnabled). Called once from
-// Run during startup. When the opt-in is absent the daemon still runs and
-// serves the MCP protocol — it just exposes no tools, so a misconfigured
-// client cannot reach the arbitrary-command surface.
+// ONLY after an explicit unsafe opt-in. Called once from Run during startup.
+// When the opt-in is absent the daemon still runs and serves the MCP protocol
+// — it just exposes no tools (unsafegate.RegisterAllowed logs WHY to stderr so
+// the secure-default is observable), so a misconfigured client cannot reach
+// the arbitrary-command surface.
 func registerTools(rs *OneAPIRunServer) {
-	if !oneAPIRunEnabled() {
+	if !unsafegate.RegisterAllowed(enableUnsafeOneAPIRunEnv, "oneapi-run") {
 		return
 	}
 

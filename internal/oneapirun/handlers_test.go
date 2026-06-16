@@ -32,7 +32,7 @@ func (m *mockCallToolRequest) toReal() *mcp.CallToolRequest {
 }
 
 // newTestServer builds an OneAPIRunServer with the env-computation seams
-// stubbed to fixed values, so tests never invoke the real ~1-2s vcvars64.
+// stubbed to fixed values, so tests never invoke the real ~1-3s setvars.
 func newTestServer(vsEnv []string, vsOK bool, dllDirs []string) *OneAPIRunServer {
 	return &OneAPIRunServer{
 		captureVSEnv:  func() ([]string, bool) { return vsEnv, vsOK },
@@ -118,7 +118,7 @@ func TestComputeRunEnv_VcvarsPlusOneAPIPrependsPath(t *testing.T) {
 
 func TestComputeRunEnv_VcvarsOnlyNoOneAPIDirsStillVcvarsSource(t *testing.T) {
 	// When vcvars is captured but no oneAPI dir exists, the source stays
-	// "vcvars64+oneapi" (the VS toolchain — the load-bearing half — WAS
+	// "setvars" (the VS toolchain — the load-bearing half — WAS
 	// captured) and PATH is unchanged.
 	vsEnv := []string{"PATH=C:\\VS\\bin", "INCLUDE=C:\\VS\\include"}
 
@@ -299,7 +299,7 @@ func TestRunInOneAPIEnvTool_TrivialCommandExitZero(t *testing.T) {
 
 func TestRunInOneAPIEnvTool_ReportsEnvSourceFromSeams(t *testing.T) {
 	cmd, args, _ := trivialEcho()
-	// Stub vcvars-captured so the reported env_source is vcvars64+oneapi
+	// Stub vcvars-captured so the reported env_source is setvars
 	// even though we pass a minimal env (the command still runs because
 	// runCommand inherits nothing — but echo via cmd/sh needs no PATH for
 	// a builtin). To keep the run robust across hosts, give the stub the

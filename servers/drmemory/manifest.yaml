@@ -1,12 +1,21 @@
 name: drmemory
-description: "Dr. Memory memory-error MCP server (drmemory) — run a target under Dr. Memory and report leaks, uninitialized reads, and invalid accesses."
+description: "Dr. Memory memory-error MCP server (drmemory) — run a target under Dr. Memory and report leaks, uninitialized reads, and invalid accesses. DISABLED by default; set MCP_LOCAL_HUB_ENABLE_UNSAFE_DRMEMORY=1 to opt in (runs a caller-supplied executable)."
 kind: global
 transport: stdio-bridge
 command: mcphub
 base_args:
   - drmemory
 
-env: {}
+# drmemory_run executes a caller-supplied target executable under Dr. Memory —
+# the same arbitrary-local-code-execution class as oneapi-run's
+# run_in_oneapi_env (the client picks any on-disk exe and it runs with the
+# user's privileges). SECURE BY DEFAULT: the tool is NOT registered unless the
+# operator sets MCP_LOCAL_HUB_ENABLE_UNSAFE_DRMEMORY=1. The committed default is
+# "0"; an operator who accepts the risk opts in per host (edit here, or override
+# the daemon env via the overlay). The daemon still runs when disabled, it just
+# registers no tool.
+env:
+  MCP_LOCAL_HUB_ENABLE_UNSAFE_DRMEMORY: "0"
 
 # Dr. Memory MCP server: runs a target binary under Dr. Memory and parses
 # the resulting error report (leaks, uninitialized reads, invalid memory
