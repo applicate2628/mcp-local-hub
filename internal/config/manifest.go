@@ -343,6 +343,17 @@ func ArgsContainContextFlag(args []string) bool {
 // mutation-path gate that rejects them.
 //
 // G4 §"Pre-gate" (docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md).
+// ReservedGUIPort is the mcphub GUI/router listener's default port. A server
+// manifest daemon must NEVER declare it: the GUI binds it, so a daemon sharing
+// the port collides with the GUI listener. This is the static "disjoint
+// GUI-vs-daemon" planning guard enforced at manifest validation (DM-2);
+// runtime collisions against a non-default operator-configured GUI port are
+// separately caught by install Preflight. Keep in sync with the api band map
+// in internal/api/global_port_alloc.go (which documents 9125 as the GUI port
+// carved OUTSIDE every daemon band) and the settings default in
+// internal/api/settings_registry.go.
+const ReservedGUIPort = 9125
+
 func (m *ServerManifest) Validate() error {
 	if m.Name == "" {
 		return fmt.Errorf("manifest: name is required")
@@ -443,6 +454,17 @@ func (m *ServerManifest) Validate() error {
 
 	if m.Command == "" {
 		return fmt.Errorf("manifest %s: command is required", m.Name)
+	}
+	// Port-planning gate (DM-2): a fixed daemon port must not squat the GUI
+	// listener port. Applies to any non-remote-http manifest with declared
+	// daemons (remote-http returned above; workspace-scoped pools declare a
+	// range, not a fixed port, and are unaffected since a pool start of 9125
+	// is itself outside every reserved pool band).
+	for i := range m.Daemons {
+		if m.Daemons[i].Port == ReservedGUIPort {
+			return fmt.Errorf("manifest %s: daemons[%d] (%q) declares port %d, the reserved GUI listener port; choose a port outside the GUI/infra range (hand-assigned globals use 9121–9149 per configs/ports.yaml)",
+				m.Name, i, m.Daemons[i].Name, ReservedGUIPort)
+		}
 	}
 	if m.Kind == KindWorkspaceScoped {
 		// Dynamic-pool branch (Phase D.1): per-workspace daemon spawned
