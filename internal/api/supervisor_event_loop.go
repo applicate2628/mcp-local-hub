@@ -1,6 +1,9 @@
 package api
 
-import "context"
+import (
+	"context"
+	"sync/atomic"
+)
 
 // LoopEvent is the supervisor's FIFO event envelope. Per spec Q4 v13.
 type LoopEvent struct {
@@ -39,9 +42,18 @@ type LoopEvent struct {
 // handler that just returned - so the priority-drain on next iteration
 // guarantees the self-event lands before any external work.
 type EventLoop struct {
-	ch       chan LoopEvent
-	selfCh   chan LoopEvent
-	handlers []func(LoopEvent)
+	ch     chan LoopEvent
+	selfCh chan LoopEvent
+	// handlers is copy-on-write via an atomic pointer so RegisterHandler —
+	// which the supervisor calls AFTER `go loop.Run` has already started (the
+	// ctrl.handleLoopEvent registration at supervise.go can only happen once
+	// ctrl is constructed, which is after the loop goroutine launches) —
+	// cannot data-race the dispatch goroutine's read of the slice. Conc-F5
+	// (PR #268 deep-sec P3): the old plain-slice `append` was verified safe
+	// only because no producer Posts in the register→Run window, an invariant
+	// one early producer away from a genuine -race hit. COW removes the
+	// dependency without restructuring supervise.go's ctrl-construction order.
+	handlers atomic.Pointer[[]func(LoopEvent)]
 
 	// onPanic, when set via SetPanicHandler, is invoked if a handler
 	// panics during dispatch. It exists ONLY to make an otherwise-silent
@@ -68,7 +80,25 @@ func NewEventLoop(capacity int) *EventLoop {
 }
 
 func (l *EventLoop) RegisterHandler(h func(LoopEvent)) {
-	l.handlers = append(l.handlers, h)
+	// Copy-on-write: build a fresh slice (old + h) and atomically swap it in.
+	// Registration is rare (startup) and dispatch is hot, so COW keeps the hot
+	// path lock-free (a single atomic load in dispatch) while making concurrent
+	// registration safe. The CAS retry loop covers the (practically impossible
+	// but cheap to handle) case of two registrations racing.
+	for {
+		old := l.handlers.Load()
+		var next []func(LoopEvent)
+		if old != nil {
+			next = make([]func(LoopEvent), len(*old), len(*old)+1)
+			copy(next, *old)
+		} else {
+			next = make([]func(LoopEvent), 0, 1)
+		}
+		next = append(next, h)
+		if l.handlers.CompareAndSwap(old, &next) {
+			return
+		}
+	}
 }
 
 // SetPanicHandler installs an observer invoked when a handler panics
@@ -100,7 +130,11 @@ func (l *EventLoop) dispatch(e LoopEvent) {
 			}
 		}()
 	}
-	for _, h := range l.handlers {
+	hs := l.handlers.Load()
+	if hs == nil {
+		return
+	}
+	for _, h := range *hs {
 		h(e)
 	}
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -125,5 +126,55 @@ func TestEventLoop_PriorityDrainsSelfBeforeMain(t *testing.T) {
 	// after the main events. This is the priority-drain guarantee.
 	if g[0] != "self-1" {
 		t.Fatalf("priority drain failed: got order=%v; expected self-1 first", g)
+	}
+}
+
+// TestEventLoop_RegisterHandlerConcurrentWithRun is the Conc-F5 (PR #268
+// deep-sec P3) regression guard: the supervisor registers ctrl.handleLoopEvent
+// AFTER `go loop.Run` has already started (ctrl is constructed only after the
+// loop goroutine launches). The old plain-slice `append` in RegisterHandler
+// data-raced the dispatch goroutine's read of the slice. With the atomic
+// copy-on-write the registration is safe. Run under `-race`: pre-fix this fails
+// the race detector; post-fix it is clean. It also asserts the late-registered
+// handler actually receives events posted after its registration.
+func TestEventLoop_RegisterHandlerConcurrentWithRun(t *testing.T) {
+	loop := NewEventLoop(64)
+
+	var firstSeen, lateSeen atomic.Int64
+	// First handler registered before Run (the supervise.go:538 pattern).
+	loop.RegisterHandler(func(e LoopEvent) { firstSeen.Add(1) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	// Concurrently: keep posting events (dispatch reads handlers) WHILE a
+	// second handler is registered after Run started (the supervise.go:910
+	// pattern). This is the exact register→Run overlap Conc-F5 describes.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			loop.Post(LoopEvent{Kind: EvChildExit, TaskName: "T"})
+		}
+	}()
+	loop.RegisterHandler(func(e LoopEvent) { lateSeen.Add(1) })
+	// Post more events AFTER the late registration so the late handler is
+	// guaranteed some traffic it must observe.
+	for i := 0; i < 200; i++ {
+		loop.Post(LoopEvent{Kind: EvChildExit, TaskName: "T"})
+	}
+	wg.Wait()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && lateSeen.Load() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if firstSeen.Load() == 0 {
+		t.Fatalf("first handler never fired")
+	}
+	if lateSeen.Load() == 0 {
+		t.Fatalf("late-registered handler never received an event after registration")
 	}
 }
