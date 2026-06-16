@@ -1,12 +1,59 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/buildinfo"
 )
+
+// normalizeExePath resolves symlinks and cleans an executable path so two
+// references to the same on-disk binary compare equal. Best-effort: a
+// resolve error returns the cleaned-but-unresolved path so the caller can
+// still compare, and the caller treats a normalize failure as "no warning".
+func normalizeExePath(p string) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
+	return filepath.Clean(abs), nil
+}
+
+// pathShadowDiagnostic compares the running executable against the `mcphub`
+// the shell PATH resolves to. When they are DIFFERENT on-disk binaries (a
+// shadow — e.g. a stale npm-global `mcphub` ahead of a fresher dev deploy in
+// ~/.local/bin), it returns an operator warning naming both locations;
+// otherwise "". Pure + best-effort: any empty/unresolvable input yields ""
+// (never a false alarm). Paths compared case-insensitively (Windows FS is
+// case-insensitive; harmless on POSIX where real paths already match case).
+func pathShadowDiagnostic(runningExe, pathResolved string) string {
+	if runningExe == "" || pathResolved == "" {
+		return ""
+	}
+	a, errA := normalizeExePath(runningExe)
+	b, errB := normalizeExePath(pathResolved)
+	if errA != nil || errB != nil {
+		return ""
+	}
+	if strings.EqualFold(a, b) {
+		return ""
+	}
+	return fmt.Sprintf("the 'mcphub' on your PATH (%s) is NOT this running binary (%s); "+
+		"a fresh shell may run the shadowed one. Reconcile the two install locations, "+
+		"or invoke this binary by its full path.", b, a)
+}
 
 // SetBuildInfo retains the cli package's existing public surface so
 // main.main() doesn't need to switch to a new import path. It
@@ -44,6 +91,19 @@ Example:
 			cmd.Printf("  build date: %s\n", date)
 			cmd.Printf("  go version: %s\n", runtime.Version())
 			cmd.Printf("  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
+			// Running-binary location + PATH-shadow diagnostic: surfaces the
+			// case where a stale `mcphub` on PATH (e.g. an npm-global install)
+			// shadows a fresher dev deploy (~/.local/bin). Best-effort — a
+			// lookup failure prints nothing extra.
+			runningExe, _ := os.Executable()
+			if runningExe != "" {
+				cmd.Printf("  running:    %s\n", runningExe)
+			}
+			if resolved, lerr := exec.LookPath("mcphub"); lerr == nil {
+				if warn := pathShadowDiagnostic(runningExe, resolved); warn != "" {
+					cmd.Printf("  ⚠ shadow:   %s\n", warn)
+				}
+			}
 			cmd.Println()
 			cmd.Println("  homepage:   https://github.com/applicate2628/mcp-local-hub")
 			cmd.Println("  issues:     https://github.com/applicate2628/mcp-local-hub/issues")
