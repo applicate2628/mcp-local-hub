@@ -69,10 +69,10 @@ type stubDaemon struct {
 	// readAllBody on r get empty bytes). Tests assert on the captured
 	// bytes when they need to inspect the daemon-facing request
 	// payload (e.g. quote/backslash round-trip checks).
-	bodyMu        sync.Mutex
-	lastInitBody  []byte
-	lastListBody  []byte
-	lastCallBody  []byte
+	bodyMu       sync.Mutex
+	lastInitBody []byte
+	lastListBody []byte
+	lastCallBody []byte
 }
 
 func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
@@ -2182,6 +2182,97 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	}
 	if got := sess.InFlightCount(); got != 0 {
 		t.Errorf("inFlight=%d after self-heal want 0", got)
+	}
+}
+
+// TestSelfHealRetryInFlightCancellationUsesReplacementPort pins the
+// self-heal cancellation race: when a retry re-resolves a daemon onto a new
+// port, the in-flight row used by ForwardCancellation must point at that live
+// retry port, not the stale route port that failed before the retry.
+func TestSelfHealRetryInFlightCancellationUsesReplacementPort(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d2 := newStubDaemon(t, "d2-sid-fresh")
+
+	callEntered := make(chan struct{})
+	releaseCall := make(chan struct{})
+	var d2CancelCount atomic.Int32
+	d2.onCall = func(w http.ResponseWriter, r *http.Request) {
+		close(callEntered)
+		<-releaseCall
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"retry","result":{"content":[{"type":"text","text":"ok"}]}}`))
+	}
+	d2.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		if peekMethod(body) == "notifications/cancelled" {
+			d2CancelCount.Add(1)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: d2.port}}},
+	}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	clientReqID := json.RawMessage(`42`)
+	key, err := newRequestIDKey(clientReqID)
+	if err != nil {
+		t.Fatalf("newRequestIDKey: %v", err)
+	}
+	ref := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: d1.port, RawName: "read"}
+	if !sess.InsertInFlight(key, inflightEntry{
+		DaemonRef:       canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port},
+		DaemonSessionID: "d1-sid",
+		DaemonProtocol:  sess.ProtocolVersion,
+		DaemonRequestID: json.RawMessage(`"stale-attempt"`),
+		StartedAt:       time.Now(),
+	}) {
+		t.Fatalf("setup: InsertInFlight returned false")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := sess.selfHealRetry(ctx, ref, key, json.RawMessage(`{"name":"read","arguments":{}}`))
+		done <- ok
+	}()
+
+	select {
+	case <-callEntered:
+	case <-ctx.Done():
+		t.Fatalf("replacement daemon did not receive retry before timeout: %v", ctx.Err())
+	}
+
+	entry, ok := sess.LookupInFlight(key)
+	if !ok {
+		t.Fatalf("in-flight row missing while retry is running")
+	}
+	if entry.DaemonRef.Port != d2.port {
+		t.Fatalf("retry in-flight DaemonRef.Port=%d want replacement port %d", entry.DaemonRef.Port, d2.port)
+	}
+
+	ForwardCancellation(ctx, sess, clientReqID)
+	if d2CancelCount.Load() != 1 {
+		t.Errorf("replacement daemon cancellation count=%d want 1", d2CancelCount.Load())
+	}
+	if d1.notifyCount.Load() != 0 {
+		t.Errorf("stale daemon notifyCount=%d want 0", d1.notifyCount.Load())
+	}
+
+	close(releaseCall)
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatalf("selfHealRetry returned ok=false")
+		}
+	case <-ctx.Done():
+		t.Fatalf("selfHealRetry did not finish before timeout: %v", ctx.Err())
 	}
 }
 

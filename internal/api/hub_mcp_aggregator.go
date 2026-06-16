@@ -737,7 +737,6 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 	if !ok {
 		return nil, false // daemon still down → caller returns the original -32000
 	}
-	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
 
 	retryReqID, err := generateDaemonRequestID()
 	if err != nil {
@@ -748,7 +747,7 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 	// defer RemoveInFlight still balances the original Insert).
 	s.RemoveInFlight(inflightKey)
 	s.InsertInFlight(inflightKey, inflightEntry{
-		DaemonRef:       daemonKey,
+		DaemonRef:       canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port},
 		DaemonSessionID: sid,
 		DaemonProtocol:  proto,
 		DaemonRequestID: retryReqID,
