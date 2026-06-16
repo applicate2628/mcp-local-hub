@@ -119,6 +119,21 @@ const maxPendingRequests = 128
 //   short enough to fail fast when descendants are reparenting.
 const pipeDrainTimeout = 5 * time.Second
 
+// stdioToolResponseTimeout bounds how long the StdioHost bridge waits for the
+// child MCP server's reply to a single request before returning 504. It must
+// exceed the longest legitimate tool execution: a tools/call IS the tool's run,
+// and a long tool (drmemory_run instrumenting a binary under DynamoRIO — slow
+// on first run, default timeout_sec 1200; or a long build/ctest via
+// run_in_oneapi_env, default 600) holds the reply for many minutes. The earlier
+// 30 s cap returned a spurious 504 ("subprocess response timeout") before the
+// tool's own timeout could fire (observed live: drmemory first-run 504'd at
+// ~34 s). The real bounds remain the per-request r.Context() (client
+// disconnect), h.childExited (child death), h.done (host shutdown), and the
+// tool's own timeout_sec. 30 min is a generous backstop above the longest tool
+// default that still caps a truly-wedged child; fast methods (initialize,
+// tools/list) reply in ms and never approach it.
+const stdioToolResponseTimeout = 30 * time.Minute
+
 // requireJSONContentType returns true if Content-Type parses as exactly
 // `application/json` (case-insensitive media type, parameters allowed).
 // Empty Content-Type is rejected — MCP POST clients are required to set
@@ -982,7 +997,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	case <-h.childExited:
 		// Child died while we were waiting for its reply. Return 502 so the
 		// client sees a distinct, immediate failure instead of blocking the
-		// full 30s timeout. The outer daemon loop observes the same signal
+		// full stdioToolResponseTimeout. The outer daemon loop observes the same signal
 		// and exits non-zero so the scheduler can restart the whole task.
 		// Codex CLI xhigh re-review on 479cbc3 (P2): re-check respCh — a
 		// reply that landed between the peer-arm select and here must win.
@@ -1005,7 +1020,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "subprocess died unexpectedly", http.StatusBadGateway)
 	case <-r.Context().Done():
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
-	case <-time.After(30 * time.Second):
+	case <-time.After(stdioToolResponseTimeout):
 		http.Error(w, "subprocess response timeout", http.StatusGatewayTimeout)
 	}
 }
