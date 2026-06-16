@@ -361,9 +361,14 @@ func liveEntryMatchesManifestBinding(live *clients.MCPEntry, server string, bind
 	if urlPath == "" {
 		urlPath = "/mcp"
 	}
-	// HTTP shape check.
+	// HTTP shape check. This is a RECOGNITION matcher (not a URL builder), so it
+	// must accept ALL loopback spellings a live entry may carry: the legacy
+	// "localhost" form (pre-127.0.0.1-migration entries, or a restore from an old
+	// backup), the current canonical "127.0.0.1" form the hub now writes, and the
+	// IPv6 "[::1]" form. Dropping "localhost" here would make a still-localhost
+	// on-disk entry fail to match its own manifest binding.
 	expectedURLs := []string{
-		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath),
 		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
 		fmt.Sprintf("http://[::1]:%d%s", daemonPort, urlPath),
 	}

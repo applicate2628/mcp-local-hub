@@ -5,7 +5,47 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
+
+// TestLiveEntryMatchesManifestBinding_RecognizesAllLoopbackForms guards the
+// recognition matcher against the localhost->127.0.0.1 migration regression: a
+// live HTTP entry must match its manifest binding regardless of loopback
+// spelling — legacy "localhost", the canonical "127.0.0.1" the hub now writes,
+// or IPv6 "[::1]". The migration once collapsed the localhost form out of the
+// expected-URL list (a duplicate 127.0.0.1), which would silently fail-match a
+// still-localhost on-disk entry against its own binding.
+func TestLiveEntryMatchesManifestBinding_RecognizesAllLoopbackForms(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:    "memory",
+		Daemons: []config.DaemonSpec{{Name: "default", Port: 9123}},
+	}
+	binding := config.ClientBinding{Daemon: "default", URLPath: "/mcp"}
+
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"localhost form (legacy / pre-migration entry)", "http://localhost:9123/mcp", true},
+		{"127.0.0.1 form (current canonical)", "http://127.0.0.1:9123/mcp", true},
+		{"[::1] IPv6 form", "http://[::1]:9123/mcp", true},
+		{"wrong port does not match", "http://127.0.0.1:9999/mcp", false},
+		{"wrong path does not match", "http://127.0.0.1:9123/other", false},
+		{"non-loopback remote does not match", "https://api.example.com/mcp", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			live := &clients.MCPEntry{URL: tc.url}
+			matched, _ := liveEntryMatchesManifestBinding(live, "memory", binding, m)
+			if matched != tc.want {
+				t.Errorf("liveEntryMatchesManifestBinding(url=%q) matched=%v, want %v", tc.url, matched, tc.want)
+			}
+		})
+	}
+}
 
 // managedEntriesTestHelper redirects DaemonStateDir() to a
 // DACL-hardened scratch dir for the duration of the test. The
