@@ -117,6 +117,30 @@ func TestReadResultsTxt_PicksNewestSubdir(t *testing.T) {
 	}
 }
 
+// TestFormatCommandLine quotes space-bearing tokens (the real drmemory.exe
+// lives under "C:\Program Files (x86)\Dr. Memory\bin64\") so the surfaced
+// command line stays one pasteable token per arg.
+func TestFormatCommandLine(t *testing.T) {
+	exe := `C:\Program Files (x86)\Dr. Memory\bin64\drmemory.exe`
+	args := []string{"-batch", "-logdir", `C:\tmp\logs`, "--", `C:\proj\app.exe`, "--flag"}
+	got := formatCommandLine(exe, args)
+
+	// The space-bearing exe path must be wrapped in quotes.
+	if !strings.Contains(got, `"`+exe+`"`) {
+		t.Errorf("command line did not quote the space-bearing exe path: %s", got)
+	}
+	// Space-free args must NOT be quoted.
+	if strings.Contains(got, `"-batch"`) {
+		t.Errorf("space-free arg was needlessly quoted: %s", got)
+	}
+	// Every token must be present.
+	for _, want := range append([]string{exe}, args...) {
+		if !strings.Contains(got, want) {
+			t.Errorf("command line missing token %q: %s", want, got)
+		}
+	}
+}
+
 // TestTruncate caps oversized bodies with a visible marker.
 func TestTruncate(t *testing.T) {
 	if got := truncate("short", 100); got != "short" {

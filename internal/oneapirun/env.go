@@ -2,10 +2,19 @@ package oneapirun
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"mcp-local-hub/internal/oneapi"
 )
+
+// tempKeys are the environment variable names that point native toolchains
+// (icx-cl, link, ml64, …) at a scratch directory for intermediate files.
+// Both must point at a WRITABLE dir — the live host inherits TEMP=r:\Temp
+// (a RAM disk) which fails icx-cl with "error #10026: error generating
+// temporary file".
+var tempKeys = []string{"TEMP", "TMP"}
 
 // envSource labels which environment composition the run used, so the
 // caller can tell whether the command saw the full VS toolchain, only the
@@ -109,12 +118,164 @@ func computeRunEnv(captureVS func() ([]string, bool), oneAPIDirs func() []string
 	dllDirs := oneAPIDirs()
 
 	if vsEnv, ok := captureVS(); ok {
-		return prependOneAPIToPath(vsEnv, dllDirs), envSourceVcvarsOneAPI
+		env, source = prependOneAPIToPath(vsEnv, dllDirs), envSourceVcvarsOneAPI
+	} else if len(dllDirs) > 0 {
+		env, source = prependOneAPIToPath(os.Environ(), dllDirs), envSourceOneAPIOnly
+	} else {
+		env, source = os.Environ(), envSourcePlain
 	}
 
-	if len(dllDirs) > 0 {
-		return prependOneAPIToPath(os.Environ(), dllDirs), envSourceOneAPIOnly
+	// Every env_source path gets a hub-owned writable TEMP/TMP. The child
+	// inherits the parent's TEMP (often a RAM disk such as r:\Temp on the
+	// live host) which fails icx-cl with "error #10026: error generating
+	// temporary file". The working oneapi-shell.cmd wrapper sets TEMP to a
+	// writable repo dir + mkdir's it; we do the equivalent here so the agent
+	// never has to. Best-effort: if the dir can't be created TEMP is left
+	// as-is rather than blocking the run.
+	env = withWritableTemp(env)
+	return env, source
+}
+
+// envValue reads the value of the named env-var KEY from a "KEY=VALUE"
+// slice, matching the key case-insensitively (Windows treats env-var names
+// case-insensitively, and a vcvars `set` dump can emit "Path" not "PATH").
+// Returns ("", false) when no entry matches. The first matching entry wins.
+func envValue(env []string, key string) (string, bool) {
+	for _, entry := range env {
+		k, v, hasEq := strings.Cut(entry, "=")
+		if hasEq && strings.EqualFold(k, key) {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// resolveCommandPath resolves a bare command NAME against the PATH carried
+// in the COMPUTED CHILD env (not the server process's own PATH). This is
+// the fix for the classic Go-exec bug: exec.CommandContext resolves a bare
+// command via LookPath against the server's os.Getenv("PATH") BEFORE cmd.Env
+// is applied, so a tool that only exists on the augmented child PATH (oneAPI
+// / VS dirs prepended) fails to start (e.g. icx-cl resolves to "not found"
+// even though `where icx-cl` under the child env finds it). By pre-resolving
+// against the child PATH and handing exec an absolute path, exec skips its
+// own LookPath entirely.
+//
+// Behavior:
+//   - If command already contains a path separator (filepath.Separator or
+//     '/'), it is returned unchanged — the caller gave an explicit path.
+//   - Otherwise PATH is read from env (case-insensitively) and each dir in
+//     filepath.SplitList(PATH) is probed for command + each executable
+//     extension (Windows: PATHEXT from the child env, default
+//     ".COM;.EXE;.BAT;.CMD"; non-Windows: the bare name). The first existing
+//     regular file is returned.
+//   - If nothing resolves, command is returned UNCHANGED so exec surfaces a
+//     clear "executable file not found" error rather than this helper
+//     swallowing the failure.
+func resolveCommandPath(command string, env []string) string {
+	if strings.ContainsRune(command, filepath.Separator) || strings.ContainsRune(command, '/') {
+		return command
 	}
 
-	return os.Environ(), envSourcePlain
+	pathVal, ok := envValue(env, oneapi.PathKey)
+	if !ok || pathVal == "" {
+		return command
+	}
+
+	exts := commandExtensions(command, env)
+	for _, dir := range filepath.SplitList(pathVal) {
+		if dir == "" {
+			continue
+		}
+		for _, ext := range exts {
+			candidate := filepath.Join(dir, command+ext)
+			if isRegularFile(candidate) {
+				return candidate
+			}
+		}
+	}
+	return command
+}
+
+// isRegularFile reports whether path names an existing regular file (not a
+// directory). Used by resolveCommandPath to confirm a candidate before
+// returning it as the resolved command.
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular()
+}
+
+// hubTempDir computes the hub-owned writable scratch directory used for the
+// child's TEMP/TMP. On Windows it is %LOCALAPPDATA%\mcp-local-hub\
+// oneapi-run-tmp (falling back to <home>\.mcphub-oneapi-tmp when LOCALAPPDATA
+// is empty). On non-Windows os.TempDir() is already writable, so it is used
+// directly. Returns ("", false) only when no candidate directory can be
+// derived at all (no LOCALAPPDATA and no home dir on Windows).
+func hubTempDir() (string, bool) {
+	if runtime.GOOS != "windows" {
+		return os.TempDir(), true
+	}
+	if la := os.Getenv("LOCALAPPDATA"); la != "" {
+		return filepath.Join(la, "mcp-local-hub", "oneapi-run-tmp"), true
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".mcphub-oneapi-tmp"), true
+	}
+	return "", false
+}
+
+// withWritableTemp returns env with TEMP and TMP overridden (case-insensitive
+// replace-or-append) to a hub-owned writable directory, creating that
+// directory with os.MkdirAll first. It is BEST-EFFORT: if the directory
+// cannot be derived or created, env is returned unchanged so a failed temp
+// setup never blocks the run. The override (not merely a default-if-absent)
+// is deliberate — the inherited TEMP=r:\Temp must be REPLACED, not preserved.
+func withWritableTemp(env []string) []string {
+	dir, ok := hubTempDir()
+	if !ok {
+		return env
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		// Best-effort: leave TEMP as-is rather than blocking the run.
+		return env
+	}
+	return setEnvOverride(env, tempKeys, dir)
+}
+
+// setEnvOverride returns a copy of env with every key in keys set to val,
+// matching existing entries case-insensitively (so an inherited "Temp=..."
+// is replaced, not duplicated alongside a new "TEMP="). A key absent from
+// env is appended (canonical upper-case form). The casing of a replaced
+// entry's existing KEY is preserved. Other entries are kept verbatim and in
+// order.
+func setEnvOverride(env []string, keys []string, val string) []string {
+	out := make([]string, 0, len(env)+len(keys))
+	seen := make(map[string]bool, len(keys))
+
+	for _, entry := range env {
+		key, _, hasEq := strings.Cut(entry, "=")
+		replaced := false
+		if hasEq {
+			for _, k := range keys {
+				if strings.EqualFold(key, k) {
+					out = append(out, key+"="+val)
+					seen[strings.ToUpper(k)] = true
+					replaced = true
+					break
+				}
+			}
+		}
+		if !replaced {
+			out = append(out, entry)
+		}
+	}
+
+	for _, k := range keys {
+		if !seen[strings.ToUpper(k)] {
+			out = append(out, k+"="+val)
+		}
+	}
+	return out
 }

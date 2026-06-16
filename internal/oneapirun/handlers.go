@@ -95,7 +95,31 @@ func registerTools(rs *OneAPIRunServer) {
 // runInOneAPIEnvTool is the run_in_oneapi_env handler. It computes the
 // VS+oneAPI environment, runs the requested native command under that env
 // + cwd + timeout, and returns the structured runResult as JSON.
-func (rs *OneAPIRunServer) runInOneAPIEnvTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (rs *OneAPIRunServer) runInOneAPIEnvTool(ctx context.Context, req *mcp.CallToolRequest) (result *mcp.CallToolResult, retErr error) {
+	// NEVER return an empty/crashing result. A panic anywhere in the handler
+	// (a marshal edge case, an env-merge surprise, a runtime fault) is
+	// recovered here and turned into a structured runResult JSON with
+	// exit_code -1 and the panic on stderr, so the MCP client always gets a
+	// parseable answer instead of an empty result or a dropped daemon.
+	defer func() {
+		if r := recover(); r != nil {
+			res := runResult{
+				ExitCode: -1,
+				Stderr:   fmt.Sprintf("oneapi-run: internal panic: %v", r),
+			}
+			payload, err := json.Marshal(res)
+			if err != nil {
+				// Last-resort: a hand-built JSON string so we still return
+				// structured, non-empty content (never an empty result).
+				payload = []byte(`{"exit_code":-1,"stderr":"oneapi-run: internal panic (and result marshal failed)"}`)
+			}
+			result = &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: string(payload)}},
+			}
+			retErr = nil
+		}
+	}()
+
 	var args struct {
 		Command    string   `json:"command"`
 		Args       []string `json:"args"`
@@ -139,10 +163,22 @@ func runCommand(ctx context.Context, command string, args []string, cwd string, 
 
 	start := time.Now()
 
+	// Resolve the command against the COMPUTED CHILD env's PATH first.
+	// exec.CommandContext resolves a bare command NAME via LookPath against
+	// the SERVER process's PATH (os.Getenv) BEFORE cmd.Env is applied, so a
+	// tool that only exists on the augmented child PATH (oneAPI / VS dirs
+	// prepended) fails to start (observed live: command:"icx-cl" → "exec:
+	// icx-cl: executable file not found in %PATH%" even though `where icx-cl`
+	// under the child env finds it). Handing exec an already-resolved
+	// absolute path makes it skip its own LookPath. resolveCommandPath
+	// returns the command unchanged when it already bears a path separator
+	// or when it cannot be resolved (so exec still surfaces a clear error).
+	resolved := resolveCommandPath(command, env)
+
 	// Run the command DIRECTLY — no shell interpretation. This avoids
 	// Git-Bash path mangling and cmd.exe quoting surprises; the caller
 	// supplies a native command + native-path args.
-	cmd := exec.CommandContext(runCtx, command, args...)
+	cmd := exec.CommandContext(runCtx, resolved, args...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
 	cmd.Env = env
 	if cwd != "" {

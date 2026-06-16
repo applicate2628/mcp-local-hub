@@ -8,19 +8,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"mcp-local-hub/internal/process"
 )
 
 // runOutput is the result of one Dr. Memory invocation: the target's
 // exit code (Dr. Memory forwards the instrumented process's exit code),
-// the raw results.txt body, the stderr Dr. Memory itself emitted, and the
-// resolved path to results.txt (empty when none was produced).
+// the raw results.txt body, the stderr Dr. Memory itself emitted, the
+// resolved path to results.txt (empty when none was produced), and the
+// exact drmemory.exe command line that was executed (so a failing launch is
+// reproducible / diagnosable from the structured result).
 type runOutput struct {
 	ExitCode    int
 	ResultsText string
 	Stderr      string
 	ResultsPath string
+	CommandLine string
 }
 
 // runFunc is the injectable seam that invokes Dr. Memory on a target.
@@ -56,6 +60,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 	defer os.RemoveAll(logdir)
 
 	cmdArgs := buildDrMemoryArgs(logdir, target, args, light, checkUninit)
+	commandLine := formatCommandLine(exePath, cmdArgs)
 
 	cmd := exec.CommandContext(ctx, exePath, cmdArgs...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
@@ -78,8 +83,17 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 			// are found; it is NOT a runner failure. Capture the code.
 			exitCode = ee.ExitCode()
 		} else {
-			// Genuine spawn failure (binary not executable, ctx cancelled).
-			return nil, fmt.Errorf("run drmemory: %w (stderr: %s)", runErr, truncate(stderr.String(), 2000))
+			// Genuine spawn failure (binary not executable, DynamoRIO
+			// first-run setup failing, ctx cancelled). Return a POPULATED
+			// runOutput alongside the error so the handler can surface the
+			// command line + captured stderr in the structured result rather
+			// than dropping it into an empty answer.
+			out := &runOutput{
+				ExitCode:    -1,
+				Stderr:      truncate(stderr.String(), drMemoryOutputCap),
+				CommandLine: commandLine,
+			}
+			return out, fmt.Errorf("run drmemory: %w (stderr: %s)", runErr, truncate(stderr.String(), 2000))
 		}
 	}
 
@@ -90,7 +104,30 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 		ResultsText: body,
 		Stderr:      truncate(stderr.String(), drMemoryOutputCap),
 		ResultsPath: resultsPath,
+		CommandLine: commandLine,
 	}, nil
+}
+
+// formatCommandLine joins the drmemory.exe path and its argv into a single
+// human-readable command line for the structured result, quoting any token
+// that contains whitespace so a reader can paste it back into a shell.
+func formatCommandLine(exePath string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, quoteIfSpaced(exePath))
+	for _, a := range args {
+		parts = append(parts, quoteIfSpaced(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+// quoteIfSpaced wraps s in double quotes when it contains whitespace, so a
+// space-bearing path (e.g. C:\Program Files (x86)\...) stays one token in
+// the surfaced command line.
+func quoteIfSpaced(s string) string {
+	if strings.ContainsAny(s, " \t") {
+		return `"` + s + `"`
+	}
+	return s
 }
 
 // buildDrMemoryArgs assembles the drmemory.exe argv. Kept separate from

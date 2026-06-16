@@ -3,6 +3,7 @@ package oneapirun
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -431,8 +432,206 @@ func TestCappedBuffer_UnderLimitNoMarker(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// resolveCommandPath — BUG 1: resolve against the CHILD env's PATH.
+// ---------------------------------------------------------------------------
+
+// fakeExeName returns a platform-appropriate fake executable basename and the
+// bare command name a caller would pass (no extension). On Windows the file
+// needs an extension that PATHEXT recognizes (.exe); elsewhere a bare name +
+// 0755 mode is enough.
+func fakeExeName() (file string, bare string) {
+	if runtime.GOOS == "windows" {
+		return "icx-cl.exe", "icx-cl"
+	}
+	return "icx-cl", "icx-cl"
+}
+
+func TestResolveCommandPath_FindsExeOnChildPathNotServerPath(t *testing.T) {
+	// Place a fake executable in a dir that is ONLY on the CHILD env's PATH,
+	// never on the server (os.Getenv) PATH. resolveCommandPath must find it
+	// there — proving it resolves against the passed-in env, not the process
+	// environment (the BUG 1 fix).
+	dir := t.TempDir()
+	file, bare := fakeExeName()
+	exePath := filepath.Join(dir, file)
+	if err := os.WriteFile(exePath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	childEnv := []string{"PATH=" + dir, "OTHER=x"}
+	got := resolveCommandPath(bare, childEnv)
+	if !samePath(got, exePath) {
+		t.Errorf("resolveCommandPath(%q) = %q, want %q (resolved against child PATH)", bare, got, exePath)
+	}
+}
+
+func TestResolveCommandPath_CaseInsensitivePathKey(t *testing.T) {
+	// vcvars `set` can emit "Path=" — resolution must still read it.
+	dir := t.TempDir()
+	file, bare := fakeExeName()
+	exePath := filepath.Join(dir, file)
+	if err := os.WriteFile(exePath, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	childEnv := []string{"Path=" + dir}
+	if got := resolveCommandPath(bare, childEnv); !samePath(got, exePath) {
+		t.Errorf("resolveCommandPath with 'Path' key = %q, want %q", got, exePath)
+	}
+}
+
+func TestResolveCommandPath_SeparatorBearingReturnedUnchanged(t *testing.T) {
+	// A command that already carries a path separator is an explicit path —
+	// returned verbatim, never re-resolved.
+	for _, cmd := range []string{`C:\build\app.exe`, "/usr/bin/gdb", "sub/dir/tool"} {
+		if got := resolveCommandPath(cmd, []string{"PATH=" + t.TempDir()}); got != cmd {
+			t.Errorf("resolveCommandPath(%q) = %q, want unchanged", cmd, got)
+		}
+	}
+}
+
+func TestResolveCommandPath_UnresolvedReturnedUnchanged(t *testing.T) {
+	// A bare name absent from every PATH dir is returned unchanged so exec
+	// surfaces a clear "not found" error instead of this helper swallowing it.
+	childEnv := []string{"PATH=" + t.TempDir()}
+	if got := resolveCommandPath("definitely-not-a-real-binary", childEnv); got != "definitely-not-a-real-binary" {
+		t.Errorf("unresolved command = %q, want unchanged", got)
+	}
+}
+
+func TestResolveCommandPath_NoPathEntryReturnsUnchanged(t *testing.T) {
+	if got := resolveCommandPath("icx-cl", []string{"OTHER=x"}); got != "icx-cl" {
+		t.Errorf("no-PATH env: resolveCommandPath = %q, want unchanged", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// withWritableTemp / setEnvOverride — BUG 2: writable TEMP/TMP.
+// ---------------------------------------------------------------------------
+
+func TestSetEnvOverride_ReplacesInheritedValueCaseInsensitive(t *testing.T) {
+	// The inherited "Temp=r:\Temp" (RAM disk) must be REPLACED, not left in
+	// place and not duplicated alongside a new TEMP entry.
+	env := []string{"Temp=r:\\Temp", "TMP=r:\\Temp", "PATH=C:\\x"}
+	out := setEnvOverride(env, tempKeys, "C:\\writable")
+
+	tempVal, _ := envValue(out, "TEMP")
+	tmpVal, _ := envValue(out, "TMP")
+	if tempVal != "C:\\writable" {
+		t.Errorf("TEMP = %q, want C:\\writable (inherited value must be replaced)", tempVal)
+	}
+	if tmpVal != "C:\\writable" {
+		t.Errorf("TMP = %q, want C:\\writable", tmpVal)
+	}
+	// PATH untouched.
+	if v, _ := envValue(out, "PATH"); v != "C:\\x" {
+		t.Errorf("PATH changed: %q", v)
+	}
+	// No duplicate TEMP/TMP entries.
+	if n := countKeys(out, "TEMP"); n != 1 {
+		t.Errorf("got %d TEMP entries, want exactly 1: %v", n, out)
+	}
+	if n := countKeys(out, "TMP"); n != 1 {
+		t.Errorf("got %d TMP entries, want exactly 1: %v", n, out)
+	}
+	// Original casing of the replaced key is preserved.
+	if !containsEntry(out, "Temp=C:\\writable") {
+		t.Errorf("expected the 'Temp' key casing preserved: %v", out)
+	}
+}
+
+func TestSetEnvOverride_AppendsWhenAbsent(t *testing.T) {
+	env := []string{"PATH=C:\\x"}
+	out := setEnvOverride(env, tempKeys, "C:\\w")
+	if v, _ := envValue(out, "TEMP"); v != "C:\\w" {
+		t.Errorf("TEMP not appended: %v", out)
+	}
+	if v, _ := envValue(out, "TMP"); v != "C:\\w" {
+		t.Errorf("TMP not appended: %v", out)
+	}
+}
+
+func TestWithWritableTemp_CreatesDirAndOverridesTempTmp(t *testing.T) {
+	// Point LOCALAPPDATA (and HOME for the non-Windows path) at a temp root so
+	// the hub temp dir is created under the test sandbox, never the real
+	// %LOCALAPPDATA%.
+	root := t.TempDir()
+	t.Setenv("LOCALAPPDATA", root)
+
+	env := []string{"TEMP=r:\\Temp", "TMP=r:\\Temp"}
+	out := withWritableTemp(env)
+
+	tempVal, ok := envValue(out, "TEMP")
+	if !ok {
+		t.Fatalf("TEMP missing from env: %v", out)
+	}
+	if tempVal == "r:\\Temp" {
+		t.Errorf("TEMP not overridden (still the inherited RAM-disk value): %q", tempVal)
+	}
+	// The override dir must actually EXIST (MkdirAll ran).
+	info, err := os.Stat(tempVal)
+	if err != nil || !info.IsDir() {
+		t.Errorf("TEMP dir %q was not created: err=%v", tempVal, err)
+	}
+	// TMP must match TEMP.
+	if tmpVal, _ := envValue(out, "TMP"); tmpVal != tempVal {
+		t.Errorf("TMP = %q, want = TEMP %q", tmpVal, tempVal)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// panic recovery — BUG 3: ALWAYS return structured JSON, never empty/crash.
+// ---------------------------------------------------------------------------
+
+func TestRunInOneAPIEnvTool_PanicRecoveredToStructuredJSON(t *testing.T) {
+	// Force a panic from inside the handler via a seam that panics, then
+	// assert the deferred recover produced a structured runResult JSON (never
+	// empty, never a crash) with exit_code -1 and the panic on stderr.
+	rs := &OneAPIRunServer{
+		captureVSEnv:  func() ([]string, bool) { panic("simulated env-merge fault") },
+		oneAPIDLLDirs: func() []string { return nil },
+	}
+	rawArgs, _ := json.Marshal(map[string]any{"command": "anything", "timeout_sec": 5})
+	result, err := rs.runInOneAPIEnvTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("handler returned a Go error instead of recovering: %v", err)
+	}
+	if result == nil {
+		t.Fatal("handler returned nil result on panic (must be structured, non-empty)")
+	}
+	res := decodeRunResult(t, result)
+	if res.ExitCode != -1 {
+		t.Errorf("exit_code = %d, want -1 on panic", res.ExitCode)
+	}
+	if !strings.Contains(res.Stderr, "internal panic") {
+		t.Errorf("stderr = %q, want to mention internal panic", res.Stderr)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+// samePath compares two paths for equality, case-insensitively on Windows
+// (NTFS is case-insensitive; filepath.Join preserves the casing the caller
+// passed, so a candidate built as "icx-cl.EXE" legitimately resolves to the
+// on-disk "icx-cl.exe"). On other platforms the comparison is exact.
+func samePath(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func countKeys(env []string, key string) int {
+	n := 0
+	for _, e := range env {
+		k, _, ok := strings.Cut(e, "=")
+		if ok && strings.EqualFold(k, key) {
+			n++
+		}
+	}
+	return n
+}
 
 func containsEntry(env []string, want string) bool {
 	for _, e := range env {

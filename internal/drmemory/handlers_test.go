@@ -142,9 +142,11 @@ func TestRunTool_ParsesInjectedResults(t *testing.T) {
 	}
 }
 
-// TestRunTool_DrMemoryNotFound verifies the clear not-found error path:
-// when findExe returns ErrDrMemoryNotFound the handler surfaces it as a
-// tool-level error WITHOUT ever invoking the runner.
+// TestRunTool_DrMemoryNotFound verifies the not-found path surfaces a
+// STRUCTURED, non-empty result (never an opaque IsError text, never empty)
+// carrying the install-guidance error in the `error` field — WITHOUT ever
+// invoking the runner. The "never empty / always structured" contract is the
+// fix for the live-agent "drmemory_run returns EMPTY" symptom.
 func TestRunTool_DrMemoryNotFound(t *testing.T) {
 	var runnerCalled bool
 	ds := &DrMemoryServer{
@@ -159,15 +161,23 @@ func TestRunTool_DrMemoryNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runTool returned error: %v", err)
 	}
-	if !res.IsError {
-		t.Fatal("expected IsError=true when drmemory.exe not found")
+	if res.IsError {
+		t.Fatal("expected a STRUCTURED result (IsError=false) when drmemory.exe not found, not a bare tool error")
 	}
 	if runnerCalled {
 		t.Error("runner invoked despite drmemory.exe not found — must short-circuit")
 	}
-	text := contentText(t, res)
-	if !strings.Contains(text, "drmemory.exe not found") {
-		t.Errorf("error message = %q, want to mention drmemory.exe not found", text)
+	// The body must be parseable JSON whose `error` names the not-found cause.
+	var parsed runResult
+	body := contentText(t, res)
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("not-found result is not valid JSON: %v\n%s", err, body)
+	}
+	if !strings.Contains(parsed.Error, "drmemory.exe not found") {
+		t.Errorf("error field = %q, want to mention drmemory.exe not found", parsed.Error)
+	}
+	if parsed.ExitCode != -1 {
+		t.Errorf("exit_code = %d, want -1 on not-found", parsed.ExitCode)
 	}
 }
 
@@ -221,23 +231,121 @@ func TestRunTool_DefaultsCheckUninitializedTrue(t *testing.T) {
 }
 
 // TestRunTool_RunnerFailureSurfaces verifies a genuine runner failure
-// (not an *exec.ExitError) is reported as a tool-level error.
+// (not an *exec.ExitError) is encoded into a STRUCTURED result (never empty)
+// carrying the cause + the resolved drmemory path + any captured stderr /
+// command line the runner attached, so a swallowed launch failure is visible.
 func TestRunTool_RunnerFailureSurfaces(t *testing.T) {
 	ds := &DrMemoryServer{
 		findExe: func() (string, error) { return `C:\fake\drmemory.exe`, nil },
 		run: func(context.Context, string, string, []string, string, bool, bool) (*runOutput, error) {
-			return nil, errFake
+			// Mimic defaultRun's launch-failure path: a populated runOutput
+			// (with stderr + command line) returned ALONGSIDE the error.
+			return &runOutput{
+				ExitCode:    -1,
+				Stderr:      "drmemory: failed to load client library",
+				CommandLine: `C:\fake\drmemory.exe -batch -logdir TMP -- C:\proj\t.exe`,
+			}, errFake
 		},
 	}
 	res, err := ds.runTool(t.Context(), newRequest(t, map[string]any{"exe": `C:\proj\t.exe`}))
 	if err != nil {
 		t.Fatalf("runTool: %v", err)
 	}
-	if !res.IsError {
-		t.Fatal("expected IsError=true on runner failure")
+	if res.IsError {
+		t.Fatal("expected a STRUCTURED result (IsError=false) on runner failure, not a bare tool error")
 	}
-	if !strings.Contains(contentText(t, res), "drmemory run failed") {
-		t.Errorf("unexpected error text: %s", contentText(t, res))
+	var parsed runResult
+	body := contentText(t, res)
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("runner-failure result is not valid JSON: %v\n%s", err, body)
+	}
+	if !strings.Contains(parsed.Error, "drmemory run failed") {
+		t.Errorf("error field = %q, want to mention 'drmemory run failed'", parsed.Error)
+	}
+	if parsed.DrMemoryPath != `C:\fake\drmemory.exe` {
+		t.Errorf("drmemory_path = %q, want the resolved exe path", parsed.DrMemoryPath)
+	}
+	if !strings.Contains(parsed.Stderr, "failed to load client library") {
+		t.Errorf("stderr not surfaced on failure: %q", parsed.Stderr)
+	}
+	if !strings.Contains(parsed.CommandLine, "drmemory.exe -batch") {
+		t.Errorf("command_line not surfaced on failure: %q", parsed.CommandLine)
+	}
+}
+
+// TestRunTool_PanicRecoveredToStructuredError verifies a panic in the runner
+// seam is recovered into a STRUCTURED error result (never an empty result,
+// never a crashed daemon — the "port went down" symptom).
+func TestRunTool_PanicRecoveredToStructuredError(t *testing.T) {
+	ds := &DrMemoryServer{
+		findExe: func() (string, error) { return `C:\fake\drmemory.exe`, nil },
+		run: func(context.Context, string, string, []string, string, bool, bool) (*runOutput, error) {
+			panic("simulated DynamoRIO first-run fault")
+		},
+	}
+	res, err := ds.runTool(t.Context(), newRequest(t, map[string]any{"exe": `C:\proj\t.exe`}))
+	if err != nil {
+		t.Fatalf("runTool returned a Go error instead of recovering: %v", err)
+	}
+	if res == nil {
+		t.Fatal("runTool returned nil result on panic (must be structured, non-empty)")
+	}
+	if res.IsError {
+		t.Fatal("expected a STRUCTURED result on panic, not a bare tool error")
+	}
+	var parsed runResult
+	body := contentText(t, res)
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("panic result is not valid JSON: %v\n%s", err, body)
+	}
+	if !strings.Contains(parsed.Error, "internal panic") {
+		t.Errorf("error field = %q, want to mention an internal panic", parsed.Error)
+	}
+	if parsed.ExitCode != -1 {
+		t.Errorf("exit_code = %d, want -1 on panic", parsed.ExitCode)
+	}
+}
+
+// TestRunTool_NoResultsTxtSurfacesError verifies the swallowed-failure mode:
+// a run that "succeeds" (no Go error) but produced NO results.txt and NO
+// summary must NOT look like a clean empty success — the handler attaches an
+// explicit `error` plus the exit code / stderr / command line so a failed
+// first-run (missing DynamoRIO bits) is diagnosable.
+func TestRunTool_NoResultsTxtSurfacesError(t *testing.T) {
+	ds := &DrMemoryServer{
+		findExe: func() (string, error) { return `C:\fake\drmemory.exe`, nil },
+		run: func(context.Context, string, string, []string, string, bool, bool) (*runOutput, error) {
+			return &runOutput{
+				ExitCode:    1,
+				ResultsText: "", // no results.txt written
+				ResultsPath: "",
+				Stderr:      "drmemory: error initializing DynamoRIO",
+				CommandLine: `C:\fake\drmemory.exe -batch -logdir TMP -- C:\proj\t.exe`,
+			}, nil
+		},
+	}
+	res, err := ds.runTool(t.Context(), newRequest(t, map[string]any{"exe": `C:\proj\t.exe`}))
+	if err != nil {
+		t.Fatalf("runTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected structured result, got IsError: %s", contentText(t, res))
+	}
+	var parsed runResult
+	if err := json.Unmarshal([]byte(contentText(t, res)), &parsed); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if parsed.Error == "" || !strings.Contains(parsed.Error, "no results.txt") {
+		t.Errorf("error field = %q, want to mention the missing results.txt", parsed.Error)
+	}
+	if !strings.Contains(parsed.Stderr, "initializing DynamoRIO") {
+		t.Errorf("stderr not surfaced: %q", parsed.Stderr)
+	}
+	if !strings.Contains(parsed.CommandLine, "drmemory.exe -batch") {
+		t.Errorf("command_line not surfaced: %q", parsed.CommandLine)
+	}
+	if parsed.DrMemoryPath != `C:\fake\drmemory.exe` {
+		t.Errorf("drmemory_path = %q, want resolved exe path", parsed.DrMemoryPath)
 	}
 }
 
