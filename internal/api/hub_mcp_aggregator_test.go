@@ -69,10 +69,10 @@ type stubDaemon struct {
 	// readAllBody on r get empty bytes). Tests assert on the captured
 	// bytes when they need to inspect the daemon-facing request
 	// payload (e.g. quote/backslash round-trip checks).
-	bodyMu        sync.Mutex
-	lastInitBody  []byte
-	lastListBody  []byte
-	lastCallBody  []byte
+	bodyMu       sync.Mutex
+	lastInitBody []byte
+	lastListBody []byte
+	lastCallBody []byte
 }
 
 func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
@@ -2233,5 +2233,109 @@ func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
 	}
 	if d1.initCount.Load() != initAfterFirst {
 		t.Errorf("stale mark not consumed: second call re-initialized again (initCount %d -> %d)", initAfterFirst, d1.initCount.Load())
+	}
+}
+
+// TestAggregateToolsCall_ConcurrentProactiveReinitRereadsFreshSID pins the
+// restart-race fixed after Aardvark's report: multiple tools/call requests can
+// resolve the old daemon session id before one caller consumes the stale-port
+// mark. Followers must wait for the proactive re-init and re-read the refreshed
+// daemon session id before dispatching, not send the old Mcp-Session-Id.
+func TestAggregateToolsCall_ConcurrentProactiveReinitRereadsFreshSID(t *testing.T) {
+	const oldSID = "d1-old-sid"
+	const freshSID = "d1-fresh-sid"
+
+	reinitStarted := make(chan struct{})
+	releaseReinit := make(chan struct{})
+	var reinitStartedOnce sync.Once
+	var callHeadersMu sync.Mutex
+	var callHeaders []string
+
+	d1 := newStubDaemon(t, oldSID)
+	d1.onInit = func(w http.ResponseWriter, r *http.Request) {
+		if d1.initCount.Load() >= 2 {
+			reinitStartedOnce.Do(func() { close(reinitStarted) })
+			select {
+			case <-releaseReinit:
+			case <-r.Context().Done():
+				return
+			}
+			w.Header().Set("Mcp-Session-Id", freshSID)
+		} else {
+			w.Header().Set("Mcp-Session-Id", oldSID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	d1.onCall = func(w http.ResponseWriter, r *http.Request) {
+		callHeadersMu.Lock()
+		callHeaders = append(callHeaders, r.Header.Get("Mcp-Session-Id"))
+		callHeadersMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"ok"}]}}`))
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+		t.Fatal(err)
+	}
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	sess.markStalePort(d1.port)
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+		firstDone <- err
+	}()
+
+	select {
+	case <-reinitStarted:
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for proactive re-init to start: %v", ctx.Err())
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := AggregateToolsCall(ctx, sess, json.RawMessage(`43`), params)
+		secondDone <- err
+	}()
+
+	// Give the follower a chance to reach the stale-port synchronization point
+	// while the first caller is still re-initializing.
+	time.Sleep(25 * time.Millisecond)
+	close(releaseReinit)
+
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first AggregateToolsCall: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second AggregateToolsCall: %v", err)
+	}
+
+	callHeadersMu.Lock()
+	gotHeaders := append([]string(nil), callHeaders...)
+	callHeadersMu.Unlock()
+	if len(gotHeaders) != 2 {
+		t.Fatalf("call headers = %v, want 2 calls", gotHeaders)
+	}
+	for i, got := range gotHeaders {
+		if got != freshSID {
+			t.Fatalf("call %d used Mcp-Session-Id %q, want fresh %q; all headers=%v", i, got, freshSID, gotHeaders)
+		}
+	}
+	if got := d1.initCount.Load(); got != 2 {
+		t.Fatalf("initCount=%d want 2 (initial + one coalesced proactive re-init)", got)
 	}
 }

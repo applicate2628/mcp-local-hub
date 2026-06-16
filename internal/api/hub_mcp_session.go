@@ -76,11 +76,11 @@ var ErrSessionCapExceeded = errors.New("session cap exceeded")
 // Production defaults applied when SessionStoreOpts zero values
 // are passed to NewHubSessionStore.
 const (
-	defaultMaxSessionsPerClient   = 16
-	defaultMaxSessionsGlobal      = 256
-	defaultSessionIdleTimeout     = 30 * time.Minute
-	defaultSessionSweepInterval   = 60 * time.Second
-	sessionIDByteLength           = 16 // 128-bit; hex-encodes to 32 chars
+	defaultMaxSessionsPerClient = 16
+	defaultMaxSessionsGlobal    = 256
+	defaultSessionIdleTimeout   = 30 * time.Minute
+	defaultSessionSweepInterval = 60 * time.Second
+	sessionIDByteLength         = 16 // 128-bit; hex-encodes to 32 chars
 )
 
 // SessionStoreOpts configures bound + sweep tuning. Zero values get
@@ -160,19 +160,39 @@ type hubSession struct {
 	// path: the DaemonRestartWatcher sets these when it observes a per-port
 	// current_pid change). The next tools/call to such a port re-initializes
 	// BEFORE dispatching, so the client never sees the stale-session failure that
-	// (a) would otherwise recover reactively. keys: int port. value: struct{}.
+	// (a) would otherwise recover reactively. keys: int port. value:
+	// *stalePortState. The per-port state is intentionally retained after a
+	// successful refresh so callers that resolved the old daemon session just
+	// before the refresh can serialize behind it and re-read the fresh session id
+	// before dispatching.
 	staleDaemonPorts sync.Map
+}
+
+type stalePortState struct {
+	mu    sync.Mutex
+	stale bool
 }
 
 // markStalePort flags a daemon port's cached session as needing re-init (called
 // by HubSessionStore.MarkPortStale from the supervisor-state restart watcher).
-func (s *hubSession) markStalePort(port int) { s.staleDaemonPorts.Store(port, struct{}{}) }
+func (s *hubSession) markStalePort(port int) {
+	v, _ := s.staleDaemonPorts.LoadOrStore(port, &stalePortState{})
+	state := v.(*stalePortState)
+	state.mu.Lock()
+	state.stale = true
+	state.mu.Unlock()
+}
 
-// consumeStalePort reports whether the port was stale-marked and clears the mark
-// (consume-once): the dispatch path re-inits exactly once per observed restart.
-func (s *hubSession) consumeStalePort(port int) bool {
-	_, ok := s.staleDaemonPorts.LoadAndDelete(port)
-	return ok
+// stalePortStateFor returns the per-port restart state, if the port was ever
+// marked stale. The state is not deleted after refresh: callers that already
+// resolved the old daemon session before the refresh still need a synchronization
+// point where they can wait for the refresh and re-read the current session id.
+func (s *hubSession) stalePortStateFor(port int) (*stalePortState, bool) {
+	v, ok := s.staleDaemonPorts.Load(port)
+	if !ok {
+		return nil, false
+	}
+	return v.(*stalePortState), true
 }
 
 // MarkPortStale flags every live session's cached session for the daemon at the
