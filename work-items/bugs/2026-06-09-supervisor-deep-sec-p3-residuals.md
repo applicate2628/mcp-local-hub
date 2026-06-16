@@ -1,8 +1,51 @@
 # Supervisor deep-sec P3/LOW residuals deferred from PR #268
 
-- **Status:** open / deferred (tracked for a future hardening pass)
-- **Date:** 2026-06-09
+- **Status:** RESOLVED 2026-06-16 (3-angle review-loop synthesis: Sonnet code-review + consultant; codex+fable unavailable that session). Conc-F5 fixed; Conc-F4 + Conc-F7 fixed via the converged minimal approach; Reg-F2 deliberately DEFERRED (proposed fix rejected — see below).
+- **Date:** 2026-06-09 (residuals) / 2026-06-16 (resolution)
 - **Severity:** P3 / LOW (none blocking)
+
+## RESOLUTION 2026-06-16 (review-loop converged)
+
+The original "Action" lines below were the FIRST-PASS designs. A 3-angle review
+loop (fix-design `.scratch/reviews/fix-design-2026-06-16-deepsec-f4f7r2.md`)
+materially revised two of them and rejected one:
+
+- **Conc-F5 → FIXED (836b1b2).** Atomic copy-on-write on `EventLoop.handlers`
+  (RegisterHandler CAS-swaps a fresh slice; dispatch does one atomic load).
+  Register-after-`go loop.Run` is now race-free without restructuring
+  supervise.go's ctrl-construction order. `-race` regression test added.
+- **Conc-F4 → FIXED as an INVARIANT TEST + table comment (a222538), NOT a timer
+  restructure.** The real risk is "a future SM edit"; a code change guards only
+  the current path, whereas `TestStateMachineInvariant_TimerDueSpawnsOnlyFromBackoffWaiting`
+  pins the PROPERTY (EvTimerDue issues a spawn only from StBackoffWaiting) and
+  goes RED the moment the dangerous edit lands — pure function, internal/api,
+  zero fleet risk. The timer goroutine is left untouched (its smStates re-check
+  is a harmless perf early-out + observability emit, not the safety property).
+- **Conc-F7 → FIXED as a DEDUP (6410064); staleness left DOCUMENTED, not closed.**
+  The inline NormalizeOverlayKey scan was replaced by the single-owner
+  `IntentCache.LookupCanonical` (semantically identical — NormalizeOverlayKey is
+  purely the backslash toggle, the same equivalence class LookupCanonical
+  covers). The review loop established that the cheap swap does NOT close the
+  cache-vs-disk staleness (LookupCanonical reads the same snapshot), and the
+  fresh-disk-read variant (reapIntentReader) adds per-respawn disk I/O to close
+  a sub-second operator-initiated window — not justified. Documented in code.
+- **Reg-F2 → DEFERRED (NO code change; the proposed fix is REJECTED).** Both
+  reviewers rejected the "skip the liveness sweep for StExiting/StSpawning"
+  action: (a) Sonnet — an unconditional `StExiting → continue` removes the ONLY
+  retry for a foreign-PID daemon whose `terminate` keeps FAILING
+  (executeSideEffect skips synthesizeForeignChildExit on terminate!=nil), so it
+  trades a self-correcting one-extra-restart (LOW) for a possible PERMANENT
+  wedge — a net-negative fleet-safety regression. (b) Consultant — the fix has
+  the sweep goroutine read SM state to self-suppress, which VIOLATES the PR #268
+  architectural principle "off-loop posters detect and post; the event loop is
+  the only gate, they must not pre-judge SM state." Today's "post unconditionally,
+  let the loop coalesce" IS the principled behavior. Combined with self-
+  correcting + Conc-F2 having already shrunk the window, Reg-F2 stays
+  documented-and-deferred; re-evaluate ONLY on a live repro.
+
+---
+
+### Original first-pass residual notes (superseded by the resolution above)
 - **Source:** the 3-angle deep-security gate on PR #268 (full diff master..52d390b, post-bot-PASS). The operator chose "fix all P2+"; the P2+ set (Sec-F1 overlay read-gate, Conc-F1 PersistTo field-drop, Conc-F2 sweep/handler persist non-atomicity, Conc-F3 ownSpawned re-registration double-spawn, Conc-F6 overlay torn-read, Reg-F1 stale_pid IPC field) is fixed in #268. The findings below are the explicitly-deferred P3/LOW residuals.
 
 ## Conc-F4 (P3) — backoff stale-timer relies on the SM table, not its own re-check
