@@ -405,7 +405,7 @@ weekly_refresh: false
 		t.Errorf("zed relay command (RelayExePath proof): got %q, want canonical %q", mem.Command, canonicalMcphub)
 	}
 	// The relay args must forward to the hub HTTP URL via `relay --url`.
-	wantURL := "http://localhost:9123/mcp"
+	wantURL := "http://127.0.0.1:9123/mcp"
 	var sawRelay, sawURL bool
 	for i, arg := range mem.Args {
 		if arg == "relay" {
@@ -484,8 +484,8 @@ weekly_refresh: false
 	for _, ap := range report.Applied {
 		if ap.Client == "gemini-cli" && ap.Server == "fetch" {
 			applied = true
-			if ap.URL != "http://localhost:9133/mcp" {
-				t.Errorf("synthesized URL = %q, want http://localhost:9133/mcp", ap.URL)
+			if ap.URL != "http://127.0.0.1:9133/mcp" {
+				t.Errorf("synthesized URL = %q, want http://127.0.0.1:9133/mcp", ap.URL)
 			}
 		}
 	}
@@ -508,8 +508,8 @@ weekly_refresh: false
 	if !ok {
 		t.Fatalf("gemini config has no fetch entry: %s", data)
 	}
-	if mem["url"] != "http://localhost:9133/mcp" {
-		t.Errorf("gemini fetch.url = %v, want http://localhost:9133/mcp", mem["url"])
+	if mem["url"] != "http://127.0.0.1:9133/mcp" {
+		t.Errorf("gemini fetch.url = %v, want http://127.0.0.1:9133/mcp", mem["url"])
 	}
 }
 
@@ -580,8 +580,8 @@ weekly_refresh: false
 		t.Fatalf("unmarshal gemini: %v", err)
 	}
 	mem := cfg.MCPServers["fetch"]
-	if mem["url"] != "http://localhost:9133/mcp" {
-		t.Errorf("stale-port entry was NOT overwritten: fetch.url = %v, want http://localhost:9133/mcp", mem["url"])
+	if mem["url"] != "http://127.0.0.1:9133/mcp" {
+		t.Errorf("stale-port entry was NOT overwritten: fetch.url = %v, want http://127.0.0.1:9133/mcp", mem["url"])
 	}
 	if strings.Contains(string(data), "9121") {
 		t.Errorf("stale port 9121 still present after overwrite; file = %s", data)

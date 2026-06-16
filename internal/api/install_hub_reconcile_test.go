@@ -321,9 +321,9 @@ func TestBuildHubReconcilePlanGateOffRemovesMcphubHubAndRestoresPerDaemon(t *tes
 	// per-daemon URLs; codex-cli gets AddReplace alpha; cursor gets
 	// AddReplace beta.
 	wantAdds := map[string]map[string]string{
-		"claude-code": {"alpha": "http://localhost:9301/mcp", "beta": "http://localhost:9303/mcp"},
-		"codex-cli":   {"alpha": "http://localhost:9302/mcp"},
-		"cursor":      {"beta": "http://localhost:9303/mcp"},
+		"claude-code": {"alpha": "http://127.0.0.1:9301/mcp", "beta": "http://127.0.0.1:9303/mcp"},
+		"codex-cli":   {"alpha": "http://127.0.0.1:9302/mcp"},
+		"cursor":      {"beta": "http://127.0.0.1:9303/mcp"},
 	}
 	for client, names := range wantAdds {
 		for entryName, wantURL := range names {
