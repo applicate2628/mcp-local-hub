@@ -622,37 +622,115 @@ func IsMcphubBinary(cmd string) bool {
 		base == "mcp" || base == "mcp.exe"
 }
 
-// SupportedClientNames returns every client id understood by this build.
-// The order is stable for CLI help, docs, and tests.
-func SupportedClientNames() []string {
-	return []string{
-		"claude-code",
-		"codex-cli",
-		"cursor",
-		"vscode",
-		"gemini-cli",
-		"qwen-cli",
-		"antigravity",
-		// Wave 2 (PR pending): 8 additional opt-in clients. Stable order
-		// after the original 7. None are added to DefaultInstallClientNames
-		// — every one stays opt-in.
-		"zed",
-		"kiro",
-		"windsurf",
-		"cline",
-		"kilocode",
-		"opencode",
-		"hermes",
-		"openclaw",
+// clientDescriptor is one row of the canonical client registry. It is the
+// SINGLE source of truth for the set of supported clients: every accessor
+// below (SupportedClientNames, DefaultInstallClientNames, ConfigPathForName,
+// AllClients) derives from clientRegistry, so adding a new client means
+// adding exactly ONE descriptor here — there is no parallel list to keep in
+// sync. (ROADMAP §9.2: this collapses the former three independent
+// 15-element enumerations that caused the scan/migrate drift in ab80309.)
+type clientDescriptor struct {
+	// name is the stable client id used in manifest client_bindings, CLI
+	// help, docs, and tests (e.g. "claude-code", "codex-cli").
+	name string
+	// defaultInstall reports whether install touches this client when the
+	// user does not request a narrower/wider target. Heavy/experimental
+	// clients leave this false so a fresh install stays minimal.
+	defaultInstall bool
+	// configPath returns the default config-file path for this client given
+	// the user's home dir. Mirrors the adapter's own ConfigPath() derivation.
+	configPath func(home string) string
+	// factory constructs the adapter. May return an error (e.g. UserHomeDir
+	// failure); AllClients() silently skips a factory that errors.
+	factory func() (Client, error)
+}
+
+// clientRegistry returns the canonical, order-stable list of every client
+// this build understands. The order is load-bearing: SupportedClientNames(),
+// ConfigPathForName()'s error message, and AllClients()'s construction order
+// all reproduce it, and CLI help / docs / tests assert against it. The first
+// 7 are the original clients (stable order); the trailing 8 are the Wave 2
+// opt-in clients (stable order after the original 7). None of the Wave 2
+// entries set defaultInstall — every one stays opt-in.
+//
+// This is a function, not a package-level var, on purpose: the descriptors
+// reference the New* factories, and some factories (e.g. NewCursor) call
+// ConfigPathForName, which reads this registry — a package-var initializer
+// would form an initialization cycle. A function body is evaluated lazily at
+// call time, so no cycle exists.
+func clientRegistry() []clientDescriptor {
+	return []clientDescriptor{
+		{name: "claude-code", defaultInstall: true, factory: NewClaudeCode,
+			configPath: func(home string) string { return filepath.Join(home, ".claude.json") }},
+		{name: "codex-cli", defaultInstall: true, factory: NewCodexCLI,
+			configPath: func(home string) string { return filepath.Join(home, ".codex", "config.toml") }},
+		{name: "cursor", defaultInstall: true, factory: NewCursor,
+			configPath: func(home string) string { return filepath.Join(home, ".cursor", "mcp.json") }},
+		{name: "vscode", factory: NewVSCode,
+			configPath: defaultVSCodeConfigPath},
+		{name: "gemini-cli", factory: NewGeminiCLI,
+			configPath: func(home string) string { return filepath.Join(home, ".gemini", "settings.json") }},
+		{name: "qwen-cli", factory: NewQwenCLI,
+			configPath: func(home string) string { return filepath.Join(home, ".qwen", "settings.json") }},
+		{name: "antigravity", factory: NewAntigravity,
+			configPath: func(home string) string { return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json") }},
+		// Wave 2: 8 additional opt-in clients.
+		{name: "zed", factory: NewZed,
+			// Mirrors defaultZedConfigPath (zed.go): %APPDATA%\Zed\settings.json
+			// on Windows, $XDG_CONFIG_HOME/zed or ~/.config/zed elsewhere.
+			configPath: defaultZedConfigPath},
+		{name: "kiro", factory: NewKiro,
+			// Mirrors NewKiro (kiro.go): ~/.kiro/settings/mcp.json.
+			configPath: func(home string) string { return filepath.Join(home, ".kiro", "settings", "mcp.json") }},
+		{name: "windsurf", factory: NewWindsurf,
+			// Mirrors NewWindsurf (windsurf.go): ~/.codeium/windsurf/mcp_config.json.
+			configPath: func(home string) string { return filepath.Join(home, ".codeium", "windsurf", "mcp_config.json") }},
+		{name: "cline", factory: NewCline,
+			// Mirrors defaultClineConfigPath (cline.go): VS Code globalStorage
+			// under saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
+			configPath: defaultClineConfigPath},
+		{name: "kilocode", factory: NewKiloCode,
+			// Mirrors defaultKiloCodeConfigPath (kilocode.go): VS Code
+			// globalStorage under kilo-code.kilo-code/settings/mcp_settings.json.
+			configPath: defaultKiloCodeConfigPath},
+		{name: "opencode", factory: NewOpenCode,
+			// Mirrors defaultOpenCodeConfigPath (opencode.go):
+			// ~/.config/opencode/opencode.json on every OS ($XDG_CONFIG_HOME-aware).
+			configPath: defaultOpenCodeConfigPath},
+		{name: "hermes", factory: NewHermes,
+			// Mirrors NewHermes (hermes.go): ~/.hermes/config.yaml.
+			configPath: func(home string) string { return filepath.Join(home, ".hermes", "config.yaml") }},
+		{name: "openclaw", factory: NewOpenClaw,
+			// Mirrors defaultOpenClawConfigPath (openclaw.go): ~/.openclaw/openclaw.json.
+			configPath: defaultOpenClawConfigPath},
 	}
+}
+
+// SupportedClientNames returns every client id understood by this build.
+// The order is stable for CLI help, docs, and tests — it is the order of
+// clientRegistry.
+func SupportedClientNames() []string {
+	registry := clientRegistry()
+	names := make([]string, 0, len(registry))
+	for _, d := range registry {
+		names = append(names, d.name)
+	}
+	return names
 }
 
 // DefaultInstallClientNames returns the clients touched by install when the
 // user does not request a narrower or wider target set. Heavy/experimental
 // clients remain opt-in so a fresh install does not silently mutate every
-// assistant on the workstation.
+// assistant on the workstation. Derived from clientRegistry's defaultInstall
+// flag, preserving registry order.
 func DefaultInstallClientNames() []string {
-	return []string{"claude-code", "codex-cli", "cursor"}
+	names := []string{}
+	for _, d := range clientRegistry() {
+		if d.defaultInstall {
+			names = append(names, d.name)
+		}
+	}
+	return names
 }
 
 // ConfigPathForName returns the default config path for a supported client.
@@ -661,52 +739,12 @@ func ConfigPathForName(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	switch name {
-	case "claude-code":
-		return filepath.Join(home, ".claude.json"), nil
-	case "codex-cli":
-		return filepath.Join(home, ".codex", "config.toml"), nil
-	case "cursor":
-		return filepath.Join(home, ".cursor", "mcp.json"), nil
-	case "vscode":
-		return defaultVSCodeConfigPath(home), nil
-	case "gemini-cli":
-		return filepath.Join(home, ".gemini", "settings.json"), nil
-	case "qwen-cli":
-		return filepath.Join(home, ".qwen", "settings.json"), nil
-	case "antigravity":
-		return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"), nil
-	case "zed":
-		// Mirrors defaultZedConfigPath (zed.go): %APPDATA%\Zed\settings.json
-		// on Windows, $XDG_CONFIG_HOME/zed or ~/.config/zed elsewhere.
-		return defaultZedConfigPath(home), nil
-	case "kiro":
-		// Mirrors NewKiro (kiro.go): ~/.kiro/settings/mcp.json.
-		return filepath.Join(home, ".kiro", "settings", "mcp.json"), nil
-	case "windsurf":
-		// Mirrors NewWindsurf (windsurf.go): ~/.codeium/windsurf/mcp_config.json.
-		return filepath.Join(home, ".codeium", "windsurf", "mcp_config.json"), nil
-	case "cline":
-		// Mirrors defaultClineConfigPath (cline.go): VS Code globalStorage
-		// under saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
-		return defaultClineConfigPath(home), nil
-	case "kilocode":
-		// Mirrors defaultKiloCodeConfigPath (kilocode.go): VS Code
-		// globalStorage under kilo-code.kilo-code/settings/mcp_settings.json.
-		return defaultKiloCodeConfigPath(home), nil
-	case "opencode":
-		// Mirrors defaultOpenCodeConfigPath (opencode.go):
-		// ~/.config/opencode/opencode.json on every OS ($XDG_CONFIG_HOME-aware).
-		return defaultOpenCodeConfigPath(home), nil
-	case "hermes":
-		// Mirrors NewHermes (hermes.go): ~/.hermes/config.yaml.
-		return filepath.Join(home, ".hermes", "config.yaml"), nil
-	case "openclaw":
-		// Mirrors defaultOpenClawConfigPath (openclaw.go): ~/.openclaw/openclaw.json.
-		return defaultOpenClawConfigPath(home), nil
-	default:
-		return "", fmt.Errorf("unknown client %q (expected %s)", name, strings.Join(SupportedClientNames(), " | "))
+	for _, d := range clientRegistry() {
+		if d.name == name {
+			return d.configPath(home), nil
+		}
 	}
+	return "", fmt.Errorf("unknown client %q (expected %s)", name, strings.Join(SupportedClientNames(), " | "))
 }
 
 func defaultVSCodeConfigPath(home string) string {
@@ -733,12 +771,8 @@ func defaultVSCodeConfigPath(home string) string {
 // used by both internal/api and internal/cli.
 func AllClients() map[string]Client {
 	result := map[string]Client{}
-	for _, factory := range []func() (Client, error){
-		NewClaudeCode, NewCodexCLI, NewCursor, NewVSCode, NewGeminiCLI, NewQwenCLI, NewAntigravity,
-		// Wave 2 (PR pending): 8 additional opt-in clients.
-		NewZed, NewKiro, NewWindsurf, NewCline, NewKiloCode, NewOpenCode, NewHermes, NewOpenClaw,
-	} {
-		c, err := factory()
+	for _, d := range clientRegistry() {
+		c, err := d.factory()
 		if err != nil {
 			continue
 		}
