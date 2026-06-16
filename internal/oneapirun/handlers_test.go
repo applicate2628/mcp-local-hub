@@ -85,8 +85,8 @@ func TestComputeRunEnv_VcvarsPlusOneAPIPrependsPath(t *testing.T) {
 		func() []string { return dllDirs },
 	)
 
-	if source != envSourceVcvarsOneAPI {
-		t.Errorf("source = %q, want %q", source, envSourceVcvarsOneAPI)
+	if source != envSourceSetvars {
+		t.Errorf("source = %q, want %q", source, envSourceSetvars)
 	}
 
 	// VS vars must all survive.
@@ -126,8 +126,8 @@ func TestComputeRunEnv_VcvarsOnlyNoOneAPIDirsStillVcvarsSource(t *testing.T) {
 		func() ([]string, bool) { return vsEnv, true },
 		func() []string { return nil },
 	)
-	if source != envSourceVcvarsOneAPI {
-		t.Errorf("source = %q, want %q", source, envSourceVcvarsOneAPI)
+	if source != envSourceSetvars {
+		t.Errorf("source = %q, want %q", source, envSourceSetvars)
 	}
 	if pathValueOf(t, env) != "C:\\VS\\bin" {
 		t.Errorf("PATH should be unchanged when no oneAPI dirs: %q", pathValueOf(t, env))
@@ -294,8 +294,8 @@ func TestRunInOneAPIEnvTool_ReportsEnvSourceFromSeams(t *testing.T) {
 		t.Fatalf("runInOneAPIEnvTool: %v", err)
 	}
 	res := decodeRunResult(t, result)
-	if res.EnvSource != envSourceVcvarsOneAPI {
-		t.Errorf("env_source = %q, want %q", res.EnvSource, envSourceVcvarsOneAPI)
+	if res.EnvSource != envSourceSetvars {
+		t.Errorf("env_source = %q, want %q", res.EnvSource, envSourceSetvars)
 	}
 }
 

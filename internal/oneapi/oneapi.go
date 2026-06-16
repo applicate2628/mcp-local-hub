@@ -9,25 +9,30 @@
 // DLL directories. The operator's documented workaround was to manually
 // wrap the debug session in an oneapi-shell.
 //
-// WHY direct enumeration instead of setvars.bat (the earlier design):
-// setvars.bat is BROKEN on the live host for oneAPI components — it adds
-// only the Visual-Studio dirs to PATH and FAILS to run the per-component
-// `vars.bat` scripts ("'vars.bat' is not recognized"), so it does NOT add
-// the oneAPI mkl/tbb/compiler bin dirs and does NOT set
-// MKLROOT/TBBROOT/CMPLR_ROOT. Under the supervisor's env it even exits 1.
-// The live deploy logged "oneapi-env-capture-failed" and injected NOTHING.
-// The component DLL dirs that an MKL-linked .exe actually needs at runtime
-// DO exist and are reliable:
+// WHY direct enumeration (this package) vs capturing setvars.bat: these are
+// COMPLEMENTARY, used by different consumers. The full build environment
+// (PATH + LIB + INCLUDE + MKLROOT/…) — needed to COMPILE and LINK oneAPI code
+// — is captured from oneAPI's own setvars.bat by the oneapi-run server (see
+// internal/oneapirun); that is the complete, version-correct, vendor-sanctioned
+// path. This package instead enumerates ONLY the runtime DLL dirs, for the
+// RUNTIME-ONLY consumers that just need a built exe's DLLs on PATH and must NOT
+// pay setvars' ~1-3 s subprocess on every spawn: the supervisor's gdb / lldb
+// debugger injector and drmemory's instrumented-target spawn. The component
+// DLL dirs an MKL-linked .exe needs at runtime are stable and cheap to find:
 //
 //	<root>\mkl\latest\bin        (mkl_core etc.)
 //	<root>\tbb\latest\bin        (tbb12.dll etc.)
 //	<root>\compiler\latest\bin   (libiomp5md / svml — OpenMP + SVML runtimes)
 //
-// where <root> = "C:\Program Files (x86)\Intel\oneAPI". So we enumerate
-// those DLL dirs directly — exactly what a HEALTHY setvars WOULD add to
-// PATH for runtime DLL loading, minus the broken-install dependency and
-// the slow / flaky subprocess. The enumeration is pure + fast (a few
-// os.Stat + a cheap *.dll glob per component); no subprocess, no caching.
+// where <root> = "C:\Program Files (x86)\Intel\oneAPI". The enumeration is pure
+// + fast (a few os.Stat + a cheap *.dll glob per component); no subprocess, no
+// caching. (An earlier note here claimed setvars.bat was simply "broken on the
+// host". The real story: setvars works, but its component init fails under the
+// supervisor's NoDefaultCurrentDirectoryInExePath=1 hardening because it
+// invokes each component vars.bat as a bare command via current-dir search;
+// oneapi-run's capture clears that var so setvars configures every component —
+// see internal/oneapirun/vcvars_windows.go. This direct enumeration is kept for
+// the speed/runtime-only consumers above, independent of that capture.)
 //
 // Platform scope: Windows-focused. On Linux / other platforms this is a
 // no-op (DetectRoot returns ("", false), so DLLDirs is never reached with
@@ -40,6 +45,7 @@
 package oneapi
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -176,6 +182,51 @@ func DLLDirs(root string) []string {
 	}
 
 	return dirs
+}
+
+// ---------------------------------------------------------------------------
+// Env-list prepend (shared by the runtime-only consumers).
+// ---------------------------------------------------------------------------
+
+// PrependEnvList returns a copy of env with dirs prepended (in order) to the
+// value of the named env var, joined with the OS path-list separator. key is
+// matched case-insensitively: Windows env-var names are case-insensitive and a
+// captured `set` dump can emit "Path" rather than "PATH", so a case-sensitive
+// compare would miss the entry and the dirs would never reach the real search
+// path. When env has no entry for key, a new one is synthesized from dirs
+// alone (canonical upper-case key). When dirs is empty, env is returned as a
+// fresh copy unchanged. The matched entry's original KEY casing is preserved;
+// every other entry is kept verbatim and in order. This is the single owner of
+// the prepend logic shared by the runtime-only oneAPI consumers (drmemory's
+// instrumented-target spawn; available to the supervisor debugger injector).
+func PrependEnvList(env []string, key string, dirs []string) []string {
+	if len(dirs) == 0 {
+		out := make([]string, len(env))
+		copy(out, env)
+		return out
+	}
+
+	prefix := strings.Join(dirs, string(os.PathListSeparator))
+
+	out := make([]string, 0, len(env)+1)
+	found := false
+	for _, entry := range env {
+		k, v, hasEq := strings.Cut(entry, "=")
+		if hasEq && strings.EqualFold(k, key) {
+			found = true
+			if v == "" {
+				out = append(out, k+"="+prefix)
+			} else {
+				out = append(out, k+"="+prefix+string(os.PathListSeparator)+v)
+			}
+			continue
+		}
+		out = append(out, entry)
+	}
+	if !found {
+		out = append(out, key+"="+prefix)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

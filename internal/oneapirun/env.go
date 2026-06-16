@@ -20,13 +20,20 @@ var tempKeys = []string{"TEMP", "TMP"}
 // caller can tell whether the command saw the full VS toolchain, only the
 // oneAPI runtime, or neither.
 const (
-	// envSourceVcvarsOneAPI: VS env captured from vcvars64.bat AND oneAPI
-	// DLL dirs prepended to PATH — the fully-initialized environment.
-	envSourceVcvarsOneAPI = "vcvars64+oneapi"
-	// envSourceOneAPIOnly: vcvars64.bat not found, but oneAPI DLL dirs
-	// were prepended onto the inherited os.Environ() PATH.
+	// envSourceSetvars: the COMPLETE VS + oneAPI environment captured from
+	// setvars.bat — full PATH (runtime DLLs), LIB (link libs incl.
+	// libircmt.lib + the MKL import libs), INCLUDE (headers incl. mkl.h), and
+	// the component root vars (MKLROOT/CMPLR_ROOT/…). This is the healthy
+	// build+run environment; the oneAPI DLL dirs are additionally prepended to
+	// PATH as belt-and-suspenders (a redundant no-op when setvars already
+	// placed them).
+	envSourceSetvars = "setvars"
+	// envSourceOneAPIOnly: setvars.bat not found, but the hand-enumerated
+	// oneAPI DLL dirs were prepended onto the inherited os.Environ() PATH — a
+	// runtime-only DEGRADED fallback (a prebuilt MKL exe can RUN, but a build
+	// would fail without LIB/INCLUDE).
 	envSourceOneAPIOnly = "oneapi-only"
-	// envSourcePlain: neither vcvars nor any oneAPI dir available — the
+	// envSourcePlain: neither setvars nor any oneAPI dir available — the
 	// command runs with the inherited os.Environ() unchanged.
 	envSourcePlain = "plain"
 )
@@ -104,21 +111,22 @@ func prependOneAPIToPath(baseEnv []string, dllDirs []string) []string {
 // computeRunEnv builds the final environment for a run, returning the
 // "KEY=VALUE" env slice and the env_source label. The composition:
 //
-//  1. VS env captured (vcvars64.bat) → prepend oneAPI dirs → "vcvars64+oneapi"
-//     (env_source stays "vcvars64+oneapi" even when no oneAPI dir is present,
-//     because the VS toolchain — the load-bearing half — WAS captured).
-//  2. vcvars not found, oneAPI dirs present → os.Environ()+oneAPI →
-//     "oneapi-only".
+//  1. setvars.bat captured → the COMPLETE VS + oneAPI env (PATH/LIB/INCLUDE/
+//     MKLROOT/…); the oneAPI DLL dirs are additionally prepended to PATH as a
+//     redundant belt-and-suspenders → "setvars".
+//  2. setvars not found, oneAPI DLL dirs present → os.Environ()+oneAPI DLL dirs
+//     on PATH (runtime-only DEGRADED fallback) → "oneapi-only".
 //  3. neither → os.Environ() unchanged → "plain".
 //
-// captureVS and oneAPIDirs are passed in (the server's injectable seams)
-// so this is fully testable without the real subprocess. It never errors —
-// it always yields a runnable environment, only the label changes.
+// captureVS (the setvars capture) and oneAPIDirs (the hand-enumerated DLL-dir
+// fallback) are passed in as the server's injectable seams so this is fully
+// testable without the real subprocess. It never errors — it always yields a
+// runnable environment, only the label changes.
 func computeRunEnv(captureVS func() ([]string, bool), oneAPIDirs func() []string) (env []string, source string) {
 	dllDirs := oneAPIDirs()
 
 	if vsEnv, ok := captureVS(); ok {
-		env, source = prependOneAPIToPath(vsEnv, dllDirs), envSourceVcvarsOneAPI
+		env, source = prependOneAPIToPath(vsEnv, dllDirs), envSourceSetvars
 	} else if len(dllDirs) > 0 {
 		env, source = prependOneAPIToPath(os.Environ(), dllDirs), envSourceOneAPIOnly
 	} else {

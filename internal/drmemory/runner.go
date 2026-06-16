@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/hubtemp"
+	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
 )
 
@@ -65,6 +66,12 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 
 	cmd := exec.CommandContext(ctx, exePath, cmdArgs...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	// The instrumented target (and Dr. Memory itself) must see the Intel
+	// oneAPI runtime DLL dirs on PATH, else an icx-built exe dies with
+	// 0xC0000135 (DLL not found) ~65 ms in, BEFORE instrumentation, and
+	// drmemory_run returns a useless empty result. The daemon's inherited env
+	// does not carry those dirs, so inject them here.
+	cmd.Env = oneAPIRuntimeEnv()
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -107,6 +114,23 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 		ResultsPath: resultsPath,
 		CommandLine: commandLine,
 	}, nil
+}
+
+// oneAPIRuntimeEnv returns the process environment with the Intel oneAPI
+// component DLL dirs prepended to PATH, so the instrumented target (and
+// Dr. Memory itself) can load the MKL / TBB / compiler runtime DLLs. An
+// icx-built exe otherwise dies with 0xC0000135 (DLL not found) almost
+// immediately, before any instrumentation runs. Returns os.Environ() unchanged
+// when no oneAPI install is present. Runtime-only (DLL dirs → PATH); drmemory
+// instruments a PREBUILT exe — it does not compile or link, so it needs
+// neither LIB nor INCLUDE (unlike the oneapi-run server, which captures the
+// full setvars.bat environment).
+func oneAPIRuntimeEnv() []string {
+	root, ok := oneapi.DetectRoot()
+	if !ok {
+		return os.Environ()
+	}
+	return oneapi.PrependEnvList(os.Environ(), oneapi.PathKey, oneapi.DLLDirs(root))
 }
 
 // makeLogdir creates a fresh per-run logdir for Dr. Memory under the hub-owned

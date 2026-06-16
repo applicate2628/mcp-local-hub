@@ -62,10 +62,10 @@ func registerTools(rs *OneAPIRunServer) {
 		Name: "run_in_oneapi_env",
 		Description: "Run ANY native command under the fully-initialized Visual-Studio + Intel-oneAPI environment. " +
 			"Use this when gdb / lldb / a freshly built .exe / ctest / an ASan build fails because it can't see the VS toolchain DLLs or the oneAPI MKL/TBB runtime DLLs without a manual `vcvars64 && oneapi-shell` wrap, or when Git-Bash mangles native backslash paths. " +
-			"The command is executed DIRECTLY via the OS (no shell interpretation) with an environment = the VS env captured from vcvars64.bat PLUS the oneAPI component DLL dirs prepended to PATH. " +
+			"The command is executed DIRECTLY via the OS (no shell interpretation) with an environment = the COMPLETE Visual-Studio + Intel-oneAPI environment captured from oneAPI's setvars.bat (full PATH for runtime DLLs, LIB for link libs incl. libircmt.lib + the MKL import libs, INCLUDE for headers incl. mkl.h, plus MKLROOT/CMPLR_ROOT/CPATH), with the oneAPI component DLL dirs additionally prepended to PATH. " +
 			"Pass a NATIVE command and NATIVE-path args (e.g. command=\"ctest\", args=[\"-C\",\"Release\"], cwd=\"C:\\\\path\\\\to\\\\build\"). " +
 			"Returns structured JSON: {exit_code, stdout, stderr, env_source, duration_ms, timed_out}. " +
-			"env_source is \"vcvars64+oneapi\" when the VS env was captured, \"oneapi-only\" when vcvars64.bat was not found (only oneAPI dirs prepended), or \"plain\" when neither is available — the command always runs regardless.",
+			"env_source is \"setvars\" when the full setvars.bat environment was captured, \"oneapi-only\" when setvars.bat was not found (only the oneAPI runtime DLL dirs were prepended to PATH — a prebuilt MKL exe can RUN but a build would fail without LIB/INCLUDE), or \"plain\" when neither is available — the command always runs regardless.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
