@@ -178,7 +178,7 @@ func makeLogdir() (string, error) {
 	}
 	// 0o700: owner-only, so a co-resident user on a multi-tenant POSIX host
 	// can't read another user's Dr. Memory output (module paths, findings).
-	if err := os.MkdirAll(base, 0o700); err != nil {
+	if err := hubtemp.EnsurePrivateDir(base); err != nil {
 		return os.MkdirTemp("", "drmemory-logs-")
 	}
 	// Reap logdirs abandoned by an abnormally-terminated prior run (timeout
@@ -260,7 +260,10 @@ func symcacheDir() string {
 		return ""
 	}
 	dir := filepath.Join(base, "symcache")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := hubtemp.EnsurePrivateDir(base); err != nil {
+		return ""
+	}
+	if err := hubtemp.EnsurePrivateDir(dir); err != nil {
 		return ""
 	}
 	return dir

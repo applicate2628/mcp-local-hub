@@ -1,6 +1,7 @@
 package hubtemp
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -42,15 +43,36 @@ func TestDir_WindowsFallsBackToHomeWhenLocalAppDataEmpty(t *testing.T) {
 	}
 }
 
-func TestDir_NonWindowsUsesTempDir(t *testing.T) {
+func TestDir_NonWindowsUsesUserCacheDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("non-Windows os.TempDir branch")
+		t.Skip("non-Windows user cache branch")
 	}
+	root := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", root)
+
 	got, ok := Dir("drmemory")
 	if !ok {
 		t.Fatalf("Dir returned ok=false on non-Windows")
 	}
-	if filepath.Base(got) != "drmemory" {
-		t.Errorf("Dir leaf = %q, want drmemory", filepath.Base(got))
+	want := filepath.Join(root, "mcp-local-hub", "drmemory")
+	if got != want {
+		t.Errorf("Dir(drmemory) = %q, want %q", got, want)
+	}
+}
+
+func TestEnsurePrivateDirCreatesOwnerWritableDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "scratch")
+	if err := EnsurePrivateDir(dir); err != nil {
+		t.Fatalf("EnsurePrivateDir: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat ensured dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("ensured path is not a directory")
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Errorf("mode = %o, want 700", info.Mode().Perm())
 	}
 }
