@@ -3,9 +3,9 @@ package oneapirun
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
+	"mcp-local-hub/internal/hubtemp"
 	"mcp-local-hub/internal/oneapi"
 )
 
@@ -208,22 +208,14 @@ func isRegularFile(path string) bool {
 }
 
 // hubTempDir computes the hub-owned writable scratch directory used for the
-// child's TEMP/TMP. On Windows it is %LOCALAPPDATA%\mcp-local-hub\
-// oneapi-run-tmp (falling back to <home>\.mcphub-oneapi-tmp when LOCALAPPDATA
-// is empty). On non-Windows os.TempDir() is already writable, so it is used
-// directly. Returns ("", false) only when no candidate directory can be
-// derived at all (no LOCALAPPDATA and no home dir on Windows).
+// child's TEMP/TMP, delegating to the shared hubtemp owner so this server's
+// scratch location stays in lockstep with the other MCP servers (e.g.
+// drmemory's -logdir). On Windows it resolves to
+// %LOCALAPPDATA%\mcp-local-hub\oneapi-run-tmp; see hubtemp.Dir for the full
+// per-OS contract and fallbacks. Returns ("", false) only when no candidate
+// directory can be derived at all.
 func hubTempDir() (string, bool) {
-	if runtime.GOOS != "windows" {
-		return os.TempDir(), true
-	}
-	if la := os.Getenv("LOCALAPPDATA"); la != "" {
-		return filepath.Join(la, "mcp-local-hub", "oneapi-run-tmp"), true
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".mcphub-oneapi-tmp"), true
-	}
-	return "", false
+	return hubtemp.Dir("oneapi-run-tmp")
 }
 
 // withWritableTemp returns env with TEMP and TMP overridden (case-insensitive

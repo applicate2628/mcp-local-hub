@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mcp-local-hub/internal/hubtemp"
 	"mcp-local-hub/internal/process"
 )
 
@@ -53,7 +54,7 @@ const drMemoryOutputCap = 512 * 1024
 // runs it, then locates results.txt under <tmp>\DrMemory-<exe>.<pid>.NNN\
 // and reads it back. The temp logdir is removed before returning.
 func defaultRun(ctx context.Context, exePath, target string, args []string, cwd string, light, checkUninit bool) (*runOutput, error) {
-	logdir, err := os.MkdirTemp("", "drmemory-logs-")
+	logdir, err := makeLogdir()
 	if err != nil {
 		return nil, fmt.Errorf("create logdir: %w", err)
 	}
@@ -106,6 +107,24 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 		ResultsPath: resultsPath,
 		CommandLine: commandLine,
 	}, nil
+}
+
+// makeLogdir creates a fresh per-run logdir for Dr. Memory under the hub-owned
+// writable scratch dir (NOT the inherited process TEMP, which on the live host
+// is a small RAM disk that makes Dr. Memory log "WARNING: Unable to write to
+// the disk" and risks a truncated/missing results.txt on a real target). It
+// returns the created directory; the caller os.RemoveAll's it after reading
+// results.txt. If the hub scratch base can't be derived or created, it falls
+// back to the OS temp dir so a run still proceeds rather than failing outright.
+func makeLogdir() (string, error) {
+	base, ok := hubtemp.Dir("drmemory")
+	if !ok {
+		return os.MkdirTemp("", "drmemory-logs-")
+	}
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return os.MkdirTemp("", "drmemory-logs-")
+	}
+	return os.MkdirTemp(base, "logs-")
 }
 
 // formatCommandLine joins the drmemory.exe path and its argv into a single
