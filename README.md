@@ -55,28 +55,25 @@ Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTAL
 `mcp-local-hub` runs each MCP server **once per OS user**, exposes it as a local HTTP endpoint via [Streamable HTTP transport](https://modelcontextprotocol.io/docs/concepts/transports), and writes the correct client-config entry into each managed MCP client. Clients see a shared daemon instead of their own child process.
 
 ```
-   ┌─────────────────────────────────────────────────────────────────────┐
-   │             OS-level Task Scheduler (Windows schtasks)              │
-   │             starts on logon, restarts on failure                    │
-   └──┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬───┘
-      │      │      │      │      │      │      │      │      │      │
-      ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼      ▼
-   ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐
-   │seren││memor││seq- ││wolf-││god- ││paper││time ││gdb  ││lldb ││perf │
-   │×2   ││y    ││think││ram  ││bolt ││-srch││     ││     ││     ││tools│
-   │/22  ││9123 ││9124 ││9132 ││9126 ││9127 ││9128 ││9129 ││9130 ││9131 │
-   └──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘
-      │      │      │      │      │      │      │      │      │      │
-      └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
-                                    │
-                 shared by default + opt-in MCP clients
-                                    │
-         ┌───────────┬───────────┬───────────┬───────────┬───────────┐
-         ▼           ▼           ▼           ▼           ▼
-      Claude      Codex       Cursor      VS Code   Gemini/Qwen/
-      Code        CLI         (HTTP)      (HTTP)    Antigravity
-      (HTTP)      (HTTP)                            (opt-in)
+  MCP clients                      mcphub                  shared daemons
+  (Claude Code,                                            (one per server,
+   Codex, Cursor,        ┌──────────────────────┐           per OS user)
+   VS Code, Gemini,      │   mcphub supervise   │         ┌──────────────┐
+   Qwen, …)              │  ───────────────────  │   ┌────▶│ serena ×2    │
+                         │  supervisor: owns,    │   │     ├──────────────┤
+   ┌──────────┐  HTTP    │  restarts, shares     │   ├────▶│ memory       │
+   │ client A │ ───────▶ │  every daemon         │ ──┤     ├──────────────┤
+   ├──────────┤  HTTP    │                       │   ├────▶│ godbolt …    │
+   │ client B │ ───────▶ │  (HTTP front +        │   │     ├──────────────┤
+   ├──────────┤  HTTP    │   stdio-host /        │   └────▶│ +7 more      │
+   │ client C │ ───────▶ │   embedded Go)        │         └──────────────┘
+   └──────────┘          └──────────────────────┘
 ```
+
+Each MCP server runs **once per OS user**; every client shares the same
+daemon over loopback HTTP instead of spawning its own copy. See
+[docs/supervisor-architecture.md](docs/supervisor-architecture.md) for the
+full lifecycle, state-file layout, migration, and per-OS behavior.
 
 Stdio-only MCP servers (memory, time, sequential-thinking, wolfram, gdb, paper-search-mcp) run behind a native Go **stdio-host** (`internal/daemon/host.go`): one subprocess per daemon, multiplexed across concurrent HTTP clients via JSON-RPC `id` rewriting and a cached `initialize` response. Three servers (**godbolt**, **lldb-bridge**, **perftools**) ship as Go code **embedded directly in the mcphub binary** — no npm/pip dependency, starts instantly.
 
@@ -185,64 +182,24 @@ assistant installed on the workstation.
 
 ## CLI surface
 
-### Core operations
+The commands you reach for day to day:
 
 | Command | What it does |
 |---|---|
 | `mcphub setup` | Install binary to `~/.local/bin` and register on user PATH (idempotent) |
-| `mcphub setup --trusted-root <abs-path>` | Same as `setup`, plus bless one or more ABSOLUTE workspace paths as LSP trusted roots (repeatable; idempotent) so the GUI LSP router auto-registers language servers under them without a manual GUI bless |
 | `mcphub install --server <name>` | Create scheduler tasks, write default client configs, start daemons |
-| `mcphub install --server <name> --clients <ids>` | Install only the named client bindings |
-| `mcphub install --server <name> --all-clients` | Install every client binding declared by the manifest |
 | `mcphub install --all` | Bulk install every manifest under `servers/` into default clients |
-| `mcphub install --server <n> --dry-run` | Print plan without applying |
-| `mcphub uninstall --server <name>` | Remove scheduler tasks + client entries (backups retained) |
 | `mcphub status` | Show state of every `mcp-local-hub-*` task (Running / Scheduled / Stopped) with PID, RAM, uptime, next-run |
 | `mcphub restart --server <n>` / `--all` | Stop + re-launch one or all daemons |
-| `mcphub stop --server <n>` / `--all` | Stop daemons without uninstalling |
+| `mcphub scan` | Classify every MCP entry across managed clients (`via-hub`, `can-migrate`, `unknown`, `per-session`, `not-installed`) |
+| `mcphub migrate --server <n>` | Rewrite stdio client entries to hub HTTP for a given server |
+| `mcphub secrets {init,set,get,list,…}` | Age-encrypted vault for API keys |
+| `mcphub rollback` | Restore the latest client-config backup for every client |
 | `mcphub version` | Print version, commit, build metadata |
 
-### Discovery & migration
-
-| Command | What it does |
-|---|---|
-| `mcphub scan` | Classify every MCP entry across managed clients into `via-hub`, `can-migrate`, `unknown`, `per-session`, `not-installed` |
-| `mcphub migrate --server <n>` | Rewrite stdio client entries to hub HTTP for a given server |
-| `mcphub manifest list` | List every manifest under `servers/*/manifest.yaml` |
-| `mcphub manifest show <name>` | Print a manifest's contents |
-
-### Logs, backups, recovery
-
-| Command | What it does |
-|---|---|
-| `mcphub logs <server> [--tail N]` | Tail daemon's stdout/stderr log |
-| `mcphub backups list` | Every `.bak-mcp-local-hub-*` across managed clients |
-| `mcphub backups clean` | Prune old timestamped backups, keep N most recent + pristine sentinel |
-| `mcphub backups show <file>` | Diff a backup against the live config |
-| `mcphub rollback` | Restore the latest backup for every client |
-| `mcphub rollback --original` | Restore the pristine pre-hub sentinel |
-| `mcphub cleanup --dry-run` | List candidate orphan MCP server processes |
-
-### Scheduler & secrets
-
-| Command | What it does |
-|---|---|
-| `mcphub scheduler upgrade` | Rewrite every task's `<Command>` to the current canonical `mcphub.exe` path |
-| `mcphub scheduler weekly-refresh set "SUN 03:00"` | Install a hub-wide weekly `restart --all` task |
-| `mcphub scheduler weekly-refresh disable` | Remove the hub-wide weekly task |
-| `mcphub secrets {init,set,get,list,delete,edit,migrate}` | Age-encrypted vault for API keys |
-| `mcphub settings {get,set,list}` | GUI preference registry for Phase 3B/3B-II surfaces |
-
-### Transport shims (Hidden; called by scheduler, not by humans)
-
-| Command | What it does |
-|---|---|
-| `mcphub daemon --server <n> --daemon <d>` | Invoked by the scheduler; exec real server with tee'd logs |
-| `mcphub relay --server <n> --daemon <d>` | Stdio↔HTTP bridge (for clients that reject loopback-HTTP) |
-| `mcphub relay --url <url>` | Direct relay to an arbitrary Streamable HTTP endpoint |
-| `mcphub godbolt` | Embedded godbolt MCP server (also ships as `./cmd/godbolt` standalone) |
-| `mcphub lldb-bridge <host:port>` | LLDB TCP↔stdio bridge + auto-spawn (also `./cmd/lldb-bridge`) |
-| `mcphub perftools` | Embedded perf-toolbox MCP (also `./cmd/perftools`) |
+The full command surface — install flags, discovery/migration, logs/backups/recovery,
+scheduler/secrets, and the hidden transport shims — is in
+[docs/cli-reference.md](docs/cli-reference.md).
 
 ## Architecture highlights
 
@@ -259,10 +216,10 @@ See [docs/architecture-highlights.md](docs/architecture-highlights.md) for the f
 v0.5.0 replaces the v0.4.x N-scheduled-tasks-per-daemon model with a single
 long-lived `mcphub supervise` parent process per user that owns every MCP
 daemon under an OS-appropriate lifecycle primitive, observes child exits in
-real time, and applies a persisted restart-policy state machine.
-
-Full details — overview, new commands, state files, migration from v0.4.x, and
-the per-OS behavior matrix — are in
+real time, and applies a persisted restart-policy state machine. The new
+commands (`supervise`, `strict-mode`, `autostart`, `install --upgrade`), the
+state-file layout, the v0.4.x migration flow, and the per-OS behavior matrix
+are all documented in
 [docs/supervisor-architecture.md](docs/supervisor-architecture.md).
 
 ## Current status
