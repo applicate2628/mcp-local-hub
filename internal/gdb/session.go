@@ -456,18 +456,28 @@ func firstNonEmptyLine(s string) string {
 // unrecognized escape's following byte verbatim. Robust to a missing closing
 // quote (partial line).
 func unescapeMIString(s string) string {
-	// Strip surrounding quotes if present.
+	// Strip the leading quote if present. The value ends at the FIRST UNESCAPED
+	// closing quote, which the loop below detects — NOT the last quote in the
+	// input. This matters because miFieldValue passes the whole rest of an MI
+	// record (e.g. `add",file="test.cpp",line="2"`); a LastIndexByte scan would
+	// over-read past this field's closing quote and splice in the trailing
+	// fields, producing garbled stop summaries like `func=add",file=...`. For a
+	// well-formed single quoted stream record the first unescaped closing quote
+	// IS the last quote, so that caller is unaffected.
 	if len(s) >= 1 && s[0] == '"' {
 		s = s[1:]
-		if i := strings.LastIndexByte(s, '"'); i >= 0 {
-			s = s[:i]
-		}
 	}
 
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		if c == '"' {
+			// First unescaped closing quote terminates the value. (An escaped
+			// quote `\"` is consumed by the backslash branch below before it can
+			// reach this check, so only a real closing quote breaks here.)
+			break
+		}
 		if c != '\\' || i+1 >= len(s) {
 			b.WriteByte(c)
 			continue

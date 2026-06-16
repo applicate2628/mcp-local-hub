@@ -43,6 +43,11 @@ func TestUnescapeMIString(t *testing.T) {
 		{"missing closing quote", `"partial`, "partial"},
 		{"empty quotes", `""`, ""},
 		{"bell+backspace", `"a\ab\b"`, "a\ab\b"},
+		// Regression: miFieldValue passes the whole rest of an MI record, so the
+		// value must terminate at THIS field's closing quote, not the record's
+		// last quote (the old LastIndexByte scan spliced trailing fields in).
+		{"stops at field boundary in record", `"add",file="x.cpp",line="2"`, "add"},
+		{"escaped quote then field boundary", `"a\"b",next="y"`, `a"b`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -192,11 +197,13 @@ func TestCommand_EOFBeforeResult(t *testing.T) {
 // TestAsyncSummary covers the stop-record summarizer directly, including the
 // bare *stopped (no fields) and *running paths.
 func TestAsyncSummary(t *testing.T) {
+	// Exact-match (not Contains): each field value must be clean, with no
+	// trailing junk spliced in from later fields. Under the pre-fix LastIndexByte
+	// termination, reason would have been "end-stepping-range\",frame={func=...42"
+	// and this exact assertion would fail — that is the regression guard.
 	got := asyncSummary(`*stopped,reason="end-stepping-range",frame={func="foo",file="x.c",line="42"}`)
-	for _, want := range []string{"reason=end-stepping-range", "func=foo", "file=x.c", "line=42"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("asyncSummary missing %q in %q", want, got)
-		}
+	if want := "[stopped: reason=end-stepping-range func=foo file=x.c line=42]\n"; got != want {
+		t.Errorf("asyncSummary = %q, want %q", got, want)
 	}
 	if bare := asyncSummary("*stopped"); !strings.Contains(bare, "stopped") {
 		t.Errorf("bare *stopped summary = %q, want it to mention stopped", bare)
