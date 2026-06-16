@@ -129,7 +129,7 @@ func NewHTTPHost(cfg HTTPHostConfig) (*HTTPHost, error) {
 		// disconnect / host Shutdown cancels) AND the tool's own timeout_sec
 		// (it kills its subprocess and returns). 30 min is a generous backstop
 		// above the longest tool default that still caps a truly-stuck upstream.
-		// The short health-probe + DELETE-cleanup paths carry their own ctx
+		// The short readiness-probe + DELETE-cleanup paths carry their own ctx
 		// deadlines, so they are unaffected by this larger client timeout.
 		httpClient: &http.Client{Timeout: 30 * time.Minute},
 		// streamClient is used for the long-lived SSE subscription on
@@ -259,9 +259,11 @@ func (h *HTTPHost) waitForReady(ctx context.Context) error {
 	attempt := 0
 	for time.Now().Before(deadline) {
 		attempt++
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, h.upstreamURL, nil)
+		probeCtx, cancel := context.WithDeadline(ctx, deadline)
+		req, _ := http.NewRequestWithContext(probeCtx, http.MethodGet, h.upstreamURL, nil)
 		req.Header.Set("Accept", "text/event-stream")
 		resp, err := h.httpClient.Do(req)
+		cancel()
 		if err == nil {
 			_ = resp.Body.Close()
 			return nil
