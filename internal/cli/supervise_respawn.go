@@ -147,15 +147,20 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	var ctrl *supervisorController
 	if deps.controllerProvider != nil {
 		if ctrl = deps.controllerProvider(); ctrl != nil && ctrl.intentCache != nil {
-			if snap, ok := ctrl.intentCache.snap.Load().(*intentSnapshot); ok && snap != nil && snap.intent != nil {
-				for i := range snap.intent.Daemons {
-					d := &snap.intent.Daemons[i]
-					if daemon_env_overlay.NormalizeOverlayKey(d.TaskName) == taskName {
-						desc = d
-						break
-					}
-				}
-			}
+			// Conc-F7 (PR #268 deep-sec P3): resolve through the single-owner
+			// IntentCache.LookupCanonical (exact key + bare/canonical backslash
+			// toggle) instead of re-implementing the scan inline. Semantically
+			// identical to the old NormalizeOverlayKey loop here — both match a
+			// descriptor whose TaskName equals taskName modulo the leading
+			// backslash — but without duplicating the lookup logic.
+			//
+			// NOTE this deliberately does NOT close the staleness the bug doc
+			// names: LookupCanonical reads the SAME ctrl.intentCache.snap the
+			// inline loop did, so a descriptor edited on disk since the last 60s
+			// IntentWatcher refresh is still seen stale here. That window is
+			// sub-second on an operator-initiated respawn; closing it would cost
+			// a fresh disk read per respawn, so it stays documented, not fixed.
+			desc, _ = ctrl.intentCache.LookupCanonical(taskName)
 		}
 	}
 	if desc == nil && deps.intent != nil {
