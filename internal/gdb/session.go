@@ -83,7 +83,7 @@ func defaultStartVersion(gdbPath string) string {
 	return version
 }
 
-// startSession spawns `gdb --interpreter=mi3 --nx -q [program]`, wires its
+// startSession spawns `gdb --interpreter=mi3 --nx -q [--args program]`, wires its
 // stdin/stdout (stderr merged into stdout so MI log/error records are not lost),
 // drains the MI startup banner up to the first `(gdb) ` prompt, and disables the
 // interactive confirm + pagination prompts that would otherwise block a
@@ -100,10 +100,7 @@ func startSession(gdbPath, program string) (*session, error) {
 		gdbPath = toolchain.DefaultGdbPath()
 	}
 
-	args := []string{"--interpreter=mi3", "--nx", "-q"}
-	if program != "" {
-		args = append(args, program)
-	}
+	args := gdbStartArgs(program)
 
 	cmd := exec.Command(gdbPath, args...)
 	process.NoConsole(cmd) // suppress console flash on a windowsgui parent
@@ -158,6 +155,18 @@ func startSession(gdbPath, program string) (*session, error) {
 		return nil, fmt.Errorf("gdb-set pagination off: %w", err)
 	}
 	return s, nil
+}
+
+func gdbStartArgs(program string) []string {
+	args := []string{"--interpreter=mi3", "--nx", "-q"}
+	if program != "" {
+		// Use --args before the caller-provided program so GDB treats it as the
+		// inferior executable instead of continuing option parsing. Without this,
+		// a program name beginning with e.g. "-ex=shell ..." would be executed as a
+		// GDB startup command.
+		args = append(args, "--args", program)
+	}
+	return args
 }
 
 // Command sends cmd to gdb and returns the human-readable console output (the
