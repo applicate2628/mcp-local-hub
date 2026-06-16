@@ -51,7 +51,14 @@ func Dir(subdir string) (string, bool) {
 	return "", false
 }
 
-const activeRunMarker = ".mcp-local-hub-active"
+const (
+	activeRunMarker = ".mcp-local-hub-active"
+	// activeRunMarkerTTL is deliberately longer than the stale-run TTLs used by
+	// callers, so legitimate long-running tools are not removed solely because
+	// their top-level scratch directory is old. It still bounds disk growth when
+	// a daemon, host, or tool process terminates before MarkActive's cleanup runs.
+	activeRunMarkerTTL = 24 * time.Hour
+)
 
 // MarkActive creates a marker inside a just-created per-run scratch directory so
 // a concurrent SweepStale does not remove it while the owning run is still in
@@ -111,11 +118,13 @@ func EnsurePrivateDir(dir string) error {
 // os.RemoveAll is no longer the only cleanup path.
 //
 // Active runs call MarkActive after creating their scratch dir. SweepStale skips
-// any directory carrying that marker, so request-controlled runs whose timeout
-// exceeds ttl are not removed solely because the top-level directory mtime is
-// old. Errors (in-use entry, permission glitch) are ignored — a sweep that can't
-// remove one entry must not fail the run it is making room for. Non-matching
-// siblings (e.g. a shared "symcache" dir) are left untouched.
+// marker-bearing directories only while the marker is fresh, so request-
+// controlled runs whose timeout exceeds ttl are not removed solely because the
+// top-level directory mtime is old. Abandoned markers left behind by crashes or
+// hard kills eventually expire and the stale directory is reclaimed. Errors
+// (in-use entry, permission glitch) are ignored — a sweep that can't remove one
+// entry must not fail the run it is making room for. Non-matching siblings (e.g.
+// a shared "symcache" dir) are left untouched.
 func SweepStale(dir, prefix string, ttl time.Duration) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -127,8 +136,10 @@ func SweepStale(dir, prefix string, ttl time.Duration) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		if _, err := os.Lstat(filepath.Join(path, activeRunMarker)); err == nil {
-			continue
+		if markerInfo, err := os.Lstat(filepath.Join(path, activeRunMarker)); err == nil {
+			if markerInfo.ModTime().After(time.Now().Add(-activeRunMarkerTTL)) {
+				continue
+			}
 		}
 		info, err := e.Info()
 		if err != nil || info.ModTime().After(cutoff) {
