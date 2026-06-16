@@ -135,18 +135,37 @@ func findVcvarsViaProbe() (string, bool) {
 }
 
 // captureVcvarsEnv runs vcvars64.bat and dumps the resulting environment.
-// The classic recipe is `cmd /c ""<vcvars>" > NUL 2>&1 && set"`: run the
-// batch (discarding its banner on stdout/stderr) and, only on success,
-// print the env via `set`. We parse the KEY=VALUE lines that follow.
 //
-// Returns (env, true) on success; (nil, false) when the command fails to
-// run or its output has no parseable KEY=VALUE lines.
+// It writes a tiny temp .bat (`call "<vcvars>" >NUL 2>&1` then `set`) and runs
+// `cmd /c <tempbat>`, rather than an inline `cmd /c ""<vcvars>" ... && set"`.
+// The inline form is fragile: Go's exec.Command escapes the cmdLine argument
+// for the MS C-runtime, and cmd /c's own first/last-quote-stripping rule then
+// mangles the quoted, space-bearing vcvars path (e.g. "C:\Program Files\..."),
+// so vcvars never runs and the capture fails (observed live: env_source
+// fell back to oneapi-only, cl.exe absent). Quoting the path INSIDE the .bat
+// sidesteps both layers — cmd parses it natively, no Go escaping involved.
+//
+// Returns (env, true) on success; (nil, false) when the temp file cannot be
+// written, the command fails to run, or its output has no parseable
+// KEY=VALUE lines.
 func captureVcvarsEnv(vcvars string) ([]string, bool) {
-	// Build the cmd.exe command line. The doubled outer quotes are
-	// required by cmd /c's quote-stripping rule when the inner command
-	// itself contains quotes: cmd /c "" "<quoted path>" ... "".
-	cmdLine := `"` + vcvars + `" > NUL 2>&1 && set`
-	cmd := exec.Command("cmd", "/c", cmdLine)
+	bat, err := os.CreateTemp("", "mcphub-vcvars-*.bat")
+	if err != nil {
+		return nil, false
+	}
+	batPath := bat.Name()
+	defer os.Remove(batPath)
+	// CRLF so cmd parses the batch reliably; `call` so control returns to
+	// dump `set` after vcvars finishes; banner discarded to NUL.
+	content := "@echo off\r\ncall \"" + vcvars + "\" > NUL 2>&1\r\nset\r\n"
+	if _, err := bat.WriteString(content); err != nil {
+		_ = bat.Close()
+		return nil, false
+	}
+	if err := bat.Close(); err != nil {
+		return nil, false
+	}
+	cmd := exec.Command("cmd", "/c", batPath)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
 	out, err := cmd.Output()
 	if err != nil {
