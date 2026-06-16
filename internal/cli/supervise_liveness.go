@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"time"
 
@@ -83,6 +84,27 @@ func supervisorPortOwnerPID(port int) (int, bool, error) {
 	return api.LoopbackPortOwnerPID(port)
 }
 
+// supervisorLivenessUsesProductionPortOwnerProbe reports whether the given
+// PortOwnerPID closure is the production per-port netstat probe
+// (supervisorPortOwnerPID). The sweep only swaps in the single-snapshot probe
+// for that exact production probe:
+//   - a nil probe (macOS / other POSIX) keeps the PortLive TCP fallback — no
+//     snapshot, no behavior change;
+//   - a TEST-injected per-port closure (a different func pointer) is left
+//     intact so existing per-port-probe sweep tests drive the SAME verdicts
+//     (the snapshot seam would otherwise replace their injected closure with a
+//     snapshot resolved from the real netstat default and change the verdict).
+//
+// Function values are not == comparable in Go, so identity is checked via the
+// underlying code pointer (reflect.Value.Pointer); both sides are package-level
+// funcs, so the comparison is stable.
+func supervisorLivenessUsesProductionPortOwnerProbe(fn func(port int) (int, bool, error)) bool {
+	if fn == nil {
+		return false
+	}
+	return reflect.ValueOf(fn).Pointer() == reflect.ValueOf(supervisorPortOwnerPID).Pointer()
+}
+
 func hydrateControllerRunningStates(ctrl *supervisorController, currentRunning map[string]bool) {
 	if ctrl == nil {
 		return
@@ -155,6 +177,42 @@ func sweepSupervisorLivenessOnce(
 		byTask[canonicalSupervisorTaskName(d.TaskName)] = d
 	}
 	now := time.Now().UTC()
+
+	// Perf: take ONE OS port-owner snapshot for the whole sweep and resolve
+	// every running daemon against it, instead of letting each daemon's
+	// liveness check spawn its own `netstat -ano` (15 running daemons → 15
+	// spawns EVERY 5s, continuously — the same anti-pattern /api/status fixed
+	// in a699713, which deliberately left the sweep on the per-port path).
+	// The seam is identical to supervisorStatusDaemons. Critically, the sweep
+	// DRIVES RESTARTS, so the snapshot-backed probe must yield BYTE-IDENTICAL
+	// liveness verdicts vs the per-port netstat:
+	//   - snapshot error → every port returns that err → port_owner_unverified
+	//     (observe-only, NEVER a restart — same fail-closed outcome as a
+	//     per-port netstat failure);
+	//   - port in map → its owner PID (== tracked PID → live; != → mismatch;
+	//     == supervisor self → port_owner_self);
+	//   - port NOT in map → (0, false, nil) = port_unbound, exactly what a
+	//     per-port netstat finding nothing returns.
+	// The snapshot replaces ONLY the production per-port probe; when a test
+	// injects its own PortOwnerPID closure (a different func pointer than the
+	// production supervisorPortOwnerPID), that injected per-port probe is kept
+	// so existing per-port-probe sweep tests drive the exact same verdicts.
+	// When PortOwnerPID is nil (macOS / other POSIX) no snapshot is taken and
+	// the per-daemon PortLive TCP fallback is preserved unchanged.
+	livenessProbe := supervisorLivenessProbeFns
+	if supervisorLivenessUsesProductionPortOwnerProbe(livenessProbe.PortOwnerPID) {
+		snapshot, snapErr := loopbackPortOwnersSnapshotFn()
+		livenessProbe.PortOwnerPID = func(port int) (int, bool, error) {
+			if snapErr != nil {
+				return 0, false, snapErr
+			}
+			if pid, ok := snapshot[port]; ok {
+				return pid, true, nil
+			}
+			return 0, false, nil
+		}
+	}
+
 	for taskName, entry := range tracker.Snapshot() {
 		taskName = canonicalSupervisorTaskName(taskName)
 		if entry.State != daemonRuntimeStateRunning || entry.CurrentPID <= 0 {
@@ -164,7 +222,7 @@ func sweepSupervisorLivenessOnce(
 		if !ok {
 			continue
 		}
-		live, reason := supervisorDaemonEntryLive(d, entry, now)
+		live, reason := supervisorDaemonEntryLiveWithProbe(d, entry, now, livenessProbe)
 		if live {
 			continue
 		}
