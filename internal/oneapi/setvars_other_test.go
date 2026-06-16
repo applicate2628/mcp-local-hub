@@ -3,9 +3,42 @@
 package oneapi
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCaptureSetvarsEnv_PassesPathAsShellArgument(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a'; touch should-not-exist; #")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	setvars := filepath.Join(dir, "setvars.sh")
+	if err := os.WriteFile(setvars, []byte("export ONEAPI_CAPTURE_TEST=ok\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	env, ok := captureSetvarsEnv(setvars)
+	if !ok {
+		t.Fatalf("captureSetvarsEnv() ok = false, env = %v", env)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "should-not-exist")); !os.IsNotExist(err) {
+		t.Fatalf("shell metacharacters in setvars path were evaluated; Stat() error = %v", err)
+	}
+	if !envContains(env, "ONEAPI_CAPTURE_TEST=ok") {
+		t.Fatalf("captured env missing ONEAPI_CAPTURE_TEST=ok: %v", env)
+	}
+}
+
+func envContains(env []string, want string) bool {
+	for _, entry := range env {
+		if entry == want {
+			return true
+		}
+	}
+	return false
+}
 
 func TestParseEnvLines_ParsesKeyValue(t *testing.T) {
 	dump := "PATH=/usr/bin:/bin\n" +
