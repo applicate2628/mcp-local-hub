@@ -3,8 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"mcp-local-hub/internal/api"
@@ -65,38 +63,22 @@ func runStdioMigrate(cmd *cobra.Command, servers []string, clientsFlag string, d
 		include = strings.Split(clientsFlag, ",")
 	}
 	a := api.NewAPI()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	vscodePath, _ := clientConfigPath("vscode")
 	report, err := a.MigrateFrom(api.MigrateOpts{
 		Servers:        servers,
 		ClientsInclude: include,
 		DryRun:         dryRun,
 		ScanOpts: api.ScanOpts{
-			ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
-			CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
-			CursorConfigPath:      filepath.Join(home, ".cursor", "mcp.json"),
-			VSCodeConfigPath:      vscodePath,
-			GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
-			QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
-			AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
-			// Wave-2 opt-in clients — kept in lockstep with the API scan
-			// surface (internal/api/scan.go). Omitting them here made
-			// `mcphub migrate` skip these 8 clients while the GUI/API
-			// migrated all 15 (the §9.2 canonical-set drift). The resolver
-			// returns "" on error, which ScanFrom skips — same as the
-			// original-seven behavior.
-			ZedConfigPath:      clientConfigPathOrEmpty("zed"),
-			KiroConfigPath:     clientConfigPathOrEmpty("kiro"),
-			WindsurfConfigPath: clientConfigPathOrEmpty("windsurf"),
-			ClineConfigPath:    clientConfigPathOrEmpty("cline"),
-			KiloCodeConfigPath: clientConfigPathOrEmpty("kilocode"),
-			OpenCodeConfigPath: clientConfigPathOrEmpty("opencode"),
-			HermesConfigPath:   clientConfigPathOrEmpty("hermes"),
-			OpenClawConfigPath: clientConfigPathOrEmpty("openclaw"),
-			ManifestDir:        scanManifestDir(),
+			// §9.2 drift-prevention: derive the per-client config-path set
+			// from the canonical registry (api.DefaultScanConfigPaths →
+			// clients.SupportedClientNames + ConfigPathForName), identical
+			// to the api.Scan + `mcphub scan` surfaces. A new registry
+			// client is covered automatically with ZERO edits here. (The
+			// actual migrate WRITE path in api.MigrateFrom is already
+			// registry-driven via clients.AllClients(); these paths feed the
+			// scan/presence half only — kept in lockstep so the two halves
+			// never disagree on the client set.)
+			ConfigPaths: api.DefaultScanConfigPaths(),
+			ManifestDir: scanManifestDir(),
 		},
 	})
 	if err != nil {

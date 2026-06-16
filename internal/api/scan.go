@@ -19,7 +19,33 @@ import (
 
 // ScanOpts provides per-client config paths so tests can point at temp dirs.
 // Production callers pass "" for each to use the OS default discovery.
+//
+// §9.2 FAMILY-B drift-prevention (2026-06-17): the canonical per-client
+// path set is now the registry-derived `ConfigPaths` map (client-name →
+// path override). Production callers populate it from
+// clients.ConfigPathForName over clients.SupportedClientNames(), so a new
+// registry client is automatically scanned/probed with ZERO scan.go edits
+// — closing the drift class where a registry client with no named
+// ScanOpts field was invisible to the scan surface (the bug ab80309 fixed
+// once already for the original seven, then recurred for wave-2 and the
+// agent-skills vendor set).
+//
+// The per-client named fields below are RETAINED as a thin back-compat
+// layer: ~20 test sites construct `ScanOpts{ClaudeConfigPath: x, ...}` and
+// keep working. effectiveConfigPaths() folds the named fields into the
+// same map keyed by client id, with ConfigPaths taking precedence when a
+// client is set in both. Empty paths (named field "" and absent map key)
+// are skipped by ScanFrom/probeClientConfigPresence exactly as before.
 type ScanOpts struct {
+	// ConfigPaths is the registry-keyed config-path set (client id →
+	// absolute path). The canonical input for production scan/probe.
+	// nil/absent key for a client means "use the named-field fallback,
+	// else skip". A "" value is treated the same as absent (skipped).
+	ConfigPaths map[string]string
+
+	// --- Back-compat named fields (folded into ConfigPaths by
+	// effectiveConfigPaths; ConfigPaths wins on conflict). New code should
+	// prefer ConfigPaths. ---
 	ClaudeConfigPath      string
 	CodexConfigPath       string
 	CursorConfigPath      string
@@ -27,11 +53,8 @@ type ScanOpts struct {
 	GeminiConfigPath      string
 	QwenConfigPath        string
 	AntigravityConfigPath string
-	// Wave-2 opt-in clients (PR #306 added the adapters; this PR wires
-	// them into the scan/GUI surface). One config path per client,
-	// defaulted from clients.ConfigPathForName in Scan() and pointable
-	// at temp dirs by tests. Empty paths are skipped by ScanFrom exactly
-	// like the original seven.
+	// Wave-2 opt-in clients (PR #306 added the adapters; a follow-up PR
+	// wired them into the scan/GUI surface).
 	ZedConfigPath      string
 	KiroConfigPath     string
 	WindsurfConfigPath string
@@ -40,8 +63,74 @@ type ScanOpts struct {
 	OpenCodeConfigPath string
 	HermesConfigPath   string
 	OpenClawConfigPath string
-	ManifestDir        string
-	WithProcessCount   bool // populate ScanEntry.ProcessCount via wmic
+
+	ManifestDir      string
+	WithProcessCount bool // populate ScanEntry.ProcessCount via wmic
+}
+
+// legacyNamedConfigPathSet maps the back-compat named ScanOpts fields to
+// their client id. Only clients that ever had a named field appear here;
+// registry clients added after the §9.2 refactor (copilot-cli, amazon-q,
+// openhands, aider, and future ones) have NO named field and are reached
+// exclusively through ConfigPaths — which is the whole point of the
+// refactor. This map exists only so effectiveConfigPaths can fold the
+// legacy fields in; it is NOT the canonical client set (that is
+// clients.SupportedClientNames()).
+func (o ScanOpts) legacyNamedConfigPathSet() map[string]string {
+	return map[string]string{
+		"claude-code": o.ClaudeConfigPath,
+		"codex-cli":   o.CodexConfigPath,
+		"cursor":      o.CursorConfigPath,
+		"vscode":      o.VSCodeConfigPath,
+		"gemini-cli":  o.GeminiConfigPath,
+		"qwen-cli":    o.QwenConfigPath,
+		"antigravity": o.AntigravityConfigPath,
+		"zed":         o.ZedConfigPath,
+		"kiro":        o.KiroConfigPath,
+		"windsurf":    o.WindsurfConfigPath,
+		"cline":       o.ClineConfigPath,
+		"kilocode":    o.KiloCodeConfigPath,
+		"opencode":    o.OpenCodeConfigPath,
+		"hermes":      o.HermesConfigPath,
+		"openclaw":    o.OpenClawConfigPath,
+	}
+}
+
+// effectiveConfigPaths is the SINGLE derivation point that turns ScanOpts
+// into the client-id → path set the scan/probe loops iterate. It merges,
+// per client:
+//   - ConfigPaths[name]      (registry-derived input; wins)
+//   - the back-compat named field for that client (fallback)
+//
+// Empty values are dropped so the returned map only carries clients with a
+// real path — preserving the long-standing "absent from the probe map when
+// the path is empty" contract that
+// TestProbeClientConfigPresence_Wave2Clients pins.
+//
+// Iteration is driven by the union of (a) every registry client that has a
+// ConfigPaths entry and (b) every legacy named field — so a registry
+// client with only a ConfigPaths value is included even though it has no
+// named field, and a legacy field still works even if the caller never
+// touched ConfigPaths.
+func (o ScanOpts) effectiveConfigPaths() map[string]string {
+	out := map[string]string{}
+	// 1. Legacy named fields (fallback layer).
+	for name, p := range o.legacyNamedConfigPathSet() {
+		if p != "" {
+			out[name] = p
+		}
+	}
+	// 2. ConfigPaths overrides (registry-derived; wins on conflict).
+	for name, p := range o.ConfigPaths {
+		if p != "" {
+			out[name] = p
+		} else {
+			// An explicit "" in ConfigPaths blanks the entry so a caller
+			// can suppress a client even if a legacy field is also set.
+			delete(out, name)
+		}
+	}
+	return out
 }
 
 // probeClientConfigPresence reports whether each known MCP client's
@@ -78,32 +167,19 @@ type ScanOpts struct {
 // keeps tempdir-based tests deterministic.
 func probeClientConfigPresence(opts ScanOpts) map[string]string {
 	out := map[string]string{}
-	pairs := []struct {
-		name string
-		path string
-	}{
-		{"claude-code", opts.ClaudeConfigPath},
-		{"codex-cli", opts.CodexConfigPath},
-		{"cursor", opts.CursorConfigPath},
-		{"vscode", opts.VSCodeConfigPath},
-		{"gemini-cli", opts.GeminiConfigPath},
-		{"qwen-cli", opts.QwenConfigPath},
-		{"antigravity", opts.AntigravityConfigPath},
-		// Wave-2 opt-in clients — same Lstat-first presence probe as the
-		// original seven (the loop body below is client-agnostic).
-		{"zed", opts.ZedConfigPath},
-		{"kiro", opts.KiroConfigPath},
-		{"windsurf", opts.WindsurfConfigPath},
-		{"cline", opts.ClineConfigPath},
-		{"kilocode", opts.KiloCodeConfigPath},
-		{"opencode", opts.OpenCodeConfigPath},
-		{"hermes", opts.HermesConfigPath},
-		{"openclaw", opts.OpenClawConfigPath},
-	}
-	for _, p := range pairs {
-		if p.path == "" {
-			continue
-		}
+	// §9.2 drift-prevention: iterate the registry-derived effective path
+	// set (ConfigPaths + back-compat named fields) instead of a hardcoded
+	// per-client list. ANY client a caller supplies a path for — including
+	// registry clients with no named ScanOpts field — is probed here with
+	// ZERO scan.go edits. The loop body below is client-agnostic.
+	// effectiveConfigPaths already drops empty paths, so a client absent
+	// from the map (no path supplied) never appears in `out` — preserving
+	// the "absent when path empty" contract.
+	for name, path := range opts.effectiveConfigPaths() {
+		p := struct {
+			name string
+			path string
+		}{name, path}
 		// PR #208 deep-sec Lane B rounds 4-6 P2 closure: Lstat-first
 		// probe + symlink resolution that matches the write pipeline's
 		// default-relax contract.
@@ -251,6 +327,59 @@ func classifyMissingClientConfig(path string) string {
 	return "missing-init-possible"
 }
 
+// clientScanFunc reads a single client's config at `path` and merges any
+// discovered MCP server entries into `entries`. Every per-client scanner
+// (scanClaude, scanCodex, …) has this signature.
+type clientScanFunc func(entries map[string]*ScanEntry, path string) error
+
+// clientScanners is the §9.2 drift-prevention registry mapping a client id
+// to (its scan function, its error-wrap prefix). ScanFrom dispatches
+// through this map driven by clients.SupportedClientNames(), so adding a
+// registry client + its scanner here is the ONLY edit needed to give that
+// client scan coverage — the per-client `if opts.XConfigPath != "" {...}`
+// ladder it replaced forced an edit to ScanFrom for every new client and
+// silently dropped any registry client that lacked a named ScanOpts field.
+//
+// A registry client absent from this map (copilot-cli, amazon-q, openhands,
+// aider today — no shape parser written yet) is still presence-probed by
+// probeClientConfigPresence; it is only skipped for entry discovery. When a
+// shape parser is added, register it here and it is auto-dispatched.
+//
+// The wrap prefix is carried explicitly to keep error messages byte-for-byte
+// identical to the pre-refactor ladder (which used short names like
+// "claude"/"codex"/"gemini"/"qwen", not the client ids
+// "claude-code"/"codex-cli"/…).
+func clientScanners() map[string]struct {
+	scan   clientScanFunc
+	prefix string
+} {
+	return map[string]struct {
+		scan   clientScanFunc
+		prefix string
+	}{
+		"claude-code": {scanClaude, "claude"},
+		"codex-cli":   {scanCodex, "codex"},
+		"cursor":      {scanCursor, "cursor"},
+		"vscode":      {scanVSCode, "vscode"},
+		"gemini-cli":  {scanGemini, "gemini"},
+		"qwen-cli":    {scanQwen, "qwen"},
+		"antigravity": {scanAntigravity, "antigravity"},
+		// Wave-2 opt-in clients. Each scanner mirrors the shape its adapter
+		// writes (see internal/clients/<client>.go). The HTTP-direct clients
+		// reuse the generic per-client shaper; zed uses the relay-shape
+		// detector because, like antigravity, its hub entry is a `mcphub
+		// relay` stdio invocation rather than a loopback url.
+		"zed":      {scanZed, "zed"},
+		"kiro":     {scanKiro, "kiro"},
+		"windsurf": {scanWindsurf, "windsurf"},
+		"cline":    {scanCline, "cline"},
+		"kilocode": {scanKiloCode, "kilocode"},
+		"opencode": {scanOpenCode, "opencode"},
+		"hermes":   {scanHermes, "hermes"},
+		"openclaw": {scanOpenClaw, "openclaw"},
+	}
+}
+
 // perSessionServers are MCP servers whose sessions must remain isolated
 // per local client/process. Even when an upstream tool supports a session_id
 // parameter, we conservatively keep them per-session unless the hub
@@ -283,6 +412,7 @@ var perSessionServers = map[string]bool{
 func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
 	presence := probeClientConfigPresence(opts)
+	paths := opts.effectiveConfigPaths()
 	scanIfReadable := func(name string) bool {
 		// "ok" is the only state for which an adapter read is
 		// guaranteed to find a regular file. "missing" /
@@ -294,84 +424,33 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		return presence[name] == "ok"
 	}
 
-	if opts.ClaudeConfigPath != "" && scanIfReadable("claude-code") {
-		if err := scanClaude(entries, opts.ClaudeConfigPath); err != nil {
-			return nil, fmt.Errorf("claude: %w", err)
+	// §9.2 drift-prevention: dispatch per-client scanning through the
+	// clientScanners registry keyed by client id, driven by the
+	// registry-derived effective path set. A registry client gains scan
+	// coverage the moment it has BOTH a config path (via ConfigPaths /
+	// SupportedClientNames in production) AND a clientScanners entry — with
+	// ZERO edits to this loop. Clients in the registry but without a parser
+	// (e.g. copilot-cli/amazon-q/openhands/aider until a shape parser is
+	// written) are still PROBED for presence above; they are simply skipped
+	// here, surfacing in the matrix as an available/installed column with
+	// no discovered entries rather than silently vanishing.
+	//
+	// Iteration order follows clients.SupportedClientNames() (stable
+	// registry order) so multi-client scan results are deterministic — the
+	// original code's fixed claude→...→openclaw order is preserved because
+	// that is exactly the registry order.
+	scanners := clientScanners()
+	for _, name := range clients.SupportedClientNames() {
+		sc, ok := scanners[name]
+		if !ok || sc.scan == nil {
+			continue // registry client with no shape parser yet
 		}
-	}
-	if opts.CodexConfigPath != "" && scanIfReadable("codex-cli") {
-		if err := scanCodex(entries, opts.CodexConfigPath); err != nil {
-			return nil, fmt.Errorf("codex: %w", err)
+		path := paths[name]
+		if path == "" || !scanIfReadable(name) {
+			continue
 		}
-	}
-	if opts.CursorConfigPath != "" && scanIfReadable("cursor") {
-		if err := scanCursor(entries, opts.CursorConfigPath); err != nil {
-			return nil, fmt.Errorf("cursor: %w", err)
-		}
-	}
-	if opts.VSCodeConfigPath != "" && scanIfReadable("vscode") {
-		if err := scanVSCode(entries, opts.VSCodeConfigPath); err != nil {
-			return nil, fmt.Errorf("vscode: %w", err)
-		}
-	}
-	if opts.GeminiConfigPath != "" && scanIfReadable("gemini-cli") {
-		if err := scanGemini(entries, opts.GeminiConfigPath); err != nil {
-			return nil, fmt.Errorf("gemini: %w", err)
-		}
-	}
-	if opts.QwenConfigPath != "" && scanIfReadable("qwen-cli") {
-		if err := scanQwen(entries, opts.QwenConfigPath); err != nil {
-			return nil, fmt.Errorf("qwen: %w", err)
-		}
-	}
-	if opts.AntigravityConfigPath != "" && scanIfReadable("antigravity") {
-		if err := scanAntigravity(entries, opts.AntigravityConfigPath); err != nil {
-			return nil, fmt.Errorf("antigravity: %w", err)
-		}
-	}
-	// Wave-2 opt-in clients. Each scanner mirrors the shape its adapter
-	// writes (see internal/clients/<client>.go). The HTTP-direct clients
-	// reuse the generic per-client shaper; zed uses the relay-shape
-	// detector because, like antigravity, its hub entry is a `mcphub
-	// relay` stdio invocation rather than a loopback url.
-	if opts.ZedConfigPath != "" && scanIfReadable("zed") {
-		if err := scanZed(entries, opts.ZedConfigPath); err != nil {
-			return nil, fmt.Errorf("zed: %w", err)
-		}
-	}
-	if opts.KiroConfigPath != "" && scanIfReadable("kiro") {
-		if err := scanKiro(entries, opts.KiroConfigPath); err != nil {
-			return nil, fmt.Errorf("kiro: %w", err)
-		}
-	}
-	if opts.WindsurfConfigPath != "" && scanIfReadable("windsurf") {
-		if err := scanWindsurf(entries, opts.WindsurfConfigPath); err != nil {
-			return nil, fmt.Errorf("windsurf: %w", err)
-		}
-	}
-	if opts.ClineConfigPath != "" && scanIfReadable("cline") {
-		if err := scanCline(entries, opts.ClineConfigPath); err != nil {
-			return nil, fmt.Errorf("cline: %w", err)
-		}
-	}
-	if opts.KiloCodeConfigPath != "" && scanIfReadable("kilocode") {
-		if err := scanKiloCode(entries, opts.KiloCodeConfigPath); err != nil {
-			return nil, fmt.Errorf("kilocode: %w", err)
-		}
-	}
-	if opts.OpenCodeConfigPath != "" && scanIfReadable("opencode") {
-		if err := scanOpenCode(entries, opts.OpenCodeConfigPath); err != nil {
-			return nil, fmt.Errorf("opencode: %w", err)
-		}
-	}
-	if opts.HermesConfigPath != "" && scanIfReadable("hermes") {
-		if err := scanHermes(entries, opts.HermesConfigPath); err != nil {
-			return nil, fmt.Errorf("hermes: %w", err)
-		}
-	}
-	if opts.OpenClawConfigPath != "" && scanIfReadable("openclaw") {
-		if err := scanOpenClaw(entries, opts.OpenClawConfigPath); err != nil {
-			return nil, fmt.Errorf("openclaw: %w", err)
+		if err := sc.scan(entries, path); err != nil {
+			return nil, fmt.Errorf("%s: %w", sc.prefix, err)
 		}
 	}
 
@@ -1188,32 +1267,24 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 
 // Scan is the production entry point: it resolves client config paths from
 // OS defaults and calls ScanFrom.
+//
+// §9.2 drift-prevention: the per-client config-path set is DERIVED from the
+// canonical registry (clients.SupportedClientNames() +
+// clients.ConfigPathForName) via DefaultScanConfigPaths, NOT a hand-listed
+// set of named ScanOpts fields. A new registry client is therefore scanned
+// + presence-probed automatically with ZERO edits here — closing the drift
+// class where a registry client without a named ScanOpts field was invisible
+// to scan.
 func (a *API) Scan() (*ScanResult, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	// Preserve the legacy contract: a home-dir resolution failure fails the
+	// whole Scan rather than silently yielding an empty result. (Each
+	// ConfigPathForName call below also resolves home, but failing fast here
+	// keeps the error surface identical to the pre-refactor Scan.)
+	if _, err := os.UserHomeDir(); err != nil {
 		return nil, err
 	}
 	return a.ScanFrom(ScanOpts{
-		ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
-		CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
-		CursorConfigPath:      filepath.Join(home, ".cursor", "mcp.json"),
-		VSCodeConfigPath:      mustClientConfigPath("vscode"),
-		GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
-		QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
-		AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
-		// Wave-2 opt-in clients. Each path comes from the same
-		// clients.ConfigPathForName resolver the CLI/install side uses, so
-		// the scan surface and the write surface agree on the location.
-		// mustClientConfigPath returns "" on a resolver error, which
-		// ScanFrom skips — identical to the original-seven behavior.
-		ZedConfigPath:      mustClientConfigPath("zed"),
-		KiroConfigPath:     mustClientConfigPath("kiro"),
-		WindsurfConfigPath: mustClientConfigPath("windsurf"),
-		ClineConfigPath:    mustClientConfigPath("cline"),
-		KiloCodeConfigPath: mustClientConfigPath("kilocode"),
-		OpenCodeConfigPath: mustClientConfigPath("opencode"),
-		HermesConfigPath:   mustClientConfigPath("hermes"),
-		OpenClawConfigPath: mustClientConfigPath("openclaw"),
+		ConfigPaths: DefaultScanConfigPaths(),
 		// Empty ManifestDir → ScanFrom uses the embed-first resolution
 		// path. The on-disk defaultManifestDir stays available as a
 		// secondary source for dev-checkout scenarios where a freshly-
@@ -1222,12 +1293,30 @@ func (a *API) Scan() (*ScanResult, error) {
 	})
 }
 
-func mustClientConfigPath(name string) string {
-	path, err := clients.ConfigPathForName(name)
-	if err != nil {
-		return ""
+// DefaultScanConfigPaths returns the canonical client-id → OS-default
+// config-path map for every client in clients.SupportedClientNames(),
+// resolved through clients.ConfigPathForName — the SAME resolver the
+// CLI/install/GUI write surface uses, so the scan surface and the write
+// surface always agree on the on-disk location. A client whose resolver
+// errors (e.g. unresolvable home dir) is OMITTED from the map; ScanFrom
+// then skips it, identical to the legacy mustClientConfigPath("") behavior.
+//
+// This is the single point through which a freshly-registered client gains
+// scan/probe coverage: it lands in SupportedClientNames(), gets a path
+// here, and (if it also has a clientScanners entry) is scanned — all
+// without touching ScanOpts or ScanFrom.
+//
+// Exported so the CLI scan/migrate callers derive the identical set rather
+// than maintaining their own parallel hand-listed copy (the original §9.2
+// drift had THREE such copies: api.Scan, cli scan, cli migrate).
+func DefaultScanConfigPaths() map[string]string {
+	out := map[string]string{}
+	for _, name := range clients.SupportedClientNames() {
+		if path, err := clients.ConfigPathForName(name); err == nil && path != "" {
+			out[name] = path
+		}
 	}
-	return path
+	return out
 }
 
 // defaultManifestDir returns the path to `servers/` resolved against the

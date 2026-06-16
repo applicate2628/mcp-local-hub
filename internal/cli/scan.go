@@ -44,29 +44,18 @@ See also: migrate, manifest list, install.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			result, err := a.ScanFrom(api.ScanOpts{
-				ClaudeConfigPath:      clientConfigPathOrEmpty("claude-code"),
-				CodexConfigPath:       clientConfigPathOrEmpty("codex-cli"),
-				CursorConfigPath:      clientConfigPathOrEmpty("cursor"),
-				VSCodeConfigPath:      clientConfigPathOrEmpty("vscode"),
-				GeminiConfigPath:      clientConfigPathOrEmpty("gemini-cli"),
-				QwenConfigPath:        clientConfigPathOrEmpty("qwen-cli"),
-				AntigravityConfigPath: clientConfigPathOrEmpty("antigravity"),
-				// Wave-2 opt-in clients — kept in lockstep with the API scan
-				// surface (internal/api/scan.go). Omitting them here made
-				// `mcphub scan` blind to MCP configs in these 8 clients while
-				// the GUI/API saw all 15 (the §9.2 canonical-set drift).
-				// clientConfigPathOrEmpty returns "" on resolver error, which
-				// ScanFrom skips — identical to the original-seven behavior.
-				ZedConfigPath:      clientConfigPathOrEmpty("zed"),
-				KiroConfigPath:     clientConfigPathOrEmpty("kiro"),
-				WindsurfConfigPath: clientConfigPathOrEmpty("windsurf"),
-				ClineConfigPath:    clientConfigPathOrEmpty("cline"),
-				KiloCodeConfigPath: clientConfigPathOrEmpty("kilocode"),
-				OpenCodeConfigPath: clientConfigPathOrEmpty("opencode"),
-				HermesConfigPath:   clientConfigPathOrEmpty("hermes"),
-				OpenClawConfigPath: clientConfigPathOrEmpty("openclaw"),
-				ManifestDir:        scanManifestDir(),
-				WithProcessCount:   withProcs,
+				// §9.2 drift-prevention: the per-client config-path set is
+				// DERIVED from the canonical registry
+				// (api.DefaultScanConfigPaths → clients.SupportedClientNames
+				// + ConfigPathForName), identical to the api.Scan production
+				// path. A new registry client is scanned by `mcphub scan`
+				// automatically with ZERO edits here — closing the §9.2
+				// drift where this call site had its own hand-listed copy of
+				// the 15 named fields that fell out of lockstep with the GUI/
+				// API surface every time a client was added.
+				ConfigPaths:      api.DefaultScanConfigPaths(),
+				ManifestDir:      scanManifestDir(),
+				WithProcessCount: withProcs,
 			})
 			if err != nil {
 				return err
@@ -140,14 +129,6 @@ func shortClient(c string) string {
 		return "ag"
 	}
 	return c
-}
-
-func clientConfigPathOrEmpty(name string) string {
-	path, err := clients.ConfigPathForName(name)
-	if err != nil {
-		return ""
-	}
-	return path
 }
 
 // scanManifestDir returns "" to tell the api layer to use the
