@@ -849,7 +849,7 @@ func sendForceMaterializeTools(port int, backend string) string {
 		`{"jsonrpc":"2.0","id":101,"method":"tools/call","params":{"name":%q,"arguments":{}}}`,
 		toolName)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		fmt.Sprintf("http://127.0.0.1:%d/mcp", port),
+		clients.HubLoopbackURL(port, "/mcp"),
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -973,7 +973,7 @@ const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
 func singleHealthProbe(port int) *HealthProbe {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+	url := clients.HubLoopbackURL(port, "/mcp")
 	client := &http.Client{Timeout: 3 * time.Second}
 
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"mcphub-health","version":"1"}}}`
@@ -1163,15 +1163,9 @@ func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
 	if urlPath == "" {
 		urlPath = "/mcp"
 	}
-	// Use the explicit IPv4 loopback 127.0.0.1, NOT "localhost". "localhost"
-	// goes through name resolution: on an IPv6-preferring host it resolves to
-	// ::1 first, and since the daemon binds 127.0.0.1 only, every client
-	// connection paid a ~2s ::1 connect-timeout before falling back to IPv4
-	// (measured: localhost round-trip 2008ms vs 127.0.0.1 18ms). "localhost"
-	// can also be re-pointed by a VPN / hosts-file / split-horizon resolver.
-	// 127.0.0.1 is the hardcoded loopback — no DNS, no IPv6 fallback, no VPN
-	// interception. The daemon already binds 127.0.0.1, so this matches.
-	return fmt.Sprintf("http://127.0.0.1:%d%s", daemon.Port, urlPath)
+	// Single owner of the loopback-host literal (127.0.0.1, NOT "localhost") —
+	// see clients.HubLoopbackURL for the IPv6-fallback / VPN-rerouting rationale.
+	return clients.HubLoopbackURL(daemon.Port, urlPath)
 }
 
 // isHubOwnedEntry reports whether the client entry was placed by this
@@ -1475,10 +1469,8 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		if err := validateClientURLPath(urlPath); err != nil {
 			return nil, fmt.Errorf("invalid url_path for client %q: %w", b.Client, err)
 		}
-		// 127.0.0.1, NOT "localhost" — see the buildBindingURL comment: localhost
-		// resolution causes a ~2s ::1 IPv6-fallback per connection and is
-		// VPN/hosts-file routable; the hardcoded IPv4 loopback avoids both.
-		url := fmt.Sprintf("http://127.0.0.1:%d%s", daemon.Port, urlPath)
+		// Single owner of the loopback-host literal — see clients.HubLoopbackURL.
+		url := clients.HubLoopbackURL(daemon.Port, urlPath)
 		// Per-server install path NEVER emits Remove (including a Remove
 		// of the mcphub-hub aggregate). The full-reconcile pipeline
 		// (BuildHubReconcilePlan / ApplyHubReconcileInOrder) owns gate

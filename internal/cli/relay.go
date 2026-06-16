@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/servers"
@@ -101,7 +102,7 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 	}
 	for _, d := range m.Daemons {
 		if d.Name == daemonName {
-			return fmt.Sprintf("http://127.0.0.1:%d/mcp", d.Port), nil
+			return clients.HubLoopbackURL(d.Port, "/mcp"), nil
 		}
 	}
 	return "", fmt.Errorf("no daemon %q in manifest %s", daemonName, server)

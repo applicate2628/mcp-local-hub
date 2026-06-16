@@ -525,6 +525,25 @@ func IsHubHTTPURL(urlStr string) bool {
 		strings.HasPrefix(urlStr, "http://[::1]:")
 }
 
+// HubLoopbackHost is the loopback host every hub client-binding URL is written
+// with. Hardcoded IPv4 — NOT "localhost" — so a client connection never pays
+// the ~2 s IPv6 ::1 connect-timeout fallback (daemons bind 127.0.0.1 only) and
+// is immune to VPN / hosts-file rerouting of "localhost" (measured: localhost
+// round-trip 2008 ms vs 127.0.0.1 18 ms).
+const HubLoopbackHost = "127.0.0.1"
+
+// HubLoopbackURL builds a URL that reaches a hub daemon over the loopback:
+// http://127.0.0.1:<port><path>. path must already start with "/" (e.g. "/mcp"
+// or "/clients/<name>/mcp"). It is the SINGLE OWNER of the loopback-host literal
+// for every daemon-reaching URL — a client-config binding written to disk, an
+// install-time daemon health probe, and the relay dial target — so the
+// localhost->127.0.0.1 fix can never silently regress one builder site at a
+// time. (Recognition of EXISTING entries across loopback spellings stays with
+// the IsHubHTTPURL matcher above, which deliberately still accepts "localhost".)
+func HubLoopbackURL(port int, path string) string {
+	return fmt.Sprintf("http://%s:%d%s", HubLoopbackHost, port, path)
+}
+
 // isHubURLShapeEntry reports whether a parsed client-config entry map
 // is in mcphub's hub-HTTP shape for URL-native clients: the entry's
 // urlField value is a hub loopback URL (IsHubHTTPURL) AND the entry has

@@ -259,6 +259,38 @@ func TestLatestBackup_ReturnsNotOkWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestHubLoopbackURL pins the single owner of hub loopback URL construction:
+// it must emit the explicit IPv4 loopback (127.0.0.1), NEVER "localhost" — a
+// regression here reintroduces the ~2 s IPv6 ::1 connect-timeout per MCP call.
+// IsHubHTTPURL must in turn accept the output (round-trip), and the host
+// constant must match.
+func TestHubLoopbackURL(t *testing.T) {
+	if HubLoopbackHost != "127.0.0.1" {
+		t.Fatalf("HubLoopbackHost = %q, want 127.0.0.1 (localhost would reintroduce the IPv6 lag)", HubLoopbackHost)
+	}
+	cases := []struct {
+		port int
+		path string
+		want string
+	}{
+		{9200, "/mcp", "http://127.0.0.1:9200/mcp"},
+		{9133, "/clients/claude-code/mcp", "http://127.0.0.1:9133/clients/claude-code/mcp"},
+		{1, "/", "http://127.0.0.1:1/"},
+	}
+	for _, tc := range cases {
+		got := HubLoopbackURL(tc.port, tc.path)
+		if got != tc.want {
+			t.Errorf("HubLoopbackURL(%d, %q) = %q, want %q", tc.port, tc.path, got, tc.want)
+		}
+		if strings.Contains(got, "localhost") {
+			t.Errorf("HubLoopbackURL must never emit 'localhost': %q", got)
+		}
+		if !IsHubHTTPURL(got) {
+			t.Errorf("IsHubHTTPURL must accept the builder's own output: %q", got)
+		}
+	}
+}
+
 func TestIsHubHTTPURL(t *testing.T) {
 	cases := []struct {
 		name string

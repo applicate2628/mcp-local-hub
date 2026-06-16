@@ -227,7 +227,7 @@ func BuildHubReconcilePlan(
 				Path:      path,
 				Action:    ClientUpdateAddReplace,
 				EntryName: hubReconcileAggregateEntryName,
-				URL:       fmt.Sprintf("http://127.0.0.1:%d/clients/%s/mcp", endpoint.Port, client),
+				URL:       clients.HubLoopbackURL(endpoint.Port, fmt.Sprintf("/clients/%s/mcp", client)),
 				Headers: map[string]string{
 					"X-Mcphub-Hub-Token":   tok,
 					"X-Mcphub-Instance-Id": endpoint.InstanceID,
@@ -306,7 +306,7 @@ func BuildHubReconcilePlan(
 					Path:       path,
 					Action:     ClientUpdateAddReplace,
 					EntryName:  ref.Server,
-					URL:        fmt.Sprintf("http://127.0.0.1:%d%s", ref.Port, p),
+					URL:        clients.HubLoopbackURL(ref.Port, p),
 					DaemonName: ref.Daemon,
 				})
 			}

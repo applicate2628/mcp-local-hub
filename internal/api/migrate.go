@@ -205,7 +205,7 @@ func migrateOneBinding(
 	if urlPath == "" {
 		urlPath = "/mcp"
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath)
+	url := clients.HubLoopbackURL(daemonPort, urlPath)
 
 	if dryRun {
 		report.Applied = append(report.Applied, AppliedMigration{
