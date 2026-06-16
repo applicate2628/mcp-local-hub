@@ -116,6 +116,84 @@
       "env": {},
       "categories": ["debug", "reference"],
       "license": "MIT"
+    },
+    {
+      "id": "memory",
+      "name": "Memory MCP server",
+      "summary": "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/memory/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {
+        "MEMORY_FILE_PATH": "${HOME}/.local/share/mcp-memory/memory.jsonl"
+      },
+      "categories": ["memory", "knowledge-graph"],
+      "license": "MIT"
+    },
+    {
+      "id": "time",
+      "name": "Time MCP server",
+      "summary": "Time and timezone utilities — current time, conversions, and timezone-aware calculations.",
+      "homepage": "https://www.npmjs.com/package/@mcpcentral/mcp-time",
+      "readme_url": "https://www.npmjs.com/package/@mcpcentral/mcp-time",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@mcpcentral/mcp-time@0.0.5"],
+      "env": {},
+      "categories": ["time", "utilities"],
+      "license": "MIT"
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking MCP server",
+      "summary": "Structured step-by-step reasoning — decompose hard problems into revisable thought sequences.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sequentialthinking/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking@2025.12.18"],
+      "env": {},
+      "categories": ["reasoning", "agent"],
+      "license": "MIT"
+    },
+    {
+      "id": "serena",
+      "name": "Serena MCP server",
+      "summary": "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase. Launched via uvx from the upstream repo (pinned commit); requires Python + uv.",
+      "homepage": "https://github.com/oraios/serena",
+      "readme_url": "https://raw.githubusercontent.com/oraios/serena/main/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena@f0a3a279b7c48d28b9e7e4aea1ed9caed846906b",
+        "serena",
+        "start-mcp-server",
+        "--transport",
+        "streamable-http"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "categories": ["code-intelligence", "lsp", "refactoring"],
+      "license": "MIT"
+    },
+    {
+      "id": "paper-search-mcp",
+      "name": "Paper Search MCP server",
+      "summary": "Academic paper search — query arXiv and other sources for research papers and abstracts. Requires Python + uv; set the Unpaywall email secret for full-text resolution.",
+      "homepage": "https://github.com/openags/paper-search-mcp",
+      "readme_url": "https://raw.githubusercontent.com/openags/paper-search-mcp/main/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["--from", "paper-search-mcp", "python", "-m", "paper_search_mcp.server"],
+      "env": {
+        "PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "secret:unpaywall_email"
+      },
+      "categories": ["research", "papers"],
+      "license": "MIT"
     }
   ]
 }
