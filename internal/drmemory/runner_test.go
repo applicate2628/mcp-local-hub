@@ -10,10 +10,12 @@ import (
 
 // TestBuildDrMemoryArgs asserts the flag wiring without spawning a
 // process: -batch always present, -light / -no_check_uninitialized only
-// on their toggles, -logdir + -- separator + target + args in order.
+// on their toggles, -symcache_dir only when a cache dir is supplied (and
+// before -logdir), -logdir + -- separator + target + args in order.
 func TestBuildDrMemoryArgs(t *testing.T) {
 	tests := []struct {
 		name        string
+		symcache    string
 		light       bool
 		checkUninit bool
 		want        []string
@@ -42,10 +44,24 @@ func TestBuildDrMemoryArgs(t *testing.T) {
 			checkUninit: false,
 			want:        []string{"-batch", "-light", "-no_check_uninitialized", "-logdir", "LOG", "--", "t.exe", "-a", "-b"},
 		},
+		{
+			name:        "with-symcache",
+			symcache:    "SYM",
+			light:       true,
+			checkUninit: true,
+			want:        []string{"-batch", "-light", "-symcache_dir", "SYM", "-logdir", "LOG", "--", "t.exe", "-a", "-b"},
+		},
+		{
+			name:        "empty-symcache-omits-flag",
+			symcache:    "",
+			light:       false,
+			checkUninit: true,
+			want:        []string{"-batch", "-logdir", "LOG", "--", "t.exe", "-a", "-b"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildDrMemoryArgs("LOG", "t.exe", []string{"-a", "-b"}, tc.light, tc.checkUninit)
+			got := buildDrMemoryArgs("LOG", tc.symcache, "t.exe", []string{"-a", "-b"}, tc.light, tc.checkUninit)
 			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
 				t.Errorf("buildDrMemoryArgs = %v, want %v", got, tc.want)
 			}

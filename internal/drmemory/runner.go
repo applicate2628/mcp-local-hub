@@ -60,7 +60,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd 
 	}
 	defer os.RemoveAll(logdir)
 
-	cmdArgs := buildDrMemoryArgs(logdir, target, args, light, checkUninit)
+	cmdArgs := buildDrMemoryArgs(logdir, symcacheDir(), target, args, light, checkUninit)
 	commandLine := formatCommandLine(exePath, cmdArgs)
 
 	cmd := exec.CommandContext(ctx, exePath, cmdArgs...)
@@ -151,8 +151,11 @@ func quoteIfSpaced(s string) string {
 
 // buildDrMemoryArgs assembles the drmemory.exe argv. Kept separate from
 // defaultRun so a test can assert the flag wiring without spawning a
-// process.
-func buildDrMemoryArgs(logdir, target string, args []string, light, checkUninit bool) []string {
+// process. When symcacheDir is non-empty it is passed via -symcache_dir so
+// Dr. Memory's symbol + auto-generated syscall caches persist on a writable
+// disk instead of failing against the read-only install default (see
+// symcacheDir for why this matters).
+func buildDrMemoryArgs(logdir, symcacheDir, target string, args []string, light, checkUninit bool) []string {
 	cmdArgs := []string{"-batch"}
 	if light {
 		cmdArgs = append(cmdArgs, "-light")
@@ -160,9 +163,46 @@ func buildDrMemoryArgs(logdir, target string, args []string, light, checkUninit 
 	if !checkUninit {
 		cmdArgs = append(cmdArgs, "-no_check_uninitialized")
 	}
+	if symcacheDir != "" {
+		cmdArgs = append(cmdArgs, "-symcache_dir", symcacheDir)
+	}
 	cmdArgs = append(cmdArgs, "-logdir", logdir, "--", target)
 	cmdArgs = append(cmdArgs, args...)
 	return cmdArgs
+}
+
+// symcacheDir returns the PERSISTENT directory Dr. Memory uses for its module
+// symbol caches and its auto-generated system-call table (-symcache_dir).
+// Unlike the per-run logdir (removed after each run), this MUST survive across
+// runs: Dr. Memory's default -symcache_dir is <install>\logs\symcache under
+// "C:\Program Files (x86)\Dr. Memory\", which a non-admin user cannot write.
+// On the live host (an unknown-to-Dr.Memory Windows build) that read-only
+// default means Dr. Memory cannot persist the syscall table it auto-generates
+// ("Restarting to trigger auto-generation of system call information...") and
+// re-generates it on EVERY run — a multi-second tax per invocation. Pointing
+// -symcache_dir at a writable hub dir lets the table + symbol caches persist,
+// so only the first run pays the auto-generation cost (verified live: run 2
+// skipped auto-generation and returned immediately). It is a sibling of the
+// ephemeral logs-* dirs under the same hub base, so makeLogdir's per-run
+// os.RemoveAll never touches it. Returns "" (caller omits the flag, Dr. Memory
+// falls back to its install default) when no writable base can be derived.
+//
+// NOTE: a residual "WARNING: Unable to write to the disk" still appears in
+// Dr. Memory's stderr even with this set — it is a benign DynamoRIO-level
+// message (results, symbol caches, and the syscall table all persist correctly
+// and the run exits 0; verified live). It is deliberately NOT filtered from the
+// surfaced stderr: swallowing it would hide a genuine disk-full / permissions
+// failure if one ever arises.
+func symcacheDir() string {
+	base, ok := hubtemp.Dir("drmemory")
+	if !ok {
+		return ""
+	}
+	dir := filepath.Join(base, "symcache")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
 }
 
 // readResultsTxt finds the results.txt Dr. Memory wrote under logdir.
