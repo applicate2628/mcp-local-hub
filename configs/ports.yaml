@@ -38,4 +38,7 @@ global:
   - server: drmemory
     daemon: default
     port: 9135
+  - server: vtune
+    daemon: default
+    port: 9136
 workspace_scoped: []

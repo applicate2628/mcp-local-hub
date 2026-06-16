@@ -8,6 +8,7 @@ import (
 	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/oneapirun"
 	"mcp-local-hub/internal/perftools"
+	"mcp-local-hub/internal/vtune"
 )
 
 // NewRootCmd builds the top-level `mcphub` command with all subcommand stubs attached.
@@ -65,6 +66,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(perftools.NewCommand())
 	root.AddCommand(oneapirun.NewCommand())
 	root.AddCommand(drmemory.NewCommand())
+	root.AddCommand(vtune.NewCommand())
 	return root
 }
 

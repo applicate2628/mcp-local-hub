@@ -1,0 +1,46 @@
+name: vtune
+description: "Intel VTune Profiler MCP server (vtune) — profile a target exe under VTune and report top hotspots + a summary (hotspots / memory-access / threading / uarch-exploration / memory-consumption)."
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - vtune
+
+env: {}
+
+# VTune Profiler MCP server: runs a target binary under Intel VTune
+# (`-collect <type>` then `-report -format=csv`) and parses the top
+# hotspots + summary. Lives inside the mcphub binary — one hub-managed
+# daemon shared across all MCP clients via HTTP multiplexing through the
+# stdio-bridge transport. Mirrors the drmemory / godbolt global-daemon shape.
+# The profiled target runs under the full oneAPI runtime env (shared
+# oneapi.SetvarsEnv) so an icx-built / MKL-linked target loads its DLLs.
+
+daemons:
+  - name: default
+    port: 9136
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false
