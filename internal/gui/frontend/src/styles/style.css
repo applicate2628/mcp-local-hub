@@ -11,6 +11,27 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 
+/* ── Flowbite (Tailwind v4 plugin) ─────────────────────────────────────────
+   Flowbite is added the Tailwind-v4-native way: the `@plugin` CSS directive,
+   NOT a `tailwind.config.js` + `postcss.config.js` (that is the legacy v3
+   path; this project is on Tailwind v4 via `@tailwindcss/vite`). The plugin
+   only REGISTERS Flowbite's component utilities + variants — it emits CSS
+   solely for Flowbite classes that are actually used in the markup. Because
+   the existing screens use none of those classes, this line adds ZERO bytes
+   to their rendered styles and cannot affect them.
+
+   COEXISTENCE GUARANTEE: Tailwind Preflight (the base reset) stays OMITTED
+   above (only the `theme` + `utilities` layers are imported), so the existing
+   hand-tuned, token-based stylesheet for the six legacy screens is untouched.
+   Flowbite's plugin does not re-introduce Preflight.
+
+   `@source` tells Tailwind to scan Flowbite's compiled JS for any utility
+   class names it injects at runtime (e.g. when `initFlowbite()` toggles a
+   dropdown/modal), so those classes survive the content-based purge. The path
+   is the npm package dir; Tailwind resolves it relative to this CSS file. */
+@plugin "flowbite/plugin";
+@source "../../node_modules/flowbite";
+
 @theme {
   --color-app-bg: var(--bg);
   --color-app-surface: var(--sidebar-bg);
