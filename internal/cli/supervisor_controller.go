@@ -2841,6 +2841,36 @@ func (c *supervisorController) executeSideEffect(
 			return errors.New("spawn function unavailable")
 		}
 		err := c.spawn(*d)
+		// FAIL-CLOSED job-protection refusal (ROADMAP §11.3). The production
+		// spawn closure returns errSpawnJobProtectionRefused when
+		// --strict-job-protection is set AND the per-spawn Job Object could
+		// not be allocated: NO child was started (the gate refuses before
+		// cmd.Start), so there is no own-spawned reaper to record and no
+		// orphan to reap. A Job-create failure is a recurring host-policy
+		// condition, so routing through StBackoffWaiting would churn backoff
+		// forever; quarantine the SM state directly instead (mirrors the
+		// legacy serena nil-spec quarantine arm above). The spawn closure
+		// already marked the tracker Quarantined + persisted state.json, so
+		// here we only align smStates and surface the audit row. Return the
+		// sentinel so the idle-respawn completion path (handleLoopEvent) and
+		// the reconcile caller see the spawn failed; no EvChildExit/EvHealthOK
+		// self-post fires for this case (the switch below matches neither).
+		if errors.Is(err, errSpawnJobProtectionRefused) {
+			c.smStates.Store(ev.TaskName, api.StQuarantined)
+			if c.events != nil {
+				_ = c.events.Emit(api.SupervisorEvent{
+					Severity: "error",
+					Source:   "lifecycle",
+					Event:    "daemon-quarantined",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"reason":    "per-spawn Job Object allocation failed and --strict-job-protection is set; spawn refused (fail-closed) so the daemon is not started without orphan-protection",
+						"workspace": d.Workspace,
+					},
+				})
+			}
+			return err
+		}
 		if err == nil {
 			// This controller now owns a live child for the task: the
 			// production spawn closure launched it AND its cmd.Wait/reaper

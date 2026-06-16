@@ -939,12 +939,32 @@ warning badge.
   the supervisor (in-place via `mcphub supervise` Ctrl+C + restart,
   or via the IPC `restart` command).
 
-**Future v0.5.x followups** (NOT in PR #242 scope):
+**Strict job-protection (fail-closed) — SHIPPED.** The
+`mcphub supervise --strict-job-protection` flag (env equivalent:
+`MCPHUB_STRICT_JOB_PROTECTION=1`, truthy `1`/`true`) flips the
+documented non-fatal fallback into a refusal. With it set, a per-spawn
+Job-Object allocation failure makes the supervisor REFUSE the spawn
+(no `cmd.Start`, no child) and quarantine the daemon directly — it does
+NOT churn through backoff (a Job-create failure is a recurring
+host-policy condition, so backoff would never recover). The daemon
+stays Quarantined until the operator clears the underlying cause
+(AppLocker/WDAC publisher allowlist, handle exhaustion, etc. — see the
+field runbook above) and restarts the supervisor. The same
+`per-spawn-job-create-failed` event is emitted (now with
+`strict_job_protection: true` + a fail-closed `action`, at `error`
+severity), and a `daemon-quarantined` event records the SM transition.
+DEFAULT is unchanged (flag/env unset → non-fatal fallback, daemon
+spawns without orphan-protection + `severity: warn
+per-spawn-job-create-failed` with `strict_job_protection: false`). The
+env var is the host-level config knob that survives supervisor restart
+via the autostart shim's inherited environment, mirroring the
+`MCPHUB_REQUIRE_SINGLE_USER_HOME` DACL-gate posture; there is no
+GUI-spawn flag chain for it. The flag is resolved ONCE at supervisor
+startup (`runSupervise` → `strictJobProtectionEnabled`) and threaded
+into the per-spawn closure. ROADMAP §11.3.
 
-- Configurable `--strict-job-protection` flag that fails-closed on
-  Job-create failure (refuses the spawn, daemon stays Quarantined
-  instead of falling through). For environments where running
-  without orphan-protection is unacceptable.
+**Future v0.5.x followups** (still NOT scoped):
+
 - Auto-remediation: retry Job allocation on a bounded schedule
   (e.g. exponential backoff via the existing supervisor restart
   policy) so a transient cause clears without operator action.

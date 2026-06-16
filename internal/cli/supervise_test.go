@@ -75,7 +75,7 @@ func TestSuperviseCommand_FailsClosedWhenIntentCollapseCannotMergeLegacyStops(t 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	err := runSupervise(ctx, true, false)
+	err := runSupervise(ctx, true, false, false)
 	if err == nil {
 		t.Fatal("runSupervise succeeded after an unmerged legacy stop collapse failure; want fail-closed error")
 	}

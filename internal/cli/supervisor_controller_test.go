@@ -1819,3 +1819,114 @@ func waitForSMStateHelper(t *testing.T, ctrl *supervisorController, taskName str
 	st, _ := ctrl.GetSMState(taskName)
 	t.Fatalf("SM state for %s = %s; want %s", taskName, st, want)
 }
+
+// TestSupervisorController_StrictJobProtectionRefused_QuarantinedNotBackoff is the
+// fail-closed routing guard (ROADMAP §11.3 + PR #242 runbook follow-up). When the
+// production spawn closure returns errSpawnJobProtectionRefused — strict
+// job-protection is set AND the per-spawn Windows Job Object could not be
+// allocated — executeSideEffect must quarantine the SM state DIRECTLY rather than
+// routing through StBackoffWaiting (a Job-create failure is a recurring host-policy
+// condition, so backoff would churn forever). NO synthetic EvChildExit / EvHealthOK
+// is posted for this case. This mirrors the legacy nil-spec serena-proxy quarantine
+// arm. Positive control: the errSpawnPreChild test elsewhere asserts the OTHER
+// branch (synthetic EvChildExit → StBackoffWaiting).
+func TestSupervisorController_StrictJobProtectionRefused_QuarantinedNotBackoff(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	tracker := NewDaemonRuntimeTracker()
+	var spawnCalls atomic.Int32
+	// Simulate the production spawn closure's fail-closed return: strict mode on,
+	// per-spawn Job Object allocation failed → refuse before cmd.Start. The real
+	// closure also marks the tracker Quarantined + persists; the controller aligns
+	// smStates and emits the audit row. Here we assert the controller-side routing.
+	fakeSpawn := func(d api.SupervisorDaemon) error {
+		spawnCalls.Add(1)
+		return errSpawnJobProtectionRefused
+	}
+
+	const task = `\mcp-local-hub-strictjob-default`
+	descriptor := api.SupervisorDaemon{
+		TaskName: task,
+		Server:   "strictjob",
+		Daemon:   "default",
+	}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// A real event loop so an erroneously-posted EvChildExit/EvHealthOK would have
+	// somewhere to land — but the fail-closed branch must post neither, so the
+	// state never moves off StQuarantined.
+	loop := api.NewEventLoop(16)
+	ctrl := &supervisorController{
+		intentCache:         newIntentCache(),
+		eventLoop:           loop,
+		tracker:             tracker,
+		events:              events,
+		daemonIntent:        newDaemonIntentCache(),
+		spawn:               fakeSpawn,
+		statePath:           filepath.Join(tmpHome, "supervisor-state.json"),
+		ctx:                 ctx,
+		failureWindow:       respawnFailureWindow,
+		quarantineThreshold: respawnQuarantineThreshold,
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.smStates.Store(task, api.StIdle)
+
+	ctrl.handleLoopEvent(api.LoopEvent{Kind: api.EvStart, TaskName: task})
+
+	if got := spawnCalls.Load(); got != 1 {
+		t.Fatalf("spawn closure call count = %d, want exactly 1 (the gate refuses inside the closure, returning the sentinel)", got)
+	}
+	st, _ := ctrl.GetSMState(task)
+	if st != api.StQuarantined {
+		t.Fatalf("strict-job-protection refusal must quarantine directly; state = %s, want %s (NOT StBackoffWaiting — backoff would churn a recurring host-policy failure)", st, api.StQuarantined)
+	}
+	logStr := readFileString(t, eventsPath)
+	if !strings.Contains(logStr, `"event":"daemon-quarantined"`) {
+		t.Fatalf("expected daemon-quarantined event for strict-job-protection refusal:\n%s", logStr)
+	}
+}
+
+// TestStrictJobProtectionEnabled covers the CLI-flag-OR-env resolver. The flag
+// always wins; absent the flag the env var enables it only for the truthy
+// spellings "1"/"true" (case-insensitive, trimmed), mirroring autoCleanupOptedOut.
+// Uses t.Setenv so it is fully state-safe (no file or live-fleet interaction).
+func TestStrictJobProtectionEnabled(t *testing.T) {
+	cases := []struct {
+		name    string
+		cliFlag bool
+		env     string
+		want    bool
+	}{
+		{name: "default off", env: "", want: false},
+		{name: "flag wins", cliFlag: true, env: "", want: true},
+		{name: "flag wins over off env", cliFlag: true, env: "0", want: true},
+		{name: "env 1", env: "1", want: true},
+		{name: "env true", env: "true", want: true},
+		{name: "env TRUE case-insensitive", env: "TRUE", want: true},
+		{name: "env padded true", env: "  true  ", want: true},
+		{name: "env 0 off", env: "0", want: false},
+		{name: "env false off", env: "false", want: false},
+		{name: "env garbage off", env: "yes", want: false},
+		{name: "env empty off", env: "", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// t.Setenv always sets a concrete value (including "" for the
+			// unset-equivalent cases) and auto-restores after the subtest,
+			// so no inherited value leaks across cases.
+			t.Setenv(StrictJobProtectionEnv, tc.env)
+			if got := strictJobProtectionEnabled(tc.cliFlag); got != tc.want {
+				t.Fatalf("strictJobProtectionEnabled(cliFlag=%v, env=%q) = %v, want %v", tc.cliFlag, tc.env, got, tc.want)
+			}
+		})
+	}
+}

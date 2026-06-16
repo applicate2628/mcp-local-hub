@@ -83,6 +83,47 @@ var reaperFn = ReapStaleTransients
 // stuck-StSpawning bug on commit 2d67031).
 var errSpawnPreChild = errors.New("supervise: spawn failed before child created")
 
+// errSpawnJobProtectionRefused marks a SpawnFunc error raised when
+// strict job-protection is ON and the per-spawn Windows Job Object
+// allocation failed. Unlike errSpawnPreChild it is NOT routed through
+// the synthetic-EvChildExit backoff path: a host that cannot allocate
+// a Job Object will keep failing the allocation, so churning backoff
+// would never recover. The controller's executeSideEffect recognizes
+// this sentinel (errors.Is) and quarantines the daemon directly so the
+// restart loop stops — the operator must clear the underlying policy
+// (AppLocker/WDAC publisher allowlist, handle exhaustion, etc. — see
+// CLAUDE.md "Job Protection field operator runbook") and restart the
+// supervisor. NO child process was ever started on this path (the
+// fail-closed gate refuses BEFORE cmd.Start), so there is no orphan to
+// reap. Default behavior (strict OFF) is unchanged: the documented
+// non-fatal fallback spawns the daemon WITHOUT Job-Object orphan
+// protection. ROADMAP §11.3 + the PR #242 runbook follow-up.
+var errSpawnJobProtectionRefused = errors.New("supervise: per-spawn Job Object allocation failed and --strict-job-protection is set; refusing to spawn without orphan protection")
+
+// StrictJobProtectionEnv is the operator env-var form of the
+// --strict-job-protection flag. Set it to "1"/"true" (case-insensitive)
+// on a host where running a daemon WITHOUT Windows Job Object
+// orphan-protection is unacceptable; a per-spawn Job-create failure then
+// fails closed (the daemon stays Quarantined) instead of falling through
+// to the documented non-fatal cmd.Start fallback. It mirrors the
+// MCPHUB_REQUIRE_SINGLE_USER_HOME env posture for the DACL gate: a
+// host-level config knob that survives supervisor restart via the
+// autostart shim's inherited environment, with no GUI-spawn flag chain.
+const StrictJobProtectionEnv = "MCPHUB_STRICT_JOB_PROTECTION"
+
+// strictJobProtectionEnabled resolves the effective fail-closed posture
+// from the CLI flag OR the env var (either source enables it; the env is
+// a host-level fallback for operators who cannot thread the CLI flag
+// through every supervisor launch path). Truthy parsing mirrors
+// autoCleanupOptedOut: "1" or "true" after trim+lowercase.
+func strictJobProtectionEnabled(cliFlag bool) bool {
+	if cliFlag {
+		return true
+	}
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(StrictJobProtectionEnv)))
+	return v == "1" || v == "true"
+}
+
 // errTerminateTargetGone marks a TerminateFunc error whose underlying cause
 // PROVES the targeted process is ALREADY GONE even though terminate returned a
 // non-nil error (Codex pr302 r3 finding F, narrowed by r4 #2316). The production
@@ -236,9 +277,10 @@ func setSuperviseTestExitCh(ch chan struct{}) func() {
 // end-to-end at this phase without depending on those later layers.
 func newSuperviseCmd() *cobra.Command {
 	var (
-		noIPC       bool
-		strictMode  bool
-		ensureAlive bool
+		noIPC               bool
+		strictMode          bool
+		strictJobProtection bool
+		ensureAlive         bool
 	)
 	cmd := &cobra.Command{
 		Use:   "supervise",
@@ -274,11 +316,13 @@ running (or liveness is undeterminable) it is a no-op. Always exits 0.
 			if ensureAlive {
 				return runEnsureAliveFromState()
 			}
-			return runSupervise(cmd.Context(), noIPC, strictMode)
+			return runSupervise(cmd.Context(), noIPC, strictMode, strictJobProtection)
 		},
 	}
 	cmd.Flags().BoolVar(&noIPC, "no-ipc", false, "skip IPC listener (test flag)")
 	cmd.Flags().BoolVar(&strictMode, "strict-mode", false, "enforce strict parent-dir DACL gate")
+	cmd.Flags().BoolVar(&strictJobProtection, "strict-job-protection", false,
+		"fail closed when a per-spawn Windows Job Object cannot be allocated: the daemon stays Quarantined instead of spawning without orphan-protection (corp-managed AppLocker/WDAC hosts). Also settable via "+StrictJobProtectionEnv+"=1")
 	cmd.Flags().BoolVar(&ensureAlive, "ensure-alive", false,
 		"one-shot supervisor-liveness tick: relaunch the owner if dead, else no-op (run by the \\mcp-local-hub-liveness task; always exits 0)")
 	return cmd
@@ -405,10 +449,15 @@ type runningProcessIdentity struct {
 // Phase-6 scope: lock → audit log → event loop → IPC listener → wait
 // for signal → cancel loop → return. Reconciliation, IPC dispatch,
 // and quiesce-drain are wired in later tasks.
-func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
+func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	// Resolve the effective fail-closed posture ONCE at startup from the
+	// CLI flag OR the env var, so the per-spawn closure (built below) reads
+	// a single computed bool rather than re-reading the env on every spawn.
+	strictJobProtection := strictJobProtectionEnabled(strictJobProtectionFlag)
 
 	stateDir, err := stateDirFunc()
 	if err != nil {
@@ -448,10 +497,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 		Source:   "lifecycle",
 		Event:    "supervisor-start",
 		Body: map[string]any{
-			"pid":         os.Getpid(),
-			"strict_mode": strictMode,
-			"no_ipc":      noIPC,
-			"state_dir":   stateDir,
+			"pid":                   os.Getpid(),
+			"strict_mode":           strictMode,
+			"strict_job_protection": strictJobProtection,
+			"no_ipc":                noIPC,
+			"state_dir":             stateDir,
 		},
 	})
 
@@ -843,7 +893,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	oneAPIInj := buildOneAPIInjector(events)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, oneAPIInj)
+		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, oneAPIInj, strictJobProtection)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
@@ -2891,7 +2941,7 @@ func resolveSpawnIntentChannelPath(statePath string) (string, error) {
 // PR #241 (separator comment between the two doc blocks meant godoc
 // rendered only the second).
 func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, nil)
+	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, nil, false)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -2922,7 +2972,14 @@ type crashEvent struct {
 // the operator manually wrapping in an oneapi-shell. A nil injector means no
 // injection (non-oneAPI host, opt-out, or no DLL dirs) — zero behavior
 // change.
-func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, oneAPIInj *oneAPIInjector) SpawnFunc {
+// The strictJobProtection parameter is the resolved fail-closed posture
+// (--strict-job-protection flag OR MCPHUB_STRICT_JOB_PROTECTION env).
+// When false (the default) a per-spawn Job Object allocation failure
+// degrades to the documented non-fatal cmd.Start fallback (daemon spawns
+// without orphan-protection). When true the closure refuses the spawn
+// BEFORE cmd.Start and returns errSpawnJobProtectionRefused so the
+// controller quarantines the daemon directly. ROADMAP §11.3.
+func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, oneAPIInj *oneAPIInjector, strictJobProtection bool) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		// NOTE (bot PR #246 r2 P2): the legacy nil-RuntimeSpec serena-proxy SKIP
 		// no longer lives here. r1 expressed it as `return nil` inside this
@@ -3160,14 +3217,47 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// (silent-degradation gap when fallback fires).
 		tracker.MarkJobProtection(d.TaskName, process.JobProtectionStatus(jobErr))
 		if jobErr != nil {
+			// FAIL-CLOSED gate (ROADMAP §11.3 + PR #242 runbook follow-up).
+			// On a host where running a daemon WITHOUT Job-Object
+			// orphan-protection is unacceptable, --strict-job-protection (or
+			// MCPHUB_STRICT_JOB_PROTECTION=1) flips the documented non-fatal
+			// fallback into a refusal: do NOT call cmd.Start. We emit the SAME
+			// per-spawn-job-create-failed event (so existing log consumers keep
+			// firing) with strict_job_protection=true + a fail-closed action,
+			// mark the tracker Quarantined + persist so IPC status / the GUI
+			// Dashboard reflect it immediately, and return
+			// errSpawnJobProtectionRefused. The controller's executeSideEffect
+			// recognizes that sentinel and quarantines the SM state directly
+			// (no synthetic-EvChildExit backoff churn) — a Job-create failure is
+			// a host-policy condition that keeps recurring, so backoff would
+			// never recover. NO child was started, so there is no orphan to reap
+			// and daemonJob is already nil (Windows NewKillOnCloseJob returns
+			// nil on error). The deferred Close below is a no-op.
+			if strictJobProtection {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "error",
+					Source:   "lifecycle",
+					Event:    "per-spawn-job-create-failed",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"err":                   jobErr.Error(),
+						"strict_job_protection": true,
+						"action":                "refused spawn: --strict-job-protection is set, so the daemon is Quarantined instead of spawning without Job Object orphan-protection. Clear the underlying cause (AppLocker/WDAC publisher allowlist, handle exhaustion — see CLAUDE.md \"Job Protection field operator runbook\") then restart the supervisor.",
+					},
+				})
+				tracker.MarkQuarantined(d.TaskName)
+				_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
+				return errSpawnJobProtectionRefused
+			}
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "lifecycle",
 				Event:    "per-spawn-job-create-failed",
 				TaskName: d.TaskName,
 				Body: map[string]any{
-					"err":      jobErr.Error(),
-					"fallback": "proceeding via cmd.Start without StartWithJob; daemon spawns without Job Object orphan-protection",
+					"err":                   jobErr.Error(),
+					"strict_job_protection": false,
+					"fallback":              "proceeding via cmd.Start without StartWithJob; daemon spawns without Job Object orphan-protection",
 				},
 			})
 			daemonJob = nil
