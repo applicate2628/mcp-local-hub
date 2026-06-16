@@ -635,25 +635,7 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 // the daemon's response id back to the client's id. Removes the
 // in-flight row via defer.
 func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage, ref canonicalToolRef, daemonSID, daemonProto string) ([]byte, error) {
-	// Hot-swap (b) event-driven proactive re-init: the DaemonRestartWatcher marks
-	// a daemon's port stale when it observes a per-port current_pid change (the
-	// daemon was restarted). If this port is stale, re-initialize the cached
-	// session BEFORE dispatching so the client never sees the stale-session
-	// failure that (a) recovers only reactively (one-call lag). On a re-init
-	// failure we keep the cached sid and fall through to (a)'s reactive path
-	// (logged for diagnosability). INVARIANT: the proactive path keys the stale
-	// mark + the InitSuccesses refresh on ref.Port (the route's port), which holds
-	// because a supervisor restart respawns onto the same configured port; a
-	// future port-CHANGING restart would re-key on the supervisor-reported port.
-	if sess.consumeStalePort(ref.Port) {
-		if sid, proto, _, ok := sess.reinitDaemonSession(ctx, ref); ok {
-			daemonSID, daemonProto = sid, proto
-		} else {
-			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
-				"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
-			})
-		}
-	}
+	daemonSID, daemonProto = sess.refreshStalePortBeforeDispatch(ctx, ref, daemonSID, daemonProto)
 
 	// Build the rewritten body. params.name → RawName.
 	rewrittenParams, err := buildRewrittenParams(ref.RawName, paramsRaw)
@@ -762,6 +744,53 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 		return nil, false // hard count 1 — never retry again
 	}
 	return body, true
+}
+
+// refreshStalePortBeforeDispatch is the hot-swap (b) event-driven proactive
+// re-init path. The DaemonRestartWatcher marks a daemon's port stale when it
+// observes a per-port current_pid change (the daemon was restarted). If this
+// port is stale, the first caller re-initializes the cached session BEFORE
+// dispatching so the client never sees the stale-session failure that (a)
+// recovers only reactively (one-call lag).
+//
+// Concurrent callers may have already resolved the old daemonSID before the
+// first caller refreshed it. They all serialize on the retained per-port state:
+// the first caller performs the refresh and clears state.stale; followers then
+// re-read InitSuccesses/DaemonProtoVer under sess.mu and dispatch with the fresh
+// daemon session id instead of their stale local copy.
+func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string) {
+	state, ok := s.stalePortStateFor(ref.Port)
+	if !ok {
+		return daemonSID, daemonProto
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if state.stale {
+		if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref); ok {
+			state.stale = false
+			return sid, proto
+		}
+		_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
+			"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
+		})
+		return daemonSID, daemonProto
+	}
+
+	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
+	s.mu.Lock()
+	freshSID, hasSID := s.InitSuccesses[daemonKey]
+	freshProto := s.DaemonProtoVer[daemonKey]
+	sessProto := s.ProtocolVersion
+	s.mu.Unlock()
+	if !hasSID {
+		return daemonSID, daemonProto
+	}
+	if freshProto == "" {
+		freshProto = sessProto
+	}
+	return freshSID, freshProto
 }
 
 // reinitDaemonSession re-initializes the hub's MCP session to a daemon that was
