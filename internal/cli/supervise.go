@@ -40,6 +40,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/daemon_env_overlay"
+	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
 )
 
@@ -832,9 +833,15 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool) error {
 	// reconcileSpawnFn skip this wiring entirely — they don't need the
 	// dispatcher because their fake spawn fn never posts to the channel.
 	crashCh := make(chan crashEvent, 64)
+	// Intel oneAPI env injection (operator-CRITICAL): detect setvars.bat +
+	// capture its env delta ONCE here so the spawn closure can merge the
+	// oneAPI runtime into gdb/lldb daemon env. No-op when setvars is absent
+	// (non-oneAPI host) or MCPHUB_DISABLE_ONEAPI_PATH=1. Capture failures
+	// emit a warn event and degrade to no-injection — never block startup.
+	oneAPIInj := buildOneAPIInjector(events)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh)
+		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, oneAPIInj)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
@@ -2517,6 +2524,248 @@ func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []stri
 	return out
 }
 
+// defaultOneAPITargetServers is the DEFAULT set of daemon Server names
+// whose composed spawn env receives the Intel oneAPI environment delta:
+// the gdb + lldb debugger daemons. Their inferior (the debugged exe) is
+// spawned by the debugger which inherits the daemon's env, so injecting
+// here propagates oneAPI DLL dirs (MKL/TBB/compiler) down the whole chain
+// with ONE injection point. Other daemons are untouched.
+var defaultOneAPITargetServers = map[string]bool{
+	"gdb":  true,
+	"lldb": true,
+}
+
+// oneAPIInjector carries the once-detected setvars path + cached oneAPI
+// env delta + target server set + enabled flag. The supervisor builds it
+// ONCE at startup (detect setvars + capture delta) and the spawn closure
+// reuses it for every spawn. A nil injector (or Enabled=false) means "no
+// oneAPI injection" — the zero behavior on non-oneAPI hosts or under the
+// MCPHUB_DISABLE_ONEAPI_PATH opt-out.
+type oneAPIInjector struct {
+	Enabled     bool            // false → no-op (setvars absent, opt-out, or capture failed)
+	SetvarsPath string          // the resolved setvars.bat path (for the audit event body)
+	Delta       map[string]string // oneAPI additions/changes (PATH-with-prefix, MKLROOT, ...)
+	Targets     map[string]bool // server names that receive the delta (default {gdb,lldb})
+}
+
+// applies reports whether this injector should inject into the given
+// daemon's env: enabled, non-empty delta, and the server is in the target
+// set.
+func (inj *oneAPIInjector) applies(server string) bool {
+	if inj == nil || !inj.Enabled || len(inj.Delta) == 0 {
+		return false
+	}
+	return inj.Targets[server]
+}
+
+// injectOneAPIEnv merges the oneAPI env delta into an already-composed
+// daemon env block (cmdEnv, the output of mergeDaemonEnv + overlay markers
+// — may be nil meaning "inherit os.Environ()"). It returns the new env
+// block plus the sorted list of oneAPI keys actually applied (for the
+// audit event). It is PURE (modulo os.Environ() when cmdEnv==nil) so the
+// precedence + PATH-prepend behavior is unit-testable without spawning.
+//
+// baselinePATH is the os.Environ() PATH value the daemon would otherwise
+// inherit (the same base the delta's PATH was built on by setvars). It is
+// used to compute the oneAPI-only PATH PREFIX = delta.PATH with the
+// baseline PATH suffix stripped, so the prefix is prepended onto whatever
+// PATH currently sits in cmdEnv (which may already reflect an operator
+// overlay) — neither the operator's PATH nor the original tail is lost.
+//
+// Precedence (DOCUMENTED):
+//   - PATH (case-insensitive on Windows): PREPEND-merge. The oneAPI prefix
+//     is prepended to the current cmdEnv PATH so both the oneAPI dirs AND
+//     the operator/base PATH survive. Neither side is dropped.
+//   - Every OTHER oneAPI var (MKLROOT, TBBROOT, CMPLR_ROOT, ...): the
+//     operator overlay WINS on collision — the var is set ONLY if the key
+//     is not already present in cmdEnv. (mergeDaemonEnv already placed
+//     overlay/manifest values into cmdEnv, so "already present" means the
+//     operator set it explicitly and we must not clobber it.)
+//
+// Determinism: cmdEnv key order is preserved for untouched keys; newly
+// added oneAPI vars are appended in sorted order.
+func injectOneAPIEnv(cmdEnv []string, delta map[string]string, baselinePATH string) ([]string, []string) {
+	if len(delta) == 0 {
+		return cmdEnv, nil
+	}
+	if cmdEnv == nil {
+		cmdEnv = os.Environ()
+	}
+
+	winCaseFold := runtime.GOOS == "windows"
+	normKey := func(k string) string {
+		if winCaseFold {
+			return strings.ToUpper(k)
+		}
+		return k
+	}
+
+	// Index existing cmdEnv keys (normalized) → slice position, so we can
+	// detect collisions and rewrite the PATH entry in place.
+	pos := make(map[string]int, len(cmdEnv))
+	for i, kv := range cmdEnv {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		pos[normKey(kv[:eq])] = i
+	}
+
+	out := make([]string, len(cmdEnv))
+	copy(out, cmdEnv)
+
+	pathNorm := normKey(oneapi.PathKey)
+	applied := make([]string, 0, len(delta))
+
+	// Split delta into PATH and the rest; process PATH specially.
+	for dk, dv := range delta {
+		if normKey(dk) != pathNorm {
+			continue
+		}
+		// Compute the oneAPI-only prefix = delta.PATH with the baseline
+		// PATH suffix stripped. setvars builds delta.PATH as
+		// "<oneAPI dirs><sep><baseline PATH>", so trimming the baseline
+		// suffix yields exactly the oneAPI prepend (incl. its trailing
+		// separator). If the suffix is not present (defensive — value
+		// shape changed), fall back to the whole delta value as the
+		// prefix so oneAPI dirs are never lost.
+		prefix := oneAPIPathPrefix(dv, baselinePATH)
+		if prefix == "" {
+			// delta.PATH equals baseline (no oneAPI prepend) → nothing to add.
+			continue
+		}
+		if i, ok := pos[pathNorm]; ok {
+			// Prepend the oneAPI prefix onto the CURRENT cmdEnv PATH (which
+			// may already carry an operator-overlaid PATH).
+			eq := strings.IndexByte(out[i], '=')
+			curKey := out[i][:eq]
+			curVal := out[i][eq+1:]
+			out[i] = curKey + "=" + prefix + curVal
+		} else {
+			// No PATH in cmdEnv (rare) — set it to the full delta PATH.
+			out = append(out, dk+"="+dv)
+		}
+		applied = append(applied, dk)
+	}
+
+	// Non-PATH oneAPI vars: set only if absent (operator overlay wins).
+	// Sorted for deterministic append order + stable audit list.
+	restKeys := make([]string, 0, len(delta))
+	for dk := range delta {
+		if normKey(dk) == pathNorm {
+			continue
+		}
+		restKeys = append(restKeys, dk)
+	}
+	sort.Strings(restKeys)
+	for _, dk := range restKeys {
+		if _, present := pos[normKey(dk)]; present {
+			continue // operator overlay / manifest set it → do not clobber
+		}
+		out = append(out, dk+"="+delta[dk])
+		applied = append(applied, dk)
+	}
+
+	sort.Strings(applied)
+	return out, applied
+}
+
+// oneAPIPathPrefix returns the oneAPI-only prepend portion of deltaPATH,
+// computed by stripping the baselinePATH suffix. deltaPATH is
+// "<prefix><baselinePATH>" as produced by setvars (which prepends oneAPI
+// component dirs to the inherited PATH). Returns:
+//   - the prefix (incl. its trailing separator) when deltaPATH ends with
+//     baselinePATH and the prefix is non-empty
+//   - "" when deltaPATH == baselinePATH (no oneAPI prepend → nothing to do)
+//   - deltaPATH verbatim when baselinePATH is empty or is NOT a suffix
+//     (defensive: value shape unexpected → keep all oneAPI dirs rather
+//     than silently dropping them)
+func oneAPIPathPrefix(deltaPATH, baselinePATH string) string {
+	if baselinePATH == "" {
+		return deltaPATH
+	}
+	if deltaPATH == baselinePATH {
+		return ""
+	}
+	if strings.HasSuffix(deltaPATH, baselinePATH) {
+		return deltaPATH[:len(deltaPATH)-len(baselinePATH)]
+	}
+	// Baseline not a clean suffix (e.g. case differences on Windows or a
+	// reordered PATH). Keep the full delta as the prefix so oneAPI dirs are
+	// not lost; the operator PATH tail still follows from the cmdEnv PATH we
+	// prepend onto.
+	return deltaPATH
+}
+
+// currentPATHValue returns the PATH value from an os.Environ()-style env
+// slice using case-insensitive lookup on Windows. Returns "" if no PATH is
+// present. Used to supply injectOneAPIEnv's baselinePATH from os.Environ().
+func currentPATHValue(env []string) string {
+	winCaseFold := runtime.GOOS == "windows"
+	for _, kv := range env {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
+		k := kv[:eq]
+		if (winCaseFold && strings.EqualFold(k, oneapi.PathKey)) || (!winCaseFold && k == oneapi.PathKey) {
+			return kv[eq+1:]
+		}
+	}
+	return ""
+}
+
+// buildOneAPIInjector detects the Intel oneAPI env shell and captures its
+// env delta ONCE at supervisor startup, returning an injector the spawn
+// closure reuses for every gdb/lldb spawn. Toggle:
+//
+//   - MCPHUB_DISABLE_ONEAPI_PATH=1 → disabled (no detect-driven capture, no
+//     inject). Auto-ON otherwise when setvars is detected.
+//   - setvars not detected (non-oneAPI host) → disabled, zero behavior change.
+//   - setvars detected but CaptureEnvDelta failed → disabled + ONE warn event
+//     ("oneapi-env-capture-failed") so the operator sees the degradation;
+//     never fatal.
+//
+// Returns a non-nil injector always (Enabled reflects the outcome) so the
+// caller never nil-checks; the spawn closure's inj.applies() guards usage.
+func buildOneAPIInjector(events *api.SupervisorEventLog) *oneAPIInjector {
+	inj := &oneAPIInjector{Targets: defaultOneAPITargetServers}
+
+	if os.Getenv(oneapi.DisableEnvVar) == "1" {
+		return inj // disabled via operator opt-out
+	}
+
+	setvarsPath, found := oneapi.DetectSetvars()
+	if !found {
+		return inj // non-oneAPI host → no-op
+	}
+	inj.SetvarsPath = setvarsPath
+
+	delta, err := oneapi.CaptureEnvDelta(setvarsPath)
+	if err != nil {
+		if events != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: api.SupervisorEventSeverityWarn,
+				Source:   "lifecycle",
+				Event:    "oneapi-env-capture-failed",
+				Body: map[string]any{
+					"setvars":  setvarsPath,
+					"err":      err.Error(),
+					"fallback": "gdb/lldb daemons spawn WITHOUT the oneAPI environment; an MKL-linked inferior may fail to load DLLs until this is resolved",
+				},
+			})
+		}
+		return inj // capture failed → no inject
+	}
+	if len(delta) == 0 {
+		return inj // setvars produced no additions/changes → nothing to inject
+	}
+
+	inj.Enabled = true
+	inj.Delta = delta
+	return inj
+}
+
 // overlayKeySet returns the overlay map's keys (original spelling) in
 // deterministic sorted order. The supervisor injects this set via
 // MCPHUB_DAEMON_ENV_OVERLAY_KEYS at spawn time so the wrapper's
@@ -2677,7 +2926,7 @@ func resolveSpawnIntentChannelPath(statePath string) (string, error) {
 // PR #241 (separator comment between the two doc blocks meant godoc
 // rendered only the second).
 func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil)
+	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, nil)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -2700,7 +2949,15 @@ type crashEvent struct {
 // real values for both; legacy callers (makeProductionSpawnFn, tests)
 // pass nil to preserve the existing "no overlay, spawn once, no
 // respawn" behavior.
-func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent) SpawnFunc {
+// The oneAPIInj parameter carries the once-detected setvars path + cached
+// oneAPI env delta (built once at supervisor startup). When it applies to a
+// daemon's Server (default {gdb,lldb}) the captured oneAPI environment delta
+// is merged into the daemon's composed env so the debugger + its inferior
+// inherit the Intel oneAPI runtime (MKL/TBB/compiler DLL dirs) without the
+// operator manually wrapping in an oneapi-shell. A nil injector means no
+// injection (non-oneAPI host, opt-out, or capture failed) — zero behavior
+// change.
+func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, oneAPIInj *oneAPIInjector) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		// NOTE (bot PR #246 r2 P2): the legacy nil-RuntimeSpec serena-proxy SKIP
 		// no longer lives here. r1 expressed it as `return nil` inside this
@@ -2798,6 +3055,40 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			// the overlay stored them; appendDaemonOverlayKeys strips any
 			// spoofed value first (same discipline as the APPLIED marker).
 			cmd.Env = appendDaemonOverlayKeys(cmd.Env, overlayKeySet(overlayEnv))
+		}
+
+		// Intel oneAPI env injection (operator-CRITICAL: MKL-linked inferior
+		// exes fail to load DLLs under gdb/lldb because the daemon + inferior
+		// don't inherit the oneAPI environment). For a TARGET-set daemon
+		// ({gdb,lldb} by default) the supervisor merges the once-captured
+		// oneAPI env delta into the composed cmd.Env: the delta's PATH (oneAPI
+		// dirs prepended by setvars) is PREPEND-merged onto the daemon's
+		// current PATH so neither the oneAPI dirs nor the operator/base PATH
+		// is lost; the other oneAPI vars (MKLROOT/TBBROOT/CMPLR_ROOT/…) are
+		// set unless an operator overlay already set them (overlay wins). The
+		// delta is captured ONCE at supervisor startup (setvars is ~1-3s) and
+		// reused here. A nil/disabled injector is a clean no-op. The merge
+		// runs INSIDE this single env-composition path (no parallel spawn
+		// flow). See internal/oneapi + the makeProductionSpawnFnWithStatePath
+		// oneAPIInj doc.
+		if oneAPIInj.applies(d.Server) {
+			baselinePATH := currentPATHValue(os.Environ())
+			merged, applied := injectOneAPIEnv(cmd.Env, oneAPIInj.Delta, baselinePATH)
+			cmd.Env = merged
+			if len(applied) > 0 && events != nil {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: api.SupervisorEventSeverityInfo,
+					Source:   "lifecycle",
+					Event:    "oneapi-env-injected",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"server":     d.Server,
+						"daemon":     d.Daemon,
+						"setvars":    oneAPIInj.SetvarsPath,
+						"vars_added": applied,
+					},
+				})
+			}
 		}
 
 		// Intent-path control channel (bot PR #246 P2). A serena-proxy resolves
