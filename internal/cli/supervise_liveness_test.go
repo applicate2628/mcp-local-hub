@@ -1656,10 +1656,26 @@ func TestSupervisorLivenessSweepConcurrentWithHandlerNoRace(t *testing.T) {
 	}()
 	wg.Wait()
 
-	// Drain a moment so any in-flight loop persist settles, then assert the
-	// on-disk state is internally consistent (no torn/partial write surfaced
-	// as a parse error or lost version).
-	time.Sleep(100 * time.Millisecond)
+	// Deterministically drain the loop instead of a fixed sleep (the "natural
+	// window" anti-pattern flagged by the Race-window assertion discipline):
+	// post the TEST-ONLY evReapBarrier at the tail of the main channel AFTER
+	// both producers finished, then block until the loop signals it. The loop
+	// priority-drains self-posts before each main-channel read, so when the
+	// barrier fires every prior event — and every cascaded self-post, including
+	// the last on-loop supervisor-state.json persist — has completed and
+	// happens-before this read. The post-barrier read is then race-free, so the
+	// on-disk state is internally consistent (no torn/partial write surfaced as
+	// a parse error or lost version) without a probabilistic settle delay.
+	barrierDone := make(chan struct{})
+	loop.Post(api.LoopEvent{
+		Kind: evReapBarrier,
+		Body: map[string]any{reapBarrierResultBodyKey: barrierDone},
+	})
+	select {
+	case <-barrierDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("loop did not drain within 5s (wedged?)")
+	}
 	final, err := api.ReadSupervisorState(statePath)
 	if err != nil {
 		t.Fatalf("final supervisor-state.json unreadable (torn write / race corruption): %v", err)
