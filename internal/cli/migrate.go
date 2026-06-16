@@ -82,7 +82,21 @@ func runStdioMigrate(cmd *cobra.Command, servers []string, clientsFlag string, d
 			GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
 			QwenConfigPath:        filepath.Join(home, ".qwen", "settings.json"),
 			AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
-			ManifestDir:           scanManifestDir(),
+			// Wave-2 opt-in clients — kept in lockstep with the API scan
+			// surface (internal/api/scan.go). Omitting them here made
+			// `mcphub migrate` skip these 8 clients while the GUI/API
+			// migrated all 15 (the §9.2 canonical-set drift). The resolver
+			// returns "" on error, which ScanFrom skips — same as the
+			// original-seven behavior.
+			ZedConfigPath:      clientConfigPathOrEmpty("zed"),
+			KiroConfigPath:     clientConfigPathOrEmpty("kiro"),
+			WindsurfConfigPath: clientConfigPathOrEmpty("windsurf"),
+			ClineConfigPath:    clientConfigPathOrEmpty("cline"),
+			KiloCodeConfigPath: clientConfigPathOrEmpty("kilocode"),
+			OpenCodeConfigPath: clientConfigPathOrEmpty("opencode"),
+			HermesConfigPath:   clientConfigPathOrEmpty("hermes"),
+			OpenClawConfigPath: clientConfigPathOrEmpty("openclaw"),
+			ManifestDir:        scanManifestDir(),
 		},
 	})
 	if err != nil {

@@ -51,8 +51,22 @@ See also: migrate, manifest list, install.`,
 				GeminiConfigPath:      clientConfigPathOrEmpty("gemini-cli"),
 				QwenConfigPath:        clientConfigPathOrEmpty("qwen-cli"),
 				AntigravityConfigPath: clientConfigPathOrEmpty("antigravity"),
-				ManifestDir:           scanManifestDir(),
-				WithProcessCount:      withProcs,
+				// Wave-2 opt-in clients — kept in lockstep with the API scan
+				// surface (internal/api/scan.go). Omitting them here made
+				// `mcphub scan` blind to MCP configs in these 8 clients while
+				// the GUI/API saw all 15 (the §9.2 canonical-set drift).
+				// clientConfigPathOrEmpty returns "" on resolver error, which
+				// ScanFrom skips — identical to the original-seven behavior.
+				ZedConfigPath:      clientConfigPathOrEmpty("zed"),
+				KiroConfigPath:     clientConfigPathOrEmpty("kiro"),
+				WindsurfConfigPath: clientConfigPathOrEmpty("windsurf"),
+				ClineConfigPath:    clientConfigPathOrEmpty("cline"),
+				KiloCodeConfigPath: clientConfigPathOrEmpty("kilocode"),
+				OpenCodeConfigPath: clientConfigPathOrEmpty("opencode"),
+				HermesConfigPath:   clientConfigPathOrEmpty("hermes"),
+				OpenClawConfigPath: clientConfigPathOrEmpty("openclaw"),
+				ManifestDir:        scanManifestDir(),
+				WithProcessCount:   withProcs,
 			})
 			if err != nil {
 				return err
