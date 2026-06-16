@@ -1163,7 +1163,15 @@ func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
 	if urlPath == "" {
 		urlPath = "/mcp"
 	}
-	return fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
+	// Use the explicit IPv4 loopback 127.0.0.1, NOT "localhost". "localhost"
+	// goes through name resolution: on an IPv6-preferring host it resolves to
+	// ::1 first, and since the daemon binds 127.0.0.1 only, every client
+	// connection paid a ~2s ::1 connect-timeout before falling back to IPv4
+	// (measured: localhost round-trip 2008ms vs 127.0.0.1 18ms). "localhost"
+	// can also be re-pointed by a VPN / hosts-file / split-horizon resolver.
+	// 127.0.0.1 is the hardcoded loopback — no DNS, no IPv6 fallback, no VPN
+	// interception. The daemon already binds 127.0.0.1, so this matches.
+	return fmt.Sprintf("http://127.0.0.1:%d%s", daemon.Port, urlPath)
 }
 
 // isHubOwnedEntry reports whether the client entry was placed by this
@@ -1191,11 +1199,42 @@ func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon, expectedURL string
 	if entry.RelayExePath != "" && entry.RelayServer == server && entry.RelayDaemon == daemon {
 		return true
 	}
-	// Signal 2: URL match against what BuildPlan would install.
-	if expectedURL != "" && entry.URL == expectedURL {
+	// Signal 2: URL match against what BuildPlan would install — host-agnostic
+	// across the loopback family. The exact compare keeps the fast path; the
+	// loopback-equivalent compare ALSO recognizes an entry the hub wrote under
+	// an earlier URL host as still hub-owned. This matters because the hub
+	// switched its written host from "localhost" to "127.0.0.1" (to avoid the
+	// ::1 IPv6-fallback / VPN-routing latency): an existing
+	// http://localhost:<port>/mcp entry must still be recognized so a
+	// re-install REPLACES it with the 127.0.0.1 form instead of orphaning the
+	// old one and adding a duplicate.
+	if expectedURL != "" && (entry.URL == expectedURL || hubLoopbackEquivalentURL(entry.URL, expectedURL)) {
 		return true
 	}
 	return false
+}
+
+// hubLoopbackEquivalentURL reports whether a and b are hub loopback URLs
+// (http://localhost: / http://127.0.0.1: / http://[::1]:) that differ ONLY in
+// the loopback host — i.e. the same :port + path after the host. Used so an
+// entry written under a different loopback host (notably the legacy
+// "localhost" form) still matches the current 127.0.0.1 form for ownership.
+func hubLoopbackEquivalentURL(a, b string) bool {
+	sa, oka := stripHubLoopbackHostPrefix(a)
+	sb, okb := stripHubLoopbackHostPrefix(b)
+	return oka && okb && sa == sb
+}
+
+// stripHubLoopbackHostPrefix removes a leading hub loopback host prefix
+// ("http://localhost:", "http://127.0.0.1:", or "http://[::1]:") and returns
+// the remainder ("<port><path>") plus whether a prefix matched.
+func stripHubLoopbackHostPrefix(u string) (string, bool) {
+	for _, p := range []string{"http://localhost:", "http://127.0.0.1:", "http://[::1]:"} {
+		if rest, ok := strings.CutPrefix(u, p); ok {
+			return rest, true
+		}
+	}
+	return "", false
 }
 
 // uninstallWithoutManifest cleans up stale scheduler tasks and client
@@ -1436,7 +1475,10 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		if err := validateClientURLPath(urlPath); err != nil {
 			return nil, fmt.Errorf("invalid url_path for client %q: %w", b.Client, err)
 		}
-		url := fmt.Sprintf("http://localhost:%d%s", daemon.Port, urlPath)
+		// 127.0.0.1, NOT "localhost" — see the buildBindingURL comment: localhost
+		// resolution causes a ~2s ::1 IPv6-fallback per connection and is
+		// VPN/hosts-file routable; the hardcoded IPv4 loopback avoids both.
+		url := fmt.Sprintf("http://127.0.0.1:%d%s", daemon.Port, urlPath)
 		// Per-server install path NEVER emits Remove (including a Remove
 		// of the mcphub-hub aggregate). The full-reconcile pipeline
 		// (BuildHubReconcilePlan / ApplyHubReconcileInOrder) owns gate
