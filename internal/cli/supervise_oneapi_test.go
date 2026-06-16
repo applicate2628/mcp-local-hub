@@ -1,8 +1,7 @@
 package cli
 
 import (
-	"context"
-	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -48,16 +47,13 @@ func envValue(env []string, key string) (string, bool) {
 	return "", false
 }
 
-// TestOneAPIInjectPrependsPATHAndSetsMKLROOT pins the core injection
-// contract: a target daemon's composed env receives the oneAPI PATH
-// PREPENDED (oneAPI dirs in front of the daemon's existing PATH, so the
-// original tail survives) and the new MKLROOT, while every other base /
-// overlay var is retained.
-func TestOneAPIInjectPrependsPATHAndSetsMKLROOT(t *testing.T) {
-	sep := ";"
-	if runtime.GOOS != "windows" {
-		sep = ":"
-	}
+// TestOneAPIInjectPrependsDLLDirsOntoPATH pins the core injection contract:
+// a target daemon's composed env receives the oneAPI DLL dirs PREPENDED
+// (oneAPI dirs in front, joined by the OS list separator, with the daemon's
+// original PATH tail retained), and every other base / overlay var is
+// untouched.
+func TestOneAPIInjectPrependsDLLDirsOntoPATH(t *testing.T) {
+	sep := string(os.PathListSeparator)
 	baselinePATH := "C:" + sep + "base"
 	// Daemon's composed env BEFORE oneAPI (parent<manifest<overlay already
 	// merged). Includes an operator-overlaid PATH and an unrelated overlay key.
@@ -66,94 +62,88 @@ func TestOneAPIInjectPrependsPATHAndSetsMKLROOT(t *testing.T) {
 		"OVERLAY_KEY=op",
 		"BASE_KEY=keepme",
 	}
-	// Delta as setvars would produce: PATH = "<oneAPI dirs><sep><baselinePATH>"
-	// (oneAPI prepended to the inherited PATH), plus a new MKLROOT.
-	oneAPIDirs := "C:" + sep + "oneapi" + sep + "mkl" + sep + "bin"
-	delta := map[string]string{
-		"PATH":    oneAPIDirs + sep + baselinePATH,
-		"MKLROOT": "C:" + sep + "oneapi" + sep + "mkl",
-	}
+	dirs := []string{`C:\oneapi\mkl\bin`, `C:\oneapi\tbb\bin`}
 
-	got, applied := injectOneAPIEnv(cmdEnv, delta, baselinePATH)
+	got, applied := injectOneAPIEnv(cmdEnv, dirs)
 
-	// PATH must be oneAPI prefix + the daemon's (overlaid) PATH.
-	wantPATH := oneAPIDirs + sep + baselinePATH
+	// PATH must be oneAPI dirs (joined) + sep + the daemon's original PATH.
+	wantPATH := dirs[0] + sep + dirs[1] + sep + baselinePATH
 	if v := pathFamilyValue(t, got); v != wantPATH {
-		t.Fatalf("injected PATH = %q, want %q (oneAPI prepended onto base tail)", v, wantPATH)
+		t.Fatalf("injected PATH = %q, want %q (oneAPI dirs prepended onto base tail)", v, wantPATH)
 	}
-	// MKLROOT must be set.
-	if v, ok := envValue(got, "MKLROOT"); !ok || v != "C:"+sep+"oneapi"+sep+"mkl" {
-		t.Fatalf("MKLROOT = (%q, %v), want set", v, ok)
-	}
-	// Overlay + base keys must survive untouched.
+	// Other vars must survive untouched.
 	if v, ok := envValue(got, "OVERLAY_KEY"); !ok || v != "op" {
 		t.Fatalf("OVERLAY_KEY lost: (%q, %v)", v, ok)
 	}
 	if v, ok := envValue(got, "BASE_KEY"); !ok || v != "keepme" {
 		t.Fatalf("BASE_KEY lost: (%q, %v)", v, ok)
 	}
-	// applied list must be exactly the keys we touched.
-	wantApplied := map[string]bool{"PATH": true, "MKLROOT": true}
-	if len(applied) != 2 || !wantApplied[applied[0]] || !wantApplied[applied[1]] {
-		t.Fatalf("applied = %v, want [MKLROOT PATH] (sorted)", applied)
+	// No spurious extra var (direct enumeration sets ONLY PATH).
+	if len(got) != len(cmdEnv) {
+		t.Fatalf("env length changed: got %d entries, want %d (only PATH rewritten): %v", len(got), len(cmdEnv), got)
+	}
+	// applied list must be exactly the dirs we prepended, in order.
+	if len(applied) != 2 || applied[0] != dirs[0] || applied[1] != dirs[1] {
+		t.Fatalf("applied = %v, want %v", applied, dirs)
 	}
 }
 
-// TestOneAPIInjectOperatorOverlayWinsForNonPATH asserts the documented
-// precedence: a non-PATH oneAPI var is NOT injected when the operator
-// overlay already set that key (overlay wins), but PATH is still
-// prepend-merged.
-func TestOneAPIInjectOperatorOverlayWinsForNonPATH(t *testing.T) {
-	sep := ";"
-	if runtime.GOOS != "windows" {
-		sep = ":"
-	}
-	baselinePATH := "C:" + sep + "base"
-	cmdEnv := []string{
-		"PATH=" + baselinePATH,
-		"MKLROOT=C:" + sep + "operator-mkl", // operator explicitly set this
-	}
-	oneAPIDirs := "C:" + sep + "oneapi" + sep + "bin"
-	delta := map[string]string{
-		"PATH":    oneAPIDirs + sep + baselinePATH,
-		"MKLROOT": "C:" + sep + "oneapi-mkl", // oneAPI value — must NOT clobber operator
-	}
+// TestOneAPIInjectIdempotentOnRespawn asserts a dir already present in the
+// current PATH is NOT prepended again (idempotent across respawn / an
+// overlay-supplied PATH that already carries the oneAPI dirs).
+func TestOneAPIInjectIdempotentOnRespawn(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	mkl := `C:\oneapi\mkl\bin`
+	tbb := `C:\oneapi\tbb\bin`
+	// Current PATH already has mkl at the head (e.g. a respawn after a
+	// prior inject) but NOT tbb.
+	cmdEnv := []string{"PATH=" + mkl + sep + "C:" + sep + "base"}
 
-	got, applied := injectOneAPIEnv(cmdEnv, delta, baselinePATH)
+	got, applied := injectOneAPIEnv(cmdEnv, []string{mkl, tbb})
 
-	if v, ok := envValue(got, "MKLROOT"); !ok || v != "C:"+sep+"operator-mkl" {
-		t.Fatalf("MKLROOT = (%q, %v), want operator value preserved (overlay wins)", v, ok)
-	}
-	// PATH still gets the oneAPI prefix.
-	wantPATH := oneAPIDirs + sep + baselinePATH
+	// Only tbb should be prepended; mkl must not be duplicated.
+	wantPATH := tbb + sep + mkl + sep + "C:" + sep + "base"
 	if v := pathFamilyValue(t, got); v != wantPATH {
-		t.Fatalf("PATH = %q, want %q (prepend even when other var collides)", v, wantPATH)
+		t.Fatalf("PATH = %q, want %q (only missing dir prepended, no dup)", v, wantPATH)
 	}
-	// applied must contain PATH but NOT MKLROOT (it was skipped).
-	for _, k := range applied {
-		if k == "MKLROOT" {
-			t.Fatalf("applied includes MKLROOT but it should have been skipped (overlay collision): %v", applied)
-		}
+	if len(applied) != 1 || applied[0] != tbb {
+		t.Fatalf("applied = %v, want [%q] (mkl already present)", applied, tbb)
 	}
 }
 
-// TestOneAPIInjectEmptyDeltaIsNoOp asserts an empty delta returns the env
-// unchanged with no applied keys.
-func TestOneAPIInjectEmptyDeltaIsNoOp(t *testing.T) {
+// TestOneAPIInjectEmptyDirsIsNoOp asserts an empty dir list returns the env
+// unchanged with no applied dirs.
+func TestOneAPIInjectEmptyDirsIsNoOp(t *testing.T) {
 	cmdEnv := []string{"PATH=C:/base", "X=1"}
-	got, applied := injectOneAPIEnv(cmdEnv, nil, "C:/base")
+	got, applied := injectOneAPIEnv(cmdEnv, nil)
 	if len(applied) != 0 {
-		t.Fatalf("applied = %v, want empty for nil delta", applied)
+		t.Fatalf("applied = %v, want empty for nil dirs", applied)
 	}
 	if len(got) != len(cmdEnv) {
-		t.Fatalf("env changed for nil delta: %v", got)
+		t.Fatalf("env changed for nil dirs: %v", got)
+	}
+}
+
+// TestOneAPIInjectNoPATHCreatesOne asserts that when cmdEnv has no PATH
+// entry (rare) one is created from the oneAPI dirs.
+func TestOneAPIInjectNoPATHCreatesOne(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	cmdEnv := []string{"X=1"}
+	dirs := []string{`C:\oneapi\mkl\bin`}
+	got, applied := injectOneAPIEnv(cmdEnv, dirs)
+	if v := pathFamilyValue(t, got); v != dirs[0] {
+		t.Fatalf("PATH = %q, want %q (created from oneAPI dirs)", v, dirs[0])
+	}
+	_ = sep
+	if len(applied) != 1 || applied[0] != dirs[0] {
+		t.Fatalf("applied = %v, want %v", applied, dirs)
 	}
 }
 
 // TestOneAPIInjectorApplies pins the target-set + enabled gating: only
-// enabled injectors with a non-empty delta and a target server apply.
+// enabled injectors with a non-empty dir list and a target server apply.
 func TestOneAPIInjectorApplies(t *testing.T) {
-	delta := map[string]string{"MKLROOT": "x"}
+	dirs := []string{`C:\oneapi\mkl\bin`}
 	cases := []struct {
 		name string
 		inj  *oneAPIInjector
@@ -161,11 +151,11 @@ func TestOneAPIInjectorApplies(t *testing.T) {
 		want bool
 	}{
 		{"nil-injector", nil, "gdb", false},
-		{"disabled", &oneAPIInjector{Enabled: false, Delta: delta, Targets: defaultOneAPITargetServers}, "gdb", false},
-		{"enabled-gdb", &oneAPIInjector{Enabled: true, Delta: delta, Targets: defaultOneAPITargetServers}, "gdb", true},
-		{"enabled-lldb", &oneAPIInjector{Enabled: true, Delta: delta, Targets: defaultOneAPITargetServers}, "lldb", true},
-		{"enabled-nontarget", &oneAPIInjector{Enabled: true, Delta: delta, Targets: defaultOneAPITargetServers}, "memory", false},
-		{"enabled-empty-delta", &oneAPIInjector{Enabled: true, Delta: nil, Targets: defaultOneAPITargetServers}, "gdb", false},
+		{"disabled", &oneAPIInjector{Enabled: false, Dirs: dirs, Targets: defaultOneAPITargetServers}, "gdb", false},
+		{"enabled-gdb", &oneAPIInjector{Enabled: true, Dirs: dirs, Targets: defaultOneAPITargetServers}, "gdb", true},
+		{"enabled-lldb", &oneAPIInjector{Enabled: true, Dirs: dirs, Targets: defaultOneAPITargetServers}, "lldb", true},
+		{"enabled-nontarget", &oneAPIInjector{Enabled: true, Dirs: dirs, Targets: defaultOneAPITargetServers}, "memory", false},
+		{"enabled-empty-dirs", &oneAPIInjector{Enabled: true, Dirs: nil, Targets: defaultOneAPITargetServers}, "gdb", false},
 	}
 	for _, c := range cases {
 		if got := c.inj.applies(c.srv); got != c.want {
@@ -175,16 +165,19 @@ func TestOneAPIInjectorApplies(t *testing.T) {
 }
 
 // TestOneAPIBuildInjectorDisabledByEnv asserts MCPHUB_DISABLE_ONEAPI_PATH=1
-// produces a disabled injector even when setvars would be detectable.
+// produces a disabled injector even when a root would be detectable.
 func TestOneAPIBuildInjectorDisabledByEnv(t *testing.T) {
 	t.Setenv(oneapi.DisableEnvVar, "1")
 	restore := oneapi.SetSeamsForTest(
-		func(string) bool { return true }, // setvars "exists"
-		func(_ context.Context, _ string) (string, error) {
-			t.Fatalf("CaptureEnvDelta must not run when disabled")
-			return "", nil
+		func(string) bool { return true }, // root "exists"
+		func(string) bool {
+			t.Fatalf("DLLDirs dll-check must not run when disabled")
+			return false
 		},
-		func() []string { return []string{"PATH=C:/base"} },
+		func(string) []string {
+			t.Fatalf("DLLDirs component-list must not run when disabled")
+			return nil
+		},
 	)
 	defer restore()
 
@@ -197,8 +190,8 @@ func TestOneAPIBuildInjectorDisabledByEnv(t *testing.T) {
 	}
 }
 
-// TestOneAPIBuildInjectorNotDetectedIsNoOp asserts a host without setvars
-// yields a disabled injector (zero behavior change on non-oneAPI hosts).
+// TestOneAPIBuildInjectorNotDetectedIsNoOp asserts a host without a oneAPI
+// root yields a disabled injector (zero behavior change on non-oneAPI hosts).
 func TestOneAPIBuildInjectorNotDetectedIsNoOp(t *testing.T) {
 	t.Setenv(oneapi.DisableEnvVar, "")
 	restore := oneapi.SetSeamsForTest(
@@ -217,34 +210,64 @@ func TestOneAPIBuildInjectorNotDetectedIsNoOp(t *testing.T) {
 	}
 }
 
-// TestOneAPIBuildInjectorCaptureFailureEmitsWarn asserts that a detected
-// setvars whose capture fails yields a disabled injector AND emits the
-// warn event so the operator sees the degradation.
-func TestOneAPIBuildInjectorCaptureFailureEmitsWarn(t *testing.T) {
+// TestOneAPIBuildInjectorNoDLLDirsEmitsWarn asserts that a detected root
+// with NO component DLL dirs yields a disabled injector AND emits the warn
+// event so the operator sees the degradation.
+func TestOneAPIBuildInjectorNoDLLDirsEmitsWarn(t *testing.T) {
 	t.Setenv(oneapi.DisableEnvVar, "")
-	// On platforms where setvarsProbePaths is empty (POSIX), DetectSetvars
-	// returns ("",false) regardless of the fileExists seam, so this test
-	// only meaningfully exercises the capture-failure branch on Windows.
+	// On platforms where rootProbePaths is empty (POSIX), DetectRoot returns
+	// ("",false) regardless of the dirExists seam, so this test only
+	// meaningfully exercises the no-dll-dirs branch on Windows.
 	if runtime.GOOS != "windows" {
-		t.Skip("DetectSetvars has no probe candidates on non-Windows; capture branch unreachable")
+		t.Skip("DetectRoot has no probe candidates on non-Windows; no-dll-dirs branch unreachable")
 	}
-	t.Setenv("ONEAPI_ROOT", "C:\\fake-oneapi")
+	t.Setenv("ONEAPI_ROOT", `C:\fake-oneapi`)
 	restore := oneapi.SetSeamsForTest(
-		func(string) bool { return true }, // setvars "exists"
-		func(_ context.Context, _ string) (string, error) {
-			return "", errors.New("setvars boom")
+		func(p string) bool {
+			// Root "exists"; component bin dirs do NOT (so DLLDirs is empty).
+			return p == `C:\fake-oneapi`
 		},
-		func() []string { return []string{"PATH=C:\\base"} },
+		func(string) bool { return false }, // no *.dll anywhere
+		func(string) []string { return nil },
 	)
 	defer restore()
 
 	events := newCapturingEventLog(t)
 	inj := buildOneAPIInjector(events.log)
 	if inj.Enabled {
-		t.Fatalf("capture failure: injector Enabled=true, want false (no inject)")
+		t.Fatalf("no-dll-dirs: injector Enabled=true, want false (no inject)")
 	}
-	if !events.sawEvent("oneapi-env-capture-failed") {
-		t.Fatalf("capture failure did not emit oneapi-env-capture-failed warn event")
+	if !events.sawEvent("oneapi-no-dll-dirs") {
+		t.Fatalf("no-dll-dirs did not emit oneapi-no-dll-dirs warn event")
+	}
+}
+
+// TestOneAPIBuildInjectorEnumeratesDirs asserts a detected root with a
+// dll-bearing component yields an ENABLED injector carrying that dir.
+func TestOneAPIBuildInjectorEnumeratesDirs(t *testing.T) {
+	t.Setenv(oneapi.DisableEnvVar, "")
+	if runtime.GOOS != "windows" {
+		t.Skip("DetectRoot has no probe candidates on non-Windows; enable branch unreachable")
+	}
+	root := `C:\fake-oneapi`
+	mklBin := filepath.Join(root, "mkl", "latest", "bin")
+	t.Setenv("ONEAPI_ROOT", root)
+	restore := oneapi.SetSeamsForTest(
+		func(p string) bool { return p == root || p == mklBin },
+		func(p string) bool { return p == mklBin }, // mkl bin has a dll
+		func(string) []string { return []string{"mkl"} },
+	)
+	defer restore()
+
+	inj := buildOneAPIInjector(nil)
+	if !inj.Enabled {
+		t.Fatalf("dll-bearing root: injector Enabled=false, want true")
+	}
+	if len(inj.Dirs) != 1 || inj.Dirs[0] != mklBin {
+		t.Fatalf("inj.Dirs = %v, want [%q]", inj.Dirs, mklBin)
+	}
+	if !inj.applies("gdb") {
+		t.Fatalf("enabled dll-bearing injector does not apply to gdb")
 	}
 }
 

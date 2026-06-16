@@ -3,75 +3,68 @@
 package oneapi
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-
-	"mcp-local-hub/internal/process"
 )
 
-// setvarsProbePaths returns the ordered list of candidate setvars.bat
-// paths for Windows (see DetectSetvars doc for the probe order):
+// rootProbePaths returns the ordered list of candidate oneAPI install-root
+// directories for Windows (see DetectRoot doc for the probe order):
 //
-//  1. ONEAPI_ROOT (if set) → "<ONEAPI_ROOT>\setvars.bat"
-//  2. "%ProgramFiles(x86)%\Intel\oneAPI\setvars.bat"
-//  3. "%ProgramFiles%\Intel\oneAPI\setvars.bat"
+//  1. ONEAPI_ROOT (if set) → "<ONEAPI_ROOT>"
+//  2. "%ProgramFiles(x86)%\Intel\oneAPI"
+//  3. "%ProgramFiles%\Intel\oneAPI"
 //
-// Empty / unset env candidates are returned as "" so DetectSetvars skips
-// them; the real host's oneAPI 2026.0 lives under ProgramFiles(x86).
-func setvarsProbePaths() []string {
+// Empty / unset env candidates are returned as "" so DetectRoot skips
+// them; the real host's oneAPI lives under ProgramFiles(x86).
+func rootProbePaths() []string {
 	var out []string
 	if root := os.Getenv("ONEAPI_ROOT"); root != "" {
-		out = append(out, filepath.Join(root, "setvars.bat"))
+		out = append(out, root)
 	}
 	if pf86 := os.Getenv("ProgramFiles(x86)"); pf86 != "" {
-		out = append(out, filepath.Join(pf86, "Intel", "oneAPI", "setvars.bat"))
+		out = append(out, filepath.Join(pf86, "Intel", "oneAPI"))
 	}
 	if pf := os.Getenv("ProgramFiles"); pf != "" {
-		out = append(out, filepath.Join(pf, "Intel", "oneAPI", "setvars.bat"))
+		out = append(out, filepath.Join(pf, "Intel", "oneAPI"))
 	}
 	return out
 }
 
-// realFileExists reports whether path is an existing regular-ish file
-// (Stat succeeds and it is not a directory).
-func realFileExists(path string) bool {
+// realDirExists reports whether path is an existing directory.
+func realDirExists(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		return false
 	}
-	return !info.IsDir()
+	return info.IsDir()
 }
 
-// realBaselineEnv returns the current process environment as the diff
-// baseline.
-func realBaselineEnv() []string { return os.Environ() }
-
-// realSetvarsRunner runs the oneAPI env shell and returns the stdout of
-// the trailing `set` dump. It builds:
-//
-//	cmd /c ""<setvars>" > NUL 2>&1 && set"
-//
-// so setvars' banner is redirected to NUL (it prints version info to
-// stdout that would otherwise pollute the `set` dump), and the trailing
-// `set` enumerates the resulting environment to stdout, which we capture.
-//
-// process.NoConsole suppresses any console-window flash (CREATE_NO_WINDOW
-// + HideWindow), matching the rest of the repo's subprocess discipline
-// (e.g. internal/api/serena_port_owner_windows.go). The context timeout is
-// applied via exec.CommandContext so a hung setvars is force-killed.
-func realSetvarsRunner(ctx context.Context, setvarsPath string) (string, error) {
-	// The whole command is passed to cmd /c as ONE argument. Quote the
-	// setvars path (it contains spaces: "Program Files (x86)"). The OUTER
-	// pair of double-quotes around the entire command string is the cmd.exe
-	// convention required when the command itself contains quoted tokens.
-	inner := `""` + setvarsPath + `" > NUL 2>&1 && set"`
-	cmd := exec.CommandContext(ctx, "cmd", "/c", inner)
-	process.NoConsole(cmd)
-	out, err := cmd.Output()
+// realDirHasDLL reports whether dir contains at least one *.dll file. The
+// glob is case-insensitive on Windows (the OS filesystem folds case), so
+// "*.dll" matches "mkl_core.DLL" too. A glob error (bad pattern, dir gone)
+// is treated as "no DLL" — clean no-op.
+func realDirHasDLL(dir string) bool {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.dll"))
 	if err != nil {
-		return "", err
+		return false
 	}
-	return string(out), nil
+	return len(matches) > 0
+}
+
+// realListComponentDirs returns the immediate sub-directory names under
+// root (the component dirs). A read error yields nil — DLLDirs then only
+// emits the priority components it can stat directly, which is the
+// MKL-runtime-essential set anyway.
+func realListComponentDirs(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
 }
