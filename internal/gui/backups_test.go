@@ -261,6 +261,16 @@ func TestBackupsClean_StorageError_500(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBackupsClean_POST_PerClientHappyPath(t *testing.T) {
+	// Isolate api.SettingsPath() to an empty temp dir so the no-keep_n-query
+	// path reads the registry default (5), never the developer's live
+	// %LOCALAPPDATA%\mcp-local-hub\gui-preferences.yaml (which persists
+	// backups.keep_n=2). Same LOCALAPPDATA/XDG_DATA_HOME seam used by
+	// setupGateOverrides (hub_listener_test.go) and backup_keep_test.go.
+	// NOTE: MCPHUB_STATE_DIR_OVERRIDE (used by the sibling keep_n-query tests)
+	// is a NO-OP for SettingsPath — it only redirects the daemon state dir.
+	settingsRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", settingsRoot)
+	t.Setenv("XDG_DATA_HOME", settingsRoot)
 	s, fb := newBackupsTestServer(t)
 	fb.cleanInResult = []string{
 		"/home/u/.cursor/mcp.json.bak-mcp-local-hub-2026-04-30T12-00-00",
