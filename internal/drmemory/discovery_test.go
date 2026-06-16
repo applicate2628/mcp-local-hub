@@ -50,6 +50,25 @@ func TestFindDrMemory_DrMemoryHomeMiss(t *testing.T) {
 	}
 }
 
+// TestFirstNonEmptyLine verifies the version-banner extractor used by the
+// drmemory_status probe: it returns the first trimmed non-blank line and ""
+// when none exists.
+func TestFirstNonEmptyLine(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"Dr. Memory version 2.6.0 build 0\nextra\n", "Dr. Memory version 2.6.0 build 0"},
+		{"\n\n  Dr. Memory 2.6.0  \nmore", "Dr. Memory 2.6.0"},
+		{"", ""},
+		{"\n  \n\t\n", ""},
+	}
+	for _, c := range cases {
+		if got := firstNonEmptyLine(c.in); got != c.want {
+			t.Errorf("firstNonEmptyLine(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestIsExecutableFile distinguishes a real file from a directory and a
 // missing path — the predicate findDrMemory relies on.
 func TestIsExecutableFile(t *testing.T) {

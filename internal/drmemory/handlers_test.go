@@ -356,6 +356,91 @@ type fakeErr struct{}
 
 func (*fakeErr) Error() string { return "spawn failed: access denied" }
 
+// TestStatusTool_Available reports availability + version from the injected
+// probe seam — never spawning the real (slow) drmemory.exe.
+func TestStatusTool_Available(t *testing.T) {
+	ds := &DrMemoryServer{
+		probeVersion: func() (string, string, bool) {
+			return `C:\fake\drmemory.exe`, "Dr. Memory version 2.6.0 build 0", true
+		},
+	}
+	res, err := ds.statusTool(t.Context(), newRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("statusTool error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("statusTool IsError=true: %s", contentText(t, res))
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(contentText(t, res)), &got); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if got["available"] != true {
+		t.Errorf("available = %v, want true", got["available"])
+	}
+	if got["drmemory_path"] != `C:\fake\drmemory.exe` {
+		t.Errorf("drmemory_path = %v, want C:\\fake\\drmemory.exe", got["drmemory_path"])
+	}
+	if got["version"] != "Dr. Memory version 2.6.0 build 0" {
+		t.Errorf("version = %v, want the injected banner", got["version"])
+	}
+}
+
+// TestStatusTool_Unavailable reports the not-available shape when the probe
+// cannot resolve drmemory.exe (no install).
+func TestStatusTool_Unavailable(t *testing.T) {
+	ds := &DrMemoryServer{
+		probeVersion: func() (string, string, bool) {
+			return "", "", false
+		},
+	}
+	res, err := ds.statusTool(t.Context(), newRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("statusTool error: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(contentText(t, res)), &got); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if got["available"] != false {
+		t.Errorf("available = %v, want false", got["available"])
+	}
+	if got["drmemory_path"] != "" {
+		t.Errorf("drmemory_path = %v, want empty on unavailable", got["drmemory_path"])
+	}
+	if got["version"] != "" {
+		t.Errorf("version = %v, want empty on unavailable", got["version"])
+	}
+}
+
+// TestStatusTool_AvailableVersionUnknown covers the documented fallback: the
+// binary resolves but `-version` is unsupported, so available stays true while
+// version is empty (a present install must never report available:false).
+func TestStatusTool_AvailableVersionUnknown(t *testing.T) {
+	ds := &DrMemoryServer{
+		probeVersion: func() (string, string, bool) {
+			return `C:\fake\drmemory.exe`, "", true
+		},
+	}
+	res, err := ds.statusTool(t.Context(), newRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("statusTool error: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(contentText(t, res)), &got); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if got["available"] != true {
+		t.Errorf("available = %v, want true (binary resolved even without -version)", got["available"])
+	}
+	if got["drmemory_path"] != `C:\fake\drmemory.exe` {
+		t.Errorf("drmemory_path = %v, want the resolved path", got["drmemory_path"])
+	}
+	if got["version"] != "" {
+		t.Errorf("version = %v, want empty when -version unsupported", got["version"])
+	}
+}
+
 func TestDrmemoryEnabledRequiresExplicitOptIn(t *testing.T) {
 	t.Setenv(enableUnsafeDrmemoryEnv, "")
 	if drmemoryEnabled() {

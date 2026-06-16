@@ -187,6 +187,38 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+// TestDefaultReport_RejectsMissingResultDir verifies the read-only guard:
+// defaultReport refuses a result_dir that is not an existing directory BEFORE
+// it ever tries to spawn vtune.exe, so a bad path is a clean error rather than
+// a confusing reporter launch. This exercises only the filesystem precheck (no
+// real vtune is invoked).
+func TestDefaultReport_RejectsMissingResultDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nonexistent-result")
+	_, err := defaultReport(t.Context(), `C:\fake\vtune.exe`, missing, "hotspots")
+	if err == nil {
+		t.Fatal("defaultReport accepted a missing result dir; want an error before any vtune launch")
+	}
+	if !strings.Contains(err.Error(), "not an existing VTune result directory") {
+		t.Errorf("error = %v, want to name the missing-result-dir cause", err)
+	}
+}
+
+// TestDefaultReport_RejectsFileAsResultDir verifies the guard also rejects a
+// regular FILE handed as result_dir (a result dir must be a directory).
+func TestDefaultReport_RejectsFileAsResultDir(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := defaultReport(t.Context(), `C:\fake\vtune.exe`, f, "hotspots")
+	if err == nil {
+		t.Fatal("defaultReport accepted a regular file as result dir; want an error")
+	}
+	if !strings.Contains(err.Error(), "not an existing VTune result directory") {
+		t.Errorf("error = %v, want to name the not-a-dir cause", err)
+	}
+}
+
 func TestVtuneEnabledRequiresExplicitOptIn(t *testing.T) {
 	t.Setenv(enableUnsafeVtuneEnv, "")
 	if vtuneEnabled() {

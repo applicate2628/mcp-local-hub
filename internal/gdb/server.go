@@ -316,13 +316,26 @@ func (gs *GdbServer) lookup(id string) *session {
 // exact thing GDB-MCP's python subprocess probe could not do.
 func defaultVersionProbe() (string, string, bool) {
 	path := toolchain.DefaultGdbPath()
+	version, ok := gdbVersionLine(path)
+	return path, version, ok
+}
+
+// gdbVersionLine runs `<path> --version` via Go exec and returns the first
+// non-empty line of its output and whether the probe succeeded. It is the single
+// owner of the version-exec logic shared by debugger_status (via
+// defaultVersionProbe) and gdb_start (via defaultStartVersion in session.go) —
+// startSession spawns gdb with `-q`, which suppresses the startup banner the
+// version used to be scraped from, so the session version must come from this
+// dedicated `--version` probe instead. The Go exec works in the console-less
+// daemon, the exact thing GDB-MCP's python subprocess probe could not do.
+func gdbVersionLine(path string) (string, bool) {
 	cmd := exec.Command(path, "--version")
 	process.NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		return path, "", false
+		return "", false
 	}
-	return path, firstNonEmptyLine(string(out)), true
+	return firstNonEmptyLine(string(out)), true
 }
 
 // textResult wraps text in a non-error CallToolResult.

@@ -134,6 +134,21 @@ func registerResourceTools(gs *GodboltServer) {
 			"properties": map[string]any{},
 		},
 	}, gs.getVersionTool)
+
+	gs.server.AddTool(&mcp.Tool{
+		Name:        "shortlink_info",
+		Description: "Return the stored compilation state (source, compiler settings, libraries) behind a godbolt.org short link id, via GET /api/shortlinkinfo/{linkid}. The linkid is the trailing segment of a https://godbolt.org/z/<linkid> share URL. Use to recover what a shared Compiler Explorer link compiles before re-running it via compile_code. Response is JSON.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"linkid": map[string]any{
+					"type":        "string",
+					"description": "Short link id — the trailing path segment of a https://godbolt.org/z/<linkid> URL.",
+				},
+			},
+			"required": []string{"linkid"},
+		},
+	}, gs.shortlinkInfoTool)
 }
 
 func (gs *GodboltServer) listLanguagesTool(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -238,6 +253,26 @@ func (gs *GodboltServer) lookupInstructionTool(ctx context.Context, req *mcp.Cal
 func (gs *GodboltServer) getVersionTool(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	resReq := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{URI: "resource://version"}}
 	result, err := gs.getVersion(ctx, resReq)
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	return resourceResultToToolResult(result), nil
+}
+
+func (gs *GodboltServer) shortlinkInfoTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args struct {
+		LinkID string `json:"linkid"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return toolErrorResult(fmt.Errorf("invalid arguments: %w", err)), nil
+	}
+	if args.LinkID == "" {
+		return toolErrorResult(fmt.Errorf("missing required parameter: linkid")), nil
+	}
+	resReq := &mcp.ReadResourceRequest{
+		Params: &mcp.ReadResourceParams{URI: "resource://shortlinkinfo/" + args.LinkID},
+	}
+	result, err := gs.getShortlinkInfo(ctx, resReq)
 	if err != nil {
 		return toolErrorResult(err), nil
 	}

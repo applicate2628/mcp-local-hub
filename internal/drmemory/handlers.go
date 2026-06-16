@@ -178,6 +178,27 @@ func (ds *DrMemoryServer) runTool(ctx context.Context, req *mcp.CallToolRequest)
 	return result, nil
 }
 
+// statusTool handles drmemory_status: it probes Dr. Memory availability via the
+// injectable seam and returns {available, drmemory_path, version}. It runs only
+// `<drmemory> -version` (no instrumented target), so it is safe to expose
+// unconditionally. The Go-exec probe works in the console-less daemon.
+func (ds *DrMemoryServer) statusTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	path, version, available := ds.probeVersion()
+	body, _ := json.Marshal(map[string]any{
+		"available":     available,
+		"drmemory_path": path,
+		"version":       version,
+	})
+	return textResult(string(body)), nil
+}
+
+// textResult wraps text in a non-error CallToolResult.
+func textResult(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: text}},
+	}
+}
+
 // structuredErrResult marshals a runResult into a NON-IsError CallToolResult
 // (a structured, parseable JSON body) so failure paths surface the cause in
 // the same shape as a successful run instead of an opaque tool-level error

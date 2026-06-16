@@ -69,13 +69,18 @@ func oneAPIRunEnabled() bool {
 	return unsafegate.Enabled(enableUnsafeOneAPIRunEnv)
 }
 
-// registerTools attaches the run_in_oneapi_env tool to the MCP server, but
-// ONLY after an explicit unsafe opt-in. Called once from Run during startup.
-// When the opt-in is absent the daemon still runs and serves the MCP protocol
-// — it just exposes no tools (unsafegate.RegisterAllowed logs WHY to stderr so
-// the secure-default is observable), so a misconfigured client cannot reach
-// the arbitrary-command surface.
+// registerTools attaches the oneapi-run tools to the MCP server. The
+// read-only oneapi_env_status probe is ALWAYS registered (it runs no
+// caller-supplied command — it only reports whether oneAPI is present). The
+// arbitrary-command run_in_oneapi_env tool is registered ONLY after an
+// explicit unsafe opt-in. Called once from Run during startup. When the
+// opt-in is absent the daemon still runs and serves the MCP protocol exposing
+// just the safe status probe (unsafegate.RegisterAllowed logs WHY the run
+// tool is withheld to stderr so the secure-default is observable), so a
+// misconfigured client cannot reach the arbitrary-command surface.
 func registerTools(rs *OneAPIRunServer) {
+	registerStatusTool(rs)
+
 	if !unsafegate.RegisterAllowed(enableUnsafeOneAPIRunEnv, "oneapi-run") {
 		return
 	}

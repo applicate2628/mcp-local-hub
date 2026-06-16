@@ -247,6 +247,202 @@ func TestFormatTool_RejectsOversizedResponse(t *testing.T) {
 	}
 }
 
+// fakeFormatGodbolt echoes the formatter request payload back and returns
+// a valid {"answer", "exit"} body so format-style tests can assert the
+// style options reached the wire.
+func fakeFormatGodbolt(t *testing.T, gotURL *string, gotPayload *map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*gotURL = r.URL.String()
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, gotPayload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"answer":"int main() {}\n","exit":0}`))
+	}))
+}
+
+func TestFormatTool_ForwardsStyleOptions(t *testing.T) {
+	var gotURL string
+	var gotPayload map[string]any
+	srv := fakeFormatGodbolt(t, &gotURL, &gotPayload)
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+	rawArgs, _ := json.Marshal(map[string]any{
+		"formatter": "clangformat",
+		"source":    "int main(){}",
+		"base":      "Google",
+		"useSpaces": true,
+		"tabWidth":  4,
+	})
+
+	res, err := gs.formatTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("formatTool returned error: %v", err)
+	}
+	if res.IsError {
+		text := res.Content[0].(*mcp.TextContent).Text
+		t.Fatalf("formatTool unexpected IsError: %s", text)
+	}
+	if gotURL != "/api/format/clangformat" {
+		t.Errorf("godbolt URL = %q, want /api/format/clangformat", gotURL)
+	}
+	if gotPayload["base"] != "Google" {
+		t.Errorf("base not forwarded: %+v", gotPayload)
+	}
+	if gotPayload["useSpaces"] != true {
+		t.Errorf("useSpaces not forwarded: %+v", gotPayload)
+	}
+	// JSON numbers unmarshal into float64 through map[string]any.
+	if gotPayload["tabWidth"] != float64(4) {
+		t.Errorf("tabWidth not forwarded: %+v", gotPayload)
+	}
+	if gotPayload["source"] != "int main(){}" {
+		t.Errorf("source not forwarded: %+v", gotPayload)
+	}
+}
+
+// TestFormatTool_OmitsUnsetStyleOptions guards the pointer-based
+// presence detection: an omitted useSpaces/tabWidth/base must NOT be
+// sent (so the formatter's own defaults apply), not silently coerced to
+// false / 0 / "".
+func TestFormatTool_OmitsUnsetStyleOptions(t *testing.T) {
+	var gotURL string
+	var gotPayload map[string]any
+	srv := fakeFormatGodbolt(t, &gotURL, &gotPayload)
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+	rawArgs, _ := json.Marshal(map[string]any{
+		"formatter": "clangformat",
+		"source":    "int main(){}",
+	})
+
+	res, err := gs.formatTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("formatTool returned error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("formatTool unexpected IsError: %s", res.Content[0].(*mcp.TextContent).Text)
+	}
+	if _, ok := gotPayload["base"]; ok {
+		t.Errorf("base sent despite being unset: %+v", gotPayload)
+	}
+	if _, ok := gotPayload["useSpaces"]; ok {
+		t.Errorf("useSpaces sent despite being unset: %+v", gotPayload)
+	}
+	if _, ok := gotPayload["tabWidth"]; ok {
+		t.Errorf("tabWidth sent despite being unset: %+v", gotPayload)
+	}
+}
+
+// TestFormatTool_ForwardsExplicitZeroValues verifies the pointer seam
+// sends an explicit useSpaces:false (the meaningful "use tabs" choice)
+// rather than dropping it as if unset.
+func TestFormatTool_ForwardsExplicitZeroValues(t *testing.T) {
+	var gotURL string
+	var gotPayload map[string]any
+	srv := fakeFormatGodbolt(t, &gotURL, &gotPayload)
+	defer srv.Close()
+
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+	rawArgs, _ := json.Marshal(map[string]any{
+		"formatter": "clangformat",
+		"source":    "int main(){}",
+		"useSpaces": false,
+		"tabWidth":  0,
+	})
+
+	res, err := gs.formatTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("formatTool returned error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("formatTool unexpected IsError: %s", res.Content[0].(*mcp.TextContent).Text)
+	}
+	v, ok := gotPayload["useSpaces"]
+	if !ok || v != false {
+		t.Errorf("explicit useSpaces:false not forwarded: %+v", gotPayload)
+	}
+	w, ok := gotPayload["tabWidth"]
+	if !ok || w != float64(0) {
+		t.Errorf("explicit tabWidth:0 not forwarded: %+v", gotPayload)
+	}
+}
+
+func TestShortlinkInfoTool_DelegatesToResource(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sessions":[{"source":"int main(){}","language":"c++"}]}`))
+	}))
+	defer srv.Close()
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	rawArgs, _ := json.Marshal(map[string]any{"linkid": "abc123"})
+	result, err := gs.shortlinkInfoTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("shortlinkInfoTool: %v", err)
+	}
+	if gotURL != "/api/shortlinkinfo/abc123" {
+		t.Errorf("godbolt URL = %q, want /api/shortlinkinfo/abc123", gotURL)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected IsError result: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("empty Content")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("Content[0] is not TextContent: %T", result.Content[0])
+	}
+	if !strings.Contains(text.Text, `"source":"int main(){}"`) {
+		t.Errorf("response missing stored source: %s", text.Text)
+	}
+}
+
+func TestShortlinkInfoTool_MissingLinkIDReturnsError(t *testing.T) {
+	gs := &GodboltServer{httpClient: http.DefaultClient, baseURL: "http://unused"}
+	rawArgs, _ := json.Marshal(map[string]any{})
+	result, err := gs.shortlinkInfoTool(t.Context(), (&mockCallToolRequest{Arguments: rawArgs}).toReal())
+	if err != nil {
+		t.Fatalf("shortlinkInfoTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing linkid")
+	}
+}
+
+func TestGetShortlinkInfo_ExtractsLinkID(t *testing.T) {
+	var gotURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sessions":[]}`))
+	}))
+	defer srv.Close()
+	gs := &GodboltServer{httpClient: srv.Client(), baseURL: srv.URL + "/api"}
+
+	req := &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{}}
+	req.Params.URI = "resource://shortlinkinfo/xY9zK"
+	result, err := gs.getShortlinkInfo(t.Context(), req)
+	if err != nil {
+		t.Fatalf("getShortlinkInfo: %v", err)
+	}
+	if gotURL != "/api/shortlinkinfo/xY9zK" {
+		t.Errorf("godbolt URL = %q, want /api/shortlinkinfo/xY9zK", gotURL)
+	}
+	rc := result.Contents[0]
+	if rc.MIMEType != "application/json" {
+		t.Errorf("MIME = %q, want application/json", rc.MIMEType)
+	}
+	if rc.URI != "resource://shortlinkinfo/xY9zK" {
+		t.Errorf("URI = %q, want resource://shortlinkinfo/xY9zK", rc.URI)
+	}
+}
+
 func TestGetPopularArguments(t *testing.T) {
 	var gotURL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

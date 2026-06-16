@@ -202,3 +202,15 @@ func TestAsyncSummary(t *testing.T) {
 		t.Errorf("bare *stopped summary = %q, want it to mention stopped", bare)
 	}
 }
+
+// TestDefaultStartVersion_ProbeFailureReturnsEmpty: when the `<gdb> --version`
+// exec fails (here a guaranteed-nonexistent binary, so no real gdb is spawned),
+// defaultStartVersion returns "" without erroring — a version-probe failure must
+// never abort an otherwise-healthy session start. The non-error path (a real
+// gdb) is covered end-to-end by the injected-probe startTool tests in
+// server_test.go.
+func TestDefaultStartVersion_ProbeFailureReturnsEmpty(t *testing.T) {
+	if v := defaultStartVersion(`Z:\does\not\exist\nope-gdb.exe`); v != "" {
+		t.Errorf("defaultStartVersion on a missing binary = %q, want \"\"", v)
+	}
+}

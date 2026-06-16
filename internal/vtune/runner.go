@@ -42,6 +42,11 @@ type runOutput struct {
 	ReportPath  string
 	CommandLine string
 	TimedOut    bool
+	// ResultDir is the absolute path to the per-run VTune result dir, populated
+	// ONLY when the caller passed keep_result=true (otherwise the dir is deleted
+	// before returning and this stays ""). An agent feeds this path back to
+	// vtune_report to re-generate a report without re-profiling.
+	ResultDir string
 }
 
 // runFunc is the injectable seam that profiles a target under VTune. The
@@ -55,7 +60,23 @@ type runOutput struct {
 //   - args:    the target's own argv
 //   - cwd:     working directory for the target ("" inherits parent)
 //   - analysis: the validated analysis type (e.g. "hotspots")
-type runFunc func(ctx context.Context, exePath, target string, args []string, cwd, analysis string) (*runOutput, error)
+//   - keepResult: when true the per-run result dir is NOT deleted and its
+//     absolute path is returned in runOutput.ResultDir so a later vtune_report
+//     call can re-report against it without re-profiling.
+type runFunc func(ctx context.Context, exePath, target string, args []string, cwd, analysis string, keepResult bool) (*runOutput, error)
+
+// reportFunc is the injectable seam that re-runs only VTune's report phase
+// against an EXISTING result dir (one a prior keep_result profile left
+// behind), producing a fresh CSV table + summary WITHOUT re-profiling. The
+// default implementation is defaultReport; tests substitute a fake so they
+// never invoke the real reporter.
+//
+// Parameters:
+//   - exePath:   vtune.exe (already resolved by the findExe seam)
+//   - resultDir: the absolute path to the existing VTune result dir (-r)
+//   - analysis:  the validated analysis type (only used to choose the report
+//     name, which is always "hotspots" today — see reportName)
+type reportFunc func(ctx context.Context, exePath, resultDir, analysis string) (*runOutput, error)
 
 // vtuneOutputCap bounds the bytes read from the report CSV / summary / stderr
 // so a pathological report can't blow up memory or overrun the daemon stdio
@@ -75,7 +96,7 @@ const vtuneOutputCap = 512 * 1024
 // returning. A non-zero collect exit is captured (the profiled target failed
 // or returned non-zero), NOT treated as a runner failure — the report is
 // still generated from whatever data was collected.
-func defaultRun(ctx context.Context, exePath, target string, args []string, cwd, analysis string) (*runOutput, error) {
+func defaultRun(ctx context.Context, exePath, target string, args []string, cwd, analysis string, keepResult bool) (*runOutput, error) {
 	base, ok := hubtemp.Dir("vtune")
 	if !ok {
 		return nil, fmt.Errorf("derive vtune scratch dir")
@@ -90,7 +111,9 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	// Reap result dirs abandoned by an abnormally-terminated prior run (timeout
 	// force-kill, daemon restart, reboot mid-run); they hold a full result DB
 	// (often 50-500 MB) so unbounded accumulation is real. Prefix-scoped to
-	// "run-", so any shared sibling is untouched.
+	// "run-", so any shared sibling is untouched. A keep_result dir is subject
+	// to the same TTL sweep, so a kept-but-forgotten dir is reclaimed after
+	// staleRunDirTTL rather than leaking forever.
 	hubtemp.SweepStale(base, "run-", staleRunDirTTL)
 	// runDir holds the per-run result dir + the report output files. VTune
 	// REQUIRES the result dir (-r) to be FRESH/nonexistent (it creates it), so
@@ -99,7 +122,12 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	if err != nil {
 		return nil, fmt.Errorf("create vtune run dir: %w", err)
 	}
-	defer os.RemoveAll(runDir)
+	// keep_result keeps the per-run result dir on disk and returns its path so
+	// vtune_report can re-report against it without re-profiling. The default
+	// (keepResult=false) deletes the whole run dir on return, as before.
+	if !keepResult {
+		defer os.RemoveAll(runDir)
+	}
 
 	resultDir := filepath.Join(runDir, "result")
 	csvPath := filepath.Join(runDir, "report.csv")
@@ -108,6 +136,14 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 	env := vtuneEnv()
 	var stderr bytes.Buffer
 	var cmdLines []string
+
+	// keptDir is the result-dir path surfaced to the caller only when
+	// keepResult is set (so a default run never advertises a path it just
+	// deleted).
+	keptDir := ""
+	if keepResult {
+		keptDir = resultDir
+	}
 
 	// --- Phase 1: collect ---------------------------------------------------
 	collectArgs := buildCollectArgs(analysis, resultDir, target, args)
@@ -127,6 +163,7 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 				Stderr:      truncate(stderr.String(), vtuneOutputCap),
 				CommandLine: strings.Join(cmdLines, "\n"),
 				TimedOut:    true,
+				ResultDir:   keptDir,
 			}, err
 		} else {
 			// Genuine spawn failure (vtune.exe not executable, missing oneAPI
@@ -137,52 +174,109 @@ func defaultRun(ctx context.Context, exePath, target string, args []string, cwd,
 				ExitCode:    -1,
 				Stderr:      truncate(stderr.String(), vtuneOutputCap),
 				CommandLine: strings.Join(cmdLines, "\n"),
+				ResultDir:   keptDir,
 			}, fmt.Errorf("run vtune collect: %w (stderr: %s)", err, truncate(stderr.String(), 2000))
 		}
 	}
 
-	// --- Phase 2: report (CSV table) ----------------------------------------
+	// --- Phases 2 & 3: report (CSV table) + summary (human-readable text) ---
+	out, err := runReportPhases(ctx, exePath, resultDir, csvPath, summaryPath, analysis, cwd, env, &stderr, &cmdLines)
+	out.ExitCode = exitCode
+	out.ResultDir = keptDir
+	return out, err
+}
+
+// runReportPhases runs VTune's two read-only report phases (the CSV hotspots
+// table + the human-readable summary) against an EXISTING resultDir, reads the
+// outputs back, and returns a populated runOutput. It is shared by defaultRun
+// (after a fresh collect) and defaultReport (re-reporting a kept result dir),
+// so the report-phase flag wiring + non-fatal-failure + timeout handling live
+// in ONE place. It does NOT set ExitCode/ResultDir — the caller owns those (a
+// re-report has no target exit code to forward). cmdLines is appended in place
+// so the caller's command-line accumulator captures every phase. A returned
+// error is non-nil ONLY on a timeout (DeadlineExceeded); a plain report
+// failure is folded into stderr and returned with a nil error, since a report
+// that fails to render is still a successful "we tried" result the caller
+// surfaces.
+func runReportPhases(ctx context.Context, exePath, resultDir, csvPath, summaryPath, analysis, cwd string, env []string, stderr *bytes.Buffer, cmdLines *[]string) (*runOutput, error) {
+	// --- report (CSV table) -------------------------------------------------
 	reportArgs := buildReportArgs(reportName(analysis), resultDir, csvPath)
-	cmdLines = append(cmdLines, formatCommandLine(exePath, reportArgs))
+	*cmdLines = append(*cmdLines, formatCommandLine(exePath, reportArgs))
 	// A report failure is non-fatal: collect already succeeded, so surface
 	// whatever we have. The error is folded into stderr for diagnosis.
-	if err := runVTunePhase(ctx, exePath, reportArgs, cwd, env, &stderr); err != nil {
+	if err := runVTunePhase(ctx, exePath, reportArgs, cwd, env, stderr); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return &runOutput{
-				ExitCode:    exitCode,
 				Stderr:      truncate(stderr.String(), vtuneOutputCap),
-				CommandLine: strings.Join(cmdLines, "\n"),
+				CommandLine: strings.Join(*cmdLines, "\n"),
 				TimedOut:    true,
 			}, err
 		}
-		fmt.Fprintf(&stderr, "\nvtune report (%s) failed: %v\n", reportName(analysis), err)
+		fmt.Fprintf(stderr, "\nvtune report (%s) failed: %v\n", reportName(analysis), err)
 	}
 
-	// --- Phase 3: summary (human-readable text) -----------------------------
+	// --- summary (human-readable text) --------------------------------------
 	summaryArgs := buildReportArgs("summary", resultDir, summaryPath)
-	cmdLines = append(cmdLines, formatCommandLine(exePath, summaryArgs))
-	if err := runVTunePhase(ctx, exePath, summaryArgs, cwd, env, &stderr); err != nil {
+	*cmdLines = append(*cmdLines, formatCommandLine(exePath, summaryArgs))
+	if err := runVTunePhase(ctx, exePath, summaryArgs, cwd, env, stderr); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return &runOutput{
-				ExitCode:    exitCode,
 				ReportCSV:   readReportFile(csvPath),
 				ReportPath:  reportPathIfPresent(csvPath),
 				Stderr:      truncate(stderr.String(), vtuneOutputCap),
-				CommandLine: strings.Join(cmdLines, "\n"),
+				CommandLine: strings.Join(*cmdLines, "\n"),
 				TimedOut:    true,
 			}, err
 		}
-		fmt.Fprintf(&stderr, "\nvtune report (summary) failed: %v\n", err)
+		fmt.Fprintf(stderr, "\nvtune report (summary) failed: %v\n", err)
 	}
 
 	return &runOutput{
-		ExitCode:    exitCode,
 		ReportCSV:   readReportFile(csvPath),
 		Summary:     readReportFile(summaryPath),
 		Stderr:      truncate(stderr.String(), vtuneOutputCap),
 		ReportPath:  reportPathIfPresent(csvPath),
-		CommandLine: strings.Join(cmdLines, "\n"),
+		CommandLine: strings.Join(*cmdLines, "\n"),
 	}, nil
+}
+
+// defaultReport is the production reportFunc. It re-runs ONLY VTune's report
+// phases (no collect, no target execution) against an EXISTING result dir a
+// prior keep_result profile left behind, writing the CSV + summary into a
+// FRESH per-run scratch dir (always cleaned up — re-reporting never keeps its
+// own output dir). The supplied resultDir is read-only here; this never
+// mutates or deletes the caller's kept result dir.
+func defaultReport(ctx context.Context, exePath, resultDir, analysis string) (*runOutput, error) {
+	if info, err := os.Stat(resultDir); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("result_dir is not an existing VTune result directory: %s", resultDir)
+	}
+
+	base, ok := hubtemp.Dir("vtune")
+	if !ok {
+		return nil, fmt.Errorf("derive vtune scratch dir")
+	}
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return nil, fmt.Errorf("create vtune scratch base: %w", err)
+	}
+	// The report outputs (CSV + summary) go into a throwaway dir, NOT the
+	// caller's result dir, so the kept result dir stays pristine for further
+	// re-reports. "report-" prefix keeps it out of the "run-" stale sweep.
+	outDir, err := os.MkdirTemp(base, "report-")
+	if err != nil {
+		return nil, fmt.Errorf("create vtune report dir: %w", err)
+	}
+	defer os.RemoveAll(outDir)
+
+	csvPath := filepath.Join(outDir, "report.csv")
+	summaryPath := filepath.Join(outDir, "summary.txt")
+
+	env := vtuneEnv()
+	var stderr bytes.Buffer
+	var cmdLines []string
+
+	out, err := runReportPhases(ctx, exePath, resultDir, csvPath, summaryPath, analysis, "", env, &stderr, &cmdLines)
+	// A re-report has no target exit code to forward, so ExitCode stays 0.
+	return out, err
 }
 
 // runVTunePhase runs one vtune.exe invocation, appending its stderr to the

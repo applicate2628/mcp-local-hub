@@ -5,6 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+
+	"mcp-local-hub/internal/process"
 )
 
 // ErrDrMemoryNotFound is returned by the default path probe when no
@@ -68,6 +71,48 @@ func findDrMemory() (string, error) {
 	}
 
 	return "", ErrDrMemoryNotFound
+}
+
+// defaultVersionProbe is the production versionProbeFunc backing drmemory_status.
+// It resolves drmemory.exe via findDrMemory, then runs `<drmemory> -version`
+// (Dr. Memory's single-dash version flag) via Go exec — which works in the
+// console-less daemon. The reported availability/version follow these rules:
+//
+//   - findDrMemory fails (no install) → ("", "", false): Dr. Memory is not
+//     available; the caller's install-guidance comes from drmemory_run.
+//   - drmemory.exe resolves AND `-version` succeeds → (path, firstLine, true).
+//   - drmemory.exe resolves but `-version` fails (older Dr. Memory that does not
+//     support -version, or it prints to stderr) → (path, "", true): a usable
+//     drmemory.exe was located, so available stays true; version is just unknown.
+//     Reporting available:false here would wrongly claim a present install is
+//     missing, since resolution already proved the binary exists.
+func defaultVersionProbe() (string, string, bool) {
+	path, err := findDrMemory()
+	if err != nil {
+		return "", "", false
+	}
+	cmd := exec.Command(path, "-version")
+	process.NoConsole(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		// -version unsupported / wrote to stderr: the binary is still present,
+		// so report it as available with an unknown version rather than masking
+		// a real install behind available:false.
+		return path, "", true
+	}
+	return path, firstNonEmptyLine(string(out)), true
+}
+
+// firstNonEmptyLine returns the first non-blank line of s (trimmed), or "" when
+// s holds no non-blank line. Dr. Memory's `-version` output leads with the
+// version banner; the rest is noise for an availability probe.
+func firstNonEmptyLine(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(ln); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 // isExecutableFile reports whether path exists and is a regular file

@@ -94,6 +94,103 @@ func (tb *PerfToolbox) llvmObjdumpTool(ctx context.Context, req *mcp.CallToolReq
 	}, nil
 }
 
+// llvmNMTool dumps the symbol table of a binary via `llvm-objdump
+// --syms`. Unlike the disassembly tool, this answers "what symbols
+// (functions, globals, weak/local linkage) does the REAL built binary
+// export?" — the post-LTO/PGO/linker view, not godbolt's sandbox.
+// Shares llvmObjdumpTool's project_root boundary + extra_args guard
+// exactly so it can't be used to read files outside the workspace.
+func (tb *PerfToolbox) llvmNMTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if !tb.tools.LLVMObjdump.Installed {
+		return errResult("llvm-objdump not installed: " + tb.tools.LLVMObjdump.Error), nil
+	}
+
+	var args struct {
+		Binary      string   `json:"binary"`
+		ProjectRoot string   `json:"project_root"`
+		ExtraArgs   []string `json:"extra_args"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	if args.Binary == "" {
+		return errResult("missing required parameter: binary (path to a built .exe / .o / .so / .a)"), nil
+	}
+	safeBinary, err := validateLLVMObjdumpBinaryPath(args.ProjectRoot, args.Binary)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	if err := validateLLVMObjdumpExtraArgs(args.ExtraArgs); err != nil {
+		return errResult(err.Error()), nil
+	}
+
+	cmdArgs := []string{"--syms", "--demangle"}
+	cmdArgs = append(cmdArgs, args.ExtraArgs...)
+	cmdArgs = append(cmdArgs, safeBinary)
+
+	cap, err := runCaptureLimited(ctx, tb.tools.LLVMObjdump.Path, "", cmdArgs, llvmObjdumpMaxStdoutBytes, 512*1024)
+	if err != nil {
+		if errors.Is(err, errOutputLimitExceeded) {
+			return errResult(fmt.Sprintf("llvm-objdump --syms output exceeded %d bytes; the binary has an unusually large symbol table", llvmObjdumpMaxStdoutBytes)), nil
+		}
+		return errResult(fmt.Sprintf("llvm-objdump --syms failed: %v", err)), nil
+	}
+	if cap.ExitCode != 0 {
+		return errResult(fmt.Sprintf("llvm-objdump --syms exited %d\nstderr:\n%s", cap.ExitCode, string(cap.Stderr))), nil
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(cap.Stdout)}},
+	}, nil
+}
+
+// llvmSizeTool dumps the section-header / size breakdown of a binary via
+// `llvm-objdump --section-headers`. It answers "how big are .text / .data
+// / .rodata / .bss in the REAL built binary?" — useful for tracking code
+// bloat or confirming a section layout. Shares llvmObjdumpTool's
+// project_root boundary + extra_args guard exactly.
+func (tb *PerfToolbox) llvmSizeTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if !tb.tools.LLVMObjdump.Installed {
+		return errResult("llvm-objdump not installed: " + tb.tools.LLVMObjdump.Error), nil
+	}
+
+	var args struct {
+		Binary      string   `json:"binary"`
+		ProjectRoot string   `json:"project_root"`
+		ExtraArgs   []string `json:"extra_args"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	if args.Binary == "" {
+		return errResult("missing required parameter: binary (path to a built .exe / .o / .so / .a)"), nil
+	}
+	safeBinary, err := validateLLVMObjdumpBinaryPath(args.ProjectRoot, args.Binary)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	if err := validateLLVMObjdumpExtraArgs(args.ExtraArgs); err != nil {
+		return errResult(err.Error()), nil
+	}
+
+	cmdArgs := []string{"--section-headers"}
+	cmdArgs = append(cmdArgs, args.ExtraArgs...)
+	cmdArgs = append(cmdArgs, safeBinary)
+
+	cap, err := runCaptureLimited(ctx, tb.tools.LLVMObjdump.Path, "", cmdArgs, llvmObjdumpMaxStdoutBytes, 512*1024)
+	if err != nil {
+		if errors.Is(err, errOutputLimitExceeded) {
+			return errResult(fmt.Sprintf("llvm-objdump --section-headers output exceeded %d bytes", llvmObjdumpMaxStdoutBytes)), nil
+		}
+		return errResult(fmt.Sprintf("llvm-objdump --section-headers failed: %v", err)), nil
+	}
+	if cap.ExitCode != 0 {
+		return errResult(fmt.Sprintf("llvm-objdump --section-headers exited %d\nstderr:\n%s", cap.ExitCode, string(cap.Stderr))), nil
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(cap.Stdout)}},
+	}, nil
+}
+
 // validateLLVMObjdumpBinaryPath is a thin wrapper around the shared
 // validateBinaryInsideRoot helper that preserves the "binary" wording
 // the llvm-objdump tool surfaces in error messages.

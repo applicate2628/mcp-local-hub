@@ -230,7 +230,7 @@ func registerTools(gs *GodboltServer) {
 	// Tool 3: format_code
 	gs.server.AddTool(&mcp.Tool{
 		Name:        "format_code",
-		Description: "⚠ SENDS SOURCE to https://godbolt.org (third-party public service). Set MCPHUB_GODBOLT_DISABLE=1 before launch to hard-block every tool in this server. Format source code using a specified code formatter.",
+		Description: "⚠ SENDS SOURCE to https://godbolt.org (third-party public service). Set MCPHUB_GODBOLT_DISABLE=1 before launch to hard-block every tool in this server. Format source code using a specified code formatter. Optional style options (base / useSpaces / tabWidth) tune the formatter — discover which the formatter accepts via list_formats (each entry carries its supported styles).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -241,6 +241,18 @@ func registerTools(gs *GodboltServer) {
 				"source": map[string]any{
 					"type":        "string",
 					"description": "The source code to format",
+				},
+				"base": map[string]any{
+					"type":        "string",
+					"description": "Optional base style preset to derive formatting from (e.g. 'Google', 'LLVM', 'Mozilla', 'WebKit', 'Chromium', 'GNU'). Valid presets vary per formatter — see list_formats.",
+				},
+				"useSpaces": map[string]any{
+					"type":        "boolean",
+					"description": "Optional: indent with spaces (true) instead of tabs (false).",
+				},
+				"tabWidth": map[string]any{
+					"type":        "integer",
+					"description": "Optional indentation width in columns (e.g. 2, 4).",
 				},
 			},
 			"required": []string{"formatter", "source"},
@@ -439,6 +451,32 @@ func (gs *GodboltServer) getPopularArguments(ctx context.Context, req *mcp.ReadR
 	}, nil
 }
 
+// getShortlinkInfo handles GET /api/shortlinkinfo/{linkid} — the stored
+// compilation state (source, compiler settings, libraries) behind a
+// godbolt.org short link id. The id is the trailing path segment of a
+// https://godbolt.org/z/<linkid> URL. Returns the raw JSON state object.
+func (gs *GodboltServer) getShortlinkInfo(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	linkID := extractPathParam(req.Params.URI, "linkid")
+	if linkID == "" {
+		return nil, fmt.Errorf("missing linkid parameter")
+	}
+
+	body, err := gs.fetchResource(fmt.Sprintf("%s/shortlinkinfo/%s", gs.baseURL, linkID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shortlink info: %w", err)
+	}
+
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{
+			{
+				URI:      req.Params.URI,
+				MIMEType: "application/json",
+				Text:     string(body),
+			},
+		},
+	}, nil
+}
+
 // extractPathParam extracts a parameter value from a resource URI template
 // e.g., from "resource://compilers/cpp" with template "resource://compilers/{language_id}"
 // returns "cpp"
@@ -462,6 +500,8 @@ func extractPathParam(uri, paramName string) string {
 		paramPosition = 4 // resource://asm/x86/mov → "mov" at index 4
 	case paramName == "compiler_id":
 		paramPosition = 3 // resource://popularArguments/gcc-13.2 → parts=["resource:","","popularArguments","gcc-13.2"]
+	case paramName == "linkid":
+		paramPosition = 3 // resource://shortlinkinfo/abc123 → parts=["resource:","","shortlinkinfo","abc123"]
 	default:
 		return ""
 	}
@@ -683,6 +723,13 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 	var args struct {
 		Formatter string `json:"formatter"`
 		Source    string `json:"source"`
+		Base      string `json:"base"`
+		// Pointers so an omitted option is distinguishable from an
+		// explicit zero value (useSpaces:false / tabWidth:0). The
+		// /api/format/<formatter> endpoint treats a present field as an
+		// override, so we must only send fields the caller actually set.
+		UseSpaces *bool `json:"useSpaces"`
+		TabWidth  *int  `json:"tabWidth"`
 	}
 
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
@@ -707,9 +754,21 @@ func (gs *GodboltServer) formatTool(ctx context.Context, req *mcp.CallToolReques
 		}, nil
 	}
 
-	// Build request payload
+	// Build request payload. base / useSpaces / tabWidth are the formatter
+	// style options the Compiler Explorer /api/format/<formatter> endpoint
+	// accepts; thread them through only when the caller supplied them so
+	// the formatter's own defaults still apply otherwise.
 	payload := map[string]any{
 		"source": args.Source,
+	}
+	if args.Base != "" {
+		payload["base"] = args.Base
+	}
+	if args.UseSpaces != nil {
+		payload["useSpaces"] = *args.UseSpaces
+	}
+	if args.TabWidth != nil {
+		payload["tabWidth"] = *args.TabWidth
 	}
 
 	// Marshal payload to JSON

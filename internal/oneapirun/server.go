@@ -56,6 +56,12 @@ type OneAPIRunServer struct {
 	// directories to prepend to PATH (empty when no oneAPI install is
 	// found). Overridable in tests.
 	oneAPIDLLDirs func() []string
+
+	// detectRoot locates the Intel oneAPI install root, returning (root, true)
+	// when found. Backs the read-only oneapi_env_status probe's `root` /
+	// `oneapi_present` fields without running setvars. The production seam is
+	// oneapi.DetectRoot; overridable in tests so detection is faked.
+	detectRoot func() (string, bool)
 }
 
 // Run wires up a fresh OneAPIRunServer with the production env-computation
@@ -66,6 +72,7 @@ func Run(ctx context.Context) error {
 	rs := &OneAPIRunServer{
 		captureVSEnv:  oneapi.SetvarsEnv,
 		oneAPIDLLDirs: detectOneAPIDLLDirs,
+		detectRoot:    oneapi.DetectRoot,
 	}
 
 	rs.server = mcp.NewServer(&mcp.Implementation{

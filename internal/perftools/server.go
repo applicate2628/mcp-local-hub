@@ -191,6 +191,69 @@ func registerTools(tb *PerfToolbox) {
 		},
 	}, tb.llvmObjdumpTool)
 
+	// llvm_nm dumps the symbol table of the user's REAL built binary
+	// (post-LTO/PGO/linker) via `llvm-objdump --syms`. Same
+	// project_root boundary + extra_args discipline as llvm_objdump.
+	tb.server.AddTool(&mcp.Tool{
+		Name: "llvm_nm",
+		Description: "Dump the symbol table of the user's REAL built binary via llvm-objdump --syms. " +
+			"Answers 'what functions / globals (and their linkage: global/local/weak) does my actual " +
+			".exe/.o/.so export?' — the post-LTO/PGO/linker view, not godbolt's sandbox. Symbol names " +
+			"are demangled. Returns the raw symbol-table text. Use it to confirm a symbol survived " +
+			"stripping/inlining, or to find the exact mangled-then-demangled name to pass to " +
+			"llvm_objdump's function filter.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"binary": map[string]any{
+					"type":        "string",
+					"description": "Path to the binary file (executable, object, shared lib, or archive). Relative paths resolve under project_root; the resolved file must stay inside project_root.",
+				},
+				"project_root": map[string]any{
+					"type":        "string",
+					"description": "Required project/workspace boundary. llvm_nm refuses binaries that resolve outside this directory.",
+				},
+				"extra_args": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional. Additional raw llvm-objdump flags (e.g. ['--dynamic']). Each entry must start with '-' or '--' — positional input files and @-response-file directives are rejected.",
+				},
+			},
+			"required": []string{"binary", "project_root"},
+		},
+	}, tb.llvmNMTool)
+
+	// llvm_size dumps the section-header / size breakdown of the user's
+	// REAL built binary via `llvm-objdump --section-headers`. Same
+	// project_root boundary + extra_args discipline as llvm_objdump.
+	tb.server.AddTool(&mcp.Tool{
+		Name: "llvm_size",
+		Description: "Dump the section-header / size breakdown of the user's REAL built binary via " +
+			"llvm-objdump --section-headers. Answers 'how big are .text / .data / .rodata / .bss in my " +
+			"actual .exe/.o/.so, and what's the section layout?' — useful for tracking code bloat across " +
+			"builds or confirming a custom section landed. Returns the raw section-header table (name, " +
+			"size, VMA, file offset, flags per section).",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"binary": map[string]any{
+					"type":        "string",
+					"description": "Path to the binary file (executable, object, shared lib, or archive). Relative paths resolve under project_root; the resolved file must stay inside project_root.",
+				},
+				"project_root": map[string]any{
+					"type":        "string",
+					"description": "Required project/workspace boundary. llvm_size refuses binaries that resolve outside this directory.",
+				},
+				"extra_args": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional. Additional raw llvm-objdump flags (e.g. ['--wide']). Each entry must start with '-' or '--' — positional input files and @-response-file directives are rejected.",
+				},
+			},
+			"required": []string{"binary", "project_root"},
+		},
+	}, tb.llvmSizeTool)
+
 	tb.server.AddTool(&mcp.Tool{
 		Name: "iwyu",
 		Description: "Run include-what-you-use on a source file. Returns structured JSON with reports[] — one entry " +

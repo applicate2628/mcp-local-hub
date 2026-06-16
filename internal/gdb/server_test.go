@@ -36,13 +36,20 @@ func contentText(t *testing.T, res *mcp.CallToolResult) string {
 // newTestServer builds a GdbServer whose startSession seam returns a fake
 // session backed by the canned MI output, so no real gdb is spawned. The
 // resolveGdbPath + probeVersion seams are also faked.
+//
+// The fake startSession populates s.version through the SAME startVersionProbe
+// seam the production startSession uses (defaulted to the canned version in
+// each test that asserts on it). It deliberately does NOT hardcode a version
+// literal: an earlier revision did, which masked the production bug where
+// gdb_start always returned version="" because the `-q`-suppressed banner was
+// scraped for the version instead of a dedicated `--version` probe.
 func newTestServer(miOutput string) *GdbServer {
 	return &GdbServer{
 		resolveGdbPath: func() string { return `C:\fake\gdb.exe` },
 		startSession: func(gdbPath, program string) (*session, error) {
 			s := newFakeSession(miOutput)
 			s.gdbPath = gdbPath
-			s.version = "GNU gdb (GDB) 14.2"
+			s.version = startVersionProbe(gdbPath)
 			return s, nil
 		},
 		probeVersion: func() (string, string, bool) {
@@ -52,9 +59,27 @@ func newTestServer(miOutput string) *GdbServer {
 	}
 }
 
+// withStartVersionProbe swaps the package-level startVersionProbe seam for the
+// duration of a test (restored via t.Cleanup) so a test exercises the
+// version-population path without spawning real gdb.
+func withStartVersionProbe(t *testing.T, fn func(gdbPath string) string) {
+	t.Helper()
+	prev := startVersionProbe
+	startVersionProbe = fn
+	t.Cleanup(func() { startVersionProbe = prev })
+}
+
 // TestStartTool registers a session and returns the deterministic id + path +
-// version.
+// version. The version must be the non-empty string produced by the
+// startVersionProbe seam — the production bug was that gdb_start always returned
+// version="" because the `-q`-suppressed banner was scraped instead.
 func TestStartTool(t *testing.T) {
+	var probedPath string
+	withStartVersionProbe(t, func(gdbPath string) string {
+		probedPath = gdbPath
+		return "GNU gdb (GDB) 14.2"
+	})
+
 	gs := newTestServer("^done\n(gdb) \n")
 	res, err := gs.startTool(context.Background(), newRequest(t, map[string]any{}))
 	if err != nil {
@@ -75,7 +100,10 @@ func TestStartTool(t *testing.T) {
 		t.Errorf("gdb_path = %q", got["gdb_path"])
 	}
 	if got["version"] != "GNU gdb (GDB) 14.2" {
-		t.Errorf("version = %q", got["version"])
+		t.Errorf("version = %q, want the probe result (non-empty)", got["version"])
+	}
+	if probedPath != `C:\fake\gdb.exe` {
+		t.Errorf("startVersionProbe got gdb_path %q, want the resolved path", probedPath)
 	}
 
 	// A second start increments the counter deterministically.
@@ -84,6 +112,31 @@ func TestStartTool(t *testing.T) {
 	_ = json.Unmarshal([]byte(contentText(t, res2)), &got2)
 	if got2["session_id"] != "gdb-2" {
 		t.Errorf("second session_id = %q, want gdb-2", got2["session_id"])
+	}
+}
+
+// TestStartVersionProbeWired asserts the version a session carries is exactly
+// what startVersionProbe returns for the resolved gdb path — the regression
+// guard for the gdb_start version="" bug. It drives the full startTool path with
+// an injected probe (no real gdb), so a future regression that drops the probe
+// and re-scrapes the empty `-q` banner fails here.
+func TestStartVersionProbeWired(t *testing.T) {
+	withStartVersionProbe(t, func(gdbPath string) string {
+		return "GNU gdb (GDB) 99.9 [probe]"
+	})
+
+	gs := newTestServer("^done\n(gdb) \n")
+	res, err := gs.startTool(context.Background(), newRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("startTool error: %v", err)
+	}
+	var got map[string]string
+	_ = json.Unmarshal([]byte(contentText(t, res)), &got)
+	if got["version"] != "GNU gdb (GDB) 99.9 [probe]" {
+		t.Errorf("version = %q, want the injected probe result", got["version"])
+	}
+	if got["version"] == "" {
+		t.Error("version is empty — the gdb_start version='' regression is back")
 	}
 }
 

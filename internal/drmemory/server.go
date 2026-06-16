@@ -37,20 +37,32 @@ func drmemoryEnabled() bool {
 	return unsafegate.Enabled(enableUnsafeDrmemoryEnv)
 }
 
-// DrMemoryServer holds the MCP server instance plus the two injectable
-// seams used by the run handler:
+// versionProbeFunc resolves and probes drmemory.exe for the drmemory_status
+// tool: it returns the resolved drmemory.exe path, the reported version (the
+// first line of `<drmemory> -version`, empty when -version is unsupported), and
+// whether the probe found a usable drmemory.exe. The production implementation
+// is defaultVersionProbe (a real exec.Command — which WORKS in the console-less
+// daemon, unlike a python subprocess probe); tests inject a fake.
+type versionProbeFunc func() (path, version string, available bool)
+
+// DrMemoryServer holds the MCP server instance plus the injectable seams used
+// by the handlers:
 //
 //   - findExe resolves drmemory.exe (default: findDrMemory, probing the
-//     known install dirs / %DRMEMORY_HOME% / PATH).
+//     known install dirs / %DRMEMORY_HOME% / PATH). Used by the run handler.
 //   - run invokes Dr. Memory on a target and returns the raw results.txt
 //     (default: defaultRun).
+//   - probeVersion backs drmemory_status: it resolves drmemory.exe and reports
+//     availability + version WITHOUT a full instrumented run (default:
+//     defaultVersionProbe).
 //
-// Tests construct a DrMemoryServer with fakes for both so the handler is
-// exercised end-to-end without a real Dr. Memory install.
+// Tests construct a DrMemoryServer with fakes so the handlers are exercised
+// end-to-end without a real Dr. Memory install.
 type DrMemoryServer struct {
-	server  *mcp.Server
-	findExe func() (string, error)
-	run     runFunc
+	server       *mcp.Server
+	findExe      func() (string, error)
+	run          runFunc
+	probeVersion versionProbeFunc
 }
 
 // Run wires up a fresh DrMemoryServer with the production seams,
@@ -59,8 +71,9 @@ type DrMemoryServer struct {
 // truth for every entry point; keep runtime behavior here.
 func Run(ctx context.Context) error {
 	ds := &DrMemoryServer{
-		findExe: findDrMemory,
-		run:     defaultRun,
+		findExe:      findDrMemory,
+		run:          defaultRun,
+		probeVersion: defaultVersionProbe,
 	}
 
 	ds.server = mcp.NewServer(&mcp.Implementation{
@@ -76,13 +89,32 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-// registerTools attaches the drmemory_run tool, but ONLY after an explicit
-// unsafe opt-in. Called once from Run during startup. When the opt-in is
-// absent the daemon still serves MCP — it just exposes no tool
-// (unsafegate.RegisterAllowed logs WHY to stderr so the secure-default is
-// observable), so a misconfigured client cannot reach the arbitrary-exec
-// surface.
+// registerTools attaches the drmemory tools. Called once from Run during
+// startup. drmemory_status (a read-only availability + version probe that runs
+// only `<drmemory> -version`, never a caller-supplied executable) is registered
+// UNCONDITIONALLY so a client can always discover whether Dr. Memory is
+// installed. drmemory_run (which runs an arbitrary caller-supplied .exe under
+// instrumentation — the arbitrary-local-code-execution surface) is registered
+// ONLY after an explicit unsafe opt-in; when absent the daemon still serves the
+// status probe but exposes no run tool (unsafegate.RegisterAllowed logs WHY to
+// stderr so the secure-default is observable), so a misconfigured client cannot
+// reach the arbitrary-exec surface.
 func registerTools(ds *DrMemoryServer) {
+	ds.server.AddTool(&mcp.Tool{
+		Name: "drmemory_status",
+		Description: "Report whether Dr. Memory is available and at what version, WITHOUT running an " +
+			"instrumented target. Resolves drmemory.exe (via %DRMEMORY_HOME%, the known install dirs, then " +
+			"PATH) and runs `<drmemory> -version` via Go exec (which works in the console-less mcphub " +
+			"daemon). Returns JSON {available, drmemory_path, version}. available is true whenever a usable " +
+			"drmemory.exe is found; version may be empty if the installed Dr. Memory does not support " +
+			"-version. Unlike drmemory_run this is read-only and is always registered (no unsafe opt-in " +
+			"required).",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}, ds.statusTool)
+
 	if !unsafegate.RegisterAllowed(enableUnsafeDrmemoryEnv, "drmemory") {
 		return
 	}

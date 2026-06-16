@@ -65,6 +65,24 @@ type session struct {
 // returns a session backed by a canned reader so no real gdb is spawned.
 type startSessionFunc func(gdbPath, program string) (*session, error)
 
+// startVersionProbe resolves a started session's version by running
+// `<gdbPath> --version` via Go exec. It is a package-level seam so tests can
+// exercise startSession's version-population path without spawning real gdb. The
+// production implementation (defaultStartVersion) reuses gdbVersionLine — the
+// SAME `--version` exec that backs debugger_status — because the session is
+// spawned with `-q`, which suppresses the startup banner the version was
+// previously (and unreliably) scraped from. defaultStartVersion returns "" when
+// the probe fails so a version-probe failure never aborts an otherwise-healthy
+// session start.
+var startVersionProbe = defaultStartVersion
+
+// defaultStartVersion is the production startVersionProbe: it runs
+// `<gdbPath> --version` and returns the first non-empty line, or "" on failure.
+func defaultStartVersion(gdbPath string) string {
+	version, _ := gdbVersionLine(gdbPath)
+	return version
+}
+
 // startSession spawns `gdb --interpreter=mi3 --nx -q [program]`, wires its
 // stdin/stdout (stderr merged into stdout so MI log/error records are not lost),
 // drains the MI startup banner up to the first `(gdb) ` prompt, and disables the
@@ -118,13 +136,16 @@ func startSession(gdbPath, program string) (*session, error) {
 
 	// Drain the MI startup banner up to the first prompt. A spawn that dies
 	// immediately (bad binary, missing DLL) surfaces here as a read error rather
-	// than a later confusing command failure.
-	banner, err := s.readUntilPrompt(runResultDeadline)
-	if err != nil {
+	// than a later confusing command failure. The banner text itself is NOT used
+	// for the version: gdb is spawned with `-q`, which suppresses the version
+	// banner, so the banner is empty in production and scraping it yielded "".
+	if _, err := s.readUntilPrompt(runResultDeadline); err != nil {
 		s.Terminate()
 		return nil, fmt.Errorf("gdb startup banner: %w", err)
 	}
-	s.version = firstNonEmptyLine(banner)
+	// Populate the version from a dedicated `<gdb> --version` probe (the same exec
+	// debugger_status uses), which is reliable regardless of the `-q` banner.
+	s.version = startVersionProbe(gdbPath)
 
 	// Disable interactive confirmation + pagination so non-interactive MI driving
 	// never blocks on a `---Type <return> to continue---` or a `[y/n]` prompt.

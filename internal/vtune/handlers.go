@@ -37,6 +37,10 @@ type profileResult struct {
 	Summary      string    `json:"summary"`
 	TopHotspots  []Hotspot `json:"top_hotspots"`
 	ReportPath   string    `json:"report_path"`
+	// ResultDir is the retained per-run VTune result dir, populated ONLY when
+	// the caller passed keep_result=true; feed it back to vtune_report to
+	// re-report without re-profiling. Empty (and omitted) on a default run.
+	ResultDir    string    `json:"result_dir,omitempty"`
 	CommandLine  string    `json:"command_line,omitempty"`
 	Stderr       string    `json:"stderr,omitempty"`
 	DurationMS   int64     `json:"duration_ms"`
@@ -75,6 +79,7 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 		Args         []string `json:"args"`
 		Cwd          string   `json:"cwd"`
 		AnalysisType string   `json:"analysis_type"`
+		KeepResult   bool     `json:"keep_result"`
 		TimeoutSec   int      `json:"timeout_sec"`
 	}
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
@@ -121,7 +126,7 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 	defer cancel()
 
 	start := time.Now()
-	out, err := vs.run(runCtx, exePath, args.Exe, args.Args, args.Cwd, analysis)
+	out, err := vs.run(runCtx, exePath, args.Exe, args.Args, args.Cwd, analysis, args.KeepResult)
 	durationMS := time.Since(start).Milliseconds()
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
@@ -136,6 +141,7 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 			if out != nil {
 				res.Stderr = out.Stderr
 				res.CommandLine = out.CommandLine
+				res.ResultDir = out.ResultDir
 			}
 			return structuredErrResult(res), nil
 		}
@@ -154,6 +160,7 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 			res.Stderr = out.Stderr
 			res.CommandLine = out.CommandLine
 			res.TimedOut = out.TimedOut
+			res.ResultDir = out.ResultDir
 			if out.ExitCode != 0 {
 				res.ExitCode = out.ExitCode
 			}
@@ -173,6 +180,7 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 		Summary:      out.Summary,
 		TopHotspots:  top,
 		ReportPath:   out.ReportPath,
+		ResultDir:    out.ResultDir,
 		CommandLine:  out.CommandLine,
 		Stderr:       out.Stderr,
 		DurationMS:   durationMS,
@@ -202,6 +210,208 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}, nil
+}
+
+// statusTool handles vtune_status: it probes vtune availability via the
+// injectable seam and returns {available, vtune_path, version, sep_driver_note}.
+// It runs NO profiling and executes no target, so it is ungated. Mirrors gdb's
+// debugger_status.
+func (vs *VTuneServer) statusTool(ctx context.Context, req *mcp.CallToolRequest) (result *mcp.CallToolResult, retErr error) {
+	// Same never-crash discipline as profileTool: a panic in the probe seam is
+	// recovered into a structured (non-empty) result.
+	defer func() {
+		if r := recover(); r != nil {
+			body, _ := json.Marshal(map[string]any{
+				"available": false,
+				"error":     fmt.Sprintf("vtune: internal panic: %v", r),
+			})
+			result = textResult(string(body))
+			retErr = nil
+		}
+	}()
+
+	path, version, sepNote, available := vs.probeVersion()
+	body, err := json.Marshal(map[string]any{
+		"available":       available,
+		"vtune_path":      path,
+		"version":         version,
+		"sep_driver_note": sepNote,
+	})
+	if err != nil {
+		return errResult(fmt.Sprintf("failed to marshal status: %v", err)), nil
+	}
+	return textResult(string(body)), nil
+}
+
+// listAnalysesTool handles vtune_list_analyses: it asks the host's vtune for
+// its actual supported collect types via the injectable seam and returns them
+// alongside this server's validation allowlist, so a caller sees both the
+// host's real capability set and the set vtune_profile will accept. Ungated
+// (runs `vtune -collect-list`, never a caller-supplied target).
+func (vs *VTuneServer) listAnalysesTool(ctx context.Context, req *mcp.CallToolRequest) (result *mcp.CallToolResult, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			body, _ := json.Marshal(map[string]any{
+				"available": false,
+				"error":     fmt.Sprintf("vtune: internal panic: %v", r),
+			})
+			result = textResult(string(body))
+			retErr = nil
+		}
+	}()
+
+	path, hostAnalyses, raw, available := vs.listAnalyses()
+	if hostAnalyses == nil {
+		hostAnalyses = []string{}
+	}
+	body, err := json.Marshal(map[string]any{
+		"available":        available,
+		"vtune_path":       path,
+		"host_analyses":    hostAnalyses,
+		"allowed_analyses": sortedAnalysisTypes(),
+		"raw":              truncate(raw, vtuneOutputCap),
+	})
+	if err != nil {
+		return errResult(fmt.Sprintf("failed to marshal analyses: %v", err)), nil
+	}
+	return textResult(string(body)), nil
+}
+
+// reportTool handles vtune_report: it re-runs ONLY VTune's report phase against
+// an existing result dir (left behind by a prior keep_result profile) via the
+// report seam, parses the resulting CSV, and returns the SAME structured shape
+// as vtune_profile. No collect, no target execution. Gated like vtune_profile.
+func (vs *VTuneServer) reportTool(ctx context.Context, req *mcp.CallToolRequest) (result *mcp.CallToolResult, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = structuredErrResult(profileResult{
+				ExitCode: -1,
+				Error:    fmt.Sprintf("vtune: internal panic: %v", r),
+			})
+			retErr = nil
+		}
+	}()
+
+	var args struct {
+		ResultDir    string `json:"result_dir"`
+		AnalysisType string `json:"analysis_type"`
+		TimeoutSec   int    `json:"timeout_sec"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+		return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	if strings.TrimSpace(args.ResultDir) == "" {
+		return errResult("missing required parameter: result_dir (path to an existing VTune result dir)"), nil
+	}
+
+	// analysis_type only selects the report name (always "hotspots" today); it
+	// is still validated against the allowlist so a typo is rejected with the
+	// same clear error as vtune_profile rather than reaching vtune.exe.
+	analysis := strings.TrimSpace(args.AnalysisType)
+	if analysis == "" {
+		analysis = defaultAnalysisType
+	}
+	if !knownAnalysisTypes[analysis] {
+		return structuredErrResult(profileResult{
+			ExitCode:     -1,
+			AnalysisType: analysis,
+			Error: fmt.Sprintf("unknown analysis_type %q: must be one of %s",
+				analysis, strings.Join(sortedAnalysisTypes(), ", ")),
+		}), nil
+	}
+
+	exePath, err := vs.findExe()
+	if err != nil {
+		return structuredErrResult(profileResult{
+			ExitCode:     -1,
+			AnalysisType: analysis,
+			Error:        err.Error(),
+		}), nil
+	}
+
+	timeoutSec := args.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = defaultTimeoutSec
+	}
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	out, err := vs.report(runCtx, exePath, args.ResultDir, analysis)
+	durationMS := time.Since(start).Milliseconds()
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			res := profileResult{
+				ExitCode:     -1,
+				AnalysisType: analysis,
+				Error:        fmt.Sprintf("vtune report timed out after %d s (raise timeout_sec)", timeoutSec),
+				VTunePath:    exePath,
+				DurationMS:   durationMS,
+				TimedOut:     true,
+			}
+			if out != nil {
+				res.Stderr = out.Stderr
+				res.CommandLine = out.CommandLine
+			}
+			return structuredErrResult(res), nil
+		}
+		res := profileResult{
+			ExitCode:     -1,
+			AnalysisType: analysis,
+			Error:        fmt.Sprintf("vtune report failed: %v", err),
+			VTunePath:    exePath,
+			DurationMS:   durationMS,
+		}
+		if out != nil {
+			res.Stderr = out.Stderr
+			res.CommandLine = out.CommandLine
+		}
+		return structuredErrResult(res), nil
+	}
+
+	parsed := parseReport(out.ReportCSV)
+	top := parsed.Hotspots
+	if len(top) > maxHotspots {
+		top = top[:maxHotspots]
+	}
+
+	res := profileResult{
+		ExitCode:     out.ExitCode,
+		AnalysisType: analysis,
+		Summary:      out.Summary,
+		TopHotspots:  top,
+		ReportPath:   out.ReportPath,
+		CommandLine:  out.CommandLine,
+		Stderr:       out.Stderr,
+		DurationMS:   durationMS,
+		TimedOut:     out.TimedOut,
+		Truncated: strings.Contains(out.ReportCSV, "…[truncated]") ||
+			strings.Contains(out.Summary, "…[truncated]"),
+		VTunePath: exePath,
+	}
+	if res.TopHotspots == nil {
+		res.TopHotspots = []Hotspot{}
+	}
+
+	// Same swallowed-failure guard as profileTool: a re-report that produced no
+	// CSV and no summary is surfaced as an explicit error rather than an
+	// empty-looking success.
+	if out.ReportPath == "" && strings.TrimSpace(out.Summary) == "" {
+		res.Error = "vtune produced no report from result_dir (the result dir may be incomplete or from a different vtune version — check stderr / command_line)"
+	}
+
+	body, err := json.Marshal(res)
+	if err != nil {
+		return errResult(fmt.Sprintf("failed to marshal result: %v", err)), nil
+	}
+	return textResult(string(body)), nil
+}
+
+// textResult wraps text in a non-error CallToolResult. Mirrors the gdb helper.
+func textResult(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: text}},
+	}
 }
 
 // sortedAnalysisTypes returns the allowlisted analysis types in a stable

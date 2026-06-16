@@ -38,6 +38,27 @@ const (
 	envSourcePlain = "plain"
 )
 
+// envSourceFor maps the two availability signals — whether setvars.bat was
+// captured (vsCaptured) and whether any oneAPI DLL dir was found
+// (haveDLLDirs) — to the env_source label. It is the SINGLE OWNER of the
+// three-way precedence shared by computeRunEnv (which also builds the env)
+// and the read-only oneapi_env_status probe (which only needs the label),
+// so the label a status probe reports always matches what a real run uses:
+//
+//   - setvars captured                 → "setvars"   (full VS+oneAPI build env)
+//   - no setvars, but DLL dirs present  → "oneapi-only" (runtime-only fallback)
+//   - neither                           → "plain"
+func envSourceFor(vsCaptured, haveDLLDirs bool) string {
+	switch {
+	case vsCaptured:
+		return envSourceSetvars
+	case haveDLLDirs:
+		return envSourceOneAPIOnly
+	default:
+		return envSourcePlain
+	}
+}
+
 // detectOneAPIDLLDirs is the production oneAPIDLLDirs seam: it reuses the
 // internal/oneapi package's DetectRoot + DLLDirs to enumerate the component
 // runtime DLL directories (mkl / tbb / compiler / …). Returns nil on any
@@ -123,14 +144,19 @@ func prependOneAPIToPath(baseEnv []string, dllDirs []string) []string {
 // testable without the real subprocess. It never errors — it always yields a
 // runnable environment, only the label changes.
 func computeRunEnv(captureVS func() ([]string, bool), oneAPIDirs func() []string) (env []string, source string) {
+	vsEnv, vsOK := captureVS()
 	dllDirs := oneAPIDirs()
 
-	if vsEnv, ok := captureVS(); ok {
-		env, source = prependOneAPIToPath(vsEnv, dllDirs), envSourceSetvars
-	} else if len(dllDirs) > 0 {
-		env, source = prependOneAPIToPath(os.Environ(), dllDirs), envSourceOneAPIOnly
-	} else {
-		env, source = os.Environ(), envSourcePlain
+	// envSourceFor is the single owner of the three-way precedence so the
+	// read-only status probe reports the SAME label a real run would use.
+	source = envSourceFor(vsOK, len(dllDirs) > 0)
+	switch source {
+	case envSourceSetvars:
+		env = prependOneAPIToPath(vsEnv, dllDirs)
+	case envSourceOneAPIOnly:
+		env = prependOneAPIToPath(os.Environ(), dllDirs)
+	default:
+		env = os.Environ()
 	}
 
 	// Every env_source path gets a hub-owned writable TEMP/TMP. The child
