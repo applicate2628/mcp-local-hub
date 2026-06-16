@@ -7,11 +7,27 @@ import (
 	"path/filepath"
 )
 
-// rootProbePaths returns no candidates on non-Windows platforms: oneAPI
-// PATH injection is Windows-focused in this iteration, so DetectRoot
-// always returns ("", false) here and the supervisor never injects. A
-// Linux extension is possible future work.
-func rootProbePaths() []string { return nil }
+// rootProbePaths returns the candidate Intel oneAPI install roots on POSIX
+// hosts (Linux + macOS), in priority order:
+//
+//  1. $ONEAPI_ROOT, if set.
+//  2. /opt/intel/oneapi          (the default system-wide install).
+//  3. <home>/intel/oneapi        (the default per-user install).
+//
+// DetectRoot picks the FIRST that exists as a directory. On a host without
+// oneAPI all candidates are absent, so DetectRoot returns ("", false) and the
+// SetvarsEnv / DLLDirs consumers degrade to os.Environ() — the clean no-op.
+func rootProbePaths() []string {
+	var paths []string
+	if r := os.Getenv("ONEAPI_ROOT"); r != "" {
+		paths = append(paths, r)
+	}
+	paths = append(paths, filepath.Join("/opt", "intel", "oneapi"))
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		paths = append(paths, filepath.Join(home, "intel", "oneapi"))
+	}
+	return paths
+}
 
 // realDirExists reports whether path is an existing directory. Retained on
 // POSIX so the test seam (which overrides dirExists) has a real default,
