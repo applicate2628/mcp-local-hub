@@ -3,6 +3,7 @@ package drmemory
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,27 @@ func TestBuildDrMemoryArgs(t *testing.T) {
 				t.Errorf("buildDrMemoryArgs = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSymcacheDirUsesPrivateUserCacheOnNonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("non-Windows cache location test")
+	}
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	got := symcacheDir()
+	want := filepath.Join(cacheRoot, "mcp-local-hub", "drmemory", "symcache")
+	if got != want {
+		t.Fatalf("symcacheDir() = %q, want %q", got, want)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Fatalf("symcacheDir mode = %o, want 700", mode)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -244,9 +245,10 @@ func buildDrMemoryArgs(logdir, symcacheDir, target string, args []string, light,
 // -symcache_dir at a writable hub dir lets the table + symbol caches persist,
 // so only the first run pays the auto-generation cost (verified live: run 2
 // skipped auto-generation and returned immediately). It is a sibling of the
-// ephemeral logs-* dirs under the same hub base, so makeLogdir's per-run
-// os.RemoveAll never touches it. Returns "" (caller omits the flag, Dr. Memory
-// falls back to its install default) when no writable base can be derived.
+// ephemeral logs-* dirs on Windows, and under the user's cache directory on
+// non-Windows so persistent cache files are not stored below a shared temp base.
+// Returns "" (caller omits the flag, Dr. Memory falls back to its install
+// default) when no writable base can be derived.
 //
 // NOTE: a residual "WARNING: Unable to write to the disk" still appears in
 // Dr. Memory's stderr even with this set — it is a benign DynamoRIO-level
@@ -255,15 +257,33 @@ func buildDrMemoryArgs(logdir, symcacheDir, target string, args []string, light,
 // surfaced stderr: swallowing it would hide a genuine disk-full / permissions
 // failure if one ever arises.
 func symcacheDir() string {
-	base, ok := hubtemp.Dir("drmemory")
+	base, ok := symcacheBaseDir()
 	if !ok {
 		return ""
 	}
 	dir := filepath.Join(base, "symcache")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return ""
 	}
+	if runtime.GOOS != "windows" {
+		// Tighten permissions on pre-existing cache dirs so persistent symbol and
+		// syscall caches are not exposed to other local users.
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return ""
+		}
+	}
 	return dir
+}
+
+func symcacheBaseDir() (string, bool) {
+	if runtime.GOOS == "windows" {
+		return hubtemp.Dir("drmemory")
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil || cache == "" {
+		return "", false
+	}
+	return filepath.Join(cache, "mcp-local-hub", "drmemory"), true
 }
 
 // readResultsTxt finds the results.txt Dr. Memory wrote under logdir.
