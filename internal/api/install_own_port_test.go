@@ -597,5 +597,112 @@ func TestParseNameParent(t *testing.T) {
 	}
 }
 
+// TestSupervisorIntentDaemonForPort_Port0StdioMatchedByIdentity pins the
+// matcher fix: a stdio-bridge descriptor records Port==0 (its HTTP bridge port
+// is assigned at spawn, never written to the row), so the matcher must decide
+// identity FIRST and treat a Port==0 row as an external-port candidate — a
+// port-first match would skip it and a running stdio server could never
+// recognize its own reinstall. Real external + internal-offset matches must
+// keep their prior semantics.
+func TestSupervisorIntentDaemonForPort_Port0StdioMatchedByIdentity(t *testing.T) {
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default", Port: 0},
+			{TaskName: `\mcp-local-hub-serena-unified`, Server: "serena", Daemon: "unified", Port: 9121},
+			{TaskName: `\mcp-local-hub-demo-alpha`, Server: "demo", Daemon: "alpha", Port: 9300},
+		},
+	}
+	cases := []struct {
+		name        string
+		port        int
+		server      string
+		daemon      string
+		allowIntern bool
+		wantOK      bool
+		wantIntern  bool // matchedInternalPort
+	}{
+		{"port0 stdio matched by identity (the bug)", 9123, "memory", "default", true, true, false},
+		{"port0 stdio matched even when internal-match disabled", 9123, "memory", "default", false, true, false},
+		{"real external port still matches", 9121, "serena", "unified", true, true, false},
+		{"internal offset still matches when allowed", 9300 + config.NativeHTTPInternalPortOffset, "demo", "alpha", true, true, true},
+		{"internal offset NOT matched when disabled", 9300 + config.NativeHTTPInternalPortOffset, "demo", "alpha", false, false, false},
+		{"port0 row NOT claimed for a different server", 9123, "other", "default", true, false, false},
+		{"non-zero row NOT claimed for an unrelated probed port", 7777, "demo", "alpha", true, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row, matchedIntern, ok := supervisorIntentDaemonForPort(intent, tc.port, tc.server, tc.daemon, tc.allowIntern)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (row=%+v)", ok, tc.wantOK, row)
+			}
+			if ok && matchedIntern != tc.wantIntern {
+				t.Errorf("matchedInternalPort = %v, want %v", matchedIntern, tc.wantIntern)
+			}
+		})
+	}
+}
+
+// TestPortHeldBySupervisorIntentDaemon_Port0StdioBridgeRecognized is the
+// end-to-end regression guard for the live bug: a running stdio-bridge global
+// daemon (memory/time/wolfram/gdb/…) whose descriptor records Port==0 must be
+// recognized as self-owned on its own port so a reinstall does NOT spuriously
+// fail with port-in-use. The live-PID-owns-the-probed-port proof (supervisor
+// IPC PID == netstat port owner) both authorizes the self-owned case and
+// rejects a foreign PID holding the same port.
+func TestPortHeldBySupervisorIntentDaemon_Port0StdioBridgeRecognized(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	const (
+		bridgePort = 9123
+		daemonPID  = 103948
+	)
+	const taskName = `\mcp-local-hub-memory-default`
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Command:  "mcphub",
+			Port:     0,
+		}},
+	}); err != nil {
+		t.Fatalf("seed port-0 stdio supervisor intent: %v", err)
+	}
+
+	origLookup := lookupProcess
+	origStatus := supervisorIPCStatusFn
+	t.Cleanup(func() {
+		lookupProcess = origLookup
+		supervisorIPCStatusFn = origStatus
+	})
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return []DaemonStatus{{TaskName: taskName, PID: daemonPID, State: "Running"}}, nil
+	}
+	lookupProcess = func(p int) (int, uint64, int64, bool) {
+		if p == bridgePort {
+			return daemonPID, 0, 0, true
+		}
+		return 0, 0, 0, false
+	}
+	if got := portHeldBySupervisorIntentDaemon(bridgePort, "memory", "default"); !got {
+		t.Fatal("running stdio-bridge daemon (Port==0 descriptor) not recognized as self-owned; its reinstall would spuriously fail port-in-use")
+	}
+
+	// Over-claim guard: a DIFFERENT live PID owning the probed port must NOT be
+	// claimed as ours, even though the descriptor row matches the server.
+	lookupProcess = func(p int) (int, uint64, int64, bool) {
+		if p == bridgePort {
+			return daemonPID + 1, 0, 0, true // a foreign process holds the port
+		}
+		return 0, 0, 0, false
+	}
+	if got := portHeldBySupervisorIntentDaemon(bridgePort, "memory", "default"); got {
+		t.Fatal("foreign PID holding the bridge port was claimed as ours; the live-PID proof must reject it")
+	}
+}
+
 // Suppress unused-import warning when running narrow test build subsets.
 var _ = errors.New

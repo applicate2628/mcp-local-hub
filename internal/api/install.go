@@ -1952,20 +1952,42 @@ func supervisorIntentDaemonForPort(intent *SupervisorIntentFile, port int, serve
 		return SupervisorDaemon{}, false, false
 	}
 	for _, row := range intent.Daemons {
-		matchedExternalPort := row.Port == port
-		var matchedInternalPort bool
-		if allowInternalPortMatch {
-			matchedInternalPort = row.Port > 0 && row.Port+config.NativeHTTPInternalPortOffset == port
-			if row.RuntimeSpec != nil && row.RuntimeSpec.UpstreamPort == port {
-				matchedInternalPort = true
-			}
-		}
-		if !matchedExternalPort && !matchedInternalPort {
+		// Identity gate FIRST: a row can only own the probed port if it is the
+		// (server, daemon) being checked. Deciding identity before the port
+		// relationship is what lets a stdio-bridge row (Port==0, see below) be
+		// recognized at all — its runtime HTTP-bridge port never lands in the
+		// descriptor, so a port-first match skips it.
+		if !supervisorIntentRowMatchesServerDaemon(row, server, daemon) {
 			continue
 		}
-		if supervisorIntentRowMatchesServerDaemon(row, server, daemon) {
-			return row, matchedInternalPort && !matchedExternalPort, true
+		// Exact external port — the common native-http / explicit-port case.
+		if row.Port == port {
+			return row, false, true
 		}
+		if allowInternalPortMatch {
+			if row.Port > 0 && row.Port+config.NativeHTTPInternalPortOffset == port {
+				return row, true, true
+			}
+			if row.RuntimeSpec != nil && row.RuntimeSpec.UpstreamPort == port {
+				return row, true, true
+			}
+		}
+		// Stdio-bridge daemon: the descriptor records Port==0 because the HTTP
+		// bridge port is assigned at spawn, not at install, so it is not in the
+		// row. The probed port came from THIS server's own manifest binding, so
+		// treat it as an external candidate (matchedInternalPort=false) and let
+		// the caller's live-PID-owns-the-probed-port proof (supervisor IPC PID ==
+		// netstat port owner) decide ownership — that proof prevents over-claim
+		// of a foreign port. Without this, a running stdio server
+		// (memory/time/wolfram/gdb/…) fails its OWN reinstall Preflight with a
+		// spurious port-in-use: the v0.6 global has no scheduler-task fallback to
+		// recognize itself, and the port-first match skipped its Port==0 row.
+		if row.Port == 0 {
+			return row, false, true
+		}
+		// server+daemon match but the row records a DIFFERENT non-zero port (or
+		// the probe is an internal port while internal matching is disabled):
+		// this probe is for another port of a multi-port server — keep scanning.
 	}
 	return SupervisorDaemon{}, false, false
 }
