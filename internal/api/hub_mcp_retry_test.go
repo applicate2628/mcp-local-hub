@@ -41,9 +41,9 @@ func TestIsRetriableTransportFailure(t *testing.T) {
 		{"context deadline (ambiguous)", context.DeadlineExceeded, false},
 		{"context canceled", context.Canceled, false},
 		{"net timeout (ambiguous)", fakeNetTimeout{}, false},
-		{"connection refused (bare)", syscall.ECONNREFUSED, true},
-		{"connection refused (wrapped url.Error → net.OpError)", refusedWrapped, true},
-		{"connection reset", syscall.ECONNRESET, true},
+		{"connection refused (bare ECONNREFUSED fallback)", syscall.ECONNREFUSED, true},
+		{"dial failure (wrapped url.Error → net.OpError op=dial)", refusedWrapped, true},
+		{"mid-stream reset (ambiguous: NOT retried — double-exec risk)", syscall.ECONNRESET, false},
 		{"generic error (conservative: no retry)", errors.New("boom"), false},
 	}
 	for _, tc := range cases {

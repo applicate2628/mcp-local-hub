@@ -62,6 +62,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // ErrSessionCapExceeded is returned by HubSessionStore.Create when a
@@ -147,7 +149,12 @@ type hubSession struct {
 	inFlightCount    atomic.Int32
 	InitAt           time.Time
 	LastUsedAt       time.Time
-	mu               sync.Mutex // protects LastUsedAt + lifecycle
+	mu               sync.Mutex // protects LastUsedAt + lifecycle + InitSuccesses + DaemonProtoVer
+	// reinitGroup coalesces concurrent hot-swap (a) self-heal re-initializations
+	// of the SAME daemon (keyed Server\x00Daemon) into ONE initialize, so a mass
+	// daemon restart that fails many in-flight tools/call at once cannot trigger
+	// an init-storm. Zero value is ready to use.
+	reinitGroup singleflight.Group
 }
 
 // InFlightCount returns the current in-flight count (atomic load).

@@ -2130,3 +2130,57 @@ func TestAggregateToolsCall_DaemonHTTPErrorReturnsMinus32000(t *testing.T) {
 		t.Errorf("daemon should be hit exactly once on an HTTP error; callCount=%d want 1", d1.callCount.Load())
 	}
 }
+
+// TestAggregateToolsCall_SelfHealsAfterRestart is the hot-swap (a) self-heal
+// success path (Phase 2): the original daemon (d1) is taken down (connection
+// refused = transport failure), the resolver snapshot is re-pointed at a live
+// replacement (d2) — modelling a daemon that came back — and the hub
+// transparently re-initializes + retries the call ONCE, returning the daemon's
+// real response instead of -32000. d2 must see exactly one re-init and one call.
+func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d2 := newStubDaemon(t, "d2-sid-fresh") // the "restarted" daemon on a new port
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Publish a snapshot binding srv1/claude-code to d2's port, and set it as
+	// SnapshotAtInit so resolveToolsCallRoute's stale-revalidation is skipped
+	// (current == SnapshotAtInit). The ROUTE map still points at d1's port, so
+	// the first dispatch hits the (closed) d1 and the self-heal re-resolves to
+	// d2 via the snapshot.
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: d2.port}}},
+	}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	// Take d1 down: the first tools/call gets connection-refused (transport).
+	d1.server.Close()
+
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	if !strings.Contains(string(body), "called=read") {
+		t.Errorf("self-heal retry did not reach the replacement daemon; body=%s", string(body))
+	}
+	if d2.initCount.Load() < 1 {
+		t.Errorf("replacement daemon was not re-initialized; d2.initCount=%d want >=1", d2.initCount.Load())
+	}
+	if d2.callCount.Load() != 1 {
+		t.Errorf("replacement daemon callCount=%d want exactly 1 (one retry)", d2.callCount.Load())
+	}
+	if got := sess.InFlightCount(); got != 0 {
+		t.Errorf("inFlight=%d after self-heal want 0", got)
+	}
+}
