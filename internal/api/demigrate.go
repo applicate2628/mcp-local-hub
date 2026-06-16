@@ -104,7 +104,7 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 			if !includedClient(binding.Client) {
 				continue
 			}
-			demigrateOneBinding(report, allClients, m, server, binding, opts.Writer)
+			demigrateOneBinding(report, allClients, m, server, binding, opts.Writer, true)
 		}
 		// Servers-matrix fix (symmetry with MigrateFrom): the matrix
 		// renders a toggleable cell for EVERY detected client, not only
@@ -141,7 +141,7 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 				Daemon:  primaryDaemon,
 				URLPath: "/mcp",
 			}
-			demigrateOneBinding(report, allClients, m, server, synth, opts.Writer)
+			demigrateOneBinding(report, allClients, m, server, synth, opts.Writer, false)
 		}
 	}
 	return report, nil
@@ -151,8 +151,10 @@ func (a *API) Demigrate(opts DemigrateOpts) (*DemigrateReport, error) {
 // a single binding — real (from m.ClientBindings) or synthesized (for a
 // targeted non-binding client). It appends exactly one row to report.Restored
 // or report.Failed, or none when the client is skipped (missing adapter /
-// non-existent client). Extracted so manifest-bound and synthesized clients
-// run identical logic (no duplication).
+// non-existent client). For synthesized non-binding clients, timestamped
+// backups that lack the entry are not treated as rollback proof because they
+// may come from an unrelated hub operation before a user-created same-name
+// entry; those clients must fall through to explicit marker-based removal.
 func demigrateOneBinding(
 	report *DemigrateReport,
 	allClients map[string]clients.Client,
@@ -160,6 +162,7 @@ func demigrateOneBinding(
 	server string,
 	binding config.ClientBinding,
 	writer io.Writer,
+	allowBackupMissingEntryRestore bool,
 ) {
 	adapter := allClients[binding.Client]
 	if adapter == nil {
@@ -210,7 +213,9 @@ func demigrateOneBinding(
 	//
 	//   1. errBackupMissingEntry — sentinel backup does not
 	//      contain the entry (predates the server install).
-	//      Skip and keep searching older candidates.
+	//      Skip and keep searching older candidates. For manifest-bound
+	//      clients only, a timestamped missing-entry backup may instead
+	//      be restored as the pre-migrate state (removing the live entry).
 	//   2. clients.ErrBackupEntryAlreadyMigrated — backup
 	//      contains the entry in hub-managed form. No
 	//      pre-hub state to restore; skip.
@@ -222,7 +227,7 @@ func demigrateOneBinding(
 			return fmt.Errorf("backup %s unreadable: %w", path, err)
 		}
 		if !has {
-			if !strings.HasSuffix(path, ".bak-mcp-local-hub-original") {
+			if !strings.HasSuffix(path, ".bak-mcp-local-hub-original") && allowBackupMissingEntryRestore {
 				return adapter.RestoreEntryFromBackup(path, server)
 			}
 			return errBackupMissingEntry
@@ -272,17 +277,21 @@ func demigrateOneBinding(
 	// pre-hub form). The two iterations above guarantee the
 	// "no pre-hub form available" precondition; the marker
 	// check guarantees the "mcphub installed it" precondition.
-	// allowURLBackfill = len(backups) > 0 || sawLegacy: a URL-backfill
-	// RemoveEntry is corroborated only when mcphub demonstrably ran on
-	// this host (a current OR legacy backup file exists). With ZERO
-	// backups of ANY codename the URL match is uncorroborated and must
-	// fail closed (bot PR #257 r2/r3).
+	// allowURLBackfill = allowBackupMissingEntryRestore && (len(backups) > 0 || sawLegacy),
+	// and allowHubURLBackfill = allowBackupMissingEntryRestore: URL-backfill
+	// RemoveEntry is corroborated only for real manifest bindings
+	// when mcphub demonstrably ran on this host (a current OR legacy backup file
+	// exists). Synthesized non-binding clients require explicit marker ownership;
+	// an unrelated backup plus a same-name user entry is not enough evidence. With
+	// ZERO backups of ANY codename the URL match is uncorroborated and must fail
+	// closed (bot PR #257 r2/r3).
 	if restoredFrom == "" && err == nil {
 		err = tryMarkerOrBackfillRemove(
 			adapter, binding, m, server,
 			fmt.Sprintf("no backup (of %d candidates, newest %s) contains %q in pre-hub form — last skip: %v",
 				len(backups), latestBackupPath, server, lastSkipReason),
-			len(backups) > 0 || sawLegacy,
+			allowBackupMissingEntryRestore && (len(backups) > 0 || sawLegacy),
+			allowBackupMissingEntryRestore,
 			&restoredFrom,
 		)
 	}
@@ -345,10 +354,11 @@ func tryMarkerOrBackfillRemove(
 	server string,
 	reasonPrefix string,
 	allowURLBackfill bool,
+	allowHubURLBackfill bool,
 	restoredFrom *string,
 ) error {
 	managed, mErr := IsManagedEntry(binding.Client, server)
-	if !managed && mErr == nil && (allowURLBackfill || liveEntryHasHubURL(adapter, server)) {
+	if !managed && mErr == nil && (allowURLBackfill || (allowHubURLBackfill && liveEntryHasHubURL(adapter, server))) {
 		// v0.4.x upgrade backfill: existing users have hub-form entries
 		// that were never marked (B4 marker introduced in PR #187 only
 		// marks fresh migrates). Two corroboration sources for the URL

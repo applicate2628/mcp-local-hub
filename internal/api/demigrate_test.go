@@ -1326,3 +1326,45 @@ func TestDemigrate_NonBindingClient_StdioEntry_FailsClosed(t *testing.T) {
 		t.Errorf("stdio entry command not preserved; got %+v", entry)
 	}
 }
+
+func TestDemigrate_NonBindingClient_UnrelatedBackupLacksEntry_FailsClosed(t *testing.T) {
+	// Regression for targeted non-binding demigrate: a timestamped
+	// mcp-local-hub backup for the client can be unrelated to this
+	// server/client pair. If that backup lacks the target entry, it must
+	// not be treated as proof that demigrate may delete a later user-owned
+	// same-name live entry.
+	tmp := t.TempDir()
+	managedEntriesTestHelper(t)
+	geminiPath := seedGeminiForNonBinding(t, tmp,
+		`{"mcpServers":{"fetch":{"url":"http://localhost:9133/mcp","type":"http"},"other":{"url":"http://localhost:9000/mcp","type":"http"}}}`)
+	backup := geminiPath + ".bak-mcp-local-hub-20260601-120000"
+	if err := os.WriteFile(backup, []byte(
+		`{"mcpServers":{"other":{"url":"http://localhost:9000/mcp","type":"http"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := writeNonBindingManifest(t, 9133)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:        []string{"fetch"},
+		ClientsInclude: []string{"gemini-cli"},
+		ScanOpts:       ScanOpts{ManifestDir: manifestDir},
+		Writer:         io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Fatalf("expected 0 restored (unrelated backup is not ownership proof); got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 failure, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	live, _ := os.ReadFile(geminiPath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers, _ := liveMap["mcpServers"].(map[string]any)
+	if _, present := servers["fetch"]; !present {
+		t.Fatalf("user-owned non-binding entry was deleted from unrelated backup path; file = %s", live)
+	}
+}
