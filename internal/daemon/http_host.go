@@ -117,9 +117,21 @@ func NewHTTPHost(cfg HTTPHostConfig) (*HTTPHost, error) {
 	return &HTTPHost{
 		cfg: cfg,
 		// httpClient is used for request-response POSTs (initialize,
-		// tools/list, tools/call). 60 s is a generous upper bound — most
-		// MCP method round-trips finish in tens of ms to a few seconds.
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		// tools/list, tools/call). Most MCP round-trips finish in tens of ms
+		// to a few seconds, BUT a tools/call IS the tool's execution: a
+		// long-running tool (e.g. drmemory_run instrumenting a binary under
+		// DynamoRIO — slow on first run, default timeout_sec 1200; or a long
+		// build/ctest via run_in_oneapi_env, default 600) legitimately holds
+		// the request for many minutes. A 60 s cap here returned a spurious
+		// 504 Gateway Timeout on those before the tool's own timeout could
+		// fire (observed live: drmemory first-run). The real bounds are the
+		// per-request context (line ~469 forwards r.Context() → client
+		// disconnect / host Shutdown cancels) AND the tool's own timeout_sec
+		// (it kills its subprocess and returns). 30 min is a generous backstop
+		// above the longest tool default that still caps a truly-stuck upstream.
+		// The short health-probe + DELETE-cleanup paths carry their own ctx
+		// deadlines, so they are unaffected by this larger client timeout.
+		httpClient: &http.Client{Timeout: 30 * time.Minute},
 		// streamClient is used for the long-lived SSE subscription on
 		// GET /mcp. Per Streamable HTTP spec, the server-to-client
 		// notifications channel stays open for the lifetime of the
