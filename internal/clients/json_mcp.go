@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 )
@@ -57,49 +56,47 @@ func (j *jsonMCPClient) Restore(backupPath string) error {
 	return WriteConfigFile(j.path, data)
 }
 
+// readConfigBytes returns the raw on-disk config bytes (nil for an absent
+// file). The single owner of the live-config read for the comment-preserving
+// write seams (setMember / deleteMember), which need the ORIGINAL bytes to
+// patch through hujson rather than a rebuilt map.
+func (j *jsonMCPClient) readConfigBytes() ([]byte, error) {
+	return readRawConfig(j.path)
+}
+
 func (j *jsonMCPClient) readJSON() (map[string]any, error) {
-	data, err := os.ReadFile(j.path)
+	data, err := j.readConfigBytes()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", j.path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
 	}
 	return m, nil
 }
 
-func (j *jsonMCPClient) writeJSON(m map[string]any) error {
-	out, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	// WriteConfigFile creates parent dirs as needed (the test fallback
-	// does its own MkdirAll; production's SecureWriteClientConfig
-	// requires the parent dir to exist + pass the DACL allowlist gate,
-	// which install paths arrange via `clients.ConfigPathForName` +
-	// per-adapter directory bootstrap before calling AddEntry).
-	return WriteConfigFile(j.path, append(out, '\n'))
+// setMember sets mcpServers.<name> = value in the live config, preserving the
+// operator's comments, unrelated keys, and formatting when the file already
+// has JSONC content. An empty/absent file falls back to a clean indented
+// marshal of a freshly-built `{ "mcpServers": { <name>: value } }` so a
+// brand-new config is born readable rather than as a single packed line.
+// Routes the resulting bytes through the UNCHANGED WriteConfigFile pipeline.
+func (j *jsonMCPClient) setMember(name string, value any) error {
+	return j.mutateMember(name, value, false)
+}
+
+// deleteMember removes mcpServers.<name> from the live config, preserving the
+// operator's comments and unrelated keys. Absence is a no-op.
+func (j *jsonMCPClient) deleteMember(name string) error {
+	return j.mutateMember(name, nil, true)
+}
+
+func (j *jsonMCPClient) mutateMember(name string, value any, del bool) error {
+	return mutateJSONObjectMember(j.path, "mcpServers", name, value, del)
 }
 
 func (j *jsonMCPClient) AddEntry(entry MCPEntry) error {
-	m, err := j.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		j.urlField: entry.URL,
 		"disabled": false,
@@ -107,23 +104,16 @@ func (j *jsonMCPClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return j.writeJSON(m)
+	// Comment-preserving set: patches mcpServers.<name> into the original
+	// on-disk bytes via hujson so the operator's comments and unrelated keys
+	// survive (a full map re-marshal would drop both).
+	return j.setMember(entry.Name, serverEntry)
 }
 
 func (j *jsonMCPClient) RemoveEntry(name string) error {
-	m, err := j.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		return nil
-	}
-	delete(servers, name)
-	m["mcpServers"] = servers
-	return j.writeJSON(m)
+	// Comment-preserving delete: removes mcpServers.<name> from the original
+	// bytes, leaving comments + unrelated keys intact. Absence is a no-op.
+	return j.deleteMember(name)
 }
 
 func (j *jsonMCPClient) GetEntry(name string) (*MCPEntry, error) {
@@ -183,25 +173,15 @@ func (j *jsonMCPClient) RestoreEntryFromBackupForRollback(backupPath, name strin
 // Antigravity) with ErrBackupEntryAlreadyMigrated; when true (migrate
 // rollback) it writes the backup bytes verbatim regardless of shape.
 func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
-	backupData, err := os.ReadFile(backupPath)
+	backupData, err := readRawConfig(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	var backupMap map[string]any
-	if len(backupData) == 0 {
-		backupMap = map[string]any{}
-	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+	backupMap, err := parseJSONCBytes(backupData)
+	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	backupServers, _ := backupMap["mcpServers"].(map[string]any)
-	liveMap, err := j.readJSON()
-	if err != nil {
-		return err
-	}
-	liveServers, _ := liveMap["mcpServers"].(map[string]any)
-	if liveServers == nil {
-		liveServers = map[string]any{}
-	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback
@@ -214,14 +194,12 @@ func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHub
 					}
 				}
 			}
-			liveServers[name] = backupEntry
-			liveMap["mcpServers"] = liveServers
-			return j.writeJSON(liveMap)
+			// Comment-preserving set into the LIVE config (its comments +
+			// unrelated keys survive; the backup's entry VALUE is written).
+			return j.setMember(name, backupEntry)
 		}
 	}
-	delete(liveServers, name)
-	liveMap["mcpServers"] = liveServers
-	return j.writeJSON(liveMap)
+	return j.deleteMember(name)
 }
 
 // AllStdioEntries returns every stdio entry from mcpServers.
@@ -256,15 +234,12 @@ func (j *jsonMCPClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioE
 // has an mcpServers[name] entry. Inherited by both geminiCLI and
 // antigravityClient via struct embedding.
 func (j *jsonMCPClient) BackupContainsEntry(backupPath, name string) (bool, error) {
-	data, err := os.ReadFile(backupPath)
+	data, err := readRawConfig(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers, _ := m["mcpServers"].(map[string]any)
@@ -298,15 +273,12 @@ func (j *jsonMCPClient) backupEntryMapIsHubManaged(rawMap map[string]any) bool {
 // embedding (the antigravity variant routes to the relay-shape branch
 // because its urlField is "command"). See Client.BackupEntryIsHubManaged.
 func (j *jsonMCPClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
-	data, err := os.ReadFile(backupPath)
+	data, err := readRawConfig(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers, _ := m["mcpServers"].(map[string]any)

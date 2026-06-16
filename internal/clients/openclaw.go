@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -162,10 +161,13 @@ func (o *openClawClient) BackupKeep(keepN int) (string, error) {
 // InitEmpty seeds ~/.openclaw/openclaw.json with `{"mcp":{"servers":{}}}` if
 // the file is absent. AddEntry's later merge writes into the same nested
 // `mcp.servers` map. OpenClaw config also accepts a top-level `$schema` field
-// and many other keys; the merge path round-trips through encoding/json which
-// preserves every unknown top-level key already present in the file (only the
-// nested `mcp.servers` map is touched), so seeding a minimal stub does not
-// clobber a hand-authored config — but on a truly fresh host this minimal
+// and many other keys, plus JSONC comments / trailing commas (operators
+// hand-edit it): the read path parses comments via the shared JSONC helper,
+// and AddEntry/RemoveEntry patch through hujson so the operator's comments,
+// every unknown top-level key, and every sibling key on the `mcp` object
+// (sessionIdleTtlMs, etc.) are PRESERVED on every write (only the nested
+// `mcp.servers.<name>` member is touched) — so seeding a minimal stub does
+// not clobber a hand-authored config, and on a truly fresh host this minimal
 // stub is all that is needed.
 func (o *openClawClient) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(o.path, []byte("{\n  \"mcp\": {\n    \"servers\": {}\n  }\n}\n"))
@@ -182,42 +184,32 @@ func (o *openClawClient) Restore(backupPath string) error {
 }
 
 func (o *openClawClient) readJSON() (map[string]any, error) {
-	data, err := os.ReadFile(o.path)
+	data, err := readRawConfig(o.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	// OpenClaw's config is JSONC (operators hand-edit it; it carries `//` +
+	// `/* */` comments and trailing commas) — parse via the comment-tolerant
+	// shared helper so a comment in the file does not break migrate / Init.
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", o.path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
 	}
 	return m, nil
 }
 
-func (o *openClawClient) writeJSON(m map[string]any) error {
-	out, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Route through WriteConfigFile so production gets the
-	// SecureWriteClientConfig pipeline (handle-relative + DACL-bound) for
-	// token-bearing rewrites; tests get the os.WriteFile fallback.
-	return WriteConfigFile(o.path, append(out, '\n'))
-}
+// openClawServerPath is the nested object key chain (`mcp` -> `servers`) under
+// which OpenClaw's server members live. Single owner of the path passed to the
+// nested-path JSONC mutate helper so the writer stays in sync with the
+// serversFromMap read accessor.
+var openClawServerPath = []string{openClawMCPKey, openClawServersKey}
 
 // serversFromMap returns the nested `mcp.servers` map from a parsed config
 // root, or nil when the `mcp` object or its `servers` child is missing or the
-// wrong type. Read-only; callers that need to mutate use writeServers to put
-// the (possibly newly-created) map back under the right nested key while
-// preserving the rest of the `mcp` object.
+// wrong type. Read-only; the write seams (setMember / deleteMember) patch the
+// nested member through hujson via the openClawServerPath helper rather than
+// rebuilding the map, so the rest of the `mcp` object and every unrelated
+// top-level key survive untouched.
 func serversFromMap(root map[string]any) map[string]any {
 	mcp, _ := root[openClawMCPKey].(map[string]any)
 	if mcp == nil {
@@ -227,17 +219,18 @@ func serversFromMap(root map[string]any) map[string]any {
 	return servers
 }
 
-// writeServers stores `servers` under root["mcp"]["servers"], creating (and
-// preserving) the intermediate `mcp` object. Any other keys already present
-// on the `mcp` object (sessionIdleTtlMs, etc.) and every unrelated top-level
-// field survive untouched.
-func writeServers(root, servers map[string]any) {
-	mcp, _ := root[openClawMCPKey].(map[string]any)
-	if mcp == nil {
-		mcp = map[string]any{}
-	}
-	mcp[openClawServersKey] = servers
-	root[openClawMCPKey] = mcp
+// setMember sets mcp.servers.<name> = value, and deleteMember removes it, both
+// preserving the operator's comments, every sibling key on the `mcp` object,
+// and every unrelated top-level key when the file already has JSONC content.
+// An empty/absent file falls back to a clean indented marshal of the full
+// `{"mcp":{"servers":{...}}}` nesting. The bytes route through the UNCHANGED
+// WriteConfigFile pipeline.
+func (o *openClawClient) setMember(name string, value any) error {
+	return mutateJSONObjectMemberPath(o.path, openClawServerPath, name, value, false)
+}
+
+func (o *openClawClient) deleteMember(name string) error {
+	return mutateJSONObjectMemberPath(o.path, openClawServerPath, name, nil, true)
 }
 
 // AddEntry writes the hub-managed HTTP server definition under
@@ -245,14 +238,6 @@ func writeServers(root, servers map[string]any) {
 // `{"url":...,"transport":"streamable-http","enabled":true}`; an optional
 // `headers` object is emitted when MCPEntry.Headers is non-empty.
 func (o *openClawClient) AddEntry(entry MCPEntry) error {
-	m, err := o.readJSON()
-	if err != nil {
-		return err
-	}
-	servers := serversFromMap(m)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"url":       entry.URL,
 		"transport": "streamable-http",
@@ -261,23 +246,16 @@ func (o *openClawClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	writeServers(m, servers)
-	return o.writeJSON(m)
+	// Comment-preserving set: patches mcp.servers.<name> into the original
+	// on-disk bytes via hujson so the operator's comments, the `mcp` object's
+	// sibling keys, and unrelated top-level keys all survive (a full map
+	// re-marshal would drop the comments).
+	return o.setMember(entry.Name, serverEntry)
 }
 
 func (o *openClawClient) RemoveEntry(name string) error {
-	m, err := o.readJSON()
-	if err != nil {
-		return err
-	}
-	servers := serversFromMap(m)
-	if servers == nil {
-		return nil
-	}
-	delete(servers, name)
-	writeServers(m, servers)
-	return o.writeJSON(m)
+	// Comment-preserving delete; absence is a no-op.
+	return o.deleteMember(name)
 }
 
 func (o *openClawClient) GetEntry(name string) (*MCPEntry, error) {
@@ -320,25 +298,19 @@ func (o *openClawClient) RestoreEntryFromBackupForRollback(backupPath, name stri
 // backup bytes verbatim regardless of shape. Both the backup read and the
 // live write go through the nested `mcp.servers` accessor.
 func (o *openClawClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
+	// genuine read error the demigrate caller must see, not a silent
+	// treat-as-empty. Empty / comment-only / malformed bytes are then
+	// classified by parseJSONCBytes (empty map vs parse error).
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	var backupMap map[string]any
-	if len(backupData) == 0 {
-		backupMap = map[string]any{}
-	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+	backupMap, err := parseJSONCBytes(backupData)
+	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	backupServers := serversFromMap(backupMap)
-	liveMap, err := o.readJSON()
-	if err != nil {
-		return err
-	}
-	liveServers := serversFromMap(liveMap)
-	if liveServers == nil {
-		liveServers = map[string]any{}
-	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback caller
@@ -351,14 +323,13 @@ func (o *openClawClient) restoreEntryFromBackup(backupPath, name string, allowHu
 					}
 				}
 			}
-			liveServers[name] = backupEntry
-			writeServers(liveMap, liveServers)
-			return o.writeJSON(liveMap)
+			// Comment-preserving set into the LIVE config (its comments,
+			// `mcp` siblings + unrelated keys survive; the backup's entry
+			// VALUE is written).
+			return o.setMember(name, backupEntry)
 		}
 	}
-	delete(liveServers, name)
-	writeServers(liveMap, liveServers)
-	return o.writeJSON(liveMap)
+	return o.deleteMember(name)
 }
 
 // AllStdioEntries returns every stdio entry from OpenClaw's nested
@@ -387,15 +358,14 @@ func (o *openClawClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 }
 
 func (o *openClawClient) BackupContainsEntry(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error,
+	// not a silent (false, nil); empty bytes parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers := serversFromMap(m)
@@ -410,15 +380,15 @@ func (o *openClawClient) BackupContainsEntry(backupPath, name string) (bool, err
 // backupPath is in OpenClaw's hub-managed shape (a hub loopback `url` with no
 // `command`). See Client.BackupEntryIsHubManaged.
 func (o *openClawClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error
+	// the demigrate caller must see, not a silent (false, nil); empty bytes
+	// parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers := serversFromMap(m)

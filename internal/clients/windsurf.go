@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -117,14 +116,6 @@ func (w *windsurfClient) InitEmpty() (created bool, err error) {
 
 // AddEntry writes the hub-managed HTTP entry under the `serverUrl` key.
 func (w *windsurfClient) AddEntry(entry MCPEntry) error {
-	m, err := w.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		windsurfURLField: entry.URL,
 		"disabled":       false,
@@ -132,9 +123,8 @@ func (w *windsurfClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return w.writeJSON(m)
+	// Comment-preserving set via the embedded seam.
+	return w.setMember(entry.Name, serverEntry)
 }
 
 // GetEntry reads the endpoint from the `serverUrl` key (the base reader keys
@@ -178,15 +168,12 @@ func (w *windsurfClient) RestoreEntryFromBackupForRollback(backupPath, name stri
 // `serverUrl` and no `command`). Overrides the base predicate so it keys off
 // `serverUrl` instead of the base urlField routing.
 func (w *windsurfClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
-	data, err := os.ReadFile(backupPath)
+	data, err := readRawConfig(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers, _ := m["mcpServers"].(map[string]any)
@@ -207,25 +194,15 @@ func (w *windsurfClient) BackupEntryIsHubManaged(backupPath, name string) (bool,
 // hub-managed shape with ErrBackupEntryAlreadyMigrated; when true (migrate
 // rollback) it writes the backup bytes verbatim regardless of shape.
 func (w *windsurfClient) restoreEntryFromBackupServerURL(backupPath, name string, allowHubEntry bool) error {
-	backupData, err := os.ReadFile(backupPath)
+	backupData, err := readRawConfig(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	var backupMap map[string]any
-	if len(backupData) == 0 {
-		backupMap = map[string]any{}
-	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+	backupMap, err := parseJSONCBytes(backupData)
+	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	backupServers, _ := backupMap["mcpServers"].(map[string]any)
-	liveMap, err := w.readJSON()
-	if err != nil {
-		return err
-	}
-	liveServers, _ := liveMap["mcpServers"].(map[string]any)
-	if liveServers == nil {
-		liveServers = map[string]any{}
-	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			if !allowHubEntry {
@@ -235,12 +212,9 @@ func (w *windsurfClient) restoreEntryFromBackupServerURL(backupPath, name string
 					}
 				}
 			}
-			liveServers[name] = backupEntry
-			liveMap["mcpServers"] = liveServers
-			return w.writeJSON(liveMap)
+			// Comment-preserving set into the LIVE config.
+			return w.setMember(name, backupEntry)
 		}
 	}
-	delete(liveServers, name)
-	liveMap["mcpServers"] = liveServers
-	return w.writeJSON(liveMap)
+	return w.deleteMember(name)
 }

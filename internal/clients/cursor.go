@@ -55,14 +55,6 @@ func (c *cursorClient) InitEmpty() (created bool, err error) {
 }
 
 func (c *cursorClient) AddEntry(entry MCPEntry) error {
-	m, err := c.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"type": "http",
 		"url":  entry.URL,
@@ -70,7 +62,8 @@ func (c *cursorClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return c.writeJSON(m)
+	// Comment-preserving set via the embedded seam: Cursor's mcp.json is
+	// JSONC (operators hand-edit it), so patch mcpServers.<name> into the
+	// original bytes instead of a lossy full-map re-marshal.
+	return c.setMember(entry.Name, serverEntry)
 }

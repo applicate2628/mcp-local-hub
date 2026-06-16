@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,11 +140,14 @@ func (o *openCodeClient) BackupKeep(keepN int) (string, error) {
 // InitEmpty seeds ~/.config/opencode/opencode.json with `{"mcp": {}}` if
 // the file is absent. AddEntry's later merge writes into the same `mcp`
 // map. OpenCode also accepts a top-level `$schema` field and many other
-// keys; the merge path round-trips through encoding/json which preserves
-// every unknown top-level key already present in the file (only the `mcp`
-// map is touched), so seeding a minimal stub does not clobber a
-// hand-authored config — but on a truly fresh host this minimal stub is
-// all that is needed.
+// keys, plus JSONC comments / trailing commas (it explicitly supports a
+// `.jsonc` variant and operators hand-edit it): the read path parses
+// comments via the shared JSONC helper, and AddEntry/RemoveEntry patch
+// through hujson so the operator's comments and every unknown top-level key
+// already present in the file are PRESERVED on every write (only the `mcp`
+// map is touched) — so seeding a minimal stub does not clobber a
+// hand-authored config, and on a truly fresh host this minimal stub is all
+// that is needed.
 func (o *openCodeClient) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(o.path, []byte("{\n  \"mcp\": {}\n}\n"))
 }
@@ -161,35 +163,32 @@ func (o *openCodeClient) Restore(backupPath string) error {
 }
 
 func (o *openCodeClient) readJSON() (map[string]any, error) {
-	data, err := os.ReadFile(o.path)
+	data, err := readRawConfig(o.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	// OpenCode's config is JSONC (it supports a `.jsonc` variant, comments,
+	// and trailing commas, and operators hand-edit it) — parse via the
+	// comment-tolerant shared helper so a comment in the file does not break
+	// migrate / Init.
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", o.path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
 	}
 	return m, nil
 }
 
-func (o *openCodeClient) writeJSON(m map[string]any) error {
-	out, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Route through WriteConfigFile so production gets the
-	// SecureWriteClientConfig pipeline (handle-relative + DACL-bound) for
-	// token-bearing rewrites; tests get the os.WriteFile fallback.
-	return WriteConfigFile(o.path, append(out, '\n'))
+// setMember sets mcp.<name> = value, and deleteMember removes it, both
+// preserving the operator's comments + unrelated top-level keys (e.g.
+// `$schema`) when the file already has JSONC content. An empty/absent file
+// falls back to a clean indented marshal. The bytes route through the
+// UNCHANGED WriteConfigFile pipeline.
+func (o *openCodeClient) setMember(name string, value any) error {
+	return mutateJSONObjectMember(o.path, openCodeMCPKey, name, value, false)
+}
+
+func (o *openCodeClient) deleteMember(name string) error {
+	return mutateJSONObjectMember(o.path, openCodeMCPKey, name, nil, true)
 }
 
 // AddEntry writes the hub-managed remote-HTTP entry under mcp.<name>.
@@ -197,14 +196,6 @@ func (o *openCodeClient) writeJSON(m map[string]any) error {
 // "enabled":true}`; an optional `headers` object is emitted when
 // MCPEntry.Headers is non-empty.
 func (o *openCodeClient) AddEntry(entry MCPEntry) error {
-	m, err := o.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m[openCodeMCPKey].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"type":    "remote",
 		"url":     entry.URL,
@@ -213,23 +204,15 @@ func (o *openCodeClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m[openCodeMCPKey] = servers
-	return o.writeJSON(m)
+	// Comment-preserving set: patches mcp.<name> into the original on-disk
+	// bytes via hujson so the operator's comments and unrelated keys survive (a
+	// full map re-marshal would drop both).
+	return o.setMember(entry.Name, serverEntry)
 }
 
 func (o *openCodeClient) RemoveEntry(name string) error {
-	m, err := o.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m[openCodeMCPKey].(map[string]any)
-	if servers == nil {
-		return nil
-	}
-	delete(servers, name)
-	m[openCodeMCPKey] = servers
-	return o.writeJSON(m)
+	// Comment-preserving delete; absence is a no-op.
+	return o.deleteMember(name)
 }
 
 func (o *openCodeClient) GetEntry(name string) (*MCPEntry, error) {
@@ -271,25 +254,19 @@ func (o *openCodeClient) RestoreEntryFromBackupForRollback(backupPath, name stri
 // ErrBackupEntryAlreadyMigrated; when true (migrate rollback) it writes
 // the backup bytes verbatim regardless of shape.
 func (o *openCodeClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
+	// genuine read error the demigrate caller must see, not a silent
+	// treat-as-empty. Empty / comment-only / malformed bytes are then
+	// classified by parseJSONCBytes (empty map vs parse error).
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	var backupMap map[string]any
-	if len(backupData) == 0 {
-		backupMap = map[string]any{}
-	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+	backupMap, err := parseJSONCBytes(backupData)
+	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	backupServers, _ := backupMap[openCodeMCPKey].(map[string]any)
-	liveMap, err := o.readJSON()
-	if err != nil {
-		return err
-	}
-	liveServers, _ := liveMap[openCodeMCPKey].(map[string]any)
-	if liveServers == nil {
-		liveServers = map[string]any{}
-	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback caller
@@ -302,14 +279,12 @@ func (o *openCodeClient) restoreEntryFromBackup(backupPath, name string, allowHu
 					}
 				}
 			}
-			liveServers[name] = backupEntry
-			liveMap[openCodeMCPKey] = liveServers
-			return o.writeJSON(liveMap)
+			// Comment-preserving set into the LIVE config (its comments +
+			// unrelated keys survive; the backup's entry VALUE is written).
+			return o.setMember(name, backupEntry)
 		}
 	}
-	delete(liveServers, name)
-	liveMap[openCodeMCPKey] = liveServers
-	return o.writeJSON(liveMap)
+	return o.deleteMember(name)
 }
 
 // AllStdioEntries returns every stdio entry from OpenCode's top-level `mcp`
@@ -344,15 +319,14 @@ func (o *openCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 }
 
 func (o *openCodeClient) BackupContainsEntry(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error,
+	// not a silent (false, nil); empty bytes parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers, _ := m[openCodeMCPKey].(map[string]any)
@@ -367,15 +341,15 @@ func (o *openCodeClient) BackupContainsEntry(backupPath, name string) (bool, err
 // backupPath is in OpenCode's hub-managed shape (a hub loopback `url` with
 // no `command`). See Client.BackupEntryIsHubManaged.
 func (o *openCodeClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error
+	// the demigrate caller must see, not a silent (false, nil); empty bytes
+	// parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers, _ := m[openCodeMCPKey].(map[string]any)

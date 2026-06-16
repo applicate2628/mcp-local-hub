@@ -42,14 +42,6 @@ type geminiCLI struct {
 const defaultGeminiHTTPTimeoutMs = 10000
 
 func (g *geminiCLI) AddEntry(entry MCPEntry) error {
-	m, err := g.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"url":     entry.URL,
 		"type":    "http",
@@ -58,9 +50,8 @@ func (g *geminiCLI) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return g.writeJSON(m)
+	// Comment-preserving set via the embedded seam.
+	return g.setMember(entry.Name, serverEntry)
 }
 
 func (g *geminiCLI) GetEntry(name string) (*MCPEntry, error) {

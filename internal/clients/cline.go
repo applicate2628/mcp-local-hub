@@ -163,14 +163,6 @@ func (c *clineClient) InitEmpty() (created bool, err error) {
 // the JSON-family adapters — see the NewCline doc comment for the schema
 // rationale.
 func (c *clineClient) AddEntry(entry MCPEntry) error {
-	m, err := c.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"type": "streamableHttp",
 		"url":  entry.URL,
@@ -178,7 +170,6 @@ func (c *clineClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return c.writeJSON(m)
+	// Comment-preserving set via the embedded seam.
+	return c.setMember(entry.Name, serverEntry)
 }

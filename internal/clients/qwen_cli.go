@@ -58,14 +58,6 @@ func (q *qwenCLI) InitEmpty() (created bool, err error) {
 }
 
 func (q *qwenCLI) AddEntry(entry MCPEntry) error {
-	m, err := q.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"httpUrl": entry.URL,
 		"timeout": defaultQwenHTTPTimeoutMs,
@@ -73,9 +65,8 @@ func (q *qwenCLI) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return q.writeJSON(m)
+	// Comment-preserving set via the embedded seam.
+	return q.setMember(entry.Name, serverEntry)
 }
 
 func (q *qwenCLI) GetEntry(name string) (*MCPEntry, error) {

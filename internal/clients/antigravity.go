@@ -85,22 +85,16 @@ func (a *antigravityClient) AddEntry(entry MCPEntry) error {
 		}
 		relayArgs = []string{"relay", "--server", entry.RelayServer, "--daemon", entry.RelayDaemon}
 	}
-	m, err := a.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"command":  entry.RelayExePath,
 		"args":     relayArgs,
 		"disabled": false,
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return a.writeJSON(m)
+	// Comment-preserving set via the embedded jsonMCPClient seam: patches
+	// mcpServers.<name> into the original bytes so any operator comments +
+	// unrelated keys in mcp_config.json survive (Antigravity's config is the
+	// same JSONC-tolerant family). RemoveEntry/Restore are promoted unchanged.
+	return a.setMember(entry.Name, serverEntry)
 }
 
 // GetEntry returns a minimal MCPEntry with just Name populated. The

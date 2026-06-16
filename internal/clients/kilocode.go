@@ -173,14 +173,6 @@ func (k *kiloCodeClient) InitEmpty() (created bool, err error) {
 // jsonMCPClient.AddEntry would omit the `type` discriminator, so this
 // override is required.
 func (k *kiloCodeClient) AddEntry(entry MCPEntry) error {
-	m, err := k.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"type":     kiloCodeMCPType,
 		"url":      entry.URL,
@@ -189,7 +181,6 @@ func (k *kiloCodeClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return k.writeJSON(m)
+	// Comment-preserving set via the embedded seam.
+	return k.setMember(entry.Name, serverEntry)
 }

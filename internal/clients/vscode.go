@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +18,11 @@ func NewVSCode() (Client, error) {
 type vscodeClient struct {
 	path string
 }
+
+// vscodeServersKey is the single owner of VS Code's top-level MCP section name
+// (the 1.103+ `servers` key, NOT the JSON family's `mcpServers`). Every method
+// that reaches into the parsed config map uses it.
+const vscodeServersKey = "servers"
 
 func (v *vscodeClient) Name() string       { return "vscode" }
 func (v *vscodeClient) ConfigPath() string { return v.path }
@@ -59,6 +63,13 @@ func (v *vscodeClient) BackupKeep(keepN int) (string, error) {
 // 1.103+ migrated MCP entries to a top-level `servers` key (NOT
 // `mcpServers`); the stub matches that schema so AddEntry's later
 // merge writes into the right map.
+//
+// VS Code's mcp.json is JSONC (it allows `//` + `/* */` comments and
+// trailing commas, and operators hand-edit it): the read path parses
+// comments via the shared JSONC helper, and AddEntry/RemoveEntry patch
+// through hujson so the operator's comments and unrelated top-level keys
+// are PRESERVED on every write — no longer the lossy encoding/json
+// round-trip.
 func (v *vscodeClient) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(v.path, []byte("{\n  \"servers\": {}\n}\n"))
 }
@@ -74,46 +85,35 @@ func (v *vscodeClient) Restore(backupPath string) error {
 }
 
 func (v *vscodeClient) readJSON() (map[string]any, error) {
-	data, err := os.ReadFile(v.path)
+	data, err := readRawConfig(v.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	// VS Code's mcp.json is JSONC (it allows `//` + `/* */` comments and
+	// trailing commas, and operators hand-edit it) — parse via the
+	// comment-tolerant shared helper so a comment in the file does not break
+	// migrate / Init.
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", v.path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
 	}
 	return m, nil
 }
 
-func (v *vscodeClient) writeJSON(m map[string]any) error {
-	out, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Route through WriteConfigFile so production gets the
-	// SecureWriteClientConfig pipeline (handle-relative + DACL-bound)
-	// for token-bearing rewrites; tests get the os.WriteFile fallback.
-	return WriteConfigFile(v.path, append(out, '\n'))
+// setMember sets servers.<name> = value, and deleteMember removes it, both
+// preserving the operator's comments + unrelated top-level keys when the file
+// already has JSONC content. An empty/absent file falls back to a clean
+// indented marshal. The bytes route through the UNCHANGED WriteConfigFile
+// pipeline.
+func (v *vscodeClient) setMember(name string, value any) error {
+	return mutateJSONObjectMember(v.path, vscodeServersKey, name, value, false)
+}
+
+func (v *vscodeClient) deleteMember(name string) error {
+	return mutateJSONObjectMember(v.path, vscodeServersKey, name, nil, true)
 }
 
 func (v *vscodeClient) AddEntry(entry MCPEntry) error {
-	m, err := v.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["servers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	serverEntry := map[string]any{
 		"type": "http",
 		"url":  entry.URL,
@@ -121,23 +121,15 @@ func (v *vscodeClient) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["servers"] = servers
-	return v.writeJSON(m)
+	// Comment-preserving set: patches servers.<name> into the original on-disk
+	// bytes via hujson so the operator's comments and unrelated keys survive (a
+	// full map re-marshal would drop both).
+	return v.setMember(entry.Name, serverEntry)
 }
 
 func (v *vscodeClient) RemoveEntry(name string) error {
-	m, err := v.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["servers"].(map[string]any)
-	if servers == nil {
-		return nil
-	}
-	delete(servers, name)
-	m["servers"] = servers
-	return v.writeJSON(m)
+	// Comment-preserving delete; absence is a no-op.
+	return v.deleteMember(name)
 }
 
 func (v *vscodeClient) GetEntry(name string) (*MCPEntry, error) {
@@ -145,7 +137,7 @@ func (v *vscodeClient) GetEntry(name string) (*MCPEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["servers"].(map[string]any)
+	servers, _ := m[vscodeServersKey].(map[string]any)
 	if servers == nil {
 		return nil, nil
 	}
@@ -178,25 +170,19 @@ func (v *vscodeClient) RestoreEntryFromBackupForRollback(backupPath, name string
 // ErrBackupEntryAlreadyMigrated; when true (migrate rollback) it writes
 // the backup bytes verbatim regardless of shape.
 func (v *vscodeClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
+	// genuine read error the demigrate caller must see, not a silent
+	// treat-as-empty. Empty / comment-only / malformed bytes are then
+	// classified by parseJSONCBytes (empty map vs parse error).
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	var backupMap map[string]any
-	if len(backupData) == 0 {
-		backupMap = map[string]any{}
-	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+	backupMap, err := parseJSONCBytes(backupData)
+	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	backupServers, _ := backupMap["servers"].(map[string]any)
-	liveMap, err := v.readJSON()
-	if err != nil {
-		return err
-	}
-	liveServers, _ := liveMap["servers"].(map[string]any)
-	if liveServers == nil {
-		liveServers = map[string]any{}
-	}
+	backupServers, _ := backupMap[vscodeServersKey].(map[string]any)
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback caller
@@ -209,14 +195,12 @@ func (v *vscodeClient) restoreEntryFromBackup(backupPath, name string, allowHubE
 					}
 				}
 			}
-			liveServers[name] = backupEntry
-			liveMap["servers"] = liveServers
-			return v.writeJSON(liveMap)
+			// Comment-preserving set into the LIVE config (its comments +
+			// unrelated keys survive; the backup's entry VALUE is written).
+			return v.setMember(name, backupEntry)
 		}
 	}
-	delete(liveServers, name)
-	liveMap["servers"] = liveServers
-	return v.writeJSON(liveMap)
+	return v.deleteMember(name)
 }
 
 // AllStdioEntries returns every stdio entry from VS Code's
@@ -227,7 +211,7 @@ func (v *vscodeClient) AllStdioEntries() ([]StdioEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["servers"].(map[string]any)
+	servers, _ := m[vscodeServersKey].(map[string]any)
 	return collectStdioEntries(servers), nil
 }
 
@@ -240,23 +224,22 @@ func (v *vscodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioEn
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["servers"].(map[string]any)
+	servers, _ := m[vscodeServersKey].(map[string]any)
 	return findLanguageServerStdioInMap(servers), nil
 }
 
 func (v *vscodeClient) BackupContainsEntry(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error,
+	// not a silent (false, nil); empty bytes parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	servers, _ := m["servers"].(map[string]any)
+	servers, _ := m[vscodeServersKey].(map[string]any)
 	if servers == nil {
 		return false, nil
 	}
@@ -269,18 +252,18 @@ func (v *vscodeClient) BackupContainsEntry(backupPath, name string) (bool, error
 // `url` present, `command` absent). VS Code uses the top-level `servers`
 // key (NOT `mcpServers`). See Client.BackupEntryIsHubManaged.
 func (v *vscodeClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error
+	// the demigrate caller must see, not a silent (false, nil); empty bytes
+	// parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	servers, _ := m["servers"].(map[string]any)
+	servers, _ := m[vscodeServersKey].(map[string]any)
 	if servers == nil {
 		return false, nil
 	}

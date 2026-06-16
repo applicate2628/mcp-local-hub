@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +21,11 @@ func NewClaudeCode() (Client, error) {
 type claudeCode struct {
 	path string
 }
+
+// claudeCodeMCPServersKey is the single owner of claude-code's top-level MCP
+// section name (the canonical JSON family `mcpServers` key). Every method that
+// reaches into the parsed config map uses it.
+const claudeCodeMCPServersKey = "mcpServers"
 
 func (c *claudeCode) Name() string       { return "claude-code" }
 func (c *claudeCode) ConfigPath() string { return c.path }
@@ -46,6 +50,12 @@ func (c *claudeCode) BackupKeep(keepN int) (string, error) {
 // file is absent. claude-code's single-file user config uses the
 // canonical JSON family `mcpServers` key; AddEntry's later merge
 // writes into the same map.
+//
+// ~/.claude.json is parsed JSONC-tolerantly and rewritten
+// comment-preservingly: the read path strips `//` + `/* */` comments and
+// trailing commas via the shared JSONC helper, and AddEntry/RemoveEntry
+// patch through hujson so any comments and unrelated top-level keys are
+// PRESERVED on every write — no longer the lossy encoding/json round-trip.
 func (c *claudeCode) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(c.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
 }
@@ -62,50 +72,35 @@ func (c *claudeCode) Restore(backupPath string) error {
 	return WriteConfigFile(c.path, data)
 }
 
-// readJSON / writeJSON keep unknown top-level fields untouched by round-tripping
-// through map[string]any.
+// readJSON keeps unknown top-level fields untouched by parsing through
+// map[string]any. The bytes are parsed JSONC-tolerantly so a `//` comment or
+// trailing comma in a hand-edited ~/.claude.json does not break migrate / Init.
 func (c *claudeCode) readJSON() (map[string]any, error) {
-	data, err := os.ReadFile(c.path)
+	data, err := readRawConfig(c.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", c.path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
 	}
 	return m, nil
 }
 
-func (c *claudeCode) writeJSON(m map[string]any) error {
-	out, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Append trailing newline to match Claude Code's own formatting preference.
-	// Route through WriteConfigFile so production gets the
-	// SecureWriteClientConfig pipeline (handle-relative, DACL-bound)
-	// for token-bearing rewrites; tests get the os.WriteFile fallback.
-	return WriteConfigFile(c.path, append(out, '\n'))
+// setMember sets mcpServers.<name> = value, and deleteMember removes it, both
+// preserving the operator's comments + unrelated top-level keys when the file
+// already has JSONC content. An empty/absent file falls back to a clean
+// indented marshal. The bytes route through the UNCHANGED WriteConfigFile
+// pipeline.
+func (c *claudeCode) setMember(name string, value any) error {
+	return mutateJSONObjectMember(c.path, claudeCodeMCPServersKey, name, value, false)
+}
+
+func (c *claudeCode) deleteMember(name string) error {
+	return mutateJSONObjectMember(c.path, claudeCodeMCPServersKey, name, nil, true)
 }
 
 func (c *claudeCode) AddEntry(entry MCPEntry) error {
-	m, err := c.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
 	// Claude Code's per-transport schema requires an explicit `type` field.
 	// For HTTP-transport servers the correct value is "http"; stdio servers use
 	// "stdio" and include command/args/env instead. This adapter only produces
@@ -117,23 +112,15 @@ func (c *claudeCode) AddEntry(entry MCPEntry) error {
 	if len(entry.Headers) > 0 {
 		serverEntry["headers"] = entry.Headers
 	}
-	servers[entry.Name] = serverEntry
-	m["mcpServers"] = servers
-	return c.writeJSON(m)
+	// Comment-preserving set: patches mcpServers.<name> into the original
+	// on-disk bytes via hujson so any comments and unrelated keys survive (a
+	// full map re-marshal would drop both).
+	return c.setMember(entry.Name, serverEntry)
 }
 
 func (c *claudeCode) RemoveEntry(name string) error {
-	m, err := c.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m["mcpServers"].(map[string]any)
-	if servers == nil {
-		return nil
-	}
-	delete(servers, name)
-	m["mcpServers"] = servers
-	return c.writeJSON(m)
+	// Comment-preserving delete; absence is a no-op.
+	return c.deleteMember(name)
 }
 
 func (c *claudeCode) GetEntry(name string) (*MCPEntry, error) {
@@ -141,7 +128,7 @@ func (c *claudeCode) GetEntry(name string) (*MCPEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[claudeCodeMCPServersKey].(map[string]any)
 	if servers == nil {
 		return nil, nil
 	}
@@ -186,25 +173,19 @@ func (c *claudeCode) RestoreEntryFromBackupForRollback(backupPath, name string) 
 // ErrBackupEntryAlreadyMigrated; when true (the migrate rollback) it
 // writes the backup bytes verbatim regardless of shape.
 func (c *claudeCode) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
+	// genuine read error the demigrate caller must see, not a silent
+	// treat-as-empty. Empty / comment-only / malformed bytes are then
+	// classified by parseJSONCBytes (empty map vs parse error).
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	var backupMap map[string]any
-	if len(backupData) == 0 {
-		backupMap = map[string]any{}
-	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+	backupMap, err := parseJSONCBytes(backupData)
+	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	backupServers, _ := backupMap["mcpServers"].(map[string]any)
-	liveMap, err := c.readJSON()
-	if err != nil {
-		return err
-	}
-	liveServers, _ := liveMap["mcpServers"].(map[string]any)
-	if liveServers == nil {
-		liveServers = map[string]any{}
-	}
+	backupServers, _ := backupMap[claudeCodeMCPServersKey].(map[string]any)
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive: refuse hub-HTTP-shaped backup entries. The
@@ -222,14 +203,12 @@ func (c *claudeCode) restoreEntryFromBackup(backupPath, name string, allowHubEnt
 					}
 				}
 			}
-			liveServers[name] = backupEntry
-			liveMap["mcpServers"] = liveServers
-			return c.writeJSON(liveMap)
+			// Comment-preserving set into the LIVE config (its comments +
+			// unrelated keys survive; the backup's entry VALUE is written).
+			return c.setMember(name, backupEntry)
 		}
 	}
-	delete(liveServers, name)
-	liveMap["mcpServers"] = liveServers
-	return c.writeJSON(liveMap)
+	return c.deleteMember(name)
 }
 
 // AllStdioEntries returns every stdio entry from mcpServers.
@@ -238,7 +217,7 @@ func (c *claudeCode) AllStdioEntries() ([]StdioEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[claudeCodeMCPServersKey].(map[string]any)
 	return collectStdioEntries(servers), nil
 }
 
@@ -249,25 +228,24 @@ func (c *claudeCode) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntr
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[claudeCodeMCPServersKey].(map[string]any)
 	return findLanguageServerStdioInMap(servers), nil
 }
 
 // BackupContainsEntry reports whether the backup file at backupPath
 // has an mcpServers[name] entry.
 func (c *claudeCode) BackupContainsEntry(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error,
+	// not a silent (false, nil); empty bytes parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[claudeCodeMCPServersKey].(map[string]any)
 	if servers == nil {
 		return false, nil
 	}
@@ -285,18 +263,18 @@ func (c *claudeCode) BackupContainsEntry(backupPath, name string) (bool, error) 
 // (loopback `url` present, `command` absent). See
 // Client.BackupEntryIsHubManaged.
 func (c *claudeCode) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	// os.ReadFile (NOT readRawConfig): a missing named backup is a read error
+	// the demigrate caller must see, not a silent (false, nil); empty bytes
+	// parse to an empty map below.
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[claudeCodeMCPServersKey].(map[string]any)
 	if servers == nil {
 		return false, nil
 	}

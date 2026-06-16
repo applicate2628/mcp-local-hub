@@ -1,7 +1,6 @@
 package clients
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -129,10 +128,12 @@ func (z *zedClient) BackupKeep(keepN int) (string, error) {
 }
 
 // InitEmpty seeds settings.json with `{"context_servers": {}}` if the
-// file is absent. AddEntry's later merge writes into the same map. Zed's
-// settings.json supports `//` comments, but an empty stub is plain JSON,
-// and the merge path round-trips through encoding/json which does not
-// preserve comments — same limitation as every JSON-family adapter here.
+// file is absent. AddEntry's later merge writes into the same section. Zed's
+// settings.json is JSONC (it ships with a `// Zed settings` header and
+// operators hand-edit it): the read path parses comments via the shared
+// JSONC helper, and AddEntry/RemoveEntry patch through hujson so the
+// operator's comments and unrelated keys (wsl_connections, theme, …) are
+// PRESERVED on every write — no longer the lossy encoding/json round-trip.
 func (z *zedClient) InitEmpty() (created bool, err error) {
 	return EnsureClientConfigStub(z.path, []byte("{\n  \"context_servers\": {}\n}\n"))
 }
@@ -148,35 +149,31 @@ func (z *zedClient) Restore(backupPath string) error {
 }
 
 func (z *zedClient) readJSON() (map[string]any, error) {
-	data, err := os.ReadFile(z.path)
+	data, err := readRawConfig(z.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	// Zed's settings.json is JSONC (it ships with a `// Zed settings` header
+	// comment and operators hand-edit it) — parse via the comment-tolerant
+	// shared helper so a comment in the file does not break migrate / Init.
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", z.path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
 	}
 	return m, nil
 }
 
-func (z *zedClient) writeJSON(m map[string]any) error {
-	out, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Route through WriteConfigFile so production gets the
-	// SecureWriteClientConfig pipeline; tests get the os.WriteFile
-	// fallback.
-	return WriteConfigFile(z.path, append(out, '\n'))
+// setMember sets context_servers.<name> = value, and deleteMember removes it,
+// both preserving the operator's comments + unrelated keys (e.g. Zed's
+// wsl_connections and the // header) when the file already has JSONC content.
+// An empty/absent file falls back to a clean indented marshal. The bytes route
+// through the UNCHANGED WriteConfigFile pipeline.
+func (z *zedClient) setMember(name string, value any) error {
+	return mutateJSONObjectMember(z.path, contextServersKey, name, value, false)
+}
+
+func (z *zedClient) deleteMember(name string) error {
+	return mutateJSONObjectMember(z.path, contextServersKey, name, nil, true)
 }
 
 // AddEntry writes a stdio relay entry under context_servers.<name>. Zed
@@ -198,34 +195,18 @@ func (z *zedClient) AddEntry(entry MCPEntry) error {
 	if target == "" {
 		return fmt.Errorf("zed adapter requires MCPEntry.URL or MCPEntry.RelayURL (the HTTP endpoint the stdio relay forwards to; Zed does not reliably support native loopback-HTTP MCP)")
 	}
-	m, err := z.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m[contextServersKey].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
-	servers[entry.Name] = map[string]any{
+	// Comment-preserving set: patches context_servers.<name> into the
+	// original on-disk bytes via hujson so the user's // header comment and
+	// unrelated keys (wsl_connections, theme, …) survive.
+	return z.setMember(entry.Name, map[string]any{
 		"command": entry.RelayExePath,
 		"args":    []string{"relay", "--url", target},
-	}
-	m[contextServersKey] = servers
-	return z.writeJSON(m)
+	})
 }
 
 func (z *zedClient) RemoveEntry(name string) error {
-	m, err := z.readJSON()
-	if err != nil {
-		return err
-	}
-	servers, _ := m[contextServersKey].(map[string]any)
-	if servers == nil {
-		return nil
-	}
-	delete(servers, name)
-	m[contextServersKey] = servers
-	return z.writeJSON(m)
+	// Comment-preserving delete; absence is a no-op.
+	return z.deleteMember(name)
 }
 
 // GetEntry returns a minimal MCPEntry reconstructed from the stored
@@ -282,25 +263,15 @@ func (z *zedClient) RestoreEntryFromBackupForRollback(backupPath, name string) e
 // true (migrate rollback) it writes the backup bytes verbatim regardless
 // of shape.
 func (z *zedClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
-	backupData, err := os.ReadFile(backupPath)
+	backupData, err := readRawConfig(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	var backupMap map[string]any
-	if len(backupData) == 0 {
-		backupMap = map[string]any{}
-	} else if err := json.Unmarshal(backupData, &backupMap); err != nil {
+	backupMap, err := parseJSONCBytes(backupData)
+	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	backupServers, _ := backupMap[contextServersKey].(map[string]any)
-	liveMap, err := z.readJSON()
-	if err != nil {
-		return err
-	}
-	liveServers, _ := liveMap[contextServersKey].(map[string]any)
-	if liveServers == nil {
-		liveServers = map[string]any{}
-	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback caller
@@ -313,14 +284,12 @@ func (z *zedClient) restoreEntryFromBackup(backupPath, name string, allowHubEntr
 					}
 				}
 			}
-			liveServers[name] = backupEntry
-			liveMap[contextServersKey] = liveServers
-			return z.writeJSON(liveMap)
+			// Comment-preserving set into the LIVE config (its comments +
+			// unrelated keys survive; the backup's entry VALUE is written).
+			return z.setMember(name, backupEntry)
 		}
 	}
-	delete(liveServers, name)
-	liveMap[contextServersKey] = liveServers
-	return z.writeJSON(liveMap)
+	return z.deleteMember(name)
 }
 
 // AllStdioEntries returns every stdio entry from Zed's top-level
@@ -348,15 +317,12 @@ func (z *zedClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry
 }
 
 func (z *zedClient) BackupContainsEntry(backupPath, name string) (bool, error) {
-	data, err := os.ReadFile(backupPath)
+	data, err := readRawConfig(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers, _ := m[contextServersKey].(map[string]any)
@@ -372,15 +338,12 @@ func (z *zedClient) BackupContainsEntry(backupPath, name string) (bool, error) {
 // invocation: command is the mcphub binary AND args[0] == "relay"). See
 // Client.BackupEntryIsHubManaged.
 func (z *zedClient) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
-	data, err := os.ReadFile(backupPath)
+	data, err := readRawConfig(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	m, err := parseJSONCBytes(data)
+	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	servers, _ := m[contextServersKey].(map[string]any)
