@@ -183,6 +183,11 @@ export function ServersScreen() {
   // collectServers — keeping `scanForLsp` separate avoids re-deriving
   // collectServers on every minor refresh.
   const [scanForLsp, setScanForLsp] = useState<ScanResult | null>(null);
+  // Monotonic guard for scan refreshes. Auto-refresh, manual Rescan,
+  // reloadToken effects, and SSE can overlap; only the newest request is
+  // allowed to publish state so a slow older response cannot overwrite a
+  // fresher matrix.
+  const latestScanRequestRef = useRef(0);
 
   // Per-client matrix-column visibility overrides, persisted in
   // localStorage (see lib/matrix-columns.ts). Initialized once from
@@ -248,6 +253,9 @@ export function ServersScreen() {
   // visible checkbox folds `dirty` over the baseline (effectiveChecked), a
   // baseline-only refresh can never visually drop a pending toggle.
   const loadScan = useCallback(async () => {
+    const requestId = latestScanRequestRef.current + 1;
+    latestScanRequestRef.current = requestId;
+    const isLatest = () => latestScanRequestRef.current === requestId;
     try {
       // /api/workspaces returns {workspaces, entries}. A registry
       // load failure must NOT block the matrix render — the
@@ -260,6 +268,7 @@ export function ServersScreen() {
         fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
         listWorkspaces().catch(() => ({ workspaces: [], entries: [] })),
       ]);
+      if (!isLatest()) return;
       if (scan.entries != null && !Array.isArray(scan.entries)) {
         setError("/api/scan returned malformed entries");
         return;
@@ -294,7 +303,7 @@ export function ServersScreen() {
       // the user starts a new Apply cycle.
       setApplyMsg((msg) => (msg === "Applied. Refreshing…" ? "" : msg));
     } catch (err) {
-      setError((err as Error).message);
+      if (isLatest()) setError((err as Error).message);
     }
   }, []);
 
