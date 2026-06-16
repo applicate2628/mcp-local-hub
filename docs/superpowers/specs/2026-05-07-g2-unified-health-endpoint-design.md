@@ -329,4 +329,4 @@ Estimate: **~2 days** wall time. Original backlog said ~1d but capability discov
 - `singleflight` — `golang.org/x/sync/singleflight` package; collapses concurrent identical requests into one execution.
 - `lazy proxy` / `proxy-synthetic` — workspace-scoped server proxy that answers `initialize`+`tools/list` from the embedded catalog without spawning the heavy backend; identified by `source="proxy-synthetic"` on the probe result.
 - `wmic` — Windows Management Instrumentation Command-line; the snapshot tool used for daemon process info on Windows.
-- `kosyak` — Russian for "fuckup"; per dima_'s standing rule, every shipped mistake gets a confession file in `d:/dev/kosyaks/`.
+- `kosyak` — Russian for "fuckup"; per the maintainer's standing rule, every shipped mistake gets a confession file in `d:/dev/kosyaks/`.

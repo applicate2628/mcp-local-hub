@@ -77,7 +77,7 @@ F2 = legacy-task cleanup не убивает процесс → орфан де�
 ## REDEPLOY-бандл (после закрытия #288)
 
 1. `bash build.sh` (из d:/dev/mcp-local-hub, master)
-2. stage SAME-DIR: `Copy-Item .\build\mcphub.exe C:\Users\dima_\.local\bin\mcphub-deploy.exe` (cross-volume MoveFileEx fail → стейдж рядом с target)
+2. stage SAME-DIR: `Copy-Item .\build\mcphub.exe C:\Users\<you>\.local\bin\mcphub-deploy.exe` (cross-volume MoveFileEx fail → стейдж рядом с target)
 3. batch-stop ВСЕХ serena-proxy + workspace-proxy демонов (иначе port-verify timeout whack-a-mole)
 4. `mcphub install --upgrade` (флага --reset-failure-windows НЕ существует)
 5. Удалить 4 стейл-таски v0.4.x: `\mcp-local-hub-memory-default`, `\mcp-local-hub-fetch-default`, `\mcp-local-hub-serena-unified`, `\mcp-local-hub-watchdog` (ОСТАВИТЬ `\mcp-local-hub-supervisor` + `\mcp-local-hub-liveness` + `-workspace-weekly-refresh`). Это лечит "вечный рестарт" (логон-таски спавнят демонов ДО супервизора → port-fight 9123).

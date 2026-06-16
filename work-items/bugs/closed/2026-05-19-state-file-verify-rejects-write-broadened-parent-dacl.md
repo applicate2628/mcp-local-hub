@@ -13,11 +13,11 @@ env var set in the launching shell).
 
 ```text
 memory/demigrate/gemini-cli: latest backup
-  C:\Users\dima_\.gemini\settings.json.bak-mcp-local-hub-20260516-012732
+  C:\Users\<you>\.gemini\settings.json.bak-mcp-local-hub-20260516-012732
   and -original sentinel both hold "memory" in hub-managed form,
   AND consulting managed-entries marker failed:
   hub-mcp state verify managed-entries.json:
-  parent C:\Users\dima_\AppData\Local\mcp-local-hub
+  parent C:\Users\<you>\AppData\Local\mcp-local-hub
   grants write/delete/DAC-edit access to non-allowlisted SID
   (TOCTOU swap risk during fd-verify → path-read window):
   hub-mcp state file DACL grants read to a SID outside

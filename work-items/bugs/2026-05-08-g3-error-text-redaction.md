@@ -13,7 +13,7 @@ related-pr: #144 (G3 capability display)
 
 1. Configure an MCP daemon whose `tools/list` response carries a
    workspace path or token-like value in its error message
-   (e.g., `tools/list: stat C:\Users\dima_\secret\token.json: ...`).
+   (e.g., `tools/list: stat C:\Users\<you>\secret\token.json: ...`).
 2. Open `#/capabilities`. Observe the failure banner / inline
    probe-error pill renders the raw err text into the DOM.
 3. Operator screenshot or browser dev-tools session captures the

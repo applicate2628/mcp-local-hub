@@ -905,7 +905,7 @@ Used by §53 status output.
 - State dir root
 
 ```text
-State dir: C:\Users\dima_\AppData\Local\mcp-local-hub
+State dir: C:\Users\<you>\AppData\Local\mcp-local-hub
 Files:
   daemon-intent.json    (intent)
   watchdog-state.json   (cooldown + windows)

@@ -32,7 +32,7 @@ description: "Explains mcphub architecture in plain Russian: how supervisor + da
 
 Результат: **~18 процессов вместо ~100**. Меньше памяти, меньше CPU, меньше хаоса.
 
-**Это и есть смысл mcphub**: сокращение копий MCP-серверов через shared-hub архитектуру. Запись от 2026-04-17: [memory/project_mcphub_process_tails_motivation.md](../../../../../C:/Users/dima_/.claude/projects/d--dev-mcp-local-hub/memory/project_mcphub_process_tails_motivation.md).
+**Это и есть смысл mcphub**: сокращение копий MCP-серверов через shared-hub архитектуру. Запись от 2026-04-17: [memory/project_mcphub_process_tails_motivation.md](../../../../../C:/Users/<you>/.claude/projects/d--dev-mcp-local-hub/memory/project_mcphub_process_tails_motivation.md).
 
 ## 3. Архитектура — три слоя
 

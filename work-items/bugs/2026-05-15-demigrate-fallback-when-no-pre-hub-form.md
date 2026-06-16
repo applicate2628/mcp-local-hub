@@ -9,7 +9,7 @@ failed with:
 
 ```text
 time/demigrate/gemini-cli: latest backup
-  C:\Users\dima_\.gemini\settings.json.bak-mcp-local-hub-20260429-004626
+  C:\Users\<you>\.gemini\settings.json.bak-mcp-local-hub-20260429-004626
   holds "time" already in hub-managed form, and
   -original sentinel fallback failed: clients: backup copy of entry is
   already in hub-managed shape

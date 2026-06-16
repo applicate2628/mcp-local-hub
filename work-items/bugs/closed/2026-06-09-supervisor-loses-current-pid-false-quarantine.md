@@ -29,7 +29,7 @@ respawn loop, not by the daemon actually failing.
 - **supervisor-state.json:** `state="quarantined"`, `current_pid=0`,
   `quarantine_since=null`, `restart_history=null`, `backoff_until=null` — i.e.
   quarantined with NO quarantine metadata (inconsistent on its own).
-- **Live process tree:** PID `167352` = `C:\Users\dima_\.local\bin\mcphub.exe
+- **Live process tree:** PID `167352` = `C:\Users\<you>\.local\bin\mcphub.exe
   daemon --server time --daemon default`, parent `109756` =
   `D:\dev\mcp-local-hub\bin\mcphub.exe supervise`, **CreationDate 2026-06-04**
   (alive 5 days). `netstat`: `127.0.0.1:9128 LISTENING 167352` + an ESTABLISHED
@@ -57,7 +57,7 @@ respawn loop, not by the daemon actually failing.
    `ExecutablePath = canonicalMcphubPath()` — the SUPERVISOR's OWN `os.Executable()`.
    The evidence above shows the supervisor (109756) ran from
    `D:\dev\mcp-local-hub\bin\mcphub.exe` while the time child (167352) ran from
-   `C:\Users\dima_\.local\bin\mcphub.exe`. Because the two paths differ,
+   `C:\Users\<you>\.local\bin\mcphub.exe`. Because the two paths differ,
    `process.VerifyPIDIdentity` returned `ErrProcessIdentityMismatch`
    ("executable path mismatch") for the live, correctly-serving child. The
    liveness sweep classified it `pid_identity_mismatch` → `EvManualRestart`; the

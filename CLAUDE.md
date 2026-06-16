@@ -226,7 +226,7 @@ because surgical Edit left old phrasing intact.
 ### Quick reference — KOSYAK index
 
 These are the failure modes documented in
-`C:\Users\dima_\.claude\projects\d--dev-mcp-local-hub\memory\` from
+`C:\Users\<you>\.claude\projects\d--dev-mcp-local-hub\memory\` from
 prior sessions. Read each file before starting work that hits the same
 surface:
 
