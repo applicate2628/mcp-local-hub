@@ -5,12 +5,15 @@ import "testing"
 // relayStdioClientNames is the canonical set of relay-stdio adapters — the
 // ones whose AddEntry requires relay context (RelayExePath, and for the
 // manifest-lookup form RelayServer/RelayDaemon) and rejects a URL-only
-// entry. Exactly antigravity and zed today. A new relay adapter must be
-// added here AND declare IsRelayStdio()=true on its concrete struct; the
+// entry. antigravity, zed, and aider today (aider's MCP client is stdio-only:
+// its .aider.conf.yml mcp-server entries take a command, not a URL, so mcphub
+// writes a `mcphub relay` stdio command). A new relay adapter must be added
+// here AND declare IsRelayStdio()=true on its concrete struct; the
 // SupportedClientNames()-driven loop below fails until both are done.
 var relayStdioClientNames = map[string]bool{
 	"antigravity": true,
 	"zed":         true,
+	"aider":       true,
 }
 
 // TestIsRelayStdioClassifiesEverySupportedClient asserts the relay-stdio

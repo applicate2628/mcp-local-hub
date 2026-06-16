@@ -649,9 +649,10 @@ type clientDescriptor struct {
 // this build understands. The order is load-bearing: SupportedClientNames(),
 // ConfigPathForName()'s error message, and AllClients()'s construction order
 // all reproduce it, and CLI help / docs / tests assert against it. The first
-// 7 are the original clients (stable order); the trailing 8 are the Wave 2
-// opt-in clients (stable order after the original 7). None of the Wave 2
-// entries set defaultInstall — every one stays opt-in.
+// 7 are the original clients (stable order); then the 8 Wave 2 opt-in clients;
+// then the 4 agent-skills-reconciliation opt-in clients (copilot-cli, amazon-q,
+// openhands, aider). None of the opt-in entries set defaultInstall — every one
+// stays opt-in, so a fresh install touches only the 3 defaultInstall clients.
 //
 // This is a function, not a package-level var, on purpose: the descriptors
 // reference the New* factories, and some factories (e.g. NewCursor) call
@@ -703,6 +704,28 @@ func clientRegistry() []clientDescriptor {
 		{name: "openclaw", factory: NewOpenClaw,
 			// Mirrors defaultOpenClawConfigPath (openclaw.go): ~/.openclaw/openclaw.json.
 			configPath: defaultOpenClawConfigPath},
+		// agent-skills vendor reconciliation (2026-06-17): 4 more opt-in clients
+		// matching the vendor set TheQtCompanyRnD/agent-skills installs into
+		// (GitHub Copilot CLI, Amazon Q) plus the other major file-config agents
+		// (OpenHands, Aider). All opt-in (no defaultInstall).
+		{name: "copilot-cli", factory: NewCopilotCLI,
+			// Mirrors defaultCopilotCLIConfigPath (copilot_cli.go): COPILOT_HOME,
+			// when set, replaces the ~/.copilot directory entirely.
+			configPath: func(home string) string {
+				if h := os.Getenv("COPILOT_HOME"); h != "" {
+					return filepath.Join(h, "mcp-config.json")
+				}
+				return filepath.Join(home, ".copilot", "mcp-config.json")
+			}},
+		{name: "amazon-q", factory: NewAmazonQ,
+			// Mirrors NewAmazonQ (amazon_q.go): ~/.aws/amazonq/mcp.json (global).
+			configPath: func(home string) string { return filepath.Join(home, ".aws", "amazonq", "mcp.json") }},
+		{name: "openhands", factory: NewOpenHands,
+			// Mirrors NewOpenHands (openhands.go): ~/.openhands/config.toml.
+			configPath: func(home string) string { return filepath.Join(home, ".openhands", "config.toml") }},
+		{name: "aider", factory: NewAider,
+			// Mirrors NewAider (aider.go): ~/.aider.conf.yml (relay-stdio client).
+			configPath: func(home string) string { return filepath.Join(home, ".aider.conf.yml") }},
 	}
 }
 
