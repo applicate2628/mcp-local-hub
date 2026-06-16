@@ -306,7 +306,7 @@ func BuildHubReconcilePlan(
 					Path:       path,
 					Action:     ClientUpdateAddReplace,
 					EntryName:  ref.Server,
-					URL:        fmt.Sprintf("http://localhost:%d%s", ref.Port, p),
+					URL:        fmt.Sprintf("http://127.0.0.1:%d%s", ref.Port, p),
 					DaemonName: ref.Daemon,
 				})
 			}

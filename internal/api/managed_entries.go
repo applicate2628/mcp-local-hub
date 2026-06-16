@@ -363,7 +363,7 @@ func liveEntryMatchesManifestBinding(live *clients.MCPEntry, server string, bind
 	}
 	// HTTP shape check.
 	expectedURLs := []string{
-		fmt.Sprintf("http://localhost:%d%s", daemonPort, urlPath),
+		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
 		fmt.Sprintf("http://127.0.0.1:%d%s", daemonPort, urlPath),
 		fmt.Sprintf("http://[::1]:%d%s", daemonPort, urlPath),
 	}

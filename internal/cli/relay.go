@@ -101,7 +101,7 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 	}
 	for _, d := range m.Daemons {
 		if d.Name == daemonName {
-			return fmt.Sprintf("http://localhost:%d/mcp", d.Port), nil
+			return fmt.Sprintf("http://127.0.0.1:%d/mcp", d.Port), nil
 		}
 	}
 	return "", fmt.Errorf("no daemon %q in manifest %s", daemonName, server)
