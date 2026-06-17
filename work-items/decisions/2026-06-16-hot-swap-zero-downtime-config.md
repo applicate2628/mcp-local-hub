@@ -160,6 +160,37 @@ Slice 3 (eligibility classifier, pure fn) → Slice 2 (hub auto-reinit, CORRECTE
 transport-only retry + per-daemonKey singleflight + test-first + bounded backoff)
 → Slice 4 (gate-ON migration, opt-in). Slice 5 NEVER this round. Slice 1 deferred.
 
+## ✅ STATUS 2026-06-17 — DESIGN COMPLETE (all in-scope slices shipped)
+
+Reconciliation against HEAD found Slices 2 + 4 already built; Slice 3 was the only
+gap, now closed:
+
+- **Slice 2 (hub auto-reinit) — DONE** (prior drive, PR #355/#356/#357). On a
+  tools/call TRANSPORT failure (`isRetriableTransportFailure`, NEVER HTTP>=400 —
+  double-exec safe) `dispatchToolsCall` calls `selfHealRetry`: re-resolve port,
+  re-init under per-daemonKey singleflight (`reinitDaemonSession`), refresh
+  `InitSuccesses` under sess.mu, retry ONCE in-place (hard-capped, never recurses).
+  `refreshStalePortBeforeDispatch` is the proactive pre-dispatch refresh. Tests:
+  `hub_mcp_retry_test.go` + 9 refs in `hub_mcp_aggregator_test.go`. (Cadence is
+  failure-driven via the client's own retries rather than an internal backoff
+  timer — a valid alternative to the council's "bounded backoff" suggestion: zero
+  added happy-path latency, the restart window is spanned across successive client
+  calls.)
+- **Slice 3 (eligibility classifier) — DONE** (30884e1, 2026-06-17). Pure
+  `ClassifyHotSwapEligibility` + observation-only `DriftEntry.HotSwap`.
+- **Slice 4 (gate-ON migration, opt-in) — EXISTS** (`mcphub install
+  --reconcile-hub-mode` + the Settings gate toggle in gui-preferences.yaml;
+  `runReconcileHubMode`/`BuildHubReconcilePlan`/`ApplyHubReconcileInOrder`).
+  Default gate-OFF; flipping gate-ON rewrites every client config to the hub
+  aggregate endpoint so a global daemon (memory/time/seq-thinking) restart is
+  invisible behind the stable hub URL + Slice 2 auto-reinit. OPT-IN by operator
+  choice (the 2026-06-15 gate-ON review verdict was unanimous don't-flip-default;
+  operator: "я ничего не буду обкатывать"). No flip performed — kept available.
+
+**Net:** global-daemon hot-swap is achievable TODAY by flipping the gate-ON toggle
+(opt-in); the new Slice-3 classifier surfaces which daemons would benefit. Slice 5
+stays dropped. Design closed.
+
 ## STABILITY COUNCIL VERDICT (2026-06-16) — operator constraint "hot-swap must NET-IMPROVE stability"
 
 Convened a multi-lens council (reliability + consultant completed on opus;
