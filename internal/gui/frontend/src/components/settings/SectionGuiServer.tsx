@@ -16,6 +16,7 @@ import { useState } from "preact/hooks";
 import { SectionFooter } from "./SectionAppearance";
 import { useSectionSaveFlow } from "./useSectionSaveFlow";
 import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 import { restartGui } from "../../api";
 import type { SettingsSnapshot, ConfigSettingDTO, SettingDTO } from "../../lib/settings-types";
 
@@ -113,13 +114,12 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
   const showHubBadge = hubDef !== undefined && persistedHubEnabled !== actualHubEnabled;
 
   return (
-    <section data-section="gui_server" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">GUI server</h2>
-        <InfoTip text="Controls how the local GUI server runs: whether a browser opens on launch, which port it listens on, whether the hub endpoint is exposed, and the tray icon. Port and hub-endpoint changes take effect after a restart." />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">How the GUI server runs.</p>
-
+    <SettingsCard
+      section="gui_server"
+      title="GUI server"
+      infoTip="Controls how the local GUI server runs: whether a browser opens on launch, which port it listens on, whether the hub endpoint is exposed, and the tray icon. Port and hub-endpoint changes take effect after a restart."
+      subtitle="How the GUI server runs."
+    >
       <div class="divide-y divide-app-border/60">
         {SECTION_KEYS.map((k) => {
           const def = snapshot.data.settings.find((s: SettingDTO) => s.key === k) as ConfigSettingDTO | undefined;
@@ -220,6 +220,6 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
       ) : null}
 
       <SectionFooter flow={flow} />
-    </section>
+    </SettingsCard>
   );
 }

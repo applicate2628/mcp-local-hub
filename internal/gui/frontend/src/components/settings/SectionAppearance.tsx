@@ -1,5 +1,6 @@
 import { useSectionSaveFlow } from "./useSectionSaveFlow";
 import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionAppearanceProps = {
@@ -24,13 +25,12 @@ export function SectionAppearance({ snapshot, onDirtyChange }: SectionAppearance
     .filter((s): s is ConfigSettingDTO => !!s && s.type !== "action");
 
   return (
-    <section data-section="appearance" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">Appearance</h2>
-        <InfoTip text="Visual appearance of the GUI — theme, spacing density, default shell, navigation layout, and which screen opens first." />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">Theme, density, and navigation defaults.</p>
-
+    <SettingsCard
+      section="appearance"
+      title="Appearance"
+      infoTip="Visual appearance of the GUI — theme, spacing density, default shell, navigation layout, and which screen opens first."
+      subtitle="Theme, density, and navigation defaults."
+    >
       <div class="divide-y divide-app-border/60">
         {defs.map((d) => (
           <AppearanceField
@@ -43,7 +43,7 @@ export function SectionAppearance({ snapshot, onDirtyChange }: SectionAppearance
         ))}
       </div>
       <SectionFooter flow={flow} />
-    </section>
+    </SettingsCard>
   );
 }
 

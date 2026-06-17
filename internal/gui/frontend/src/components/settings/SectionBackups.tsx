@@ -3,7 +3,7 @@ import { putSetting, cleanBackups } from "../../lib/settings-api";
 import { ConfirmModal } from "../ConfirmModal";
 import { BackupsList } from "./BackupsList";
 import { BACKUPS_COPY } from "./backups-copy";
-import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionBackupsProps = {
@@ -112,16 +112,13 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
   }
 
   return (
-    <section data-section="backups" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">Backups</h2>
-        <InfoTip
-          label="About this section"
-          text="Retention applies per client. Each client keeps its newest N timestamped backups; older timestamped copies become eligible for cleanup. Original (pre-migration) backups are never deleted."
-        />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">Manage backup retention for managed client configs.</p>
-
+    <SettingsCard
+      section="backups"
+      title="Backups"
+      infoTipLabel="About this section"
+      infoTip="Retention applies per client. Each client keeps its newest N timestamped backups; older timestamped copies become eligible for cleanup. Original (pre-migration) backups are never deleted."
+      subtitle="Manage backup retention for managed client configs."
+    >
       <div class="divide-y divide-app-border/60">
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
           <label for="backups-keep-n-slider" class="flex items-center gap-1.5 text-sm font-medium text-app-text">
@@ -183,6 +180,6 @@ export function SectionBackups({ snapshot, onDirtyChange = () => {} }: SectionBa
         </button>
         <button type="button" disabled={!dirty || busy} onClick={onReset}>Reset</button>
       </div>
-    </section>
+    </SettingsCard>
   );
 }
