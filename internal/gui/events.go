@@ -313,6 +313,12 @@ func classifyEvent(eventType string) (source string, severity string) {
 	switch eventType {
 	case "daemon-state":
 		return "poller", api.GUIEventSeverityInfo
+	case "daemon-failed":
+		// Rising-edge daemon failure observed by the poller (same predicate
+		// as the tray icon + toast). Error severity so the gui-events.log
+		// reader can filter the failure onset out of the steady-state
+		// daemon-state churn.
+		return "poller", api.GUIEventSeverityError
 	case "poller-error":
 		return "poller", api.GUIEventSeverityError
 	case "bulk-action":

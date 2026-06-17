@@ -360,6 +360,94 @@ func TestPoller_SupervisorDownEmitsPollerErrorNotStaleDeltas(t *testing.T) {
 	}
 }
 
+// TestPoller_EmitsDaemonFailedOnRisingEdge guards the daemon-failed SSE event:
+// it must fire EXACTLY ONCE on the rising failure edge — including the
+// fail-in-place case where State stays "Running" but LastResult flips 0 -> 1
+// (which only surfaces because LastResult is in the change-detection key) — and
+// must NOT re-fire while the daemon stays failed, nor on the falling
+// (recovery) edge.
+func TestPoller_EmitsDaemonFailedOnRisingEdge(t *testing.T) {
+	frames := [][]api.DaemonStatus{
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, LastResult: 0}}, // healthy
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, LastResult: 1}}, // fail in place
+		{{Server: "memory", State: "Running", Port: 9123, PID: 99, LastResult: 0}}, // recovered
+	}
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	go p.Run(ctx)
+
+	// Three daemon-state deltas are expected (insert, 0->1, 1->0). Collect
+	// until we have all three, counting daemon-failed events seen alongside.
+	// After frame 3 the scripted source replays the last frame, so the stream
+	// goes quiet — by the time the 3rd daemon-state arrives, the single
+	// daemon-failed (published between deltas 2 and 3, FIFO) is already in hand.
+	var failedBodies []map[string]any
+	daemonStates := 0
+	deadline := time.After(2 * time.Second)
+	for daemonStates < 3 {
+		select {
+		case ev := <-ch:
+			switch ev.Type {
+			case "daemon-state":
+				daemonStates++
+			case "daemon-failed":
+				failedBodies = append(failedBodies, ev.Body)
+			}
+		case <-deadline:
+			t.Fatalf("did not observe 3 daemon-state deltas; got %d, daemon-failed=%d", daemonStates, len(failedBodies))
+		}
+	}
+
+	if len(failedBodies) != 1 {
+		t.Fatalf("daemon-failed fired %d times, want exactly 1 (rising edge only); bodies=%v", len(failedBodies), failedBodies)
+	}
+	body := failedBodies[0]
+	if got, _ := body["server"].(string); got != "memory" {
+		t.Errorf("daemon-failed server = %q, want memory", got)
+	}
+	if got, _ := body["last_result"].(int32); got != 1 {
+		t.Errorf("daemon-failed last_result = %v, want int32(1)", body["last_result"])
+	}
+}
+
+// TestPoller_DaemonFailedOnFailStateString guards the second failure predicate
+// path: a state string containing "fail" (e.g. "FailedToLaunch") trips
+// daemon-failed even with a zero LastResult, matching tray.isFailedRow.
+func TestPoller_DaemonFailedOnFailStateString(t *testing.T) {
+	frames := [][]api.DaemonStatus{
+		{{Server: "serena", Daemon: "claude", State: "Running", Port: 9121}},
+		{{Server: "serena", Daemon: "claude", State: "FailedToLaunch", Port: 9121}},
+	}
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	go p.Run(ctx)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type == "daemon-failed" {
+				if got, _ := ev.Body["state"].(string); got != "FailedToLaunch" {
+					t.Errorf("daemon-failed state = %q, want FailedToLaunch", got)
+				}
+				return // success
+			}
+		case <-deadline:
+			t.Fatal("never observed daemon-failed for a 'fail'-containing state string")
+		}
+	}
+}
+
 // errStatus is a statusProvider that always returns the configured
 // error, modeling a down-supervisor fail-loud snapshot.
 type errStatus struct{ err error }

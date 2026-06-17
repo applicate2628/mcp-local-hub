@@ -3,6 +3,7 @@ import { cleanupOrphans, fetchOrThrow, restartSupervisor } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { stateShape } from "../lib/status";
 import { formatBytes, formatUptime } from "../lib/format";
+import { pushToast } from "../lib/toast-store";
 import type { DaemonStatus } from "../types";
 
 // formatUptime + formatBytes now live in lib/format (single owner shared
@@ -183,10 +184,34 @@ export function DashboardScreen() {
     setError(body.err ?? "supervisor unreachable");
   }, []);
 
+  // SSE handler for daemon-failed (backend rising-edge failure event,
+  // internal/gui/poller.go). Fires a sticky danger toast so the operator
+  // gets an explicit, must-acknowledge alert the moment a daemon trips the
+  // failure predicate — the same gate that turns the tray icon red. The
+  // daemon-state delta still updates the card; this is the attention-grabbing
+  // overlay on top of it. Edge-triggered upstream, so no toast spam while a
+  // daemon stays failed.
+  const onDaemonFailed = useCallback((ev: MessageEvent) => {
+    const body = JSON.parse(ev.data) as {
+      server: string;
+      daemon?: string;
+      state?: string;
+      last_result?: number;
+    };
+    const who = body.daemon && body.daemon !== "default"
+      ? `${body.server}/${body.daemon}`
+      : body.server;
+    const code = typeof body.last_result === "number" && body.last_result !== 0
+      ? ` (exit ${body.last_result})`
+      : "";
+    pushToast("danger", `Daemon ${who} failed${code}`);
+  }, []);
+
   useEventSource("/api/events", {
     "daemon-state": onDelta,
     "bulk-action": onBulkAction,
     "poller-error": onPollerError,
+    "daemon-failed": onDaemonFailed,
   });
 
   // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.

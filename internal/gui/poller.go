@@ -3,9 +3,12 @@
 // StatusPoller samples statusProvider.Status() on a fixed interval and
 // publishes a "daemon-state" event onto the Broadcaster on every
 // observed change in (Server, Daemon, State, PID, Port, OrphanPID,
-// JobProtection). Fetch errors are surfaced as "poller-error" events
-// and the loop continues on the next tick. Daemons that disappear
-// between samples emit a terminal daemon-state event with state="Gone".
+// LastResult, JobProtection). On a rising FAILURE edge (a row that newly
+// trips api.IsRealFailure(LastResult) or whose State contains "fail") it
+// ALSO publishes a "daemon-failed" event for the Dashboard/toast alert
+// surface. Fetch errors are surfaced as "poller-error" events and the
+// loop continues on the next tick. Daemons that disappear between samples
+// emit a terminal daemon-state event with state="Gone".
 //
 // Spec: §3.6 (real-time event bus).
 // Task 12 lays the pump; Task 13 wires it into `mcphub gui` RunE.
@@ -13,6 +16,7 @@ package gui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -101,6 +105,20 @@ func boolPtrEqual(a, b *bool) bool {
 	return *a == *b
 }
 
+// isFailedDaemonState reports whether a daemon row looks failed, using the
+// SAME canonical predicate as the tray (cli.isFailedRow / tray.Aggregate): a
+// real Task-Scheduler/exit-code failure via api.IsRealFailure(LastResult), OR a
+// state string containing "fail" (defensive — deriveState emits "Failed"
+// historically and labels like "FailedToLaunch" should keep tripping). Sharing
+// api.IsRealFailure keeps the SSE daemon-failed onset on the same gate as the
+// tray icon + toast, so the operator never sees one signal without the other.
+func isFailedDaemonState(r api.DaemonStatus) bool {
+	if api.IsRealFailure(r.LastResult) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(r.State), "fail")
+}
+
 // keyFor produces the composite cache / delta key for one DaemonStatus
 // row. An empty Daemon field (single-daemon manifests) falls back to
 // "default" to match the convention used by the logs adapter and the
@@ -168,9 +186,18 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			prev.PID == r.PID &&
 			prev.Port == r.Port &&
 			prev.OrphanPID == r.OrphanPID &&
+			prev.LastResult == r.LastResult &&
 			boolPtrEqual(prev.JobProtection, r.JobProtection) {
 			continue
 		}
+		// Rising-edge failure detection (computed against the OLD row,
+		// BEFORE p.last is updated). LastResult joins the delta key above so
+		// a fail-in-place — State stays "Running" while LastResult flips
+		// 0 -> non-zero — is observed here instead of being silently
+		// swallowed by the unchanged-continue. An unknown prev (!ok) reads as
+		// non-failed (zero-value State + LastResult=0), so a daemon already
+		// failed on first observation still emits once.
+		failedEdge := isFailedDaemonState(r) && !isFailedDaemonState(prev)
 		p.last[k] = r
 		body := map[string]any{
 			"server":         r.Server,
@@ -200,6 +227,26 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			Type: "daemon-state",
 			Body: body,
 		})
+		// On a rising failure edge, publish a dedicated daemon-failed event
+		// so the Dashboard / toast surface can alert without re-deriving the
+		// failure predicate from the daemon-state stream. Carries the exit
+		// code (last_result) so the toast can name it. Edge-triggered (not
+		// level-triggered) so a daemon that stays failed across cycles does
+		// not spam — the unchanged-continue above suppresses repeat ticks,
+		// and a falling edge (recovery) is intentionally silent here.
+		if failedEdge {
+			p.events.Publish(Event{
+				Type: "daemon-failed",
+				Body: map[string]any{
+					"server":      r.Server,
+					"daemon":      r.Daemon,
+					"state":       r.State,
+					"last_result": r.LastResult,
+					"pid":         r.PID,
+					"port":        r.Port,
+				},
+			})
+		}
 	}
 	// Removed rows: key in last but not in this fetch.
 	for k := range p.last {
