@@ -74,8 +74,10 @@ const defaultIntentReaderTimeout = 250 * time.Millisecond
 // At 5s snapshot cadence the cache covers ~60 cycles before eviction.
 const intentCacheTTL = 5 * time.Minute
 
-// defaultIntentReader reads the on-disk intent via api.TryReadDaemonIntent
-// with the bounded timeout above so a held lock cannot stall the tray
+// defaultIntentReader reads the on-disk intent via api.TryReadUnifiedStops
+// (the v0.6 supervisor-intent.json `stops` sub-block — the legacy
+// daemon-intent.json read was retired by the Phase-E2 precedence flip;
+// see the call below) with the bounded timeout above so a held lock cannot stall the tray
 // snapshot loop. Per IntentReadResult contract:
 //   - State="missing" + Err=nil  → file genuinely absent (clean install
 //     or operator cleared every entry). Empty Tasks map IS authoritative.
