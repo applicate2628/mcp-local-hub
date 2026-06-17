@@ -1317,4 +1317,72 @@ Exit codes:
 5 — RESERVED (not emitted)
 6 — non-interactive shell with --kill but no --yes
 7 — --kill refused by identity gate
+8 — --reset-port refused: a client is gate-ON (hub-aggregate mode).
+    Resetting the port would orphan every gated client URL. Gate OFF
+    first, OR after the reset run `mcphub install --reconcile-hub-mode`.
+    See "Hub aggregate (gate-ON) mode + port reset" below.
 ```
+
+## Hub aggregate (gate-ON) mode + port reset
+
+**What gate-ON is.** When `gui_server.hub_endpoint_enabled` is `true`
+(Settings → "Expose a single aggregated hub URL"), mcphub runs a
+**single aggregated hub listener** inside the GUI process. Instead of
+each client config pointing at N per-daemon URLs (`http://localhost:<daemonport>/mcp`),
+the gate-ON reconciler (`mcphub install --reconcile-hub-mode`) rewrites
+every client's config to ONE aggregate entry named `mcphub-hub` whose
+URL is `http://127.0.0.1:<hubport>/clients/<client>/mcp`. The hub then
+fans each client's MCP traffic out to the per-daemon backends. The
+hub's `instance_id` is the long-lived identity (persisted across
+restarts in `<state-dir>/hub-mcp.endpoint.json`); the hub PORT is NOT —
+it is re-bound on each start.
+
+**The port-reset footgun (B2, guarded since this PR).** The hub port is
+baked into every gate-ON client URL. `mcphub gui --reset-port` (and the
+internal listener-rollback path) clear the persisted port to 0, so the
+NEXT hub bind grabs a fresh OS-assigned ephemeral port. Every gated
+client URL then points at the OLD port → `connection refused` for ALL
+aggregated servers at once. The symptom ("connection refused")
+misdirects diagnosis toward the daemons, not the config.
+
+**The guard.** `mcphub gui --reset-port` now REFUSES (exit 8) while any
+client is gate-ON — detected by reading each supported client's config
+for the reserved `mcphub-hub` aggregate entry. The refusal message
+names the gated clients and tells the operator to gate-OFF first OR to
+re-run `mcphub install --reconcile-hub-mode` after the reset.
+
+**If you DID reset the hub port while clients were gate-ON** (e.g. via
+an older binary, or the internal rollback path fired on a reload-handler
+failure): re-run `mcphub install --reconcile-hub-mode`. That rewrites
+every gated client's `mcphub-hub` URL to the new bound port. A hub port
+reset REQUIRES this re-reconcile whenever clients are gate-ON;
+otherwise the gated URLs stay orphaned.
+
+## Hub listener hang — observability (B1, partial)
+
+The gate-ON hub aggregate listener is a fire-and-forget goroutine inside
+the GUI process. A serve-loop death (fatal accept error) already logs
+`hub-listener-down` to `hub-mcp.log` and flips the live badge. A HANG
+(wedged accept loop, stuck handler, deadlock) with the GUI still alive
+was previously SILENT — `\mcp-local-hub-liveness` probes the supervisor
+lock, not the hub listener's responsiveness, so a live GUI with a hung
+listener passes the liveness probe and all aggregated MCP dies with no
+automatic recovery.
+
+**What ships now (observability only).** A self-watchdog goroutine in
+the GUI periodically TCP-dials the bound hub port. When the socket is
+unreachable for a bounded number of consecutive probes, it emits a
+structured `severity: warn, event: hub-listener-unresponsive` entry to
+`hub-mcp.log` (and `hub-listener-probe-recovered` info on recovery), so
+the previously-silent failure is observable in the same log stream as
+bind/lifecycle events. It does NOT auto-restart the listener.
+
+**Deferred (full recovery).** Auto-restart of a hung listener
+(ShutdownHubListener + startHubMcpListener) and handler-deadlock
+detection (a full authed round-trip rather than a TCP dial) need
+careful Server-lifecycle integration and are out of scope here to avoid
+destabilizing the running hub. Until then, the runbook recovery for "ALL
+aggregated MCP dies at once under gate-ON" is: **restart the GUI**
+(close the tray/window and relaunch, or `mcphub gui --force --kill --yes`
+then relaunch). Tracked in
+`work-items/backlog/2026-06-16-hub-listener-hang-no-recovery.md`.

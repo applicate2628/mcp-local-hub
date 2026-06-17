@@ -293,6 +293,20 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// observation (and for the astronomically-unlikely same-PID-recycle case).
 	go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(ctx)
 
+	// B1 footgun observability (work-items/backlog/2026-06-16-hub-listener-hang-no-recovery.md):
+	// a HUNG (not crashed) hub listener with the GUI process still alive
+	// is otherwise SILENT — the serve goroutine's `hub-listener-down`
+	// only fires on a serve-loop DEATH, and `\mcp-local-hub-liveness`
+	// probes the supervisor lock, not this listener. This watcher TCP-
+	// dials the bound port on a cadence and emits a structured
+	// `hub-listener-unresponsive` warn (once, on transition) so the
+	// previously-invisible failure is observable in hub-mcp.log. It does
+	// NOT auto-restart the listener (deferred — needs Server-lifecycle
+	// integration; see CLAUDE.md "Hub listener hang — observability").
+	// Fire-and-forget on the listener ctx: unwinds solely on ctx
+	// cancellation (hub stop / shutdown), same as the watcher above.
+	go api.NewHubListenerHealthWatcher(port, 0).Run(ctx)
+
 	go func() {
 		// Mark the listener dead on any exit path (clean shutdown via
 		// ErrServerClosed AND fatal accept-loop errors). The badge

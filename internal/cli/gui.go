@@ -223,6 +223,29 @@ activates the first window and exits 0.`,
 					return fmt.Errorf("acquire single-instance lock: %w", lockErr)
 				}
 				defer lock.Release()
+				// B2 footgun guard
+				// (work-items/backlog/2026-06-16-hub-port-drift-on-reset-port.md):
+				// the hub port is baked into every gate-ON client URL
+				// (`http://127.0.0.1:<hubport>/clients/<client>/mcp`).
+				// Clearing the persisted port to 0 makes the NEXT hub bind
+				// grab a fresh OS-assigned ephemeral port, orphaning every
+				// gated client URL at once (connection refused for ALL
+				// aggregated servers — and the symptom misdirects diagnosis
+				// toward the daemons, not the config). Refuse the reset
+				// while any client is gate-ON; the operator must gate-OFF
+				// first (or re-run `mcphub install --reconcile-hub-mode`
+				// after the reset to rewrite the gated URLs to the new
+				// port). This is the bounded safe fix vs a stable-port pin.
+				// The single-instance lock above already proved the GUI is
+				// not running, so this read sees the at-rest config.
+				if gated := api.GatedOnClients(); len(gated) > 0 {
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"--reset-port refused: %d client(s) are gate-ON (hub-aggregate mode) and their URLs are pinned to the current hub port: %s.\n"+
+							"Resetting the port would orphan every gated client URL (the next hub bind grabs a NEW ephemeral port → connection refused for ALL aggregated servers).\n"+
+							"Gate OFF first (Settings → uncheck \"Expose a single aggregated hub URL\" + restart), OR after the reset re-run `mcphub install --reconcile-hub-mode` to rewrite the gated URLs to the new port.\n",
+						len(gated), strings.Join(gated, ", "))
+					return &forceExitError{code: 8}
+				}
 				if err := api.ResetHubPort(); err != nil {
 					return fmt.Errorf("reset hub port: %w", err)
 				}
