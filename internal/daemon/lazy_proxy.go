@@ -67,6 +67,13 @@ const (
 	DefaultLSPMaterializedHardCap   = api.DefaultLSPMaterializedHardCap
 	DefaultLSPIdleBackendTTL        = 30 * time.Minute
 	DefaultLSPIdleBackendCheckEvery = time.Minute
+
+	// Bounds attacker-controlled document lifecycle state retained by the
+	// long-lived lazy proxy. Normal editors keep far fewer concurrently-open
+	// documents; this cap prevents unbounded unique URI growth from local
+	// clients while preserving duplicate-open refcounting for tracked URIs.
+	maxTrackedDocRefs = 4096
+	maxDocURIBytes    = 4096
 )
 
 var materializedSlotPortLiveFn = lazyProxyPortLive
@@ -481,7 +488,11 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 	}
 
 	isOpen := req.Method == "textDocument/didOpen"
-	forward := p.applyDocRef(uri, isOpen)
+	forward, err := p.applyDocRef(uri, isOpen)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	}
 	if !forward {
 		// Refcount absorbed this open/close — upstream already has the
 		// correct view of the document. No materialize, no forward.
@@ -503,7 +514,8 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	defer p.endBackendRequest()
-	if _, err := ep.SendRequest(r.Context(), req); err != nil {
+	resp, err := ep.SendRequest(r.Context(), req)
+	if err != nil {
 		// Client-cancel is not a backend failure — see handleToolsCall.
 		// The notification was not delivered, so roll back the transition.
 		p.rollbackDocRef(uri, isOpen)
@@ -515,6 +527,12 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
+	if resp != nil && resp.Error != nil {
+		// Backend rejected the lifecycle notification, so do not retain a
+		// refcount that would suppress a future legitimate open/close. The
+		// client-visible HTTP contract remains notification-like (202/no body).
+		p.rollbackDocRef(uri, isOpen)
+	}
 	// Notification delivered. JSON-RPC notifications take no response body.
 	w.WriteHeader(http.StatusAccepted)
 }
@@ -525,25 +543,31 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 // against an already-zero count is absorbed and never drives the count
 // negative (a spurious or duplicate close from one agent must not affect the
 // document state another agent still depends on).
-func (p *LazyProxy) applyDocRef(uri string, open bool) bool {
+func (p *LazyProxy) applyDocRef(uri string, open bool) (bool, error) {
+	if len(uri) > maxDocURIBytes {
+		return false, fmt.Errorf("textDocument.uri exceeds %d bytes", maxDocURIBytes)
+	}
 	p.docRefsMu.Lock()
 	defer p.docRefsMu.Unlock()
 	if open {
 		prev := p.docRefs[uri]
+		if prev == 0 && len(p.docRefs) >= maxTrackedDocRefs {
+			return false, fmt.Errorf("too many tracked text documents (max %d)", maxTrackedDocRefs)
+		}
 		p.docRefs[uri] = prev + 1
-		return prev == 0
+		return prev == 0, nil
 	}
 	prev := p.docRefs[uri]
 	if prev <= 0 {
 		// Close with no recorded open — nothing upstream to release.
-		return false
+		return false, nil
 	}
 	if prev == 1 {
 		delete(p.docRefs, uri)
-		return true
+		return true, nil
 	}
 	p.docRefs[uri] = prev - 1
-	return false
+	return false, nil
 }
 
 // rollbackDocRef undoes the most recent applyDocRef transition for uri when
