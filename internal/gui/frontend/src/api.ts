@@ -617,6 +617,79 @@ export async function removeTrustedRoot(root: string): Promise<TrustedRootsRespo
 }
 
 // ───────────────────────────────────────────────────────────────────
+// Default-install client set override (Settings → Clients panel)
+//
+// Thin wrappers around /api/client-install-prefs (GET/POST). The override
+// lets the operator pick which clients are in the default-install set (the
+// compile-time {claude-code, codex-cli, cursor} trio plus opt-ins) without
+// CLI flags; the chosen set is persisted to gui-preferences.yaml and becomes
+// the effective default for installs that do not name an explicit --clients
+// target. Both methods return the fresh snapshot so the caller re-renders
+// without a follow-up GET.
+// ───────────────────────────────────────────────────────────────────
+
+export interface ClientInstallPrefRow {
+  name: string;
+  // True when the compile-time registry marks this client default-install
+  // (the canonical {claude-code, codex-cli, cursor} trio).
+  compile_default: boolean;
+  // True when this client is in the currently-effective default-install set.
+  selected: boolean;
+}
+
+export interface ClientInstallPrefsResponse {
+  clients: ClientInstallPrefRow[];
+  // True when an explicit operator override is persisted (vs. the
+  // compile-time trio fallback).
+  override_active: boolean;
+}
+
+// normalizeClientInstallPrefs guarantees a non-null `clients` array and a
+// boolean `override_active` regardless of what the wire carried — defensive
+// against an older/partial backend body (consistent with
+// normalizeTrustedRoots' philosophy).
+function normalizeClientInstallPrefs(
+  raw: Partial<ClientInstallPrefsResponse>,
+): ClientInstallPrefsResponse {
+  return {
+    clients: Array.isArray(raw.clients)
+      ? raw.clients.map((c) => ({
+          name: typeof c?.name === "string" ? c.name : "",
+          compile_default: c?.compile_default === true,
+          selected: c?.selected === true,
+        }))
+      : [],
+    override_active: raw.override_active === true,
+  };
+}
+
+// getClientInstallPrefs reads the current default-install client set. An
+// absent gui-preferences.yaml yields the compile-time trio selected with
+// override_active=false — the normal first-run path.
+export async function getClientInstallPrefs(): Promise<ClientInstallPrefsResponse> {
+  return normalizeClientInstallPrefs(
+    await fetchOrThrow<Partial<ClientInstallPrefsResponse>>("/api/client-install-prefs", "object"),
+  );
+}
+
+// setClientInstallPrefs persists `clients` as the default-install set (POST).
+// The backend rejects an empty set or an unknown client name with 400; the
+// message embeds the backend code (CLIENT_INSTALL_PREFS_INVALID) so the
+// caller can surface a precise validation error. Resolves to the refreshed
+// snapshot on success.
+export async function setClientInstallPrefs(
+  clients: string[],
+): Promise<ClientInstallPrefsResponse> {
+  return normalizeClientInstallPrefs(
+    await fetchOrThrow<Partial<ClientInstallPrefsResponse>>("/api/client-install-prefs", "object", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clients }),
+    }),
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Marketplace one-click install (roadmap §B #1, frontend slice S3)
 //
 // POST /api/marketplace/install drives the Store "one-click install" UI.

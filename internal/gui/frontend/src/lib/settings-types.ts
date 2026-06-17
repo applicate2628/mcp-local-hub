@@ -2,7 +2,7 @@
 // entries omit `value` and `default` to match the wire shape from
 // internal/gui/settings.go::settingDTO.MarshalJSON.
 
-export type Section = "appearance" | "gui_server" | "daemons" | "backups" | "trusted_roots" | "maintenance" | "advanced";
+export type Section = "appearance" | "gui_server" | "daemons" | "backups" | "clients" | "trusted_roots" | "maintenance" | "advanced";
 
 type BaseSettingDTO = {
   key: string;

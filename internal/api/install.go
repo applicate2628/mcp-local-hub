@@ -255,9 +255,10 @@ func (a *API) Install(opts InstallOpts) error {
 	}
 	// 3. Build plan.
 	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
-		DaemonFilter:      opts.DaemonFilter,
-		ClientsInclude:    opts.ClientsInclude,
-		IncludeAllClients: opts.IncludeAllClients,
+		DaemonFilter:           opts.DaemonFilter,
+		ClientsInclude:         opts.ClientsInclude,
+		IncludeAllClients:      opts.IncludeAllClients,
+		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
 	})
 	if err != nil {
 		return err
@@ -411,14 +412,37 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 		return err
 	}
 	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
-		DaemonFilter:      opts.DaemonFilter,
-		ClientsInclude:    opts.ClientsInclude,
-		IncludeAllClients: opts.IncludeAllClients,
+		DaemonFilter:           opts.DaemonFilter,
+		ClientsInclude:         opts.ClientsInclude,
+		IncludeAllClients:      opts.IncludeAllClients,
+		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
 	})
 	if err != nil {
 		return err
 	}
 	return a.installPlanCore(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w)
+}
+
+// resolveDefaultClientsOverride returns the operator's persisted
+// default-install client set ONLY when this install would fall through to
+// the compile-time default — i.e. neither IncludeAllClients nor an explicit
+// ClientsInclude is set. In every other case it returns nil so the explicit
+// selection wins and the predicate never even consults the override.
+//
+// A read error (corrupt gui-preferences.yaml) is swallowed to nil: the
+// install then proceeds on the compile-time default trio rather than
+// failing the whole install over an unreadable GUI-preference file. The
+// override is a convenience layer; it must never make `mcphub install`
+// harder to complete than it was before the feature existed.
+func (a *API) resolveDefaultClientsOverride(opts InstallOpts) []string {
+	if opts.IncludeAllClients || len(opts.ClientsInclude) > 0 {
+		return nil
+	}
+	override, err := a.DefaultInstallClientNamesOverride()
+	if err != nil {
+		return nil
+	}
+	return override
 }
 
 // Status returns the slice of MCP daemons under supervisor management
@@ -1365,6 +1389,22 @@ type BuildPlanOpts struct {
 	DaemonFilter      string
 	ClientsInclude    []string
 	IncludeAllClients bool
+
+	// DefaultClientsOverride, when non-empty, REPLACES the compile-time
+	// clients.DefaultInstallClientNames() fallback used when ClientsInclude
+	// is empty and IncludeAllClients is false. It carries the operator's
+	// persisted default-install client set (gui-preferences.yaml, resolved
+	// by API.DefaultInstallClientNamesEffective) into the plan-builder.
+	//
+	// The field — not a disk read inside installClientPredicate — is the
+	// seam ON PURPOSE: it keeps BuildPlanWithOpts hermetic. A direct
+	// BuildPlanWithOpts/BuildPlan caller (every unit test, plus any future
+	// caller that wants the pure compile-time default) leaves this nil and
+	// gets the {claude-code, codex-cli, cursor} trio regardless of what
+	// gui-preferences.yaml on the host happens to contain. Only the
+	// top-level install entry points (Install / installFromManifestDir)
+	// resolve the override from disk and populate this.
+	DefaultClientsOverride []string
 }
 
 // BuildPlan translates a manifest into concrete intended actions using the
@@ -1495,10 +1535,22 @@ func installClientPredicate(opts BuildPlanOpts) (func(string) bool, error) {
 	if opts.IncludeAllClients {
 		return func(string) bool { return true }, nil
 	}
+	// Default-client resolution precedence:
+	//   1. explicit ClientsInclude (operator/CLI --clients or a caller-
+	//      supplied set) — used verbatim;
+	//   2. DefaultClientsOverride (the operator's persisted default-install
+	//      set, resolved from gui-preferences.yaml by the top-level Install
+	//      entry points) — replaces the compile-time fallback;
+	//   3. clients.DefaultInstallClientNames() — the compile-time trio.
+	// Keeping the override in this field (not a disk read here) is what
+	// keeps BuildPlanWithOpts hermetic for direct callers/tests.
 	var names []string
-	if len(opts.ClientsInclude) > 0 {
+	switch {
+	case len(opts.ClientsInclude) > 0:
 		names = opts.ClientsInclude
-	} else {
+	case len(opts.DefaultClientsOverride) > 0:
+		names = opts.DefaultClientsOverride
+	default:
 		names = clients.DefaultInstallClientNames()
 	}
 	supported := map[string]bool{}
