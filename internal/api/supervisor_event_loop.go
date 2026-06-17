@@ -123,6 +123,10 @@ func (l *EventLoop) RegisterHandler(h func(LoopEvent)) {
 // Typically set before Run; the atomic store makes a concurrent set
 // data-race-free regardless (mirrors RegisterHandler's COW posture).
 func (l *EventLoop) SetPanicHandler(f func(recovered any, e LoopEvent)) {
+	if f == nil {
+		l.onPanic.Store(nil)
+		return
+	}
 	l.onPanic.Store(&f)
 }
 

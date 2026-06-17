@@ -231,3 +231,28 @@ func TestEventLoop_SetPanicHandlerConcurrentWithRun(t *testing.T) {
 		t.Fatalf("panic observer installed via SetPanicHandler did not fire: before=%d after=%d", before, observed.Load())
 	}
 }
+
+// TestEventLoop_SetPanicHandlerNilClearsObserver verifies SetPanicHandler(nil)
+// preserves the pre-atomic behavior: nil removes the panic observer instead of
+// installing a non-nil pointer to a nil function value. A later handler panic
+// must therefore propagate as the original panic, with no secondary nil-call
+// panic masking it.
+func TestEventLoop_SetPanicHandlerNilClearsObserver(t *testing.T) {
+	loop := NewEventLoop(16)
+
+	var observed atomic.Int64
+	loop.SetPanicHandler(func(any, LoopEvent) { observed.Add(1) })
+	loop.SetPanicHandler(nil)
+	loop.RegisterHandler(func(LoopEvent) { panic("original-handler-panic") })
+
+	defer func() {
+		r := recover()
+		if r != "original-handler-panic" {
+			t.Fatalf("dispatch panic = %v; want original-handler-panic", r)
+		}
+		if got := observed.Load(); got != 0 {
+			t.Fatalf("cleared panic observer fired %d times; want 0", got)
+		}
+	}()
+	loop.dispatch(LoopEvent{TaskName: "boom"})
+}
