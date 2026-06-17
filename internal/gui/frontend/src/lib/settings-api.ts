@@ -108,6 +108,40 @@ export async function cleanBackupsForClient(
   return await jsonOrThrow(res);
 }
 
+// Per-timestamp backup actions (#2). Both POST a {client, path} body to a
+// requireSameOrigin-guarded handler that re-validates the path belongs to
+// the named client's config dir and matches the
+// `.bak-mcp-local-hub-` naming convention server-side — the client never
+// influences WHICH file is touched beyond naming one already shown in the
+// list. restoreBackup overwrites the live config from the chosen backup
+// (the server snapshots the current config first so the restore is
+// undoable); deleteBackup removes one recognized backup file.
+export async function restoreBackup(
+  client: string,
+  path: string,
+): Promise<{ restored: string; client: string; snapshot: string }> {
+  const res = await fetch("/api/backups/restore", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client, path }),
+  });
+  return await jsonOrThrow(res);
+}
+
+export async function deleteBackup(
+  client: string,
+  path: string,
+): Promise<{ deleted: string; client: string }> {
+  const res = await fetch("/api/backups/delete", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client, path }),
+  });
+  return await jsonOrThrow(res);
+}
+
 // Maintenance section helpers — Cleanup-5 per
 // docs/superpowers/specs/2026-05-06-cleanup-buttons-design.md.
 //

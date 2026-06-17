@@ -19,11 +19,20 @@ export type ConfirmModalProps = {
   danger?: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
+  /**
+   * Optional data-testid override for the dialog and its action buttons.
+   * Defaults to "confirm-modal". A screen that renders more than one
+   * ConfirmModal at once (e.g. BackupsList's per-row restore + delete)
+   * MUST pass distinct ids so getByTestId stays unambiguous — the
+   * <dialog> element is always present in the DOM regardless of `open`.
+   */
+  testId?: string;
 };
 
 export function ConfirmModal(props: ConfirmModalProps): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [busy, setBusy] = useState(false);
+  const testId = props.testId ?? "confirm-modal";
 
   useEffect(() => {
     const d = dialogRef.current;
@@ -50,7 +59,7 @@ export function ConfirmModal(props: ConfirmModalProps): JSX.Element {
     <dialog
       ref={dialogRef}
       class="confirm-modal"
-      data-testid="confirm-modal"
+      data-testid={testId}
       onCancel={(e) => {
         if (busy) {
           e.preventDefault();
@@ -69,7 +78,7 @@ export function ConfirmModal(props: ConfirmModalProps): JSX.Element {
           type="button"
           onClick={() => !busy && props.onCancel()}
           disabled={busy}
-          data-testid="confirm-modal-cancel"
+          data-testid={`${testId}-cancel`}
         >
           Cancel
         </button>
@@ -78,7 +87,7 @@ export function ConfirmModal(props: ConfirmModalProps): JSX.Element {
           class={props.danger ? "danger" : ""}
           onClick={onConfirmClick}
           disabled={busy}
-          data-testid="confirm-modal-confirm"
+          data-testid={`${testId}-confirm`}
         >
           {busy ? "Working…" : props.confirmLabel}
         </button>

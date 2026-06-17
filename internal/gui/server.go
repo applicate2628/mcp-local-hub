@@ -498,6 +498,7 @@ type Server struct {
 	secrets                  secretsAPI
 	settings                 settingsAPI
 	backups                  backupsAPI
+	backupActions            backupActionsAPI
 	cleanup                  cleanupAPI
 	clientInit               clientInitializer
 	lspRegistrar             lspRegistrar
@@ -713,6 +714,7 @@ func NewServer(cfg Config) *Server {
 	s.secrets = realSecretsAPI{}
 	s.settings = realSettingsAPI{}
 	s.backups = realBackupsAPI{}
+	s.backupActions = realBackupActionsAPI{}
 	s.cleanup = realCleanupAPI{}
 	s.clientInit = realClientInitializer{}
 	s.lspRegistrar = realLSPRegistrar{}

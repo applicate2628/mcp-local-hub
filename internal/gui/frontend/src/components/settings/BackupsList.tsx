@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import {
   cleanBackupsForClient,
+  deleteBackup,
   getBackups,
   getBackupsCleanPreview,
+  restoreBackup,
 } from "../../lib/settings-api";
 import type { BackupInfo } from "../../lib/settings-types";
 import { BACKUPS_COPY } from "./backups-copy";
 import { CORE_CLIENTS, WAVE2_CLIENTS } from "../../lib/routing";
+import { ConfirmModal } from "../ConfirmModal";
 
 export type BackupsListProps = {
   // The keep_n value to preview against. -1 means "no preview yet".
@@ -48,6 +51,16 @@ export function BackupsList({
   // backups list re-fetches without depending on the parent's
   // snapshot.refresh cycle (which is gated on the keepN dirty state).
   const [refreshTick, setRefreshTick] = useState(0);
+  // #2 per-timestamp restore/delete. Each is gated behind a ConfirmModal:
+  // `pending*` holds the {client, row} a dialog is open for (null = closed),
+  // `rowBusy` disables every row action while one is in-flight (avoid
+  // concurrent live-config writes), and `rowErr` keys the last error by
+  // backup path so it renders inline on the offending row.
+  const [pendingRestore, setPendingRestore] = useState<BackupInfo | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<BackupInfo | null>(null);
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowErr, setRowErr] = useState<Record<string, string>>({});
+  const [rowOk, setRowOk] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +96,64 @@ export function BackupsList({
       setPerClientErr((prev) => ({ ...prev, [client]: msg }));
     } finally {
       setCleaningClient(null);
+    }
+  }
+
+  function rowErrMsg(e: unknown): string {
+    return e instanceof Error
+      ? e.message
+      : typeof e === "string"
+      ? e
+      : "action failed";
+  }
+
+  async function doRestore(b: BackupInfo) {
+    setRowBusy(true);
+    setRowOk(null);
+    setRowErr((prev) => {
+      const next = { ...prev };
+      delete next[b.path];
+      return next;
+    });
+    try {
+      const res = await restoreBackup(b.client, b.path);
+      setPendingRestore(null);
+      // A restore both rewrites the live config AND (server-side) writes a
+      // fresh safety snapshot of the prior config, so the backup list
+      // changed — re-fetch it.
+      setRefreshTick((n) => n + 1);
+      onClientCleaned(b.client);
+      setRowOk(
+        res.snapshot
+          ? `Restored ${b.client}. Previous config saved as a new backup.`
+          : `Restored ${b.client}.`,
+      );
+    } catch (e: unknown) {
+      setPendingRestore(null);
+      setRowErr((prev) => ({ ...prev, [b.path]: rowErrMsg(e) }));
+    } finally {
+      setRowBusy(false);
+    }
+  }
+
+  async function doDelete(b: BackupInfo) {
+    setRowBusy(true);
+    setRowOk(null);
+    setRowErr((prev) => {
+      const next = { ...prev };
+      delete next[b.path];
+      return next;
+    });
+    try {
+      await deleteBackup(b.client, b.path);
+      setPendingDelete(null);
+      setRefreshTick((n) => n + 1);
+      onClientCleaned(b.client);
+    } catch (e: unknown) {
+      setPendingDelete(null);
+      setRowErr((prev) => ({ ...prev, [b.path]: rowErrMsg(e) }));
+    } finally {
+      setRowBusy(false);
     }
   }
 
@@ -194,6 +265,33 @@ export function BackupsList({
                         {BACKUPS_COPY.rowBadge}
                       </span>
                     ) : null}
+                    <span class="backups-row-actions">
+                      <button
+                        type="button"
+                        class="backups-row-restore"
+                        disabled={rowBusy}
+                        data-testid={`restore-backup-${b.path}`}
+                        title={`Overwrite ${b.client}'s live config from this backup. Your current config is saved as a new backup first.`}
+                        onClick={() => { setRowOk(null); setPendingRestore(b); }}
+                      >
+                        Restore
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-danger backups-row-delete"
+                        disabled={rowBusy}
+                        data-testid={`delete-backup-${b.path}`}
+                        title={`Permanently delete this backup file for ${b.client}.`}
+                        onClick={() => { setRowOk(null); setPendingDelete(b); }}
+                      >
+                        Delete
+                      </button>
+                    </span>
+                    {rowErr[b.path] ? (
+                      <span class="error-banner backups-row-error" role="alert">
+                        {rowErr[b.path]}
+                      </span>
+                    ) : null}
                   </li>
                 );
               })}
@@ -231,6 +329,44 @@ export function BackupsList({
           </details>
         );
       })}
+
+      {rowOk ? (
+        <p class="save-banner ok backups-row-ok" role="status">{rowOk}</p>
+      ) : null}
+
+      <ConfirmModal
+        testId="restore-confirm-modal"
+        open={pendingRestore !== null}
+        title="Restore this backup?"
+        body={
+          <>
+            This overwrites <strong>{pendingRestore?.client}</strong>'s live
+            config with the selected backup. Your current config is saved as a
+            new backup first, so you can undo this.
+          </>
+        }
+        confirmLabel="Restore"
+        danger
+        onConfirm={() => (pendingRestore ? doRestore(pendingRestore) : undefined)}
+        onCancel={() => setPendingRestore(null)}
+      />
+
+      <ConfirmModal
+        testId="delete-confirm-modal"
+        open={pendingDelete !== null}
+        title="Delete this backup?"
+        body={
+          <>
+            Permanently delete this backup file for{" "}
+            <strong>{pendingDelete?.client}</strong>. This cannot be undone. The
+            live config and other backups are not affected.
+          </>
+        }
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => (pendingDelete ? doDelete(pendingDelete) : undefined)}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
