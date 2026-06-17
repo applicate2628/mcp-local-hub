@@ -5,7 +5,7 @@ found-by: roadmap-audit during PR #264 func-hook test-seam analysis
 found-on: 2026-06-03
 project: mcp-local-hub
 context: adjacent-finding
-status: open
+status: closed
 related-pr: (none — surfaced while closing the #264 test-infra batch)
 ---
 
@@ -107,3 +107,7 @@ operator-docs update.
   bullet) — the documentation gap is itself part of this bug
 - `work-items/bugs/2026-05-20-tests-leak-state-into-production-logs.md` —
   sibling leaked-env hazard (api-side fixed by #264; gui-side leak still open)
+
+## Resolution (closed 2026-06-17)
+
+Fixed-in: #318 prod gate (env override behind test_state_path_env build tag) + Wave-3 gui TestMain fence; gui-side residual closed 2026-06-17

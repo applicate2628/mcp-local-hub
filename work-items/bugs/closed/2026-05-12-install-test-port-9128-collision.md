@@ -5,7 +5,7 @@ found-by: g4-phase3 r6 verification on PR #157
 found-on: 2026-05-12
 project: mcp-local-hub
 context: pre-existing master flake
-status: open
+status: closed
 related-pr: pending Phase 3 (feat/g4-phase3-resolver-sessions-aggregator)
 ---
 
@@ -86,3 +86,7 @@ Skip this test on local pre-push verification when a `mcphub time`
 daemon is detected on port 9128. CI (manual-only on `workflow_dispatch`)
 runs on a clean Windows runner with no installed daemons, so it
 passes there.
+
+## Resolution (closed 2026-06-17)
+
+Fixed-in: already-fixed (pickFreeLocalPort + AST guard TestNoLiveBandLiteralReachesKillOrListenSink); verified 2026-06-17

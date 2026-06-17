@@ -65,3 +65,7 @@ Does NOT add an auto-trigger on push.
 - Coordinate with the existing `internal/gui/e2e/global-setup.ts`
   pattern — DRY: extract the freshness check into a helper script
   invoked from both CI and E2E setup.
+
+## Resolution (closed 2026-06-17)
+
+Fixed-in: #315 (acf9f7f) — ci.yml lines 136-156 regenerate the embedded bundle + git diff --exit-code internal/gui/assets/

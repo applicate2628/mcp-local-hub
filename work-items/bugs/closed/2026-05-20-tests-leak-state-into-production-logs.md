@@ -5,7 +5,7 @@ found-by: diagnostic dig during "после перезагрузки слома�
 found-on: 2026-05-20
 project: mcp-local-hub
 context: pre-existing test-hygiene gap, not caused by feat/v0.5.x-servers-matrix-revamp
-status: open
+status: closed
 related-pr: PR #264 (914d0cf) — api-side fixed; gui-side leak still open
 ---
 
@@ -180,3 +180,7 @@ patch. Pick based on how many call sites are affected.
   STOPS the operator's real installed daemons via the scheduler API. That
   one is about side-effects on the real Task Scheduler; this one is
   about side-effects on the real audit log.
+
+## Resolution (closed 2026-06-17)
+
+Fixed-in: Wave-3 gui TestMain fence (65d307f) + per-test isolateStateDir (#264, init_client_config_test.go:410), 2026-06-17 — gui tests no longer leak hub-mcp.log/workspaces.yaml into the live %LOCALAPPDATA%

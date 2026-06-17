@@ -5,7 +5,7 @@ found-by: backend-engineer
 found-in-phase: PR #142 round-1 codex deep-sec follow-up
 affected-surface: internal/api/legacy_migrate_test.go, internal/api/register_test.go
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Reproduction
@@ -73,3 +73,7 @@ Low: dev-environment-only flake; no CI impact; no production-runtime impact. Tes
 ## Discovery context
 
 Found while running `go test -count=1 -timeout 8m ./...` to verify the round-1 deep-sec fix on `internal/tray/state.go`. The tray fix itself is hermetic; the api package hang reproduces on master without the fix and is unrelated to the tray-state change.
+
+## Resolution (closed 2026-06-17)
+
+Fixed-in: Wave-3 TestMain state-dir fence (65d307f, 2026-06-17) — api test binary now defaults to a temp daemonStateRoot, so tests no longer contend on the user's real daemon-intent.json.lock

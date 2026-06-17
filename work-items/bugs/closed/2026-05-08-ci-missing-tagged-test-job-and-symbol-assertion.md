@@ -5,7 +5,7 @@ found-by: qa-engineer
 found-in-phase: PR #134 final QA gate
 affected-surface: .github/workflows/ci.yml
 context: standalone
-status: open
+status: closed
 ---
 
 ## Reproduction
@@ -51,3 +51,7 @@ However, the explicit acceptance criterion from plan v13 §43 is unmet:
 ## Severity rationale
 
 Low: build-tag separation already provides compile-time guarantee for symbol absence. The CI gate is additional defense-in-depth, missing but not blocking ship.
+
+## Resolution (closed 2026-06-17)
+
+Fixed-in: #315 (acf9f7f) — ci.yml tagged-test step (lines 100-109) + go-tool-nm symbol assertion
