@@ -27,7 +27,7 @@ func newPochiForTest(t *testing.T, initial string) *pochiClient {
 // `mcp` key and preserves unrelated keys.
 func TestPochi_AddEntry_WritesRelayStdioUnderMcpKey(t *testing.T) {
 	exe := filepath.Join(t.TempDir(), "mcphub.exe") // guaranteed-absolute path
-	p := newPochiForTest(t, `{"other":"keep"}`)
+	p := newPochiForTest(t, `{"other":"keep","mcp":{}}`)
 	err := p.AddEntry(MCPEntry{Name: "serena", RelayExePath: exe, RelayServer: "serena", RelayDaemon: "serena-default"})
 	if err != nil {
 		t.Fatalf("AddEntry: %v", err)
@@ -57,6 +57,41 @@ func TestPochi_AddEntry_WritesRelayStdioUnderMcpKey(t *testing.T) {
 	args, ok := entry["args"].([]any)
 	if !ok || len(args) != 5 || args[0] != "relay" || args[1] != "--server" || args[3] != "--daemon" {
 		t.Errorf("args = %v, want [relay --server serena --daemon serena-default]", entry["args"])
+	}
+}
+
+func TestPochi_ExistsRequiresMCPSection(t *testing.T) {
+	p := newPochiForTest(t, `{"owner":"other-app","settings":{}}`)
+	if p.Exists() {
+		t.Fatal("Exists() = true for unrelated ~/config.json without top-level mcp object")
+	}
+
+	p = newPochiForTest(t, `{"mcp":{}}`)
+	if !p.Exists() {
+		t.Fatal("Exists() = false for config with top-level mcp object")
+	}
+}
+
+func TestPochi_RefusesToMutateUnrelatedConfig(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "mcphub.exe")
+	p := newPochiForTest(t, `{"owner":"other-app","settings":{}}`)
+	original, err := os.ReadFile(p.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := p.AddEntry(MCPEntry{Name: "serena", RelayExePath: exe, RelayServer: "serena", RelayDaemon: "serena-default"}); err == nil {
+		t.Fatal("AddEntry succeeded for unrelated config without top-level mcp object")
+	}
+	if _, err := p.BackupKeep(0); err == nil {
+		t.Fatal("BackupKeep succeeded for unrelated config without top-level mcp object")
+	}
+	after, err := os.ReadFile(p.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(original) {
+		t.Fatalf("unrelated config mutated: got %s, want %s", after, original)
 	}
 }
 
