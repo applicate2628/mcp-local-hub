@@ -17,6 +17,18 @@ import (
 // Tests that override knownFolderResolverFn or daemonStateRootOverride
 // MUST call this first; otherwise leftover state from one test leaks
 // into another via the shared package state.
+//
+// It also CLEARS daemonStateRootOverride at entry (saving + restoring it via the
+// cleanup below). The api TestMain (main_test.go) installs a global non-empty
+// override as a state-leak fence for the whole test binary; the resolver-chain
+// tests (state_paths_test.go, state_paths_envfallback_test.go) call
+// daemonStateDir() expecting the REAL LOCALAPPDATA/KnownFolder resolver to run
+// (which the non-empty override would short-circuit), and the
+// override-driving tests below (managedEntriesTestHelper, hubMcpStateTestHelper,
+// TestWriteStateFileAtomic_*, TestInstallPlanCore_*, ...) set their own value
+// AFTER this call so the clear is harmless to them. Clearing here lets every
+// statePathsHelper caller start from the empty/real-resolver baseline while the
+// cleanup restores the TestMain global default for subsequent tests.
 func statePathsHelper(t *testing.T) {
 	t.Helper()
 	prevResolver := knownFolderResolverFn
@@ -25,6 +37,7 @@ func statePathsHelper(t *testing.T) {
 		knownFolderResolverFn = prevResolver
 		daemonStateRootOverride = prevOverride
 	})
+	daemonStateRootOverride = ""
 }
 
 // installKnownFolderStub replaces the Windows KnownFolder resolver with
