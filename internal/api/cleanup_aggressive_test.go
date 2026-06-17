@@ -98,6 +98,22 @@ host,"node.exe c:\unrelated\other.js",20250101090000.000000+000,1000,9999,800000
 	}
 }
 
+// TestParseAggressiveCandidates_RootPIDScopeSparesHubDaemonAncestor
+// verifies the no-bypass guard still wins when the requested --root-pid
+// is itself below an mcphub daemon. The root match must not stop the
+// ancestor walk before the daemon guard can see the higher ancestor.
+func TestParseAggressiveCandidates_RootPIDScopeSparesHubDaemonAncestor(t *testing.T) {
+	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Program Files\mcphub\mcphub.exe daemon --server serena",20250101090000.000000+000,1000,4000,90000000
+host,"uv.exe run server",20250101090000.000000+000,4000,7777,150000000
+host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,7777,8888,80000000
+`
+	out := parseAggressiveCandidates(strings.NewReader(csv), "", 7777, nil)
+	if _, ok := candidatePIDs(out)[8888]; ok {
+		t.Errorf("PID 8888 (descendant of mcphub.exe daemon above root-pid 7777) must be SPARED")
+	}
+}
+
 // TestParseAggressiveCandidates_DenyListExcludesDangerousClassesByDefault
 // verifies a chrome.exe under the scoped client is excluded by default.
 func TestParseAggressiveCandidates_DenyListExcludesDangerousClassesByDefault(t *testing.T) {
