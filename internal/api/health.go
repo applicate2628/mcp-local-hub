@@ -853,6 +853,19 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 		if errEnv.Error.Code == -32601 {
 			return CapabilitySubSection{State: "unsupported"}
 		}
+		// G2: some MCP servers report method-absence with a NON-(-32601)
+		// JSON-RPC error code but a "method not found" message (e.g. lldb
+		// has no prompts). The strict code check above misses those, so they
+		// fall through to the red "error" state below — alarming the operator
+		// for what is really just an unsupported category. Treat a
+		// method-absence message (case-insensitive) the same as code -32601:
+		// neutral "unsupported", not "error".
+		// PROPER fix (Phase 2): parse the initialize response's declared
+		// capabilities and skip probing undeclared categories entirely — the
+		// init body is currently discarded around health.go:813.
+		if isMethodNotFoundMessage(errEnv.Error.Message) {
+			return CapabilitySubSection{State: "unsupported"}
+		}
 		// g3: the daemon's own MCP error message may embed a workspace path
 		// or token-like value (e.g. `stat C:\Users\<name>\secret\token.json`).
 		// The GUI renders Err verbatim, so scrub leak-prone substrings on the
@@ -917,6 +930,24 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 		return CapabilitySubSection{State: "empty", Items: items}
 	}
 	return CapabilitySubSection{State: "ok", Items: items}
+}
+
+// isMethodNotFoundMessage reports whether a JSON-RPC error message text
+// indicates the server simply does not implement the probed method (so the
+// capability category is unsupported, not broken). It complements the strict
+// code -32601 check for servers that report method-absence with a different
+// code but a recognizable message. Matching is case-insensitive on the common
+// phrasings ("method not found", "unsupported method", "unknown method", or a
+// bare "not found").
+func isMethodNotFoundMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "method not found") ||
+		strings.Contains(m, "unsupported method") ||
+		strings.Contains(m, "unknown method") ||
+		strings.Contains(m, "not found")
 }
 
 // syntheticToolsSubSection answers from the embedded ToolCatalogForBackend
