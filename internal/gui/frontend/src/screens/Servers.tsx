@@ -1096,7 +1096,15 @@ function ServerRowView(props: {
   const rowAllChecked = rowToggleable && rowInteractive.every(rowEffectiveChecked);
   return (
     <tr>
-      <td>
+      {/* The WHOLE server cell is the row-toggle hover target (not just the
+          ⇄ glyph): hovering anywhere in the server's own cell previews the
+          horizontal bulk-toggle scope — highlights every toggleable client
+          cell in this row. Gated on rowToggleable so a non-interactive row
+          lights nothing. */}
+      <td
+        onMouseEnter={rowToggleable ? () => onRowToggleHover(true) : undefined}
+        onMouseLeave={rowToggleable ? () => onRowToggleHover(false) : undefined}
+      >
         {rowToggleable && (
           <span
             class={`matrix-row-toggle${rowAllChecked ? " matrix-row-toggle--full" : ""}`}
@@ -1106,8 +1114,6 @@ function ServerRowView(props: {
             aria-pressed={rowAllChecked}
             title={`Toggle all visible clients for ${server.name}`}
             onClick={() => onRowToggle(server)}
-            onMouseEnter={() => onRowToggleHover(true)}
-            onMouseLeave={() => onRowToggleHover(false)}
             onKeyDown={(ev: KeyboardEvent) => {
               if (ev.key === "Enter" || ev.key === " ") {
                 ev.preventDefault();

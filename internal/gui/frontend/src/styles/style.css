@@ -1358,6 +1358,18 @@ menu button[disabled] {
   margin-bottom: var(--gap-sm);
   min-height: var(--row-height);
 }
+/* Row-layout settings fields (SectionAppearance's AppearanceField opts in via
+   the Tailwind `justify-between` utility: label left, control flush-right) must
+   override the legacy column default above. The two-class selector
+   (.settings-field.justify-between) outranks the single-class .settings-field
+   AND the layered Tailwind utilities, which an unlayered .settings-field would
+   otherwise beat — so the label/control sit on ONE row with the control aligned
+   to the card edge, matching the GUI-server section's rows. Legacy FieldRenderer
+   fields (no justify-between) keep the stacked column layout untouched. */
+.settings-field.justify-between {
+  flex-direction: row;
+  margin-bottom: 0;
+}
 .settings-field-label {
   font-weight: 600;
 }
