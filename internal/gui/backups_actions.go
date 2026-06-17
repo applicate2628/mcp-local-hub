@@ -237,6 +237,18 @@ func (s *Server) backupsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, verr, status, code)
 		return
 	}
+	// Never delete the pristine one-shot `-original` sentinel — it captures the
+	// user's pre-hub config so a full uninstall can always reach a clean slate
+	// (writeBackup in internal/clients). Losing it is unrecoverable. (PR #360.)
+	if strings.HasSuffix(filepath.Base(cleaned), "-original") {
+		writeAPIError(
+			w,
+			fmt.Errorf("refusing to delete pristine original backup: %s", cleaned),
+			http.StatusBadRequest,
+			"BACKUPS_DELETE_ORIGINAL_FORBIDDEN",
+		)
+		return
+	}
 	if err := s.backupActions.Delete(cleaned); err != nil {
 		writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_DELETE_FAILED")
 		return

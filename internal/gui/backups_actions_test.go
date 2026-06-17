@@ -102,6 +102,30 @@ func TestBackupsDelete_HappyPath(t *testing.T) {
 	}
 }
 
+// TestBackupsDelete_RejectOriginalSentinel proves the pristine one-shot
+// `-original` backup (the pre-hub clean-slate capture) cannot be deleted via
+// the API, and the adapter is never invoked. (PR #360.)
+func TestBackupsDelete_RejectOriginalSentinel(t *testing.T) {
+	home, _ := seedHomeWithClaudeBackup(t)
+	s, fa := newBackupActionsTestServer(t)
+
+	original := filepath.Join(home, ".claude.json.bak-mcp-local-hub-original")
+	if err := os.WriteFile(original, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+		t.Fatalf("seed original sentinel: %v", err)
+	}
+	body, _ := json.Marshal(map[string]string{"client": "claude-code", "path": original})
+	rec := postBackupAction(t, s, "/api/backups/delete", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "BACKUPS_DELETE_ORIGINAL_FORBIDDEN") {
+		t.Fatalf("body = %s, want BACKUPS_DELETE_ORIGINAL_FORBIDDEN", rec.Body.String())
+	}
+	if fa.deletePath != "" {
+		t.Fatalf("adapter must not be called on original sentinel; got %q", fa.deletePath)
+	}
+}
+
 func TestBackupsActions_RejectUnknownClient(t *testing.T) {
 	_, backupPath := seedHomeWithClaudeBackup(t)
 	s, fa := newBackupActionsTestServer(t)
