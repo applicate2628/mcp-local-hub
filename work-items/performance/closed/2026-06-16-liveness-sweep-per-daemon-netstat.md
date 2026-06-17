@@ -1,6 +1,6 @@
 ---
 severity: high
-status: open
+status: closed
 found-by: performance-engineer
 context: standalone
 ---
@@ -34,3 +34,7 @@ seam needed to fix the sweep (`supervisorDaemonEntryLiveWithProbe` +
 - internal/cli/supervise_liveness.go:82-84 (supervisorPortOwnerPID → per-port netstat)
 - internal/cli/supervise_status.go:33,57-78 (the existing snapshot pattern to mirror)
 - internal/api/serena_port_owner_windows.go:41-57 (per-port loopbackPortOwnerPID)
+
+## Resolution (closed 2026-06-17 — repo audit)
+
+Fixed-in: de1bde6 "perf(supervisor): one port-owner snapshot per liveness sweep instead of netstat-per-daemon" — the sweep now takes ONE loopbackPortOwnersSnapshotFn() per sweep (supervise_liveness.go:204, outside the per-daemon loop) and resolves every daemon against the shared map, mirroring the /api/status fix (a699713). Finding was filed before de1bde6 landed.
