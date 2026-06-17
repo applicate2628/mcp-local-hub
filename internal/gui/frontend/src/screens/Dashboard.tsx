@@ -3,6 +3,7 @@ import { cleanupOrphans, fetchOrThrow, restartSupervisor } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { stateShape } from "../lib/status";
 import { formatBytes, formatUptime } from "../lib/format";
+import { DaemonMetrics } from "../components/DaemonMetrics";
 import { pushToast } from "../lib/toast-store";
 import type { DaemonStatus } from "../types";
 
@@ -565,13 +566,11 @@ function Card(props: {
       ? `${d.server} (${d.daemon})`
       : d.server;
 
-  // Live process metrics. Both come from the supervisor IPC status path
-  // (uptime_sec derived server-side from started_at; ram_bytes from a
-  // per-pid GetProcessMemoryInfo lookup). Empty string ⇒ omit the row —
-  // a non-running daemon carries no uptime, and RAM is absent on non-
-  // Windows hosts / when the lookup failed.
-  const uptimeText = formatUptime(d.uptime_sec);
-  const ramText = formatBytes(d.ram_bytes);
+  // Live process metrics (Port / PID / Uptime / RAM + the orphan-PID and
+  // job-protection diagnostics) are rendered by DaemonMetrics, the single
+  // owner of the per-daemon metric rows. It humanizes uptime_sec / ram_bytes
+  // via formatUptime / formatBytes and omits a row when its source field is
+  // absent/zero. See internal/gui/frontend/src/components/DaemonMetrics.tsx.
 
   // Effective per-button state merges local click-driven state with
   // the parent's bulk-action state. Precedence (top wins):
@@ -630,30 +629,6 @@ function Card(props: {
         {title}
       </div>
       <div class="card-kv">
-        <span>Port</span>
-        <span>{d.port ?? "—"}</span>
-      </div>
-      <div class="card-kv">
-        <span>PID</span>
-        <span>{d.pid ?? "—"}</span>
-      </div>
-      {d.orphan_pid ? (
-        <div class="card-kv" data-testid="orphan-pid-row">
-          <span>Orphan PID</span>
-          <span title="Windows post-create orphan PID; supervisor's best-effort kill failed. Run `taskkill /F /T /PID` for manual cleanup.">
-            {d.orphan_pid} ⚠
-          </span>
-        </div>
-      ) : null}
-      {d.job_protection === false ? (
-        <div class="card-kv" data-testid="job-protection-row">
-          <span>Job Protection</span>
-          <span title="Per-spawn Windows Job Object allocation FAILED for the current spawn. Supervisor proceeded via the non-fatal cmd.Start fallback documented in ADR #239 — daemon runs without KILL_ON_JOB_CLOSE orphan-protection. On supervisor crash, this daemon's descendant tree (e.g. uvx/python or npx/node wrappers) may survive as orphans. Underlying causes are typically AppLocker / nested-job constraints / handle exhaustion on restrictive corp-managed hosts. Reference: PR #242 (consultant strategic concern #1 on PR #241).">
-            UNPROTECTED ⚠
-          </span>
-        </div>
-      ) : null}
-      <div class="card-kv">
         <span>State</span>
         <span class="state">
           {/* Flowbite Badge for the state chip — color + the shape glyph
@@ -664,18 +639,11 @@ function Card(props: {
           </span>
         </span>
       </div>
-      {uptimeText ? (
-        <div class="card-kv" data-testid="uptime-row">
-          <span>Uptime</span>
-          <span>{uptimeText}</span>
-        </div>
-      ) : null}
-      {ramText ? (
-        <div class="card-kv" data-testid="ram-row">
-          <span>RAM</span>
-          <span>{ramText}</span>
-        </div>
-      ) : null}
+      {/* Process-metrics block: Port / PID / Uptime / RAM + orphan-PID and
+          job-protection diagnostics. Single owner so the Card stays focused
+          on header/state/actions chrome. Reads only fields already present
+          on DaemonStatus (no new backend surface). */}
+      <DaemonMetrics daemon={d} />
       {/* View-logs link — an <a> (link role), NOT a <button>, so the
           long-standing per-card button-count invariant (2 bulk + 2 per
           card) the Dashboard tests assert is preserved. Navigates to the
