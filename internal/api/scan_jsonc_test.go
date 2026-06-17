@@ -47,3 +47,28 @@ func TestScanVSCode_TolerateJSONC(t *testing.T) {
 		t.Fatalf("expected the mem entry parsed from the JSONC config; got %v", entries)
 	}
 }
+
+func TestScanCodeBuddy_TolerateJSONC(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "mcp.json")
+	jsonc := []byte(`{
+  // CodeBuddy documents mcp.json as JSON/JSONC.
+  "mcpServers": {
+    "memory": { "url": "http://localhost:9123/mcp", "type": "http", },
+  },
+}`)
+	if err := os.WriteFile(cfg, jsonc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]*ScanEntry{}
+	if err := scanCodeBuddy(entries, cfg); err != nil {
+		t.Fatalf("scanCodeBuddy must tolerate JSONC (comments + trailing commas), got: %v", err)
+	}
+	entry, ok := entries["memory"]
+	if !ok {
+		t.Fatalf("expected the memory entry parsed from the JSONC config; got %v", entries)
+	}
+	if got := entry.ClientPresence["codebuddy"].Transport; got != "http" {
+		t.Fatalf("CodeBuddy memory transport = %q, want http", got)
+	}
+}

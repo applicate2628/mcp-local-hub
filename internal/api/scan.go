@@ -957,7 +957,7 @@ func scanBob(entries map[string]*ScanEntry, path string) error {
 }
 
 func scanCodeBuddy(entries map[string]*ScanEntry, path string) error {
-	return scanMCPServersJSON(entries, path, "codebuddy", shapeURLOrCommandEntry)
+	return scanMCPServersJSONC(entries, path, "codebuddy", shapeURLOrCommandEntry)
 }
 
 func scanCommandCode(entries map[string]*ScanEntry, path string) error {
@@ -1033,6 +1033,14 @@ func scanTabnineCLI(entries map[string]*ScanEntry, path string) error {
 // kilocode). The per-client url-shape difference is captured by the shaper
 // callback, keeping the read/parse logic in one owner.
 func scanMCPServersJSON(entries map[string]*ScanEntry, path, client string, shaper func(map[string]any) ClientEntry) error {
+	return scanMCPServersJSONWithDecoder(entries, path, client, shaper, func(data []byte) []byte { return data })
+}
+
+func scanMCPServersJSONC(entries map[string]*ScanEntry, path, client string, shaper func(map[string]any) ClientEntry) error {
+	return scanMCPServersJSONWithDecoder(entries, path, client, shaper, stripJSONCommentsAndTrailingCommas)
+}
+
+func scanMCPServersJSONWithDecoder(entries map[string]*ScanEntry, path, client string, shaper func(map[string]any) ClientEntry, prepare func([]byte) []byte) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1043,7 +1051,7 @@ func scanMCPServersJSON(entries map[string]*ScanEntry, path, client string, shap
 	var cfg struct {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(prepare(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCPServers {
