@@ -751,6 +751,7 @@ func NewServer(cfg Config) *Server {
 	registerLSPRegisterRoutes(s)
 	registerLSPTrustedRootsRoutes(s)
 	registerSupervisorRestartRoutes(s)
+	registerGUISelfRestartRoutes(s) // Wave 3: POST /api/gui/restart self re-exec with lock handoff
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)
 	registerLSPRouterRoutes(s)

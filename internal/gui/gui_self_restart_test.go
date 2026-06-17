@@ -31,7 +31,6 @@ func swapSelfRestartSeams(t *testing.T, pid int, spawnErr error) (exited *bool) 
 // (via the seam) so the lock is handed off.
 func TestGUISelfRestart_SpawnSuccess(t *testing.T) {
 	s := NewServer(Config{Port: 9})
-	registerGUISelfRestartRoutes(s)
 	_ = swapSelfRestartSeams(t, 4242, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/gui/restart", nil)
@@ -59,7 +58,6 @@ func TestGUISelfRestart_SpawnSuccess(t *testing.T) {
 // error in the body with spawned:false / restarting:false.
 func TestGUISelfRestart_SpawnFailureNoExit(t *testing.T) {
 	s := NewServer(Config{Port: 9})
-	registerGUISelfRestartRoutes(s)
 	exited := swapSelfRestartSeams(t, 0, errSelfRestartTest)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/gui/restart", nil)
