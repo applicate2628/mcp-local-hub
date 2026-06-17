@@ -38,6 +38,9 @@ type fakeLifecycle struct {
 	// sendResultRaw is the raw result bytes the fake endpoint returns (default
 	// `{"ok":true}`).
 	sendResultRaw json.RawMessage
+	// sendRPCError, if set, is returned as a JSON-RPC error response with a
+	// nil Go error to model backends rejecting a delivered request.
+	sendRPCError *JSONRPCError
 
 	materializeCount atomic.Int32
 	stopCount        atomic.Int32
@@ -75,6 +78,9 @@ func (e *fakeEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest) (*J
 	e.parent.sendCount.Add(1)
 	if e.parent.sendRequestErr != nil {
 		return nil, e.parent.sendRequestErr
+	}
+	if e.parent.sendRPCError != nil {
+		return &JSONRPCResponse{Jsonrpc: "2.0", ID: req.ID, Error: e.parent.sendRPCError}, nil
 	}
 	res := e.parent.sendResultRaw
 	if len(res) == 0 {
@@ -1630,9 +1636,9 @@ func TestLazyProxy_DidOpenDistinctURIsForwardIndependently(t *testing.T) {
 	const uriA = "file:///ws/a.go"
 	const uriB = "file:///ws/b.go"
 
-	postDocNotification(t, h, "textDocument/didOpen", uriA) // A 0->1 forward
-	postDocNotification(t, h, "textDocument/didOpen", uriB) // B 0->1 forward
-	postDocNotification(t, h, "textDocument/didOpen", uriA) // A 1->2 absorb
+	postDocNotification(t, h, "textDocument/didOpen", uriA)  // A 0->1 forward
+	postDocNotification(t, h, "textDocument/didOpen", uriB)  // B 0->1 forward
+	postDocNotification(t, h, "textDocument/didOpen", uriA)  // A 1->2 absorb
 	postDocNotification(t, h, "textDocument/didClose", uriB) // B 1->0 forward
 
 	got := f.forwardedDocs()
@@ -1672,6 +1678,48 @@ func TestLazyProxy_DidOpenMalformedURIAbsorbed(t *testing.T) {
 	}
 	if mc := f.materializeCount.Load(); mc != 0 {
 		t.Errorf("malformed didOpen materialized backend: count=%d", mc)
+	}
+}
+
+func TestLazyProxy_DocRefsRejectUniqueURIsOverCap(t *testing.T) {
+	p, f := newRecordingProxy(t)
+	h := p.Handler()
+
+	for i := 0; i < maxTrackedDocRefs; i++ {
+		uri := fmt.Sprintf("file:///ws/%04d.go", i)
+		if rr := postDocNotification(t, h, "textDocument/didOpen", uri); rr.Code != http.StatusAccepted {
+			t.Fatalf("didOpen %d code=%d, want 202; body=%s", i, rr.Code, rr.Body.String())
+		}
+	}
+	if got := len(f.forwardedDocs()); got != maxTrackedDocRefs {
+		t.Fatalf("forwarded %d didOpen notifications, want %d", got, maxTrackedDocRefs)
+	}
+
+	if rr := postDocNotification(t, h, "textDocument/didOpen", "file:///ws/overflow.go"); rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("overflow didOpen code=%d, want 429; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := len(f.forwardedDocs()); got != maxTrackedDocRefs {
+		t.Fatalf("overflow didOpen forwarded unexpectedly; forwarded=%d want %d", got, maxTrackedDocRefs)
+	}
+}
+
+func TestLazyProxy_DocRefRollsBackOnBackendJSONRPCError(t *testing.T) {
+	f := &fakeLifecycle{
+		kind:         "mcp-language-server",
+		sendRPCError: &JSONRPCError{Code: -32602, Message: "invalid params"},
+	}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+	const uri = "file:///ws/rejected.go"
+
+	if rr := postDocNotification(t, h, "textDocument/didOpen", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("first rejected didOpen code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := postDocNotification(t, h, "textDocument/didOpen", uri); rr.Code != http.StatusAccepted {
+		t.Fatalf("second rejected didOpen code=%d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := f.sendCount.Load(); got != 2 {
+		t.Fatalf("backend sends=%d, want 2 (JSON-RPC errors must not leave URI refcounted)", got)
 	}
 }
 
