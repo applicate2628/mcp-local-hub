@@ -377,6 +377,28 @@ func clientScanners() map[string]struct {
 		"opencode": {scanOpenCode, "opencode"},
 		"hermes":   {scanHermes, "hermes"},
 		"openclaw": {scanOpenClaw, "openclaw"},
+		// TIER-1 skills-CLI clients. These all use the canonical
+		// top-level mcpServers JSON shape; Pi is relay-stdio, while the
+		// others are HTTP-direct and expose the endpoint under url.
+		"bob":           {scanBob, "bob"},
+		"codebuddy":     {scanCodeBuddy, "codebuddy"},
+		"command-code":  {scanCommandCode, "command-code"},
+		"cortex":        {scanCortex, "cortex"},
+		"deepagents":    {scanDeepAgents, "deepagents"},
+		"devin":         {scanDevin, "devin"},
+		"droid":         {scanDroid, "droid"},
+		"firebender":    {scanFirebender, "firebender"},
+		"iflow-cli":     {scanIFlowCLI, "iflow-cli"},
+		"junie":         {scanJunie, "junie"},
+		"kimi-code-cli": {scanKimiCodeCLI, "kimi-code-cli"},
+		"kode":          {scanKode, "kode"},
+		"ona":           {scanOna, "ona"},
+		"pi":            {scanPi, "pi"},
+		"qoder":         {scanQoder, "qoder"},
+		"qoder-cn":      {scanQoderCN, "qoder-cn"},
+		"roo":           {scanRoo, "roo"},
+		"rovodev":       {scanRovoDev, "rovodev"},
+		"tabnine-cli":   {scanTabnineCLI, "tabnine-cli"},
 	}
 }
 
@@ -928,6 +950,82 @@ func scanCline(entries map[string]*ScanEntry, path string) error {
 
 func scanKiloCode(entries map[string]*ScanEntry, path string) error {
 	return scanMCPServersJSON(entries, path, "kilocode", shapeURLOrCommandEntry)
+}
+
+func scanBob(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "bob", shapeURLOrCommandEntry)
+}
+
+func scanCodeBuddy(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "codebuddy", shapeURLOrCommandEntry)
+}
+
+func scanCommandCode(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "command-code", shapeURLOrCommandEntry)
+}
+
+func scanCortex(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "cortex", shapeURLOrCommandEntry)
+}
+
+func scanDeepAgents(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "deepagents", shapeURLOrCommandEntry)
+}
+
+func scanDevin(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "devin", shapeURLOrCommandEntry)
+}
+
+func scanDroid(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "droid", shapeURLOrCommandEntry)
+}
+
+func scanFirebender(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "firebender", shapeURLOrCommandEntry)
+}
+
+func scanIFlowCLI(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "iflow-cli", shapeURLOrCommandEntry)
+}
+
+func scanJunie(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "junie", shapeURLOrCommandEntry)
+}
+
+func scanKimiCodeCLI(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "kimi-code-cli", shapeURLOrCommandEntry)
+}
+
+func scanKode(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "kode", shapeURLOrCommandEntry)
+}
+
+func scanOna(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "ona", shapeURLOrCommandEntry)
+}
+
+func scanPi(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "pi", shapeAntigravityEntry)
+}
+
+func scanQoder(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "qoder", shapeURLOrCommandEntry)
+}
+
+func scanQoderCN(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "qoder-cn", shapeURLOrCommandEntry)
+}
+
+func scanRoo(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "roo", shapeURLOrCommandEntry)
+}
+
+func scanRovoDev(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "rovodev", shapeURLOrCommandEntry)
+}
+
+func scanTabnineCLI(entries map[string]*ScanEntry, path string) error {
+	return scanMCPServersJSON(entries, path, "tabnine-cli", shapeURLOrCommandEntry)
 }
 
 // scanMCPServersJSON is the shared body for the JSON-family clients whose
