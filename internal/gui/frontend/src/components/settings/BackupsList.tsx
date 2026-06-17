@@ -276,16 +276,18 @@ export function BackupsList({
                       >
                         Restore
                       </button>
-                      <button
-                        type="button"
-                        class="btn-danger backups-row-delete"
-                        disabled={rowBusy}
-                        data-testid={`delete-backup-${b.path}`}
-                        title={`Permanently delete this backup file for ${b.client}.`}
-                        onClick={() => { setRowOk(null); setPendingDelete(b); }}
-                      >
-                        Delete
-                      </button>
+                      {b.kind === "timestamped" ? (
+                        <button
+                          type="button"
+                          class="btn-danger backups-row-delete"
+                          disabled={rowBusy}
+                          data-testid={`delete-backup-${b.path}`}
+                          title={`Permanently delete this backup file for ${b.client}.`}
+                          onClick={() => { setRowOk(null); setPendingDelete(b); }}
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </span>
                     {rowErr[b.path] ? (
                       <span class="error-banner backups-row-error" role="alert">

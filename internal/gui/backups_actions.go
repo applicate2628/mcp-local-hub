@@ -237,6 +237,15 @@ func (s *Server) backupsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, verr, status, code)
 		return
 	}
+	if strings.HasSuffix(filepath.Base(cleaned), "-original") {
+		writeAPIError(
+			w,
+			fmt.Errorf("refusing to delete pristine original backup: %s", cleaned),
+			http.StatusBadRequest,
+			"BACKUPS_DELETE_ORIGINAL_FORBIDDEN",
+		)
+		return
+	}
 	if err := s.backupActions.Delete(cleaned); err != nil {
 		writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_DELETE_FAILED")
 		return

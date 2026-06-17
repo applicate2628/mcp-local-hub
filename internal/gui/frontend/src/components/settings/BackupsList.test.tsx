@@ -73,6 +73,14 @@ describe("BackupsList", () => {
     expect(orig.querySelector('[data-testid="eligible-badge"]')).toBeNull();
   });
 
+  it("does not render a delete action for original sentinel backups", async () => {
+    const { container } = render(<BackupsList keepN={5} />);
+    await waitFor(() => expect(container.querySelectorAll(".backups-row.original").length).toBeGreaterThan(0));
+    const original = Array.from(container.querySelectorAll(".backups-row.original"))[0];
+    expect(original.querySelector(".backups-row-delete")).toBeNull();
+    expect(original.querySelector(".backups-row-restore")).toBeTruthy();
+  });
+
   it("preview failure shows 'Preview unavailable' inline + base list still visible", async () => {
     vi.spyOn(api, "getBackupsCleanPreview").mockRejectedValue(new Error("boom"));
     const { findByTestId, findAllByText } = render(<BackupsList keepN={2} />);
