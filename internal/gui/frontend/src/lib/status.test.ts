@@ -80,13 +80,47 @@ describe("stateShape", () => {
     expect(stateShape("Running")).toBe("●");
   });
 
-  it("returns ○ for everything else", () => {
-    // Spec dichotomy is binary: only "Running" gets the filled shape.
-    // Stopped, Failed, Partial (mixed multi-daemon), and any future
-    // state value all map to the open shape, matching the existing
-    // .card.ok / .card.down two-class CSS.
-    for (const s of ["Stopped", "Failed", "Partial", "Gone", "Starting", ""]) {
+  it("returns ◐ for Partial (mixed multi-daemon aggregate)", () => {
+    expect(stateShape("Partial")).toBe("◐");
+  });
+
+  it("returns ◓ for the recovering group (Starting/Restarting/Backoff/Spawning)", () => {
+    for (const s of ["Starting", "Restarting", "Backoff", "Spawning"]) {
+      expect(stateShape(s)).toBe("◓");
+    }
+  });
+
+  it("returns ✕ for the terminal-failure group (Failed/Quarantined)", () => {
+    for (const s of ["Failed", "Quarantined"]) {
+      expect(stateShape(s)).toBe("✕");
+    }
+  });
+
+  it("returns ○ for the benign-idle group (Ready/Scheduled/Stopped)", () => {
+    for (const s of ["Ready", "Scheduled", "Stopped"]) {
       expect(stateShape(s)).toBe("○");
     }
+  });
+
+  it("returns ○ for unrecognized / blank vocabulary", () => {
+    // Unknown states are benign, not errors — they must not borrow the
+    // failure cross. They fall back to the open circle.
+    for (const s of ["Gone", "Disabled", "Queued", ""]) {
+      expect(stateShape(s)).toBe("○");
+    }
+  });
+
+  it("gives the three most-confused states distinct silhouettes", () => {
+    // Color-blind regression guard: Running, Stopped, Failed, and Partial
+    // must NOT collapse to the same glyph (the pre-fix binary helper made
+    // Stopped/Failed/Partial all render ○, defeating the shape encoding).
+    const glyphs = new Set([
+      stateShape("Running"),
+      stateShape("Stopped"),
+      stateShape("Failed"),
+      stateShape("Partial"),
+      stateShape("Starting"),
+    ]);
+    expect(glyphs.size).toBe(5);
   });
 });
