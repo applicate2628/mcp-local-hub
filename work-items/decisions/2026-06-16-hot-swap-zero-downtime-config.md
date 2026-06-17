@@ -134,23 +134,31 @@ flag-gated, user-reviewed cutover.
    subagent `go test` wiping live `supervisor-intent.json` already killed the
    fleet once. Back up state before any live validation.
 
-## OPEN QUESTIONS (operator decisions gating the design)
+## OPEN QUESTIONS — ✅ RESOLVED by operator 2026-06-17
 
-1. **Scope:** global stdio-wrapped daemons (memory/time/sequential-thinking) are
-   direct-port (gate-OFF) today, so they CANNOT be hot-swapped without first
-   migrating behind the hub. Do you want global-daemon hot-swap (requires gate-ON
-   migration), or only serena/LSP (already partly fronted)?
-2. **Latency tolerance:** is a brief added FIRST-CALL latency during the restart
-   window (Option B foundation) acceptable as "hot-swap", or do you require
-   literally zero added latency (Option A blue/green)? This decides whether the
-   risky `api.Transition` change is in scope at all.
-3. **Serena:** it is workspace-session-stateful (sticky router bindings); a
-   restart may drop in-progress LSP/indexing state even with the connection
-   preserved. Hot-swap serena, or exclude it as inherently stateful?
-4. **Port-allocation policy** for blue/green: where do ephemeral new ports come
-   from, and must the client-config rewrite stop racing the swap? (Moot for
-   gate-ON daemons — client config holds the stable hub port — another reason to
-   require gate-ON as a prerequisite.)
+1. **Scope** → **serena/LSP (Slice 2) NOW + global daemons gate-ON as opt-in (Slice 4).**
+   Migrate memory/time/sequential-thinking behind the hub (opt-in, one announced
+   restart-blip per daemon) so their config-update also stops dropping the client.
+2. **Latency tolerance** → **brief first-call latency OK (Option B foundation);
+   blue/green (Slice 5) stays DROPPED.** Operator leaned minimal-latency AND
+   flagged a FUTURE VPS-hosted-hub requirement. VPS REINFORCES this: (a) network
+   RTT dominates the sub-second local reconnect → zero-latency's benefit becomes
+   noise over the wire; (b) a remote stable hub-endpoint with daemon restarts
+   invisible behind it IS the correct VPS architecture (reinforces hub-front
+   slices 2/4); (c) blue/green on a VPS is worse — ephemeral ports + 2-live-children
+   on a remote host = firewall/port-mgmt cost for no benefit; (d) a VPS hub is a
+   SPOF for MORE clients → hub must be rock-solid → MORE reason not to add
+   blue/green risk to api.Transition. Decision: minimal-latency, hub-front.
+3. **Serena** → **INCLUDE in auto-reinit (heal the crash-respawn case).** Accept
+   that in-progress LSP indexing may reset on restart (it re-indexes); the autonomous
+   crash-respawn heal (today a hard -32000) is the bigger win.
+4. **Port-allocation policy** → **MOOT** (Slice 5 dropped; gate-ON daemons hold the
+   stable hub port in client config, no ephemeral ports needed).
+
+**Implementation order (per the Stability Council verdict + these answers):**
+Slice 3 (eligibility classifier, pure fn) → Slice 2 (hub auto-reinit, CORRECTED:
+transport-only retry + per-daemonKey singleflight + test-first + bounded backoff)
+→ Slice 4 (gate-ON migration, opt-in). Slice 5 NEVER this round. Slice 1 deferred.
 
 ## STABILITY COUNCIL VERDICT (2026-06-16) — operator constraint "hot-swap must NET-IMPROVE stability"
 

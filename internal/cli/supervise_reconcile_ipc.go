@@ -329,12 +329,16 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			action = classifyDriftAction(schedState, hasSched, intentDesired, smState, cachedDescriptor, newDescriptor)
 		}
 
+		// Slice 3 observation-only field: classify this daemon's hot-swap
+		// eligibility from its descriptor (pure; never feeds `action` above).
+		hotSwap := api.ClassifyHotSwapEligibility(d)
 		drift = append(drift, api.DriftEntry{
 			TaskName:       taskName,
 			SchedulerState: schedState,
 			IntentDesired:  intentDesired,
 			SMState:        smState,
 			Action:         action,
+			HotSwap:        &hotSwap,
 		})
 	}
 

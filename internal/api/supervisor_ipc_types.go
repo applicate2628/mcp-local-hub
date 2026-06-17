@@ -73,6 +73,14 @@ type DriftEntry struct {
 	IntentDesired  string  `json:"intent_desired"`  // "running" | "stopped" | "?"
 	SMState        SMState `json:"sm_state"`
 	Action         string  `json:"action"` // "post_ev_intent_update" | "no_op" | "needs_manual_review"
+
+	// HotSwap is the OBSERVATION-ONLY hot-swap eligibility verdict for this
+	// daemon (zero-downtime hot-swap design, Slice 3). Additive + omitempty: a
+	// pre-Slice-3 consumer ignores it, and orphan scheduler-task entries (no
+	// intent descriptor to classify) leave it nil. It NEVER feeds the supervisor
+	// Action — it exists so the reconcile/status surface can show which daemons
+	// would benefit from the gate-ON migration before any behavior changes.
+	HotSwap *HotSwapEligibility `json:"hot_swap,omitempty"`
 }
 
 // Reconcile action string constants — kept here next to the type so
