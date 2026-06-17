@@ -202,6 +202,14 @@ func BuildHubReconcilePlan(
 			continue
 		}
 		if opts.GateOn {
+			// OpenHands cannot persist the hub aggregate auth headers in its
+			// config format. Do not replace its working per-server entries
+			// with an unauthenticated mcphub-hub URL that the hub auth gate
+			// would reject. Gate-OFF still removes any stale aggregate entry
+			// through the supported-client sweep above.
+			if client == "openhands" {
+				continue
+			}
 			// codex bot phase5 r7 P1 closure on PR #160: a missing
 			// token map entry for `client` yields tokens.Tokens[client]
 			// == "" with no error, and the planner would happily emit

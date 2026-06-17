@@ -279,6 +279,53 @@ func TestBuildHubReconcilePlanGateOnFailsFastOnMissingToken(t *testing.T) {
 	}
 }
 
+// TestBuildHubReconcilePlanGateOnSkipsOpenHands pins the fail-closed
+// compatibility rule for OpenHands: its config schema cannot persist
+// arbitrary HTTP headers, so a gate-ON hub aggregate entry would be
+// written without X-Mcphub-Hub-Token/X-Mcphub-Instance-Id and then be
+// rejected by the hub MCP auth gate. Gate-ON reconcile must leave the
+// existing per-server OpenHands entries alone instead of replacing
+// them with an unusable aggregate.
+func TestBuildHubReconcilePlanGateOnSkipsOpenHands(t *testing.T) {
+	manifests := []config.ServerManifest{{
+		Name:      "alpha",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "uvx",
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: 9301}},
+		ClientBindings: []config.ClientBinding{
+			{Client: "openhands", Daemon: "default", URLPath: "/mcp"},
+			{Client: "claude-code", Daemon: "default", URLPath: "/mcp"},
+		},
+	}}
+	endpoint := HubEndpoint{Port: 9180, InstanceID: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}
+	// No openhands token is provided: skipped clients must not trigger
+	// the missing-token fail-fast path because no aggregate is emitted.
+	tokens := HubTokenTable{Tokens: map[string]string{
+		"claude-code": "11111111111111111111111111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}
+
+	plan, err := BuildHubReconcilePlan(manifests, endpoint, tokens, HubReconcileOpts{GateOn: true})
+	if err != nil {
+		t.Fatalf("BuildHubReconcilePlan: %v", err)
+	}
+	for _, op := range plan {
+		if op.Client == "openhands" {
+			t.Fatalf("gate ON emitted OpenHands op %+v; want OpenHands skipped so per-server entries remain usable", op)
+		}
+	}
+
+	gotClaudeAggregate := false
+	for _, op := range plan {
+		if op.Client == "claude-code" && op.Action == ClientUpdateAddReplace && op.EntryName == "mcphub-hub" {
+			gotClaudeAggregate = true
+		}
+	}
+	if !gotClaudeAggregate {
+		t.Fatal("gate ON should still emit aggregate entries for header-capable clients")
+	}
+}
+
 // TestBuildHubReconcilePlanGateOffRemovesMcphubHubAndRestoresPerDaemon
 // is the symmetric OFF-transition: AddReplace each per-(server,
 // client) entry pointing at the per-daemon HTTP URL + Remove the
