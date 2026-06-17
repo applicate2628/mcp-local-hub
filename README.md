@@ -213,13 +213,10 @@ See [docs/architecture-highlights.md](docs/architecture-highlights.md) for the f
 
 ## Supervisor architecture (v0.5.0)
 
-v0.5.0 replaces the v0.4.x N-scheduled-tasks-per-daemon model with a single
-long-lived `mcphub supervise` parent process per user that owns every MCP
-daemon under an OS-appropriate lifecycle primitive, observes child exits in
-real time, and applies a persisted restart-policy state machine. The new
-commands (`supervise`, `strict-mode`, `autostart`, `install --upgrade`), the
-state-file layout, the v0.4.x migration flow, and the per-OS behavior matrix
-are all documented in
+A single long-lived `mcphub supervise` process per user owns every MCP daemon,
+restarts it on failure, and shares it across clients. Full design — new commands
+(`supervise`, `strict-mode`, `autostart`, `install --upgrade`), state-file
+layout, v0.4.x migration flow, and per-OS behavior matrix — is in
 [docs/supervisor-architecture.md](docs/supervisor-architecture.md).
 
 ## Current status
