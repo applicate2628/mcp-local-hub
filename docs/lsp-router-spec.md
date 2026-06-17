@@ -628,7 +628,16 @@ These are documented, NOT fixed (scope is "document what exists").
    not in the code.
 
 2. **Spec proposes an LSP fail-loud session sweep the router does not
-   implement.** The spec
+   implement — RESOLVED 2026-06-17: by design, not a gap.** The request-driven
+   fail-loud (502/504/503 on the next forward, §8) IS the correct as-built
+   behavior for the LSP router's single-disambiguation-store design; building
+   the proposed serena-style proactive backend-loss sweep would CONTRADICT the
+   §15 P2 "do not mirror serena" correction (the LSP router deliberately has one
+   store, not the serena three-store stack) and is unnecessary because the
+   LazyProxy answers `initialize` itself so a client transparently re-handshakes
+   after a reap. The redesign-spec line-735 prose (the unimplemented mirror) is
+   SUPERSEDED by this; no code change is owed. Original drift note retained
+   below for provenance. The spec
    ([`2026-06-10-clean-architecture-redesign.md:735`](superpowers/specs/2026-06-10-clean-architecture-redesign.md))
    says the LSP router should "mirror the serena
    `coordinateExpiredRouterSessionUnbind` pattern" and tear down client
