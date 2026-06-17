@@ -283,18 +283,78 @@ export function App() {
   }
 
   // Nav links — same set in both layouts; CSS swaps direction.
+  //
+  // Keyboard a11y (WAI-ARIA Navigation pattern): the links form a roving
+  // set inside one <nav> landmark. Native <a> already gives Tab order +
+  // Enter activation + the `nav a:focus-visible` ring (style.css §3.1), so
+  // here we add the three remaining pieces: an aria-label distinguishing
+  // this landmark for AT, aria-current="page" on the active link, and
+  // Arrow/Home/End roving focus between sibling links. The roving handler
+  // only moves DOM focus — it never changes the route — so pressing Enter
+  // (native anchor) is what actually navigates, matching the pointer flow.
+  // Orientation is layout-aware: vertical sidebar listens to Up/Down,
+  // horizontal tabs to Left/Right (both also accept the cross-axis keys so
+  // muscle memory works either way). Mirrors the ARIA combobox keyboard
+  // discipline already in SecretPicker (env-picker).
+  const NAV_ITEMS: ReadonlyArray<{ screen: string; href: string; label: string }> = [
+    { screen: "servers",      href: "#/servers",      label: "Servers" },
+    { screen: "catalog",      href: "#/catalog",      label: "Catalog" },
+    { screen: "migration",    href: "#/migration",    label: "Discovery" },
+    { screen: "add-server",   href: "#/add-server",   label: "Add server" },
+    { screen: "secrets",      href: "#/secrets",      label: "Secrets" },
+    { screen: "dashboard",    href: "#/dashboard",    label: "Dashboard" },
+    { screen: "logs",         href: "#/logs",         label: "Logs" },
+    { screen: "capabilities", href: "#/capabilities", label: "Capabilities" },
+    { screen: "settings",     href: "#/settings",     label: "Settings" },
+    { screen: "about",        href: "#/about",        label: "About" },
+  ];
+
+  function onNavKeyDown(e: KeyboardEvent): void {
+    const fwd = e.key === "ArrowDown" || e.key === "ArrowRight";
+    const back = e.key === "ArrowUp" || e.key === "ArrowLeft";
+    const home = e.key === "Home";
+    const end = e.key === "End";
+    if (!fwd && !back && !home && !end) return;
+    // The event target must be one of the nav links — query siblings off
+    // the <nav> the keydown bubbled to so both layouts (sidebar/topbar)
+    // resolve their own link set.
+    const navEl = e.currentTarget as HTMLElement;
+    const links = Array.from(navEl.querySelectorAll<HTMLAnchorElement>("a"));
+    if (links.length === 0) return;
+    const current = links.indexOf(document.activeElement as HTMLAnchorElement);
+    let next: number;
+    if (home) {
+      next = 0;
+    } else if (end) {
+      next = links.length - 1;
+    } else if (current === -1) {
+      // Focus isn't on a link yet (e.g. arrowed in from the brand) — land
+      // on the first for forward, last for backward.
+      next = fwd ? 0 : links.length - 1;
+    } else {
+      const delta = fwd ? 1 : -1;
+      next = (current + delta + links.length) % links.length;
+    }
+    e.preventDefault();
+    links[next]?.focus();
+  }
+
   const navLinks = (
-    <nav>
-      <a href="#/servers"    class={route.screen === "servers"    ? "active" : ""} onClick={guardClick("servers")}>Servers</a>
-      <a href="#/catalog"    class={route.screen === "catalog"    ? "active" : ""} onClick={guardClick("catalog")}>Catalog</a>
-      <a href="#/migration"  class={route.screen === "migration"  ? "active" : ""} onClick={guardClick("migration")}>Discovery</a>
-      <a href="#/add-server" class={route.screen === "add-server" ? "active" : ""} onClick={guardClick("add-server")}>Add server</a>
-      <a href="#/secrets"    class={route.screen === "secrets"    ? "active" : ""} onClick={guardClick("secrets")}>Secrets</a>
-      <a href="#/dashboard"  class={route.screen === "dashboard"  ? "active" : ""} onClick={guardClick("dashboard")}>Dashboard</a>
-      <a href="#/logs"       class={route.screen === "logs"       ? "active" : ""} onClick={guardClick("logs")}>Logs</a>
-      <a href="#/capabilities" class={route.screen === "capabilities" ? "active" : ""} onClick={guardClick("capabilities")}>Capabilities</a>
-      <a href="#/settings"   class={route.screen === "settings"   ? "active" : ""} onClick={guardClick("settings")}>Settings</a>
-      <a href="#/about"      class={route.screen === "about"      ? "active" : ""} onClick={guardClick("about")}>About</a>
+    <nav aria-label="Primary" onKeyDown={onNavKeyDown}>
+      {NAV_ITEMS.map((item) => {
+        const active = route.screen === item.screen;
+        return (
+          <a
+            key={item.screen}
+            href={item.href}
+            class={active ? "active" : ""}
+            aria-current={active ? "page" : undefined}
+            onClick={guardClick(item.screen)}
+          >
+            {item.label}
+          </a>
+        );
+      })}
     </nav>
   );
 
