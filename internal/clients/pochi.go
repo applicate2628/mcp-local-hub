@@ -78,13 +78,45 @@ type pochiClient struct {
 // requires relay context and rejects a URL-only entry.
 func (p *pochiClient) IsRelayStdio() bool { return true }
 
-// Exists reports the client as present when the config file exists. Pochi's
-// config lives directly at ~/config.json (no dedicated parent dir to probe), so
-// the directory-means-installed heuristic the dot-dir adapters use does not
-// apply here.
+// Exists reports Pochi as present only when the generic ~/config.json file
+// already has Pochi's top-level `mcp` object. The path itself is too generic to
+// prove ownership: unrelated tools can also use ~/config.json, and treating mere
+// file existence as installation would let auto-targeting flows mutate another
+// application's config.
 func (p *pochiClient) Exists() bool {
-	_, err := os.Stat(p.path)
-	return err == nil
+	ok, err := p.hasPochiMCPSection()
+	return err == nil && ok
+}
+
+func (p *pochiClient) hasPochiMCPSection() (bool, error) {
+	if _, err := os.Stat(p.path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	m, err := p.readJSON()
+	if err != nil {
+		return false, err
+	}
+	_, ok := m[p.sectionKey()].(map[string]any)
+	return ok, nil
+}
+
+func (p *pochiClient) requirePochiMCPSectionIfFileExists() error {
+	ok, err := p.hasPochiMCPSection()
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	if _, err := os.Stat(p.path); err == nil {
+		return fmt.Errorf("refusing to modify %s as Pochi config: existing file lacks top-level %q object", p.path, p.sectionKey())
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (p *pochiClient) Backup() (string, error) {
@@ -95,6 +127,9 @@ func (p *pochiClient) Backup() (string, error) {
 // InitEmpty) if the config is absent, then writes the timestamped backup. The
 // parent (home dir) always exists, so no MkdirAll is needed.
 func (p *pochiClient) BackupKeep(keepN int) (string, error) {
+	if err := p.requirePochiMCPSectionIfFileExists(); err != nil {
+		return "", err
+	}
 	if _, err := p.InitEmpty(); err != nil {
 		return "", err
 	}
@@ -105,6 +140,9 @@ func (p *pochiClient) BackupKeep(keepN int) (string, error) {
 // piClient.AddEntry: requires an absolute RelayExePath and either RelayURL
 // (direct form) or RelayServer+RelayDaemon (manifest-lookup form).
 func (p *pochiClient) AddEntry(entry MCPEntry) error {
+	if err := p.requirePochiMCPSectionIfFileExists(); err != nil {
+		return err
+	}
 	if entry.RelayExePath == "" {
 		return fmt.Errorf("pochi adapter requires MCPEntry.RelayExePath (absolute path to mcphub.exe for the 'command' field)")
 	}
