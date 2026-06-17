@@ -16,7 +16,7 @@ import { useState } from "preact/hooks";
 import { SectionFooter } from "./SectionAppearance";
 import { useSectionSaveFlow } from "./useSectionSaveFlow";
 import { InfoTip } from "../InfoTip";
-import { restartSupervisor } from "../../api";
+import { restartGui } from "../../api";
 import type { SettingsSnapshot, ConfigSettingDTO, SettingDTO } from "../../lib/settings-types";
 
 export type SectionGuiServerProps = {
@@ -46,13 +46,19 @@ function labelFromKey(key: string): string {
 
 export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerProps): preact.JSX.Element {
   const flow = useSectionSaveFlow(snapshot, EDITABLE_KEYS, onDirtyChange);
-  // Restart-supervisor affordance for the port / hub-endpoint restart-required
-  // badges. CAVEAT: restarting the supervisor (POST /api/supervisor/restart)
-  // restarts the daemons, NOT the GUI process — the GUI OWNS the supervisor
-  // (it spawns it), so a port change (a GUI-listener concern) still needs the
-  // mcphub GUI itself relaunched. There is no GUI-self-restart endpoint yet
-  // (ROADMAP: "Settings GUI self-restart endpoint"); until then the badges tell
-  // the user to relaunch the GUI, and this button only restarts the daemons.
+  // GUI self-restart affordance for the port / hub-endpoint restart-required
+  // badges. POST /api/gui/restart spawns a replacement `mcphub gui` process
+  // (re-running the same args, so the new port / flags take effect) and then
+  // exits the current one to hand off the single-instance lock. The
+  // replacement listener binds the SAME port, so the browser tab reconnects
+  // on its own after a brief drop — there is no need to close and reopen the
+  // app by hand. The supervisor + daemon fleet survive the handoff (the child
+  // adopts the live supervisor), so this is a GUI-listener restart, not a
+  // daemon restart.
+  //
+  // The post-200 connection drop is EXPECTED: the backend may send the 200 as
+  // its last byte before the listener dies, so a fetch network error AFTER a
+  // successful parse is treated as a normal handoff rather than a failure.
   const [restartBusy, setRestartBusy] = useState(false);
   const [restartMsg, setRestartMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   async function doRestart() {
@@ -60,16 +66,21 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
     setRestartBusy(true);
     setRestartMsg(null);
     try {
-      const res = await restartSupervisor();
-      if (res.spawned) {
-        setRestartMsg({ kind: "ok", text: "Supervisor + daemons restarted. A GUI port or hub-endpoint change also needs the mcphub GUI itself relaunched (close and reopen) — the GUI can't restart its own listener yet." });
+      const res = await restartGui();
+      if (res.restarting) {
+        setRestartMsg({
+          kind: "ok",
+          text: "Restarting the GUI… the replacement window reconnects on the same port in a moment. If this tab does not refresh on its own, reload it.",
+        });
       } else {
-        const detail = res.per_step_error
-          ? Object.entries(res.per_step_error).map(([k, v]) => `${k}: ${v}`).join("; ")
-          : "supervisor did not respawn";
+        const detail = res.spawn_error || "the replacement GUI process did not start";
         setRestartMsg({ kind: "error", text: `Restart incomplete: ${detail}` });
       }
     } catch (e: any) {
+      // A network error AFTER the handler returned 200 is the expected
+      // handoff (the listener exited). restartGui only throws on a non-2xx
+      // BEFORE the body is read, so reaching here means the request failed
+      // outright (e.g. could not connect) — surface it.
       setRestartMsg({ kind: "error", text: e?.message ?? "Restart failed" });
     } finally {
       setRestartBusy(false);
@@ -168,7 +179,7 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
                 ) : null}
                 {k === "gui_server.port" && showPortBadge ? (
                   <span class="settings-restart-badge" data-test-id="port-restart-badge" role="status">
-                    ⚠ Restart required — port {persistedPort} takes effect after the mcphub GUI is relaunched (close and reopen the app).
+                    ⚠ Restart required — port {persistedPort} takes effect after the mcphub GUI restarts. Use “Restart GUI now” below.
                   </span>
                 ) : null}
                 {k === "gui_server.hub_endpoint_enabled" && showHubBadge ? (
@@ -177,7 +188,7 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
                     data-test-id="hub-endpoint-restart-badge"
                     role="status"
                   >
-                    ⚠ Restart required — hub endpoint {persistedHubEnabled ? "ON" : "OFF"} takes effect after the mcphub GUI restart (close and reopen the app).
+                    ⚠ Restart required — hub endpoint {persistedHubEnabled ? "ON" : "OFF"} takes effect after the mcphub GUI restarts. Use “Restart GUI now” below.
                   </span>
                 ) : null}
               </div>
@@ -194,7 +205,7 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
             disabled={restartBusy}
             data-testid="gui-server-restart-now"
           >
-            {restartBusy ? "Restarting…" : "Restart supervisor + daemons"}
+            {restartBusy ? "Restarting…" : "Restart GUI now"}
           </button>
           {restartMsg ? (
             <span

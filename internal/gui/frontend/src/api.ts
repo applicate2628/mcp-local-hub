@@ -478,6 +478,45 @@ export async function restartSupervisor(): Promise<SupervisorRestartResult> {
   return (await resp.json()) as SupervisorRestartResult;
 }
 
+// GuiRestartResult mirrors gui.guiSelfRestartResponse: the outcome of
+// the GUI self-restart handoff. `restarting: true` means the replacement
+// `mcphub gui` child was spawned and the current process is about to exit
+// to hand off the single-instance lock — the browser tab will lose its
+// connection momentarily, then the child's listener (same port) answers.
+// `spawned: false` + `spawn_error` means the child did NOT launch and the
+// current GUI keeps running, so the operator sees the error rather than
+// losing the GUI.
+export interface GuiRestartResult {
+  spawned: boolean;
+  spawned_pid: number;
+  spawn_error?: string;
+  restarting: boolean;
+}
+
+// restartGui posts to /api/gui/restart. On success the backend spawns a
+// replacement GUI process and then exits the current one to release the
+// single-instance lock, so the HTTP response may be the LAST byte this
+// listener sends before the connection drops — callers must treat a
+// post-200 fetch/network error as the expected handoff, not a failure.
+export async function restartGui(): Promise<GuiRestartResult> {
+  const resp = await fetch("/api/gui/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // non-JSON
+    }
+    const msg = body?.error ?? resp.statusText ?? "unknown";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/gui/restart [${code}]: ${msg}`);
+  }
+  return (await resp.json()) as GuiRestartResult;
+}
+
 // ManifestHashMismatchError marks the stale-file-detection branch so
 // the AddServer edit flow can show the [Reload]/[Force Save] banner
 // instead of a generic error toast.

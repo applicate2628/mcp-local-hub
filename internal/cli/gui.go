@@ -54,6 +54,62 @@ func resolveGuiPort(flagChanged bool, flagValue int, settingValue string) int {
 	return 0
 }
 
+// selfRestartHandoffEnv mirrors gui.SelfRestartHandoffEnv. The GUI
+// self-restart handler (internal/gui/gui_self_restart.go) sets this env
+// var on the replacement `mcphub gui` child it spawns; this CLI startup
+// path reads it to switch the single-instance acquire from a single-shot
+// TryLock to a bounded retry poll. Duplicated as a local const (rather
+// than importing the value) only to keep the literal in one obvious
+// place per package; the gui package owns the canonical name and a unit
+// test pins the two equal.
+const selfRestartHandoffEnv = "MCPHUB_GUI_SELF_RESTART_HANDOFF"
+
+// selfRestartHandoffAcquireDeadline / selfRestartHandoffAcquireBackoff
+// bound the handoff acquire poll. The window only needs to cover the
+// outgoing parent's flush-response + selfRestartExitDelay (~250ms) + OS
+// flock release; 10s is generously padded for a loaded host. After the
+// deadline the child falls through to the normal busy/handshake path so
+// a genuinely-stuck incumbent (not a handoff) is still diagnosed.
+var (
+	selfRestartHandoffAcquireDeadline = 10 * time.Second
+	selfRestartHandoffAcquireBackoff  = 100 * time.Millisecond
+)
+
+// acquireSingleInstanceWithHandoff acquires the GUI single-instance lock.
+// On the normal path it is a single AcquireSingleInstanceAt (identical to
+// the prior direct call). When MCPHUB_GUI_SELF_RESTART_HANDOFF=1 is set
+// (the replacement GUI spawned by POST /api/gui/restart), it polls the
+// acquire for a bounded window so the brief overlap where the outgoing
+// parent still holds the flock does not BUSY-out the handoff — the child
+// catches the lock the instant the parent's exit releases it.
+//
+// Only ErrSingleInstanceBusy is retried; any other acquire error (write
+// failure, etc.) returns immediately. On deadline expiry the last busy
+// error is returned so the caller's existing handshake/--force flow runs
+// exactly as before for a genuinely-occupied lock.
+func acquireSingleInstanceWithHandoff(ctx context.Context, pidportPath string, port int) (*gui.SingleInstanceLock, error) {
+	lock, err := gui.AcquireSingleInstanceAt(pidportPath, port)
+	if err == nil || !errors.Is(err, gui.ErrSingleInstanceBusy) {
+		return lock, err
+	}
+	if os.Getenv(selfRestartHandoffEnv) != "1" {
+		return lock, err
+	}
+	deadline := time.Now().Add(selfRestartHandoffAcquireDeadline)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(selfRestartHandoffAcquireBackoff):
+		}
+		lock, err = gui.AcquireSingleInstanceAt(pidportPath, port)
+		if err == nil || !errors.Is(err, gui.ErrSingleInstanceBusy) {
+			return lock, err
+		}
+	}
+	return lock, err
+}
+
 // inputIsTerminal reports whether r is a terminal-backed *os.File. The
 // non-TTY guard for --force --kill must check the SAME stream the
 // confirmation prompt reads from (cmd.InOrStdin) so test / embedded
@@ -210,7 +266,17 @@ activates the first window and exits 0.`,
 			// be 0 = auto); once the server actually binds, we rewrite it
 			// with the resolved port so second-instance handshake probes
 			// reach the right place.
-			lock, err := gui.AcquireSingleInstanceAt(pidportPath, port)
+			//
+			// Self-restart handoff (MCPHUB_GUI_SELF_RESTART_HANDOFF=1): when
+			// this process is the replacement GUI spawned by POST
+			// /api/gui/restart, the outgoing parent still briefly holds the
+			// flock while it flushes its 200 response and exits. The normal
+			// single-shot AcquireSingleInstanceAt would BUSY-out on that
+			// window and route to the activate-then-exit handshake, leaving
+			// NO GUI once the parent dies. acquireSingleInstanceWithHandoff
+			// instead polls the acquire for a bounded window so the child
+			// catches the lock the instant the parent's exit releases it.
+			lock, err := acquireSingleInstanceWithHandoff(ctx, pidportPath, port)
 			if err != nil {
 				if !errors.Is(err, gui.ErrSingleInstanceBusy) {
 					return err
