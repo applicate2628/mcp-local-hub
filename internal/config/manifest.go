@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -107,6 +108,15 @@ type DaemonSpec struct {
 	Context   string   `yaml:"context"`
 	Port      int      `yaml:"port"`
 	ExtraArgs []string `yaml:"extra_args"`
+
+	// Cwd, when non-empty, is the working directory the supervisor sets
+	// as the daemon subprocess's cwd (cmd.Dir) at spawn time. Empty means
+	// inherit mcphub's own cwd (the prior behavior). MUST be an absolute
+	// path — a relative cwd has no stable base across the scheduler /
+	// supervisor / interactive launch surfaces, so Validate() rejects it.
+	// ${ENV} / ${HOME} tokens are expanded at parse time (like base_args /
+	// env) so a shipped manifest stays portable.
+	Cwd string `yaml:"cwd,omitempty" json:"cwd,omitempty"`
 }
 
 // DaemonTemplate describes a per-workspace daemon spawn template for the
@@ -226,6 +236,20 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 		m.Env[k] = expanded
 		for _, name := range miss {
 			missing = append(missing, k+":"+name)
+		}
+	}
+	// Expand ${ENV} / ${HOME} tokens in each daemon's cwd at parse time so
+	// a shipped manifest can carry e.g. cwd: "${HOME}/.cache/foo" without
+	// hard-coding the operator's home. Mirrors the base_args / env handling
+	// above; a referenced-but-unset variable is reported the same way.
+	for i := range m.Daemons {
+		if m.Daemons[i].Cwd == "" {
+			continue
+		}
+		expanded, miss := expandEnvCrossPlatform(m.Daemons[i].Cwd)
+		m.Daemons[i].Cwd = expanded
+		for _, name := range miss {
+			missing = append(missing, fmt.Sprintf("daemons[%d].cwd:%s", i, name))
 		}
 	}
 	if len(missing) > 0 {
@@ -464,6 +488,17 @@ func (m *ServerManifest) Validate() error {
 		if m.Daemons[i].Port == ReservedGUIPort {
 			return fmt.Errorf("manifest %s: daemons[%d] (%q) declares port %d, the reserved GUI listener port; choose a port outside the GUI/infra range (hand-assigned globals use 9121–9149 per configs/ports.yaml)",
 				m.Name, i, m.Daemons[i].Name, ReservedGUIPort)
+		}
+		// A daemon cwd, when set, becomes the subprocess's cmd.Dir at spawn
+		// time. It MUST be absolute: the daemon is launched from the
+		// supervisor / scheduler / an interactive shell whose own cwd is not
+		// stable, so a relative cwd would resolve against an unpredictable
+		// base. Reject it at validation so the dead-end never reaches spawn.
+		// (${ENV}/${HOME} tokens were already expanded at parse time, so by
+		// here Cwd is a literal path.)
+		if c := m.Daemons[i].Cwd; c != "" && !filepath.IsAbs(c) {
+			return fmt.Errorf("manifest %s: daemons[%d] (%q) cwd %q must be an absolute path (a relative cwd has no stable base across the supervisor / scheduler / interactive launch surfaces)",
+				m.Name, i, m.Daemons[i].Name, c)
 		}
 	}
 	if m.Kind == KindWorkspaceScoped {

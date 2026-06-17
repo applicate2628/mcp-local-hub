@@ -239,6 +239,54 @@ sys.stdout.flush()
 	}
 }
 
+// TestHostWorkingDirSetsSubprocessCwd verifies HostConfig.WorkingDir flows to
+// the subprocess as its cwd (cmd.Dir). This is the spawn-side honoring of the
+// manifest's per-daemon `cwd` field: config.DaemonSpec.Cwd → HostConfig.WorkingDir
+// → cmd.Dir. Without this wire the GUI cwd form would be dead UI. The child
+// resolves its cwd via os.path.realpath so the assertion is robust against
+// macOS /var → /private/var and Windows 8.3 short-name symlink resolution.
+func TestHostWorkingDirSetsSubprocessCwd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	wantDir := t.TempDir()
+
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args: []string{"-u", "-c", `
+import os, sys, json
+print(json.dumps({"cwd": os.path.realpath(os.getcwd())}))
+sys.stdout.flush()
+`},
+		WorkingDir: wantDir,
+	})
+	if err != nil {
+		t.Fatalf("NewStdioHost: %v", err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer h.Stop()
+
+	got, err := h.readStdoutTest(2 * time.Second)
+	if err != nil {
+		t.Fatalf("readStdoutTest: %v", err)
+	}
+	var result struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal(got, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(wantDir)
+	if err != nil {
+		wantResolved = wantDir
+	}
+	if result.Cwd != wantResolved && result.Cwd != wantDir {
+		t.Errorf("subprocess cwd = %q, want %q (WorkingDir not applied to cmd.Dir)", result.Cwd, wantResolved)
+	}
+}
+
 // TestHostHTTPIDMultiplexing verifies that two concurrent HTTP clients each
 // receive the response matching their original request id, even when the
 // TestStdioHost_TeesStderrToLogFile verifies that with HostConfig.LogPath

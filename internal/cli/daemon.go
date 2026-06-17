@@ -168,6 +168,11 @@ See also: install, logs, restart, status.`,
 					Env:          env,
 					UpstreamPort: internalPort,
 					LogPath:      logPath,
+					// spec.Cwd is the manifest-declared per-daemon working
+					// directory (validated absolute at parse time; empty means
+					// inherit mcphub's own cwd). cmd.Dir is set from this in
+					// the host's Start().
+					WorkingDir: spec.Cwd,
 				})
 				if err != nil {
 					return fmt.Errorf("NewHTTPHost: %w", err)
@@ -231,6 +236,11 @@ See also: install, logs, restart, status.`,
 					Args:    childArgs,
 					Env:     env,
 					LogPath: logPath,
+					// spec.Cwd is the manifest-declared per-daemon working
+					// directory (validated absolute at parse time; empty means
+					// inherit mcphub's own cwd). cmd.Dir is set from this in
+					// the host's Start().
+					WorkingDir: spec.Cwd,
 				})
 				if err != nil {
 					return fmt.Errorf("NewStdioHost: %w", err)

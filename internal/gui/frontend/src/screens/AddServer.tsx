@@ -303,7 +303,7 @@ export function AddServerScreen(props: {
 
   function updateDaemonExtras(
     id: string,
-    field: "context" | "extra_args",
+    field: "context" | "extra_args" | "cwd",
     value: string | string[] | undefined,
   ) {
     setFormState((prev) => ({
@@ -1427,12 +1427,13 @@ function BindingsMatrix(props: {
   );
 }
 
-// DaemonExtrasSubsection renders per-daemon context + extra_args fields.
-// context is only rendered when kind === "workspace-scoped".
+// DaemonExtrasSubsection renders per-daemon context + cwd + extra_args fields.
+// context is only rendered when kind === "workspace-scoped"; cwd applies to
+// every daemon (global + workspace-scoped) and must be an absolute path.
 function DaemonExtrasSubsection(props: {
   daemons: DaemonFormEntry[];
   kind: ManifestFormState["kind"];
-  onUpdate: (id: string, field: "context" | "extra_args", value: string | string[] | undefined) => void;
+  onUpdate: (id: string, field: "context" | "extra_args" | "cwd", value: string | string[] | undefined) => void;
   disabled?: boolean;
 }) {
   const { daemons, kind, onUpdate, disabled } = props;
@@ -1457,6 +1458,20 @@ function DaemonExtrasSubsection(props: {
               />
             </div>
           )}
+          <div class="form-row">
+            <label>Working dir (cwd)</label>
+            <input
+              type="text"
+              placeholder="(inherit) — absolute path"
+              value={d.cwd ?? ""}
+              onInput={(e) => {
+                const v = (e.currentTarget as HTMLInputElement).value;
+                onUpdate(d._id, "cwd", v === "" ? undefined : v);
+              }}
+              disabled={disabled}
+              data-field="daemon-cwd"
+            />
+          </div>
           <div class="form-row">
             <label>Extra args</label>
             <RepeatableStringRows

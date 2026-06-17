@@ -224,6 +224,10 @@ export interface DaemonFormEntry {
   // A2b Advanced, workspace-scoped only:
   context?: string;
   extra_args?: string[];
+  // cwd: optional per-daemon working directory (subprocess cmd.Dir at spawn).
+  // Must be an absolute path; the backend rejects a relative cwd at manifest
+  // parse time. Empty/undefined means inherit mcphub's own cwd.
+  cwd?: string;
 }
 
 // BindingFormEntry — A2b extension: references daemon by _id internally

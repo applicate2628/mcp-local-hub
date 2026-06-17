@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -71,6 +72,85 @@ daemons: [{name: default, port: 9999}]
 	}
 	if !strings.Contains(err.Error(), "TOTALLY_UNSET_VAR") {
 		t.Errorf("error should name the missing variable: %v", err)
+	}
+}
+
+// TestParseManifest_DaemonCwd covers the per-daemon `cwd` field round-trip:
+// an absolute cwd is accepted and carried onto DaemonSpec.Cwd, and ${ENV}
+// tokens inside it are expanded at parse time (mirroring base_args / env).
+// The platform-native absolute prefix is built via filepath so the assertion
+// holds on both Windows (C:\...) and POSIX (/...). KnownFields(true) means a
+// successful parse also proves the YAML tag is declared (an undeclared `cwd:`
+// key would have errored).
+func TestParseManifest_DaemonCwd(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "wsroot") // platform-native absolute path
+	t.Setenv("MCPHUB_CWD_TEST_BASE", base)
+
+	yaml := `
+name: t
+kind: global
+transport: stdio-bridge
+command: bash
+daemons:
+  - name: default
+    port: 9999
+    cwd: "${MCPHUB_CWD_TEST_BASE}"
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if len(m.Daemons) != 1 {
+		t.Fatalf("len(Daemons) = %d, want 1", len(m.Daemons))
+	}
+	if m.Daemons[0].Cwd != base {
+		t.Errorf("Daemons[0].Cwd = %q, want %q (env not expanded?)", m.Daemons[0].Cwd, base)
+	}
+}
+
+// TestParseManifest_DaemonCwdEmptyOmitted confirms a daemon with no cwd
+// declared leaves DaemonSpec.Cwd empty (the inherit-cwd default). Empty must
+// pass validation (omitempty / optional).
+func TestParseManifest_DaemonCwdEmptyOmitted(t *testing.T) {
+	yaml := `
+name: t
+kind: global
+transport: stdio-bridge
+command: bash
+daemons:
+  - name: default
+    port: 9999
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if m.Daemons[0].Cwd != "" {
+		t.Errorf("Daemons[0].Cwd = %q, want empty (no cwd declared)", m.Daemons[0].Cwd)
+	}
+}
+
+// TestParseManifest_DaemonCwdRelativeRejected is the validation guard: a
+// relative cwd has no stable base across the supervisor / scheduler /
+// interactive launch surfaces, so it is rejected at parse time rather than
+// silently flowing to cmd.Dir.
+func TestParseManifest_DaemonCwdRelativeRejected(t *testing.T) {
+	yaml := `
+name: t
+kind: global
+transport: stdio-bridge
+command: bash
+daemons:
+  - name: default
+    port: 9999
+    cwd: "relative/path"
+`
+	_, err := ParseManifest(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected ParseManifest to reject a relative daemon cwd")
+	}
+	if !strings.Contains(err.Error(), "absolute path") {
+		t.Errorf("error should explain the absolute-path requirement: %v", err)
 	}
 }
 

@@ -78,6 +78,41 @@ describe("toYAML", () => {
     expect(yaml).toMatch(/- name: 'workspace-py'\s+port: 9124/);
   });
 
+  it("serializes a per-daemon cwd only when non-empty", () => {
+    const withCwd: ManifestFormState = {
+      ...base,
+      name: "demo",
+      command: "npx",
+      daemons: [{ _id: "id-1", name: "default", port: 9123, cwd: "C:\\srv\\demo" }],
+    };
+    const yaml = toYAML(withCwd);
+    // backslash path → single-quoted (mirrors the Windows-path quoting rule)
+    expect(yaml).toContain("cwd: 'C:\\srv\\demo'");
+
+    const noCwd: ManifestFormState = {
+      ...base,
+      name: "demo",
+      command: "npx",
+      daemons: [{ _id: "id-1", name: "default", port: 9123 }],
+    };
+    expect(toYAML(noCwd)).not.toContain("cwd:");
+  });
+
+  it("round-trips a per-daemon cwd through parseYAMLToForm → toYAML", () => {
+    const yaml = `name: demo
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9123
+    cwd: "/srv/demo"
+`;
+    const form = parseYAMLToForm(yaml);
+    expect(form.daemons[0].cwd).toBe("/srv/demo");
+    expect(toYAML(form)).toContain("cwd: '/srv/demo'");
+  });
+
   it("renders client_bindings as a list-of-maps with client + daemon + url_path", () => {
     const state: ManifestFormState = {
       ...base,

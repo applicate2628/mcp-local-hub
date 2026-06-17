@@ -25,7 +25,7 @@ const TOP_LEVEL_KNOWN = new Set([
 ]);
 
 // Nested per-level known keys — used by hasNestedUnknown.
-const DAEMON_KNOWN = new Set(["name", "port", "context", "extra_args"]);
+const DAEMON_KNOWN = new Set(["name", "port", "context", "extra_args", "cwd"]);
 const LANGUAGE_KNOWN = new Set([
   "name",
   "backend",
@@ -155,6 +155,7 @@ export function parseYAMLToForm(yaml: string): ManifestFormState {
             port: asNumber(d.port, 0),
           };
           if (typeof d.context === "string") entry.context = d.context;
+          if (typeof d.cwd === "string" && d.cwd.length > 0) entry.cwd = d.cwd;
           const extra = asStringArray(d.extra_args);
           if (extra.length > 0) entry.extra_args = extra;
           return entry;
@@ -346,6 +347,11 @@ export function toYAML(state: ManifestFormState): string {
       }
       if (d.extra_args && d.extra_args.length > 0) {
         lines.push(`    extra_args: [${d.extra_args.map(quote).join(", ")}]`);
+      }
+      // cwd is NOT kind-gated (applies to global + workspace-scoped daemons);
+      // serialized only when non-empty so the omitempty backend tag matches.
+      if (typeof d.cwd === "string" && d.cwd.length > 0) {
+        lines.push(`    cwd: ${quote(d.cwd)}`);
       }
     }
   }
