@@ -90,9 +90,9 @@ func validateMarketplaceEntry(e *MarketplaceEntry) error {
 		return fmt.Errorf("id %q fails manifest-name gate: %w", e.ID, err)
 	}
 	switch e.Transport {
-	case "stdio":
+	case "stdio", "native-http":
 		if e.Command == "" {
-			return fmt.Errorf("stdio entry must declare command")
+			return fmt.Errorf("%s entry must declare command", e.Transport)
 		}
 	case "http":
 		if e.URL == "" {
@@ -102,7 +102,7 @@ func validateMarketplaceEntry(e *MarketplaceEntry) error {
 			return fmt.Errorf("http entry url must be https:// (got %q)", e.URL)
 		}
 	default:
-		return fmt.Errorf("unknown transport %q (want stdio or http)", e.Transport)
+		return fmt.Errorf("unknown transport %q (want stdio, native-http, or http)", e.Transport)
 	}
 	return nil
 }
