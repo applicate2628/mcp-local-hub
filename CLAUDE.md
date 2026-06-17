@@ -242,6 +242,71 @@ surface:
 | `feedback_kosyak_surgical_edits_leave_stale_text.md` | Edit-tool patches left contradictory stale sections |
 | `feedback_kosyak_trusted_ide_diagnostics_blindly.md` | reported IDE diagnostics as compile errors without command-line verify |
 
+## npm publish — CANONICAL pipeline (tag-push CI, NEVER local `npm publish`)
+
+The ONLY supported publish path is a **git tag push** that triggers
+`.github/workflows/npm-publish.yml`. Do NOT `npm publish` from a local
+shell — see "Why not local" below. Every prior release (`v0.4.6`,
+`v0.4.7`, `v0.4.8`) went out this way.
+
+### The 4 steps
+
+1. **Bump the version.** `npm/package.json` is the SINGLE version authority.
+   Set `version` + every `optionalDependencies` entry to the new `X.Y.Z`,
+   then propagate:
+
+   ```bash
+   V=0.4.9   # must be > the current `npm view mcp-local-hub version` (latest)
+   node -e "const f='npm/package.json';const p=require('./'+f);p.version='$V';for(const k in p.optionalDependencies)p.optionalDependencies[k]='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+   node npm/generate-platform-packages.js   # rewrites the 6 npm/packages/*/package.json
+   node npm/sync-version.js --inject         # pushes $V into build.sh + build.ps1
+   ```
+
+2. **Commit** the bump (`npm/package.json`, the 6 `npm/packages/*/package.json`,
+   `build.sh`, `build.ps1`) and `git push origin master`.
+
+3. **Tag + push the tag:**
+
+   ```bash
+   git tag v$V && git push origin v$V
+   ```
+
+4. **Watch + verify:**
+
+   ```bash
+   gh run watch "$(gh run list --workflow=npm-publish.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+   npm view mcp-local-hub version dist-tags   # latest must == $V
+   ```
+
+The workflow cross-builds the 6 platform binaries (win32/darwin/linux ×
+x64/arm64) with `-s -w -X main.version=$V`, drops them into each
+`@applicate2628/mcp-local-hub-<plat>-<arch>` sub-package's `bin/`, asserts
+the binary version, then `npm publish --provenance --access public`-es the
+6 scoped platform packages FIRST (so the meta's `optionalDependencies`
+resolve) and the `mcp-local-hub` meta LAST. Prereleases (`vX.Y.Z-beta.N`)
+auto-route to the `beta` dist-tag, never `latest`.
+
+### Why NOT local `npm publish`
+
+- The npm account has **2FA enabled**, so a local `npm publish` hits
+  `EOTP` ("This operation requires a one-time password") on EVERY package.
+  The web-auth OTP flow (`Open this URL …`) needs an interactive CLI
+  session an automated run cannot complete; a 6-digit TOTP would have to
+  be re-pasted within its short window for all 7 publishes.
+- The local `~/.npmrc` `_authToken` periodically **expires** (`npm whoami`
+  → `E401`). Do not "fix" this by pasting a value into `_authToken` — a
+  64-hex OTP/auth-code is NOT a token and will only `E401` AND clobber a
+  working interactive-login session token.
+- The CI workflow uses the repo secret **`NPM_TOKEN`** (an npm Automation
+  token) which bypasses the OTP prompt, and `--provenance` (Sigstore
+  attestation) only works from CI (needs the `id-token: write` OIDC), not
+  locally.
+
+KOSYAK (2026-06-17): wasted a round fumbling local publish (EOTP →
+mis-set the OTP as `_authToken` → E401 → clobbered the session token)
+before remembering the canonical tag-push path that `v0.4.6`/`v0.4.7`
+already used. Tag-push first; never local-publish.
+
 ## GUI frontend (Phase 3B-II onward)
 
 The web UI lives under `internal/gui/frontend/` (Vite + TypeScript +
