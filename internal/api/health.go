@@ -1053,25 +1053,13 @@ func ensureCanonicalIDs(row CapabilityRow) CapabilityRow {
 // (e.g. "Disabled", "Queued", ""), preserving the fail-loud signal for
 // real failures while still fixing the original unmapped→failed false
 // negative. A genuinely "Failed" daemon still maps to "failed".
+//
+// The mapping table itself now lives in the canonical daemon-state classifier
+// (daemon_state.go::ProjectHealthWireState) alongside the other two display-
+// state projections so the vocabulary has a single owner; this function name
+// is kept so its caller (computeDaemonsSection) is unchanged.
 func normalizeDaemonState(s string) string {
-	switch s {
-	case "Running":
-		return "running"
-	case "Starting", "Restarting", "Backoff", "Spawning":
-		return "starting"
-	case "Failed", "Quarantined":
-		return "failed"
-	case "Ready", "Scheduled", "Stopped":
-		return "stopped"
-	default:
-		// Honest classification: an unrecognized (or blank) source state
-		// is "unknown", NOT "failed". Reporting a daemon as failed when
-		// its state is merely unmapped is a false negative (§3.1); the
-		// closed enum keeps a dedicated "unknown" value for this case.
-		// KNOWN degraded/terminal supervisor states are handled above so
-		// they never silently fall to "unknown" (fail-quiet weakening).
-		return "unknown"
-	}
+	return ProjectHealthWireState(s)
 }
 
 // healthNow returns current time in ms. Test seam.

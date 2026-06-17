@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -262,7 +261,7 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			// started_at on the floor, leaving UptimeSec zero in production
 			// while tests injected it). Uses time.Now() as the evaluation
 			// clock — the same wall clock the sweeper's last-activity uses.
-			UptimeSec:     supervisorIPCUptimeSec(d.StartedAt, time.Now()),
+			UptimeSec: supervisorIPCUptimeSec(d.StartedAt, time.Now()),
 			// RAMBytes is carried straight through from the supervisor's
 			// live per-pid lookup (the wire field). Zero means "unknown" —
 			// the GUI Dashboard omits the RAM row in that case.
@@ -298,15 +297,11 @@ func supervisorIPCUptimeSec(startedAt string, now time.Time) int64 {
 	return int64(d / time.Second)
 }
 
+// normalizeSupervisorIPCStatusState is a thin delegate over the canonical
+// daemon-state classifier (daemon_state.go::ProjectIPCStatusState). The
+// vocabulary — including the now-enumerated Quarantined case that closes the
+// latent fail-quiet trap — lives in one place; this function name is kept so
+// its caller (decodeSupervisorIPCStatusResult) is unchanged.
 func normalizeSupervisorIPCStatusState(state string) string {
-	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "running":
-		return "Running"
-	case "idle", "stopped":
-		return "Stopped"
-	case "backoff", "backoff-waiting", "restarting":
-		return "Restarting"
-	default:
-		return state
-	}
+	return ProjectIPCStatusState(state)
 }

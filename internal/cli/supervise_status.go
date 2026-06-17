@@ -201,21 +201,13 @@ func canonicalSupervisorTaskName(taskName string) string {
 	return `\` + taskName
 }
 
+// supervisorStatusGUIState is a thin delegate over the canonical daemon-state
+// classifier (internal/api/daemon_state.go::ProjectGUIState). The producer-side
+// vocabulary (tracker raw-runtime state -> Title-case GUI/IPC-wire state) lives
+// in one place shared with the IPC-consumer and /api/health projections; this
+// function name is kept so its caller (supervisorStatusDaemons) is unchanged.
 func supervisorStatusGUIState(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "running":
-		return "Running"
-	case "idle":
-		return "Stopped"
-	case "backoff", "backoff-waiting", "spawning":
-		return "Restarting"
-	case "quarantine", "quarantined":
-		return "Quarantined"
-	case "":
-		return "Idle"
-	default:
-		return raw
-	}
+	return api.ProjectGUIState(raw)
 }
 
 func daemonRuntimeStartedAt(startedAt time.Time) string {
