@@ -207,11 +207,24 @@ export function DashboardScreen() {
     pushToast("danger", `Daemon ${who} failed${code}`);
   }, []);
 
+  // SSE handler for daemon-recovered (poller falling edge). The all-clear
+  // paired with daemon-failed: a success toast (auto-dismisses by variant
+  // default) so the operator who saw the sticky failure also sees the
+  // recovery without having to re-read the cards.
+  const onDaemonRecovered = useCallback((ev: MessageEvent) => {
+    const body = JSON.parse(ev.data) as { server: string; daemon?: string };
+    const who = body.daemon && body.daemon !== "default"
+      ? `${body.server}/${body.daemon}`
+      : body.server;
+    pushToast("success", `Daemon ${who} recovered`);
+  }, []);
+
   useEventSource("/api/events", {
     "daemon-state": onDelta,
     "bulk-action": onBulkAction,
     "poller-error": onPollerError,
     "daemon-failed": onDaemonFailed,
+    "daemon-recovered": onDaemonRecovered,
   });
 
   // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.

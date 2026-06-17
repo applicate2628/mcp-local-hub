@@ -448,6 +448,54 @@ func TestPoller_DaemonFailedOnFailStateString(t *testing.T) {
 	}
 }
 
+// TestPoller_EmitsDaemonRecoveredOnFallingEdge guards the symmetric all-clear:
+// a daemon that was failed and returns to healthy must emit daemon-recovered
+// EXACTLY ONCE on the falling edge, and a daemon first-seen healthy must NOT
+// spuriously announce a recovery.
+func TestPoller_EmitsDaemonRecoveredOnFallingEdge(t *testing.T) {
+	frames := [][]api.DaemonStatus{
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, LastResult: 0}}, // healthy first-seen
+		{{Server: "memory", State: "Running", Port: 9123, PID: 42, LastResult: 1}}, // failed
+		{{Server: "memory", State: "Running", Port: 9123, PID: 99, LastResult: 0}}, // recovered
+	}
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	go p.Run(ctx)
+
+	// Wait for the one daemon-recovered (it trails the frame-3 daemon-state in
+	// the same cycle; the scripted source then replays frame 3 with no further
+	// delta, so there is never a second recovery). A spurious recovery on the
+	// frame-1 first-seen-healthy insert would arrive FIRST and fail the
+	// server-name check below (it would be the only one), so this also guards
+	// the no-spurious property.
+	var firstFailed bool
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-ch:
+			switch ev.Type {
+			case "daemon-failed":
+				firstFailed = true
+			case "daemon-recovered":
+				if !firstFailed {
+					t.Fatal("daemon-recovered fired BEFORE any daemon-failed (spurious recovery on first-seen-healthy)")
+				}
+				if got, _ := ev.Body["server"].(string); got != "memory" {
+					t.Errorf("daemon-recovered server = %q, want memory", got)
+				}
+				return // success: recovery observed after the failure
+			}
+		case <-deadline:
+			t.Fatalf("never observed daemon-recovered after the failure (firstFailed=%v)", firstFailed)
+		}
+	}
+}
+
 // errStatus is a statusProvider that always returns the configured
 // error, modeling a down-supervisor fail-loud snapshot.
 type errStatus struct{ err error }

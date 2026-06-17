@@ -6,7 +6,8 @@
 // LastResult, JobProtection). On a rising FAILURE edge (a row that newly
 // trips api.IsRealFailure(LastResult) or whose State contains "fail") it
 // ALSO publishes a "daemon-failed" event for the Dashboard/toast alert
-// surface. Fetch errors are surfaced as "poller-error" events and the
+// surface, and on the symmetric FALLING edge (failed -> healthy) a
+// "daemon-recovered" all-clear event. Fetch errors are surfaced as "poller-error" events and the
 // loop continues on the next tick. Daemons that disappear between samples
 // emit a terminal daemon-state event with state="Gone".
 //
@@ -197,7 +198,14 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		// swallowed by the unchanged-continue. An unknown prev (!ok) reads as
 		// non-failed (zero-value State + LastResult=0), so a daemon already
 		// failed on first observation still emits once.
-		failedEdge := isFailedDaemonState(r) && !isFailedDaemonState(prev)
+		nowFailed := isFailedDaemonState(r)
+		failedEdge := nowFailed && !isFailedDaemonState(prev)
+		// Falling edge: was failed, now healthy — the supervisor's auto-restart
+		// (or a manual restart) succeeded. The `ok` guard means a daemon
+		// first-seen healthy does NOT spuriously announce a recovery; only a
+		// real failed->healthy transition does. (failed->Gone is handled by the
+		// removed-rows loop below, not here.)
+		recoveredEdge := ok && !nowFailed && isFailedDaemonState(prev)
 		p.last[k] = r
 		body := map[string]any{
 			"server":         r.Server,
@@ -244,6 +252,21 @@ func (p *StatusPoller) poll(ctx context.Context) {
 					"last_result": r.LastResult,
 					"pid":         r.PID,
 					"port":        r.Port,
+				},
+			})
+		}
+		// Symmetric falling edge: announce the recovery so the operator who
+		// got the danger toast also sees the all-clear (C4 "auto-restart done"
+		// notification). Edge-triggered, so it fires exactly once per recovery.
+		if recoveredEdge {
+			p.events.Publish(Event{
+				Type: "daemon-recovered",
+				Body: map[string]any{
+					"server": r.Server,
+					"daemon": r.Daemon,
+					"state":  r.State,
+					"pid":    r.PID,
+					"port":   r.Port,
 				},
 			})
 		}
