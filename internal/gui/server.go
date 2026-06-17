@@ -736,7 +736,10 @@ func NewServer(cfg Config) *Server {
 	registerExtractManifestRoutes(s)
 	registerSecretsRoutes(s)
 	registerSettingsRoutes(s)
+	registerPathValidateRoutes(s)       // Wave 2: TypePath "Browse…" path-exists/is-dir validate
+	registerClientInstallPrefsRoutes(s) // Wave 2: Settings → Clients default-install override
 	registerBackupsRoutes(s)
+	registerBackupsActionsRoutes(s) // Wave 2: per-timestamp backup restore + delete
 	registerVersionRoutes(s)
 	registerDaemonsRoutes(s)
 	registerExportBundleRoutes(s)
