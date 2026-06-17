@@ -49,6 +49,7 @@ export function ServerRowDrawer(props: ServerRowDrawerProps) {
   const { serverName, daemons, onClose } = props;
   const drawerElRef = useRef<HTMLDivElement>(null);
   const drawerInstRef = useRef<Drawer | null>(null);
+  const onCloseRef = useRef(onClose);
   const [yaml, setYaml] = useState<string | null>(null);
   const [yamlErr, setYamlErr] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
@@ -60,6 +61,9 @@ export function ServerRowDrawer(props: ServerRowDrawerProps) {
       mountedRef.current = false;
     };
   }, []);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   // Construct the Flowbite Drawer instance once and slide it in. Flowbite
   // handles the backdrop, body-scroll lock, and the translate transition;
@@ -75,7 +79,7 @@ export function ServerRowDrawer(props: ServerRowDrawerProps) {
       onHide: () => {
         // Only propagate when the component is still mounted; the cleanup
         // below also calls hide() which would re-enter onHide otherwise.
-        if (mountedRef.current) onClose();
+        if (mountedRef.current) onCloseRef.current();
       },
     });
     drawerInstRef.current = inst;
@@ -87,7 +91,7 @@ export function ServerRowDrawer(props: ServerRowDrawerProps) {
       drawerInstRef.current = null;
     };
     // serverName in deps so opening a different row rebuilds the instance.
-  }, [serverName, onClose]);
+  }, [serverName]);
 
   // Fetch the manifest YAML on open (and whenever the row changes).
   useEffect(() => {

@@ -14,10 +14,18 @@ import { getManifest } from "../api";
 // happy-dom only partially provides. Mock it to a no-op constructor so the
 // component's show()/hide() lifecycle is exercised without the real DOM
 // plumbing — the markup + handlers are what we assert.
+const hideSpy = vi.hoisted(() => vi.fn());
 vi.mock("flowbite", () => ({
   Drawer: class {
+    private opts: { onHide?: () => void };
+    constructor(_el: HTMLElement, opts: { onHide?: () => void }) {
+      this.opts = opts;
+    }
     show() {}
-    hide() {}
+    hide() {
+      hideSpy();
+      this.opts.onHide?.();
+    }
   },
 }));
 
@@ -139,5 +147,20 @@ describe("ServerRowDrawer (Flowbite Drawer)", () => {
     render(<ServerRowDrawer serverName="memory" daemons={[RUNNING_ROW]} onClose={onClose} />);
     fireEvent.click(screen.getByTestId("server-row-drawer-close"));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("keeps the Flowbite drawer mounted across onClose prop identity changes", () => {
+    const firstClose = vi.fn();
+    const secondClose = vi.fn();
+    const { rerender } = render(
+      <ServerRowDrawer serverName="memory" daemons={[RUNNING_ROW]} onClose={firstClose} />,
+    );
+    hideSpy.mockClear();
+
+    rerender(<ServerRowDrawer serverName="memory" daemons={[RUNNING_ROW]} onClose={secondClose} />);
+
+    expect(hideSpy).not.toHaveBeenCalled();
+    expect(firstClose).not.toHaveBeenCalled();
+    expect(secondClose).not.toHaveBeenCalled();
   });
 });
