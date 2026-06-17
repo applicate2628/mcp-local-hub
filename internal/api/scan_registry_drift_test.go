@@ -157,3 +157,71 @@ func TestClientScanners_AreAllRegistryClients(t *testing.T) {
 		}
 	}
 }
+
+// TestScanCoversTier1Clients verifies the skills-CLI TIER-1 registry clients
+// are not merely presence-probed: they also have scanner registrations that
+// discover existing MCP entries for migration/reconciliation workflows.
+func TestScanCoversTier1Clients(t *testing.T) {
+	tmp := t.TempDir()
+	manifestDir := filepath.Join(tmp, "servers")
+	if err := os.MkdirAll(filepath.Join(manifestDir, "memory"), 0o755); err != nil {
+		t.Fatalf("mkdir manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+		[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	paths := map[string]string{}
+	for _, client := range []string{
+		"bob", "codebuddy", "command-code", "cortex", "deepagents", "devin",
+		"droid", "firebender", "iflow-cli", "junie", "kimi-code-cli", "kode",
+		"ona", "qoder", "qoder-cn", "roo", "rovodev", "tabnine-cli",
+	} {
+		path := filepath.Join(tmp, client+".json")
+		if err := os.WriteFile(path, []byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp","type":"http"}}}`), 0o600); err != nil {
+			t.Fatalf("write %s config: %v", client, err)
+		}
+		paths[client] = path
+	}
+
+	piPath := filepath.Join(tmp, "pi.json")
+	if err := os.WriteFile(piPath, []byte(`{"mcpServers":{"memory":{"command":"/opt/mcphub","args":["relay","--url","http://localhost:9123/mcp"]}}}`), 0o600); err != nil {
+		t.Fatalf("write pi config: %v", err)
+	}
+	paths["pi"] = piPath
+
+	result, err := NewAPI().ScanFrom(ScanOpts{ConfigPaths: paths, ManifestDir: manifestDir})
+	if err != nil {
+		t.Fatalf("ScanFrom: %v", err)
+	}
+	var mem *ScanEntry
+	for i := range result.Entries {
+		if result.Entries[i].Name == "memory" {
+			mem = &result.Entries[i]
+		}
+	}
+	if mem == nil {
+		t.Fatal("tier-1 configs were presence-probed but not entry-scanned: missing memory entry")
+	}
+	for client := range paths {
+		presence, ok := mem.ClientPresence[client]
+		if !ok {
+			t.Errorf("memory missing ClientPresence[%q] (scanner not registered or not dispatched)", client)
+			continue
+		}
+		wantTransport := "http"
+		if client == "pi" {
+			wantTransport = "relay"
+		}
+		if presence.Transport != wantTransport {
+			t.Errorf("%s transport = %q, want %q", client, presence.Transport, wantTransport)
+		}
+		if got := result.ClientConfigPresence[client]; got != "ok" {
+			t.Errorf("ClientConfigPresence[%s] = %q, want ok", client, got)
+		}
+	}
+	if mem.Status != "via-hub" {
+		t.Errorf("memory Status with tier-1 hub bindings = %q, want via-hub", mem.Status)
+	}
+}
