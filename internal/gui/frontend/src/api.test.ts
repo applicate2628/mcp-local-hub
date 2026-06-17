@@ -332,3 +332,77 @@ describe("installMarketplaceEntry", () => {
     );
   });
 });
+
+import { validatePath } from "./api";
+
+describe("validatePath", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("URL-encodes the path query param", async () => {
+    const seen: { url?: string } = {};
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+      seen.url = url.toString();
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ path: "C:/Program Files", exists: true, is_dir: true }),
+      } as unknown as Response;
+    });
+    await validatePath("C:/Program Files");
+    expect(seen.url).toContain("path=C%3A%2FProgram%20Files");
+  });
+
+  it("returns exists+is_dir for an existing directory", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ path: "/home/x", exists: true, is_dir: true }),
+    }) as unknown as Response);
+    const out = await validatePath("/home/x");
+    expect(out).toEqual({ path: "/home/x", exists: true, is_dir: true, error: undefined });
+  });
+
+  it("returns exists:false for a missing path WITHOUT throwing", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ path: "/nope", exists: false, is_dir: false }),
+    }) as unknown as Response);
+    const out = await validatePath("/nope");
+    expect(out.exists).toBe(false);
+    expect(out.is_dir).toBe(false);
+  });
+
+  it("normalizes a partial/older body to a complete result", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    }) as unknown as Response);
+    const out = await validatePath("/x");
+    // Missing fields default to safe falses; path echoes the request arg.
+    expect(out).toEqual({ path: "/x", exists: false, is_dir: false, error: undefined });
+  });
+
+  it("surfaces a stat error string when present", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ path: "/root/secret", exists: false, is_dir: false, error: "permission denied" }),
+    }) as unknown as Response);
+    const out = await validatePath("/root/secret");
+    expect(out.error).toBe("permission denied");
+  });
+
+  it("throws the backend envelope on 400 PATH_INVALID", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      json: async () => ({ error: "path contains control characters", code: "PATH_INVALID" }),
+    }) as unknown as Response);
+    await expect(validatePath("/tmp/foo\nbar")).rejects.toThrow(/path contains control characters/);
+  });
+});

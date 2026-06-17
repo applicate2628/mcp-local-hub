@@ -689,6 +689,57 @@ export async function setClientInstallPrefs(
   );
 }
 
+// Path validation for the Settings "Browse…" affordance (TypePath fields
+// such as appearance.default_home once it is wired).
+//
+// The GUI is a browser UI served by a headless HTTP server; the actual UI
+// is a separate Chrome --app window. A native OS folder dialog spawned
+// from the server process surfaces unreliably (no parent-window
+// relationship to the browser, would block a request goroutine), so the
+// Browse affordance is a plain path text field with live exists/is-dir
+// feedback driven by GET /api/path/validate. This wrapper hits that
+// read-only endpoint. A non-existent path is a NORMAL result
+// (exists:false), not a thrown error — the operator is mid-typing.
+// ───────────────────────────────────────────────────────────────────
+
+export interface PathValidateResult {
+  path: string;
+  exists: boolean;
+  is_dir: boolean;
+  // Set only when the path could not be checked for a reason OTHER than
+  // "does not exist" (e.g. permission denied). A plain not-found leaves
+  // this empty.
+  error?: string;
+}
+
+// validatePath GETs /api/path/validate?path=<p>. Resolves to the
+// {exists, is_dir} record for any syntactically-valid path (including
+// non-existent ones). Rejects (throws) only on a transport/HTTP error
+// such as 400 PATH_REQUIRED / PATH_INVALID (empty or control-char path)
+// — the caller should debounce input so these are rare — surfacing the
+// backend {error, code} envelope.
+export async function validatePath(path: string): Promise<PathValidateResult> {
+  const resp = await fetch(`/api/path/validate?path=${encodeURIComponent(path)}`);
+  if (!resp.ok) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    const msg = body?.error ?? resp.statusText ?? "unknown";
+    const code = body?.code ?? `HTTP_${resp.status}`;
+    throw new Error(`/api/path/validate [${code}]: ${msg}`);
+  }
+  const body = (await resp.json()) as Partial<PathValidateResult>;
+  return {
+    path: typeof body.path === "string" ? body.path : path,
+    exists: body.exists === true,
+    is_dir: body.is_dir === true,
+    error: typeof body.error === "string" ? body.error : undefined,
+  };
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Marketplace one-click install (roadmap §B #1, frontend slice S3)
 //
