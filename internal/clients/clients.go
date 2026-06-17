@@ -782,6 +782,32 @@ func clientRegistry() []clientDescriptor {
 			// Mirrors defaultGooseConfigPath (goose.go): ~/.config/goose/config.yaml
 			// (XDG_CONFIG_HOME-aware), yaml under an `extensions` key.
 			configPath: defaultGooseConfigPath},
+		// skills-CLI vendor reconciliation TIER-2 bespoke (2026-06-17): vendors
+		// whose writable config lives under a NON-standard top-level key. All
+		// five embed the jsonMCPClient parameterized with serversKey, so a new
+		// key needed no Client re-implementation. neovate uses the standard
+		// `mcpServers`; crush + pochi use `mcp`; amp + zencoder use VS Code
+		// settings.json flat dotted keys (`amp.mcpServers` / `zencoder.mcpServers`).
+		// pochi + zencoder are relay-stdio (stdio-only documented hand-edit form).
+		{name: "neovate", factory: NewNeovate,
+			// Mirrors NewNeovate (neovate.go): ~/.neovate/config.json.
+			configPath: func(home string) string { return filepath.Join(home, ".neovate", "config.json") }},
+		{name: "crush", factory: NewCrush,
+			// Mirrors defaultCrushConfigPath (crush.go): ~/.config/crush/crush.json
+			// (XDG_CONFIG_HOME-aware), object map under top-level `mcp`.
+			configPath: defaultCrushConfigPath},
+		{name: "pochi", factory: NewPochi,
+			// Mirrors NewPochi (pochi.go): ~/config.json, object map under `mcp`
+			// (relay-stdio).
+			configPath: func(home string) string { return filepath.Join(home, "config.json") }},
+		{name: "amp", factory: NewAmp,
+			// Mirrors NewAmp (amp.go): VS Code User settings.json, flat dotted key
+			// `amp.mcpServers`.
+			configPath: defaultVSCodeUserSettingsPath},
+		{name: "zencoder", factory: NewZencoder,
+			// Mirrors NewZencoder (zencoder.go): VS Code User settings.json, flat
+			// dotted key `zencoder.mcpServers` (relay-stdio).
+			configPath: defaultVSCodeUserSettingsPath},
 	}
 }
 

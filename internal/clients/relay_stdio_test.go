@@ -15,6 +15,11 @@ var relayStdioClientNames = map[string]bool{
 	"zed":         true,
 	"aider":       true,
 	"pi":          true,
+	// pochi (~/config.json `mcp`) and zencoder (VS Code settings.json
+	// `zencoder.mcpServers`) both document stdio-only hand-edit entry forms,
+	// so the hub writes a `mcphub relay` stdio command for them too.
+	"pochi":    true,
+	"zencoder": true,
 }
 
 // TestIsRelayStdioClassifiesEverySupportedClient asserts the relay-stdio

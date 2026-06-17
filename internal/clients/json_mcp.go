@@ -13,10 +13,31 @@ type jsonMCPClient struct {
 	path       string
 	clientName string
 	urlField   string // "httpUrl" for both known cases
+	// serversKey is the top-level JSON object key the entries live under.
+	// Empty defaults to "mcpServers" (the JSON-family schema shared by
+	// gemini-cli / antigravity / cursor / qwen and the relay clients), so every
+	// existing embedder — which leaves it empty — keeps identical behavior. A
+	// non-empty value lets an embedder target a different FLAT top-level key,
+	// including a VS-Code-style dotted key like "amp.mcpServers": the
+	// comment-preserving write path (jsonc.go) builds an RFC-6901 JSON Pointer
+	// where the dot is one literal key character (only `/` separates pointer
+	// tokens), so the entry lands under the flat dotted key exactly as VS Code
+	// settings.json requires — no re-implementation of the Client interface.
+	serversKey string
 }
 
 func (j *jsonMCPClient) Name() string       { return j.clientName }
 func (j *jsonMCPClient) ConfigPath() string { return j.path }
+
+// sectionKey returns the top-level JSON object key the entries live under,
+// defaulting to "mcpServers" when serversKey is unset. Single owner of the
+// default so every read/write seam below resolves the same key.
+func (j *jsonMCPClient) sectionKey() string {
+	if j.serversKey == "" {
+		return "mcpServers"
+	}
+	return j.serversKey
+}
 
 // IsRelayStdio reports false: the JSON-family adapters (and every adapter
 // that embeds jsonMCPClient without overriding this) are URL-native HTTP
@@ -43,7 +64,8 @@ func (j *jsonMCPClient) BackupKeep(keepN int) (string, error) {
 // Both write subsequent entries into the same top-level `mcpServers`
 // map that AddEntry merges into.
 func (j *jsonMCPClient) InitEmpty() (created bool, err error) {
-	return EnsureClientConfigStub(j.path, []byte("{\n  \"mcpServers\": {}\n}\n"))
+	stub := fmt.Sprintf("{\n  %q: {}\n}\n", j.sectionKey())
+	return EnsureClientConfigStub(j.path, []byte(stub))
 }
 
 func (j *jsonMCPClient) Restore(backupPath string) error {
@@ -93,7 +115,7 @@ func (j *jsonMCPClient) deleteMember(name string) error {
 }
 
 func (j *jsonMCPClient) mutateMember(name string, value any, del bool) error {
-	return mutateJSONObjectMember(j.path, "mcpServers", name, value, del)
+	return mutateJSONObjectMember(j.path, j.sectionKey(), name, value, del)
 }
 
 func (j *jsonMCPClient) AddEntry(entry MCPEntry) error {
@@ -121,7 +143,7 @@ func (j *jsonMCPClient) GetEntry(name string) (*MCPEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[j.sectionKey()].(map[string]any)
 	if servers == nil {
 		return nil, nil
 	}
@@ -181,7 +203,7 @@ func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHub
 	if err != nil {
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	backupServers, _ := backupMap["mcpServers"].(map[string]any)
+	backupServers, _ := backupMap[j.sectionKey()].(map[string]any)
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback
@@ -212,7 +234,7 @@ func (j *jsonMCPClient) AllStdioEntries() ([]StdioEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[j.sectionKey()].(map[string]any)
 	return collectStdioEntries(servers), nil
 }
 
@@ -226,7 +248,7 @@ func (j *jsonMCPClient) FindStdioLanguageServerEntries() ([]LanguageServerStdioE
 	if err != nil {
 		return nil, err
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[j.sectionKey()].(map[string]any)
 	return findLanguageServerStdioInMap(servers), nil
 }
 
@@ -242,7 +264,7 @@ func (j *jsonMCPClient) BackupContainsEntry(backupPath, name string) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[j.sectionKey()].(map[string]any)
 	if servers == nil {
 		return false, nil
 	}
@@ -281,7 +303,7 @@ func (j *jsonMCPClient) BackupEntryIsHubManaged(backupPath, name string) (bool, 
 	if err != nil {
 		return false, fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
-	servers, _ := m["mcpServers"].(map[string]any)
+	servers, _ := m[j.sectionKey()].(map[string]any)
 	if servers == nil {
 		return false, nil
 	}
