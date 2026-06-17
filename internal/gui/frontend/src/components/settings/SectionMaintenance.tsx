@@ -196,7 +196,10 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   const confirmCount = confirmOrphans.length;
   return (
     <div data-card="orphan-mcp-servers" class={CARD_CLASS}>
-      <h3 class={CARD_TITLE_CLASS}>Orphan MCP server processes</h3>
+      <div class="flex items-center gap-1.5">
+        <h3 class={CARD_TITLE_CLASS}>Orphan MCP server processes</h3>
+        <InfoTip text="Reclaim uvx/npx/python MCP-server children left behind by dead client sessions (an IDE restart, a Ctrl-C that didn't propagate). Preview lists the orphans, then Clean kills them. Wraps mcphub cleanup --confirm." />
+      </div>
       <p class={CARD_DESC_CLASS}>
         Reclaim uvx/npx/python children left behind by dead client
         sessions (IDE restart, Ctrl-C didn't propagate). Wraps
@@ -381,7 +384,10 @@ function CardOrphanLogWatchers(): preact.JSX.Element {
 
   return (
     <div data-card="orphan-log-watchers" class={CARD_CLASS}>
-      <h3 class={CARD_TITLE_CLASS}>Orphan log watchers (tail / grep / bash)</h3>
+      <div class="flex items-center gap-1.5">
+        <h3 class={CARD_TITLE_CLASS}>Orphan log watchers (tail / grep / bash)</h3>
+        <InfoTip text="Reclaim tail.exe + grep.exe pipelines left behind by agent shell-snapshot launchers (Claude Code, codex CLI). Preview lists them, then Clean kills them. Optionally include live-parent processes to also kill watchers of currently active sessions. See scripts/cleanup-orphan-watchers.ps1." />
+      </div>
       <p class={CARD_DESC_CLASS}>
         Reclaim <code>tail.exe</code> + <code>grep.exe</code> pipelines
         left behind by agent shell-snapshot launchers (Claude Code,
@@ -529,7 +535,10 @@ function CardForceKillInstance(): preact.JSX.Element {
 
   return (
     <div data-card="force-kill-instance" class={CARD_CLASS}>
-      <h3 class={CARD_TITLE_CLASS}>Stuck mcphub instance</h3>
+      <div class="flex items-center gap-1.5">
+        <h3 class={CARD_TITLE_CLASS}>Stuck mcphub instance</h3>
+        <InfoTip text="Force-kill another mcphub gui process that is holding the single-instance lock so a new GUI can start. Diagnose inspects the lock holder first; Force-kill terminates it after an identity gate. Equivalent to mcphub gui --force --kill. macOS not yet supported." />
+      </div>
       <p class={CARD_DESC_CLASS}>
         Force-kill another mcphub gui that holds the single-instance
         lock. Equivalent to <code>mcphub gui --force --kill</code>.
@@ -607,7 +616,10 @@ function CardStopAllDaemons(): preact.JSX.Element {
 
   return (
     <div data-card="stop-all-daemons" class={CARD_CLASS}>
-      <h3 class={CARD_TITLE_CLASS}>Stop all daemons</h3>
+      <div class="flex items-center gap-1.5">
+        <h3 class={CARD_TITLE_CLASS}>Stop all daemons</h3>
+        <InfoTip text="Stop every running daemon at once. Use after a multi-daemon zombie scenario; pair with the orphan-MCP cleanup above for a full reset. Wraps the /api/stop-all endpoint." />
+      </div>
       <p class={CARD_DESC_CLASS}>
         Stop every running daemon. Use after multi-daemon zombie
         scenarios; pair with the orphan-MCP cleanup above for a full

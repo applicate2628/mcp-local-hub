@@ -6,6 +6,7 @@ import {
   type DaemonEnvRow,
 } from "../../api";
 import { ConfirmModal } from "../ConfirmModal";
+import { InfoTip } from "../InfoTip";
 
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DEFAULT_ENV_KEY = "MEMORY_FILE_PATH";
@@ -194,7 +195,10 @@ export function DaemonEnvSettings({
 
   return (
     <div class="daemon-env-settings" data-testid="daemon-env-settings">
-      <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">Server env overrides</h3>
+      <div class="mb-1 flex items-center gap-1.5">
+        <h3 class="m-0 text-xs font-semibold uppercase tracking-wide text-app-muted">Server env overrides</h3>
+        <InfoTip text="Set per-daemon environment variable overrides. Pick a supervised daemon, enter a key/value pair, and Apply to persist it; Restart relaunches that daemon so the new value takes effect. Useful for things like a server's MEMORY_FILE_PATH or other per-server config." />
+      </div>
 
       <div class="daemon-env-body">
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">

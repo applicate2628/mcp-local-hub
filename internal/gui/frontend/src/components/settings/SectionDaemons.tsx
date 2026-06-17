@@ -357,7 +357,10 @@ export function SectionDaemons({
       </div>
 
       <div class="mt-5">
-        <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">Auto-prune</h3>
+        <div class="mb-1 flex items-center gap-1.5">
+          <h3 class="m-0 text-xs font-semibold uppercase tracking-wide text-app-muted">Auto-prune</h3>
+          <InfoTip text="Automatically retire workspace LSP daemons that are no longer needed: drop daemons for workspaces whose directory no longer exists, and stop daemons that have been idle past a configurable number of hours (0 disables idle pruning)." />
+        </div>
         <div class="divide-y divide-app-border/60">
           <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
             <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-auto-prune-workspaces">

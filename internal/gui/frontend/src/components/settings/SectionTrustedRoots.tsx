@@ -134,9 +134,12 @@ export function SectionTrustedRoots(): preact.JSX.Element {
       {state.kind === "ok" && (
         <>
           <div class="mt-5">
-            <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">
-              Roots
-            </h3>
+            <div class="mb-1 flex items-center gap-1.5">
+              <h3 class="m-0 text-xs font-semibold uppercase tracking-wide text-app-muted">
+                Roots
+              </h3>
+              <InfoTip text="The trusted root paths currently configured. Any workspace under one of these trees can auto-register an LSP daemon without explicit registration. Use Remove to revoke a root; existing daemons are unaffected but new workspaces under it will no longer auto-register." />
+            </div>
             {state.roots.length === 0 ? (
               <p class="trusted-roots-empty m-0 text-sm text-app-muted" data-testid="trusted-roots-empty">
                 No trusted roots yet. The first workspace under any tree must be
@@ -170,9 +173,12 @@ export function SectionTrustedRoots(): preact.JSX.Element {
           </div>
 
           <div class="mt-5 border-t border-app-border/60 pt-4">
-            <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">
-              Add a root
-            </h3>
+            <div class="mb-1 flex items-center gap-1.5">
+              <h3 class="m-0 text-xs font-semibold uppercase tracking-wide text-app-muted">
+                Add a root
+              </h3>
+              <InfoTip text="Pre-trust a new root by entering an absolute path. Once added, sibling workspaces under that tree auto-register their LSP daemons without explicit registration. Add only roots you control." />
+            </div>
             <div class="trusted-roots-add flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
               <label class="trusted-roots-add-label flex items-center gap-1.5 text-sm font-medium text-app-text" for="trusted-roots-input">
                 Add a trusted root

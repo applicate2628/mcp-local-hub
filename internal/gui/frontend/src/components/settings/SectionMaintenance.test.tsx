@@ -69,6 +69,21 @@ function clickCancelModal(container: Element) {
   fireEvent.click(btn);
 }
 
+// Helper: the card's primary action button (the first NON-InfoTip <button>).
+// Each card header now carries an InfoTip whose trigger is itself a <button>
+// (class `infotip-trigger`); positional `querySelectorAll("button")[0]` would
+// otherwise hit that tooltip trigger instead of Preview/Diagnose/etc. Filter
+// it out so the selector stays anchored on the real action regardless of how
+// many tooltip affordances precede it.
+function cardActionButton(card: Element, index = 0): HTMLButtonElement {
+  const buttons = Array.from(card.querySelectorAll("button")).filter(
+    (b) => !b.classList.contains("infotip-trigger"),
+  ) as HTMLButtonElement[];
+  const btn = buttons[index];
+  if (!btn) throw new Error(`card action button[${index}] not in DOM`);
+  return btn;
+}
+
 describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 72757c6)", () => {
   beforeEach(() => {
     cleanup();
@@ -122,7 +137,7 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
 
     // Preview phase.
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
 
     // Preview state: no Result column yet (no kill_err on any row).
@@ -168,7 +183,7 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!); // open modal
     await waitFor(() =>
@@ -190,7 +205,7 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
 
     const { container, findByText } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     const msg = await findByText(/Windows only/);
     expect(msg).toBeTruthy();
   });
@@ -209,7 +224,7 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-log-watchers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
 
     const cleanBtn = card.querySelector(
@@ -242,7 +257,7 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-log-watchers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-log-watchers-clean-button"]')!);
     await waitFor(() =>
@@ -279,7 +294,7 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-log-watchers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-log-watchers-clean-button"]')!);
     await waitFor(() =>
@@ -323,7 +338,7 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     const card = container.querySelector('[data-card="orphan-log-watchers"]')!;
     // Apply with includeLive=false (the default checkbox state). The
     // live-parent row should render as "skipped (live parent)".
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-log-watchers-clean-button"]')!);
     await waitFor(() =>
@@ -442,7 +457,7 @@ describe("SectionMaintenance — ConfirmModal swap (Cleanup-6)", () => {
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
 
     // Preview.
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenLastCalledWith(false);
@@ -476,7 +491,7 @@ describe("SectionMaintenance — ConfirmModal swap (Cleanup-6)", () => {
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
     await waitFor(() =>
@@ -509,7 +524,7 @@ describe("SectionMaintenance — ConfirmModal swap (Cleanup-6)", () => {
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
 
     const cmdCell = card.querySelector("td.maintenance-cmd");
@@ -532,7 +547,7 @@ describe("SectionMaintenance — ConfirmModal swap (Cleanup-6)", () => {
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
 
@@ -570,7 +585,7 @@ describe("SectionMaintenance — ConfirmModal swap (Cleanup-6)", () => {
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
 
@@ -704,7 +719,7 @@ describe("SectionMaintenance — finding R1 (modal snapshot) + A2 (no cmdline fa
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
 
     // Preview #1 → 2 orphans rendered.
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     expect(card.querySelectorAll("tbody tr").length).toBe(2);
 
@@ -726,7 +741,7 @@ describe("SectionMaintenance — finding R1 (modal snapshot) + A2 (no cmdline fa
     // Re-click Preview while the modal is still open. R1 contract: the
     // modal closes and the snapshot clears, forcing the user to
     // explicitly re-confirm against the new preview.
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => {
       // The modal must be closed (no `dialog[open]` for this card).
       const open = card.querySelector('dialog[data-testid="confirm-modal"][open]');
@@ -764,7 +779,7 @@ describe("SectionMaintenance — finding R1 (modal snapshot) + A2 (no cmdline fa
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
 
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
 
     // Open + Cancel.
@@ -813,7 +828,7 @@ describe("SectionMaintenance — finding R1 (modal snapshot) + A2 (no cmdline fa
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
 
-    fireEvent.click(card.querySelectorAll("button")[0]); // Preview
+    fireEvent.click(cardActionButton(card)); // Preview
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
 
     fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
@@ -854,7 +869,7 @@ describe("SectionMaintenance — finding R1 (modal snapshot) + A2 (no cmdline fa
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
 
     const cmdCell = card.querySelector("td.maintenance-cmd");
@@ -885,7 +900,7 @@ describe("SectionMaintenance — finding R1 (modal snapshot) + A2 (no cmdline fa
 
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
-    fireEvent.click(card.querySelectorAll("button")[0]);
+    fireEvent.click(cardActionButton(card));
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
     fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
     await waitFor(() => expect(activeModal(container)).toBeTruthy());
