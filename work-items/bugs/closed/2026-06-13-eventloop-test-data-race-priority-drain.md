@@ -5,8 +5,28 @@ found-by: backend-engineer
 found-in-phase: PR #302 r3 (root-orphan-reap follow-up)
 affected-surface: internal/api/supervisor_event_loop_test.go
 context: adjacent-finding
-status: open
+status: closed
+fixed-in: acf9f7f (PR #315) — mutex barrier added around the order-tracking slice
 ---
+
+## Resolution
+
+Fixed in commit `acf9f7f` (PR #315, "test,ci: harden test-infra
+isolation + add CI tagged-test/symbol/bundle gates"). The suggested
+fix below was applied: the order-tracking slice `got` is now guarded
+by a `sync.Mutex`, the handler appends under the lock, and the test
+goroutine reads via a `snapshot()` helper that copies the slice under
+the same lock. This installs the missing happens-before barrier
+between the loop goroutine's writes and the assertion reads. The
+priority-drain assertion (`g[0] != "self-1"`) is unchanged — the fix
+is synchronization-only.
+
+Verified clean:
+
+```bash
+go test -tags=test_state_path_env -run TestEventLoop -race -count=20 ./internal/api/
+# ok  mcp-local-hub/internal/api
+```
 
 ## Reproduction
 
