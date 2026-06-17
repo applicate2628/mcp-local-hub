@@ -36,8 +36,9 @@ func normalizeExePath(p string) (string, error) {
 // shadow — e.g. a stale npm-global `mcphub` ahead of a fresher dev deploy in
 // ~/.local/bin), it returns an operator warning naming both locations;
 // otherwise "". Pure + best-effort: any empty/unresolvable input yields ""
-// (never a false alarm). Paths compared case-insensitively (Windows FS is
-// case-insensitive; harmless on POSIX where real paths already match case).
+// (never a false alarm). Paths are compared case-insensitively only on
+// Windows, where executable paths are case-insensitive; POSIX keeps exact
+// case so case-only distinct paths on case-sensitive filesystems still warn.
 func pathShadowDiagnostic(runningExe, pathResolved string) string {
 	if runningExe == "" || pathResolved == "" {
 		return ""
@@ -47,12 +48,19 @@ func pathShadowDiagnostic(runningExe, pathResolved string) string {
 	if errA != nil || errB != nil {
 		return ""
 	}
-	if strings.EqualFold(a, b) {
+	if sameExePath(a, b) {
 		return ""
 	}
 	return fmt.Sprintf("the 'mcphub' on your PATH (%s) is NOT this running binary (%s); "+
 		"a fresh shell may run the shadowed one. Reconcile the two install locations, "+
 		"or invoke this binary by its full path.", b, a)
+}
+
+func sameExePath(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // SetBuildInfo retains the cli package's existing public surface so
