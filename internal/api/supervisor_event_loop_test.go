@@ -178,3 +178,56 @@ func TestEventLoop_RegisterHandlerConcurrentWithRun(t *testing.T) {
 		t.Fatalf("late-registered handler never received an event after registration")
 	}
 }
+
+// TestEventLoop_SetPanicHandlerConcurrentWithRun guards the onPanic field
+// against the SAME unsynchronized-field-read class the COW fixed for handlers.
+// dispatch reads l.onPanic on the loop goroutine while SetPanicHandler writes
+// it; pre-fix (plain field) the race detector flags dispatch's read vs the
+// write. With onPanic behind an atomic.Pointer this is clean. Run under
+// `-race`: pre-fix fails, post-fix passes. It also asserts the concurrently
+// installed observer fires when a handler panics.
+func TestEventLoop_SetPanicHandlerConcurrentWithRun(t *testing.T) {
+	loop := NewEventLoop(64)
+
+	var observed atomic.Int64
+	loop.RegisterHandler(func(e LoopEvent) {
+		if e.TaskName == "boom" {
+			panic("boom")
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	// Concurrently post non-panicking events (dispatch loads onPanic on every
+	// event) WHILE the panic handler is (re)installed from this goroutine.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			loop.Post(LoopEvent{Kind: EvChildExit, TaskName: "ok"})
+		}
+	}()
+	for i := 0; i < 500; i++ {
+		loop.SetPanicHandler(func(any, LoopEvent) { observed.Add(1) })
+	}
+	wg.Wait()
+
+	// Now verify the installed observer actually fires on a real panic. The
+	// loop goroutine re-raises after the observer, which would crash the test
+	// process — so exercise the observed-then-reraised path on a throwaway
+	// loop via dispatch directly (single goroutine, no -race concern).
+	probe := NewEventLoop(16)
+	probe.SetPanicHandler(func(any, LoopEvent) { observed.Add(1) })
+	probe.RegisterHandler(func(LoopEvent) { panic("boom") })
+	before := observed.Load()
+	func() {
+		defer func() { _ = recover() }()
+		probe.dispatch(LoopEvent{TaskName: "boom"})
+	}()
+	if observed.Load() != before+1 {
+		t.Fatalf("panic observer installed via SetPanicHandler did not fire: before=%d after=%d", before, observed.Load())
+	}
+}

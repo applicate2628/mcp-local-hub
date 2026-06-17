@@ -61,7 +61,17 @@ type EventLoop struct {
 	// the loop goroutine with NO supervisor-exit event otherwise) — see
 	// dispatch. It must NOT swallow the panic; dispatch re-raises after
 	// calling it.
-	onPanic func(recovered any, e LoopEvent)
+	//
+	// Stored behind an atomic pointer for the SAME reason `handlers` is
+	// (Conc-F5): production wires SetPanicHandler before `go loop.Run`, so
+	// the write happens-before the loop goroutine's dispatch read — but a
+	// plain field is "safe only because no concurrent setter exists", an
+	// invariant one early caller away from a genuine -race hit on
+	// dispatch's read vs SetPanicHandler's write. The atomic pointer makes
+	// the read lock-free (a single Load in dispatch) and the field
+	// genuinely synchronized regardless of call ordering. nil pointer ==
+	// no observer installed.
+	onPanic atomic.Pointer[func(recovered any, e LoopEvent)]
 }
 
 func NewEventLoop(capacity int) *EventLoop {
@@ -110,9 +120,10 @@ func (l *EventLoop) RegisterHandler(h func(LoopEvent)) {
 // observer — the death stays loud so the recovery layer respawns, and a
 // half-applied state-machine transition is never silently continued.
 //
-// Must be set before Run. Not safe to change concurrently with Run.
+// Typically set before Run; the atomic store makes a concurrent set
+// data-race-free regardless (mirrors RegisterHandler's COW posture).
 func (l *EventLoop) SetPanicHandler(f func(recovered any, e LoopEvent)) {
-	l.onPanic = f
+	l.onPanic.Store(&f)
 }
 
 // dispatch fans one event to every handler. When a panic handler is
@@ -122,10 +133,10 @@ func (l *EventLoop) SetPanicHandler(f func(recovered any, e LoopEvent)) {
 // handler set the behavior is identical to a bare handler loop (the
 // panic propagates unchanged).
 func (l *EventLoop) dispatch(e LoopEvent) {
-	if l.onPanic != nil {
+	if onPanic := l.onPanic.Load(); onPanic != nil {
 		defer func() {
 			if r := recover(); r != nil {
-				l.onPanic(r, e)
+				(*onPanic)(r, e)
 				panic(r)
 			}
 		}()
