@@ -101,6 +101,54 @@ func TestSweepStaleSkipsActiveMarkedDirectory(t *testing.T) {
 	}
 }
 
+func TestMarkActiveRefreshesMarkerDuringLongRun(t *testing.T) {
+	oldInterval := activeRunMarkerRefreshInterval
+	activeRunMarkerRefreshInterval = 10 * time.Millisecond
+	t.Cleanup(func() { activeRunMarkerRefreshInterval = oldInterval })
+
+	base := t.TempDir()
+	active := filepath.Join(base, "run-refreshing")
+	if err := os.Mkdir(active, 0o700); err != nil {
+		t.Fatalf("Mkdir active: %v", err)
+	}
+	cleanup, err := MarkActive(active)
+	if err != nil {
+		t.Fatalf("MarkActive: %v", err)
+	}
+	defer cleanup()
+
+	oldDir := time.Now().Add(-2 * time.Hour)
+	oldMarker := time.Now().Add(-activeRunMarkerTTL - time.Hour)
+	if err := os.Chtimes(active, oldDir, oldDir); err != nil {
+		t.Fatalf("Chtimes active: %v", err)
+	}
+	marker := filepath.Join(active, activeRunMarker)
+	if err := os.Chtimes(marker, oldMarker, oldMarker); err != nil {
+		t.Fatalf("Chtimes marker: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		info, err := os.Stat(marker)
+		if err != nil {
+			t.Fatalf("stat marker: %v", err)
+		}
+		if info.ModTime().After(time.Now().Add(-activeRunMarkerTTL)) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("marker was not refreshed before deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	SweepStale(base, "run-", time.Hour)
+
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active directory with refreshed marker was swept: %v", err)
+	}
+}
+
 func TestSweepStaleRemovesExpiredActiveMarkedDirectory(t *testing.T) {
 	base := t.TempDir()
 	stale := filepath.Join(base, "run-stale-active")

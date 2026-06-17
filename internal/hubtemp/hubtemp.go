@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,6 +61,10 @@ const (
 	activeRunMarkerTTL = 24 * time.Hour
 )
 
+// activeRunMarkerRefreshInterval is a variable so tests can shorten the
+// heartbeat without waiting for the production cadence.
+var activeRunMarkerRefreshInterval = activeRunMarkerTTL / 2
+
 // MarkActive creates a marker inside a just-created per-run scratch directory so
 // a concurrent SweepStale does not remove it while the owning run is still in
 // flight. The returned cleanup function removes only that marker; callers may
@@ -80,7 +85,28 @@ func MarkActive(dir string) (func(), error) {
 		_ = os.Remove(marker)
 		return nil, closeErr
 	}
-	return func() { _ = os.Remove(marker) }, nil
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		ticker := time.NewTicker(activeRunMarkerRefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now()
+				_ = os.Chtimes(marker, now, now)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	return func() {
+		once.Do(func() {
+			close(done)
+			_ = os.Remove(marker)
+		})
+	}, nil
 }
 
 // EnsurePrivateDir creates dir as an owner-only directory and verifies that the
@@ -118,9 +144,10 @@ func EnsurePrivateDir(dir string) error {
 // os.RemoveAll is no longer the only cleanup path.
 //
 // Active runs call MarkActive after creating their scratch dir. SweepStale skips
-// marker-bearing directories only while the marker is fresh, so request-
-// controlled runs whose timeout exceeds ttl are not removed solely because the
-// top-level directory mtime is old. Abandoned markers left behind by crashes or
+// marker-bearing directories only while the marker is fresh. MarkActive
+// refreshes live markers, so request-controlled runs whose timeout exceeds ttl
+// are not removed solely because the top-level directory mtime is old.
+// Abandoned markers left behind by crashes or
 // hard kills eventually expire and the stale directory is reclaimed. Errors
 // (in-use entry, permission glitch) are ignored — a sweep that can't remove one
 // entry must not fail the run it is making room for. Non-matching siblings (e.g.
