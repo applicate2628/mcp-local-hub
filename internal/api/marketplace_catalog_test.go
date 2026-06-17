@@ -45,13 +45,13 @@ func TestParseCatalog_RejectsBadSchema(t *testing.T) {
 // create <name>` uses, so the draft will not fail later at create.
 func TestParseCatalog_RejectsInvalidIDViaCheckManifestName(t *testing.T) {
 	for _, badID := range []string{
-		"UPPERCASE",       // CheckManifestName rejects non-lowercase
-		"has space",       // CheckManifestName rejects whitespace
-		"-leading-dash",   // regex rejects leading dash
-		".leading-dot",    // regex rejects leading dot
-		"mcphub-hub",      // reserved aggregate entry name (r15)
-		"con",             // Windows device name
-		"nul",             // Windows device name
+		"UPPERCASE",     // CheckManifestName rejects non-lowercase
+		"has space",     // CheckManifestName rejects whitespace
+		"-leading-dash", // regex rejects leading dash
+		".leading-dot",  // regex rejects leading dot
+		"mcphub-hub",    // reserved aggregate entry name (r15)
+		"con",           // Windows device name
+		"nul",           // Windows device name
 	} {
 		raw := `{"schema_version": "1", "entries": [{"id": "` + badID +
 			`", "name": "X", "transport": "stdio", "command": "npx"}]}`
@@ -107,5 +107,19 @@ func TestParseCatalog_HttpEntryAllowedNoCommand(t *testing.T) {
 	}
 	if cat.Entries[0].URL != "https://mcp.context7.com/mcp" {
 		t.Errorf("url round-trip failed")
+	}
+}
+
+func TestParseCatalog_NativeHTTPEntryAllowedWithCommand(t *testing.T) {
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "serena", "name": "Serena", "transport": "native-http", "command": "uvx",
+		 "args": ["serena", "start-mcp-server", "--transport", "streamable-http"]}
+	]}`
+	cat, err := ParseMarketplaceCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("native-http entry should parse with command: %v", err)
+	}
+	if cat.Entries[0].Transport != "native-http" {
+		t.Errorf("transport round-trip failed: %q", cat.Entries[0].Transport)
 	}
 }

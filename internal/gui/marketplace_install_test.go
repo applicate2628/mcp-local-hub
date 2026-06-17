@@ -124,6 +124,16 @@ func stdioEntry(id string) *api.MarketplaceEntry {
 	}
 }
 
+func nativeHTTPEntry(id string) *api.MarketplaceEntry {
+	return &api.MarketplaceEntry{
+		ID:        id,
+		Name:      "Serena",
+		Transport: "native-http",
+		Command:   "uvx",
+		Args:      []string{"serena", "start-mcp-server", "--transport", "streamable-http"},
+	}
+}
+
 // ---- hub mode ----
 
 func TestMarketplaceInstall_HubHappyPath(t *testing.T) {
@@ -162,6 +172,34 @@ func TestMarketplaceInstall_HubHappyPath(t *testing.T) {
 	}
 	if body.Name != "filesystem" || body.Port != 9207 || body.Mode != "hub" {
 		t.Errorf("response = %+v", body)
+	}
+}
+
+func TestMarketplaceInstall_HubNativeHTTPPicksPort(t *testing.T) {
+	loader := &fakeMarketplaceEntryLoader{entry: nativeHTTPEntry("serena"), found: true}
+	picker := &fakeGlobalPortPicker{port: 9211}
+	creator := &fakeManifestCreator{}
+	installer := &fakeInstaller{}
+	s := newMarketplaceInstallTestServer(loader, picker, &fakeServerNamePresence{}, &fakeDirectClientWriter{}, creator, installer)
+
+	rec := postInstall(t, s, `{"id":"serena","mode":"hub"}`, "same-origin")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%q", rec.Code, rec.Body.String())
+	}
+	if !picker.called {
+		t.Fatal("native-http hub install must pick a daemon port")
+	}
+	if !strings.Contains(creator.yaml, "transport: native-http") {
+		t.Errorf("manifest YAML missing native-http transport:\n%s", creator.yaml)
+	}
+	if !strings.Contains(creator.yaml, "port: 9211") {
+		t.Errorf("manifest YAML missing resolved port 9211:\n%s", creator.yaml)
+	}
+	if strings.Contains(creator.yaml, "transport: stdio-bridge") {
+		t.Errorf("native-http install downgraded to stdio-bridge:\n%s", creator.yaml)
+	}
+	if !installer.called || installer.seenName != "serena" {
+		t.Errorf("Install seenName=%q called=%v, want serena/true", installer.seenName, installer.called)
 	}
 }
 

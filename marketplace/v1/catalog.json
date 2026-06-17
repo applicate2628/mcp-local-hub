@@ -164,7 +164,7 @@
       "summary": "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase. Launched via uvx from the upstream repo (pinned commit); requires Python + uv.",
       "homepage": "https://github.com/oraios/serena",
       "readme_url": "https://raw.githubusercontent.com/oraios/serena/main/README.md",
-      "transport": "stdio",
+      "transport": "native-http",
       "command": "uvx",
       "args": [
         "--from",

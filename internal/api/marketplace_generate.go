@@ -29,7 +29,9 @@ type GenerateOpts struct {
 func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []string, error) {
 	switch e.Transport {
 	case "stdio":
-		return generateStdioDraft(e, opts)
+		return generateCommandDraft(e, opts, config.TransportStdioBridge)
+	case "native-http":
+		return generateCommandDraft(e, opts, config.TransportNativeHTTP)
 	case "http":
 		return generateRemoteHTTPDraft(e)
 	default:
@@ -97,7 +99,7 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 	return header + string(data), nil, nil
 }
 
-func generateStdioDraft(e *MarketplaceEntry, opts GenerateOpts) (string, []string, error) {
+func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransport string) (string, []string, error) {
 	workspace := opts.WorkspaceFolder
 	if workspace == "" {
 		// codex deep-sec PR #163 lane 3 P3 closure: surface
@@ -161,7 +163,7 @@ func generateStdioDraft(e *MarketplaceEntry, opts GenerateOpts) (string, []strin
 	draft := map[string]any{
 		"name":      e.ID,
 		"kind":      "global",
-		"transport": config.TransportStdioBridge,
+		"transport": manifestTransport,
 		"command":   e.Command,
 		"base_args": args,
 	}

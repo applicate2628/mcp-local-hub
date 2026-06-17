@@ -162,8 +162,9 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 	}
 
 	// Draft the manifest YAML from the catalog entry. The generator emits a
-	// global stdio manifest with daemons[0].port:0 (which manifest-create
-	// rejects), or a remote-http manifest with no daemon for http transport.
+	// global daemon manifest with daemons[0].port:0 for stdio/native-http
+	// transports (which manifest-create rejects), or a remote-http manifest
+	// with no daemon for http transport.
 	draft, _, err := api.GenerateDraftManifest(entry, api.GenerateOpts{})
 	if err != nil {
 		// A generator refusal (hostile registry runes, empty url, getwd
@@ -175,8 +176,8 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 
 	finalYAML := draft
 	resolvedPort := 0
-	if entry.Transport == "stdio" {
-		// stdio drafts carry daemons[0].port:0 — substitute the resolved
+	if entry.Transport == "stdio" || entry.Transport == "native-http" {
+		// daemon drafts carry daemons[0].port:0 — substitute the resolved
 		// hub-band port AND rewrite the top-level name to the operator's
 		// final choice (ManifestCreate rejects a name/YAML mismatch).
 		port, err := s.marketplacePortPicker.PickGlobalPort(req.Port)
@@ -240,7 +241,7 @@ func (s *Server) handleMarketplaceDirectInstall(w http.ResponseWriter, req *mark
 	// stdio servers install correctly via hub mode (one shared daemon every
 	// client routes to). Fail loud so the frontend can gate the toggle.
 	if entry.Transport != "http" {
-		writeAPIError(w, fmt.Errorf("direct-mode install supports http servers only (this entry is transport=%q) — use hub mode for stdio servers", entry.Transport), http.StatusBadRequest, "DIRECT_MODE_UNSUPPORTED_TRANSPORT")
+		writeAPIError(w, fmt.Errorf("direct-mode install supports http servers only (this entry is transport=%q) — use hub mode for daemon-backed servers", entry.Transport), http.StatusBadRequest, "DIRECT_MODE_UNSUPPORTED_TRANSPORT")
 		return
 	}
 

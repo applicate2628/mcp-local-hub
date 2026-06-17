@@ -51,6 +51,39 @@ func TestGenerateDraftManifest_StdioEntryMapsToStdioBridge(t *testing.T) {
 	}
 }
 
+func TestGenerateDraftManifest_NativeHTTPEntryMapsToNativeHTTP(t *testing.T) {
+	e := &MarketplaceEntry{
+		ID:        "serena",
+		Name:      "Serena",
+		Transport: "native-http",
+		Command:   "uvx",
+		Args:      []string{"serena", "start-mcp-server", "--transport", "streamable-http"},
+		Env:       map[string]string{"PYTHONUNBUFFERED": "1"},
+	}
+	got, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: "/path/to/ws"})
+	if err != nil {
+		t.Fatalf("GenerateDraftManifest: %v", err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("unexpected warnings: %v", warns)
+	}
+	for _, want := range []string{
+		"name: serena",
+		fmt.Sprintf("transport: %s", config.TransportNativeHTTP),
+		"command: uvx",
+		"streamable-http",
+		"PYTHONUNBUFFERED: \"1\"",
+		"port: 0",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("draft YAML missing %q\n---\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, fmt.Sprintf("transport: %s", config.TransportStdioBridge)) {
+		t.Errorf("native-http draft must not be downgraded to stdio-bridge:\n---\n%s", got)
+	}
+}
+
 // TestGenerateDraftManifest_HttpEntryEmitsRemoteHTTPDraft pins G6
 // sub-PR 4: http catalog entries now project onto a
 // transport=remote-http manifest with the entry URL preserved. The
