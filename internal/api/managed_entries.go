@@ -282,14 +282,14 @@ func IsManagedEntry(client, server string) (bool, error) {
 // Backfill criterion (strict, NOT the loose URL heuristic codex
 // bot rejected):
 //
-//   1. Live entry's URL EXACTLY matches what mcphub would write
-//      for this (server, daemon, binding): scheme/host/port/path
-//      derived from the manifest daemon + binding url_path.
-//   2. Both loopback host variants (localhost / 127.0.0.1 / [::1])
-//      are accepted because IsHubHTTPURL accepts all three on the
-//      classification side.
-//   3. The entry's name matches the manifest server name (this
-//      is the loop variable, so already aligned at call site).
+//  1. Live entry's URL EXACTLY matches what mcphub would write
+//     for this (server, daemon, binding): scheme/host/port/path
+//     derived from the manifest daemon + binding url_path.
+//  2. Both loopback host variants (localhost / 127.0.0.1 / [::1])
+//     are accepted because IsHubHTTPURL accepts all three on the
+//     classification side.
+//  3. The entry's name matches the manifest server name (this
+//     is the loop variable, so already aligned at call site).
 //
 // On exact match, RecordManagedEntry is called with the (client,
 // server) pair. The marker now contains a row, IsManagedEntry
@@ -382,6 +382,24 @@ func liveEntryMatchesManifestBinding(live *clients.MCPEntry, server string, bind
 		live.RelayDaemon == binding.Daemon &&
 		clients.IsMcphubBinary(live.RelayExePath) {
 		return true, "v0.4.x upgrade backfill — Antigravity relay shape exactly matches manifest binding (command=mcphub args=[relay,--server,server," + server + ",--daemon," + binding.Daemon + "])"
+	}
+	// Relay-URL shape check (URL empty; the entry is `mcphub relay --url
+	// http://<loopback>:<port>/mcp`, which GetEntry maps back to RelayURL).
+	// Relay-stdio clients (Zed, pi, pochi, zencoder) write THIS form — not the
+	// --server/--daemon form above — for stable-port GLOBAL daemons (the
+	// --server/--daemon form is the serena dynamic-pool manifest-lookup path).
+	// Recognize it exactly like the direct-HTTP `url` branch: accept every
+	// loopback spelling (localhost / 127.0.0.1 / [::1]) of the daemon's expected
+	// endpoint, gated on the mcphub binary so a user-authored relay to some
+	// other URL is NOT mistaken for a hub-managed entry. Without this branch,
+	// demigrate refused to roll back relay-URL globals (e.g. Zed fetch/drmemory),
+	// since neither the `url` exact-match nor the Antigravity --server branch
+	// covers the relay-URL form.
+	if live.URL == "" &&
+		live.RelayURL != "" &&
+		slices.Contains(expectedURLs, live.RelayURL) &&
+		clients.IsMcphubBinary(live.RelayExePath) {
+		return true, "v0.4.x upgrade backfill — relay --url matches manifest expectation (relay_url=" + live.RelayURL + ")"
 	}
 	return false, ""
 }

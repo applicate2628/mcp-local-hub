@@ -47,6 +47,43 @@ func TestLiveEntryMatchesManifestBinding_RecognizesAllLoopbackForms(t *testing.T
 	}
 }
 
+// TestLiveEntryMatchesManifestBinding_RecognizesRelayURLForm is the Zed
+// demigrate regression: relay-stdio clients (Zed/pi/pochi/zencoder) write a
+// `mcphub relay --url http://<loopback>:<port>/mcp` entry for stable-port global
+// daemons (GetEntry maps --url back to RelayURL, URL stays ""). The matcher must
+// recognize this hub-managed shape so demigrate can roll it back — before the
+// relay-URL branch, neither the `url` exact-match nor the Antigravity
+// --server/--daemon branch covered it, so demigrate refused Zed fetch/drmemory.
+func TestLiveEntryMatchesManifestBinding_RecognizesRelayURLForm(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:    "fetch",
+		Daemons: []config.DaemonSpec{{Name: "default", Port: 9133}},
+	}
+	binding := config.ClientBinding{Daemon: "default", URLPath: "/mcp"}
+	const mcphub = `C:\Users\u\.local\bin\mcphub.exe`
+
+	cases := []struct {
+		name  string
+		entry *clients.MCPEntry
+		want  bool
+	}{
+		{"relay --url localhost (Zed fetch)", &clients.MCPEntry{RelayURL: "http://localhost:9133/mcp", RelayExePath: mcphub}, true},
+		{"relay --url 127.0.0.1 (Zed drmemory-style)", &clients.MCPEntry{RelayURL: "http://127.0.0.1:9133/mcp", RelayExePath: mcphub}, true},
+		{"relay --url [::1]", &clients.MCPEntry{RelayURL: "http://[::1]:9133/mcp", RelayExePath: mcphub}, true},
+		{"relay --url wrong port → no match", &clients.MCPEntry{RelayURL: "http://127.0.0.1:9999/mcp", RelayExePath: mcphub}, false},
+		{"relay --url non-mcphub binary → no match (user-owned)", &clients.MCPEntry{RelayURL: "http://127.0.0.1:9133/mcp", RelayExePath: `C:\other\tool.exe`}, false},
+		{"relay --url but no exe → no match", &clients.MCPEntry{RelayURL: "http://127.0.0.1:9133/mcp"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			matched, _ := liveEntryMatchesManifestBinding(tc.entry, "fetch", binding, m)
+			if matched != tc.want {
+				t.Errorf("liveEntryMatchesManifestBinding(relay_url=%q exe=%q) matched=%v, want %v", tc.entry.RelayURL, tc.entry.RelayExePath, matched, tc.want)
+			}
+		})
+	}
+}
+
 // managedEntriesTestHelper redirects DaemonStateDir() to a
 // DACL-hardened scratch dir for the duration of the test. The
 // marker file is written through SecureWriteClientConfig, which
