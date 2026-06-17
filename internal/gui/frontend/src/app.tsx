@@ -358,11 +358,45 @@ export function App() {
     </nav>
   );
 
+  // Shared brand header: a decorative inline hub-mark logo next to the
+  // product name. One owner for both the sidebar and top-tabs layouts so
+  // the brand markup never drifts between them. The SVG uses currentColor
+  // so it inherits the brand text color and adapts to the light/dark
+  // data-theme automatically; aria-hidden keeps it decorative (the text
+  // name remains the accessible label).
+  const brandHeader = (
+    <div class="brand">
+      <svg
+        class="brand-logo"
+        viewBox="0 0 24 24"
+        width="20"
+        height="20"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {/* Hub/node-cluster mark: a central node routing to three satellites. */}
+        <line x1="12" y1="12" x2="12" y2="4" />
+        <line x1="12" y1="12" x2="5" y2="17" />
+        <line x1="12" y1="12" x2="19" y2="17" />
+        <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="4" r="2" />
+        <circle cx="5" cy="17" r="2" />
+        <circle cx="19" cy="17" r="2" />
+      </svg>
+      <span class="brand-name">mcp-local-hub</span>
+    </div>
+  );
+
   if (layoutValue === "tabs") {
     return (
       <>
         <header class="topbar">
-          <div class="brand">mcp-local-hub</div>
+          {brandHeader}
           {navLinks}
         </header>
         <main id="screen-root">
@@ -379,7 +413,7 @@ export function App() {
   return (
     <>
       <aside class="sidebar">
-        <div class="brand">mcp-local-hub</div>
+        {brandHeader}
         {navLinks}
       </aside>
       <main id="screen-root">

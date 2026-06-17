@@ -126,6 +126,28 @@ describe("App — lifted snapshot ownership (Codex PR #20 r11 P2)", () => {
   });
 });
 
+describe("App — sidebar brand logo (G6)", () => {
+  it("renders a decorative hub-mark logo next to the product name", async () => {
+    window.location.hash = "#/servers";
+    const { container } = render(<App />);
+
+    const brand = await waitFor(() => {
+      const el = container.querySelector(".brand");
+      if (!el) throw new Error("brand not yet rendered");
+      return el;
+    });
+
+    // The decorative logo is an aria-hidden inline SVG so the text name
+    // remains the sole accessible label for the brand.
+    const logo = brand.querySelector("svg.brand-logo");
+    expect(logo).not.toBeNull();
+    expect(logo!.getAttribute("aria-hidden")).toBe("true");
+
+    // The product name stays present as the accessible text label.
+    expect(brand.querySelector(".brand-name")?.textContent).toBe("mcp-local-hub");
+  });
+});
+
 describe("App — sidebar keyboard navigation (a11y residual)", () => {
   it("exposes the nav as a labelled landmark with aria-current on the active link", async () => {
     window.location.hash = "#/servers";

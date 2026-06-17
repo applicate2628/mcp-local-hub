@@ -105,7 +105,12 @@ html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: 
 /* Default sidebar layout (data-layout="sidebar" or unset). */
 #app { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
 .sidebar { background: var(--sidebar-bg); border-right: 1px solid var(--border); padding: var(--card-padding); }
-.brand { font-weight: 600; margin-bottom: var(--section-gap); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: var(--section-gap); }
+/* Decorative inline hub-mark next to the product name. currentColor +
+   flex-shrink:0 keep it theme-aware and crisp regardless of brand text
+   length; the SVG itself carries aria-hidden. Own small block so it stays
+   clear of the matrix-hover region below. */
+.brand-logo { flex-shrink: 0; color: var(--accent, var(--link)); }
 nav { display: flex; flex-direction: column; gap: 4px; }
 nav a { color: var(--text); text-decoration: none; padding: var(--cell-padding-y) var(--cell-padding-x); border-radius: 6px; }
 nav a:hover { background: var(--border); }
