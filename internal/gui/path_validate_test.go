@@ -11,14 +11,12 @@ import (
 )
 
 // newPathValidateServer builds a test server with the path-validate route
-// wired. NewServer does not call registerPathValidateRoutes (its central
-// registration is added by the integration step), so the test registers
-// the route directly — exactly the call the integration owner will add to
-// server.go.
+// wired. NewServer (via newTestServer) now calls registerPathValidateRoutes
+// in its central route block (server.go), so the test no longer registers the
+// route manually — doing so would double-register and panic.
 func newPathValidateServer(t *testing.T) *Server {
 	t.Helper()
 	s, _ := newTestServer(t)
-	registerPathValidateRoutes(s)
 	return s
 }
 

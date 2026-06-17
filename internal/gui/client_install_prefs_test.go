@@ -29,7 +29,6 @@ func clientInstallPrefsTestServer(
 		clientInstallPrefsSetFn = origSet
 	})
 	s := NewServer(Config{})
-	registerClientInstallPrefsRoutes(s)
 	return s
 }
 

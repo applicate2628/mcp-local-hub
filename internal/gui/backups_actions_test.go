@@ -71,7 +71,6 @@ func postBackupAction(t *testing.T, s *Server, path, body string) *httptest.Resp
 func TestBackupsRestore_HappyPath(t *testing.T) {
 	_, backupPath := seedHomeWithClaudeBackup(t)
 	s, fa := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 	fa.restoreSnap = filepath.Join(filepath.Dir(backupPath), ".claude.json.bak-mcp-local-hub-snap")
 
 	body, _ := json.Marshal(map[string]string{"client": "claude-code", "path": backupPath})
@@ -92,7 +91,6 @@ func TestBackupsRestore_HappyPath(t *testing.T) {
 func TestBackupsDelete_HappyPath(t *testing.T) {
 	_, backupPath := seedHomeWithClaudeBackup(t)
 	s, fa := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 
 	body, _ := json.Marshal(map[string]string{"client": "claude-code", "path": backupPath})
 	rec := postBackupAction(t, s, "/api/backups/delete", string(body))
@@ -107,7 +105,6 @@ func TestBackupsDelete_HappyPath(t *testing.T) {
 func TestBackupsActions_RejectUnknownClient(t *testing.T) {
 	_, backupPath := seedHomeWithClaudeBackup(t)
 	s, fa := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 
 	body, _ := json.Marshal(map[string]string{"client": "not-a-client", "path": backupPath})
 	rec := postBackupAction(t, s, "/api/backups/restore", string(body))
@@ -125,7 +122,6 @@ func TestBackupsActions_RejectUnknownClient(t *testing.T) {
 func TestBackupsActions_RejectTraversal(t *testing.T) {
 	home, _ := seedHomeWithClaudeBackup(t)
 	s, fa := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 
 	// A sibling-directory escape: $HOME/../evil/.claude.json.bak-mcp-local-hub-x
 	evil := filepath.Join(home, "..", "evil", ".claude.json.bak-mcp-local-hub-x")
@@ -147,7 +143,6 @@ func TestBackupsActions_RejectTraversal(t *testing.T) {
 func TestBackupsActions_RejectNonBackupSibling(t *testing.T) {
 	home, _ := seedHomeWithClaudeBackup(t)
 	s, fa := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 
 	live := filepath.Join(home, ".claude.json") // the live config, not a backup
 	if err := os.WriteFile(live, []byte(`{}`), 0600); err != nil {
@@ -166,7 +161,6 @@ func TestBackupsActions_RejectNonBackupSibling(t *testing.T) {
 func TestBackupsActions_RejectMissingFile(t *testing.T) {
 	home, _ := seedHomeWithClaudeBackup(t)
 	s, _ := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 
 	// Correctly-named + right dir, but no such file on disk.
 	missing := filepath.Join(home, ".claude.json.bak-mcp-local-hub-99999999-000000")
@@ -186,7 +180,6 @@ func TestBackupsActions_RejectSymlink(t *testing.T) {
 	}
 	home, _ := seedHomeWithClaudeBackup(t)
 	s, fa := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 
 	target := filepath.Join(home, "secret.txt")
 	if err := os.WriteFile(target, []byte("secret"), 0600); err != nil {
@@ -208,7 +201,6 @@ func TestBackupsActions_RejectSymlink(t *testing.T) {
 
 func TestBackupsActions_RejectGET(t *testing.T) {
 	s, _ := newBackupActionsTestServer(t)
-	registerBackupsActionsRoutes(s)
 	for _, route := range []string{"/api/backups/restore", "/api/backups/delete"} {
 		req := httptest.NewRequest(http.MethodGet, route, nil)
 		rec := httptest.NewRecorder()
