@@ -233,16 +233,17 @@ activates the first window and exits 0.`,
 				// aggregated servers — and the symptom misdirects diagnosis
 				// toward the daemons, not the config). Refuse the reset
 				// while any client is gate-ON; the operator must gate-OFF
-				// first (or re-run `mcphub install --reconcile-hub-mode`
-				// after the reset to rewrite the gated URLs to the new
-				// port). This is the bounded safe fix vs a stable-port pin.
-				// The single-instance lock above already proved the GUI is
-				// not running, so this read sees the at-rest config.
+				// FIRST (which removes the on-disk mcphub-hub entries this
+				// guard keys on) and THEN retry --reset-port. This is the
+				// bounded safe fix vs a stable-port pin. The single-instance
+				// lock above already proved the GUI is not running, so this
+				// read sees the at-rest config.
 				if gated := api.GatedOnClients(); len(gated) > 0 {
 					fmt.Fprintf(cmd.ErrOrStderr(),
 						"--reset-port refused: %d client(s) are gate-ON (hub-aggregate mode) and their URLs are pinned to the current hub port: %s.\n"+
 							"Resetting the port would orphan every gated client URL (the next hub bind grabs a NEW ephemeral port → connection refused for ALL aggregated servers).\n"+
-							"Gate OFF first (Settings → uncheck \"Expose a single aggregated hub URL\" + restart), OR after the reset re-run `mcphub install --reconcile-hub-mode` to rewrite the gated URLs to the new port.\n",
+							"Gate OFF first, THEN retry --reset-port. Headless: `mcphub settings set gui_server.hub_endpoint_enabled false` then `mcphub install --reconcile-hub-mode` (removes the on-disk mcphub-hub entries) — or in the GUI: Settings → uncheck \"Expose a single aggregated hub URL\" + restart.\n"+
+							"(If the GUI itself is stuck, `mcphub gui --force --kill` is the separate recovery and is NOT blocked by this guard.)\n",
 						len(gated), strings.Join(gated, ", "))
 					return &forceExitError{code: 8}
 				}
