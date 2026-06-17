@@ -234,10 +234,22 @@ main { padding: var(--screen-padding); overflow: auto; }
   margin: calc(-1 * var(--cell-padding-y)) calc(-1 * var(--cell-padding-x));
   padding: var(--cell-padding-y) var(--cell-padding-x);
   cursor: pointer;
+  transition: background-color .12s ease;
 }
 /* A disabled cell (no interactive checkbox) stays inert: default cursor and
    a native no-op on click (the wrapped input is disabled). */
 .servers-matrix td > .matrix-cell-label.disabled { cursor: default; }
+/* G1 — hover points only at what clicks, and previews the click SCOPE:
+   - Single-cell hover: highlight THAT toggleable cell only (pure CSS — the
+     :not(.disabled) guard skips inert cells so port/state/disabled never tint).
+   - Column-header / row toggle hover: the parent threads a hover scope down to
+     each CellView, which adds .matrix-cell-hover-scope to every toggleable cell
+     the bulk toggle would flip — so the whole column (across rows) or whole row
+     lights up as a preview of the click. The transition above ramps it. */
+.servers-matrix td > .matrix-cell-label:not(.disabled):hover,
+.servers-matrix td > .matrix-cell-label.matrix-cell-hover-scope {
+  background: var(--sidebar-bg);
+}
 
 /* ── ToggleSwitch — shared polished on/off switch ────────────────────────────
    A real <input type="checkbox"> visually hidden under a CSS track + knob.
@@ -1856,15 +1868,15 @@ nav a,
   transition: background-color .12s ease, border-color .12s ease,
               color .12s ease, opacity .12s ease;
 }
-/* Interactive table rows / accordion headers get a subtle hover cue
- * where none existed before. */
+/* G1: the whole-row hover background was REMOVED. It lit the entire <tr>
+ * (server name, every client cell, Port, State) on hover, falsely implying
+ * the whole row was one click target. Hover highlight is now scoped to what
+ * actually clicks — see the .matrix-cell-label hover + .matrix-cell-hover-scope
+ * rules near the matrix-cell-label block above. The transition is retained so
+ * the scoped cell highlights ramp in/out instead of snapping. */
 .servers-matrix tbody tr,
 .lsp-matrix tbody tr {
   transition: background-color .12s ease;
-}
-.servers-matrix tbody tr:hover,
-.lsp-matrix tbody tr:hover {
-  background: var(--sidebar-bg);
 }
 .screen.add-server .accordion-header:hover {
   background: var(--border);

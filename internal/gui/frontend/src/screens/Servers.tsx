@@ -89,6 +89,13 @@ type DirtyMap = Map<string, Map<string, Direction>>;
 type Outcome = "succeeded" | "failed" | "gated";
 type OutcomeMap = Map<string, Map<string, Outcome>>;
 
+// HoverScope (G1) names the bulk-toggle group the pointer is currently over so
+// the matrix can preview which cells a click would flip. `kind: "col"` → key
+// is a client (column-header toggle hover); `kind: "row"` → key is a server
+// name (row swap-toggle hover). null = no bulk toggle hovered (single-cell
+// hover is handled by CSS, not this state).
+type HoverScope = { kind: "col"; key: string } | { kind: "row"; key: string };
+
 // cellInteractive is the SINGLE source of truth for whether a matrix data
 // cell exposes a live, toggleable checkbox. CellView's `disabled` derivation
 // and the whole-column header toggle both consume it so the two can never
@@ -205,6 +212,16 @@ export function ServersScreen() {
   // visible, `false` = hide; an absent client defers to auto-detection.
   // This drives ONLY which columns render — a pure view filter.
   const [columnPrefs, setColumnPrefs] = useState<ColumnPrefs>(() => loadColumnPrefs());
+
+  // G1 hover-scope: which bulk-toggle the pointer is currently over, so the
+  // matrix can PREVIEW the click SCOPE before the operator commits. CSS alone
+  // cannot light up a whole COLUMN across rows (sibling <td>s in different
+  // <tr>s have no common hover ancestor), so a small JS signal carries the
+  // hovered scope down to every CellView. `kind: "col"` → key is a client;
+  // `kind: "row"` → key is a server name. A CellView highlights itself when
+  // it is toggleable AND falls inside this scope. Single-cell hover stays
+  // pure CSS (.matrix-cell-label:not(.disabled):hover) — no JS needed there.
+  const [hoverScope, setHoverScope] = useState<HoverScope | null>(null);
 
   // Show or hide one client column. Updates the in-memory prefs AND
   // persists immediately so the choice survives a reload; the matrix
@@ -904,6 +921,10 @@ export function ServersScreen() {
                       tabIndex={colToggleable ? 0 : undefined}
                       title={colToggleable ? `Toggle all ${c} cells` : undefined}
                       onClick={colToggleable ? () => toggleColumnCells(c) : undefined}
+                      onMouseEnter={
+                        colToggleable ? () => setHoverScope({ kind: "col", key: c }) : undefined
+                      }
+                      onMouseLeave={colToggleable ? () => setHoverScope(null) : undefined}
                       onKeyDown={
                         colToggleable
                           ? (ev: KeyboardEvent) => {
@@ -949,6 +970,10 @@ export function ServersScreen() {
               applyGen={applyGen}
               onToggle={toggleCell}
               onRowToggle={toggleRowCells}
+              onRowToggleHover={(hovering) =>
+                setHoverScope(hovering ? { kind: "row", key: server.name } : null)
+              }
+              hoverScope={hoverScope}
               onOpenDrawer={() => setDrawerServer(server.name)}
               applying={applying}
             />
@@ -1041,12 +1066,19 @@ function ServerRowView(props: {
   // column header toggle. Mutates only the parent dirty map via the shared
   // flipCellGroup owner, so Apply semantics are identical to per-cell edits.
   onRowToggle: (server: ServerRow) => void;
+  // G1 hover-scope: pointer entered (true) / left (false) the row toggle, so
+  // the parent can set/clear the "row" hover scope that previews which cells a
+  // row toggle would flip.
+  onRowToggleHover: (hovering: boolean) => void;
+  // The currently-hovered bulk-toggle scope (col/row) threaded from the parent
+  // so each CellView can light up when it falls inside the previewed group.
+  hoverScope: HoverScope | null;
   // Opens the per-row detail drawer (manifest preview + lifetime stats +
   // Stop/Restart). Parent owns the open flag.
   onOpenDrawer: () => void;
   applying: boolean;
 }) {
-  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, onOpenDrawer, applying } = props;
+  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, onRowToggleHover, hoverScope, onOpenDrawer, applying } = props;
   // Row-toggle affordance state: a cell is "checked" if a pending dirty
   // edit says so, else the scan baseline (via-hub). rowInteractive uses the
   // same cellInteractive gate as the per-cell checkbox + the column toggle,
@@ -1074,6 +1106,8 @@ function ServerRowView(props: {
             aria-pressed={rowAllChecked}
             title={`Toggle all visible clients for ${server.name}`}
             onClick={() => onRowToggle(server)}
+            onMouseEnter={() => onRowToggleHover(true)}
+            onMouseLeave={() => onRowToggleHover(false)}
             onKeyDown={(ev: KeyboardEvent) => {
               if (ev.key === "Enter" || ev.key === " ") {
                 ev.preventDefault();
@@ -1111,6 +1145,16 @@ function ServerRowView(props: {
           client={client}
           lastOutcome={outcomes?.get(client)}
           pendingDirection={pending?.get(client)}
+          // G1 hover-scope preview: this cell is inside the hovered group when
+          // a column-header toggle for this client is hovered, OR the row
+          // toggle for THIS server is hovered. CellView still gates the actual
+          // highlight on the cell being interactive, so disabled cells in a
+          // hovered column/row never light up.
+          inHoverScope={
+            hoverScope != null &&
+            ((hoverScope.kind === "col" && hoverScope.key === client) ||
+              (hoverScope.kind === "row" && hoverScope.key === server.name))
+          }
           onToggle={onToggle}
           applying={applying}
         />
@@ -1142,10 +1186,16 @@ function CellView(props: {
   // clicked directly. A direct per-cell click also flows through dirty,
   // so the same path keeps the visual honest in every case.
   pendingDirection?: Direction;
+  // G1 hover-scope: true when a hovered column/row bulk toggle covers this
+  // cell. The visual highlight is gated additionally on the cell being
+  // interactive (see `disabled` below) so a hovered column/row only lights up
+  // the cells a click would actually flip — port/state/disabled cells stay
+  // dark.
+  inHoverScope?: boolean;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   applying: boolean;
 }) {
-  const { server, client, lastOutcome, pendingDirection, onToggle, applying } = props;
+  const { server, client, lastOutcome, pendingDirection, inHoverScope, onToggle, applying } = props;
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
@@ -1263,7 +1313,11 @@ function CellView(props: {
           so a dirty toggle still reads visibly different from a clean one,
           mirroring what the raw-checkbox + retry-outline gave before. The
           title carries the per-cell help text exactly as before. */}
-      <label class={`matrix-cell-label${disabled ? " disabled" : ""}`}>
+      <label
+        class={`matrix-cell-label${disabled ? " disabled" : ""}${
+          inHoverScope && !disabled ? " matrix-cell-hover-scope" : ""
+        }`}
+      >
         <ToggleSwitch
           checked={checked}
           disabled={disabled}
