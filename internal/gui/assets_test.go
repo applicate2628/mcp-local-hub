@@ -78,3 +78,22 @@ func TestStaticAsset_AppJS(t *testing.T) {
 		t.Errorf("content-type = %q, want javascript MIME", ct)
 	}
 }
+
+// TestStaticAsset_NoCacheHeader pins the deploy-freshness fix: the embedded
+// bundle filenames are NOT content-hashed, so the asset routes must send
+// Cache-Control: no-cache or a browser serves a STALE GUI after every deploy
+// until a manual hard-refresh. Covers both the JS/CSS bundle and the favicon.
+func TestStaticAsset_NoCacheHeader(t *testing.T) {
+	s := NewServer(Config{})
+	for _, path := range []string{"/assets/style.css", "/assets/app.js", "/favicon.ico"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%s status = %d", path, rec.Code)
+		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+			t.Errorf("%s Cache-Control = %q, want no-cache (unhashed assets must revalidate so deploys are visible)", path, cc)
+		}
+	}
+}

@@ -15,8 +15,18 @@ func registerAssetRoutes(s *Server) {
 	if err != nil {
 		panic(err) // embed.FS is a compile-time source, so this cannot fail at runtime
 	}
-	fileServer := http.FileServer(http.FS(sub))
-	s.mux.Handle("/assets/", http.StripPrefix("/assets/", fileServer))
+	// The embedded bundle filenames are NOT content-hashed (app.js, style.css,
+	// index.html stay stable across builds), so a browser that caches them shows
+	// a STALE GUI after every deploy until the operator hard-refreshes
+	// (Ctrl+Shift+R). Force revalidation on every asset load with no-cache — the
+	// assets are local + small, so re-fetching costs nothing and the operator
+	// always sees the build that is actually deployed. (Content-hashed filenames
+	// are the proper long-term fix; tracked in the GUI design-system work.)
+	fileServer := http.StripPrefix("/assets/", http.FileServer(http.FS(sub)))
+	s.mux.Handle("/assets/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		fileServer.ServeHTTP(w, r)
+	}))
 
 	// Browser tab indicator. Served straight from the embedded asset
 	// because the index.html <link rel="icon" href="/favicon.ico" />
@@ -33,7 +43,7 @@ func registerAssetRoutes(s *Server) {
 			return
 		}
 		w.Header().Set("Content-Type", "image/x-icon")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(b)
 	})
 
