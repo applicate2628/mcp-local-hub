@@ -75,19 +75,20 @@ func DrawHubMark(img *image.RGBA, col color.RGBA) {
 	}
 	// Central 4×4 hub at design grid (6,6)-(9,9).
 	block(6, 6, 4, 4)
-	// Four corner clients (2×2 each).
-	block(2, 2, 2, 2)
-	block(12, 2, 2, 2)
-	block(2, 12, 2, 2)
-	block(12, 12, 2, 2)
-	// Diagonal connection pixels from corner clients toward hub.
-	diagonals := [][2]int{
-		{4, 4}, {5, 5}, // top-left → hub
-		{11, 4}, {10, 5}, // top-right → hub
-		{4, 11}, {5, 10}, // bottom-left → hub
-		{11, 11}, {10, 10}, // bottom-right → hub
+	// Three satellite nodes (2×2 each) — one up, two down-spread — mirroring
+	// the GUI brand SVG (app.tsx .brand-logo: a central node routing to three
+	// satellites). The tray / .exe / favicon now match the in-app logo.
+	block(6, 0, 4, 2)   // top satellite (wide cap so it reads distinct from the neck)
+	block(0, 13, 3, 2)  // bottom-left satellite
+	block(13, 13, 3, 2) // bottom-right satellite
+	// Radial connectors from the hub out to each satellite.
+	block(7, 3, 2, 3) // hub → top (thin neck below the cap)
+	// hub → bottom-left (diagonal staircase)
+	for _, d := range [][2]int{{5, 10}, {4, 11}, {3, 12}, {2, 13}} {
+		block(d[0], d[1], 1, 1)
 	}
-	for _, d := range diagonals {
+	// hub → bottom-right (diagonal staircase)
+	for _, d := range [][2]int{{10, 10}, {11, 11}, {12, 12}, {13, 13}} {
 		block(d[0], d[1], 1, 1)
 	}
 }
