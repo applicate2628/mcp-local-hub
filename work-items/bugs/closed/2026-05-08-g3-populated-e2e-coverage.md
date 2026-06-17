@@ -5,9 +5,44 @@ found-by: codex deep-sec r10 qa lane on PR #144
 found-on: 2026-05-08
 project: mcp-local-hub
 related-pr: #144 (G3 capability display, all unit-tested but minimal E2E)
+status: closed
+closed: 2026-06-17
 ---
 
 # G3 needs populated-fixture E2E coverage
+
+## Closure (2026-06-17)
+
+Closed by adding `internal/gui/e2e/tests/populated-matrix.spec.ts` plus a
+real on-disk seed fixture `internal/gui/e2e/fixtures/seeded-hub.ts`.
+
+- **Populated matrix via the REAL backend (the primary gap):** the seed
+  fixture writes a real `~/.cursor/mcp.json` into the per-test temp home
+  BEFORE the binary starts, so the live Go `/api/scan` reads it off disk
+  (full embed-bundle + backend roundtrip — exactly the wiring unit tests
+  with mocked `fetchOrThrow` cannot see). Two rows are exercised: a
+  manifested server (`memory`, bundled manifest) renders as an interactive
+  main-matrix row with a cursor cell; a manifest-less server
+  (`legacy-thirdparty`) surfaces in the read-only "Other MCP entries"
+  expander. Verified the seed→scan wiring end-to-end against the
+  production `api.Scan()` path (memory → manifested/can-migrate,
+  legacy → non-manifested/unknown).
+- **Capabilities cards + synthetic-source pill + partial-failures /
+  redaction banner:** exercised via an injected `/api/health` response
+  (page.route), covering the per-card render, the `synthetic-source-pill`,
+  the `capabilities-partial-failures` banner, the failure-empty branch, and
+  the backend-redacted error text surviving to the section-error list.
+- **DEFERRED (architectural):** a REAL-backend (un-mocked) capabilities /
+  redaction-banner e2e is not feasible under the current fixture.
+  Capabilities/probes iterate live `DaemonStatus` rows and the e2e fixture
+  pins `MCPHUB_E2E_SCHEDULER=none` (so `/api/status` is always `[]`); a
+  seeded CLIENT config populates `/api/scan` but does NOT start a hub
+  DAEMON, so no probe ever runs. Exercising the live redaction path needs a
+  scheduler/supervisor test seam that injects a failing daemon — tracked
+  alongside the CLAUDE.md "Real migrate/restart flows (needs populated
+  client configs)" + scheduler-test-seam backlog items. The injected-response
+  test above covers the banner + pill + redacted-text RENDER wiring, which is
+  the portion reachable in the headless e2e environment.
 
 ## Current state
 
