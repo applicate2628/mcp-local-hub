@@ -100,3 +100,6 @@ restore.
   §5 R1 (5 Codex revisions, 1 P1 order-of-operations + 1 P1 gate + 1 P1
   retry-prune + 1 P1 always-reload all in this race's orbit)
 - A2b backlog follow-ups: `work-items/bugs/a2b-combined-pr-followups.md`
+## Resolution (closed 2026-06-17 — repo audit)
+
+Fixed-in: lockingClient mutex+flock (#319) + 2c4ba62 read-lock on backup-selection; 4 named tests pass -race

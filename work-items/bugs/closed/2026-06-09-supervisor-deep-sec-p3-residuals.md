@@ -62,3 +62,7 @@ materially revised two of them and rejected one:
 
 ## Note
 Conc-F2's full single-writer fix (routing the liveness MarkExited+persist through the event loop) closes most of the window Reg-F2 lives in; after the #268 deep-sec fixes land, re-evaluate whether Reg-F2 is still reachable before spending effort on it.
+
+## Resolution (closed 2026-06-17 — repo audit)
+
+Fixed-in: Conc-F5 (836b1b2 atomic COW) + Conc-F4 (a222538 invariant test) + Conc-F7 (6410064 dedup); Reg-F2 deferred by both reviewers

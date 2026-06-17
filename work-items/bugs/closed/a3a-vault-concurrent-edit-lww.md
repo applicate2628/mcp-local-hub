@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed
 context: A3-a Secrets registry — concurrent vault edits limitation
 phase: Phase 3B-II A3-a
 ---
@@ -57,3 +57,7 @@ simultaneously, or two GUI processes) is still last-write-wins because
 `vaultMutex` is process-local. An OS-level advisory file lock
 (`github.com/gofrs/flock`, already in `go.mod`) is the correct fix and
 remains future work.
+
+## Resolution (closed 2026-06-17 — repo audit)
+
+Fixed-in: vault flock (#319 config_lock.go + vault_lock.go) serializes concurrent vault edits

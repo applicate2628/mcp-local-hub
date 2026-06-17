@@ -5,7 +5,7 @@ found-by: code-quality reviewer pass on feat/g4-phase1-pre-gate
 found-in-phase: G4 Phase 1 — Pre-gate + Write Hardening
 affected-surface: internal/api/server_manifest.go, internal/api/secure_write_*.go, multiple Windows test files
 context: feat/g4-phase1-pre-gate post-implementation review (reviewer returned PASS with 7 MINOR optional cleanups; 4 applied as feat/g4-phase1 cleanup commit; 3 deferred to follow-up)
-status: open
+status: closed
 label: phase-1-followup
 ---
 
@@ -143,3 +143,7 @@ expansion.
 Recommend: schedule as three independent small PRs on top of master
 post-merge of `feat/g4-phase1-pre-gate`. None is blocking for Phase 2
 work.
+
+## Resolution (closed 2026-06-17 — repo audit)
+
+Fixed-in: MINOR-5 validation single-owner + MINOR-6 3-SID allowlist already deduped (allowlistSIDs single owner); verified 2026-06-17

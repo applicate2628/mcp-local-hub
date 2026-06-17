@@ -79,3 +79,7 @@ with `mcphub cleanup` CLI which also shows raw cmdline.
 User explicitly scoped G3 as read-only consumer of G2 backend.
 This redaction is a backend-side change (G4 or G3 follow-up) +
 frontend update — out of G3 scope.
+
+## Resolution (closed 2026-06-17 — repo audit)
+
+Fixed-in: redactErrorDetail wired into every capability/health error path (health.go:450/615/728/810+); verified 2026-06-17

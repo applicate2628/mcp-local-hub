@@ -340,3 +340,7 @@ corrected here.
 
 The "Failed attempt: PR #218 (reverted by PR #219)" and "Proper-fix design
 (deferred)" sections above are retained as execution history.
+
+## Resolution (closed 2026-06-17 — repo audit)
+
+Fixed-in: operator accepted fail-closed residual (#257 f144dea); manual workaround exists, fail-closed safety > always-succeed
