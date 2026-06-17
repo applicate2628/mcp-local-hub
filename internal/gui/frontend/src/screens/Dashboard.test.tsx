@@ -963,3 +963,47 @@ describe("DashboardScreen — expanded-card metrics (Uptime + RAM)", () => {
     });
   });
 });
+
+// Flowbite-Card metric cards (Feature 3): each daemon card now carries a
+// "View logs" link (an <a>, NOT a button) plus Flowbite Card shell classes
+// and a Flowbite state badge.
+describe("DashboardScreen — Flowbite card layout + View-logs link", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("renders a View-logs link as an anchor to #/logs (not a button)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findByTestId } = render(<DashboardScreen />);
+    const link = (await findByTestId("card-view-logs")) as HTMLAnchorElement;
+    expect(link.tagName).toBe("A");
+    expect(link.getAttribute("href")).toBe("#/logs");
+  });
+
+  it("does not add extra buttons (View-logs is a link)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      // Still 2 bulk + 2 per-card — the View-logs <a> is link-role, not button.
+      expect(buttons.length).toBe(4);
+    });
+  });
+
+  it("applies Flowbite Card shell classes while keeping the .card test hook", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findByTestId } = render(<DashboardScreen />);
+    const card = await findByTestId("dashboard-card");
+    // Both the legacy class (status coloring + .cards .card selector) and
+    // the Flowbite Card vocabulary are present.
+    expect(card.className).toContain("card");
+    expect(card.className).toContain("rounded-lg");
+    expect(card.className).toContain("shadow-sm");
+  });
+});

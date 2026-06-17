@@ -21,9 +21,11 @@ import {
 } from "../lib/matrix-columns";
 import { collectLspRows, type LspRow, LSP_MANIFEST_SERVER } from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
+import { pushToast } from "../lib/toast-store";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
 import { MatrixColumnsMenu } from "../components/MatrixColumnsMenu";
 import { EnvDrawer } from "../components/EnvDrawer";
+import { ServerRowDrawer } from "../components/ServerRowDrawer";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import type {
   ClientConfigState,
@@ -107,6 +109,13 @@ function cellInteractive(routing: Routing, applying: boolean): boolean {
 export function ServersScreen() {
   const [servers, setServers] = useState<ServerRow[] | null>(null);
   const [statusByServer, setStatusByServer] = useState<Record<string, { state: string; port: number | null }>>({});
+  // Raw per-server DaemonStatus rows from /api/status, kept alongside the
+  // aggregate `statusByServer` so the ServerRowDrawer can render per-daemon
+  // lifetime stats (PID / uptime / RAM) without a second fetch. Keyed by
+  // server name; each value is the list of daemon rows for that server.
+  const [statusRowsByServer, setStatusRowsByServer] = useState<Record<string, DaemonStatus[]>>({});
+  // The server whose detail drawer is currently open (null = closed).
+  const [drawerServer, setDrawerServer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // v0.4.5 init-button: client_config_presence drives the per-column
   // "Initialize <client>" header affordance. Stored alongside servers
@@ -291,6 +300,14 @@ export function ServersScreen() {
         flat[name] = { state: a.state, port: a.port };
       }
       setStatusByServer(flat);
+      // Group raw daemon rows per server for the row detail drawer. Skip
+      // maintenance rows (same filter the aggregate uses) so the drawer
+      // never shows a blank weekly-refresh task as a "daemon".
+      const rowsByServer: Record<string, DaemonStatus[]> = {};
+      for (const row of status.filter((r) => !r.is_maintenance)) {
+        (rowsByServer[row.server] ??= []).push(row);
+      }
+      setStatusRowsByServer(rowsByServer);
       setError(null);
       // PR #186 fix: clear the "Applied. Refreshing…" indicator
       // once the authoritative reload completes. Pre-fix the
@@ -585,9 +602,16 @@ export function ServersScreen() {
     // not via the checkbox visual.
     setApplyGen((g) => g + 1);
 
+    const total = demigrateCells.length + migrateCells.length;
     if (failed.length === 0) {
       setApplyMsg("Applied. Refreshing…");
       setFailedRows([]);
+      // Flowbite success toast — a transient, screen-agnostic confirmation
+      // that complements the inline "Applied. Refreshing…" toolbar text.
+      pushToast(
+        "success",
+        `Applied ${total} change${total === 1 ? "" : "s"} to client configs.`,
+      );
     } else {
       // Bug-bash B1 closure (#7): each failed entry becomes its own
       // <li> row in the toolbar list (see render below). applyMsg
@@ -595,6 +619,13 @@ export function ServersScreen() {
       // single string is gone.
       setApplyMsg(`Failed: ${failed.length} row(s); re-toggle and retry below.`);
       setFailedRows(failed);
+      // Flowbite danger toast — sticky (no auto-dismiss) so the operator
+      // acknowledges the partial-failure explicitly. The per-row detail
+      // still lives in the inline failedRows list below.
+      pushToast(
+        "danger",
+        `Apply failed for ${failed.length} of ${total} change${total === 1 ? "" : "s"}; see the list below to retry.`,
+      );
     }
     setApplying(false);
   }
@@ -918,6 +949,7 @@ export function ServersScreen() {
               applyGen={applyGen}
               onToggle={toggleCell}
               onRowToggle={toggleRowCells}
+              onOpenDrawer={() => setDrawerServer(server.name)}
               applying={applying}
             />
           ))}
@@ -938,6 +970,14 @@ export function ServersScreen() {
           taskName={openDrawerFor.taskName}
           rowLabel={`${openDrawerFor.language} (${openDrawerFor.workspaceKey || "—"})`}
           onClose={() => setOpenDrawerFor(null)}
+        />
+      )}
+      {drawerServer && (
+        <ServerRowDrawer
+          key={drawerServer}
+          serverName={drawerServer}
+          daemons={statusRowsByServer[drawerServer] ?? []}
+          onClose={() => setDrawerServer(null)}
         />
       )}
       {otherServers.length > 0 && (
@@ -1001,9 +1041,12 @@ function ServerRowView(props: {
   // column header toggle. Mutates only the parent dirty map via the shared
   // flipCellGroup owner, so Apply semantics are identical to per-cell edits.
   onRowToggle: (server: ServerRow) => void;
+  // Opens the per-row detail drawer (manifest preview + lifetime stats +
+  // Stop/Restart). Parent owns the open flag.
+  onOpenDrawer: () => void;
   applying: boolean;
 }) {
-  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, applying } = props;
+  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, onOpenDrawer, applying } = props;
   // Row-toggle affordance state: a cell is "checked" if a pending dirty
   // edit says so, else the scan baseline (via-hub). rowInteractive uses the
   // same cellInteractive gate as the per-cell checkbox + the column toggle,
@@ -1047,6 +1090,19 @@ function ServerRowView(props: {
         >
           {server.name}
         </a>
+        {/* Per-row detail drawer trigger (Flowbite Drawer): manifest
+            preview + lifetime stats + Stop/Restart. Kept a plain text
+            button so existing matrix selectors (edit-server link, the
+            row/column toggles) are untouched. */}
+        <button
+          type="button"
+          class="matrix-row-details"
+          data-testid={`server-row-details-${server.name}`}
+          title={`Open details for ${server.name} (manifest, stats, stop/restart)`}
+          onClick={onOpenDrawer}
+        >
+          Details
+        </button>
       </td>
       {clients.map((client) => (
         <CellView

@@ -76,6 +76,7 @@ if (typeof document !== "undefined") {
   document.documentElement.setAttribute("data-layout", readCachedLayout());
 }
 import { FirstRunBanner } from "./components/FirstRunBanner";
+import { ToastContainer } from "./components/Toast";
 import { AboutScreen } from "./screens/About";
 import { AddServerScreen } from "./screens/AddServer";
 import { CapabilitiesScreen } from "./screens/Capabilities";
@@ -308,6 +309,9 @@ export function App() {
           <FirstRunBanner />
           {body}
         </main>
+        {/* One shared Flowbite Toast stack for every screen (toast store
+            is module-level; ToastContainer just subscribes + renders). */}
+        <ToastContainer />
       </>
     );
   }
@@ -322,6 +326,8 @@ export function App() {
         <FirstRunBanner />
         {body}
       </main>
+      {/* One shared Flowbite Toast stack for every screen. */}
+      <ToastContainer />
     </>
   );
 }

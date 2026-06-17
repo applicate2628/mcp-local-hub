@@ -18,6 +18,7 @@ import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
+import { pushToast } from "../lib/toast-store";
 
 // MANIFEST_NAME_REGEX mirrors internal/api/manifest.go:23 validManifestName.
 // Live client-side regex check provides instant feedback; the backend still
@@ -484,6 +485,8 @@ export function AddServerScreen(props: {
             : `Saved servers/${name}/manifest.yaml.`,
           reinstall: mode === "edit",
         });
+        // Flowbite success toast mirroring the inline save banner.
+        pushToast("success", `Saved ${name} manifest.`);
         return;
       }
       await runInstallNow(name, version);
@@ -582,9 +585,11 @@ export function AddServerScreen(props: {
             : `Force-saved.`,
         reinstall: true,
       });
+      pushToast("success", `Force-saved ${name} manifest.`);
     } catch (err) {
       if (version !== submissionCounter.current) return;
       setBanner({ kind: "error", text: `Force Save failed: ${(err as Error).message}` });
+      pushToast("danger", `Force Save failed: ${(err as Error).message}`);
     } finally {
       if (version === submissionCounter.current) setBusy("");
     }
@@ -605,10 +610,12 @@ export function AddServerScreen(props: {
           text: `Saved servers/${name}/manifest.yaml, but install failed: ${err}`,
           retry: () => runInstallNow(name, ++submissionCounter.current),
         });
+        pushToast("danger", `Install failed for ${name}: ${err}`);
         return;
       }
       setWarnings(null);
       setBanner({ kind: "success", text: `Installed ${name}. Daemons will start at next logon (or run "mcphub restart --server ${name}" now).` });
+      pushToast("success", `Installed ${name}.`);
     } catch (err) {
       if (version !== submissionCounter.current) return;
       setBanner({
@@ -616,6 +623,7 @@ export function AddServerScreen(props: {
         text: `Saved servers/${name}/manifest.yaml, but install threw: ${(err as Error).message}`,
         retry: () => runInstallNow(name, ++submissionCounter.current),
       });
+      pushToast("danger", `Install failed for ${name}: ${(err as Error).message}`);
     }
   }
 

@@ -2,52 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { cleanupOrphans, fetchOrThrow, restartSupervisor } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { stateShape } from "../lib/status";
+import { formatBytes, formatUptime } from "../lib/format";
 import type { DaemonStatus } from "../types";
+
+// formatUptime + formatBytes now live in lib/format (single owner shared
+// with the Servers row drawer). Re-exported here so the existing
+// Dashboard.test.tsx imports (`import { ..., formatUptime, formatBytes }
+// from "./Dashboard"`) keep resolving unchanged.
+export { formatBytes, formatUptime };
 
 // Key state map by "<server>/<daemon>" — matches the poller convention.
 // A multi-daemon server (serena: claude + codex) would otherwise collide
 // on server alone and render one card instead of two.
 function keyFor(r: { server: string; daemon?: string }): string {
   return `${r.server}/${r.daemon ?? "default"}`;
-}
-
-// formatUptime humanizes a duration-in-seconds into a compact "2h 14m" /
-// "3d 5h" / "47s" string for the Dashboard card. The two-largest-unit
-// convention keeps the cell readable (a daemon up for 3 days does not need
-// minute precision). Returns "" for a non-positive / undefined value so the
-// caller can omit the row — uptime_sec is 0/absent for a just-spawned or
-// non-running daemon.
-export function formatUptime(sec: number | undefined): string {
-  if (!sec || sec <= 0 || !Number.isFinite(sec)) return "";
-  const s = Math.floor(sec);
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const secs = s % 60;
-  if (d > 0) return h > 0 ? `${d}d ${h}h` : `${d}d`;
-  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
-  if (m > 0) return secs > 0 ? `${m}m ${secs}s` : `${m}m`;
-  return `${secs}s`;
-}
-
-// formatBytes humanizes a byte count into "48 MB" / "1.2 GB" for the RAM
-// row. Uses binary (1024) units to match the working-set semantics of the
-// underlying GetProcessMemoryInfo value. Returns "" for a non-positive /
-// undefined value so the caller can omit the row — ram_bytes is 0/absent
-// when RAM could not be determined.
-export function formatBytes(bytes: number | undefined): string {
-  if (!bytes || bytes <= 0 || !Number.isFinite(bytes)) return "";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  // Whole numbers for B/KB/MB (process RAM is naturally MB-scale); one
-  // decimal for GB+ so a 1.2 GB daemon does not collapse to "1 GB".
-  const rounded = i >= 3 ? v.toFixed(1) : Math.round(v).toString();
-  return `${rounded} ${units[i]}`;
 }
 
 // BulkAction is the action verb used in /api/{restart,stop}-all and in
@@ -533,7 +501,21 @@ function Card(props: {
   const restartBtn = useActionButton(onRestart);
   const stopBtn = useActionButton(onStop);
 
-  const cls = d.state === "Running" ? "card ok" : "card down";
+  // Flowbite Card shell classes (the documented `p-6 bg-white border
+  // border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700`
+  // vocabulary) layered on top of the existing `card ok`/`card down`
+  // classes the Dashboard tests select on. Keeping both means the metric
+  // cards read as Flowbite Cards while the status-color (`.card.ok .state`)
+  // and `.cards .card` selectors stay intact.
+  const flowbiteCard =
+    "p-6 bg-white border border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700";
+  const cls = `${d.state === "Running" ? "card ok" : "card down"} ${flowbiteCard}`;
+  // Flowbite Badge color for the State chip (green when Running, red
+  // otherwise) — the documented pill-badge palette.
+  const stateBadgeClass =
+    d.state === "Running"
+      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+      : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
   // Prefer the backend-computed human-readable name ("serena · <project>",
   // "<lang> @ <workspace>") when present; it replaces the hash-suffixed
   // task name for workspace-scoped daemons. Global daemons carry no
@@ -605,8 +587,10 @@ function Card(props: {
   }[stopEffective];
 
   return (
-    <div class={cls}>
-      <div class="card-title">{title}</div>
+    <div class={cls} data-testid="dashboard-card">
+      <div class="card-title text-lg font-semibold tracking-tight text-gray-900 dark:text-white">
+        {title}
+      </div>
       <div class="card-kv">
         <span>Port</span>
         <span>{d.port ?? "—"}</span>
@@ -634,8 +618,12 @@ function Card(props: {
       <div class="card-kv">
         <span>State</span>
         <span class="state">
-          <span class="state-shape" aria-hidden="true">{stateShape(d.state)}</span>{" "}
-          {d.state}
+          {/* Flowbite Badge for the state chip — color + the shape glyph
+              so meaning survives a red-green color deficit. */}
+          <span class={`text-xs font-medium px-2.5 py-0.5 rounded-full ${stateBadgeClass}`}>
+            <span class="state-shape" aria-hidden="true">{stateShape(d.state)}</span>{" "}
+            {d.state}
+          </span>
         </span>
       </div>
       {uptimeText ? (
@@ -650,6 +638,23 @@ function Card(props: {
           <span>{ramText}</span>
         </div>
       ) : null}
+      {/* View-logs link — an <a> (link role), NOT a <button>, so the
+          long-standing per-card button-count invariant (2 bulk + 2 per
+          card) the Dashboard tests assert is preserved. Navigates to the
+          Logs screen where the operator picks this server's log file. */}
+      <div class="card-logs-link" style="margin-top: var(--gap-xs)">
+        <a
+          href="#/logs"
+          class="inline-flex items-center text-sm font-medium text-blue-600 hover:underline dark:text-blue-500"
+          data-testid="card-view-logs"
+          title={`View logs for ${title}`}
+        >
+          View logs
+          <svg class="w-3.5 h-3.5 ms-1.5 rtl:rotate-180" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 10">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 5h12m0 0L9 1m4 4L9 9" />
+          </svg>
+        </a>
+      </div>
       <div class="card-actions">
         <button onClick={restartBtn.click} disabled={restartDisabled} aria-busy={anyWorking}>
           {restartLabel}

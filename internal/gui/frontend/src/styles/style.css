@@ -1775,6 +1775,15 @@ section[data-section] button.btn-danger:not(:disabled):hover {
 .env-drawer .info { color: #1b5e20; margin-top: 0.5rem; }
 .env-drawer .error { color: #b71c1c; margin-top: 0.5rem; }
 
+/* Per-row "Details" trigger that opens the Flowbite ServerRowDrawer. A
+   small unobtrusive text button next to the server-name edit link. */
+.matrix-row-details {
+  margin-left: 0.5rem; padding: 0 0.25rem; font-size: 0.8em;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); text-decoration: underline;
+}
+.matrix-row-details:hover { color: var(--text); }
+
 /* (legacy .daemon-env-settings + .daemon-env-grid rules removed — the env
    editor was rebuilt onto .daemon-env-body / .daemon-env-kv / .daemon-env-field.
    The redesign block higher up (search ".daemon-env-body") is the intended one;
