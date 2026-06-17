@@ -1136,11 +1136,11 @@ func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, 
 			continue
 		}
 
-		// Walk the ancestor chain. The scope match is the FIRST
-		// recognized anchor; the mcphub-daemon guard takes priority so
-		// a child that is BOTH under the scoped client AND under a hub
-		// daemon (e.g. the operator routed a server through the hub but
-		// also has a stray client) is spared.
+		// Walk the ancestor chain. Record the first recognized scope
+		// anchor, but keep walking so the mcphub-daemon guard can still
+		// take priority even when it appears above the requested scope
+		// root. A child that is BOTH under the scoped client/root and
+		// under a hub daemon is always spared.
 		matchSource := ""
 		spared := false
 		for cur, depth := r.ppid, 0; depth < 16; depth++ {
@@ -1157,14 +1157,12 @@ func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, 
 				break
 			}
 			if rootPID != 0 {
-				if cur == rootPID {
+				if cur == rootPID && matchSource == "" {
 					matchSource = "root-pid " + strconv.Itoa(rootPID)
-					break
 				}
 			} else if clientBasename != "" {
-				if stripExtension(strings.ToLower(firstTokenBasename(pcmd))) == clientBasename {
+				if matchSource == "" && stripExtension(strings.ToLower(firstTokenBasename(pcmd))) == clientBasename {
 					matchSource = clientBasename
-					break
 				}
 			}
 			if parent.ppid == 0 || parent.ppid == cur {
