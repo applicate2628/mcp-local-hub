@@ -252,6 +252,13 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// handler's path parser validates the trailing /mcp + the client
 	// id (gate 2).
 	mux.Handle("/clients/", handler)
+	// Groups/namespaces Phase 4b: the SAME handler serves /g/<group>/mcp
+	// (the design's structurally-separate-prefix decision). The handler's
+	// parseHubPathFromURL recognizes BOTH prefixes and maps a group to the
+	// kind-namespaced "g:<group>" scope key; gate 2 rejects an unknown
+	// group with the same empty-body 404 the unknown-client path uses. No
+	// /clients/ behavior changes — the client branch is byte-identical.
+	mux.Handle("/g/", handler)
 	// codex bot phase4 r12 P2 closure on PR #158: also register the
 	// bare /clients pattern (no trailing slash) so ServeMux does NOT
 	// auto-301 /clients → /clients/ before the auth/path gates run.
@@ -269,6 +276,11 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// empty body, status 404. Eliminates route-fingerprinting and
 	// keeps callers from differentiating /clients vs /clients/foo.
 	mux.HandleFunc("/clients", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	// Mirror the bare-prefix 404 guard for /g (same anti-301 +
+	// empty-body-404 contract as /clients above).
+	mux.HandleFunc("/g", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	mux.Handle("/internal/reload-tokens", reload)
