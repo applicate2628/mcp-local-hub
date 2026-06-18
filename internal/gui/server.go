@@ -502,6 +502,7 @@ type Server struct {
 	cleanup                  cleanupAPI
 	clientInit               clientInitializer
 	lspRegistrar             lspRegistrar
+	groups                   groupsAPI
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
@@ -718,6 +719,7 @@ func NewServer(cfg Config) *Server {
 	s.cleanup = realCleanupAPI{}
 	s.clientInit = realClientInitializer{}
 	s.lspRegistrar = realLSPRegistrar{}
+	s.groups = realGroupsAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -755,6 +757,7 @@ func NewServer(cfg Config) *Server {
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)
 	registerLSPRouterRoutes(s)
+	registerGroupsRoutes(s) // groups Phase 5b-1: /api/groups CRUD authoring endpoint
 	return s
 }
 

@@ -119,6 +119,16 @@ func validateGroupName(name string) error {
 	return nil
 }
 
+// ValidateGroupName is the exported wrapper over the single-owner
+// validateGroupName, for the AUTHORING boundary (the GUI /api/groups
+// handler, groups Phase 5b-1) to reject a bad group name with a precise
+// error BEFORE the read-modify-write of the full groups set — rather than
+// discovering it inside WriteGroups after the merge. It delegates verbatim
+// so the invariant stays owned in one place (no duplicated rule).
+func ValidateGroupName(name string) error {
+	return validateGroupName(name)
+}
+
 // parseGroupsConfig decodes + validates groups.yaml bytes. Unknown YAML
 // keys are rejected (KnownFields(true)) so a typo'd field surfaces rather
 // than silently dropping config. Every group name is validated; the FIRST
