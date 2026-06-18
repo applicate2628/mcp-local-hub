@@ -290,6 +290,11 @@ main { padding: var(--screen-padding); overflow: auto; }
 .servers-matrix { border-collapse: collapse; width: 100%; max-width: 960px; }
 .servers-matrix th, .servers-matrix td { border: 1px solid var(--border); padding: var(--cell-padding-y) var(--cell-padding-x); text-align: left; }
 .servers-matrix thead th { background: var(--sidebar-bg); font-weight: 500; }
+/* G15 a11y: the per-row Server/Language cell is a <th scope="row"> (so screen
+   readers associate every toggle in the row with its server/language name).
+   Neutralize the UA <th> defaults (bold + sidebar background only apply to
+   thead) so a body row-header renders byte-identical to the old <td>. */
+.servers-matrix tbody th { font-weight: normal; background: transparent; }
 .servers-matrix input[type="checkbox"] { margin: 0; }
 /* v0.4.5 init-button: header cells with a "missing-init-possible"
    client config render a compact Initialize affordance below the
@@ -1329,6 +1334,13 @@ menu button[disabled] {
   --accent-color: #3b82f6;
   --error-color: #dc2626;
   --warning-color: #92400e;
+  /* Success/ok token for the A4-a (Settings/Backups) family — the sibling of
+     --error-color / --warning-color it previously lacked. Light value #047857
+     = 5.48:1 on the white --bg-color (WCAG AA pass). The dark/system-dark
+     blocks override it to #10b981 (7.04:1 on #0f172a). Replaces the
+     hardcoded, theme-blind, AA-failing #059669 (3.77:1 on white) in
+     .save-banner.ok. */
+  --success-color: #047857;
   --row-height: 32px;
   --section-gap: 24px;
   /* Density-keyed visible-spacing tokens applied across screens.
@@ -1368,6 +1380,8 @@ menu button[disabled] {
   --text-color: #e5e7eb;
   --muted-color: #9ca3af;
   --border-color: #334155;
+  /* G15 a11y: dark success #10b981 = 7.04:1 on #0f172a (WCAG AA pass). */
+  --success-color: #10b981;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
@@ -1376,6 +1390,8 @@ menu button[disabled] {
     --text-color: #e5e7eb;
     --muted-color: #9ca3af;
     --border-color: #334155;
+    /* G15 a11y: keep success readable in system-dark too (7.04:1). */
+    --success-color: #10b981;
     /* Codex PR #20 r10 P2: also override the legacy variables that the
      * rest of the app reads (Servers, Migration, Add server, Secrets,
      * Dashboard, Logs use --bg/--text/--border at the top of this file).
@@ -1684,7 +1700,11 @@ section[data-section] button.btn-danger:not(:disabled):hover {
   margin-top: var(--gap-sm);
 }
 .save-banner.ok {
-  color: #059669;
+  /* G15 a11y: was a hardcoded #059669 that bypassed the token system and
+     failed WCAG AA (3.77:1 on the light --bg-color). Now a theme-aware
+     token that passes AA in light (#047857 = 5.48:1) and dark/system-dark
+     (#10b981 = 7.04:1). */
+  color: var(--success-color);
 }
 .save-banner.partial {
   color: var(--warning-color);

@@ -1004,3 +1004,80 @@ describe("ServersScreen — whole-row toggle", () => {
     await vi.waitFor(() => expect(interactiveRowInputs().every((i) => !i.checked)).toBe(true));
   });
 });
+
+// G15 a11y: the matrix tables must carry table semantics so a screen-reader
+// user can associate each toggle cell with its server (row) and client
+// (column). These assertions are additive — they do not change any existing
+// testid, text, or role count, only verify the new scope= + <caption>.
+describe("ServersScreen — matrix table a11y semantics (G15)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders a <caption> and scope= on the servers matrix headers", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanWith({ vscode: "ok" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    const { container } = render(<ServersScreen />);
+    await waitFor(() => {
+      expect(container.querySelector("table.servers-matrix")).toBeTruthy();
+    });
+
+    const table = container.querySelector("table.servers-matrix") as HTMLTableElement;
+    // <caption> present and non-empty (describes the matrix for AT).
+    const caption = table.querySelector("caption");
+    expect(caption).toBeTruthy();
+    expect((caption!.textContent ?? "").trim().length).toBeGreaterThan(0);
+
+    // Every column header (<thead th>) carries scope="col".
+    const colHeaders = table.querySelectorAll("thead th");
+    expect(colHeaders.length).toBeGreaterThan(0);
+    colHeaders.forEach((th) => {
+      expect(th.getAttribute("scope")).toBe("col");
+    });
+
+    // The per-server row header cell is a <th scope="row"> (associates every
+    // client toggle in the row with the server name).
+    const rowHeaders = table.querySelectorAll("tbody th[scope='row']");
+    expect(rowHeaders.length).toBeGreaterThan(0);
+  });
+
+  it("renders a <caption> and scope= on the LSP matrix headers", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanWith({ vscode: "ok" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    const { container } = render(<ServersScreen />);
+    await waitFor(() => {
+      expect(container.querySelector("table.lsp-matrix")).toBeTruthy();
+    });
+
+    const lsp = container.querySelector("table.lsp-matrix") as HTMLTableElement;
+    const caption = lsp.querySelector("caption");
+    expect(caption).toBeTruthy();
+    expect((caption!.textContent ?? "").trim().length).toBeGreaterThan(0);
+
+    const colHeaders = lsp.querySelectorAll("thead th");
+    expect(colHeaders.length).toBeGreaterThan(0);
+    colHeaders.forEach((th) => {
+      expect(th.getAttribute("scope")).toBe("col");
+    });
+
+    // The LSP matrix always renders 9 placeholder language rows, each a
+    // <th scope="row">, even on a clean home.
+    const rowHeaders = lsp.querySelectorAll("tbody th[scope='row']");
+    expect(rowHeaders.length).toBeGreaterThan(0);
+  });
+});

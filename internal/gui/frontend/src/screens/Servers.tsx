@@ -888,9 +888,17 @@ export function ServersScreen() {
         />
       </div>
       <table class="servers-matrix">
+        {/* G15 a11y: a visually-hidden <caption> names the matrix for screen
+            readers, and every header carries scope= so AT can associate each
+            toggle cell with its server (row) + client (column). */}
+        <caption class="visually-hidden">
+          MCP servers by client install matrix: each row is an MCP server,
+          each column a client, and each cell toggles routing that server
+          through the hub for that client.
+        </caption>
         <thead>
           <tr>
-            <th>Server</th>
+            <th scope="col">Server</th>
             {clientColumns.map((c) => {
               const presence = clientConfigPresence[c];
               const canInit = presence === "missing-init-possible";
@@ -906,7 +914,7 @@ export function ServersScreen() {
               // button remains a separate sibling control.
               const colToggleable = columnInteractiveServers(c).length > 0;
               return (
-                <th key={c}>
+                <th key={c} scope="col">
                   <div class="matrix-col-header">
                     <span
                       class={
@@ -954,8 +962,8 @@ export function ServersScreen() {
                 </th>
               );
             })}
-            <th>Port</th>
-            <th>State</th>
+            <th scope="col">Port</th>
+            <th scope="col">State</th>
           </tr>
         </thead>
         <tbody>
@@ -1100,8 +1108,13 @@ function ServerRowView(props: {
           ⇄ glyph): hovering anywhere in the server's own cell previews the
           horizontal bulk-toggle scope — highlights every toggleable client
           cell in this row. Gated on rowToggleable so a non-interactive row
-          lights nothing. */}
-      <td
+          lights nothing.
+          G15 a11y: this is the row-header cell, so it is a <th scope="row">
+          (associates every client toggle in the row with its server name for
+          screen readers). CSS normalizes the tbody th back to body-cell
+          weight/background so the visual is unchanged. */}
+      <th
+        scope="row"
         onMouseEnter={rowToggleable ? () => onRowToggleHover(true) : undefined}
         onMouseLeave={rowToggleable ? () => onRowToggleHover(false) : undefined}
       >
@@ -1143,7 +1156,7 @@ function ServerRowView(props: {
         >
           Details
         </button>
-      </td>
+      </th>
       {clients.map((client) => (
         <CellView
           key={`${client}-${props.applyGen}`}
@@ -1395,13 +1408,20 @@ function LspMatrix(props: {
         </div>
       )}
       <table class="servers-matrix lsp-matrix" data-testid="lsp-matrix">
+        {/* G15 a11y: caption + scope= mirror the main servers matrix so the
+            LSP daemons table is equally navigable by screen readers. */}
+        <caption class="visually-hidden">
+          Language servers by client install matrix: each row is a language,
+          each column a client, showing how that language server routes for
+          the client.
+        </caption>
         <thead>
           <tr>
-            <th>Language</th>
+            <th scope="col">Language</th>
             {clients.map((c) => (
-              <th key={c}>{c}</th>
+              <th key={c} scope="col">{c}</th>
             ))}
-            <th>Env</th>
+            <th scope="col">Env</th>
           </tr>
         </thead>
         <tbody>
@@ -1418,7 +1438,8 @@ function LspMatrix(props: {
                 data-workspace={row.workspaceKey || undefined}
                 data-ambiguous={ambiguous ? "true" : undefined}
               >
-                <td>
+                {/* G15 a11y: row-header cell for the LSP matrix. */}
+                <th scope="row">
                   <strong>{row.language}</strong>
                   {row.workspaceKey && (
                     <span class="lsp-row-workspace">
@@ -1433,7 +1454,7 @@ function LspMatrix(props: {
                       (multi: {row.ambiguousOwners!.join(", ")})
                     </span>
                   )}
-                </td>
+                </th>
                 {clients.map((client) => (
                   <LspCellView
                     key={client}
