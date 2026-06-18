@@ -10,16 +10,15 @@
 // contract.
 //
 // Windows has no mkdirat equivalent in x/sys, so directories are created
-// by absolute path with CreateDirectoryW (which fails with
-// ERROR_ALREADY_EXISTS if the name exists — it NEVER follows or replaces
-// a reparse point, so a fresh CreateDirectoryW cannot be redirected
-// through a symlink). After each create-or-exists, the component is
-// re-opened with openDirHandleNoReparse (FILE_FLAG_OPEN_REPARSE_POINT,
-// so the open does not auto-follow a reparse point) and verified to be a
-// REAL directory (no FILE_ATTRIBUTE_REPARSE_POINT). A reparse point /
-// junction / non-directory in the chain is REFUSED — the walk never
-// follows it. The restrictive allowlist DACL is installed at create time
-// via SecurityAttributes so each new directory is BORN owner-only.
+// with NtCreateFile relative to the currently-held verified parent
+// handle. Each ObjectName is a single path component; the walk never
+// re-resolves an absolute descendant after a prefix has been verified.
+// Existing components are opened relative to that same parent handle with
+// FILE_OPEN_REPARSE_POINT and verified to be real directories. A reparse
+// point / junction / non-directory in the chain is REFUSED — the walk
+// never follows it. The restrictive allowlist DACL is installed at create
+// time via OBJECT_ATTRIBUTES.SecurityDescriptor so each new directory is
+// BORN owner-only.
 
 package api
 
@@ -27,10 +26,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"unsafe"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
+
+var secureCreateClientConfigParentDirAfterVerifyHook func(verifiedPath string) error
 
 func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate bool) error {
 	parent := filepath.Dir(configPath)
@@ -70,64 +71,112 @@ func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate boo
 			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, home, verr)
 		}
 	}
-	windows.CloseHandle(anchorHandle)
+	curHandle := anchorHandle
+	curPath := home
+	defer func() {
+		if curHandle != windows.InvalidHandle {
+			_ = windows.CloseHandle(curHandle)
+		}
+	}()
 
-	// Build the restrictive SD once; reused as the SecurityAttributes
-	// for every CreateDirectoryW so each new dir is born owner-only.
+	// Build the restrictive SD once; reused as the create-time security
+	// descriptor for every NtCreateFile directory create so each new dir
+	// is born owner-only.
 	sd, err := buildRestrictiveSecurityDescriptor()
 	if err != nil {
 		return fmt.Errorf("secure mkparent: build SD: %w", err)
 	}
-	sa := &windows.SecurityAttributes{
-		SecurityDescriptor: sd,
-		InheritHandle:      0,
-	}
-	sa.Length = uint32(unsafe.Sizeof(*sa))
 
-	// Descend the chain by absolute path, creating each missing
-	// component and verifying every component is a real directory.
-	cur := home
+	// Descend the chain handle-relative. curHandle stays live until the
+	// next component has been opened and verified, closing the fresh
+	// absolute path-walk window between verified prefix N and child N+1.
 	for _, comp := range rel {
-		cur = filepath.Join(cur, comp)
-		if err := mkdirOrVerifyRealDirWindows(cur, sa); err != nil {
+		nextPath := filepath.Join(curPath, comp)
+		nextHandle, err := mkdirOrVerifyRealDirWindows(curHandle, comp, nextPath, sd, !skipParentGate)
+		if err != nil {
 			return err
 		}
+		if secureCreateClientConfigParentDirAfterVerifyHook != nil {
+			if err := secureCreateClientConfigParentDirAfterVerifyHook(nextPath); err != nil {
+				_ = windows.CloseHandle(nextHandle)
+				return fmt.Errorf("secure mkparent: post-verify hook %s: %w", nextPath, err)
+			}
+		}
+
+		oldHandle := curHandle
+		curHandle = windows.InvalidHandle
+		closeErr := windows.CloseHandle(oldHandle)
+		if closeErr != nil {
+			_ = windows.CloseHandle(nextHandle)
+			return fmt.Errorf("secure mkparent: close verified parent %s: %w", curPath, closeErr)
+		}
+		curHandle = nextHandle
+		curPath = nextPath
 	}
 	return nil
 }
 
-// mkdirOrVerifyRealDirWindows ensures `full` exists as a real directory
-// (not a reparse point). It creates it fresh via CreateDirectoryW with
-// the restrictive `sa` (born owner-only) when absent, accepts an
-// existing real directory, and REFUSES a reparse point / non-directory.
-//
-// CreateDirectoryW never follows or replaces a reparse point: on an
-// existing entry it returns ERROR_ALREADY_EXISTS without touching it, so
-// it cannot be redirected through a planted symlink. The post-create
-// reparse-refusal open is what catches a pre-existing or race-planted
-// reparse point at the slot.
-func mkdirOrVerifyRealDirWindows(full string, sa *windows.SecurityAttributes) error {
-	pathW, err := windows.UTF16PtrFromString(full)
+// mkdirOrVerifyRealDirWindows ensures `name` exists below `parentHandle`
+// as a real directory (not a reparse point). It creates the component
+// fresh via NtCreateFile(FILE_CREATE|FILE_DIRECTORY_FILE) with the
+// restrictive create-time security descriptor when absent, or opens an
+// existing component relative to the same parent handle with
+// FILE_OPEN_REPARSE_POINT before verifying it.
+func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string, sd *windows.SECURITY_DESCRIPTOR, verifyDACL bool) (windows.Handle, error) {
+	if !singleWindowsPathComponent(name) {
+		return windows.InvalidHandle, fmt.Errorf("secure mkparent: invalid path component %q", name)
+	}
+
+	h, err := ntCreateRelative(
+		parentHandle,
+		name,
+		windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.SYNCHRONIZE,
+		windows.FILE_CREATE,
+		windows.FILE_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT,
+		sd,
+	)
 	if err != nil {
-		return fmt.Errorf("secure mkparent: utf16 %q: %w", full, err)
+		if !isAlreadyExistsErr(err) {
+			return windows.InvalidHandle, fmt.Errorf("secure mkparent: ntcreate dir %s: %w", full, err)
+		}
+		h, err = ntOpenDirRelative(parentHandle, name, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL)
+		if err != nil {
+			return windows.InvalidHandle, fmt.Errorf("secure mkparent: relative open %s: %w", full, err)
+		}
 	}
-	createErr := windows.CreateDirectory(pathW, sa)
-	if createErr != nil && createErr != windows.ERROR_ALREADY_EXISTS {
-		return fmt.Errorf("secure mkparent: CreateDirectory %s: %w", full, createErr)
-	}
-	// Open WITHOUT following a reparse point and verify it is a real
-	// directory. This catches a pre-existing symlink/junction at the
-	// slot (createErr == ERROR_ALREADY_EXISTS) and a hostile reparse
-	// point race-planted in the create/open window.
-	h, err := openDirHandleNoReparse(full)
-	if err != nil {
-		return fmt.Errorf("secure mkparent: re-open %s: %w", full, err)
-	}
-	defer windows.CloseHandle(h)
+
+	closeOnErr := true
+	defer func() {
+		if closeOnErr {
+			_ = windows.CloseHandle(h)
+		}
+	}()
+
 	if rerr := refuseReparsePointHandle(h); rerr != nil {
-		return fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, rerr)
+		return windows.InvalidHandle, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, rerr)
 	}
-	return nil
+	if verifyDACL {
+		if verr := verifyWindowsDACLFromHandle(h); verr != nil {
+			return windows.InvalidHandle, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
+		}
+	}
+	closeOnErr = false
+	return h, nil
+}
+
+func ntOpenDirRelative(parentHandle windows.Handle, name string, desiredAccess uint32) (windows.Handle, error) {
+	return ntCreateRelative(
+		parentHandle,
+		name,
+		desiredAccess|windows.SYNCHRONIZE,
+		windows.FILE_OPEN,
+		windows.FILE_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT,
+		nil,
+	)
+}
+
+func singleWindowsPathComponent(name string) bool {
+	return name != "" && name != "." && name != ".." && !filepath.IsAbs(name) && !strings.ContainsAny(name, `\/`)
 }
 
 // refuseReparsePointHandle returns a non-nil error when the open handle

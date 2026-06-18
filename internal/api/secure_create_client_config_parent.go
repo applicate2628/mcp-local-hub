@@ -42,16 +42,18 @@
 //     LocalSystem, BuiltinAdministrators} installed at create time).
 //   - STRICT-MODE: when skipParentGate is false (strict gate enforced),
 //     the home anchor's DACL/mode is verified before any creation, and
-//     a broadened anchor returns ErrSecureWriteParentInsecure. The
+//     a broadened anchor returns ErrSecureWriteParentInsecure. On
+//     Windows, every existing prefix opened during descent is also
+//     DACL-verified before its handle can become the RootDirectory for
+//     the next component create/open. The
 //     cross-package wrapper (secureCreateClientConfigParentDirWithOperatorOpt
 //     in client_write_init.go) relaxes this on solo-dev hosts exactly
 //     like the file create, and refuses in strict mode.
 //
 // The function is IDEMPOTENT: if the target parent already exists as a
-// real directory, it returns nil without creating anything (and without
-// re-verifying every existing ancestor — the existing chain is the
-// operator's, the same trust model as the file create's parent-dir gate
-// which only checks the immediate parent).
+// real directory, it returns nil without creating anything. POSIX keeps
+// the existing home-anchor trust model; Windows strict mode verifies
+// each existing prefix handle used for the handle-relative descent.
 package api
 
 // SecureCreateClientConfigParentDir securely creates the immediate
