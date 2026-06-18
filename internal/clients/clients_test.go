@@ -353,6 +353,36 @@ func TestSupportedClientNamesIncludesNewClients(t *testing.T) {
 	}
 }
 
+// TestConfigPathForName_MatchesAdapterConfigPath is the reconcile guard for
+// the single-owner refactor: the config-file path is no longer encoded twice
+// per client (once in a descriptor closure, once in the adapter's ConfigPath()).
+// ConfigPathForName now resolves through the constructed adapter, so this test
+// pins that the resolver and the adapter agree for EVERY client.
+//
+// The former TestDefaultScanConfigPaths_CoversEverySupportedClient could not
+// catch a descriptor-vs-adapter divergence because both sides derived from the
+// same descriptor field. This test compares the resolver against the adapter's
+// OWN ConfigPath(), so a future re-introduction of a parallel path literal that
+// drifts from the adapter fails here.
+func TestConfigPathForName_MatchesAdapterConfigPath(t *testing.T) {
+	all := AllClients()
+	if len(all) == 0 {
+		t.Fatal("AllClients() returned no adapters (UserHomeDir likely failed on this host)")
+	}
+	for name, adapter := range all {
+		resolved, err := ConfigPathForName(name)
+		if err != nil {
+			t.Errorf("ConfigPathForName(%q) errored although the adapter constructed: %v", name, err)
+			continue
+		}
+		if got := adapter.ConfigPath(); got != resolved {
+			t.Errorf("path drift for %q: adapter.ConfigPath() = %q, ConfigPathForName() = %q "+
+				"(the adapter must be the single owner; resolver must read the same write surface)",
+				name, got, resolved)
+		}
+	}
+}
+
 func TestLatestBackup_IgnoresDirectoriesWithBackupPrefix(t *testing.T) {
 	// Defensive: if something odd (a checkout side-channel, an archiver)
 	// leaves a DIRECTORY whose name starts with the backup prefix,

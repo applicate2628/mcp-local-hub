@@ -7,12 +7,19 @@ import (
 )
 
 // NewVSCode returns a Client bound to VS Code's default user-profile mcp.json.
+//
+// The factory resolves home and calls defaultVSCodeConfigPath directly (rather
+// than via ConfigPathForName) to stay out of the registry-resolver init cycle:
+// ConfigPathForName builds the adapter through this factory, so a factory that
+// re-entered ConfigPathForName("vscode") would recurse. defaultVSCodeConfigPath
+// is the single owner of the path derivation, shared by the factory and (via
+// the constructed adapter's ConfigPath()) the resolver.
 func NewVSCode() (Client, error) {
-	path, err := ConfigPathForName("vscode")
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	return newLockingClient(&vscodeClient{path: path}), nil
+	return newLockingClient(&vscodeClient{path: defaultVSCodeConfigPath(home)}), nil
 }
 
 type vscodeClient struct {

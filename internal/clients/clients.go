@@ -637,11 +637,11 @@ type clientDescriptor struct {
 	// user does not request a narrower/wider target. Heavy/experimental
 	// clients leave this false so a fresh install stays minimal.
 	defaultInstall bool
-	// configPath returns the default config-file path for this client given
-	// the user's home dir. Mirrors the adapter's own ConfigPath() derivation.
-	configPath func(home string) string
 	// factory constructs the adapter. May return an error (e.g. UserHomeDir
-	// failure); AllClients() silently skips a factory that errors.
+	// failure); AllClients() silently skips a factory that errors. The
+	// constructed adapter's ConfigPath() is the SINGLE owner of this client's
+	// config-file path — ConfigPathForName resolves through it, so there is no
+	// parallel path literal in the descriptor to drift against the adapter.
 	factory func() (Client, error)
 }
 
@@ -661,127 +661,56 @@ type clientDescriptor struct {
 // call time, so no cycle exists.
 func clientRegistry() []clientDescriptor {
 	return []clientDescriptor{
-		{name: "claude-code", defaultInstall: true, factory: NewClaudeCode,
-			configPath: func(home string) string { return filepath.Join(home, ".claude.json") }},
-		{name: "codex-cli", defaultInstall: true, factory: NewCodexCLI,
-			configPath: func(home string) string { return filepath.Join(home, ".codex", "config.toml") }},
-		{name: "cursor", defaultInstall: true, factory: NewCursor,
-			configPath: func(home string) string { return filepath.Join(home, ".cursor", "mcp.json") }},
-		{name: "vscode", factory: NewVSCode,
-			configPath: defaultVSCodeConfigPath},
-		{name: "gemini-cli", factory: NewGeminiCLI,
-			configPath: func(home string) string { return filepath.Join(home, ".gemini", "settings.json") }},
-		{name: "qwen-cli", factory: NewQwenCLI,
-			configPath: func(home string) string { return filepath.Join(home, ".qwen", "settings.json") }},
-		{name: "antigravity", factory: NewAntigravity,
-			configPath: func(home string) string { return filepath.Join(home, ".gemini", "antigravity", "mcp_config.json") }},
+		{name: "claude-code", defaultInstall: true, factory: NewClaudeCode},
+		{name: "codex-cli", defaultInstall: true, factory: NewCodexCLI},
+		{name: "cursor", defaultInstall: true, factory: NewCursor},
+		{name: "vscode", factory: NewVSCode},
+		{name: "gemini-cli", factory: NewGeminiCLI},
+		{name: "qwen-cli", factory: NewQwenCLI},
+		{name: "antigravity", factory: NewAntigravity},
 		// Wave 2: 8 additional opt-in clients.
-		{name: "zed", factory: NewZed,
-			// Mirrors defaultZedConfigPath (zed.go): %APPDATA%\Zed\settings.json
-			// on Windows, $XDG_CONFIG_HOME/zed or ~/.config/zed elsewhere.
-			configPath: defaultZedConfigPath},
-		{name: "kiro", factory: NewKiro,
-			// Mirrors NewKiro (kiro.go): ~/.kiro/settings/mcp.json.
-			configPath: func(home string) string { return filepath.Join(home, ".kiro", "settings", "mcp.json") }},
-		{name: "windsurf", factory: NewWindsurf,
-			// Mirrors NewWindsurf (windsurf.go): ~/.codeium/windsurf/mcp_config.json.
-			configPath: func(home string) string { return filepath.Join(home, ".codeium", "windsurf", "mcp_config.json") }},
-		{name: "cline", factory: NewCline,
-			// Mirrors defaultClineConfigPath (cline.go): VS Code globalStorage
-			// under saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
-			configPath: defaultClineConfigPath},
-		{name: "kilocode", factory: NewKiloCode,
-			// Mirrors defaultKiloCodeConfigPath (kilocode.go): VS Code
-			// globalStorage under kilo-code.kilo-code/settings/mcp_settings.json.
-			configPath: defaultKiloCodeConfigPath},
-		{name: "opencode", factory: NewOpenCode,
-			// Mirrors defaultOpenCodeConfigPath (opencode.go):
-			// ~/.config/opencode/opencode.json on every OS ($XDG_CONFIG_HOME-aware).
-			configPath: defaultOpenCodeConfigPath},
-		{name: "hermes", factory: NewHermes,
-			// Mirrors NewHermes (hermes.go): ~/.hermes/config.yaml.
-			configPath: func(home string) string { return filepath.Join(home, ".hermes", "config.yaml") }},
-		{name: "openclaw", factory: NewOpenClaw,
-			// Mirrors defaultOpenClawConfigPath (openclaw.go): ~/.openclaw/openclaw.json.
-			configPath: defaultOpenClawConfigPath},
+		{name: "zed", factory: NewZed},
+		{name: "kiro", factory: NewKiro},
+		{name: "windsurf", factory: NewWindsurf},
+		{name: "cline", factory: NewCline},
+		{name: "kilocode", factory: NewKiloCode},
+		{name: "opencode", factory: NewOpenCode},
+		{name: "hermes", factory: NewHermes},
+		{name: "openclaw", factory: NewOpenClaw},
 		// agent-skills vendor reconciliation (2026-06-17): 4 more opt-in clients
 		// matching the vendor set TheQtCompanyRnD/agent-skills installs into
 		// (GitHub Copilot CLI, Amazon Q) plus the other major file-config agents
 		// (OpenHands, Aider). All opt-in (no defaultInstall).
-		{name: "copilot-cli", factory: NewCopilotCLI,
-			// Mirrors defaultCopilotCLIConfigPath (copilot_cli.go): COPILOT_HOME,
-			// when set, replaces the ~/.copilot directory entirely.
-			configPath: func(home string) string {
-				if h := os.Getenv("COPILOT_HOME"); h != "" {
-					return filepath.Join(h, "mcp-config.json")
-				}
-				return filepath.Join(home, ".copilot", "mcp-config.json")
-			}},
-		{name: "amazon-q", factory: NewAmazonQ,
-			// Mirrors NewAmazonQ (amazon_q.go): ~/.aws/amazonq/mcp.json (global).
-			configPath: func(home string) string { return filepath.Join(home, ".aws", "amazonq", "mcp.json") }},
-		{name: "openhands", factory: NewOpenHands,
-			// Mirrors NewOpenHands (openhands.go): ~/.openhands/config.toml.
-			configPath: func(home string) string { return filepath.Join(home, ".openhands", "config.toml") }},
-		{name: "aider", factory: NewAider,
-			// Mirrors NewAider (aider.go): ~/.aider.conf.yml (relay-stdio client).
-			configPath: func(home string) string { return filepath.Join(home, ".aider.conf.yml") }},
+		{name: "copilot-cli", factory: NewCopilotCLI},
+		{name: "amazon-q", factory: NewAmazonQ},
+		{name: "openhands", factory: NewOpenHands},
+		{name: "aider", factory: NewAider},
 		// skills-CLI vendor reconciliation TIER-1 (2026-06-17): 19 more opt-in
-		// clients with a verified file-based mcpServers config. Each mirrors its
-		// adapter's ConfigPath derivation (default*ConfigPath helper or inline).
-		{name: "bob", factory: NewBob, configPath: defaultBobConfigPath},
-		{name: "codebuddy", factory: NewCodeBuddy, configPath: defaultCodeBuddyConfigPath},
-		{name: "command-code", factory: NewCommandCode, configPath: defaultCommandCodeConfigPath},
-		{name: "cortex", factory: NewCortex, configPath: defaultCortexConfigPath},
-		{name: "deepagents", factory: NewDeepAgents, configPath: defaultDeepAgentsConfigPath},
-		{name: "devin", factory: NewDevin, configPath: defaultDevinConfigPath},
-		{name: "droid", factory: NewDroid,
-			configPath: func(home string) string { return filepath.Join(home, ".factory", "mcp.json") }},
-		{name: "firebender", factory: NewFirebender,
-			configPath: func(home string) string { return filepath.Join(home, ".firebender", "firebender.json") }},
-		{name: "iflow-cli", factory: NewIFlowCLI,
-			configPath: func(home string) string { return filepath.Join(home, ".iflow", "settings.json") }},
-		{name: "junie", factory: NewJunie,
-			configPath: func(home string) string { return filepath.Join(home, ".junie", "mcp", "mcp.json") }},
-		{name: "kimi-code-cli", factory: NewKimiCodeCLI,
-			// Mirrors defaultKimiCodeCLIConfigPath: KIMI_CODE_HOME overrides ~/.kimi-code.
-			configPath: func(home string) string {
-				if h := os.Getenv("KIMI_CODE_HOME"); h != "" {
-					return filepath.Join(h, "mcp.json")
-				}
-				return filepath.Join(home, ".kimi-code", "mcp.json")
-			}},
-		{name: "kode", factory: NewKode,
-			configPath: func(home string) string { return filepath.Join(home, ".kode.json") }},
-		{name: "ona", factory: NewOna,
-			configPath: func(home string) string { return filepath.Join(home, ".ona", "mcp-config.json") }},
-		{name: "pi", factory: NewPi,
-			// pi is relay-stdio (.pi/agent/mcp.json takes a command, not a url).
-			configPath: func(home string) string { return filepath.Join(home, ".pi", "agent", "mcp.json") }},
-		{name: "qoder", factory: NewQoder,
-			configPath: func(home string) string { return filepath.Join(home, ".qoder", "mcp-settings.json") }},
-		{name: "qoder-cn", factory: NewQoderCN,
-			configPath: func(home string) string { return filepath.Join(home, ".qoder-cn.json") }},
-		{name: "roo", factory: NewRoo,
-			// Mirrors defaultRooConfigPath (roo.go): VS Code globalStorage
-			// rooveterinaryinc.roo-cline/settings/cline_mcp_settings.json (per-OS).
-			configPath: defaultRooConfigPath},
-		{name: "rovodev", factory: NewRovoDev,
-			configPath: func(home string) string { return filepath.Join(home, ".rovodev", "mcp.json") }},
-		{name: "tabnine-cli", factory: NewTabnineCLI,
-			configPath: func(home string) string { return filepath.Join(home, ".tabnine", "mcp_servers.json") }},
+		// clients with a verified file-based mcpServers config.
+		{name: "bob", factory: NewBob},
+		{name: "codebuddy", factory: NewCodeBuddy},
+		{name: "command-code", factory: NewCommandCode},
+		{name: "cortex", factory: NewCortex},
+		{name: "deepagents", factory: NewDeepAgents},
+		{name: "devin", factory: NewDevin},
+		{name: "droid", factory: NewDroid},
+		{name: "firebender", factory: NewFirebender},
+		{name: "iflow-cli", factory: NewIFlowCLI},
+		{name: "junie", factory: NewJunie},
+		{name: "kimi-code-cli", factory: NewKimiCodeCLI},
+		{name: "kode", factory: NewKode},
+		{name: "ona", factory: NewOna},
+		{name: "pi", factory: NewPi},
+		{name: "qoder", factory: NewQoder},
+		{name: "qoder-cn", factory: NewQoderCN},
+		{name: "roo", factory: NewRoo},
+		{name: "rovodev", factory: NewRovoDev},
+		{name: "tabnine-cli", factory: NewTabnineCLI},
 		// skills-CLI vendor reconciliation TIER-2 (2026-06-17): vendors with a
 		// verified writable global config (object-map mcpServers, type:http).
-		{name: "warp", factory: NewWarp,
-			// Mirrors warp.go: ~/.warp/.mcp.json (note the leading dot on .mcp.json).
-			configPath: func(home string) string { return filepath.Join(home, ".warp", ".mcp.json") }},
-		{name: "continue", factory: NewContinue,
-			// Mirrors continue.go: ~/.continue/config.yaml (yaml, mcpServers key).
-			configPath: func(home string) string { return filepath.Join(home, ".continue", "config.yaml") }},
-		{name: "goose", factory: NewGoose,
-			// Mirrors defaultGooseConfigPath (goose.go): ~/.config/goose/config.yaml
-			// (XDG_CONFIG_HOME-aware), yaml under an `extensions` key.
-			configPath: defaultGooseConfigPath},
+		{name: "warp", factory: NewWarp},
+		{name: "continue", factory: NewContinue},
+		{name: "goose", factory: NewGoose},
 		// skills-CLI vendor reconciliation TIER-2 bespoke (2026-06-17): vendors
 		// whose writable config lives under a NON-standard top-level key. All
 		// five embed the jsonMCPClient parameterized with serversKey, so a new
@@ -789,25 +718,11 @@ func clientRegistry() []clientDescriptor {
 		// `mcpServers`; crush + pochi use `mcp`; amp + zencoder use VS Code
 		// settings.json flat dotted keys (`amp.mcpServers` / `zencoder.mcpServers`).
 		// pochi + zencoder are relay-stdio (stdio-only documented hand-edit form).
-		{name: "neovate", factory: NewNeovate,
-			// Mirrors NewNeovate (neovate.go): ~/.neovate/config.json.
-			configPath: func(home string) string { return filepath.Join(home, ".neovate", "config.json") }},
-		{name: "crush", factory: NewCrush,
-			// Mirrors defaultCrushConfigPath (crush.go): ~/.config/crush/crush.json
-			// (XDG_CONFIG_HOME-aware), object map under top-level `mcp`.
-			configPath: defaultCrushConfigPath},
-		{name: "pochi", factory: NewPochi,
-			// Mirrors NewPochi (pochi.go): ~/config.json, object map under `mcp`
-			// (relay-stdio).
-			configPath: func(home string) string { return filepath.Join(home, "config.json") }},
-		{name: "amp", factory: NewAmp,
-			// Mirrors NewAmp (amp.go): VS Code User settings.json, flat dotted key
-			// `amp.mcpServers`.
-			configPath: defaultVSCodeUserSettingsPath},
-		{name: "zencoder", factory: NewZencoder,
-			// Mirrors NewZencoder (zencoder.go): VS Code User settings.json, flat
-			// dotted key `zencoder.mcpServers` (relay-stdio).
-			configPath: defaultVSCodeUserSettingsPath},
+		{name: "neovate", factory: NewNeovate},
+		{name: "crush", factory: NewCrush},
+		{name: "pochi", factory: NewPochi},
+		{name: "amp", factory: NewAmp},
+		{name: "zencoder", factory: NewZencoder},
 	}
 }
 
@@ -839,14 +754,30 @@ func DefaultInstallClientNames() []string {
 }
 
 // ConfigPathForName returns the default config path for a supported client.
+//
+// The path is resolved through the constructed adapter's ConfigPath(), so the
+// adapter is the SINGLE owner of its config-path derivation and a scan/probe
+// site (which reads via this resolver) can never read a different file than the
+// install write surface (the adapter) writes. This mirrors how IsRelayStdio
+// delegates name → adapter → method, and replaces the former descriptor-level
+// configPath closure that duplicated each adapter's literal (e.g. copilot-cli's
+// COPILOT_HOME logic was re-implemented inline; that drift class is now closed).
+//
+// Init-cycle note: the resolver builds the adapter via its factory. The three
+// factories that historically derived their path through ConfigPathForName
+// (NewCursor, NewQwenCLI, NewVSCode) now call their own shared path helper
+// (defaultCursorConfigPath / defaultQwenCLIConfigPath / defaultVSCodeConfigPath)
+// directly, so building them here does NOT re-enter ConfigPathForName. The
+// reconcile guard TestConfigPathForName_MatchesAdapterConfigPath pins the
+// adapter==resolver invariant for every client.
 func ConfigPathForName(name string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
 	for _, d := range clientRegistry() {
 		if d.name == name {
-			return d.configPath(home), nil
+			c, err := d.factory()
+			if err != nil {
+				return "", err
+			}
+			return c.ConfigPath(), nil
 		}
 	}
 	return "", fmt.Errorf("unknown client %q (expected %s)", name, strings.Join(SupportedClientNames(), " | "))

@@ -7,7 +7,7 @@ import (
 
 // NewQwenCLI returns a Client bound to ~/.qwen/settings.json.
 func NewQwenCLI() (Client, error) {
-	path, err := ConfigPathForName("qwen-cli")
+	path, err := defaultQwenCLIConfigPath()
 	if err != nil {
 		return nil, err
 	}
@@ -17,6 +17,18 @@ func NewQwenCLI() (Client, error) {
 		urlField:   "httpUrl",
 	}
 	return newLockingClient(&qwenCLI{jsonMCPClient: base}), nil
+}
+
+// defaultQwenCLIConfigPath returns ~/.qwen/settings.json. Single owner of
+// qwen-cli's config-path derivation; see defaultCursorConfigPath for why the
+// factory resolves home here directly instead of via ConfigPathForName (init
+// cycle: the resolver builds the adapter via this factory).
+func defaultQwenCLIConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".qwen", "settings.json"), nil
 }
 
 type qwenCLI struct {
