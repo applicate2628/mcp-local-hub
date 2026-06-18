@@ -400,10 +400,13 @@ export function App() {
 
   // Wrap the per-screen body in an error boundary so a render-time throw in
   // ONE screen renders a recovery UI inside <main> while the sidebar/topbar
-  // shell stays alive. Keyed on the screen name so navigating away resets the
-  // boundary (a crashed screen doesn't stay stuck after the user moves on).
+  // shell stays alive. Keyed on the FULL route identity (screen + query) so
+  // navigating away resets the boundary — keying on route.screen alone left a
+  // crash stuck across same-screen query changes (e.g. #/edit-server?name=a ->
+  // ?name=b, #/settings?section=x -> ?section=y), since Preact kept the same
+  // boundary instance + its hasError state (codex review of Phase 2a).
   const guardedBody = (
-    <ErrorBoundary key={route.screen} screenName={activeScreenLabel}>
+    <ErrorBoundary key={`${route.screen}?${route.query ?? ""}`} screenName={activeScreenLabel}>
       {body}
     </ErrorBoundary>
   );

@@ -179,14 +179,19 @@ func (r *Registry) Save() error {
 	if err != nil {
 		return fmt.Errorf("marshal registry: %w", err)
 	}
-	// Route the live-file write through the single hardened state-file
-	// owner (G9 P3): per-file flock + handle-bound DACL + parent-dir
-	// relax-gate + audit event, instead of the prior hand-rolled
-	// os.WriteFile(0600)+os.Rename. workspaces.yaml is operator-meaningful
-	// YAML, so WriteStateFileBytesAtomic (bytes form) is the correct entry
-	// point (it skips JSON marshaling). The .bak backup above stays as a
-	// plain rolling copy — it is not the canonical state file.
-	if err := WriteStateFileBytesAtomic(r.path, out); err != nil {
+	// Route the live-file write through the single hardened state-file owner
+	// (G9 P3): handle-bound DACL + parent-dir relax-gate + audit event, instead
+	// of the prior hand-rolled os.WriteFile(0600)+os.Rename. Use the LOCK-HELD
+	// variant: Save() takes NO internal flock (its original contract), because
+	// the registry's own Lock() (below) flocks the SAME leaf, r.path+".lock",
+	// that WriteStateFileBytesAtomic would acquire — and many callers
+	// (PutLifecycle*, membership updates, register/unregister, migrate rollback)
+	// already hold r.Lock() before calling Save(). gofrs/flock is non-reentrant,
+	// so acquiring it again here self-deadlocks (codex review of the Phase 2a
+	// integration; TestRegistry_LockPreventsSimultaneousWriters). Exclusivity
+	// stays the caller's job via r.Lock(), exactly as before this hardening.
+	// The .bak backup above stays a plain rolling copy — not the canonical file.
+	if err := WriteStateFileBytesLockHeld(r.path, out); err != nil {
 		return fmt.Errorf("write registry: %w", err)
 	}
 	return nil
