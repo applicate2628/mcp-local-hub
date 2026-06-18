@@ -88,6 +88,57 @@ func TestGroupsRound2_EmptyGroupReturnsEmptyToolsNotMinus32000(t *testing.T) {
 	}
 }
 
+// TestGroupsRound3_ZeroBindingClientReturnsMinus32000NotEmptySuccess pins B2
+// (bot R3): the empty-success branch is restricted to GROUP scopes. A /clients/
+// session with ZERO IntendedParticipants (a client with no bindings — a startup
+// publish failure or a client absent from the snapshot) must keep the -32000
+// all-failed envelope, NOT empty-success. Returning empty-success there would
+// mask a broken hub config and violate the byte-identical client contract
+// (pre-groups a zero-binding client got -32000). Only a group scope (ScopeKey
+// prefixed "g:") reaches empty-success; a bare client scope never does.
+func TestGroupsRound3_ZeroBindingClientReturnsMinus32000NotEmptySuccess(t *testing.T) {
+	sess := &hubSession{
+		ClientSessionID: "client-sid-zero-binding",
+		// Bare client scope key (NO "g:" prefix) — a normal /clients/ session.
+		ScopeKey:         "claude-code",
+		ProtocolVersion:  "2025-11-25",
+		InitSuccesses:    map[canonicalDaemonRef]string{},
+		DaemonProtoVer:   map[canonicalDaemonRef]string{},
+		InFlightRequests: map[requestIDKey]inflightEntry{},
+		InitAt:           time.Now(),
+		LastUsedAt:       time.Now(),
+		// IntendedParticipants intentionally empty — a zero-binding client.
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+
+	var env struct {
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+		Result *json.RawMessage `json:"result"`
+	}
+	if uerr := json.Unmarshal(body, &env); uerr != nil {
+		t.Fatalf("parse response: %v body=%s", uerr, body)
+	}
+	if env.Error == nil {
+		t.Fatalf("zero-binding CLIENT returned success (want -32000 all-failed envelope): %s", body)
+	}
+	if env.Error.Code != -32000 {
+		t.Errorf("zero-binding CLIENT Error.Code=%d want -32000: %s", env.Error.Code, body)
+	}
+}
+
 // TestGroupsRound2_HiddenCollidingToolNeverLeaksViaPartialFailures pins F4: a
 // group that HIDES a tool which ALSO collides between two same-server daemons
 // must drop that tool from BOTH result.tools AND partialFailures. Before the

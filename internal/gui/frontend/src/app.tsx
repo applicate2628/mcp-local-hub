@@ -43,7 +43,7 @@ const DEFAULT_SCREEN_CACHE_KEY = "mcphub.appearance.default_screen";
 // entry can't drop the router into an unknown screen and crash on
 // the switch fall-through.
 const VALID_DEFAULT_SCREENS = new Set([
-  "dashboard", "servers", "catalog", "migration", "add-server",
+  "dashboard", "servers", "groups", "catalog", "migration", "add-server",
   "secrets", "logs", "capabilities", "settings", "about",
 ]);
 

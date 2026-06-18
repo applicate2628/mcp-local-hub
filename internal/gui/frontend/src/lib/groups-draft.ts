@@ -54,6 +54,11 @@ const GROUP_NAME_ALLOWED = /^[A-Za-z0-9._-]+$/;
 // GROUP_NAME_FIRST_BAD finds the FIRST character outside the allowlist, for the
 // error message.
 const GROUP_NAME_FIRST_BAD = /[^A-Za-z0-9._-]/;
+// MAX_GROUP_NAME_LEN mirrors maxGroupNameLen in internal/api/hub_mcp_groups.go:
+// a group name is one URL path segment + one scope-key suffix; 64 chars is a
+// generous sanity cap. The allowlist restricts to single-byte ASCII, so a JS
+// string length matches the Go byte length.
+const MAX_GROUP_NAME_LEN = 64;
 
 // validateGroupName mirrors the Go validateGroupName: non-empty (after trim),
 // free of the reserved ':' separator, matching the route-segment allowlist
@@ -74,6 +79,9 @@ export function validateGroupName(name: string): string | null {
   }
   if (trimmed === "." || trimmed === "..") {
     return `Group name "${trimmed}" is a path-traversal segment (a name of "." or ".." is rewritten by the route mux and could never reach the /g/<name>/mcp route).`;
+  }
+  if (trimmed.length > MAX_GROUP_NAME_LEN) {
+    return `Group name is too long (${trimmed.length} characters; the maximum is ${MAX_GROUP_NAME_LEN}).`;
   }
   return null;
 }

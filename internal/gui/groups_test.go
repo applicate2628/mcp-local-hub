@@ -29,6 +29,7 @@ package gui
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -50,6 +51,19 @@ type fakeGroupsAPI struct {
 	loadErr    error
 	writeErr   error
 	serversErr error
+	// pruneErr, when non-nil AND the callback reports a deleted set, is
+	// returned AFTER the write is recorded as applied — emulating the real
+	// ReadModifyWriteGroups contract where the groups.yaml write committed but
+	// the post-write token-prune failed (api.ErrTokenPruneFailed). It must be
+	// wrapped in api.ErrTokenPruneFailed by the test so the handler's
+	// errors.Is(err, api.ErrTokenPruneFailed) branch fires.
+	pruneErr error
+
+	// instanceID / groupTokens back the B4 connection-detail surface.
+	// instanceID empty ⇒ HubInstanceID reports not-present; a group absent
+	// from groupTokens ⇒ GroupToken reports not-present.
+	instanceID  string
+	groupTokens map[string]string
 
 	writeCalls  int
 	lastWrite   api.GroupsConfig
@@ -84,6 +98,12 @@ func (f *fakeGroupsAPI) ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig)
 		return f.writeErr
 	}
 	f.cfg = cfg
+	// Post-write token-prune failure: the groups.yaml write committed (f.cfg
+	// updated above), but pruning the deleted token row failed. Mirrors the
+	// real RMW returning ErrTokenPruneFailed AFTER a successful write.
+	if f.pruneErr != nil && len(deleted) > 0 {
+		return f.pruneErr
+	}
 	return nil
 }
 
@@ -92,6 +112,24 @@ func (f *fakeGroupsAPI) AvailableServers() ([]string, error) {
 		return nil, f.serversErr
 	}
 	return f.available, nil
+}
+
+// HubInstanceID / GroupToken back the B4 connection-detail surface. The fake
+// returns the injected instanceID (empty ⇒ not present) and looks the group
+// token up in groupTokens (absent ⇒ not present), so a handler test can drive
+// the available / not-available connection paths without touching live state.
+func (f *fakeGroupsAPI) HubInstanceID() (string, bool) {
+	if f.instanceID == "" {
+		return "", false
+	}
+	return f.instanceID, true
+}
+func (f *fakeGroupsAPI) GroupToken(group string) (string, bool) {
+	tok, ok := f.groupTokens[group]
+	if !ok || tok == "" {
+		return "", false
+	}
+	return tok, true
 }
 
 // groupsTestServer wires a fresh Server with the /api/groups route and
@@ -287,6 +325,120 @@ func TestGroups_DeleteAbsentIs404(t *testing.T) {
 	}
 }
 
+// TestGroups_DeleteTokenPruneFailStillRepublishes pins B3 (bot R3): when the
+// groups.yaml write committed but the post-write token-prune failed
+// (api.ErrTokenPruneFailed), the DELETE must NOT 500. It is a degraded SUCCESS:
+// the handler still republishes the snapshot (dropping the deleted group so its
+// /g/ route 404s) and returns 200 with restart_required=true (forced, so the
+// operator restarts the hub to clear the stale token row). A 500 here would
+// skip the republish and strand a routable deleted group.
+func TestGroups_DeleteTokenPruneFailStillRepublishes(t *testing.T) {
+	g := &fakeGroupsAPI{
+		available: []string{"memory"},
+		cfg:       api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{"memory"}}}},
+		// Inject a post-write prune failure wrapped in the sentinel.
+		pruneErr: fmt.Errorf("%w: simulated DACL gate failure", api.ErrTokenPruneFailed),
+	}
+	s := groupsTestServer(t, g)
+	// Mark the gate-ON hub listener live so HubMcpEndpointActive() is true and
+	// the republish path runs.
+	comp := &HubListenerComponents{port: 9200}
+	comp.alive.Store(true)
+	s.hubMcpComp.Store(comp)
+	republishCalled := false
+	s.groupsRepublishFn = func(_ *api.API) error { republishCalled = true; return nil }
+
+	rec := doJSON(t, s, http.MethodDelete, "/api/groups?name=frontend", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q, want 200 (token-prune fail is a degraded success, NOT a 500)", rec.Code, rec.Body.String())
+	}
+	resp := decodeMutationResp(t, rec)
+	if !resp.RestartRequired {
+		t.Fatal("restart_required must be forced true on a token-prune-failure delete (stale token row needs a hub restart)")
+	}
+	if !republishCalled {
+		t.Fatal("republish MUST still fire on a token-prune-failure delete — the snapshot must drop the deleted group so its /g/ route 404s")
+	}
+	if g.writeCalls != 1 {
+		t.Fatalf("WriteGroups calls=%d, want 1 (the groups.yaml delete persisted)", g.writeCalls)
+	}
+}
+
+// TestGroups_GetConnectionDetailsWhenHubLive pins B4 (bot R3): the GET list
+// path surfaces a usable /g/<group>/mcp connection triple (url + token +
+// instance id) when the gate-ON hub is live and the auth seam is primed.
+func TestGroups_GetConnectionDetailsWhenHubLive(t *testing.T) {
+	g := &fakeGroupsAPI{
+		available:   []string{"memory"},
+		cfg:         api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{"memory"}}}},
+		instanceID:  "inst-abc",
+		groupTokens: map[string]string{"frontend": "tok-frontend"},
+	}
+	s := groupsTestServer(t, g)
+	comp := &HubListenerComponents{port: 9201}
+	comp.alive.Store(true)
+	s.hubMcpComp.Store(comp)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/groups", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	resp := decodeListResp(t, rec)
+	if len(resp.Groups) != 1 {
+		t.Fatalf("groups=%d want 1", len(resp.Groups))
+	}
+	conn := resp.Groups[0].Connection
+	if conn == nil {
+		t.Fatal("connection must be present on the GET list path when the hub is live")
+	}
+	if !conn.Available {
+		t.Fatalf("connection.available=false, want true (hub live + token + instance present): %+v", conn)
+	}
+	wantURL := "http://127.0.0.1:9201/g/frontend/mcp"
+	if conn.URL != wantURL {
+		t.Errorf("connection.url=%q want %q", conn.URL, wantURL)
+	}
+	if conn.InstanceID != "inst-abc" {
+		t.Errorf("connection.instance_id=%q want inst-abc", conn.InstanceID)
+	}
+	if conn.Token != "tok-frontend" {
+		t.Errorf("connection.token=%q want tok-frontend", conn.Token)
+	}
+}
+
+// TestGroups_GetConnectionPlaceholderWhenHubOff pins B4: when the hub is
+// gate-OFF / not bound, the connection is NOT available and carries a hint
+// instead of a dead URL + a real token.
+func TestGroups_GetConnectionPlaceholderWhenHubOff(t *testing.T) {
+	g := &fakeGroupsAPI{
+		available:   []string{"memory"},
+		cfg:         api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{"memory"}}}},
+		instanceID:  "inst-abc",
+		groupTokens: map[string]string{"frontend": "tok-frontend"},
+	}
+	s := groupsTestServer(t, g)
+	// No hubMcpComp → HubMcpBoundPort() returns (0,false) → gate-OFF.
+
+	rec := doJSON(t, s, http.MethodGet, "/api/groups", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	resp := decodeListResp(t, rec)
+	conn := resp.Groups[0].Connection
+	if conn == nil {
+		t.Fatal("connection must still be present (carrying the not-available placeholder)")
+	}
+	if conn.Available {
+		t.Fatal("connection.available must be false when the hub is not bound")
+	}
+	if conn.URL != "" || conn.Token != "" {
+		t.Errorf("a not-available connection must NOT carry a URL or token: %+v", conn)
+	}
+	if conn.Hint == "" {
+		t.Error("a not-available connection must carry a hint telling the operator to start the hub")
+	}
+}
+
 // --- restart_required wiring (hub not live) ---
 
 func TestGroups_PostRestartRequiredWhenHubNotLive(t *testing.T) {
@@ -412,6 +564,21 @@ func (diskTestGroupsAPI) ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig
 	return api.ReadModifyWriteGroups(mutate)
 }
 func (d diskTestGroupsAPI) AvailableServers() ([]string, error) { return d.available, nil }
+func (diskTestGroupsAPI) HubInstanceID() (string, bool) {
+	ep, err := api.LoadHubEndpoint()
+	if err != nil || ep.InstanceID == "" {
+		return "", false
+	}
+	return ep.InstanceID, true
+}
+func (diskTestGroupsAPI) GroupToken(group string) (string, bool) {
+	tbl := api.CurrentTokenTable()
+	tok, ok := tbl.Tokens[api.GroupScopeKey(group)]
+	if !ok || tok == "" {
+		return "", false
+	}
+	return tok, true
+}
 
 // --- LIVE RE-PUBLISH: published snapshot carries Bindings["g:<name>"] ---
 

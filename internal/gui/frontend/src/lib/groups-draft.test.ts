@@ -48,6 +48,11 @@ describe("validateGroupName", () => {
     // A dot is still allowed mid-name (e.g. a versioned group).
     expect(validateGroupName("v1.2")).toBeNull();
   });
+  it("caps the name length at 64 (mirrors the Go maxGroupNameLen — C5)", () => {
+    // 64 chars is at the cap → accepted; 65 → rejected.
+    expect(validateGroupName("a".repeat(64))).toBeNull();
+    expect(validateGroupName("a".repeat(65))).not.toBeNull();
+  });
 });
 
 describe("parseHiddenTools", () => {

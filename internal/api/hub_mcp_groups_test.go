@@ -26,6 +26,7 @@ package api
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/config"
@@ -145,6 +146,40 @@ func TestGroups_UnknownYAMLFieldRejected(t *testing.T) {
 	raw := []byte("version: 1\ngroups:\n  - name: frontend\n    serverz: [memory]\n")
 	if _, err := parseGroupsConfig(raw); err == nil {
 		t.Fatal("parseGroupsConfig accepted an unknown YAML field — KnownFields(true) must reject")
+	}
+}
+
+// TestGroups_UnsupportedVersionRejected pins C1 (consultant): parseGroupsConfig
+// must reject a version this binary does not understand. version 0 (absent) and
+// version 1 are accepted; anything else (a config from a newer binary) is a
+// hard error rather than a silent misread.
+func TestGroups_UnsupportedVersionRejected(t *testing.T) {
+	// A future v2 — this binary can only read v1, so reject.
+	raw := []byte("version: 2\ngroups:\n  - name: frontend\n    servers: [memory]\n")
+	if _, err := parseGroupsConfig(raw); err == nil {
+		t.Fatal("parseGroupsConfig accepted version 2 — must reject an unsupported version")
+	}
+	// version 1 explicit is accepted.
+	if _, err := parseGroupsConfig([]byte("version: 1\ngroups: []\n")); err != nil {
+		t.Fatalf("parseGroupsConfig rejected version 1: %v", err)
+	}
+	// version 0 / absent is accepted (the default form; writeGroupsLocked
+	// stamps it to 1 on write).
+	if _, err := parseGroupsConfig([]byte("groups:\n  - name: frontend\n    servers: [memory]\n")); err != nil {
+		t.Fatalf("parseGroupsConfig rejected an absent version (default v0): %v", err)
+	}
+}
+
+// TestGroups_NameLengthCapRejected pins C5-length (consultant): a group name
+// longer than maxGroupNameLen (64) is rejected; a 64-char name is accepted.
+func TestGroups_NameLengthCapRejected(t *testing.T) {
+	atCap := strings.Repeat("a", maxGroupNameLen)
+	if err := validateGroupName(atCap); err != nil {
+		t.Fatalf("validateGroupName rejected a %d-char name (at the cap): %v", maxGroupNameLen, err)
+	}
+	overCap := strings.Repeat("a", maxGroupNameLen+1)
+	if err := validateGroupName(overCap); err == nil {
+		t.Fatalf("validateGroupName accepted a %d-char name — must reject names longer than %d", maxGroupNameLen+1, maxGroupNameLen)
 	}
 }
 

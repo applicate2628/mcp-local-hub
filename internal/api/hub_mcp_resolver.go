@@ -32,6 +32,7 @@
 package api
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"mcp-local-hub/internal/config"
@@ -333,4 +334,68 @@ func BumpResolverOnManifestChange(manifests []config.ServerManifest) {
 // BumpResolverOnManifestChange.
 func BumpResolverOnConfigChange(manifests []config.ServerManifest, groups []Group) {
 	PublishResolverSnapshot(BuildResolverSnapshotFromManifestsAndGroups(manifests, groups))
+}
+
+// PublishGroupsSnapshotLocked is the LOCK-SERIALIZED groups-aware publish span
+// (P3-2, opus-arch). It reads groups.yaml, ensures the per-group token rows,
+// and publishes the merged snapshot — all under ONE held hub-mcp.lock — so a
+// concurrent GUI groups mutation can never make this read an intermediate
+// groups.yaml and publish a torn topology. The supplied `manifests` are read
+// OUTSIDE this lock by the caller (manifests are not part of the groups
+// race and were never under hub-mcp.lock); only the groups read→ensure→publish
+// span needs serializing.
+//
+// It is the exported entry point the gui-package publish choke point
+// (publishResolverSnapshotForHubBind) calls; the unexported in-flock helpers
+// (loadGroupsLocked, ensureHubTokensLocked) live in the api package and cannot
+// be reached cross-package, so the whole locked span is owned here.
+//
+// Reentrancy: every helper it calls is the in-flock ("…Locked") half that does
+// NOT re-acquire hub-mcp.lock, and BumpResolverOnConfigChange is a pure
+// in-memory build + atomic publish (no lock). So holding the lock across all
+// three never deadlocks. NONE of this helper's callers hold hub-mcp.lock when
+// they call it (the gate-ON bind path runs AFTER BindHubMcpListener released
+// its lock; the GUI mutation tail runs AFTER ReadModifyWriteGroups released
+// its lock), so acquiring it here is always a fresh, non-nested acquisition.
+//
+// A groups.yaml load error degrades to "no groups" with a structured warn
+// (additive-by-omission, decision claim 5) so the client bindings still
+// publish — byte-identical client routing for a host with a missing/corrupt
+// groups.yaml. A token-ensure failure is DEFERRED: the snapshot still publishes
+// first (bindings live), then the token error is returned so the caller can
+// surface restart_required (without the row the /g/ route cannot auth).
+func PublishGroupsSnapshotLocked(manifests []config.ServerManifest) error {
+	lk, err := acquireHubMcpLock()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	cfg, gerr := loadGroupsLocked()
+	if gerr != nil {
+		_ = LogHubMcpEvent("warn", "groups-config-load-failed", map[string]any{
+			"err": gerr.Error(),
+		})
+		cfg = GroupsConfig{}
+	}
+
+	// Ensure a per-group token row for each "g:<group>" scope key UNDER the
+	// SAME held lock (in-flock half — no re-acquire). Deferred so the snapshot
+	// publishes even when the token-ensure fails.
+	var tokenEnsureErr error
+	if groupKeys := GroupScopeKeys(cfg.Groups); len(groupKeys) > 0 {
+		if _, terr := ensureHubTokensLocked(groupKeys); terr != nil {
+			_ = LogHubMcpEvent("warn", "group-tokens-ensure-failed", map[string]any{
+				"err": terr.Error(),
+			})
+			tokenEnsureErr = fmt.Errorf("ensure group token rows: %w", terr)
+		}
+	}
+
+	// In-memory build + atomic publish (no lock taken inside). Held under the
+	// hub-mcp.lock so the cfg read above and this publish are one critical
+	// section — no interleaving mutation can publish a torn read.
+	BumpResolverOnConfigChange(manifests, cfg.Groups)
+
+	return tokenEnsureErr
 }

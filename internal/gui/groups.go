@@ -29,8 +29,10 @@
 // — a stale config never faults routing). At the AUTHORING boundary,
 // though, an unknown server is a 400 — an operator typo should surface
 // immediately, not silently route nothing. The known-server set is the
-// SAME source the Servers matrix and the snapshot builder derive from:
-// api.ManifestList() (embed-first server names).
+// locally-routable server names from api.NewAPI().RoutableServerNames()
+// (the R1 fix — filtered to servers with a local daemon ref, so a group
+// can never bind a daemonless / transport=remote-http server it could
+// never route to).
 //
 // Live re-publish (closes the Phase 3b staleness for GUI edits): this
 // endpoint runs in the GUI process, which OWNS the running hub listener.
@@ -61,6 +63,16 @@ import (
 // package (the handler translates it before writing the response).
 var errGroupNotFound = errors.New("group not found")
 
+// hubGroupRoutePrefix / hubMcpRouteSuffix mirror hubGroupPrefix / hubPathSuffix
+// in internal/api/hub_mcp_handler.go (which are unexported). Used to build the
+// /g/<group>/mcp connection URL the Groups GET path surfaces (B4). They are the
+// route grammar the api handler's parseHubPathFromURL recognizes, so the URL
+// the GUI hands the operator is the exact path the hub serves.
+const (
+	hubGroupRoutePrefix = "/g/"
+	hubMcpRouteSuffix   = "/mcp"
+)
+
 // groupsAPI is the narrow seam the groups handler needs over the api data
 // layer. Behind an interface so handler tests inject a fake and never
 // touch the real groups.yaml / hub snapshot. Production wires
@@ -80,6 +92,15 @@ type groupsAPI interface {
 	// transport=remote-http / daemonless servers are excluded because a group
 	// can never route to them). The same locality the snapshot builder honors.
 	AvailableServers() ([]string, error)
+	// HubInstanceID returns the hub endpoint's long-lived InstanceID (the
+	// X-Mcphub-Instance-Id header value a /g/ client must send) and true when
+	// the endpoint file is present + readable. Read-only; no lock. (B4
+	// connection details.)
+	HubInstanceID() (string, bool)
+	// GroupToken returns the loopback bearer token for a group's "g:<name>"
+	// scope key (the X-Mcphub-Hub-Token header value) from the live token
+	// table, and true when a row exists. Read-only snapshot read. (B4.)
+	GroupToken(group string) (string, bool)
 }
 
 type realGroupsAPI struct{}
@@ -90,6 +111,21 @@ func (realGroupsAPI) ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig) ([
 }
 func (realGroupsAPI) AvailableServers() ([]string, error) {
 	return api.NewAPI().RoutableServerNames()
+}
+func (realGroupsAPI) HubInstanceID() (string, bool) {
+	ep, err := api.LoadHubEndpoint()
+	if err != nil || ep.InstanceID == "" {
+		return "", false
+	}
+	return ep.InstanceID, true
+}
+func (realGroupsAPI) GroupToken(group string) (string, bool) {
+	tbl := api.CurrentTokenTable()
+	tok, ok := tbl.Tokens[api.GroupScopeKey(group)]
+	if !ok || tok == "" {
+		return "", false
+	}
+	return tok, true
 }
 
 // republishGroupsSnapshot drives the live hub-snapshot re-publish after a
@@ -111,11 +147,33 @@ func registerGroupsRoutes(s *Server) {
 // groupDTO is one group row in the GET / POST wire shape. Servers is
 // always a non-nil array. ToolsHidden is emitted only when non-empty
 // (omitempty) so a group with only `servers` has a compact shape.
+//
+// Connection is populated ONLY on the GET list path (groupsList) — the
+// mutation responses (POST/DELETE via groupToDTO) leave it nil so they stay
+// compact. It carries the operator-facing /g/<group>/mcp connection triple
+// (B4). localhost same-origin only — the token is the operator's own loopback
+// bearer, intended to be surfaced in the same-origin GUI.
 type groupDTO struct {
 	Name        string              `json:"name"`
 	Description string              `json:"description,omitempty"`
 	Servers     []string            `json:"servers"`
 	ToolsHidden map[string][]string `json:"tools_hidden,omitempty"`
+	Connection  *groupConnectionDTO `json:"connection,omitempty"`
+}
+
+// groupConnectionDTO is the copy-pasteable connection info for a group's
+// /g/<group>/mcp route (B4 — bot R3). Available is true ONLY when the gate-ON
+// hub listener is live AND bound AND a token row + instance id exist; in that
+// case URL/InstanceID/Token are the three values a client must use (the URL
+// plus the X-Mcphub-Hub-Token and X-Mcphub-Instance-Id headers). When the hub
+// is gate-OFF / not bound, Available is false and Hint tells the operator how
+// to bring the endpoint up instead of presenting a dead URL with a live token.
+type groupConnectionDTO struct {
+	Available  bool   `json:"available"`
+	URL        string `json:"url,omitempty"`
+	InstanceID string `json:"instance_id,omitempty"`
+	Token      string `json:"token,omitempty"`
+	Hint       string `json:"hint,omitempty"`
 }
 
 // groupsListResponse is the GET wire shape. Groups is always a non-nil
@@ -188,14 +246,51 @@ func (s *Server) groupsList(w http.ResponseWriter, _ *http.Request) {
 		writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_SERVERS_FAILED")
 		return
 	}
+	// B4: resolve the hub connection prerequisites ONCE for the whole list
+	// (port + instance id are group-independent; only the token is per-group).
+	port, hubLive := s.HubMcpBoundPort()
+	instanceID, hasInstance := s.groups.HubInstanceID()
 	rows := make([]groupDTO, 0, len(cfg.Groups))
 	for _, g := range cfg.Groups {
-		rows = append(rows, groupToDTO(g))
+		dto := groupToDTO(g)
+		dto.Connection = s.groupConnection(g.Name, port, hubLive, instanceID, hasInstance)
+		rows = append(rows, dto)
 	}
 	if servers == nil {
 		servers = []string{}
 	}
 	writeJSON(w, http.StatusOK, groupsListResponse{Groups: rows, AvailableServers: servers})
+}
+
+// groupConnection builds the B4 copy-pasteable connection triple for one
+// group's /g/<group>/mcp route. It is "available" ONLY when the gate-ON hub
+// listener is live + bound (hubLive), the endpoint instance id is present
+// (hasInstance), AND a per-group loopback token row exists. Otherwise it
+// returns a not-available placeholder with a hint so the GUI never shows a dead
+// URL paired with a real token. localhost same-origin only.
+func (s *Server) groupConnection(name string, port int, hubLive bool, instanceID string, hasInstance bool) *groupConnectionDTO {
+	if !hubLive {
+		return &groupConnectionDTO{
+			Available: false,
+			Hint:      "Start the aggregated hub (Settings → Expose a single aggregated hub URL) to get this group's endpoint.",
+		}
+	}
+	token, hasToken := s.groups.GroupToken(name)
+	if !hasInstance || !hasToken {
+		// The hub is live but the auth seam isn't fully primed yet (token row
+		// not ensured, or endpoint not readable). Tell the operator to restart
+		// the hub to re-ensure rather than handing out an unauthable URL.
+		return &groupConnectionDTO{
+			Available: false,
+			Hint:      "The hub is running but this group's auth row is not ready yet — restart the hub (or re-save the group) to ensure it.",
+		}
+	}
+	return &groupConnectionDTO{
+		Available:  true,
+		URL:        fmt.Sprintf("http://127.0.0.1:%d%s%s%s", port, hubGroupRoutePrefix, name, hubMcpRouteSuffix),
+		InstanceID: instanceID,
+		Token:      token,
+	}
 }
 
 // groupsUpsert handles POST /api/groups with body
@@ -228,8 +323,9 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Known-server gate (AUTHORING-boundary strictness, decision §POST 2).
-	// Source = api.ManifestList(), the same set the snapshot builder reads
-	// manifests from. An unknown server is a 400, not a silent skip.
+	// Source = s.groups.AvailableServers() → RoutableServerNames() (the R1
+	// fix): the locally-routable server names, the same locality the snapshot
+	// builder honors. An unknown server is a 400, not a silent skip.
 	known, err := s.groups.AvailableServers()
 	if err != nil {
 		writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_SERVERS_FAILED")
@@ -334,7 +430,24 @@ func (s *Server) groupsDelete(w http.ResponseWriter, r *http.Request) {
 				http.StatusNotFound, "GROUPS_NOT_FOUND")
 			return
 		}
-		writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_WRITE_FAILED")
+		// B3 (bot R3): a token-prune failure is NOT a delete failure — the
+		// groups.yaml write committed, so the group is durably gone. 500-ing
+		// here would SKIP the republish below and leave the deleted group
+		// routable (the snapshot still carries it) until a hub restart. Treat
+		// ErrTokenPruneFailed as a degraded SUCCESS: fall through to the shared
+		// write+republish tail (which drops the group from the snapshot →
+		// isKnownGroup 404) with restart_required forced so the operator
+		// restarts the hub to clear the stale token row. Only a genuine
+		// write/load failure is a 500.
+		if !errors.Is(err, api.ErrTokenPruneFailed) {
+			writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_WRITE_FAILED")
+			return
+		}
+		_ = api.LogHubMcpEvent("warn", "groups-delete-token-prune-failed", map[string]any{
+			"group": name,
+			"err":   err.Error(),
+		})
+		s.writeGroupMutationForceRestart(w, nil)
 		return
 	}
 
@@ -351,6 +464,24 @@ func (s *Server) groupsDelete(w http.ResponseWriter, r *http.Request) {
 // publish degrades to the same "restart to apply" path as gate-OFF rather
 // than reporting a false success.
 func (s *Server) writeGroupMutation(w http.ResponseWriter, group *groupDTO) {
+	s.writeGroupMutationWithForce(w, group, false)
+}
+
+// writeGroupMutationForceRestart is the degraded-success variant used by the
+// DELETE path when the groups.yaml write committed but the token-prune step
+// failed (api.ErrTokenPruneFailed). The republish still runs (dropping the
+// group from the snapshot so its /g/ route 404s), but restart_required is
+// forced true so the GUI tells the operator to restart the hub to clear the
+// stranded token row even when the in-place republish itself succeeded.
+func (s *Server) writeGroupMutationForceRestart(w http.ResponseWriter, group *groupDTO) {
+	s.writeGroupMutationWithForce(w, group, true)
+}
+
+// writeGroupMutationWithForce is the shared write + live-re-publish tail. When
+// forceRestart is true the response always carries restart_required=true
+// regardless of whether the in-place republish succeeded (the token-prune
+// degraded path).
+func (s *Server) writeGroupMutationWithForce(w http.ResponseWriter, group *groupDTO, forceRestart bool) {
 	hubLive := s.HubMcpEndpointActive()
 	restartRequired := !hubLive
 	if hubLive {
@@ -363,6 +494,9 @@ func (s *Server) writeGroupMutation(w http.ResponseWriter, group *groupDTO) {
 			})
 			restartRequired = true
 		}
+	}
+	if forceRestart {
+		restartRequired = true
 	}
 	writeJSON(w, http.StatusOK, groupMutationResponse{
 		Group:           group,

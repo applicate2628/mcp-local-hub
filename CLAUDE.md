@@ -1323,6 +1323,60 @@ Exit codes:
     See "Hub aggregate (gate-ON) mode + port reset" below.
 ```
 
+## Groups (/g/ namespaces)
+
+A **group** is a named subset of MCP servers exposed at the gate-ON hub
+route `/g/<group>/mcp` — the fix for tool-context bloat (point a client
+at a group URL to give it only that group's tools). Groups live in
+`<state-dir>/groups.yaml`, owned by the GUI **Groups** screen (or
+hand-edited). Decision:
+[`work-items/decisions/2026-06-18-groups-namespaces-tool-visibility.md`](work-items/decisions/2026-06-18-groups-namespaces-tool-visibility.md).
+
+### `groups.yaml` schema (v1)
+
+```yaml
+version: 1                        # only 1 (or absent/0) is accepted; an
+                                  # unknown version is a hard parse error
+groups:
+  - name: "frontend"             # single URL path segment: ^[A-Za-z0-9._-]+$,
+                                  # no ':' (it is the "g:" scope-key separator),
+                                  # not "."/"..", max 64 chars
+    description: "JS/TS tools"    # optional, free-form
+    servers:                      # member server names (manifest .Name);
+      - "serena"                  # only LOCALLY-ROUTABLE servers (a local
+      - "mcp-language-server"     # daemon ref) can be bound
+    tools_hidden:                 # OPTIONAL per-server HIDE-list (deny only)
+      mcp-language-server:        # key MUST be a member of `servers`
+        - "delete_file"           # raw tool names to drop from the /g/ view
+```
+
+### Route shape + required headers
+
+- Route: `http://127.0.0.1:<hubport>/g/<group>/mcp` (the hub port is the
+  same listener the `/clients/` routes use; re-bound on each start).
+- Scope key: `g:<group>` — a kind-namespaced subspace disjoint from the
+  bare-client keys in the shared Bindings/Tokens maps (a group and a
+  client of the same name never collide).
+- Auth headers (same as the client routes): `X-Mcphub-Hub-Token` (the
+  `g:<group>` row from the hub token table) + `X-Mcphub-Instance-Id`
+  (the hub endpoint InstanceID). The GUI Groups screen surfaces the
+  URL + both header values as copyable fields when the hub is live (B4);
+  it shows a "start the hub" placeholder when gate-OFF.
+- Gate-OFF host → inert (no listener, no `/g/` routes).
+- A declared-but-EMPTY group (no members) is KNOWN and returns an empty
+  `tools/list` success — NOT a 404 and NOT a `-32000`.
+- A DELETED group's route returns an empty-body 404 after the snapshot
+  republishes (`isKnownGroup` false) — repoint or restart the client.
+
+### `tools_hidden` is NOT a security boundary
+
+Hiding a tool reduces the surface EXPOSED AT THE HUB; it is not access
+control. Daemon ports remain directly reachable; at gate-OFF the hub
+filter is not in the path; filter changes apply to NEW client sessions
+only (reconnect to apply); granularity is per-SERVER (cannot hide a tool
+on daemon A but keep it on daemon B of the same server). Treat it as
+context-bloat reduction, never as a fence.
+
 ## Hub aggregate (gate-ON) mode + port reset
 
 **What gate-ON is.** When `gui_server.hub_endpoint_enabled` is `true`
@@ -1358,6 +1412,17 @@ every gated client's `mcphub-hub` URL to the new bound port. A hub port
 reset REQUIRES this re-reconcile whenever clients are gate-ON;
 otherwise the gated URLs stay orphaned.
 
+**Groups `/g/` routes share the hub port (C7).** A group's
+`http://127.0.0.1:<hubport>/g/<group>/mcp` URL bakes in the SAME bound
+hub port. A port reset orphans every `/g/` client URL too — but UNLIKE
+the `mcphub-hub` client entries, NO `reconcile-hub-mode` path rewrites
+group URLs into client configs (the operator copies them from the
+Groups GUI by hand — B4). After a hub port reset, re-open the Groups
+screen and re-copy each group's URL into the client that points at it.
+The `--reset-port` exit-8 gate keys on the `mcphub-hub` client entry, so
+it does NOT fire for a host that ONLY uses `/g/` group routes — reset
+those at will, but re-copy the group URLs afterward.
+
 ## Hub listener hang — observability (B1, partial)
 
 The gate-ON hub aggregate listener is a fire-and-forget goroutine inside
@@ -1386,3 +1451,10 @@ aggregated MCP dies at once under gate-ON" is: **restart the GUI**
 (close the tray/window and relaunch, or `mcphub gui --force --kill --yes`
 then relaunch). Tracked in
 `work-items/backlog/2026-06-16-hub-listener-hang-no-recovery.md`.
+
+**Groups `/g/` routes ride the same listener (C7).** A hung or dead hub
+listener takes the `/g/<group>/mcp` group routes down alongside the
+`/clients/` routes — they share the one aggregate listener. The
+`hub-listener-unresponsive` warn + the "restart the GUI" recovery above
+apply identically to groups; there is no separate group-listener health
+signal.

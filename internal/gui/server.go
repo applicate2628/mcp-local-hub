@@ -834,6 +834,20 @@ func (s *Server) HubMcpEndpointActive() bool {
 	return comp.Alive()
 }
 
+// HubMcpBoundPort returns the live hub listener's actually-bound TCP port and
+// true when the gate-ON hub listener is currently running; (0, false)
+// otherwise. The port is the one the listener bound at startup (the
+// authoritative runtime value, not the persisted endpoint file which may lag a
+// reset). B4 (bot R3): the Groups GET path uses this to build a usable
+// /g/<group>/mcp connection URL only when the hub is actually serving it.
+func (s *Server) HubMcpBoundPort() (int, bool) {
+	comp := s.hubMcpComp.Load()
+	if comp == nil || !comp.Alive() {
+		return 0, false
+	}
+	return comp.port, true
+}
+
 // Start binds 127.0.0.1:<cfg.Port>, signals `ready` once the listener
 // is accepting, then blocks in ListenAndServe. Returns when ctx is
 // canceled (graceful shutdown, 5s deadline) or the listener errors.

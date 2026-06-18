@@ -561,9 +561,18 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// route exposes an empty tool surface, not a -32000 "all daemons
 		// failed" envelope. Distinguish on IntendedParticipants (empty ⇒
 		// nothing intended) vs the genuine all-failed case (≥1 intended, all
-		// failed). A normal client always binds ≥1 server, so its path is
-		// unaffected; only an empty group reaches the empty-success branch.
-		if len(sess.IntendedParticipants) == 0 {
+		// failed).
+		//
+		// B2 (bot R3): the empty-success branch is restricted to GROUP scopes
+		// (ScopeKey carries the GroupScopeKeyPrefix "g:"). A /clients/ session
+		// with zero IntendedParticipants is NOT a declared-but-empty group —
+		// it is a client with no bindings (a startup-publish failure, or a
+		// client absent from the resolver snapshot). Returning empty-success
+		// there would MASK a broken hub config AND change the byte-identical
+		// client contract (pre-groups, a zero-binding client got the -32000
+		// all-failed envelope). So a non-group scope keeps the -32000 envelope;
+		// only a group reaches empty-success.
+		if len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) {
 			sess.RouteMap.Store(&mergedRoutes)                             // empty map — no tools to route
 			return buildToolsListResponse(reqID, mergedTools, allFailures) // mergedTools is empty → result.tools=[]
 		}

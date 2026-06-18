@@ -988,6 +988,24 @@ export interface GroupDTO {
   description?: string;
   servers: string[];
   tools_hidden?: Record<string, string[]>;
+  // connection is populated only on the GET list path (B4). It carries the
+  // copy-pasteable /g/<group>/mcp connection triple when the gate-ON hub is
+  // live, else a not-available placeholder with a hint.
+  connection?: GroupConnectionDTO;
+}
+
+// GroupConnectionDTO mirrors groupConnectionDTO in internal/gui/groups.go. When
+// available is true the url + token + instance_id are the values a client uses
+// (the URL plus X-Mcphub-Hub-Token and X-Mcphub-Instance-Id headers). When
+// false, the hub is gate-OFF / not bound and hint explains how to bring it up —
+// the backend deliberately omits url/token in that case so the GUI never shows
+// a dead URL with a live token. localhost same-origin only.
+export interface GroupConnectionDTO {
+  available: boolean;
+  url?: string;
+  instance_id?: string;
+  token?: string;
+  hint?: string;
 }
 
 // GroupsListResponse mirrors groupsListResponse — the GET /api/groups body.
@@ -1042,12 +1060,25 @@ function normalizeGroup(raw: Partial<GroupDTO>): GroupDTO {
       hidden[srv] = Array.isArray(tools) ? tools.filter((t) => typeof t === "string") : [];
     }
   }
-  return {
+  const out: GroupDTO = {
     name: typeof raw.name === "string" ? raw.name : "",
     description: typeof raw.description === "string" ? raw.description : "",
     servers: Array.isArray(raw.servers) ? raw.servers.filter((s) => typeof s === "string") : [],
     tools_hidden: hidden,
   };
+  // connection (B4) is present only on the GET list path. Carry it through
+  // defensively (the backend omits url/token unless available is true).
+  if (raw.connection && typeof raw.connection === "object") {
+    const c = raw.connection;
+    out.connection = {
+      available: c.available === true,
+      url: typeof c.url === "string" ? c.url : undefined,
+      instance_id: typeof c.instance_id === "string" ? c.instance_id : undefined,
+      token: typeof c.token === "string" ? c.token : undefined,
+      hint: typeof c.hint === "string" ? c.hint : undefined,
+    };
+  }
+  return out;
 }
 
 // getGroups reads every group from groups.yaml plus the available server

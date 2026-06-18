@@ -107,6 +107,36 @@ type manifestEditResponse struct {
 	Hash string `json:"hash"`
 }
 
+// republishOnManifestMutation re-publishes the live hub ResolverSnapshot after
+// a successful manifest create / edit / delete, but ONLY when the gate-ON hub
+// listener is live (HubMcpEndpointActive). B1 (bot R3): a manifest mutation
+// changes the set of client_bindings the snapshot is built from, so without a
+// republish a running gate-ON hub keeps serving the STALE snapshot for BOTH
+// /clients/ AND /g/ routes until a restart or an unrelated group edit happens
+// to trigger one. It reuses the SAME publishResolverSnapshotForHubBind seam the
+// group-mutation tail (writeGroupMutation) uses — which rebuilds from the
+// CURRENT manifests (now including this mutation) plus groups.
+//
+// A republish failure is NON-fatal: the manifest write already committed
+// durably (it is the source of truth), so the handler must NOT 500 the
+// already-successful manifest op. The failure is logged so a wedged in-place
+// publish is observable; the operator can restart the hub to pick up the
+// persisted edit (the same degrade the group path takes).
+//
+// Gate-OFF / hub-not-live is a silent no-op: there is no live snapshot to
+// refresh, and a gate-OFF host re-reads manifests fresh on its next bind.
+func (s *Server) republishOnManifestMutation(op string) {
+	if !s.HubMcpEndpointActive() {
+		return
+	}
+	if err := s.republishGroupsSnapshot(); err != nil {
+		_ = api.LogHubMcpEvent("warn", "manifest-republish-failed", map[string]any{
+			"op":  op,
+			"err": err.Error(),
+		})
+	}
+}
+
 // registerManifestRoutes wires POST /api/manifest/create and
 // POST /api/manifest/validate onto the server's mux.
 //
@@ -139,6 +169,9 @@ func registerManifestRoutes(s *Server) {
 			writeAPIError(w, errors.New("internal error creating manifest"), http.StatusInternalServerError, "MANIFEST_CREATE_FAILED")
 			return
 		}
+		// B1: refresh the live hub snapshot so a gate-ON hub picks up the new
+		// server's bindings without a restart (non-fatal, gate-ON guarded).
+		s.republishOnManifestMutation("create")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	s.mux.HandleFunc("/api/manifest/validate", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +244,9 @@ func registerManifestRoutes(s *Server) {
 			writeAPIError(w, errors.New("internal error writing manifest"), http.StatusInternalServerError, "MANIFEST_EDIT_FAILED")
 			return
 		}
+		// B1: refresh the live hub snapshot so a gate-ON hub picks up the
+		// edited bindings without a restart (non-fatal, gate-ON guarded).
+		s.republishOnManifestMutation("edit")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(manifestEditResponse{Hash: newHash})
 	}))
@@ -301,6 +337,9 @@ func registerManifestRoutes(s *Server) {
 			writeAPIError(w, errors.New("internal error deleting manifest"), http.StatusInternalServerError, "MANIFEST_DELETE_FAILED")
 			return
 		}
+		// B1: refresh the live hub snapshot so a gate-ON hub drops the deleted
+		// server's bindings without a restart (non-fatal, gate-ON guarded).
+		s.republishOnManifestMutation("delete")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 }

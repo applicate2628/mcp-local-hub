@@ -36,6 +36,7 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -43,6 +44,17 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// ErrTokenPruneFailed is the sentinel ReadModifyWriteGroups wraps when the
+// groups.yaml write SUCCEEDED (the config is durably persisted) but pruning
+// the deleted group's "g:<name>" hub-token row afterward failed. It is a
+// DISTINCT error class from a genuine load/write failure so the GUI delete
+// path (groups.go::groupsDelete) can treat it correctly: the durable delete
+// landed, so the route must STILL be republished (dropping the group from the
+// snapshot so isKnownGroup → 404), with restart_required flagged to cover the
+// stale token row — NOT a 500 that skips the republish and strands a routable
+// deleted group. Detect with errors.Is.
+var ErrTokenPruneFailed = errors.New("groups.yaml written, but pruning the deleted group's token row failed")
 
 // hubMcpGroupsFileLeaf is the canonical state-file basename for the
 // groups config. validateStateFileName accepts it (single component, no
@@ -154,8 +166,23 @@ func validateGroupName(name string) error {
 	if name == "." || name == ".." {
 		return fmt.Errorf("group name %q is a path-traversal segment (a name of %q or %q is rewritten by the route mux and could never reach the %s<name>%s route)", name, ".", "..", hubGroupPrefix, hubPathSuffix)
 	}
+	// C5-length (consultant): cap the name length. A group name is a single
+	// URL path segment; 64 chars is a generous sanity bound that keeps the
+	// /g/<name>/mcp route + the "g:<name>" scope key well within any
+	// reasonable limit and stops an unbounded operator typo from bloating the
+	// token table / snapshot keyspace. len() (bytes) is the right measure for
+	// a URL segment; the allowlist already restricts to single-byte ASCII, so
+	// byte length == rune length here.
+	if len(name) > maxGroupNameLen {
+		return fmt.Errorf("group name %q is too long (%d characters; the maximum is %d)", name, len(name), maxGroupNameLen)
+	}
 	return nil
 }
+
+// maxGroupNameLen bounds a group name's length. A group name is one URL path
+// segment in /g/<name>/mcp and one scope-key suffix in "g:<name>"; 64 chars is
+// a generous sanity cap.
+const maxGroupNameLen = 64
 
 // ValidateGroupName is the exported wrapper over the single-owner
 // validateGroupName, for the AUTHORING boundary (the GUI /api/groups
@@ -186,6 +213,16 @@ func parseGroupsConfig(raw []byte) (GroupsConfig, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
 		return GroupsConfig{}, fmt.Errorf("groups.yaml decode: %w", err)
+	}
+	// C1 (consultant — cheapest paint-into-corner): reject an unknown schema
+	// version up front. With KnownFields(true) a future v2 that adds a field
+	// would hard-break an OLD binary anyway (unknown-key decode error), but a
+	// v2 that only CHANGES the MEANING of an existing field would be silently
+	// misread as v1. version 0 is the absent/default form (writeGroupsLocked
+	// stamps it to 1); version 1 is this binary's schema. Anything else is a
+	// config written by a newer binary this one cannot safely interpret.
+	if cfg.Version != 0 && cfg.Version != 1 {
+		return GroupsConfig{}, fmt.Errorf("groups.yaml: unsupported version %d (this binary supports version 1; upgrade mcphub to read a newer groups.yaml)", cfg.Version)
 	}
 	seen := make(map[string]bool, len(cfg.Groups))
 	for i := range cfg.Groups {
@@ -336,7 +373,15 @@ func ReadModifyWriteGroups(mutate func(cfg *GroupsConfig) (deletedGroups []strin
 		}
 		if len(keys) > 0 {
 			if perr := pruneHubTokensLocked(keys); perr != nil {
-				return fmt.Errorf("groups.yaml written, but pruning token row(s) for deleted group(s) failed: %w", perr)
+				// B3 (bot R3): the groups.yaml write already committed (the
+				// config is the source of truth). A post-write token-prune
+				// failure must NOT be conflated with a genuine write failure:
+				// wrap it in the DISTINCT ErrTokenPruneFailed sentinel so the
+				// caller still republishes the snapshot (dropping the deleted
+				// group → isKnownGroup 404) instead of 500-ing and stranding a
+				// routable deleted group. errors.Is(err, ErrTokenPruneFailed)
+				// detects it; %w also preserves the underlying cause.
+				return fmt.Errorf("%w: %v", ErrTokenPruneFailed, perr)
 			}
 		}
 	}

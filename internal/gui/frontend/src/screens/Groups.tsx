@@ -30,6 +30,7 @@ import {
   deleteGroup,
   GroupsApiError,
   type GroupDTO,
+  type GroupConnectionDTO,
 } from "../api";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
@@ -155,7 +156,14 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
     setSavedNotice(false);
   }
 
-  function closeEditor(): void {
+  // closeEditor closes the editor. The Close button path (force=false) guards
+  // unsaved edits with a discard confirm (S1, sonnet): F5 guarded openNew /
+  // openEdit but NOT this path, so the Close button silently discarded a dirty
+  // draft. Returns without closing if the operator cancels the discard prompt.
+  // The post-delete path passes force=true — there is nothing meaningful to
+  // discard once the group is gone, and prompting there would be wrong UX.
+  function closeEditor(force = false): void {
+    if (!force && !confirmDiscardIfDirty()) return;
     setTarget({ mode: "none" });
     setFieldError(null);
     setRestartNotice(null);
@@ -255,7 +263,9 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
     try {
       const resp = await deleteGroup(deletedName);
       // If the editor was open on the deleted group, close it.
-      if (target.mode === "edit" && target.name === deletedName) closeEditor();
+      // force=true: the group is gone, so there is nothing meaningful to
+      // discard — skip the dirty-discard prompt the Close button uses.
+      if (target.mode === "edit" && target.name === deletedName) closeEditor(true);
       setDeleteTarget(null);
       // The DELETE response carries restart_required just like save(): when
       // the write persisted but the live hub could not be re-published in
@@ -391,6 +401,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
                   ? "No servers"
                   : `Servers: ${g.servers.join(", ")}`}
               </p>
+              <ConnectionDetails group={g.name} connection={g.connection} />
             </li>
           ))}
         </ul>
@@ -544,7 +555,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
               class="btn"
               disabled={busy}
               data-testid="groups-cancel"
-              onClick={closeEditor}
+              onClick={() => closeEditor()}
             >
               Close
             </button>
@@ -592,5 +603,106 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
         onCancel={() => setDeleteTarget(null)}
       />
     </section>
+  );
+}
+
+// CopyRow renders a labelled read-only value with a copy-to-clipboard button.
+// The value is the operator's own loopback bearer / endpoint metadata, surfaced
+// in the same-origin GUI by design (B4) so the operator can wire a client.
+function CopyRow({
+  label,
+  value,
+  testId,
+}: {
+  label: string;
+  value: string;
+  testId: string;
+}): preact.JSX.Element {
+  const [copied, setCopied] = useState(false);
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable (insecure context / denied) — the value is still
+      // visible + selectable in the <code> block, so this is a non-fatal
+      // convenience failure.
+    }
+  }
+  return (
+    <div class="mt-1 flex items-center gap-2">
+      <span class="text-xs text-app-muted" style="min-width: 5.5rem">{label}</span>
+      <code
+        class="flex-1 overflow-x-auto whitespace-nowrap text-xs text-app-text"
+        data-testid={testId}
+      >
+        {value}
+      </code>
+      <button
+        type="button"
+        class="btn text-xs"
+        data-testid={`${testId}-copy`}
+        onClick={() => void copy()}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
+// ConnectionDetails renders the copy-pasteable /g/<group>/mcp connection triple
+// for a group (B4). When the hub is live + primed it shows the URL plus the two
+// required headers (X-Mcphub-Hub-Token, X-Mcphub-Instance-Id) as copyable
+// fields; otherwise it shows the backend's hint (start the hub) instead of a
+// dead URL. It also carries the tools_hidden NOT-a-security-boundary disclaimer
+// (B5 + consultant) so an operator never mistakes a group for an access fence.
+function ConnectionDetails({
+  group,
+  connection,
+}: {
+  group: string;
+  connection?: GroupConnectionDTO;
+}): preact.JSX.Element | null {
+  if (!connection) return null;
+  return (
+    <div class="mt-2 border-t border-app-border/40 pt-2" data-testid={`groups-connection-${group}`}>
+      {connection.available ? (
+        <>
+          <p class="m-0 mb-1 text-xs font-medium text-app-text">
+            Point a client at this group:
+          </p>
+          <CopyRow label="URL" value={connection.url ?? ""} testId={`groups-conn-url-${group}`} />
+          <CopyRow
+            label="Hub token"
+            value={connection.token ?? ""}
+            testId={`groups-conn-token-${group}`}
+          />
+          <CopyRow
+            label="Instance ID"
+            value={connection.instance_id ?? ""}
+            testId={`groups-conn-instance-${group}`}
+          />
+          <p class="m-0 mt-1 text-xs text-app-muted">
+            Send the token as <code>X-Mcphub-Hub-Token</code> and the instance ID
+            as <code>X-Mcphub-Instance-Id</code>. localhost only.
+          </p>
+        </>
+      ) : (
+        <p
+          class="m-0 text-xs text-app-muted"
+          data-testid={`groups-connection-hint-${group}`}
+          role="status"
+        >
+          {connection.hint ?? "The aggregated hub is not running."}
+        </p>
+      )}
+      <p class="m-0 mt-2 text-xs text-app-muted">
+        <strong>Note:</strong> hiding tools reduces the surface exposed at the
+        hub; it is <strong>not</strong> an access-control boundary — daemon ports
+        stay directly reachable, and at gate-OFF the hub filter is not in the
+        path. Filter changes apply to new client sessions (reconnect to apply).
+      </p>
+    </div>
   );
 }
