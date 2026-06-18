@@ -517,3 +517,32 @@ path are all explicit. No implementation code is included.
 **Gate decision: PASS** — design is decision-ready; promotion of this
 `status: proposed` decision to `accepted` is the `architecture-reviewer`
 gate's call after the operator answers the open questions above.
+
+---
+
+## Phase 3 diagnostic finding (2026-06-18) — Defect A operationally CONFIRMED
+
+Code-traced (read-only, pre-implementation per the diagnostic-first gate): the
+`ResolverSnapshot` publish path (`PublishResolverSnapshot`/`BumpResolverOnManifestChange`,
+hub_mcp_resolver.go:90/169) has **ZERO production callers** — only test files publish it
+(hub_mcp_{aggregator,resolver,scope_characterization}_test.go). `startHubMcpListener`
+(internal/gui/hub_listener.go:132) and `BindHubMcpListener` (hub_mcp_bind.go:81) do NOT
+publish on startup. `IntendedParticipants` is set at exactly ONE site (hub_mcp_handler.go:602)
+inside `if snap != nil` — and `snap` is always nil in prod (handler.go:584
+`LoadResolverSnapshot()`).
+
+**Operational impact:** in gate-ON hub-aggregate mode, every session gets EMPTY
+`IntendedParticipants` → `AggregateInitialize` fans out to nothing → the aggregate exposes
+no tools. **The gate-ON hub aggregate is effectively dormant/non-functional in production.**
+NOT currently impacting the operator: gate-ON is OFF in the live config (no
+`hub_endpoint_enabled` key in gui-preferences.yaml), and at gate-OFF `startHubMcpListener`
+short-circuits at line 133 (`enabled=false`) so the listener never runs and the snapshot
+reads never happen. The hub aggregate's manual-publish unit tests masked this prod gap.
+
+**Implication for groups Phase 3:** wiring the publish choke point (build snapshot from
+manifests + `PublishResolverSnapshot` on hub-listener startup + on manifest change while
+gate-ON) is (a) the groups prerequisite, (b) the fix for the dormant gate-ON aggregate, and
+(c) INERT for the operator's current gate-OFF setup (the listener isn't running, so a
+published snapshot is read by no one). Lower risk than a generic live-request-path change.
+Still tests-first + a gate-ON integration test that exercises the REAL publish path (not the
+manual-publish test fixtures) before this lands.
