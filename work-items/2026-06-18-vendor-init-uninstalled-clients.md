@@ -2,6 +2,7 @@
 
 Date: 2026-06-18 (user: "инициализация не везде доступна при чистой установке")
 Status: design — implement as a security-reviewed lane (codex/security review loop)
+Epic: 2026-06-17-gui-quality-initiative
 
 ## Symptom (user-confirmed)
 On a clean install, the Servers-matrix **Initialize** affordance is NOT shown for
