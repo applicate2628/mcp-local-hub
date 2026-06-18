@@ -3,12 +3,43 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
 )
+
+// TestWriteAPIErrorRedacted_HidesRawPathKeepsCode pins the G16 P2 contract
+// for the central redaction helper: the response body must NOT echo the
+// raw err.Error() (which can embed the operator's absolute home path —
+// C:\Users\<name>\... — revealing the AD username on corp hosts), but MUST
+// still carry the stable, code-keyed signal the frontend switches on.
+func TestWriteAPIErrorRedacted_HidesRawPathKeepsCode(t *testing.T) {
+	leaky := errors.New("open C:\\Users\\alice\\AppData\\Local\\mcp-local-hub\\supervisor-intent.json: permission denied")
+	rec := httptest.NewRecorder()
+	writeAPIErrorRedacted(rec, leaky, http.StatusInternalServerError, "STATE_READ_FAILED", "/api/test")
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "C:\\Users\\alice") || strings.Contains(body, "permission denied") {
+		t.Errorf("response body leaks filesystem path or raw error: %q", body)
+	}
+	var out struct{ Error, Code string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Error != "internal error" {
+		t.Errorf("error=%q, want generic \"internal error\"", out.Error)
+	}
+	if out.Code != "STATE_READ_FAILED" {
+		t.Errorf("code=%q, want STATE_READ_FAILED (stable code preserved)", out.Code)
+	}
+}
 
 type fakeScanner struct {
 	result *api.ScanResult

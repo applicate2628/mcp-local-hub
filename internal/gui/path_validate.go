@@ -22,6 +22,7 @@
 package gui
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -116,8 +117,13 @@ func (s *Server) pathValidateHandler(w http.ResponseWriter, r *http.Request) {
 		// A real stat failure (permission denied, path-too-long, etc.).
 		// Still 200 with exists:false, but surface the reason so the UI
 		// can distinguish "not found" from "could not check". os.Stat
-		// already includes the path in its error string.
-		resp.Error = err.Error()
+		// includes the absolute path in its error string, which on
+		// corp-managed hosts reveals the operator's home/AD path (G16 P3);
+		// log the raw error server-side and return a stable opaque reason
+		// token so the UI keeps its "could not check" signal without the
+		// path leak.
+		log.Printf("/api/path/validate stat failed: %v", err)
+		resp.Error = "could not check path"
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

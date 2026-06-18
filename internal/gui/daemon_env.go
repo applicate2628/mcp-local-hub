@@ -118,7 +118,10 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 	// write to avoid accumulating orphan overlay rows.
 	intent, err := loadCurrentSupervisorIntent()
 	if err != nil {
-		writeAPIError(w, fmt.Errorf("read supervisor-intent.json: %w", err), http.StatusInternalServerError, "STATE_READ_FAILED")
+		// The read wraps an *os.PathError embedding the absolute
+		// supervisor-intent.json path; log server-side + return a stable
+		// opaque message (G16 P2).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_READ_FAILED", "/api/daemon/env read supervisor-intent.json")
 		return
 	}
 	if !intentContainsTask(intent, taskName) {
@@ -173,7 +176,10 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 		ov.Daemons[taskName] = row
 		return nil
 	}); err != nil {
-		writeAPIError(w, fmt.Errorf("write overlay: %w", err), http.StatusInternalServerError, "OVERLAY_WRITE_FAILED")
+		// The overlay write wraps an *os.PathError embedding the absolute
+		// overlay-file path; log server-side + return a stable opaque
+		// message (G16 P2).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "OVERLAY_WRITE_FAILED", "/api/daemon/env write overlay")
 		return
 	}
 
@@ -201,7 +207,10 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	intent, err := loadCurrentSupervisorIntent()
 	if err != nil {
-		writeAPIError(w, fmt.Errorf("read supervisor-intent.json: %w", err), http.StatusInternalServerError, "STATE_READ_FAILED")
+		// The read wraps an *os.PathError embedding the absolute
+		// supervisor-intent.json path; log server-side + return a stable
+		// opaque message (G16 P2).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_READ_FAILED", "/api/daemon/env list read supervisor-intent.json")
 		return
 	}
 	if taskFilter != "" && !intentContainsTask(intent, taskFilter) {
@@ -216,7 +225,10 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ov, err := daemon_env_overlay.Load(overlayPath)
 	if err != nil {
-		writeAPIError(w, fmt.Errorf("load overlay: %w", err), http.StatusInternalServerError, "OVERLAY_READ_FAILED")
+		// The overlay load wraps an *os.PathError embedding the absolute
+		// overlay-file path; log server-side + return a stable opaque
+		// message (G16 P2).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "OVERLAY_READ_FAILED", "/api/daemon/env list load overlay")
 		return
 	}
 	rows := make([]daemonEnvListRow, 0, len(intent.Daemons))
@@ -285,7 +297,10 @@ func (s *Server) discoveryRefreshHandler(w http.ResponseWriter, r *http.Request)
 
 	manifests, err := s.loadAllManifestsForOverlay()
 	if err != nil {
-		writeAPIError(w, fmt.Errorf("load manifests: %w", err), http.StatusInternalServerError, "MANIFEST_LOAD_FAILED")
+		// The manifest load wraps an *os.PathError embedding the absolute
+		// manifest dir; log server-side + return a stable opaque message
+		// (G16 P2).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "MANIFEST_LOAD_FAILED", "/api/discovery/refresh load manifests")
 		return
 	}
 	overlayPath, err := resolveOverlayPath()
@@ -297,7 +312,10 @@ func (s *Server) discoveryRefreshHandler(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	if err := seedOverlayFromDiscoveryViaGUI(ctx, manifests, overlayPath); err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "DISCOVERY_FAILED")
+		// The discovery seed wraps an *os.PathError embedding the absolute
+		// overlay-file path; log server-side + return a stable opaque
+		// message (G16 P2).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "DISCOVERY_FAILED", "/api/discovery/refresh seed overlay")
 		return
 	}
 

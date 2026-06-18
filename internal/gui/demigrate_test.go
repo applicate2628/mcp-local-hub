@@ -153,8 +153,14 @@ func TestDemigrateHandler_NilReportTreatedAsEmpty(t *testing.T) {
 	}
 }
 
+// TestDemigrateHandler_SurfacesDemigrateError pins the redacted 500
+// envelope (G16 P2): the setup-level error can wrap an *os.PathError
+// embedding the operator's absolute home path, so the client body carries
+// ONLY the stable code + a generic "internal error" message — never the
+// raw err.Error().
 func TestDemigrateHandler_SurfacesDemigrateError(t *testing.T) {
-	fake := &fakeDemigrater{err: errStub("boom")}
+	leaky := errStub("open C:\\Users\\alice\\AppData\\Local\\mcp-local-hub\\manifests\\demo: permission denied")
+	fake := &fakeDemigrater{err: leaky}
 	s := NewServer(Config{Port: 0})
 	s.demigrater = fake
 	body := bytes.NewReader([]byte(`{"servers":["memory"]}`))
@@ -166,10 +172,14 @@ func TestDemigrateHandler_SurfacesDemigrateError(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("want 500, got %d", w.Code)
 	}
+	rawBody := w.Body.String()
+	if strings.Contains(rawBody, "C:\\Users\\alice") || strings.Contains(rawBody, "permission denied") {
+		t.Errorf("response body leaks filesystem path or raw error: %q", rawBody)
+	}
 	var body2 struct{ Error, Code string }
 	_ = json.Unmarshal(w.Body.Bytes(), &body2)
-	if !strings.Contains(body2.Error, "boom") {
-		t.Errorf("error=%q, want contains boom", body2.Error)
+	if body2.Error != "internal error" {
+		t.Errorf("error=%q, want generic \"internal error\"", body2.Error)
 	}
 	if body2.Code != "DEMIGRATE_FAILED" {
 		t.Errorf("code=%q, want DEMIGRATE_FAILED", body2.Code)

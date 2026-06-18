@@ -39,8 +39,11 @@ func registerMigrateRoutes(s *Server) {
 		report, err := s.migrator.Migrate(req.Servers, req.Clients)
 		if err != nil {
 			// Setup-level failure (e.g., manifest load failed for every
-			// requested server). No per-row data to surface; 500.
-			writeAPIError(w, err, http.StatusInternalServerError, "MIGRATE_FAILED")
+			// requested server). No per-row data to surface; 500. The
+			// setup error can wrap an *os.PathError embedding the operator's
+			// absolute home path, so log server-side + return a stable
+			// opaque message (G16 P2).
+			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "MIGRATE_FAILED", "/api/migrate")
 			return
 		}
 		// Defensive: a nil report on nil error is treated as an empty

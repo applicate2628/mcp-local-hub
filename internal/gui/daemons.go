@@ -4,6 +4,7 @@ package gui
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -22,6 +23,24 @@ func registerDaemonsRoutes(s *Server) {
 		s.requireSameOrigin(s.weeklyRefreshMembershipHandler))
 	s.mux.HandleFunc("/api/daemons/weekly-schedule",
 		s.requireSameOrigin(s.weeklyScheduleHandler))
+}
+
+// writeRegistryError is the leak-safe sibling of writeJSON for the
+// daemons.go registry/membership 500-class sites, whose backend errors
+// wrap an *os.PathError embedding the absolute registry/lock path (which on
+// corp-managed hosts reveals the operator's AD username — G16 P2). It is
+// the {error, detail}-envelope counterpart of writeAPIErrorRedacted in
+// scan.go: it log.Printf's the raw err + logCtx server-side, then emits a
+// 500 carrying the stable error token plus a fixed opaque `detail` — never
+// err.Error(). errorToken is the stable, code-keyed signal the frontend
+// already switches on ("registry_path", "registry_load",
+// "membership_failed"); only the leaky detail is redacted.
+func writeRegistryError(w http.ResponseWriter, errorToken string, err error, logCtx string) {
+	log.Printf("%s: %v", logCtx, err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{
+		"error":  errorToken,
+		"detail": "internal error",
+	})
 }
 
 // membershipRowDTO is the on-the-wire shape of one row in the weekly-refresh
@@ -65,18 +84,16 @@ func (s *Server) weeklyRefreshMembershipHandler(w http.ResponseWriter, r *http.R
 func (s *Server) weeklyRefreshMembershipList(w http.ResponseWriter, _ *http.Request) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error":  "registry_path",
-			"detail": err.Error(),
-		})
+		// err can embed the absolute LOCALAPPDATA registry path; log
+		// server-side + return a stable opaque detail (G16 P2).
+		writeRegistryError(w, "registry_path", err, "/api/daemons/weekly-refresh-membership GET registry path")
 		return
 	}
 	reg := api.NewRegistry(regPath)
 	if err := reg.Load(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error":  "registry_load",
-			"detail": err.Error(),
-		})
+		// reg.Load wraps an *os.PathError embedding the absolute registry
+		// path; log server-side + return a stable opaque detail (G16 P2).
+		writeRegistryError(w, "registry_load", err, "/api/daemons/weekly-refresh-membership GET registry load")
 		return
 	}
 	// B.1: the weekly-refresh membership table is LSP-only; serena
@@ -113,10 +130,9 @@ func (s *Server) weeklyRefreshMembershipPut(w http.ResponseWriter, r *http.Reque
 	}
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error":  "registry_path",
-			"detail": err.Error(),
-		})
+		// err can embed the absolute LOCALAPPDATA registry path; log
+		// server-side + return a stable opaque detail (G16 P2).
+		writeRegistryError(w, "registry_path", err, "/api/daemons/weekly-refresh-membership PUT registry path")
 		return
 	}
 	updated, err := api.UpdateWeeklyRefreshMembership(regPath, body)
@@ -127,6 +143,16 @@ func (s *Server) weeklyRefreshMembershipPut(w http.ResponseWriter, r *http.Reque
 			strings.HasPrefix(err.Error(), "load registry") ||
 			strings.HasPrefix(err.Error(), "acquire lock") {
 			status = http.StatusInternalServerError
+		}
+		if status == http.StatusInternalServerError {
+			// Storage errors (save/load registry, acquire lock) wrap an
+			// *os.PathError embedding the absolute registry/lock path; log
+			// server-side + return a stable opaque detail (G16 P2). The
+			// 400 validation branch below keeps its client-facing
+			// "unknown pair" detail — that is an intentional caller signal,
+			// not a path leak.
+			writeRegistryError(w, "membership_failed", err, "/api/daemons/weekly-refresh-membership PUT update membership")
+			return
 		}
 		writeJSON(w, status, map[string]string{
 			"error":  "membership_failed",

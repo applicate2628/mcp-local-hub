@@ -3,6 +3,7 @@ package gui
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"mcp-local-hub/internal/api"
@@ -51,6 +52,32 @@ func writeAPIError(w http.ResponseWriter, err error, status int, code string) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error": err.Error(),
+		"code":  code,
+	})
+}
+
+// writeAPIErrorRedacted is the leak-safe sibling of writeAPIError for
+// 500-class sites whose err may wrap an *os.PathError embedding the
+// operator's absolute home path (C:\Users\<name>\...), which on
+// corp-managed hosts reveals the AD username (G16 P2). It centralizes the
+// log-server-side + stable-opaque-client-message pattern the manifest.go
+// and marketplace_install.go handlers already apply inline:
+//
+//   - The raw err (with logCtx for routing) is written to the server log
+//     so operators can still diagnose from the host.
+//   - The client receives ONLY the stable, code-keyed `code` and a fixed
+//     generic "internal error" message — never err.Error().
+//
+// logCtx is the route/operation tag (e.g. "/api/demigrate") prepended to
+// the server-side log line so the leaky error stays diagnosable without
+// reaching the wire. Use this instead of writeAPIError at any 500-class
+// site that forwards a backend error which may carry a filesystem path.
+func writeAPIErrorRedacted(w http.ResponseWriter, err error, status int, code string, logCtx string) {
+	log.Printf("%s: %v", logCtx, err)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": "internal error",
 		"code":  code,
 	})
 }
