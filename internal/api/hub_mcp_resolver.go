@@ -113,59 +113,156 @@ func LoadResolverSnapshot() *ResolverSnapshot {
 // built per-call by the aggregator from per-daemon tools/list
 // responses. The snapshot owns only the binding topology used at
 // initialize fan-out time.
+//
+// This is the groups-free form, preserved byte-identical for every
+// existing caller: it delegates to
+// BuildResolverSnapshotFromManifestsAndGroups with nil groups, which
+// adds NO keys to Bindings — the client (bare-key) path is untouched.
 func BuildResolverSnapshotFromManifests(manifests []config.ServerManifest) *ResolverSnapshot {
+	return BuildResolverSnapshotFromManifestsAndGroups(manifests, nil)
+}
+
+// BuildResolverSnapshotFromManifestsAndGroups builds a fresh
+// ResolverSnapshot carrying BOTH per-client bindings (bare-key, from each
+// manifest's ClientBindings) AND per-group bindings (kind-namespaced
+// "g:<group>" key, from the supplied groups). The dispatch path cannot
+// tell the two apart — both are entries in the shared Bindings map keyed
+// by an opaque scope string (groups/namespaces Phase 4a).
+//
+// Group resolution (groups/namespaces decision §"Config model"): each
+// group names member SERVERS (Group.Servers, matching ServerManifest.Name);
+// every daemon of each named server is added as a canonicalDaemonRef under
+// the group's scope key. A group naming a server with NO live manifest /
+// daemon degrades to a skipped binding — never a fault (mirrors the
+// missing-daemon-port defensive skip in the client path). The (scopeKey,
+// ref) dedupe spans BOTH sources so a server bound to two groups, or a
+// repeated member, never fans the same daemon out twice.
+//
+// Kind-namespacing makes a group and a client of the same name produce
+// DISJOINT keys ("g:frontend" vs "frontend"), so they can never collide
+// in Bindings by construction (operator decision 2).
+func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManifest, groups []Group) *ResolverSnapshot {
 	gen := resolverGen.Add(1)
 	snap := &ResolverSnapshot{
 		Gen:      gen,
 		Bindings: make(map[string][]canonicalDaemonRef),
 	}
-	// codex bot r10 P2 closure on PR #157: dedupe (client, ref) pairs
+	// codex bot r10 P2 closure on PR #157: dedupe (scopeKey, ref) pairs
 	// so a manifest that accidentally repeats a ClientBinding row (no
 	// uniqueness check in validation yet) cannot make AggregateInitialize
 	// fan-out the same daemon twice. Duplicate fan-outs both write to
 	// the same InitSuccesses key, leaving one daemon session orphaned
-	// (and the other un-tracked for cancellation / cleanup).
+	// (and the other un-tracked for cancellation / cleanup). The same
+	// dedupe now also covers the group path (a server named by two
+	// groups, or twice by one group).
 	type seenKey struct {
-		Client string
-		Ref    canonicalDaemonRef
+		ScopeKey string
+		Ref      canonicalDaemonRef
 	}
 	seen := make(map[seenKey]bool)
-	for _, m := range manifests {
-		// Index daemons by name so we can resolve port via
-		// ClientBinding.Daemon.
-		daemonPort := make(map[string]int, len(m.Daemons))
-		for _, d := range m.Daemons {
-			daemonPort[d.Name] = d.Port
+	add := func(scopeKey string, ref canonicalDaemonRef) {
+		key := seenKey{ScopeKey: scopeKey, Ref: ref}
+		if seen[key] {
+			return
 		}
+		seen[key] = true
+		snap.Bindings[scopeKey] = append(snap.Bindings[scopeKey], ref)
+	}
+
+	// Per-server daemon index, reused by BOTH the client-binding path
+	// (resolve ClientBinding.Daemon → port) and the group path (resolve
+	// a member server → all its daemons).
+	type serverDaemons struct {
+		// portByDaemon resolves a daemon name to its port.
+		portByDaemon map[string]int
+		// refs are all canonicalDaemonRefs for this server, in manifest
+		// daemon order — the group binding set for a member server.
+		refs []canonicalDaemonRef
+	}
+	byServer := make(map[string]serverDaemons, len(manifests))
+	for _, m := range manifests {
+		sd := serverDaemons{
+			portByDaemon: make(map[string]int, len(m.Daemons)),
+			refs:         make([]canonicalDaemonRef, 0, len(m.Daemons)),
+		}
+		for _, d := range m.Daemons {
+			sd.portByDaemon[d.Name] = d.Port
+			sd.refs = append(sd.refs, canonicalDaemonRef{
+				Server: m.Name,
+				Daemon: d.Name,
+				Port:   d.Port,
+			})
+		}
+		byServer[m.Name] = sd
+	}
+
+	// Client path — UNCHANGED behavior: bare-<client> scope keys from
+	// each manifest's ClientBindings. Resolve ClientBinding.Daemon → port
+	// via the per-server index built above.
+	for _, m := range manifests {
+		sd := byServer[m.Name]
 		for _, b := range m.ClientBindings {
 			if b.Client == "" || b.Daemon == "" {
 				continue
 			}
-			port, ok := daemonPort[b.Daemon]
+			port, ok := sd.portByDaemon[b.Daemon]
 			if !ok {
 				// Manifest validation should catch this at parse
 				// time. Defensive skip rather than panic.
 				continue
 			}
-			ref := canonicalDaemonRef{
+			add(b.Client, canonicalDaemonRef{
 				Server: m.Name,
 				Daemon: b.Daemon,
 				Port:   port,
-			}
-			key := seenKey{Client: b.Client, Ref: ref}
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			snap.Bindings[b.Client] = append(snap.Bindings[b.Client], ref)
+			})
 		}
 	}
+
+	// Group path — ADDITIVE, kind-namespaced "g:<group>" scope keys. A
+	// group binds every daemon of each member server. A member server
+	// with no manifest (byServer miss) or no daemons degrades to a
+	// skipped binding so a stale / bad group config never faults the
+	// snapshot (decision claim 5).
+	for _, g := range groups {
+		if validateGroupName(g.Name) != nil {
+			// LoadGroups rejects bad names at parse time; this guards a
+			// programmatically-constructed group. A bad name must not
+			// reach the scope keyspace.
+			continue
+		}
+		scopeKey := GroupScopeKey(g.Name)
+		for _, server := range g.Servers {
+			sd, ok := byServer[server]
+			if !ok {
+				// Group names a server with no live manifest/daemon —
+				// skip (validation warning surfaced in the GUI in a
+				// later phase; never a hub-start fault here).
+				continue
+			}
+			for _, ref := range sd.refs {
+				add(scopeKey, ref)
+			}
+		}
+	}
+
 	return snap
 }
 
 // BumpResolverOnManifestChange rebuilds + publishes a fresh snapshot
 // from the supplied manifests. Convenience wrapper called by the
-// install reconciler (Phase 5) and manifest-mutating callers.
+// install reconciler (Phase 5) and manifest-mutating callers. Groups-free
+// (nil groups) — see BumpResolverOnConfigChange for the groups-aware form.
 func BumpResolverOnManifestChange(manifests []config.ServerManifest) {
 	PublishResolverSnapshot(BuildResolverSnapshotFromManifests(manifests))
+}
+
+// BumpResolverOnConfigChange rebuilds + publishes a fresh snapshot from
+// BOTH manifests (client bindings) AND groups (kind-namespaced group
+// bindings). This is the groups-aware build+publish convenience wrapper
+// the gate-ON hub-listener publish choke point uses (groups/namespaces
+// Phase 4a). With nil/empty groups it is byte-equivalent to
+// BumpResolverOnManifestChange.
+func BumpResolverOnConfigChange(manifests []config.ServerManifest, groups []Group) {
+	PublishResolverSnapshot(BuildResolverSnapshotFromManifestsAndGroups(manifests, groups))
 }

@@ -83,8 +83,34 @@ func EnsureHubTokens(clients []string) (HubTokenTable, error) {
 	return ensureHubTokensLocked(clients)
 }
 
+// EnsureGroupTokens ensures a per-group hub-token row exists for each
+// supplied group scope key ("g:<group>", from GroupScopeKeys) and returns
+// the post-mutation snapshot. It is the §D auth seam wired loopback-only
+// (operator decision 1): a group row gets the SAME generated-token
+// treatment a client row gets — present in the table, keyed by the
+// kind-namespaced scope string — so ConstantTimeCompareToken (already
+// keyed on the opaque scope string) is kind-agnostic. Phase 4a builds NO
+// real bearer-key auth; the row's presence IS the seam.
+//
+// Because group scope keys carry the "g:" prefix and client keys are
+// bare, the two never collide in tbl.Tokens by construction — passing a
+// group key here can never overwrite a client row and vice-versa.
+//
+// Existing rows are never rotated (same contract as EnsureHubTokens).
+func EnsureGroupTokens(groupKeys []string) (HubTokenTable, error) {
+	lk, err := acquireHubMcpLock()
+	if err != nil {
+		return HubTokenTable{}, err
+	}
+	defer func() { _ = lk.Unlock() }()
+	return ensureHubTokensLocked(groupKeys)
+}
+
 // ensureHubTokensLocked is the in-flock half. Caller MUST already
-// hold hub-mcp.lock.
+// hold hub-mcp.lock. The supplied list is a set of SCOPE KEYS — bare
+// client ids from EnsureHubTokens, or kind-namespaced "g:<group>" keys
+// from EnsureGroupTokens. The function is kind-agnostic: it generates a
+// token for every key not already present and preserves existing rows.
 func ensureHubTokensLocked(clients []string) (HubTokenTable, error) {
 	tbl, err := loadHubTokensLocked()
 	if err != nil && !isHubMcpStateMissingErr(err) {

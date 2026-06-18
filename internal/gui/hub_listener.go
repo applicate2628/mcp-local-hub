@@ -527,9 +527,42 @@ func publishResolverSnapshotForHubBind(a *api.API) error {
 		}
 		manifests = append(manifests, *m)
 	}
-	// BumpResolverOnManifestChange builds + atomically publishes a fresh
-	// snapshot from the manifest set (client_bindings → Bindings[client]).
-	api.BumpResolverOnManifestChange(manifests)
+	// Groups/namespaces Phase 4a (DATA layer): fold groups.yaml into the
+	// SAME published snapshot under kind-namespaced "g:<group>" keys, and
+	// ensure a per-group hub-token row (loopback-only — the §D auth seam).
+	//
+	// A bad / unreadable groups.yaml must NEVER fault the client snapshot
+	// publish (additive-by-omission, decision claim 5): a load error
+	// degrades to "no groups" with a structured warn, so the bare-<client>
+	// bindings still publish exactly as before. This keeps the feature
+	// provably inert for every existing client path — a host with no
+	// groups.yaml (or a malformed one) gets byte-identical client routing.
+	cfg, gerr := api.LoadGroups()
+	if gerr != nil {
+		_ = api.LogHubMcpEvent("warn", "groups-config-load-failed", map[string]any{
+			"err": gerr.Error(),
+		})
+		cfg = api.GroupsConfig{}
+	}
+
+	// Ensure a per-group token row for each "g:<group>" scope key. Group
+	// keys carry the "g:" prefix so they can never collide with the bare
+	// client rows. A token-ensure failure is non-fatal to routing (the
+	// row is the inert §D seam, read by nobody in Phase 4a) — log + carry
+	// on so a token-table hiccup cannot suppress the snapshot publish.
+	if groupKeys := api.GroupScopeKeys(cfg.Groups); len(groupKeys) > 0 {
+		if _, terr := api.EnsureGroupTokens(groupKeys); terr != nil {
+			_ = api.LogHubMcpEvent("warn", "group-tokens-ensure-failed", map[string]any{
+				"err": terr.Error(),
+			})
+		}
+	}
+
+	// BumpResolverOnConfigChange builds + atomically publishes a fresh
+	// snapshot from BOTH the manifest set (client_bindings → Bindings[client])
+	// AND the groups (servers → Bindings["g:"+group]). With no groups it is
+	// byte-equivalent to the prior BumpResolverOnManifestChange call.
+	api.BumpResolverOnConfigChange(manifests, cfg.Groups)
 	return nil
 }
 
