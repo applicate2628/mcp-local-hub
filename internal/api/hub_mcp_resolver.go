@@ -32,6 +32,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 
@@ -277,6 +278,20 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 		}
 		snap.Groups[scopeKey] = true
 		for _, server := range g.Servers {
+			// R4-1 (bot R4): a per-session server (scan.go marks it
+			// CanMigrate=false — it MUST stay 1-per-local-client, never folded
+			// into a shared hub route) must NOT contribute group bindings even
+			// if a hand-edited groups.yaml names it. The RoutableServerNames
+			// authoring gate already excludes these, so this is defense for a
+			// config that bypassed the GUI. Skip with a structured warn so the
+			// drop is observable (mirrors the byServer-miss skip below).
+			if perSessionServers[server] {
+				_ = LogHubMcpEvent("warn", "group-member-per-session-skipped", map[string]any{
+					"group":  g.Name,
+					"server": server,
+				})
+				continue
+			}
 			sd, ok := byServer[server]
 			if !ok {
 				// Group names a server with no live manifest/daemon —
@@ -337,13 +352,31 @@ func BumpResolverOnConfigChange(manifests []config.ServerManifest, groups []Grou
 }
 
 // PublishGroupsSnapshotLocked is the LOCK-SERIALIZED groups-aware publish span
-// (P3-2, opus-arch). It reads groups.yaml, ensures the per-group token rows,
-// and publishes the merged snapshot — all under ONE held hub-mcp.lock — so a
-// concurrent GUI groups mutation can never make this read an intermediate
-// groups.yaml and publish a torn topology. The supplied `manifests` are read
-// OUTSIDE this lock by the caller (manifests are not part of the groups
-// race and were never under hub-mcp.lock); only the groups read→ensure→publish
-// span needs serializing.
+// (P3-2, opus-arch). It SCANS the manifests, reads groups.yaml, ensures the
+// per-group token rows, and publishes the merged snapshot — all under ONE held
+// hub-mcp.lock — so a concurrent GUI groups OR manifest mutation can never make
+// this read an intermediate config and publish a torn / out-of-order topology.
+//
+// R4-3 (bot R4): the manifest scan is now run UNDER the held lock via the
+// supplied `scan` closure rather than passed in pre-scanned from outside. Two
+// concurrent manifest mutations each scan-then-publish; before this change each
+// scanned OUTSIDE the lock, so a late-arriving stale scan could overwrite a
+// newer one (publish ordering decoupled from scan ordering). Scanning under the
+// lock makes scan+publish one atomic critical section: concurrent mutations
+// serialize on the flock and each publishes the LATEST on-disk manifest set, so
+// the last publish always reflects the last write — no stale clobber.
+//
+// CRITICAL (R4-3 deadlock invariant): the `scan` closure MUST NOT itself
+// acquire hub-mcp.lock. The production closure (publishResolverSnapshotForHubBind's
+// a.Scan() + a.ManifestGet/config.ParseManifest loop) reads client config,
+// the workspace registry, process snapshots, and embed-first manifests — none
+// of which touch hub-mcp.lock — so running it under the held lock is safe.
+//
+// R4-4 (bot R4): the flock is acquired via the CONTEXT-AWARE
+// acquireHubMcpLockContext so a stuck sibling holder cannot freeze a caller
+// (GUI startup / shutdown publish path) past its ctx budget; ctx cancellation
+// unwinds the acquisition within ~10 ms (the retry cadence). A nil ctx falls
+// through to the blocking acquire (acquireHubMcpLockContext handles nil).
 //
 // It is the exported entry point the gui-package publish choke point
 // (publishResolverSnapshotForHubBind) calls; the unexported in-flock helpers
@@ -358,18 +391,28 @@ func BumpResolverOnConfigChange(manifests []config.ServerManifest, groups []Grou
 // its lock; the GUI mutation tail runs AFTER ReadModifyWriteGroups released
 // its lock), so acquiring it here is always a fresh, non-nested acquisition.
 //
-// A groups.yaml load error degrades to "no groups" with a structured warn
-// (additive-by-omission, decision claim 5) so the client bindings still
+// A scan error is fatal (returned without publishing) — the caller treats it as
+// non-fatal to the bind/mutation and logs a warn, degrading to the prior
+// snapshot. A groups.yaml load error degrades to "no groups" with a structured
+// warn (additive-by-omission, decision claim 5) so the client bindings still
 // publish — byte-identical client routing for a host with a missing/corrupt
 // groups.yaml. A token-ensure failure is DEFERRED: the snapshot still publishes
 // first (bindings live), then the token error is returned so the caller can
 // surface restart_required (without the row the /g/ route cannot auth).
-func PublishGroupsSnapshotLocked(manifests []config.ServerManifest) error {
-	lk, err := acquireHubMcpLock()
+func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.ServerManifest, error)) error {
+	lk, err := acquireHubMcpLockContext(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = lk.Unlock() }()
+
+	// R4-3: scan UNDER the held lock so scan+publish is one atomic critical
+	// section. A scan failure aborts WITHOUT publishing (no torn snapshot from
+	// a partial scan) and surfaces to the caller.
+	manifests, serr := scan()
+	if serr != nil {
+		return fmt.Errorf("scan manifests under hub-mcp.lock: %w", serr)
+	}
 
 	cfg, gerr := loadGroupsLocked()
 	if gerr != nil {
@@ -393,8 +436,8 @@ func PublishGroupsSnapshotLocked(manifests []config.ServerManifest) error {
 	}
 
 	// In-memory build + atomic publish (no lock taken inside). Held under the
-	// hub-mcp.lock so the cfg read above and this publish are one critical
-	// section — no interleaving mutation can publish a torn read.
+	// hub-mcp.lock so the scan + cfg read above and this publish are one
+	// critical section — no interleaving mutation can publish a torn read.
 	BumpResolverOnConfigChange(manifests, cfg.Groups)
 
 	return tokenEnsureErr

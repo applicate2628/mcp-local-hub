@@ -61,13 +61,32 @@ describe("postManifestCreate", () => {
     vi.restoreAllMocks();
   });
 
-  it("resolves on 204", async () => {
+  it("resolves with restart flags on 200 (R4-2)", async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      status: 204,
-      statusText: "No Content",
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ restart_required: true, hub_live: true }),
     }) as unknown as Response);
-    await expect(postManifestCreate("demo", "name: demo")).resolves.toBeUndefined();
+    await expect(postManifestCreate("demo", "name: demo")).resolves.toEqual({
+      restartRequired: true,
+      hubLive: true,
+    });
+  });
+
+  it("defaults restart flags to false when the success body is empty/missing", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => {
+        throw new Error("no body");
+      },
+    }) as unknown as Response);
+    await expect(postManifestCreate("demo", "name: demo")).resolves.toEqual({
+      restartRequired: false,
+      hubLive: false,
+    });
   });
 
   it("throws with backend error field on non-2xx", async () => {
@@ -84,7 +103,12 @@ describe("postManifestCreate", () => {
     const seen: { body?: string } = {};
     globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       seen.body = init?.body as string;
-      return { ok: true, status: 204, statusText: "No Content" } as unknown as Response;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ restart_required: false, hub_live: false }),
+      } as unknown as Response;
     });
     await postManifestCreate("demo", "name: demo\nkind: global\n");
     expect(JSON.parse(seen.body!)).toEqual({ name: "demo", yaml: "name: demo\nkind: global\n" });
@@ -175,7 +199,19 @@ describe("postManifestEdit", () => {
       json: async () => ({ hash: "new-hash-abc" }),
     }) as unknown as Response);
     const out = await postManifestEdit("demo", "name: demo\n", "old-hash");
-    expect(out).toEqual({ hash: "new-hash-abc" });
+    // R4-2: edit now also carries restart_required/hub_live (default false when
+    // the success body omits them, as this mock does).
+    expect(out).toEqual({ hash: "new-hash-abc", restartRequired: false, hubLive: false });
+  });
+  it("surfaces restart_required from the edit success body (R4-2)", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ hash: "new-hash-xyz", restart_required: true, hub_live: true }),
+    }) as unknown as Response);
+    const out = await postManifestEdit("demo", "name: demo\n", "old-hash");
+    expect(out).toEqual({ hash: "new-hash-xyz", restartRequired: true, hubLive: true });
   });
   it("throws ManifestHashMismatchError on 409 MANIFEST_HASH_MISMATCH", async () => {
     globalThis.fetch = vi.fn(async () => ({

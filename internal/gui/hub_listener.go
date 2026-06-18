@@ -198,7 +198,7 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// behavior that existed before this wiring (empty participants), not a
 	// crash. Surface it as a structured warn so the dormant-aggregate
 	// condition is observable rather than silent.
-	if perr := publishResolverSnapshotForHubBind(a); perr != nil {
+	if perr := publishResolverSnapshotForHubBind(ctx, a); perr != nil {
 		_ = api.LogHubMcpEvent("warn", "resolver-snapshot-publish-failed", map[string]any{
 			"port": port,
 			"err":  perr.Error(),
@@ -510,47 +510,60 @@ func validateParticipatingManifestsForHubBind(a *api.API) error {
 // routine missing-server case. The caller treats the returned error as
 // non-fatal to the bind (logs a warn) so a single bad manifest degrades
 // to the dormant-aggregate behavior, never a failed gui startup.
-func publishResolverSnapshotForHubBind(a *api.API) error {
+func publishResolverSnapshotForHubBind(ctx context.Context, a *api.API) error {
 	if a == nil {
 		return nil
 	}
-	scan, err := a.Scan()
-	if err != nil {
-		return fmt.Errorf("scan manifests: %w", err)
-	}
-	manifests := make([]config.ServerManifest, 0, len(scan.Entries))
-	for _, entry := range scan.Entries {
-		if !entry.ManifestExists {
-			continue
+	// R4-3 (bot R4): the manifest scan is now run UNDER hub-mcp.lock, inside
+	// PublishGroupsSnapshotLocked, via this closure — so scan+publish is one
+	// atomic critical section and concurrent manifest mutations serialize on
+	// the flock, each publishing the LATEST on-disk manifest set (no stale
+	// scan can clobber a newer publish). The closure reads client config, the
+	// workspace registry, process snapshots, and embed-first manifests — NONE
+	// of which acquire hub-mcp.lock — so running it under the held lock is
+	// deadlock-free (verified: a.Scan / a.ManifestGet / config.ParseManifest
+	// have no path to acquireHubMcpLock).
+	scanManifests := func() ([]config.ServerManifest, error) {
+		scan, err := a.Scan()
+		if err != nil {
+			return nil, fmt.Errorf("scan manifests: %w", err)
 		}
-		// Embed-first read, matching validateParticipatingManifestsForHubBind.
-		yamlStr, gerr := a.ManifestGet(entry.Name)
-		if gerr != nil {
-			// Scan-window race (manifest deleted between scan and read) is
-			// benign — skip it. Any other read error is surfaced.
-			if errors.Is(gerr, os.ErrNotExist) {
+		manifests := make([]config.ServerManifest, 0, len(scan.Entries))
+		for _, entry := range scan.Entries {
+			if !entry.ManifestExists {
 				continue
 			}
-			return fmt.Errorf("manifest %q: read: %w", entry.Name, gerr)
+			// Embed-first read, matching validateParticipatingManifestsForHubBind.
+			yamlStr, gerr := a.ManifestGet(entry.Name)
+			if gerr != nil {
+				// Scan-window race (manifest deleted between scan and read) is
+				// benign — skip it. Any other read error is surfaced.
+				if errors.Is(gerr, os.ErrNotExist) {
+					continue
+				}
+				return nil, fmt.Errorf("manifest %q: read: %w", entry.Name, gerr)
+			}
+			m, perr := config.ParseManifest(strings.NewReader(yamlStr))
+			if perr != nil {
+				return nil, fmt.Errorf("manifest %q: parse: %w", entry.Name, perr)
+			}
+			manifests = append(manifests, *m)
 		}
-		m, perr := config.ParseManifest(strings.NewReader(yamlStr))
-		if perr != nil {
-			return fmt.Errorf("manifest %q: parse: %w", entry.Name, perr)
-		}
-		manifests = append(manifests, *m)
+		return manifests, nil
 	}
 	// Groups/namespaces Phase 4a (DATA layer): fold groups.yaml into the
 	// SAME published snapshot under kind-namespaced "g:<group>" keys, and
 	// ensure a per-group hub-token row (loopback-only — the §D auth seam).
 	//
-	// P3-2 (opus-arch): the groups read → token-ensure → publish span is
-	// serialized under ONE held hub-mcp.lock inside PublishGroupsSnapshotLocked
-	// so a concurrent GUI groups mutation can never make this read an
-	// intermediate groups.yaml and publish a torn topology. The manifest scan
-	// above stays OUTSIDE that lock (manifests were never under hub-mcp.lock
-	// and are not part of the groups race). No deadlock: this runs in the
-	// republish phase AFTER any RMW / bind lock was released, and the helper
-	// only calls in-flock ("…Locked") halves that do not re-acquire.
+	// P3-2 (opus-arch) + R4-3/R4-4 (bot R4): the scan → groups read →
+	// token-ensure → publish span is serialized under ONE held hub-mcp.lock
+	// inside PublishGroupsSnapshotLocked so a concurrent GUI groups OR manifest
+	// mutation can never make this read an intermediate config and publish a
+	// torn / out-of-order topology. The flock is acquired ctx-bounded (R4-4) so
+	// a stuck sibling holder cannot freeze GUI startup/shutdown past its budget.
+	// No deadlock: this runs AFTER any RMW / bind lock was released, the scan
+	// closure does not acquire hub-mcp.lock, and the helper only calls in-flock
+	// ("…Locked") halves that do not re-acquire.
 	//
 	// A bad / unreadable groups.yaml must NEVER fault the client snapshot
 	// publish (additive-by-omission, decision claim 5): the helper degrades a
@@ -558,7 +571,7 @@ func publishResolverSnapshotForHubBind(a *api.API) error {
 	// bindings still publish exactly as before. A token-ensure failure is
 	// surfaced (deferred — the snapshot publishes first) so the GUI mutation
 	// tail reports restart_required rather than a false full success.
-	return api.PublishGroupsSnapshotLocked(manifests)
+	return api.PublishGroupsSnapshotLocked(ctx, scanManifests)
 }
 
 // isMissingHubEndpoint is true if err describes a "hub-mcp.endpoint.json

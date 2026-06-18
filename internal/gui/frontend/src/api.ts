@@ -57,19 +57,46 @@ export async function postDismiss(server: string): Promise<void> {
   throw new Error(`/api/dismiss: ${body?.error ?? resp.statusText}`);
 }
 
+// ManifestMutationResult carries the R4-2 (bot R4) restart signal a manifest
+// create / edit returns. restartRequired is true when the durable manifest
+// write committed but the live gate-ON hub's in-place republish failed, so
+// /clients + /g are serving a stale snapshot until the operator restarts the
+// hub. hubLive reports whether the gate-ON hub listener was live at mutation
+// time so the caller can word the restart banner precisely. Both false on a
+// gate-OFF host (nothing to refresh; the next bind re-reads manifests fresh).
+export interface ManifestMutationResult {
+  restartRequired: boolean;
+  hubLive: boolean;
+}
+
 // postManifestCreate writes a new manifest via the A2a GUI pipeline. On
-// success the backend returns 204; any non-2xx is surfaced as a thrown
-// Error carrying the backend's {error} envelope text when present. Callers
-// handle the "already exists" case by inspecting the error message — the
-// backend currently returns "manifest \"<name>\" already exists at ..."
-// verbatim, which is user-friendly enough to show in a banner.
-export async function postManifestCreate(name: string, yaml: string): Promise<void> {
+// success the backend returns 200 with {restart_required, hub_live} (R4-2 —
+// was 204); any non-2xx is surfaced as a thrown Error carrying the backend's
+// {error} envelope text when present. Callers handle the "already exists" case
+// by inspecting the error message — the backend currently returns "manifest
+// \"<name>\" already exists at ..." verbatim, which is user-friendly enough to
+// show in a banner.
+export async function postManifestCreate(
+  name: string,
+  yaml: string,
+): Promise<ManifestMutationResult> {
   const resp = await fetch("/api/manifest/create", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, yaml }),
   });
-  if (resp.status === 204) return;
+  if (resp.ok) {
+    // Tolerate a missing/empty body (older 204 backend or empty 200) by
+    // defaulting both flags to false — a gate-OFF host's shape.
+    const payload = (await resp.json().catch(() => ({}))) as {
+      restart_required?: boolean;
+      hub_live?: boolean;
+    };
+    return {
+      restartRequired: payload.restart_required ?? false,
+      hubLive: payload.hub_live ?? false,
+    };
+  }
   let body: { error?: string } | null = null;
   try {
     body = (await resp.json()) as { error?: string };
@@ -560,14 +587,18 @@ export async function postManifestEdit(
   name: string,
   yaml: string,
   expectedHash: string,
-): Promise<{ hash: string }> {
+): Promise<{ hash: string } & ManifestMutationResult> {
   const resp = await fetch("/api/manifest/edit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, yaml, expected_hash: expectedHash }),
   });
   if (resp.ok) {
-    const payload = (await resp.json()) as { hash?: string };
+    const payload = (await resp.json()) as {
+      hash?: string;
+      restart_required?: boolean;
+      hub_live?: boolean;
+    };
     // R3 correction: reject malformed success (empty/missing hash).
     // An empty returned hash would become loadedHash, and the next
     // edit call would send expected_hash="" — which the backend treats
@@ -576,7 +607,13 @@ export async function postManifestEdit(
     if (!payload.hash) {
       throw new Error("/api/manifest/edit: success response missing hash field");
     }
-    return { hash: payload.hash };
+    // R4-2: also carry the restart signal so a gate-ON in-place republish
+    // failure surfaces a "restart hub to apply" banner.
+    return {
+      hash: payload.hash,
+      restartRequired: payload.restart_required ?? false,
+      hubLive: payload.hub_live ?? false,
+    };
   }
   let body: { error?: string; code?: string } | null = null;
   try {

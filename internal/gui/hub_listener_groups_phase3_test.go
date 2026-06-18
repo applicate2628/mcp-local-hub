@@ -87,7 +87,7 @@ func TestGroupsPhase3_PublishSeamPopulatesSnapshotFromManifests(t *testing.T) {
 	resetResolverSnapshot(t)
 
 	a := api.NewAPI()
-	if err := publishResolverSnapshotForHubBind(a); err != nil {
+	if err := publishResolverSnapshotForHubBind(context.Background(), a); err != nil {
 		t.Fatalf("publishResolverSnapshotForHubBind: %v", err)
 	}
 

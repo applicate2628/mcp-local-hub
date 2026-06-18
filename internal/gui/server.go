@@ -513,7 +513,7 @@ type Server struct {
 	// package-level var) so concurrent tests can't race a shared global and so
 	// the seam is owned by the Server it belongs to (mirrors swapForRoute /
 	// probeForRoute above).
-	groupsRepublishFn func(a *api.API) error
+	groupsRepublishFn func(ctx context.Context, a *api.API) error
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real

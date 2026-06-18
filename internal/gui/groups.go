@@ -48,6 +48,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -129,15 +130,19 @@ func (realGroupsAPI) GroupToken(group string) (string, bool) {
 }
 
 // republishGroupsSnapshot drives the live hub-snapshot re-publish after a
-// groups.yaml mutation. The re-publish seam is the per-Server
+// groups.yaml (or manifest) mutation. The re-publish seam is the per-Server
 // s.groupsRepublishFn field (a test fake when set); production leaves it nil
-// and calls publishResolverSnapshotForHubBind(s.api) directly — the same
+// and calls publishResolverSnapshotForHubBind(ctx, s.api) directly — the same
 // choke point startHubMcpListener uses at gate-ON bind.
-func (s *Server) republishGroupsSnapshot() error {
+//
+// ctx is the request context (R4-4): it bounds the ctx-aware hub-mcp.lock
+// acquisition inside PublishGroupsSnapshotLocked so a stuck sibling holder
+// cannot freeze the HTTP handler past the request lifetime.
+func (s *Server) republishGroupsSnapshot(ctx context.Context) error {
 	if s.groupsRepublishFn != nil {
-		return s.groupsRepublishFn(s.api)
+		return s.groupsRepublishFn(ctx, s.api)
 	}
-	return publishResolverSnapshotForHubBind(s.api)
+	return publishResolverSnapshotForHubBind(ctx, s.api)
 }
 
 func registerGroupsRoutes(s *Server) {
@@ -392,7 +397,7 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dto := groupToDTO(updated)
-	s.writeGroupMutation(w, &dto)
+	s.writeGroupMutation(r.Context(), w, &dto)
 }
 
 // groupsDelete handles DELETE /api/groups?name=<name> — remove one group;
@@ -447,11 +452,11 @@ func (s *Server) groupsDelete(w http.ResponseWriter, r *http.Request) {
 			"group": name,
 			"err":   err.Error(),
 		})
-		s.writeGroupMutationForceRestart(w, nil)
+		s.writeGroupMutationForceRestart(r.Context(), w, nil)
 		return
 	}
 
-	s.writeGroupMutation(w, nil)
+	s.writeGroupMutation(r.Context(), w, nil)
 }
 
 // writeGroupMutation is the shared write + live-re-publish tail for POST
@@ -463,8 +468,8 @@ func (s *Server) groupsDelete(w http.ResponseWriter, r *http.Request) {
 // we still return 200 but flag restart_required=true so a wedged in-place
 // publish degrades to the same "restart to apply" path as gate-OFF rather
 // than reporting a false success.
-func (s *Server) writeGroupMutation(w http.ResponseWriter, group *groupDTO) {
-	s.writeGroupMutationWithForce(w, group, false)
+func (s *Server) writeGroupMutation(ctx context.Context, w http.ResponseWriter, group *groupDTO) {
+	s.writeGroupMutationWithForce(ctx, w, group, false)
 }
 
 // writeGroupMutationForceRestart is the degraded-success variant used by the
@@ -473,26 +478,37 @@ func (s *Server) writeGroupMutation(w http.ResponseWriter, group *groupDTO) {
 // group from the snapshot so its /g/ route 404s), but restart_required is
 // forced true so the GUI tells the operator to restart the hub to clear the
 // stranded token row even when the in-place republish itself succeeded.
-func (s *Server) writeGroupMutationForceRestart(w http.ResponseWriter, group *groupDTO) {
-	s.writeGroupMutationWithForce(w, group, true)
+func (s *Server) writeGroupMutationForceRestart(ctx context.Context, w http.ResponseWriter, group *groupDTO) {
+	s.writeGroupMutationWithForce(ctx, w, group, true)
 }
 
 // writeGroupMutationWithForce is the shared write + live-re-publish tail. When
 // forceRestart is true the response always carries restart_required=true
 // regardless of whether the in-place republish succeeded (the token-prune
 // degraded path).
-func (s *Server) writeGroupMutationWithForce(w http.ResponseWriter, group *groupDTO, forceRestart bool) {
+func (s *Server) writeGroupMutationWithForce(ctx context.Context, w http.ResponseWriter, group *groupDTO, forceRestart bool) {
 	hubLive := s.HubMcpEndpointActive()
 	restartRequired := !hubLive
 	if hubLive {
-		if err := s.republishGroupsSnapshot(); err != nil {
-			// The durable write succeeded; only the in-place live publish
-			// failed. Surface as restart_required (not a 500) so the
-			// operator restarts the hub to pick up the persisted edit.
-			_ = api.LogHubMcpEvent("warn", "groups-republish-failed", map[string]any{
-				"err": err.Error(),
-			})
-			restartRequired = true
+		if err := s.republishGroupsSnapshot(ctx); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				// Benign (concurrency-lane F1): the caller's request context
+				// ended (client disconnect / deadline) before the in-place
+				// republish could acquire hub-mcp.lock, so the publish was
+				// never attempted. The durable write already landed and the
+				// next mutation / bind republishes — the hub is NOT wedged, so
+				// no restart is owed and this is not a failure worth a warn.
+				// (forceRestart, set for the token-prune degraded path below,
+				// is independent and still honored.)
+			} else {
+				// The durable write succeeded; only the in-place live publish
+				// failed. Surface as restart_required (not a 500) so the
+				// operator restarts the hub to pick up the persisted edit.
+				_ = api.LogHubMcpEvent("warn", "groups-republish-failed", map[string]any{
+					"err": err.Error(),
+				})
+				restartRequired = true
+			}
 		}
 	}
 	if forceRestart {

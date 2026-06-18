@@ -28,6 +28,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -141,7 +142,7 @@ func groupsTestServer(t *testing.T, g groupsAPI) *Server {
 	t.Helper()
 	s := NewServer(Config{})
 	s.groups = g
-	s.groupsRepublishFn = func(_ *api.API) error { return nil }
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { return nil }
 	return s
 }
 
@@ -346,7 +347,7 @@ func TestGroups_DeleteTokenPruneFailStillRepublishes(t *testing.T) {
 	comp.alive.Store(true)
 	s.hubMcpComp.Store(comp)
 	republishCalled := false
-	s.groupsRepublishFn = func(_ *api.API) error { republishCalled = true; return nil }
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { republishCalled = true; return nil }
 
 	rec := doJSON(t, s, http.MethodDelete, "/api/groups?name=frontend", nil)
 	if rec.Code != http.StatusOK {
@@ -446,7 +447,7 @@ func TestGroups_PostRestartRequiredWhenHubNotLive(t *testing.T) {
 	s := groupsTestServer(t, g)
 	// No hubMcpComp stored → HubMcpEndpointActive() is false → gate-OFF.
 	republishCalled := false
-	s.groupsRepublishFn = func(_ *api.API) error { republishCalled = true; return nil }
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { republishCalled = true; return nil }
 
 	rec := doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{
 		"name": "frontend", "servers": []string{"memory"},
@@ -484,7 +485,7 @@ func TestGroups_DiskRoundTrip(t *testing.T) {
 	// server set deterministically (the host's embedded manifests are
 	// irrelevant — we only need "memory" to be known).
 	s.groups = diskTestGroupsAPI{available: []string{"memory", "time"}}
-	s.groupsRepublishFn = func(_ *api.API) error { return nil }
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { return nil }
 
 	// POST creates the group.
 	rec := doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{

@@ -376,6 +376,11 @@ export function AddServerScreen(props: {
     reinstall?: boolean;
     staleReload?: boolean;
     staleForceSave?: boolean;
+    // R4-2 (bot R4): true when the manifest write committed but the live
+    // gate-ON hub's in-place republish failed, so /clients + /g are serving a
+    // stale snapshot until the operator restarts the hub. Renders a restart
+    // notice line under the success banner (mirrors the Groups restart-notice).
+    restartHub?: boolean;
   };
 
   const [banner, setBanner] = useState<Banner | null>(null);
@@ -446,11 +451,15 @@ export function AddServerScreen(props: {
         });
         return;
       }
+      // R4-2: captures the gate-ON in-place republish-failure signal from the
+      // create/edit response so the success banner can prompt a hub restart.
+      let restartHub = false;
       if (mode === "edit") {
         try {
           const expectedHash = initialSnapshot.loadedHash;
-          const { hash: newHash } = await postManifestEdit(name, payload, expectedHash);
+          const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, expectedHash);
           if (version !== submissionCounter.current) return;
+          restartHub = restartRequired;
           // Atomic snapshot update: build one post-save object carrying the
           // fresh hash AND the user's just-persisted form state; set both
           // formState and initialSnapshot from the same reference so dirty
@@ -472,8 +481,9 @@ export function AddServerScreen(props: {
           throw err;
         }
       } else {
-        await postManifestCreate(name, payload);
+        const { restartRequired } = await postManifestCreate(name, payload);
         if (version !== submissionCounter.current) return;
+        restartHub = restartRequired;
         setInitialSnapshot(formState);
       }
       setWarnings(null);
@@ -484,6 +494,7 @@ export function AddServerScreen(props: {
             ? `Saved. Daemon still running old config.`
             : `Saved servers/${name}/manifest.yaml.`,
           reinstall: mode === "edit",
+          restartHub,
         });
         // Flowbite success toast mirroring the inline save banner.
         pushToast("success", `Saved ${name} manifest.`);
@@ -570,7 +581,7 @@ export function AddServerScreen(props: {
         return;
       }
       // 5. Write with fresh hash as expectedHash; consume returned new hash.
-      const { hash: newHash } = await postManifestEdit(name, payload, fresh.hash);
+      const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, fresh.hash);
       if (version !== submissionCounter.current) return;
       // 6. Atomic baseline update.
       const postSave: ManifestFormState = { ...merged, loadedHash: newHash };
@@ -584,6 +595,7 @@ export function AddServerScreen(props: {
             ? `Force-saved. Preserved external fields: ${preservedKeys.join(", ")}.`
             : `Force-saved.`,
         reinstall: true,
+        restartHub: restartRequired,
       });
       pushToast("success", `Force-saved ${name} manifest.`);
     } catch (err) {
@@ -749,6 +761,11 @@ export function AddServerScreen(props: {
       {banner && (
         <div class={`banner ${banner.kind}`} data-testid="banner">
           <p>{banner.text}</p>
+          {banner.restartHub && (
+            <p class="restart-hub-notice" data-testid="restart-hub-notice">
+              The aggregated hub is running but could not refresh its routing in place — restart the hub (Settings → Expose a single aggregated hub URL, toggle off and on) to apply this change to /clients and /g endpoints.
+            </p>
+          )}
           {banner.retry && (
             <button type="button" onClick={() => banner.retry?.()} data-action="retry-install">Retry Install</button>
           )}

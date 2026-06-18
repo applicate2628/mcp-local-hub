@@ -173,6 +173,14 @@ func (a *API) ManifestList() ([]string, error) {
 // re-trip GROUPS_UNKNOWN_SERVER on the next save. A manifest that fails to
 // load or parse is SKIPPED (best-effort enrichment, never blanks the picker),
 // mirroring CatalogList.
+//
+// R4-1 (bot R4): a per-session server (perSessionServers — scan.go marks it
+// CanMigrate=false because its sessions MUST stay 1-per-local-client) is also
+// EXCLUDED. Such a server can never be folded into a shared /g/<group>/mcp
+// route without breaking per-session isolation, so the group picker must not
+// offer it AND the groupsUpsert known-server save-gate (which sources its set
+// here) must reject it — the snapshot builder's matching skip is the
+// defense-in-depth backstop for a hand-edited groups.yaml.
 func (a *API) RoutableServerNames() ([]string, error) {
 	names, err := listManifestNamesEmbedFirst()
 	if err != nil {
@@ -180,6 +188,12 @@ func (a *API) RoutableServerNames() ([]string, error) {
 	}
 	out := make([]string, 0, len(names))
 	for _, name := range names {
+		// Per-session servers must stay 1-per-local-client; they are never
+		// routable as a shared group member (see doc comment + the matching
+		// skip in BuildResolverSnapshotFromManifestsAndGroups).
+		if perSessionServers[name] {
+			continue
+		}
 		data, err := loadManifestYAMLEmbedFirst(name)
 		if err != nil {
 			// Unreadable manifest — skip (it still appears in ManifestList,

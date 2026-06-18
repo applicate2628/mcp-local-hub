@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -105,6 +106,24 @@ type manifestEditRequest struct {
 
 type manifestEditResponse struct {
 	Hash string `json:"hash"`
+	// RestartRequired / HubLive mirror groupMutationResponse (R4-2 — bot R4).
+	// RestartRequired is true when the durable manifest write committed but the
+	// in-place live-hub republish failed on a gate-ON hub, so /clients + /g are
+	// serving a STALE snapshot until the operator restarts. HubLive reports
+	// whether the gate-ON hub listener was live at mutation time so the GUI can
+	// word the restart banner precisely. Both false on a gate-OFF host.
+	RestartRequired bool `json:"restart_required"`
+	HubLive         bool `json:"hub_live"`
+}
+
+// manifestMutationResponse is the create / delete wire shape (R4-2 — bot R4).
+// Those handlers used to return 204 No Content; they now return 200 with this
+// body so the same restart_required signal the edit + group paths carry reaches
+// the operator when a gate-ON in-place republish fails. The fields mirror
+// groupMutationResponse exactly.
+type manifestMutationResponse struct {
+	RestartRequired bool `json:"restart_required"`
+	HubLive         bool `json:"hub_live"`
 }
 
 // republishOnManifestMutation re-publishes the live hub ResolverSnapshot after
@@ -117,24 +136,51 @@ type manifestEditResponse struct {
 // group-mutation tail (writeGroupMutation) uses — which rebuilds from the
 // CURRENT manifests (now including this mutation) plus groups.
 //
+// R4-2 (bot R4): it returns (restartRequired, hubLive) so the handler can
+// surface the gate-ON republish-failure to the OPERATOR rather than swallowing
+// it. Before this, a republish failure on a live gate-ON hub was logged only —
+// the handler still returned plain success, so the operator had NO signal that
+// /clients + /g were serving a STALE snapshot (the group path already surfaced
+// restart_required; the manifest path did not). restartRequired is true when
+// the hub is live but the in-place republish failed (the durable write landed,
+// only the live refresh wedged → "restart hub to apply"). It is false on a
+// gate-OFF / hub-not-live host: there is no live snapshot to refresh and the
+// next bind re-reads manifests fresh, so no restart is owed for the manifest
+// op itself. hubLive mirrors HubMcpEndpointActive at mutation time so the GUI
+// can word the banner precisely (matches groupMutationResponse semantics).
+//
 // A republish failure is NON-fatal: the manifest write already committed
 // durably (it is the source of truth), so the handler must NOT 500 the
 // already-successful manifest op. The failure is logged so a wedged in-place
 // publish is observable; the operator can restart the hub to pick up the
 // persisted edit (the same degrade the group path takes).
 //
-// Gate-OFF / hub-not-live is a silent no-op: there is no live snapshot to
-// refresh, and a gate-OFF host re-reads manifests fresh on its next bind.
-func (s *Server) republishOnManifestMutation(op string) {
+// ctx is the request context (R4-4): it bounds the ctx-aware hub-mcp.lock
+// acquisition inside the publish seam so a stuck sibling holder cannot freeze
+// the manifest handler past the request lifetime.
+func (s *Server) republishOnManifestMutation(ctx context.Context, op string) (restartRequired, hubLive bool) {
 	if !s.HubMcpEndpointActive() {
-		return
+		return false, false
 	}
-	if err := s.republishGroupsSnapshot(); err != nil {
+	if err := s.republishGroupsSnapshot(ctx); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// Benign (concurrency-lane F1): the request context ended (client
+			// disconnect / deadline) before the in-place republish could
+			// acquire hub-mcp.lock — the publish was never attempted. The
+			// durable manifest write already landed and the next mutation /
+			// bind republishes, so the hub is NOT wedged: no restart is owed
+			// and this is not a failure worth a warn or a restart banner.
+			// (F2, accepted: a client that disconnects mid-mutation forfeits
+			// the in-place refresh; routing self-heals on the next republish.)
+			return false, true
+		}
 		_ = api.LogHubMcpEvent("warn", "manifest-republish-failed", map[string]any{
 			"op":  op,
 			"err": err.Error(),
 		})
+		return true, true
 	}
+	return false, true
 }
 
 // registerManifestRoutes wires POST /api/manifest/create and
@@ -171,8 +217,15 @@ func registerManifestRoutes(s *Server) {
 		}
 		// B1: refresh the live hub snapshot so a gate-ON hub picks up the new
 		// server's bindings without a restart (non-fatal, gate-ON guarded).
-		s.republishOnManifestMutation("create")
-		w.WriteHeader(http.StatusNoContent)
+		// R4-2: surface restart_required when the gate-ON in-place republish
+		// failed so the operator knows /clients + /g are serving stale routing.
+		restartRequired, hubLive := s.republishOnManifestMutation(r.Context(), "create")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(manifestMutationResponse{
+			RestartRequired: restartRequired,
+			HubLive:         hubLive,
+		})
 	}))
 	s.mux.HandleFunc("/api/manifest/validate", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -246,9 +299,15 @@ func registerManifestRoutes(s *Server) {
 		}
 		// B1: refresh the live hub snapshot so a gate-ON hub picks up the
 		// edited bindings without a restart (non-fatal, gate-ON guarded).
-		s.republishOnManifestMutation("edit")
+		// R4-2: surface restart_required when the gate-ON in-place republish
+		// failed so the operator knows /clients + /g are serving stale routing.
+		restartRequired, hubLive := s.republishOnManifestMutation(r.Context(), "edit")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(manifestEditResponse{Hash: newHash})
+		_ = json.NewEncoder(w).Encode(manifestEditResponse{
+			Hash:            newHash,
+			RestartRequired: restartRequired,
+			HubLive:         hubLive,
+		})
 	}))
 	// GET /api/manifests — sorted list of available server names. Empty
 	// set is 200 [] (no 404): "no manifests yet" is a normal state the
@@ -339,7 +398,14 @@ func registerManifestRoutes(s *Server) {
 		}
 		// B1: refresh the live hub snapshot so a gate-ON hub drops the deleted
 		// server's bindings without a restart (non-fatal, gate-ON guarded).
-		s.republishOnManifestMutation("delete")
-		w.WriteHeader(http.StatusNoContent)
+		// R4-2: surface restart_required when the gate-ON in-place republish
+		// failed so the operator knows /clients + /g are serving stale routing.
+		restartRequired, hubLive := s.republishOnManifestMutation(r.Context(), "delete")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(manifestMutationResponse{
+			RestartRequired: restartRequired,
+			HubLive:         hubLive,
+		})
 	}))
 }
