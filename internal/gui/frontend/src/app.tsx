@@ -75,6 +75,7 @@ function writeCachedDefaultScreen(v: string): void {
 if (typeof document !== "undefined") {
   document.documentElement.setAttribute("data-layout", readCachedLayout());
 }
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FirstRunBanner } from "./components/FirstRunBanner";
 import { ToastContainer } from "./components/Toast";
 import { AboutScreen } from "./screens/About";
@@ -392,6 +393,21 @@ export function App() {
     </div>
   );
 
+  // Human-readable name of the active screen for the error-boundary recovery
+  // UI. Derived from the nav labels (falling back to the raw route name for
+  // screens not in the nav, e.g. "edit-server").
+  const activeScreenLabel = NAV_ITEMS.find((i) => i.screen === route.screen)?.label ?? route.screen;
+
+  // Wrap the per-screen body in an error boundary so a render-time throw in
+  // ONE screen renders a recovery UI inside <main> while the sidebar/topbar
+  // shell stays alive. Keyed on the screen name so navigating away resets the
+  // boundary (a crashed screen doesn't stay stuck after the user moves on).
+  const guardedBody = (
+    <ErrorBoundary key={route.screen} screenName={activeScreenLabel}>
+      {body}
+    </ErrorBoundary>
+  );
+
   if (layoutValue === "tabs") {
     return (
       <>
@@ -401,7 +417,7 @@ export function App() {
         </header>
         <main id="screen-root">
           <FirstRunBanner />
-          {body}
+          {guardedBody}
         </main>
         {/* One shared Flowbite Toast stack for every screen (toast store
             is module-level; ToastContainer just subscribes + renders). */}
@@ -418,7 +434,7 @@ export function App() {
       </aside>
       <main id="screen-root">
         <FirstRunBanner />
-        {body}
+        {guardedBody}
       </main>
       {/* One shared Flowbite Toast stack for every screen. */}
       <ToastContainer />
