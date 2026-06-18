@@ -2025,3 +2025,146 @@ nav a,
 .matrix-col-init-btn:disabled {
   transition: opacity .12s ease;
 }
+
+/* ============================================================
+ * G14 responsive — narrow-window reflow (single breakpoint)
+ * ------------------------------------------------------------
+ * Contract: internal/gui/frontend/src/styles/STYLE-CONTRACT.md
+ * ("Responsive layout contract (G14)"). Keep the two in sync.
+ *
+ * CSS-first, no JS: the desktop shell (fixed 220px sidebar, the
+ * up-to-6-column .servers-matrix capped at 960px, the two-column
+ * Settings layout) does not reflow on a narrow tray-launched window
+ * and horizontally scrolls/clips. Below 768px this block:
+ *   1. collapses the default sidebar into a horizontal top bar
+ *      WITHOUT touching the user's appearance.layout setting,
+ *   2. turns the matrices into a horizontal-scroll region with a
+ *      sticky first (Server-name) column,
+ *   3. collapses Settings to one column and keeps cards from clipping.
+ *
+ * The whole block is one max-width media query so the unchanged
+ * desktop rules above are the default and these are additive
+ * overrides — at > 768px not one of these rules applies.
+ * ============================================================ */
+@media (max-width: 768px) {
+  /* --- 1. Default sidebar → top bar (data-layout="sidebar"/unset) ---
+     The #app grid flips from two columns (220px 1fr) to two rows
+     (auto 1fr); the .sidebar is restyled in place as a horizontal bar
+     so the existing markup + the persisted layout setting are both
+     untouched. The :root[data-layout="tabs"] layout already owns its
+     own narrow flow (its nav wraps), so scope these to the default
+     shell by NOT matching when data-layout="tabs". */
+  :root:not([data-layout="tabs"]) #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  :root:not([data-layout="tabs"]) .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: var(--gap-sm) var(--card-padding);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-md);
+  }
+  :root:not([data-layout="tabs"]) .sidebar .brand {
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+  :root:not([data-layout="tabs"]) .sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px;
+    flex: 1 1 auto;
+  }
+
+  /* The tabs top bar already wraps in principle, but its nav forces a
+     single non-wrapping row via flex:1; let it wrap on narrow so every
+     link stays reachable instead of overflowing the bar. */
+  :root[data-layout="tabs"] .topbar { flex-wrap: wrap; }
+  :root[data-layout="tabs"] .topbar nav { flex-wrap: wrap; }
+
+  /* Tighten the screen padding so cards/tables get the full width and
+     don't clip at the right edge of a narrow window. */
+  main { padding: var(--gap-md); }
+
+  /* --- 2. Matrices: horizontal scroll + sticky first column ---
+     Drop the 960px cap so the client columns keep a legible width; the
+     parent <main id="screen-root"> already has overflow:auto and is the
+     scroll boundary (no DOM wrapper added → every testid + the test DOM
+     stay intact). Pin the first column (Server name) so the row label
+     survives a horizontal scroll. position:sticky on table cells needs
+     border-collapse:separate to paint the sticky cell's own background,
+     so switch to separate borders here and restore the single-border
+     look with explicit per-cell borders. */
+  .servers-matrix {
+    max-width: none;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .servers-matrix th,
+  .servers-matrix td {
+    /* separate-borders: draw top+left on every cell, plus right+bottom
+       on the last column/row, so the collapsed-look single grid is kept
+       without double lines. */
+    border: none;
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+  }
+  .servers-matrix tr > th:last-child,
+  .servers-matrix tr > td:last-child {
+    border-right: 1px solid var(--border);
+  }
+  .servers-matrix tbody tr:last-child td,
+  .servers-matrix thead tr:last-child th {
+    border-bottom: 1px solid var(--border);
+  }
+  /* Sticky Server-name column. Opaque background so scrolled client
+     columns slide UNDER it; the body cells sit on the page bg, header
+     cells keep their --sidebar-bg, matching the desktop look. */
+  .servers-matrix th:first-child,
+  .servers-matrix td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg);
+    /* A slightly heavier right edge marks the freeze line. */
+    border-right: 1px solid var(--border);
+  }
+  .servers-matrix thead th:first-child {
+    z-index: 2;
+    background: var(--sidebar-bg);
+  }
+
+  /* --- 3. Settings + cards ---
+     Collapse the 110px+body two-column grid to one column; un-stick the
+     section nav and let it wrap as a horizontal row above the body so it
+     can't overlap content in a short window. */
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+  .settings-section-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--gap-xs);
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    padding-right: 0;
+    padding-bottom: var(--gap-xs);
+  }
+  .settings-section-nav a {
+    margin-left: 0;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+  .settings-section-nav a.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--accent-color);
+  }
+  /* The Add-server two-column (form + YAML preview) grid stacks so the
+     preview drops below the form instead of squeezing both. */
+  .screen.add-server .add-server-grid {
+    grid-template-columns: 1fr;
+  }
+}

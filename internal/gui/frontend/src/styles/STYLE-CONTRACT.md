@@ -118,3 +118,74 @@ chrome from the per-screen rule, keep only genuine layout deltas):
   already-clean family; folding them into `.btn` would change their radius
   and surface and is a deliberate non-goal here.
 - The `.infotip-trigger` (ⓘ) keeps its own pill style.
+
+# Responsive layout contract (G14)
+
+The GUI is launched by the tray at arbitrary window sizes — frequently a
+half-screen / narrow window. The desktop shell (a fixed 220px sidebar +
+the up-to-6-column `.servers-matrix` capped at `960px` + the Settings
+two-column layout) does NOT reflow below those widths, so a narrow window
+horizontally scrolls and clips. This contract defines the breakpoints and
+the per-region narrow behaviour. Everything is **CSS-first** (media
+queries); there is no JS layout switch — the existing `appearance.layout`
+user setting is untouched.
+
+## Breakpoints
+
+| Token | Range | Name | Triggers |
+|---|---|---|---|
+| (none) | `> 768px` | **desktop** | The unchanged shipped layout. |
+| `--bp-narrow` = `768px` | `<= 768px` | **narrow** | Sidebar collapses to a top bar; matrices become horizontal-scroll regions with a sticky first column; Settings collapses to one column. |
+| `600px` | `<= 600px` | **xs** | Pre-existing env-kv / daemon-env-kv grid single-column collapse (kept as-is). |
+
+`768px` is the single new narrow breakpoint. It is expressed as one
+`@media (max-width: 768px)` block (search "G14 responsive" in
+[`style.css`](./style.css)) so the desktop rules above the block are the
+default and the narrow rules are purely additive overrides. The desktop
+layout is never altered by this contract — at `> 768px` not one of these
+rules applies.
+
+## Sidebar → top bar (CSS-only, layout setting preserved)
+
+Below the narrow breakpoint the `#app` grid switches from
+`220px 1fr` (two columns) to `auto 1fr` (two **rows**), and the
+`.sidebar` is restyled in place as a horizontal top bar: brand inline on
+the left, the `nav` flowing as a horizontal wrapping row of links. This is
+the lowest-risk responsive move — it reuses the existing markup and the
+existing topbar visual idiom (the same horizontal-nav look the
+`data-layout="tabs"` setting produces) **without** mutating the user's
+persisted `appearance.layout` and without any JS. The sidebar's
+`border-right` becomes a `border-bottom`. The already-tabs layout
+(`:root[data-layout="tabs"]`) is independent and unaffected — the narrow
+block only restyles the default `.sidebar` shell, and the tabs `.topbar`
+nav already wraps.
+
+## Matrices → horizontal scroll + sticky first column
+
+`.servers-matrix` (and `.servers-matrix.lsp-matrix`) on narrow:
+
+- The `max-width: 960px` cap is dropped so the table keeps its natural
+  width instead of squeezing the client columns to illegibility.
+- The screen body (`#screen-root`, which already carries `overflow: auto`
+  via the `main` rule) is the horizontal-scroll boundary — no DOM wrapper
+  is added (keeps every existing testid + the test DOM intact).
+- The **first column** (`th:first-child` / `td:first-child` — the Server
+  name) is pinned with `position: sticky; left: 0` plus an opaque
+  background and a right separator, so the operator scrolls the client
+  columns while the row label stays visible. `position: sticky` on table
+  cells needs `border-collapse: separate` to paint the sticky cell
+  background reliably across browsers, so the narrow block switches the
+  matrices to `border-collapse: separate; border-spacing: 0` and restores
+  the single-border look with explicit cell borders (desktop keeps
+  `border-collapse: collapse`).
+
+## Settings + cards
+
+- `.settings-layout` collapses from `110px 1fr` to a single column; the
+  sticky section nav (`.settings-section-nav`) becomes a non-sticky,
+  horizontally-wrapping row above the body so it never overlaps content in
+  a short window.
+- `.cards` already uses `repeat(auto-fit, minmax(240px, 1fr))` and the
+  Settings cards are `max-width`-bounded, so they reflow to one column on
+  their own; the narrow block only guarantees `#screen-root` padding
+  shrinks so the cards are not clipped at the right edge.
