@@ -100,6 +100,120 @@ a:hover {
 a:visited {
   color: var(--link-visited);
 }
+
+/* ============================================================
+ * Button design-system foundation (G5)
+ * ------------------------------------------------------------
+ * ONE token-driven button base + variant/size modifiers that
+ * de-duplicates the per-screen button chrome historically copied
+ * into .dashboard-bulk-actions button, .card-actions button,
+ * .catalog-card-actions button, etc. The full contract (variants,
+ * sizes, spacing scale, states) lives in
+ * internal/gui/frontend/src/styles/STYLE-CONTRACT.md — keep the two
+ * in sync when this block changes.
+ *
+ * Migration is INCREMENTAL: a screen opts in by adding `btn` (plus a
+ * variant/size class) to its <button>. Until a screen is converted it
+ * keeps its legacy per-screen rule, so this block is additive and does
+ * NOT restyle any unconverted button. The Settings card buttons keep
+ * their own `section[data-section] button` rule (already unified);
+ * they are intentionally NOT migrated here.
+ *
+ * Variants: (base = secondary outline) · .btn-primary (accent-filled)
+ *           · .btn-danger (destructive outline) · .btn-ghost (borderless)
+ * Sizes:    .btn-sm · .btn-md (default; omit for md)
+ * ============================================================ */
+.btn {
+  /* Layout + chrome ride the same density tokens the legacy rules used,
+     so converted buttons render byte-identical to the old chrome at
+     every density. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-xs);
+  padding: var(--button-padding-y) var(--button-padding-x);
+  border: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  color: var(--text);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease,
+              color .12s ease, opacity .12s ease;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--link);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  /* Disabled ramps opacity only (color/border stay put) so the busy
+     state reads as a fade, not a flicker. */
+  transition: opacity .12s ease;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--focus, #0969da);
+  outline-offset: 2px;
+}
+
+/* Primary — accent-filled call-to-action (Save / Apply / Install). */
+.btn.btn-primary:not(:disabled) {
+  background: var(--link);
+  border-color: var(--link);
+  color: #ffffff;
+}
+.btn.btn-primary:not(:disabled):hover {
+  background: var(--link-hover);
+  border-color: var(--link-hover);
+}
+
+/* Secondary — the default outline look (explicit class for clarity at
+   call sites that want to name it). Same as the bare `.btn` base. */
+.btn.btn-secondary {
+  /* inherits the base; declared so .btn-secondary is a real, documented
+     token rather than an implicit "absence of a variant". */
+  background: var(--sidebar-bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* Danger — destructive outline (Stop / Delete / Uninstall / Force-kill).
+   Recolors text + border only; stays outline (not filled) so it reads as
+   "careful" rather than "primary action", matching the legacy .btn-stop /
+   .danger convention. */
+.btn.btn-danger:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+.btn.btn-danger:not(:disabled):hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--sidebar-bg));
+  border-color: var(--danger);
+}
+
+/* Ghost — borderless, transparent until hover; for low-emphasis inline
+   actions that should not draw a box. */
+.btn.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
+.btn.btn-ghost:hover:not(:disabled) {
+  background: var(--border);
+  border-color: transparent;
+}
+
+/* Sizes — md is the default (no class needed); sm is the compact form
+   used in dense toolbars/card rows. */
+.btn.btn-sm {
+  padding: var(--input-padding-y) var(--input-padding-x);
+  font-size: 13px;
+}
+.btn.btn-md {
+  padding: var(--button-padding-y) var(--button-padding-x);
+  font-size: 14px;
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 /* Default sidebar layout (data-layout="sidebar" or unset). */
@@ -361,9 +475,11 @@ main { padding: var(--screen-padding); overflow: auto; }
 .dashboard-header { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); flex-wrap: wrap; }
 .dashboard-header h1 { margin: 0; }
 .dashboard-bulk-actions { display: flex; gap: var(--gap-sm); }
-.dashboard-bulk-actions button { padding: var(--cell-padding-y) var(--gap-md); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 14px; }
-.dashboard-bulk-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-.dashboard-bulk-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+/* Converted to the unified .btn base (G5): chrome/disabled/danger now ride
+   .btn / .btn-danger. The only per-container delta is the wider bulk-action
+   padding (--cell-padding-y / --gap-md), preserved here so the Dashboard
+   header buttons render byte-identical to the pre-G5 look. */
+.dashboard-bulk-actions button.btn { padding: var(--cell-padding-y) var(--gap-md); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap-md); margin-top: var(--gap-md); }
 .card { border: 1px solid var(--border); border-radius: 12px; padding: var(--card-padding); background: var(--card-surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); }
 /* Card titles lay the name + an on-demand InfoTip (ⓘ) inline so cards stay
@@ -388,9 +504,10 @@ main { padding: var(--screen-padding); overflow: auto; }
 .servers-matrix .state-cell.state-down { color: var(--danger); }
 
 .card-actions { margin-top: var(--gap-sm); display: flex; gap: var(--gap-xs); }
-.card-actions button { flex: 1; padding: var(--button-padding-y) var(--button-padding-x); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
-.card-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-.card-actions button.btn-stop:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+/* Converted to the unified .btn base (G5): chrome/disabled/danger now ride
+   .btn / .btn-danger. The only per-container delta is `flex: 1` so the two
+   card actions split the row evenly — preserved here. */
+.card-actions button.btn { flex: 1; }
 
 /* --- Catalog screen (v1 GUI MCP Store) --- */
 .screen.catalog .catalog-intro { color: var(--text-muted); margin-bottom: var(--gap-xs); }
@@ -398,9 +515,10 @@ main { padding: var(--screen-padding); overflow: auto; }
    an on-demand InfoTip (ⓘ) next to the card title, so cards are compact and
    uniform across tabs (some cards no longer wrap a multi-line description). */
 .catalog-card-actions { margin-top: var(--gap-sm); display: flex; align-items: center; gap: var(--gap-xs); }
-.catalog-card-actions button { padding: var(--button-padding-y) var(--button-padding-x); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; cursor: pointer; }
-.catalog-card-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-.catalog-card-actions button.danger:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+/* Converted to the unified .btn base (G5): every button in this container
+   carries .btn (+ .btn-danger for Uninstall), so the chrome/disabled/danger
+   declarations that used to live here are owned by the .btn base now. No
+   per-container delta remains. */
 /* Search/filter input over the shipped-server cards (§10 v2b). */
 .catalog-search { margin: var(--gap-sm) 0 var(--gap-md); }
 .catalog-search input { width: 100%; max-width: 420px; padding: var(--button-padding-y) var(--button-padding-x); border: 1px solid var(--border); background: var(--sidebar-bg); color: var(--text); border-radius: 4px; font-size: 14px; }

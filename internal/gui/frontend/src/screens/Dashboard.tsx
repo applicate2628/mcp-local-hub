@@ -475,6 +475,7 @@ function BulkActionsRow(props: {
   return (
     <div class="dashboard-bulk-actions">
       <button
+        class="btn btn-secondary"
         onClick={() => {
           if (!lockDisabled) void props.runAll();
         }}
@@ -488,7 +489,7 @@ function BulkActionsRow(props: {
           if (!lockDisabled) void props.stopAll();
         }}
         disabled={lockDisabled}
-        class="btn-stop"
+        class="btn btn-danger btn-stop"
         aria-busy={props.inflight === "stop"}
       >
         {labelFor("stop", "Stop all", "Stopping…", "Stopped")}
@@ -671,14 +672,14 @@ function Card(props: {
         </a>
       </div>
       <div class="card-actions">
-        <button onClick={restartBtn.click} disabled={restartDisabled} aria-busy={anyWorking}>
+        <button class="btn btn-secondary" onClick={restartBtn.click} disabled={restartDisabled} aria-busy={anyWorking}>
           {restartLabel}
         </button>
         <button
           onClick={stopBtn.click}
           disabled={stopDisabled}
           aria-busy={anyWorking}
-          class="btn-stop"
+          class="btn btn-danger btn-stop"
         >
           {stopLabel}
         </button>

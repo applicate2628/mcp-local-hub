@@ -353,7 +353,7 @@ export function CatalogScreen() {
                         <>
                           <button
                             type="button"
-                            class="danger"
+                            class="btn btn-danger danger"
                             data-testid={`catalog-uninstall-confirm-${name}`}
                             disabled={unstate.phase === "uninstalling"}
                             onClick={() => uninstallServer(name)}
@@ -364,6 +364,7 @@ export function CatalogScreen() {
                           </button>
                           <button
                             type="button"
+                            class="btn btn-secondary"
                             data-testid={`catalog-uninstall-cancel-${name}`}
                             disabled={unstate.phase === "uninstalling"}
                             onClick={() => setConfirmUninstall(null)}
@@ -374,7 +375,7 @@ export function CatalogScreen() {
                       ) : (
                         <button
                           type="button"
-                          class="danger"
+                          class="btn btn-danger danger"
                           data-testid={`catalog-uninstall-${name}`}
                           disabled={unstate.phase === "uninstalling"}
                           onClick={() => setConfirmUninstall(name)}
@@ -386,6 +387,7 @@ export function CatalogScreen() {
                   ) : (
                     <button
                       type="button"
+                      class="btn btn-secondary"
                       data-testid={`catalog-install-${name}`}
                       disabled={state.phase === "installing"}
                       onClick={() => installServer(name)}
