@@ -937,8 +937,7 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 // capability category is unsupported, not broken). It complements the strict
 // code -32601 check for servers that report method-absence with a different
 // code but a recognizable message. Matching is case-insensitive on the common
-// phrasings ("method not found", "unsupported method", "unknown method", or a
-// bare "not found").
+// phrasings ("method not found", "unsupported method", or "unknown method").
 func isMethodNotFoundMessage(msg string) bool {
 	if msg == "" {
 		return false
@@ -946,8 +945,7 @@ func isMethodNotFoundMessage(msg string) bool {
 	m := strings.ToLower(msg)
 	return strings.Contains(m, "method not found") ||
 		strings.Contains(m, "unsupported method") ||
-		strings.Contains(m, "unknown method") ||
-		strings.Contains(m, "not found")
+		strings.Contains(m, "unknown method")
 }
 
 // syntheticToolsSubSection answers from the embedded ToolCatalogForBackend
