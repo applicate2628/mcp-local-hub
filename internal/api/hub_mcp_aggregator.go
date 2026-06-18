@@ -604,7 +604,7 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 	// pointer has moved.
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
-		if !daemonStillBound(current, sess.Client, ref) {
+		if !daemonStillBound(current, sess.ScopeKey, ref) {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
@@ -854,7 +854,7 @@ func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolR
 func (s *hubSession) currentDaemonPort(ref canonicalToolRef) int {
 	snap := LoadResolverSnapshot()
 	if snap != nil {
-		for _, b := range snap.Bindings[s.Client] {
+		for _, b := range snap.Bindings[s.ScopeKey] {
 			if b.Server == ref.Server && b.Daemon == ref.Daemon {
 				return b.Port
 			}

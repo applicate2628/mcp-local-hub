@@ -363,7 +363,7 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		writeJSONRPCErrorStatus(w, env.ID, http.StatusNotFound, -32600, "unknown session", nil)
 		return
 	}
-	if sess.Client != clientID {
+	if sess.ScopeKey != clientID {
 		// Cross-client session reuse → 401 empty body (no oracle).
 		w.WriteHeader(http.StatusUnauthorized)
 		return
@@ -644,7 +644,7 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	if sess.Client != clientID {
+	if sess.ScopeKey != clientID {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}

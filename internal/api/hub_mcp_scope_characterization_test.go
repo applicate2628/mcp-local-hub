@@ -1,5 +1,5 @@
 // hub_mcp_scope_characterization_test.go — CHARACTERIZATION tests for
-// the groups/namespaces "sess.Client → sess.ScopeKey" generalization.
+// the groups/namespaces "sess.ScopeKey → sess.ScopeKey" generalization.
 //
 // These tests pin the CURRENT, per-client behavior of the hub request-
 // path functions the upcoming ScopeKey rename will touch. They are a
@@ -12,7 +12,7 @@
 // tool-visibility.md "Defect B"):
 //
 //   - daemonStillBound           (hub_mcp_aggregator.go) — snap.Bindings[client] lookup
-//   - currentDaemonPort          (hub_mcp_aggregator.go) — snap.Bindings[s.Client] self-heal
+//   - currentDaemonPort          (hub_mcp_aggregator.go) — snap.Bindings[s.ScopeKey] self-heal
 //   - resolveToolsCallRoute      (hub_mcp_aggregator.go) — RouteMap + scope-key revalidation
 //   - dispatchToolsCall          (hub_mcp_aggregator.go) — resolved-target path is scope-key-independent
 //   - cross-client 401 gate      (hub_mcp_handler.go handlePost + handleDelete)
@@ -116,7 +116,7 @@ func TestCharacterizeDaemonStillBound(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
-// currentDaemonPort — self-heal port re-resolution from snap.Bindings[s.Client].
+// currentDaemonPort — self-heal port re-resolution from snap.Bindings[s.ScopeKey].
 //
 // Reviewer flagged this as an un-enumerated, untested touch site. Pins
 // the (Server,Daemon)→Port re-resolution against the LIVE snapshot plus
@@ -144,7 +144,7 @@ func TestCharacterizeCurrentDaemonPort(t *testing.T) {
 			snap: &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{
 				"codex-cli": {{Server: "srv1", Daemon: "claude-code", Port: 9200}},
 			}},
-			want: 9101, // s.Client="claude-code" not in Bindings → ref.Port
+			want: 9101, // s.ScopeKey="claude-code" not in Bindings → ref.Port
 		},
 		{
 			name:   "matching-server-daemon-returns-live-port",
@@ -177,7 +177,7 @@ func TestCharacterizeCurrentDaemonPort(t *testing.T) {
 			if tc.snap != nil {
 				PublishResolverSnapshot(tc.snap)
 			}
-			s := &hubSession{Client: tc.client}
+			s := &hubSession{ScopeKey: tc.client}
 			if got := s.currentDaemonPort(ref); got != tc.want {
 				t.Errorf("currentDaemonPort = %d, want %d", got, tc.want)
 			}
@@ -189,7 +189,7 @@ func TestCharacterizeCurrentDaemonPort(t *testing.T) {
 // resolveToolsCallRoute — RouteMap lookup + scope-key revalidation.
 //
 // Pins the error-envelope contract for each rejection branch AND that
-// the snapshot revalidation keys on sess.Client. No daemons are stood
+// the snapshot revalidation keys on sess.ScopeKey. No daemons are stood
 // up: these branches return before any HTTP call.
 // ----------------------------------------------------------------------
 
@@ -213,7 +213,7 @@ func decodeJSONRPCErr(t *testing.T, body []byte) (int, string) {
 }
 
 func TestCharacterizeResolveToolsCallRouteMissingName(t *testing.T) {
-	sess := &hubSession{Client: "claude-code"}
+	sess := &hubSession{ScopeKey: "claude-code"}
 	// params with no "name".
 	target, err := resolveToolsCallRoute(sess, json.RawMessage(`1`), json.RawMessage(`{"arguments":{}}`))
 	if err != nil {
@@ -232,7 +232,7 @@ func TestCharacterizeResolveToolsCallRouteMissingName(t *testing.T) {
 }
 
 func TestCharacterizeResolveToolsCallRouteInvalidParams(t *testing.T) {
-	sess := &hubSession{Client: "claude-code"}
+	sess := &hubSession{ScopeKey: "claude-code"}
 	// malformed JSON params → -32602 Invalid params.
 	target, err := resolveToolsCallRoute(sess, json.RawMessage(`1`), json.RawMessage(`{not json`))
 	if err != nil {
@@ -252,7 +252,7 @@ func TestCharacterizeResolveToolsCallRouteInvalidParams(t *testing.T) {
 
 func TestCharacterizeResolveToolsCallRouteNilRouteMap(t *testing.T) {
 	// RouteMap never Stored → nil pointer → -32601 Method not found.
-	sess := &hubSession{Client: "claude-code"}
+	sess := &hubSession{ScopeKey: "claude-code"}
 	target, err := resolveToolsCallRoute(sess, json.RawMessage(`1`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -267,7 +267,7 @@ func TestCharacterizeResolveToolsCallRouteNilRouteMap(t *testing.T) {
 }
 
 func TestCharacterizeResolveToolsCallRouteUnknownName(t *testing.T) {
-	sess := &hubSession{Client: "claude-code"}
+	sess := &hubSession{ScopeKey: "claude-code"}
 	sess.RouteMap.Store(&map[string]canonicalToolRef{
 		"srv1__read": {Server: "srv1", Daemon: "claude-code", Port: 9101, RawName: "read"},
 	})
@@ -287,15 +287,15 @@ func TestCharacterizeResolveToolsCallRouteUnknownName(t *testing.T) {
 // TestCharacterizeResolveToolsCallRouteOutOfScopeKeysOnSessClient pins
 // THE behavior the ScopeKey rename must preserve byte-identical: when
 // the snapshot pointer has MOVED since init, revalidation calls
-// daemonStillBound(current, sess.Client, ref). If sess.Client is NOT a
+// daemonStillBound(current, sess.ScopeKey, ref). If sess.ScopeKey is NOT a
 // key in the new snapshot's Bindings, the route is refused with -32601
 // "tool moved out of scope". The current snapshot here intentionally
-// binds a DIFFERENT client only — proving the gate keys on sess.Client.
+// binds a DIFFERENT client only — proving the gate keys on sess.ScopeKey.
 func TestCharacterizeResolveToolsCallRouteOutOfScopeKeysOnSessClient(t *testing.T) {
 	resetResolverForTest(t)
 	ref := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: 9101, RawName: "read"}
 
-	sess := &hubSession{Client: "claude-code", InitSuccesses: map[canonicalDaemonRef]string{}}
+	sess := &hubSession{ScopeKey: "claude-code", InitSuccesses: map[canonicalDaemonRef]string{}}
 	sess.RouteMap.Store(&map[string]canonicalToolRef{"srv1__read": ref})
 
 	// SnapshotAtInit: the session's original snapshot (pointer P1).
@@ -305,7 +305,7 @@ func TestCharacterizeResolveToolsCallRouteOutOfScopeKeysOnSessClient(t *testing.
 	sess.SnapshotAtInit = atInit
 
 	// CURRENT snapshot (pointer P2 != P1) binds ONLY codex-cli. Because
-	// sess.Client == "claude-code" is absent here, daemonStillBound
+	// sess.ScopeKey == "claude-code" is absent here, daemonStillBound
 	// returns false → out-of-scope refusal.
 	current := &ResolverSnapshot{Gen: 2, Bindings: map[string][]canonicalDaemonRef{
 		"codex-cli": {{Server: "srv1", Daemon: "claude-code", Port: 9101}},
@@ -326,7 +326,7 @@ func TestCharacterizeResolveToolsCallRouteOutOfScopeKeysOnSessClient(t *testing.
 }
 
 // TestCharacterizeResolveToolsCallRouteSameClientKeyStillBound pins the
-// complement: when the moved snapshot STILL binds sess.Client to the
+// complement: when the moved snapshot STILL binds sess.ScopeKey to the
 // ref, revalidation passes the daemonStillBound gate. It then fails at
 // the next stage (-32603 no daemon session id) because InitSuccesses is
 // empty — which is the expected contract for a session that never
@@ -336,7 +336,7 @@ func TestCharacterizeResolveToolsCallRouteSameClientKeyStillBound(t *testing.T) 
 	resetResolverForTest(t)
 	ref := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: 9101, RawName: "read"}
 
-	sess := &hubSession{Client: "claude-code", InitSuccesses: map[canonicalDaemonRef]string{}}
+	sess := &hubSession{ScopeKey: "claude-code", InitSuccesses: map[canonicalDaemonRef]string{}}
 	sess.RouteMap.Store(&map[string]canonicalToolRef{"srv1__read": ref})
 	sess.SnapshotAtInit = &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{
 		"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: 9101}},
@@ -377,7 +377,7 @@ func TestCharacterizeResolveToolsCallRouteSamePointerSkipsRevalidation(t *testin
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{}}
 	PublishResolverSnapshot(snap)
 
-	sess := &hubSession{Client: "claude-code", InitSuccesses: map[canonicalDaemonRef]string{}}
+	sess := &hubSession{ScopeKey: "claude-code", InitSuccesses: map[canonicalDaemonRef]string{}}
 	sess.RouteMap.Store(&map[string]canonicalToolRef{"srv1__read": ref})
 	// SnapshotAtInit is the SAME pointer the live snapshot holds.
 	sess.SnapshotAtInit = LoadResolverSnapshot()
@@ -406,7 +406,7 @@ func TestCharacterizeResolveToolsCallRouteResolvesTargetPort(t *testing.T) {
 	daemonKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: 9101}
 
 	sess := &hubSession{
-		Client:          "claude-code",
+		ScopeKey:        "claude-code",
 		ProtocolVersion: "2025-11-25",
 		InitSuccesses:   map[canonicalDaemonRef]string{daemonKey: "daemon-sid-1"},
 		DaemonProtoVer:  map[canonicalDaemonRef]string{daemonKey: "2025-11-25"},
@@ -449,7 +449,7 @@ func TestCharacterizeResolveToolsCallRouteNoDaemonSID(t *testing.T) {
 	ref := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: 9101, RawName: "read"}
 
 	sess := &hubSession{
-		Client:        "claude-code",
+		ScopeKey:      "claude-code",
 		InitSuccesses: map[canonicalDaemonRef]string{}, // no SID for the target
 	}
 	sess.RouteMap.Store(&map[string]canonicalToolRef{"srv1__read": ref})
@@ -476,10 +476,10 @@ func TestCharacterizeResolveToolsCallRouteNoDaemonSID(t *testing.T) {
 // dispatchToolsCall — resolved-target path is scope-key-independent.
 //
 // The design claims the dispatch path "does NOT depend on the scope
-// key". This pins that: two sessions with DIFFERENT sess.Client values
+// key". This pins that: two sessions with DIFFERENT sess.ScopeKey values
 // but the SAME resolved target (same daemon ref + SID) both reach the
 // same stub daemon and get an identical rewritten-name response. If
-// dispatch secretly re-keyed on sess.Client, one would diverge.
+// dispatch secretly re-keyed on sess.ScopeKey, one would diverge.
 // ----------------------------------------------------------------------
 
 func TestCharacterizeDispatchToolsCallIgnoresScopeKey(t *testing.T) {
@@ -490,7 +490,7 @@ func TestCharacterizeDispatchToolsCallIgnoresScopeKey(t *testing.T) {
 	// Two sessions, DIFFERENT Client keys, identical resolved target.
 	mk := func(client string) *hubSession {
 		s := &hubSession{
-			Client:           client,
+			ScopeKey:         client,
 			ProtocolVersion:  "2025-11-25",
 			InitSuccesses:    map[canonicalDaemonRef]string{daemonKey: "d1-sid"},
 			DaemonProtoVer:   map[canonicalDaemonRef]string{daemonKey: "2025-11-25"},
@@ -537,7 +537,7 @@ func TestCharacterizeDispatchToolsCallIgnoresScopeKey(t *testing.T) {
 // ----------------------------------------------------------------------
 // Cross-client 401 gate (handlePost + handleDelete).
 //
-// hub_mcp_handler.go gates `sess.Client != clientID` → 401 empty body on
+// hub_mcp_handler.go gates `sess.ScopeKey != clientID` → 401 empty body on
 // BOTH the POST and DELETE paths. The ScopeKey rename rewrites this to
 // `sess.ScopeKey != scopeKey` and the decision requires it stay
 // byte-identical. Pin the exact contract: mismatch → 401 empty; match →
@@ -624,9 +624,9 @@ func TestCharacterizeCrossClient401DeleteTable(t *testing.T) {
 // ----------------------------------------------------------------------
 // Per-client session-cap accounting (Create + deleteLocked perClient).
 //
-// hub_mcp_session.go keys the per-client cap on sess.Client:
+// hub_mcp_session.go keys the per-client cap on sess.ScopeKey:
 //   - Create:        perClient[client] >= MaxPerClient → ErrSessionCapExceeded; else perClient[client]++
-//   - deleteLocked:  perClient[sess.Client]--; if <=0 delete(perClient, sess.Client)
+//   - deleteLocked:  perClient[sess.ScopeKey]--; if <=0 delete(perClient, sess.ScopeKey)
 //
 // The ScopeKey rename touches the struct field + these accounting sites.
 // Pin the exact counter contract so the rename can't change which key

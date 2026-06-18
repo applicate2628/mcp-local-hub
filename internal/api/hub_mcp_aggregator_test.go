@@ -205,7 +205,7 @@ func portFromURL(u string) int {
 func sessionWithParticipants(daemons ...*stubDaemon) *hubSession {
 	s := &hubSession{
 		ClientSessionID:  "client-sid-1",
-		Client:           "claude-code",
+		ScopeKey:         "claude-code",
 		ProtocolVersion:  "2025-11-25",
 		InitSuccesses:    map[canonicalDaemonRef]string{},
 		DaemonProtoVer:   map[canonicalDaemonRef]string{},
@@ -1651,7 +1651,7 @@ func TestAggregateToolsListNamespaceCollision(t *testing.T) {
 	// after construction by swapping in a session built manually.
 	sess := &hubSession{
 		ClientSessionID:  "client-sid-1",
-		Client:           "claude-code",
+		ScopeKey:         "claude-code",
 		ProtocolVersion:  "2025-11-25",
 		InitSuccesses:    map[canonicalDaemonRef]string{},
 		DaemonProtoVer:   map[canonicalDaemonRef]string{},
