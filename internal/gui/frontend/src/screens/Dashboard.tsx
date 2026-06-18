@@ -4,6 +4,7 @@ import { useEventSource } from "../hooks/useEventSource";
 import { stateShape } from "../lib/status";
 import { formatBytes, formatUptime } from "../lib/format";
 import { DaemonMetrics } from "../components/DaemonMetrics";
+import { ConnectionBadge } from "../components/ConnectionBadge";
 import { pushToast } from "../lib/toast-store";
 import type { DaemonStatus } from "../types";
 
@@ -220,7 +221,12 @@ export function DashboardScreen() {
     pushToast("success", `Daemon ${who} recovered`);
   }, []);
 
-  useEventSource("/api/events", {
+  // connectionState surfaces the live SSE transport status so the
+  // Dashboard header can show a "live / reconnecting…" cue. When the
+  // supervisor/GUI drops, native EventSource retries silently; without
+  // this cue the cards would keep showing the last snapshot with no
+  // signal the data is stale. (G13 resilience.)
+  const connectionState = useEventSource("/api/events", {
     "daemon-state": onDelta,
     "bulk-action": onBulkAction,
     "poller-error": onPollerError,
@@ -405,7 +411,10 @@ export function DashboardScreen() {
   return (
     <div>
       <header class="dashboard-header">
-        <h1>Dashboard</h1>
+        <div class="dashboard-header-title" style="display: flex; align-items: baseline; gap: var(--gap-sm)">
+          <h1>Dashboard</h1>
+          <ConnectionBadge state={connectionState} />
+        </div>
         <BulkActionsRow
           runAll={runAll}
           stopAll={stopAll}
