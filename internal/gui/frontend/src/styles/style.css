@@ -2136,7 +2136,11 @@ nav a,
     border-right: 1px solid var(--border);
   }
   .servers-matrix tbody tr:last-child td,
-  .servers-matrix thead tr:last-child th {
+  .servers-matrix tbody tr:last-child th,
+  .servers-matrix thead tr:last-child th,
+  .lsp-matrix tbody tr:last-child td,
+  .lsp-matrix tbody tr:last-child th,
+  .lsp-matrix thead tr:last-child th {
     border-bottom: 1px solid var(--border);
   }
   /* Sticky Server-name column. Opaque background so scrolled client
