@@ -1,7 +1,7 @@
 import { test, expect } from "../fixtures/hub";
 
 test.describe("shell", () => {
-  test("renders sidebar with brand + ten nav links", async ({ page, hub }) => {
+  test("renders sidebar with brand + eleven nav links", async ({ page, hub }) => {
     await page.goto(`${hub.url}/`);
     await expect(page.locator(".sidebar .brand")).toHaveText("mcp-local-hub");
     const links = page.locator(".sidebar nav a");
@@ -11,18 +11,21 @@ test.describe("shell", () => {
     // Phase 3B-II G3 added Capabilities as the 7th link.
     // G5 marketplace added Catalog as the 2nd link (after Servers);
     // every subsequent link shifts down by one (10 links total).
+    // Groups Phase 5b-2 added Groups as the 2nd link (after Servers,
+    // before Catalog); every subsequent link shifts down by one (11 total).
     // Authoritative order is app.tsx NAV_ITEMS.
-    await expect(links).toHaveCount(10);
+    await expect(links).toHaveCount(11);
     await expect(links.nth(0)).toHaveText("Servers");
-    await expect(links.nth(1)).toHaveText("Catalog");
-    await expect(links.nth(2)).toHaveText("Discovery");
-    await expect(links.nth(3)).toHaveText("Add server");
-    await expect(links.nth(4)).toHaveText("Secrets");
-    await expect(links.nth(5)).toHaveText("Dashboard");
-    await expect(links.nth(6)).toHaveText("Logs");
-    await expect(links.nth(7)).toHaveText("Capabilities");
-    await expect(links.nth(8)).toHaveText("Settings");
-    await expect(links.nth(9)).toHaveText("About");
+    await expect(links.nth(1)).toHaveText("Groups");
+    await expect(links.nth(2)).toHaveText("Catalog");
+    await expect(links.nth(3)).toHaveText("Discovery");
+    await expect(links.nth(4)).toHaveText("Add server");
+    await expect(links.nth(5)).toHaveText("Secrets");
+    await expect(links.nth(6)).toHaveText("Dashboard");
+    await expect(links.nth(7)).toHaveText("Logs");
+    await expect(links.nth(8)).toHaveText("Capabilities");
+    await expect(links.nth(9)).toHaveText("Settings");
+    await expect(links.nth(10)).toHaveText("About");
   });
 
   test("default route is Dashboard and nav highlights on click", async ({ page, hub }) => {

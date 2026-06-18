@@ -45,6 +45,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 // HubListenerComponents bundles the resources the hub listener owns
@@ -176,6 +178,33 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	ep := res.Endpoint
 	port := ep.Port
 
+	// Groups/namespaces Phase 3 (decision §"Phase 3 diagnostic finding",
+	// Defect A): publish the ResolverSnapshot from the participating
+	// manifests NOW that the gate-ON listener has bound. Before this
+	// wiring NOTHING in production published a snapshot, so the live hub
+	// LoadResolverSnapshot()'d nil at every session initialize → empty
+	// IntendedParticipants → AggregateInitialize fanned out to nothing →
+	// the aggregate exposed no tools (dormant). This is the choke point
+	// the design names: build from the SAME manifest source the bind
+	// pre-gate (validateParticipatingManifestsForHubBind) just validated.
+	//
+	// Gate-ON only by construction: this code is past the `enabled` short-
+	// circuit, so a gate-OFF process never reaches it (no publish at
+	// gate-OFF — the listener never runs, so a published snapshot would be
+	// read by no one anyway).
+	//
+	// A publish failure is NON-fatal to the bind: the listener is already
+	// up and a published-nil snapshot degrades to the same dormant
+	// behavior that existed before this wiring (empty participants), not a
+	// crash. Surface it as a structured warn so the dormant-aggregate
+	// condition is observable rather than silent.
+	if perr := publishResolverSnapshotForHubBind(ctx, a); perr != nil {
+		_ = api.LogHubMcpEvent("warn", "resolver-snapshot-publish-failed", map[string]any{
+			"port": port,
+			"err":  perr.Error(),
+		})
+	}
+
 	// Step 9 — set up mux + serve. Session store is per-listener so
 	// a future "stop hub mode" path can tear down sessions cleanly.
 	store := api.NewHubSessionStore(api.SessionStoreOpts{})
@@ -223,6 +252,13 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// handler's path parser validates the trailing /mcp + the client
 	// id (gate 2).
 	mux.Handle("/clients/", handler)
+	// Groups/namespaces Phase 4b: the SAME handler serves /g/<group>/mcp
+	// (the design's structurally-separate-prefix decision). The handler's
+	// parseHubPathFromURL recognizes BOTH prefixes and maps a group to the
+	// kind-namespaced "g:<group>" scope key; gate 2 rejects an unknown
+	// group with the same empty-body 404 the unknown-client path uses. No
+	// /clients/ behavior changes — the client branch is byte-identical.
+	mux.Handle("/g/", handler)
 	// codex bot phase4 r12 P2 closure on PR #158: also register the
 	// bare /clients pattern (no trailing slash) so ServeMux does NOT
 	// auto-301 /clients → /clients/ before the auth/path gates run.
@@ -240,6 +276,11 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// empty body, status 404. Eliminates route-fingerprinting and
 	// keeps callers from differentiating /clients vs /clients/foo.
 	mux.HandleFunc("/clients", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	// Mirror the bare-prefix 404 guard for /g (same anti-301 +
+	// empty-body-404 contract as /clients above).
+	mux.HandleFunc("/g", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	mux.Handle("/internal/reload-tokens", reload)
@@ -442,6 +483,95 @@ func validateParticipatingManifestsForHubBind(a *api.API) error {
 		}
 	}
 	return nil
+}
+
+// publishResolverSnapshotForHubBind builds + publishes the hub's
+// ResolverSnapshot from the participating manifests. This is the
+// production publish choke point the groups/namespaces design names
+// (decision §"Phase 3 diagnostic finding", Defect A): pre-this-wiring
+// the snapshot publish path (PublishResolverSnapshot /
+// BumpResolverOnManifestChange) had ZERO production callers, so the
+// gate-ON hub aggregate read a nil snapshot and exposed no tools.
+//
+// Manifest source: the SAME set validateParticipatingManifestsForHubBind
+// validates — a.Scan() entries with ManifestExists, loaded via
+// a.ManifestGet (embed-first). Building from the validated set keeps the
+// published topology consistent with what passed the bind pre-gate.
+//
+// Each manifest's client_bindings rows become Bindings[client] entries
+// (keyed by the same client id parseClientPathFromURL yields), via the
+// existing BumpResolverOnManifestChange atomic-swap publish. A manifest
+// whose client_bindings is empty contributes nothing — additive by
+// omission, identical to today when the file carries no bindings.
+//
+// A per-manifest parse failure is a hard error here (not a silent skip):
+// the bind pre-gate already validated every manifest, so a parse failure
+// at this point is a genuine inconsistency the operator should see, not a
+// routine missing-server case. The caller treats the returned error as
+// non-fatal to the bind (logs a warn) so a single bad manifest degrades
+// to the dormant-aggregate behavior, never a failed gui startup.
+func publishResolverSnapshotForHubBind(ctx context.Context, a *api.API) error {
+	if a == nil {
+		return nil
+	}
+	// R4-3 (bot R4): the manifest scan is now run UNDER hub-mcp.lock, inside
+	// PublishGroupsSnapshotLocked, via this closure — so scan+publish is one
+	// atomic critical section and concurrent manifest mutations serialize on
+	// the flock, each publishing the LATEST on-disk manifest set (no stale
+	// scan can clobber a newer publish). The closure reads client config, the
+	// workspace registry, process snapshots, and embed-first manifests — NONE
+	// of which acquire hub-mcp.lock — so running it under the held lock is
+	// deadlock-free (verified: a.Scan / a.ManifestGet / config.ParseManifest
+	// have no path to acquireHubMcpLock).
+	scanManifests := func() ([]config.ServerManifest, error) {
+		scan, err := a.Scan()
+		if err != nil {
+			return nil, fmt.Errorf("scan manifests: %w", err)
+		}
+		manifests := make([]config.ServerManifest, 0, len(scan.Entries))
+		for _, entry := range scan.Entries {
+			if !entry.ManifestExists {
+				continue
+			}
+			// Embed-first read, matching validateParticipatingManifestsForHubBind.
+			yamlStr, gerr := a.ManifestGet(entry.Name)
+			if gerr != nil {
+				// Scan-window race (manifest deleted between scan and read) is
+				// benign — skip it. Any other read error is surfaced.
+				if errors.Is(gerr, os.ErrNotExist) {
+					continue
+				}
+				return nil, fmt.Errorf("manifest %q: read: %w", entry.Name, gerr)
+			}
+			m, perr := config.ParseManifest(strings.NewReader(yamlStr))
+			if perr != nil {
+				return nil, fmt.Errorf("manifest %q: parse: %w", entry.Name, perr)
+			}
+			manifests = append(manifests, *m)
+		}
+		return manifests, nil
+	}
+	// Groups/namespaces Phase 4a (DATA layer): fold groups.yaml into the
+	// SAME published snapshot under kind-namespaced "g:<group>" keys, and
+	// ensure a per-group hub-token row (loopback-only — the §D auth seam).
+	//
+	// P3-2 (opus-arch) + R4-3/R4-4 (bot R4): the scan → groups read →
+	// token-ensure → publish span is serialized under ONE held hub-mcp.lock
+	// inside PublishGroupsSnapshotLocked so a concurrent GUI groups OR manifest
+	// mutation can never make this read an intermediate config and publish a
+	// torn / out-of-order topology. The flock is acquired ctx-bounded (R4-4) so
+	// a stuck sibling holder cannot freeze GUI startup/shutdown past its budget.
+	// No deadlock: this runs AFTER any RMW / bind lock was released, the scan
+	// closure does not acquire hub-mcp.lock, and the helper only calls in-flock
+	// ("…Locked") halves that do not re-acquire.
+	//
+	// A bad / unreadable groups.yaml must NEVER fault the client snapshot
+	// publish (additive-by-omission, decision claim 5): the helper degrades a
+	// load error to "no groups" with a structured warn, so the bare-<client>
+	// bindings still publish exactly as before. A token-ensure failure is
+	// surfaced (deferred — the snapshot publishes first) so the GUI mutation
+	// tail reports restart_required rather than a false full success.
+	return api.PublishGroupsSnapshotLocked(ctx, scanManifests)
 }
 
 // isMissingHubEndpoint is true if err describes a "hub-mcp.endpoint.json

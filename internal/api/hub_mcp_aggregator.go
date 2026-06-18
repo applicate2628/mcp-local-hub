@@ -396,6 +396,24 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	})
 	results = sorted
 
+	// Resolve the session's FINE-GRAINED per-tool visibility filter
+	// (groups/namespaces Phase 5a) BEFORE collision detection. For a GROUP
+	// scope key this is the group's tools_hidden map (server → hidden raw
+	// names) carried on the captured snapshot; for a CLIENT scope key it is
+	// nil → NO filtering (the byte-identical fence). Reading it off
+	// SnapshotAtInit keeps the (bindings, filter) pair consistent: a session
+	// always sees the filter from the SAME atomic snapshot it captured its
+	// bindings from. Precomputed into a (server → set-of-raw-names) lookup
+	// ONCE so each per-tool check is O(1); nil/empty filter → nil set →
+	// hides() short-circuits to false, preserving the client fence.
+	//
+	// CRITICAL (codex bot r2 — leak via diagnostics): this MUST be computed
+	// before Pass 1 so a HIDDEN tool is excluded from collision detection
+	// too. Otherwise a hidden tool that ALSO collides between two same-server
+	// daemons is dropped from result.tools (Pass 2) yet still named in a
+	// `partialFailures` collision row — leaking the hidden tool's existence.
+	hiddenSet := buildHiddenToolSet(sess.hiddenToolsForScope())
+
 	// Pass 1 — for each successful daemon, record the SET of unique
 	// daemons that produced each exposed key. Keys claimed by more
 	// than one DISTINCT daemon become collisions. codex bot r13 P2
@@ -409,6 +427,9 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			continue
 		}
 		for _, t := range r.tools {
+			if hiddenSet.hides(t.Ref.Server, t.Ref.RawName) {
+				continue // hidden tools never enter collision detection → never leak via partialFailures
+			}
 			set, ok := keyDaemons[t.Exposed]
 			if !ok {
 				set = make(map[canonicalDaemonRef]bool)
@@ -496,6 +517,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			if seenExposed[t.Exposed] {
 				continue
 			}
+			// Per-tool hide: drop a tool the group hides for its server.
+			// Matched on the daemon-side (Server, RawName) — the same
+			// (server → raw tool name) shape groups.yaml authors. A
+			// dropped tool enters NEITHER the merged response NOR
+			// mergedRoutes below, so a later tools/call for it returns
+			// the existing -32601 (the dispatch path is untouched).
+			if hiddenSet.hides(t.Ref.Server, t.Ref.RawName) {
+				continue
+			}
 			seenExposed[t.Exposed] = true
 			flatTools = append(flatTools, t)
 		}
@@ -526,6 +556,26 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	allFailures = append(allFailures, listFailures...)
 
 	if listSuccessCount == 0 {
+		// Zero INTENDED participants (a declared-but-empty group — decision
+		// claim 5) is NOT the all-failed case: nothing was attempted, so the
+		// route exposes an empty tool surface, not a -32000 "all daemons
+		// failed" envelope. Distinguish on IntendedParticipants (empty ⇒
+		// nothing intended) vs the genuine all-failed case (≥1 intended, all
+		// failed).
+		//
+		// B2 (bot R3): the empty-success branch is restricted to GROUP scopes
+		// (ScopeKey carries the GroupScopeKeyPrefix "g:"). A /clients/ session
+		// with zero IntendedParticipants is NOT a declared-but-empty group —
+		// it is a client with no bindings (a startup-publish failure, or a
+		// client absent from the resolver snapshot). Returning empty-success
+		// there would MASK a broken hub config AND change the byte-identical
+		// client contract (pre-groups, a zero-binding client got the -32000
+		// all-failed envelope). So a non-group scope keeps the -32000 envelope;
+		// only a group reaches empty-success.
+		if len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) {
+			sess.RouteMap.Store(&mergedRoutes)                             // empty map — no tools to route
+			return buildToolsListResponse(reqID, mergedTools, allFailures) // mergedTools is empty → result.tools=[]
+		}
 		return buildAllFailedToolsListResponse(reqID, allFailures)
 	}
 	sess.RouteMap.Store(&mergedRoutes)
@@ -604,7 +654,7 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 	// pointer has moved.
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
-		if !daemonStillBound(current, sess.Client, ref) {
+		if !daemonStillBound(current, sess.ScopeKey, ref) {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
@@ -854,7 +904,7 @@ func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolR
 func (s *hubSession) currentDaemonPort(ref canonicalToolRef) int {
 	snap := LoadResolverSnapshot()
 	if snap != nil {
-		for _, b := range snap.Bindings[s.Client] {
+		for _, b := range snap.Bindings[s.ScopeKey] {
 			if b.Server == ref.Server && b.Daemon == ref.Daemon {
 				return b.Port
 			}
@@ -1600,6 +1650,68 @@ func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) []namespace
 		})
 	}
 	return out
+}
+
+// hiddenToolsForScope returns the session's FINE-GRAINED per-tool
+// visibility filter (server name → hidden raw tool names) for its scope
+// key, read from the snapshot captured at initialize (groups/namespaces
+// Phase 5a). Returns nil for a CLIENT scope key (no entry → no filtering,
+// the byte-identical fence) and for any session whose captured snapshot
+// has no ToolsHidden. Reading from SnapshotAtInit (not the live snapshot)
+// keeps the filter consistent with the bindings the session fanned out
+// over — both come from the SAME immutable pointer.
+func (s *hubSession) hiddenToolsForScope() map[string][]string {
+	snap := s.SnapshotAtInit
+	if snap == nil || snap.ToolsHidden == nil {
+		return nil
+	}
+	return snap.ToolsHidden[s.ScopeKey]
+}
+
+// hiddenToolSet is the precomputed O(1)-lookup form of a group's per-tool
+// visibility filter: server name → set of hidden raw tool names. Built ONCE
+// per tools/list assembly (buildHiddenToolSet) so the per-tool check in the
+// merge loop is a map lookup, not a linear scan over the slice form. nil for
+// a CLIENT scope key (no filter) or any group with no hidden tools.
+type hiddenToolSet map[string]map[string]bool
+
+// buildHiddenToolSet converts the snapshot's (server → []rawName) slice
+// filter into the set form. nil/empty filter → nil set (the byte-identical
+// client fence: hides() short-circuits to false). The conversion is a pure
+// reshape — the same (server, rawName) pairs, just indexed for O(1) lookup.
+func buildHiddenToolSet(filter map[string][]string) hiddenToolSet {
+	if len(filter) == 0 {
+		return nil
+	}
+	set := make(hiddenToolSet, len(filter))
+	for server, names := range filter {
+		if len(names) == 0 {
+			continue
+		}
+		m := make(map[string]bool, len(names))
+		for _, n := range names {
+			m[n] = true
+		}
+		set[server] = m
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// hides reports whether the filter hides the raw tool name for the given
+// server. nil/empty set → never hidden (the fence). The match is on
+// (server, rawName) — the exact (server → raw tool name) shape groups.yaml's
+// tools_hidden authors. A filter entry naming a server not in the session's
+// fan-out, or a tool the server never advertises, simply matches nothing — a
+// harmless no-op (decision claim 5: a stale/bad filter never faults, only
+// narrows). O(1) per call (vs the prior linear scan over the slice form).
+func (s hiddenToolSet) hides(server, rawName string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	return s[server][rawName]
 }
 
 // failuresOrEmpty returns failures if non-nil, otherwise an empty

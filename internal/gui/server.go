@@ -502,6 +502,18 @@ type Server struct {
 	cleanup                  cleanupAPI
 	clientInit               clientInitializer
 	lspRegistrar             lspRegistrar
+	groups                   groupsAPI
+
+	// groupsRepublishFn is the live hub-snapshot re-publish seam used by the
+	// /api/groups mutation tail (republishGroupsSnapshot). Production: nil —
+	// the handler calls publishResolverSnapshotForHubBind(s.api) directly (the
+	// same choke point startHubMcpListener uses at gate-ON bind). Tests set a
+	// fake to drive the seam deterministically without standing up a real hub
+	// listener, and to assert it fired (or not). A per-Server field (not a
+	// package-level var) so concurrent tests can't race a shared global and so
+	// the seam is owned by the Server it belongs to (mirrors swapForRoute /
+	// probeForRoute above).
+	groupsRepublishFn func(ctx context.Context, a *api.API) error
 
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
@@ -718,6 +730,7 @@ func NewServer(cfg Config) *Server {
 	s.cleanup = realCleanupAPI{}
 	s.clientInit = realClientInitializer{}
 	s.lspRegistrar = realLSPRegistrar{}
+	s.groups = realGroupsAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
 	registerScanRoutes(s)
@@ -755,6 +768,7 @@ func NewServer(cfg Config) *Server {
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)
 	registerLSPRouterRoutes(s)
+	registerGroupsRoutes(s) // groups Phase 5b-1: /api/groups CRUD authoring endpoint
 	return s
 }
 
@@ -818,6 +832,20 @@ func (s *Server) HubMcpEndpointActive() bool {
 		return false
 	}
 	return comp.Alive()
+}
+
+// HubMcpBoundPort returns the live hub listener's actually-bound TCP port and
+// true when the gate-ON hub listener is currently running; (0, false)
+// otherwise. The port is the one the listener bound at startup (the
+// authoritative runtime value, not the persisted endpoint file which may lag a
+// reset). B4 (bot R3): the Groups GET path uses this to build a usable
+// /g/<group>/mcp connection URL only when the hub is actually serving it.
+func (s *Server) HubMcpBoundPort() (int, bool) {
+	comp := s.hubMcpComp.Load()
+	if comp == nil || !comp.Alive() {
+		return 0, false
+	}
+	return comp.port, true
 }
 
 // Start binds 127.0.0.1:<cfg.Port>, signals `ready` once the listener

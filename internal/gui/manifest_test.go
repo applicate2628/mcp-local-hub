@@ -83,8 +83,18 @@ func TestManifestCreateHandler_ForwardsNameAndYAML(t *testing.T) {
 	s := newManifestTestServer(create, &fakeManifestValidator{})
 	rec := postJSON(t, s, "/api/manifest/create",
 		`{"name":"demo","yaml":"name: demo\nkind: global\n"}`)
-	if rec.Code != http.StatusNoContent {
+	// R4-2: create now returns 200 + {restart_required, hub_live} (was 204) so
+	// a gate-ON republish failure can surface restart_required to the operator.
+	// Gate-OFF here (no hubMcpComp) → both false.
+	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	var body manifestMutationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode create response: %v (body=%q)", err, rec.Body.String())
+	}
+	if body.RestartRequired || body.HubLive {
+		t.Fatalf("gate-OFF create must report restart_required=false hub_live=false, got %+v", body)
 	}
 	if create.name != "demo" || create.yaml != "name: demo\nkind: global\n" {
 		t.Errorf("got name=%q yaml=%q", create.name, create.yaml)
@@ -711,15 +721,24 @@ func TestManifestDeleteHandler_RejectsCrossOrigin(t *testing.T) {
 	}
 }
 
-func TestManifestDeleteHandler_Success_204AndForwardsName(t *testing.T) {
+func TestManifestDeleteHandler_Success_200AndForwardsName(t *testing.T) {
 	deleter := &fakeManifestDeleter{}
 	s := newManifestListDeleteTestServer(&fakeManifestLister{}, deleter)
 	req := httptest.NewRequest(http.MethodDelete, "/api/manifest/demo", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204, body=%q", rec.Code, rec.Body.String())
+	// R4-2: delete now returns 200 + {restart_required, hub_live} (was 204).
+	// Gate-OFF here (no hubMcpComp) → both false.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%q", rec.Code, rec.Body.String())
+	}
+	var body manifestMutationResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode delete response: %v (body=%q)", err, rec.Body.String())
+	}
+	if body.RestartRequired || body.HubLive {
+		t.Fatalf("gate-OFF delete must report restart_required=false hub_live=false, got %+v", body)
 	}
 	if !deleter.called || deleter.seenName != "demo" {
 		t.Fatalf("deleter saw name=%q called=%v, want demo/true", deleter.seenName, deleter.called)
@@ -794,8 +813,9 @@ func TestManifestDeleteSubtree_DoesNotShadowExactPaths(t *testing.T) {
 	registerManifestRoutes(s)
 	rec := postJSON(t, s, "/api/manifest/create",
 		`{"name":"demo","yaml":"name: demo\nkind: global\n"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("POST /api/manifest/create status = %d, want 204 (exact path must win)", rec.Code)
+	// R4-2: create returns 200 (was 204) — the exact-path handler still wins.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/manifest/create status = %d, want 200 (exact path must win)", rec.Code)
 	}
 	if create.name != "demo" {
 		t.Error("create handler should have run (recorded name), not the delete subtree")

@@ -133,12 +133,24 @@ func (h *HubMcpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gate 2: path → canonical client_id.
-	clientID, ok := parseClientPathFromURL(r.URL.Path)
-	if !ok || !isSupportedClient(clientID) {
-		// Unknown path or unknown client → 404 with EMPTY body so the
-		// failure shape is identical regardless of whether the path is
-		// well-formed-but-unknown vs malformed.
+	// Gate 2: path → kind-namespaced scope key. Two prefixes are
+	// served by this same handler (groups/namespaces Phase 4b):
+	//   - /clients/<id>/mcp  → kind=client, scopeKey = bare <id>
+	//   - /g/<group>/mcp      → kind=group,  scopeKey = "g:"+<group>
+	// The client path stays BYTE-IDENTICAL to before: a client kind is
+	// gated by isSupportedClient and its scope key is the bare id, so
+	// every downstream comparison (token row, sess.ScopeKey, bindings
+	// lookup) is unchanged for clients.
+	kind, name, ok := parseHubPathFromURL(r.URL.Path)
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	scopeKey, known := resolveHubScopeKey(kind, name)
+	if !known {
+		// Unknown path or unknown client/group → 404 with EMPTY body so
+		// the failure shape is identical regardless of whether the path
+		// is well-formed-but-unknown vs malformed.
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -153,7 +165,7 @@ func (h *HubMcpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// spec says version validation precedes method-not-allowed. An
 	// empty/absent header still returns 405 (no implied version).
 	if r.Method == http.MethodGet {
-		if !h.checkTokenAndInstanceID(w, r, clientID) {
+		if !h.checkTokenAndInstanceID(w, r, scopeKey) {
 			return
 		}
 		if pv := r.Header.Get("MCP-Protocol-Version"); pv != "" && !hubSupportedVersions[pv] {
@@ -173,16 +185,16 @@ func (h *HubMcpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Gates 3-5: token shape + constant-time compare + instance id.
-	if !h.checkTokenAndInstanceID(w, r, clientID) {
+	if !h.checkTokenAndInstanceID(w, r, scopeKey) {
 		return
 	}
 
 	// Gates 6-7 + dispatch live in per-method handlers.
 	switch r.Method {
 	case http.MethodPost:
-		h.handlePost(w, r, clientID)
+		h.handlePost(w, r, scopeKey)
 	case http.MethodDelete:
-		h.handleDelete(w, r, clientID)
+		h.handleDelete(w, r, scopeKey)
 	default:
 		w.Header().Set("Allow", "POST, DELETE")
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -198,7 +210,7 @@ func (h *HubMcpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // (identical body)" — the response is intentionally bare so an
 // attacker cannot distinguish wrong-shape vs wrong-token vs
 // wrong-instance.
-func (h *HubMcpHandler) checkTokenAndInstanceID(w http.ResponseWriter, r *http.Request, clientID string) bool {
+func (h *HubMcpHandler) checkTokenAndInstanceID(w http.ResponseWriter, r *http.Request, scopeKey string) bool {
 	tok := r.Header.Get("X-Mcphub-Hub-Token")
 	// Gate 3: shape (64 lower-hex).
 	if !isLowerHex64(tok) {
@@ -206,8 +218,12 @@ func (h *HubMcpHandler) checkTokenAndInstanceID(w http.ResponseWriter, r *http.R
 		return false
 	}
 	// Gate 4: constant-time compare. Returns 1 only when the table has
-	// a 64-hex entry for clientID AND it matches tok byte-for-byte.
-	if ConstantTimeCompareToken(clientID, tok) != 1 {
+	// a 64-hex entry for scopeKey AND it matches tok byte-for-byte. The
+	// scope key is the bare client id for a /clients/ request and the
+	// "g:<group>" key for a /g/ request; the token table holds a row for
+	// both kinds (clients via EnsureHubTokens, groups via
+	// EnsureGroupTokens), so the compare is kind-agnostic.
+	if ConstantTimeCompareToken(scopeKey, tok) != 1 {
 		w.WriteHeader(http.StatusUnauthorized)
 		return false
 	}
@@ -225,8 +241,10 @@ func (h *HubMcpHandler) checkTokenAndInstanceID(w http.ResponseWriter, r *http.R
 }
 
 // handlePost runs gates 6-7 (session + protocol version), then
-// dispatches the JSON-RPC method via aggregator entry points.
-func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clientID string) {
+// dispatches the JSON-RPC method via aggregator entry points. scopeKey is
+// the kind-namespaced binding key parsed from the URL — a bare client id
+// for /clients/, or "g:<group>" for /g/ (groups/namespaces Phase 4b).
+func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, scopeKey string) {
 	// Body-size cap: 4 MiB matches maxAggregatorResponseBytes (spec
 	// §"Concurrency + bounds" — same ceiling on inbound + outbound).
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxAggregatorResponseBytes+1))
@@ -317,7 +335,7 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 			writeJSONRPCErrorStatus(w, json.RawMessage(`null`), http.StatusBadRequest, -32600, "invalid request: initialize requires a non-null id", nil)
 			return
 		}
-		h.handleInitialize(w, r, clientID, env.ID, env.Params)
+		h.handleInitialize(w, r, scopeKey, env.ID, env.Params)
 		return
 	}
 
@@ -363,8 +381,11 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 		writeJSONRPCErrorStatus(w, env.ID, http.StatusNotFound, -32600, "unknown session", nil)
 		return
 	}
-	if sess.Client != clientID {
-		// Cross-client session reuse → 401 empty body (no oracle).
+	if sess.ScopeKey != scopeKey {
+		// Cross-scope session reuse → 401 empty body (no oracle). The
+		// kind-namespaced key makes a group session replayed under a
+		// client path (or vice-versa) unequal here, so the existing
+		// cross-client fence now also fences cross-KIND reuse for free.
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -516,8 +537,11 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, clien
 
 // handleInitialize is the initialize sub-handler. Mcp-Session-Id MUST
 // be absent; protocolVersion is validated synchronously before any
-// session is created (codex r7-bot-r2 P2 closure).
-func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request, clientID string, reqID json.RawMessage, paramsRaw json.RawMessage) {
+// session is created (codex r7-bot-r2 P2 closure). scopeKey is the
+// kind-namespaced binding key (bare client id for /clients/, "g:<group>"
+// for /g/) — it becomes sess.ScopeKey and selects the snapshot bindings
+// the new session fans out to (groups/namespaces Phase 4b).
+func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request, scopeKey string, reqID json.RawMessage, paramsRaw json.RawMessage) {
 	if r.Header.Get("Mcp-Session-Id") != "" {
 		writeJSONRPCErrorStatus(w, reqID, http.StatusBadRequest, -32600, "session-id only valid after initialize", nil)
 		return
@@ -583,7 +607,7 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	// Capture the current resolver snapshot for the new session.
 	snap := LoadResolverSnapshot()
 
-	sess, err := h.sessions.Create(clientID, negotiatedVersion, snap)
+	sess, err := h.sessions.Create(scopeKey, negotiatedVersion, snap)
 	if err != nil {
 		if errors.Is(err, ErrSessionCapExceeded) {
 			w.Header().Set("Retry-After", "30")
@@ -595,10 +619,14 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Populate IntendedParticipants from the snapshot's bindings for
-	// this client. AggregateInitialize fans out to every binding.
+	// this scope key. AggregateInitialize fans out to every binding.
+	// For a /clients/ request scopeKey is the bare client id (unchanged
+	// behavior); for a /g/ request it is "g:<group>", so the SAME lookup
+	// selects the group's member-server daemons (the tool-visibility
+	// narrowing — groups/namespaces Phase 4b).
 	if snap != nil {
-		participants := make([]canonicalDaemonRef, len(snap.Bindings[clientID]))
-		copy(participants, snap.Bindings[clientID])
+		participants := make([]canonicalDaemonRef, len(snap.Bindings[scopeKey]))
+		copy(participants, snap.Bindings[scopeKey])
 		sess.IntendedParticipants = participants
 	}
 
@@ -631,7 +659,7 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 // client binding but skipped the version header, so a valid session
 // holder could terminate a session without negotiating the matching
 // version. Same shape as handlePost lines 273-286.
-func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, clientID string) {
+func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, scopeKey string) {
 	sid := r.Header.Get("Mcp-Session-Id")
 	if sid == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -644,7 +672,8 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, cli
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	if sess.Client != clientID {
+	if sess.ScopeKey != scopeKey {
+		// Cross-scope (and cross-kind) session reuse → 401 empty body.
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -779,30 +808,105 @@ func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, 
 	return nil
 }
 
+// hubScopeKind discriminates the two URL prefixes this handler serves.
+// A client request keys on the bare client id; a group request keys on
+// the kind-namespaced "g:<group>" scope key (groups/namespaces Phase 4b).
+type hubScopeKind int
+
+const (
+	// kindClient is the /clients/<id>/mcp route. scopeKey = bare <id>.
+	kindClient hubScopeKind = iota
+	// kindGroup is the /g/<group>/mcp route. scopeKey = "g:"+<group>.
+	kindGroup
+)
+
+// hubClientPrefix / hubGroupPrefix / hubPathSuffix are the URL grammar
+// the hub mux routes on (mounted in internal/gui/hub_listener.go). Named
+// constants so the parser and the listener mount reference the same
+// literals.
+const (
+	hubClientPrefix = "/clients/"
+	hubGroupPrefix  = "/g/"
+	hubPathSuffix   = "/mcp"
+)
+
+// parseHubPathFromURL extracts (kind, name) from the two hub request
+// shapes:
+//
+//	/clients/<id>/mcp  → (kindClient, <id>)
+//	/g/<group>/mcp      → (kindGroup,  <group>)
+//
+// Returns (_, "", false) on any other shape. The strict shape rules are
+// IDENTICAL to the original client-only parser: the leading slash is
+// mandatory, the trailing /mcp is mandatory, and the name segment must be
+// non-empty with no embedded slash or whitespace (so /clients/foo/,
+// /clients/foo/mcp/bar, /g/, and /g/a/b/mcp all reject). The /clients/
+// branch is byte-equivalent to the pre-Phase-4b parseClientPathFromURL —
+// every existing path that parsed before parses to the same (id) now.
+//
+// Group vs client disambiguation is purely by prefix; the kind-namespaced
+// scope key (resolveHubScopeKey) keeps the two keyspaces disjoint so a
+// group and a client of the same name can never collide downstream.
+func parseHubPathFromURL(p string) (hubScopeKind, string, bool) {
+	if name, ok := parseHubSegment(p, hubClientPrefix); ok {
+		return kindClient, name, true
+	}
+	if name, ok := parseHubSegment(p, hubGroupPrefix); ok {
+		return kindGroup, name, true
+	}
+	return kindClient, "", false
+}
+
+// parseHubSegment is the shared strict-shape extractor: given a prefix
+// (e.g. "/clients/" or "/g/") it returns the single path segment between
+// the prefix and the trailing "/mcp", rejecting any embedded slash /
+// whitespace / emptiness. It is the one owner of the path grammar so the
+// client and group routes can never drift apart.
+func parseHubSegment(p, prefix string) (string, bool) {
+	if !strings.HasPrefix(p, prefix) {
+		return "", false
+	}
+	rest := p[len(prefix):]
+	if !strings.HasSuffix(rest, hubPathSuffix) {
+		return "", false
+	}
+	name := rest[:len(rest)-len(hubPathSuffix)]
+	// Empty name, embedded slash, or whitespace → reject.
+	if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
+		return "", false
+	}
+	return name, true
+}
+
 // parseClientPathFromURL extracts {client} from /clients/{client}/mcp.
-// Returns ("", false) on any other shape. The leading slash is
-// mandatory; trailing slashes and additional segments are rejected.
+// Returns ("", false) on any other shape. Retained as the byte-identical
+// client-only parser the Phase 1/2 characterization + handler tests pin;
+// it now delegates to the shared parseHubSegment so the two routes share
+// one grammar owner.
 //
 // Spec §"Cross-client invariant" step 2: only `/clients/<id>/mcp`
 // is accepted as a path; the strict shape closes off `/clients/foo/`
 // (could collide with a future route) and `/clients/foo/mcp/bar`
 // (drives the gate's lookup against an unrelated client id).
 func parseClientPathFromURL(p string) (string, bool) {
-	const prefix = "/clients/"
-	const suffix = "/mcp"
-	if !strings.HasPrefix(p, prefix) {
-		return "", false
+	return parseHubSegment(p, hubClientPrefix)
+}
+
+// resolveHubScopeKey maps a parsed (kind, name) to the kind-namespaced
+// scope key used by the token table, the session store, and the resolver
+// snapshot — AND gates the name against the known-roster for its kind.
+// Returns (scopeKey, known). A not-known result drives the gate-2 404.
+//
+//   - client → scopeKey = bare name, known iff isSupportedClient(name).
+//     BYTE-IDENTICAL to the pre-Phase-4b gate.
+//   - group  → scopeKey = "g:"+name, known iff isKnownGroup(name).
+func resolveHubScopeKey(kind hubScopeKind, name string) (string, bool) {
+	switch kind {
+	case kindGroup:
+		return GroupScopeKey(name), isKnownGroup(name)
+	default:
+		return name, isSupportedClient(name)
 	}
-	rest := p[len(prefix):]
-	if !strings.HasSuffix(rest, suffix) {
-		return "", false
-	}
-	id := rest[:len(rest)-len(suffix)]
-	// Empty id, embedded slash, or whitespace → reject.
-	if id == "" || strings.ContainsAny(id, "/ \t\r\n") {
-		return "", false
-	}
-	return id, true
 }
 
 // isSupportedClient returns true iff name is in
@@ -816,6 +920,35 @@ func isSupportedClient(name string) bool {
 		}
 	}
 	return false
+}
+
+// isKnownGroup returns true iff a group named `name` is declared in the
+// live hub state. The authoritative in-memory record is the published
+// ResolverSnapshot's Groups set: BuildResolverSnapshotFromManifestsAndGroups
+// records EVERY group in groups.yaml under its "g:<name>" scope key,
+// regardless of whether its member servers currently resolve to live
+// daemons. This makes a declared-but-empty group "known" (it passes gate 2,
+// then routes nothing — the design-claim-5 degradation) rather than 404-ing,
+// while an undeclared group is absent from the set and is rejected with the
+// same empty-body 404 the unknown-client path uses.
+//
+// Sourcing the gate from the snapshot (the in-memory cache of groups.yaml,
+// rebuilt + atomically republished on every group create/delete) — NOT the
+// token table — keeps gate 2 (known) consistent with the config source of
+// truth: a deleted group drops out of the next published snapshot and is
+// immediately unknown, whereas a stale "g:<name>" token row left behind
+// would otherwise keep a deleted group "known". The lookup is lock-free
+// (LoadResolverSnapshot reads the atomic-pointer snapshot); a nil snapshot
+// (no publish yet) yields a nil Groups map → not known.
+func isKnownGroup(name string) bool {
+	if validateGroupName(name) != nil {
+		return false
+	}
+	snap := LoadResolverSnapshot()
+	if snap == nil {
+		return false
+	}
+	return snap.Groups[GroupScopeKey(name)]
 }
 
 // isLowerHex64 returns true iff s is exactly 64 lowercase hex chars.

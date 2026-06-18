@@ -127,7 +127,7 @@ type DaemonFailure struct {
 // another.
 type hubSession struct {
 	ClientSessionID      string
-	Client               string
+	ScopeKey             string
 	ProtocolVersion      string // version requested at hub-side initialize (used for daemons that don't return a negotiated version)
 	SnapshotAtInit       *ResolverSnapshot
 	IntendedParticipants []canonicalDaemonRef
@@ -396,7 +396,7 @@ func (s *HubSessionStore) Create(client, protoVer string, snap *ResolverSnapshot
 	now := s.now()
 	sess := &hubSession{
 		ClientSessionID:  id,
-		Client:           client,
+		ScopeKey:         client,
 		ProtocolVersion:  protoVer,
 		SnapshotAtInit:   snap,
 		InitSuccesses:    map[canonicalDaemonRef]string{},
@@ -489,9 +489,9 @@ func (s *HubSessionStore) deleteLocked(id string) bool {
 		return false
 	}
 	delete(s.sessions, id)
-	s.perClient[sess.Client]--
-	if s.perClient[sess.Client] <= 0 {
-		delete(s.perClient, sess.Client)
+	s.perClient[sess.ScopeKey]--
+	if s.perClient[sess.ScopeKey] <= 0 {
+		delete(s.perClient, sess.ScopeKey)
 	}
 	if el, ok := s.lruIndex[id]; ok {
 		s.lru.Remove(el)

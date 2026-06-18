@@ -216,11 +216,21 @@ groups:
     servers:                      # server names (manifest .Name)
       - "serena"
       - "mcp-language-server"
-    tool_filter:                  # OPTIONAL per-server allow/deny (deferred-friendly)
-      mcp-language-server:
-        mode: "allow"             # allow | deny
-        tools: ["definition", "references", "hover"]
+    tools_hidden:                 # OPTIONAL per-server HIDE-list (SHIPPED form)
+      mcp-language-server:        # server name (must be a member of `servers`)
+        - "delete_file"           # raw tool names to hide for that server
+        - "write_file"
 ```
+
+> **SHIPPED schema note (reconciled — C2).** v1 ships `tools_hidden`
+> (server → list of raw tool names to HIDE), NOT the
+> `tool_filter`/`mode: allow|deny` shape this section originally drafted.
+> It is a pure DENY/hide list keyed per member server — there is no
+> allow-mode. A hidden tool is dropped from the merged `tools/list` AND
+> from `mergedRoutes`, so a later `tools/call` for it returns the existing
+> `-32601`. The version field is validated: only `version: 1` (or an
+> absent/`0` default) is accepted; an unknown version is a hard parse
+> error (C1).
 
 - **Resolution into the snapshot.** `BuildResolverSnapshotFromManifests`
   (`hub_mcp_resolver.go:116`) gains a sibling input: a groups list is
@@ -258,12 +268,12 @@ Two layers, both already have a choke point:
    — **the "don't dump all tools" win falls out of the binding subset for
    free**, no new code in the dispatch path.
 
-2. **Per-server tool allow/deny (fine, v1-optional / deferrable).** The
+2. **Per-server tool hide-list (fine, SHIPPED as `tools_hidden`).** The
    per-session `RouteMap` is built at tools/list merge from per-daemon
-   responses (`hub_mcp_resolver.go:21-25`). Adding a filter there — drop
-   `<Server>__<RawName>` entries that fail the group's `tool_filter` —
-   keys the visibility on the group. `resolveToolsCallRoute`
-   (`hub_mcp_aggregator.go:573`) needs NO change: a filtered tool simply
+   responses (`hub_mcp_resolver.go:21-25`). The merge step drops any
+   `(Server, RawName)` pair the group's `tools_hidden` names — a pure
+   per-server DENY/hide list (there is no allow-mode). `resolveToolsCallRoute`
+   (`hub_mcp_aggregator.go:573`) needs NO change: a hidden tool simply
    never enters the RouteMap, so a call to it already returns the existing
    `-32601 "Method not found"` (`:598`). The filter is a pure addition at
    the merge step; the call path's failure mode is reused.
@@ -274,6 +284,26 @@ is repurposed as `sess.ScopeKey` (the binding-map key), set from the URL's
 `snap.Bindings[scopeKey]` identically whether the key is a client id or a
 group name. The tool filter is the only group-aware branch, and it lives
 at the merge step, not the hot dispatch path.
+
+> **`tools_hidden` is NOT a security boundary (B5 + consultant — load-bearing
+> disclaimer; mirrored in the GUI Groups copy).** Hiding a tool reduces the
+> tool surface EXPOSED AT THE HUB; it does **not** restrict access:
+>
+> - **Daemon ports remain directly reachable.** A client that knows a
+>   daemon's per-daemon URL still reaches the "hidden" tool directly — the
+>   hub filter only shapes the aggregated `/g/` view.
+> - **At gate-OFF the hub filter is not in the path at all** (the aggregated
+>   listener isn't running), so `tools_hidden` has zero effect.
+> - **Filter changes apply to NEW client sessions only.** An existing
+>   session captured its filter view at initialize; it keeps that view (and
+>   can keep calling an already-listed tool) until it reconnects. The GUI
+>   sets `restart_required` / "reconnect to apply" expectations accordingly.
+> - **Granularity is per-SERVER, not per-daemon.** `tools_hidden` keys on a
+>   server name, so a tool cannot be hidden on daemon A of a server while
+>   left visible on daemon B of the SAME server.
+>
+> Treat `tools_hidden` as context-bloat reduction (the feature's actual goal),
+> never as an access-control fence.
 
 ---
 
@@ -317,9 +347,14 @@ The v1 design must leave these seams clean:
   requirement).** A group is a single owning artifact (`groups.yaml`).
   Deleting a group: drop its `Bindings[name]` key on the next snapshot
   publish AND drop its token-table row AND (best-effort) emit a structured
-  event so an operator who still has a client pointed at the dead group
-  URL gets a `-32601`/401 rather than silent wrong-routing. Renaming =
-  delete-old + create-new (URLs are not auto-migrated; documented).
+  event. **Actual deleted-group route behavior (reconciled — C6):** a
+  client still pointed at the dead group URL gets an **empty-body 404** —
+  the group drops from the republished snapshot's `.Groups` set, so
+  `isKnownGroup` returns false and the `/g/<group>/mcp` route 404s with the
+  same quiet empty body the unknown-client path uses (NOT a `-32601` and NOT
+  a 401; those were the original draft's guess). This is the correct
+  anti-redirect / empty-404 contract: repoint or restart the client. Renaming
+  = delete-old + create-new (URLs are not auto-migrated; documented).
   Persisted `groups.yaml` rows for a since-removed *server* are skipped at
   resolve time (same defensive skip as the missing-daemon-port case,
   `hub_mcp_resolver.go:144-149`) and surfaced as a validation warning in
@@ -464,7 +499,11 @@ the tools/list merge step.
 6. The feature has a **single owning gate** (`groups.yaml` + the snapshot
    builder); removing/renaming/default-flipping a group is handled by the
    one owner (snapshot key drop + token-row drop + event), with **no
-   scattered consumer-side group checks**.
+   scattered consumer-side group checks**. A deleted group's
+   `/g/<group>/mcp` route returns an **empty-body 404** once the snapshot
+   republishes (the group drops from `.Groups` → `isKnownGroup` false) —
+   the anti-redirect / empty-404 contract, not a `-32601` or 401 (reconciled
+   — C6).
 7. The per-group auth seam reuses the **existing string-keyed token table**
    (gate 4); no auth mechanism is built in v1, but no design choice blocks
    adding a per-group bearer key later without a keyspace change.
@@ -517,3 +556,32 @@ path are all explicit. No implementation code is included.
 **Gate decision: PASS** — design is decision-ready; promotion of this
 `status: proposed` decision to `accepted` is the `architecture-reviewer`
 gate's call after the operator answers the open questions above.
+
+---
+
+## Phase 3 diagnostic finding (2026-06-18) — Defect A operationally CONFIRMED
+
+Code-traced (read-only, pre-implementation per the diagnostic-first gate): the
+`ResolverSnapshot` publish path (`PublishResolverSnapshot`/`BumpResolverOnManifestChange`,
+hub_mcp_resolver.go:90/169) has **ZERO production callers** — only test files publish it
+(hub_mcp_{aggregator,resolver,scope_characterization}_test.go). `startHubMcpListener`
+(internal/gui/hub_listener.go:132) and `BindHubMcpListener` (hub_mcp_bind.go:81) do NOT
+publish on startup. `IntendedParticipants` is set at exactly ONE site (hub_mcp_handler.go:602)
+inside `if snap != nil` — and `snap` is always nil in prod (handler.go:584
+`LoadResolverSnapshot()`).
+
+**Operational impact:** in gate-ON hub-aggregate mode, every session gets EMPTY
+`IntendedParticipants` → `AggregateInitialize` fans out to nothing → the aggregate exposes
+no tools. **The gate-ON hub aggregate is effectively dormant/non-functional in production.**
+NOT currently impacting the operator: gate-ON is OFF in the live config (no
+`hub_endpoint_enabled` key in gui-preferences.yaml), and at gate-OFF `startHubMcpListener`
+short-circuits at line 133 (`enabled=false`) so the listener never runs and the snapshot
+reads never happen. The hub aggregate's manual-publish unit tests masked this prod gap.
+
+**Implication for groups Phase 3:** wiring the publish choke point (build snapshot from
+manifests + `PublishResolverSnapshot` on hub-listener startup + on manifest change while
+gate-ON) is (a) the groups prerequisite, (b) the fix for the dormant gate-ON aggregate, and
+(c) INERT for the operator's current gate-OFF setup (the listener isn't running, so a
+published snapshot is read by no one). Lower risk than a generic live-request-path change.
+Still tests-first + a gate-ON integration test that exercises the REAL publish path (not the
+manual-publish test fixtures) before this lands.
