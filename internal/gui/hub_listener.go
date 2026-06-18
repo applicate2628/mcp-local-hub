@@ -45,6 +45,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 // HubListenerComponents bundles the resources the hub listener owns
@@ -175,6 +177,33 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	ln := res.Listener
 	ep := res.Endpoint
 	port := ep.Port
+
+	// Groups/namespaces Phase 3 (decision §"Phase 3 diagnostic finding",
+	// Defect A): publish the ResolverSnapshot from the participating
+	// manifests NOW that the gate-ON listener has bound. Before this
+	// wiring NOTHING in production published a snapshot, so the live hub
+	// LoadResolverSnapshot()'d nil at every session initialize → empty
+	// IntendedParticipants → AggregateInitialize fanned out to nothing →
+	// the aggregate exposed no tools (dormant). This is the choke point
+	// the design names: build from the SAME manifest source the bind
+	// pre-gate (validateParticipatingManifestsForHubBind) just validated.
+	//
+	// Gate-ON only by construction: this code is past the `enabled` short-
+	// circuit, so a gate-OFF process never reaches it (no publish at
+	// gate-OFF — the listener never runs, so a published snapshot would be
+	// read by no one anyway).
+	//
+	// A publish failure is NON-fatal to the bind: the listener is already
+	// up and a published-nil snapshot degrades to the same dormant
+	// behavior that existed before this wiring (empty participants), not a
+	// crash. Surface it as a structured warn so the dormant-aggregate
+	// condition is observable rather than silent.
+	if perr := publishResolverSnapshotForHubBind(a); perr != nil {
+		_ = api.LogHubMcpEvent("warn", "resolver-snapshot-publish-failed", map[string]any{
+			"port": port,
+			"err":  perr.Error(),
+		})
+	}
 
 	// Step 9 — set up mux + serve. Session store is per-listener so
 	// a future "stop hub mode" path can tear down sessions cleanly.
@@ -441,6 +470,66 @@ func validateParticipatingManifestsForHubBind(a *api.API) error {
 			return fmt.Errorf("manifest %q: %w", entry.Name, verr)
 		}
 	}
+	return nil
+}
+
+// publishResolverSnapshotForHubBind builds + publishes the hub's
+// ResolverSnapshot from the participating manifests. This is the
+// production publish choke point the groups/namespaces design names
+// (decision §"Phase 3 diagnostic finding", Defect A): pre-this-wiring
+// the snapshot publish path (PublishResolverSnapshot /
+// BumpResolverOnManifestChange) had ZERO production callers, so the
+// gate-ON hub aggregate read a nil snapshot and exposed no tools.
+//
+// Manifest source: the SAME set validateParticipatingManifestsForHubBind
+// validates — a.Scan() entries with ManifestExists, loaded via
+// a.ManifestGet (embed-first). Building from the validated set keeps the
+// published topology consistent with what passed the bind pre-gate.
+//
+// Each manifest's client_bindings rows become Bindings[client] entries
+// (keyed by the same client id parseClientPathFromURL yields), via the
+// existing BumpResolverOnManifestChange atomic-swap publish. A manifest
+// whose client_bindings is empty contributes nothing — additive by
+// omission, identical to today when the file carries no bindings.
+//
+// A per-manifest parse failure is a hard error here (not a silent skip):
+// the bind pre-gate already validated every manifest, so a parse failure
+// at this point is a genuine inconsistency the operator should see, not a
+// routine missing-server case. The caller treats the returned error as
+// non-fatal to the bind (logs a warn) so a single bad manifest degrades
+// to the dormant-aggregate behavior, never a failed gui startup.
+func publishResolverSnapshotForHubBind(a *api.API) error {
+	if a == nil {
+		return nil
+	}
+	scan, err := a.Scan()
+	if err != nil {
+		return fmt.Errorf("scan manifests: %w", err)
+	}
+	manifests := make([]config.ServerManifest, 0, len(scan.Entries))
+	for _, entry := range scan.Entries {
+		if !entry.ManifestExists {
+			continue
+		}
+		// Embed-first read, matching validateParticipatingManifestsForHubBind.
+		yamlStr, gerr := a.ManifestGet(entry.Name)
+		if gerr != nil {
+			// Scan-window race (manifest deleted between scan and read) is
+			// benign — skip it. Any other read error is surfaced.
+			if errors.Is(gerr, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("manifest %q: read: %w", entry.Name, gerr)
+		}
+		m, perr := config.ParseManifest(strings.NewReader(yamlStr))
+		if perr != nil {
+			return fmt.Errorf("manifest %q: parse: %w", entry.Name, perr)
+		}
+		manifests = append(manifests, *m)
+	}
+	// BumpResolverOnManifestChange builds + atomically publishes a fresh
+	// snapshot from the manifest set (client_bindings → Bindings[client]).
+	api.BumpResolverOnManifestChange(manifests)
 	return nil
 }
 
