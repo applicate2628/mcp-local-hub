@@ -43,8 +43,6 @@ func TestLiveCapabilitySubSection_MethodNotFoundNon32601(t *testing.T) {
 		"unsupported-method": `{"jsonrpc":"2.0","id":2,"error":{"code":1,"message":"unsupported method: prompts/list"}}`,
 		// "unknown method" phrasing.
 		"unknown-method": `{"jsonrpc":"2.0","id":2,"error":{"code":42,"message":"unknown method"}}`,
-		// Bare "not found" phrasing.
-		"not-found": `{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"prompts not found"}}`,
 	}
 	for name, errBody := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -60,6 +58,23 @@ func TestLiveCapabilitySubSection_MethodNotFoundNon32601(t *testing.T) {
 				t.Errorf("Err should be empty for unsupported state, got %q", got.Err)
 			}
 		})
+	}
+}
+
+// TestLiveCapabilitySubSection_NonMethodNotFoundStillError pins that backend
+// failures containing "not found" are not hidden as unsupported capabilities
+// unless the message specifically identifies method absence.
+func TestLiveCapabilitySubSection_NonMethodNotFoundStillError(t *testing.T) {
+	port, closeSrv := capabilityProbeServer(t, `{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"workspace not found: /tmp/acme-project"}}`)
+	defer closeSrv()
+
+	a := &API{}
+	got := a.liveCapabilitySubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "tools/list", "tool")
+	if got.State != "error" {
+		t.Errorf("State = %q, want %q (err=%q)", got.State, "error", got.Err)
+	}
+	if !strings.Contains(got.Err, "workspace not found") {
+		t.Errorf("Err = %q, want it to contain %q", got.Err, "workspace not found")
 	}
 }
 
