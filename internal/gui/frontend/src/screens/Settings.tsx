@@ -63,14 +63,40 @@ export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScree
   useEffect(() => {
     const params = new URLSearchParams(route.query ?? "");
     const target = params.get("section");
-    if (target && SECTION_IDS.includes(target as Section)) {
-      // Wait one tick so sections have mounted + measured.
-      const id = setTimeout(() => {
-        const el = document.querySelector<HTMLElement>(`section[data-section="${target}"]`);
-        el?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 0);
-      return () => clearTimeout(id);
+    if (!target || !SECTION_IDS.includes(target as Section)) return;
+
+    const scrollToTarget = () => {
+      document
+        .querySelector<HTMLElement>(`section[data-section="${target}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+
+    // Sections BELOW the target (async-loaded Daemons/Backups/Clients) grow
+    // their height after mount, so a one-shot scroll lands short for a lower
+    // section (e.g. Trusted Roots, the 6th). Re-scroll on each layout change
+    // for a bounded settle window, then stop so a later user scroll isn't
+    // fought. (e2e-repair flagged the one-shot setTimeout(0) as the root cause.)
+    let raf = 0;
+    const rescroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(scrollToTarget);
+    };
+    rescroll();
+
+    if (typeof ResizeObserver === "undefined") {
+      return () => cancelAnimationFrame(raf);
     }
+    const ro = new ResizeObserver(rescroll);
+    const container = document.querySelector(".settings-screen") ?? document.body;
+    ro.observe(container);
+    for (const s of document.querySelectorAll("section[data-section]")) ro.observe(s);
+    const stop = window.setTimeout(() => ro.disconnect(), 1000);
+
+    return () => {
+      ro.disconnect();
+      clearTimeout(stop);
+      cancelAnimationFrame(raf);
+    };
   }, [route.query, snapshot.status]);
 
   // Codex PR #20 r11 P2: theme/density apply removed from here.

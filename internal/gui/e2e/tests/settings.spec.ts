@@ -106,7 +106,7 @@ test("Trusted Roots section renders nav link, header, security note, and empty-s
 // Root fix belongs in production Settings.tsx (re-scroll after sections
 // settle — e.g. ResizeObserver/layout-effect rather than setTimeout(0)),
 // which is out of scope for an e2e-test refresh. Tracked as a real bug.
-test.fixme("Trusted Roots deep-link scrolls the section into view", async ({ page, hub }) => {
+test("Trusted Roots deep-link scrolls the section into view", async ({ page, hub }) => {
   await page.goto(hub.url + "#/settings?section=trusted_roots");
   const target = page.locator('section[data-section="trusted_roots"]');
   await expect(target).toBeInViewport();
