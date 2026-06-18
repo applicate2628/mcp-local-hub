@@ -83,6 +83,7 @@ import { AddServerScreen } from "./screens/AddServer";
 import { CapabilitiesScreen } from "./screens/Capabilities";
 import { CatalogScreen } from "./screens/Catalog";
 import { DashboardScreen } from "./screens/Dashboard";
+import { GroupsScreen } from "./screens/Groups";
 import { LogsScreen } from "./screens/Logs";
 import { MigrationScreen } from "./screens/Migration";
 import { SecretsScreen } from "./screens/Secrets";
@@ -92,7 +93,8 @@ import { SettingsScreen } from "./screens/Settings";
 export function App() {
   const [addServerDirty, setAddServerDirty] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
-  const dirtyAny = addServerDirty || settingsDirty;
+  const [groupsDirty, setGroupsDirty] = useState(false);
+  const dirtyAny = addServerDirty || settingsDirty || groupsDirty;
 
   // Codex r2 P1: discard signal for in-screen navigation. Section-local
   // edit state in useSectionSaveFlow / SectionBackups stays mounted across
@@ -164,6 +166,7 @@ export function App() {
     if (ok) {
       setAddServerDirty(false);
       setSettingsDirty(false);
+      setGroupsDirty(false);
       setDiscardKey((n) => n + 1);
     }
     return ok;
@@ -225,7 +228,10 @@ export function App() {
       if (!dirtyAny) return;
       // Only prompt if leaving a dirty-guarded screen for a different one.
       const onGuardedScreen =
-        route.screen === "add-server" || route.screen === "edit-server" || route.screen === "settings";
+        route.screen === "add-server" ||
+        route.screen === "edit-server" ||
+        route.screen === "settings" ||
+        route.screen === "groups";
       if (!onGuardedScreen) return;
       if (targetScreen === route.screen) return;
       // eslint-disable-next-line no-alert
@@ -235,6 +241,7 @@ export function App() {
       } else {
         setAddServerDirty(false);
         setSettingsDirty(false);
+        setGroupsDirty(false);
         setDiscardKey((n) => n + 1);
       }
     };
@@ -244,6 +251,9 @@ export function App() {
   switch (route.screen) {
     case "servers":
       body = <ServersScreen />;
+      break;
+    case "groups":
+      body = <GroupsScreen onDirtyChange={setGroupsDirty} />;
       break;
     case "catalog":
       body = <CatalogScreen />;
@@ -299,6 +309,7 @@ export function App() {
   // discipline already in SecretPicker (env-picker).
   const NAV_ITEMS: ReadonlyArray<{ screen: string; href: string; label: string }> = [
     { screen: "servers",      href: "#/servers",      label: "Servers" },
+    { screen: "groups",       href: "#/groups",       label: "Groups" },
     { screen: "catalog",      href: "#/catalog",      label: "Catalog" },
     { screen: "migration",    href: "#/migration",    label: "Discovery" },
     { screen: "add-server",   href: "#/add-server",   label: "Add server" },

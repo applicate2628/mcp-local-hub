@@ -1,0 +1,358 @@
+// screens/Groups.test.tsx — component tests for the Groups authoring screen
+// (groups Phase 5b-2). Mirrors Catalog.test.tsx's fetch-router idiom: a
+// declarative URL→response map so each test describes the wire surface
+// without brittle mockResolvedValueOnce ordering. The pure draft/dirty/
+// validation logic is unit-tested in lib/groups-draft.test.ts; these tests
+// cover the screen's network glue + the operator-visible behaviors:
+//   - list render + empty-state;
+//   - create-via-form → POST body shape (servers + tools_hidden);
+//   - validation code → inline field error (unknown server, invalid name);
+//   - the restart_required banner;
+//   - delete via the ConfirmModal.
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, waitFor, cleanup, fireEvent, screen } from "@testing-library/preact";
+import { GroupsScreen } from "./Groups";
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+// fetchRouter dispatches each fetch call to the matching response based on
+// the request URL prefix (same helper shape as Catalog.test.tsx). The
+// per-route fn receives the RequestInit so a test can capture POST bodies.
+function fetchRouter(routes: Record<string, (init?: RequestInit, url?: string) => Response>) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    // Longest-prefix match so "/api/groups?name=x" can route distinctly if
+    // a test ever needs it; default falls back to the plain "/api/groups".
+    const keys = Object.keys(routes).sort((a, b) => b.length - a.length);
+    for (const prefix of keys) {
+      if (url.startsWith(prefix)) {
+        return routes[prefix](init, url);
+      }
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+}
+
+const AVAILABLE = ["memory", "serena", "time"];
+
+// listBody builds the GET /api/groups response.
+function listBody(groups: unknown[], available: string[] = AVAILABLE) {
+  return { groups, available_servers: available };
+}
+
+describe("GroupsScreen", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.location.hash = "#/groups";
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders the empty-state on a clean install (no groups)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () => jsonResponse(200, listBody([])),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-empty")).toBeTruthy();
+    });
+    expect(screen.getByTestId("groups-empty").textContent).toContain("No groups yet");
+    // h1 present for nav/shell smoke parity.
+    expect(screen.getByText("Groups")).toBeTruthy();
+  });
+
+  it("lists existing groups with their servers", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () =>
+          jsonResponse(
+            200,
+            listBody([
+              { name: "frontend", description: "JS tools", servers: ["serena", "time"] },
+              { name: "infra", servers: ["memory"] },
+            ]),
+          ),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-row-frontend")).toBeTruthy();
+    });
+    expect(screen.getByTestId("groups-row-servers-frontend").textContent).toContain("serena, time");
+    expect(screen.getByTestId("groups-row-infra").textContent).toContain("infra");
+  });
+
+  it("renders an error banner with Retry when GET /api/groups fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () =>
+          jsonResponse(500, { error: "groups list failed", code: "GROUPS_LIST_FAILED" }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-load-error")).toBeTruthy();
+    });
+    expect(screen.getByTestId("groups-load-error").textContent).toContain("groups list failed");
+  });
+
+  it("creates a group via the form → POSTs {name, servers, tools_hidden} and shows it", async () => {
+    const bodies: unknown[] = [];
+    let getCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": (init) => {
+          if (init?.method === "POST") {
+            bodies.push(JSON.parse(String(init.body)));
+            return jsonResponse(200, {
+              group: {
+                name: "frontend",
+                servers: ["serena"],
+                tools_hidden: { serena: ["find_symbol"] },
+              },
+              restart_required: false,
+              hub_live: true,
+            });
+          }
+          // GET: first load empty, second load (after save) shows the row.
+          getCount += 1;
+          return getCount === 1
+            ? jsonResponse(200, listBody([]))
+            : jsonResponse(
+                200,
+                listBody([
+                  {
+                    name: "frontend",
+                    servers: ["serena"],
+                    tools_hidden: { serena: ["find_symbol"] },
+                  },
+                ]),
+              );
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    // Open the editor.
+    fireEvent.click(await screen.findByTestId("groups-new"));
+    // Fill the name.
+    fireEvent.input(screen.getByTestId("groups-name-input"), {
+      target: { value: "frontend" },
+    });
+    // Select a server.
+    fireEvent.click(screen.getByTestId("groups-server-checkbox-serena"));
+    // Hide a tool on that server (the fine-grained filter).
+    const hiddenInput = await screen.findByTestId("groups-hidden-input-serena");
+    fireEvent.input(hiddenInput, { target: { value: "find_symbol" } });
+    // Save.
+    fireEvent.click(screen.getByTestId("groups-save"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-row-frontend")).toBeTruthy();
+    });
+    // The POST carried the projected body shape.
+    expect(bodies[0]).toMatchObject({
+      name: "frontend",
+      servers: ["serena"],
+      tools_hidden: { serena: ["find_symbol"] },
+    });
+  });
+
+  it("shows the restart banner when the save returns restart_required (gate-OFF)", async () => {
+    let getCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": (init) => {
+          if (init?.method === "POST") {
+            return jsonResponse(200, {
+              group: { name: "infra", servers: ["memory"] },
+              restart_required: true,
+              hub_live: false,
+            });
+          }
+          getCount += 1;
+          return getCount === 1
+            ? jsonResponse(200, listBody([]))
+            : jsonResponse(200, listBody([{ name: "infra", servers: ["memory"] }]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    fireEvent.click(await screen.findByTestId("groups-new"));
+    fireEvent.input(screen.getByTestId("groups-name-input"), { target: { value: "infra" } });
+    fireEvent.click(screen.getByTestId("groups-server-checkbox-memory"));
+    fireEvent.click(screen.getByTestId("groups-save"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-restart-notice")).toBeTruthy();
+    });
+    expect(screen.getByTestId("groups-restart-notice").textContent).toContain("restart the hub");
+  });
+
+  it("maps GROUPS_UNKNOWN_SERVER to an inline servers error and keeps the editor open", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": (init) => {
+          if (init?.method === "POST") {
+            return jsonResponse(400, {
+              error: 'unknown server "ghost"',
+              code: "GROUPS_UNKNOWN_SERVER",
+            });
+          }
+          return jsonResponse(200, listBody([]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    fireEvent.click(await screen.findByTestId("groups-new"));
+    fireEvent.input(screen.getByTestId("groups-name-input"), { target: { value: "g" } });
+    fireEvent.click(screen.getByTestId("groups-server-checkbox-memory"));
+    fireEvent.click(screen.getByTestId("groups-save"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-servers-error")).toBeTruthy();
+    });
+    expect(screen.getByTestId("groups-servers-error").textContent).toContain("unknown server");
+    // The editor stays open so the operator can correct + retry.
+    expect(screen.queryByTestId("groups-editor")).toBeTruthy();
+  });
+
+  it("blocks Save on a client-invalid name (':' separator) without a POST", async () => {
+    const posts: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": (init) => {
+          if (init?.method === "POST") posts.push("POST");
+          return jsonResponse(200, listBody([]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    fireEvent.click(await screen.findByTestId("groups-new"));
+    fireEvent.input(screen.getByTestId("groups-name-input"), { target: { value: "g:bad" } });
+    fireEvent.click(screen.getByTestId("groups-server-checkbox-memory"));
+
+    // The inline name error renders and Save is disabled.
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-name-error")).toBeTruthy();
+    });
+    const saveBtn = screen.getByTestId("groups-save") as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+    // No POST ever fired (guarded client-side).
+    expect(posts).toEqual([]);
+  });
+
+  it("deletes a group via the ConfirmModal and removes it from the list", async () => {
+    const deletes: string[] = [];
+    let getCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": (init, url) => {
+          if (init?.method === "DELETE") {
+            deletes.push(url ?? "");
+            return jsonResponse(200, { restart_required: false, hub_live: true });
+          }
+          getCount += 1;
+          // First load: one group. After delete: empty.
+          return getCount === 1
+            ? jsonResponse(200, listBody([{ name: "frontend", servers: ["serena"] }]))
+            : jsonResponse(200, listBody([]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    fireEvent.click(await screen.findByTestId("groups-delete-frontend"));
+    // ConfirmModal appears; confirm.
+    fireEvent.click(await screen.findByTestId("groups-confirm-delete-confirm"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-empty")).toBeTruthy();
+    });
+    // The DELETE carried the group name on the query string.
+    expect(deletes.some((u) => u.includes("name=frontend"))).toBe(true);
+  });
+
+  it("cancelling the delete ConfirmModal fires no DELETE and keeps the group", async () => {
+    const deletes: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": (init) => {
+          if (init?.method === "DELETE") {
+            deletes.push("DELETE");
+            return jsonResponse(200, { restart_required: false, hub_live: true });
+          }
+          return jsonResponse(200, listBody([{ name: "frontend", servers: ["serena"] }]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    fireEvent.click(await screen.findByTestId("groups-delete-frontend"));
+    fireEvent.click(await screen.findByTestId("groups-confirm-delete-cancel"));
+
+    // Still present; no DELETE issued.
+    await waitFor(() => {
+      expect(screen.queryByTestId("groups-row-frontend")).toBeTruthy();
+    });
+    expect(deletes).toEqual([]);
+  });
+
+  it("editing an existing group hydrates the form with its members + locks the name", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () =>
+          jsonResponse(
+            200,
+            listBody([
+              {
+                name: "frontend",
+                description: "JS tools",
+                servers: ["serena", "time"],
+                tools_hidden: { serena: ["find_symbol"] },
+              },
+            ]),
+          ),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    fireEvent.click(await screen.findByTestId("groups-edit-frontend"));
+
+    // Name is hydrated + locked (rename = delete + create).
+    const nameInput = (await screen.findByTestId("groups-name-input")) as HTMLInputElement;
+    expect(nameInput.value).toBe("frontend");
+    expect(nameInput.disabled).toBe(true);
+    // Members are pre-checked.
+    expect((screen.getByTestId("groups-server-checkbox-serena") as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect((screen.getByTestId("groups-server-checkbox-time") as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect((screen.getByTestId("groups-server-checkbox-memory") as HTMLInputElement).checked).toBe(
+      false,
+    );
+    // Hidden tools round-trip back into the tag input.
+    expect((screen.getByTestId("groups-hidden-input-serena") as HTMLInputElement).value).toBe(
+      "find_symbol",
+    );
+    // No change yet → Save is disabled (not dirty).
+    expect((screen.getByTestId("groups-save") as HTMLButtonElement).disabled).toBe(true);
+  });
+});

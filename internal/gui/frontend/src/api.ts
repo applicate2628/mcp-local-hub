@@ -961,3 +961,163 @@ export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
     transport: typeof e.transport === "string" ? e.transport : "",
   }));
 }
+
+// ───────────────────────────────────────────────────────────────────
+// Groups / namespaces (Groups screen, groups Phase 5b-2)
+//
+// A group is a NAMED subset of MCP servers exposed at /g/<group>/mcp with
+// optional per-server hidden tools — the tool-context-bloat fix (decision
+// work-items/decisions/2026-06-18-groups-namespaces-tool-visibility.md).
+// Thin wrappers around /api/groups (GET list + POST upsert + DELETE), the
+// thin HTTP wrapper over the api data layer (internal/gui/groups.go).
+//
+// Error-shape policy: the POST/DELETE handlers surface validation errors
+// via the {error, code} envelope (GROUPS_INVALID_NAME / _UNKNOWN_SERVER /
+// _HIDDEN_NONMEMBER / _INVALID_JSON / _NAME_REQUIRED / _NOT_FOUND). We
+// preserve `code` on a typed GroupsApiError (mirroring InitClientConfigError)
+// so the Groups screen can map a 400 to a precise inline field error rather
+// than grepping the human-readable string.
+// ───────────────────────────────────────────────────────────────────
+
+// GroupDTO mirrors groupDTO in internal/gui/groups.go. Servers is always a
+// non-nil array on the wire; tools_hidden is omitted by the backend when
+// empty (omitempty) — we normalize it to {} so callers never branch on
+// undefined.
+export interface GroupDTO {
+  name: string;
+  description?: string;
+  servers: string[];
+  tools_hidden?: Record<string, string[]>;
+}
+
+// GroupsListResponse mirrors groupsListResponse — the GET /api/groups body.
+// Both arrays are always non-nil (the backend guarantees it); the normalize
+// helper defends against an older/partial body anyway.
+export interface GroupsListResponse {
+  groups: GroupDTO[];
+  available_servers: string[];
+}
+
+// GroupMutationResponse mirrors groupMutationResponse — the POST/DELETE body.
+// restart_required is true when the write persisted but the live hub could
+// NOT be re-published in-place (gate-OFF or hub not live); the screen shows a
+// "restart the hub to apply" notice in that case. hub_live reports whether
+// the gate-ON hub listener was live at mutation time so the banner can be
+// worded precisely.
+export interface GroupMutationResponse {
+  group?: GroupDTO;
+  restart_required: boolean;
+  hub_live: boolean;
+}
+
+// SaveGroupBody is the POST /api/groups upsert body shape.
+export interface SaveGroupBody {
+  name: string;
+  description?: string;
+  servers: string[];
+  tools_hidden?: Record<string, string[]>;
+}
+
+// GroupsApiError preserves the backend's `code` field and the HTTP status so
+// the Groups screen can surface the operational error code (and map it to the
+// offending field) without parsing the free-form `error` string.
+export class GroupsApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "GroupsApiError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+// normalizeGroup guarantees a non-null `servers` array and a normalized
+// `tools_hidden` map regardless of what the wire carried — defensive against
+// an older/partial backend body (consistent with normalizeTrustedRoots).
+function normalizeGroup(raw: Partial<GroupDTO>): GroupDTO {
+  const hidden: Record<string, string[]> = {};
+  if (raw.tools_hidden && typeof raw.tools_hidden === "object") {
+    for (const [srv, tools] of Object.entries(raw.tools_hidden)) {
+      hidden[srv] = Array.isArray(tools) ? tools.filter((t) => typeof t === "string") : [];
+    }
+  }
+  return {
+    name: typeof raw.name === "string" ? raw.name : "",
+    description: typeof raw.description === "string" ? raw.description : "",
+    servers: Array.isArray(raw.servers) ? raw.servers.filter((s) => typeof s === "string") : [],
+    tools_hidden: hidden,
+  };
+}
+
+// getGroups reads every group from groups.yaml plus the available server
+// names a picker offers. An absent groups.yaml yields an empty `groups`
+// array — the normal first-run path.
+export async function getGroups(): Promise<GroupsListResponse> {
+  const raw = await fetchOrThrow<Partial<GroupsListResponse>>("/api/groups", "object");
+  return {
+    groups: Array.isArray(raw.groups) ? raw.groups.map(normalizeGroup) : [],
+    available_servers: Array.isArray(raw.available_servers)
+      ? raw.available_servers.filter((s) => typeof s === "string")
+      : [],
+  };
+}
+
+// readMutationError pulls the {error, code} envelope off a non-2xx response
+// and throws a GroupsApiError carrying the operational code. Shared by
+// saveGroup + deleteGroup so both surface the same typed error.
+async function readMutationError(path: string, resp: Response): Promise<never> {
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const msg = body?.error ?? resp.statusText ?? "unknown";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new GroupsApiError(`${path} [${code}]: ${msg}`, code, resp.status);
+}
+
+// saveGroup create-or-updates ONE group (POST). The backend rejects an
+// invalid name (GROUPS_INVALID_NAME), an unknown server (GROUPS_UNKNOWN_SERVER),
+// or a tools_hidden key naming a non-member server (GROUPS_HIDDEN_NONMEMBER)
+// with 400; the thrown GroupsApiError carries the code so the screen can map
+// it to the offending field. Resolves to the mutation response (the updated
+// group + restart_required/hub_live) on success.
+export async function saveGroup(body: SaveGroupBody): Promise<GroupMutationResponse> {
+  const resp = await fetch("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    return readMutationError("/api/groups", resp);
+  }
+  const raw = (await resp.json()) as Partial<GroupMutationResponse>;
+  return {
+    group: raw.group ? normalizeGroup(raw.group) : undefined,
+    restart_required: raw.restart_required === true,
+    hub_live: raw.hub_live === true,
+  };
+}
+
+// deleteGroup removes one group by name (DELETE). The backend rejects an
+// empty name with 400 GROUPS_NAME_REQUIRED and an absent group with 404
+// GROUPS_NOT_FOUND; both surface as a GroupsApiError carrying the code.
+// Resolves to the mutation response (restart_required/hub_live; group absent)
+// on success.
+export async function deleteGroup(name: string): Promise<GroupMutationResponse> {
+  const resp = await fetch(`/api/groups?name=${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!resp.ok) {
+    return readMutationError("/api/groups", resp);
+  }
+  const raw = (await resp.json()) as Partial<GroupMutationResponse>;
+  return {
+    group: raw.group ? normalizeGroup(raw.group) : undefined,
+    restart_required: raw.restart_required === true,
+    hub_live: raw.hub_live === true,
+  };
+}
