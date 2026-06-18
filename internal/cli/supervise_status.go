@@ -32,6 +32,57 @@ var rssByPID = process.ResidentSetSizeByPID
 // and keeps the per-daemon PortLive TCP fallback.
 var loopbackPortOwnersSnapshotFn = api.LoopbackPortOwnersSnapshot
 
+// resolveManifestDaemonPortFn is the per-(server, daemon) manifest port
+// lookup the status producer calls for daemons whose intent Port is 0 (the
+// PR #211-and-earlier installs that wrote Port=0 for every daemon).
+// Indirected through a package var so status tests can inject a deterministic
+// resolver AND assert it is loaded AT MOST ONCE PER SERVER per refresh — the
+// per-server-manifest memo (newManifestPortResolver) wraps this fn so a
+// server with N Port=0 daemons reads + parses that server's manifest.yaml
+// ONCE, not N times. Defaults to the production embed-first lookup.
+var resolveManifestDaemonPortFn = api.ResolveManifestDaemonPort
+
+// newManifestPortResolver returns a closure that resolves a daemon's port
+// from its server manifest, MEMOIZED PER SERVER for the lifetime of the
+// returned closure (one supervisorStatusDaemons refresh).
+//
+// Perf: ResolveManifestDaemonPort reads + parses the WHOLE server manifest
+// YAML on every call (loadManifestForServer → loadManifestYAMLEmbedFirst →
+// config.ParseManifest). A server with multiple daemons whose intent Port is
+// 0 (e.g. serena's dynamic workspace-proxy pool, or any multi-daemon server
+// from a pre-port-seeding install) used to re-parse the SAME manifest once
+// per daemon row. The memo collapses that to ONE parse per server per status
+// refresh — the same per-iteration-redundant-parse class the port-owner
+// snapshot already fixed for netstat. The lookup result is unchanged: the
+// underlying fn is keyed on (server, daemon) and the memo stores the exact
+// (port, ok) pair it returned, so the resolved value is byte-identical.
+func newManifestPortResolver() func(server, daemon string) (int, bool) {
+	type portResult struct {
+		port int
+		ok   bool
+	}
+	// memo[server][daemon] → resolved (port, ok). The server-level map is
+	// allocated lazily on the first daemon seen for that server; its mere
+	// presence records that the server's manifest was already consulted, so
+	// a second daemon of the same server reuses the cached entry instead of
+	// re-reading the manifest.
+	memo := map[string]map[string]portResult{}
+	return func(server, daemon string) (int, bool) {
+		byDaemon, seenServer := memo[server]
+		if seenServer {
+			if r, ok := byDaemon[daemon]; ok {
+				return r.port, r.ok
+			}
+		} else {
+			byDaemon = map[string]portResult{}
+			memo[server] = byDaemon
+		}
+		port, ok := resolveManifestDaemonPortFn(server, daemon)
+		byDaemon[daemon] = portResult{port: port, ok: ok}
+		return port, ok
+	}
+}
+
 func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]map[string]any, error) {
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	intent, err := api.ReadSupervisorIntent(intentPath)
@@ -77,6 +128,10 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		}
 	}
 
+	// Per-refresh memo so a server with multiple Port=0 daemons reads +
+	// parses that server's manifest.yaml ONCE, not once per daemon row.
+	resolveManifestPort := newManifestPortResolver()
+
 	rows := make([]map[string]any, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
 		taskName := canonicalSupervisorTaskName(d.TaskName)
@@ -117,7 +172,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		// write time — when it does, this lookup becomes a no-op.
 		port := d.Port
 		if port == 0 && server != "" {
-			if p, ok := api.ResolveManifestDaemonPort(server, daemon); ok {
+			if p, ok := resolveManifestPort(server, daemon); ok {
 				port = p
 			}
 		}
