@@ -106,6 +106,45 @@ func EnsureGroupTokens(groupKeys []string) (HubTokenTable, error) {
 	return ensureHubTokensLocked(groupKeys)
 }
 
+// pruneHubTokensLocked removes the token row for each supplied scope key
+// (e.g. the "g:<group>" key of a just-deleted group), rewrites the table,
+// and republishes the live snapshot. Caller MUST already hold hub-mcp.lock
+// (called from ReadModifyWriteGroups under its held lock). Kind-agnostic
+// like ensureHubTokensLocked: it deletes whatever keys it is handed.
+//
+// A missing token file is treated as "nothing to prune" (no rows exist), not
+// an error — the same additive-by-omission posture the ensure path takes. A
+// key not present in the table is a no-op. Only a genuine load/write failure
+// (corrupt file, DACL gate) surfaces.
+func pruneHubTokensLocked(scopeKeys []string) error {
+	tbl, err := loadHubTokensLocked()
+	if err != nil {
+		if isHubMcpStateMissingErr(err) {
+			// No token file ⇒ no rows to prune.
+			return nil
+		}
+		return err
+	}
+	if tbl.Tokens == nil {
+		return nil
+	}
+	changed := false
+	for _, k := range scopeKeys {
+		if _, ok := tbl.Tokens[k]; ok {
+			delete(tbl.Tokens, k)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if werr := writeHubTokensLocked(tbl); werr != nil {
+		return werr
+	}
+	publishTokenTable(tbl)
+	return nil
+}
+
 // ensureHubTokensLocked is the in-flock half. Caller MUST already
 // hold hub-mcp.lock. The supplied list is a set of SCOPE KEYS — bare
 // client ids from EnsureHubTokens, or kind-namespaced "g:<group>" keys

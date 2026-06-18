@@ -158,6 +158,52 @@ func (a *API) ManifestList() ([]string, error) {
 	return listManifestNamesEmbedFirst()
 }
 
+// RoutableServerNames returns the sorted subset of ManifestList() whose
+// manifest declares at least one LOCAL daemon (a non-empty daemons[] block)
+// — i.e. the servers a group can actually route to. It is the same locality
+// the resolver snapshot builder honors: a group binds a member server by
+// folding each of that server's daemons into the snapshot, so a server with
+// NO local daemon ref (transport=remote-http, where clients connect straight
+// to the remote URL; or a daemonless / dynamic-pool-only manifest with no
+// static daemons[]) contributes ZERO bindings and is unroutable as a group
+// member.
+//
+// The Groups GUI sources its server picker from this (not ManifestList) so it
+// never offers an unroutable member that would persist as a dead row and then
+// re-trip GROUPS_UNKNOWN_SERVER on the next save. A manifest that fails to
+// load or parse is SKIPPED (best-effort enrichment, never blanks the picker),
+// mirroring CatalogList.
+func (a *API) RoutableServerNames() ([]string, error) {
+	names, err := listManifestNamesEmbedFirst()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		data, err := loadManifestYAMLEmbedFirst(name)
+		if err != nil {
+			// Unreadable manifest — skip (it still appears in ManifestList,
+			// but without a parsed body we cannot assert local routability).
+			continue
+		}
+		m, err := config.ParseManifest(bytes.NewReader(data))
+		if err != nil {
+			continue
+		}
+		// Local daemon ref == a non-empty static daemons[] block. This is
+		// exactly what BuildResolverSnapshotFromManifestsAndGroups indexes
+		// per server, so a member with no daemons[] binds nothing.
+		// transport=remote-http manifests are rejected from declaring
+		// daemons[] at parse time, so they fall out here by construction.
+		if len(m.Daemons) == 0 {
+			continue
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // CatalogList returns the catalog projection ({name, description, kind})
 // of every available server, sorted by name. It reuses the same
 // embed-first name set as ManifestList, then loads + projects each

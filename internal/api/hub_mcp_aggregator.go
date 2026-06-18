@@ -486,6 +486,14 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	// (bindings, filter) pair consistent: a session always sees the filter
 	// from the SAME atomic snapshot it captured its bindings from.
 	hiddenTools := sess.hiddenToolsForScope()
+	// Precompute the per-tool hide filter as a (server → set-of-raw-names)
+	// lookup ONCE, so the per-tool check in the merge loop below is O(1)
+	// instead of a linear scan over filter[server] for every tool (the
+	// merge is O(tools); the prior scan made it O(tools × hidden-per-server)).
+	// nil/empty filter → nil set → the check short-circuits to "never hidden",
+	// preserving the byte-identical client fence. Behavior is unchanged: a
+	// tool is hidden iff (server, rawName) is in the filter.
+	hiddenSet := buildHiddenToolSet(hiddenTools)
 	for _, r := range results {
 		if r.err != nil {
 			listFailures = append(listFailures, DaemonFailure{
@@ -510,7 +518,7 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			// dropped tool enters NEITHER the merged response NOR
 			// mergedRoutes below, so a later tools/call for it returns
 			// the existing -32601 (the dispatch path is untouched).
-			if toolHidden(hiddenTools, t.Ref.Server, t.Ref.RawName) {
+			if hiddenSet.hides(t.Ref.Server, t.Ref.RawName) {
 				continue
 			}
 			seenExposed[t.Exposed] = true
@@ -1635,23 +1643,50 @@ func (s *hubSession) hiddenToolsForScope() map[string][]string {
 	return snap.ToolsHidden[s.ScopeKey]
 }
 
-// toolHidden reports whether the per-tool filter hides the raw tool name
-// for the given server. nil/empty filter → never hidden (the fence). The
-// match is on (server, rawName) — the exact (server → raw tool name) shape
-// groups.yaml's tools_hidden authors. A filter entry naming a server not
-// in the session's fan-out, or a tool the server never advertises, simply
-// matches nothing — a harmless no-op (decision claim 5: a stale/bad filter
-// never faults, only narrows).
-func toolHidden(filter map[string][]string, server, rawName string) bool {
+// hiddenToolSet is the precomputed O(1)-lookup form of a group's per-tool
+// visibility filter: server name → set of hidden raw tool names. Built ONCE
+// per tools/list assembly (buildHiddenToolSet) so the per-tool check in the
+// merge loop is a map lookup, not a linear scan over the slice form. nil for
+// a CLIENT scope key (no filter) or any group with no hidden tools.
+type hiddenToolSet map[string]map[string]bool
+
+// buildHiddenToolSet converts the snapshot's (server → []rawName) slice
+// filter into the set form. nil/empty filter → nil set (the byte-identical
+// client fence: hides() short-circuits to false). The conversion is a pure
+// reshape — the same (server, rawName) pairs, just indexed for O(1) lookup.
+func buildHiddenToolSet(filter map[string][]string) hiddenToolSet {
 	if len(filter) == 0 {
+		return nil
+	}
+	set := make(hiddenToolSet, len(filter))
+	for server, names := range filter {
+		if len(names) == 0 {
+			continue
+		}
+		m := make(map[string]bool, len(names))
+		for _, n := range names {
+			m[n] = true
+		}
+		set[server] = m
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// hides reports whether the filter hides the raw tool name for the given
+// server. nil/empty set → never hidden (the fence). The match is on
+// (server, rawName) — the exact (server → raw tool name) shape groups.yaml's
+// tools_hidden authors. A filter entry naming a server not in the session's
+// fan-out, or a tool the server never advertises, simply matches nothing — a
+// harmless no-op (decision claim 5: a stale/bad filter never faults, only
+// narrows). O(1) per call (vs the prior linear scan over the slice form).
+func (s hiddenToolSet) hides(server, rawName string) bool {
+	if len(s) == 0 {
 		return false
 	}
-	for _, hidden := range filter[server] {
-		if hidden == rawName {
-			return true
-		}
-	}
-	return false
+	return s[server][rawName]
 }
 
 // failuresOrEmpty returns failures if non-nil, otherwise an empty

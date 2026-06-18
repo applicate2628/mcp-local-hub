@@ -90,6 +90,21 @@ type ResolverSnapshot struct {
 	// nil when there are no groups (the groups-free build never allocates
 	// it), preserving additive-by-omission.
 	ToolsHidden map[string]map[string][]string
+
+	// Groups is the set of DECLARED group scope keys ("g:<group>") from
+	// groups.yaml, regardless of whether each group currently resolves to
+	// any live daemon (Bindings). It is the authoritative "is this group
+	// known" source the /g/ route's gate-2 (isKnownGroup) reads — NOT the
+	// token table (a stale token row would otherwise keep a deleted group
+	// "known"). A declared-but-empty group (no live member daemons → no
+	// Bindings key) is still present here so it passes gate 2 and then
+	// routes nothing (decision claim 5), while a deleted group drops out of
+	// the next published snapshot and is immediately unknown.
+	//
+	// nil when there are no groups (additive-by-omission: the groups-free
+	// build never allocates it, and a nil map's lookup is false → no group
+	// is ever "known" on a host with no groups.yaml).
+	Groups map[string]bool
 }
 
 // Package-level atomic pointer to the currently-published snapshot.
@@ -253,6 +268,13 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 			continue
 		}
 		scopeKey := GroupScopeKey(g.Name)
+		// Record the group as DECLARED (gate-2 known source) BEFORE the
+		// servers loop, so a group with no resolvable member daemons is
+		// still "known" (passes gate 2, routes nothing — decision claim 5).
+		if snap.Groups == nil {
+			snap.Groups = make(map[string]bool)
+		}
+		snap.Groups[scopeKey] = true
 		for _, server := range g.Servers {
 			sd, ok := byServer[server]
 			if !ok {

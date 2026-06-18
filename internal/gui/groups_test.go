@@ -51,8 +51,9 @@ type fakeGroupsAPI struct {
 	writeErr   error
 	serversErr error
 
-	writeCalls int
-	lastWrite  api.GroupsConfig
+	writeCalls  int
+	lastWrite   api.GroupsConfig
+	lastDeleted []string
 }
 
 func (f *fakeGroupsAPI) LoadGroups() (api.GroupsConfig, error) {
@@ -62,9 +63,23 @@ func (f *fakeGroupsAPI) LoadGroups() (api.GroupsConfig, error) {
 	return f.cfg, nil
 }
 
-func (f *fakeGroupsAPI) WriteGroups(cfg api.GroupsConfig) error {
+// ReadModifyWriteGroups emulates the real atomic load→mutate→write: it runs
+// the callback against the current cfg, records the write, applies it, and
+// remembers the deleted-group set (the token-prune is a no-op in-fake — the
+// fake holds no token table). loadErr / writeErr inject failure at the load
+// and write steps respectively.
+func (f *fakeGroupsAPI) ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig) ([]string, error)) error {
+	if f.loadErr != nil {
+		return f.loadErr
+	}
+	cfg := f.cfg
+	deleted, err := mutate(&cfg)
+	if err != nil {
+		return err
+	}
 	f.writeCalls++
 	f.lastWrite = cfg
+	f.lastDeleted = deleted
 	if f.writeErr != nil {
 		return f.writeErr
 	}
@@ -81,15 +96,14 @@ func (f *fakeGroupsAPI) AvailableServers() ([]string, error) {
 
 // groupsTestServer wires a fresh Server with the /api/groups route and
 // injects the supplied groupsAPI. The republish seam is stubbed to a no-op
-// counter by default so a handler-logic test never reaches the real hub
-// snapshot; individual tests override groupsRepublishFn as needed.
+// by default (per-Server s.groupsRepublishFn field) so a handler-logic test
+// never reaches the real hub snapshot; individual tests override
+// s.groupsRepublishFn as needed.
 func groupsTestServer(t *testing.T, g groupsAPI) *Server {
 	t.Helper()
 	s := NewServer(Config{})
 	s.groups = g
-	orig := groupsRepublishFn
-	groupsRepublishFn = func(_ *api.API) error { return nil }
-	t.Cleanup(func() { groupsRepublishFn = orig })
+	s.groupsRepublishFn = func(_ *api.API) error { return nil }
 	return s
 }
 
@@ -280,7 +294,7 @@ func TestGroups_PostRestartRequiredWhenHubNotLive(t *testing.T) {
 	s := groupsTestServer(t, g)
 	// No hubMcpComp stored → HubMcpEndpointActive() is false → gate-OFF.
 	republishCalled := false
-	groupsRepublishFn = func(_ *api.API) error { republishCalled = true; return nil }
+	s.groupsRepublishFn = func(_ *api.API) error { republishCalled = true; return nil }
 
 	rec := doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{
 		"name": "frontend", "servers": []string{"memory"},
@@ -318,9 +332,7 @@ func TestGroups_DiskRoundTrip(t *testing.T) {
 	// server set deterministically (the host's embedded manifests are
 	// irrelevant — we only need "memory" to be known).
 	s.groups = diskTestGroupsAPI{available: []string{"memory", "time"}}
-	orig := groupsRepublishFn
-	groupsRepublishFn = func(_ *api.API) error { return nil }
-	t.Cleanup(func() { groupsRepublishFn = orig })
+	s.groupsRepublishFn = func(_ *api.API) error { return nil }
 
 	// POST creates the group.
 	rec := doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{
@@ -389,14 +401,17 @@ func TestGroups_DiskRoundTrip(t *testing.T) {
 	}
 }
 
-// diskTestGroupsAPI uses the REAL api LoadGroups/WriteGroups (so the write
-// hits the per-test state root on disk) but pins the available-server set
-// to a deterministic list (independent of the host's embedded manifests).
+// diskTestGroupsAPI uses the REAL api LoadGroups/ReadModifyWriteGroups (so
+// the atomic RMW hits the per-test state root on disk) but pins the
+// available-server set to a deterministic list (independent of the host's
+// embedded manifests).
 type diskTestGroupsAPI struct{ available []string }
 
-func (diskTestGroupsAPI) LoadGroups() (api.GroupsConfig, error)  { return api.LoadGroups() }
-func (diskTestGroupsAPI) WriteGroups(cfg api.GroupsConfig) error { return api.WriteGroups(cfg) }
-func (d diskTestGroupsAPI) AvailableServers() ([]string, error)  { return d.available, nil }
+func (diskTestGroupsAPI) LoadGroups() (api.GroupsConfig, error) { return api.LoadGroups() }
+func (diskTestGroupsAPI) ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig) ([]string, error)) error {
+	return api.ReadModifyWriteGroups(mutate)
+}
+func (d diskTestGroupsAPI) AvailableServers() ([]string, error) { return d.available, nil }
 
 // --- LIVE RE-PUBLISH: published snapshot carries Bindings["g:<name>"] ---
 
@@ -427,11 +442,9 @@ func TestGroups_LiveRepublishCarriesGroupBinding(t *testing.T) {
 	comp.alive.Store(true)
 	s.hubMcpComp.Store(comp)
 
-	// Leave groupsRepublishFn nil → the handler calls the REAL
+	// Leave s.groupsRepublishFn nil → the handler calls the REAL
 	// publishResolverSnapshotForHubBind(s.api) seam.
-	orig := groupsRepublishFn
-	groupsRepublishFn = nil
-	t.Cleanup(func() { groupsRepublishFn = orig })
+	s.groupsRepublishFn = nil
 
 	member := s.groups.(diskTestGroupsAPI).available[0]
 	rec := doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{

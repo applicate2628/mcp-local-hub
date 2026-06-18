@@ -16,7 +16,8 @@
 //   - DELETE /api/groups?name=<n>   — remove one group (404 if absent).
 //
 // It is the thin HTTP wrapper over the api data layer
-// (api.LoadGroups / api.WriteGroups / api.ValidateGroupName), mirroring
+// (api.LoadGroups for the read path / api.ReadModifyWriteGroups for the
+// atomic mutation path / api.ValidateGroupName), mirroring
 // internal/gui/client_install_prefs.go: every method is wrapped in
 // s.requireSameOrigin, inputs are validated server-side, and there is no
 // arbitrary path / file target — the only persistence sink is the fixed
@@ -46,12 +47,19 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"mcp-local-hub/internal/api"
 )
+
+// errGroupNotFound is the sentinel a ReadModifyWriteGroups DELETE callback
+// returns when the named group is absent, so the handler maps it to a 404
+// GROUPS_NOT_FOUND rather than a generic 500. The error never leaves the
+// package (the handler translates it before writing the response).
+var errGroupNotFound = errors.New("group not found")
 
 // groupsAPI is the narrow seam the groups handler needs over the api data
 // layer. Behind an interface so handler tests inject a fake and never
@@ -60,38 +68,38 @@ import (
 // realDismisser idiom in server.go).
 type groupsAPI interface {
 	// LoadGroups returns the parsed groups.yaml (empty + nil error when
-	// the file is absent).
+	// the file is absent). Read-only — the GET path uses it.
 	LoadGroups() (api.GroupsConfig, error)
-	// WriteGroups persists the full groups set through the hardened
-	// flock+secure-write pipeline.
-	WriteGroups(cfg api.GroupsConfig) error
-	// AvailableServers returns the known server names a group may bind
-	// (api.ManifestList — embed-first, the same source the Servers matrix
-	// and the snapshot builder use).
+	// ReadModifyWriteGroups runs an ATOMIC load→mutate→write under ONE held
+	// hub-mcp.lock (so concurrent POST/DELETE can't lost-update), then prunes
+	// the token rows of any groups the callback reports deleted. The POST
+	// (create-or-update) and DELETE paths both route through it.
+	ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig) ([]string, error)) error
+	// AvailableServers returns the known server names a group may bind —
+	// filtered to LOCALLY-ROUTABLE servers (those with a local daemon ref;
+	// transport=remote-http / daemonless servers are excluded because a group
+	// can never route to them). The same locality the snapshot builder honors.
 	AvailableServers() ([]string, error)
 }
 
 type realGroupsAPI struct{}
 
 func (realGroupsAPI) LoadGroups() (api.GroupsConfig, error) { return api.LoadGroups() }
-func (realGroupsAPI) WriteGroups(cfg api.GroupsConfig) error {
-	return api.WriteGroups(cfg)
+func (realGroupsAPI) ReadModifyWriteGroups(mutate func(cfg *api.GroupsConfig) ([]string, error)) error {
+	return api.ReadModifyWriteGroups(mutate)
 }
 func (realGroupsAPI) AvailableServers() ([]string, error) {
-	return api.NewAPI().ManifestList()
+	return api.NewAPI().RoutableServerNames()
 }
 
-// groupsRepublishFn is the live re-publish seam. Production leaves it nil
-// and the handler calls publishResolverSnapshotForHubBind(s.api) directly
-// (the same choke point startHubMcpListener uses at gate-ON bind). A test
-// sets this to a fake to drive the seam deterministically without standing
-// up a real hub listener, and to assert it fired (or did not) per the
-// gate-live decision. Restored after the test.
-var groupsRepublishFn func(a *api.API) error
-
+// republishGroupsSnapshot drives the live hub-snapshot re-publish after a
+// groups.yaml mutation. The re-publish seam is the per-Server
+// s.groupsRepublishFn field (a test fake when set); production leaves it nil
+// and calls publishResolverSnapshotForHubBind(s.api) directly — the same
+// choke point startHubMcpListener uses at gate-ON bind.
 func (s *Server) republishGroupsSnapshot() error {
-	if groupsRepublishFn != nil {
-		return groupsRepublishFn(s.api)
+	if s.groupsRepublishFn != nil {
+		return s.groupsRepublishFn(s.api)
 	}
 	return publishResolverSnapshotForHubBind(s.api)
 }
@@ -255,12 +263,6 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Read-modify-write the full set under the api layer's flock.
-	cfg, err := s.groups.LoadGroups()
-	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_LIST_FAILED")
-		return
-	}
 	servers := body.Servers
 	if servers == nil {
 		servers = []string{}
@@ -271,18 +273,24 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 		Servers:     servers,
 		ToolsHidden: body.ToolsHidden,
 	}
-	replaced := false
-	for i := range cfg.Groups {
-		if cfg.Groups[i].Name == name {
-			cfg.Groups[i] = updated
-			replaced = true
-			break
+	// Atomic read-modify-write under ONE held hub-mcp.lock so two concurrent
+	// POSTs can't lost-update (each reading the same baseline, the later write
+	// clobbering the earlier). The callback edits the loaded set in place;
+	// create-or-update deletes nothing (empty deleted-set).
+	if err := s.groups.ReadModifyWriteGroups(func(cfg *api.GroupsConfig) ([]string, error) {
+		replaced := false
+		for i := range cfg.Groups {
+			if cfg.Groups[i].Name == name {
+				cfg.Groups[i] = updated
+				replaced = true
+				break
+			}
 		}
-	}
-	if !replaced {
-		cfg.Groups = append(cfg.Groups, updated)
-	}
-	if err := s.groups.WriteGroups(cfg); err != nil {
+		if !replaced {
+			cfg.Groups = append(cfg.Groups, updated)
+		}
+		return nil, nil
+	}); err != nil {
 		writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_WRITE_FAILED")
 		return
 	}
@@ -301,25 +309,31 @@ func (s *Server) groupsDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.groups.LoadGroups()
-	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_LIST_FAILED")
-		return
-	}
-	idx := -1
-	for i := range cfg.Groups {
-		if cfg.Groups[i].Name == name {
-			idx = i
-			break
+	// Atomic read-modify-write under ONE held hub-mcp.lock. The callback
+	// removes the matching row (signalling 404 via errGroupNotFound when
+	// absent) and reports the deleted group name so ReadModifyWriteGroups
+	// prunes its "g:<name>" token row under the same held lock — no stale
+	// auth row survives a delete.
+	err := s.groups.ReadModifyWriteGroups(func(cfg *api.GroupsConfig) ([]string, error) {
+		idx := -1
+		for i := range cfg.Groups {
+			if cfg.Groups[i].Name == name {
+				idx = i
+				break
+			}
 		}
-	}
-	if idx < 0 {
-		writeAPIError(w, fmt.Errorf("group %q not found", name),
-			http.StatusNotFound, "GROUPS_NOT_FOUND")
-		return
-	}
-	cfg.Groups = append(cfg.Groups[:idx], cfg.Groups[idx+1:]...)
-	if err := s.groups.WriteGroups(cfg); err != nil {
+		if idx < 0 {
+			return nil, errGroupNotFound
+		}
+		cfg.Groups = append(cfg.Groups[:idx], cfg.Groups[idx+1:]...)
+		return []string{name}, nil
+	})
+	if err != nil {
+		if errors.Is(err, errGroupNotFound) {
+			writeAPIError(w, fmt.Errorf("group %q not found", name),
+				http.StatusNotFound, "GROUPS_NOT_FOUND")
+			return
+		}
 		writeAPIError(w, err, http.StatusInternalServerError, "GROUPS_WRITE_FAILED")
 		return
 	}

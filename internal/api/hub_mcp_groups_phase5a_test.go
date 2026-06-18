@@ -63,6 +63,10 @@ func frontendSnapshotWithHiddenFixture(t *testing.T, hidden map[string][]string)
 		ToolsHidden: map[string]map[string][]string{
 			GroupScopeKey("frontend"): hidden,
 		},
+		// The DECLARED-group set the production builder records for every
+		// groups.yaml group — the gate-2 source isKnownGroup now reads; the
+		// manual fixture mirrors it (else /g/frontend 404s before routing).
+		Groups: map[string]bool{GroupScopeKey("frontend"): true},
 	}
 	PublishResolverSnapshot(snap)
 	return memSD, timeSD, fsSD

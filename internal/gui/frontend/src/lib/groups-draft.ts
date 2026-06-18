@@ -41,8 +41,16 @@ export interface GroupDraft {
 // "g:<name>"), so a name carrying it could forge a kind prefix.
 export const GROUP_NAME_SEPARATOR = ":";
 
-// validateGroupName mirrors the Go validateGroupName: non-empty (after trim)
-// and free of the reserved ':' separator. Returns null when valid, else a
+// ROUTE_UNSAFE_NAME mirrors routeUnsafeChars in internal/api/hub_mcp_groups.go:
+// a group name must be reachable as the `/g/<group>/mcp` route segment, so it
+// may not contain a slash, '?', backslash, or any whitespace (these break the
+// route grammar parseHubSegment enforces and would persist an unreachable
+// group). The regex matches the FIRST offending character.
+const ROUTE_UNSAFE_NAME = /[/?\\\s]/;
+
+// validateGroupName mirrors the Go validateGroupName: non-empty (after trim),
+// free of the reserved ':' separator, and free of any route-unsafe character
+// (slash, '?', backslash, whitespace). Returns null when valid, else a
 // human-readable message. The screen calls this on every keystroke so the
 // operator sees the verdict before Save (the backend re-validates and is the
 // source of truth — GROUPS_INVALID_NAME).
@@ -51,6 +59,10 @@ export function validateGroupName(name: string): string | null {
   if (trimmed === "") return "Group name is required.";
   if (trimmed.includes(GROUP_NAME_SEPARATOR)) {
     return `Group name cannot contain "${GROUP_NAME_SEPARATOR}" (it is reserved for the scope-key namespace).`;
+  }
+  const unsafe = trimmed.match(ROUTE_UNSAFE_NAME);
+  if (unsafe !== null) {
+    return `Group name cannot contain "${unsafe[0]}" (a group name may not contain slashes, "?", or whitespace; it must be reachable as the /g/<name>/mcp route segment).`;
   }
   return null;
 }

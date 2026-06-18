@@ -200,6 +200,12 @@ func frontendSnapshotFixture(t *testing.T) (memSD, timeSD, fsSD *stubDaemon) {
 			// Client: the SUPERSET — all three. Proves the group narrows.
 			"claude-code": {memRef, timeRef, fsRef},
 		},
+		// The DECLARED-group set the production builder
+		// (BuildResolverSnapshotFromManifestsAndGroups) records for every
+		// groups.yaml group — the gate-2 source isKnownGroup now reads. This
+		// manual fixture must mirror it or a /g/frontend request 404s as
+		// "unknown group" before routing.
+		Groups: map[string]bool{GroupScopeKey("frontend"): true},
 	}
 	PublishResolverSnapshot(snap)
 	return memSD, timeSD, fsSD

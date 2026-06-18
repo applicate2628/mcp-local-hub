@@ -504,6 +504,17 @@ type Server struct {
 	lspRegistrar             lspRegistrar
 	groups                   groupsAPI
 
+	// groupsRepublishFn is the live hub-snapshot re-publish seam used by the
+	// /api/groups mutation tail (republishGroupsSnapshot). Production: nil —
+	// the handler calls publishResolverSnapshotForHubBind(s.api) directly (the
+	// same choke point startHubMcpListener uses at gate-ON bind). Tests set a
+	// fake to drive the seam deterministically without standing up a real hub
+	// listener, and to assert it fired (or not). A per-Server field (not a
+	// package-level var) so concurrent tests can't race a shared global and so
+	// the seam is owned by the Server it belongs to (mirrors swapForRoute /
+	// probeForRoute above).
+	groupsRepublishFn func(a *api.API) error
+
 	// Weekly-schedule swap test seams (memo D8). Production: nil — the
 	// handler falls back to api.SwapWeeklyTrigger and a real
 	// scheduler.New() ExportXML adapter. Tests inject closures to drive

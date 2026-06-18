@@ -169,6 +169,24 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
   // null when valid. Shown inline under the name field.
   const nameError = target.mode === "new" ? validateGroupName(draft.name) : null;
   const chosen = selectedServers(draft);
+
+  // serverRows is the UNION of (currently-available servers ∪ the draft's
+  // selected members), sorted, each tagged stale=true when it is a selected
+  // member that is NO LONGER available (e.g. its manifest was removed, or it
+  // became daemonless/remote-http after the group was authored). Rendering the
+  // union — not just `available` — keeps a stale persisted member VISIBLE with
+  // its checkbox so the operator can uncheck + Save to remove it; otherwise it
+  // would be invisible and un-removable, and a re-save would re-post it →
+  // GROUPS_UNKNOWN_SERVER. selectedServers() reads draft.selected, which
+  // draftFromGroup hydrates from the persisted group's members.
+  const availableSet = useMemo(() => new Set(state.kind === "ok" ? state.available : []), [state]);
+  const serverRows = useMemo(() => {
+    const names = new Set<string>(availableSet);
+    for (const s of selectedServers(draft)) names.add(s);
+    return Array.from(names)
+      .sort()
+      .map((name) => ({ name, stale: !availableSet.has(name) }));
+  }, [availableSet, draft]);
   const canSave =
     target.mode !== "none" &&
     dirty &&
@@ -213,11 +231,26 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
   async function confirmDelete(): Promise<void> {
     if (deleteTarget === null) return;
     setDeleteError(null);
+    const deletedName = deleteTarget;
     try {
-      await deleteGroup(deleteTarget);
+      const resp = await deleteGroup(deletedName);
       // If the editor was open on the deleted group, close it.
-      if (target.mode === "edit" && target.name === deleteTarget) closeEditor();
+      if (target.mode === "edit" && target.name === deletedName) closeEditor();
       setDeleteTarget(null);
+      // The DELETE response carries restart_required just like save(): when
+      // the write persisted but the live hub could not be re-published in
+      // place (gate-OFF or the in-place publish failed), the operator must
+      // restart the hub for the route to fully stop resolving. Surface the
+      // same restart notice rather than discarding it.
+      if (resp.restart_required) {
+        setRestartNotice(
+          resp.hub_live
+            ? `Deleted "${deletedName}", but the live hub could not be re-published in place. Restart the hub to fully apply the removal.`
+            : `Deleted "${deletedName}". The aggregated hub is not running, so restart the hub (or enable the aggregated hub endpoint) for /g/${deletedName}/mcp to stop resolving.`,
+        );
+      } else {
+        setRestartNotice(null);
+      }
       await load();
     } catch (e) {
       setDeleteError(asError(e));
@@ -248,7 +281,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
     );
   }
 
-  const { groups, available } = state;
+  const { groups } = state;
 
   return (
     <section class="groups-screen" data-testid="groups-loaded">
@@ -263,6 +296,19 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
       {deleteError !== null && (
         <p class="settings-error" data-testid="groups-delete-error">
           Could not delete group: {deleteError}
+        </p>
+      )}
+
+      {/* Top-level restart notice (e.g. after a DELETE while the editor is
+          closed). When the editor is open it renders its own copy near Save,
+          so this one is gated to the list view to avoid a duplicate. */}
+      {restartNotice !== null && target.mode === "none" && (
+        <p
+          class="save-banner partial mb-4 text-sm"
+          data-testid="groups-restart-notice-list"
+          role="status"
+        >
+          {restartNotice}
         </p>
       )}
 
@@ -390,16 +436,21 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
               Pick the servers this group exposes. Only the selected servers&rsquo;
               tools reach a client pointed at the group URL.
             </p>
-            {available.length === 0 ? (
+            {serverRows.length === 0 ? (
               <p class="text-sm text-app-muted" data-testid="groups-no-servers">
                 No servers available.
               </p>
             ) : (
               <ul class="groups-server-list m-0 list-none p-0" data-testid="groups-server-list">
-                {available.map((server) => {
+                {serverRows.map(({ name: server, stale }) => {
                   const checked = draft.selected[server] === true;
                   return (
-                    <li key={server} class="py-1.5" data-server={server}>
+                    <li
+                      key={server}
+                      class="py-1.5"
+                      data-server={server}
+                      data-stale={stale ? "true" : undefined}
+                    >
                       <label class="flex items-center gap-2 text-sm text-app-text">
                         <input
                           type="checkbox"
@@ -409,6 +460,15 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
                           onChange={() => toggleServer(server)}
                         />
                         <code class="text-sm text-app-text">{server}</code>
+                        {stale && (
+                          <span
+                            class="text-xs text-app-muted"
+                            data-testid={`groups-server-unavailable-${server}`}
+                            title="This server is no longer available. Uncheck and Save to remove it from the group."
+                          >
+                            (unavailable)
+                          </span>
+                        )}
                       </label>
                       {checked && (
                         <div class="ml-6 mt-1">

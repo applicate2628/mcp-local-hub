@@ -102,19 +102,39 @@ func GroupScopeKey(group string) string {
 	return GroupScopeKeyPrefix + group
 }
 
-// validateGroupName enforces the operator-decision-2 invariant: a group
-// name is non-empty and contains no ':' so it cannot forge a kind prefix
-// in the shared scope keyspace. (Reserved-name collision against client
-// names is MOOT given kind-namespacing — a group key and a client key
-// live in disjoint subspaces — so no name-equality gate is needed; the
-// only correctness requirement is that the name cannot inject the
-// separator.)
+// routeUnsafeChars are the characters a group name MUST NOT contain because
+// they break the `/g/<group>/mcp` route grammar parseHubSegment enforces, so
+// a persisted group would be UNREACHABLE by its own route. parseHubSegment
+// rejects a name segment containing any slash or whitespace; we add '?' (a
+// URL query separator — a name carrying it would split the path before the
+// trailing /mcp and never match the route) and the remaining ASCII
+// whitespace forms. A persisted group must always be reachable by its route,
+// so the validator (the persistence gate) refuses these up front rather than
+// letting a write land a dead group.
+const routeUnsafeChars = "/?\\ \t\r\n\v\f"
+
+// validateGroupName enforces two invariants:
+//
+//  1. operator-decision-2: a group name is non-empty and contains no ':' so
+//     it cannot forge a kind prefix in the shared scope keyspace. (Reserved-
+//     name collision against client names is MOOT given kind-namespacing — a
+//     group key and a client key live in disjoint subspaces — so no name-
+//     equality gate is needed; the only keyspace requirement is that the name
+//     cannot inject the separator.)
+//  2. route-reachability: the name contains no character that breaks the
+//     `/g/<group>/mcp` route grammar (slash, '?', whitespace — see
+//     routeUnsafeChars and parseHubSegment). A persisted group MUST always be
+//     reachable by its route, so a route-unsafe name is rejected at the
+//     persistence boundary, never written.
 func validateGroupName(name string) error {
 	if name == "" {
 		return fmt.Errorf("group name is empty")
 	}
 	if strings.Contains(name, groupNameSeparator) {
 		return fmt.Errorf("group name %q contains the reserved %q separator (group scope keys are namespaced as %s<name>; a name with %q could forge a kind prefix)", name, groupNameSeparator, GroupScopeKeyPrefix, groupNameSeparator)
+	}
+	if i := strings.IndexAny(name, routeUnsafeChars); i >= 0 {
+		return fmt.Errorf("group name %q contains a route-unsafe character %q (a group name may not contain slashes, '?', or whitespace; it must be reachable as the %s<name>%s route segment)", name, string(name[i]), hubGroupPrefix, hubPathSuffix)
 	}
 	return nil
 }
@@ -168,7 +188,22 @@ func parseGroupsConfig(raw []byte) (GroupsConfig, error) {
 // no groups.yaml ⇒ today's behavior exactly). Any other read error
 // (DACL gate, partial read) or a parse/validation failure surfaces so a
 // corrupt file is not silently treated as "no groups".
+//
+// LoadGroups does NOT hold hub-mcp.lock; it is the read-only snapshot the
+// SERVE path and read-only GET surfaces use. A load→mutate→write sequence
+// MUST use ReadModifyWriteGroups instead so the whole transition is atomic
+// under one held lock (otherwise two concurrent writers lost-update).
 func LoadGroups() (GroupsConfig, error) {
+	return loadGroupsLocked()
+}
+
+// loadGroupsLocked is the lock-agnostic groups reader. It does not acquire
+// hub-mcp.lock itself, so it is callable BOTH from the lock-free LoadGroups
+// and from inside ReadModifyWriteGroups (which already holds the lock). The
+// helper performs no locking of its own; the "Locked" suffix follows the
+// hub_mcp_tokens.go convention (loadHubTokensLocked) meaning "the in-flock
+// half — caller owns the lock when one is required".
+func loadGroupsLocked() (GroupsConfig, error) {
 	raw, err := readHubMcpStateFile(hubMcpGroupsFileLeaf)
 	if err != nil {
 		if isHubMcpStateMissingErr(err) {
@@ -185,10 +220,29 @@ func LoadGroups() (GroupsConfig, error) {
 // so a bad config can never be persisted. Version defaults to 1 when
 // unset.
 //
-// This is the single owning write path for groups.yaml (a future Groups
-// GUI screen calls it). It mirrors writeHubTokensLocked's
-// flock-then-secure-write discipline.
+// This is the single owning write path for groups.yaml. It mirrors
+// writeHubTokensLocked's flock-then-secure-write discipline.
+//
+// CAUTION: WriteGroups acquires hub-mcp.lock for the write ONLY. A
+// load→modify→write sequence built from a bare LoadGroups + WriteGroups is
+// NOT atomic — two concurrent POSTs each read the same baseline, each append
+// their row, and the second write clobbers the first (lost update). Authoring
+// callers MUST use ReadModifyWriteGroups so the read and the write share one
+// held lock. WriteGroups is retained for the (rare) whole-set replacement
+// caller that already owns the merge.
 func WriteGroups(cfg GroupsConfig) error {
+	lk, err := acquireHubMcpLock()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lk.Unlock() }()
+	return writeGroupsLocked(cfg)
+}
+
+// writeGroupsLocked is the in-flock half of WriteGroups. Caller MUST already
+// hold hub-mcp.lock. Validates + marshals + persists through the hardened
+// state-file pipeline. Mirrors writeHubTokensLocked.
+func writeGroupsLocked(cfg GroupsConfig) error {
 	if cfg.Version == 0 {
 		cfg.Version = 1
 	}
@@ -207,12 +261,68 @@ func WriteGroups(cfg GroupsConfig) error {
 	if err != nil {
 		return fmt.Errorf("marshal groups.yaml: %w", err)
 	}
+	return writeHubMcpStateFile(hubMcpGroupsFileLeaf, payload)
+}
+
+// ReadModifyWriteGroups is the ATOMIC load→mutate→write transition for
+// groups.yaml: it acquires hub-mcp.lock ONCE, reads the current config under
+// that lock, hands the caller a mutable copy to edit in place, then writes
+// the result back — all under the single held lock. This closes the
+// concurrent-POST lost-update window a bare LoadGroups+WriteGroups pair
+// leaves open (two writers reading the same baseline; the later write
+// clobbering the earlier). Both the GUI POST (create-or-update) and DELETE
+// paths route through it.
+//
+// The mutate callback returns the set of group names it DELETED (empty for a
+// create-or-update). After a successful write, ReadModifyWriteGroups prunes
+// the "g:<name>" hub-token row for each deleted group UNDER THE SAME HELD
+// LOCK, so the token table never keeps a stale row for a removed group (the
+// gate-2 isKnownGroup source is now the resolver snapshot, but the token row
+// is the gate-4 auth seam — leaving it behind would let a re-created group of
+// the same name silently inherit the old token). A token-prune failure is
+// NON-fatal to the groups.yaml write (the durable config already landed and
+// is the source of truth); it is returned so the caller can surface it, but
+// the write is not rolled back.
+//
+// The callback MUST NOT call any helper that re-acquires hub-mcp.lock
+// (LoadGroups, WriteGroups, EnsureGroupTokens, …) — doing so would deadlock
+// against the lock this helper already holds. It edits the supplied *cfg
+// directly.
+func ReadModifyWriteGroups(mutate func(cfg *GroupsConfig) (deletedGroups []string, err error)) error {
 	lk, err := acquireHubMcpLock()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = lk.Unlock() }()
-	return writeHubMcpStateFile(hubMcpGroupsFileLeaf, payload)
+
+	cfg, err := loadGroupsLocked()
+	if err != nil {
+		return err
+	}
+	deleted, err := mutate(&cfg)
+	if err != nil {
+		return err
+	}
+	if err := writeGroupsLocked(cfg); err != nil {
+		return err
+	}
+	// Prune the token row for each deleted group under the SAME held lock.
+	// Non-fatal: the groups.yaml write already committed.
+	if len(deleted) > 0 {
+		keys := make([]string, 0, len(deleted))
+		for _, name := range deleted {
+			if validateGroupName(name) != nil {
+				continue
+			}
+			keys = append(keys, GroupScopeKey(name))
+		}
+		if len(keys) > 0 {
+			if perr := pruneHubTokensLocked(keys); perr != nil {
+				return fmt.Errorf("groups.yaml written, but pruning token row(s) for deleted group(s) failed: %w", perr)
+			}
+		}
+	}
+	return nil
 }
 
 // GroupScopeKeys returns the sorted set of "g:<group>" scope keys for the

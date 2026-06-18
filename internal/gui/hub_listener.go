@@ -559,14 +559,21 @@ func publishResolverSnapshotForHubBind(a *api.API) error {
 
 	// Ensure a per-group token row for each "g:<group>" scope key. Group
 	// keys carry the "g:" prefix so they can never collide with the bare
-	// client rows. A token-ensure failure is non-fatal to routing (the
-	// row is the inert §D seam, read by nobody in Phase 4a) — log + carry
-	// on so a token-table hiccup cannot suppress the snapshot publish.
+	// client rows. A token-ensure failure does NOT block the snapshot
+	// publish (the bindings still apply, so the group routes), but it IS
+	// surfaced to the caller: without the token row the /g/<group>/mcp route
+	// cannot authenticate (gate 4), so the live route is NOT fully applied.
+	// We log it here AND remember it so the GUI mutation tail reports
+	// restart_required (the operator restarts the hub to re-ensure the row)
+	// rather than reporting a false full success. The error is deferred to
+	// the end so the snapshot still publishes first.
+	var tokenEnsureErr error
 	if groupKeys := api.GroupScopeKeys(cfg.Groups); len(groupKeys) > 0 {
 		if _, terr := api.EnsureGroupTokens(groupKeys); terr != nil {
 			_ = api.LogHubMcpEvent("warn", "group-tokens-ensure-failed", map[string]any{
 				"err": terr.Error(),
 			})
+			tokenEnsureErr = fmt.Errorf("ensure group token rows: %w", terr)
 		}
 	}
 
@@ -575,7 +582,10 @@ func publishResolverSnapshotForHubBind(a *api.API) error {
 	// AND the groups (servers → Bindings["g:"+group]). With no groups it is
 	// byte-equivalent to the prior BumpResolverOnManifestChange call.
 	api.BumpResolverOnConfigChange(manifests, cfg.Groups)
-	return nil
+
+	// Snapshot is published (bindings live). If the token-row ensure failed,
+	// surface it now so the caller knows the route is not auth-complete.
+	return tokenEnsureErr
 }
 
 // isMissingHubEndpoint is true if err describes a "hub-mcp.endpoint.json

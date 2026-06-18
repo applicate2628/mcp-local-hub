@@ -924,25 +924,31 @@ func isSupportedClient(name string) bool {
 
 // isKnownGroup returns true iff a group named `name` is declared in the
 // live hub state. The authoritative in-memory record is the published
-// token table: publishResolverSnapshotForHubBind calls EnsureGroupTokens
-// for EVERY group in groups.yaml, so a "g:<name>" token row exists for
-// each declared group regardless of whether its member servers currently
-// resolve to live daemons. This makes a declared-but-empty group "known"
-// (it passes gate 2, then routes nothing — the design-claim-5 degradation)
-// rather than 404-ing, while an undeclared group has no row and is
-// rejected with the same empty-body 404 the unknown-client path uses.
+// ResolverSnapshot's Groups set: BuildResolverSnapshotFromManifestsAndGroups
+// records EVERY group in groups.yaml under its "g:<name>" scope key,
+// regardless of whether its member servers currently resolve to live
+// daemons. This makes a declared-but-empty group "known" (it passes gate 2,
+// then routes nothing — the design-claim-5 degradation) rather than 404-ing,
+// while an undeclared group is absent from the set and is rejected with the
+// same empty-body 404 the unknown-client path uses.
 //
-// Sourcing the gate from the token table (not the snapshot Bindings) keeps
-// gate 2 (known) and gate 4 (token) consistent: both key on the same
-// "g:<group>" row. The lookup is lock-free (CurrentTokenTable reads the
-// atomic-pointer snapshot).
+// Sourcing the gate from the snapshot (the in-memory cache of groups.yaml,
+// rebuilt + atomically republished on every group create/delete) — NOT the
+// token table — keeps gate 2 (known) consistent with the config source of
+// truth: a deleted group drops out of the next published snapshot and is
+// immediately unknown, whereas a stale "g:<name>" token row left behind
+// would otherwise keep a deleted group "known". The lookup is lock-free
+// (LoadResolverSnapshot reads the atomic-pointer snapshot); a nil snapshot
+// (no publish yet) yields a nil Groups map → not known.
 func isKnownGroup(name string) bool {
 	if validateGroupName(name) != nil {
 		return false
 	}
-	tbl := CurrentTokenTable()
-	_, ok := tbl.Tokens[GroupScopeKey(name)]
-	return ok
+	snap := LoadResolverSnapshot()
+	if snap == nil {
+		return false
+	}
+	return snap.Groups[GroupScopeKey(name)]
 }
 
 // isLowerHex64 returns true iff s is exactly 64 lowercase hex chars.
