@@ -69,6 +69,27 @@ type canonicalToolRef struct {
 type ResolverSnapshot struct {
 	Gen      int64
 	Bindings map[string][]canonicalDaemonRef
+
+	// ToolsHidden is the FINE-GRAINED per-tool visibility filter for
+	// group scope keys (groups/namespaces Phase 5a, operator decision 3).
+	// Keyed scopeKey ("g:<group>") → server name → the raw (un-namespaced)
+	// tool names hidden for that server within that group. A session whose
+	// scope key has an entry drops those tools at the tools/list MERGE step
+	// (assembleToolsListResponse) so they enter NEITHER the merged response
+	// NOR the per-session RouteMap; a later tools/call for a hidden tool
+	// hits the existing -32601 "Method not found" because the route was
+	// never published.
+	//
+	// CRITICAL invariant: only GROUP scope keys ever appear here. A bare
+	// client scope key has NO entry → nil filter → ZERO filtering, so the
+	// /clients/ route stays byte-identical (the fence). Carried on the SAME
+	// immutable snapshot as Bindings so a session captures a CONSISTENT
+	// (bindings, filter) pair in one atomic pointer load — never a torn
+	// read where the bindings are new but the filter is stale.
+	//
+	// nil when there are no groups (the groups-free build never allocates
+	// it), preserving additive-by-omission.
+	ToolsHidden map[string]map[string][]string
 }
 
 // Package-level atomic pointer to the currently-published snapshot.
@@ -242,6 +263,31 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 			}
 			for _, ref := range sd.refs {
 				add(scopeKey, ref)
+			}
+		}
+
+		// Fold the per-tool visibility filter (groups/namespaces Phase 5a)
+		// onto the SAME snapshot under the SAME scope key. Carried as a
+		// defensive deep copy so a post-publish mutation of the source
+		// Group cannot reach into the immutable snapshot. An empty / nil
+		// ToolsHidden contributes NO entry, so a group with only `servers`
+		// leaves snap.ToolsHidden untouched (Phase-4b-identical) and the
+		// bare client path never gains a filter (additive-by-omission).
+		if len(g.ToolsHidden) > 0 {
+			if snap.ToolsHidden == nil {
+				snap.ToolsHidden = make(map[string]map[string][]string)
+			}
+			filter := make(map[string][]string, len(g.ToolsHidden))
+			for server, names := range g.ToolsHidden {
+				if len(names) == 0 {
+					continue
+				}
+				cp := make([]string, len(names))
+				copy(cp, names)
+				filter[server] = cp
+			}
+			if len(filter) > 0 {
+				snap.ToolsHidden[scopeKey] = filter
 			}
 		}
 	}

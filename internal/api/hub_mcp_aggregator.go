@@ -478,6 +478,14 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	seenExposed := make(map[string]bool)
 	listFailures := make([]DaemonFailure, 0)
 	listSuccessCount := 0
+	// Resolve the session's FINE-GRAINED per-tool visibility filter
+	// (groups/namespaces Phase 5a). For a GROUP scope key this is the
+	// group's tools_hidden map (server → hidden raw names) carried on the
+	// captured snapshot; for a CLIENT scope key it is nil → NO filtering
+	// (the byte-identical fence). Reading it off SnapshotAtInit keeps the
+	// (bindings, filter) pair consistent: a session always sees the filter
+	// from the SAME atomic snapshot it captured its bindings from.
+	hiddenTools := sess.hiddenToolsForScope()
 	for _, r := range results {
 		if r.err != nil {
 			listFailures = append(listFailures, DaemonFailure{
@@ -494,6 +502,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 				continue
 			}
 			if seenExposed[t.Exposed] {
+				continue
+			}
+			// Per-tool hide: drop a tool the group hides for its server.
+			// Matched on the daemon-side (Server, RawName) — the same
+			// (server → raw tool name) shape groups.yaml authors. A
+			// dropped tool enters NEITHER the merged response NOR
+			// mergedRoutes below, so a later tools/call for it returns
+			// the existing -32601 (the dispatch path is untouched).
+			if toolHidden(hiddenTools, t.Ref.Server, t.Ref.RawName) {
 				continue
 			}
 			seenExposed[t.Exposed] = true
@@ -1600,6 +1617,41 @@ func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) []namespace
 		})
 	}
 	return out
+}
+
+// hiddenToolsForScope returns the session's FINE-GRAINED per-tool
+// visibility filter (server name → hidden raw tool names) for its scope
+// key, read from the snapshot captured at initialize (groups/namespaces
+// Phase 5a). Returns nil for a CLIENT scope key (no entry → no filtering,
+// the byte-identical fence) and for any session whose captured snapshot
+// has no ToolsHidden. Reading from SnapshotAtInit (not the live snapshot)
+// keeps the filter consistent with the bindings the session fanned out
+// over — both come from the SAME immutable pointer.
+func (s *hubSession) hiddenToolsForScope() map[string][]string {
+	snap := s.SnapshotAtInit
+	if snap == nil || snap.ToolsHidden == nil {
+		return nil
+	}
+	return snap.ToolsHidden[s.ScopeKey]
+}
+
+// toolHidden reports whether the per-tool filter hides the raw tool name
+// for the given server. nil/empty filter → never hidden (the fence). The
+// match is on (server, rawName) — the exact (server → raw tool name) shape
+// groups.yaml's tools_hidden authors. A filter entry naming a server not
+// in the session's fan-out, or a tool the server never advertises, simply
+// matches nothing — a harmless no-op (decision claim 5: a stale/bad filter
+// never faults, only narrows).
+func toolHidden(filter map[string][]string, server, rawName string) bool {
+	if len(filter) == 0 {
+		return false
+	}
+	for _, hidden := range filter[server] {
+		if hidden == rawName {
+			return true
+		}
+	}
+	return false
 }
 
 // failuresOrEmpty returns failures if non-nil, otherwise an empty
