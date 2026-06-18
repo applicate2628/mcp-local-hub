@@ -1,8 +1,8 @@
 import { test as base } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -57,6 +57,17 @@ export function seededHubFor(seed: SeedFn) {
         throw err;
       }
 
+      // SHGetKnownFolderPath(FOLDERID_LocalAppData) expands
+      // %USERPROFILE%\AppData\Local; with USERPROFILE redirected to the
+      // temp home that subdir must exist or the state dir is unresolvable
+      // → strict-mode fail-closed → hardened state-file writes 500. Same
+      // rationale + refs as fixtures/hub.ts.
+      const localAppData = join(home, "AppData", "Local");
+      mkdirSync(localAppData, { recursive: true });
+      // APPDATA (Roaming) redirect — same rationale as hub.ts: vscode/
+      // cline/devin/amp resolvers read os.Getenv("APPDATA") first.
+      const roamingAppData = join(home, "AppData", "Roaming");
+      mkdirSync(roamingAppData, { recursive: true });
       const binPath = resolve(
         __dirname,
         "..",
@@ -69,16 +80,23 @@ export function seededHubFor(seed: SeedFn) {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
-        LOCALAPPDATA: home,
+        LOCALAPPDATA: localAppData, // matches SHGetKnownFolderPath(USERPROFILE\AppData\Local)
+        APPDATA: roamingAppData,    // Windows Roaming base (vscode/cline/devin/amp resolvers read this first)
         XDG_STATE_HOME: home,
         XDG_DATA_HOME: home,
         XDG_CONFIG_HOME: home,
+        // Cross-process state-dir redirect (test_state_path_env binary only)
+        // — fences the Windows state dir off the live fleet. See hub.ts.
+        MCPHUB_STATE_DIR_OVERRIDE: join(localAppData, "mcp-local-hub"),
         MCPHUB_GUI_TEST_PIDPORT_DIR: home,
         // Same seams as hub.ts: noop scheduler so /api/status is [] and noop
         // supervisor so the GUI does not spend 15s waiting for an IPC bind
         // that cannot happen under a temp home with no supervisor-intent.json.
         MCPHUB_E2E_SCHEDULER: "none",
         MCPHUB_E2E_SUPERVISOR: "none",
+        // Strict-mode neutralization + relax-lane opt-in — see hub.ts.
+        MCPHUB_REQUIRE_SINGLE_USER_HOME: "",
+        MCPHUB_ALLOW_UNHARDENED_STATE_WRITE: "1",
       };
       const child = spawn(
         binPath,

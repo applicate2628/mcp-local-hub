@@ -72,12 +72,31 @@ export default async function globalSetup() {
   }
 
   // 2) Compile mcphub binary so the fixture can spawn it fast.
-  console.log("[global-setup] go build ./cmd/mcphub…");
-  const { stderr } = await execFileP("go", ["build", "-o", binPath, "./cmd/mcphub"], {
-    cwd: repoRoot,
-    env: { ...process.env },
-    maxBuffer: 10 * 1024 * 1024,
-  });
+  //
+  // Built WITH `-tags=test_state_path_env` so the Windows state-dir
+  // resolver honors the MCPHUB_STATE_DIR_OVERRIDE / LOCALAPPDATA env
+  // redirect the fixture sets. The PRODUCTION resolver
+  // (internal/api/state_paths_prod.go) calls
+  // SHGetKnownFolderPath(FOLDERID_LocalAppData), which reads the real
+  // user-profile AppData\Local from the access token and IGNORES the
+  // env redirect — so a production-tagged e2e binary leaks the
+  // developer's REAL supervisor-intent.json / managed-entries.json
+  // into /api/scan and /api/status, breaking the empty-home contract
+  // every clean-home spec relies on (Discovery empty-state, Dashboard
+  // cards, etc.). The env-fallback variant
+  // (internal/api/state_paths_envfallback.go, this tag) is the only
+  // way to fence the state dir off the live fleet on a real Windows
+  // host. The tag is a TEST seam — it never ships in a release binary.
+  console.log("[global-setup] go build -tags=test_state_path_env ./cmd/mcphub…");
+  const { stderr } = await execFileP(
+    "go",
+    ["build", "-tags=test_state_path_env", "-o", binPath, "./cmd/mcphub"],
+    {
+      cwd: repoRoot,
+      env: { ...process.env },
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
   if (stderr) {
     // `go build` writes nothing to stderr on success. Non-empty stderr
     // usually means deprecation warnings we can ignore; surface it for

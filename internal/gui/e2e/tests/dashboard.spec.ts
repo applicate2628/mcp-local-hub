@@ -17,13 +17,25 @@ test.describe("dashboard", () => {
     page,
     hub,
   }) => {
+    // Dashboard.tsx now has a STARTUP GRACE (STARTUP_GRACE_POLLS = 2) that
+    // shows a calm "Loading status…" during the initial supervisor-IPC bind
+    // window before the fail-loud banner; the 30s HTTP poll makes the
+    // post-grace banner ~90s away. Drive the grace-bypass deterministically:
+    // one successful /api/status (sets hasEverLoaded=true), then the live
+    // 5s `poller-error` SSE the backend emits because the supervisor is
+    // genuinely down renders the banner immediately. See the matching note
+    // in dashboard-fail-loud.spec.ts. The wire-level 500 STATUS_FAILED
+    // contract is asserted there.
+    await page.route("**/api/status", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
     await page.goto(`${hub.url}/#/dashboard`);
     await expect(page.locator("h1")).toHaveText("Dashboard");
 
     // The degraded banner names the operator action (the message comes from
-    // api.ErrSupervisorDown, surfaced through writeAPIError → fetchOrThrow).
+    // api.ErrSupervisorDown, surfaced through the poller-error SSE event).
     const banner = page.locator('[data-testid="dashboard-error"]');
-    await expect(banner).toBeVisible();
+    await expect(banner).toBeVisible({ timeout: 15_000 });
     await expect(banner).toContainText("supervisor unreachable — restart the hub");
 
     // No daemon cards in the degraded state.

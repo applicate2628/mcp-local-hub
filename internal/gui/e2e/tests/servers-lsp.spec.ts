@@ -39,11 +39,15 @@ test.describe("servers — LSP matrix", () => {
     for (const lang of expected) {
       const row = page.locator(`[data-testid="lsp-row-${lang}"]`);
       await expect(row).toBeVisible();
-      // No workspace registration → row carries data-registered=false
-      // and renders the "(run `mcphub register` to register)" copy
-      // instead of an Edit-env button.
+      // No workspace registration → row carries data-registered=false and
+      // renders the in-GUI "Enable" affordance (Servers.tsx:1503-1516)
+      // instead of an Edit-env button. (The old static "run `mcphub
+      // register`" placeholder copy was replaced by the Enable button;
+      // with no workspace selected the button renders disabled.)
       await expect(row).toHaveAttribute("data-registered", "false");
-      await expect(row.locator('.lsp-row-unregistered')).toBeVisible();
+      const enableBtn = row.locator(`[data-testid="lsp-enable-${lang}"]`);
+      await expect(enableBtn).toBeVisible();
+      await expect(enableBtn).toBeDisabled();
       await expect(row.locator(`[data-testid="lsp-edit-env-${lang}"]`)).toHaveCount(0);
     }
   });

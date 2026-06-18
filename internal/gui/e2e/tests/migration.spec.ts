@@ -11,8 +11,12 @@ test.describe("Discovery screen", () => {
 
   test("Rescan button is present and clickable on empty home", async ({ page, hub }) => {
     await page.goto(`${hub.url}/#/migration`);
-    const rescan = page.locator("button.rescan", { hasText: "Rescan" });
+    // The inline rescan button was extracted into the shared
+    // ScanRefreshControls component: stable testid `scan-rescan-btn`,
+    // label "Rescan now" (internal/gui/frontend/src/components/ScanRefreshControls.tsx).
+    const rescan = page.locator('[data-testid="scan-rescan-btn"]');
     await expect(rescan).toBeVisible();
+    await expect(rescan).toHaveText("Rescan now");
     await rescan.click();
     await expect(page.locator(".empty-state")).toBeVisible();
   });
@@ -33,11 +37,13 @@ test.describe("Discovery screen", () => {
     page,
     hub,
   }) => {
-    // The hub fixture at internal/gui/e2e/fixtures/hub.ts:46 sets
-    // LOCALAPPDATA=<home>, so api.dismiss.go's dismissedFilePath
-    // resolves to <home>/mcp-local-hub/gui-dismissed.json. Three
-    // assertions together prove the full round-trip on a real
-    // spawned binary:
+    // The hub fixture redirects the Windows state dir to
+    // <home>/AppData/Local (via LOCALAPPDATA + MCPHUB_STATE_DIR_OVERRIDE,
+    // honored by the test_state_path_env binary global-setup builds), so
+    // api.dismiss.go's dismissedFilePath resolves to
+    // <home>/AppData/Local/mcp-local-hub/gui-dismissed.json. Three
+    // assertions together prove the full round-trip on a real spawned
+    // binary:
     //   (a) POST /api/dismiss returns 204
     //   (b) The JSON file on disk includes the name with version=1
     //   (c) GET /api/dismissed returns the same name in its list
@@ -47,7 +53,13 @@ test.describe("Discovery screen", () => {
     });
     expect(resp.status()).toBe(204);
 
-    const dismissedPath = join(hub.home, "mcp-local-hub", "gui-dismissed.json");
+    const dismissedPath = join(
+      hub.home,
+      "AppData",
+      "Local",
+      "mcp-local-hub",
+      "gui-dismissed.json",
+    );
     expect(existsSync(dismissedPath)).toBe(true);
     const raw = readFileSync(dismissedPath, "utf-8");
     const parsed = JSON.parse(raw) as { version: number; unknown: string[] };

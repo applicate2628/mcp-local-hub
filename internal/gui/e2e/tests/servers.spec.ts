@@ -13,7 +13,11 @@ test.describe("servers", () => {
     );
     await page.goto(`${hub.url}/#/servers`);
     await expect(page.locator("h1")).toHaveText("Servers");
-    const matrix = page.locator("table.servers-matrix");
+    // The Servers screen now renders TWO `.servers-matrix` tables: the MCP
+    // matrix (this one) and the new LSP matrix (`.lsp-matrix`,
+    // data-testid="lsp-matrix"). Scope to the MCP matrix to avoid the
+    // strict-mode "resolved to 2 elements" violation.
+    const matrix = page.locator("table.servers-matrix:not(.lsp-matrix)");
     await expect(matrix).toBeVisible();
     const headerCells = matrix.locator("thead th");
     await expect(headerCells).toHaveCount(10);
@@ -43,8 +47,24 @@ test.describe("servers", () => {
     await page.route("**/api/status", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
     );
+    // ALSO stub /api/scan → empty entries. The real scan's manifest-only
+    // pass surfaces every manifest baked into the binary's embed FS
+    // (servers.Manifests) PLUS any leftover manifest other specs wrote to
+    // the SHARED on-disk e2e/bin/servers dir (defaultManifestDir is process-
+    // global, not per-test temp-home — so add-server/edit-server/secret-picker
+    // manifests leak in when the full suite runs). Neither is a client
+    // config, so this test's "no client configs → empty body" intent is
+    // only honored by pinning the scan to empty — the same convention the
+    // populated-matrix specs use to control the matrix rows. (manifest_source.go
+    // embed FS; global-setup.ts wipes e2e/servers but specs repopulate it.)
+    await page.route("**/api/scan", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) }),
+    );
     await page.goto(`${hub.url}/#/servers`);
-    const matrix = page.locator("table.servers-matrix");
+    // Scope to the MCP matrix — the LSP matrix (`.lsp-matrix`) shares the
+    // `.servers-matrix` class and has its own rows, so an unscoped selector
+    // both trips strict mode and would count LSP rows here.
+    const matrix = page.locator("table.servers-matrix:not(.lsp-matrix)");
     await expect(matrix).toBeVisible();
     await expect(matrix.locator("tbody tr")).toHaveCount(0);
     await expect(page.getByText("Loading…")).toHaveCount(0);

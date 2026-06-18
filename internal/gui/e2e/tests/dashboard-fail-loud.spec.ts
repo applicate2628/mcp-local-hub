@@ -27,14 +27,33 @@ test.describe("dashboard — supervisor-down fail-loud (Workstream B §3.1)", ()
     page,
     hub,
   }) => {
+    // Dashboard.tsx gained a STARTUP GRACE (STARTUP_GRACE_POLLS = 2): while
+    // it has NEVER loaded real data and only a couple of failures have
+    // happened, it shows a calm "Loading status… the supervisor is
+    // starting" rather than flashing the scary fail-loud banner during the
+    // normal supervisor-IPC bind window. The HTTP /api/status poll is 30s,
+    // so reaching the post-grace banner via repeated HTTP failures alone
+    // would take ~90s (well past the test timeout). To exercise the degraded
+    // BANNER deterministically and fast, drive the grace-bypass the real GUI
+    // uses: one successful /api/status (sets hasEverLoaded=true) followed by
+    // the live `poller-error` SSE event the backend StatusPoller emits every
+    // 5s because the supervisor is genuinely down (MCPHUB_E2E_SUPERVISOR=none).
+    // With hasEverLoaded=true the grace gate is bypassed and the SSE-driven
+    // `error` renders the banner (Dashboard.tsx onPollerError + the
+    // hasEverLoaded fail-loud branch). The wire-level 500 STATUS_FAILED
+    // contract itself is asserted by the sibling test below.
+    await page.route("**/api/status", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
     await page.goto(`${hub.url}/#/dashboard`);
 
     // Heading still renders (the error branch keeps the shell intact).
     await expect(page.locator("h1")).toHaveText("Dashboard");
 
-    // Explicit degraded banner naming the operator action.
+    // Explicit degraded banner naming the operator action — surfaced via the
+    // backend `poller-error` SSE within one 5s poll cycle.
     const banner = page.locator('[data-testid="dashboard-error"]');
-    await expect(banner).toBeVisible();
+    await expect(banner).toBeVisible({ timeout: 15_000 });
     await expect(banner).toContainText("supervisor unreachable — restart the hub");
 
     // NO daemon cards — the operator must NOT see Running daemons painted
