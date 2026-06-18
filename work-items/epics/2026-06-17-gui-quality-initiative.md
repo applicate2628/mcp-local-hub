@@ -1,5 +1,5 @@
 ---
-status: active
+status: closed
 ---
 
 # Epic: GUI quality initiative (debug + polish the dev-variant GUI)
@@ -34,14 +34,37 @@ child here).
 - gui-g13-sse-resilience (closed) — useEventSource onerror + live/reconnecting badge
 - gui-g16-error-redaction (closed) — writeAPIErrorRedacted central helper; home-path leaks closed
 - gui-live-tweaks (closed) — Settings row-align, whole-server-cell row-hover, asset no-cache
-- gui-g14-responsive (active) — breakpoint contract (sidebar→drawer, matrix→scroll); only 1 @media today
-- gui-g15-a11y-deepening (active) — th scope=, table caption, WCAG-AA contrast, modal focus-return
-- gui-g17-vendor-init-uninstalled (active) — secure parent-dir create so not-installed clients can Initialize on clean install (`work-items/2026-06-18-vendor-init-uninstalled-clients.md`); SECURITY-reviewed lane
-- gui-g4-functional-test (active) — control inventory: every button × screen × expected outcome (Playwright)
-- gui-g11-coverage-audit (active) — raise coverage on highest-risk branches (unified with G4)
-- gui-g10-stale-sweep (active) — worktrees/.scratch/.old + the phantom serena-registration daemon
+- gui-g14-responsive (closed) — sidebar→topbar @≤768px verified@700px; matrix horiz-scroll; codex P3 sticky-border fix
+- gui-g15-a11y-deepening (closed) — th scope= + table caption + WCAG-AA --success-color token + modal focus-return
+- gui-g17-vendor-init-uninstalled (closed) — secure handle-relative parent-dir create (POSIX fd-relative + Windows NtCreateFile RootDirectory=held-handle); codex MEDIUM Windows-TOCTOU found+fixed; deterministic junction-swap regression test; deployed 62bbf48
+- gui-g4-functional-test (closed) — full e2e suite repaired 19-red→129-green (fixture state-isolation hole fixed: binary was untagged → leaked real %LOCALAPPDATA% state, so empty-home contracts never actually tested) + live-drive of all 10 screens (0 console errors); 2 real bugs found+fixed (deploy-stale-serve, split-brain fleet) + Settings deep-link scroll re-scroll fix
+- gui-g11-coverage-audit (closed) — high-risk branches gained NEW tests via each G-item (G9-P1 classifier golden tests, G17 junction-swap + strict-prefix-DACL regression, Settings scroll regression) + the e2e VALIDITY fix (the suite was silently reading real state → not testing its empty-home claims). Formal coverage-% measurement NOT run as a separate pass — optional follow-up.
+- gui-g10-stale-sweep (closed) — 3 phantom worktree-LSP daemons deregistered; worktree-prune + .scratch + .old sweep
 
-## Rollup (manual snapshot — derive live via /agents-status)
-14 of 19 children closed. Open: G14 responsive, G15 a11y, G17 vendor-init (security lane),
-G4+G11 test, G10 sweep. Close the epic only when all 19 are closed AND the dev-variant
-GUI is user-solid.
+## Rollup
+19 of 19 children closed. Epic CLOSED 2026-06-18.
+
+## Closure
+
+Closed 2026-06-18. All 19 children delivered, deployed (HEAD 8df85be, pushed), and
+reviewed. Headline outcomes: shared .btn design-system + STYLE-CONTRACT; one canonical
+DaemonDisplayState classifier (fail-quiet Quarantined trap closed); top-level
+ErrorBoundary + SSE live/reconnecting badge; WCAG-AA a11y (th scope/caption/contrast
+token) + responsive sidebar→topbar @≤768px; G17 secure handle-relative parent-dir create
+(codex-found MEDIUM Windows-TOCTOU fixed with NtCreateFile RootDirectory=held-handle +
+deterministic junction-swap regression test); central error-redaction; perf status-memo;
+go-vet clean.
+
+Real defects surfaced + fixed during verification (not just planned scope): (1) deploy
+procedure served STALE bundles (gui-only kill left the old web server running) → canonical
+full-reset deploy procedure documented; (2) repeated deploys left orphan daemons → supervisor
+split-brain (Dashboard all-Quarantined while MCP worked via orphans) → clean-reset recovery;
+(3) e2e suite was silently reading the developer's REAL state-dir (binary untagged) so its
+empty-home contracts tested nothing → fixture isolation fixed; (4) Settings deep-link
+one-shot scroll landed short below async-grown sections → ResizeObserver re-scroll.
+
+Residual (optional follow-ups, non-blocking): formal coverage-% measurement; 2 autocomplete
+a11y hints on password inputs (Secrets/Add-server); the broader clean-install/end-user
+productization track (`work-items/2026-06-18-clean-install-ux-vision.md`) is a SEPARATE
+future epic the user explicitly deferred. Deploy discipline: see
+feedback_deploy_kill_gui_process_directly memory (full-reset + verify-served + zero-quarantine).
