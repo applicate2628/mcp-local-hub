@@ -3215,10 +3215,9 @@ func waitForPortFree(port int, timeout time.Duration) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if lastErr != nil {
-		return fmt.Errorf("port %d still in use after %v: %w", port, timeout, lastErr)
-	}
-	return fmt.Errorf("port %d still in use after %v", port, timeout)
+	// The loop only breaks after at least one failed Listen, so lastErr is
+	// always the non-nil bind error here — wrap it unconditionally.
+	return fmt.Errorf("port %d still in use after %v: %w", port, timeout, lastErr)
 }
 
 // StopAll stops every running scheduler task under our prefix. Leaves tasks

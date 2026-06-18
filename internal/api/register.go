@@ -834,7 +834,7 @@ func (a *API) Unregister(workspacePath string, languages []string) (*UnregisterR
 	return a.unregisterWithManifest(m, workspacePath, languages, os.Stderr)
 }
 
-func (a *API) unregisterWithManifest(m *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (*UnregisterReport, error) {
+func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (*UnregisterReport, error) {
 	// Use the existence-tolerant variant: the operator may be cleaning up
 	// a registration whose workspace directory has since been deleted,
 	// moved, or is on an unavailable drive. Without this weakening, an

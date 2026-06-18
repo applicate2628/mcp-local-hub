@@ -147,7 +147,9 @@ func makeWorkspaceDir(t *testing.T, root string, seedLanguages []string) string 
 		buf := &bytes.Buffer{}
 		buf.WriteString("languages:\n")
 		for _, l := range seedLanguages {
-			buf.WriteString("  - " + l + "\n")
+			buf.WriteString("  - ")
+			buf.WriteString(l)
+			buf.WriteString("\n")
 		}
 		buf.WriteString("read_only: false\n")
 		if err := os.WriteFile(filepath.Join(ws, ".serena", "project.yml"), buf.Bytes(), 0o600); err != nil {
@@ -1126,7 +1128,9 @@ func makeWorkspaceDirNamed(t *testing.T, root, name string, seedLanguages []stri
 		buf := &bytes.Buffer{}
 		buf.WriteString("languages:\n")
 		for _, l := range seedLanguages {
-			buf.WriteString("  - " + l + "\n")
+			buf.WriteString("  - ")
+			buf.WriteString(l)
+			buf.WriteString("\n")
 		}
 		buf.WriteString("read_only: false\n")
 		if err := os.WriteFile(filepath.Join(ws, ".serena", "project.yml"), buf.Bytes(), 0o600); err != nil {

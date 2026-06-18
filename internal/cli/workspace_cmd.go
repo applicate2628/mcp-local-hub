@@ -900,6 +900,13 @@ func readGitignoreDirs(path string) map[string]bool {
 		}
 		out[line] = true
 	}
+	// A scan error (e.g. bufio.ErrTooLong on a pathologically long .gitignore
+	// line) ends the loop early and silently truncates the ignore-dir set.
+	// Surface it rather than swallow it; the entries parsed so far are still
+	// returned best-effort.
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "mcphub: warning: .gitignore scan ended early (%s): %v\n", path, err)
+	}
 	return out
 }
 

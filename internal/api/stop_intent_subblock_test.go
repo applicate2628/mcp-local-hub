@@ -98,8 +98,9 @@ func TestWriteStopIntent_RunningDropsPriorStop(t *testing.T) {
 	if _, ok := sup.Stops[task]; ok {
 		t.Fatalf("expected stop dropped after Desired=running write, still present: %+v", sup.Stops)
 	}
-	// An emptied sub-block is omitted from JSON (omitempty / nil).
-	if sup.Stops != nil && len(sup.Stops) != 0 {
+	// An emptied sub-block is omitted from JSON (omitempty / nil). len of a nil
+	// map is 0, so the explicit nil check is redundant.
+	if len(sup.Stops) != 0 {
 		t.Fatalf("expected empty/nil sub-block, got %+v", sup.Stops)
 	}
 }

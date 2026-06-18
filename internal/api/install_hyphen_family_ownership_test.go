@@ -47,9 +47,15 @@ func seedManifestsWithDaemons(t *testing.T, specs map[string]map[string]int) str
 			t.Fatalf("mkdir manifest %q: %v", name, err)
 		}
 		var b strings.Builder
-		b.WriteString("name: " + name + "\nkind: global\ntransport: stdio-bridge\ncommand: go\ndaemons:\n")
+		b.WriteString("name: ")
+		b.WriteString(name)
+		b.WriteString("\nkind: global\ntransport: stdio-bridge\ncommand: go\ndaemons:\n")
 		for dn, port := range daemons {
-			b.WriteString("  - name: " + dn + "\n    port: " + strconv.Itoa(port) + "\n")
+			b.WriteString("  - name: ")
+			b.WriteString(dn)
+			b.WriteString("\n    port: ")
+			b.WriteString(strconv.Itoa(port))
+			b.WriteString("\n")
 		}
 		if err := os.WriteFile(filepath.Join(dir, name, "manifest.yaml"), []byte(b.String()), 0o600); err != nil {
 			t.Fatalf("write manifest %q: %v", name, err)

@@ -222,8 +222,10 @@ type clientFile struct {
 	Path   string
 }
 
-// clientFiles returns absolute paths to all managed client configs.
-func clientFiles(home string) []clientFile {
+// clientFiles returns absolute paths to all managed client configs. The home
+// argument is retained for call-site symmetry (every caller already resolves
+// it) but is unused: config paths resolve through clients.ConfigPathForName.
+func clientFiles(_ string) []clientFile {
 	var out []clientFile
 	for _, name := range clients.SupportedClientNames() {
 		path, err := clients.ConfigPathForName(name)

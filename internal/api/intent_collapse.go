@@ -527,7 +527,7 @@ func checkDaemonIntentCollapseUnlocked(supervisorIntentPath, daemonIntentPath st
 // confirmed — non-fatal, retried next boot); (false, err) only on an
 // unexpected I/O failure reading the sub-block for confirmation.
 func deleteLegacyDaemonIntentIfMerged(
-	stateDir, supervisorIntentPath, daemonIntentPath string,
+	_, supervisorIntentPath, daemonIntentPath string,
 	daemonIntent *DaemonIntentFile,
 	now time.Time,
 ) (bool, error) {

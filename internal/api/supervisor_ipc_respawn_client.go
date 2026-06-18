@@ -108,7 +108,7 @@ func DialSupervisorIPCRespawn(ctx context.Context, taskName string, force bool, 
 	return dialSupervisorIPCRespawnFromStateDir(ctx, stateDir, taskName, force, timeoutMs)
 }
 
-func dialSupervisorIPCRespawnFromStateDir(ctx context.Context, stateDir, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+func dialSupervisorIPCRespawnFromStateDir(ctx context.Context, stateDir, taskName string, force bool, _ int) (RespawnResult, error) {
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	owner, err := ReadSupervisorLockOwner(lockPath)
 	if err != nil {

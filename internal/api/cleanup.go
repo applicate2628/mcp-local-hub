@@ -3,7 +3,9 @@ package api
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"slices"
@@ -953,6 +955,14 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 			continue
 		}
 		rows = append(rows, procRow{pid: pid, ppid: ppid, created: created, cmdline: cmdline, ram: ram})
+	}
+	// A scan error (e.g. bufio.ErrTooLong on a pathologically long CommandLine
+	// row) ends the loop early and silently truncates the process snapshot,
+	// which would drop rows the orphan-detector's parent-chain walk relies on.
+	// Surface it rather than swallow it; the rows parsed so far are still
+	// returned best-effort.
+	if err := s.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "mcphub: warning: process snapshot scan ended early: %v\n", err)
 	}
 
 	// Index by PID so callers can inspect a parent's cmdline.

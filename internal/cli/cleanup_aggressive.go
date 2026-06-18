@@ -215,7 +215,7 @@ func aggressiveConfirmToken(candidates []api.OrphanProcess) string {
 // helper). It uses TryEmit so a live supervisor holding the flock never
 // blocks the CLI. The body carries the operator scope + outcome
 // counters; no full cmdlines (wire-safety).
-func emitAggressiveCleanupAuditEvent(cmd *cobra.Command, opts api.CleanupOpts, candidateCount, killedCount int, includeClasses []string, token string) {
+func emitAggressiveCleanupAuditEvent(_ *cobra.Command, opts api.CleanupOpts, candidateCount, killedCount int, includeClasses []string, token string) {
 	stateDir, err := stateDirFunc()
 	if err != nil {
 		return

@@ -1268,11 +1268,17 @@ func formatDiagnostic(v gui.Verdict, pidportPath string) string {
 		fmt.Fprintf(&b, "  /api/ping on %d:  failed or PID mismatch\n\n", v.Port)
 	}
 	if v.Diagnose != "" {
-		b.WriteString("Verdict: " + v.Class.String() + "\n")
-		b.WriteString("  " + v.Diagnose + "\n")
+		b.WriteString("Verdict: ")
+		b.WriteString(v.Class.String())
+		b.WriteString("\n")
+		b.WriteString("  ")
+		b.WriteString(v.Diagnose)
+		b.WriteString("\n")
 	}
 	if v.Hint != "" {
-		b.WriteString("Hint: " + v.Hint + "\n")
+		b.WriteString("Hint: ")
+		b.WriteString(v.Hint)
+		b.WriteString("\n")
 	}
 	return b.String()
 }

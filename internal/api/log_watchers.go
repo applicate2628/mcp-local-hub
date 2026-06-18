@@ -402,6 +402,13 @@ func parsePosixPSRows(r io.Reader) []processRow {
 			StartTime: startTime,
 		})
 	}
+	// A scan error (e.g. bufio.ErrTooLong on a pathologically long argv line)
+	// ends the loop early and silently truncates the process list, which would
+	// under-report watchers. Surface it rather than swallow it; the parsed rows
+	// so far are still returned best-effort.
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "mcphub: warning: ps output scan ended early: %v\n", err)
+	}
 	return rows
 }
 

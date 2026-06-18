@@ -163,7 +163,7 @@ func livenessSweepIntent(stateDir string, fallback *api.SupervisorIntentFile) *a
 }
 
 func sweepSupervisorLivenessOnce(
-	stateDir string,
+	_ string,
 	intent *api.SupervisorIntentFile,
 	tracker *DaemonRuntimeTracker,
 	loop *api.EventLoop,

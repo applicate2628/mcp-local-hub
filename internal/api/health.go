@@ -974,14 +974,14 @@ func (a *API) syntheticToolsSubSection(d DaemonStatus) CapabilitySubSection {
 // syntheticPromptsSubSection reports the lazy proxy's synthetic
 // prompts/list response. Current backend catalogs expose no embedded prompts,
 // so the synthetic response is intentionally an empty list.
-func (a *API) syntheticPromptsSubSection(d DaemonStatus) CapabilitySubSection {
+func (a *API) syntheticPromptsSubSection(_ DaemonStatus) CapabilitySubSection {
 	return CapabilitySubSection{State: "empty", Items: []CapabilityItem{}}
 }
 
 // syntheticResourcesSubSection reports the lazy proxy's synthetic
 // resources/list response. Current backend catalogs expose no embedded
 // resources, so the synthetic response is intentionally an empty list.
-func (a *API) syntheticResourcesSubSection(d DaemonStatus) CapabilitySubSection {
+func (a *API) syntheticResourcesSubSection(_ DaemonStatus) CapabilitySubSection {
 	return CapabilitySubSection{State: "empty", Items: []CapabilityItem{}}
 }
 
