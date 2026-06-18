@@ -279,6 +279,13 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 //   - "missing-init-possible"        : the config file's immediate
 //     parent directory exists and is a regular directory (operator can
 //     click Initialize; the hardened init pipeline will accept it).
+//   - "missing-init-creatable"       : the config file's immediate
+//     parent directory does NOT exist, but the path is under the user
+//     home and the longest-existing prefix of the parent chain is a
+//     real (non-symlink) directory chain. The hardened init pipeline
+//     can securely create the missing parent components and then seed
+//     the stub. The GUI renders Initialize with a "will create <dir>"
+//     tooltip. G17 (vendor-init-uninstalled-clients).
 //   - "missing-init-blocked-symlink" : the parent path resolves through
 //     a symlink (Init pipeline opens the parent with O_NOFOLLOW on POSIX
 //     / FILE_FLAG_OPEN_REPARSE_POINT on Windows, both of which refuse
@@ -289,8 +296,12 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 //     for this state; operators who want the stub seeded should either
 //     remove the symlink (and let mcphub create the config in the real
 //     parent), or seed the file manually inside the symlinked target.
+//     This state ALSO covers a missing parent whose longest-existing
+//     prefix passes through a symlink — the secure parent-create refuses
+//     to descend through it, so the affordance stays suppressed.
 //   - "missing"                       : neither file nor parent dir
-//     exists (client genuinely not installed on this host).
+//     exists AND the path is not under the user home (or the existing
+//     prefix contains a non-directory), so secure creation is refused.
 //
 // Split out for testability and to keep probeClientConfigPresence flat.
 //
@@ -299,6 +310,14 @@ func probeClientConfigPresence(opts ScanOpts) map[string]string {
 // classified as missing-init-possible, GUI showed Initialize button,
 // click failed with INIT_FAILED. The Lstat-first probe now distinguishes
 // the symlinked-parent case so the UI matches the actual write contract.
+//
+// G17 (2026-06-18): the absent-parent case now distinguishes
+// "missing-init-creatable" (parent under home, creatable via the secure
+// parent-create) from "missing" (not under home / non-dir prefix). This
+// lets the operator pre-configure a not-yet-installed client whose config
+// dir does not exist yet — the secure parent-create makes the missing
+// directory component-by-component, refusing symlinks/reparse-points and
+// any path outside the user home (see SecureCreateClientConfigParentDir).
 func classifyMissingClientConfig(path string) string {
 	parent := filepath.Dir(path)
 	if parent == "" || parent == "." {
@@ -306,8 +325,13 @@ func classifyMissingClientConfig(path string) string {
 	}
 	lst, lerr := os.Lstat(parent)
 	if lerr != nil {
-		// Parent path itself is absent OR stat failed; either way,
-		// initializing through this path is not a clean operation.
+		// Parent path itself is absent OR stat failed. If the absence
+		// is a clean "not found", probe whether the secure parent-create
+		// could make it (under home, no symlink/non-dir in the existing
+		// prefix). Any other stat error → "missing" (not initializable).
+		if os.IsNotExist(lerr) {
+			return classifyAbsentParentCreatable(parent)
+		}
 		return "missing"
 	}
 	if lst.Mode()&os.ModeSymlink != 0 {
@@ -325,6 +349,99 @@ func classifyMissingClientConfig(path string) string {
 		return "missing"
 	}
 	return "missing-init-possible"
+}
+
+// classifyAbsentParentCreatable classifies a config-file parent dir that
+// is absent (clean os.IsNotExist). It mirrors the safety contract of the
+// secure parent-create (SecureCreateClientConfigParentDir) WITHOUT
+// mutating the filesystem, so the GUI affordance matches what an
+// Initialize click would actually do:
+//
+//   - "missing-init-creatable"       : parent is under the user home,
+//     and the longest-existing prefix of the chain is a real
+//     (non-symlink) directory chain. The remaining components can be
+//     securely created.
+//   - "missing-init-blocked-symlink" : the longest-existing prefix
+//     passes through a symlink — the secure create refuses to descend,
+//     so the affordance is suppressed (same UX as a directly-symlinked
+//     parent).
+//   - "missing"                       : parent is NOT under the user
+//     home, OR the existing prefix contains a non-directory entry, OR
+//     the user home cannot be resolved. Not securely creatable.
+//
+// The "under the user home" constraint is the blast-radius bound: the
+// secure create never makes directories outside HOME, so neither does
+// this classifier offer the affordance for such paths.
+func classifyAbsentParentCreatable(parent string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "missing"
+	}
+	rel, under := pathUnderHome(home, parent)
+	if !under {
+		return "missing"
+	}
+	// rel is the set of components from home down to parent. Walk the
+	// existing prefix: each existing component must be a real directory
+	// (no symlink, no non-dir). The first absent component (and beyond)
+	// is what the secure create would make.
+	cur := filepath.Clean(home)
+	for _, comp := range rel {
+		cur = filepath.Join(cur, comp)
+		lst, lerr := os.Lstat(cur)
+		if lerr != nil {
+			if os.IsNotExist(lerr) {
+				// Reached the first absent component. Everything from
+				// here down is creatable; nothing more to inspect.
+				return "missing-init-creatable"
+			}
+			// Anomalous stat on an existing-prefix component — not
+			// safely creatable.
+			return "missing"
+		}
+		if lst.Mode()&os.ModeSymlink != 0 {
+			// Existing prefix passes through a symlink — the secure
+			// create refuses to descend through it. Suppress.
+			return "missing-init-blocked-symlink"
+		}
+		if !lst.IsDir() {
+			// Existing prefix component is a non-directory (regular
+			// file, device, pipe) — cannot create a child under it.
+			return "missing"
+		}
+	}
+	// Whole chain already exists as real dirs — caller's earlier Lstat
+	// said the parent was absent, so this is a benign race (the parent
+	// appeared between the two stats). Treat as initializable.
+	return "missing-init-possible"
+}
+
+// pathUnderHome reports whether `target` (an absolute path) lies at or
+// below the user `home` directory, and if so returns the slice of path
+// components from home down to target (empty slice when target == home).
+//
+// Both inputs are filepath.Clean-ed and compared with the OS-appropriate
+// path-equality semantics (case-insensitive on Windows). Returns
+// (nil, false) when target is not under home, or when filepath.Rel
+// produces a parent-escaping (`..`) or absolute result. This is the
+// classifier-side mirror of the secure parent-create's home-containment
+// gate; both must agree so the GUI affordance matches the write contract.
+func pathUnderHome(home, target string) ([]string, bool) {
+	home = filepath.Clean(home)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(home, target)
+	if err != nil {
+		return nil, false
+	}
+	if rel == "." {
+		return []string{}, true
+	}
+	// Reject any path that escapes home (`..`) or is absolute (Rel can
+	// return an absolute path when the volumes differ on Windows).
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return nil, false
+	}
+	return strings.Split(rel, string(filepath.Separator)), true
 }
 
 // clientScanFunc reads a single client's config at `path` and merges any

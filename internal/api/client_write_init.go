@@ -89,6 +89,46 @@ func secureCreateClientConfigIfMissingWithOperatorOpt(path string, stub []byte) 
 	return secureCreateClientConfigIfMissingSkipParentGate(path, stub)
 }
 
+// SecureCreateClientConfigParentDirWithOperatorOpt securely creates the
+// missing parent directory of `configPath` (G17) applying the SAME
+// operator-opt-in policy as the file create: try the hardened pipeline
+// (home-anchor DACL/mode gate ENFORCED) first; on
+// ErrSecureWriteParentInsecure, return the strict error when strict mode
+// is active, else re-run with the anchor gate bypassed and log a warn
+// event. Created directories are owner-only and the symlink /
+// home-containment refusals apply on BOTH lanes.
+//
+// Exported so the GUI /api/init-client-config endpoint
+// (internal/gui/init_client_config.go) can secure-create the parent for
+// the new "missing-init-creatable" state before calling adapter
+// InitEmpty(). G17 (2026-06-18).
+func SecureCreateClientConfigParentDirWithOperatorOpt(configPath string) error {
+	err := SecureCreateClientConfigParentDir(configPath)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+		return err
+	}
+	if operatorRequiresSingleUserHome() {
+		return fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for init-parent creation (unset that env var or run `mcphub strict-mode disable`, or tighten the home directory's DACL to remove the offending principal, to proceed)",
+			err, RequireSingleUserHomeEnv)
+	}
+	// Default-relax lane: home-anchor gate rejected but operator did not
+	// opt into strict mode. Re-run with the anchor gate skipped; created
+	// dirs stay owner-only (mode 0700 / allowlist DACL) and the symlink /
+	// home-containment refusals still apply.
+	if logErr := LogHubMcpEvent("warn", "client-write-unhardened-fallback", map[string]any{
+		"path":   configPath,
+		"reason": "default-relax-on-solo-host (init-parent-dir)",
+		"origin": "SecureCreateClientConfigParentDir",
+		"err":    err.Error(),
+	}); logErr != nil {
+		_ = logErr
+	}
+	return secureCreateClientConfigParentDirSkipParentGate(configPath)
+}
+
 // AllowUnhardenedClientWriteEnv is a legacy operator-explicit opt-in
 // for the unhardened client-config write path. Pre-v0.4.0 the
 // parent-dir DACL gate was STRICT by default, and this env var was

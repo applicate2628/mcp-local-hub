@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -235,24 +236,23 @@ func TestInitClientConfig_MalformedBody(t *testing.T) {
 	}
 }
 
-// TestRealClientInitializer_ParentMissingError exercises the real
-// adapter against a path whose parent directory does not exist on
-// disk. The Init call must return errParentMissing without touching
-// the filesystem (no stub file is created).
+// TestRealClientInitializer_RefusesSymlinkParent pins the surviving
+// 412 PARENT_MISSING contract after G17: a SYMLINKED parent is still
+// refused (the hardened pipeline must not follow it), and no stub is
+// written. G17 changed the ABSENT-parent case to a secure create
+// (covered by TestRealClientInitializer_CreatesAbsentParent), but the
+// symlink/non-dir parent refusal is preserved.
 //
-// We can't easily redirect clients.AllClients() to a temp dir, so
-// this test uses a custom Server that wraps realClientInitializer
-// with a path override. Instead, we directly probe the predicate
-// via the real adapter selected through clients.AllClients() and
-// verify a missing parent is detected — using a sub-directory
-// path under t.TempDir() that we know does not exist.
-//
-// Approach: we cannot mutate the adapter's path without exporting
-// new test seams, so this test focuses on the OUTPUT contract of
-// the real initializer by stubbing the clients.AllClients() lookup
-// at the OS-level — HOME=t.TempDir() so vscode adapter binds to
-// %APPDATA% / $HOME-derived paths that do not exist.
-func TestRealClientInitializer_ParentMissingError(t *testing.T) {
+// POSIX-only: symlink creation requires elevation on Windows. The
+// vscode adapter's parent (%APPDATA%/Code/User) is symlinked to a
+// real dir; the Init call must surface errParentMissing without
+// seeding the stub through the symlink.
+func TestRealClientInitializer_RefusesSymlinkParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	t.Cleanup(api.SetDaemonStateRootForTest(t.TempDir()))
+
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
@@ -260,20 +260,35 @@ func TestRealClientInitializer_ParentMissingError(t *testing.T) {
 	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
 
 	all := clients.AllClients()
-	if _, ok := all["vscode"]; !ok {
+	vscode, ok := all["vscode"]
+	if !ok {
 		t.Skipf("vscode adapter not constructible in test env; got clients=%v", keys(all))
+	}
+	parent := filepath.Dir(vscode.ConfigPath())
+	// Create the parent's grandparent so we can plant a symlink AT the
+	// parent slot. Real target dir + symlink the parent to it.
+	realTarget := filepath.Join(tmp, "real-vscode-user")
+	if err := os.MkdirAll(realTarget, 0o700); err != nil {
+		t.Fatalf("mkdir real target: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(parent), 0o700); err != nil {
+		t.Fatalf("mkdir parent's parent: %v", err)
+	}
+	if err := os.Symlink(realTarget, parent); err != nil {
+		t.Fatalf("symlink parent: %v", err)
 	}
 
 	init := realClientInitializer{}
 	_, err := init.Init("vscode")
 	if !errors.Is(err, errParentMissing) {
-		t.Errorf("err=%v, want wraps errParentMissing", err)
+		t.Errorf("err=%v, want wraps errParentMissing (symlinked parent must be refused)", err)
 	}
-
-	// Verify no stub file was written.
-	vscodePath := all["vscode"].ConfigPath()
-	if _, statErr := os.Stat(vscodePath); statErr == nil {
-		t.Errorf("vscode config %s was created despite parent missing", vscodePath)
+	// No stub may have been written through the symlink target either.
+	if _, statErr := os.Stat(vscode.ConfigPath()); statErr == nil {
+		t.Errorf("vscode config %s was created despite symlinked parent", vscode.ConfigPath())
+	}
+	if _, statErr := os.Stat(filepath.Join(realTarget, filepath.Base(vscode.ConfigPath()))); statErr == nil {
+		t.Errorf("stub leaked into symlink target %s", realTarget)
 	}
 }
 
@@ -453,6 +468,63 @@ func TestRealClientInitializer_HappyPath(t *testing.T) {
 	}
 	if res2.Created {
 		t.Errorf("second Init Created=true, want false (idempotent)")
+	}
+}
+
+// TestRealClientInitializer_CreatesAbsentParent pins the G17
+// (2026-06-18) behavior: when the client's config PARENT directory is
+// absent (clean install, client not yet installed), Init securely
+// creates the parent chain (component-by-component, under the user home)
+// and then seeds the stub — instead of returning errParentMissing. The
+// created parent must be a real directory (not a symlink) and on POSIX
+// owner-only.
+func TestRealClientInitializer_CreatesAbsentParent(t *testing.T) {
+	// Isolate the daemon state root FIRST (audit-log destination for any
+	// relax-lane warn row) so it does not land in the operator's real
+	// %LOCALAPPDATA%\mcp-local-hub\.
+	t.Cleanup(api.SetDaemonStateRootForTest(t.TempDir()))
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+
+	all := clients.AllClients()
+	vscode, ok := all["vscode"]
+	if !ok {
+		t.Skipf("vscode adapter not constructible in test env")
+	}
+	parent := filepath.Dir(vscode.ConfigPath())
+	// Sanity: the parent must be ABSENT (this is the case under test).
+	// vscode's config dir (under %APPDATA%/Code/User) does not exist in
+	// the fresh tmp home.
+	if _, statErr := os.Stat(parent); statErr == nil {
+		t.Skipf("vscode parent %s already exists in test env; cannot exercise absent-parent path", parent)
+	}
+
+	init := realClientInitializer{}
+	res, err := init.Init("vscode")
+	if err != nil {
+		// On a broadened tmp home + strict-mode-off this should succeed
+		// (default-relax). A failure here is a real defect unless the
+		// home anchor is somehow non-creatable.
+		t.Fatalf("Init on absent parent: %v", err)
+	}
+	if !res.Created {
+		t.Errorf("Init on absent parent Created=false, want true")
+	}
+	// Parent must now exist as a real directory.
+	pst, perr := os.Lstat(parent)
+	if perr != nil {
+		t.Fatalf("parent %s not created: %v", parent, perr)
+	}
+	if !pst.IsDir() || pst.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("parent %s is not a real directory (mode %s)", parent, pst.Mode())
+	}
+	// Stub file must exist.
+	if _, sErr := os.Stat(vscode.ConfigPath()); sErr != nil {
+		t.Errorf("stub %s not created: %v", vscode.ConfigPath(), sErr)
 	}
 }
 

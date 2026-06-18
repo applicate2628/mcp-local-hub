@@ -199,10 +199,29 @@ type ScanResult struct {
 	//                                     operator can initialize via
 	//                                     POST /api/init-client-config
 	//                                     to seed an empty stub.
+	//   "missing-init-creatable"          config file AND its parent
+	//                                     directory do not exist, but the
+	//                                     path is under the user home and
+	//                                     the longest-existing prefix of
+	//                                     the parent chain is a real
+	//                                     (non-symlink) directory chain.
+	//                                     The hardened init pipeline can
+	//                                     securely create the missing
+	//                                     parent components (component-by-
+	//                                     component, refusing symlinks /
+	//                                     reparse-points and any path
+	//                                     outside the home) then seed the
+	//                                     stub. The GUI renders Initialize
+	//                                     with a "will create <dir>"
+	//                                     tooltip so the operator can pre-
+	//                                     configure a not-yet-installed
+	//                                     client. G17 (2026-06-18).
 	//   "missing-init-blocked-symlink"    config file does not exist
 	//                                     and the parent path is a
-	//                                     symlink. The hardened init
-	//                                     pipeline refuses to follow
+	//                                     symlink (or the absent parent's
+	//                                     longest-existing prefix passes
+	//                                     through a symlink). The hardened
+	//                                     init pipeline refuses to follow
 	//                                     parent symlinks (POSIX
 	//                                     O_NOFOLLOW, Windows
 	//                                     FILE_FLAG_OPEN_REPARSE_POINT),
@@ -211,8 +230,12 @@ type ScanResult struct {
 	//                                     this state. v0.4.5 PR #208
 	//                                     codex r1 F2 closure.
 	//   "missing"                         neither file nor parent
-	//                                     directory exists (client
-	//                                     genuinely not installed).
+	//                                     directory exists, AND the path
+	//                                     is not under the user home (or
+	//                                     the existing prefix contains a
+	//                                     non-directory) — client
+	//                                     genuinely not installed and not
+	//                                     securely creatable.
 	//   "error"                           stat returned an unexpected
 	//                                     error (permissions, ACL/I-O
 	//                                     anomaly) OR the path is a

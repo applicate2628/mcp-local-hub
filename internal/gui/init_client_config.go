@@ -2,20 +2,28 @@
 //
 // POST /api/init-client-config drives the v0.4.5 "Initialize <client>"
 // affordance surfaced in the Servers matrix header for clients whose
-// MCP config file is absent BUT whose immediate parent directory
-// exists (`client_config_presence == "missing-init-possible"`).
+// MCP config file is absent. It serves both the legacy
+// `missing-init-possible` state (parent directory already exists) and
+// the G17 `missing-init-creatable` state (parent directory absent but
+// the path is under the user home and securely creatable).
 //
 // The endpoint:
 //   - validates the requested client name against the known adapter
 //     catalog (`clients.AllClients()`), returning 404 / UNKNOWN_CLIENT
 //     for unrecognized names so a typo in the GUI cannot fan into
 //     arbitrary filesystem writes;
-//   - re-verifies that the parent directory still exists (defense in
-//     depth against a stale scan snapshot — the user could have
-//     uninstalled the client between Refresh and Init click),
-//     returning 412 / PARENT_MISSING so the matrix can refresh
-//     instead of seeding an empty `~/.cursor/` tree on a host
-//     where the client is genuinely not installed;
+//   - re-inspects the immediate parent directory (defense in depth
+//     against a stale scan snapshot):
+//   - parent is a real directory → proceed (legacy path);
+//   - parent is a symlink / non-directory → return 412 /
+//     PARENT_MISSING so the matrix can refresh instead of seeding
+//     through an attacker-followable reparse point;
+//   - parent is ABSENT → securely create the missing parent chain
+//     (G17: component-by-component, symlink-refusing, bounded to the
+//     user home) via api.SecureCreateClientConfigParentDirWithOperatorOpt,
+//     then proceed. A refusal (symlink/non-dir component, path
+//     outside home, strict-mode broadened home anchor) maps to 500 /
+//     INIT_FAILED with the actionable underlying message;
 //   - invokes the adapter's `InitEmpty()` which writes the
 //     per-client empty stub through the SecureWriteClientConfig
 //     pipeline (handle-relative + DACL-bound) and is idempotent
@@ -36,6 +44,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -111,15 +120,32 @@ func (realClientInitializer) Init(client string) (*InitClientConfigResult, error
 	if parent == "" || parent == "." {
 		return nil, fmt.Errorf("%w: %s", errParentMissing, path)
 	}
-	st, err := os.Stat(parent)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", errParentMissing, parent)
-		}
-		return nil, fmt.Errorf("stat parent %s: %w", parent, err)
-	}
-	if !st.IsDir() {
+	lst, err := os.Lstat(parent)
+	switch {
+	case err == nil && lst.Mode()&os.ModeSymlink != 0:
+		// Parent is a symlink — the hardened pipeline refuses to follow
+		// it. Keep the 412 PARENT_MISSING contract (the GUI suppresses
+		// the affordance for this state; a stale-scan click lands here).
+		return nil, fmt.Errorf("%w: %s is a symlink (init must not follow symlinks)", errParentMissing, parent)
+	case err == nil && !lst.IsDir():
 		return nil, fmt.Errorf("%w: %s exists but is not a directory", errParentMissing, parent)
+	case err == nil:
+		// Parent is a real directory — proceed to InitEmpty directly
+		// (the legacy missing-init-possible path, behavior-identical).
+	case os.IsNotExist(err):
+		// G17: the parent directory is absent. Securely create the
+		// missing parent chain (component-by-component, symlink-refusing,
+		// home-bounded) so a not-yet-installed client can be pre-
+		// configured. The secure create refuses a symlinked / non-dir
+		// component or a path outside the user home; those refusals
+		// surface here and map to INIT_FAILED (default branch) so the
+		// operator sees the actionable message. Strict mode is honored
+		// by the same wrapper as the file create.
+		if mkErr := api.SecureCreateClientConfigParentDirWithOperatorOpt(path); mkErr != nil {
+			return nil, fmt.Errorf("create parent for %s: %w", client, mkErr)
+		}
+	default:
+		return nil, fmt.Errorf("stat parent %s: %w", parent, err)
 	}
 	created, initErr := adapter.InitEmpty()
 	if initErr != nil {

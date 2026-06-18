@@ -112,6 +112,33 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
     expect(btn.disabled).toBe(false);
   });
 
+  // G17 (2026-06-18): "missing-init-creatable" (config dir absent but
+  // securely creatable under the user home) also surfaces the Initialize
+  // affordance, with a tooltip that names the directory-creation
+  // semantic so the operator knows a config DIR is being made for a
+  // not-yet-installed client.
+  it("renders Initialize button in vscode header when presence is missing-init-creatable", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(200, scanWith({ vscode: "missing-init-creatable" })),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("init-client-vscode")).toBeTruthy();
+    });
+    const btn = screen.getByTestId("init-client-vscode") as HTMLButtonElement;
+    expect(btn.textContent).toBe("Initialize");
+    expect(btn.disabled).toBe(false);
+    // Tooltip must describe the create-directory semantic, distinct
+    // from the missing-init-possible (stub-only) wording.
+    expect(btn.title).toContain("config directory does not exist yet");
+    expect(btn.title).toContain("create the config directory");
+  });
+
   it("does NOT render Initialize button when presence is ok", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({

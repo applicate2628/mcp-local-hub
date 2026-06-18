@@ -74,6 +74,15 @@ export interface ScanResult {
   // matrix header so the operator can seed the empty stub from the
   // GUI without dropping to the shell.
   //
+  // G17 (2026-06-18): "missing-init-creatable" is emitted when the
+  // config file AND its parent directory are absent, but the path is
+  // under the user home and securely creatable. The Initialize
+  // affordance is rendered for this state too (with a "will create the
+  // config dir" tooltip) so the operator can pre-configure a
+  // not-yet-installed client; the secure parent-create makes the
+  // missing directory component-by-component, refusing symlinks and any
+  // path outside the home.
+  //
   // v0.4.5 PR #208 codex r1 F2: "missing-init-blocked-symlink" is
   // emitted when the client's config parent path resolves through a
   // symlink. The hardened init pipeline refuses to follow parent
@@ -88,6 +97,7 @@ export interface ScanResult {
 export type ClientConfigState =
   | "ok"
   | "missing-init-possible"
+  | "missing-init-creatable"
   | "missing-init-blocked-symlink"
   | "missing"
   | "error"

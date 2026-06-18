@@ -901,7 +901,16 @@ export function ServersScreen() {
             <th scope="col">Server</th>
             {clientColumns.map((c) => {
               const presence = clientConfigPresence[c];
-              const canInit = presence === "missing-init-possible";
+              // G17: render Initialize for BOTH the legacy
+              // "missing-init-possible" (parent dir exists) and the new
+              // "missing-init-creatable" (parent dir absent but securely
+              // creatable under the user home) states. The tooltip
+              // differs so the operator knows when a config DIRECTORY is
+              // being created vs only a stub file.
+              const canInit =
+                presence === "missing-init-possible" ||
+                presence === "missing-init-creatable";
+              const willCreateDir = presence === "missing-init-creatable";
               const busy = initBusy[c] === true;
               // Whole-column toggle (Feature 2): the client-NAME span doubles
               // as a clickable enable-all / disable-all control for that
@@ -952,7 +961,11 @@ export function ServersScreen() {
                         class="matrix-col-init-btn"
                         data-testid={`init-client-${c}`}
                         disabled={busy}
-                        title={`${c}'s MCP config file is not present on this host, but its parent directory exists. Click to seed an empty stub so this column becomes active.`}
+                        title={
+                          willCreateDir
+                            ? `${c}'s MCP config directory does not exist yet. Click to create the config directory and seed an empty MCP config so this column becomes active.`
+                            : `${c}'s MCP config file is not present on this host, but its parent directory exists. Click to seed an empty stub so this column becomes active.`
+                        }
                         onClick={() => initializeClient(c)}
                       >
                         {busy ? "Init…" : "Initialize"}

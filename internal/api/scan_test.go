@@ -1145,6 +1145,91 @@ func TestProbeClientConfigPresence_SymlinkedParent(t *testing.T) {
 	}
 }
 
+// TestClassifyMissingClientConfig_Creatable pins the G17 (2026-06-18)
+// "missing-init-creatable" state: when the config file AND its parent
+// directory are absent BUT the path is under the user home and the
+// existing prefix is a real directory chain, classify returns
+// "missing-init-creatable" so the GUI offers Initialize (which securely
+// creates the parent). Paths outside the home, or with a non-directory
+// in the existing prefix, stay "missing".
+func TestClassifyMissingClientConfig_Creatable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// Absent parent under home, real-dir prefix → creatable. The path's
+	// parent (.cursor) does not exist yet.
+	creatable := filepath.Join(home, ".cursor", "mcp.json")
+	if got := classifyMissingClientConfig(creatable); got != "missing-init-creatable" {
+		t.Errorf("absent parent under home: got %q, want missing-init-creatable", got)
+	}
+
+	// Deeper absent chain under home (multiple missing components) →
+	// still creatable.
+	deep := filepath.Join(home, ".config", "SomeClient", "User", "mcp.json")
+	if got := classifyMissingClientConfig(deep); got != "missing-init-creatable" {
+		t.Errorf("deep absent chain under home: got %q, want missing-init-creatable", got)
+	}
+
+	// A path whose existing prefix passes through a regular FILE (not a
+	// dir) is NOT creatable → "missing".
+	regularFile := filepath.Join(home, "afile")
+	if err := os.WriteFile(regularFile, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed regular file: %v", err)
+	}
+	overFile := filepath.Join(regularFile, "sub", "mcp.json")
+	if got := classifyMissingClientConfig(overFile); got != "missing" {
+		t.Errorf("absent chain whose prefix is a file: got %q, want missing", got)
+	}
+}
+
+// TestClassifyMissingClientConfig_OutsideHome pins that an absent parent
+// OUTSIDE the user home is NOT creatable — the affordance must not be
+// offered for a path the secure parent-create would refuse (blast-radius
+// bound). Returns "missing".
+func TestClassifyMissingClientConfig_OutsideHome(t *testing.T) {
+	home := t.TempDir()
+	other := t.TempDir() // sibling temp dir, NOT under home
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	outside := filepath.Join(other, "elsewhere", "mcp.json")
+	if got := classifyMissingClientConfig(outside); got != "missing" {
+		t.Errorf("absent parent outside home: got %q, want missing", got)
+	}
+}
+
+// TestClassifyMissingClientConfig_CreatableThroughSymlinkPrefix pins
+// that an absent parent whose longest-existing prefix passes through a
+// symlink classifies as "missing-init-blocked-symlink" (suppressed), not
+// "missing-init-creatable" — the secure parent-create refuses to descend
+// through a symlink, so the affordance must stay hidden.
+func TestClassifyMissingClientConfig_CreatableThroughSymlinkPrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; POSIX path exercises the prefix-symlink refusal")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// A real target dir + a symlink to it under home. The config path's
+	// parent is BELOW the symlinked component (absent), so the existing
+	// prefix passes through the symlink.
+	target := filepath.Join(home, "real-config-root")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(home, ".config")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	// .config (symlink) exists; SomeClient (below it) is absent.
+	through := filepath.Join(link, "SomeClient", "mcp.json")
+	if got := classifyMissingClientConfig(through); got != "missing-init-blocked-symlink" {
+		t.Errorf("absent parent through symlinked prefix: got %q, want missing-init-blocked-symlink", got)
+	}
+}
+
 // seedLSPRegistry writes a workspaces.yaml at tmpHome/workspaces.yaml carrying
 // the supplied entries and points the package-level defaultRegistryPathFn test
 // seam at it so classifyLSPEntries can find it under hermetic test conditions.
