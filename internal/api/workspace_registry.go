@@ -179,16 +179,15 @@ func (r *Registry) Save() error {
 	if err != nil {
 		return fmt.Errorf("marshal registry: %w", err)
 	}
-	tmp := r.path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0600); err != nil {
-		return fmt.Errorf("write tmp: %w", err)
-	}
-	// On Windows, os.Rename fails if the destination is open. Registry
-	// callers hold no concurrent file handles across Save (Load closes
-	// the file before returning), so a plain Rename is sufficient.
-	if err := os.Rename(tmp, r.path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename tmp -> live: %w", err)
+	// Route the live-file write through the single hardened state-file
+	// owner (G9 P3): per-file flock + handle-bound DACL + parent-dir
+	// relax-gate + audit event, instead of the prior hand-rolled
+	// os.WriteFile(0600)+os.Rename. workspaces.yaml is operator-meaningful
+	// YAML, so WriteStateFileBytesAtomic (bytes form) is the correct entry
+	// point (it skips JSON marshaling). The .bak backup above stays as a
+	// plain rolling copy — it is not the canonical state file.
+	if err := WriteStateFileBytesAtomic(r.path, out); err != nil {
+		return fmt.Errorf("write registry: %w", err)
 	}
 	return nil
 }

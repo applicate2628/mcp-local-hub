@@ -31,8 +31,6 @@ package api
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -152,39 +150,20 @@ func (a *API) SetDefaultInstallClientNamesIn(path string, names []string) error 
 		return err
 	}
 	raw[defaultInstallClientsKey] = strings.Join(cleaned, ",")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
 	data, err := yaml.Marshal(raw)
 	if err != nil {
 		return err
 	}
-	// Atomic temp-then-rename, mirroring SettingsSetIn (internal/api/
-	// settings.go) so a cross-process reader never observes a partially
-	// truncated file. The temp lives in the same directory so the final
-	// rename is intra-volume (os.Rename is atomic only same-filesystem).
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".client-install-prefs-*.yaml.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp settings file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, werr := tmp.Write(data); werr != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write temp settings file: %w", werr)
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		cleanup()
-		return fmt.Errorf("close temp settings file: %w", cerr)
-	}
-	if err := os.Chmod(tmpPath, 0600); err != nil {
-		cleanup()
-		return fmt.Errorf("chmod temp settings file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("atomic rename settings file: %w", err)
+	// G9 P3: route through the single hardened state-file owner
+	// (WriteStateFileBytesAtomic — per-file flock + handle-bound DACL +
+	// parent-dir relax-gate + audit event) instead of the prior
+	// hand-rolled os.CreateTemp+Chmod(0600)+os.Rename mirror of
+	// SettingsSetIn. It still writes atomically (temp+rename in the
+	// destination directory) so a cross-process reader never observes a
+	// partially-truncated gui-preferences.yaml, and now installs the
+	// owner-only DACL on the file handle before any bytes hit disk.
+	if err := WriteStateFileBytesAtomic(path, data); err != nil {
+		return fmt.Errorf("write settings file: %w", err)
 	}
 	return nil
 }

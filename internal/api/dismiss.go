@@ -116,30 +116,22 @@ func DismissUnknown(name string) error {
 	sort.Strings(sorted) // Stable on-disk order for readable diffs / grep.
 
 	payload := dismissedPayload{Version: 1, Unknown: sorted}
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal dismissed payload: %w", err)
-	}
 
 	path, err := dismissedFilePath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
-	}
 
-	// Atomic write: write to sibling temp file, then rename over the
-	// target. Rename is atomic on both NTFS and ext4 for same-directory
-	// renames; the sibling lives in the same dir as the target so the
-	// cross-device-link gotcha does not apply.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("write tmp %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp) // Best-effort cleanup on rename failure.
-		return fmt.Errorf("rename %s -> %s: %w", tmp, path, err)
+	// G9 P3: route through the single hardened state-file owner
+	// (WriteStateFileAtomic — JSON marshal with the same "  " indent as
+	// before + per-file flock + handle-bound DACL + parent-dir relax-gate +
+	// audit event) instead of the prior hand-rolled os.MkdirAll +
+	// os.WriteFile(0600) temp + os.Rename. The atomic temp+rename property
+	// (a cross-process reader never sees a partially-written
+	// gui-dismissed.json) is preserved, and the owner-only DACL is now
+	// installed on the file handle before any bytes hit disk.
+	if err := WriteStateFileAtomic(path, payload); err != nil {
+		return fmt.Errorf("write dismissed payload %s: %w", path, err)
 	}
 	return nil
 }
