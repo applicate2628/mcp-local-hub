@@ -117,8 +117,23 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
 
+  // confirmDiscardIfDirty guards an intra-screen editor switch: when the open
+  // editor has unsaved edits and the operator opens a DIFFERENT target (another
+  // group, or "new"), the App-level route dirty guard never fires (the route
+  // stays #/groups), so without this the unsaved draft is silently discarded.
+  // Mirrors the established window.confirm intra-screen pattern (AddServer's
+  // daemon-delete + sidebar-intercept guards). Returns true to proceed.
+  function confirmDiscardIfDirty(): boolean {
+    if (!dirty) return true;
+    // eslint-disable-next-line no-alert
+    return window.confirm(
+      "Discard your unsaved changes to this group?",
+    );
+  }
+
   function openNew(): void {
     if (state.kind !== "ok") return;
+    if (!confirmDiscardIfDirty()) return;
     setDraft(emptyDraft(state.available));
     setTarget({ mode: "new" });
     setFieldError(null);
@@ -128,6 +143,11 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
 
   function openEdit(group: GroupDTO): void {
     if (state.kind !== "ok") return;
+    // Opening the SAME target is a no-op re-hydration, not a target switch, so
+    // it never needs a discard prompt; only a switch to a different target does.
+    if (!(target.mode === "edit" && target.name === group.name) && !confirmDiscardIfDirty()) {
+      return;
+    }
     setDraft(draftFromGroup(group, state.available));
     setTarget({ mode: "edit", name: group.name });
     setFieldError(null);

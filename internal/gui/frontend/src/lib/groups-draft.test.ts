@@ -33,6 +33,21 @@ describe("validateGroupName", () => {
   it("trims before validating so a padded but otherwise-valid name passes", () => {
     expect(validateGroupName("  frontend  ")).toBeNull();
   });
+  it("rejects route-unsafe characters the old denylist leaked (#, %, slash, whitespace)", () => {
+    // The allowlist (^[A-Za-z0-9._-]+$) closes the whole class the denylist
+    // missed: '#' (URL fragment — server would see only "/g/ops"), '%'
+    // (percent-encoding), slash + whitespace, mirroring the Go groupNameAllowed.
+    expect(validateGroupName("ops#prod")).not.toBeNull();
+    expect(validateGroupName("ops%20prod")).not.toBeNull();
+    expect(validateGroupName("front/end")).not.toBeNull();
+    expect(validateGroupName("front end")).not.toBeNull();
+  });
+  it("rejects '.' and '..' (path-traversal segments the route mux rewrites)", () => {
+    expect(validateGroupName(".")).not.toBeNull();
+    expect(validateGroupName("..")).not.toBeNull();
+    // A dot is still allowed mid-name (e.g. a versioned group).
+    expect(validateGroupName("v1.2")).toBeNull();
+  });
 });
 
 describe("parseHiddenTools", () => {

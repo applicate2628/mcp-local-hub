@@ -396,6 +396,24 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	})
 	results = sorted
 
+	// Resolve the session's FINE-GRAINED per-tool visibility filter
+	// (groups/namespaces Phase 5a) BEFORE collision detection. For a GROUP
+	// scope key this is the group's tools_hidden map (server → hidden raw
+	// names) carried on the captured snapshot; for a CLIENT scope key it is
+	// nil → NO filtering (the byte-identical fence). Reading it off
+	// SnapshotAtInit keeps the (bindings, filter) pair consistent: a session
+	// always sees the filter from the SAME atomic snapshot it captured its
+	// bindings from. Precomputed into a (server → set-of-raw-names) lookup
+	// ONCE so each per-tool check is O(1); nil/empty filter → nil set →
+	// hides() short-circuits to false, preserving the client fence.
+	//
+	// CRITICAL (codex bot r2 — leak via diagnostics): this MUST be computed
+	// before Pass 1 so a HIDDEN tool is excluded from collision detection
+	// too. Otherwise a hidden tool that ALSO collides between two same-server
+	// daemons is dropped from result.tools (Pass 2) yet still named in a
+	// `partialFailures` collision row — leaking the hidden tool's existence.
+	hiddenSet := buildHiddenToolSet(sess.hiddenToolsForScope())
+
 	// Pass 1 — for each successful daemon, record the SET of unique
 	// daemons that produced each exposed key. Keys claimed by more
 	// than one DISTINCT daemon become collisions. codex bot r13 P2
@@ -409,6 +427,9 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			continue
 		}
 		for _, t := range r.tools {
+			if hiddenSet.hides(t.Ref.Server, t.Ref.RawName) {
+				continue // hidden tools never enter collision detection → never leak via partialFailures
+			}
 			set, ok := keyDaemons[t.Exposed]
 			if !ok {
 				set = make(map[canonicalDaemonRef]bool)
@@ -478,22 +499,6 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	seenExposed := make(map[string]bool)
 	listFailures := make([]DaemonFailure, 0)
 	listSuccessCount := 0
-	// Resolve the session's FINE-GRAINED per-tool visibility filter
-	// (groups/namespaces Phase 5a). For a GROUP scope key this is the
-	// group's tools_hidden map (server → hidden raw names) carried on the
-	// captured snapshot; for a CLIENT scope key it is nil → NO filtering
-	// (the byte-identical fence). Reading it off SnapshotAtInit keeps the
-	// (bindings, filter) pair consistent: a session always sees the filter
-	// from the SAME atomic snapshot it captured its bindings from.
-	hiddenTools := sess.hiddenToolsForScope()
-	// Precompute the per-tool hide filter as a (server → set-of-raw-names)
-	// lookup ONCE, so the per-tool check in the merge loop below is O(1)
-	// instead of a linear scan over filter[server] for every tool (the
-	// merge is O(tools); the prior scan made it O(tools × hidden-per-server)).
-	// nil/empty filter → nil set → the check short-circuits to "never hidden",
-	// preserving the byte-identical client fence. Behavior is unchanged: a
-	// tool is hidden iff (server, rawName) is in the filter.
-	hiddenSet := buildHiddenToolSet(hiddenTools)
 	for _, r := range results {
 		if r.err != nil {
 			listFailures = append(listFailures, DaemonFailure{
@@ -551,6 +556,17 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	allFailures = append(allFailures, listFailures...)
 
 	if listSuccessCount == 0 {
+		// Zero INTENDED participants (a declared-but-empty group — decision
+		// claim 5) is NOT the all-failed case: nothing was attempted, so the
+		// route exposes an empty tool surface, not a -32000 "all daemons
+		// failed" envelope. Distinguish on IntendedParticipants (empty ⇒
+		// nothing intended) vs the genuine all-failed case (≥1 intended, all
+		// failed). A normal client always binds ≥1 server, so its path is
+		// unaffected; only an empty group reaches the empty-success branch.
+		if len(sess.IntendedParticipants) == 0 {
+			sess.RouteMap.Store(&mergedRoutes)                             // empty map — no tools to route
+			return buildToolsListResponse(reqID, mergedTools, allFailures) // mergedTools is empty → result.tools=[]
+		}
 		return buildAllFailedToolsListResponse(reqID, allFailures)
 	}
 	sess.RouteMap.Store(&mergedRoutes)

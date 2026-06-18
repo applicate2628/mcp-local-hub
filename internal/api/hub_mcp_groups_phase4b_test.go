@@ -124,6 +124,12 @@ func TestResolveHubScopeKey(t *testing.T) {
 		"g:frontend":   realToken,
 		"g:bad:forged": realToken, // a forged key; validateGroupName must reject the NAME
 	}})
+	// gate-2 (isKnownGroup) now reads LoadResolverSnapshot().Groups, NOT the
+	// token table, so publish a snapshot whose Groups set is the source of
+	// truth — mirroring what the production builder records. Only "frontend"
+	// is declared here: "infra" is absent (group-unknown), and the forged
+	// "bad:forged" name fails validateGroupName before the Groups lookup.
+	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{GroupScopeKey("frontend"): true}})
 
 	cases := []struct {
 		name      string

@@ -37,6 +37,7 @@ package api
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -102,16 +103,18 @@ func GroupScopeKey(group string) string {
 	return GroupScopeKeyPrefix + group
 }
 
-// routeUnsafeChars are the characters a group name MUST NOT contain because
-// they break the `/g/<group>/mcp` route grammar parseHubSegment enforces, so
-// a persisted group would be UNREACHABLE by its own route. parseHubSegment
-// rejects a name segment containing any slash or whitespace; we add '?' (a
-// URL query separator — a name carrying it would split the path before the
-// trailing /mcp and never match the route) and the remaining ASCII
-// whitespace forms. A persisted group must always be reachable by its route,
-// so the validator (the persistence gate) refuses these up front rather than
-// letting a write land a dead group.
-const routeUnsafeChars = "/?\\ \t\r\n\v\f"
+// groupNameAllowed is the ALLOWLIST a group name must fully match to be a
+// safe single URL path segment in the `/g/<group>/mcp` route. It is an
+// allowlist, NOT a denylist, on purpose: a denylist of "route-unsafe"
+// characters is unclosable — it kept missing '#' (a name like "ops#prod"
+// makes the server see only the "/g/ops" path, the rest is a URL fragment),
+// '%' (percent-encoding), and other separators http.ServeMux normalizes. The
+// allowlist closes the WHOLE class by admitting only ASCII letters, digits,
+// '.', '_', and '-' — every one of which survives a path segment verbatim.
+// (The exact names "." and ".." match this charset but are path-traversal
+// segments ServeMux rewrites via redirects, so validateGroupName rejects them
+// separately below.)
+var groupNameAllowed = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // validateGroupName enforces two invariants:
 //
@@ -121,11 +124,16 @@ const routeUnsafeChars = "/?\\ \t\r\n\v\f"
 //     group key and a client key live in disjoint subspaces — so no name-
 //     equality gate is needed; the only keyspace requirement is that the name
 //     cannot inject the separator.)
-//  2. route-reachability: the name contains no character that breaks the
-//     `/g/<group>/mcp` route grammar (slash, '?', whitespace — see
-//     routeUnsafeChars and parseHubSegment). A persisted group MUST always be
-//     reachable by its route, so a route-unsafe name is rejected at the
-//     persistence boundary, never written.
+//  2. route-reachability via an ALLOWLIST: the name must match
+//     groupNameAllowed (`^[A-Za-z0-9._-]+$`), the set of characters that
+//     survive a `/g/<group>/mcp` URL path segment verbatim. This is an
+//     allowlist, not a denylist, because a denylist of "unsafe" characters is
+//     unclosable — it leaked '#', '%', and other separators http.ServeMux
+//     normalizes, any of which would make a persisted group UNREACHABLE by its
+//     own route. The exact names "." and ".." match the charset but are
+//     path-traversal segments ServeMux rewrites, so they are rejected
+//     separately. The validator (the persistence gate) refuses a bad name up
+//     front rather than letting a write land a dead group.
 func validateGroupName(name string) error {
 	if name == "" {
 		return fmt.Errorf("group name is empty")
@@ -133,8 +141,18 @@ func validateGroupName(name string) error {
 	if strings.Contains(name, groupNameSeparator) {
 		return fmt.Errorf("group name %q contains the reserved %q separator (group scope keys are namespaced as %s<name>; a name with %q could forge a kind prefix)", name, groupNameSeparator, GroupScopeKeyPrefix, groupNameSeparator)
 	}
-	if i := strings.IndexAny(name, routeUnsafeChars); i >= 0 {
-		return fmt.Errorf("group name %q contains a route-unsafe character %q (a group name may not contain slashes, '?', or whitespace; it must be reachable as the %s<name>%s route segment)", name, string(name[i]), hubGroupPrefix, hubPathSuffix)
+	if !groupNameAllowed.MatchString(name) {
+		i := strings.IndexFunc(name, func(r rune) bool {
+			return !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-')
+		})
+		bad := name
+		if i >= 0 {
+			bad = string([]rune(name[i:])[0])
+		}
+		return fmt.Errorf("group name %q contains a route-unsafe character %q (a group name may contain only ASCII letters, digits, '.', '_', and '-'; it must be reachable as the %s<name>%s route segment)", name, bad, hubGroupPrefix, hubPathSuffix)
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("group name %q is a path-traversal segment (a name of %q or %q is rewritten by the route mux and could never reach the %s<name>%s route)", name, ".", "..", hubGroupPrefix, hubPathSuffix)
 	}
 	return nil
 }

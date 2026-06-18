@@ -6,8 +6,9 @@
 // optional per-server hidden tools (decision
 // work-items/decisions/2026-06-18-groups-namespaces-tool-visibility.md). The
 // editor draft is the in-progress form state; this module owns the rules for:
-//   - name validation (byte-identical to the Go ValidateGroupName: non-empty,
-//     no ':'), so the operator gets the same verdict before the POST round-trip;
+//   - name validation (mirrors the Go ValidateGroupName: non-empty, no ':',
+//     matching the route-segment allowlist ^[A-Za-z0-9._-]+$, and not "."/".."),
+//     so the operator gets the same verdict before the POST round-trip;
 //   - hidden-tool parsing (a per-server comma/whitespace-separated tag input
 //     → a deduped string[] the wire carries as tools_hidden[server]);
 //   - the SaveGroupBody projection (selected servers + non-empty hidden maps);
@@ -41,28 +42,38 @@ export interface GroupDraft {
 // "g:<name>"), so a name carrying it could forge a kind prefix.
 export const GROUP_NAME_SEPARATOR = ":";
 
-// ROUTE_UNSAFE_NAME mirrors routeUnsafeChars in internal/api/hub_mcp_groups.go:
-// a group name must be reachable as the `/g/<group>/mcp` route segment, so it
-// may not contain a slash, '?', backslash, or any whitespace (these break the
-// route grammar parseHubSegment enforces and would persist an unreachable
-// group). The regex matches the FIRST offending character.
-const ROUTE_UNSAFE_NAME = /[/?\\\s]/;
+// GROUP_NAME_ALLOWED mirrors groupNameAllowed in internal/api/hub_mcp_groups.go:
+// the ALLOWLIST a group name must fully match to be a safe single URL path
+// segment in the `/g/<group>/mcp` route. It is an allowlist, NOT a denylist, on
+// purpose: a denylist of "route-unsafe" characters is unclosable — it kept
+// missing '#' (a URL fragment), '%' (percent-encoding), and other separators
+// http.ServeMux normalizes. The allowlist closes the WHOLE class by admitting
+// only ASCII letters, digits, '.', '_', and '-'. (The exact names "." and ".."
+// match this charset but are path-traversal segments rejected separately.)
+const GROUP_NAME_ALLOWED = /^[A-Za-z0-9._-]+$/;
+// GROUP_NAME_FIRST_BAD finds the FIRST character outside the allowlist, for the
+// error message.
+const GROUP_NAME_FIRST_BAD = /[^A-Za-z0-9._-]/;
 
 // validateGroupName mirrors the Go validateGroupName: non-empty (after trim),
-// free of the reserved ':' separator, and free of any route-unsafe character
-// (slash, '?', backslash, whitespace). Returns null when valid, else a
-// human-readable message. The screen calls this on every keystroke so the
-// operator sees the verdict before Save (the backend re-validates and is the
-// source of truth — GROUPS_INVALID_NAME).
+// free of the reserved ':' separator, matching the route-segment allowlist
+// (ASCII letters, digits, '.', '_', '-'), and not the path-traversal segments
+// "." or "..". Returns null when valid, else a human-readable message. The
+// screen calls this on every keystroke so the operator sees the verdict before
+// Save (the backend re-validates and is the source of truth —
+// GROUPS_INVALID_NAME).
 export function validateGroupName(name: string): string | null {
   const trimmed = name.trim();
   if (trimmed === "") return "Group name is required.";
   if (trimmed.includes(GROUP_NAME_SEPARATOR)) {
     return `Group name cannot contain "${GROUP_NAME_SEPARATOR}" (it is reserved for the scope-key namespace).`;
   }
-  const unsafe = trimmed.match(ROUTE_UNSAFE_NAME);
-  if (unsafe !== null) {
-    return `Group name cannot contain "${unsafe[0]}" (a group name may not contain slashes, "?", or whitespace; it must be reachable as the /g/<name>/mcp route segment).`;
+  if (!GROUP_NAME_ALLOWED.test(trimmed)) {
+    const bad = trimmed.match(GROUP_NAME_FIRST_BAD);
+    return `Group name cannot contain "${bad?.[0] ?? trimmed}" (a group name may contain only ASCII letters, digits, ".", "_", and "-"; it must be reachable as the /g/<name>/mcp route segment).`;
+  }
+  if (trimmed === "." || trimmed === "..") {
+    return `Group name "${trimmed}" is a path-traversal segment (a name of "." or ".." is rewritten by the route mux and could never reach the /g/<name>/mcp route).`;
   }
   return null;
 }

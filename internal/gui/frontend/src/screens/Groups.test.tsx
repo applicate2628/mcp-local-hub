@@ -355,4 +355,48 @@ describe("GroupsScreen", () => {
     // No change yet → Save is disabled (not dirty).
     expect((screen.getByTestId("groups-save") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("guards a dirty editor when switching to a different group's Edit (confirm-to-discard)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () =>
+          jsonResponse(
+            200,
+            listBody([
+              { name: "frontend", description: "", servers: ["serena"] },
+              { name: "backend", description: "", servers: ["time"] },
+            ]),
+          ),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    // Open the frontend editor and make it dirty (toggle a member off).
+    fireEvent.click(await screen.findByTestId("groups-edit-frontend"));
+    fireEvent.click(await screen.findByTestId("groups-server-checkbox-serena"));
+    expect((screen.getByTestId("groups-name-input") as HTMLInputElement).value).toBe("frontend");
+
+    // jsdom does not implement window.confirm, so install a mock directly
+    // (vi.spyOn requires an existing function). CANCEL the discard prompt →
+    // the dirty frontend draft is kept (the editor stays on frontend; the
+    // App-level route guard never fired because the route stayed #/groups).
+    const confirmMock = vi.fn().mockReturnValue(false);
+    const origConfirm = window.confirm;
+    window.confirm = confirmMock as unknown as typeof window.confirm;
+    try {
+      fireEvent.click(screen.getByTestId("groups-edit-backend"));
+      expect(confirmMock).toHaveBeenCalledTimes(1);
+      expect((screen.getByTestId("groups-name-input") as HTMLInputElement).value).toBe("frontend");
+
+      // CONFIRM the discard prompt → the editor switches to backend.
+      confirmMock.mockReturnValue(true);
+      fireEvent.click(screen.getByTestId("groups-edit-backend"));
+      expect(confirmMock).toHaveBeenCalledTimes(2);
+      await waitFor(() =>
+        expect((screen.getByTestId("groups-name-input") as HTMLInputElement).value).toBe("backend"),
+      );
+    } finally {
+      window.confirm = origConfirm;
+    }
+  });
 });
