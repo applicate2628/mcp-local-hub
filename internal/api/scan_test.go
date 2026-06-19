@@ -669,6 +669,29 @@ func TestClassify(t *testing.T) {
 			serverName: "memory",
 			want:       "not-installed",
 		},
+		{
+			// SERENA ROUTER (serena-client-revert-on-manifest-sync read-side): a
+			// correctly-routed serena client points at the /serena/mcp router on the
+			// LIVE GUI port (9125), which does NOT match serena's legacy manifest
+			// daemon port (9121). The serena special-case recognizes it as via-hub
+			// instead of misreading it as a stale-port external — so the matrix shows
+			// a connected serena as connected.
+			name:        "serena /serena/mcp router (GUI port != legacy 9121) -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			want:        "via-hub",
+		},
+		{
+			// The serena router special-case is NAME-GATED: a NON-serena server at a
+			// loopback /serena/mcp-shaped URL whose port does not match its daemon
+			// ports stays external (no cross-server leakage of the serena rule).
+			name:        "non-serena server at /serena/mcp-shaped loopback + wrong port -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "memory",
+			daemonPorts: []int{9200},
+			want:        "external",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

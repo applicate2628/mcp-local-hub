@@ -1436,9 +1436,19 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	hasRemoteExternal := false
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
-			if loopbackPortMatchesDaemon(c.Endpoint, daemonPorts) {
+			switch {
+			case IsSerenaServer(name) && IsSerenaRouterURL(c.Endpoint):
+				// serena's canonical client URL is the /serena/mcp router on the
+				// LIVE GUI port — recognize it as via-hub regardless of the
+				// manifest's legacy per-daemon port (9121). Without this, a
+				// correctly-routed serena entry parses its port (the GUI port) as
+				// not-a-daemon-port and is misclassified as external, so the matrix
+				// shows a connected serena as not-connected (serena-client-revert-
+				// on-manifest-sync read-side).
 				hasHub = true
-			} else {
+			case loopbackPortMatchesDaemon(c.Endpoint, daemonPorts):
+				hasHub = true
+			default:
 				// Loopback shape but wrong/absent port for this server's
 				// daemons (stale migration, or operator's own local server).
 				// Not hub-managed — classify as an external remote so it

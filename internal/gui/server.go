@@ -144,7 +144,13 @@ type migrator interface {
 	Migrate(servers, clients []string) (*api.MigrateReport, error)
 }
 
-type realMigrator struct{}
+type realMigrator struct {
+	// guiPort returns the LIVE bound GUI/hub listener port (Server.Port). It is
+	// read lazily at Migrate time (not at wiring time) because the port is only
+	// assigned after the listener binds. Passed into MigrateOpts.GUIPort so the
+	// dynamic-pool serena server is written with its /serena/mcp router URL.
+	guiPort func() int
+}
 
 // Migrate delegates to api.MigrateFrom. ScanOpts is left zero so
 // ManifestDir defaults to "", which api.loadManifestForServer documents as
@@ -157,10 +163,15 @@ type realMigrator struct{}
 // Returns the api.MigrateReport verbatim so the handler can surface per-
 // row failures structurally. Aggregation into a single error is no longer
 // performed here — that was the source of the bug-bash B1 wall-of-text UX.
-func (realMigrator) Migrate(servers, clients []string) (*api.MigrateReport, error) {
+func (r realMigrator) Migrate(servers, clients []string) (*api.MigrateReport, error) {
+	guiPort := 0
+	if r.guiPort != nil {
+		guiPort = r.guiPort()
+	}
 	return api.NewAPI().MigrateFrom(api.MigrateOpts{
 		Servers:        servers,
 		ClientsInclude: clients,
+		GUIPort:        guiPort,
 	})
 }
 
@@ -716,7 +727,7 @@ func NewServer(cfg Config) *Server {
 	s.scanner = realScanner{}
 	s.status = realStatusProvider{}
 	s.health = realHealthBackend{api: s.api}
-	s.migrator = realMigrator{}
+	s.migrator = realMigrator{guiPort: s.Port}
 	s.demigrater = realDemigrater{}
 	s.dismisser = realDismisser{}
 	s.manifestCreator = realManifestCreator{}

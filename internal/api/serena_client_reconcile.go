@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -52,6 +53,42 @@ const SerenaRouterURLPath = "/serena/mcp"
 // serenaEntryName is the MCP entry name every client uses for serena. It is
 // the manifest server name; clients key their config map on it.
 const serenaEntryName = "serena"
+
+// SerenaRouterClientURL is the canonical client MCP URL for the dynamic-pool
+// serena server: the constant /serena/mcp router on the LIVE GUI port. It is the
+// SINGLE OWNER of serena's client URL — consumed by the write path (migrate) and
+// matched by the read path (scan classify) so neither falls back to the legacy
+// per-daemon 9121 URL from serena's still-legacy-shaped manifest (the
+// serena-client-revert-on-manifest-sync defect). It mirrors the exact shape
+// ReconcileSerenaClientsToRouter builds (serena_client_reconcile.go routerURL).
+func SerenaRouterClientURL(guiPort int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d%s", guiPort, SerenaRouterURLPath)
+}
+
+// IsSerenaRouterURL reports whether an endpoint is serena's /serena/mcp router
+// URL (loopback host + the router path). PORT-AGNOSTIC on purpose: the GUI
+// re-binds its listener port on each start, so the path is the stable
+// discriminator. The scan classifier uses it to recognize a correctly-routed
+// serena client entry as via-hub instead of misreading it as a stale/foreign
+// loopback.
+func IsSerenaRouterURL(endpoint string) bool {
+	if !clients.IsHubHTTPURL(endpoint) {
+		return false
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	return u.Path == SerenaRouterURLPath
+}
+
+// IsSerenaServer reports whether a server name is the dynamic-pool serena server
+// (THE router-fronted server). The write + read paths special-case it by name
+// because serena's client URL is the /serena/mcp router, not the manifest's
+// legacy per-daemon port.
+func IsSerenaServer(server string) bool {
+	return server == serenaEntryName
+}
 
 // defaultLegacySerenaPort is the legacy global serena daemon port that
 // dynamic-pool clients must be moved OFF of. Used only when
