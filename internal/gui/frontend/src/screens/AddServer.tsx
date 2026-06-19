@@ -900,7 +900,20 @@ export function AddServerScreen(props: {
             </p>
           )}
           {banner.retry && (
-            <button type="button" onClick={() => banner.retry?.()} data-action="retry-install">Retry Install</button>
+            <button
+              type="button"
+              // Retry re-installs the LAST SAVED manifest, and retryInstall persists
+              // inline secrets from the CURRENT form. Once the operator edits the
+              // draft (manifestDirty), retrying would write secrets for unsaved refs
+              // that the saved-manifest install never uses (orphans). Disable it —
+              // the edited manifest must go through Save & Install, not Retry (#378 r6).
+              disabled={busy !== "" || manifestDirty}
+              title={manifestDirty ? "Save your changes first — Retry re-installs the last saved manifest." : undefined}
+              onClick={() => banner.retry?.()}
+              data-action="retry-install"
+            >
+              Retry Install
+            </button>
           )}
           {banner.reinstall && (
             <button
