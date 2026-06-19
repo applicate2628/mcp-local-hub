@@ -1768,6 +1768,21 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			return fmt.Errorf("lldb-bridge: no MCP listener on %s and no lldb binary found — %s, or start an lldb MCP listener on %s first", addr, lfix, addr)
 		}
 	}
+	// 1d. Entry script present — node/python manifests run base_args[0] as a
+	// LOCAL script; the launcher being on PATH does not prove the script exists
+	// (e.g. wolfram's build/index.js inside an uncloned repo). Mirror readiness
+	// via the shared entryScriptCheckTargets and block BEFORE side effects —
+	// except for workspace-scoped template manifests where the launcher (and so
+	// the script) is optional, matching readiness's launcherOptional (Codex #377
+	// r14).
+	scriptOptional := m.Kind == config.KindWorkspaceScoped && m.DaemonTemplate == nil
+	if !scriptOptional {
+		for _, c := range entryScriptCheckTargets(m) {
+			if _, err := os.Stat(c.path); err != nil {
+				return fmt.Errorf("entry script %q for %q not found — install/clone the server so base_args[0] exists, then re-run install", filepath.Base(c.path), normalizeLauncher(m.Command))
+			}
+		}
+	}
 	// 2. Canonical mcphub must exist — scheduler tasks reference
 	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
 	// Scheduler's CreateProcess call skips PATH lookup. Antigravity

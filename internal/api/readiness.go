@@ -101,15 +101,35 @@ func LauncherGuidance(command string) (display, fix string) {
 	}
 }
 
+// normalizeLauncher reduces a manifest command to its bare launcher name for
+// matching: it strips any directory (an absolute `C:\tools\uvx.exe` still IS
+// uvx) and a Windows executable/shim suffix (`.exe`/`.cmd`/`.bat`/`.ps1`), so
+// `uvx`, `uvx.exe`, and `/opt/bin/uvx` all compare equal. Single owner used by
+// runtimeBehindLauncher, manifestNeedsGit, and the entry-script gate so none of
+// them silently skip a dependency on an absolute / suffixed launcher (Codex
+// #377 r14).
+func normalizeLauncher(command string) string {
+	base := filepath.Base(command)
+	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1"} {
+		if len(base) > len(ext) && strings.EqualFold(base[len(base)-len(ext):], ext) {
+			return base[:len(base)-len(ext)]
+		}
+	}
+	return base
+}
+
 // runtimeBehindLauncher returns the deeper runtime command a launcher needs to
 // actually fetch + run its package, when that differs from the launcher
 // itself. LookPath(launcher) succeeding does NOT prove the runtime can fetch +
-// run the target package; npx in particular delegates to node. Empty string
-// means the launcher IS self-contained (uvx bootstraps its own Python; go,
-// node, mcphub are themselves the runtime), so no deeper check is added.
+// run the target package; the npm/npx shims are themselves `#!/usr/bin/env
+// node` scripts, so both delegate to node. Empty string means the launcher IS
+// self-contained (uvx bootstraps its own Python; go, node, mcphub are
+// themselves the runtime), so no deeper check is added. The command is
+// normalized first so `npm.cmd` / an absolute npx path still match (Codex #377
+// r14).
 func runtimeBehindLauncher(command string) string {
-	switch command {
-	case "npx":
+	switch normalizeLauncher(command) {
+	case "npx", "npm":
 		return "node"
 	default:
 		return ""
@@ -165,7 +185,9 @@ func binaryAvailable(bin string) bool {
 // binary at launch — uv does NOT vendor git, so uvx-on-PATH does not prove git
 // is. SINGLE OWNER shared by readiness and Preflight (Codex #377 r13).
 func manifestNeedsGit(m *config.ServerManifest) bool {
-	if m.Command != "uvx" && m.Command != "uv" {
+	switch normalizeLauncher(m.Command) {
+	case "uvx", "uv":
+	default:
 		return false
 	}
 	for _, a := range append(append([]string{}, m.BaseArgs...), m.BaseArgsTemplate...) {
@@ -174,6 +196,56 @@ func manifestNeedsGit(m *config.ServerManifest) bool {
 		}
 	}
 	return false
+}
+
+// entryScript is one (label, absolute-path) target the node/python entry-script
+// gate stats.
+type entryScript struct{ label, path string }
+
+// entryScriptCheckTargets returns the entry scripts to stat for a node/python
+// manifest. base_args[0] is the local script the launcher runs; the launcher
+// being on PATH does NOT prove the script exists (e.g. wolfram's build/index.js
+// inside an uncloned repo). An ABSOLUTE arg is one cwd-independent target. A
+// RELATIVE arg resolves against EACH daemon's cwd (a multi-daemon manifest can
+// differ per daemon); an EMPTY daemon cwd means the daemon inherits mcphub's
+// launch cwd, approximated by the process cwd (os.Getwd) — the best proxy
+// available, and far better than silently skipping the check (Codex #377
+// r10/r14). SINGLE OWNER shared by CheckServerReadiness and Preflight so the
+// readiness report and the install gate cannot diverge.
+func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
+	switch normalizeLauncher(m.Command) {
+	case "node", "python", "python3":
+	default:
+		return nil
+	}
+	if len(m.BaseArgs) == 0 || strings.HasPrefix(m.BaseArgs[0], "-") {
+		return nil
+	}
+	arg := m.BaseArgs[0]
+	if filepath.IsAbs(arg) {
+		return []entryScript{{filepath.Base(arg), arg}}
+	}
+	daemons := m.Daemons
+	if len(daemons) == 0 {
+		daemons = []config.DaemonSpec{{Name: "default"}}
+	}
+	cwdProxy, _ := os.Getwd()
+	var out []entryScript
+	for _, d := range daemons {
+		base := d.Cwd
+		if base == "" {
+			base = cwdProxy // empty cwd → daemon inherits mcphub's launch cwd
+		}
+		if !filepath.IsAbs(base) {
+			continue // no usable absolute base → cannot stat reliably
+		}
+		name := d.Name
+		if name == "" {
+			name = "default"
+		}
+		out = append(out, entryScript{filepath.Base(arg) + " (" + name + ")", filepath.Join(base, arg)})
+	}
+	return out
 }
 
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
@@ -256,41 +328,20 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// per-daemon cwd (m.Daemons[i].Cwd) at spawn, so resolve it against that
 	// (when known + absolute) rather than skipping or statting it against this
 	// process's cwd (Codex #377 r9). Skip flag-shaped args (python -m, --flag).
-	if m.Command == "node" || m.Command == "python" || m.Command == "python3" {
-		if len(m.BaseArgs) > 0 && !strings.HasPrefix(m.BaseArgs[0], "-") {
-			arg := m.BaseArgs[0]
-			// Build the list of (label, absolute-path) to stat. An ABSOLUTE
-			// arg is cwd-independent → one check. A RELATIVE arg resolves
-			// against EACH daemon's per-daemon cwd, which can DIFFER per daemon
-			// (a multi-daemon manifest), so check it against every daemon whose
-			// cwd is known + absolute — the script must exist for each (Codex
-			// #377 r10). Daemons with an unknown cwd are skipped (cannot stat).
-			type scriptCheck struct{ label, path string }
-			var checks []scriptCheck
-			if filepath.IsAbs(arg) {
-				checks = append(checks, scriptCheck{filepath.Base(arg), arg})
-			} else {
-				for _, d := range m.Daemons {
-					if filepath.IsAbs(d.Cwd) {
-						checks = append(checks, scriptCheck{filepath.Base(arg) + " (" + d.Name + ")", filepath.Join(d.Cwd, arg)})
-					}
-				}
-			}
-			for _, c := range checks {
-				if _, err := os.Stat(c.path); err != nil {
-					add(ReadinessRequirement{
-						Name:     "script: " + c.label,
-						OK:       false,
-						Optional: launcherOptional,
-						// Reason names only the script BASENAME, not the absolute
-						// host path, which the GUI renders (Codex pre-catch r9).
-						Reason: fmt.Sprintf("the %s entry script %q does not exist", m.Command, filepath.Base(c.path)),
-						Fix:    "Install/clone the server so the manifest's base_args[0] script path exists, then re-run install.",
-					})
-				} else {
-					add(ReadinessRequirement{Name: "script: " + c.label, OK: true})
-				}
-			}
+	for _, c := range entryScriptCheckTargets(m) {
+		if _, err := os.Stat(c.path); err != nil {
+			add(ReadinessRequirement{
+				Name:     "script: " + c.label,
+				OK:       false,
+				Optional: launcherOptional,
+				// Reason names only the script BASENAME + the normalized launcher
+				// (never the absolute host path), which the GUI renders (Codex
+				// pre-catch r9 / r14).
+				Reason: fmt.Sprintf("the %s entry script %q does not exist", normalizeLauncher(m.Command), filepath.Base(c.path)),
+				Fix:    "Install/clone the server so the manifest's base_args[0] script path exists, then re-run install.",
+			})
+		} else {
+			add(ReadinessRequirement{Name: "script: " + c.label, OK: true})
 		}
 	}
 

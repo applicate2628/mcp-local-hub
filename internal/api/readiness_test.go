@@ -269,6 +269,64 @@ func TestCheckServerReadiness_RelativeScriptCheckedPerDaemonCwd(t *testing.T) {
 	}
 }
 
+func TestNormalizeLauncher(t *testing.T) {
+	cases := map[string]string{
+		"uvx":              "uvx",
+		"uvx.exe":          "uvx",
+		`C:\tools\uvx.exe`: "uvx",
+		"npm.cmd":          "npm",
+		"python3":          "python3",
+		"definitely-bare":  "definitely-bare",
+	}
+	for in, want := range cases {
+		if got := normalizeLauncher(in); got != want {
+			t.Errorf("normalizeLauncher(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRuntimeBehindLauncher_NpmAndNpxNeedNode(t *testing.T) {
+	// npm shims are #!/usr/bin/env node scripts just like npx, and the command
+	// is normalized first so npm.cmd / an absolute npx path still match (Codex
+	// #377 r14).
+	for _, c := range []string{"npx", "npm", "npm.cmd", `C:\nodejs\npx.exe`} {
+		if rt := runtimeBehindLauncher(c); rt != "node" {
+			t.Errorf("runtimeBehindLauncher(%q) = %q, want node", c, rt)
+		}
+	}
+	if rt := runtimeBehindLauncher("go"); rt != "" {
+		t.Errorf("go is self-contained; runtimeBehindLauncher = %q, want empty", rt)
+	}
+}
+
+func TestManifestNeedsGit_NormalizesLauncher(t *testing.T) {
+	m := &config.ServerManifest{Command: "uvx.exe", BaseArgs: []string{"--from", "git+https://x@abc", "pkg"}}
+	if !manifestNeedsGit(m) {
+		t.Error("uvx.exe with a git+ source must require git (normalized launcher)")
+	}
+	if manifestNeedsGit(&config.ServerManifest{Command: "uvx", BaseArgs: []string{"some-pkg"}}) {
+		t.Error("uvx without a git+ source must not require git")
+	}
+}
+
+func TestEntryScriptCheckTargets_EmptyCwdUsesProcessCwd(t *testing.T) {
+	// A relative entry script with an EMPTY daemon cwd must still produce a
+	// target (resolved against the process cwd, the inherited-launch-cwd proxy)
+	// rather than being silently skipped (Codex #377 r14).
+	m := &config.ServerManifest{
+		Command:  "node",
+		BaseArgs: []string{"build/index.js"},
+		Daemons:  []config.DaemonSpec{{Name: "default", Cwd: ""}},
+	}
+	targets := entryScriptCheckTargets(m)
+	if len(targets) != 1 {
+		t.Fatalf("empty-cwd relative script must yield 1 target; got %d", len(targets))
+	}
+	if !filepath.IsAbs(targets[0].path) {
+		t.Errorf("target path must be absolute (process-cwd-resolved); got %q", targets[0].path)
+	}
+}
+
 func TestLauncherGuidance_UnknownAbsoluteCommandBasenamed(t *testing.T) {
 	// An unknown command that is an absolute host path must not leak its
 	// directory through the display name OR the fix string — LauncherGuidance
