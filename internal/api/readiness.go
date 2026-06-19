@@ -215,6 +215,31 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 	}
 
+	// Workspace-scoped (dynamic-pool) registration allocates from a PortPool
+	// via AllocatePort, and m.Daemons is EMPTY for these (e.g.
+	// mcp-language-server), so the daemon-port loop above checks nothing. If
+	// every port in the declared pool is occupied, `mcphub register` fails
+	// "port pool exhausted" — surface that as blocking (Codex #377).
+	checkPool := func(p *config.PortPool) {
+		if p == nil || p.End < p.Start {
+			return
+		}
+		name := fmt.Sprintf("port pool %d-%d", p.Start, p.End)
+		for port := p.Start; port <= p.End; port++ {
+			if !preflightPortInUse(port) {
+				add(ReadinessRequirement{Name: name, OK: true})
+				return
+			}
+		}
+		add(ReadinessRequirement{Name: name, OK: false,
+			Reason: "every port in the workspace pool is already in use",
+			Fix:    "Free a port in the pool range, or widen the pool in the manifest."})
+	}
+	checkPool(m.PortPool)
+	if m.DaemonTemplate != nil {
+		checkPool(m.DaemonTemplate.PortPool)
+	}
+
 	// Declared secrets — reported PER KEY so the GUI can offer each as an
 	// inline "fill this field at install" prompt (the operator's request:
 	// "секреты нужно явно предлагать в конкретные поля при установке").
@@ -261,6 +286,26 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			req.OK = true
 		}
 		add(req)
+	}
+	// Validate the WHOLE url/header strings through ExpandSecrets — the same
+	// path buildRemoteHTTPPlan runs before writing client config — to catch
+	// MALFORMED `${secret:...}` (bad key shape / unterminated) and CR/LF in
+	// resolved values that the well-formed-key scan above cannot see. Without
+	// this, readiness could green-light an install the planner then rejects
+	// (Codex #377). Blocking.
+	validateRemote := func(label, s string) {
+		if !strings.Contains(s, "${secret:") {
+			return
+		}
+		if _, err := ExpandSecrets(s, nil); err != nil {
+			add(ReadinessRequirement{Name: "remote config: " + label, OK: false,
+				Reason: fmt.Sprintf("invalid/unresolvable ${secret:} placeholder: %v", err),
+				Fix:    "Fix the placeholder (key chars [A-Za-z0-9_-.] terminated by `}`, no CR/LF in the value) and set the secret."})
+		}
+	}
+	validateRemote("url", m.URL)
+	for hk, hv := range m.Headers {
+		validateRemote("header "+hk, hv)
 	}
 
 	return rep

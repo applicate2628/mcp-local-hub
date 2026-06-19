@@ -111,11 +111,15 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
 			resolver := secrets.NewResolver(vault, nil)
 			// Best-effort: a skipped optional `secret:` ref is omitted (spawn
-			// proceeds) rather than fatal; $VAR/file: refs stay fatal. Omitted
-			// keys are diagnosable via the resolver's own log path. (Codex #377)
-			env, _, err := resolver.ResolveMapBestEffort(spec.EnvRefs)
+			// proceeds) rather than fatal; $VAR/file: refs stay fatal. Each
+			// omitted key is shadowed with an explicit empty value so a
+			// same-named ambient parent env var is NOT inherited (Codex #377).
+			env, omittedSecrets, err := resolver.ResolveMapBestEffort(spec.EnvRefs)
 			if err != nil {
 				return err
+			}
+			for k := range omittedSecrets {
+				env[k] = ""
 			}
 
 			// Final child argv: the spec's fully-materialized ChildArgs

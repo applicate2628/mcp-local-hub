@@ -184,3 +184,28 @@ func TestCheckServerReadiness_RemoteHTTPSecretIsBlocking(t *testing.T) {
 		t.Fatalf("no remote secret requirement for ${secret:} in headers: %+v", rep.Requirements)
 	}
 }
+
+func TestCheckServerReadiness_MalformedRemotePlaceholderBlocks(t *testing.T) {
+	// A malformed ${secret:...} (space in key) is not matched by the
+	// well-formed-key scan, but ExpandSecrets (which buildRemoteHTTPPlan runs)
+	// rejects it — readiness must surface it as a blocking "remote config" req.
+	m := &config.ServerManifest{
+		Name:      "remote-bad",
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://example.com/mcp",
+		Headers:   map[string]string{"Authorization": "Bearer ${secret:BAD KEY}"},
+	}
+	rep := CheckServerReadiness(m)
+	var found bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "remote config:") {
+			found = true
+			if r.OK {
+				t.Errorf("malformed remote placeholder reported OK=true")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("malformed ${secret:} placeholder not surfaced: %+v", rep.Requirements)
+	}
+}

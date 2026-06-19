@@ -353,6 +353,14 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 		return nil, err
 	}
 	for k, ref := range omitted {
+		// Explicit empty override (Codex #377): the daemon host appends to
+		// os.Environ(), so a skipped secret whose KEY also exists in the
+		// parent process env would otherwise be INHERITED ambiently — the
+		// server would run with an unintended ambient secret the operator
+		// chose to skip. Setting KEY="" shadows the ambient value so the child
+		// sees the declared key as empty (== unset for an optional secret),
+		// never the parent's value.
+		env[k] = ""
 		fmt.Fprintf(os.Stderr, "mcphub daemon %s/%s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
 			server, daemonName, k, ref)
 	}
