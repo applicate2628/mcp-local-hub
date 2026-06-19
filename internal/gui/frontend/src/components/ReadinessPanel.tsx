@@ -30,6 +30,12 @@ export interface ReadinessPanelProps {
   // persisted — offering an editable field would only invite the operator to type
   // a secret that is then silently discarded on navigation (Codex #378 r6).
   readOnly?: boolean;
+  // inputsDisabled locks the inline secret inputs while a Save/Save & Install is
+  // in flight (busy). Editing the field mid-save would mutate inlineSecrets under
+  // the running persist path (which read the pre-click map), so the new value
+  // would be silently dropped or clobbered — disable input until the save settles
+  // (Codex #378 r6).
+  inputsDisabled?: boolean;
 }
 
 // ReadinessPanel renders the install-readiness report as actionable rows so the
@@ -38,7 +44,8 @@ export interface ReadinessPanelProps {
 // an INLINE field to set the value right here at install (epic install-and-it-
 // works, area 1).
 export function ReadinessPanel(props: ReadinessPanelProps) {
-  const { report, loading, error, inlineSecrets, onInlineSecretChange, readOnly } = props;
+  const { report, loading, error, inlineSecrets, onInlineSecretChange, readOnly, inputsDisabled } =
+    props;
 
   if (loading && !report) {
     return (
@@ -119,6 +126,7 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
                       data-testid={"readiness-secret-input-" + key}
                       placeholder={`enter ${key}…`}
                       value={inlineSecrets[key] ?? ""}
+                      disabled={inputsDisabled}
                       onInput={(e) =>
                         onInlineSecretChange(key, (e.target as HTMLInputElement).value)
                       }

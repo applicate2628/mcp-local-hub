@@ -481,7 +481,12 @@ export function AddServerScreen(props: {
   type Banner = {
     kind: "error" | "success";
     text: string;
-    retry?: () => Promise<void>;
+    // retryName is the install TARGET name, NOT a callback: the Retry button
+    // invokes the CURRENT render's retryInstall(retryName) so it reads the latest
+    // formState / inlineSecrets. Storing a `() => retryInstall(name)` closure
+    // instead froze the inline-secret map at banner-creation time, so a value the
+    // operator typed AFTER the failure was lost on Retry (Codex #378 r6).
+    retryName?: string;
     reinstall?: boolean;
     staleReload?: boolean;
     staleForceSave?: boolean;
@@ -626,7 +631,7 @@ export function AddServerScreen(props: {
           setBanner({
             kind: "error",
             text: `Saved servers/${name}/manifest.yaml, but install could not complete: ${(installErr as Error).message}`,
-            retry: () => retryInstall(name),
+            retryName: name,
           });
         }
       }
@@ -757,7 +762,7 @@ export function AddServerScreen(props: {
         setBanner({
           kind: "error",
           text: `Saved servers/${name}/manifest.yaml, but install could not complete: ${(err as Error).message}`,
-          retry: () => retryInstall(name),
+          retryName: name,
         });
       }
     }
@@ -776,7 +781,7 @@ export function AddServerScreen(props: {
         setBanner({
           kind: "error",
           text: `Saved servers/${name}/manifest.yaml, but install failed: ${err}`,
-          retry: () => retryInstall(name),
+          retryName: name,
         });
         pushToast("danger", `Install failed for ${name}: ${err}`);
         return;
@@ -792,7 +797,7 @@ export function AddServerScreen(props: {
         // Route through retryInstall (not runInstallNow) so a Retry persists any
         // inline secret the operator enters/edits while fixing the failure before
         // re-installing the saved manifest (Codex #378 r6).
-        retry: () => retryInstall(name),
+        retryName: name,
       });
       pushToast("danger", `Install failed for ${name}: ${(err as Error).message}`);
     }
@@ -929,7 +934,7 @@ export function AddServerScreen(props: {
               The aggregated hub is running but could not refresh its routing in place — restart the hub (Settings → Expose a single aggregated hub URL, toggle off and on) to apply this change to /clients and /g endpoints.
             </p>
           )}
-          {banner.retry && (
+          {banner.retryName && (
             <button
               type="button"
               // Retry re-installs the LAST SAVED manifest, and retryInstall persists
@@ -939,7 +944,9 @@ export function AddServerScreen(props: {
               // the edited manifest must go through Save & Install, not Retry (#378 r6).
               disabled={busy !== "" || manifestDirty}
               title={manifestDirty ? "Save your changes first — Retry re-installs the last saved manifest." : undefined}
-              onClick={() => banner.retry?.()}
+              // Call the CURRENT render's retryInstall with the stored target so it
+              // reads the latest inlineSecrets, not a closure frozen at failure time.
+              onClick={() => retryInstall(banner.retryName!)}
               data-action="retry-install"
             >
               Retry Install
@@ -1075,6 +1082,7 @@ export function AddServerScreen(props: {
                   setInlineSecrets((prev) => ({ ...prev, [key]: value }))
                 }
                 readOnly={readOnly}
+                inputsDisabled={busy !== ""}
               />
             </AccordionSection>
           )}
