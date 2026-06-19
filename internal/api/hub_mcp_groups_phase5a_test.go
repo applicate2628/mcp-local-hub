@@ -232,6 +232,24 @@ func TestGroupsPhase5a_RepublishedHiddenToolRevokesExistingSession(t *testing.T)
 		Groups: map[string]bool{GroupScopeKey("frontend"): true},
 	})
 
+	// REGRESSION (list/call symmetry): a SECOND tools/list on the SAME session
+	// after the republish must NOT re-advertise memory__write. Before the
+	// hiddenToolsForScope live-snapshot fix, tools/list filtered off the
+	// init-captured snapshot and kept listing (and re-routing) memory__write
+	// even though the very next tools/call rejected it with -32601 — a
+	// list-says-yes / call-says-no split that only self-healed on reconnect.
+	reqL2 := authedRequest(t, http.MethodPost, "/g/frontend/mcp", listBody)
+	reqL2.Header.Set("Mcp-Session-Id", sid)
+	reqL2.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	wL2 := httptest.NewRecorder()
+	h.ServeHTTP(wL2, reqL2)
+	if wL2.Code != http.StatusOK {
+		t.Fatalf("post-republish tools/list status=%d want 200; body=%s", wL2.Code, wL2.Body.String())
+	}
+	if toolNamesFromListResponse(t, wL2.Body.Bytes())["memory__write"] {
+		t.Fatalf("post-republish tools/list still advertises hidden memory__write; list and call disagree; body=%s", wL2.Body.String())
+	}
+
 	callHidden := []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory__write","arguments":{}}}`)
 	reqC := authedRequest(t, http.MethodPost, "/g/frontend/mcp", callHidden)
 	reqC.Header.Set("Mcp-Session-Id", sid)

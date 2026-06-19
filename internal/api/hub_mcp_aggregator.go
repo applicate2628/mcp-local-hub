@@ -399,13 +399,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	// Resolve the session's FINE-GRAINED per-tool visibility filter
 	// (groups/namespaces Phase 5a) BEFORE collision detection. For a GROUP
 	// scope key this is the group's tools_hidden map (server → hidden raw
-	// names) carried on the captured snapshot; for a CLIENT scope key it is
-	// nil → NO filtering (the byte-identical fence). Reading it off
-	// SnapshotAtInit keeps the (bindings, filter) pair consistent: a session
-	// always sees the filter from the SAME atomic snapshot it captured its
-	// bindings from. Precomputed into a (server → set-of-raw-names) lookup
-	// ONCE so each per-tool check is O(1); nil/empty filter → nil set →
-	// hides() short-circuits to false, preserving the client fence.
+	// names); for a CLIENT scope key it is nil → NO filtering (the
+	// byte-identical fence). hiddenToolsForScope reads the LIVE snapshot (the
+	// same source tools/call's snapshotHidesTool revalidates against) so a
+	// tools_hidden republish takes effect on the next tools/list, matching
+	// the tools/call fence rather than re-advertising a tool call will reject
+	// (see hiddenToolsForScope for the bindings-stay-fixed rationale).
+	// Precomputed into a (server → set-of-raw-names) lookup ONCE so each
+	// per-tool check is O(1); nil/empty filter → nil set → hides()
+	// short-circuits to false, preserving the client fence.
 	//
 	// CRITICAL (codex bot r2 — leak via diagnostics): this MUST be computed
 	// before Pass 1 so a HIDDEN tool is excluded from collision detection
@@ -1663,14 +1665,33 @@ func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) []namespace
 
 // hiddenToolsForScope returns the session's FINE-GRAINED per-tool
 // visibility filter (server name → hidden raw tool names) for its scope
-// key, read from the snapshot captured at initialize (groups/namespaces
-// Phase 5a). Returns nil for a CLIENT scope key (no entry → no filtering,
-// the byte-identical fence) and for any session whose captured snapshot
-// has no ToolsHidden. Reading from SnapshotAtInit (not the live snapshot)
-// keeps the filter consistent with the bindings the session fanned out
-// over — both come from the SAME immutable pointer.
+// key (groups/namespaces Phase 5a). Returns nil for a CLIENT scope key (no
+// entry → no filtering, the byte-identical fence) and for any session whose
+// snapshot has no ToolsHidden.
+//
+// It reads the LIVE snapshot (LoadResolverSnapshot) — the SAME one
+// tools/call revalidates against via snapshotHidesTool — NOT the
+// init-captured one, so a tools_hidden republish takes effect on the
+// session's next tools/list. Before this (PR #374 left the fence on
+// tools/call only) a re-listing group session kept advertising — and
+// re-routing — a tool the very next tools/call then rejected with -32601
+// "tool moved out of scope": a list-says-yes / call-says-no contract split
+// that only self-healed on reconnect. Sourcing both filters from the live
+// snapshot makes list and call agree.
+//
+// Reading LIVE does NOT reintroduce a (bindings, filter) torn read: the
+// session's daemon bindings are fixed at initialize (InitSuccesses), and a
+// per-tool hide filter only NARROWS the already-bound tool set — it can
+// never advertise a tool the bindings cannot serve. Group MEMBERSHIP
+// changes (a server added/removed) are an orthogonal concern handled at
+// tools/call (daemonStillBound) and by the route being absent, not by this
+// per-tool filter. Falls back to the init snapshot only when the live
+// snapshot is momentarily unavailable (nil), preserving the client fence.
 func (s *hubSession) hiddenToolsForScope() map[string][]string {
-	snap := s.SnapshotAtInit
+	snap := LoadResolverSnapshot()
+	if snap == nil {
+		snap = s.SnapshotAtInit
+	}
 	if snap == nil || snap.ToolsHidden == nil {
 		return nil
 	}
