@@ -1372,10 +1372,13 @@ groups:
 
 Hiding a tool reduces the surface EXPOSED AT THE HUB; it is not access
 control. Daemon ports remain directly reachable; at gate-OFF the hub
-filter is not in the path; filter changes apply to NEW client sessions
-only (reconnect to apply); granularity is per-SERVER (cannot hide a tool
-on daemon A but keep it on daemon B of the same server). Treat it as
-context-bloat reduction, never as a fence.
+filter is not in the path. HIDING a tool revokes existing sessions at
+`tools/call` time (the call target is revalidated against the live
+snapshot — PR #374, so a freshly-hidden tool returns -32601 to an
+already-open session), but UN-hiding / adding a tool still takes effect
+only on the session's next reconnect; granularity is per-SERVER (cannot
+hide a tool on daemon A but keep it on daemon B of the same server).
+Treat it as context-bloat reduction, never as a fence.
 
 ## Hub aggregate (gate-ON) mode + port reset
 
