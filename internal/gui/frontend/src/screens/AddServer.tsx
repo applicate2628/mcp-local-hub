@@ -106,12 +106,14 @@ export function AddServerScreen(props: {
   // diverges, a Reinstall would install stale config while persisting current
   // refs, so it must be disabled until re-saved (Codex #378 r6).
   const manifestDirty = !deepEqualForm(formState, initialSnapshot);
-  // Only inline secrets for a CURRENTLY-referenced secret: ref count as pending
-  // unsaved data — a value typed then abandoned (its ref removed/renamed) is
-  // filtered out by inlineSecretsToWrite, so it cannot leave the form permanently
-  // dirty with a hidden value the input no longer shows (Codex #378 r6).
-  const hasPendingInlineSecret =
-    inlineSecretsToWrite(inlineSecrets, formState.env).length > 0;
+  // hasPendingInlineSecret counts ONLY inline values that persistInlineSecrets
+  // would actually WRITE — current valid secret: refs whose key is NOT already in
+  // the vault. Using the same single-owner filter (pendingInlineSecretEntries)
+  // keeps the dirty flag and the write set in lockstep: a value for a ref the
+  // user abandoned, OR a key resolved meanwhile via the AddSecretModal/another
+  // tab, is neither written nor counted as dirty — so the screen never stays
+  // permanently dirty with a hidden, already-resolved value (Codex #378 r6).
+  const hasPendingInlineSecret = pendingInlineSecretEntries(formState).length > 0;
   // isDirty (sidebar/close navigation guard) — a value typed into a readiness
   // inline secret field is unsaved data too, so warn before discarding it (r4),
   // but only while it is still a live ref (r6).
@@ -146,16 +148,22 @@ export function AddServerScreen(props: {
     // (Codex #378).
   }, [yamlPreview, debouncedState.name, snapshot.fetchedAt]);
 
-  async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
-    // inlineSecretsToWrite keeps ONLY current, valid-named secret: refs (a value
-    // typed for a ref the user later removed/renamed, or for a non-conforming
-    // key, is dropped). Then skip keys already present in the vault (created
-    // meanwhile via the AddSecretModal / another tab) so a resolved key is never
-    // re-written (Codex #378 r1/r2).
+  // pendingInlineSecretEntries is the SINGLE OWNER of "which inline values still
+  // need writing": current valid-named secret: refs (inlineSecretsToWrite drops a
+  // value typed for a ref the user later removed/renamed, or a non-conforming/
+  // reserved key) MINUS keys already present in the vault (created meanwhile via
+  // the AddSecretModal / another tab — never re-written). The dirty flag and the
+  // persist write set both derive from this, so they can never drift (Codex #378
+  // r1/r2/r6).
+  function pendingInlineSecretEntries(state: ManifestFormState): [string, string][] {
     const present = new Set(
       (snapshot.data?.secrets ?? []).filter((s) => s.state === "present").map((s) => s.name),
     );
-    const entries = inlineSecretsToWrite(inlineSecrets, state.env).filter(([key]) => !present.has(key));
+    return inlineSecretsToWrite(inlineSecrets, state.env).filter(([key]) => !present.has(key));
+  }
+
+  async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
+    const entries = pendingInlineSecretEntries(state);
     if (entries.length === 0) return;
     // A fresh profile has no vault yet — initialize it before the first write, or
     // addSecret fails on the uninitialized vault (Codex #378 r2).
@@ -601,16 +609,27 @@ export function AddServerScreen(props: {
         pushToast("success", `Saved ${name} manifest.`);
         return;
       }
-      // Persist inline secrets ONLY AFTER the manifest commit (create/edit)
-      // succeeded, and BEFORE install. Persisting earlier orphaned vault keys
-      // when the commit then failed (create "already exists", edit stale-hash
-      // ManifestHashMismatchError) — the manifest was never saved but the typed
-      // secret stayed in the vault, and a later retry hit SECRETS_KEY_EXISTS
-      // instead of using the value (Codex #378 r4). The secret must still exist
-      // before install so the daemon resolves the `secret:` ref.
-      await persistInlineSecrets(payloadState);
-      if (version !== submissionCounter.current) return;
-      await runInstallNow(name, version);
+      // Install phase — the manifest is now COMMITTED. Persist inline secrets
+      // (AFTER the commit so a failed commit never orphans a vault key — Codex
+      // #378 r4) then install. A failure HERE is retryable: the manifest is
+      // saved, so a transient vault init/write failure must surface a Retry path
+      // (retryInstall persists + re-installs), not a dead-end error that strands
+      // the saved manifest behind a future "already exists" (Codex #378 r6). The
+      // outer catch is left to handle only manifest-COMMIT failures (manifest not
+      // saved → plain error, correctly no Retry).
+      try {
+        await persistInlineSecrets(payloadState);
+        if (version !== submissionCounter.current) return;
+        await runInstallNow(name, version);
+      } catch (installErr) {
+        if (version === submissionCounter.current) {
+          setBanner({
+            kind: "error",
+            text: `Saved servers/${name}/manifest.yaml, but install could not complete: ${(installErr as Error).message}`,
+            retry: () => retryInstall(name),
+          });
+        }
+      }
     } catch (err) {
       if (version !== submissionCounter.current) return;
       setBanner({ kind: "error", text: (err as Error).message });
@@ -731,7 +750,15 @@ export function AddServerScreen(props: {
       await runInstallNow(name, version);
     } catch (err) {
       if (version === submissionCounter.current) {
-        setBanner({ kind: "error", text: (err as Error).message });
+        // The manifest is already saved at this point, so a persist/install
+        // failure (transient vault init/write, connection reset) must stay
+        // RETRYABLE — a dead-end error would strand the saved manifest, and a
+        // fresh Save & Install would hit "already exists" (Codex #378 r6).
+        setBanner({
+          kind: "error",
+          text: `Saved servers/${name}/manifest.yaml, but install could not complete: ${(err as Error).message}`,
+          retry: () => retryInstall(name),
+        });
       }
     }
   }
@@ -762,7 +789,10 @@ export function AddServerScreen(props: {
       setBanner({
         kind: "error",
         text: `Saved servers/${name}/manifest.yaml, but install threw: ${(err as Error).message}`,
-        retry: () => runInstallNow(name, ++submissionCounter.current),
+        // Route through retryInstall (not runInstallNow) so a Retry persists any
+        // inline secret the operator enters/edits while fixing the failure before
+        // re-installing the saved manifest (Codex #378 r6).
+        retry: () => retryInstall(name),
       });
       pushToast("danger", `Install failed for ${name}: ${(err as Error).message}`);
     }

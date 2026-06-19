@@ -82,6 +82,38 @@ func TestReadinessHandler_DraftPOST_ReservedNameBlocks(t *testing.T) {
 	}
 }
 
+func TestReadinessHandler_DraftPOST_DoubleUnderscoreNameBlocks(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	// A `__` substring passes config.ParseManifest AND CheckManifestName but is
+	// rejected by the strict-mode gate Save & Install runs (ManifestValidateMode
+	// Strict). Draft readiness must mirror that gate so it does not show "Ready to
+	// install" then fail the create (Codex #378 r6).
+	yaml := "name: foo__bar\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
+		"daemons:\n  - name: default\n    port: 9323\n" +
+		"client_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n"
+	body, _ := json.Marshal(map[string]string{"yaml": yaml})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	var rep api.ReadinessReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Error("name with '__' reported Ready=true; strict-mode gate should block it")
+	}
+	found := false
+	for _, r := range rep.Requirements {
+		if r.Name == "server name" && !r.OK {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no 'server name' blocker for a '__' name; requirements=%+v", rep.Requirements)
+	}
+}
+
 func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	body, _ := json.Marshal(map[string]string{"yaml": ":::not a manifest:::"})

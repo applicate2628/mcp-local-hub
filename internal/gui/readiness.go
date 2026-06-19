@@ -82,21 +82,28 @@ func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rep := api.CheckServerReadiness(m)
-	// The draft name has NOT passed the storage-name gate that Save & Install
-	// enforces (CheckManifestName). A name the frontend regex still allows but
-	// the backend rejects — e.g. a Windows-reserved name like `con` / `nul.txt`
-	// — would otherwise show "Ready to install" and then fail the create before
-	// install even starts. Surface it as a hard blocker so readiness matches the
-	// gate Save & Install must pass (Codex #378 r4). The name-validator error is
-	// about the name itself (reserved/charset), not a host path, so it is safe to
-	// echo.
-	if nameErr := api.CheckManifestName(m.Name); nameErr != nil {
+	// Mirror the SAME two name gates Save & Install runs in ManifestCreate, so a
+	// draft the create path would reject never renders "Ready to install" and then
+	// fails before install starts (Codex #378 r4/r6):
+	//   1. CheckManifestName — a frontend-regex-valid but backend-reserved name
+	//      (Windows `con` / `nul.txt` / `aux`).
+	//   2. ManifestValidateMode(Strict) — strict-mode-only rejections the regular
+	//      validate accepts, notably a `__` substring in the server name.
+	// Both errors are about the manifest/name (validation text, not a host path),
+	// so they are safe to echo.
+	nameErr := api.CheckManifestName(m.Name)
+	if nameErr == nil {
+		if _, strictErr := api.NewAPI().ManifestValidateMode(req.YAML, api.ValidateModeStrict); strictErr != nil {
+			nameErr = strictErr
+		}
+	}
+	if nameErr != nil {
 		rep.Ready = false
 		rep.Requirements = append([]api.ReadinessRequirement{{
 			Name:   "server name",
 			OK:     false,
 			Reason: nameErr.Error(),
-			Fix:    "choose a name the backend accepts (avoid reserved names like con/nul/aux)",
+			Fix:    "choose a name the backend accepts (avoid reserved names like con/nul/aux and a `__` substring)",
 		}}, rep.Requirements...)
 	}
 	writeReadinessJSON(w, rep)
