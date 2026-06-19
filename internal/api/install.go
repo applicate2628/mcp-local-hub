@@ -1737,6 +1737,37 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			return fmt.Errorf("runtime %q (needed by %q) not found on PATH — %s: %w", rt, m.Command, rfix, err)
 		}
 	}
+	// 1c. Blocking runtime dependencies CheckServerReadiness enforces but
+	// CLI/API installs (which call Preflight directly, never readiness) would
+	// otherwise skip — so `mcphub install --server gdb` on a host without gdb,
+	// or a `uvx --from git+...` manifest without git, could commit client +
+	// supervisor state and fail only when the daemon starts (Codex #377 r13).
+	// Mirror them here BEFORE any side effects via the SAME predicates readiness
+	// uses (binaryAvailable / manifestNeedsGit / bridgeListenerUp), so the two
+	// gates cannot diverge. Server-level required_binaries are blocking;
+	// per-language ones (workspace LSP alternatives) are advisory and skipped.
+	for _, bin := range m.RequiredBinaries {
+		if !binaryAvailable(bin) {
+			_, bfix := LauncherGuidance(bin)
+			// Basename only: required_binaries entries are free-form and may be
+			// absolute (the error is operator-facing / loggable).
+			return fmt.Errorf("required binary %q not found — %s", filepath.Base(bin), bfix)
+		}
+	}
+	if manifestNeedsGit(m) && !binaryAvailable("git") {
+		_, gfix := LauncherGuidance("git")
+		return fmt.Errorf("git is required to fetch the uvx git+ source but is not on PATH — %s", gfix)
+	}
+	// lldb-bridge dials its address first and only needs a local lldb when no
+	// listener is up — mirror the readiness conditional (gdb-bridge has no addr
+	// arg, so it relies on its unconditional required_binaries:[gdb] above).
+	if m.Transport == config.TransportStdioBridge && len(m.BaseArgs) >= 2 && m.BaseArgs[0] == "lldb-bridge" {
+		addr := m.BaseArgs[1]
+		if !bridgeListenerUp(addr) && !binaryAvailable("lldb") {
+			_, lfix := LauncherGuidance("lldb")
+			return fmt.Errorf("lldb-bridge: no MCP listener on %s and no lldb binary found — %s, or start an lldb MCP listener on %s first", addr, lfix, addr)
+		}
+	}
 	// 2. Canonical mcphub must exist — scheduler tasks reference
 	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
 	// Scheduler's CreateProcess call skips PATH lookup. Antigravity

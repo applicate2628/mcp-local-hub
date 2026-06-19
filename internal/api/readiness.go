@@ -130,6 +130,52 @@ func bridgeListenerUp(addr string) bool {
 	return true
 }
 
+// binaryAvailable reports whether an external binary a manifest depends on is
+// runnable. It honors the native-debugger discovery for gdb/lldb (the bridges
+// resolve them via DebuggerDirs, so a debugger present in a toolchain dir but
+// not on the process PATH still runs — a plain LookPath would falsely report it
+// missing), and falls back to LookPath for everything else. SINGLE OWNER shared
+// by CheckServerReadiness and Preflight so the two install gates cannot diverge
+// on what counts as a present dependency (Codex #377 r13).
+func binaryAvailable(bin string) bool {
+	// resolve checks one concrete token WITHOUT re-entering the switch (an
+	// absolute path means the toolchain stat'd a real file in a debugger dir;
+	// a bare name goes to PATH). DefaultGdbPath/DefaultLldbPath return either an
+	// absolute path or the bare name, so resolve handles both without recursion.
+	resolve := func(p string) bool {
+		if filepath.IsAbs(p) {
+			return true
+		}
+		_, err := exec.LookPath(p)
+		return err == nil
+	}
+	switch bin {
+	case "gdb":
+		return resolve(toolchain.DefaultGdbPath())
+	case "lldb":
+		return resolve(toolchain.DefaultLldbPath())
+	default:
+		_, err := exec.LookPath(bin)
+		return err == nil
+	}
+}
+
+// manifestNeedsGit reports whether a uvx/uv manifest fetches a `git+` source
+// (e.g. serena's `--from git+https://…@<sha>`), which shells out to the git
+// binary at launch — uv does NOT vendor git, so uvx-on-PATH does not prove git
+// is. SINGLE OWNER shared by readiness and Preflight (Codex #377 r13).
+func manifestNeedsGit(m *config.ServerManifest) bool {
+	if m.Command != "uvx" && m.Command != "uv" {
+		return false
+	}
+	for _, a := range append(append([]string{}, m.BaseArgs...), m.BaseArgsTemplate...) {
+		if strings.Contains(a, "git+") {
+			return true
+		}
+	}
+	return false
+}
+
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
 // failing fast and returns a structured, GUI-renderable report. It is the
 // non-fatal, all-requirements companion to Preflight (which fails fast at the
@@ -252,22 +298,13 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// shells out to the `git` binary to clone the pinned commit; uv does NOT
 	// vendor git, so uvx-on-PATH does not prove git is. Surface it so a host
 	// with uv but no git is not reported ready (Codex pre-catch r9).
-	if m.Command == "uvx" || m.Command == "uv" {
-		needsGit := false
-		for _, a := range append(append([]string{}, m.BaseArgs...), m.BaseArgsTemplate...) {
-			if strings.Contains(a, "git+") {
-				needsGit = true
-				break
-			}
-		}
-		if needsGit {
-			gdisp, gfix := LauncherGuidance("git")
-			if _, err := exec.LookPath("git"); err != nil {
-				add(ReadinessRequirement{Name: "binary: " + gdisp, OK: false, Optional: launcherOptional,
-					Reason: "git is required to fetch the uvx git+ source but is not on PATH", Fix: gfix})
-			} else {
-				add(ReadinessRequirement{Name: "binary: " + gdisp, OK: true})
-			}
+	if manifestNeedsGit(m) {
+		gdisp, gfix := LauncherGuidance("git")
+		if !binaryAvailable("git") {
+			add(ReadinessRequirement{Name: "binary: " + gdisp, OK: false, Optional: launcherOptional,
+				Reason: "git is required to fetch the uvx git+ source but is not on PATH", Fix: gfix})
+		} else {
+			add(ReadinessRequirement{Name: "binary: " + gdisp, OK: true})
 		}
 	}
 
@@ -300,24 +337,10 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// process PATH still runs — a plain LookPath would falsely report it
 	// missing (Codex #377 r8). DefaultGdbPath/DefaultLldbPath return an
 	// ABSOLUTE path when they stat'd a real file, else the bare name (→ PATH).
-	binaryFound := func(bin string) bool {
-		resolve := func(p string) bool {
-			if filepath.IsAbs(p) {
-				return true // toolchain stat'd a real file in a debugger dir
-			}
-			_, err := exec.LookPath(p)
-			return err == nil
-		}
-		switch bin {
-		case "gdb":
-			return resolve(toolchain.DefaultGdbPath())
-		case "lldb":
-			return resolve(toolchain.DefaultLldbPath())
-		default:
-			_, err := exec.LookPath(bin)
-			return err == nil
-		}
-	}
+	// binaryFound delegates to the package-level binaryAvailable — the SINGLE
+	// OWNER shared with Preflight so the readiness report and the install gate
+	// cannot diverge on what counts as a present dependency (Codex #377 r13).
+	binaryFound := binaryAvailable
 	seenBin := map[string]bool{}
 	addBin := func(bin string, optional bool) {
 		if bin == "" || seenBin[bin] {

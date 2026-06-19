@@ -373,6 +373,34 @@ func TestPreflight_MissingSecretDoesNotBlockInstall(t *testing.T) {
 	}
 }
 
+func TestPreflight_MissingRequiredBinaryBlocks(t *testing.T) {
+	preparePreflightBinaryChecks(t)
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	// command (go) is on PATH so the launcher check passes, but the server-level
+	// required_binary is absent. CLI/API installs call Preflight directly (never
+	// CheckServerReadiness), so Preflight must block here BEFORE committing
+	// client/supervisor state rather than letting the daemon fail at spawn
+	// (Codex #377 r13 — Preflight↔readiness dependency parity, shared predicate
+	// binaryAvailable).
+	m := &config.ServerManifest{
+		Name:             "needs-tool",
+		Kind:             config.KindGlobal,
+		Transport:        config.TransportStdioBridge,
+		Command:          "go",
+		RequiredBinaries: []string{"definitely-not-on-path-zzz"},
+		Daemons:          []config.DaemonSpec{{Name: "default", Port: 0}},
+	}
+	err := Preflight(m, "")
+	if err == nil {
+		t.Fatal("Preflight must block install when a server-level required_binary is missing")
+	}
+	if !strings.Contains(err.Error(), "definitely-not-on-path-zzz") {
+		t.Errorf("error should name the missing binary; got: %v", err)
+	}
+}
+
 // TestPreflight_NoSecretsNeeded confirms manifests without any secret:
 // references preflight cleanly even when no vault exists (fresh
 // machine, user has not run `mcphub secrets init`).
