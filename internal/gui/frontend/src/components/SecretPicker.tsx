@@ -140,17 +140,32 @@ export function SecretPicker(props: SecretPickerProps) {
   const isEditingQuery = open && valueAtOpen !== null && value !== valueAtOpen;
   const refState = useMemo(() => classifyRefState(value, snapshot, isEditingQuery), [value, snapshot, isEditingQuery]);
 
-  // The prefix kind the selector currently reflects, derived from the
-  // value's parsed RefKind. Drives which input affordance is live (the
-  // 🔑 dropdown only when kind === "secret") and the placeholder/aria.
-  const selectedKind = selectorKindFor(parseSecretRef(value).kind);
+  // pendingKind remembers a Secret/Env selection made on a BLANK field.
+  // applyKind holds back the bare prefix on an empty key (R2 Finding 3), so
+  // without this the selector would snap straight back to Literal and a key
+  // typed next would be saved as a literal (bot #373 R3 P2). It is cleared as
+  // soon as the value becomes non-blank (the value then derives its own kind).
+  const [pendingKind, setPendingKind] = useState<SelectableKind | null>(null);
+
+  // The prefix kind the selector currently reflects. Derived from the value's
+  // parsed RefKind, EXCEPT a blank field honors pendingKind so a Secret/Env
+  // choice survives until the operator types the key. Drives which input
+  // affordance is live (the 🔑 dropdown only when kind === "secret") and the
+  // placeholder/aria.
+  const derivedKind = selectorKindFor(parseSecretRef(value).kind);
+  const selectedKind: SelectableKind =
+    value.trim() === "" && pendingKind !== null ? pendingKind : derivedKind;
 
   function changeKind(next: SelectableKind) {
     if (next === selectedKind) return;
     // Re-prefix the bare key for the new kind. If we're leaving "secret",
     // close the dropdown — it is only meaningful for secret refs.
     if (selectedKind === "secret") closePicker();
-    onChange(applyKind(value, next));
+    const rewritten = applyKind(value, next);
+    // On a blank field applyKind returns "" for secret/env — remember the kind
+    // so the selector stays on it and the first typed key composes the ref.
+    setPendingKind(rewritten.trim() === "" && next !== "literal" ? next : null);
+    onChange(rewritten);
     inputRef.current?.focus();
   }
 
@@ -427,7 +442,16 @@ export function SecretPicker(props: SecretPickerProps) {
   }
 
   function onInputChange(e: Event) {
-    const next = (e.target as HTMLInputElement).value;
+    const raw = (e.target as HTMLInputElement).value;
+    // First key typed into a blank field that has a pending secret/env kind:
+    // compose the ref (e.g. "FOO" → "secret:FOO" / "$FOO") so the held-back
+    // prefix applies now. Otherwise the raw value passes through; either way
+    // a now-non-blank value clears the pending kind (it derives its own).
+    let next = raw;
+    if (pendingKind !== null && pendingKind !== "literal" && value.trim() === "" && raw.trim() !== "") {
+      next = applyKind(raw, pendingKind);
+    }
+    if (pendingKind !== null && raw.trim() !== "") setPendingKind(null);
     onChange(next);
     if (isSecretRef(next) && !open) {
       // Codex Task-5 quality P2: pass `next` so valueAtOpen captures the

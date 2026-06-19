@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/preact";
+import { render, screen, cleanup, fireEvent } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { useState } from "preact/hooks";
 import { SecretPicker } from "./SecretPicker";
@@ -925,6 +925,39 @@ describe("SecretPicker — prefix-kind selector (Literal | Secret | Env $)", () 
     render(<Harness />);
     await user.click(screen.getByTestId("secret-picker-kind-env"));
     expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+  });
+
+  it("preserves a Secret kind chosen on a blank field — radio stays checked and the first typed key composes secret:<key> (bot #373 R3 P2)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={(nv) => { setV(nv); onChange(nv); }} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    // Choose Secret on a blank field: value stays "" (no bare prefix) BUT the
+    // selector stays on Secret — does NOT snap back to Literal.
+    await user.click(screen.getByTestId("secret-picker-kind-secret"));
+    expect(screen.getByTestId("secret-picker-kind-secret").getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+    // Typing the key now composes a secret: ref (NOT a literal).
+    fireEvent.input(screen.getByRole("combobox"), { target: { value: "FOO" } });
+    expect(onChange).toHaveBeenLastCalledWith("secret:FOO");
+    expect(screen.getByTestId("secret-picker-kind-secret").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("preserves an Env kind chosen on a blank field — the first typed key composes $VAR (bot #373 R3 P2)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={(nv) => { setV(nv); onChange(nv); }} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    expect(screen.getByTestId("secret-picker-kind-env").getAttribute("aria-checked")).toBe("true");
+    fireEvent.input(screen.getByRole("combobox"), { target: { value: "BAR" } });
+    expect(onChange).toHaveBeenLastCalledWith("$BAR");
   });
 });
 
