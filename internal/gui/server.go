@@ -383,6 +383,15 @@ type cleanupAPI interface {
 	CleanupOrphansSupported() bool
 	CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess, error)
 	CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
+
+	// CleanupAggressiveSupported / AggressiveCleanup back the
+	// /api/cleanup/aggressive route (the operator-confirmed override
+	// that kills the live-rooted MCP-stdio fan-out the default safe
+	// sweep correctly refuses to touch). Same Windows-only gate as the
+	// orphan sweep — production checks runtime.GOOS, the test seam can
+	// return true to exercise the handler cross-platform.
+	CleanupAggressiveSupported() bool
+	AggressiveCleanup(opts api.CleanupOpts) ([]api.OrphanProcess, error)
 }
 
 type realCleanupAPI struct{}
@@ -397,6 +406,14 @@ func (realCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProcess,
 
 func (realCleanupAPI) CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
 	return api.NewAPI().CleanupLogWatchers(opts)
+}
+
+func (realCleanupAPI) CleanupAggressiveSupported() bool {
+	return runtime.GOOS == "windows"
+}
+
+func (realCleanupAPI) AggressiveCleanup(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+	return api.NewAPI().AggressiveCleanup(opts)
 }
 
 type realSecretsAPI struct{}

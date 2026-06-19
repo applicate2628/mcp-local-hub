@@ -11,24 +11,35 @@
 // + Server) on the confirm screen so the operator can sanity-check
 // before clicking Clean.
 
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import {
   cleanupOrphans,
   cleanupLogWatchers,
+  cleanupAggressive,
+  CLEANUP_AGGRESSIVE_TOKEN_MISMATCH,
   forceKillProbe,
   forceKillApply,
   stopAllDaemons,
   type OrphanProcess,
   type LogWatcher,
   type StopResult,
+  type AggressiveCleanupScope,
+  type AggressiveCleanupResponse,
 } from "../../lib/settings-api";
 import { ConfirmModal } from "../ConfirmModal";
 import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 
 type ActionState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "preview"; orphans?: OrphanProcess[]; watchers?: LogWatcher[]; verdict?: unknown }
+  // `token` (aggressive card only) is the confirm token bound to the
+  // previewed candidate set (bot #373 R2 Finding 1). apply() replays it so
+  // the backend can refuse (409) if the set drifted since Preview.
+  // `notice` (aggressive card only) carries the "candidate set changed —
+  // re-Preview" message when a 409 token-mismatch re-renders the FRESH
+  // candidate set as a new preview the operator must explicitly re-confirm.
+  | { kind: "preview"; orphans?: OrphanProcess[]; watchers?: LogWatcher[]; verdict?: unknown; token?: string; notice?: string }
   // applied carries the post-kill row list so the table can render
   // per-row kill_err. Codex Cloud bot P2 on PR #131 commit 72757c6
   // (escalates QA F1): apply state previously stored only counts and
@@ -54,23 +65,21 @@ function asError(e: unknown): string {
 
 export function SectionMaintenance(): preact.JSX.Element {
   return (
-    <section data-section="maintenance" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">Maintenance</h2>
-        <InfoTip
-          label="About this section"
-          text="Reclaim leftover processes from dead client sessions and stuck instances. All actions default to a preview before any kill; actual termination is gated by an explicit confirmation."
-        />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">Preview, then confirm — reclaim leftover processes and recover stuck instances.</p>
-
+    <SettingsCard
+      section="maintenance"
+      title="Maintenance"
+      infoTipLabel="About this section"
+      infoTip="Reclaim leftover processes from dead client sessions and stuck instances. All actions default to a preview before any kill; actual termination is gated by an explicit confirmation."
+      subtitle="Preview, then confirm — reclaim leftover processes and recover stuck instances."
+    >
       <div class="flex flex-col gap-4">
         <CardOrphanMcpServers />
+        <CardAggressiveCleanup />
         <CardOrphanLogWatchers />
         <CardForceKillInstance />
         <CardStopAllDaemons />
       </div>
-    </section>
+    </SettingsCard>
   );
 }
 
@@ -296,6 +305,451 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
                 Full cmdlines often carry workspace paths, username
                 segments, and possible API-keys-in-args; the wire now
                 hides the raw `cmdline` field (`json:"-"` server-side). */}
+            <td class="maintenance-cmd py-1.5 pr-4 font-mono text-xs">{cmdlineDisplayOf(o)}</td>
+            {showResult && (
+              <td class={`py-1.5 pr-4 ${o.kill_err ? "maintenance-error text-app-danger" : ""}`}>
+                {o.kill_err || "killed"}
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// --- Card 1b: Aggressive cleanup (operator-confirmed override) -------------
+
+// The recognized client launchers the backend allowlists for a --client
+// aggressive sweep (knownClientLauncherBasenames in
+// internal/api/cleanup.go). Kept in product-name order for the dropdown.
+const AGGRESSIVE_CLIENTS = [
+  "claude",
+  "codex",
+  "gemini",
+  "qwen",
+  "cursor",
+  "code",
+  "cascade",
+  "antigravity",
+] as const;
+
+// The default-EXCLUDED dangerous classes the operator can opt back into
+// the kill set (aggressiveDenyClasses in internal/api/cleanup.go):
+// operator terminals + Playwright browser sessions.
+const AGGRESSIVE_DANGER_CLASSES = [
+  "cmd",
+  "conhost",
+  "pwsh",
+  "powershell",
+  "chrome",
+] as const;
+
+// CardAggressiveCleanup is the GUI surface over `mcphub cleanup
+// aggressive` — the operator-confirmed override that kills the
+// live-rooted MCP-stdio fan-out the default safe sweep (CardOrphanMcpServers
+// above) CORRECTLY refuses to touch: a single live client (e.g. codex)
+// spawns N subagents that each leak their own stdio MCP children which
+// never get reaped on subagent finish.
+//
+// It clones the orphan card's preview→ConfirmModal→apply flow but adds:
+//   - a SCOPE selector (exactly one of By-client / By-root-PID) — Preview
+//     is disabled until a valid scope is chosen (no implicit "all
+//     live-rooted" mode, per spec H.1);
+//   - optional DANGER-class checkboxes (cmd/conhost/pwsh/powershell/chrome)
+//     that the ConfirmModal surfaces prominently before the kill.
+//
+// Unlike the CLI it uses the same-origin + CSRF + ConfirmModal guard
+// (per the design memo at cleanup.go:12-18), NOT the recompute-token
+// protocol.
+function CardAggressiveCleanup(): preact.JSX.Element {
+  const [state, setState] = useState<ActionState>({ kind: "idle" });
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  // Scope: "client" with a chosen launcher, or "root-pid" with a number.
+  const [scopeKind, setScopeKind] = useState<"client" | "root-pid">("client");
+  const [client, setClient] = useState<string>(AGGRESSIVE_CLIENTS[0]);
+  const [rootPidText, setRootPidText] = useState<string>("");
+  // Dangerous classes the operator opted back in.
+  const [includeClasses, setIncludeClasses] = useState<string[]>([]);
+  // Snapshot the candidate list AND the resolved scope/include-class set
+  // at modal-open time so Confirm applies against exactly what the user
+  // acknowledged (same R1 discipline as CardOrphanMcpServers). The scope
+  // selector + class checkboxes stay live while the modal is open, so
+  // reading them at apply-time would be a TOCTOU: the operator could widen
+  // the scope under the open modal and kill a different process set than
+  // the previewed/acknowledged one (security + sonnet review, converged).
+  const [orphansSnapshot, setOrphansSnapshot] = useState<OrphanProcess[] | null>(null);
+  const [scopeSnapshot, setScopeSnapshot] = useState<AggressiveCleanupScope | null>(null);
+  const [classesSnapshot, setClassesSnapshot] = useState<string[]>([]);
+  // tokenSnapshot is the confirm token captured at openConfirm — the token
+  // that was bound to the acknowledged candidate set. apply() replays THIS,
+  // not a live token, so a scope/preview change can't slip a different
+  // token under the open modal (bot #373 R2 Finding 1).
+  const [tokenSnapshot, setTokenSnapshot] = useState<string | null>(null);
+  // previewGen monotonically increments on every preview() launch and on
+  // every invalidatePreview(). A preview captures its gen BEFORE the await
+  // and discards its own response if the gen advanced while it was in
+  // flight — so a scope change (or a newer Preview) during a pending
+  // request cannot publish stale candidates for the OLD scope (bot #373 R2
+  // Finding 2).
+  const previewGen = useRef(0);
+
+  function friendlyError(e: unknown): string {
+    const raw = asError(e);
+    if (raw.includes("not_supported_on_this_os")) {
+      return "Not supported on this OS yet — Windows only. POSIX support is on the roadmap.";
+    }
+    return raw;
+  }
+
+  // The current scope as a typed value, or null when invalid (no
+  // client chosen, or a non-positive / unparseable root PID). Preview is
+  // gated on this being non-null.
+  function currentScope(): AggressiveCleanupScope | null {
+    if (scopeKind === "client") {
+      return client ? { kind: "client", client } : null;
+    }
+    // Strict integer: parseInt would TRUNCATE "123.9"→123 / "1e3"→1 and
+    // preview/kill a DIFFERENT pid than the operator typed (bot #373 P2).
+    // Require a pure-digit string, then a finite positive integer.
+    const trimmed = rootPidText.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const pid = Number(trimmed);
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    return { kind: "root-pid", rootPid: pid };
+  }
+
+  // invalidatePreview clears any standing preview/confirm + snapshots. A scope
+  // or danger-class change makes the previewed candidate list stale, so the
+  // operator must re-Preview — the confirm list then always matches the scope
+  // that apply() will actually send (bot #373 P1: preview codex, switch to
+  // claude, confirm → would have killed claude's tree, never previewed).
+  //
+  // Bumping previewGen here ALSO discards any preview request still in
+  // flight (bot #373 R2 Finding 2): a request that resolves after the
+  // invalidation captured an older gen and bails instead of publishing
+  // candidates for the now-stale scope.
+  function invalidatePreview() {
+    previewGen.current++;
+    // Reset BOTH a rendered preview AND an in-flight loading state to idle
+    // (bot #373 R4): previewGen already discards the in-flight response, but
+    // without clearing `loading` the card would be stuck on the spinner after
+    // a scope/class change mid-Preview. Other states (applied/error/idle) are
+    // left intact.
+    setState((s) => (s.kind === "preview" || s.kind === "loading" ? { kind: "idle" } : s));
+    setConfirmOpen(false);
+    setOrphansSnapshot(null);
+    setScopeSnapshot(null);
+    setClassesSnapshot([]);
+    setTokenSnapshot(null);
+  }
+  function changeScopeKind(k: "client" | "root-pid") {
+    setScopeKind(k);
+    invalidatePreview();
+  }
+  function changeClient(v: string) {
+    setClient(v);
+    invalidatePreview();
+  }
+  function changeRootPidText(v: string) {
+    setRootPidText(v);
+    invalidatePreview();
+  }
+
+  function toggleClass(cls: string, on: boolean) {
+    setIncludeClasses((prev) =>
+      on ? [...prev, cls] : prev.filter((c) => c !== cls),
+    );
+    invalidatePreview();
+  }
+
+  async function preview() {
+    const scope = currentScope();
+    if (!scope) return;
+    if (confirmOpen) {
+      setConfirmOpen(false);
+      setOrphansSnapshot(null);
+      setScopeSnapshot(null);
+      setClassesSnapshot([]);
+      setTokenSnapshot(null);
+    }
+    // Capture the generation BEFORE the await. If the scope/classes change
+    // (invalidatePreview) or a newer Preview launches while this request is
+    // in flight, previewGen advances and this response is discarded so it
+    // can't publish stale candidates for the old scope (bot #373 R2 F2).
+    const gen = ++previewGen.current;
+    setState({ kind: "loading" });
+    try {
+      const r = await cleanupAggressive(false, scope, includeClasses);
+      if (gen !== previewGen.current) return; // stale — superseded in flight
+      setState({ kind: "preview", orphans: r.orphans, token: r.token });
+    } catch (e) {
+      if (gen !== previewGen.current) return; // stale — discard the error too
+      setState({ kind: "error", error: friendlyError(e) });
+    }
+  }
+
+  function openConfirm() {
+    if (state.kind !== "preview" || !state.orphans) return;
+    if (state.orphans.length === 0) return;
+    const scope = currentScope();
+    if (!scope) return;
+    setOrphansSnapshot([...state.orphans]);
+    setScopeSnapshot(scope);
+    setClassesSnapshot([...includeClasses]);
+    // Pin the preview token alongside the candidate snapshot so apply()
+    // replays exactly the token bound to the acknowledged set (bot #373 R2
+    // Finding 1). May be undefined for a legacy/empty backend response;
+    // apply still sends it (the backend then 400s an empty token).
+    setTokenSnapshot(state.token ?? null);
+    setConfirmOpen(true);
+  }
+
+  function cancelConfirm() {
+    setConfirmOpen(false);
+    setOrphansSnapshot(null);
+    setScopeSnapshot(null);
+    setClassesSnapshot([]);
+    setTokenSnapshot(null);
+  }
+
+  async function apply() {
+    // Apply against the SNAPSHOT taken at openConfirm — NOT live scope/classes
+    // — so a scope change under the open modal can't redirect the kill.
+    if (!orphansSnapshot || orphansSnapshot.length === 0 || !scopeSnapshot) {
+      cancelConfirm();
+      return;
+    }
+    setConfirmOpen(false);
+    // Capture the scope/token snapshots locally before we clear them so the
+    // 409-retry branch (which re-publishes a fresh preview) starts clean.
+    const scope = scopeSnapshot;
+    const token = tokenSnapshot ?? undefined;
+    setState({ kind: "loading" });
+    try {
+      const r = await cleanupAggressive(true, scope, classesSnapshot, token);
+      setState({ kind: "applied", killed: r.killed, skipped: r.skipped, orphans: r.orphans });
+      setOrphansSnapshot(null);
+      setScopeSnapshot(null);
+      setClassesSnapshot([]);
+      setTokenSnapshot(null);
+    } catch (e) {
+      // Token mismatch (409): the candidate set drifted between Preview and
+      // Confirm. The backend refused the kill and returned the FRESH
+      // candidate set + a new token. Re-render that fresh set as a NEW
+      // preview the operator must explicitly re-Preview/re-confirm — nothing
+      // was killed (bot #373 R2 Finding 1). previewGen is bumped so this
+      // re-publish wins over any older in-flight preview.
+      const err = e as { status?: number; body?: AggressiveCleanupResponse };
+      if (err?.status === 409 && err.body?.code === CLEANUP_AGGRESSIVE_TOKEN_MISMATCH) {
+        previewGen.current++;
+        setState({
+          kind: "preview",
+          orphans: err.body.orphans ?? [],
+          token: err.body.token,
+          notice:
+            "The candidate set changed since Preview — nothing was killed. Review the refreshed list and click Preview again to re-confirm.",
+        });
+      } else {
+        setState({ kind: "error", error: friendlyError(e) });
+      }
+      setOrphansSnapshot(null);
+      setScopeSnapshot(null);
+      setClassesSnapshot([]);
+      setTokenSnapshot(null);
+    }
+  }
+
+  const scope = currentScope();
+  const confirmOrphans = orphansSnapshot ?? [];
+  const confirmCount = confirmOrphans.length;
+  // Modal label comes from the SNAPSHOT (what was acknowledged), not live scope.
+  const scopeLabel =
+    scopeSnapshot == null
+      ? ""
+      : scopeSnapshot.kind === "client"
+        ? `client ${scopeSnapshot.client}`
+        : `root PID ${scopeSnapshot.rootPid}`;
+
+  return (
+    <div data-card="aggressive-cleanup" class={CARD_CLASS}>
+      <div class="flex items-center gap-1.5">
+        <h3 class={CARD_TITLE_CLASS}>Aggressive cleanup (live-rooted)</h3>
+        <InfoTip text="Operator-confirmed override: kill the live-rooted MCP-stdio children the default safe sweep refuses to touch — the per-subagent fan-out where one live client (codex, claude, …) spawns N subagents that each leak their own stdio MCP children. REQUIRES exactly one scope (a client launcher OR a root PID). Dangerous classes (terminals + Playwright chrome) are excluded unless you opt them back in. mcphub.exe daemons are always spared. Wraps mcphub cleanup aggressive." />
+      </div>
+      <p class={CARD_DESC_CLASS}>
+        Kill the live-rooted MCP-stdio fan-out the default sweep above
+        spares (a live client's leaked subagent children). Pick exactly
+        one scope. Wraps <code>mcphub cleanup aggressive</code>.
+      </p>
+
+      {/* Scope selector — exactly one of By-client / By-root-PID. */}
+      <fieldset class="maintenance-scope mt-3 m-0 border-0 p-0">
+        <legend class="sr-only">Aggressive cleanup scope</legend>
+        <label class="flex items-center gap-2 text-sm text-app-text">
+          <input
+            type="radio"
+            name="aggressive-scope"
+            class="h-4 w-4 accent-app-accent"
+            checked={scopeKind === "client"}
+            data-testid="aggressive-scope-client"
+            onChange={() => changeScopeKind("client")}
+          />
+          By client
+          <select
+            class="field-ctl"
+            value={client}
+            disabled={scopeKind !== "client"}
+            data-testid="aggressive-client-select"
+            aria-label="Client launcher"
+            onChange={(e) => changeClient((e.target as HTMLSelectElement).value)}
+          >
+            {AGGRESSIVE_CLIENTS.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+        <label class="mt-2 flex items-center gap-2 text-sm text-app-text">
+          <input
+            type="radio"
+            name="aggressive-scope"
+            class="h-4 w-4 accent-app-accent"
+            checked={scopeKind === "root-pid"}
+            data-testid="aggressive-scope-root-pid"
+            onChange={() => changeScopeKind("root-pid")}
+          />
+          By root PID
+          <input
+            type="number"
+            min="1"
+            class="field-ctl w-32"
+            value={rootPidText}
+            placeholder="e.g. 12345"
+            disabled={scopeKind !== "root-pid"}
+            data-testid="aggressive-root-pid-input"
+            aria-label="Root PID"
+            onInput={(e) => changeRootPidText((e.target as HTMLInputElement).value)}
+          />
+        </label>
+      </fieldset>
+
+      {/* Optional danger-class opt-ins. */}
+      <div class="maintenance-danger-classes mt-3">
+        <p class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">
+          Also kill (dangerous — off by default)
+        </p>
+        <div class="flex flex-wrap gap-x-4 gap-y-1">
+          {AGGRESSIVE_DANGER_CLASSES.map((cls) => (
+            <label key={cls} class="flex items-center gap-1.5 text-sm text-app-text">
+              <input
+                type="checkbox"
+                class="h-4 w-4 accent-app-accent"
+                checked={includeClasses.includes(cls)}
+                data-testid={`aggressive-class-${cls}`}
+                onChange={(e) => toggleClass(cls, (e.target as HTMLInputElement).checked)}
+              />
+              {cls}
+            </label>
+          ))}
+        </div>
+        {includeClasses.length > 0 && (
+          <p class="maintenance-danger-warning m-0 mt-1 text-xs text-app-danger">
+            Including {includeClasses.join(", ")} may terminate operator
+            terminals or live Playwright sessions.
+          </p>
+        )}
+      </div>
+
+      <div class={CARD_ACTIONS_CLASS}>
+        <button onClick={preview} disabled={state.kind === "loading" || scope == null} data-testid="aggressive-preview-button">
+          Preview
+        </button>
+        {state.kind === "preview" && state.orphans && state.orphans.length > 0 && (
+          <button
+            onClick={openConfirm}
+            class="btn-danger"
+            data-testid="aggressive-clean-button"
+          >
+            Clean ({state.orphans.length})
+          </button>
+        )}
+      </div>
+      <CardResult state={state} />
+      {state.kind === "preview" && state.notice && (
+        <p class="maintenance-status maintenance-error mt-3 text-sm text-app-danger" data-testid="aggressive-token-mismatch-notice">
+          {state.notice}
+        </p>
+      )}
+      {(state.kind === "preview" || state.kind === "applied") && state.orphans && (
+        <AggressiveTable orphans={state.orphans} />
+      )}
+      <ConfirmModal
+        open={confirmOpen}
+        title={`Aggressively kill ${confirmCount} live-rooted process${confirmCount === 1 ? "" : "es"}?`}
+        body={
+          <>
+            <p class="m-0 mb-2 text-sm">
+              Scope: <code>{scopeLabel}</code>. These processes are children
+              of a STILL-RUNNING client — killing them is an explicit
+              override of the safe-sweep guard.
+            </p>
+            {classesSnapshot.length > 0 && (
+              <p class="maintenance-danger-warning m-0 mb-2 text-sm text-app-danger" data-testid="aggressive-confirm-danger">
+                Also killing dangerous classes:{" "}
+                <strong>{classesSnapshot.join(", ")}</strong> — operator
+                terminals or live Playwright browser sessions may be
+                terminated.
+              </p>
+            )}
+            <ul class="maintenance-confirm-list m-0 list-none space-y-1 p-0 text-sm" data-testid="aggressive-confirm-list">
+              {confirmOrphans.map((o) => (
+                <li key={o.pid}>
+                  <code>{cmdlineDisplayOf(o)}</code>
+                  {" "}PID {o.pid}
+                  {o.match_source ? <> — match <code>{o.match_source}</code></> : null}
+                </li>
+              ))}
+            </ul>
+          </>
+        }
+        confirmLabel="Kill"
+        danger
+        onConfirm={apply}
+        onCancel={cancelConfirm}
+      />
+    </div>
+  );
+}
+
+// AggressiveTable renders the aggressive candidates. Like OrphansTable it
+// shows the redacted cmdline_display, but it adds a Match column (the
+// backend's match_source explaining WHY each candidate was included) and
+// drops the Server column (aggressive candidates are matched by ancestor
+// scope, not by manifest).
+function AggressiveTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Element {
+  if (orphans.length === 0) {
+    return <p class="maintenance-empty mt-3 text-sm text-app-muted">No aggressive candidates found.</p>;
+  }
+  const showResult = orphans.some((o) => !!o.kill_err);
+  return (
+    <table class="maintenance-table mt-3 w-full border-collapse text-sm">
+      <thead>
+        <tr class="text-left text-app-muted">
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">PID</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Match</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Age</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">RAM (MB)</th>
+          <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Cmd</th>
+          {showResult && <th class="border-b border-app-border py-1.5 pr-4 font-semibold">Result</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {orphans.map((o) => (
+          <tr key={o.pid} class="border-b border-app-border/50">
+            <td class="py-1.5 pr-4">{o.pid}</td>
+            <td class="maintenance-match py-1.5 pr-4">{o.match_source || "—"}</td>
+            <td class="py-1.5 pr-4">{Math.round(o.age_sec)}s</td>
+            <td class="py-1.5 pr-4">{Math.round(o.ram_bytes / (1024 * 1024))}</td>
             <td class="maintenance-cmd py-1.5 pr-4 font-mono text-xs">{cmdlineDisplayOf(o)}</td>
             {showResult && (
               <td class={`py-1.5 pr-4 ${o.kill_err ? "maintenance-error text-app-danger" : ""}`}>

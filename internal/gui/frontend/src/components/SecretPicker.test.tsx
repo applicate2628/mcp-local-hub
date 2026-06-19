@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/preact";
+import { render, screen, cleanup, fireEvent } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { useState } from "preact/hooks";
 import { SecretPicker } from "./SecretPicker";
@@ -773,6 +773,191 @@ describe("SecretPicker — legacy reserved init key in vault (memo R4)", () => {
     render(<SecretPicker value="" onChange={vi.fn()} envKey="K" snapshot={snap} onRequestCreate={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: /Pick secret/i }));
     expect(screen.queryByText("init")).toBeTruthy();
+  });
+});
+
+describe("SecretPicker — prefix-kind selector (Literal | Secret | Env $)", () => {
+  it("renders a radiogroup with exactly the three offered kinds — file: is NOT offered", () => {
+    render(
+      <SecretPicker
+        value=""
+        onChange={vi.fn()}
+        envKey="API_KEY"
+        snapshot={snapshotOk()}
+        onRequestCreate={vi.fn()}
+      />
+    );
+    const group = screen.getByTestId("secret-picker-kind");
+    expect(group.getAttribute("role")).toBe("radiogroup");
+    const radios = screen.getAllByRole("radio");
+    const labels = radios.map((r) => r.textContent);
+    expect(labels).toEqual(["Literal", "Secret", "Env ($)"]);
+    // No File option — file: refs always error at daemon start (resolver
+    // local map is nil in production), so the selector must not offer it.
+    expect(labels.some((l) => /file/i.test(l ?? ""))).toBe(false);
+  });
+
+  it("reflects the parsed kind of the current value as the checked radio", () => {
+    const { rerender } = render(
+      <SecretPicker value="" onChange={vi.fn()} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />
+    );
+    const checkedLabel = () =>
+      screen.getAllByRole("radio").find((r) => r.getAttribute("aria-checked") === "true")?.textContent;
+    expect(checkedLabel()).toBe("Literal");
+
+    rerender(<SecretPicker value="secret:foo" onChange={vi.fn()} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />);
+    expect(checkedLabel()).toBe("Secret");
+
+    rerender(<SecretPicker value="$HOME" onChange={vi.fn()} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />);
+    expect(checkedLabel()).toBe("Env ($)");
+  });
+
+  it("switching Literal → Env prefixes the bare value with $ (resolved at spawn)", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("HOME");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("$HOME");
+  });
+
+  it("switching Env → Literal strips the leading $", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("$HOME");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-literal"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("HOME");
+  });
+
+  it("switching Secret → Env re-prefixes the bare key without stacking prefixes", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("secret:FOO");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    // Must be $FOO, NOT $secret:FOO — the secret: prefix is stripped first.
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("$FOO");
+  });
+
+  it("switching Literal → Secret prefixes secret: and keeps the 🔑 dropdown reachable", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("wolf");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk([{ name: "wolfram_app_id" }])} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-secret"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("secret:wolf");
+    // 🔑 still present (it commits secret:<key>).
+    expect(screen.getByRole("button", { name: /Pick secret/i })).toBeTruthy();
+  });
+
+  it("Env kind shows a $VAR-resolution placeholder + accessible label", () => {
+    render(
+      <SecretPicker value="$HOME" onChange={vi.fn()} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />
+    );
+    const combo = screen.getByRole("combobox") as HTMLInputElement;
+    expect(combo.placeholder.toLowerCase()).toContain("$var");
+    expect(combo.getAttribute("aria-label")?.toLowerCase()).toContain("environment variable");
+  });
+
+  it("the value <input> is still the only combobox (radio selector must not collide)", () => {
+    render(
+      <SecretPicker value="" onChange={vi.fn()} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />
+    );
+    // getByRole throws if there are multiple; this asserts exactly one.
+    expect(screen.getByRole("combobox")).toBeTruthy();
+  });
+
+  it("a hand-typed file: ref surfaces as Literal in the selector (no file option) without rewriting the value", () => {
+    render(
+      <SecretPicker value="file:somekey" onChange={vi.fn()} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />
+    );
+    const checkedLabel = screen
+      .getAllByRole("radio")
+      .find((r) => r.getAttribute("aria-checked") === "true")?.textContent;
+    expect(checkedLabel).toBe("Literal");
+    // The value is left intact (file: is a legacy hand-typed form).
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("file:somekey");
+  });
+
+  // bot #373 R2 Finding 3: a BLANK value switched to Secret/Env must NOT
+  // write a bare prefix (`secret:` / `$`). Both pass the selector but
+  // resolve to a missing-key / empty-var-name ref that fails at daemon
+  // start. The value stays "" until the operator types a key.
+  it("switching a BLANK value to Secret keeps it blank — no bare 'secret:' prefix", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-secret"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+  });
+
+  it("switching a BLANK value to Env keeps it blank — no bare '$' prefix", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+  });
+
+  it("an all-prefix value (only 'secret:') switched to Env stays blank — the bare key is empty", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      // `secret:` with no key is itself a broken ref; switching kind must
+      // not carry the empty key across as a bare `$`.
+      const [v, setV] = useState("secret:");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+  });
+
+  it("preserves a Secret kind chosen on a blank field — radio stays checked and the first typed key composes secret:<key> (bot #373 R3 P2)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={(nv) => { setV(nv); onChange(nv); }} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    // Choose Secret on a blank field: value stays "" (no bare prefix) BUT the
+    // selector stays on Secret — does NOT snap back to Literal.
+    await user.click(screen.getByTestId("secret-picker-kind-secret"));
+    expect(screen.getByTestId("secret-picker-kind-secret").getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+    // Typing the key now composes a secret: ref (NOT a literal).
+    fireEvent.input(screen.getByRole("combobox"), { target: { value: "FOO" } });
+    expect(onChange).toHaveBeenLastCalledWith("secret:FOO");
+    expect(screen.getByTestId("secret-picker-kind-secret").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("preserves an Env kind chosen on a blank field — the first typed key composes $VAR (bot #373 R3 P2)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={(nv) => { setV(nv); onChange(nv); }} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    expect(screen.getByTestId("secret-picker-kind-env").getAttribute("aria-checked")).toBe("true");
+    fireEvent.input(screen.getByRole("combobox"), { target: { value: "BAR" } });
+    expect(onChange).toHaveBeenLastCalledWith("$BAR");
   });
 });
 

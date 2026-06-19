@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,9 +20,11 @@ import (
 // production gate uses runtime.GOOS, but the test seam returns true
 // so non-Windows CI exercises the full handler path.
 type fakeCleanupAPI struct {
-	SupportedFn          func() bool
-	CleanupOrphansFn     func(opts api.CleanupOpts) ([]api.OrphanProcess, error)
-	CleanupLogWatchersFn func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
+	SupportedFn           func() bool
+	CleanupOrphansFn      func(opts api.CleanupOpts) ([]api.OrphanProcess, error)
+	CleanupLogWatchersFn  func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error)
+	AggressiveSupportedFn func() bool
+	AggressiveCleanupFn   func(opts api.CleanupOpts) ([]api.OrphanProcess, error)
 }
 
 func (f fakeCleanupAPI) CleanupOrphansSupported() bool {
@@ -37,6 +40,20 @@ func (f fakeCleanupAPI) CleanupOrphans(opts api.CleanupOpts) ([]api.OrphanProces
 
 func (f fakeCleanupAPI) CleanupLogWatchers(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
 	return f.CleanupLogWatchersFn(opts)
+}
+
+// CleanupAggressiveSupported defaults to true (like CleanupOrphansSupported)
+// so cross-platform CI exercises the full handler path; flip
+// AggressiveSupportedFn to false to assert the 501 OS-gate branch.
+func (f fakeCleanupAPI) CleanupAggressiveSupported() bool {
+	if f.AggressiveSupportedFn != nil {
+		return f.AggressiveSupportedFn()
+	}
+	return true
+}
+
+func (f fakeCleanupAPI) AggressiveCleanup(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+	return f.AggressiveCleanupFn(opts)
 }
 
 // newCleanupTestServer wires a fake cleanup API into a Server with the
@@ -386,5 +403,474 @@ func TestCleanupLogWatchersHandler_GET_405(t *testing.T) {
 	s.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status: got %d, want 405", rr.Code)
+	}
+}
+
+// --- /api/cleanup/aggressive handler ---------------------------------------
+//
+// The aggressive sweep is the operator-confirmed override that kills the
+// live-rooted MCP-stdio fan-out the default safe sweep refuses to touch.
+// These tests inject fakeCleanupAPI.AggressiveCleanupFn so nothing real
+// dies — the fake never runs a process snapshot or taskkill. They clone
+// the orphan-handler family (dry-run/apply opts assertion, scope
+// validation, method/origin/OS gates).
+
+// TestCleanupAggressiveHandler_DryRun_OK posts apply=false (preview) with
+// a valid --client scope and asserts the seam was called with DryRun=true
+// and the candidate list is returned verbatim.
+func TestCleanupAggressiveHandler_DryRun_OK(t *testing.T) {
+	gotOpts := api.CleanupOpts{}
+	want := []api.OrphanProcess{
+		{PID: 4321, RAMBytes: 50 * 1024 * 1024, AgeSec: 300, CmdlineDisplay: "node.exe", MatchSource: "codex"},
+	}
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			gotOpts = opts
+			return want, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "client": "codex", "min_age_sec": 60}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !gotOpts.DryRun {
+		t.Errorf("CleanupOpts.DryRun = false, want true (apply=false → handler flips)")
+	}
+	if !gotOpts.Aggressive {
+		t.Errorf("CleanupOpts.Aggressive = false, want true")
+	}
+	if gotOpts.Client != "codex" {
+		t.Errorf("CleanupOpts.Client = %q, want codex", gotOpts.Client)
+	}
+	if gotOpts.MinAgeSec != 60 {
+		t.Errorf("CleanupOpts.MinAgeSec = %d, want 60", gotOpts.MinAgeSec)
+	}
+
+	var got struct {
+		Orphans []api.OrphanProcess `json:"orphans"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rr.Body.String())
+	}
+	if len(got.Orphans) != 1 || got.Orphans[0].PID != 4321 || got.Orphans[0].MatchSource != "codex" {
+		t.Errorf("orphans = %+v, want one candidate PID 4321 match_source=codex", got.Orphans)
+	}
+}
+
+// aggressiveCandidatesFor is the fixed candidate set used by the
+// token-contract tests below. The fake returns it for both the recompute
+// dry-run and the kill so the apply token matches when it is computed over
+// this exact set.
+func aggressiveCandidatesFor() []api.OrphanProcess {
+	return []api.OrphanProcess{
+		{PID: 11, CmdlineDisplay: "python.exe", MatchSource: "root-pid 999"},
+		{PID: 22, CmdlineDisplay: "node.exe", MatchSource: "root-pid 999", KillErr: "access denied"},
+	}
+}
+
+// TestCleanupAggressiveHandler_Apply_OK posts apply=true with a --root-pid
+// scope + an opted-in danger class AND a matching confirm token, and
+// asserts the seam ran a recompute dry-run THEN a DryRun=false kill (bot
+// #373 R2 Finding 1 — the apply path now recomputes the candidate set and
+// validates the token before killing).
+func TestCleanupAggressiveHandler_Apply_OK(t *testing.T) {
+	var dryRunCalls, killCalls int
+	var killOpts api.CleanupOpts
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			if opts.DryRun {
+				dryRunCalls++
+			} else {
+				killCalls++
+				killOpts = opts
+			}
+			return aggressiveCandidatesFor(), nil
+		},
+	})
+
+	// The matching token is computed over the same candidate set the fake
+	// returns for the apply-path recompute dry-run (single owner:
+	// api.AggressiveConfirmToken).
+	token := api.AggressiveConfirmToken(aggressiveCandidatesFor())
+
+	body := strings.NewReader(`{"apply": true, "root_pid": 999, "include_classes": ["chrome"], "token": "` + token + `"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	// One recompute dry-run + one kill.
+	if dryRunCalls != 1 {
+		t.Errorf("dry-run recompute calls = %d, want 1", dryRunCalls)
+	}
+	if killCalls != 1 {
+		t.Errorf("kill calls = %d, want 1", killCalls)
+	}
+	if killOpts.DryRun {
+		t.Errorf("kill CleanupOpts.DryRun = true, want false (apply=true → kill mode)")
+	}
+	if killOpts.RootPID != 999 {
+		t.Errorf("CleanupOpts.RootPID = %d, want 999", killOpts.RootPID)
+	}
+	if len(killOpts.IncludeClasses) != 1 || killOpts.IncludeClasses[0] != "chrome" {
+		t.Errorf("CleanupOpts.IncludeClasses = %v, want [chrome]", killOpts.IncludeClasses)
+	}
+	// The kill MUST be bound to the token-validated PID set (bot #373 R5), so a
+	// process spawned after validation cannot be killed unacknowledged: the
+	// kill call carries ExpectPIDs = the validated candidate set's PIDs.
+	wantPIDs := make([]int, 0)
+	for _, c := range aggressiveCandidatesFor() {
+		wantPIDs = append(wantPIDs, c.PID)
+	}
+	if len(killOpts.ExpectPIDs) != len(wantPIDs) {
+		t.Errorf("kill ExpectPIDs = %v, want %v (kill bound to the validated set)", killOpts.ExpectPIDs, wantPIDs)
+	} else {
+		for i := range wantPIDs {
+			if killOpts.ExpectPIDs[i] != wantPIDs[i] {
+				t.Errorf("kill ExpectPIDs[%d] = %d, want %d", i, killOpts.ExpectPIDs[i], wantPIDs[i])
+			}
+		}
+	}
+
+	var got struct {
+		Killed  int `json:"killed"`
+		Skipped int `json:"skipped"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Killed != 1 {
+		t.Errorf("killed = %d, want 1 (only the kill_err-free row)", got.Killed)
+	}
+	if got.Skipped != 1 {
+		t.Errorf("skipped = %d, want 1 (the access-denied row)", got.Skipped)
+	}
+}
+
+// TestCleanupAggressiveHandler_DryRun_ReturnsToken verifies the dry-run
+// response carries a `token` bound to the returned candidate set so the
+// GUI can replay it on apply (bot #373 R2 Finding 1).
+func TestCleanupAggressiveHandler_DryRun_ReturnsToken(t *testing.T) {
+	want := aggressiveCandidatesFor()
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			return want, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "root_pid": 999}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Orphans []api.OrphanProcess `json:"orphans"`
+		Token   string              `json:"token"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rr.Body.String())
+	}
+	if got.Token == "" {
+		t.Fatalf("dry-run response must carry a non-empty token; body=%s", rr.Body.String())
+	}
+	if want := api.AggressiveConfirmToken(want); got.Token != want {
+		t.Errorf("token = %q, want %q (bound to the candidate set)", got.Token, want)
+	}
+}
+
+// TestCleanupAggressiveHandler_Apply_EmptyToken_400 verifies apply=true
+// with no token is rejected 400 (the kill seam must NOT run).
+func TestCleanupAggressiveHandler_Apply_EmptyToken_400(t *testing.T) {
+	killed := false
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			if !opts.DryRun {
+				killed = true
+			}
+			return aggressiveCandidatesFor(), nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true, "root_pid": 999}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if killed {
+		t.Errorf("kill must NOT run when the apply token is empty")
+	}
+}
+
+// TestCleanupAggressiveHandler_Apply_StaleToken_409 verifies that a token
+// that no longer matches the freshly-recomputed candidate set yields 409 +
+// the fresh candidates + a new token, and the kill seam never runs (bot
+// #373 R2 Finding 1 — the candidate set drifted between Preview and apply).
+func TestCleanupAggressiveHandler_Apply_StaleToken_409(t *testing.T) {
+	killed := false
+	fresh := aggressiveCandidatesFor()
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			if !opts.DryRun {
+				killed = true
+			}
+			return fresh, nil
+		},
+	})
+
+	// A token that does NOT match the fresh set (the candidate set changed
+	// since the operator previewed it).
+	body := strings.NewReader(`{"apply": true, "root_pid": 999, "token": "deadbeefdeadbeef"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	if killed {
+		t.Errorf("kill must NOT run on a token mismatch")
+	}
+	var got struct {
+		Orphans []api.OrphanProcess `json:"orphans"`
+		Token   string              `json:"token"`
+		Code    string              `json:"code"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rr.Body.String())
+	}
+	if got.Code != "CLEANUP_AGGRESSIVE_TOKEN_MISMATCH" {
+		t.Errorf("code = %q, want CLEANUP_AGGRESSIVE_TOKEN_MISMATCH", got.Code)
+	}
+	// The 409 body must carry the FRESH candidate set + a NEW token over it
+	// so the GUI can re-render and force a fresh Preview.
+	if len(got.Orphans) != len(fresh) {
+		t.Errorf("409 body orphans len = %d, want %d (fresh set)", len(got.Orphans), len(fresh))
+	}
+	if want := api.AggressiveConfirmToken(fresh); got.Token != want {
+		t.Errorf("409 body token = %q, want fresh token %q", got.Token, want)
+	}
+}
+
+// TestCleanupAggressiveHandler_EmptyBody_NoScope_400 verifies a `{}` body
+// (no scope) is rejected 400 — exactly one of client/root_pid is
+// required, and the safe zero-value still cannot trigger an implicit
+// "all live-rooted" sweep. The seam must NOT be called.
+func TestCleanupAggressiveHandler_NoScope_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("AggressiveCleanup must not be called with no scope")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", rr.Code)
+	}
+}
+
+// TestCleanupAggressiveHandler_BothScopes_400 verifies setting BOTH
+// client and root_pid is rejected 400 (mutually exclusive). Seam not
+// called.
+func TestCleanupAggressiveHandler_BothScopes_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("AggressiveCleanup must not be called with both scopes")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "client": "codex", "root_pid": 999}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", rr.Code)
+	}
+}
+
+// TestCleanupAggressiveHandler_UnknownClient_400 verifies a backend
+// errAggressiveUnknownClient (surfaced through the exported sentinel) is
+// mapped to 400 via errors.Is, not a generic 500. The valid-scope
+// pre-check passes (exactly one scope set), so this exercises the
+// backend-error classification path specifically.
+func TestCleanupAggressiveHandler_UnknownClient_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			return nil, api.ErrAggressiveUnknownClient
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "client": "notaclient"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestCleanupAggressiveHandler_BackendError_500 verifies a non-scope
+// backend error (e.g. a process-snapshot failure) maps to 500.
+func TestCleanupAggressiveHandler_BackendError_500(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			return nil, errors.New("wmic snapshot failed")
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "client": "codex"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestCleanupAggressiveHandler_NegativeMinAge_400 — min_age_sec must be >= 0.
+func TestCleanupAggressiveHandler_NegativeMinAge_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("AggressiveCleanup must not be called for negative min_age_sec")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "client": "codex", "min_age_sec": -1}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", rr.Code)
+	}
+}
+
+// TestCleanupAggressiveHandler_GET_405 — destructive op rejected on GET.
+func TestCleanupAggressiveHandler_GET_405(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("AggressiveCleanup must not be called on GET")
+			return nil, nil
+		},
+	})
+
+	req := httptest.NewRequest("GET", "/api/cleanup/aggressive", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want 405", rr.Code)
+	}
+}
+
+// TestCleanupAggressiveHandler_BadJSON_400 — malformed body returns 400.
+func TestCleanupAggressiveHandler_BadJSON_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("AggressiveCleanup must not be called on bad JSON")
+			return nil, nil
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", bytes.NewReader([]byte("{not json")))
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400", rr.Code)
+	}
+}
+
+// TestCleanupAggressiveHandler_RequiresSameOrigin — CSRF gate rejects a
+// foreign origin (same shared wrapper as the orphan route).
+func TestCleanupAggressiveHandler_RequiresSameOrigin(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("AggressiveCleanup must not be called on cross-origin request")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "client": "codex"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://evil.example.com")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusOK {
+		t.Errorf("cross-origin request should be rejected; got 200")
+	}
+}
+
+// TestCleanupAggressiveHandler_Unsupported_501 — OS gate through the seam
+// (AggressiveSupportedFn=false) so the assertion is identical on Windows
+// and POSIX runners.
+func TestCleanupAggressiveHandler_Unsupported_501(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveSupportedFn: func() bool { return false },
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("AggressiveCleanup must not be called when CleanupAggressiveSupported returns false")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "client": "codex"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("status: got %d, want 501; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "not_supported_on_this_os") {
+		t.Errorf("body should contain not_supported_on_this_os; got %s", rr.Body.String())
 	}
 }

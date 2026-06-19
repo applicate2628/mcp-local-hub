@@ -73,24 +73,27 @@ func TestCleanupAggressive_IncludeClassFlagOverridesWithWarning(t *testing.T) {
 
 // TestAggressiveConfirmToken_DeterministicAndSetBound verifies the token
 // is stable for an unchanged candidate set, order-independent, and
-// changes when the set changes (the stale-token rejection contract).
+// changes when the set changes (the stale-token rejection contract). The
+// token fn now lives in the api package (single owner shared by the CLI
+// and the GUI apply path); this test exercises api.AggressiveConfirmToken
+// directly to prove the CLI-relied-on contract still holds after the move.
 func TestAggressiveConfirmToken_DeterministicAndSetBound(t *testing.T) {
 	set := []api.OrphanProcess{
 		{PID: 100, CmdlineDisplay: "node.exe", MatchSource: "codex"},
 		{PID: 200, CmdlineDisplay: "python.exe", MatchSource: "codex"},
 	}
-	t1 := aggressiveConfirmToken(set)
+	t1 := api.AggressiveConfirmToken(set)
 
 	// Reordering the same members yields the same token (sort-stable).
 	reordered := []api.OrphanProcess{set[1], set[0]}
-	if t2 := aggressiveConfirmToken(reordered); t2 != t1 {
+	if t2 := api.AggressiveConfirmToken(reordered); t2 != t1 {
 		t.Errorf("token must be order-independent: %q != %q", t1, t2)
 	}
 
 	// Adding a member changes the token (stale token would be rejected).
 	added := append(append([]api.OrphanProcess{}, set...),
 		api.OrphanProcess{PID: 300, CmdlineDisplay: "uv.exe", MatchSource: "codex"})
-	if t3 := aggressiveConfirmToken(added); t3 == t1 {
+	if t3 := api.AggressiveConfirmToken(added); t3 == t1 {
 		t.Errorf("token must change when a candidate is added; both = %q", t1)
 	}
 
@@ -99,7 +102,7 @@ func TestAggressiveConfirmToken_DeterministicAndSetBound(t *testing.T) {
 		{PID: 100, CmdlineDisplay: "node.exe", MatchSource: "codex"},
 		{PID: 200, CmdlineDisplay: "OTHER.exe", MatchSource: "codex"},
 	}
-	if t4 := aggressiveConfirmToken(mutated); t4 == t1 {
+	if t4 := api.AggressiveConfirmToken(mutated); t4 == t1 {
 		t.Errorf("token must change when a candidate's identity changes; both = %q", t1)
 	}
 

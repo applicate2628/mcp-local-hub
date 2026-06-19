@@ -172,6 +172,14 @@ export type OrphanProcess = {
   age_sec: number;
   ram_bytes: number;
   kill_err?: string;
+  /**
+   * match_source explains why an AGGRESSIVE candidate was included: the
+   * ancestor basename that anchored the scope (e.g. "codex") for a
+   * --client run, or "root-pid <pid>" for a --root-pid run. Empty for
+   * the default safe sweep (POST /api/cleanup/orphans). Redacted basename
+   * / fixed label only — never a full cmdline — so it is wire-safe.
+   */
+  match_source?: string;
 };
 
 export type LogWatcher = {
@@ -189,6 +197,23 @@ export type CleanupOrphansResponse = {
   killed: number;
   skipped: number;
 };
+
+// AggressiveCleanupResponse extends the orphan response with the confirm
+// `token` (bot #373 R2 Finding 1). The dry-run carries a token bound to
+// the previewed candidate set; the apply replays it. A `code` field is
+// present ONLY on the 409 token-mismatch body
+// (CLEANUP_AGGRESSIVE_TOKEN_MISMATCH), where `orphans` is the fresh
+// candidate set and `token` is the new token over it.
+export type AggressiveCleanupResponse = CleanupOrphansResponse & {
+  token?: string;
+  code?: string;
+};
+
+// CLEANUP_AGGRESSIVE_TOKEN_MISMATCH is the stable code the backend returns
+// in the 409 body when the candidate set drifted between Preview and the
+// apply (the previewed token no longer matches the freshly-recomputed
+// set). The GUI keys its "re-Preview" reset on this exact string.
+export const CLEANUP_AGGRESSIVE_TOKEN_MISMATCH = "CLEANUP_AGGRESSIVE_TOKEN_MISMATCH";
 
 export type CleanupLogWatchersResponse = {
   watchers: LogWatcher[];
@@ -215,6 +240,58 @@ export async function cleanupLogWatchers(
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ apply, include_live: includeLive }),
+  });
+  return await jsonOrThrow(res);
+}
+
+// AggressiveCleanupScope narrows the aggressive sweep to exactly one of:
+//   - by client launcher basename (claude / codex / gemini / qwen /
+//     cursor / code / cascade / antigravity), or
+//   - by an explicit root PID whose descendants are swept.
+// The backend (POST /api/cleanup/aggressive) requires exactly one set;
+// the GUI enforces "one scope chosen" before enabling Preview.
+export type AggressiveCleanupScope =
+  | { kind: "client"; client: string }
+  | { kind: "root-pid"; rootPid: number };
+
+// cleanupAggressive wraps POST /api/cleanup/aggressive — the
+// operator-confirmed override that kills the live-rooted MCP-stdio
+// fan-out the default safe sweep (cleanupOrphans) correctly refuses to
+// touch. apply=false previews (dry-run); apply=true kills. includeClasses
+// opts default-excluded dangerous classes (cmd/conhost/pwsh/powershell/
+// chrome) back into the kill set. Returns the same shape as
+// cleanupOrphans plus a confirm `token`; the candidates carry match_source
+// explaining inclusion.
+//
+// Token contract (bot #373 R2 Finding 1): the dry-run response carries a
+// `token` bound to the previewed candidate set. The apply MUST replay
+// that token; the backend recomputes the CURRENT candidate set and refuses
+// with HTTP 409 + code CLEANUP_AGGRESSIVE_TOKEN_MISMATCH (fresh candidates
+// + new token in the body) if the set drifted since the preview. An empty
+// token on apply is a 400. jsonOrThrow throws on a non-2xx response with
+// `err.status` + `err.body` attached, so the caller inspects `err.status
+// === 409` / `err.body` to surface the drift and require a fresh Preview.
+export async function cleanupAggressive(
+  apply: boolean,
+  scope: AggressiveCleanupScope,
+  includeClasses: string[] = [],
+  token?: string,
+): Promise<AggressiveCleanupResponse> {
+  const body: Record<string, unknown> = { apply, include_classes: includeClasses };
+  if (scope.kind === "client") {
+    body.client = scope.client;
+  } else {
+    body.root_pid = scope.rootPid;
+  }
+  // Only attach the token on apply — the dry-run ignores it server-side.
+  if (apply && token !== undefined) {
+    body.token = token;
+  }
+  const res = await fetch("/api/cleanup/aggressive", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   return await jsonOrThrow(res);
 }
