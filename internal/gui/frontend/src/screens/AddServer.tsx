@@ -606,8 +606,14 @@ export function AddServerScreen(props: {
           kind: "success",
           text: mode === "edit"
             ? `Saved. Daemon still running old config.`
-            : `Saved servers/${name}/manifest.yaml.`,
-          reinstall: mode === "edit",
+            : `Saved servers/${name}/manifest.yaml. Click Reinstall to install it now.`,
+          // Show the Reinstall (persist-pending-secrets + install) path after a
+          // plain Save in BOTH modes. In create mode a plain Save otherwise left
+          // any inline secret stuck: there was no install path, and the next
+          // Save & Install hit "already exists" for the just-created name before
+          // reaching the persist step (Codex #378 r6). Reinstall → retryInstall
+          // installs the saved manifest with the pending secret.
+          reinstall: true,
           restartHub,
         });
         // Flowbite success toast mirroring the inline save banner.
@@ -660,6 +666,11 @@ export function AddServerScreen(props: {
       parsed.loadedHash = hash;
       setFormState(parsed);
       setInitialSnapshot(parsed);
+      // Reload replaces the draft from disk → drop inline secrets typed for the
+      // REJECTED local draft so a value entered for the old version cannot linger
+      // and later reappear/be written if the reloaded manifest references the same
+      // missing key (Codex #378 r6 — same clear as the edit-mount + paste paths).
+      setInlineSecrets({});
       if (nested) {
         setReadOnlyReason(
           "This manifest contains fields the GUI cannot handle. Editing via GUI would drop them.",
@@ -749,6 +760,12 @@ export function AddServerScreen(props: {
   // install would run without it (Codex #378 r4/r6).
   async function retryInstall(name: string) {
     const version = ++submissionCounter.current;
+    // Set busy so the readiness inline inputs + Save/Install buttons (all gated on
+    // busy !== "") are disabled WHILE the retry persists + installs. Without it the
+    // operator could edit a password mid-retry; the running persist already
+    // snapshotted the old inlineSecrets, so the new value would be dropped/clobbered
+    // (Codex #378 r6).
+    setBusy("install");
     try {
       await persistInlineSecrets(formState);
       if (version !== submissionCounter.current) return;
@@ -765,6 +782,8 @@ export function AddServerScreen(props: {
           retryName: name,
         });
       }
+    } finally {
+      if (version === submissionCounter.current) setBusy("");
     }
   }
 
