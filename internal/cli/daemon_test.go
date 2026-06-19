@@ -299,7 +299,7 @@ func TestDaemonEnvWithOverlayResolvesManifestBeforeLiteralOverlay(t *testing.T) 
 		t.Fatalf("vault.Set: %v", err)
 	}
 
-	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+	env, _, err := daemonEnvWithOverlay("memory", "default", map[string]string{
 		"FROM_ENV":    "$MANIFEST_FROM_PARENT",
 		"FROM_SECRET": "secret:MANIFEST_SECRET",
 		"FOO":         "manifest-value",
@@ -402,7 +402,7 @@ func TestDaemonEnvWithOverlayPathCaseMatrix(t *testing.T) {
 				}
 			}
 
-			env, err := daemonEnvWithOverlay("memory", "default", tt.manifest, secrets.NewResolver(nil, nil))
+			env, _, err := daemonEnvWithOverlay("memory", "default", tt.manifest, secrets.NewResolver(nil, nil))
 			if err != nil {
 				t.Fatalf("daemonEnvWithOverlay: %v", err)
 			}
@@ -449,7 +449,7 @@ func TestDaemonEnvWithOverlaySkipsSupervisorAppliedOverlay(t *testing.T) {
 			t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
 			seedDaemonPathOverlay(t, stateDir, prefix+sep+"${parent_path}", nil)
 
-			env, err := daemonEnvWithOverlay("memory", "default", map[string]string{}, secrets.NewResolver(nil, nil))
+			env, _, err := daemonEnvWithOverlay("memory", "default", map[string]string{}, secrets.NewResolver(nil, nil))
 			if err != nil {
 				t.Fatalf("daemonEnvWithOverlay: %v", err)
 			}
@@ -489,7 +489,7 @@ func TestDaemonEnvWithOverlaySupervisorAppliedOverlayWinsOverManifest(t *testing
 	t.Setenv("MEMORY_FILE_PATH", overlayValue)
 	seedDaemonOverlay(t, stateDir, map[string]string{"MEMORY_FILE_PATH": overlayValue})
 
-	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+	env, _, err := daemonEnvWithOverlay("memory", "default", map[string]string{
 		"MEMORY_FILE_PATH": manifestDefault,
 	}, secrets.NewResolver(nil, nil))
 	if err != nil {
@@ -526,7 +526,7 @@ func TestDaemonEnvWithOverlaySupervisorAppliedParentPathExpandedOnce(t *testing.
 			// A manifest PATH that would clobber the overlay if dropped.
 			seedDaemonOverlay(t, stateDir, map[string]string{"PATH": prefix + sep + "${parent_path}"})
 
-			env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+			env, _, err := daemonEnvWithOverlay("memory", "default", map[string]string{
 				"PATH": "/manifest/only/bin",
 			}, secrets.NewResolver(nil, nil))
 			if err != nil {
@@ -712,7 +712,7 @@ func TestDaemonOverlayEnvSupervisedReloadFailureIsNonFatal(t *testing.T) {
 	// cfg.Env...)) must still see the supervisor-applied override because
 	// it is inherited from os.Environ() and the manifest here does not
 	// carry MEMORY_FILE_PATH (no overlap-key clobber in this case).
-	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+	env, _, err := daemonEnvWithOverlay("memory", "default", map[string]string{
 		"OTHER_KEY": "manifest-only",
 	}, secrets.NewResolver(nil, nil))
 	if err != nil {
@@ -796,7 +796,7 @@ func TestDaemonOverlayEnvSupervisedReloadFailureOverlayWinsOnOverlapKey(t *testi
 	// End-to-end: cfg.Env must carry the overlay value so it WINS the
 	// StdioHost append(os.Environ(), cfg.Env...) duplicate-key resolution,
 	// even though the manifest carries the SAME key with a different value.
-	env, err := daemonEnvWithOverlay("memory", "default", map[string]string{
+	env, _, err := daemonEnvWithOverlay("memory", "default", map[string]string{
 		"MEMORY_FILE_PATH": manifestDefault,
 	}, secrets.NewResolver(nil, nil))
 	if err != nil {

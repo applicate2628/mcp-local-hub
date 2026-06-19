@@ -21,6 +21,7 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 	"mcp-local-hub/internal/secrets"
@@ -1719,9 +1720,89 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		// remote-http.
 		return nil
 	}
-	// 1. Command available.
+	// 1. Command available. On failure, attach the guided install fix
+	// (LauncherGuidance is the single owner of "how do I get this dep")
+	// so the operator sees the exact command instead of a bare "not found"
+	// and then a downstream cryptic HTTP-502 at the client.
 	if _, err := exec.LookPath(m.Command); err != nil {
-		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
+		_, fix := LauncherGuidance(m.Command)
+		return fmt.Errorf("command %q not found on PATH — %s: %w", m.Command, fix, err)
+	}
+	// 1b. Runtime behind the launcher (npx → node). An npx shim can be on PATH
+	// while node itself is missing (the shim is a `#!/usr/bin/env node` script),
+	// so the daemon would still fail to start; check it here too (same depth as
+	// CheckServerReadiness, Codex #377 r8).
+	if rt := runtimeBehindLauncher(m.Command); rt != "" {
+		if _, err := exec.LookPath(rt); err != nil {
+			_, rfix := LauncherGuidance(rt)
+			return fmt.Errorf("runtime %q (needed by %q) not found on PATH — %s: %w", rt, m.Command, rfix, err)
+		}
+	}
+	// 1c. Blocking runtime dependencies CheckServerReadiness enforces but
+	// CLI/API installs (which call Preflight directly, never readiness) would
+	// otherwise skip — so `mcphub install --server gdb` on a host without gdb,
+	// or a `uvx --from git+...` manifest without git, could commit client +
+	// supervisor state and fail only when the daemon starts (Codex #377 r13).
+	// Mirror them here BEFORE any side effects via the SAME predicates readiness
+	// uses (binaryAvailable / manifestNeedsGit / bridgeListenerUp), so the two
+	// gates cannot diverge. Server-level required_binaries are blocking;
+	// per-language ones (workspace LSP alternatives) are advisory and skipped.
+	for _, bin := range m.RequiredBinaries {
+		if !binaryAvailable(bin) {
+			_, bfix := LauncherGuidance(bin)
+			// Basename only: required_binaries entries are free-form and may be
+			// absolute (the error is operator-facing / loggable).
+			return fmt.Errorf("required binary %q not found — %s", filepath.Base(bin), bfix)
+		}
+	}
+	if manifestNeedsGit(m) && !binaryAvailable("git") {
+		_, gfix := LauncherGuidance("git")
+		return fmt.Errorf("git is required to fetch the uvx git+ source but is not on PATH — %s", gfix)
+	}
+	// lldb-bridge dials its address first and only needs a local lldb when no
+	// listener is up — mirror the readiness conditional (gdb-bridge has no addr
+	// arg, so it relies on its unconditional required_binaries:[gdb] above).
+	if m.Transport == config.TransportStdioBridge && len(m.BaseArgs) >= 2 && m.BaseArgs[0] == "lldb-bridge" {
+		addr := m.BaseArgs[1]
+		// The lldb-bridge subcommand rejects a malformed host:port BEFORE
+		// spawning (lldb.ParseHostPort — its OWN validator), so an invalid
+		// address would commit state then instantly exit. Reject it here too,
+		// matching readiness (Codex #377 r16).
+		if _, _, err := lldb.ParseHostPort(addr); err != nil {
+			return fmt.Errorf("lldb-bridge address %q is not a valid host:port (e.g. localhost:47000): %w", addr, err)
+		}
+		if !bridgeListenerUp(addr) && !binaryAvailable("lldb") {
+			_, lfix := LauncherGuidance("lldb")
+			return fmt.Errorf("lldb-bridge: no MCP listener on %s and no lldb binary found — %s, or start an lldb MCP listener on %s first", addr, lfix, addr)
+		}
+	}
+	// 1d. Entry script present — node/python manifests run base_args[0] as a
+	// LOCAL script; the launcher being on PATH does not prove the script exists
+	// (e.g. wolfram's build/index.js inside an uncloned repo). Mirror readiness
+	// via the shared entryScriptCheckTargets and block BEFORE side effects —
+	// except for workspace-scoped template manifests where the launcher (and so
+	// the script) is optional, matching readiness's launcherOptional (Codex #377
+	// r14).
+	scriptOptional := m.Kind == config.KindWorkspaceScoped && m.DaemonTemplate == nil
+	if !scriptOptional {
+		for _, c := range entryScriptCheckTargets(m) {
+			// Respect the daemon filter exactly like the port loop below: a
+			// `--daemon a` partial install must not be blocked by a sibling
+			// daemon b's missing relative script. A daemon-independent (absolute)
+			// target has daemon=="" and always applies (Codex #377 r15).
+			if daemonFilter != "" && c.daemon != "" && c.daemon != daemonFilter {
+				continue
+			}
+			if !c.resolvable {
+				// Relative script + non-absolute daemon cwd: the launch cwd is
+				// unknowable here, so this is advisory-only in readiness and must
+				// NOT block the install (Codex #377 r18; architect Q2/Q3).
+				continue
+			}
+			if ok, reason := entryScriptStatus(c.path); !ok {
+				return fmt.Errorf("entry script %q for %q %s — install/clone the server so base_args[0] points at the file, then re-run install", filepath.Base(c.path), normalizeLauncher(m.Command), reason)
+			}
+		}
 	}
 	// 2. Canonical mcphub must exist — scheduler tasks reference
 	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
@@ -1742,6 +1823,15 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		if daemonFilter != "" && d.Name != daemonFilter {
 			continue
 		}
+		// Range-check first: an out-of-range fixed port (0 / > 65535) reads as
+		// "free" to a dial and would let install commit state for a daemon that
+		// can never serve its URL (Codex #377 r16). The dial-based in-use check
+		// below keeps Preflight's supervisor-intent-aware collision semantics
+		// (portHeldByOurDaemonForPortArm distinguishes our own running daemon from
+		// a foreign holder) — deliberately richer than readiness's simple probe.
+		if d.Port < 1 || d.Port > 65535 {
+			return fmt.Errorf("daemon %s/%s: port %d is outside the valid range 1..65535", m.Name, d.Name, d.Port)
+		}
 		if preflightPortInUse(d.Port) {
 			// Bug-bash A6 (#6) closure: distinguish "our own running
 			// daemon already holds this port" (idempotent reinstall;
@@ -1753,6 +1843,10 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
+			if internal < 1 || internal > 65535 {
+				return fmt.Errorf("daemon %s/%s native-http upstream port %d is outside the valid range 1..65535 (external=%d, internal=external+%d)",
+					m.Name, d.Name, internal, d.Port, config.NativeHTTPInternalPortOffset)
+			}
 			if preflightPortInUse(internal) {
 				if !portHeldByOurDaemonForPortArm(internal, m.Name, d.Name, true) {
 					return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
@@ -1761,13 +1855,39 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			}
 		}
 	}
-	// 4. Secret references resolve. Any `secret:<key>` in manifest.Env
-	// must already exist in the vault — otherwise the daemon would
-	// spawn, fail to start on the missing env var, and the user would
-	// chase a cryptic subprocess error. Failing here surfaces the real
-	// cause (missing secret) before any side effect is applied.
-	if err := checkSecretRefs(m.Env); err != nil {
-		return err
+	// 4. Secret references are OPTIONAL (install-and-it-works): a missing
+	// `secret:` ref does NOT block the install. Previously checkSecretRefs
+	// hard-failed here, blocking install of EVERY server that declares a
+	// secret (e.g. wolfram's wolfram_app_id) even when the operator wanted
+	// to set the key later — the reported bug. The daemon now spawns
+	// best-effort (the unset env var is omitted, see daemonEnvWithOverlay)
+	// so the SERVER reports its own missing-key, and CheckServerReadiness
+	// surfaces unset secrets as ADVISORY (Optional) requirements the
+	// operator is prompted to fill inline at install — explicit fields, not
+	// a hard gate.
+	//
+	// An UNREADABLE vault is the exception: a corrupt/inaccessible vault for a
+	// manifest that USES secret refs is fatal at the daemon launch path
+	// (OpenVaultOptional + HasSecretRef), so Preflight must reject it too —
+	// otherwise install succeeds and the daemon then fails to start (Codex
+	// #377 r6). A truly-ABSENT vault is still fine (secrets optional).
+	if secrets.HasSecretRef(m.Env) {
+		if _, verr := secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath()); verr != nil {
+			return fmt.Errorf("manifest %s uses secret refs but the vault is unreadable: %w", m.Name, verr)
+		}
+	}
+	// `file:` env refs resolve against a local config map the daemon-launch
+	// path does NOT wire (the resolver's local map is nil), so a file: ref is
+	// fatal at spawn — ResolveMapBestEffort returns an error and the daemon
+	// never starts. Reject it at Preflight too so install does not "succeed"
+	// and then the daemon fail to start — the asymmetry the optional-secret
+	// model avoids. CheckServerReadiness flags file: refs as blocking for the
+	// same reason (Codex #377 merge-gate P3). The ref value is not echoed (it
+	// may carry a path-like key); only the env key name is named.
+	for k, v := range m.Env {
+		if strings.HasPrefix(v, "file:") {
+			return fmt.Errorf("manifest %s env[%s] uses a file: ref, which the daemon launch path cannot resolve (mcphub has no local config map); replace it with a secret: ref or a literal value", m.Name, k)
+		}
 	}
 	return nil
 }

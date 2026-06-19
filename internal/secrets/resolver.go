@@ -69,3 +69,77 @@ func (r *Resolver) ResolveMap(env map[string]string) (map[string]string, error) 
 	}
 	return out, nil
 }
+
+// ResolveMapBestEffort resolves every value in a manifest env map, OMITTING an
+// unresolvable `secret:` ref instead of failing the whole map. It returns the
+// resolved subset, a map of omitted keys to their original `secret:` ref (so
+// the caller can log + explicitly UNSET them), and an error for any
+// NON-secret resolution failure.
+//
+// This is the daemon-launch path for OPTIONAL secrets (install-and-it-works:
+// secrets are optional by default). A server whose `secret:` ref is not set in
+// the vault still spawns — with that env var unset — so the server reports its
+// own "missing API key" instead of mcphub failing the spawn cryptically.
+//
+// ONLY `secret:` refs are optional. `$VAR` and `file:` refs are documented
+// REQUIRED resolver inputs (resolver doc + Resolve); a missing one stays
+// fail-fast (returns an error) so it surfaces loudly rather than silently
+// starting the daemon without required configuration (Codex #377). The
+// caller MUST treat the returned omitted keys as explicit unsets in the child
+// environment, NOT merely "absent from the resolved map" — otherwise a skipped
+// secret whose key also exists in the parent process env would be inherited
+// ambiently (Codex #377).
+func (r *Resolver) ResolveMapBestEffort(env map[string]string) (resolved, omitted map[string]string, err error) {
+	resolved = make(map[string]string, len(env))
+	for k, v := range env {
+		val, e := r.Resolve(v)
+		if e != nil {
+			if strings.HasPrefix(v, "secret:") {
+				if omitted == nil {
+					omitted = make(map[string]string, 1)
+				}
+				omitted[k] = v
+				continue
+			}
+			return nil, nil, fmt.Errorf("env[%s]: %w", k, e)
+		}
+		resolved[k] = val
+	}
+	return resolved, omitted, nil
+}
+
+// HasSecretRef reports whether any value in a manifest env map is a `secret:`
+// reference. Used to gate vault-read strictness: a server with no secret refs
+// must not be blocked by a corrupt vault it never touches (Codex #377 r5).
+func HasSecretRef(env map[string]string) bool {
+	for _, v := range env {
+		if strings.HasPrefix(v, "secret:") {
+			return true
+		}
+	}
+	return false
+}
+
+// OpenVaultOptional opens the vault, distinguishing an ABSENT vault (no
+// secrets configured → returns nil, nil; secret refs are then optional/omitted)
+// from one that EXISTS but is unreadable/undecryptable (returns nil, error).
+// A caller whose manifest uses NO secret refs ignores the error and proceeds
+// with a nil vault; a caller whose manifest DOES use secret refs treats the
+// error as fatal (daemon) / blocking (readiness) rather than silently omitting
+// secrets the operator may have set (Codex #377 r5). Single owner of the
+// absent-vs-unreadable distinction shared by the daemon launch + readiness.
+func OpenVaultOptional(keyPath, vaultPath string) (*Vault, error) {
+	vault, err := OpenVault(keyPath, vaultPath)
+	if err != nil {
+		// ABSENT (→ optional) ONLY when stat proves the file does not exist.
+		// Stat SUCCESS (file present) OR a non-not-exist stat error
+		// (permission denied, broken mount) means the vault may exist but be
+		// inaccessible — treat as UNREADABLE, never silently as "no secrets"
+		// (Codex #377 r6).
+		if _, statErr := os.Stat(vaultPath); statErr != nil && os.IsNotExist(statErr) {
+			return nil, nil // genuinely absent
+		}
+		return nil, fmt.Errorf("vault exists but unreadable: %w", err)
+	}
+	return vault, nil
+}

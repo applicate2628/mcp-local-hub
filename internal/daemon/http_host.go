@@ -79,12 +79,15 @@ const httpHostCleanupTimeout = 5 * time.Second
 
 // HTTPHostConfig describes one native-http-host instance.
 type HTTPHostConfig struct {
-	Command      string            // subprocess executable (e.g. "uvx")
-	Args         []string          // subprocess args
-	Env          map[string]string // appended to os.Environ()
-	WorkingDir   string            // subprocess cwd; empty means inherit
-	UpstreamPort int               // port the subprocess listens on (internal)
-	UpstreamPath string            // MCP endpoint path; defaults to "/mcp"
+	Command string            // subprocess executable (e.g. "uvx")
+	Args    []string          // subprocess args
+	Env     map[string]string // appended to os.Environ()
+	// UnsetEnv lists env keys to REMOVE from inherited os.Environ() (skipped
+	// optional secrets → truly absent, not present-but-empty; Codex #377).
+	UnsetEnv     []string
+	WorkingDir   string // subprocess cwd; empty means inherit
+	UpstreamPort int    // port the subprocess listens on (internal)
+	UpstreamPath string // MCP endpoint path; defaults to "/mcp"
 	// HealthTimeout bounds how long Start() waits for the upstream
 	// server to begin accepting connections. Default 30 s.
 	HealthTimeout time.Duration
@@ -166,12 +169,8 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	// like uvx/npx that fork-and-stay. See pdeathsig_linux.go.
 	process.SetParentDeathSignal(cmd)
 	cmd.Dir = h.cfg.WorkingDir
-	if len(h.cfg.Env) > 0 {
-		env := append([]string{}, os.Environ()...)
-		for k, v := range h.cfg.Env {
-			env = append(env, k+"="+v)
-		}
-		cmd.Env = env
+	if len(h.cfg.Env) > 0 || len(h.cfg.UnsetEnv) > 0 {
+		cmd.Env = composeChildEnv(h.cfg.Env, h.cfg.UnsetEnv)
 	}
 	// Upstream logs to its own stdout+stderr. There is no protocol
 	// channel on stdout for native-http servers (JSON-RPC is carried by

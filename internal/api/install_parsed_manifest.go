@@ -129,6 +129,33 @@ type InstallParsedManifestOpts struct {
 // rows; pass an empty non-nil slice for an intentional zero-workspace install).
 // On any sub-failure inside step 4, the shared rollback stack runs and the
 // function returns the error with every side effect undone.
+
+// validateDynamicPoolManifest runs the daemon_template-specific admission
+// gates InstallParsedManifest enforces before any mutation: native-http
+// transport (the per-workspace proxy is an HTTP reverse-proxy), a non-empty
+// daemon_template.context (materialized as `--context <value>` for the child),
+// and no duplicate --context in base_args/extra_args_template (the fan-out
+// appends it). These pass config.ServerManifest.Validate + BuildPlan but break
+// the per-workspace materialization, so CheckServerReadiness calls the SAME
+// function (single owner) to avoid reporting Ready for a manifest the
+// dynamic-pool install rejects (Codex #377 r6). A nil DaemonTemplate is a
+// no-op (not a dynamic-pool manifest).
+func validateDynamicPoolManifest(m *config.ServerManifest) error {
+	if m == nil || m.DaemonTemplate == nil {
+		return nil
+	}
+	if m.Transport != config.TransportNativeHTTP {
+		return fmt.Errorf("daemon_template manifest %q is transport=%q; a daemon_template spawns an HTTP reverse-proxy, which requires transport=%q", m.Name, m.Transport, config.TransportNativeHTTP)
+	}
+	if strings.TrimSpace(m.DaemonTemplate.Context) == "" {
+		return fmt.Errorf("manifest %q has an empty daemon_template.context; the per-workspace proxy materializes --context <value> for the child, so a non-empty context is required", m.Name)
+	}
+	if config.ArgsContainContextFlag(m.BaseArgs) || config.ArgsContainContextFlag(m.DaemonTemplate.ExtraArgsTemplate) {
+		return fmt.Errorf("manifest %q places --context in base_args or extra_args_template; the per-workspace proxy appends --context <daemon_template.context> at spawn, so a token here duplicates the flag — remove it", m.Name)
+	}
+	return nil
+}
+
 func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifest, opts InstallParsedManifestOpts) (intentPath string, err error) {
 	w := opts.Writer
 	if w == nil {
@@ -163,34 +190,12 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// HTTP-reverse-proxy spawn path. Reject BEFORE any mutation, same
 	// fail-loud style as the kind+template gate above. Additive admission
 	// tightening only — the write/rollback/deferred-start shape is unchanged.
-	if m.Transport != config.TransportNativeHTTP {
-		return "", fmt.Errorf("InstallParsedManifest only installs transport=%q dynamic-pool manifests (manifest %q is transport=%q); a daemon_template manifest spawns an HTTP reverse-proxy, which requires native-http", config.TransportNativeHTTP, m.Name, m.Transport)
-	}
-	// Empty-context gate (bot PR #246 P2). The per-workspace fan-out
-	// (BuildSupervisorDaemonsForSerena → buildSerenaChildArgs, design §5)
-	// APPENDS `--context <DaemonTemplate.Context>` into every materialized
-	// RuntimeSpec.ChildArgs. config.ServerManifest.Validate does NOT check
-	// Context (only port_pool + extra_args_template — internal/config/manifest.go),
-	// so a manifest with an absent/blank daemon_template.context PASSES Validate
-	// but would materialize `--context ""` and the supervisor would respawn a
-	// serena child with an invalid empty context. Reject BEFORE any mutation,
-	// same fail-loud style as the kind+template+transport gates above. This is
-	// the install-time mirror of the build-time skip in
-	// BuildSupervisorDaemonsForSerena. Additive admission tightening only.
-	if strings.TrimSpace(m.DaemonTemplate.Context) == "" {
-		return "", fmt.Errorf("InstallParsedManifest: manifest %q has an empty daemon_template.context; the per-workspace serena proxy materializes --context <value> for the child, so a non-empty context is required (set daemon_template.context in the manifest)", m.Name)
-	}
-
-	// Duplicate-context gate (bot PR #246 r2 P2). The fan-out APPENDS
-	// `--context <DaemonTemplate.Context>`, so a --context token already in
-	// base_args / extra_args_template would double the flag. FAIL LOUD here,
-	// before any mutation: BuildSupervisorDaemonsForSerena returns nil for this
-	// shape (defense-in-depth), but a nil fan-out is merged as "this server has
-	// no daemons" and would SILENTLY remove the server's existing per-workspace
-	// rows (bot finding). config.ServerManifest.Validate also rejects it, but this
-	// seam accepts a PRE-PARSED manifest that may not have been revalidated.
-	if config.ArgsContainContextFlag(m.BaseArgs) || config.ArgsContainContextFlag(m.DaemonTemplate.ExtraArgsTemplate) {
-		return "", fmt.Errorf("InstallParsedManifest: manifest %q places --context in base_args or extra_args_template; the per-workspace serena proxy appends --context <daemon_template.context> at spawn, so a token here would duplicate the flag — remove it (context comes solely from daemon_template.context)", m.Name)
+	// The daemon_template admission gates (native-http transport, non-empty
+	// context, no duplicate --context) are extracted to validateDynamicPoolManifest
+	// so CheckServerReadiness runs the SAME validation and never reports Ready
+	// for a manifest this install path rejects (Codex #377 r6, single owner).
+	if err := validateDynamicPoolManifest(m); err != nil {
+		return "", err
 	}
 
 	// 1a. Preflight: check-only gate shared with the legacy install paths.

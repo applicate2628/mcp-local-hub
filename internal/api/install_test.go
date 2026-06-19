@@ -346,18 +346,16 @@ func TestPreflight_StdioBridgeIgnoresInternalPort(t *testing.T) {
 	}
 }
 
-// TestPreflight_MissingSecretFailsFast verifies that a manifest whose
-// env declares a `secret:<key>` that is absent from the vault fails
-// preflight — surfacing the missing secret BEFORE any side effect (task
-// creation, client-config backup+rewrite, daemon spawn) is applied.
-// The alternative path (deferred resolution at daemon launch) yielded
-// a cryptic subprocess error several steps removed from the real cause.
-func TestPreflight_MissingSecretFailsFast(t *testing.T) {
+// TestPreflight_MissingSecretDoesNotBlockInstall verifies the OPTIONAL-secret
+// policy (install-and-it-works): a manifest whose env declares a `secret:<key>`
+// absent from the vault must NOT fail preflight. The daemon spawns best-effort
+// (the unset env var is omitted, see daemonEnvWithOverlay) and the server
+// reports its own missing-key; CheckServerReadiness surfaces the unset secret
+// as an advisory inline-prompt field. Previously this HARD-BLOCKED install, so
+// no secret-declaring server (wolfram etc.) could be installed without setting
+// the key first — the reported operator bug.
+func TestPreflight_MissingSecretDoesNotBlockInstall(t *testing.T) {
 	preparePreflightBinaryChecks(t)
-	// Point the secrets resolver at a non-existent vault location so
-	// any secret: ref triggers the "vault unavailable" branch. Keeps
-	// the test hermetic: we aren't exercising decryption, just the
-	// gate that blocks install when a ref cannot resolve.
 	t.Setenv("LOCALAPPDATA", t.TempDir())  // Windows path
 	t.Setenv("XDG_DATA_HOME", t.TempDir()) // Linux path
 
@@ -367,15 +365,41 @@ func TestPreflight_MissingSecretFailsFast(t *testing.T) {
 		Transport: config.TransportStdioBridge,
 		Command:   "go",
 		Env:       map[string]string{"API_KEY": "secret:nonexistent_key"},
-		Daemons:   []config.DaemonSpec{{Name: "default", Port: 0}},
+		// A valid free fixed port — Preflight now range-checks fixed ports, so
+		// the prior Port:0 placeholder would be rejected (Codex #377 r16).
+		Daemons: []config.DaemonSpec{{Name: "default", Port: 51000}},
 	}
 
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("preflight must NOT block install on an optional missing secret; got: %v", err)
+	}
+}
+
+func TestPreflight_MissingRequiredBinaryBlocks(t *testing.T) {
+	preparePreflightBinaryChecks(t)
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	// command (go) is on PATH so the launcher check passes, but the server-level
+	// required_binary is absent. CLI/API installs call Preflight directly (never
+	// CheckServerReadiness), so Preflight must block here BEFORE committing
+	// client/supervisor state rather than letting the daemon fail at spawn
+	// (Codex #377 r13 — Preflight↔readiness dependency parity, shared predicate
+	// binaryAvailable).
+	m := &config.ServerManifest{
+		Name:             "needs-tool",
+		Kind:             config.KindGlobal,
+		Transport:        config.TransportStdioBridge,
+		Command:          "go",
+		RequiredBinaries: []string{"definitely-not-on-path-zzz"},
+		Daemons:          []config.DaemonSpec{{Name: "default", Port: 0}},
+	}
 	err := Preflight(m, "")
 	if err == nil {
-		t.Fatal("expected preflight to fail for missing secret ref")
+		t.Fatal("Preflight must block install when a server-level required_binary is missing")
 	}
-	if !strings.Contains(err.Error(), "nonexistent_key") {
-		t.Errorf("error should name the missing key: %v", err)
+	if !strings.Contains(err.Error(), "definitely-not-on-path-zzz") {
+		t.Errorf("error should name the missing binary; got: %v", err)
 	}
 }
 

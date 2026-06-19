@@ -63,6 +63,13 @@ type spawnedLldb struct {
 	stdin io.WriteCloser
 }
 
+// ParseHostPort validates a host:port address EXACTLY as the lldb-bridge
+// subcommand does at launch (it is the bridge's own pre-spawn check). Exported
+// so install readiness can reject a malformed base_args[1] using the SAME
+// validator the bridge enforces, rather than re-deriving and drifting from it
+// (Codex #377 r15).
+func ParseHostPort(s string) (string, int, error) { return parseHostPort(s) }
+
 // parseHostPort splits "host:port" with IPv4 tolerance. Intentionally
 // rejects bare ports ("47000") to keep the CLI argument shape consistent
 // with bridge.py's documented usage.
@@ -98,8 +105,15 @@ func runLldbBridge(host string, port int, lldbPath string) error {
 	var spawned *spawnedLldb
 	if err != nil {
 		// Nothing listening → spawn our own LLDB and wait for it to bind.
-		if _, statErr := os.Stat(lldbPath); statErr != nil {
-			return fmt.Errorf("lldb not found at %s (pass --lldb-path): %w", lldbPath, statErr)
+		// Resolve lldbPath the way exec.Command will at spawn (spawnLldb below):
+		// an absolute path is checked directly, a BARE name (DefaultLldbPath's
+		// POSIX fallback) is resolved against PATH and checked executable. A plain
+		// os.Stat on a bare name would check the CURRENT DIRECTORY and reject a
+		// perfectly-good PATH lldb — diverging from install readiness's LookPath
+		// check, which then green-lights an install this spawn would refuse
+		// (Codex #377 r18).
+		if _, lookErr := exec.LookPath(lldbPath); lookErr != nil {
+			return fmt.Errorf("lldb not found (%q must be on PATH or an absolute path; pass --lldb-path): %w", lldbPath, lookErr)
 		}
 		s, spawnErr := spawnLldb(lldbPath, host, port)
 		if spawnErr != nil {

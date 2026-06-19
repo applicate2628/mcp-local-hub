@@ -6,6 +6,11 @@ command: mcphub
 base_args:
   - lldb-bridge
   - localhost:47000
+# NOTE: lldb is NOT declared as a required_binary. The lldb-bridge dials
+# localhost:47000 FIRST and only spawns (and thus needs) a local lldb when
+# nothing is already listening — so an externally-started lldb listener makes
+# the bridge work with no local lldb binary. An unconditional blocking
+# required_binaries:[lldb] would over-block that case (Codex #377 r9).
 env: {}
 
 # LLDB's built-in MCP server speaks MCP over a raw TCP socket, not stdio
