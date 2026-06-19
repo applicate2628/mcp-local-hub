@@ -5,7 +5,22 @@ found-by: backend-engineer
 found-in-phase: groups Phase 5b-1 (/api/groups CRUD endpoint) — full internal/api test sweep
 affected-surface: internal/api/status_enrich.go (selfPID skip, lines ~154/184/193/205) consumed by internal/api/status_enrich_test.go:110
 context: adjacent-finding
-status: open
+status: fixed
+fixed: 2026-06-19
+resolution: >
+  Root cause CAPTURED at runtime (t.Logf probe): the fixture
+  makeFakeManifest(dir/wolfram, "wolfram", 9125) is REJECTED by
+  parseManifestForName — "daemons[0] declares port 9125, the reserved GUI
+  listener port" — so manifestPortMap(dir) returns an EMPTY map, the
+  wolfram row's Port never resolves (stays 0), enrichStatus hits the
+  Port==0 early-continue (status_enrich.go:178) and SKIPS deriveState, so
+  the raw "Running" leaks and the self-PID gate (:193) is never reached.
+  STALE TEST, not a production bug: the self-PID skip is correct and a real
+  global manifest can no longer declare 9125 at all. Fix: seed
+  rows[0].Port=9125 directly (drop the now-rejected makeFakeManifest),
+  faithfully exercising the DM-2 self-PID branch for a daemon whose resolved
+  port equals the GUI listener (a collision that still arises via
+  registry/dynamic ports). All 13 EnrichStatus tests PASS.
 ---
 
 ## Summary
