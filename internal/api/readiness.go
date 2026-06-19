@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/secrets"
 )
@@ -241,20 +242,28 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// external+offset upstream, so BOTH must be free.
 	var registryTaken map[int]bool
 	var registryLoadErr error
-	if regPath, perr := DefaultRegistryPath(); perr == nil {
+	// register resolves the path (DefaultRegistryPath) AND loads it before
+	// allocating; BOTH can fail (no resolvable home/state dir in a headless
+	// session → path error; corrupt file → load error). Either leaves register
+	// unable to allocate, so capture it and let checkPool surface it as
+	// blocking rather than silently falling back to OS-bound ports — which
+	// would report the pool ready while register fails (Codex #377 r5/r7).
+	if regPath, perr := DefaultRegistryPath(); perr != nil {
+		registryLoadErr = fmt.Errorf("resolve registry path: %w", perr)
+	} else {
 		reg := NewRegistry(regPath)
-		// Load returns nil for an absent/empty registry; an ERROR means the
-		// file exists but is unreadable/corrupt. register's own reg.Load()
-		// before allocation fails the same way, so leaving registryTaken nil
-		// and reporting the pool ready off OS-bound ports alone would lie
-		// (Codex #377 r5). Capture it; checkPool surfaces it as blocking.
 		if lerr := reg.Load(); lerr != nil {
-			registryLoadErr = lerr
+			registryLoadErr = fmt.Errorf("load registry: %w", lerr)
 		} else {
 			registryTaken = reg.AllocatedPorts()
 		}
 	}
-	portTaken := func(port int) bool { return preflightPortInUse(port) || registryTaken[port] }
+	// portTaken mirrors the allocator EXACTLY: AllocatePort skips a port when
+	// registry-allocated OR when portAvailable (the OS bind probe) is false. A
+	// TCP dial (preflightPortInUse) differs — a port bound but not yet
+	// accepting reads as free to a dial yet fails the allocator's bind, so use
+	// the SAME portAvailable probe (Codex #377 r7).
+	portTaken := func(port int) bool { return !portAvailable(port) || registryTaken[port] }
 	checkPool := func(p *config.PortPool, nativeHTTP bool) {
 		if p == nil || p.End < p.Start {
 			return
@@ -382,14 +391,20 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// avoids duplicating gate logic that drifts (Codex #377 r2/r3/r4). The
 	// per-key secret + dependency requirements above stay for the structured,
 	// user-actionable inline prompts; this is the one catch-all blocker.
-	// IncludeAllClients (not the bare BuildPlan(m,"")): the bare form falls
-	// through to the COMPILE-TIME default trio {claude-code, codex-cli,
-	// cursor}, so a bad client_binding on any OTHER client — including one the
-	// operator persisted into their default-install set (gui-preferences.yaml)
-	// — would be skipped here yet rejected by the real install. Readiness is
-	// non-mutating, so validating EVERY declared binding is the conservative
-	// correct scope (Codex pre-catch r6).
-	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true}); err != nil {
+	// Validate EXACTLY the operator's effective default-install client set —
+	// the same scope a normal `mcphub install` uses. NOT the bare
+	// BuildPlan(m,"") compile-time trio (which would MISS a bad binding on a
+	// client the operator persisted into their default set), and NOT
+	// IncludeAllClients (which would validate OPT-IN bindings a default install
+	// never touches → a false Ready=false on a bad opt-in binding, Codex #377
+	// r7). DefaultInstallClientNamesEffectiveIn reads gui-preferences.yaml (it
+	// derefs no *API state, so the zero value calls it); fall back to the
+	// compile-time default on a read error.
+	clientScope := clients.DefaultInstallClientNames()
+	if eff, cerr := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); cerr == nil && len(eff) > 0 {
+		clientScope = eff
+	}
+	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope}); err != nil {
 		add(ReadinessRequirement{
 			Name:   "install plan",
 			OK:     false,
