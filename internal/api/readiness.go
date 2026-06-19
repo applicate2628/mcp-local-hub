@@ -2,10 +2,12 @@ package api
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -87,8 +89,15 @@ func LauncherGuidance(command string) (display, fix string) {
 		return "git",
 			"Install git — Windows: `winget install Git.Git`; macOS: `brew install git` (or Xcode CLT); Linux: `apt install git`."
 	default:
-		return command,
-			fmt.Sprintf("Install %q and ensure it is on PATH, then re-run install.", command)
+		// Basename only: an unknown command may be an absolute host path from a
+		// custom manifest, and LauncherGuidance's return feeds the GUI-rendered
+		// display Name AND the Fix string (not only Reason), so strip the
+		// directory at the single owner of the fallback display/fix — otherwise
+		// /api/server/readiness echoes a username-bearing host path via Name/Fix
+		// (Codex #377 r12). No-op for bare names.
+		base := filepath.Base(command)
+		return base,
+			fmt.Sprintf("Install %q and ensure it is on PATH, then re-run install.", base)
 	}
 }
 
@@ -105,6 +114,20 @@ func runtimeBehindLauncher(command string) string {
 	default:
 		return ""
 	}
+}
+
+// bridgeListenerUp reports whether something is already accepting TCP on addr
+// (host:port), mirroring the lldb-bridge's own pre-spawn dial. A live listener
+// means the bridge will reuse it and needs no local debugger binary, so
+// readiness is satisfied without one (Codex #377 r12). Short timeout: this is a
+// readiness probe, not a connection.
+func bridgeListenerUp(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
@@ -318,6 +341,36 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	for _, lang := range m.Languages {
 		for _, bin := range lang.RequiredBinaries {
 			addBin(bin, true) // per-language: advisory (alternatives per workspace)
+		}
+	}
+
+	// Conditional native-debugger bridge readiness. A stdio-bridge whose
+	// base_args are ["lldb-bridge", "<addr>"] DIALS <addr> first and only
+	// spawns + needs a local lldb when nothing is already listening there
+	// (internal/lldb/bridge.go). So readiness is CONDITIONAL: OK when a listener
+	// is already up on <addr> OR an lldb binary is available; NOT-ok only when
+	// BOTH are absent. An unconditional required_binaries:[lldb] over-blocks the
+	// listener case (Codex #377 r9); declaring NO check over-reports ready while
+	// the daemon then fails on a bare host (Codex #377 r12). gdb-bridge has no
+	// <addr> arg — it always spawns gdb directly — so it keeps an unconditional
+	// required_binaries:[gdb] and does NOT match this branch.
+	if m.Transport == config.TransportStdioBridge && len(m.BaseArgs) >= 2 && m.BaseArgs[0] == "lldb-bridge" {
+		addr := m.BaseArgs[1]
+		disp, dfix := LauncherGuidance("lldb")
+		switch {
+		case bridgeListenerUp(addr):
+			add(ReadinessRequirement{Name: "debugger: " + disp + " (listener up)", OK: true})
+		case binaryFound("lldb"):
+			add(ReadinessRequirement{Name: "debugger: " + disp, OK: true})
+		default:
+			add(ReadinessRequirement{
+				Name: "debugger: " + disp,
+				OK:   false,
+				// addr is a manifest-declared loopback address (e.g.
+				// localhost:47000), not a host path — safe to render.
+				Reason: fmt.Sprintf("no MCP listener on %s and no lldb binary found — the lldb-bridge needs one or the other", addr),
+				Fix:    dfix + " — OR start an lldb MCP listener on " + addr + " first, then re-run install.",
+			})
 		}
 	}
 

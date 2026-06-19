@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,6 +266,50 @@ func TestCheckServerReadiness_RelativeScriptCheckedPerDaemonCwd(t *testing.T) {
 	}
 	if !bSeen || bOK {
 		t.Errorf("daemon b's script (absent under its cwd) must be present-and-not-OK; seen=%v ok=%v", bSeen, bOK)
+	}
+}
+
+func TestLauncherGuidance_UnknownAbsoluteCommandBasenamed(t *testing.T) {
+	// An unknown command that is an absolute host path must not leak its
+	// directory through the display name OR the fix string — LauncherGuidance
+	// feeds both the GUI-rendered Name and Fix (Codex #377 r12).
+	abs := filepath.Join(t.TempDir(), "my-secret-tool")
+	disp, fix := LauncherGuidance(abs)
+	if strings.ContainsRune(disp, filepath.Separator) || strings.Contains(disp, "/") {
+		t.Errorf("display leaks a path separator: %q", disp)
+	}
+	if strings.Contains(fix, filepath.Dir(abs)) {
+		t.Errorf("fix leaks the directory %q: %q", filepath.Dir(abs), fix)
+	}
+}
+
+func TestCheckServerReadiness_LldbBridgeListenerSatisfiesReadiness(t *testing.T) {
+	// A live listener on the lldb-bridge's dial address satisfies readiness
+	// with NO local lldb binary — the bridge reuses the listener. Asserts the
+	// conditional debugger requirement's listener branch (Codex #377 r12).
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	m := &config.ServerManifest{
+		Name:      "lldb",
+		Transport: config.TransportStdioBridge,
+		Command:   "mcphub",
+		BaseArgs:  []string{"lldb-bridge", ln.Addr().String()},
+	}
+	rep := CheckServerReadiness(m)
+	var found, ok bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "debugger:") {
+			found, ok = true, r.OK
+		}
+	}
+	if !found {
+		t.Fatalf("no debugger requirement in report: %+v", rep.Requirements)
+	}
+	if !ok {
+		t.Errorf("debugger requirement OK=false despite a live listener on %s", ln.Addr().String())
 	}
 }
 
