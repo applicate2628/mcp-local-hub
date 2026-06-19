@@ -274,10 +274,12 @@ func TestSerenaRouter_BackendLoss_SeedNeverOverwritesExistingBaseline(t *testing
 // TestSerenaRouter_BackendLoss_DaemonFailedEvent covers §3.x signal #1: a
 // `daemon-failed` GUI event for a serena pool daemon must tear down that
 // workspace's router sessions instantly, ahead of the 30s IPC reconcile
-// fallback. The mapping sub-test verifies the event-body→wsKey resolution
-// (match by server=="serena" + Port; non-serena/zero-port/no-match → ""), and
-// the end-to-end sub-test runs the live subscriber against a synthetic event
-// published through the Broadcaster (no real daemon — in-memory store only).
+// fallback. The mapping sub-test verifies the event-body→workspace resolution
+// (match by the daemon KEY = workspace key, beating a reused port; port-only as
+// fallback; non-serena/unknown → nil). The teardown sub-test runs the live
+// subscriber against a synthetic event through the Broadcaster, and the
+// stale-event sub-test proves a queued failure for an OLD pid does NOT revoke a
+// fresh post-restart session (no real daemon — in-memory store only).
 func TestSerenaRouter_BackendLoss_DaemonFailedEvent(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 
@@ -286,36 +288,37 @@ func TestSerenaRouter_BackendLoss_DaemonFailedEvent(t *testing.T) {
 		ws := serenaWS("event-map", wsPath, 9305)
 		s, _ := newSerenaStoreSeedServer(t, ws)
 
-		// Serena daemon on the workspace's port → its WorkspaceKey.
-		got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
-			"server": "serena", "port": 9305,
-		})
-		if got != ws.WorkspaceKey {
-			t.Fatalf("mapping serena@9305 = %q, want %q", got, ws.WorkspaceKey)
+		// Match by the daemon KEY (= the workspace key) — the stable identity.
+		if got := s.serenaWorkspaceForDaemonFailedEvent(map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9305,
+		}); got == nil || got.WorkspaceKey != ws.WorkspaceKey {
+			t.Fatalf("mapping by daemon key = %v, want ws %q", got, ws.WorkspaceKey)
 		}
-		// JSON-decoded body carries float64 for the port; must still match.
-		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
+		// Daemon key BEATS a stale/reused port (bot #375): an event carrying this
+		// ws's daemon key but a DIFFERENT port still maps to this ws.
+		if got := s.serenaWorkspaceForDaemonFailedEvent(map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9999,
+		}); got == nil || got.WorkspaceKey != ws.WorkspaceKey {
+			t.Fatalf("mapping daemon-key+wrong-port = %v, want ws %q (key beats port)", got, ws.WorkspaceKey)
+		}
+		// Port FALLBACK when the event carries no daemon key (float64 port too).
+		if got := s.serenaWorkspaceForDaemonFailedEvent(map[string]any{
 			"server": "serena", "port": float64(9305),
-		}); got != ws.WorkspaceKey {
-			t.Fatalf("mapping serena@9305(float64) = %q, want %q", got, ws.WorkspaceKey)
+		}); got == nil || got.WorkspaceKey != ws.WorkspaceKey {
+			t.Fatalf("mapping port fallback = %v, want ws %q", got, ws.WorkspaceKey)
 		}
-		// Non-serena server (a global daemon / LSP proxy) → no-op.
-		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
-			"server": "memory", "port": 9305,
-		}); got != "" {
-			t.Fatalf("mapping non-serena = %q, want empty", got)
+		// Non-serena server (a global daemon / LSP proxy) → nil.
+		if got := s.serenaWorkspaceForDaemonFailedEvent(map[string]any{
+			"server": "memory", "daemon": ws.WorkspaceKey,
+		}); got != nil {
+			t.Fatalf("mapping non-serena = %v, want nil", got)
 		}
-		// Zero / absent port cannot disambiguate a workspace → no-op.
-		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
-			"server": "serena", "port": 0,
-		}); got != "" {
-			t.Fatalf("mapping serena@0 = %q, want empty", got)
-		}
-		// Serena daemon on a port no registered workspace owns → no-op.
-		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
-			"server": "serena", "port": 9999,
-		}); got != "" {
-			t.Fatalf("mapping serena@9999 = %q, want empty", got)
+		// A daemon key that matches no workspace → nil, and crucially does NOT
+		// fall back to a port match (the key is authoritative against reuse).
+		if got := s.serenaWorkspaceForDaemonFailedEvent(map[string]any{
+			"server": "serena", "daemon": "nope", "port": 9305,
+		}); got != nil {
+			t.Fatalf("mapping unknown-daemon-key = %v, want nil (no port fallback when key present)", got)
 		}
 	})
 
@@ -340,7 +343,7 @@ func TestSerenaRouter_BackendLoss_DaemonFailedEvent(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			s.consumeSerenaBackendLossEvents(ch)
+			s.consumeSerenaBackendLossEvents(ctx, ch)
 		}()
 
 		// Publish the synthetic daemon-failed event for the serena daemon on
@@ -365,6 +368,50 @@ func TestSerenaRouter_BackendLoss_DaemonFailedEvent(t *testing.T) {
 			time.Sleep(5 * time.Millisecond)
 		}
 		assertSerenaSessionGone(t, s, sessions, sid)
+
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("subscriber goroutine did not exit on ctx cancel")
+		}
+	})
+
+	t.Run("ignores-stale-event-after-restart", func(t *testing.T) {
+		const wsPath = "/proj/event-stale"
+		const sid = "sid-event-stale"
+		ws := serenaWS("event-stale", wsPath, 9307)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-stale")
+		s.Broadcaster().DisableGUIEventLog = true
+
+		// The workspace's serena backend has ALREADY restarted under a NEW live
+		// pid (7777) and a fresh session is bound on it. A queued daemon-failed
+		// event for the OLD pid (1234) must be IGNORED — tearing down now would
+		// kill that healthy post-restart session (bot #375 stale-event guard).
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Workspace: wsPath, PID: 7777}}, nil
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := s.Broadcaster().Subscribe(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.consumeSerenaBackendLossEvents(ctx, ch)
+		}()
+
+		s.Broadcaster().Publish(Event{Type: "daemon-failed", Body: map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9307, "pid": 1234,
+		}})
+
+		// Let the subscriber process (and skip) the stale event; the session
+		// MUST survive — a stale failure cannot revoke a fresh backend.
+		time.Sleep(150 * time.Millisecond)
+		if !s.serenaRouterSessions.known(sid) {
+			t.Fatalf("stale daemon-failed (old pid) tore down a healthy post-restart session")
+		}
 
 		cancel()
 		select {
