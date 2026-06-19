@@ -365,7 +365,9 @@ func TestPreflight_MissingSecretDoesNotBlockInstall(t *testing.T) {
 		Transport: config.TransportStdioBridge,
 		Command:   "go",
 		Env:       map[string]string{"API_KEY": "secret:nonexistent_key"},
-		Daemons:   []config.DaemonSpec{{Name: "default", Port: 0}},
+		// A valid free fixed port — Preflight now range-checks fixed ports, so
+		// the prior Port:0 placeholder would be rejected (Codex #377 r16).
+		Daemons: []config.DaemonSpec{{Name: "default", Port: 51000}},
 	}
 
 	if err := Preflight(m, ""); err != nil {

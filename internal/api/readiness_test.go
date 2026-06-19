@@ -327,6 +327,66 @@ func TestEntryScriptCheckTargets_EmptyCwdUsesProcessCwd(t *testing.T) {
 	}
 }
 
+func TestManifestNeedsGit_ScansDaemonTemplateExtraArgs(t *testing.T) {
+	// A dynamic-pool manifest carries the git+ source in the daemon template's
+	// extra_args_template (appended into the child argv), so it must be scanned
+	// (Codex #377 r16).
+	m := &config.ServerManifest{
+		Command: "uvx",
+		DaemonTemplate: &config.DaemonTemplate{
+			ExtraArgsTemplate: []string{"--from", "git+https://x@abc", "pkg"},
+		},
+	}
+	if !manifestNeedsGit(m) {
+		t.Error("uvx manifest with git+ in daemon_template.extra_args_template must need git")
+	}
+}
+
+func TestEntryScriptStatus_RejectsDirectory(t *testing.T) {
+	// base_args[0] pointing at a directory (e.g. build/ instead of build/index.js)
+	// cannot be run as an entry script — reject it like a missing file (Codex
+	// #377 r16).
+	dir := t.TempDir()
+	if ok, reason := entryScriptStatus(dir); ok || !strings.Contains(reason, "directory") {
+		t.Errorf("directory must be rejected as an entry script; ok=%v reason=%q", ok, reason)
+	}
+	f := filepath.Join(dir, "index.js")
+	if err := os.WriteFile(f, []byte("//"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := entryScriptStatus(f); !ok {
+		t.Error("an existing regular file must be accepted as an entry script")
+	}
+}
+
+func TestCheckServerReadiness_NativeHTTPInternalPortRange(t *testing.T) {
+	// External 60000 is valid, but internal = 60000 + NativeHTTPInternalPortOffset
+	// overflows 65535 — the internal upstream port must be reported not-OK
+	// (Codex #377 r16).
+	origAvail := portAvailable
+	portAvailable = func(int) bool { return true } // external bind probe deterministic
+	t.Cleanup(func() { portAvailable = origAvail })
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Command:   "go",
+		Transport: config.TransportNativeHTTP,
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: 60000}},
+	}
+	rep := CheckServerReadiness(m)
+	var found, ok bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "internal port") {
+			found, ok = true, r.OK
+		}
+	}
+	if !found {
+		t.Fatalf("no internal port requirement: %+v", rep.Requirements)
+	}
+	if ok {
+		t.Error("internal upstream port (60000 + offset > 65535) must be not-OK")
+	}
+}
+
 func TestEntryScriptCheckTargets_SetsPerDaemonName(t *testing.T) {
 	// Each per-daemon (relative) target must carry its daemon name so Preflight
 	// can filter to the installed daemon and not block on a sibling's missing

@@ -110,7 +110,15 @@ func LauncherGuidance(command string) (display, fix string) {
 // them silently skip a dependency on an absolute / suffixed launcher (Codex
 // #377 r14).
 func normalizeLauncher(command string) string {
-	base := filepath.Base(command)
+	// Split on BOTH separators, not filepath.Base: a Windows-style path read on
+	// POSIX (where filepath.Base only splits "/") would otherwise keep its
+	// backslashes, so `C:\nodejs\npx.exe` would not match `npx` on Linux/macOS
+	// and the dependency gates would silently skip the deeper checks (Codex #377
+	// r16).
+	base := command
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
 	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1"} {
 		if len(base) > len(ext) && strings.EqualFold(base[len(base)-len(ext):], ext) {
 			return base[:len(base)-len(ext)]
@@ -191,12 +199,59 @@ func manifestNeedsGit(m *config.ServerManifest) bool {
 	default:
 		return false
 	}
-	for _, a := range append(append([]string{}, m.BaseArgs...), m.BaseArgsTemplate...) {
+	args := append(append([]string{}, m.BaseArgs...), m.BaseArgsTemplate...)
+	// A dynamic-pool manifest carries the git+ source in the daemon template's
+	// extra_args_template (appended into the actual child argv at spawn), so it
+	// must be scanned too or readiness/Preflight would miss the git dependency
+	// (Codex #377 r16).
+	if m.DaemonTemplate != nil {
+		args = append(args, m.DaemonTemplate.ExtraArgsTemplate...)
+	}
+	for _, a := range args {
 		if strings.Contains(a, "git+") {
 			return true
 		}
 	}
 	return false
+}
+
+// entryScriptStatus stats one node/python entry-script target the way the
+// launcher needs it: the path must EXIST and be a regular file. A directory
+// (e.g. base_args[0] pointing at `build/` instead of `build/index.js`) cannot be
+// run as an entry script, so it is rejected like a missing file (Codex #377
+// r16). SINGLE OWNER shared by CheckServerReadiness and Preflight. Returns (ok,
+// reason-when-not-ok).
+func entryScriptStatus(path string) (bool, string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, "does not exist"
+	}
+	if info.IsDir() {
+		return false, "is a directory, not a runnable entry script"
+	}
+	return true, ""
+}
+
+// fixedPortStatus checks a FIXED daemon port for the readiness report the way
+// the daemon will actually bind it at launch: a valid 1..65535 range AND
+// bindable via the same probe the pool allocator uses (portAvailable),
+// tolerating our OWN already-running daemon for an idempotent reinstall. A
+// dial-only probe would miss an out-of-range port (a failed dial reads as
+// "free") and a port bound-but-not-listening (Codex #377 r15/r16). Preflight
+// keeps its own dial-based, supervisor-intent-aware collision check (richer than
+// this simple probe) and only shares the range guard. Returns (ok, reason).
+func fixedPortStatus(port int, server, daemon string, internal bool) (bool, string) {
+	if port < 1 || port > 65535 {
+		kind := "port"
+		if internal {
+			kind = "native-http internal upstream port"
+		}
+		return false, fmt.Sprintf("%s %d is outside the valid range 1..65535", kind, port)
+	}
+	if !portAvailable(port) && !portHeldByOurDaemonForPortArm(port, server, daemon, internal) {
+		return false, fmt.Sprintf("port %d is already in use by another process", port)
+	}
+	return true, ""
 }
 
 // entryScript is one entry-script target the node/python gate stats. daemon is
@@ -333,7 +388,7 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// (when known + absolute) rather than skipping or statting it against this
 	// process's cwd (Codex #377 r9). Skip flag-shaped args (python -m, --flag).
 	for _, c := range entryScriptCheckTargets(m) {
-		if _, err := os.Stat(c.path); err != nil {
+		if ok, reason := entryScriptStatus(c.path); !ok {
 			add(ReadinessRequirement{
 				Name:     "script: " + c.label,
 				OK:       false,
@@ -341,8 +396,8 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 				// Reason names only the script BASENAME + the normalized launcher
 				// (never the absolute host path), which the GUI renders (Codex
 				// pre-catch r9 / r14).
-				Reason: fmt.Sprintf("the %s entry script %q does not exist", normalizeLauncher(m.Command), filepath.Base(c.path)),
-				Fix:    "Install/clone the server so the manifest's base_args[0] script path exists, then re-run install.",
+				Reason: fmt.Sprintf("the %s entry script %q %s", normalizeLauncher(m.Command), filepath.Base(c.path), reason),
+				Fix:    "Install/clone the server so the manifest's base_args[0] script path exists and points at a file (not a directory), then re-run install.",
 			})
 		} else {
 			add(ReadinessRequirement{Name: "script: " + c.label, OK: true})
@@ -469,35 +524,30 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// held by OUR own daemon is fine: idempotent reinstall). A green report
 	// followed by an install that fails on a held port is exactly the lie this
 	// surface must not tell (Codex #377).
+	// A FIXED daemon port must be valid + bindable; pool daemons never reach
+	// here (m.Daemons is empty for dynamic-pool manifests). fixedPortStatus is
+	// the single owner shared with Preflight — it range-checks (rejecting 0 /
+	// > 65535, which a failed TCP dial would read as "free") AND bind-probes via
+	// the pool allocator's portAvailable, so a bound-but-not-listening port is
+	// not reported free (Codex #377 r15/r16).
 	for _, d := range m.Daemons {
 		portName := fmt.Sprintf("port %d (%s)", d.Port, d.Name)
-		// A FIXED daemon port must be a bindable, servable port. Manifest
-		// validation does not reject 0 or > 65535, and a failed TCP dial on such
-		// a value reads as "free" — so an out-of-range fixed port would falsely
-		// report ready while the daemon can never serve its client URL on it.
-		// Reject the range first (pool daemons never reach here: m.Daemons is
-		// empty for dynamic-pool manifests) (Codex #377 r15).
-		if d.Port < 1 || d.Port > 65535 {
-			add(ReadinessRequirement{Name: portName, OK: false,
-				Reason: fmt.Sprintf("fixed daemon port %d is outside the valid range 1..65535 — the daemon cannot serve its client URL", d.Port),
-				Fix:    "Set a valid fixed port (1..65535) for this daemon in the manifest."})
-			continue // out-of-range external port makes the native-http internal check meaningless
-		}
-		if preflightPortInUse(d.Port) && !portHeldByOurDaemonForPortArm(d.Port, m.Name, d.Name, false) {
-			add(ReadinessRequirement{Name: portName, OK: false,
-				Reason: "already in use by another process", Fix: "Free the port (close the other process) or change the daemon port in the manifest."})
+		if ok, reason := fixedPortStatus(d.Port, m.Name, d.Name, false); !ok {
+			add(ReadinessRequirement{Name: portName, OK: false, Reason: reason,
+				Fix: "Set a valid free fixed port (1..65535) for this daemon in the manifest."})
 		} else {
 			add(ReadinessRequirement{Name: portName, OK: true})
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
-			if preflightPortInUse(internal) && !portHeldByOurDaemonForPortArm(internal, m.Name, d.Name, true) {
-				add(ReadinessRequirement{Name: fmt.Sprintf("internal port %d (%s)", internal, d.Name), OK: false,
-					Reason: "native-http upstream port already in use", Fix: "Free the port or change the daemon port (internal = external + offset)."})
+			iname := fmt.Sprintf("internal port %d (%s)", internal, d.Name)
+			if ok, reason := fixedPortStatus(internal, m.Name, d.Name, true); !ok {
+				add(ReadinessRequirement{Name: iname, OK: false, Reason: reason,
+					Fix: "Free the port or change the daemon port (internal = external + offset, both must be 1..65535)."})
 			} else {
 				// Emit the green row too, so a healthy internal port is visible
 				// and the report's requirement set is symmetric (Codex pre-catch r9).
-				add(ReadinessRequirement{Name: fmt.Sprintf("internal port %d (%s)", internal, d.Name), OK: true})
+				add(ReadinessRequirement{Name: iname, OK: true})
 			}
 		}
 	}

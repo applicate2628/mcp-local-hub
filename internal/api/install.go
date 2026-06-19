@@ -21,6 +21,7 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 	"mcp-local-hub/internal/secrets"
@@ -1763,6 +1764,13 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	// arg, so it relies on its unconditional required_binaries:[gdb] above).
 	if m.Transport == config.TransportStdioBridge && len(m.BaseArgs) >= 2 && m.BaseArgs[0] == "lldb-bridge" {
 		addr := m.BaseArgs[1]
+		// The lldb-bridge subcommand rejects a malformed host:port BEFORE
+		// spawning (lldb.ParseHostPort — its OWN validator), so an invalid
+		// address would commit state then instantly exit. Reject it here too,
+		// matching readiness (Codex #377 r16).
+		if _, _, err := lldb.ParseHostPort(addr); err != nil {
+			return fmt.Errorf("lldb-bridge address %q is not a valid host:port (e.g. localhost:47000): %w", addr, err)
+		}
 		if !bridgeListenerUp(addr) && !binaryAvailable("lldb") {
 			_, lfix := LauncherGuidance("lldb")
 			return fmt.Errorf("lldb-bridge: no MCP listener on %s and no lldb binary found — %s, or start an lldb MCP listener on %s first", addr, lfix, addr)
@@ -1785,8 +1793,8 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			if daemonFilter != "" && c.daemon != "" && c.daemon != daemonFilter {
 				continue
 			}
-			if _, err := os.Stat(c.path); err != nil {
-				return fmt.Errorf("entry script %q for %q not found — install/clone the server so base_args[0] exists, then re-run install", filepath.Base(c.path), normalizeLauncher(m.Command))
+			if ok, reason := entryScriptStatus(c.path); !ok {
+				return fmt.Errorf("entry script %q for %q %s — install/clone the server so base_args[0] points at the file, then re-run install", filepath.Base(c.path), normalizeLauncher(m.Command), reason)
 			}
 		}
 	}
@@ -1809,6 +1817,15 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		if daemonFilter != "" && d.Name != daemonFilter {
 			continue
 		}
+		// Range-check first: an out-of-range fixed port (0 / > 65535) reads as
+		// "free" to a dial and would let install commit state for a daemon that
+		// can never serve its URL (Codex #377 r16). The dial-based in-use check
+		// below keeps Preflight's supervisor-intent-aware collision semantics
+		// (portHeldByOurDaemonForPortArm distinguishes our own running daemon from
+		// a foreign holder) — deliberately richer than readiness's simple probe.
+		if d.Port < 1 || d.Port > 65535 {
+			return fmt.Errorf("daemon %s/%s: port %d is outside the valid range 1..65535", m.Name, d.Name, d.Port)
+		}
 		if preflightPortInUse(d.Port) {
 			// Bug-bash A6 (#6) closure: distinguish "our own running
 			// daemon already holds this port" (idempotent reinstall;
@@ -1820,6 +1837,10 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
+			if internal < 1 || internal > 65535 {
+				return fmt.Errorf("daemon %s/%s native-http upstream port %d is outside the valid range 1..65535 (external=%d, internal=external+%d)",
+					m.Name, d.Name, internal, d.Port, config.NativeHTTPInternalPortOffset)
+			}
 			if preflightPortInUse(internal) {
 				if !portHeldByOurDaemonForPortArm(internal, m.Name, d.Name, true) {
 					return fmt.Errorf("internal port %d already in use (needed for native-http upstream of %s/%s; external=%d, internal=external+%d)",
