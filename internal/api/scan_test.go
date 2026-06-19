@@ -432,6 +432,9 @@ func TestScanCoversWave2Clients(t *testing.T) {
 	if got := memEntry.ClientPresence["zed"].Transport; got != "relay" {
 		t.Errorf("zed.Transport: got %q, want relay", got)
 	}
+	if got := memEntry.ClientPresence["zed"].RelayURL; got != "http://localhost:9123/mcp" {
+		t.Errorf("zed.RelayURL: got %q, want the relay --url target", got)
+	}
 	for _, client := range []string{"kiro", "windsurf", "cline", "kilocode", "opencode", "hermes", "openclaw"} {
 		if got := memEntry.ClientPresence[client].Transport; got != "http" {
 			t.Errorf("%s.Transport: got %q, want http", client, got)
@@ -537,6 +540,7 @@ func TestClassify(t *testing.T) {
 		// (security review) requires a loopback entry's URL port to match one
 		// of these; non-loopback cases can leave it nil.
 		daemonPorts []int
+		guiPort     int
 		want        string
 	}{
 		{
@@ -609,6 +613,30 @@ func TestClassify(t *testing.T) {
 			want:       "via-hub",
 		},
 		{
+			name:        "serena relay router on live GUI port -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe", RelayURL: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "via-hub",
+		},
+		{
+			name:        "serena relay router on stale GUI port -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe", RelayURL: "http://127.0.0.1:9124/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
+		},
+		{
+			name:        "serena relay without resolved URL -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
+		},
+		{
 			name:       "stdio + manifest -> can-migrate",
 			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "stdio", Endpoint: "npx"}}},
 			serverName: "serena",
@@ -669,10 +697,60 @@ func TestClassify(t *testing.T) {
 			serverName: "memory",
 			want:       "not-installed",
 		},
+		{
+			// SERENA ROUTER (serena-client-revert-on-manifest-sync read-side): a
+			// CLI scans do not know the live GUI port. In that mode, the serena
+			// router special-case stays port-agnostic so a router-shaped entry does
+			// not regress from r1 behavior.
+			name:        "serena /serena/mcp router + unknown GUI port -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     0,
+			want:        "via-hub",
+		},
+		{
+			name:        "serena /serena/mcp router on live GUI port -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "via-hub",
+		},
+		{
+			name:        "serena /serena/mcp router on stale GUI port -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9124/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
+		},
+		{
+			// STALE serena router at the LEGACY DAEMON port (9121): even though 9121
+			// IS serena's manifest daemon port, a router-shaped URL not on the live
+			// GUI port is a dead endpoint and must NOT be reclassified via-hub by the
+			// daemon-port fallback — the serena-shape case bypasses it (#379 r5).
+			name:        "serena /serena/mcp router on legacy daemon port (stale) -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9121/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
+		},
+		{
+			// The serena router special-case is NAME-GATED: a NON-serena server at a
+			// loopback /serena/mcp-shaped URL whose port does not match its daemon
+			// ports stays external (no cross-server leakage of the serena rule).
+			name:        "non-serena server at /serena/mcp-shaped loopback + wrong port -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "memory",
+			daemonPorts: []int{9200},
+			want:        "external",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classify(tc.entry, tc.serverName, manifests, tc.daemonPorts)
+			got := classify(tc.entry, tc.serverName, manifests, tc.daemonPorts, tc.guiPort)
 			if got != tc.want {
 				t.Fatalf("classify(%q) = %q, want %q", tc.serverName, got, tc.want)
 			}

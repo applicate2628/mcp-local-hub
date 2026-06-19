@@ -24,6 +24,13 @@ type MigrateOpts struct {
 	ClientsInclude []string
 	DryRun         bool
 	ScanOpts       ScanOpts
+	// GUIPort is the LIVE GUI/hub listener port, set by the GUI-side caller
+	// (realMigrator) so the dynamic-pool serena server is written with its
+	// canonical /serena/mcp router URL (SerenaRouterClientURL) rather than the
+	// legacy per-daemon 9121 URL from serena's still-legacy-shaped manifest. 0
+	// means "unknown" (CLI / non-GUI caller): serena then falls back to the
+	// generic per-daemon URL, since the router only exists while the GUI runs.
+	GUIPort int
 }
 
 // MigrateReport holds per-(server, client) outcomes for a migration run.
@@ -114,7 +121,7 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 			if !includedClient(binding.Client) {
 				continue
 			}
-			migrateOneBinding(report, allClients, m, server, binding, opts.DryRun, keepN)
+			migrateOneBinding(report, allClients, m, server, binding, opts.DryRun, keepN, opts.GUIPort)
 		}
 		// Servers-matrix fix: the matrix renders a toggleable cell for
 		// EVERY detected client, not only the manifest's static
@@ -160,7 +167,7 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 				Daemon:  primaryDaemon,
 				URLPath: "/mcp",
 			}
-			migrateOneBinding(report, allClients, m, server, synth, opts.DryRun, keepN)
+			migrateOneBinding(report, allClients, m, server, synth, opts.DryRun, keepN, opts.GUIPort)
 		}
 	}
 	return report, nil
@@ -185,6 +192,7 @@ func migrateOneBinding(
 	binding config.ClientBinding,
 	dryRun bool,
 	keepN int,
+	guiPort int,
 ) {
 	adapter := allClients[binding.Client]
 	if adapter == nil {
@@ -206,6 +214,16 @@ func migrateOneBinding(
 		urlPath = "/mcp"
 	}
 	url := clients.HubLoopbackURL(daemonPort, urlPath)
+	// serena is the dynamic-pool router-fronted server: its canonical client URL
+	// is the constant /serena/mcp router on the LIVE GUI port — NOT the legacy
+	// per-daemon 9121 URL the line above derives from serena's still-legacy-shaped
+	// manifest. Without this, checking serena's matrix cell wrote a dead 9121 entry
+	// (serena-client-revert-on-manifest-sync write-side). guiPort is 0 for a
+	// CLI/non-GUI caller (the router only exists while the GUI runs); the dedicated
+	// `mcphub migrate serena legacy-to-dynamic-pool` command owns that path.
+	if IsSerenaServer(server) && guiPort > 0 {
+		url = SerenaRouterClientURL(guiPort)
+	}
 
 	if dryRun {
 		report.Applied = append(report.Applied, AppliedMigration{
@@ -233,6 +251,9 @@ func migrateOneBinding(
 		RelayDaemon: binding.Daemon,
 	}
 	if clients.IsRelayStdio(binding.Client) {
+		if IsSerenaServer(server) && guiPort > 0 && url == SerenaRouterClientURL(guiPort) {
+			entry.RelayURL = url
+		}
 		// Relay-stdio adapters (antigravity, zed) spawn the
 		// stdio relay from an absolute mcphub path persisted
 		// into the client config, so AddEntry rejects an entry

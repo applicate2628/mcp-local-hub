@@ -66,6 +66,7 @@ type ScanOpts struct {
 
 	ManifestDir      string
 	WithProcessCount bool // populate ScanEntry.ProcessCount via wmic
+	GUIPort          int  // live GUI/hub listener port; zero means unknown/CLI
 }
 
 // legacyNamedConfigPathSet maps the back-compat named ScanOpts fields to
@@ -608,7 +609,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// loopback entry that backend classifies "external" must not render
 		// as a green via-hub cell).
 		e.DaemonPorts = manifestDaemonPorts(opts.ManifestDir, name)
-		e.Status = classify(e, name, manifestNames, e.DaemonPorts)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort)
 		// Managed is the explicit hub-routed flag — set true iff the
 		// classifier landed on "via-hub". Keeping it derived from Status (one
 		// owner) avoids a second hub-detection path drifting out of sync with
@@ -634,7 +635,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			ClientPresence: map[string]ClientEntry{},
 		}
 		e.DaemonPorts = manifestDaemonPorts(opts.ManifestDir, name)
-		e.Status = classify(e, name, manifestNames, e.DaemonPorts)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort)
 		e.Managed = e.Status == "via-hub" // always false here (empty presence), kept for symmetry with the main loop.
 		entries[name] = e
 	}
@@ -657,6 +658,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	out := &ScanResult{
 		At:                   time.Now(),
 		ClientConfigPresence: presence,
+		GUIPort:              opts.GUIPort,
 	}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)
@@ -998,12 +1000,24 @@ func shapeAntigravityEntry(raw map[string]any) ClientEntry {
 	if cmd, ok := raw["command"].(string); ok {
 		if args, ok := raw["args"].([]any); ok && len(args) > 0 {
 			if first, _ := args[0].(string); first == "relay" && isOurRelayBinary(cmd) {
-				return ClientEntry{Transport: "relay", Endpoint: cmd, Raw: raw}
+				return ClientEntry{Transport: "relay", Endpoint: cmd, RelayURL: relayURLFromArgs(args), Raw: raw}
 			}
 		}
 		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
 	}
 	return ClientEntry{Transport: "absent", Raw: raw}
+}
+
+func relayURLFromArgs(args []any) string {
+	for i := 0; i+1 < len(args); i++ {
+		flag, _ := args[i].(string)
+		if flag != "--url" {
+			continue
+		}
+		url, _ := args[i+1].(string)
+		return url
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -1404,7 +1418,7 @@ func loopbackPortMatchesDaemon(endpoint string, daemonPorts []int) bool {
 	return false
 }
 
-func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPorts []int) string {
+func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPorts []int, guiPort int) string {
 	if perSessionServers[name] {
 		return "per-session"
 	}
@@ -1436,9 +1450,27 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	hasRemoteExternal := false
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
-			if loopbackPortMatchesDaemon(c.Endpoint, daemonPorts) {
+			switch {
+			case IsSerenaServer(name) && IsLiveSerenaRouterURL(c.Endpoint, guiPort):
+				// serena's canonical client URL is the /serena/mcp router on the
+				// LIVE GUI port — recognize it as via-hub regardless of the
+				// manifest's legacy per-daemon port (9121). Without this, a
+				// correctly-routed serena entry parses its port (the GUI port) as
+				// not-a-daemon-port and is misclassified as external, so the matrix
+				// shows a connected serena as not-connected (serena-client-revert-
+				// on-manifest-sync read-side).
 				hasHub = true
-			} else {
+			case IsSerenaServer(name) && IsSerenaRouterURL(c.Endpoint):
+				// serena router SHAPE but NOT on the live GUI port → a STALE router
+				// URL (e.g. the GUI previously ran on 9121 and later moved). Classify
+				// it external HERE, BEFORE the daemon-port fallback below — otherwise
+				// loopbackPortMatchesDaemon would match serena's legacy 9121 manifest
+				// daemon and re-flag the dead router URL as via-hub, hiding it instead
+				// of letting Apply rewrite it to the live port (#379 r5).
+				hasRemoteExternal = true
+			case loopbackPortMatchesDaemon(c.Endpoint, daemonPorts):
+				hasHub = true
+			default:
 				// Loopback shape but wrong/absent port for this server's
 				// daemons (stale migration, or operator's own local server).
 				// Not hub-managed — classify as an external remote so it
@@ -1451,13 +1483,24 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 			hasRemoteExternal = true
 		}
 		if c.Transport == "relay" {
-			// Antigravity's hub-routed shape: the hub rewrites Antigravity
-			// bindings into a relay command (mcphub binary + args[0]=="relay").
-			// scan.go:310 flags this as Transport: "relay". Without this branch
-			// hub-routed Antigravity servers fall to "not-installed" and the
-			// Migration screen drops them, hiding a real demigrate candidate.
-			// (PR #4 Codex R1.)
-			hasHub = true
+			if IsSerenaServer(name) {
+				// Serena relay entries must target the LIVE /serena/mcp router.
+				// A stale or absent relay --url should remain re-migratable rather
+				// than looking hub-managed while the client dials a dead GUI port.
+				if IsLiveSerenaRouterURL(c.RelayURL, guiPort) {
+					hasHub = true
+				} else {
+					hasRemoteExternal = true
+				}
+			} else {
+				// Antigravity's hub-routed shape: the hub rewrites Antigravity
+				// bindings into a relay command (mcphub binary + args[0]=="relay").
+				// scan.go:310 flags this as Transport: "relay". Without this branch
+				// hub-routed Antigravity servers fall to "not-installed" and the
+				// Migration screen drops them, hiding a real demigrate candidate.
+				// (PR #4 Codex R1.)
+				hasHub = true
+			}
 		}
 		if c.Transport == "stdio" {
 			hasStdio = true

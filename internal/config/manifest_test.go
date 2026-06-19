@@ -866,6 +866,7 @@ func TestServerManifestValidate_DaemonTemplateInvalidPortPoolRange(t *testing.T)
 		{"zero start", &PortPool{Start: 0, End: 100}, "start>0"},
 		{"negative start", &PortPool{Start: -1, End: 100}, "start>0"},
 		{"end below start", &PortPool{Start: 9200, End: 9100}, "end>=start"},
+		{"end above tcp max", &PortPool{Start: 65535, End: 65536}, "end<=65535"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -983,6 +984,26 @@ func TestServerManifestValidate_RejectsAtPrefixLanguageName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "sentinel") {
 		t.Errorf("error must explain sentinel-row reservation; got %v", err)
+	}
+}
+
+func TestServerManifestValidate_LegacyWorkspacePortPoolRejectsEndAboveTCPMax(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "mcp-language-server",
+		Kind:      KindWorkspaceScoped,
+		Transport: TransportStdioBridge,
+		Command:   "mcp-language-server",
+		PortPool:  &PortPool{Start: 65535, End: 65536},
+		Languages: []LanguageSpec{
+			{Name: "go", Backend: "gopls-mcp", Transport: "stdio", LspCommand: "gopls"},
+		},
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected rejection of port_pool end above TCP port maximum; got nil")
+	}
+	if !strings.Contains(err.Error(), "end<=65535") {
+		t.Errorf("error must mention TCP maximum; got %v", err)
 	}
 }
 
