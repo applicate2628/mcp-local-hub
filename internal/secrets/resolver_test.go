@@ -143,3 +143,29 @@ func TestOpenVaultOptional_AbsentIsNilNil(t *testing.T) {
 		t.Errorf("absent vault must return nil vault; got %v", v)
 	}
 }
+
+func TestOpenVaultOptional_UnreadableIsError(t *testing.T) {
+	// The branch OpenVaultOptional exists for: a vault that is PRESENT but can
+	// no longer be decrypted/parsed must return an ERROR (fatal for a
+	// secret-using manifest), NOT be silently treated as absent → (nil,nil)
+	// (Codex #377 r5 / merge-gate P1). Without this distinction a corrupt vault
+	// would silently omit every secret.
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+	if err := InitVault(keyPath, vaultPath); err != nil {
+		t.Fatalf("InitVault: %v", err)
+	}
+	// Corrupt the vault file: it still EXISTS (os.Stat succeeds, so the
+	// absent-branch is NOT taken) but the ciphertext is now garbage.
+	if err := os.WriteFile(vaultPath, []byte("not a valid age ciphertext"), 0o600); err != nil {
+		t.Fatalf("corrupt vault: %v", err)
+	}
+	v, err := OpenVaultOptional(keyPath, vaultPath)
+	if err == nil {
+		t.Fatal("present-but-unreadable vault must return an error, not (nil,nil)")
+	}
+	if v != nil {
+		t.Errorf("unreadable vault must return nil vault; got %v", v)
+	}
+}

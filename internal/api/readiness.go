@@ -150,8 +150,13 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 				Name:     "launcher: " + disp,
 				OK:       false,
 				Optional: launcherOptional,
-				Reason:   fmt.Sprintf("%q not found on PATH", m.Command),
-				Fix:      fix,
+				// Basename only: m.Command is a free-form manifest field that a
+				// custom manifest could set to an absolute host path; the GUI
+				// renders Reason verbatim, so strip the directory (Codex #377
+				// merge-gate P3). No-op for the bare names (uvx/npx/...) every
+				// embedded manifest uses.
+				Reason: fmt.Sprintf("%q not found on PATH", filepath.Base(m.Command)),
+				Fix:    fix,
 			})
 		} else {
 			add(ReadinessRequirement{Name: "launcher: " + disp, OK: true})
@@ -162,7 +167,7 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 						Name:     "runtime: " + rdisp,
 						OK:       false,
 						Optional: launcherOptional,
-						Reason:   fmt.Sprintf("%q (needed by %s) not found on PATH", rt, m.Command),
+						Reason:   fmt.Sprintf("%q (needed by %s) not found on PATH", rt, filepath.Base(m.Command)),
 						Fix:      rfix,
 					})
 				} else {
@@ -299,7 +304,10 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		bdisp, bfix := LauncherGuidance(bin)
 		if !binaryFound(bin) {
 			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: false, Optional: optional,
-				Reason: fmt.Sprintf("%q not found on PATH", bin), Fix: bfix})
+				// Basename only: required_binaries entries are free-form and may
+				// be absolute; the GUI renders Reason verbatim (Codex #377
+				// merge-gate P3).
+				Reason: fmt.Sprintf("%q not found on PATH", filepath.Base(bin)), Fix: bfix})
 		} else {
 			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: true})
 		}

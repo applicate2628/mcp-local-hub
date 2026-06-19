@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -125,8 +126,17 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 				return err
 			}
 			unsetEnv := make([]string, 0, len(omittedSecrets))
-			for k := range omittedSecrets {
+			for k, ref := range omittedSecrets {
 				unsetEnv = append(unsetEnv, k)
+				// Operator-visible diagnostic PARITY with the global daemon
+				// path (daemonEnvWithOverlay): warn per skipped optional secret
+				// so a silently-unset key on the serena workspace daemon is not
+				// invisible (Codex #377 merge-gate P3 #1). NOTE: the serena path
+				// does not yet apply a per-daemon env overlay (tracked bug
+				// serena-proxy-ignores-env-overlay); when it does, this warning
+				// must become overlay-aware like daemonEnvWithOverlay.
+				fmt.Fprintf(os.Stderr, "mcphub %s daemon (workspace %s): env %q (%s) is not set — spawning without it; set it via `mcphub secrets` if this server needs it.\n",
+					serverFlag, wsKey, k, ref)
 			}
 
 			// Final child argv: the spec's fully-materialized ChildArgs

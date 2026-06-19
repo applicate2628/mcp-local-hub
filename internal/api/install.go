@@ -1796,6 +1796,19 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			return fmt.Errorf("manifest %s uses secret refs but the vault is unreadable: %w", m.Name, verr)
 		}
 	}
+	// `file:` env refs resolve against a local config map the daemon-launch
+	// path does NOT wire (the resolver's local map is nil), so a file: ref is
+	// fatal at spawn — ResolveMapBestEffort returns an error and the daemon
+	// never starts. Reject it at Preflight too so install does not "succeed"
+	// and then the daemon fail to start — the asymmetry the optional-secret
+	// model avoids. CheckServerReadiness flags file: refs as blocking for the
+	// same reason (Codex #377 merge-gate P3). The ref value is not echoed (it
+	// may carry a path-like key); only the env key name is named.
+	for k, v := range m.Env {
+		if strings.HasPrefix(v, "file:") {
+			return fmt.Errorf("manifest %s env[%s] uses a file: ref, which the daemon launch path cannot resolve (mcphub has no local config map); replace it with a secret: ref or a literal value", m.Name, k)
+		}
+	}
 	return nil
 }
 

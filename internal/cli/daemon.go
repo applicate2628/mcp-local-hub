@@ -363,17 +363,26 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 	if err != nil {
 		return nil, nil, err
 	}
-	unset := make([]string, 0, len(omitted))
-	for k, ref := range omitted {
-		unset = append(unset, k)
-		fmt.Fprintf(os.Stderr, "mcphub daemon %s/%s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
-			server, daemonName, k, ref)
-	}
 	overlayEnv, err := daemonOverlayEnv(server, daemonName)
 	if err != nil {
 		return nil, nil, err
 	}
-	return mergeDaemonEnvMaps(env, overlayEnv), unset, nil
+	merged := mergeDaemonEnvMaps(env, overlayEnv)
+	// Warn + UNSET only for optional secrets the per-daemon overlay did NOT
+	// supply. An omitted `secret:` ref whose key the overlay provides is NOT
+	// actually missing: warning "spawning without it" would be false, and
+	// adding it to UnsetEnv would be misleading (the merged env carries it).
+	// Compute the warning AFTER the overlay merge (Codex #377 merge-gate P3).
+	unset := make([]string, 0, len(omitted))
+	for k, ref := range omitted {
+		if _, ok := merged[k]; ok {
+			continue
+		}
+		unset = append(unset, k)
+		fmt.Fprintf(os.Stderr, "mcphub daemon %s/%s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
+			server, daemonName, k, ref)
+	}
+	return merged, unset, nil
 }
 
 func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {

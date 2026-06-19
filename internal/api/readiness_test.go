@@ -1,6 +1,8 @@
 package api
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -213,5 +215,76 @@ func TestCheckServerReadiness_MalformedRemotePlaceholderBlocks(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("malformed ${secret:} placeholder not surfaced via install-plan: %+v", rep.Requirements)
+	}
+}
+
+func TestCheckServerReadiness_RelativeScriptCheckedPerDaemonCwd(t *testing.T) {
+	// A node manifest with a RELATIVE base_args[0] and TWO daemons whose cwd
+	// differs: the script exists under daemon A's cwd but NOT under daemon B's.
+	// CheckServerReadiness must emit a per-daemon "script:" requirement for
+	// EACH daemon cwd (Codex #377 r10) — A's OK, B's not-OK — not a single
+	// check against m.Daemons[0] only. Without per-daemon resolution this test
+	// would see only one script requirement.
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dirA, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirA, "build", "index.js"), []byte("//"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &config.ServerManifest{
+		Name:     "demo",
+		Command:  "node",
+		BaseArgs: []string{"build/index.js"},
+		Daemons: []config.DaemonSpec{
+			{Name: "a", Cwd: dirA},
+			{Name: "b", Cwd: dirB},
+		},
+	}
+	rep := CheckServerReadiness(m)
+	var scriptCount int
+	var aOK, bSeen, bOK bool
+	for _, r := range rep.Requirements {
+		if !strings.HasPrefix(r.Name, "script:") {
+			continue
+		}
+		scriptCount++
+		if strings.Contains(r.Name, "(a)") {
+			aOK = r.OK
+		}
+		if strings.Contains(r.Name, "(b)") {
+			bSeen, bOK = true, r.OK
+		}
+	}
+	if scriptCount != 2 {
+		t.Fatalf("want 2 per-daemon script requirements (one per daemon cwd); got %d: %+v", scriptCount, rep.Requirements)
+	}
+	if !aOK {
+		t.Errorf("daemon a's script (present under its cwd) must be OK")
+	}
+	if !bSeen || bOK {
+		t.Errorf("daemon b's script (absent under its cwd) must be present-and-not-OK; seen=%v ok=%v", bSeen, bOK)
+	}
+}
+
+func TestCheckServerReadiness_ReasonsDoNotLeakAbsolutePaths(t *testing.T) {
+	// A manifest whose launcher is an ABSOLUTE host path that does not exist:
+	// the "not found on PATH" Reason must name only the basename, never the
+	// directory — the GUI renders Reason verbatim, so an absolute host path in
+	// it is an info leak (Codex #377 merge-gate P3). If the basename redaction
+	// were reverted to a raw %q of m.Command, the Reason would contain the temp
+	// dir and this test would fail.
+	dir := t.TempDir() // a concrete absolute host path
+	absCmd := filepath.Join(dir, "totally-absent-launcher-zzz")
+	m := &config.ServerManifest{Name: "demo", Command: absCmd}
+	rep := CheckServerReadiness(m)
+	for _, r := range rep.Requirements {
+		if r.OK {
+			continue
+		}
+		if strings.Contains(r.Reason, dir) {
+			t.Errorf("requirement %q Reason leaks the absolute host dir %q: %q", r.Name, dir, r.Reason)
+		}
 	}
 }
