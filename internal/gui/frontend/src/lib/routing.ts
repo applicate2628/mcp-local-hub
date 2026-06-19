@@ -229,7 +229,16 @@ export function perClientRouting(
         ? "via-hub"
         : "direct";
     } else if (transport === "relay") {
-      routing[client] = "via-hub";
+      if (serverName === "serena") {
+        const relayURL = entry?.relay_url ?? "";
+        const port = loopbackEntryPort(relayURL);
+        routing[client] =
+          isSerenaRouterURL(relayURL) && (guiPort <= 0 || port === guiPort)
+            ? "via-hub"
+            : "direct";
+      } else {
+        routing[client] = "via-hub";
+      }
     } else {
       routing[client] = "direct";
     }

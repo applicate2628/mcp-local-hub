@@ -160,6 +160,7 @@ export interface ScanEntry {
 export interface ClientPresence {
   transport?: "http" | "stdio" | "relay" | "absent" | string;
   endpoint?: string;
+  relay_url?: string;
   raw?: unknown;
 }
 

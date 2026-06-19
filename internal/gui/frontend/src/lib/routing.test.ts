@@ -153,6 +153,49 @@ describe("perClientRouting", () => {
     const r = perClientRouting({ "codex-cli": { transport: "relay" } });
     expect(r["codex-cli"]).toBe("via-hub");
   });
+  it("serena relay router is via-hub on the LIVE gui port", () => {
+    const r = perClientRouting(
+      {
+        antigravity: {
+          transport: "relay",
+          relay_url: "http://127.0.0.1:9125/serena/mcp",
+        },
+      },
+      {},
+      true,
+      "serena",
+      [9121],
+      9125,
+    );
+    expect(r.antigravity).toBe("via-hub");
+  });
+  it("serena relay router on a STALE port is direct", () => {
+    const r = perClientRouting(
+      {
+        antigravity: {
+          transport: "relay",
+          relay_url: "http://127.0.0.1:9124/serena/mcp",
+        },
+      },
+      {},
+      true,
+      "serena",
+      [9121],
+      9125,
+    );
+    expect(r.antigravity).toBe("direct");
+  });
+  it("serena relay without resolved relay_url is direct", () => {
+    const r = perClientRouting(
+      { antigravity: { transport: "relay" } },
+      {},
+      true,
+      "serena",
+      [9121],
+      9125,
+    );
+    expect(r.antigravity).toBe("direct");
+  });
   it("tags remote http as direct", () => {
     const r = perClientRouting({
       "gemini-cli": { transport: "http", endpoint: "https://example.com/mcp" },

@@ -361,8 +361,7 @@ func liveEntryMatchesManifestBinding(live *clients.MCPEntry, server string, bind
 	if urlPath == "" {
 		urlPath = "/mcp"
 	}
-	if IsSerenaServer(server) && (IsSerenaRouterURL(live.URL) ||
-		(IsSerenaRouterURL(live.RelayURL) && clients.IsMcphubBinary(live.RelayExePath))) {
+	if IsSerenaServer(server) && IsHubOwnedSerenaRouterEntry(live) {
 		return true, "serena dynamic-pool router entry"
 	}
 	// HTTP shape check. This is a RECOGNITION matcher (not a URL builder), so it

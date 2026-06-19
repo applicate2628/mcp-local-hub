@@ -79,17 +79,35 @@ func IsSerenaRouterURL(endpoint string) bool {
 	if err != nil {
 		return false
 	}
+	// IsHubHTTPURL is a string-prefix check, so a userinfo URL
+	// (http://127.0.0.1:9125@evil.example/serena/mcp) passes it while the PARSED
+	// host is evil.example. Reject userinfo and re-validate the parsed hostname is
+	// loopback so a remote URL cannot masquerade as the local router (#379 r4).
+	if u.User != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "::1", "localhost":
+	default:
+		return false
+	}
 	return u.Path == SerenaRouterURLPath
 }
 
-// IsSerenaRouterEntry reports whether a client entry is the serena /serena/mcp
-// router in EITHER wire shape: URL-native (entry.URL) or relay (entry.RelayURL,
-// the `relay --url <router>` form). Port-agnostic.
-func IsSerenaRouterEntry(e *clients.MCPEntry) bool {
+// IsHubOwnedSerenaRouterEntry reports whether a client entry is a HUB-OWNED serena
+// /serena/mcp router entry: the URL-native shape (only mcphub writes /serena/mcp),
+// OR the relay shape (entry.RelayURL) WHEN the relay command is the mcphub binary.
+// The relay binary guard stops uninstall/demigrate from removing a user-owned relay
+// that merely points its --url at a /serena/mcp endpoint (#379 r4). Port-agnostic
+// (cleanup removes a stale-port entry too).
+func IsHubOwnedSerenaRouterEntry(e *clients.MCPEntry) bool {
 	if e == nil {
 		return false
 	}
-	return IsSerenaRouterURL(e.URL) || IsSerenaRouterURL(e.RelayURL)
+	if IsSerenaRouterURL(e.URL) {
+		return true
+	}
+	return IsSerenaRouterURL(e.RelayURL) && clients.IsMcphubBinary(e.RelayExePath)
 }
 
 // IsLiveSerenaRouterURL reports whether endpoint is the /serena/mcp router on

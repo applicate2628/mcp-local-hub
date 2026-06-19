@@ -171,9 +171,10 @@ type ScanEntry struct {
 // ClientEntry captures the shape of how one MCP server is configured inside
 // one client config.
 type ClientEntry struct {
-	Transport string         `json:"transport"` // "http" | "stdio" | "relay" | "absent"
-	Endpoint  string         `json:"endpoint"`  // URL for http, command for stdio, etc.
-	Raw       map[string]any `json:"raw"`       // the original JSON/TOML fragment
+	Transport string         `json:"transport"`           // "http" | "stdio" | "relay" | "absent"
+	Endpoint  string         `json:"endpoint"`            // URL for http, command for stdio, etc.
+	RelayURL  string         `json:"relay_url,omitempty"` // resolved relay --url target, when present
+	Raw       map[string]any `json:"raw"`                 // the original JSON/TOML fragment
 }
 
 // ScanResult bundles a full scan with timestamp for caching / SSE.

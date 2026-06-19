@@ -432,6 +432,9 @@ func TestScanCoversWave2Clients(t *testing.T) {
 	if got := memEntry.ClientPresence["zed"].Transport; got != "relay" {
 		t.Errorf("zed.Transport: got %q, want relay", got)
 	}
+	if got := memEntry.ClientPresence["zed"].RelayURL; got != "http://localhost:9123/mcp" {
+		t.Errorf("zed.RelayURL: got %q, want the relay --url target", got)
+	}
 	for _, client := range []string{"kiro", "windsurf", "cline", "kilocode", "opencode", "hermes", "openclaw"} {
 		if got := memEntry.ClientPresence[client].Transport; got != "http" {
 			t.Errorf("%s.Transport: got %q, want http", client, got)
@@ -608,6 +611,30 @@ func TestClassify(t *testing.T) {
 			entry:      &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe"}}},
 			serverName: "memory",
 			want:       "via-hub",
+		},
+		{
+			name:        "serena relay router on live GUI port -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe", RelayURL: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "via-hub",
+		},
+		{
+			name:        "serena relay router on stale GUI port -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe", RelayURL: "http://127.0.0.1:9124/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
+		},
+		{
+			name:        "serena relay without resolved URL -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", Endpoint: "mcphub.exe"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
 		},
 		{
 			name:       "stdio + manifest -> can-migrate",

@@ -24,6 +24,7 @@ func TestIsSerenaRouterURL(t *testing.T) {
 		{"router URL on GUI port", "http://127.0.0.1:9125/serena/mcp", true},
 		{"router URL on a different port (port-agnostic)", "http://127.0.0.1:9130/serena/mcp", true},
 		{"localhost spelling", "http://localhost:9125/serena/mcp", true},
+		{"userinfo prefix spoof parses to remote host", "http://127.0.0.1:9125@evil.example/serena/mcp", false},
 		{"loopback but legacy /mcp path", "http://127.0.0.1:9121/mcp", false},
 		{"loopback but other path", "http://127.0.0.1:9125/clients/cursor/mcp", false},
 		{"non-loopback remote with serena path", "https://evil.example.com/serena/mcp", false},
@@ -38,17 +39,26 @@ func TestIsSerenaRouterURL(t *testing.T) {
 	}
 }
 
-func TestIsSerenaRouterEntryRecognizesURLAndRelayURLShapes(t *testing.T) {
-	if !IsSerenaRouterEntry(&clients.MCPEntry{URL: "http://127.0.0.1:9125/serena/mcp"}) {
+func TestIsHubOwnedSerenaRouterEntryRecognizesOwnedURLAndRelayURLShapes(t *testing.T) {
+	if !IsHubOwnedSerenaRouterEntry(&clients.MCPEntry{URL: "http://127.0.0.1:9125/serena/mcp"}) {
 		t.Fatal("URL-native serena router entry was not recognized")
 	}
-	if !IsSerenaRouterEntry(&clients.MCPEntry{RelayURL: "http://127.0.0.1:9125/serena/mcp"}) {
+	if !IsHubOwnedSerenaRouterEntry(&clients.MCPEntry{
+		RelayURL:     "http://127.0.0.1:9125/serena/mcp",
+		RelayExePath: `/usr/local/bin/mcphub`,
+	}) {
 		t.Fatal("relay-url serena router entry was not recognized")
 	}
-	if IsSerenaRouterEntry(&clients.MCPEntry{URL: "http://127.0.0.1:9121/mcp"}) {
+	if IsHubOwnedSerenaRouterEntry(&clients.MCPEntry{
+		RelayURL:     "http://127.0.0.1:9125/serena/mcp",
+		RelayExePath: `/usr/bin/other`,
+	}) {
+		t.Fatal("relay-url serena router entry with a non-mcphub binary was recognized")
+	}
+	if IsHubOwnedSerenaRouterEntry(&clients.MCPEntry{URL: "http://127.0.0.1:9121/mcp"}) {
 		t.Fatal("legacy per-daemon URL was recognized as the serena router")
 	}
-	if IsSerenaRouterEntry(nil) {
+	if IsHubOwnedSerenaRouterEntry(nil) {
 		t.Fatal("nil entry was recognized as the serena router")
 	}
 }
@@ -79,9 +89,12 @@ func TestIsHubOwnedEntry_SerenaRouter(t *testing.T) {
 	if !isHubOwnedEntry(routerEntry, "serena", "unified", legacyExpected) {
 		t.Error("serena router entry not recognized as hub-owned (uninstall would orphan it)")
 	}
-	relayRouterEntry := &clients.MCPEntry{Name: "serena", RelayURL: "http://127.0.0.1:9130/serena/mcp"}
+	relayRouterEntry := &clients.MCPEntry{Name: "serena", RelayURL: "http://127.0.0.1:9130/serena/mcp", RelayExePath: `/usr/local/bin/mcphub`}
 	if !isHubOwnedEntry(relayRouterEntry, "serena", "unified", legacyExpected) {
 		t.Error("serena relay-url router entry not recognized as hub-owned (uninstall would orphan it)")
+	}
+	if isHubOwnedEntry(&clients.MCPEntry{Name: "serena", RelayURL: "http://127.0.0.1:9130/serena/mcp", RelayExePath: `/usr/bin/other`}, "serena", "unified", legacyExpected) {
+		t.Error("user-owned serena relay-url router entry with non-mcphub binary recognized as hub-owned")
 	}
 	// Name-gated: the same router-shaped URL under a non-serena server is NOT
 	// auto-recognized (it must match expectedURL the normal way).

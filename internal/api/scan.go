@@ -1000,12 +1000,24 @@ func shapeAntigravityEntry(raw map[string]any) ClientEntry {
 	if cmd, ok := raw["command"].(string); ok {
 		if args, ok := raw["args"].([]any); ok && len(args) > 0 {
 			if first, _ := args[0].(string); first == "relay" && isOurRelayBinary(cmd) {
-				return ClientEntry{Transport: "relay", Endpoint: cmd, Raw: raw}
+				return ClientEntry{Transport: "relay", Endpoint: cmd, RelayURL: relayURLFromArgs(args), Raw: raw}
 			}
 		}
 		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
 	}
 	return ClientEntry{Transport: "absent", Raw: raw}
+}
+
+func relayURLFromArgs(args []any) string {
+	for i := 0; i+1 < len(args); i++ {
+		flag, _ := args[i].(string)
+		if flag != "--url" {
+			continue
+		}
+		url, _ := args[i+1].(string)
+		return url
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -1463,13 +1475,24 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 			hasRemoteExternal = true
 		}
 		if c.Transport == "relay" {
-			// Antigravity's hub-routed shape: the hub rewrites Antigravity
-			// bindings into a relay command (mcphub binary + args[0]=="relay").
-			// scan.go:310 flags this as Transport: "relay". Without this branch
-			// hub-routed Antigravity servers fall to "not-installed" and the
-			// Migration screen drops them, hiding a real demigrate candidate.
-			// (PR #4 Codex R1.)
-			hasHub = true
+			if IsSerenaServer(name) {
+				// Serena relay entries must target the LIVE /serena/mcp router.
+				// A stale or absent relay --url should remain re-migratable rather
+				// than looking hub-managed while the client dials a dead GUI port.
+				if IsLiveSerenaRouterURL(c.RelayURL, guiPort) {
+					hasHub = true
+				} else {
+					hasRemoteExternal = true
+				}
+			} else {
+				// Antigravity's hub-routed shape: the hub rewrites Antigravity
+				// bindings into a relay command (mcphub binary + args[0]=="relay").
+				// scan.go:310 flags this as Transport: "relay". Without this branch
+				// hub-routed Antigravity servers fall to "not-installed" and the
+				// Migration screen drops them, hiding a real demigrate candidate.
+				// (PR #4 Codex R1.)
+				hasHub = true
+			}
 		}
 		if c.Transport == "stdio" {
 			hasStdio = true

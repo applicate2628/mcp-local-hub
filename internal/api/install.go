@@ -1236,7 +1236,7 @@ func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon, expectedURL string
 	// router URL PORT-AGNOSTICALLY (the GUI re-binds its port each start) so
 	// uninstall removes serena's client entry instead of refusing it as
 	// "not hub-managed" (serena-client-revert-on-manifest-sync uninstall-side).
-	if IsSerenaServer(server) && IsSerenaRouterEntry(entry) {
+	if IsSerenaServer(server) && IsHubOwnedSerenaRouterEntry(entry) {
 		return true
 	}
 	return false
