@@ -1460,6 +1460,14 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 				// shows a connected serena as not-connected (serena-client-revert-
 				// on-manifest-sync read-side).
 				hasHub = true
+			case IsSerenaServer(name) && IsSerenaRouterURL(c.Endpoint):
+				// serena router SHAPE but NOT on the live GUI port → a STALE router
+				// URL (e.g. the GUI previously ran on 9121 and later moved). Classify
+				// it external HERE, BEFORE the daemon-port fallback below — otherwise
+				// loopbackPortMatchesDaemon would match serena's legacy 9121 manifest
+				// daemon and re-flag the dead router URL as via-hub, hiding it instead
+				// of letting Apply rewrite it to the live port (#379 r5).
+				hasRemoteExternal = true
 			case loopbackPortMatchesDaemon(c.Endpoint, daemonPorts):
 				hasHub = true
 			default:

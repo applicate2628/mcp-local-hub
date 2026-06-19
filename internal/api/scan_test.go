@@ -726,6 +726,18 @@ func TestClassify(t *testing.T) {
 			want:        "external",
 		},
 		{
+			// STALE serena router at the LEGACY DAEMON port (9121): even though 9121
+			// IS serena's manifest daemon port, a router-shaped URL not on the live
+			// GUI port is a dead endpoint and must NOT be reclassified via-hub by the
+			// daemon-port fallback — the serena-shape case bypasses it (#379 r5).
+			name:        "serena /serena/mcp router on legacy daemon port (stale) -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9121/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
+		},
+		{
 			// The serena router special-case is NAME-GATED: a NON-serena server at a
 			// loopback /serena/mcp-shaped URL whose port does not match its daemon
 			// ports stays external (no cross-server leakage of the serena rule).
