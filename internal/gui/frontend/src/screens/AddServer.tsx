@@ -1044,6 +1044,7 @@ export function AddServerScreen(props: {
                 onInlineSecretChange={(key, value) =>
                   setInlineSecrets((prev) => ({ ...prev, [key]: value }))
                 }
+                readOnly={readOnly}
               />
             </AccordionSection>
           )}

@@ -24,6 +24,12 @@ export interface ReadinessPanelProps {
   // install; the parent writes these to the vault before install.
   inlineSecrets: Record<string, string>;
   onInlineSecretChange: (key: string, value: string) => void;
+  // readOnly suppresses the inline secret inputs when the manifest cannot be
+  // saved from this screen (an edit forced read-only by hasNestedUnknown). Save /
+  // Save & Install are disabled there, so an inline value could never be
+  // persisted — offering an editable field would only invite the operator to type
+  // a secret that is then silently discarded on navigation (Codex #378 r6).
+  readOnly?: boolean;
 }
 
 // ReadinessPanel renders the install-readiness report as actionable rows so the
@@ -32,7 +38,7 @@ export interface ReadinessPanelProps {
 // an INLINE field to set the value right here at install (epic install-and-it-
 // works, area 1).
 export function ReadinessPanel(props: ReadinessPanelProps) {
-  const { report, loading, error, inlineSecrets, onInlineSecretChange } = props;
+  const { report, loading, error, inlineSecrets, onInlineSecretChange, readOnly } = props;
 
   if (loading && !report) {
     return (
@@ -86,7 +92,8 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
             !req.ok &&
             SECRET_NAME_RE.test(key) &&
             !isReservedName(key) &&
-            !vaultBlocked;
+            !vaultBlocked &&
+            !readOnly;
           const cls = req.ok
             ? "readiness-row-ok"
             : req.optional
