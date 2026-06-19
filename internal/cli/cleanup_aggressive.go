@@ -1,11 +1,8 @@
 package cli
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -116,7 +113,7 @@ See also: cleanup (safe sweep), stop, status.`,
 				return nil
 			}
 
-			computedToken := aggressiveConfirmToken(candidates)
+			computedToken := api.AggressiveConfirmToken(candidates)
 
 			if !killMode {
 				printAggressiveCandidates(cmd, candidates)
@@ -192,22 +189,10 @@ func printAggressiveCandidates(cmd *cobra.Command, candidates []api.OrphanProces
 		len(candidates), float64(totalRAM)/(1024*1024))
 }
 
-// aggressiveConfirmToken derives a deterministic confirmation token
-// bound to the candidate snapshot. The token is the first 16 hex chars
-// of SHA-256 over the SORTED (PID, exe-basename, match-source) tuples.
-// Two preview runs over the same candidate set produce the same token;
-// any add/remove/identity-change produces a different token, so a stale
-// --confirm-aggressive-token is rejected by the recompute-and-compare
-// in the kill path.
-func aggressiveConfirmToken(candidates []api.OrphanProcess) string {
-	lines := make([]string, 0, len(candidates))
-	for _, o := range candidates {
-		lines = append(lines, fmt.Sprintf("%d|%s|%s", o.PID, o.CmdlineDisplay, o.MatchSource))
-	}
-	sort.Strings(lines)
-	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
-	return hex.EncodeToString(sum[:])[:16]
-}
+// The confirmation-token derivation lives in the api package
+// (api.AggressiveConfirmToken) as the SINGLE OWNER of the preview-token
+// contract shared by the CLI and the GUI apply path. The local copy was
+// removed so the two surfaces can never drift.
 
 // emitAggressiveCleanupAuditEvent writes the `aggressive-cleanup-executed`
 // info event to supervisor-events.log (best-effort; a nil log or emit

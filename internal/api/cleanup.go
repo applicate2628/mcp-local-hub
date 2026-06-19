@@ -2,6 +2,8 @@ package api
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -396,6 +399,27 @@ var aggressiveDenyClasses = []string{
 // the list (single owner).
 func AggressiveDenyClasses() []string {
 	return slices.Clone(aggressiveDenyClasses)
+}
+
+// AggressiveConfirmToken derives a deterministic confirmation token bound
+// to the candidate snapshot. The token is the first 16 hex chars of
+// SHA-256 over the SORTED (PID, exe-basename, match-source) tuples. Two
+// runs over the same candidate set produce the same token; any
+// add/remove/identity-change produces a different token, so a stale token
+// is rejected by recompute-and-compare in the kill path.
+//
+// This is the SINGLE OWNER of the preview-token contract. Both the CLI
+// (`mcphub cleanup aggressive` --confirm-aggressive-token) and the GUI
+// (POST /api/cleanup/aggressive token field) compute and compare against
+// it, so the token semantics cannot drift between the two surfaces.
+func AggressiveConfirmToken(candidates []OrphanProcess) string {
+	lines := make([]string, 0, len(candidates))
+	for _, o := range candidates {
+		lines = append(lines, fmt.Sprintf("%d|%s|%s", o.PID, o.CmdlineDisplay, o.MatchSource))
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 // errAggressiveScopeRequired is returned by AggressiveCleanup when

@@ -40,16 +40,20 @@ function stripKnownPrefix(value: string): string {
 // applyKind rewrites a value to the given selectable kind, preserving the
 // bare key across the switch. Literal drops every prefix; secret/env
 // re-prefix the stripped key.
+//
+// Blank-value guard (bot #373 R2 Finding 3): when the stripped value is
+// empty, switching to secret/env must NOT write a bare prefix
+// (`secret:` / `$`). Both pass the daemon's selector but resolve to a
+// missing-key / empty-var-name ref that fails at spawn time. The value
+// stays blank until the operator types a key; the prefix applies only
+// then. The kind can still be visually selected — only the written value
+// is held back.
 function applyKind(value: string, kind: SelectableKind): string {
   const bare = stripKnownPrefix(value);
-  switch (kind) {
-    case "literal":
-      return bare;
-    case "secret":
-      return SECRET_PREFIX + bare;
-    case "env":
-      return ENV_PREFIX + bare;
-  }
+  if (kind === "literal") return bare;
+  // secret / env: no bare prefix on an empty key.
+  if (bare === "") return "";
+  return (kind === "secret" ? SECRET_PREFIX : ENV_PREFIX) + bare;
 }
 
 // selectorKindFor maps a value's parsed RefKind onto the offered set.

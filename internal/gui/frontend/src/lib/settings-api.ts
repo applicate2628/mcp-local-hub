@@ -198,6 +198,23 @@ export type CleanupOrphansResponse = {
   skipped: number;
 };
 
+// AggressiveCleanupResponse extends the orphan response with the confirm
+// `token` (bot #373 R2 Finding 1). The dry-run carries a token bound to
+// the previewed candidate set; the apply replays it. A `code` field is
+// present ONLY on the 409 token-mismatch body
+// (CLEANUP_AGGRESSIVE_TOKEN_MISMATCH), where `orphans` is the fresh
+// candidate set and `token` is the new token over it.
+export type AggressiveCleanupResponse = CleanupOrphansResponse & {
+  token?: string;
+  code?: string;
+};
+
+// CLEANUP_AGGRESSIVE_TOKEN_MISMATCH is the stable code the backend returns
+// in the 409 body when the candidate set drifted between Preview and the
+// apply (the previewed token no longer matches the freshly-recomputed
+// set). The GUI keys its "re-Preview" reset on this exact string.
+export const CLEANUP_AGGRESSIVE_TOKEN_MISMATCH = "CLEANUP_AGGRESSIVE_TOKEN_MISMATCH";
+
 export type CleanupLogWatchersResponse = {
   watchers: LogWatcher[];
   killed: number;
@@ -243,17 +260,32 @@ export type AggressiveCleanupScope =
 // touch. apply=false previews (dry-run); apply=true kills. includeClasses
 // opts default-excluded dangerous classes (cmd/conhost/pwsh/powershell/
 // chrome) back into the kill set. Returns the same shape as
-// cleanupOrphans; the candidates carry match_source explaining inclusion.
+// cleanupOrphans plus a confirm `token`; the candidates carry match_source
+// explaining inclusion.
+//
+// Token contract (bot #373 R2 Finding 1): the dry-run response carries a
+// `token` bound to the previewed candidate set. The apply MUST replay
+// that token; the backend recomputes the CURRENT candidate set and refuses
+// with HTTP 409 + code CLEANUP_AGGRESSIVE_TOKEN_MISMATCH (fresh candidates
+// + new token in the body) if the set drifted since the preview. An empty
+// token on apply is a 400. jsonOrThrow throws on a non-2xx response with
+// `err.status` + `err.body` attached, so the caller inspects `err.status
+// === 409` / `err.body` to surface the drift and require a fresh Preview.
 export async function cleanupAggressive(
   apply: boolean,
   scope: AggressiveCleanupScope,
   includeClasses: string[] = [],
-): Promise<CleanupOrphansResponse> {
+  token?: string,
+): Promise<AggressiveCleanupResponse> {
   const body: Record<string, unknown> = { apply, include_classes: includeClasses };
   if (scope.kind === "client") {
     body.client = scope.client;
   } else {
     body.root_pid = scope.rootPid;
+  }
+  // Only attach the token on apply — the dry-run ignores it server-side.
+  if (apply && token !== undefined) {
+    body.token = token;
   }
   const res = await fetch("/api/cleanup/aggressive", {
     method: "POST",

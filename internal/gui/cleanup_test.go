@@ -464,22 +464,43 @@ func TestCleanupAggressiveHandler_DryRun_OK(t *testing.T) {
 	}
 }
 
+// aggressiveCandidatesFor is the fixed candidate set used by the
+// token-contract tests below. The fake returns it for both the recompute
+// dry-run and the kill so the apply token matches when it is computed over
+// this exact set.
+func aggressiveCandidatesFor() []api.OrphanProcess {
+	return []api.OrphanProcess{
+		{PID: 11, CmdlineDisplay: "python.exe", MatchSource: "root-pid 999"},
+		{PID: 22, CmdlineDisplay: "node.exe", MatchSource: "root-pid 999", KillErr: "access denied"},
+	}
+}
+
 // TestCleanupAggressiveHandler_Apply_OK posts apply=true with a --root-pid
-// scope + an opted-in danger class, and asserts the seam ran with
-// DryRun=false (kill mode) and the include-class passed through.
+// scope + an opted-in danger class AND a matching confirm token, and
+// asserts the seam ran a recompute dry-run THEN a DryRun=false kill (bot
+// #373 R2 Finding 1 — the apply path now recomputes the candidate set and
+// validates the token before killing).
 func TestCleanupAggressiveHandler_Apply_OK(t *testing.T) {
-	gotOpts := api.CleanupOpts{}
+	var dryRunCalls, killCalls int
+	var killOpts api.CleanupOpts
 	s := newCleanupTestServer(t, fakeCleanupAPI{
 		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
-			gotOpts = opts
-			return []api.OrphanProcess{
-				{PID: 11, CmdlineDisplay: "python.exe", MatchSource: "root-pid 999"},
-				{PID: 22, CmdlineDisplay: "node.exe", MatchSource: "root-pid 999", KillErr: "access denied"},
-			}, nil
+			if opts.DryRun {
+				dryRunCalls++
+			} else {
+				killCalls++
+				killOpts = opts
+			}
+			return aggressiveCandidatesFor(), nil
 		},
 	})
 
-	body := strings.NewReader(`{"apply": true, "root_pid": 999, "include_classes": ["chrome"]}`)
+	// The matching token is computed over the same candidate set the fake
+	// returns for the apply-path recompute dry-run (single owner:
+	// api.AggressiveConfirmToken).
+	token := api.AggressiveConfirmToken(aggressiveCandidatesFor())
+
+	body := strings.NewReader(`{"apply": true, "root_pid": 999, "include_classes": ["chrome"], "token": "` + token + `"}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
@@ -489,14 +510,21 @@ func TestCleanupAggressiveHandler_Apply_OK(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
-	if gotOpts.DryRun {
-		t.Errorf("CleanupOpts.DryRun = true, want false (apply=true → kill mode)")
+	// One recompute dry-run + one kill.
+	if dryRunCalls != 1 {
+		t.Errorf("dry-run recompute calls = %d, want 1", dryRunCalls)
 	}
-	if gotOpts.RootPID != 999 {
-		t.Errorf("CleanupOpts.RootPID = %d, want 999", gotOpts.RootPID)
+	if killCalls != 1 {
+		t.Errorf("kill calls = %d, want 1", killCalls)
 	}
-	if len(gotOpts.IncludeClasses) != 1 || gotOpts.IncludeClasses[0] != "chrome" {
-		t.Errorf("CleanupOpts.IncludeClasses = %v, want [chrome]", gotOpts.IncludeClasses)
+	if killOpts.DryRun {
+		t.Errorf("kill CleanupOpts.DryRun = true, want false (apply=true → kill mode)")
+	}
+	if killOpts.RootPID != 999 {
+		t.Errorf("CleanupOpts.RootPID = %d, want 999", killOpts.RootPID)
+	}
+	if len(killOpts.IncludeClasses) != 1 || killOpts.IncludeClasses[0] != "chrome" {
+		t.Errorf("CleanupOpts.IncludeClasses = %v, want [chrome]", killOpts.IncludeClasses)
 	}
 
 	var got struct {
@@ -511,6 +539,122 @@ func TestCleanupAggressiveHandler_Apply_OK(t *testing.T) {
 	}
 	if got.Skipped != 1 {
 		t.Errorf("skipped = %d, want 1 (the access-denied row)", got.Skipped)
+	}
+}
+
+// TestCleanupAggressiveHandler_DryRun_ReturnsToken verifies the dry-run
+// response carries a `token` bound to the returned candidate set so the
+// GUI can replay it on apply (bot #373 R2 Finding 1).
+func TestCleanupAggressiveHandler_DryRun_ReturnsToken(t *testing.T) {
+	want := aggressiveCandidatesFor()
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			return want, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "root_pid": 999}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Orphans []api.OrphanProcess `json:"orphans"`
+		Token   string              `json:"token"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rr.Body.String())
+	}
+	if got.Token == "" {
+		t.Fatalf("dry-run response must carry a non-empty token; body=%s", rr.Body.String())
+	}
+	if want := api.AggressiveConfirmToken(want); got.Token != want {
+		t.Errorf("token = %q, want %q (bound to the candidate set)", got.Token, want)
+	}
+}
+
+// TestCleanupAggressiveHandler_Apply_EmptyToken_400 verifies apply=true
+// with no token is rejected 400 (the kill seam must NOT run).
+func TestCleanupAggressiveHandler_Apply_EmptyToken_400(t *testing.T) {
+	killed := false
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			if !opts.DryRun {
+				killed = true
+			}
+			return aggressiveCandidatesFor(), nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true, "root_pid": 999}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if killed {
+		t.Errorf("kill must NOT run when the apply token is empty")
+	}
+}
+
+// TestCleanupAggressiveHandler_Apply_StaleToken_409 verifies that a token
+// that no longer matches the freshly-recomputed candidate set yields 409 +
+// the fresh candidates + a new token, and the kill seam never runs (bot
+// #373 R2 Finding 1 — the candidate set drifted between Preview and apply).
+func TestCleanupAggressiveHandler_Apply_StaleToken_409(t *testing.T) {
+	killed := false
+	fresh := aggressiveCandidatesFor()
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		AggressiveCleanupFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			if !opts.DryRun {
+				killed = true
+			}
+			return fresh, nil
+		},
+	})
+
+	// A token that does NOT match the fresh set (the candidate set changed
+	// since the operator previewed it).
+	body := strings.NewReader(`{"apply": true, "root_pid": 999, "token": "deadbeefdeadbeef"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/aggressive", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	if killed {
+		t.Errorf("kill must NOT run on a token mismatch")
+	}
+	var got struct {
+		Orphans []api.OrphanProcess `json:"orphans"`
+		Token   string              `json:"token"`
+		Code    string              `json:"code"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rr.Body.String())
+	}
+	if got.Code != "CLEANUP_AGGRESSIVE_TOKEN_MISMATCH" {
+		t.Errorf("code = %q, want CLEANUP_AGGRESSIVE_TOKEN_MISMATCH", got.Code)
+	}
+	// The 409 body must carry the FRESH candidate set + a NEW token over it
+	// so the GUI can re-render and force a fresh Preview.
+	if len(got.Orphans) != len(fresh) {
+		t.Errorf("409 body orphans len = %d, want %d (fresh set)", len(got.Orphans), len(fresh))
+	}
+	if want := api.AggressiveConfirmToken(fresh); got.Token != want {
+		t.Errorf("409 body token = %q, want fresh token %q", got.Token, want)
 	}
 }
 

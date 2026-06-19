@@ -1085,4 +1085,131 @@ describe("SectionMaintenance — aggressive cleanup card", () => {
       expect(status?.textContent).toMatch(/Windows only/);
     });
   });
+
+  // --- bot #373 R2 Finding 1: preview-token contract ----------------------
+
+  it("captures the dry-run token and replays it on apply (preview-token contract)", async () => {
+    const spy = vi.spyOn(api, "cleanupAggressive").mockImplementation(async (apply) => ({
+      orphans: [
+        { pid: 7777, parent_pid: 1, server: "", cmdline_display: "node.exe", age_sec: 300, ram_bytes: 50 * 1024 * 1024, match_source: "codex" },
+      ],
+      killed: apply ? 1 : 0,
+      skipped: 0,
+      // The dry-run carries the token; the apply call must echo it back.
+      token: apply ? undefined : "abc123def4567890",
+    }));
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="aggressive-cleanup"]')!;
+
+    fireEvent.click(card.querySelector('[data-testid="aggressive-preview-button"]')!);
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelector('[data-testid="aggressive-clean-button"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeTruthy());
+    clickConfirmModal(container as HTMLElement);
+
+    await waitFor(() => expect(spy.mock.calls.some((c) => c[0] === true)).toBe(true));
+    // The apply call (4th positional arg) must carry the dry-run's token.
+    const applyCall = spy.mock.calls.find((c) => c[0] === true)!;
+    expect(applyCall[3]).toBe("abc123def4567890");
+  });
+
+  it("on a 409 token-mismatch: shows a re-Preview notice, kills nothing, renders the FRESH candidate set", async () => {
+    const freshCandidate = {
+      pid: 8888, parent_pid: 1, server: "", cmdline_display: "python.exe",
+      age_sec: 400, ram_bytes: 30 * 1024 * 1024, match_source: "codex",
+    };
+    const spy = vi.spyOn(api, "cleanupAggressive").mockImplementation(async (apply) => {
+      if (apply) {
+        // Simulate jsonOrThrow's thrown error for a 409 body.
+        const err: any = new Error("conflict");
+        err.status = 409;
+        err.body = {
+          orphans: [freshCandidate],
+          killed: 0,
+          skipped: 0,
+          token: "newtoken00000000",
+          code: api.CLEANUP_AGGRESSIVE_TOKEN_MISMATCH,
+        };
+        throw err;
+      }
+      return {
+        orphans: [
+          { pid: 7777, parent_pid: 1, server: "", cmdline_display: "node.exe", age_sec: 300, ram_bytes: 50 * 1024 * 1024, match_source: "codex" },
+        ],
+        killed: 0,
+        skipped: 0,
+        token: "oldtoken00000000",
+      };
+    });
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="aggressive-cleanup"]')!;
+
+    fireEvent.click(card.querySelector('[data-testid="aggressive-preview-button"]')!);
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelector('[data-testid="aggressive-clean-button"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeTruthy());
+    clickConfirmModal(container as HTMLElement);
+
+    // The mismatch notice appears...
+    await waitFor(() =>
+      expect(card.querySelector('[data-testid="aggressive-token-mismatch-notice"]')?.textContent).toMatch(/changed since Preview/),
+    );
+    // ...the apply was attempted exactly once and no successful kill happened
+    // (the 409 threw before any "applied" state)...
+    expect(spy.mock.calls.filter((c) => c[0] === true).length).toBe(1);
+    expect(card.querySelector(".maintenance-status")?.textContent ?? "").not.toMatch(/Done\. Killed/);
+    // ...and the FRESH candidate set (python.exe, PID 8888) is now rendered,
+    // replacing the previewed one (node.exe, PID 7777).
+    await waitFor(() => {
+      const cmd = card.querySelector("td.maintenance-cmd");
+      expect(cmd?.textContent).toBe("python.exe");
+    });
+  });
+
+  // --- bot #373 R2 Finding 2: discard in-flight (stale) previews ----------
+
+  it("discards an in-flight preview whose scope changed before it resolved (no stale table)", async () => {
+    // The first (codex) preview resolves SLOWLY; the scope is switched to
+    // claude while it is pending. When the slow codex response finally
+    // lands, the previewGen has advanced (invalidatePreview on scope change)
+    // so the stale candidates must NOT publish.
+    let resolveSlow: ((v: any) => void) | null = null;
+    const spy = vi.spyOn(api, "cleanupAggressive").mockImplementation((_apply, scope) => {
+      if (scope.kind === "client" && scope.client === "codex") {
+        return new Promise((resolve) => { resolveSlow = resolve; });
+      }
+      // claude / anything else resolves immediately with empty.
+      return Promise.resolve({ orphans: [], killed: 0, skipped: 0, token: "t" });
+    });
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="aggressive-cleanup"]')!;
+
+    // Launch the slow codex preview.
+    fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "codex" } });
+    fireEvent.click(card.querySelector('[data-testid="aggressive-preview-button"]')!);
+    await waitFor(() => expect(resolveSlow).not.toBeNull());
+
+    // Switch scope to claude WHILE the codex preview is still in flight —
+    // this invalidates the preview (bumps previewGen).
+    fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "claude" } });
+
+    // Now resolve the STALE codex preview with candidates for the OLD scope.
+    resolveSlow!({
+      orphans: [
+        { pid: 7777, parent_pid: 1, server: "", cmdline_display: "node.exe", age_sec: 300, ram_bytes: 50 * 1024 * 1024, match_source: "codex" },
+      ],
+      killed: 0,
+      skipped: 0,
+      token: "stale",
+    });
+
+    // The stale response must be discarded: no candidate table, no Clean
+    // button — the card stays idle until a fresh Preview for claude.
+    await waitFor(() => {
+      // give the resolved promise a tick to (not) publish
+      expect(card.querySelector('[data-testid="aggressive-clean-button"]')).toBeFalsy();
+    });
+    expect(card.querySelector("td.maintenance-cmd")).toBeFalsy();
+    expect(spy).toHaveBeenCalled();
+  });
 });

@@ -887,6 +887,45 @@ describe("SecretPicker — prefix-kind selector (Literal | Secret | Env $)", () 
     // The value is left intact (file: is a legacy hand-typed form).
     expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("file:somekey");
   });
+
+  // bot #373 R2 Finding 3: a BLANK value switched to Secret/Env must NOT
+  // write a bare prefix (`secret:` / `$`). Both pass the selector but
+  // resolve to a missing-key / empty-var-name ref that fails at daemon
+  // start. The value stays "" until the operator types a key.
+  it("switching a BLANK value to Secret keeps it blank — no bare 'secret:' prefix", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-secret"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+  });
+
+  it("switching a BLANK value to Env keeps it blank — no bare '$' prefix", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState("");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+  });
+
+  it("an all-prefix value (only 'secret:') switched to Env stays blank — the bare key is empty", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      // `secret:` with no key is itself a broken ref; switching kind must
+      // not carry the empty key across as a bare `$`.
+      const [v, setV] = useState("secret:");
+      return <SecretPicker value={v} onChange={setV} envKey="K" snapshot={snapshotOk()} onRequestCreate={vi.fn()} />;
+    }
+    render(<Harness />);
+    await user.click(screen.getByTestId("secret-picker-kind-env"));
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("");
+  });
 });
 
 describe("SecretPicker — [AV] 'Available secrets' header shown for literal/present", () => {

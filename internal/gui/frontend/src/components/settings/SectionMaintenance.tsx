@@ -11,11 +11,12 @@
 // + Server) on the confirm screen so the operator can sanity-check
 // before clicking Clean.
 
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import {
   cleanupOrphans,
   cleanupLogWatchers,
   cleanupAggressive,
+  CLEANUP_AGGRESSIVE_TOKEN_MISMATCH,
   forceKillProbe,
   forceKillApply,
   stopAllDaemons,
@@ -23,6 +24,7 @@ import {
   type LogWatcher,
   type StopResult,
   type AggressiveCleanupScope,
+  type AggressiveCleanupResponse,
 } from "../../lib/settings-api";
 import { ConfirmModal } from "../ConfirmModal";
 import { InfoTip } from "../InfoTip";
@@ -31,7 +33,13 @@ import { SettingsCard } from "./SettingsCard";
 type ActionState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "preview"; orphans?: OrphanProcess[]; watchers?: LogWatcher[]; verdict?: unknown }
+  // `token` (aggressive card only) is the confirm token bound to the
+  // previewed candidate set (bot #373 R2 Finding 1). apply() replays it so
+  // the backend can refuse (409) if the set drifted since Preview.
+  // `notice` (aggressive card only) carries the "candidate set changed —
+  // re-Preview" message when a 409 token-mismatch re-renders the FRESH
+  // candidate set as a new preview the operator must explicitly re-confirm.
+  | { kind: "preview"; orphans?: OrphanProcess[]; watchers?: LogWatcher[]; verdict?: unknown; token?: string; notice?: string }
   // applied carries the post-kill row list so the table can render
   // per-row kill_err. Codex Cloud bot P2 on PR #131 commit 72757c6
   // (escalates QA F1): apply state previously stored only counts and
@@ -373,6 +381,18 @@ function CardAggressiveCleanup(): preact.JSX.Element {
   const [orphansSnapshot, setOrphansSnapshot] = useState<OrphanProcess[] | null>(null);
   const [scopeSnapshot, setScopeSnapshot] = useState<AggressiveCleanupScope | null>(null);
   const [classesSnapshot, setClassesSnapshot] = useState<string[]>([]);
+  // tokenSnapshot is the confirm token captured at openConfirm — the token
+  // that was bound to the acknowledged candidate set. apply() replays THIS,
+  // not a live token, so a scope/preview change can't slip a different
+  // token under the open modal (bot #373 R2 Finding 1).
+  const [tokenSnapshot, setTokenSnapshot] = useState<string | null>(null);
+  // previewGen monotonically increments on every preview() launch and on
+  // every invalidatePreview(). A preview captures its gen BEFORE the await
+  // and discards its own response if the gen advanced while it was in
+  // flight — so a scope change (or a newer Preview) during a pending
+  // request cannot publish stale candidates for the OLD scope (bot #373 R2
+  // Finding 2).
+  const previewGen = useRef(0);
 
   function friendlyError(e: unknown): string {
     const raw = asError(e);
@@ -404,12 +424,19 @@ function CardAggressiveCleanup(): preact.JSX.Element {
   // operator must re-Preview — the confirm list then always matches the scope
   // that apply() will actually send (bot #373 P1: preview codex, switch to
   // claude, confirm → would have killed claude's tree, never previewed).
+  //
+  // Bumping previewGen here ALSO discards any preview request still in
+  // flight (bot #373 R2 Finding 2): a request that resolves after the
+  // invalidation captured an older gen and bails instead of publishing
+  // candidates for the now-stale scope.
   function invalidatePreview() {
+    previewGen.current++;
     setState((s) => (s.kind === "preview" ? { kind: "idle" } : s));
     setConfirmOpen(false);
     setOrphansSnapshot(null);
     setScopeSnapshot(null);
     setClassesSnapshot([]);
+    setTokenSnapshot(null);
   }
   function changeScopeKind(k: "client" | "root-pid") {
     setScopeKind(k);
@@ -437,12 +464,22 @@ function CardAggressiveCleanup(): preact.JSX.Element {
     if (confirmOpen) {
       setConfirmOpen(false);
       setOrphansSnapshot(null);
+      setScopeSnapshot(null);
+      setClassesSnapshot([]);
+      setTokenSnapshot(null);
     }
+    // Capture the generation BEFORE the await. If the scope/classes change
+    // (invalidatePreview) or a newer Preview launches while this request is
+    // in flight, previewGen advances and this response is discarded so it
+    // can't publish stale candidates for the old scope (bot #373 R2 F2).
+    const gen = ++previewGen.current;
     setState({ kind: "loading" });
     try {
       const r = await cleanupAggressive(false, scope, includeClasses);
-      setState({ kind: "preview", orphans: r.orphans });
+      if (gen !== previewGen.current) return; // stale — superseded in flight
+      setState({ kind: "preview", orphans: r.orphans, token: r.token });
     } catch (e) {
+      if (gen !== previewGen.current) return; // stale — discard the error too
       setState({ kind: "error", error: friendlyError(e) });
     }
   }
@@ -455,6 +492,11 @@ function CardAggressiveCleanup(): preact.JSX.Element {
     setOrphansSnapshot([...state.orphans]);
     setScopeSnapshot(scope);
     setClassesSnapshot([...includeClasses]);
+    // Pin the preview token alongside the candidate snapshot so apply()
+    // replays exactly the token bound to the acknowledged set (bot #373 R2
+    // Finding 1). May be undefined for a legacy/empty backend response;
+    // apply still sends it (the backend then 400s an empty token).
+    setTokenSnapshot(state.token ?? null);
     setConfirmOpen(true);
   }
 
@@ -463,6 +505,7 @@ function CardAggressiveCleanup(): preact.JSX.Element {
     setOrphansSnapshot(null);
     setScopeSnapshot(null);
     setClassesSnapshot([]);
+    setTokenSnapshot(null);
   }
 
   async function apply() {
@@ -473,18 +516,42 @@ function CardAggressiveCleanup(): preact.JSX.Element {
       return;
     }
     setConfirmOpen(false);
+    // Capture the scope/token snapshots locally before we clear them so the
+    // 409-retry branch (which re-publishes a fresh preview) starts clean.
+    const scope = scopeSnapshot;
+    const token = tokenSnapshot ?? undefined;
     setState({ kind: "loading" });
     try {
-      const r = await cleanupAggressive(true, scopeSnapshot, classesSnapshot);
+      const r = await cleanupAggressive(true, scope, classesSnapshot, token);
       setState({ kind: "applied", killed: r.killed, skipped: r.skipped, orphans: r.orphans });
       setOrphansSnapshot(null);
       setScopeSnapshot(null);
       setClassesSnapshot([]);
+      setTokenSnapshot(null);
     } catch (e) {
-      setState({ kind: "error", error: friendlyError(e) });
+      // Token mismatch (409): the candidate set drifted between Preview and
+      // Confirm. The backend refused the kill and returned the FRESH
+      // candidate set + a new token. Re-render that fresh set as a NEW
+      // preview the operator must explicitly re-Preview/re-confirm — nothing
+      // was killed (bot #373 R2 Finding 1). previewGen is bumped so this
+      // re-publish wins over any older in-flight preview.
+      const err = e as { status?: number; body?: AggressiveCleanupResponse };
+      if (err?.status === 409 && err.body?.code === CLEANUP_AGGRESSIVE_TOKEN_MISMATCH) {
+        previewGen.current++;
+        setState({
+          kind: "preview",
+          orphans: err.body.orphans ?? [],
+          token: err.body.token,
+          notice:
+            "The candidate set changed since Preview — nothing was killed. Review the refreshed list and click Preview again to re-confirm.",
+        });
+      } else {
+        setState({ kind: "error", error: friendlyError(e) });
+      }
       setOrphansSnapshot(null);
       setScopeSnapshot(null);
       setClassesSnapshot([]);
+      setTokenSnapshot(null);
     }
   }
 
@@ -603,6 +670,11 @@ function CardAggressiveCleanup(): preact.JSX.Element {
         )}
       </div>
       <CardResult state={state} />
+      {state.kind === "preview" && state.notice && (
+        <p class="maintenance-status maintenance-error mt-3 text-sm text-app-danger" data-testid="aggressive-token-mismatch-notice">
+          {state.notice}
+        </p>
+      )}
       {(state.kind === "preview" || state.kind === "applied") && state.orphans && (
         <AggressiveTable orphans={state.orphans} />
       )}
