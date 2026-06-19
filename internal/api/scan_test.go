@@ -11,6 +11,42 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 )
 
+// TestReadManifestNames_ExcludesCompanion is the companion source-filter guard:
+// a kind=companion manifest is a hub-managed NON-MCP process and must never enter
+// the scan name set (which feeds classify / the Servers matrix / via-hub
+// detection), while a normal kind=global manifest stays.
+func TestReadManifestNames_ExcludesCompanion(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, yaml string) {
+		md := filepath.Join(dir, name)
+		if err := os.MkdirAll(md, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(md, "manifest.yaml"), []byte(yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	absCwd := "/opt/canvas"
+	if runtime.GOOS == "windows" {
+		absCwd = "C:/opt/canvas"
+	}
+	write("excalidraw-canvas", "name: excalidraw-canvas\nkind: companion\ntransport: process\ncommand: node\n"+
+		"base_args: [dist/server.js]\ndaemons:\n  - name: default\n    cwd: \""+absCwd+"\"\n")
+	write("memory", "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\n"+
+		"daemons:\n  - name: default\n    port: 9128\n")
+
+	names, err := readManifestNames(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names["excalidraw-canvas"] {
+		t.Error("kind=companion manifest must be EXCLUDED from the scan name set (source-filter)")
+	}
+	if !names["memory"] {
+		t.Error("kind=global manifest must remain in the scan name set")
+	}
+}
+
 // TestScanClassifiesEntries verifies the three key classifications:
 // via-hub (HTTP entry pointing at our daemon), can-migrate (stdio entry
 // matching one of our manifest names), unknown (stdio entry with no
