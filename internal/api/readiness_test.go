@@ -327,6 +327,74 @@ func TestEntryScriptCheckTargets_EmptyCwdUsesProcessCwd(t *testing.T) {
 	}
 }
 
+func TestEntryScriptCheckTargets_SetsPerDaemonName(t *testing.T) {
+	// Each per-daemon (relative) target must carry its daemon name so Preflight
+	// can filter to the installed daemon and not block on a sibling's missing
+	// script (Codex #377 r15).
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	m := &config.ServerManifest{
+		Command:  "node",
+		BaseArgs: []string{"build/index.js"},
+		Daemons:  []config.DaemonSpec{{Name: "a", Cwd: dirA}, {Name: "b", Cwd: dirB}},
+	}
+	got := map[string]bool{}
+	for _, c := range entryScriptCheckTargets(m) {
+		got[c.daemon] = true
+	}
+	if !got["a"] || !got["b"] {
+		t.Errorf("targets must carry per-daemon names a + b for the Preflight filter; got %v", got)
+	}
+}
+
+func TestCheckServerReadiness_LldbBridgeInvalidAddressNotReady(t *testing.T) {
+	// base_args[1] without a port — the lldb-bridge subcommand (lldb.ParseHostPort)
+	// rejects it, so readiness must NOT mark it ready even if lldb is installed
+	// (Codex #377 r15).
+	m := &config.ServerManifest{
+		Name:      "lldb",
+		Transport: config.TransportStdioBridge,
+		Command:   "mcphub",
+		BaseArgs:  []string{"lldb-bridge", "localhost"}, // missing :port
+	}
+	rep := CheckServerReadiness(m)
+	var found, ok bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "debugger:") {
+			found, ok = true, r.OK
+		}
+	}
+	if !found {
+		t.Fatalf("no debugger requirement in report: %+v", rep.Requirements)
+	}
+	if ok {
+		t.Error("debugger requirement OK=true for a malformed lldb-bridge address")
+	}
+}
+
+func TestCheckServerReadiness_FixedPortOutOfRangeNotReady(t *testing.T) {
+	// A fixed daemon port outside 1..65535 must be rejected — a failed TCP dial
+	// on it would otherwise read as a free port (Codex #377 r15).
+	m := &config.ServerManifest{
+		Name:    "demo",
+		Command: "go",
+		Daemons: []config.DaemonSpec{{Name: "default", Port: 70000}},
+	}
+	rep := CheckServerReadiness(m)
+	var found, ok bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "port 70000") {
+			found, ok = true, r.OK
+		}
+	}
+	if !found {
+		t.Fatalf("no port requirement for the fixed daemon: %+v", rep.Requirements)
+	}
+	if ok {
+		t.Error("port requirement OK=true for out-of-range port 70000")
+	}
+}
+
 func TestLauncherGuidance_UnknownAbsoluteCommandBasenamed(t *testing.T) {
 	// An unknown command that is an absolute host path must not leak its
 	// directory through the display name OR the fix string — LauncherGuidance

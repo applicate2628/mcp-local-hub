@@ -63,6 +63,13 @@ type spawnedLldb struct {
 	stdin io.WriteCloser
 }
 
+// ParseHostPort validates a host:port address EXACTLY as the lldb-bridge
+// subcommand does at launch (it is the bridge's own pre-spawn check). Exported
+// so install readiness can reject a malformed base_args[1] using the SAME
+// validator the bridge enforces, rather than re-deriving and drifting from it
+// (Codex #377 r15).
+func ParseHostPort(s string) (string, int, error) { return parseHostPort(s) }
+
 // parseHostPort splits "host:port" with IPv4 tolerance. Intentionally
 // rejects bare ports ("47000") to keep the CLI argument shape consistent
 // with bridge.py's documented usage.

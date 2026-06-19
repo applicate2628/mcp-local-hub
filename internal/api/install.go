@@ -1778,6 +1778,13 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	scriptOptional := m.Kind == config.KindWorkspaceScoped && m.DaemonTemplate == nil
 	if !scriptOptional {
 		for _, c := range entryScriptCheckTargets(m) {
+			// Respect the daemon filter exactly like the port loop below: a
+			// `--daemon a` partial install must not be blocked by a sibling
+			// daemon b's missing relative script. A daemon-independent (absolute)
+			// target has daemon=="" and always applies (Codex #377 r15).
+			if daemonFilter != "" && c.daemon != "" && c.daemon != daemonFilter {
+				continue
+			}
 			if _, err := os.Stat(c.path); err != nil {
 				return fmt.Errorf("entry script %q for %q not found — install/clone the server so base_args[0] exists, then re-run install", filepath.Base(c.path), normalizeLauncher(m.Command))
 			}

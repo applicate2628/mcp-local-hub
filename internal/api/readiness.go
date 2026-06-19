@@ -11,6 +11,7 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/secrets"
 	"mcp-local-hub/internal/toolchain"
 )
@@ -198,9 +199,11 @@ func manifestNeedsGit(m *config.ServerManifest) bool {
 	return false
 }
 
-// entryScript is one (label, absolute-path) target the node/python entry-script
-// gate stats.
-type entryScript struct{ label, path string }
+// entryScript is one entry-script target the node/python gate stats. daemon is
+// the owning daemon name for a per-daemon (relative-cwd) target, or "" for a
+// cwd-independent absolute target that applies to every daemon — callers that
+// install a single daemon filter on it (Codex #377 r15).
+type entryScript struct{ label, path, daemon string }
 
 // entryScriptCheckTargets returns the entry scripts to stat for a node/python
 // manifest. base_args[0] is the local script the launcher runs; the launcher
@@ -223,7 +226,8 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 	}
 	arg := m.BaseArgs[0]
 	if filepath.IsAbs(arg) {
-		return []entryScript{{filepath.Base(arg), arg}}
+		// daemon "" → cwd-independent, applies to every daemon (never filtered).
+		return []entryScript{{label: filepath.Base(arg), path: arg}}
 	}
 	daemons := m.Daemons
 	if len(daemons) == 0 {
@@ -243,7 +247,7 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 		if name == "" {
 			name = "default"
 		}
-		out = append(out, entryScript{filepath.Base(arg) + " (" + name + ")", filepath.Join(base, arg)})
+		out = append(out, entryScript{label: filepath.Base(arg) + " (" + name + ")", path: filepath.Join(base, arg), daemon: name})
 	}
 	return out
 }
@@ -431,7 +435,20 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	if m.Transport == config.TransportStdioBridge && len(m.BaseArgs) >= 2 && m.BaseArgs[0] == "lldb-bridge" {
 		addr := m.BaseArgs[1]
 		disp, dfix := LauncherGuidance("lldb")
+		_, _, addrErr := lldb.ParseHostPort(addr)
 		switch {
+		case addrErr != nil:
+			// The lldb-bridge subcommand rejects a malformed host:port BEFORE
+			// spawning (lldb.ParseHostPort is its own validator), so a daemon with
+			// e.g. a bare host or a port > 65535 exits immediately — never mark it
+			// ready on the listener/binary branch (Codex #377 r15). addr is the
+			// operator's own manifest value echoed back so they can fix it.
+			add(ReadinessRequirement{
+				Name:   "debugger: " + disp,
+				OK:     false,
+				Reason: fmt.Sprintf("the lldb-bridge address %q is not a valid host:port — the bridge rejects it before spawning", addr),
+				Fix:    "Set base_args[1] to a valid host:port (e.g. localhost:47000) in the manifest.",
+			})
 		case bridgeListenerUp(addr):
 			add(ReadinessRequirement{Name: "debugger: " + disp + " (listener up)", OK: true})
 		case binaryFound("lldb"):
@@ -453,11 +470,24 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// followed by an install that fails on a held port is exactly the lie this
 	// surface must not tell (Codex #377).
 	for _, d := range m.Daemons {
+		portName := fmt.Sprintf("port %d (%s)", d.Port, d.Name)
+		// A FIXED daemon port must be a bindable, servable port. Manifest
+		// validation does not reject 0 or > 65535, and a failed TCP dial on such
+		// a value reads as "free" — so an out-of-range fixed port would falsely
+		// report ready while the daemon can never serve its client URL on it.
+		// Reject the range first (pool daemons never reach here: m.Daemons is
+		// empty for dynamic-pool manifests) (Codex #377 r15).
+		if d.Port < 1 || d.Port > 65535 {
+			add(ReadinessRequirement{Name: portName, OK: false,
+				Reason: fmt.Sprintf("fixed daemon port %d is outside the valid range 1..65535 — the daemon cannot serve its client URL", d.Port),
+				Fix:    "Set a valid fixed port (1..65535) for this daemon in the manifest."})
+			continue // out-of-range external port makes the native-http internal check meaningless
+		}
 		if preflightPortInUse(d.Port) && !portHeldByOurDaemonForPortArm(d.Port, m.Name, d.Name, false) {
-			add(ReadinessRequirement{Name: fmt.Sprintf("port %d (%s)", d.Port, d.Name), OK: false,
+			add(ReadinessRequirement{Name: portName, OK: false,
 				Reason: "already in use by another process", Fix: "Free the port (close the other process) or change the daemon port in the manifest."})
 		} else {
-			add(ReadinessRequirement{Name: fmt.Sprintf("port %d (%s)", d.Port, d.Name), OK: true})
+			add(ReadinessRequirement{Name: portName, OK: true})
 		}
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
