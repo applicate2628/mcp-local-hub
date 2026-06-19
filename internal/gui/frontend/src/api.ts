@@ -128,6 +128,47 @@ export async function postManifestValidate(yaml: string): Promise<string[]> {
   return payload.warnings ?? [];
 }
 
+// ReadinessRequirement mirrors api.ReadinessRequirement (lowercase JSON tags).
+// `optional` marks an ADVISORY requirement (a not-yet-set `secret:` ref) that
+// does NOT block readiness; the GUI renders these as inline "set to enable"
+// prompt fields at install rather than blockers.
+export interface ReadinessRequirement {
+  name: string;
+  ok: boolean;
+  optional?: boolean;
+  reason?: string;
+  fix?: string;
+}
+
+export interface ReadinessReport {
+  server: string;
+  ready: boolean;
+  requirements: ReadinessRequirement[];
+}
+
+// getServerReadiness fetches the install-readiness report for a SAVED server by
+// name (epic install-and-it-works, area 1). Each requirement carries a guided
+// Fix so the GUI renders an actionable panel instead of a cryptic later
+// HTTP-502 at the client.
+export async function getServerReadiness(server: string): Promise<ReadinessReport> {
+  return fetchOrThrow<ReadinessReport>(
+    `/api/server/readiness?server=${encodeURIComponent(server)}`,
+    "object",
+  );
+}
+
+// checkDraftReadiness checks the readiness of a DRAFT manifest the Add/Edit-
+// server screen is composing, BEFORE it is saved — so the panel updates live as
+// the operator fills the form (incl. which `secret:` refs are still unset). The
+// body shape matches /api/manifest/validate.
+export async function checkDraftReadiness(yaml: string): Promise<ReadinessReport> {
+  return fetchOrThrow<ReadinessReport>("/api/server/readiness", "object", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ yaml }),
+  });
+}
+
 // getExtractManifest fetches the prefill YAML that populates AddServer's
 // form when the user arrives via the A1 Migration Create-manifest button.
 // Returns the raw YAML string. Throws on non-2xx with the backend error.

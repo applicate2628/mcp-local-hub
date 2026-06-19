@@ -2192,3 +2192,101 @@ nav a,
     grid-template-columns: 1fr;
   }
 }
+
+/* Install readiness panel (epic install-and-it-works, area 1):
+   actionable rows + inline secret-entry fields at install. */
+.readiness-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.readiness-panel-loading {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  padding: 0.25rem 0;
+}
+.readiness-panel-error {
+  color: var(--danger);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.readiness-badge {
+  display: inline-block;
+  font-weight: 600;
+  font-size: 0.9em;
+}
+.readiness-badge-ready {
+  color: var(--success);
+}
+.readiness-badge-blocked {
+  color: var(--danger);
+}
+.readiness-rows {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.readiness-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+}
+.readiness-row-icon {
+  flex: 0 0 auto;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.readiness-row-ok .readiness-row-icon {
+  color: var(--success);
+}
+.readiness-row-blocker .readiness-row-icon {
+  color: var(--danger);
+}
+.readiness-row-advisory .readiness-row-icon {
+  color: #9a6700;
+}
+.readiness-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.readiness-row-name {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+.readiness-row-reason,
+.readiness-row-fix {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+.readiness-row-blocker .readiness-row-fix {
+  color: var(--danger);
+}
+.readiness-secret-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+.readiness-secret-inline-label {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.readiness-secret-inline-input {
+  flex: 1 1 auto;
+  min-width: 8rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  font-size: 0.85em;
+}

@@ -5,27 +5,46 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
 )
 
-// registerReadinessRoutes wires GET /api/server/readiness — the GUI-facing
-// surface of the install readiness check (epic install-and-it-works, area 1).
-// With ?server=<name> it returns that one server's ReadinessReport; with no
-// param it returns every server's, for a fleet-wide "what needs fixing before
-// this works" view. Each report carries per-requirement guided fixes so the
-// GUI renders an actionable panel instead of letting a missing dependency or
-// unset secret surface later as a cryptic HTTP-502 at the client.
+// registerReadinessRoutes wires /api/server/readiness — the GUI-facing surface
+// of the install readiness check (epic install-and-it-works, area 1).
+//
+//	GET  ?server=<name>  → that saved server's ReadinessReport
+//	GET  (no param)      → every server's, for a fleet-wide view
+//	POST {yaml}          → readiness of a DRAFT manifest the Add/Edit-server
+//	                       screen is composing, BEFORE it exists on disk — so the
+//	                       panel shows live readiness (incl. which secrets are
+//	                       unset) as the operator fills the form.
+//
+// Each report carries per-requirement guided fixes so the GUI renders an
+// actionable panel instead of letting a missing dependency or unset secret
+// surface later as a cryptic HTTP-502 at the client.
 func registerReadinessRoutes(s *Server) {
 	s.mux.HandleFunc("/api/server/readiness", s.requireSameOrigin(s.readinessHandler))
 }
 
+type readinessDraftRequest struct {
+	YAML string `json:"yaml"`
+}
+
 func (s *Server) readinessHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
+	switch r.Method {
+	case http.MethodGet:
+		s.readinessByName(w, r)
+	case http.MethodPost:
+		s.readinessDraft(w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
+}
+
+func (s *Server) readinessByName(w http.ResponseWriter, r *http.Request) {
 	if name := r.URL.Query().Get("server"); name != "" {
 		rep, err := api.CheckServerReadinessByName(name)
 		if err != nil {
@@ -38,10 +57,34 @@ func (s *Server) readinessHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("server %q not found or its manifest could not be loaded", name), http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(rep)
+		writeReadinessJSON(w, rep)
 		return
 	}
+	writeReadinessJSON(w, api.AllServerReadiness())
+}
+
+// readinessDraft checks a DRAFT manifest (not yet saved) the Add/Edit-server
+// screen is composing — same {yaml} body shape as /api/manifest/validate — so
+// the panel can show readiness (and the inline secret-entry prompts) before the
+// manifest exists on disk.
+func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
+	var req readinessDraftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	m, err := config.ParseManifest(strings.NewReader(req.YAML))
+	if err != nil {
+		// A draft mid-edit is frequently not-yet-valid; surface a redacted 400
+		// (the parse error can wrap field detail) so the panel shows "fix the
+		// manifest first" without leaking host paths.
+		http.Error(w, "draft manifest could not be parsed", http.StatusBadRequest)
+		return
+	}
+	writeReadinessJSON(w, api.CheckServerReadiness(m))
+}
+
+func writeReadinessJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(api.AllServerReadiness())
+	_ = json.NewEncoder(w).Encode(v)
 }

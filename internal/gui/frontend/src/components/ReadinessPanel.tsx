@@ -1,0 +1,113 @@
+import type { ReadinessReport, ReadinessRequirement } from "../api";
+
+const SECRET_PREFIX = "secret: ";
+
+// secretKeyOf returns the vault key a "secret: KEY" requirement names, or "".
+export function secretKeyOf(req: ReadinessRequirement): string {
+  return req.name.startsWith(SECRET_PREFIX) ? req.name.slice(SECRET_PREFIX.length) : "";
+}
+
+// rank orders requirements: blockers first, then unmet advisories (the inline
+// secret prompts), then satisfied requirements.
+function rank(req: ReadinessRequirement): number {
+  if (!req.ok && !req.optional) return 0;
+  if (!req.ok && req.optional) return 1;
+  return 2;
+}
+
+export interface ReadinessPanelProps {
+  report: ReadinessReport | null;
+  loading: boolean;
+  error: string | null;
+  // inlineSecrets maps a vault key → the plaintext the operator typed inline at
+  // install; the parent writes these to the vault before install.
+  inlineSecrets: Record<string, string>;
+  onInlineSecretChange: (key: string, value: string) => void;
+}
+
+// ReadinessPanel renders the install-readiness report as actionable rows so the
+// operator sees exactly what blocks (or merely advises) an install BEFORE it
+// fails later as a cryptic HTTP-502 — and, for an unset optional `secret:` ref,
+// an INLINE field to set the value right here at install (epic install-and-it-
+// works, area 1).
+export function ReadinessPanel(props: ReadinessPanelProps) {
+  const { report, loading, error, inlineSecrets, onInlineSecretChange } = props;
+
+  if (loading && !report) {
+    return (
+      <div class="readiness-panel" data-testid="readiness-panel">
+        <div class="readiness-panel-loading">Checking install readiness…</div>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div class="readiness-panel readiness-panel-error" data-testid="readiness-panel" role="status">
+        <span class="readiness-panel-icon" aria-hidden="true">⚠</span>
+        <span>{error}</span>
+      </div>
+    );
+  }
+  if (!report) return null;
+
+  const reqs = [...report.requirements].sort((a, b) => rank(a) - rank(b));
+  const blockers = reqs.filter((r) => !r.ok && !r.optional).length;
+
+  return (
+    <div class="readiness-panel" data-testid="readiness-panel" role="group" aria-label="Install readiness">
+      <div class="readiness-panel-header">
+        <span
+          class={"readiness-badge " + (report.ready ? "readiness-badge-ready" : "readiness-badge-blocked")}
+          data-testid="readiness-badge"
+        >
+          {report.ready
+            ? "✓ Ready to install"
+            : `✗ ${blockers} blocker${blockers === 1 ? "" : "s"} to fix`}
+        </span>
+      </div>
+      <ul class="readiness-rows">
+        {reqs.map((req) => {
+          const key = secretKeyOf(req);
+          const inlineable = key !== "" && !!req.optional && !req.ok;
+          const cls = req.ok
+            ? "readiness-row-ok"
+            : req.optional
+              ? "readiness-row-advisory"
+              : "readiness-row-blocker";
+          const icon = req.ok ? "✓" : req.optional ? "⚠" : "✗";
+          return (
+            <li
+              class={"readiness-row " + cls}
+              key={req.name}
+              data-testid={"readiness-row-" + req.name}
+            >
+              <span class="readiness-row-icon" aria-hidden="true">{icon}</span>
+              <div class="readiness-row-body">
+                <span class="readiness-row-name">{req.name}</span>
+                {req.reason ? <span class="readiness-row-reason">{req.reason}</span> : null}
+                {inlineable ? (
+                  <label class="readiness-secret-inline">
+                    <span class="readiness-secret-inline-label">Set {key} now:</span>
+                    <input
+                      type="password"
+                      class="readiness-secret-inline-input"
+                      data-testid={"readiness-secret-input-" + key}
+                      placeholder={`enter ${key}…`}
+                      value={inlineSecrets[key] ?? ""}
+                      onInput={(e) =>
+                        onInlineSecretChange(key, (e.target as HTMLInputElement).value)
+                      }
+                      autoComplete="off"
+                    />
+                  </label>
+                ) : req.fix && !req.ok ? (
+                  <span class="readiness-row-fix">{req.fix}</span>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

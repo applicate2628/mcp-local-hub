@@ -8,7 +8,9 @@ import {
   postManifestCreate,
   postManifestEdit,
   postManifestValidate,
+  checkDraftReadiness,
   ManifestHashMismatchError,
+  type ReadinessReport,
 } from "../api";
 import { generateUUID } from "../lib/uuid";
 import type { BindingFormEntry, DaemonFormEntry, LanguageFormEntry, ManifestFormState } from "../types";
@@ -16,6 +18,8 @@ import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
 import { AddSecretModal } from "../components/AddSecretModal";
 import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
+import { ReadinessPanel } from "../components/ReadinessPanel";
+import { addSecret } from "../lib/secrets-api";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
 import { pushToast } from "../lib/toast-store";
@@ -88,6 +92,46 @@ export function AddServerScreen(props: {
   const isDirty = !deepEqualForm(formState, initialSnapshot);
 
   const snapshot = useSecretsSnapshot();
+
+  // Live install-readiness on the debounced draft YAML (epic install-and-it-
+  // works, area 1): the ReadinessPanel shows what blocks/advises the install
+  // BEFORE it fails later, and renders inline fields for unset optional secrets.
+  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const readinessReqRef = useRef(0);
+  // inlineSecrets maps a vault key → the plaintext the operator typed in the
+  // readiness panel; persisted to the vault just before install.
+  const [inlineSecrets, setInlineSecrets] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const yaml = yamlPreview;
+    if (!yaml || !debouncedState.name.trim()) {
+      setReadiness(null);
+      return;
+    }
+    const reqId = ++readinessReqRef.current;
+    setReadinessLoading(true);
+    checkDraftReadiness(yaml)
+      .then((rep) => {
+        if (reqId === readinessReqRef.current) setReadiness(rep);
+      })
+      .catch(() => {
+        // A still-invalid draft returns 400 mid-edit; keep the last good report
+        // rather than flashing an error on every keystroke.
+      })
+      .finally(() => {
+        if (reqId === readinessReqRef.current) setReadinessLoading(false);
+      });
+  }, [yamlPreview, debouncedState.name]);
+
+  async function persistInlineSecrets(): Promise<void> {
+    const entries = Object.entries(inlineSecrets).filter(([, v]) => v.trim() !== "");
+    if (entries.length === 0) return;
+    for (const [key, value] of entries) {
+      await addSecret(key, value);
+    }
+    setInlineSecrets({});
+    await snapshot.refresh();
+  }
   const [createModalState, setCreateModalState] = useState<{ open: boolean; prefill: string | null }>({ open: false, prefill: null });
   // savedFiredRef tracks whether onSaved (which already does a refresh)
   // has fired during this modal lifecycle. If it has, the on-close
@@ -500,6 +544,10 @@ export function AddServerScreen(props: {
         pushToast("success", `Saved ${name} manifest.`);
         return;
       }
+      // Persist any secrets the operator typed inline in the readiness panel to
+      // the vault BEFORE install, so the manifest's secret: refs resolve at
+      // daemon spawn (epic install-and-it-works, area 1).
+      await persistInlineSecrets();
       await runInstallNow(name, version);
     } catch (err) {
       if (version !== submissionCounter.current) return;
@@ -879,6 +927,20 @@ export function AddServerScreen(props: {
               />
             </div>
           </AccordionSection>
+
+          {(readiness || readinessLoading) && (
+            <AccordionSection title="Install readiness" open>
+              <ReadinessPanel
+                report={readiness}
+                loading={readinessLoading}
+                error={null}
+                inlineSecrets={inlineSecrets}
+                onInlineSecretChange={(key, value) =>
+                  setInlineSecrets((prev) => ({ ...prev, [key]: value }))
+                }
+              />
+            </AccordionSection>
+          )}
 
           <AccordionSection title="Environment">
             <BrokenRefsSummary vaultState={summaryVaultState} brokenRefs={brokenRefs} />
