@@ -69,3 +69,31 @@ func (r *Resolver) ResolveMap(env map[string]string) (map[string]string, error) 
 	}
 	return out, nil
 }
+
+// ResolveMapBestEffort resolves every value in a manifest env map, OMITTING
+// any value that fails to resolve instead of failing the whole map. It returns
+// the resolved subset plus a map of omitted keys to their original (unresolved)
+// reference, so the caller can log which env vars were dropped and why.
+//
+// This is the daemon-launch path for OPTIONAL secrets (install-and-it-works:
+// secrets are optional by default). A server whose `secret:` ref is not set in
+// the vault still spawns — with that env var simply UNSET — so the server
+// itself reports its own "missing API key" instead of mcphub failing the spawn
+// with a cryptic error, or the install being blocked outright. The operator is
+// prompted to fill secrets inline at install; whatever they skip is omitted
+// here, never fatal. Never returns an error.
+func (r *Resolver) ResolveMapBestEffort(env map[string]string) (resolved, omitted map[string]string) {
+	resolved = make(map[string]string, len(env))
+	for k, v := range env {
+		val, err := r.Resolve(v)
+		if err != nil {
+			if omitted == nil {
+				omitted = make(map[string]string, 1)
+			}
+			omitted[k] = v
+			continue
+		}
+		resolved[k] = val
+	}
+	return resolved, omitted
+}

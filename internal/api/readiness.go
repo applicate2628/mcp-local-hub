@@ -17,16 +17,24 @@ import (
 // dependency or unset secret yields a guided fix here instead of a bare
 // "command not found" or a downstream cryptic HTTP-502 at the client.
 type ReadinessRequirement struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Reason string `json:"reason,omitempty"`
-	Fix    string `json:"fix,omitempty"`
+	Name string `json:"name"`
+	OK   bool   `json:"ok"`
+	// Optional marks an ADVISORY requirement that does NOT block readiness:
+	// an unmet optional requirement (a not-yet-set `secret:` ref) still lets
+	// the server install + spawn, so it does NOT flip ReadinessReport.Ready
+	// to false. The GUI renders these as "set to enable" prompt fields at
+	// install rather than blockers (install-and-it-works: secrets optional).
+	Optional bool   `json:"optional,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Fix      string `json:"fix,omitempty"`
 }
 
 // ReadinessReport aggregates every prerequisite check for one server. Ready is
-// true iff every Requirement is OK. Unlike Preflight (which fails fast at the
-// first blocker because it gates a mutating install), CheckServerReadiness
-// runs every check so the operator sees the FULL list of what to fix at once.
+// true iff every NON-optional Requirement is OK (an unmet Optional requirement
+// — e.g. an unset secret — is advisory and does not block Ready). Unlike
+// Preflight (which fails fast at the first BLOCKING issue because it gates a
+// mutating install), CheckServerReadiness runs every check so the operator
+// sees the FULL list — blockers and optional prompts — at once.
 type ReadinessReport struct {
 	Server       string                 `json:"server"`
 	Ready        bool                   `json:"ready"`
@@ -61,6 +69,15 @@ func LauncherGuidance(command string) (display, fix string) {
 	case "mcphub":
 		return "mcphub (self)",
 			"Run `mcphub setup` to install the canonical mcphub binary on PATH."
+	case "gdb":
+		return "gdb (GNU debugger)",
+			"Install gdb — Windows (MSYS2 ucrt64): `pacman -S mingw-w64-ucrt-x86_64-gdb`; Linux: `apt install gdb`; macOS: `brew install gdb`."
+	case "lldb":
+		return "lldb (LLVM debugger)",
+			"Install lldb — Windows (MSYS2 clang64): `pacman -S mingw-w64-clang-x86_64-lldb`; Linux: `apt install lldb`; macOS: ships with Xcode CLT (`xcode-select --install`)."
+	case "clang", "clang++", "clang-cl":
+		return "clang (LLVM)",
+			"Install clang/LLVM — Windows: `winget install LLVM.LLVM`; Linux: `apt install clang`; macOS: `xcode-select --install`."
 	default:
 		return command,
 			fmt.Sprintf("Install %q and ensure it is on PATH, then re-run install.", command)
@@ -85,15 +102,20 @@ func runtimeBehindLauncher(command string) string {
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
 // failing fast and returns a structured, GUI-renderable report. It is the
 // non-fatal, all-requirements companion to Preflight (which fails fast at the
-// first blocker for the install gate). Today it covers the dependency + secret
-// surface that produces the cryptic-failure pain: the launcher on PATH, the
-// runtime behind it, and every required `secret:` ref resolving in the vault.
-// Port-conflict checking stays in Preflight, where the reinstall-tolerant
-// "is this our own daemon already holding the port?" logic lives.
+// first blocker for the install gate). It MIRRORS what install + run actually
+// require, so /api/server/readiness never reports Ready while the install gate
+// (or the running server) would fail (Codex #377): the launcher on PATH + the
+// runtime behind it, the canonical mcphub binary, declared required_binaries
+// (incl. per-language), foreign daemon-port collisions, optional stdio env
+// `secret:` refs (advisory), and required remote-http url/header
+// ${secret:KEY} placeholders (blocking).
 func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	rep := &ReadinessReport{Server: m.Name, Ready: true}
 	add := func(r ReadinessRequirement) {
-		if !r.OK {
+		// An unmet OPTIONAL requirement (an unset secret) is advisory — it
+		// prompts the operator but does not block install/spawn, so it does
+		// NOT flip Ready.
+		if !r.OK && !r.Optional {
 			rep.Ready = false
 		}
 		rep.Requirements = append(rep.Requirements, r)
@@ -127,28 +149,109 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 	}
 
-	// Required secrets resolve in the vault. Reuses the install preflight's
-	// checkSecretRefs so the readiness report and the gate agree on "is this
-	// secret set". Aggregated into one requirement listing the keys, so the
-	// operator sees exactly which secrets to set.
-	var secretKeys []string
-	for _, v := range m.Env {
-		if strings.HasPrefix(v, "secret:") {
-			secretKeys = append(secretKeys, strings.TrimPrefix(v, "secret:"))
+	// Canonical mcphub binary — Preflight ALWAYS requires it (even on the
+	// remote-http branch), so a fresh / dev-run host without `mcphub setup`
+	// passes the launcher checks yet fails the install immediately. Mirror it
+	// (Codex #377). In the live GUI mcphub is the running binary, so this is
+	// only red on a not-yet-set-up host.
+	if _, err := ensureCanonicalMcphubPresent(); err != nil {
+		_, mfix := LauncherGuidance("mcphub")
+		add(ReadinessRequirement{Name: "mcphub binary", OK: false, Reason: "canonical mcphub binary not installed", Fix: mfix})
+	} else {
+		add(ReadinessRequirement{Name: "mcphub binary", OK: true})
+	}
+
+	// Declared required external binaries (e.g. gdb-mcp → required_binaries:
+	// [gdb]). These run THROUGH mcphub, so the launcher check passes even when
+	// the actual backend tool is absent; surface them so the server is not
+	// reported ready while its tool is missing (Codex #377). Blocking — the
+	// server cannot function without them. Includes per-language binaries for
+	// workspace-scoped (LSP) manifests.
+	reqBins := append([]string{}, m.RequiredBinaries...)
+	for _, lang := range m.Languages {
+		reqBins = append(reqBins, lang.RequiredBinaries...)
+	}
+	seenBin := map[string]bool{}
+	for _, bin := range reqBins {
+		if bin == "" || seenBin[bin] {
+			continue
+		}
+		seenBin[bin] = true
+		bdisp, bfix := LauncherGuidance(bin)
+		if _, err := exec.LookPath(bin); err != nil {
+			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: false,
+				Reason: fmt.Sprintf("%q not found on PATH", bin), Fix: bfix})
+		} else {
+			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: true})
 		}
 	}
-	if len(secretKeys) > 0 {
-		name := "secrets: " + strings.Join(secretKeys, ", ")
-		if err := checkSecretRefs(m.Env); err != nil {
-			add(ReadinessRequirement{
-				Name:   name,
-				OK:     false,
-				Reason: "one or more required secrets are not set in the vault",
-				Fix:    "Set them in the GUI Secrets screen, or run `mcphub secrets set <key>`.",
-			})
+
+	// Daemon ports free — mirror Preflight's FOREIGN-collision check (a port
+	// held by OUR own daemon is fine: idempotent reinstall). A green report
+	// followed by an install that fails on a held port is exactly the lie this
+	// surface must not tell (Codex #377).
+	for _, d := range m.Daemons {
+		if preflightPortInUse(d.Port) && !portHeldByOurDaemonForPortArm(d.Port, m.Name, d.Name, false) {
+			add(ReadinessRequirement{Name: fmt.Sprintf("port %d (%s)", d.Port, d.Name), OK: false,
+				Reason: "already in use by another process", Fix: "Free the port (close the other process) or change the daemon port in the manifest."})
 		} else {
-			add(ReadinessRequirement{Name: name, OK: true})
+			add(ReadinessRequirement{Name: fmt.Sprintf("port %d (%s)", d.Port, d.Name), OK: true})
 		}
+		if m.Transport == config.TransportNativeHTTP {
+			internal := d.Port + config.NativeHTTPInternalPortOffset
+			if preflightPortInUse(internal) && !portHeldByOurDaemonForPortArm(internal, m.Name, d.Name, true) {
+				add(ReadinessRequirement{Name: fmt.Sprintf("internal port %d (%s)", internal, d.Name), OK: false,
+					Reason: "native-http upstream port already in use", Fix: "Free the port or change the daemon port (internal = external + offset)."})
+			}
+		}
+	}
+
+	// Declared secrets — reported PER KEY so the GUI can offer each as an
+	// inline "fill this field at install" prompt (the operator's request:
+	// "секреты нужно явно предлагать в конкретные поля при установке").
+	// Secrets are OPTIONAL: an unset key is advisory (Optional=true), NOT a
+	// blocker — the server still installs + spawns (the env var is omitted)
+	// and reports its own missing-key if it actually needs it.
+	for k, v := range m.Env {
+		if !strings.HasPrefix(v, "secret:") {
+			continue
+		}
+		key := strings.TrimPrefix(v, "secret:")
+		req := ReadinessRequirement{Name: "secret: " + key, Optional: true}
+		if err := checkSecretRefs(map[string]string{k: v}); err != nil {
+			req.OK = false
+			req.Reason = "not set in the vault (optional — the server runs without it, or reports its own missing-key)"
+			req.Fix = fmt.Sprintf("Enter %s at install, or set it later via the Secrets screen / `mcphub secrets set %s`.", key, key)
+		} else {
+			req.OK = true
+		}
+		add(req)
+	}
+
+	// Remote-http manifests carry REQUIRED vault values as ${secret:KEY}
+	// placeholders in url + headers (NOT m.Env). buildRemoteHTTPPlan expands
+	// them and FAILS the install on a missing one, so — unlike the optional
+	// stdio env secrets above — these are BLOCKING (Codex #377).
+	remoteSecretKeys := map[string]struct{}{}
+	scan := func(s string) {
+		for _, mt := range SecretPlaceholderRE.FindAllStringSubmatch(s, -1) {
+			remoteSecretKeys[mt[1]] = struct{}{}
+		}
+	}
+	scan(m.URL)
+	for _, hv := range m.Headers {
+		scan(hv)
+	}
+	for key := range remoteSecretKeys {
+		req := ReadinessRequirement{Name: "secret (remote): " + key}
+		if err := checkSecretRefs(map[string]string{"_": "secret:" + key}); err != nil {
+			req.OK = false
+			req.Reason = "required for the remote endpoint URL/headers but not set in the vault"
+			req.Fix = fmt.Sprintf("Enter %s at install, or `mcphub secrets set %s` — the install fails without it.", key, key)
+		} else {
+			req.OK = true
+		}
+		add(req)
 	}
 
 	return rep

@@ -80,3 +80,29 @@ func TestResolver_EnvMissing(t *testing.T) {
 		t.Error("expected error for missing env var, got nil")
 	}
 }
+
+func TestResolveMapBestEffort_OmitsMissingSecret(t *testing.T) {
+	// nil vault → any secret: ref is unresolvable. A literal resolves.
+	r := NewResolver(nil, nil)
+	resolved, omitted := r.ResolveMapBestEffort(map[string]string{
+		"LITERAL": "hello",
+		"WOLFRAM": "secret:wolfram_app_id",
+	})
+	if resolved["LITERAL"] != "hello" {
+		t.Errorf("literal not resolved: %v", resolved)
+	}
+	if _, present := resolved["WOLFRAM"]; present {
+		t.Errorf("missing secret was NOT omitted: %v", resolved)
+	}
+	if omitted["WOLFRAM"] != "secret:wolfram_app_id" {
+		t.Errorf("omitted map missing WOLFRAM ref: %v", omitted)
+	}
+}
+
+func TestResolveMapBestEffort_NeverErrorsAllResolvable(t *testing.T) {
+	r := NewResolver(nil, nil)
+	resolved, omitted := r.ResolveMapBestEffort(map[string]string{"A": "x", "B": "y"})
+	if len(resolved) != 2 || len(omitted) != 0 {
+		t.Errorf("resolved=%v omitted=%v; want 2 resolved, 0 omitted", resolved, omitted)
+	}
+}

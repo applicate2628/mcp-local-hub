@@ -50,12 +50,19 @@ func TestCheckServerReadiness_MissingLauncherReportedWithFix(t *testing.T) {
 }
 
 func TestCheckServerReadiness_PresentLauncherReady(t *testing.T) {
-	// `go` is on PATH in every Go test environment (same assumption the
-	// install-test fake-manifest fixture relies on).
+	// `go` is on PATH in every Go test environment. Assert the LAUNCHER
+	// requirement is OK; overall Ready also depends on the canonical mcphub
+	// binary + free ports, which are env-dependent in a test sandbox.
 	m := &config.ServerManifest{Name: "demo", Command: "go"}
 	rep := CheckServerReadiness(m)
-	if !rep.Ready {
-		t.Fatalf("report Ready=false for present launcher `go`: %+v", rep.Requirements)
+	var launcherOK, found bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "launcher:") {
+			found, launcherOK = true, r.OK
+		}
+	}
+	if !found || !launcherOK {
+		t.Fatalf("launcher requirement not OK for present `go`: %+v", rep.Requirements)
 	}
 }
 
@@ -95,5 +102,85 @@ func TestAllServerReadiness_CoversEmbeddedServers(t *testing.T) {
 		if rep.Server == "" {
 			t.Errorf("report with empty Server name: %+v", rep)
 		}
+	}
+}
+
+func TestCheckServerReadiness_UnsetSecretIsOptionalNotBlocking(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:    "demo",
+		Command: "go", // on PATH in every Go test env
+		Env:     map[string]string{"DEMO_KEY": "secret:demo_unset_key_zzz"},
+	}
+	rep := CheckServerReadiness(m)
+	// The unset secret must be ADVISORY (Optional) so it does not block
+	// readiness. (Overall Ready also depends on env-dependent mcphub/ports, so
+	// assert the secret requirement's Optional flag — the real claim — not the
+	// aggregate.)
+	var secretReq *ReadinessRequirement
+	for i := range rep.Requirements {
+		if strings.HasPrefix(rep.Requirements[i].Name, "secret:") {
+			secretReq = &rep.Requirements[i]
+		}
+	}
+	if secretReq == nil {
+		t.Fatalf("no per-key secret requirement in report: %+v", rep.Requirements)
+	}
+	if !secretReq.Optional {
+		t.Errorf("secret requirement Optional=false; want true (advisory, not a blocker)")
+	}
+	if secretReq.OK {
+		t.Errorf("unset secret OK=true; want false so the GUI prompts to fill it")
+	}
+	if secretReq.Fix == "" {
+		t.Errorf("unset secret has no Fix guidance for the inline prompt")
+	}
+}
+
+func TestCheckServerReadiness_RequiredBinariesSurfaced(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:             "demo",
+		Command:          "mcphub",
+		RequiredBinaries: []string{"definitely-absent-binary-zzz"},
+	}
+	rep := CheckServerReadiness(m)
+	var found bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "binary:") {
+			found = true
+			if r.OK {
+				t.Errorf("absent required binary reported OK=true")
+			}
+			if r.Fix == "" {
+				t.Errorf("absent binary has no Fix guidance")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no binary requirement for declared required_binaries: %+v", rep.Requirements)
+	}
+}
+
+func TestCheckServerReadiness_RemoteHTTPSecretIsBlocking(t *testing.T) {
+	rm := &config.ServerManifest{
+		Name:      "remote-demo",
+		Transport: config.TransportRemoteHTTP,
+		URL:       "https://example.com/mcp",
+		Headers:   map[string]string{"Authorization": "Bearer ${secret:demo_remote_token_zzz}"},
+	}
+	rep := CheckServerReadiness(rm)
+	var found bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "secret (remote):") {
+			found = true
+			if r.Optional {
+				t.Errorf("remote-http secret marked Optional; remote secrets are install-blocking")
+			}
+			if r.OK {
+				t.Errorf("unset remote-http secret reported OK=true")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no remote secret requirement for ${secret:} in headers: %+v", rep.Requirements)
 	}
 }

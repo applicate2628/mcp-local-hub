@@ -1765,14 +1765,16 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			}
 		}
 	}
-	// 4. Secret references resolve. Any `secret:<key>` in manifest.Env
-	// must already exist in the vault — otherwise the daemon would
-	// spawn, fail to start on the missing env var, and the user would
-	// chase a cryptic subprocess error. Failing here surfaces the real
-	// cause (missing secret) before any side effect is applied.
-	if err := checkSecretRefs(m.Env); err != nil {
-		return err
-	}
+	// 4. Secret references are OPTIONAL (install-and-it-works): a missing
+	// `secret:` ref does NOT block the install. Previously checkSecretRefs
+	// hard-failed here, blocking install of EVERY server that declares a
+	// secret (e.g. wolfram's wolfram_app_id) even when the operator wanted
+	// to set the key later — the reported bug. The daemon now spawns
+	// best-effort (the unset env var is omitted, see daemonEnvWithOverlay)
+	// so the SERVER reports its own missing-key, and CheckServerReadiness
+	// surfaces unset secrets as ADVISORY (Optional) requirements the
+	// operator is prompted to fill inline at install — explicit fields, not
+	// a hard gate.
 	return nil
 }
 
