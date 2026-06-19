@@ -36,4 +36,8 @@ describe("inlineSecretsToWrite", () => {
       ["API_KEY2", "v"],
     ]);
   });
+
+  it("drops a reserved vault key name (init)", () => {
+    expect(inlineSecretsToWrite({ init: "v" }, [{ value: "secret:init" }])).toEqual([]);
+  });
 });

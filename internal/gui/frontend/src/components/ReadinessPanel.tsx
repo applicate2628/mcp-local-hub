@@ -1,5 +1,5 @@
 import type { ReadinessReport, ReadinessRequirement } from "../api";
-import { SECRET_NAME_RE } from "../lib/reserved-names";
+import { SECRET_NAME_RE, isReservedName } from "../lib/reserved-names";
 
 const SECRET_PREFIX = "secret: ";
 
@@ -73,7 +73,12 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
           // actually create (SECRET_NAME_RE) — a non-conforming key (e.g.
           // `foo-bar`, `123`) falls back to the guided Fix text instead of an
           // unusable input (Codex #378 r2).
-          const inlineable = key !== "" && !!req.optional && !req.ok && SECRET_NAME_RE.test(key);
+          const inlineable =
+            key !== "" &&
+            !!req.optional &&
+            !req.ok &&
+            SECRET_NAME_RE.test(key) &&
+            !isReservedName(key);
           const cls = req.ok
             ? "readiness-row-ok"
             : req.optional

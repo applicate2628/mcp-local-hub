@@ -150,9 +150,17 @@ export function AddServerScreen(props: {
       await secretsInit();
     }
     for (const [key, value] of entries) {
-      await addSecret(key, value);
-      // Clear each on success so a LATER failure's retry does not re-attempt an
-      // already-written key (→ SECRETS_KEY_EXISTS) (Codex #378 r2).
+      try {
+        await addSecret(key, value);
+      } catch (err) {
+        // A concurrent creator (another tab / the CLI) may have created the key
+        // between the snapshot and now → SECRETS_KEY_EXISTS means it is ALREADY
+        // satisfied, so treat it as success instead of aborting the install
+        // (Codex #378 r3). Any other error is real and propagates.
+        if ((err as { code?: string } | null)?.code !== "SECRETS_KEY_EXISTS") throw err;
+      }
+      // Clear each on success/already-present so a LATER failure's retry does not
+      // re-attempt an already-written key (Codex #378 r2/r3).
       setInlineSecrets((prev) => {
         const next = { ...prev };
         delete next[key];
@@ -856,7 +864,23 @@ export function AddServerScreen(props: {
           {banner.reinstall && (
             <button
               type="button"
-              onClick={() => runInstallNow(formState.name.trim(), ++submissionCounter.current)}
+              onClick={async () => {
+                // The success-banner Reinstall path ALSO commits an install, so
+                // persist inline secrets here too — otherwise a value typed in the
+                // readiness panel before a plain Save is lost on Reinstall and the
+                // daemon spawns with the secret: ref unresolved (Codex #378 r3).
+                const version = ++submissionCounter.current;
+                try {
+                  await persistInlineSecrets(formState);
+                  if (version === submissionCounter.current) {
+                    await runInstallNow(formState.name.trim(), version);
+                  }
+                } catch (err) {
+                  if (version === submissionCounter.current) {
+                    setBanner({ kind: "error", text: (err as Error).message });
+                  }
+                }
+              }}
               data-action="reinstall"
             >
               Reinstall

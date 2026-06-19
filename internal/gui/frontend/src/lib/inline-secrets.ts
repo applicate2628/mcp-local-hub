@@ -1,5 +1,5 @@
 import { isSecretRef } from "./secret-ref";
-import { SECRET_NAME_RE } from "./reserved-names";
+import { SECRET_NAME_RE, isReservedName } from "./reserved-names";
 
 // inlineSecretsToWrite returns the [key, value] pairs to write to the vault from
 // the readiness panel's inline secret entries — ONLY for keys that are (a) still
@@ -20,6 +20,12 @@ export function inlineSecretsToWrite(
     }
   }
   return Object.entries(inlineSecrets).filter(
-    ([key, value]) => value.trim() !== "" && refKeys.has(key) && SECRET_NAME_RE.test(key),
+    ([key, value]) =>
+      value.trim() !== "" &&
+      refKeys.has(key) &&
+      SECRET_NAME_RE.test(key) &&
+      // Reserved vault key names (e.g. `init`) collide with /api/secrets routes
+      // and the add endpoint rejects them — never write one inline (Codex #378 r3).
+      !isReservedName(key),
   );
 }
