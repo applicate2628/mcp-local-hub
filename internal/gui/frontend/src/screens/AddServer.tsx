@@ -90,8 +90,6 @@ export function AddServerScreen(props: {
   const debouncedState = useDebouncedValue(formState, 150);
   const yamlPreview = toYAML(debouncedState);
 
-  const isDirty = !deepEqualForm(formState, initialSnapshot);
-
   const snapshot = useSecretsSnapshot();
 
   // Live install-readiness on the debounced draft YAML (epic install-and-it-
@@ -103,6 +101,12 @@ export function AddServerScreen(props: {
   // inlineSecrets maps a vault key → the plaintext the operator typed in the
   // readiness panel; persisted to the vault just before install.
   const [inlineSecrets, setInlineSecrets] = useState<Record<string, string>>({});
+  // A value typed into a readiness inline secret field is unsaved data too: fold
+  // it into the dirty flag so the sidebar/close guard warns before discarding it,
+  // instead of silently dropping a just-entered password (Codex #378 r4).
+  const isDirty =
+    !deepEqualForm(formState, initialSnapshot) ||
+    Object.values(inlineSecrets).some((v) => v.trim() !== "");
   useEffect(() => {
     if (!yamlPreview || !debouncedState.name.trim()) {
       // Invalidate any in-flight check AND clear loading, so a late response for
@@ -260,6 +264,11 @@ export function AddServerScreen(props: {
     setReadOnlyReason(null);
     setFormState(BLANK_FORM);
     setInitialSnapshot(BLANK_FORM);
+    // Clear inline secrets typed for the PRIOR draft so a value entered for
+    // manifest a cannot reappear prefilled in manifest b that references the
+    // same missing key (Codex #378 r4 — a→b edit navigation would otherwise
+    // write a's secret value for b).
+    setInlineSecrets({});
     if (!editName) {
       setLoadError("No manifest name specified");
       return;
@@ -534,15 +543,6 @@ export function AddServerScreen(props: {
         });
         return;
       }
-      // Persist inline secrets BEFORE committing the manifest: a vault write
-      // failure (uninitialized vault, invalid/duplicate key) must not leave a
-      // committed manifest the user then cannot cleanly retry installing — in
-      // create mode the next click would hit "already exists" (Codex #378).
-      if (opts.install) {
-        await persistInlineSecrets(payloadState);
-        if (version !== submissionCounter.current) return;
-      }
-
       // R4-2: captures the gate-ON in-place republish-failure signal from the
       // create/edit response so the success banner can prompt a hub restart.
       let restartHub = false;
@@ -592,6 +592,15 @@ export function AddServerScreen(props: {
         pushToast("success", `Saved ${name} manifest.`);
         return;
       }
+      // Persist inline secrets ONLY AFTER the manifest commit (create/edit)
+      // succeeded, and BEFORE install. Persisting earlier orphaned vault keys
+      // when the commit then failed (create "already exists", edit stale-hash
+      // ManifestHashMismatchError) — the manifest was never saved but the typed
+      // secret stayed in the vault, and a later retry hit SECRETS_KEY_EXISTS
+      // instead of using the value (Codex #378 r4). The secret must still exist
+      // before install so the daemon resolves the `secret:` ref.
+      await persistInlineSecrets(payloadState);
+      if (version !== submissionCounter.current) return;
       await runInstallNow(name, version);
     } catch (err) {
       if (version !== submissionCounter.current) return;
@@ -742,6 +751,10 @@ export function AddServerScreen(props: {
       return;
     }
     setFormState(parsed);
+    // A wholesale paste replaces the draft → drop inline secrets typed for the
+    // previous draft so they cannot be written under the pasted manifest's name
+    // (Codex #378 r4).
+    setInlineSecrets({});
     // Per Q8 decision: paste does NOT reset the dirty baseline. Only
     // successful Save does. We DO auto-run structural validate since
     // paste is a mode switch and users expect "this parsed / this

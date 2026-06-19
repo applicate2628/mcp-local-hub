@@ -50,6 +50,38 @@ func TestReadinessHandler_DraftPOST(t *testing.T) {
 	}
 }
 
+func TestReadinessHandler_DraftPOST_ReservedNameBlocks(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	// "con" is a Windows-reserved device name the frontend regex still allows but
+	// CheckManifestName (the Save & Install storage gate) rejects. Draft readiness
+	// must surface it as a hard blocker rather than show "Ready to install" and
+	// then fail the create before install starts (Codex #378 r4).
+	yaml := "name: con\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
+		"daemons:\n  - name: default\n    port: 9322\n" +
+		"client_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n"
+	body, _ := json.Marshal(map[string]string{"yaml": yaml})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	var rep api.ReadinessReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Error("reserved name 'con' reported Ready=true; the storage-name gate should block it")
+	}
+	found := false
+	for _, r := range rep.Requirements {
+		if r.Name == "server name" && !r.OK {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no 'server name' blocker in report for reserved name; requirements=%+v", rep.Requirements)
+	}
+}
+
 func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	body, _ := json.Marshal(map[string]string{"yaml": ":::not a manifest:::"})

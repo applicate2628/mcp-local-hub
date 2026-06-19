@@ -53,6 +53,13 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
 
   const reqs = [...report.requirements].sort((a, b) => rank(a) - rank(b));
   const blockers = reqs.filter((r) => !r.ok && !r.optional).length;
+  // When the vault itself is unreadable (decrypt-failed / corrupt), the "secrets
+  // vault" requirement is not ok. An inline write then CANNOT succeed: the save
+  // path calls secretsInit() for any non-ok vault and init refuses pre-existing
+  // unreadable vault/key files, so Save & Install would fail AFTER the UI offered
+  // a field that looks like it fixes the problem. Suppress the inline entry while
+  // the vault blocker is present and fall back to the guided Fix text (Codex #378 r4).
+  const vaultBlocked = reqs.some((r) => r.name === "secrets vault" && !r.ok);
 
   return (
     <div class="readiness-panel" data-testid="readiness-panel" role="group" aria-label="Install readiness">
@@ -78,7 +85,8 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
             !!req.optional &&
             !req.ok &&
             SECRET_NAME_RE.test(key) &&
-            !isReservedName(key);
+            !isReservedName(key) &&
+            !vaultBlocked;
           const cls = req.ok
             ? "readiness-row-ok"
             : req.optional
