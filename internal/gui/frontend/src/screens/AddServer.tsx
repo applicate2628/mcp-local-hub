@@ -101,12 +101,21 @@ export function AddServerScreen(props: {
   // inlineSecrets maps a vault key → the plaintext the operator typed in the
   // readiness panel; persisted to the vault just before install.
   const [inlineSecrets, setInlineSecrets] = useState<Record<string, string>>({});
-  // A value typed into a readiness inline secret field is unsaved data too: fold
-  // it into the dirty flag so the sidebar/close guard warns before discarding it,
-  // instead of silently dropping a just-entered password (Codex #378 r4).
-  const isDirty =
-    !deepEqualForm(formState, initialSnapshot) ||
-    Object.values(inlineSecrets).some((v) => v.trim() !== "");
+  // manifestDirty = the editable form differs from the last saved snapshot. It
+  // gates Reinstall (which installs the LAST SAVED manifest) — once the form
+  // diverges, a Reinstall would install stale config while persisting current
+  // refs, so it must be disabled until re-saved (Codex #378 r6).
+  const manifestDirty = !deepEqualForm(formState, initialSnapshot);
+  // Only inline secrets for a CURRENTLY-referenced secret: ref count as pending
+  // unsaved data — a value typed then abandoned (its ref removed/renamed) is
+  // filtered out by inlineSecretsToWrite, so it cannot leave the form permanently
+  // dirty with a hidden value the input no longer shows (Codex #378 r6).
+  const hasPendingInlineSecret =
+    inlineSecretsToWrite(inlineSecrets, formState.env).length > 0;
+  // isDirty (sidebar/close navigation guard) — a value typed into a readiness
+  // inline secret field is unsaved data too, so warn before discarding it (r4),
+  // but only while it is still a live ref (r6).
+  const isDirty = manifestDirty || hasPendingInlineSecret;
   useEffect(() => {
     if (!yamlPreview || !debouncedState.name.trim()) {
       // Invalidate any in-flight check AND clear loading, so a late response for
@@ -708,6 +717,25 @@ export function AddServerScreen(props: {
     }
   }
 
+  // retryInstall is the SINGLE owner of "persist any pending inline secrets, then
+  // install". Used by both the install-failure Retry banner AND the edit-success
+  // Reinstall banner: each re-enters install OUTSIDE the runSave pipeline, so
+  // without this an inline secret the operator entered/changed while fixing the
+  // failure (or before a plain Save) would stay only in component state and the
+  // install would run without it (Codex #378 r4/r6).
+  async function retryInstall(name: string) {
+    const version = ++submissionCounter.current;
+    try {
+      await persistInlineSecrets(formState);
+      if (version !== submissionCounter.current) return;
+      await runInstallNow(name, version);
+    } catch (err) {
+      if (version === submissionCounter.current) {
+        setBanner({ kind: "error", text: (err as Error).message });
+      }
+    }
+  }
+
   async function runInstallNow(name: string, version: number) {
     try {
       const resp = await fetch(`/api/install?name=${encodeURIComponent(name)}`, {
@@ -721,7 +749,7 @@ export function AddServerScreen(props: {
         setBanner({
           kind: "error",
           text: `Saved servers/${name}/manifest.yaml, but install failed: ${err}`,
-          retry: () => runInstallNow(name, ++submissionCounter.current),
+          retry: () => retryInstall(name),
         });
         pushToast("danger", `Install failed for ${name}: ${err}`);
         return;
@@ -877,23 +905,15 @@ export function AddServerScreen(props: {
           {banner.reinstall && (
             <button
               type="button"
-              onClick={async () => {
-                // The success-banner Reinstall path ALSO commits an install, so
-                // persist inline secrets here too — otherwise a value typed in the
-                // readiness panel before a plain Save is lost on Reinstall and the
-                // daemon spawns with the secret: ref unresolved (Codex #378 r3).
-                const version = ++submissionCounter.current;
-                try {
-                  await persistInlineSecrets(formState);
-                  if (version === submissionCounter.current) {
-                    await runInstallNow(formState.name.trim(), version);
-                  }
-                } catch (err) {
-                  if (version === submissionCounter.current) {
-                    setBanner({ kind: "error", text: (err as Error).message });
-                  }
-                }
-              }}
+              // Reinstall installs the LAST SAVED manifest via retryInstall (which
+              // persists pending inline secrets first — Codex #378 r3). Disabled
+              // once the form diverges from the saved snapshot (manifestDirty): a
+              // Reinstall then would install stale config while persisting the
+              // current, unsaved refs — an orphaned secret + a mismatched install.
+              // The operator must Save again (which re-arms a clean banner) (r6).
+              disabled={busy !== "" || manifestDirty}
+              title={manifestDirty ? "Save your changes first — Reinstall applies the last saved manifest." : undefined}
+              onClick={() => retryInstall(formState.name.trim())}
               data-action="reinstall"
             >
               Reinstall
