@@ -1230,6 +1230,15 @@ func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon, expectedURL string
 	if expectedURL != "" && (entry.URL == expectedURL || hubLoopbackEquivalentURL(entry.URL, expectedURL)) {
 		return true
 	}
+	// Signal 3: serena is the dynamic-pool router-fronted server. Its installed
+	// client URL is the /serena/mcp router on the LIVE GUI port — which expectedURL
+	// (derived from the legacy manifest's 9121 daemon) does NOT match. Recognize the
+	// router URL PORT-AGNOSTICALLY (the GUI re-binds its port each start) so
+	// uninstall removes serena's client entry instead of refusing it as
+	// "not hub-managed" (serena-client-revert-on-manifest-sync uninstall-side).
+	if IsSerenaServer(server) && IsHubOwnedSerenaRouterEntry(entry) {
+		return true
+	}
 	return false
 }
 

@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -52,6 +53,84 @@ const SerenaRouterURLPath = "/serena/mcp"
 // serenaEntryName is the MCP entry name every client uses for serena. It is
 // the manifest server name; clients key their config map on it.
 const serenaEntryName = "serena"
+
+// SerenaRouterClientURL is the canonical client MCP URL for the dynamic-pool
+// serena server: the constant /serena/mcp router on the LIVE GUI port. It is the
+// SINGLE OWNER of serena's client URL — consumed by the write path (migrate) and
+// matched by the read path (scan classify) so neither falls back to the legacy
+// per-daemon 9121 URL from serena's still-legacy-shaped manifest (the
+// serena-client-revert-on-manifest-sync defect). It mirrors the exact shape
+// ReconcileSerenaClientsToRouter builds (serena_client_reconcile.go routerURL).
+func SerenaRouterClientURL(guiPort int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d%s", guiPort, SerenaRouterURLPath)
+}
+
+// IsSerenaRouterURL reports whether an endpoint is serena's /serena/mcp router
+// URL (loopback host + the router path). PORT-AGNOSTIC on purpose: the GUI
+// re-binds its listener port on each start, so the path is the stable
+// discriminator. The scan classifier uses it to recognize a correctly-routed
+// serena client entry as via-hub instead of misreading it as a stale/foreign
+// loopback.
+func IsSerenaRouterURL(endpoint string) bool {
+	if !clients.IsHubHTTPURL(endpoint) {
+		return false
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	// IsHubHTTPURL is a string-prefix check, so a userinfo URL
+	// (http://127.0.0.1:9125@evil.example/serena/mcp) passes it while the PARSED
+	// host is evil.example. Reject userinfo and re-validate the parsed hostname is
+	// loopback so a remote URL cannot masquerade as the local router (#379 r4).
+	if u.User != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "::1", "localhost":
+	default:
+		return false
+	}
+	return u.Path == SerenaRouterURLPath
+}
+
+// IsHubOwnedSerenaRouterEntry reports whether a client entry is a HUB-OWNED serena
+// /serena/mcp router entry: the URL-native shape (only mcphub writes /serena/mcp),
+// OR the relay shape (entry.RelayURL) WHEN the relay command is the mcphub binary.
+// The relay binary guard stops uninstall/demigrate from removing a user-owned relay
+// that merely points its --url at a /serena/mcp endpoint (#379 r4). Port-agnostic
+// (cleanup removes a stale-port entry too).
+func IsHubOwnedSerenaRouterEntry(e *clients.MCPEntry) bool {
+	if e == nil {
+		return false
+	}
+	if IsSerenaRouterURL(e.URL) {
+		return true
+	}
+	return IsSerenaRouterURL(e.RelayURL) && clients.IsMcphubBinary(e.RelayExePath)
+}
+
+// IsLiveSerenaRouterURL reports whether endpoint is the /serena/mcp router on
+// the LIVE GUI port. guiPort<=0 means the caller has no live port, so degrade to
+// the port-agnostic shape check and never claim staleness without proof.
+func IsLiveSerenaRouterURL(endpoint string, guiPort int) bool {
+	if !IsSerenaRouterURL(endpoint) {
+		return false
+	}
+	if guiPort <= 0 {
+		return true
+	}
+	p, ok := loopbackEntryPort(endpoint)
+	return ok && p == guiPort
+}
+
+// IsSerenaServer reports whether a server name is the dynamic-pool serena server
+// (THE router-fronted server). The write + read paths special-case it by name
+// because serena's client URL is the /serena/mcp router, not the manifest's
+// legacy per-daemon port.
+func IsSerenaServer(server string) bool {
+	return server == serenaEntryName
+}
 
 // defaultLegacySerenaPort is the legacy global serena daemon port that
 // dynamic-pool clients must be moved OFF of. Used only when

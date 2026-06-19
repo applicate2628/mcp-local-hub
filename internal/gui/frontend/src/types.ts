@@ -63,6 +63,11 @@ export interface DaemonStatus {
 export interface ScanResult {
   at: string;
   entries: ScanEntry[] | null;
+  // gui_port is the live GUI/hub listener port the scan ran under (absent/0 for a
+  // CLI scan). perClientRouting applies the same live-port check the backend
+  // classify uses for serena's /serena/mcp router cell so a stale-port entry
+  // renders not-connected, matching the backend (Codex #379 r3).
+  gui_port?: number;
   // Bug-bash A2 (#13): per-client config file state, independent of
   // per-entry client_presence. Keys are client names; values from
   // the ClientConfigState union below. Frontend uses this to render a
@@ -155,6 +160,7 @@ export interface ScanEntry {
 export interface ClientPresence {
   transport?: "http" | "stdio" | "relay" | "absent" | string;
   endpoint?: string;
+  relay_url?: string;
   raw?: unknown;
 }
 
