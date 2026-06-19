@@ -116,10 +116,10 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]any{
-			"error": err.Error(),
-			"code":  "CLEANUP_AGGRESSIVE_FAILED",
-		})
+		// Redact: the only non-sentinel error here is a process-snapshot
+		// failure (wmic/CIM) which can carry a path; log it server-side,
+		// return a generic body (security review P3-3, matches scan.go).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "CLEANUP_AGGRESSIVE_FAILED", "cleanup-aggressive")
 		return
 	}
 

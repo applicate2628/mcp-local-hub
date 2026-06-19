@@ -1017,6 +1017,39 @@ describe("SectionMaintenance — aggressive cleanup card", () => {
     expect(applyCall[2]).toEqual(["chrome"]);
   });
 
+  it("snapshots scope+classes at Clean-time — changing them under the open modal does NOT redirect the kill (consent-drift, security+sonnet converged)", async () => {
+    const spy = vi.spyOn(api, "cleanupAggressive").mockImplementation(async () => ({
+      orphans: [
+        { pid: 7777, parent_pid: 1, server: "", cmdline_display: "node.exe", age_sec: 300, ram_bytes: 50 * 1024 * 1024, match_source: "codex" },
+      ],
+      killed: 1,
+      skipped: 0,
+    }));
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="aggressive-cleanup"]')!;
+
+    // Preview scope = client codex, no danger classes.
+    fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "codex" } });
+    fireEvent.click(card.querySelector('[data-testid="aggressive-preview-button"]')!);
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    // Open the confirm modal (snapshots {codex, []}).
+    fireEvent.click(card.querySelector('[data-testid="aggressive-clean-button"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeTruthy());
+
+    // NOW (modal open) widen the scope + opt a danger class in.
+    fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "claude" } });
+    fireEvent.click(card.querySelector('[data-testid="aggressive-class-chrome"]')!);
+
+    // Confirm the kill.
+    clickConfirmModal(container as HTMLElement);
+    await waitFor(() => expect(spy.mock.calls.some((c) => c[0] === true)).toBe(true));
+
+    // The kill MUST use the SNAPSHOT (codex, []), NOT the drifted live state (claude, [chrome]).
+    const applyCall = spy.mock.calls.find((c) => c[0] === true)!;
+    expect(applyCall[1]).toEqual({ kind: "client", client: "codex" });
+    expect(applyCall[2]).toEqual([]);
+  });
+
   it("posts a root-pid scope when By-root-PID is chosen", async () => {
     const spy = vi.spyOn(api, "cleanupAggressive").mockResolvedValue({ orphans: [], killed: 0, skipped: 0 });
     const { container } = render(<SectionMaintenance />);

@@ -365,8 +365,14 @@ function CardAggressiveCleanup(): preact.JSX.Element {
   const [includeClasses, setIncludeClasses] = useState<string[]>([]);
   // Snapshot the candidate list AND the resolved scope/include-class set
   // at modal-open time so Confirm applies against exactly what the user
-  // acknowledged (same R1 discipline as CardOrphanMcpServers).
+  // acknowledged (same R1 discipline as CardOrphanMcpServers). The scope
+  // selector + class checkboxes stay live while the modal is open, so
+  // reading them at apply-time would be a TOCTOU: the operator could widen
+  // the scope under the open modal and kill a different process set than
+  // the previewed/acknowledged one (security + sonnet review, converged).
   const [orphansSnapshot, setOrphansSnapshot] = useState<OrphanProcess[] | null>(null);
+  const [scopeSnapshot, setScopeSnapshot] = useState<AggressiveCleanupScope | null>(null);
+  const [classesSnapshot, setClassesSnapshot] = useState<string[]>([]);
 
   function friendlyError(e: unknown): string {
     const raw = asError(e);
@@ -413,42 +419,54 @@ function CardAggressiveCleanup(): preact.JSX.Element {
   function openConfirm() {
     if (state.kind !== "preview" || !state.orphans) return;
     if (state.orphans.length === 0) return;
+    const scope = currentScope();
+    if (!scope) return;
     setOrphansSnapshot([...state.orphans]);
+    setScopeSnapshot(scope);
+    setClassesSnapshot([...includeClasses]);
     setConfirmOpen(true);
   }
 
   function cancelConfirm() {
     setConfirmOpen(false);
     setOrphansSnapshot(null);
+    setScopeSnapshot(null);
+    setClassesSnapshot([]);
   }
 
   async function apply() {
-    const scope = currentScope();
-    if (!orphansSnapshot || orphansSnapshot.length === 0 || !scope) {
+    // Apply against the SNAPSHOT taken at openConfirm — NOT live scope/classes
+    // — so a scope change under the open modal can't redirect the kill.
+    if (!orphansSnapshot || orphansSnapshot.length === 0 || !scopeSnapshot) {
       cancelConfirm();
       return;
     }
     setConfirmOpen(false);
     setState({ kind: "loading" });
     try {
-      const r = await cleanupAggressive(true, scope, includeClasses);
+      const r = await cleanupAggressive(true, scopeSnapshot, classesSnapshot);
       setState({ kind: "applied", killed: r.killed, skipped: r.skipped, orphans: r.orphans });
       setOrphansSnapshot(null);
+      setScopeSnapshot(null);
+      setClassesSnapshot([]);
     } catch (e) {
       setState({ kind: "error", error: friendlyError(e) });
       setOrphansSnapshot(null);
+      setScopeSnapshot(null);
+      setClassesSnapshot([]);
     }
   }
 
   const scope = currentScope();
-  const scopeLabel =
-    scope == null
-      ? ""
-      : scope.kind === "client"
-        ? `client ${scope.client}`
-        : `root PID ${scope.rootPid}`;
   const confirmOrphans = orphansSnapshot ?? [];
   const confirmCount = confirmOrphans.length;
+  // Modal label comes from the SNAPSHOT (what was acknowledged), not live scope.
+  const scopeLabel =
+    scopeSnapshot == null
+      ? ""
+      : scopeSnapshot.kind === "client"
+        ? `client ${scopeSnapshot.client}`
+        : `root PID ${scopeSnapshot.rootPid}`;
 
   return (
     <div data-card="aggressive-cleanup" class={CARD_CLASS}>
@@ -567,10 +585,10 @@ function CardAggressiveCleanup(): preact.JSX.Element {
               of a STILL-RUNNING client — killing them is an explicit
               override of the safe-sweep guard.
             </p>
-            {includeClasses.length > 0 && (
+            {classesSnapshot.length > 0 && (
               <p class="maintenance-danger-warning m-0 mb-2 text-sm text-app-danger" data-testid="aggressive-confirm-danger">
                 Also killing dangerous classes:{" "}
-                <strong>{includeClasses.join(", ")}</strong> — operator
+                <strong>{classesSnapshot.join(", ")}</strong> — operator
                 terminals or live Playwright browser sessions may be
                 terminated.
               </p>
