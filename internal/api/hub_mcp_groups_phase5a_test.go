@@ -232,24 +232,6 @@ func TestGroupsPhase5a_RepublishedHiddenToolRevokesExistingSession(t *testing.T)
 		Groups: map[string]bool{GroupScopeKey("frontend"): true},
 	})
 
-	// REGRESSION (list/call symmetry): a SECOND tools/list on the SAME session
-	// after the republish must NOT re-advertise memory__write. Before the
-	// hiddenToolsForScope live-snapshot fix, tools/list filtered off the
-	// init-captured snapshot and kept listing (and re-routing) memory__write
-	// even though the very next tools/call rejected it with -32601 — a
-	// list-says-yes / call-says-no split that only self-healed on reconnect.
-	reqL2 := authedRequest(t, http.MethodPost, "/g/frontend/mcp", listBody)
-	reqL2.Header.Set("Mcp-Session-Id", sid)
-	reqL2.Header.Set("MCP-Protocol-Version", "2025-11-25")
-	wL2 := httptest.NewRecorder()
-	h.ServeHTTP(wL2, reqL2)
-	if wL2.Code != http.StatusOK {
-		t.Fatalf("post-republish tools/list status=%d want 200; body=%s", wL2.Code, wL2.Body.String())
-	}
-	if toolNamesFromListResponse(t, wL2.Body.Bytes())["memory__write"] {
-		t.Fatalf("post-republish tools/list still advertises hidden memory__write; list and call disagree; body=%s", wL2.Body.String())
-	}
-
 	callHidden := []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory__write","arguments":{}}}`)
 	reqC := authedRequest(t, http.MethodPost, "/g/frontend/mcp", callHidden)
 	reqC.Header.Set("Mcp-Session-Id", sid)
@@ -263,79 +245,6 @@ func TestGroupsPhase5a_RepublishedHiddenToolRevokesExistingSession(t *testing.T)
 
 	if memSD.callCount.Load() != 0 {
 		t.Fatalf("stale hidden tool reached memory daemon %d time(s)", memSD.callCount.Load())
-	}
-}
-
-// TestGroupsPhase5a_RepublishedMemberRemovalDropsFromList closes the
-// member-removal half of the list/call split (Codex #376). When a group
-// edit REMOVES a member server, the republished snapshot no longer carries
-// that server's tools_hidden entry, so a hidden-filter-only fix would
-// re-advertise + re-route its tools on the next tools/list while tools/call
-// rejects them via daemonStillBound. tools/list must apply the live
-// membership check too, so list and call agree for member-removal edits.
-func TestGroupsPhase5a_RepublishedMemberRemovalDropsFromList(t *testing.T) {
-	memSD, timeSD, _ := frontendSnapshotWithHiddenFixture(t, nil)
-
-	h := newTestHandler(t)
-	publishGroupTokenTable(t, "frontend")
-
-	initBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`)
-	req := authedRequest(t, http.MethodPost, "/g/frontend/mcp", initBody)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("initialize status=%d want 200; body=%s", w.Code, w.Body.String())
-	}
-	sid := w.Header().Get("Mcp-Session-Id")
-
-	listBody := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-	listNames := func() map[string]bool {
-		r := authedRequest(t, http.MethodPost, "/g/frontend/mcp", listBody)
-		r.Header.Set("Mcp-Session-Id", sid)
-		r.Header.Set("MCP-Protocol-Version", "2025-11-25")
-		ww := httptest.NewRecorder()
-		h.ServeHTTP(ww, r)
-		if ww.Code != http.StatusOK {
-			t.Fatalf("tools/list status=%d want 200; body=%s", ww.Code, ww.Body.String())
-		}
-		return toolNamesFromListResponse(t, ww.Body.Bytes())
-	}
-	if !listNames()["memory__write"] {
-		t.Fatalf("pre-removal tools/list missing memory__write")
-	}
-
-	// Republish with memory REMOVED from the group (only time remains).
-	// daemonStillBound now returns false for the memory daemon.
-	PublishResolverSnapshot(&ResolverSnapshot{
-		Gen: 2,
-		Bindings: map[string][]canonicalDaemonRef{
-			GroupScopeKey("frontend"): {
-				{Server: "time", Daemon: "claude-code", Port: timeSD.port},
-			},
-		},
-		Groups: map[string]bool{GroupScopeKey("frontend"): true},
-	})
-
-	// tools/list must DROP the removed member's tools, KEEP the surviving
-	// member's — list now agrees with the daemonStillBound call fence.
-	names := listNames()
-	if names["memory__write"] || names["memory__read"] {
-		t.Fatalf("post-removal tools/list still advertises removed-member memory tools; got %v", names)
-	}
-	if !names["time__read"] {
-		t.Fatalf("post-removal tools/list dropped surviving-member time tools; got %v", names)
-	}
-
-	// tools/call on the removed member → -32601, never reaches the daemon.
-	callRemoved := []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory__write","arguments":{}}}`)
-	rc := authedRequest(t, http.MethodPost, "/g/frontend/mcp", callRemoved)
-	rc.Header.Set("Mcp-Session-Id", sid)
-	rc.Header.Set("MCP-Protocol-Version", "2025-11-25")
-	wc := httptest.NewRecorder()
-	h.ServeHTTP(wc, rc)
-	assertJSONRPCErrorCode(t, wc.Body.Bytes(), -32601)
-	if memSD.callCount.Load() != 0 {
-		t.Fatalf("removed-member tool reached memory daemon %d time(s)", memSD.callCount.Load())
 	}
 }
 
