@@ -1775,6 +1775,17 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	// surfaces unset secrets as ADVISORY (Optional) requirements the
 	// operator is prompted to fill inline at install — explicit fields, not
 	// a hard gate.
+	//
+	// An UNREADABLE vault is the exception: a corrupt/inaccessible vault for a
+	// manifest that USES secret refs is fatal at the daemon launch path
+	// (OpenVaultOptional + HasSecretRef), so Preflight must reject it too —
+	// otherwise install succeeds and the daemon then fails to start (Codex
+	// #377 r6). A truly-ABSENT vault is still fine (secrets optional).
+	if secrets.HasSecretRef(m.Env) {
+		if _, verr := secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath()); verr != nil {
+			return fmt.Errorf("manifest %s uses secret refs but the vault is unreadable: %w", m.Name, verr)
+		}
+	}
 	return nil
 }
 

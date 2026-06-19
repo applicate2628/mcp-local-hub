@@ -131,10 +131,15 @@ func HasSecretRef(env map[string]string) bool {
 func OpenVaultOptional(keyPath, vaultPath string) (*Vault, error) {
 	vault, err := OpenVault(keyPath, vaultPath)
 	if err != nil {
-		if _, statErr := os.Stat(vaultPath); statErr == nil {
-			return nil, fmt.Errorf("vault exists but unreadable: %w", err)
+		// ABSENT (→ optional) ONLY when stat proves the file does not exist.
+		// Stat SUCCESS (file present) OR a non-not-exist stat error
+		// (permission denied, broken mount) means the vault may exist but be
+		// inaccessible — treat as UNREADABLE, never silently as "no secrets"
+		// (Codex #377 r6).
+		if _, statErr := os.Stat(vaultPath); statErr != nil && os.IsNotExist(statErr) {
+			return nil, nil // genuinely absent
 		}
-		return nil, nil // absent: no secrets configured
+		return nil, fmt.Errorf("vault exists but unreadable: %w", err)
 	}
 	return vault, nil
 }

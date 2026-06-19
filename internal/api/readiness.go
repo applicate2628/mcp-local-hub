@@ -398,6 +398,19 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		})
 	}
 
+	// daemon_template (dynamic-pool) manifests: BuildPlan does NOT exercise the
+	// InstallParsedManifest admission gates (native-http transport, non-empty
+	// daemon_template.context, no duplicate --context). Run the SAME validator
+	// (single owner) so readiness mirrors that install path too (Codex #377 r6).
+	if err := validateDynamicPoolManifest(m); err != nil {
+		add(ReadinessRequirement{
+			Name:   "dynamic-pool",
+			OK:     false,
+			Reason: err.Error(),
+			Fix:    "Fix the daemon_template manifest: native-http transport, a non-empty daemon_template.context, and no --context token in base_args/extra_args_template.",
+		})
+	}
+
 	return rep
 }
 
