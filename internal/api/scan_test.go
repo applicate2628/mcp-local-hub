@@ -537,6 +537,7 @@ func TestClassify(t *testing.T) {
 		// (security review) requires a loopback entry's URL port to match one
 		// of these; non-loopback cases can leave it nil.
 		daemonPorts []int
+		guiPort     int
 		want        string
 	}{
 		{
@@ -671,16 +672,31 @@ func TestClassify(t *testing.T) {
 		},
 		{
 			// SERENA ROUTER (serena-client-revert-on-manifest-sync read-side): a
-			// correctly-routed serena client points at the /serena/mcp router on the
-			// LIVE GUI port (9125), which does NOT match serena's legacy manifest
-			// daemon port (9121). The serena special-case recognizes it as via-hub
-			// instead of misreading it as a stale-port external — so the matrix shows
-			// a connected serena as connected.
-			name:        "serena /serena/mcp router (GUI port != legacy 9121) -> via-hub",
+			// CLI scans do not know the live GUI port. In that mode, the serena
+			// router special-case stays port-agnostic so a router-shaped entry does
+			// not regress from r1 behavior.
+			name:        "serena /serena/mcp router + unknown GUI port -> via-hub",
 			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
 			serverName:  "serena",
 			daemonPorts: []int{9121},
+			guiPort:     0,
 			want:        "via-hub",
+		},
+		{
+			name:        "serena /serena/mcp router on live GUI port -> via-hub",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "via-hub",
+		},
+		{
+			name:        "serena /serena/mcp router on stale GUI port -> external",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9124/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     9125,
+			want:        "external",
 		},
 		{
 			// The serena router special-case is NAME-GATED: a NON-serena server at a
@@ -695,7 +711,7 @@ func TestClassify(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classify(tc.entry, tc.serverName, manifests, tc.daemonPorts)
+			got := classify(tc.entry, tc.serverName, manifests, tc.daemonPorts, tc.guiPort)
 			if got != tc.want {
 				t.Fatalf("classify(%q) = %q, want %q", tc.serverName, got, tc.want)
 			}

@@ -82,6 +82,30 @@ func IsSerenaRouterURL(endpoint string) bool {
 	return u.Path == SerenaRouterURLPath
 }
 
+// IsSerenaRouterEntry reports whether a client entry is the serena /serena/mcp
+// router in EITHER wire shape: URL-native (entry.URL) or relay (entry.RelayURL,
+// the `relay --url <router>` form). Port-agnostic.
+func IsSerenaRouterEntry(e *clients.MCPEntry) bool {
+	if e == nil {
+		return false
+	}
+	return IsSerenaRouterURL(e.URL) || IsSerenaRouterURL(e.RelayURL)
+}
+
+// IsLiveSerenaRouterURL reports whether endpoint is the /serena/mcp router on
+// the LIVE GUI port. guiPort<=0 means the caller has no live port, so degrade to
+// the port-agnostic shape check and never claim staleness without proof.
+func IsLiveSerenaRouterURL(endpoint string, guiPort int) bool {
+	if !IsSerenaRouterURL(endpoint) {
+		return false
+	}
+	if guiPort <= 0 {
+		return true
+	}
+	p, ok := loopbackEntryPort(endpoint)
+	return ok && p == guiPort
+}
+
 // IsSerenaServer reports whether a server name is the dynamic-pool serena server
 // (THE router-fronted server). The write + read paths special-case it by name
 // because serena's client URL is the /serena/mcp router, not the manifest's

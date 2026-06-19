@@ -37,10 +37,20 @@ type scanner interface {
 	Scan() (*api.ScanResult, error)
 }
 
-type realScanner struct{}
+type realScanner struct {
+	guiPort func() int
+}
 
-func (realScanner) Scan() (*api.ScanResult, error) {
-	return api.NewAPI().Scan()
+func (r realScanner) Scan() (*api.ScanResult, error) {
+	guiPort := 0
+	if r.guiPort != nil {
+		guiPort = r.guiPort()
+	}
+	return api.NewAPI().ScanFrom(api.ScanOpts{
+		ConfigPaths: api.DefaultScanConfigPaths(),
+		ManifestDir: "",
+		GUIPort:     guiPort,
+	})
 }
 
 // statusProvider is the narrow interface the /api/status handler needs.
@@ -724,7 +734,7 @@ func NewServer(cfg Config) *Server {
 	// THIS instance. Other handlers continue to use api.NewAPI() per
 	// request — out of scope for this task.
 	s.api = api.NewAPI()
-	s.scanner = realScanner{}
+	s.scanner = realScanner{guiPort: s.Port}
 	s.status = realStatusProvider{}
 	s.health = realHealthBackend{api: s.api}
 	s.migrator = realMigrator{guiPort: s.Port}

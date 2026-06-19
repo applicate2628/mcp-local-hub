@@ -38,6 +38,36 @@ func TestIsSerenaRouterURL(t *testing.T) {
 	}
 }
 
+func TestIsSerenaRouterEntryRecognizesURLAndRelayURLShapes(t *testing.T) {
+	if !IsSerenaRouterEntry(&clients.MCPEntry{URL: "http://127.0.0.1:9125/serena/mcp"}) {
+		t.Fatal("URL-native serena router entry was not recognized")
+	}
+	if !IsSerenaRouterEntry(&clients.MCPEntry{RelayURL: "http://127.0.0.1:9125/serena/mcp"}) {
+		t.Fatal("relay-url serena router entry was not recognized")
+	}
+	if IsSerenaRouterEntry(&clients.MCPEntry{URL: "http://127.0.0.1:9121/mcp"}) {
+		t.Fatal("legacy per-daemon URL was recognized as the serena router")
+	}
+	if IsSerenaRouterEntry(nil) {
+		t.Fatal("nil entry was recognized as the serena router")
+	}
+}
+
+func TestIsLiveSerenaRouterURLChecksLiveGUIPortWhenKnown(t *testing.T) {
+	if !IsLiveSerenaRouterURL("http://127.0.0.1:9125/serena/mcp", 9125) {
+		t.Fatal("router URL on the live GUI port was not recognized")
+	}
+	if IsLiveSerenaRouterURL("http://127.0.0.1:9124/serena/mcp", 9125) {
+		t.Fatal("stale-port router URL was recognized as live")
+	}
+	if !IsLiveSerenaRouterURL("http://127.0.0.1:9124/serena/mcp", 0) {
+		t.Fatal("zero GUI port should degrade to port-agnostic router recognition")
+	}
+	if IsLiveSerenaRouterURL("http://127.0.0.1:9125/mcp", 9125) {
+		t.Fatal("legacy /mcp path was recognized as the serena router")
+	}
+}
+
 // TestIsHubOwnedEntry_SerenaRouter is the uninstall-side guard: serena's router
 // client URL must be recognized as hub-owned (so uninstall removes it) even
 // though expectedURL is the legacy 9121 URL it can never match. The recognition
@@ -48,6 +78,10 @@ func TestIsHubOwnedEntry_SerenaRouter(t *testing.T) {
 
 	if !isHubOwnedEntry(routerEntry, "serena", "unified", legacyExpected) {
 		t.Error("serena router entry not recognized as hub-owned (uninstall would orphan it)")
+	}
+	relayRouterEntry := &clients.MCPEntry{Name: "serena", RelayURL: "http://127.0.0.1:9130/serena/mcp"}
+	if !isHubOwnedEntry(relayRouterEntry, "serena", "unified", legacyExpected) {
+		t.Error("serena relay-url router entry not recognized as hub-owned (uninstall would orphan it)")
 	}
 	// Name-gated: the same router-shaped URL under a non-serena server is NOT
 	// auto-recognized (it must match expectedURL the normal way).
@@ -61,6 +95,20 @@ func TestIsHubOwnedEntry_SerenaRouter(t *testing.T) {
 // adapter method runs. Embedding the interface satisfies it without implementing
 // every method (a call would nil-panic, which the dry-run path never triggers).
 type stubMigrateClient struct{ clients.Client }
+
+type captureMigrateClient struct {
+	clients.Client
+	entry clients.MCPEntry
+}
+
+func (c *captureMigrateClient) Exists() bool { return true }
+
+func (c *captureMigrateClient) BackupKeep(int) (string, error) { return "", nil }
+
+func (c *captureMigrateClient) AddEntry(e clients.MCPEntry) error {
+	c.entry = e
+	return nil
+}
 
 // TestMigrateOneBinding_SerenaUsesRouterURL is the write-side guard for the
 // serena-client-revert-on-manifest-sync defect: checking serena's matrix cell
@@ -125,5 +173,72 @@ func TestMigrateOneBinding_SerenaUsesRouterURL(t *testing.T) {
 				t.Fatalf("URL = %q, want %q", got, tc.wantURL)
 			}
 		})
+	}
+}
+
+func TestMigrateOneBinding_SerenaRelayStdioSetsRelayURL(t *testing.T) {
+	t.Cleanup(SetTestCanonicalMcphubPath(`C:\bin\mcphub.exe`))
+
+	serenaManifest := &config.ServerManifest{
+		Name:    "serena",
+		Daemons: []config.DaemonSpec{{Name: "unified", Port: 9121}},
+	}
+	binding := config.ClientBinding{Client: "antigravity", Daemon: "unified", URLPath: "/mcp"}
+	client := &captureMigrateClient{}
+	report := &MigrateReport{}
+
+	migrateOneBinding(report, map[string]clients.Client{"antigravity": client}, serenaManifest, "serena", binding, false, 0, 9125)
+
+	if len(report.Failed) != 0 {
+		t.Fatalf("Failed = %+v, want none", report.Failed)
+	}
+	want := SerenaRouterClientURL(9125)
+	if client.entry.URL != want {
+		t.Fatalf("entry.URL = %q, want %q", client.entry.URL, want)
+	}
+	if client.entry.RelayURL != want {
+		t.Fatalf("entry.RelayURL = %q, want %q", client.entry.RelayURL, want)
+	}
+}
+
+func TestLiveEntryMatchesManifestBinding_SerenaRouter(t *testing.T) {
+	manifest := &config.ServerManifest{
+		Name:    "serena",
+		Daemons: []config.DaemonSpec{{Name: "unified", Port: 9121}},
+	}
+	binding := config.ClientBinding{Client: "claude-code", Daemon: "unified", URLPath: "/mcp"}
+
+	matched, _ := liveEntryMatchesManifestBinding(
+		&clients.MCPEntry{Name: "serena", URL: "http://127.0.0.1:9125/serena/mcp"},
+		"serena",
+		binding,
+		manifest,
+	)
+	if !matched {
+		t.Fatal("URL-native serena router entry did not match manifest binding")
+	}
+
+	matched, _ = liveEntryMatchesManifestBinding(
+		&clients.MCPEntry{
+			Name:         "serena",
+			RelayURL:     "http://127.0.0.1:9125/serena/mcp",
+			RelayExePath: `C:\bin\mcphub.exe`,
+		},
+		"serena",
+		binding,
+		manifest,
+	)
+	if !matched {
+		t.Fatal("relay-url serena router entry did not match manifest binding")
+	}
+
+	matched, _ = liveEntryMatchesManifestBinding(
+		&clients.MCPEntry{Name: "memory", URL: "http://127.0.0.1:9125/serena/mcp"},
+		"memory",
+		config.ClientBinding{Client: "claude-code", Daemon: "default", URLPath: "/mcp"},
+		&config.ServerManifest{Name: "memory", Daemons: []config.DaemonSpec{{Name: "default", Port: 9128}}},
+	)
+	if matched {
+		t.Fatal("non-serena router-shaped entry matched as a serena router binding")
 	}
 }

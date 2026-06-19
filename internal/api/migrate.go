@@ -251,6 +251,9 @@ func migrateOneBinding(
 		RelayDaemon: binding.Daemon,
 	}
 	if clients.IsRelayStdio(binding.Client) {
+		if IsSerenaServer(server) && guiPort > 0 && url == SerenaRouterClientURL(guiPort) {
+			entry.RelayURL = url
+		}
 		// Relay-stdio adapters (antigravity, zed) spawn the
 		// stdio relay from an absolute mcphub path persisted
 		// into the client config, so AddEntry rejects an entry

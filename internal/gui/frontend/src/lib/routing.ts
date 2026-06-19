@@ -28,6 +28,17 @@ export function isHubLoopback(endpoint: string): boolean {
   }
 }
 
+// mirrors api.IsSerenaRouterURL — loopback host + /serena/mcp path,
+// port-agnostic.
+export function isSerenaRouterURL(endpoint: string): boolean {
+  if (!isHubLoopback(endpoint)) return false;
+  try {
+    return new URL(endpoint).pathname === "/serena/mcp";
+  } catch {
+    return false;
+  }
+}
+
 // loopbackEntryPort parses the TCP port out of a hub-shaped loopback URL.
 // Returns the port number only when the endpoint isHubLoopback AND carries
 // an explicit numeric port; otherwise null (a loopback URL with no explicit
@@ -171,6 +182,7 @@ export function perClientRouting(
   clientPresence: Record<string, ClientPresence>,
   clientConfigPresence: Record<string, ClientConfigState> = {},
   canMigrate: boolean = true,
+  serverName: string = "",
   // PORT-AWARE via-hub: the server's manifest daemon ports (from
   // ScanEntry.daemon_ports). A loopback-http cell is only "via-hub" when
   // its URL port matches one of these. Empty/absent → no loopback cell can
@@ -189,6 +201,10 @@ export function perClientRouting(
     if (!transport || transport === "absent") {
       routing[client] = "not-installed";
     } else if (transport === "http" && isHubLoopback(endpoint)) {
+      if (serverName === "serena" && isSerenaRouterURL(endpoint)) {
+        routing[client] = "via-hub";
+        continue;
+      }
       // Loopback SHAPE is necessary but not sufficient — require the URL
       // port to match one of this server's manifest daemon ports. A
       // stale-port loopback entry (e.g. fetch pointed at serena's 9121
@@ -278,6 +294,7 @@ export function collectServers(scan: ScanResult | null | undefined): ServerRow[]
       e.client_presence ?? {},
       ccp,
       e.can_migrate === true,
+      e.name,
       e.daemon_ports ?? [],
     ),
     manifested: e.manifest_exists === true,

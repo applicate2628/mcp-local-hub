@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isHubLoopback,
+  isSerenaRouterURL,
   loopbackEntryPort,
   loopbackPortMatchesDaemon,
   perClientRouting,
@@ -32,6 +33,18 @@ describe("isHubLoopback", () => {
   });
   it("rejects empty string", () => {
     expect(isHubLoopback("")).toBe(false);
+  });
+});
+
+describe("isSerenaRouterURL", () => {
+  it("accepts loopback /serena/mcp router URLs on any port", () => {
+    expect(isSerenaRouterURL("http://127.0.0.1:9125/serena/mcp")).toBe(true);
+    expect(isSerenaRouterURL("http://localhost:9130/serena/mcp")).toBe(true);
+  });
+
+  it("rejects legacy /mcp paths and non-loopback hosts", () => {
+    expect(isSerenaRouterURL("http://127.0.0.1:9121/mcp")).toBe(false);
+    expect(isSerenaRouterURL("https://example.com/serena/mcp")).toBe(false);
   });
 });
 
@@ -76,6 +89,7 @@ describe("perClientRouting", () => {
       { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" } },
       {},
       true,
+      "memory",
       [9100],
     );
     expect(r["claude-code"]).toBe("via-hub");
@@ -87,15 +101,27 @@ describe("perClientRouting", () => {
       { "claude-code": { transport: "http", endpoint: "http://localhost:9121/mcp" } },
       {},
       true,
+      "fetch",
       [9133],
     );
     expect(r["claude-code"]).toBe("direct");
+  });
+  it("tags serena router http as via-hub even when it is not on the legacy daemon port", () => {
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9125/serena/mcp" } },
+      {},
+      true,
+      "serena",
+      [9121],
+    );
+    expect(r["claude-code"]).toBe("via-hub");
   });
   it("tags loopback http as direct when the server has no daemon ports", () => {
     const r = perClientRouting(
       { "claude-code": { transport: "http", endpoint: "http://localhost:7777/mcp" } },
       {},
       true,
+      "my-own-local-server",
       [],
     );
     expect(r["claude-code"]).toBe("direct");
@@ -150,6 +176,23 @@ describe("collectServers", () => {
             "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" },
           },
           daemon_ports: [9100],
+        },
+      ],
+    };
+    const out = collectServers(scan);
+    expect(out[0].routing["claude-code"]).toBe("via-hub");
+  });
+
+  it("renders a serena router cell as via-hub even when daemon_ports is legacy 9121", () => {
+    const scan: ScanResult = {
+      at: "",
+      entries: [
+        {
+          name: "serena",
+          client_presence: {
+            "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9125/serena/mcp" },
+          },
+          daemon_ports: [9121],
         },
       ],
     };
@@ -241,6 +284,7 @@ describe("perClientRouting with client_config_presence", () => {
       { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9100/mcp" } },
       { "claude-code": "ok" },
       true,
+      "memory",
       [9100],
     );
     expect(r["claude-code"]).toBe("via-hub");
