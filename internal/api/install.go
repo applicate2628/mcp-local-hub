@@ -1793,6 +1793,12 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 			if daemonFilter != "" && c.daemon != "" && c.daemon != daemonFilter {
 				continue
 			}
+			if !c.resolvable {
+				// Relative script + non-absolute daemon cwd: the launch cwd is
+				// unknowable here, so this is advisory-only in readiness and must
+				// NOT block the install (Codex #377 r18; architect Q2/Q3).
+				continue
+			}
 			if ok, reason := entryScriptStatus(c.path); !ok {
 				return fmt.Errorf("entry script %q for %q %s — install/clone the server so base_args[0] points at the file, then re-run install", filepath.Base(c.path), normalizeLauncher(m.Command), reason)
 			}

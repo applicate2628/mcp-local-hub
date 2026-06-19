@@ -310,10 +310,11 @@ func TestManifestNeedsGit_NormalizesLauncher(t *testing.T) {
 	}
 }
 
-func TestEntryScriptCheckTargets_EmptyCwdUsesProcessCwd(t *testing.T) {
-	// A relative entry script with an EMPTY daemon cwd must still produce a
-	// target (resolved against the process cwd, the inherited-launch-cwd proxy)
-	// rather than being silently skipped (Codex #377 r14).
+func TestEntryScriptCheckTargets_EmptyCwdUnresolvable(t *testing.T) {
+	// A relative entry script with a non-absolute daemon cwd is UNRESOLVABLE —
+	// the daemon's launch cwd is unknowable from this process, so the target is
+	// marked resolvable=false (advisory) rather than resolved against the wrong
+	// process cwd (Codex #377 r18; architect Q3).
 	m := &config.ServerManifest{
 		Command:  "node",
 		BaseArgs: []string{"build/index.js"},
@@ -323,8 +324,23 @@ func TestEntryScriptCheckTargets_EmptyCwdUsesProcessCwd(t *testing.T) {
 	if len(targets) != 1 {
 		t.Fatalf("empty-cwd relative script must yield 1 target; got %d", len(targets))
 	}
-	if !filepath.IsAbs(targets[0].path) {
-		t.Errorf("target path must be absolute (process-cwd-resolved); got %q", targets[0].path)
+	if targets[0].resolvable {
+		t.Error("a relative script with no absolute daemon cwd must be marked unresolvable")
+	}
+	if targets[0].path != "" {
+		t.Errorf("unresolvable target must carry no path; got %q", targets[0].path)
+	}
+}
+
+func TestManifestNeedsGit_ScansPerDaemonExtraArgs(t *testing.T) {
+	// The git+ source can live in a static daemon's extra_args, not only the top-
+	// level args or the daemon template (Codex #377 r18).
+	m := &config.ServerManifest{
+		Command: "uvx",
+		Daemons: []config.DaemonSpec{{Name: "default", ExtraArgs: []string{"--from", "git+https://x@abc", "pkg"}}},
+	}
+	if !manifestNeedsGit(m) {
+		t.Error("uvx manifest with git+ in a daemon's extra_args must require git")
 	}
 }
 

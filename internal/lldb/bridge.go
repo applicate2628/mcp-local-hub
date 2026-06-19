@@ -105,8 +105,15 @@ func runLldbBridge(host string, port int, lldbPath string) error {
 	var spawned *spawnedLldb
 	if err != nil {
 		// Nothing listening → spawn our own LLDB and wait for it to bind.
-		if _, statErr := os.Stat(lldbPath); statErr != nil {
-			return fmt.Errorf("lldb not found at %s (pass --lldb-path): %w", lldbPath, statErr)
+		// Resolve lldbPath the way exec.Command will at spawn (spawnLldb below):
+		// an absolute path is checked directly, a BARE name (DefaultLldbPath's
+		// POSIX fallback) is resolved against PATH and checked executable. A plain
+		// os.Stat on a bare name would check the CURRENT DIRECTORY and reject a
+		// perfectly-good PATH lldb — diverging from install readiness's LookPath
+		// check, which then green-lights an install this spawn would refuse
+		// (Codex #377 r18).
+		if _, lookErr := exec.LookPath(lldbPath); lookErr != nil {
+			return fmt.Errorf("lldb not found (%q must be on PATH or an absolute path; pass --lldb-path): %w", lldbPath, lookErr)
 		}
 		s, spawnErr := spawnLldb(lldbPath, host, port)
 		if spawnErr != nil {

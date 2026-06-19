@@ -201,12 +201,15 @@ func manifestNeedsGit(m *config.ServerManifest) bool {
 		return false
 	}
 	args := append(append([]string{}, m.BaseArgs...), m.BaseArgsTemplate...)
-	// A dynamic-pool manifest carries the git+ source in the daemon template's
-	// extra_args_template (appended into the actual child argv at spawn), so it
-	// must be scanned too or readiness/Preflight would miss the git dependency
-	// (Codex #377 r16).
+	// The git+ source can sit anywhere that lands in the child argv: a dynamic-
+	// pool manifest's daemon_template.extra_args_template (Codex #377 r16) OR a
+	// static daemon's per-daemon extra_args (Codex #377 r18). Scan all of them or
+	// readiness/Preflight would miss the git dependency.
 	if m.DaemonTemplate != nil {
 		args = append(args, m.DaemonTemplate.ExtraArgsTemplate...)
+	}
+	for _, d := range m.Daemons {
+		args = append(args, d.ExtraArgs...)
 	}
 	for _, a := range args {
 		if strings.Contains(a, "git+") {
@@ -258,8 +261,15 @@ func fixedPortStatus(port int, server, daemon string, internal bool) (bool, stri
 // entryScript is one entry-script target the node/python gate stats. daemon is
 // the owning daemon name for a per-daemon (relative-cwd) target, or "" for a
 // cwd-independent absolute target that applies to every daemon — callers that
-// install a single daemon filter on it (Codex #377 r15).
-type entryScript struct{ label, path, daemon string }
+// install a single daemon filter on it (Codex #377 r15). resolvable is false
+// when a RELATIVE base_args[0] meets a non-absolute daemon cwd: the launch
+// directory is unknowable from this process, so the target is surfaced as a
+// known-tolerated advisory rather than checked against the wrong cwd (Codex
+// #377 r18).
+type entryScript struct {
+	label, path, daemon string
+	resolvable          bool
+}
 
 // entryScriptCheckTargets returns the entry scripts to stat for a node/python
 // manifest. base_args[0] is the local script the launcher runs; the launcher
@@ -283,31 +293,62 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 	arg := m.BaseArgs[0]
 	if filepath.IsAbs(arg) {
 		// daemon "" → cwd-independent, applies to every daemon (never filtered).
-		return []entryScript{{label: filepath.Base(arg), path: arg}}
+		return []entryScript{{label: filepath.Base(arg), path: arg, resolvable: true}}
 	}
 	daemons := m.Daemons
 	if len(daemons) == 0 {
 		daemons = []config.DaemonSpec{{Name: "default"}}
 	}
-	cwdProxy, _ := os.Getwd()
 	var out []entryScript
 	for _, d := range daemons {
-		base := d.Cwd
-		if base == "" {
-			base = cwdProxy // empty cwd → daemon inherits mcphub's launch cwd
-		}
-		if !filepath.IsAbs(base) {
-			continue // no usable absolute base → cannot stat reliably
-		}
 		name := d.Name
 		if name == "" {
 			name = "default"
 		}
-		out = append(out, entryScript{label: filepath.Base(arg) + " (" + name + ")", path: filepath.Join(base, arg), daemon: name})
+		if filepath.IsAbs(d.Cwd) {
+			out = append(out, entryScript{label: filepath.Base(arg) + " (" + name + ")", path: filepath.Join(d.Cwd, arg), daemon: name, resolvable: true})
+			continue
+		}
+		// Empty/relative daemon cwd: the daemon inherits mcphub's launch cwd,
+		// which is unpredictable across the supervisor / scheduler / GUI surfaces,
+		// so a RELATIVE script cannot be verified from THIS process. Resolving
+		// against os.Getwd() would judge the readiness/install process's directory,
+		// not the daemon's — a verdict for the wrong directory (Codex #377 r18,
+		// architect Q3). Mark unresolvable: readiness surfaces a known-tolerated
+		// advisory, Preflight does not block.
+		out = append(out, entryScript{label: filepath.Base(arg) + " (" + name + ")", daemon: name, resolvable: false})
 	}
 	return out
 }
 
+// IN-SCOPE CRITERION (the boundary that keeps this gate from chasing an
+// unbounded edge surface). A prerequisite belongs in readiness/Preflight if and
+// ONLY if it is all three of:
+//
+//	(a) PRE-SPAWN     — evaluable WITHOUT running the daemon (a stat, a LookPath,
+//	                    a port probe, or a pure validator like lldb.ParseHostPort
+//	                    / BuildPlan run as a dry-run);
+//	(b) STATE-COMMITTING — failing it means mcphub would commit client-config +
+//	                    supervisor-intent state for a daemon that is then
+//	                    guaranteed dead (a FALSE INSTALL), not a transient runtime
+//	                    hiccup;
+//	(c) MCPHUB-FIXABLE — there is an actionable Fix mcphub can name.
+//
+// Anything downstream of cmd.Start (a git+ remote being unreachable, an npm
+// registry outage, a wheel that fails to build, the server's own auth/runtime
+// behavior) fails (a) and/or (c) and is OUT OF SCOPE BY DESIGN — the daemon
+// reports its own error. `$VAR`/`file:` env-ref handling and the optional
+// `secret:` advisory already draw this line.
+//
+// KNOWN-TOLERATED non-convergences (correct to keep as advisory, not bugs): a
+// RELATIVE base_args[0] under a daemon with no absolute cwd cannot be verified
+// from this process (the daemon inherits an unpredictable launch cwd) — surfaced
+// Optional, never resolved against os.Getwd() (Codex #377 r18). Port probing
+// differs intentionally between the two gates: readiness uses a bind probe
+// (portAvailable, the allocator's own truth) while Preflight uses a dial probe
+// plus supervisor-intent awareness (portHeldByOurDaemonForPortArm) — Preflight's
+// is the richer authoritative collision check, readiness's the simpler advisory.
+//
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
 // failing fast and returns a structured, GUI-renderable report. It is the
 // non-fatal, all-requirements companion to Preflight (which fails fast at the
@@ -318,6 +359,14 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 // (incl. per-language), foreign daemon-port collisions, optional stdio env
 // `secret:` refs (advisory), and required remote-http url/header
 // ${secret:KEY} placeholders (blocking).
+//
+// NOTE (architecture, #377): the authoritative "will this install be admitted"
+// decision is currently an implicit SEQUENCE (Preflight + BuildPlan +
+// validateDynamicPoolManifest) re-spelled at each install site and approximated
+// here. A follow-up extracts that into one pure AdmissionCheck both gates adapt
+// (see work-items/decisions/2026-06-19-admission-check-single-gate.md) so the
+// two can never diverge by construction; until then the shared predicates below
+// keep them in sync.
 func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	rep := &ReadinessReport{Server: m.Name, Ready: true}
 	add := func(r ReadinessRequirement) {
@@ -389,6 +438,21 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// (when known + absolute) rather than skipping or statting it against this
 	// process's cwd (Codex #377 r9). Skip flag-shaped args (python -m, --flag).
 	for _, c := range entryScriptCheckTargets(m) {
+		if !c.resolvable {
+			// Relative entry script + non-absolute daemon cwd: known-tolerated
+			// non-convergence — the launch cwd is unknowable here. Surface as an
+			// ADVISORY (Optional) so it neither blocks Ready nor reports a verdict
+			// for the wrong directory (Codex #377 r18; see the package-doc
+			// in-scope criterion).
+			add(ReadinessRequirement{
+				Name:     "script: " + c.label,
+				OK:       false,
+				Optional: true,
+				Reason:   "relative entry script with no absolute daemon cwd — the daemon inherits an unpredictable working directory, so the script cannot be verified here",
+				Fix:      "Make base_args[0] absolute, or set an absolute daemon cwd, so readiness can verify the entry script exists.",
+			})
+			continue
+		}
 		if ok, reason := entryScriptStatus(c.path); !ok {
 			add(ReadinessRequirement{
 				Name:     "script: " + c.label,
@@ -442,16 +506,12 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// ALTERNATIVES selected per workspace, so a Go-only workspace must not be
 	// marked not-ready because rust-analyzer / fortls / tsserver are absent
 	// (Codex #377). They are surfaced (with a Fix) but do not block Ready.
-	// binaryFound honors the native-debugger discovery for gdb/lldb: the
-	// bridges resolve them via DebuggerDirs (MCPHUB_DEBUGGER_TOOLCHAIN_DIR +
-	// probed MSYS2 bins), so a gdb present in a debugger dir but NOT on the GUI
-	// process PATH still runs — a plain LookPath would falsely report it
-	// missing (Codex #377 r8). DefaultGdbPath/DefaultLldbPath return an
-	// ABSOLUTE path when they stat'd a real file, else the bare name (→ PATH).
-	// binaryFound delegates to the package-level binaryAvailable — the SINGLE
-	// OWNER shared with Preflight so the readiness report and the install gate
-	// cannot diverge on what counts as a present dependency (Codex #377 r13).
-	binaryFound := binaryAvailable
+	// The package-level binaryAvailable is the SINGLE OWNER (shared with
+	// Preflight) of "is this external binary runnable" — it honors the native-
+	// debugger discovery for gdb/lldb (DebuggerDirs: MCPHUB_DEBUGGER_TOOLCHAIN_DIR
+	// + probed MSYS2 bins, so a gdb present in a debugger dir but NOT on the GUI
+	// process PATH still resolves) and checks executability via exec.LookPath
+	// (Codex #377 r8/r13/r17). Called directly below — no local alias.
 	seenBin := map[string]bool{}
 	addBin := func(bin string, optional bool) {
 		if bin == "" || seenBin[bin] {
@@ -459,7 +519,7 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 		seenBin[bin] = true
 		bdisp, bfix := LauncherGuidance(bin)
-		if !binaryFound(bin) {
+		if !binaryAvailable(bin) {
 			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: false, Optional: optional,
 				// Basename only: required_binaries entries are free-form and may
 				// be absolute; the GUI renders Reason verbatim (Codex #377
@@ -507,7 +567,7 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			})
 		case bridgeListenerUp(addr):
 			add(ReadinessRequirement{Name: "debugger: " + disp + " (listener up)", OK: true})
-		case binaryFound("lldb"):
+		case binaryAvailable("lldb"):
 			add(ReadinessRequirement{Name: "debugger: " + disp, OK: true})
 		default:
 			add(ReadinessRequirement{
