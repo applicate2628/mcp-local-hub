@@ -93,6 +93,17 @@ type aggressiveCleanupResponse struct {
 // this exact string (bot #373 R2 Finding 1).
 const cleanupAggressiveTokenMismatchCode = "CLEANUP_AGGRESSIVE_TOKEN_MISMATCH"
 
+// pidsOf extracts the PID list from a candidate set — the token-validated
+// allowlist the apply path binds the real kill to (api.CleanupOpts.ExpectPIDs)
+// so a process spawned after validation can never be killed (bot #373 R5).
+func pidsOf(orphans []api.OrphanProcess) []int {
+	pids := make([]int, 0, len(orphans))
+	for _, o := range orphans {
+		pids = append(pids, o.PID)
+	}
+	return pids
+}
+
 // cleanupAggressiveHandler handles POST /api/cleanup/aggressive. It
 // mirrors cleanupOrphansHandler's method/OS-gate/error contract:
 //
@@ -161,9 +172,13 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 	// same way for every call (dry-run preview, apply recompute, real kill).
 	// Returns (orphans, true) on success; on error it has already written
 	// the response and returns (_, false).
-	runAggressive := func(dryRun bool) ([]api.OrphanProcess, bool) {
+	// expectPIDs is nil for a recompute (dry-run preview / token recompute) and
+	// the token-validated PID set for the real kill, so the kill touches ONLY
+	// the validated processes (bot #373 R5).
+	runAggressive := func(dryRun bool, expectPIDs []int) ([]api.OrphanProcess, bool) {
 		opts := baseOpts
 		opts.DryRun = dryRun
+		opts.ExpectPIDs = expectPIDs
 		orphans, err := s.cleanup.AggressiveCleanup(opts)
 		if err != nil {
 			// A malformed scope or unknown client is operator error → 400;
@@ -190,7 +205,7 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 		// Dry-run / preview: resolve the candidate set and return it with a
 		// confirm token bound to it. The GUI captures the token and replays
 		// it on apply (bot #373 R2 Finding 1).
-		orphans, ok := runAggressive(true)
+		orphans, ok := runAggressive(true, nil)
 		if !ok {
 			return
 		}
@@ -214,7 +229,7 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 	// candidates + new token so the GUI can re-render and force a fresh
 	// Preview. (The residual microsecond validate→kill window is accepted;
 	// the user-deliberation window is the one this closes.)
-	fresh, ok := runAggressive(true)
+	fresh, ok := runAggressive(true, nil)
 	if !ok {
 		return
 	}
@@ -228,8 +243,10 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Token matched — execute the real kill.
-	killed, ok := runAggressive(false)
+	// Token matched — execute the real kill, BOUND to the validated PID set so
+	// a process spawned since the validation snapshot cannot be killed
+	// unacknowledged (bot #373 R5).
+	killed, ok := runAggressive(false, pidsOf(fresh))
 	if !ok {
 		return
 	}

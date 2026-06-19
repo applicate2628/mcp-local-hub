@@ -198,3 +198,23 @@ func TestAggressiveDenyClasses_ReturnsCopy(t *testing.T) {
 		t.Error("AggressiveDenyClasses must return a copy; caller mutation leaked into the package state")
 	}
 }
+
+// TestFilterToExpectedPIDs pins the kill-binding contract (bot #373 R5): a
+// freshly-snapshotted candidate set is reduced to ONLY the previously
+// token-validated PIDs, so a process spawned after validation is excluded and
+// a validated PID that has since exited simply drops out.
+func TestFilterToExpectedPIDs(t *testing.T) {
+	cands := []OrphanProcess{
+		{PID: 100, CmdlineDisplay: "a"},
+		{PID: 200, CmdlineDisplay: "b"},
+		{PID: 300, CmdlineDisplay: "c"}, // spawned AFTER validation — not in the allowlist
+	}
+	// Validated set {100, 200, 999}: 300 (new) is excluded; 999 (died) is absent.
+	got := filterToExpectedPIDs(cands, []int{100, 200, 999})
+	if len(got) != 2 || got[0].PID != 100 || got[1].PID != 200 {
+		t.Fatalf("filterToExpectedPIDs = %+v, want only PIDs [100 200] (300 excluded, 999 absent)", got)
+	}
+	if g := filterToExpectedPIDs(cands, []int{}); len(g) != 0 {
+		t.Errorf("empty allowlist → %d kept, want 0 (validated-empty kills nothing)", len(g))
+	}
+}

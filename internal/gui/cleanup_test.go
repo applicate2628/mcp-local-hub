@@ -526,6 +526,22 @@ func TestCleanupAggressiveHandler_Apply_OK(t *testing.T) {
 	if len(killOpts.IncludeClasses) != 1 || killOpts.IncludeClasses[0] != "chrome" {
 		t.Errorf("CleanupOpts.IncludeClasses = %v, want [chrome]", killOpts.IncludeClasses)
 	}
+	// The kill MUST be bound to the token-validated PID set (bot #373 R5), so a
+	// process spawned after validation cannot be killed unacknowledged: the
+	// kill call carries ExpectPIDs = the validated candidate set's PIDs.
+	wantPIDs := make([]int, 0)
+	for _, c := range aggressiveCandidatesFor() {
+		wantPIDs = append(wantPIDs, c.PID)
+	}
+	if len(killOpts.ExpectPIDs) != len(wantPIDs) {
+		t.Errorf("kill ExpectPIDs = %v, want %v (kill bound to the validated set)", killOpts.ExpectPIDs, wantPIDs)
+	} else {
+		for i := range wantPIDs {
+			if killOpts.ExpectPIDs[i] != wantPIDs[i] {
+				t.Errorf("kill ExpectPIDs[%d] = %d, want %d", i, killOpts.ExpectPIDs[i], wantPIDs[i])
+			}
+		}
+	}
 
 	var got struct {
 		Killed  int `json:"killed"`

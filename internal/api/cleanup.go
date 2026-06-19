@@ -368,6 +368,16 @@ type CleanupOpts struct {
 	// Mutually exclusive with Client.
 	RootPID int
 
+	// ExpectPIDs, when non-nil, BINDS an aggressive KILL to a previously
+	// resolved + confirmed candidate set: only candidates whose PID is in
+	// this allowlist are killed, so a process that spawned AFTER the set was
+	// validated is excluded — never killed unacknowledged (bot #373 R5; the
+	// GUI apply path passes the token-validated PIDs). nil → no binding (the
+	// CLI and every dry-run recompute the full current set). An empty (but
+	// non-nil) slice kills nothing, which is the correct safe outcome for a
+	// validated-empty set.
+	ExpectPIDs []int
+
 	// IncludeClasses lists dangerous process classes the operator has
 	// explicitly opted to include in an aggressive kill (e.g. "chrome"
 	// for a Playwright cleanup). Each entry overrides one deny-list
@@ -1289,6 +1299,15 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 		filtered = append(filtered, c)
 	}
 
+	// Validated-set binding (bot #373 R5): when ExpectPIDs is non-nil the
+	// caller has already token-validated a specific candidate set, so the
+	// kill must touch ONLY those PIDs. A process that spawned between the
+	// validation snapshot and this one is excluded; a validated PID that has
+	// since died simply drops out. nil → no binding (CLI / dry-run preview).
+	if opts.ExpectPIDs != nil {
+		filtered = filterToExpectedPIDs(filtered, opts.ExpectPIDs)
+	}
+
 	if !opts.DryRun {
 		for i := range filtered {
 			cmd := exec.Command("taskkill", "/PID", strconv.Itoa(filtered[i].PID), "/F")
@@ -1304,4 +1323,25 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 		}
 	}
 	return filtered, nil
+}
+
+// filterToExpectedPIDs binds a freshly-snapshotted candidate set to a
+// previously token-validated PID allowlist: it returns only the candidates
+// whose PID is in expectPIDs, in their original order. A process that spawned
+// after the validation snapshot (PID not in the allowlist) is therefore never
+// killed, and a validated PID that has since exited simply drops out (no
+// longer a candidate). This is the api-level half of the GUI apply path's
+// "bind the kill to the token-validated set" contract (bot #373 R5).
+func filterToExpectedPIDs(candidates []OrphanProcess, expectPIDs []int) []OrphanProcess {
+	allow := make(map[int]bool, len(expectPIDs))
+	for _, p := range expectPIDs {
+		allow[p] = true
+	}
+	out := candidates[:0]
+	for _, c := range candidates {
+		if allow[c.PID] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
