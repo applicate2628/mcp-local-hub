@@ -4,6 +4,7 @@ import { restartSupervisor } from "../../api";
 import type { SettingsSnapshot } from "../../lib/settings-types";
 import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
 import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 
 export type SectionAdvancedProps = {
   snapshot: SettingsSnapshot;
@@ -146,16 +147,13 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
   const relaxIsError = relaxMsg !== null && (relaxMsg.includes("failed") || relaxMsg.includes("error"));
 
   return (
-    <section data-section="advanced" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">Advanced</h2>
-        <InfoTip
-          label="About this section"
-          text="Power-user actions: open the app-data folder on disk, export a configuration bundle, toggle autorun on corp-managed Windows hosts (the MCPHUB_ALLOW_UNHARDENED_STATE_READ env var), restart the supervisor, and diagnose the single-instance lock."
-        />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">Power-user actions.</p>
-
+    <SettingsCard
+      section="advanced"
+      title="Advanced"
+      infoTipLabel="About this section"
+      infoTip="Power-user actions: open the app-data folder on disk, export a configuration bundle, toggle autorun on corp-managed Windows hosts (the MCPHUB_ALLOW_UNHARDENED_STATE_READ env var), restart the supervisor, and diagnose the single-instance lock."
+      subtitle="Power-user actions."
+    >
       <div class="divide-y divide-app-border/60">
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
           <span class="flex items-center gap-1.5 text-sm font-medium text-app-text">Open app-data folder</span>
@@ -229,6 +227,6 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
       <div class="mt-5 border-t border-app-border/60 pt-4">
         <SectionAdvancedDiagnostics />
       </div>
-    </section>
+    </SettingsCard>
   );
 }

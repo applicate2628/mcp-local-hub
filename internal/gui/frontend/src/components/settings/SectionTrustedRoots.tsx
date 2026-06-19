@@ -18,6 +18,7 @@ import {
 } from "../../api";
 import { ConfirmModal } from "../ConfirmModal";
 import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 
 type LoadState =
   | { kind: "loading" }
@@ -105,19 +106,17 @@ export function SectionTrustedRoots(): preact.JSX.Element {
   }
 
   return (
-    <section
-      data-section="trusted_roots"
-      class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6"
+    <SettingsCard
+      section="trusted_roots"
+      title="Trusted Roots"
+      infoTip={'A trusted root lets any workspace under it auto-register an LSP daemon without explicit registration. The first workspace under any tree must still be registered explicitly (via the Servers matrix "Enable" or mcphub register); after that, sibling workspaces under that tree auto-register. Add only roots you control.'}
+      subtitle={
+        <>
+          Trees whose workspaces may auto-register an LSP daemon. Add only roots
+          you control.
+        </>
+      }
     >
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">Trusted Roots</h2>
-        <InfoTip text={'A trusted root lets any workspace under it auto-register an LSP daemon without explicit registration. The first workspace under any tree must still be registered explicitly (via the Servers matrix "Enable" or mcphub register); after that, sibling workspaces under that tree auto-register. Add only roots you control.'} />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">
-        Trees whose workspaces may auto-register an LSP daemon. Add only roots
-        you control.
-      </p>
-
       {state.kind === "loading" && <p>Loading…</p>}
 
       {state.kind === "error" && (
@@ -246,6 +245,6 @@ export function SectionTrustedRoots(): preact.JSX.Element {
         onConfirm={confirmRemove}
         onCancel={() => setPendingRemove(null)}
       />
-    </section>
+    </SettingsCard>
   );
 }

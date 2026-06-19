@@ -32,6 +32,7 @@ import {
 import { WeeklyMembershipTable } from "./WeeklyMembershipTable";
 import { DaemonEnvSettings } from "./DaemonEnvSettings";
 import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 import type { SettingsSnapshot, ConfigSettingDTO } from "../../lib/settings-types";
 
 export type SectionDaemonsProps = {
@@ -280,16 +281,13 @@ export function SectionDaemons({
   }
 
   return (
-    <section data-section="daemons" class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6">
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">Daemons</h2>
-        <InfoTip
-          label="About this section"
-          text="One Save runs settings, schedule swap, and membership update in sequence. If a step fails, the banner names which prior steps committed and which remain dirty."
-        />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">Background scheduling, restart policy, and workspace cleanup.</p>
-
+    <SettingsCard
+      section="daemons"
+      title="Daemons"
+      infoTipLabel="About this section"
+      infoTip="One Save runs settings, schedule swap, and membership update in sequence. If a step fails, the banner names which prior steps committed and which remain dirty."
+      subtitle="Background scheduling, restart policy, and workspace cleanup."
+    >
       <div class="divide-y divide-app-border/60">
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
           <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-weekly-schedule">
@@ -436,7 +434,7 @@ export function SectionDaemons({
           Reset
         </button>
       </div>
-    </section>
+    </SettingsCard>
   );
 }
 

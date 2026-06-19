@@ -21,7 +21,7 @@ import {
   setClientInstallPrefs,
   type ClientInstallPrefRow,
 } from "../../api";
-import { InfoTip } from "../InfoTip";
+import { SettingsCard } from "./SettingsCard";
 
 type LoadState =
   | { kind: "loading" }
@@ -114,22 +114,20 @@ export function SectionClients(): preact.JSX.Element {
   }
 
   return (
-    <section
-      data-section="clients"
-      class="mb-6 rounded-xl border border-app-border bg-app-card p-5 shadow-sm sm:p-6"
+    <SettingsCard
+      section="clients"
+      title="Clients"
+      infoTip="Choose which MCP clients a default install touches. The default set is claude-code, codex-cli, and cursor; other clients are opt-in. Installs that do not name an explicit client target use this set. Already-installed servers are unaffected until you reinstall them."
+      subtitle={
+        <>
+          Pick the clients in the default-install set. A plain install (Servers
+          matrix Install, Save &amp; Install, or <code>mcphub install &lt;server&gt;</code>)
+          writes hub entries to exactly these clients. Unchecking a client here
+          does not remove existing entries; it only changes what the next default
+          install touches.
+        </>
+      }
     >
-      <header class="mb-2 flex items-center gap-1.5">
-        <h2 class="m-0 text-lg font-semibold text-app-text">Clients</h2>
-        <InfoTip text="Choose which MCP clients a default install touches. The default set is claude-code, codex-cli, and cursor; other clients are opt-in. Installs that do not name an explicit client target use this set. Already-installed servers are unaffected until you reinstall them." />
-      </header>
-      <p class="m-0 mb-4 text-sm text-app-muted">
-        Pick the clients in the default-install set. A plain install (Servers
-        matrix Install, Save &amp; Install, or <code>mcphub install &lt;server&gt;</code>)
-        writes hub entries to exactly these clients. Unchecking a client here
-        does not remove existing entries; it only changes what the next default
-        install touches.
-      </p>
-
       {state.kind === "loading" && <p>Loading…</p>}
 
       {state.kind === "error" && (
@@ -209,6 +207,6 @@ export function SectionClients(): preact.JSX.Element {
           )}
         </>
       )}
-    </section>
+    </SettingsCard>
   );
 }
