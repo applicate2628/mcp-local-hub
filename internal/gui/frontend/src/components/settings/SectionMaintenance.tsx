@@ -431,7 +431,12 @@ function CardAggressiveCleanup(): preact.JSX.Element {
   // candidates for the now-stale scope.
   function invalidatePreview() {
     previewGen.current++;
-    setState((s) => (s.kind === "preview" ? { kind: "idle" } : s));
+    // Reset BOTH a rendered preview AND an in-flight loading state to idle
+    // (bot #373 R4): previewGen already discards the in-flight response, but
+    // without clearing `loading` the card would be stuck on the spinner after
+    // a scope/class change mid-Preview. Other states (applied/error/idle) are
+    // left intact.
+    setState((s) => (s.kind === "preview" || s.kind === "loading" ? { kind: "idle" } : s));
     setConfirmOpen(false);
     setOrphansSnapshot(null);
     setScopeSnapshot(null);

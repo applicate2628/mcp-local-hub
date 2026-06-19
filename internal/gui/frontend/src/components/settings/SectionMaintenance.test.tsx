@@ -1044,6 +1044,31 @@ describe("SectionMaintenance — aggressive cleanup card", () => {
     expect(spy.mock.calls.some((c) => c[0] === true)).toBe(false);
   });
 
+  it("resets a LOADING preview to idle when the scope changes mid-load — no stuck spinner, stale response discarded (bot #373 R4)", async () => {
+    let resolvePreview!: (v: unknown) => void;
+    vi.spyOn(api, "cleanupAggressive").mockImplementation(
+      () => new Promise((r) => { resolvePreview = r as (v: unknown) => void; }),
+    );
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="aggressive-cleanup"]')!;
+    const previewBtn = () => card.querySelector('[data-testid="aggressive-preview-button"]') as HTMLButtonElement;
+
+    fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "codex" } });
+    fireEvent.click(previewBtn());
+    // In flight → Preview disabled (loading).
+    await waitFor(() => expect(previewBtn().disabled).toBe(true));
+
+    // Change scope mid-load → invalidatePreview must reset loading → idle
+    // (Preview re-enabled, not a stuck spinner).
+    fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "claude" } });
+    await waitFor(() => expect(previewBtn().disabled).toBe(false));
+
+    // The stale response resolving must NOT re-enter preview state.
+    resolvePreview({ orphans: [{ pid: 1, parent_pid: 0, server: "", cmdline_display: "x", age_sec: 99, ram_bytes: 0, match_source: "codex" }], killed: 0, skipped: 0, token: "t" });
+    await Promise.resolve();
+    expect(card.querySelector("table")).toBeFalsy();
+  });
+
   it("rejects a non-integer root PID — parseInt would truncate '123.9'/'1e3' to a different pid (bot #373 P2)", async () => {
     const spy = vi.spyOn(api, "cleanupAggressive").mockResolvedValue({ orphans: [], killed: 0, skipped: 0 });
     const { container } = render(<SectionMaintenance />);
