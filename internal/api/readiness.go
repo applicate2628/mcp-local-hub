@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 )
 
 // ReadinessRequirement is one checked prerequisite for a server to run. It is
@@ -128,7 +129,13 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// (launches gopls directly), so a missing mcp-language-server must not
 	// mark a gopls-ready Go workspace not-ready (Codex #377). The per-language
 	// required_binaries (already advisory) cover the real per-language tools.
-	launcherOptional := m.Kind == config.KindWorkspaceScoped
+	// Advisory ONLY for the per-LANGUAGE LSP shape (m.Languages, no
+	// daemon_template), where the backend is selected per language and a Go
+	// workspace runs gopls-mcp without m.Command. A daemon_template
+	// workspace-scoped manifest (e.g. serena) DOES use m.Command as the child
+	// launcher and Preflight rejects it missing, so keep that blocking
+	// (Codex #377 r5).
+	launcherOptional := m.Kind == config.KindWorkspaceScoped && m.DaemonTemplate == nil
 	if m.Command != "" {
 		disp, fix := LauncherGuidance(m.Command)
 		if _, err := exec.LookPath(m.Command); err != nil {
@@ -285,6 +292,22 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		checkPool(m.DaemonTemplate.PortPool, mNative)
 	}
 
+	// A vault that EXISTS but is unreadable/undecryptable is BLOCKING for a
+	// manifest that uses secret refs — the daemon (OpenVaultOptional +
+	// HasSecretRef) fails the spawn, so readiness must NOT report it ready as a
+	// merely-optional unset key. A truly-absent vault is fine (secrets optional)
+	// (Codex #377 r5).
+	if secrets.HasSecretRef(m.Env) {
+		if _, verr := secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath()); verr != nil {
+			add(ReadinessRequirement{
+				Name:   "secrets vault",
+				OK:     false,
+				Reason: fmt.Sprintf("vault exists but unreadable: %v", verr),
+				Fix:    "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read.",
+			})
+		}
+	}
+
 	// Declared secrets — reported PER KEY so the GUI can offer each as an
 	// inline "fill this field at install" prompt (the operator's request:
 	// "секреты нужно явно предлагать в конкретные поля при установке").
@@ -305,6 +328,22 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			req.OK = true
 		}
 		add(req)
+	}
+	// Non-secret env refs (file:KEY, $VAR) are NOT optional: at spawn,
+	// ResolveMapBestEffort keeps them FATAL (only secret: refs are omitted), so
+	// an unresolvable file:/$VAR makes the daemon fail to start. Run the SAME
+	// resolver here (single owner, like the install-plan dry-run) — a nil vault
+	// is fine because secret: refs are already surfaced per-key above and are
+	// omitted by best-effort, so ONLY a non-secret failure (file: with no local
+	// config, or an unset $VAR) errors — and surface it as a BLOCKING "env"
+	// requirement, mirroring the spawn gate (Codex pre-catch r6).
+	if _, _, err := secrets.NewResolver(nil, nil).ResolveMapBestEffort(m.Env); err != nil {
+		add(ReadinessRequirement{
+			Name:   "env",
+			OK:     false,
+			Reason: fmt.Sprintf("a non-secret env ref is fatal at spawn: %v", err),
+			Fix:    "Fix the file:/$VAR env ref in the manifest (file: refs need a local config; $VAR must be set in the environment).",
+		})
 	}
 
 	// Remote-http manifests carry REQUIRED vault values as ${secret:KEY}
@@ -343,7 +382,14 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// avoids duplicating gate logic that drifts (Codex #377 r2/r3/r4). The
 	// per-key secret + dependency requirements above stay for the structured,
 	// user-actionable inline prompts; this is the one catch-all blocker.
-	if _, err := BuildPlan(m, ""); err != nil {
+	// IncludeAllClients (not the bare BuildPlan(m,"")): the bare form falls
+	// through to the COMPILE-TIME default trio {claude-code, codex-cli,
+	// cursor}, so a bad client_binding on any OTHER client — including one the
+	// operator persisted into their default-install set (gui-preferences.yaml)
+	// — would be skipped here yet rejected by the real install. Readiness is
+	// non-mutating, so validating EVERY declared binding is the conservative
+	// correct scope (Codex pre-catch r6).
+	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true}); err != nil {
 		add(ReadinessRequirement{
 			Name:   "install plan",
 			OK:     false,

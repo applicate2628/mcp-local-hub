@@ -130,10 +130,13 @@ See also: install, logs, restart, status.`,
 			if spec == nil {
 				return fmt.Errorf("no daemon %q in %s manifest", daemonName, server)
 			}
-			// Resolve env.
-			vault, verr := openDaemonVaultStrict()
-			if verr != nil {
-				return verr
+			// Resolve env. A vault that EXISTS but is unreadable is fatal ONLY
+			// when this manifest actually uses secret refs — a secretless
+			// server must not be bricked by a corrupt vault it never touches
+			// (Codex #377 r5). A truly-absent vault → nil, secret refs optional.
+			vault, verr := secrets.OpenVaultOptional(defaultKeyPath(), defaultVaultPath())
+			if verr != nil && secrets.HasSecretRef(m.Env) {
+				return fmt.Errorf("daemon %s/%s: %w", server, daemonName, verr)
 			}
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
 			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
@@ -340,22 +343,6 @@ See also: install, logs, restart, status.`,
 	// Hidden — supervisor-intent.json descriptors point here.
 	c.AddCommand(newDaemonSerenaProxyCmd())
 	return c
-}
-
-// openDaemonVaultStrict opens the secrets vault, distinguishing a truly-ABSENT
-// vault (no secrets configured → nil vault, secret refs become optional) from
-// one that EXISTS but cannot be opened/decrypted (corrupt / wrong key /
-// permission → FATAL error). The strict failure stops a vault-read problem
-// from silently masquerading as "operator skipped the optional secret", which
-// would start credentialed servers without their secrets (Codex #377).
-func openDaemonVaultStrict() (*secrets.Vault, error) {
-	vault, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
-	if err != nil {
-		if _, statErr := os.Stat(defaultVaultPath()); statErr == nil {
-			return nil, fmt.Errorf("open secrets vault (exists but unreadable — fix or remove %s; not treating set secrets as skipped): %w", defaultVaultPath(), err)
-		}
-	}
-	return vault, nil
 }
 
 // daemonEnvWithOverlay returns the resolved child env map AND the list of

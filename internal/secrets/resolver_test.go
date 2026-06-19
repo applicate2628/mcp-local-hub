@@ -122,3 +122,24 @@ func TestResolveMapBestEffort_NonSecretRefStaysFatal(t *testing.T) {
 		t.Fatal("missing $VAR ref must return an error (non-secret refs are required)")
 	}
 }
+
+func TestHasSecretRef(t *testing.T) {
+	if !HasSecretRef(map[string]string{"A": "literal", "B": "secret:k"}) {
+		t.Error("HasSecretRef missed a secret: ref")
+	}
+	if HasSecretRef(map[string]string{"A": "literal", "B": "$VAR", "C": "file:k"}) {
+		t.Error("HasSecretRef false-positive on non-secret refs")
+	}
+}
+
+func TestOpenVaultOptional_AbsentIsNilNil(t *testing.T) {
+	dir := t.TempDir()
+	// No vault file at this path → absent → (nil, nil), secrets optional.
+	v, err := OpenVaultOptional(dir+"/nokey", dir+"/novault")
+	if err != nil {
+		t.Errorf("absent vault must be (nil,nil); got err=%v", err)
+	}
+	if v != nil {
+		t.Errorf("absent vault must return nil vault; got %v", v)
+	}
+}

@@ -107,3 +107,34 @@ func (r *Resolver) ResolveMapBestEffort(env map[string]string) (resolved, omitte
 	}
 	return resolved, omitted, nil
 }
+
+// HasSecretRef reports whether any value in a manifest env map is a `secret:`
+// reference. Used to gate vault-read strictness: a server with no secret refs
+// must not be blocked by a corrupt vault it never touches (Codex #377 r5).
+func HasSecretRef(env map[string]string) bool {
+	for _, v := range env {
+		if strings.HasPrefix(v, "secret:") {
+			return true
+		}
+	}
+	return false
+}
+
+// OpenVaultOptional opens the vault, distinguishing an ABSENT vault (no
+// secrets configured → returns nil, nil; secret refs are then optional/omitted)
+// from one that EXISTS but is unreadable/undecryptable (returns nil, error).
+// A caller whose manifest uses NO secret refs ignores the error and proceeds
+// with a nil vault; a caller whose manifest DOES use secret refs treats the
+// error as fatal (daemon) / blocking (readiness) rather than silently omitting
+// secrets the operator may have set (Codex #377 r5). Single owner of the
+// absent-vs-unreadable distinction shared by the daemon launch + readiness.
+func OpenVaultOptional(keyPath, vaultPath string) (*Vault, error) {
+	vault, err := OpenVault(keyPath, vaultPath)
+	if err != nil {
+		if _, statErr := os.Stat(vaultPath); statErr == nil {
+			return nil, fmt.Errorf("vault exists but unreadable: %w", err)
+		}
+		return nil, nil // absent: no secrets configured
+	}
+	return vault, nil
+}
