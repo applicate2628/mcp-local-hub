@@ -109,7 +109,6 @@ func TestEnrichStatusWithRegistry_OrphanGlobalDaemonPreservesRawState(t *testing
 // from the operator.
 func TestEnrichStatusWithRegistry_SelfPIDIsNotAlive(t *testing.T) {
 	dir := t.TempDir()
-	makeFakeManifest(t, dir+"/wolfram", "wolfram", 9125)
 
 	origBatch := lookupProcessBatch
 	defer func() { lookupProcessBatch = origBatch }()
@@ -134,7 +133,15 @@ func TestEnrichStatusWithRegistry_SelfPIDIsNotAlive(t *testing.T) {
 	}
 
 	rows := []DaemonStatus{
-		{TaskName: `\mcp-local-hub-wolfram-default`, State: "Running"},
+		// Seed the colliding port directly. A global manifest can no longer
+		// declare 9125 — parseManifestForName rejects the reserved GUI
+		// listener port — so the manifest-resolution path can't produce it
+		// (an earlier fixture wrote a wolfram@9125 manifest that is now
+		// rejected, leaving Port=0 and silently bypassing the self-PID gate
+		// this test guards). The DM-2 skip still applies to any daemon row
+		// whose resolved port equals the GUI's own listener, a collision that
+		// arises via registry/dynamic ports; seed it to exercise that branch.
+		{TaskName: `\mcp-local-hub-wolfram-default`, State: "Running", Port: 9125},
 	}
 	enrichStatus(rows, dir)
 
@@ -292,11 +299,11 @@ func TestEnrichStatusWithRegistry_MaintenanceRowsNoTriggerBecomeStopped(t *testi
 //
 //  1. Running    — port bound by a foreign PID (healthy daemon)
 //  2. Starting   — port not bound but raw scheduler state still
-//                  "Running" (Task Scheduler mid-launch action)
+//     "Running" (Task Scheduler mid-launch action)
 //  3. Scheduled  — port not bound, raw "Ready", future trigger
-//                  (weekly-refresh-style task waiting for next fire)
+//     (weekly-refresh-style task waiting for next fire)
 //  4. Stopped    — port not bound, raw "Ready", no future trigger
-//                  (logon-only task whose process exited)
+//     (logon-only task whose process exited)
 //  5. Running    — port re-bound after operator hits Restart
 //
 // TestDeriveState covers the same mappings via deriveState() in

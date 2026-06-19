@@ -1728,11 +1728,23 @@ func (s hiddenToolSet) hides(server, rawName string) bool {
 // close stale group sessions whose RouteMap was built before a tools_hidden
 // republish. Client scope keys have no ToolsHidden entry by invariant, so
 // this remains a no-op for /clients/ sessions.
+//
+// This runs on the tools/call hot path (once per call), so it does a DIRECT
+// scan of the one server's hidden-name slice rather than calling
+// buildHiddenToolSet — that helper allocates a whole map-of-maps over EVERY
+// hidden tool in the scope just to answer a single (server, rawName) lookup,
+// which is wasted work per call. The per-server hidden list is tiny
+// (operator-authored), so a linear scan is both faster and allocation-free.
 func snapshotHidesTool(snap *ResolverSnapshot, scopeKey string, ref canonicalToolRef) bool {
 	if snap == nil || snap.ToolsHidden == nil {
 		return false
 	}
-	return buildHiddenToolSet(snap.ToolsHidden[scopeKey]).hides(ref.Server, ref.RawName)
+	for _, hidden := range snap.ToolsHidden[scopeKey][ref.Server] {
+		if hidden == ref.RawName {
+			return true
+		}
+	}
+	return false
 }
 
 // failuresOrEmpty returns failures if non-nil, otherwise an empty
