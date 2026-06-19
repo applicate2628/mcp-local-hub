@@ -294,10 +294,16 @@ at the merge step, not the hot dispatch path.
 >   hub filter only shapes the aggregated `/g/` view.
 > - **At gate-OFF the hub filter is not in the path at all** (the aggregated
 >   listener isn't running), so `tools_hidden` has zero effect.
-> - **Filter changes apply to NEW client sessions only.** An existing
->   session captured its filter view at initialize; it keeps that view (and
->   can keep calling an already-listed tool) until it reconnects. The GUI
->   sets `restart_required` / "reconnect to apply" expectations accordingly.
+> - **HIDING a tool revokes EXISTING sessions at call time (PR #374).**
+>   `tools/call` revalidates its target against the LIVE resolver snapshot's
+>   `tools_hidden` filter after a republish, so a tool an operator hides via
+>   a live edit returns `-32601` to an already-initialized session — it does
+>   NOT keep calling it until reconnect. (Only the call path is revalidated;
+>   the session's `tools/list` still reflects its initialize-time view until
+>   it reinitializes.) UN-hiding / adding a tool still takes effect only on
+>   the session's next reconnect — the revalidation closes the HIDE
+>   direction (revoke), not the additive one. The GUI's `restart_required` /
+>   "reconnect to apply" guidance covers that additive direction.
 > - **Granularity is per-SERVER, not per-daemon.** `tools_hidden` keys on a
 >   server name, so a tool cannot be hidden on daemon A of a server while
 >   left visible on daemon B of the SAME server.

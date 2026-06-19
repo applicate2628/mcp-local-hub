@@ -180,6 +180,74 @@ func TestGroupsPhase5a_HiddenToolCallReturns32601(t *testing.T) {
 	}
 }
 
+// TestGroupsPhase5a_RepublishedHiddenToolRevokesExistingSession closes the
+// stale-session revocation gap: a group session that listed memory__write
+// before the operator hid it must not keep calling the stale RouteMap entry
+// after the live ResolverSnapshot is republished with the same daemon binding
+// but a new ToolsHidden policy.
+func TestGroupsPhase5a_RepublishedHiddenToolRevokesExistingSession(t *testing.T) {
+	memSD, timeSD, _ := frontendSnapshotWithHiddenFixture(t, nil)
+
+	h := newTestHandler(t)
+	publishGroupTokenTable(t, "frontend")
+
+	// initialize + tools/list while memory__write is visible, so the
+	// session RouteMap contains a route for memory__write.
+	initBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`)
+	req := authedRequest(t, http.MethodPost, "/g/frontend/mcp", initBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("initialize status=%d want 200; body=%s", w.Code, w.Body.String())
+	}
+	sid := w.Header().Get("Mcp-Session-Id")
+
+	listBody := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	reqL := authedRequest(t, http.MethodPost, "/g/frontend/mcp", listBody)
+	reqL.Header.Set("Mcp-Session-Id", sid)
+	reqL.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	wL := httptest.NewRecorder()
+	h.ServeHTTP(wL, reqL)
+	if wL.Code != http.StatusOK {
+		t.Fatalf("tools/list status=%d want 200; body=%s", wL.Code, wL.Body.String())
+	}
+	if !toolNamesFromListResponse(t, wL.Body.Bytes())["memory__write"] {
+		t.Fatalf("pre-republish tools/list did not expose memory__write; body=%s", wL.Body.String())
+	}
+
+	// Republish the current resolver snapshot with the SAME group daemon
+	// bindings but a new tools_hidden filter. daemonStillBound remains true;
+	// only the per-tool visibility revalidation should reject the stale route.
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			GroupScopeKey("frontend"): {
+				{Server: "memory", Daemon: "claude-code", Port: memSD.port},
+				{Server: "time", Daemon: "claude-code", Port: timeSD.port},
+			},
+		},
+		ToolsHidden: map[string]map[string][]string{
+			GroupScopeKey("frontend"): {"memory": {"write"}},
+		},
+		Groups: map[string]bool{GroupScopeKey("frontend"): true},
+	})
+
+	callHidden := []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory__write","arguments":{}}}`)
+	reqC := authedRequest(t, http.MethodPost, "/g/frontend/mcp", callHidden)
+	reqC.Header.Set("Mcp-Session-Id", sid)
+	reqC.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	wC := httptest.NewRecorder()
+	h.ServeHTTP(wC, reqC)
+	if wC.Code != http.StatusOK {
+		t.Fatalf("tools/call status=%d want 200 (JSON-RPC error envelope); body=%s", wC.Code, wC.Body.String())
+	}
+	assertJSONRPCErrorCode(t, wC.Body.Bytes(), -32601)
+
+	if memSD.callCount.Load() != 0 {
+		t.Fatalf("stale hidden tool reached memory daemon %d time(s)", memSD.callCount.Load())
+	}
+}
+
 // ----------------------------------------------------------------------
 // The /clients/ FENCE — a CLIENT route is NEVER filtered.
 // ----------------------------------------------------------------------

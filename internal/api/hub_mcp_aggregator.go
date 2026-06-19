@@ -650,11 +650,20 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 	}
 
 	// Resolver-snapshot revalidation: refuse if (Server, Daemon) is
-	// not in the calling client's current bindings AND the snapshot
-	// pointer has moved.
+	// not in the calling client's current bindings, or if the current
+	// group visibility filter now hides the target tool. The session
+	// RouteMap is intentionally session-local, so a long-lived group
+	// session may still contain a route that was visible at tools/list
+	// time. Re-check the live immutable snapshot after a republish so a
+	// tools_hidden edit revokes existing sessions without requiring the
+	// daemon/server binding to change.
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
 		if !daemonStillBound(current, sess.ScopeKey, ref) {
+			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
+			return resolvedCallTarget{errBody: body}, mErr
+		}
+		if snapshotHidesTool(current, sess.ScopeKey, ref) {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
@@ -1712,6 +1721,18 @@ func (s hiddenToolSet) hides(server, rawName string) bool {
 		return false
 	}
 	return s[server][rawName]
+}
+
+// snapshotHidesTool reports whether snap's live per-tool visibility filter
+// currently hides ref for scopeKey. It is used on tools/call revalidation to
+// close stale group sessions whose RouteMap was built before a tools_hidden
+// republish. Client scope keys have no ToolsHidden entry by invariant, so
+// this remains a no-op for /clients/ sessions.
+func snapshotHidesTool(snap *ResolverSnapshot, scopeKey string, ref canonicalToolRef) bool {
+	if snap == nil || snap.ToolsHidden == nil {
+		return false
+	}
+	return buildHiddenToolSet(snap.ToolsHidden[scopeKey]).hides(ref.Server, ref.RawName)
 }
 
 // failuresOrEmpty returns failures if non-nil, otherwise an empty
