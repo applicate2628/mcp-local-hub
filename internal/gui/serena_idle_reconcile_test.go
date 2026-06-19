@@ -271,6 +271,110 @@ func TestSerenaRouter_BackendLoss_SeedNeverOverwritesExistingBaseline(t *testing
 	}
 }
 
+// TestSerenaRouter_BackendLoss_DaemonFailedEvent covers §3.x signal #1: a
+// `daemon-failed` GUI event for a serena pool daemon must tear down that
+// workspace's router sessions instantly, ahead of the 30s IPC reconcile
+// fallback. The mapping sub-test verifies the event-body→wsKey resolution
+// (match by server=="serena" + Port; non-serena/zero-port/no-match → ""), and
+// the end-to-end sub-test runs the live subscriber against a synthetic event
+// published through the Broadcaster (no real daemon — in-memory store only).
+func TestSerenaRouter_BackendLoss_DaemonFailedEvent(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+
+	t.Run("mapping", func(t *testing.T) {
+		const wsPath = "/proj/event-map"
+		ws := serenaWS("event-map", wsPath, 9305)
+		s, _ := newSerenaStoreSeedServer(t, ws)
+
+		// Serena daemon on the workspace's port → its WorkspaceKey.
+		got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
+			"server": "serena", "port": 9305,
+		})
+		if got != ws.WorkspaceKey {
+			t.Fatalf("mapping serena@9305 = %q, want %q", got, ws.WorkspaceKey)
+		}
+		// JSON-decoded body carries float64 for the port; must still match.
+		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
+			"server": "serena", "port": float64(9305),
+		}); got != ws.WorkspaceKey {
+			t.Fatalf("mapping serena@9305(float64) = %q, want %q", got, ws.WorkspaceKey)
+		}
+		// Non-serena server (a global daemon / LSP proxy) → no-op.
+		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
+			"server": "memory", "port": 9305,
+		}); got != "" {
+			t.Fatalf("mapping non-serena = %q, want empty", got)
+		}
+		// Zero / absent port cannot disambiguate a workspace → no-op.
+		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
+			"server": "serena", "port": 0,
+		}); got != "" {
+			t.Fatalf("mapping serena@0 = %q, want empty", got)
+		}
+		// Serena daemon on a port no registered workspace owns → no-op.
+		if got := s.serenaWorkspaceKeyForDaemonFailedEvent(map[string]any{
+			"server": "serena", "port": 9999,
+		}); got != "" {
+			t.Fatalf("mapping serena@9999 = %q, want empty", got)
+		}
+	})
+
+	t.Run("subscriber-tears-down", func(t *testing.T) {
+		const wsPath = "/proj/event-teardown"
+		const sid = "sid-event-teardown"
+		ws := serenaWS("event-teardown", wsPath, 9306)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-teardown")
+		// Keep the synthetic Publish off-disk — this test never wants the
+		// GUI event log persisted.
+		s.Broadcaster().DisableGUIEventLog = true
+
+		// Subscribe SYNCHRONOUSLY before publishing so the test does not race
+		// the subscriber registering its channel (production runs this as a
+		// long-lived goroutine where the first-event race is irrelevant; the
+		// test publishes immediately, so it must register the channel first).
+		// Then drive the SAME consume loop the production subscriber runs.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := s.Broadcaster().Subscribe(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.consumeSerenaBackendLossEvents(ch)
+		}()
+
+		// Publish the synthetic daemon-failed event for the serena daemon on
+		// the workspace's port. A non-serena event published first must be a
+		// no-op (it should not tear anything down).
+		s.Broadcaster().Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "serena", "port": 9306}})
+		s.Broadcaster().Publish(Event{Type: "daemon-failed", Body: map[string]any{"server": "memory", "port": 9306}})
+		s.Broadcaster().Publish(Event{Type: "daemon-failed", Body: map[string]any{
+			"server": "serena", "daemon": "event-teardown", "port": 9306, "last_result": 1,
+		}})
+
+		// The subscriber processes asynchronously; poll until the session is
+		// gone (or fail on timeout).
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if !s.serenaRouterSessions.known(sid) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("router session %q not torn down after daemon-failed event", sid)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("subscriber goroutine did not exit on ctx cancel")
+		}
+	})
+}
+
 func TestSerenaRouter_BackendLoss_LastUnbindDropsBaselineAndIdleMarker(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 	withTempSerenaStateRoot(t)

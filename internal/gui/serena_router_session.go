@@ -967,14 +967,11 @@ func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
 // per-id unbind is a cheap no-op when there is nothing to drop. The audit is
 // best-effort (a nil/erroring auditFn is tolerated) and never blocks teardown.
 //
-// TODO(§3.x signal #1 — PREFERRED upgrade, not required here): subscribe the
-// router to a cross-process supervisor child-exit → GUI `daemon-failed` event
-// (supervisor_state_machine.go EvChildExit → controller crashCh →
-// internal/gui/events.go SSE bus) so a daemon death is observed even when NO
-// client request is in flight to surface it. The GUI event bus lacks a
-// `daemon-failed` event today (§11.9), so this floor + the IPC pid_generation
-// reconcile fallback (reconcileSerenaBackendLossViaIPC) ship first; signal #1
-// is a later upgrade once the event is added.
+// §3.x signal #1 (the event-driven faster path that observes a daemon death
+// even when NO client request is in flight) now ships as
+// RunSerenaBackendLossEventSubscriber below — it subscribes to the GUI event
+// bus's `daemon-failed` event and tears the workspace down instantly, ahead of
+// the 30s IPC reconcile fallback. This floor stays the always-on backstop.
 func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID string, cause error, auditFn func(level, event string, fields map[string]any) error) {
 	var sticky sessionRouter
 	if deps := s.serenaRouterDepsProd(); deps != nil {
@@ -999,6 +996,130 @@ func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID 
 			"trigger":           "forward-failure",
 			"err":               errStr,
 		})
+	}
+}
+
+// serenaWorkspaceKeyForDaemonFailedEvent resolves a `daemon-failed` GUI event
+// body to the WorkspaceKey of a registered serena pool daemon, or "" when the
+// event is not a serena backend loss the router cares about.
+//
+// The event body (internal/gui/poller.go) carries server/daemon/port/pid/
+// last_result — it does NOT carry a workspace_key. A serena pool daemon's
+// identity in that body is server=="serena" + the daemon's bound Port; each
+// serena workspace registry row owns a unique port (AllocateSerenaPort from the
+// per-server pool, 9150+), so Port is the stable key back to the workspace.
+// Match path: server=="serena", then the first serena workspace entry
+// (isSerenaWorkspaceEntry) whose registry Port equals the event Port.
+//
+// Returns "" (a no-op for the caller) for: a non-serena daemon-failed event (a
+// global server / LSP proxy), an absent/zero port (cannot disambiguate a
+// workspace), an unwired resolver, or no matching serena workspace.
+func (s *Server) serenaWorkspaceKeyForDaemonFailedEvent(body map[string]any) string {
+	if body == nil {
+		return ""
+	}
+	if srv, _ := body["server"].(string); srv != "serena" {
+		// Only serena pool daemons feed the router's session stores; a global
+		// server or an LSP proxy daemon-failed event is irrelevant here.
+		return ""
+	}
+	port := eventBodyInt(body["port"])
+	if port <= 0 {
+		// A zero/absent port cannot be matched to a specific workspace row.
+		// (The forward-failure floor + IPC reconcile still cover this death.)
+		return ""
+	}
+	deps := s.serenaRouterDepsProd()
+	if deps == nil || deps.Resolver == nil {
+		return ""
+	}
+	lister, ok := deps.Resolver.(workspaceLister)
+	if !ok {
+		return ""
+	}
+	for _, ws := range lister.ListWorkspaces() {
+		if ws == nil || !isSerenaWorkspaceEntry(ws) {
+			continue
+		}
+		if ws.Port == port {
+			return ws.WorkspaceKey
+		}
+	}
+	return ""
+}
+
+// eventBodyInt coerces a GUI event-body numeric field to int. The bus body is
+// map[string]any; an in-process Publish (poller.go) carries native ints, while
+// a value that round-tripped through JSON decodes as float64. Both are handled;
+// any other type yields 0.
+func eventBodyInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+// RunSerenaBackendLossEventSubscriber is §3.x signal #1: the event-driven
+// backend-loss teardown. It subscribes to the GUI event bus and, on each
+// `daemon-failed` event that maps to a registered serena pool workspace
+// (serenaWorkspaceKeyForDaemonFailedEvent), tears down that workspace's router
+// sessions IMMEDIATELY via terminateSerenaSessionsForWorkspace — instead of
+// waiting up to 30s for the IPC reconcile fallback to notice the dead PID.
+//
+// This is an ADDITIONAL faster path, not a replacement: the always-on
+// forward-failure floor (handleSerenaBackendLossOnForwardFailure) and the 30s
+// IPC reconcile fallback (ReconcileSerenaBackendLossViaIPC) both remain. The
+// teardown is idempotent — terminateSerenaSessionsForWorkspace is a no-op when
+// the workspace already has no sessions — so the event path and the IPC
+// fallback both firing for the same death is safe (the second call tears down
+// nothing).
+//
+// Lifecycle: subscribes via the broadcaster's internal Subscribe (NOT the
+// capped TrySubscribe, which is for untrusted /api/events HTTP clients), runs
+// until ctx is cancelled, and drains the channel on shutdown. The broadcaster
+// closes the channel when ctx is done; the for-range exits cleanly then. s may
+// be nil / the broadcaster unwired in tests — the goroutine is a no-op then.
+func (s *Server) RunSerenaBackendLossEventSubscriber(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	bus := s.Broadcaster()
+	if bus == nil {
+		return
+	}
+	// Subscribe synchronously here (in the caller's goroutine) so the channel
+	// is registered the moment this returns — production starts this as a
+	// long-lived goroutine where the subscribe/first-event race is irrelevant.
+	s.consumeSerenaBackendLossEvents(bus.Subscribe(ctx))
+}
+
+// consumeSerenaBackendLossEvents is the loop body of the §3.x signal #1
+// subscriber, split out so a test can Subscribe synchronously (avoiding the
+// subscribe-then-publish race) and drive the same consume logic. It ranges
+// until the channel is closed (the broadcaster closes it on ctx cancel).
+func (s *Server) consumeSerenaBackendLossEvents(ch <-chan Event) {
+	for ev := range ch {
+		if ev.Type != "daemon-failed" {
+			continue
+		}
+		wsKey := s.serenaWorkspaceKeyForDaemonFailedEvent(ev.Body)
+		if wsKey == "" {
+			continue
+		}
+		n := s.terminateSerenaSessionsForWorkspace(wsKey)
+		if deps := s.serenaRouterDepsProd(); deps != nil && deps.AuditFn != nil && n > 0 {
+			_ = deps.AuditFn("warn", "serena-backend-loss-session-teardown", map[string]any{
+				"workspace_key":     wsKey,
+				"sessions_torndown": n,
+				"trigger":           "daemon-failed-event",
+			})
+		}
 	}
 }
 
