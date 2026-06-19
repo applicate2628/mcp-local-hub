@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import type { SecretsSnapshot } from "../lib/use-secrets-snapshot";
-import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
+import { hasSecretKey, isSecretRef, parseSecretRef, type RefKind } from "../lib/secret-ref";
 import { matchTier, normalizeForMatch } from "../lib/name-match";
 import { isReservedName, isValidSecretName } from "../lib/reserved-names";
 
@@ -15,6 +15,52 @@ export interface SecretPickerProps {
 }
 
 const SECRET_PREFIX = "secret:";
+const ENV_PREFIX = "$";
+
+// The prefix kinds the selector OFFERS. `file:` is deliberately NOT here:
+// the backend resolver (internal/secrets/resolver.go) looks up `file:`
+// refs in a `local` map that EVERY production NewResolver call passes as
+// nil (config.local.yaml is an unimplemented TODO), so a `file:<key>`
+// ref always errors "local config not available" at daemon start.
+// Offering it would let the user write a ref that fails at every spawn.
+// `$VAR` (env) IS resolved in production at spawn time, so it ships.
+type SelectableKind = "literal" | "secret" | "env";
+const SELECTABLE_KINDS: readonly SelectableKind[] = ["literal", "secret", "env"] as const;
+
+// stripKnownPrefix returns the bare key/value with any recognized
+// resolution prefix removed, so a kind switch can re-prefix cleanly
+// without stacking (e.g. switching secret:FOO → env yields $FOO, not
+// $secret:FOO). It strips secret:, file:, and a leading $.
+function stripKnownPrefix(value: string): string {
+  const parsed = parseSecretRef(value);
+  if (parsed.kind === "literal" || parsed.key === null) return value;
+  return parsed.key;
+}
+
+// applyKind rewrites a value to the given selectable kind, preserving the
+// bare key across the switch. Literal drops every prefix; secret/env
+// re-prefix the stripped key.
+function applyKind(value: string, kind: SelectableKind): string {
+  const bare = stripKnownPrefix(value);
+  switch (kind) {
+    case "literal":
+      return bare;
+    case "secret":
+      return SECRET_PREFIX + bare;
+    case "env":
+      return ENV_PREFIX + bare;
+  }
+}
+
+// selectorKindFor maps a value's parsed RefKind onto the offered set.
+// `file:` (a legacy hand-typed ref) has no selector option, so it is
+// surfaced as "literal" in the dropdown without rewriting the value —
+// the user can switch away explicitly.
+function selectorKindFor(kind: RefKind): SelectableKind {
+  if (kind === "secret") return "secret";
+  if (kind === "env") return "env";
+  return "literal";
+}
 
 type RefState =
   | "literal"
@@ -89,6 +135,20 @@ export function SecretPicker(props: SecretPickerProps) {
 
   const isEditingQuery = open && valueAtOpen !== null && value !== valueAtOpen;
   const refState = useMemo(() => classifyRefState(value, snapshot, isEditingQuery), [value, snapshot, isEditingQuery]);
+
+  // The prefix kind the selector currently reflects, derived from the
+  // value's parsed RefKind. Drives which input affordance is live (the
+  // 🔑 dropdown only when kind === "secret") and the placeholder/aria.
+  const selectedKind = selectorKindFor(parseSecretRef(value).kind);
+
+  function changeKind(next: SelectableKind) {
+    if (next === selectedKind) return;
+    // Re-prefix the bare key for the new kind. If we're leaving "secret",
+    // close the dropdown — it is only meaningful for secret refs.
+    if (selectedKind === "secret") closePicker();
+    onChange(applyKind(value, next));
+    inputRef.current?.focus();
+  }
 
   function openPicker(captureValue: string = value) {
     if (!open) {
@@ -413,20 +473,68 @@ export function SecretPicker(props: SecretPickerProps) {
     ? `${optionIdPrefix}-${highlightIdx}`
     : undefined;
 
+  // Kind-aware placeholder + accessible label so the input self-describes
+  // what it resolves to at spawn time.
+  const placeholder = (() => {
+    switch (selectedKind) {
+      case "secret":
+        return "secret key (pick one, or type a name)";
+      case "env":
+        return "VAR name (resolved from $VAR at spawn)";
+      default:
+        return "literal value";
+    }
+  })();
+  const baseAriaLabel = props.ariaLabel ?? "Secret value picker";
+  const ariaLabel =
+    selectedKind === "env"
+      ? `${baseAriaLabel} — environment variable name`
+      : selectedKind === "secret"
+        ? `${baseAriaLabel} — secret key`
+        : `${baseAriaLabel} — literal value`;
+  const kindLabel = (k: SelectableKind) =>
+    k === "literal" ? "Literal" : k === "secret" ? "Secret" : "Env ($)";
+
   return (
     <div class="secret-picker-wrap" ref={wrapperRef}>
+      {/* Prefix-kind selector — a segmented radio group rather than a
+          native <select>, because a single-select <select> reports the
+          ARIA role "combobox", which would collide with the value
+          <input>'s explicit role="combobox". Radio-group semantics keep
+          exactly one combobox in the subtree. */}
+      <div
+        class="secret-picker-kind"
+        role="radiogroup"
+        aria-label="Value kind"
+        data-testid="secret-picker-kind"
+      >
+        {SELECTABLE_KINDS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={selectedKind === k}
+            class={`secret-picker-kind-option ${selectedKind === k ? "selected" : ""}`}
+            disabled={disabled}
+            data-testid={`secret-picker-kind-${k}`}
+            onClick={() => changeKind(k)}
+          >
+            {kindLabel(k)}
+          </button>
+        ))}
+      </div>
       <input
         ref={inputRef}
         type="text"
         class={inputClass}
         value={value}
-        placeholder="value (literal, $HOME/..., or pick a secret)"
+        placeholder={placeholder}
         role="combobox"
         aria-expanded={open}
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeOptionId}
-        aria-label={props.ariaLabel ?? "Secret value picker"}
+        aria-label={ariaLabel}
         aria-describedby={statusText ? statusId : undefined}
         disabled={disabled}
         onInput={onInputChange}
@@ -437,6 +545,13 @@ export function SecretPicker(props: SecretPickerProps) {
           {statusText}
         </span>
       )}
+      {/* The 🔑 secret-key dropdown lists vault keys and commits a
+          secret:<key> ref. It is the secret-kind affordance: clicking it
+          (or selecting a key) switches the value to the secret kind. It
+          stays available across kinds so the operator can always browse
+          to a secret from a literal/env value (selecting a key rewrites
+          the value to secret:<key>, flipping the kind selector to
+          Secret). */}
       <button
         type="button"
         class={`secret-picker-toggle ${open ? "open" : ""}`}
