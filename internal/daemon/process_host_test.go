@@ -59,6 +59,38 @@ func TestRunProcess_CtxCancelReturnsNil(t *testing.T) {
 	}
 }
 
+// TestRunProcess_KillsWrapperGrandchildOnCancel proves the Job-Object tree-kill
+// (Codex #381): a wrapper (cmd /c) that forks a long-running grandchild (ping) is
+// FULLY reaped on ctx cancel — Wait returns promptly (within WaitDelay) instead of
+// wedging on the inherited pipe, and the grandchild is terminated. If the
+// grandchild leaked it would keep holding the temp WorkingDir, and t.TempDir's
+// deferred RemoveAll cleanup would fail the test. Windows-only: the Job is a no-op
+// stub on POSIX (process-group reaping there is a separate follow-up).
+func TestRunProcess_KillsWrapperGrandchildOnCancel(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Job-Object tree-kill is Windows-only; POSIX process-group reaping is a follow-up")
+	}
+	cwd := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := ProcessConfig{Command: "cmd", Args: []string{"/c", "ping -n 60 127.0.0.1 > nul"}, WorkingDir: cwd}
+	done := make(chan error, 1)
+	go func() { done <- RunProcess(ctx, cfg) }()
+	time.Sleep(600 * time.Millisecond) // let cmd fork the ping grandchild
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("ctx cancel must return nil; got %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > companionWaitDelay+5*time.Second {
+			t.Errorf("Wait took %v after cancel — the wrapper grandchild may have wedged it", elapsed)
+		}
+	case <-time.After(25 * time.Second):
+		t.Fatal("RunProcess did not return after cancel — wrapper grandchild wedged Wait")
+	}
+}
+
 // TestRunProcess_EmptyCommandErrors guards the obvious misconfiguration.
 func TestRunProcess_EmptyCommandErrors(t *testing.T) {
 	if err := RunProcess(context.Background(), ProcessConfig{}); err == nil {

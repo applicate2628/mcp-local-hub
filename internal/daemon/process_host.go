@@ -5,11 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"os/exec"
 
 	"mcp-local-hub/internal/process"
 )
+
+// companionWaitDelay bounds how long RunProcess's Wait blocks after the context
+// kills the direct child while a wrapper grandchild may still hold the inherited
+// log pipe. Paired with RunUnderKillJob's Job Close (which reaps that grandchild),
+// it unwedges the stop promptly — see process.RunUnderKillJob.
+const companionWaitDelay = 5 * time.Second
 
 // ProcessConfig configures a raw NON-MCP companion subprocess run by RunProcess.
 type ProcessConfig struct {
@@ -53,6 +60,14 @@ func RunProcess(ctx context.Context, cfg ProcessConfig) error {
 		cmd.Env = composeChildEnv(cfg.Env, cfg.UnsetEnv)
 	}
 	process.NoConsole(cmd)
+	// A companion command is often a WRAPPER that forks the real server (node via
+	// npm, cmd /c, sh -c). exec.CommandContext only kills the direct child on ctx
+	// cancel, so a forked grandchild would survive — keep the inherited log pipe
+	// (and the server's port) open and block Wait. WaitDelay returns Wait promptly
+	// after the kill; RunUnderKillJob binds the whole descendant tree to a
+	// KILL_ON_JOB_CLOSE Job and closes it on return, reaping the grandchild. Both
+	// are required (Codex #381). POSIX degrades to Start+Wait (Job is a no-op stub).
+	cmd.WaitDelay = companionWaitDelay
 
 	if cfg.LogPath != "" {
 		if err := os.MkdirAll(filepath.Dir(cfg.LogPath), 0700); err == nil {
@@ -65,17 +80,18 @@ func RunProcess(ctx context.Context, cfg ProcessConfig) error {
 		}
 	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("companion process start: %w", err)
-	}
-	waitErr := cmd.Wait()
+	// RunUnderKillJob owns Start + Assign-to-Job + Wait + Close (tree reaping).
+	waitErr := process.RunUnderKillJob(cmd)
 	if ctx.Err() != nil {
-		// Supervisor cancelled (stop / shutdown). The child is already being
-		// torn down by CommandContext; a graceful stop is not a failure.
+		// Supervisor cancelled (stop / shutdown). The child + its tree are being
+		// torn down by CommandContext + the Job Close; a graceful stop is not a
+		// failure.
 		return nil
 	}
 	if waitErr != nil {
-		return fmt.Errorf("companion process exited: %w", waitErr)
+		// Start failure (bad command) OR a non-zero exit / crash — either way the
+		// supervisor should respawn.
+		return fmt.Errorf("companion process failed: %w", waitErr)
 	}
 	return fmt.Errorf("companion process exited cleanly (a long-lived companion is not expected to self-exit)")
 }
