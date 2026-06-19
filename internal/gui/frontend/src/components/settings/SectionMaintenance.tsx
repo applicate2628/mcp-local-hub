@@ -389,15 +389,46 @@ function CardAggressiveCleanup(): preact.JSX.Element {
     if (scopeKind === "client") {
       return client ? { kind: "client", client } : null;
     }
-    const pid = Number.parseInt(rootPidText, 10);
+    // Strict integer: parseInt would TRUNCATE "123.9"→123 / "1e3"→1 and
+    // preview/kill a DIFFERENT pid than the operator typed (bot #373 P2).
+    // Require a pure-digit string, then a finite positive integer.
+    const trimmed = rootPidText.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const pid = Number(trimmed);
     if (!Number.isInteger(pid) || pid <= 0) return null;
     return { kind: "root-pid", rootPid: pid };
+  }
+
+  // invalidatePreview clears any standing preview/confirm + snapshots. A scope
+  // or danger-class change makes the previewed candidate list stale, so the
+  // operator must re-Preview — the confirm list then always matches the scope
+  // that apply() will actually send (bot #373 P1: preview codex, switch to
+  // claude, confirm → would have killed claude's tree, never previewed).
+  function invalidatePreview() {
+    setState((s) => (s.kind === "preview" ? { kind: "idle" } : s));
+    setConfirmOpen(false);
+    setOrphansSnapshot(null);
+    setScopeSnapshot(null);
+    setClassesSnapshot([]);
+  }
+  function changeScopeKind(k: "client" | "root-pid") {
+    setScopeKind(k);
+    invalidatePreview();
+  }
+  function changeClient(v: string) {
+    setClient(v);
+    invalidatePreview();
+  }
+  function changeRootPidText(v: string) {
+    setRootPidText(v);
+    invalidatePreview();
   }
 
   function toggleClass(cls: string, on: boolean) {
     setIncludeClasses((prev) =>
       on ? [...prev, cls] : prev.filter((c) => c !== cls),
     );
+    invalidatePreview();
   }
 
   async function preview() {
@@ -490,7 +521,7 @@ function CardAggressiveCleanup(): preact.JSX.Element {
             class="h-4 w-4 accent-app-accent"
             checked={scopeKind === "client"}
             data-testid="aggressive-scope-client"
-            onChange={() => setScopeKind("client")}
+            onChange={() => changeScopeKind("client")}
           />
           By client
           <select
@@ -499,7 +530,7 @@ function CardAggressiveCleanup(): preact.JSX.Element {
             disabled={scopeKind !== "client"}
             data-testid="aggressive-client-select"
             aria-label="Client launcher"
-            onChange={(e) => setClient((e.target as HTMLSelectElement).value)}
+            onChange={(e) => changeClient((e.target as HTMLSelectElement).value)}
           >
             {AGGRESSIVE_CLIENTS.map((c) => (
               <option key={c} value={c}>{c}</option>
@@ -513,7 +544,7 @@ function CardAggressiveCleanup(): preact.JSX.Element {
             class="h-4 w-4 accent-app-accent"
             checked={scopeKind === "root-pid"}
             data-testid="aggressive-scope-root-pid"
-            onChange={() => setScopeKind("root-pid")}
+            onChange={() => changeScopeKind("root-pid")}
           />
           By root PID
           <input
@@ -525,7 +556,7 @@ function CardAggressiveCleanup(): preact.JSX.Element {
             disabled={scopeKind !== "root-pid"}
             data-testid="aggressive-root-pid-input"
             aria-label="Root PID"
-            onInput={(e) => setRootPidText((e.target as HTMLInputElement).value)}
+            onInput={(e) => changeRootPidText((e.target as HTMLInputElement).value)}
           />
         </label>
       </fieldset>

@@ -1017,7 +1017,7 @@ describe("SectionMaintenance — aggressive cleanup card", () => {
     expect(applyCall[2]).toEqual(["chrome"]);
   });
 
-  it("snapshots scope+classes at Clean-time — changing them under the open modal does NOT redirect the kill (consent-drift, security+sonnet converged)", async () => {
+  it("invalidates the preview when scope changes under the open modal — closes it, no kill fires (bot #373 P1 + consent-drift)", async () => {
     const spy = vi.spyOn(api, "cleanupAggressive").mockImplementation(async () => ({
       orphans: [
         { pid: 7777, parent_pid: 1, server: "", cmdline_display: "node.exe", age_sec: 300, ram_bytes: 50 * 1024 * 1024, match_source: "codex" },
@@ -1028,26 +1028,39 @@ describe("SectionMaintenance — aggressive cleanup card", () => {
     const { container } = render(<SectionMaintenance />);
     const card = container.querySelector('[data-card="aggressive-cleanup"]')!;
 
-    // Preview scope = client codex, no danger classes.
+    // Preview scope = client codex, then open the confirm modal.
     fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "codex" } });
     fireEvent.click(card.querySelector('[data-testid="aggressive-preview-button"]')!);
     await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
-    // Open the confirm modal (snapshots {codex, []}).
     fireEvent.click(card.querySelector('[data-testid="aggressive-clean-button"]')!);
     await waitFor(() => expect(activeModal(container)).toBeTruthy());
 
-    // NOW (modal open) widen the scope + opt a danger class in.
+    // Changing the scope under the open modal INVALIDATES the stale preview:
+    // the modal closes, the Clean button is gone (must re-Preview), so a
+    // drifted scope can never be confirmed/killed.
     fireEvent.change(card.querySelector('[data-testid="aggressive-client-select"]')!, { target: { value: "claude" } });
-    fireEvent.click(card.querySelector('[data-testid="aggressive-class-chrome"]')!);
+    await waitFor(() => expect(activeModal(container)).toBeFalsy());
+    expect(card.querySelector('[data-testid="aggressive-clean-button"]')).toBeFalsy();
+    expect(spy.mock.calls.some((c) => c[0] === true)).toBe(false);
+  });
 
-    // Confirm the kill.
-    clickConfirmModal(container as HTMLElement);
-    await waitFor(() => expect(spy.mock.calls.some((c) => c[0] === true)).toBe(true));
+  it("rejects a non-integer root PID — parseInt would truncate '123.9'/'1e3' to a different pid (bot #373 P2)", async () => {
+    const spy = vi.spyOn(api, "cleanupAggressive").mockResolvedValue({ orphans: [], killed: 0, skipped: 0 });
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="aggressive-cleanup"]')!;
+    fireEvent.click(card.querySelector('[data-testid="aggressive-scope-root-pid"]')!);
+    const preview = card.querySelector('[data-testid="aggressive-preview-button"]') as HTMLButtonElement;
+    const pidInput = card.querySelector('[data-testid="aggressive-root-pid-input"]')!;
 
-    // The kill MUST use the SNAPSHOT (codex, []), NOT the drifted live state (claude, [chrome]).
-    const applyCall = spy.mock.calls.find((c) => c[0] === true)!;
-    expect(applyCall[1]).toEqual({ kind: "client", client: "codex" });
-    expect(applyCall[2]).toEqual([]);
+    fireEvent.input(pidInput, { target: { value: "123.9" } });
+    expect(preview.disabled).toBe(true);
+    fireEvent.input(pidInput, { target: { value: "1e3" } });
+    expect(preview.disabled).toBe(true);
+    // A clean integer enables Preview and posts exactly that pid.
+    fireEvent.input(pidInput, { target: { value: "4242" } });
+    expect(preview.disabled).toBe(false);
+    fireEvent.click(preview);
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(false, { kind: "root-pid", rootPid: 4242 }, []));
   });
 
   it("posts a root-pid scope when By-root-PID is chosen", async () => {
