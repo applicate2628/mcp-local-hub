@@ -413,6 +413,18 @@ var errAggressiveUnknownClient = errors.New(
 	"cleanup --aggressive --client: unknown client launcher (recognized: claude, codex, gemini, qwen, cursor, code, cascade, antigravity)",
 )
 
+// ErrAggressiveScopeRequired / ErrAggressiveUnknownClient are exported
+// aliases of the two malformed-scope sentinels above so callers OUTSIDE
+// the api package (the GUI /api/cleanup/aggressive handler) can classify
+// an AggressiveCleanup error with errors.Is and map it to HTTP 400
+// instead of a generic 500. The CLI keeps using the unexported names;
+// these are additive aliases, not a rename, so the existing in-package
+// reject tests stay byte-identical.
+var (
+	ErrAggressiveScopeRequired = errAggressiveScopeRequired
+	ErrAggressiveUnknownClient = errAggressiveUnknownClient
+)
+
 // knownClientLauncherBasenames is the allowlist of "this process
 // looks like an MCP client we recognize" exe basenames. A running
 // stdio MCP child whose ancestor chain contains ANY of these is

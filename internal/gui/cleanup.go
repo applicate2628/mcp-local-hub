@@ -19,6 +19,7 @@ import (
 func registerCleanupRoutes(s *Server) {
 	s.mux.HandleFunc("/api/cleanup/orphans", s.requireSameOrigin(s.cleanupOrphansHandler))
 	s.mux.HandleFunc("/api/cleanup/log-watchers", s.requireSameOrigin(s.cleanupLogWatchersHandler))
+	s.mux.HandleFunc("/api/cleanup/aggressive", s.requireSameOrigin(s.cleanupAggressiveHandler))
 }
 
 // cleanupRequest is the JSON body for POST /api/cleanup/orphans.
