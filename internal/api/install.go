@@ -1727,6 +1727,16 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		_, fix := LauncherGuidance(m.Command)
 		return fmt.Errorf("command %q not found on PATH — %s: %w", m.Command, fix, err)
 	}
+	// 1b. Runtime behind the launcher (npx → node). An npx shim can be on PATH
+	// while node itself is missing (the shim is a `#!/usr/bin/env node` script),
+	// so the daemon would still fail to start; check it here too (same depth as
+	// CheckServerReadiness, Codex #377 r8).
+	if rt := runtimeBehindLauncher(m.Command); rt != "" {
+		if _, err := exec.LookPath(rt); err != nil {
+			_, rfix := LauncherGuidance(rt)
+			return fmt.Errorf("runtime %q (needed by %q) not found on PATH — %s: %w", rt, m.Command, rfix, err)
+		}
+	}
 	// 2. Canonical mcphub must exist — scheduler tasks reference
 	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
 	// Scheduler's CreateProcess call skips PATH lookup. Antigravity

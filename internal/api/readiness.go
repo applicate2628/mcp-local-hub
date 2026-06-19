@@ -5,9 +5,13 @@ import (
 	"os/exec"
 	"strings"
 
+	"os"
+	"path/filepath"
+
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/secrets"
+	"mcp-local-hub/internal/toolchain"
 )
 
 // ReadinessRequirement is one checked prerequisite for a server to run. It is
@@ -80,6 +84,9 @@ func LauncherGuidance(command string) (display, fix string) {
 	case "clang", "clang++", "clang-cl":
 		return "clang (LLVM)",
 			"Install clang/LLVM — Windows: `winget install LLVM.LLVM`; Linux: `apt install clang`; macOS: `xcode-select --install`."
+	case "git":
+		return "git",
+			"Install git — Windows: `winget install Git.Git`; macOS: `brew install git` (or Xcode CLT); Linux: `apt install git`."
 	default:
 		return command,
 			fmt.Sprintf("Install %q and ensure it is on PATH, then re-run install.", command)
@@ -166,6 +173,58 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 	}
 
+	// node / python-script launchers run a LOCAL script as base_args[0]; the
+	// launcher existing does NOT prove the script does (e.g. wolfram's
+	// build/index.js inside an uncloned wolframalpha-llm-mcp). Check it so such
+	// a manifest is not reported ready while its entry script is missing
+	// (Codex #377 r8). base_args[0] is ALREADY env-expanded at parse — do NOT
+	// re-expand (os.ExpandEnv would mangle a literal `$` in the path; Codex
+	// pre-catch r9). Only an ABSOLUTE script path is checkable here: a relative
+	// arg resolves against the daemon's per-daemon cwd (spec.Cwd), unknown to
+	// this process, so skip it rather than stat it against the wrong cwd
+	// (Codex pre-catch r9). Skip flag-shaped args (python -m, node --flag).
+	if m.Command == "node" || m.Command == "python" || m.Command == "python3" {
+		if len(m.BaseArgs) > 0 && !strings.HasPrefix(m.BaseArgs[0], "-") && filepath.IsAbs(m.BaseArgs[0]) {
+			script := m.BaseArgs[0]
+			if _, err := os.Stat(script); err != nil {
+				add(ReadinessRequirement{
+					Name:     "script: " + filepath.Base(script),
+					OK:       false,
+					Optional: launcherOptional,
+					// Reason names only the script BASENAME, not the absolute
+					// host path, which the GUI renders (Codex pre-catch r9).
+					Reason: fmt.Sprintf("the %s entry script %q does not exist", m.Command, filepath.Base(script)),
+					Fix:    "Install/clone the server so the manifest's base_args[0] script path exists, then re-run install.",
+				})
+			} else {
+				add(ReadinessRequirement{Name: "script: " + filepath.Base(script), OK: true})
+			}
+		}
+	}
+
+	// uvx/uv with a `git+` source (e.g. serena's `--from git+https://…@<sha>`)
+	// shells out to the `git` binary to clone the pinned commit; uv does NOT
+	// vendor git, so uvx-on-PATH does not prove git is. Surface it so a host
+	// with uv but no git is not reported ready (Codex pre-catch r9).
+	if m.Command == "uvx" || m.Command == "uv" {
+		needsGit := false
+		for _, a := range append(append([]string{}, m.BaseArgs...), m.BaseArgsTemplate...) {
+			if strings.Contains(a, "git+") {
+				needsGit = true
+				break
+			}
+		}
+		if needsGit {
+			gdisp, gfix := LauncherGuidance("git")
+			if _, err := exec.LookPath("git"); err != nil {
+				add(ReadinessRequirement{Name: "binary: " + gdisp, OK: false, Optional: launcherOptional,
+					Reason: "git is required to fetch the uvx git+ source but is not on PATH", Fix: gfix})
+			} else {
+				add(ReadinessRequirement{Name: "binary: " + gdisp, OK: true})
+			}
+		}
+	}
+
 	// Canonical mcphub binary — Preflight ALWAYS requires it (even on the
 	// remote-http branch), so a fresh / dev-run host without `mcphub setup`
 	// passes the launcher checks yet fails the install immediately. Mirror it
@@ -189,6 +248,30 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// ALTERNATIVES selected per workspace, so a Go-only workspace must not be
 	// marked not-ready because rust-analyzer / fortls / tsserver are absent
 	// (Codex #377). They are surfaced (with a Fix) but do not block Ready.
+	// binaryFound honors the native-debugger discovery for gdb/lldb: the
+	// bridges resolve them via DebuggerDirs (MCPHUB_DEBUGGER_TOOLCHAIN_DIR +
+	// probed MSYS2 bins), so a gdb present in a debugger dir but NOT on the GUI
+	// process PATH still runs — a plain LookPath would falsely report it
+	// missing (Codex #377 r8). DefaultGdbPath/DefaultLldbPath return an
+	// ABSOLUTE path when they stat'd a real file, else the bare name (→ PATH).
+	binaryFound := func(bin string) bool {
+		resolve := func(p string) bool {
+			if filepath.IsAbs(p) {
+				return true // toolchain stat'd a real file in a debugger dir
+			}
+			_, err := exec.LookPath(p)
+			return err == nil
+		}
+		switch bin {
+		case "gdb":
+			return resolve(toolchain.DefaultGdbPath())
+		case "lldb":
+			return resolve(toolchain.DefaultLldbPath())
+		default:
+			_, err := exec.LookPath(bin)
+			return err == nil
+		}
+	}
 	seenBin := map[string]bool{}
 	addBin := func(bin string, optional bool) {
 		if bin == "" || seenBin[bin] {
@@ -196,7 +279,7 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 		seenBin[bin] = true
 		bdisp, bfix := LauncherGuidance(bin)
-		if _, err := exec.LookPath(bin); err != nil {
+		if !binaryFound(bin) {
 			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: false, Optional: optional,
 				Reason: fmt.Sprintf("%q not found on PATH", bin), Fix: bfix})
 		} else {
@@ -228,6 +311,10 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			if preflightPortInUse(internal) && !portHeldByOurDaemonForPortArm(internal, m.Name, d.Name, true) {
 				add(ReadinessRequirement{Name: fmt.Sprintf("internal port %d (%s)", internal, d.Name), OK: false,
 					Reason: "native-http upstream port already in use", Fix: "Free the port or change the daemon port (internal = external + offset)."})
+			} else {
+				// Emit the green row too, so a healthy internal port is visible
+				// and the report's requirement set is symmetric (Codex pre-catch r9).
+				add(ReadinessRequirement{Name: fmt.Sprintf("internal port %d (%s)", internal, d.Name), OK: true})
 			}
 		}
 	}
@@ -270,9 +357,11 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 		if registryLoadErr != nil {
 			add(ReadinessRequirement{
-				Name:   fmt.Sprintf("port pool %d-%d", p.Start, p.End),
-				OK:     false,
-				Reason: fmt.Sprintf("workspace registry unreadable, cannot verify pool allocation: %v", registryLoadErr),
+				Name: fmt.Sprintf("port pool %d-%d", p.Start, p.End),
+				OK:   false,
+				// Reason is GUI-rendered — do not echo registryLoadErr, which
+				// wraps the absolute workspaces.yaml path (Codex pre-catch r9).
+				Reason: "the workspace registry could not be read or resolved (register reads it before allocating a pool port)",
 				Fix:    "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).",
 			})
 			return
@@ -309,9 +398,11 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	if secrets.HasSecretRef(m.Env) {
 		if _, verr := secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath()); verr != nil {
 			add(ReadinessRequirement{
-				Name:   "secrets vault",
-				OK:     false,
-				Reason: fmt.Sprintf("vault exists but unreadable: %v", verr),
+				Name: "secrets vault",
+				OK:   false,
+				// Redacted: verr wraps the absolute vault/key file path (Codex
+				// pre-catch r9).
+				Reason: "the secrets vault exists but could not be read or decrypted",
 				Fix:    "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read.",
 			})
 		}
@@ -331,7 +422,11 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		req := ReadinessRequirement{Name: "secret: " + key, Optional: true}
 		if err := checkSecretRefs(map[string]string{k: v}); err != nil {
 			req.OK = false
-			req.Reason = "not set in the vault (optional — the server runs without it, or reports its own missing-key)"
+			// Neutral wording: checkSecretRefs errors for BOTH "key not set" and
+			// "vault unreadable", so do not assert "not set" — the dedicated
+			// "secrets vault" requirement above covers the unreadable case
+			// (Codex pre-catch r9).
+			req.Reason = "could not be resolved from the vault (optional — set it, or fix the vault if it exists but is unreadable; the server otherwise runs without it)"
 			req.Fix = fmt.Sprintf("Enter %s at install, or set it later via the Secrets screen / `mcphub secrets set %s`.", key, key)
 		} else {
 			req.OK = true
@@ -465,13 +560,16 @@ func AllServerReadiness() []*ReadinessReport {
 	for _, name := range names {
 		rep, err := CheckServerReadinessByName(name)
 		if err != nil {
+			// err wraps the manifest's absolute disk path (os.PathError); this
+			// report is GUI-rendered, so do NOT echo it — name only the server
+			// (Codex pre-catch r9). The full error is the caller's to log.
 			out = append(out, &ReadinessReport{
 				Server: name,
 				Ready:  false,
 				Requirements: []ReadinessRequirement{{
 					Name:   "manifest: " + name,
 					OK:     false,
-					Reason: fmt.Sprintf("manifest failed to load/parse: %v", err),
+					Reason: "the manifest could not be loaded or parsed",
 					Fix:    "Fix the manifest YAML (a custom server under the manifest dir), or remove it.",
 				}},
 			})

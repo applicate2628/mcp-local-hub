@@ -2,6 +2,8 @@ package gui
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 
 	"mcp-local-hub/internal/api"
@@ -27,9 +29,13 @@ func (s *Server) readinessHandler(w http.ResponseWriter, r *http.Request) {
 	if name := r.URL.Query().Get("server"); name != "" {
 		rep, err := api.CheckServerReadinessByName(name)
 		if err != nil {
-			// Unknown / unparseable server name — plain-text 404 before any
-			// JSON header so the body is not a half-written JSON object.
-			http.Error(w, err.Error(), http.StatusNotFound)
+			// Unknown / unparseable server name. The loader error wraps an
+			// os.PathError carrying the manifest's absolute disk path — do NOT
+			// echo it to the response (Codex #377 r8). Log the full error for
+			// diagnosis; return a redacted 404 that names only the operator's
+			// own query input.
+			log.Printf("readiness: resolve manifest %q: %v", name, err)
+			http.Error(w, fmt.Sprintf("server %q not found or its manifest could not be loaded", name), http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

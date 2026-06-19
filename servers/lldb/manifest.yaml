@@ -6,6 +6,13 @@ command: mcphub
 base_args:
   - lldb-bridge
   - localhost:47000
+# The lldb-bridge hard-fails the daemon when no lldb is resolvable
+# (internal/lldb/bridge.go: "lldb not found ..."), so declare it as a
+# required binary — readiness resolves it via the debugger-toolchain
+# discovery (DefaultLldbPath honors MCPHUB_DEBUGGER_TOOLCHAIN_DIR + MSYS2
+# clang64), mirroring the sibling gdb manifest.
+required_binaries:
+  - lldb
 env: {}
 
 # LLDB's built-in MCP server speaks MCP over a raw TCP socket, not stdio
