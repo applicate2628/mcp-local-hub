@@ -164,25 +164,34 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// Declared required external binaries (e.g. gdb-mcp → required_binaries:
 	// [gdb]). These run THROUGH mcphub, so the launcher check passes even when
 	// the actual backend tool is absent; surface them so the server is not
-	// reported ready while its tool is missing (Codex #377). Blocking — the
-	// server cannot function without them. Includes per-language binaries for
-	// workspace-scoped (LSP) manifests.
-	reqBins := append([]string{}, m.RequiredBinaries...)
-	for _, lang := range m.Languages {
-		reqBins = append(reqBins, lang.RequiredBinaries...)
-	}
+	// reported ready while its tool is missing (Codex #377).
+	//
+	// Server-level RequiredBinaries are BLOCKING (the server cannot function
+	// without them). Per-LANGUAGE RequiredBinaries (workspace-scoped LSP
+	// manifests) are ADVISORY/Optional: a manifest's `languages` are
+	// ALTERNATIVES selected per workspace, so a Go-only workspace must not be
+	// marked not-ready because rust-analyzer / fortls / tsserver are absent
+	// (Codex #377). They are surfaced (with a Fix) but do not block Ready.
 	seenBin := map[string]bool{}
-	for _, bin := range reqBins {
+	addBin := func(bin string, optional bool) {
 		if bin == "" || seenBin[bin] {
-			continue
+			return
 		}
 		seenBin[bin] = true
 		bdisp, bfix := LauncherGuidance(bin)
 		if _, err := exec.LookPath(bin); err != nil {
-			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: false,
+			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: false, Optional: optional,
 				Reason: fmt.Sprintf("%q not found on PATH", bin), Fix: bfix})
 		} else {
 			add(ReadinessRequirement{Name: "binary: " + bdisp, OK: true})
+		}
+	}
+	for _, bin := range m.RequiredBinaries {
+		addBin(bin, false) // server-level: blocking
+	}
+	for _, lang := range m.Languages {
+		for _, bin := range lang.RequiredBinaries {
+			addBin(bin, true) // per-language: advisory (alternatives per workspace)
 		}
 	}
 
@@ -278,9 +287,12 @@ func CheckServerReadinessByName(name string) (*ReadinessReport, error) {
 
 // AllServerReadiness resolves every embedded/installed server manifest and
 // returns a readiness report per server, so the GUI can show a fleet-wide
-// "what needs fixing before this works" view. Manifests that fail to resolve
-// or parse are skipped (a malformed embedded manifest is a build-time bug, not
-// an operator-facing readiness concern).
+// "what needs fixing before this works" view. A manifest that fails to
+// resolve/parse is SURFACED as a not-ready report with a "manifest parse"
+// requirement rather than dropped: listManifestNamesEmbedFirst unions embedded
+// AND disk manifests, so a parse failure can be an operator-facing broken
+// CUSTOM server, and silently omitting it would make the fleet view look
+// complete while hiding the server that needs attention (Codex #377).
 func AllServerReadiness() []*ReadinessReport {
 	names, err := listManifestNamesEmbedFirst()
 	if err != nil {
@@ -288,9 +300,21 @@ func AllServerReadiness() []*ReadinessReport {
 	}
 	out := make([]*ReadinessReport, 0, len(names))
 	for _, name := range names {
-		if rep, err := CheckServerReadinessByName(name); err == nil {
-			out = append(out, rep)
+		rep, err := CheckServerReadinessByName(name)
+		if err != nil {
+			out = append(out, &ReadinessReport{
+				Server: name,
+				Ready:  false,
+				Requirements: []ReadinessRequirement{{
+					Name:   "manifest: " + name,
+					OK:     false,
+					Reason: fmt.Sprintf("manifest failed to load/parse: %v", err),
+					Fix:    "Fix the manifest YAML (a custom server under the manifest dir), or remove it.",
+				}},
+			})
+			continue
 		}
+		out = append(out, rep)
 	}
 	return out
 }

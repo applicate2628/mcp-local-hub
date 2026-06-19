@@ -104,9 +104,16 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 
 			// Resolve env (secret:KEY -> vault lookup) over the spec's raw
 			// env refs (cleartext-free on disk; resolved in-process here).
+			// Secrets are OPTIONAL (install-and-it-works): best-effort so a
+			// workspace-scoped daemon with a skipped `secret:` ref still spawns
+			// (env var omitted) instead of failing — matching the global-daemon
+			// path (Codex #377). $VAR/file: refs stay fatal.
 			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
 			resolver := secrets.NewResolver(vault, nil)
-			env, err := resolver.ResolveMap(spec.EnvRefs)
+			// Best-effort: a skipped optional `secret:` ref is omitted (spawn
+			// proceeds) rather than fatal; $VAR/file: refs stay fatal. Omitted
+			// keys are diagnosable via the resolver's own log path. (Codex #377)
+			env, _, err := resolver.ResolveMapBestEffort(spec.EnvRefs)
 			if err != nil {
 				return err
 			}

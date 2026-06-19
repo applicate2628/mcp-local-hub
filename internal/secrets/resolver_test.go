@@ -84,10 +84,13 @@ func TestResolver_EnvMissing(t *testing.T) {
 func TestResolveMapBestEffort_OmitsMissingSecret(t *testing.T) {
 	// nil vault → any secret: ref is unresolvable. A literal resolves.
 	r := NewResolver(nil, nil)
-	resolved, omitted := r.ResolveMapBestEffort(map[string]string{
+	resolved, omitted, err := r.ResolveMapBestEffort(map[string]string{
 		"LITERAL": "hello",
 		"WOLFRAM": "secret:wolfram_app_id",
 	})
+	if err != nil {
+		t.Fatalf("secret-only omission must not error: %v", err)
+	}
 	if resolved["LITERAL"] != "hello" {
 		t.Errorf("literal not resolved: %v", resolved)
 	}
@@ -101,8 +104,21 @@ func TestResolveMapBestEffort_OmitsMissingSecret(t *testing.T) {
 
 func TestResolveMapBestEffort_NeverErrorsAllResolvable(t *testing.T) {
 	r := NewResolver(nil, nil)
-	resolved, omitted := r.ResolveMapBestEffort(map[string]string{"A": "x", "B": "y"})
+	resolved, omitted, err := r.ResolveMapBestEffort(map[string]string{"A": "x", "B": "y"})
+	if err != nil {
+		t.Fatalf("all-resolvable must not error: %v", err)
+	}
 	if len(resolved) != 2 || len(omitted) != 0 {
 		t.Errorf("resolved=%v omitted=%v; want 2 resolved, 0 omitted", resolved, omitted)
+	}
+}
+
+func TestResolveMapBestEffort_NonSecretRefStaysFatal(t *testing.T) {
+	r := NewResolver(nil, nil)
+	// A missing $VAR is a documented REQUIRED input — it must stay fail-fast,
+	// not be silently omitted like an optional secret (Codex #377).
+	_, _, err := r.ResolveMapBestEffort(map[string]string{"TOK": "$DEFINITELY_UNSET_VAR_ZZZ"})
+	if err == nil {
+		t.Fatal("missing $VAR ref must return an error (non-secret refs are required)")
 	}
 }

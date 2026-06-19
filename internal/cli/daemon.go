@@ -347,7 +347,11 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 	// secret) are OMITTED so the daemon still spawns and the SERVER reports
 	// its own "missing required key" instead of mcphub failing cryptically.
 	// Each omission is logged so it stays diagnosable.
-	env, omitted := resolver.ResolveMapBestEffort(manifestEnv)
+	// ONLY secret: refs are optional; a missing $VAR/file: stays fatal.
+	env, omitted, err := resolver.ResolveMapBestEffort(manifestEnv)
+	if err != nil {
+		return nil, err
+	}
 	for k, ref := range omitted {
 		fmt.Fprintf(os.Stderr, "mcphub daemon %s/%s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
 			server, daemonName, k, ref)
