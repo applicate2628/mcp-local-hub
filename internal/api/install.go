@@ -1719,9 +1719,13 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		// remote-http.
 		return nil
 	}
-	// 1. Command available.
+	// 1. Command available. On failure, attach the guided install fix
+	// (LauncherGuidance is the single owner of "how do I get this dep")
+	// so the operator sees the exact command instead of a bare "not found"
+	// and then a downstream cryptic HTTP-502 at the client.
 	if _, err := exec.LookPath(m.Command); err != nil {
-		return fmt.Errorf("command %q not found on PATH: %w", m.Command, err)
+		_, fix := LauncherGuidance(m.Command)
+		return fmt.Errorf("command %q not found on PATH — %s: %w", m.Command, fix, err)
 	}
 	// 2. Canonical mcphub must exist — scheduler tasks reference
 	// ~/.local/bin/mcphub.exe by absolute path because Windows Task
