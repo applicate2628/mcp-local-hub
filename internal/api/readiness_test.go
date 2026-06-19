@@ -58,3 +58,42 @@ func TestCheckServerReadiness_PresentLauncherReady(t *testing.T) {
 		t.Fatalf("report Ready=false for present launcher `go`: %+v", rep.Requirements)
 	}
 }
+
+func TestCheckServerReadinessByName_EmbeddedServer(t *testing.T) {
+	// "memory" is an embedded manifest (command: npx). Resolves without
+	// state/network. Its readiness must include a launcher requirement.
+	rep, err := CheckServerReadinessByName("memory")
+	if err != nil {
+		t.Fatalf("CheckServerReadinessByName(memory): %v", err)
+	}
+	if rep.Server != "memory" {
+		t.Errorf("report Server=%q, want memory", rep.Server)
+	}
+	var hasLauncher bool
+	for _, r := range rep.Requirements {
+		if strings.HasPrefix(r.Name, "launcher:") {
+			hasLauncher = true
+		}
+	}
+	if !hasLauncher {
+		t.Errorf("memory readiness has no launcher requirement: %+v", rep.Requirements)
+	}
+}
+
+func TestCheckServerReadinessByName_UnknownServerErrors(t *testing.T) {
+	if _, err := CheckServerReadinessByName("no-such-server-zzz"); err == nil {
+		t.Fatal("CheckServerReadinessByName(unknown) returned nil error; want resolve error")
+	}
+}
+
+func TestAllServerReadiness_CoversEmbeddedServers(t *testing.T) {
+	reports := AllServerReadiness()
+	if len(reports) < 5 {
+		t.Fatalf("AllServerReadiness returned %d reports; want >= 5 embedded servers", len(reports))
+	}
+	for _, rep := range reports {
+		if rep.Server == "" {
+			t.Errorf("report with empty Server name: %+v", rep)
+		}
+	}
+}

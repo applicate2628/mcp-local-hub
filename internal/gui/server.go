@@ -761,6 +761,7 @@ func NewServer(cfg Config) *Server {
 	registerMarketplaceInstallRoutes(s)
 	registerInstallRoutes(s)
 	registerServerRoutes(s)
+	registerReadinessRoutes(s)
 	registerEventsRoutes(s)
 	registerLogsRoutes(s)
 	registerExtractManifestRoutes(s)

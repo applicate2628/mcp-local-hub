@@ -39,10 +39,12 @@ Agreed direction (operator, 2026-06-19):
    config.toml → OneDrive), resolve the real target safely OR prompt "это
    symlink на X, писать?" — instead of the current cross-device / refuse-symlink
    cryptic failure.
-4. **serena-out-of-box** — dynamic-pool as the DEFAULT serena install shape
-   (no separate fragile `migrate serena legacy-to-dynamic-pool`); fix the
-   client-config revert (bugs/2026-06-19-serena-client-revert); per-workspace
-   "just works".
+4. **serena-AND-lsp-out-of-box** — both serena (dynamic-pool, no separate
+   fragile `migrate serena legacy-to-dynamic-pool`) AND mcp-language-server
+   (per-workspace lazy-proxy) "just work" per-workspace out of the box, no
+   manual setup. Fix the serena client-config revert
+   (bugs/2026-06-19-serena-client-revert). Operator (2026-06-19):
+   "language-server тоже из коробки как и serena".
 5. **trusted-folders-ux** — explicit workspace-trust prompt (VS Code style)
    for LSP/serena roots (`lsp-trusted-roots.json`), visible + persisted, instead
    of the opaque current gate with no add-UX.

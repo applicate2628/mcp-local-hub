@@ -153,3 +153,41 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 
 	return rep
 }
+
+// CheckServerReadinessByName resolves a server's manifest embed-first (the same
+// source the installer uses) and runs CheckServerReadiness. The GUI
+// /api/server/readiness endpoint calls this so the operator sees per-server
+// readiness — with guided fixes — BEFORE installing, instead of discovering a
+// missing dependency as a downstream cryptic failure. Returns an error only
+// when the manifest cannot be resolved or parsed (an unknown server name); a
+// resolvable manifest always yields a report (possibly Ready=false).
+func CheckServerReadinessByName(name string) (*ReadinessReport, error) {
+	data, err := loadManifestYAMLEmbedFirst(name)
+	if err != nil {
+		return nil, fmt.Errorf("resolve manifest %q: %w", name, err)
+	}
+	m, err := parseManifestForName(name, data)
+	if err != nil {
+		return nil, fmt.Errorf("parse manifest %q: %w", name, err)
+	}
+	return CheckServerReadiness(m), nil
+}
+
+// AllServerReadiness resolves every embedded/installed server manifest and
+// returns a readiness report per server, so the GUI can show a fleet-wide
+// "what needs fixing before this works" view. Manifests that fail to resolve
+// or parse are skipped (a malformed embedded manifest is a build-time bug, not
+// an operator-facing readiness concern).
+func AllServerReadiness() []*ReadinessReport {
+	names, err := listManifestNamesEmbedFirst()
+	if err != nil {
+		return nil
+	}
+	out := make([]*ReadinessReport, 0, len(names))
+	for _, name := range names {
+		if rep, err := CheckServerReadinessByName(name); err == nil {
+			out = append(out, rep)
+		}
+	}
+	return out
+}
