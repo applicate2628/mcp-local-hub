@@ -2,11 +2,10 @@ package api
 
 import (
 	"fmt"
-	"os/exec"
-	"strings"
-
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -185,27 +184,37 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// process's cwd (Codex #377 r9). Skip flag-shaped args (python -m, --flag).
 	if m.Command == "node" || m.Command == "python" || m.Command == "python3" {
 		if len(m.BaseArgs) > 0 && !strings.HasPrefix(m.BaseArgs[0], "-") {
-			script := m.BaseArgs[0]
-			if !filepath.IsAbs(script) {
-				if len(m.Daemons) > 0 && filepath.IsAbs(m.Daemons[0].Cwd) {
-					script = filepath.Join(m.Daemons[0].Cwd, script)
-				} else {
-					script = "" // unknown daemon cwd → cannot stat reliably; skip
+			arg := m.BaseArgs[0]
+			// Build the list of (label, absolute-path) to stat. An ABSOLUTE
+			// arg is cwd-independent → one check. A RELATIVE arg resolves
+			// against EACH daemon's per-daemon cwd, which can DIFFER per daemon
+			// (a multi-daemon manifest), so check it against every daemon whose
+			// cwd is known + absolute — the script must exist for each (Codex
+			// #377 r10). Daemons with an unknown cwd are skipped (cannot stat).
+			type scriptCheck struct{ label, path string }
+			var checks []scriptCheck
+			if filepath.IsAbs(arg) {
+				checks = append(checks, scriptCheck{filepath.Base(arg), arg})
+			} else {
+				for _, d := range m.Daemons {
+					if filepath.IsAbs(d.Cwd) {
+						checks = append(checks, scriptCheck{filepath.Base(arg) + " (" + d.Name + ")", filepath.Join(d.Cwd, arg)})
+					}
 				}
 			}
-			if script != "" {
-				if _, err := os.Stat(script); err != nil {
+			for _, c := range checks {
+				if _, err := os.Stat(c.path); err != nil {
 					add(ReadinessRequirement{
-						Name:     "script: " + filepath.Base(script),
+						Name:     "script: " + c.label,
 						OK:       false,
 						Optional: launcherOptional,
 						// Reason names only the script BASENAME, not the absolute
 						// host path, which the GUI renders (Codex pre-catch r9).
-						Reason: fmt.Sprintf("the %s entry script %q does not exist", m.Command, filepath.Base(script)),
+						Reason: fmt.Sprintf("the %s entry script %q does not exist", m.Command, filepath.Base(c.path)),
 						Fix:    "Install/clone the server so the manifest's base_args[0] script path exists, then re-run install.",
 					})
 				} else {
-					add(ReadinessRequirement{Name: "script: " + filepath.Base(script), OK: true})
+					add(ReadinessRequirement{Name: "script: " + c.label, OK: true})
 				}
 			}
 		}
