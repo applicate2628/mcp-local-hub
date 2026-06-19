@@ -121,15 +121,23 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		rep.Requirements = append(rep.Requirements, r)
 	}
 
-	// Launcher on PATH (with guided fix), then the runtime behind it.
+	// Launcher on PATH (with guided fix), then the runtime behind it. For a
+	// workspace-scoped (dynamic-pool LSP) manifest the launcher is ADVISORY:
+	// the actual backend is selected per workspace/language and some paths do
+	// NOT use m.Command at all — a Go workspace runs the gopls-mcp backend
+	// (launches gopls directly), so a missing mcp-language-server must not
+	// mark a gopls-ready Go workspace not-ready (Codex #377). The per-language
+	// required_binaries (already advisory) cover the real per-language tools.
+	launcherOptional := m.Kind == config.KindWorkspaceScoped
 	if m.Command != "" {
 		disp, fix := LauncherGuidance(m.Command)
 		if _, err := exec.LookPath(m.Command); err != nil {
 			add(ReadinessRequirement{
-				Name:   "launcher: " + disp,
-				OK:     false,
-				Reason: fmt.Sprintf("%q not found on PATH", m.Command),
-				Fix:    fix,
+				Name:     "launcher: " + disp,
+				OK:       false,
+				Optional: launcherOptional,
+				Reason:   fmt.Sprintf("%q not found on PATH", m.Command),
+				Fix:      fix,
 			})
 		} else {
 			add(ReadinessRequirement{Name: "launcher: " + disp, OK: true})
@@ -137,10 +145,11 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 				rdisp, rfix := LauncherGuidance(rt)
 				if _, err := exec.LookPath(rt); err != nil {
 					add(ReadinessRequirement{
-						Name:   "runtime: " + rdisp,
-						OK:     false,
-						Reason: fmt.Sprintf("%q (needed by %s) not found on PATH", rt, m.Command),
-						Fix:    rfix,
+						Name:     "runtime: " + rdisp,
+						OK:       false,
+						Optional: launcherOptional,
+						Reason:   fmt.Sprintf("%q (needed by %s) not found on PATH", rt, m.Command),
+						Fix:      rfix,
 					})
 				} else {
 					add(ReadinessRequirement{Name: "runtime: " + rdisp, OK: true})
@@ -224,15 +233,32 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// r4). For a native-http pool the materialized proxy also binds
 	// external+offset upstream, so BOTH must be free.
 	var registryTaken map[int]bool
+	var registryLoadErr error
 	if regPath, perr := DefaultRegistryPath(); perr == nil {
 		reg := NewRegistry(regPath)
-		if reg.Load() == nil {
+		// Load returns nil for an absent/empty registry; an ERROR means the
+		// file exists but is unreadable/corrupt. register's own reg.Load()
+		// before allocation fails the same way, so leaving registryTaken nil
+		// and reporting the pool ready off OS-bound ports alone would lie
+		// (Codex #377 r5). Capture it; checkPool surfaces it as blocking.
+		if lerr := reg.Load(); lerr != nil {
+			registryLoadErr = lerr
+		} else {
 			registryTaken = reg.AllocatedPorts()
 		}
 	}
 	portTaken := func(port int) bool { return preflightPortInUse(port) || registryTaken[port] }
 	checkPool := func(p *config.PortPool, nativeHTTP bool) {
 		if p == nil || p.End < p.Start {
+			return
+		}
+		if registryLoadErr != nil {
+			add(ReadinessRequirement{
+				Name:   fmt.Sprintf("port pool %d-%d", p.Start, p.End),
+				OK:     false,
+				Reason: fmt.Sprintf("workspace registry unreadable, cannot verify pool allocation: %v", registryLoadErr),
+				Fix:    "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).",
+			})
 			return
 		}
 		name := fmt.Sprintf("port pool %d-%d", p.Start, p.End)

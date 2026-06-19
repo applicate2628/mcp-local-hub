@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,13 +56,13 @@ func composeChildEnv(env map[string]string, unset []string) []string {
 	if len(unset) > 0 {
 		unsetSet = make(map[string]bool, len(unset))
 		for _, k := range unset {
-			unsetSet[k] = true
+			unsetSet[envKeyNorm(k)] = true
 		}
 	}
 	out := make([]string, 0, len(os.Environ())+len(env))
 	for _, kv := range os.Environ() {
 		if unsetSet != nil {
-			if k, _, ok := strings.Cut(kv, "="); ok && unsetSet[k] {
+			if k, _, ok := strings.Cut(kv, "="); ok && unsetSet[envKeyNorm(k)] {
 				continue
 			}
 		}
@@ -71,6 +72,19 @@ func composeChildEnv(env map[string]string, unset []string) []string {
 		out = append(out, k+"="+v)
 	}
 	return out
+}
+
+// envKeyNorm normalizes an env-var key for comparison. Windows env keys are
+// case-insensitive (the parent may hold `api_key` while the manifest declares
+// `API_KEY`), so a skipped optional secret must be removed regardless of
+// casing — otherwise the child inherits the ambient credential under a
+// different case (Codex #377). POSIX env keys are case-sensitive, so the key
+// is returned unchanged there.
+func envKeyNorm(k string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(k)
+	}
+	return k
 }
 
 // StdioHost hosts a long-lived stdio subprocess and (in later tasks) exposes

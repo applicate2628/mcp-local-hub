@@ -108,7 +108,10 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 			// workspace-scoped daemon with a skipped `secret:` ref still spawns
 			// (env var omitted) instead of failing — matching the global-daemon
 			// path (Codex #377). $VAR/file: refs stay fatal.
-			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+			vault, verr := openDaemonVaultStrict()
+			if verr != nil {
+				return verr
+			}
 			resolver := secrets.NewResolver(vault, nil)
 			// Best-effort: a skipped optional `secret:` ref is omitted (spawn
 			// proceeds) rather than fatal; $VAR/file: refs stay fatal. The

@@ -131,7 +131,10 @@ See also: install, logs, restart, status.`,
 				return fmt.Errorf("no daemon %q in %s manifest", daemonName, server)
 			}
 			// Resolve env.
-			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+			vault, verr := openDaemonVaultStrict()
+			if verr != nil {
+				return verr
+			}
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
 			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
 			if err != nil {
@@ -337,6 +340,22 @@ See also: install, logs, restart, status.`,
 	// Hidden — supervisor-intent.json descriptors point here.
 	c.AddCommand(newDaemonSerenaProxyCmd())
 	return c
+}
+
+// openDaemonVaultStrict opens the secrets vault, distinguishing a truly-ABSENT
+// vault (no secrets configured → nil vault, secret refs become optional) from
+// one that EXISTS but cannot be opened/decrypted (corrupt / wrong key /
+// permission → FATAL error). The strict failure stops a vault-read problem
+// from silently masquerading as "operator skipped the optional secret", which
+// would start credentialed servers without their secrets (Codex #377).
+func openDaemonVaultStrict() (*secrets.Vault, error) {
+	vault, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+	if err != nil {
+		if _, statErr := os.Stat(defaultVaultPath()); statErr == nil {
+			return nil, fmt.Errorf("open secrets vault (exists but unreadable — fix or remove %s; not treating set secrets as skipped): %w", defaultVaultPath(), err)
+		}
+	}
+	return vault, nil
 }
 
 // daemonEnvWithOverlay returns the resolved child env map AND the list of
