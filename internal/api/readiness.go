@@ -167,14 +167,16 @@ func bridgeListenerUp(addr string) bool {
 // by CheckServerReadiness and Preflight so the two install gates cannot diverge
 // on what counts as a present dependency (Codex #377 r13).
 func binaryAvailable(bin string) bool {
-	// resolve checks one concrete token WITHOUT re-entering the switch (an
-	// absolute path means the toolchain stat'd a real file in a debugger dir;
-	// a bare name goes to PATH). DefaultGdbPath/DefaultLldbPath return either an
-	// absolute path or the bare name, so resolve handles both without recursion.
+	// resolve checks one concrete token for RUNNABILITY via exec.LookPath, which
+	// verifies executability — not just existence. DefaultGdbPath/DefaultLldbPath
+	// return an absolute path after only an os.Stat, so a present-but-NON-
+	// executable gdb/lldb file in a debugger dir would otherwise be reported
+	// available and the daemon would then fail at exec with permission denied
+	// (Codex #377 r17). exec.LookPath tries an absolute/slash-bearing path
+	// directly (checking the execute bit) and resolves a bare name against PATH —
+	// without re-entering the switch, so the bare gdb/lldb default path does not
+	// recurse.
 	resolve := func(p string) bool {
-		if filepath.IsAbs(p) {
-			return true
-		}
 		_, err := exec.LookPath(p)
 		return err == nil
 	}
@@ -184,8 +186,7 @@ func binaryAvailable(bin string) bool {
 	case "lldb":
 		return resolve(toolchain.DefaultLldbPath())
 	default:
-		_, err := exec.LookPath(bin)
-		return err == nil
+		return resolve(bin)
 	}
 }
 

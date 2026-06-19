@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -324,6 +325,30 @@ func TestEntryScriptCheckTargets_EmptyCwdUsesProcessCwd(t *testing.T) {
 	}
 	if !filepath.IsAbs(targets[0].path) {
 		t.Errorf("target path must be absolute (process-cwd-resolved); got %q", targets[0].path)
+	}
+}
+
+func TestBinaryAvailable_NonExecutableAbsoluteDebuggerPathRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("execute-bit semantics are POSIX-only; Windows LookPath keys on file extension, not a +x bit")
+	}
+	// A present but NON-executable gdb in the override debugger dir: DefaultGdbPath
+	// returns its absolute path after only os.Stat, so binaryAvailable must still
+	// reject it — it would exec with permission denied (Codex #377 r17).
+	dir := t.TempDir()
+	gdb := filepath.Join(dir, "gdb")
+	if err := os.WriteFile(gdb, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MCPHUB_DEBUGGER_TOOLCHAIN_DIR", dir)
+	if binaryAvailable("gdb") {
+		t.Error("a present but non-executable gdb in the debugger dir must NOT be reported available")
+	}
+	if err := os.Chmod(gdb, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !binaryAvailable("gdb") {
+		t.Error("an executable gdb in the debugger dir must be reported available")
 	}
 }
 
