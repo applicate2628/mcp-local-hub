@@ -658,6 +658,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	out := &ScanResult{
 		At:                   time.Now(),
 		ClientConfigPresence: presence,
+		GUIPort:              opts.GUIPort,
 	}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)

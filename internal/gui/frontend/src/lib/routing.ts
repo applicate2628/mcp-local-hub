@@ -192,6 +192,11 @@ export function perClientRouting(
   // loopback cells then render "direct", matching the backend's
   // no-manifest → external decision rather than a deceptive green cell).
   daemonPorts: number[] = [],
+  // The LIVE GUI/hub listener port (ScanResult.gui_port). Used ONLY for serena's
+  // /serena/mcp router cell, to apply the SAME live-port check the backend
+  // classify uses (IsLiveSerenaRouterURL). 0 (unknown / CLI scan) degrades to the
+  // port-agnostic shape check so an early/CLI scan does not falsely flag staleness.
+  guiPort: number = 0,
 ): Record<string, Routing> {
   const routing: Record<string, Routing> = {};
   // First pass: signals from per-entry client_presence (existing entries).
@@ -202,7 +207,14 @@ export function perClientRouting(
       routing[client] = "not-installed";
     } else if (transport === "http" && isHubLoopback(endpoint)) {
       if (serverName === "serena" && isSerenaRouterURL(endpoint)) {
-        routing[client] = "via-hub";
+        // Live-port aware, mirroring the backend IsLiveSerenaRouterURL: the
+        // router cell is managed ONLY on the live GUI port, so a stale-port entry
+        // (a client still pointing at an OLD bound port after the GUI re-bound)
+        // renders "direct"/re-migratable — matching the backend's "external" —
+        // instead of a deceptive checked cell that hides the unusable URL. guiPort
+        // 0 degrades to port-agnostic (Codex #379 r3).
+        const port = loopbackEntryPort(endpoint);
+        routing[client] = guiPort <= 0 || port === guiPort ? "via-hub" : "direct";
         continue;
       }
       // Loopback SHAPE is necessary but not sufficient — require the URL
@@ -296,6 +308,7 @@ export function collectServers(scan: ScanResult | null | undefined): ServerRow[]
       e.can_migrate === true,
       e.name,
       e.daemon_ports ?? [],
+      scan?.gui_port ?? 0,
     ),
     manifested: e.manifest_exists === true,
     // Task 3.5: propagate the side-channel legacy_conflict map to its

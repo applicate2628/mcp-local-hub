@@ -181,6 +181,13 @@ type ScanResult struct {
 	At      time.Time   `json:"at"`
 	Entries []ScanEntry `json:"entries"`
 
+	// GUIPort is the live GUI/hub listener port the scan ran under (0 for a CLI
+	// scan with no live GUI). The frontend applies the SAME live-port check the
+	// backend classify uses for serena's /serena/mcp router cell, so a stale-port
+	// serena entry renders not-connected in the matrix (matching the backend's
+	// "external" classification) instead of falsely checked (Codex #379 r3).
+	GUIPort int `json:"gui_port,omitempty"`
+
 	// ClientConfigPresence reports per-client config file state,
 	// INDEPENDENT of any server's per-entry presence. Bug-bash A2 (#13)
 	// closure: before this field, the UI inferred "client installed"

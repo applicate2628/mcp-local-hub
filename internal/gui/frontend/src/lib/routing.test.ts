@@ -106,15 +106,38 @@ describe("perClientRouting", () => {
     );
     expect(r["claude-code"]).toBe("direct");
   });
-  it("tags serena router http as via-hub even when it is not on the legacy daemon port", () => {
+  it("serena router http is via-hub when guiPort is unknown (degrade, port-agnostic)", () => {
     const r = perClientRouting(
       { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9125/serena/mcp" } },
       {},
       true,
       "serena",
       [9121],
+      0, // unknown live port → degrade to port-agnostic
     );
     expect(r["claude-code"]).toBe("via-hub");
+  });
+  it("serena router http is via-hub on the LIVE gui port", () => {
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9125/serena/mcp" } },
+      {},
+      true,
+      "serena",
+      [9121],
+      9125, // live gui port matches the cell's port
+    );
+    expect(r["claude-code"]).toBe("via-hub");
+  });
+  it("serena router http on a STALE port is direct (matches backend external)", () => {
+    const r = perClientRouting(
+      { "claude-code": { transport: "http", endpoint: "http://127.0.0.1:9124/serena/mcp" } },
+      {},
+      true,
+      "serena",
+      [9121],
+      9125, // gui re-bound to 9125; the 9124 entry is stale → not managed
+    );
+    expect(r["claude-code"]).toBe("direct");
   });
   it("tags loopback http as direct when the server has no daemon ports", () => {
     const r = perClientRouting(
