@@ -179,25 +179,34 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// a manifest is not reported ready while its entry script is missing
 	// (Codex #377 r8). base_args[0] is ALREADY env-expanded at parse — do NOT
 	// re-expand (os.ExpandEnv would mangle a literal `$` in the path; Codex
-	// pre-catch r9). Only an ABSOLUTE script path is checkable here: a relative
-	// arg resolves against the daemon's per-daemon cwd (spec.Cwd), unknown to
-	// this process, so skip it rather than stat it against the wrong cwd
-	// (Codex pre-catch r9). Skip flag-shaped args (python -m, node --flag).
+	// pre-catch r9). A RELATIVE base_args[0] resolves against the daemon's
+	// per-daemon cwd (m.Daemons[i].Cwd) at spawn, so resolve it against that
+	// (when known + absolute) rather than skipping or statting it against this
+	// process's cwd (Codex #377 r9). Skip flag-shaped args (python -m, --flag).
 	if m.Command == "node" || m.Command == "python" || m.Command == "python3" {
-		if len(m.BaseArgs) > 0 && !strings.HasPrefix(m.BaseArgs[0], "-") && filepath.IsAbs(m.BaseArgs[0]) {
+		if len(m.BaseArgs) > 0 && !strings.HasPrefix(m.BaseArgs[0], "-") {
 			script := m.BaseArgs[0]
-			if _, err := os.Stat(script); err != nil {
-				add(ReadinessRequirement{
-					Name:     "script: " + filepath.Base(script),
-					OK:       false,
-					Optional: launcherOptional,
-					// Reason names only the script BASENAME, not the absolute
-					// host path, which the GUI renders (Codex pre-catch r9).
-					Reason: fmt.Sprintf("the %s entry script %q does not exist", m.Command, filepath.Base(script)),
-					Fix:    "Install/clone the server so the manifest's base_args[0] script path exists, then re-run install.",
-				})
-			} else {
-				add(ReadinessRequirement{Name: "script: " + filepath.Base(script), OK: true})
+			if !filepath.IsAbs(script) {
+				if len(m.Daemons) > 0 && filepath.IsAbs(m.Daemons[0].Cwd) {
+					script = filepath.Join(m.Daemons[0].Cwd, script)
+				} else {
+					script = "" // unknown daemon cwd → cannot stat reliably; skip
+				}
+			}
+			if script != "" {
+				if _, err := os.Stat(script); err != nil {
+					add(ReadinessRequirement{
+						Name:     "script: " + filepath.Base(script),
+						OK:       false,
+						Optional: launcherOptional,
+						// Reason names only the script BASENAME, not the absolute
+						// host path, which the GUI renders (Codex pre-catch r9).
+						Reason: fmt.Sprintf("the %s entry script %q does not exist", m.Command, filepath.Base(script)),
+						Fix:    "Install/clone the server so the manifest's base_args[0] script path exists, then re-run install.",
+					})
+				} else {
+					add(ReadinessRequirement{Name: "script: " + filepath.Base(script), OK: true})
+				}
 			}
 		}
 	}
@@ -433,20 +442,24 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 		add(req)
 	}
-	// Non-secret env refs (file:KEY, $VAR) are NOT optional: at spawn,
-	// ResolveMapBestEffort keeps them FATAL (only secret: refs are omitted), so
-	// an unresolvable file:/$VAR makes the daemon fail to start. Run the SAME
-	// resolver here (single owner, like the install-plan dry-run) — a nil vault
-	// is fine because secret: refs are already surfaced per-key above and are
-	// omitted by best-effort, so ONLY a non-secret failure (file: with no local
-	// config, or an unset $VAR) errors — and surface it as a BLOCKING "env"
-	// requirement, mirroring the spawn gate (Codex pre-catch r6).
-	if _, _, err := secrets.NewResolver(nil, nil).ResolveMapBestEffort(m.Env); err != nil {
+	// `file:` env refs are ALWAYS fatal at spawn: the production resolver is
+	// built with a nil local-config map (daemon.go / daemon_serena.go pass
+	// NewResolver(vault, nil)), so a `file:` ref can never resolve and the
+	// daemon fails to start — surface it as BLOCKING. `$VAR` refs are NOT
+	// checked here: the daemon resolves them in its OWN spawn environment
+	// (os.Environ + the daemon env overlay), which differs from this
+	// GUI/readiness process, so a $VAR unset HERE but set THERE would be a
+	// false-negative — env-dependent refs are left to the spawn gate (Codex
+	// #377 r9). secret: refs are surfaced per-key above.
+	for k, v := range m.Env {
+		if !strings.HasPrefix(v, "file:") {
+			continue
+		}
 		add(ReadinessRequirement{
-			Name:   "env",
+			Name:   "env: " + k,
 			OK:     false,
-			Reason: fmt.Sprintf("a non-secret env ref is fatal at spawn: %v", err),
-			Fix:    "Fix the file:/$VAR env ref in the manifest (file: refs need a local config; $VAR must be set in the environment).",
+			Reason: fmt.Sprintf("the file: env ref %q cannot be resolved (mcphub has no local config map), so the daemon fails to start", k),
+			Fix:    "Replace the file: env ref with a secret: ref (vault) or a literal value in the manifest.",
 		})
 	}
 
@@ -501,9 +514,12 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	}
 	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope}); err != nil {
 		add(ReadinessRequirement{
-			Name:   "install plan",
-			OK:     false,
-			Reason: fmt.Sprintf("the install planner rejects this manifest: %v", err),
+			Name: "install plan",
+			OK:   false,
+			// redactErrorDetail strips absolute paths (e.g. the canonical
+			// ~/.local/bin/mcphub path ensureCanonicalMcphubPresent surfaces)
+			// + token-like runs from the GUI-rendered Reason (Codex #377 r9).
+			Reason: "the install planner rejects this manifest: " + redactErrorDetail(err.Error()),
 			Fix:    "Fix the manifest client_bindings / url / headers per the error above (the install gate runs the same validation).",
 		})
 	}
