@@ -19,7 +19,7 @@ import { AddSecretModal } from "../components/AddSecretModal";
 import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
 import { ReadinessPanel } from "../components/ReadinessPanel";
-import { addSecret } from "../lib/secrets-api";
+import { addSecret, secretsInit } from "../lib/secrets-api";
 import { inlineSecretsToWrite } from "../lib/inline-secrets";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
@@ -104,20 +104,25 @@ export function AddServerScreen(props: {
   // readiness panel; persisted to the vault just before install.
   const [inlineSecrets, setInlineSecrets] = useState<Record<string, string>>({});
   useEffect(() => {
-    const yaml = yamlPreview;
-    if (!yaml || !debouncedState.name.trim()) {
+    if (!yamlPreview || !debouncedState.name.trim()) {
+      // Invalidate any in-flight check AND clear loading, so a late response for
+      // a since-cleared draft cannot land a stale report (Codex #378 r2).
+      readinessReqRef.current++;
       setReadiness(null);
+      setReadinessLoading(false);
       return;
     }
     const reqId = ++readinessReqRef.current;
     setReadinessLoading(true);
-    checkDraftReadiness(yaml)
+    checkDraftReadiness(yamlPreview)
       .then((rep) => {
         if (reqId === readinessReqRef.current) setReadiness(rep);
       })
       .catch(() => {
-        // A still-invalid draft returns 400 mid-edit; keep the last good report
-        // rather than flashing an error on every keystroke.
+        // The draft is currently unparseable (400) or unreachable → drop the
+        // now-stale report rather than leaving an out-of-date panel up (Codex
+        // #378 r2).
+        if (reqId === readinessReqRef.current) setReadiness(null);
       })
       .finally(() => {
         if (reqId === readinessReqRef.current) setReadinessLoading(false);
@@ -129,15 +134,31 @@ export function AddServerScreen(props: {
   }, [yamlPreview, debouncedState.name, snapshot.fetchedAt]);
 
   async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
-    // inlineSecretsToWrite keeps ONLY keys still referenced as a secret: ref in
-    // the draft env (a value typed for a ref the user later removed/renamed is
-    // dropped) — Codex #378.
-    const entries = inlineSecretsToWrite(inlineSecrets, state.env);
+    // inlineSecretsToWrite keeps ONLY current, valid-named secret: refs (a value
+    // typed for a ref the user later removed/renamed, or for a non-conforming
+    // key, is dropped). Then skip keys already present in the vault (created
+    // meanwhile via the AddSecretModal / another tab) so a resolved key is never
+    // re-written (Codex #378 r1/r2).
+    const present = new Set(
+      (snapshot.data?.secrets ?? []).filter((s) => s.state === "present").map((s) => s.name),
+    );
+    const entries = inlineSecretsToWrite(inlineSecrets, state.env).filter(([key]) => !present.has(key));
     if (entries.length === 0) return;
+    // A fresh profile has no vault yet — initialize it before the first write, or
+    // addSecret fails on the uninitialized vault (Codex #378 r2).
+    if (snapshot.data?.vault_state !== "ok") {
+      await secretsInit();
+    }
     for (const [key, value] of entries) {
       await addSecret(key, value);
+      // Clear each on success so a LATER failure's retry does not re-attempt an
+      // already-written key (→ SECRETS_KEY_EXISTS) (Codex #378 r2).
+      setInlineSecrets((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     }
-    setInlineSecrets({});
     // Bumps snapshot.fetchedAt → re-runs the readiness effect above so the panel
     // drops the now-resolved secret prompts (Codex #378).
     await snapshot.refresh();

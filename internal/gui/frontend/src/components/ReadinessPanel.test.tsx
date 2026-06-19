@@ -85,4 +85,16 @@ describe("ReadinessPanel", () => {
     );
     expect(screen.queryByTestId("readiness-secret-input-SET_KEY")).toBeNull();
   });
+
+  it("does not render an inline field for a non-conforming vault key (shows the Fix instead)", () => {
+    const rep = report(
+      [{ name: "secret: bad-key", ok: false, optional: true, fix: "use the secret picker" }],
+      true,
+    );
+    render(
+      <ReadinessPanel report={rep} loading={false} error={null} inlineSecrets={{}} onInlineSecretChange={noop} />,
+    );
+    expect(screen.queryByTestId("readiness-secret-input-bad-key")).toBeNull();
+    expect(screen.getByText("use the secret picker")).toBeTruthy();
+  });
 });

@@ -21,4 +21,19 @@ describe("inlineSecretsToWrite", () => {
   it("ignores a bare secret: ref with no key", () => {
     expect(inlineSecretsToWrite({ "": "v" }, [{ value: "secret:" }])).toEqual([]);
   });
+
+  it("drops a non-conforming vault key name (hyphen / leading digit)", () => {
+    expect(
+      inlineSecretsToWrite(
+        { "foo-bar": "v", "123": "x" },
+        [{ value: "secret:foo-bar" }, { value: "secret:123" }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps a valid letter/underscore/digit key", () => {
+    expect(inlineSecretsToWrite({ API_KEY2: "v" }, [{ value: "secret:API_KEY2" }])).toEqual([
+      ["API_KEY2", "v"],
+    ]);
+  });
 });
