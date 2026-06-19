@@ -1832,6 +1832,14 @@ func Preflight(m *config.ServerManifest, daemonFilter string) error {
 		if daemonFilter != "" && d.Name != daemonFilter {
 			continue
 		}
+		// A kind=companion daemon binds NO mcphub MCP port (the companion process
+		// listens on its own port directly; Port=0 is valid). Skip the MCP port
+		// range + collision checks for it — otherwise Preflight rejects the
+		// Port=0 companion before it can write supervisor intent + spawn, making
+		// the kind uninstallable (Codex #381).
+		if m.Kind == config.KindCompanion {
+			continue
+		}
 		// Range-check first: an out-of-range fixed port (0 / > 65535) reads as
 		// "free" to a dial and would let install commit state for a daemon that
 		// can never serve its URL (Codex #377 r16). The dial-based in-use check
