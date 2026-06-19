@@ -146,9 +146,21 @@ type LanguageSpec struct {
 	RequiredBinaries []string `yaml:"required_binaries,omitempty"`
 }
 
+const maxTCPPort = 65535
+
 type PortPool struct {
 	Start int `yaml:"start"`
 	End   int `yaml:"end"`
+}
+
+func validatePortPool(label string, pool *PortPool) error {
+	if pool == nil {
+		return fmt.Errorf("%s is required (start/end)", label)
+	}
+	if pool.Start <= 0 || pool.End < pool.Start || pool.End > maxTCPPort {
+		return fmt.Errorf("%s must have start>0, end>=start, and end<=%d (got {%d,%d})", label, maxTCPPort, pool.Start, pool.End)
+	}
+	return nil
 }
 
 type ClientBinding struct {
@@ -517,11 +529,8 @@ func (m *ServerManifest) Validate() error {
 			if len(m.Daemons) > 0 {
 				return fmt.Errorf("manifest %s: kind=workspace-scoped with daemon_template is mutually exclusive with daemons[] (dynamic-pool migration requires removing the legacy daemons[] block)", m.Name)
 			}
-			if m.DaemonTemplate.PortPool == nil {
-				return fmt.Errorf("manifest %s: daemon_template.port_pool is required (start/end)", m.Name)
-			}
-			if m.DaemonTemplate.PortPool.Start <= 0 || m.DaemonTemplate.PortPool.End < m.DaemonTemplate.PortPool.Start {
-				return fmt.Errorf("manifest %s: daemon_template.port_pool must have start>0 and end>=start (got {%d,%d})", m.Name, m.DaemonTemplate.PortPool.Start, m.DaemonTemplate.PortPool.End)
+			if err := validatePortPool("daemon_template.port_pool", m.DaemonTemplate.PortPool); err != nil {
+				return fmt.Errorf("manifest %s: %w", m.Name, err)
 			}
 			if len(m.DaemonTemplate.ExtraArgsTemplate) == 0 {
 				return fmt.Errorf("manifest %s: daemon_template.extra_args_template must be non-empty", m.Name)
@@ -543,11 +552,8 @@ func (m *ServerManifest) Validate() error {
 		}
 		// Legacy LSP-bridge branch (unchanged: preserves current
 		// mcp-language-server / gopls-mcp manifest shape).
-		if m.PortPool == nil {
-			return fmt.Errorf("manifest %s: port_pool is required for kind=workspace-scoped", m.Name)
-		}
-		if m.PortPool.Start <= 0 || m.PortPool.End < m.PortPool.Start {
-			return fmt.Errorf("manifest %s: port_pool must have start>0 and end>=start (got {%d,%d})", m.Name, m.PortPool.Start, m.PortPool.End)
+		if err := validatePortPool("port_pool", m.PortPool); err != nil {
+			return fmt.Errorf("manifest %s: %w", m.Name, err)
 		}
 		if len(m.Languages) == 0 {
 			return fmt.Errorf("manifest %s: languages[] must be non-empty for kind=workspace-scoped", m.Name)
