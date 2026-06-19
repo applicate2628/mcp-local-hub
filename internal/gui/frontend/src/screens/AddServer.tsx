@@ -20,6 +20,7 @@ import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
 import { ReadinessPanel } from "../components/ReadinessPanel";
 import { addSecret } from "../lib/secrets-api";
+import { inlineSecretsToWrite } from "../lib/inline-secrets";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
 import { pushToast } from "../lib/toast-store";
@@ -121,15 +122,24 @@ export function AddServerScreen(props: {
       .finally(() => {
         if (reqId === readinessReqRef.current) setReadinessLoading(false);
       });
-  }, [yamlPreview, debouncedState.name]);
+    // snapshot.fetchedAt changes on every successful vault refresh, so writing a
+    // secret (inline OR via the AddSecretModal) re-runs this effect and the
+    // panel reflects the now-resolved secret instead of a stale advisory
+    // (Codex #378).
+  }, [yamlPreview, debouncedState.name, snapshot.fetchedAt]);
 
-  async function persistInlineSecrets(): Promise<void> {
-    const entries = Object.entries(inlineSecrets).filter(([, v]) => v.trim() !== "");
+  async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
+    // inlineSecretsToWrite keeps ONLY keys still referenced as a secret: ref in
+    // the draft env (a value typed for a ref the user later removed/renamed is
+    // dropped) — Codex #378.
+    const entries = inlineSecretsToWrite(inlineSecrets, state.env);
     if (entries.length === 0) return;
     for (const [key, value] of entries) {
       await addSecret(key, value);
     }
     setInlineSecrets({});
+    // Bumps snapshot.fetchedAt → re-runs the readiness effect above so the panel
+    // drops the now-resolved secret prompts (Codex #378).
     await snapshot.refresh();
   }
   const [createModalState, setCreateModalState] = useState<{ open: boolean; prefill: string | null }>({ open: false, prefill: null });
@@ -495,6 +505,15 @@ export function AddServerScreen(props: {
         });
         return;
       }
+      // Persist inline secrets BEFORE committing the manifest: a vault write
+      // failure (uninitialized vault, invalid/duplicate key) must not leave a
+      // committed manifest the user then cannot cleanly retry installing — in
+      // create mode the next click would hit "already exists" (Codex #378).
+      if (opts.install) {
+        await persistInlineSecrets(payloadState);
+        if (version !== submissionCounter.current) return;
+      }
+
       // R4-2: captures the gate-ON in-place republish-failure signal from the
       // create/edit response so the success banner can prompt a hub restart.
       let restartHub = false;
@@ -544,10 +563,6 @@ export function AddServerScreen(props: {
         pushToast("success", `Saved ${name} manifest.`);
         return;
       }
-      // Persist any secrets the operator typed inline in the readiness panel to
-      // the vault BEFORE install, so the manifest's secret: refs resolve at
-      // daemon spawn (epic install-and-it-works, area 1).
-      await persistInlineSecrets();
       await runInstallNow(name, version);
     } catch (err) {
       if (version !== submissionCounter.current) return;
