@@ -215,29 +215,48 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 	}
 
-	// Workspace-scoped (dynamic-pool) registration allocates from a PortPool
-	// via AllocatePort, and m.Daemons is EMPTY for these (e.g.
-	// mcp-language-server), so the daemon-port loop above checks nothing. If
-	// every port in the declared pool is occupied, `mcphub register` fails
-	// "port pool exhausted" — surface that as blocking (Codex #377).
-	checkPool := func(p *config.PortPool) {
+	// Workspace-scoped (dynamic-pool) registration allocates from a PortPool;
+	// m.Daemons is EMPTY for these (e.g. mcp-language-server), so the
+	// daemon-port loop above checks nothing. A port counts as TAKEN when it is
+	// OS-bound OR already recorded in the registry (workspaces.yaml) — register's
+	// AllocatePort skips registry-allocated ports and returns
+	// ErrPortPoolExhausted even if nothing is currently listening (Codex #377
+	// r4). For a native-http pool the materialized proxy also binds
+	// external+offset upstream, so BOTH must be free.
+	var registryTaken map[int]bool
+	if regPath, perr := DefaultRegistryPath(); perr == nil {
+		reg := NewRegistry(regPath)
+		if reg.Load() == nil {
+			registryTaken = reg.AllocatedPorts()
+		}
+	}
+	portTaken := func(port int) bool { return preflightPortInUse(port) || registryTaken[port] }
+	checkPool := func(p *config.PortPool, nativeHTTP bool) {
 		if p == nil || p.End < p.Start {
 			return
 		}
 		name := fmt.Sprintf("port pool %d-%d", p.Start, p.End)
 		for port := p.Start; port <= p.End; port++ {
-			if !preflightPortInUse(port) {
-				add(ReadinessRequirement{Name: name, OK: true})
-				return
+			if portTaken(port) {
+				continue
 			}
+			if nativeHTTP && portTaken(port+config.NativeHTTPInternalPortOffset) {
+				continue
+			}
+			add(ReadinessRequirement{Name: name, OK: true})
+			return
 		}
 		add(ReadinessRequirement{Name: name, OK: false,
-			Reason: "every port in the workspace pool is already in use",
-			Fix:    "Free a port in the pool range, or widen the pool in the manifest."})
+			Reason: "no port in the workspace pool is free (OS-bound or registry-allocated)",
+			Fix:    "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest."})
 	}
-	checkPool(m.PortPool)
+	// Serena's dynamic-pool manifest is transport: native-http, so its
+	// materialized proxies bind external+offset upstream — mNative drives the
+	// offset check for both the server pool and the daemon-template pool.
+	mNative := m.Transport == config.TransportNativeHTTP
+	checkPool(m.PortPool, mNative)
 	if m.DaemonTemplate != nil {
-		checkPool(m.DaemonTemplate.PortPool)
+		checkPool(m.DaemonTemplate.PortPool, mNative)
 	}
 
 	// Declared secrets — reported PER KEY so the GUI can offer each as an
@@ -287,25 +306,24 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 		add(req)
 	}
-	// Validate the WHOLE url/header strings through ExpandSecrets — the same
-	// path buildRemoteHTTPPlan runs before writing client config — to catch
-	// MALFORMED `${secret:...}` (bad key shape / unterminated) and CR/LF in
-	// resolved values that the well-formed-key scan above cannot see. Without
-	// this, readiness could green-light an install the planner then rejects
-	// (Codex #377). Blocking.
-	validateRemote := func(label, s string) {
-		if !strings.Contains(s, "${secret:") {
-			return
-		}
-		if _, err := ExpandSecrets(s, nil); err != nil {
-			add(ReadinessRequirement{Name: "remote config: " + label, OK: false,
-				Reason: fmt.Sprintf("invalid/unresolvable ${secret:} placeholder: %v", err),
-				Fix:    "Fix the placeholder (key chars [A-Za-z0-9_-.] terminated by `}`, no CR/LF in the value) and set the secret."})
-		}
-	}
-	validateRemote("url", m.URL)
-	for hk, hv := range m.Headers {
-		validateRemote("header "+hk, hv)
+	// Install-plan dry-run — the SINGLE-OWNER authoritative check. BuildPlan
+	// is pure (validates + returns before any side effect) and runs the exact
+	// binding / url_path / remote-matrix validation the real install performs:
+	// non-remote client_bindings (unknown daemon, unsupported client, invalid
+	// url_path), remote-http client_bindings against the adapter matrix, and
+	// ExpandSecrets over url+headers (malformed `${secret:}`, CR/LF, missing
+	// remote secret). Calling it here instead of re-deriving each check keeps
+	// readiness from ever green-lighting an install the planner rejects, and
+	// avoids duplicating gate logic that drifts (Codex #377 r2/r3/r4). The
+	// per-key secret + dependency requirements above stay for the structured,
+	// user-actionable inline prompts; this is the one catch-all blocker.
+	if _, err := BuildPlan(m, ""); err != nil {
+		add(ReadinessRequirement{
+			Name:   "install plan",
+			OK:     false,
+			Reason: fmt.Sprintf("the install planner rejects this manifest: %v", err),
+			Fix:    "Fix the manifest client_bindings / url / headers per the error above (the install gate runs the same validation).",
+		})
 	}
 
 	return rep

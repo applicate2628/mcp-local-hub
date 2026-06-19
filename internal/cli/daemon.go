@@ -133,7 +133,7 @@ See also: install, logs, restart, status.`,
 			// Resolve env.
 			vault, _ := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
-			env, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
+			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
 			if err != nil {
 				return err
 			}
@@ -166,6 +166,7 @@ See also: install, logs, restart, status.`,
 					Command:      cmdPath,
 					Args:         childArgs,
 					Env:          env,
+					UnsetEnv:     unsetEnv,
 					UpstreamPort: internalPort,
 					LogPath:      logPath,
 					// spec.Cwd is the manifest-declared per-daemon working
@@ -232,10 +233,11 @@ See also: install, logs, restart, status.`,
 				// Replaces the previous npx supergateway wrapper (bridge.go),
 				// removing the node/npm dependency from the runtime.
 				h, err := daemon.NewStdioHost(daemon.HostConfig{
-					Command: cmdPath,
-					Args:    childArgs,
-					Env:     env,
-					LogPath: logPath,
+					Command:  cmdPath,
+					Args:     childArgs,
+					Env:      env,
+					UnsetEnv: unsetEnv,
+					LogPath:  logPath,
 					// spec.Cwd is the manifest-declared per-daemon working
 					// directory (validated absolute at parse time; empty means
 					// inherit mcphub's own cwd). cmd.Dir is set from this in
@@ -337,38 +339,35 @@ See also: install, logs, restart, status.`,
 	return c
 }
 
-func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver) (map[string]string, error) {
+// daemonEnvWithOverlay returns the resolved child env map AND the list of
+// declared keys to UNSET in the child (skipped optional secrets) — the host
+// removes these from the inherited os.Environ() so the child sees them as
+// truly absent, not present-but-empty (Codex #377).
+func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver) (map[string]string, []string, error) {
 	if resolver == nil {
-		return nil, fmt.Errorf("resolve manifest env for %s/%s: resolver is nil", server, daemonName)
+		return nil, nil, fmt.Errorf("resolve manifest env for %s/%s: resolver is nil", server, daemonName)
 	}
 	// Secrets are OPTIONAL by default (install-and-it-works): an unset
 	// `secret:` ref must NOT block the spawn. Resolve best-effort — the
 	// resolvable env vars are set, the unresolvable ones (a skipped/optional
 	// secret) are OMITTED so the daemon still spawns and the SERVER reports
 	// its own "missing required key" instead of mcphub failing cryptically.
-	// Each omission is logged so it stays diagnosable.
 	// ONLY secret: refs are optional; a missing $VAR/file: stays fatal.
 	env, omitted, err := resolver.ResolveMapBestEffort(manifestEnv)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	unset := make([]string, 0, len(omitted))
 	for k, ref := range omitted {
-		// Explicit empty override (Codex #377): the daemon host appends to
-		// os.Environ(), so a skipped secret whose KEY also exists in the
-		// parent process env would otherwise be INHERITED ambiently — the
-		// server would run with an unintended ambient secret the operator
-		// chose to skip. Setting KEY="" shadows the ambient value so the child
-		// sees the declared key as empty (== unset for an optional secret),
-		// never the parent's value.
-		env[k] = ""
+		unset = append(unset, k)
 		fmt.Fprintf(os.Stderr, "mcphub daemon %s/%s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
 			server, daemonName, k, ref)
 	}
 	overlayEnv, err := daemonOverlayEnv(server, daemonName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return mergeDaemonEnvMaps(env, overlayEnv), nil
+	return mergeDaemonEnvMaps(env, overlayEnv), unset, nil
 }
 
 func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {

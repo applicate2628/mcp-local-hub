@@ -196,16 +196,22 @@ func TestCheckServerReadiness_MalformedRemotePlaceholderBlocks(t *testing.T) {
 		Headers:   map[string]string{"Authorization": "Bearer ${secret:BAD KEY}"},
 	}
 	rep := CheckServerReadiness(m)
+	// The BuildPlan dry-run ("install plan") is the single-owner gate that
+	// runs the planner's ExpandSecrets over url/headers, catching the
+	// malformed placeholder as a blocking requirement.
 	var found bool
 	for _, r := range rep.Requirements {
-		if strings.HasPrefix(r.Name, "remote config:") {
+		if r.Name == "install plan" {
 			found = true
 			if r.OK {
 				t.Errorf("malformed remote placeholder reported OK=true")
 			}
+			if !strings.Contains(r.Reason, "malformed") {
+				t.Errorf("install-plan reason does not name the malformed placeholder: %q", r.Reason)
+			}
 		}
 	}
 	if !found {
-		t.Fatalf("malformed ${secret:} placeholder not surfaced: %+v", rep.Requirements)
+		t.Fatalf("malformed ${secret:} placeholder not surfaced via install-plan: %+v", rep.Requirements)
 	}
 }

@@ -23,10 +23,15 @@ import (
 
 // HostConfig describes one stdio-host instance.
 type HostConfig struct {
-	Command    string            // subprocess executable
-	Args       []string          // subprocess args
-	Env        map[string]string // appended to os.Environ() for the subprocess
-	WorkingDir string            // subprocess cwd; empty means inherit
+	Command string            // subprocess executable
+	Args    []string          // subprocess args
+	Env     map[string]string // appended to os.Environ() for the subprocess
+	// UnsetEnv lists env keys to REMOVE from the inherited os.Environ() for
+	// the subprocess — used for skipped OPTIONAL secrets so the child sees the
+	// key as truly ABSENT (not present-but-empty), and does not inherit a
+	// same-named ambient parent value (Codex #377).
+	UnsetEnv   []string
+	WorkingDir string // subprocess cwd; empty means inherit
 	// LogPath, when set, receives subprocess stderr tee'd into a rotated
 	// log file via rotatingFileWriter (10 MB, 5 rotations). Stdout is
 	// the JSON-RPC protocol channel and is never written to the log;
@@ -36,6 +41,36 @@ type HostConfig struct {
 	// subprocess output is dropped to io.Discard to avoid leaking
 	// upstream chatter into the parent's inherited stdio (issue #162).
 	LogPath string
+}
+
+// composeChildEnv builds a subprocess environment: os.Environ() with every key
+// in `unset` REMOVED, then the `env` overrides appended. Removing the unset
+// keys (vs setting them empty) makes a skipped OPTIONAL secret truly ABSENT in
+// the child, so a server that branches on env-var PRESENCE (os.LookupEnv,
+// Node `process.env.KEY !== undefined`, Python membership) does not enter its
+// credential path with an empty token, and a same-named ambient parent value
+// is never inherited (Codex #377). Shared by StdioHost + HTTPHost.
+func composeChildEnv(env map[string]string, unset []string) []string {
+	var unsetSet map[string]bool
+	if len(unset) > 0 {
+		unsetSet = make(map[string]bool, len(unset))
+		for _, k := range unset {
+			unsetSet[k] = true
+		}
+	}
+	out := make([]string, 0, len(os.Environ())+len(env))
+	for _, kv := range os.Environ() {
+		if unsetSet != nil {
+			if k, _, ok := strings.Cut(kv, "="); ok && unsetSet[k] {
+				continue
+			}
+		}
+		out = append(out, kv)
+	}
+	for k, v := range env {
+		out = append(out, k+"="+v)
+	}
+	return out
 }
 
 // StdioHost hosts a long-lived stdio subprocess and (in later tasks) exposes
@@ -82,9 +117,9 @@ type StdioHost struct {
 	sseActive  atomic.Int32
 	sessionID  string
 
-	done        chan struct{} // closed by Stop() to unblock pending handlers
-	procExited  chan struct{} // closed by the watcher goroutine when cmd.Process.Wait() returns (Phase 1 — OS-exit detected, before pipe drain)
-	childExited chan struct{} // closed by the watcher goroutine after the bounded pipe-drain wait (Phase 4 — pipes drained or pipeDrainTimeout fired); cmd.Wait runs out-of-line AFTER this close
+	done        chan struct{}                   // closed by Stop() to unblock pending handlers
+	procExited  chan struct{}                   // closed by the watcher goroutine when cmd.Process.Wait() returns (Phase 1 — OS-exit detected, before pipe drain)
+	childExited chan struct{}                   // closed by the watcher goroutine after the bounded pipe-drain wait (Phase 4 — pipes drained or pipeDrainTimeout fired); cmd.Wait runs out-of-line AFTER this close
 	exitState   atomic.Pointer[os.ProcessState] // saved by Phase 1 from cmd.Process.Wait's return; the out-of-line cmd.Wait would otherwise rewrite cmd.ProcessState to nil (Codex bot P2 on f2dbea0); read via ExitState()
 
 	// job is a Windows Job Object (no-op on POSIX) configured with
@@ -107,16 +142,16 @@ const maxPendingRequests = 128
 // pipeDrainTimeout caps how long the watcher goroutine waits for
 // stdout/stderr scanners to drain to EOF before calling cmd.Wait.
 //
-// - Fast-exiting children: scanners reach EOF within milliseconds; the
-//   wait is essentially a no-op and Go's StdoutPipe/StderrPipe contract
-//   is preserved (no truncation of the final response).
-// - Inherited-stdio descendants (Codex Cloud finding 63b417d2): a
-//   descendant that inherited stdout/stderr can keep pipes open after
-//   the immediate child exits. Without a deadline, the watcher would
-//   never call cmd.Wait, childExited would never close, the supervisor
-//   would never trigger scheduler restart, and Stop would wedge.
-// - Five seconds is enough for legitimate slow-flush patterns and
-//   short enough to fail fast when descendants are reparenting.
+//   - Fast-exiting children: scanners reach EOF within milliseconds; the
+//     wait is essentially a no-op and Go's StdoutPipe/StderrPipe contract
+//     is preserved (no truncation of the final response).
+//   - Inherited-stdio descendants (Codex Cloud finding 63b417d2): a
+//     descendant that inherited stdout/stderr can keep pipes open after
+//     the immediate child exits. Without a deadline, the watcher would
+//     never call cmd.Wait, childExited would never close, the supervisor
+//     would never trigger scheduler restart, and Stop would wedge.
+//   - Five seconds is enough for legitimate slow-flush patterns and
+//     short enough to fail fast when descendants are reparenting.
 const pipeDrainTimeout = 5 * time.Second
 
 // stdioToolResponseTimeout bounds how long the StdioHost bridge waits for the
@@ -191,12 +226,8 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// like uvx/npx that fork-and-stay. See pdeathsig_linux.go.
 	process.SetParentDeathSignal(cmd)
 	cmd.Dir = h.cfg.WorkingDir
-	if len(h.cfg.Env) > 0 {
-		env := append([]string{}, os.Environ()...)
-		for k, v := range h.cfg.Env {
-			env = append(env, k+"="+v)
-		}
-		cmd.Env = env
+	if len(h.cfg.Env) > 0 || len(h.cfg.UnsetEnv) > 0 {
+		cmd.Env = composeChildEnv(h.cfg.Env, h.cfg.UnsetEnv)
 	}
 
 	stdin, err := cmd.StdinPipe()

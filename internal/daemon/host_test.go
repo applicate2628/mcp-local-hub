@@ -884,3 +884,22 @@ func TestHostSSERequiresSessionID(t *testing.T) {
 		t.Fatalf("GET /mcp without session id: got %d want %d", resp.StatusCode, http.StatusUnauthorized)
 	}
 }
+
+func TestComposeChildEnv_RemovesUnsetKeysAndAddsOverrides(t *testing.T) {
+	t.Setenv("MCPHUB_TEST_AMBIENT_KEY_ZZZ", "ambient-leaked-value")
+	out := composeChildEnv(map[string]string{"FOO": "bar"}, []string{"MCPHUB_TEST_AMBIENT_KEY_ZZZ"})
+	for _, kv := range out {
+		if strings.HasPrefix(kv, "MCPHUB_TEST_AMBIENT_KEY_ZZZ=") {
+			t.Errorf("unset key leaked into child env (ambient inheritance): %q", kv)
+		}
+	}
+	var hasFoo bool
+	for _, kv := range out {
+		if kv == "FOO=bar" {
+			hasFoo = true
+		}
+	}
+	if !hasFoo {
+		t.Error("override FOO=bar missing from child env")
+	}
+}
