@@ -280,17 +280,86 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	// 9. Re-open destination via SAME dirHandle and re-verify DACL.
 	//    GENERIC_READ + READ_CONTROL is needed for GetSecurityInfo to
 	//    read the DACL.
+	//
+	//    "No file on error" contract (secure_write_client_config.go
+	//    package doc): after step 7's atomic rename a COMPLETE
+	//    owner-only file is published at `base`. If the re-open OR the
+	//    DACL verify below fails, the function returns an error, and the
+	//    caller (client_write_init.go) treats ANY error as refuse-and-
+	//    fall-back-to-per-daemon-URLs — believing nothing was written.
+	//    A published-but-error path therefore violates the contract: a
+	//    correct file sits at `base` while the caller assumes none does.
+	//    So a post-rename failure best-effort DELETEs the published file
+	//    via a dirHandle-relative delete (same handle-relative,
+	//    no-symlink-follow discipline as the write — never a path-based
+	//    os.Remove that could race a swapped reparse point). A
+	//    delete-failure is surfaced in the returned error rather than
+	//    swallowed, because then the file genuinely DOES remain.
 	verifyHandle, err := ntOpenRelative(
 		dirHandle,
 		base,
 		windows.GENERIC_READ|windows.READ_CONTROL,
 	)
 	if err != nil {
-		return fmt.Errorf("secure write: re-open %s: %w", base, err)
+		return postRenameFailureWindows(dirHandle, base,
+			fmt.Errorf("secure write: re-open %s: %w", base, err))
 	}
 	defer windows.CloseHandle(verifyHandle)
+	// Test-only seam (secure_write_client_config.go): force a post-rename
+	// verify failure so the "no file on error" cleanup path is
+	// exercisable without platform-specific DACL synthesis. nil in
+	// production → the real verify below runs.
+	if postRenameVerifyFailHook != nil {
+		if herr := postRenameVerifyFailHook(); herr != nil {
+			return postRenameFailureWindows(dirHandle, base,
+				fmt.Errorf("secure write: post-rename verify %s: %w", base, herr))
+		}
+	}
 	if err := verifyWindowsDACLFromHandle(verifyHandle); err != nil {
-		return fmt.Errorf("secure write: post-rename DACL verify %s: %w", base, err)
+		return postRenameFailureWindows(dirHandle, base,
+			fmt.Errorf("secure write: post-rename DACL verify %s: %w", base, err))
+	}
+	return nil
+}
+
+// postRenameFailureWindows is the "no file on error" cleanup for a
+// post-rename failure (step 9 re-open or DACL verify). It best-effort
+// DELETEs the just-published `base` file via a dirHandle-relative open
+// (FILE_OPEN_REPARSE_POINT so a swapped reparse point is NOT followed —
+// same anti-TOCTOU discipline the write pipeline uses) so the contract
+// "On any error, no partial file is left at path" holds. If the delete
+// itself fails the published file genuinely REMAINS, so that fact is
+// folded into the returned error rather than hidden. origErr is always
+// preserved as the primary cause.
+func postRenameFailureWindows(dirHandle windows.Handle, base string, origErr error) error {
+	if derr := deleteRelative(dirHandle, base); derr != nil {
+		return fmt.Errorf("%w; AND the published file could not be removed (it may remain at the destination): %v", origErr, derr)
+	}
+	return origErr
+}
+
+// deleteRelative removes `name` under `dirHandle` by opening it
+// DELETE-relative (no reparse follow) and marking it delete-on-close,
+// then closing the handle to drop the inode. Mirrors the handle-
+// relative discipline of the rest of the pipeline: the open is anchored
+// to dirHandle (not a fresh path walk from root) and uses
+// FILE_OPEN_REPARSE_POINT so it can never follow a symlink/junction
+// swapped into the slot. A "not found" open is treated as success — the
+// file is already gone, which is the desired post-condition.
+func deleteRelative(dirHandle windows.Handle, name string) error {
+	h, err := ntOpenRelative(dirHandle, name, windows.DELETE)
+	if err != nil {
+		if isNotFoundErr(err) {
+			return nil
+		}
+		return fmt.Errorf("open %s for delete: %w", name, err)
+	}
+	if derr := setFileDeleteOnClose(h); derr != nil {
+		_ = windows.CloseHandle(h)
+		return fmt.Errorf("mark %s delete-on-close: %w", name, derr)
+	}
+	if cerr := windows.CloseHandle(h); cerr != nil {
+		return fmt.Errorf("close %s after delete-mark: %w", name, cerr)
 	}
 	return nil
 }

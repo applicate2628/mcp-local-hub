@@ -96,3 +96,15 @@ func SecureWriteClientConfig(path string, contents []byte) error {
 func secureWriteClientConfigSkipParentGate(path string, contents []byte) error {
 	return secureWriteClientConfigImpl(path, contents, true)
 }
+
+// postRenameVerifyFailHook is a TEST-ONLY seam consulted by both the
+// POSIX and Windows secureWriteClientConfigImpl legs immediately after
+// the post-rename re-open, BEFORE the real owner/mode/DACL verify. When
+// nil (the production default) it is a no-op and the real verify runs.
+// When a test sets it to a function returning a non-nil error, the impl
+// treats that as a post-rename verify failure and runs the
+// "no file on error" cleanup (handle/dirfd-relative delete of the
+// just-published file). It is the only platform-neutral way to exercise
+// the post-rename cleanup contract without synthesizing a real
+// mode/DACL mismatch on the persisted inode. Never set in production.
+var postRenameVerifyFailHook func() error

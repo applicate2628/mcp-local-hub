@@ -145,6 +145,74 @@ func pruneHubTokensLocked(scopeKeys []string) error {
 	return nil
 }
 
+// rotateReusedGroupTokensLocked mints a FRESH token for every declared
+// group scope key that has a pre-existing row in the table BUT is not in
+// `activeKeys` — i.e. a group being (re)created over an ORPHANED token
+// row. Caller MUST already hold hub-mcp.lock (called from
+// PublishGroupsSnapshotLocked under its held lock).
+//
+// Why this exists (the "stale token reused on group re-create" defect):
+// ensureHubTokensLocked NEVER rotates an existing row (its contract is
+// "install a new group/client without invalidating existing ones"). When
+// a group delete hits ErrTokenPruneFailed, its "g:<name>" row is
+// intentionally LEFT in the table (the prune failed; restart_required is
+// forced). If the operator later RE-CREATES a group of the same name,
+// the plain ensure path REUSES that stale (possibly leaked/compromised)
+// row instead of minting a fresh secret. This helper closes that hole by
+// rotating exactly the orphaned-row case.
+//
+// The discriminator is `activeKeys`: the set of "g:<group>" scope keys
+// the CURRENTLY-published resolver snapshot declares active (snap.Groups).
+// A key in activeKeys is a STILL-LIVE group — rotating its token would
+// break live /g/ sessions, so it is left untouched. A declared key with
+// a row but NOT in activeKeys is the orphaned/stale case being recreated;
+// only those rotate. A declared key with NO existing row is left to the
+// subsequent ensureHubTokensLocked (which mints a fresh one anyway) — no
+// rotation needed.
+//
+// Returns true when at least one row was rotated (the table was written +
+// republished). A load/write failure surfaces; a missing token file is
+// "nothing to rotate" (the recreate path then mints fresh via ensure).
+func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]bool) (bool, error) {
+	if len(declaredKeys) == 0 {
+		return false, nil
+	}
+	tbl, err := loadHubTokensLocked()
+	if err != nil {
+		if isHubMcpStateMissingErr(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if tbl.Tokens == nil {
+		return false, nil
+	}
+	rotated := false
+	for _, k := range declaredKeys {
+		if _, present := tbl.Tokens[k]; !present {
+			continue // no row yet — ensure mints a fresh one, nothing stale to rotate.
+		}
+		if activeKeys[k] {
+			continue // still-active group — keep its token so live sessions survive.
+		}
+		// Orphaned row being (re)created over: mint a fresh secret.
+		fresh, gerr := generateHexToken()
+		if gerr != nil {
+			return rotated, gerr
+		}
+		tbl.Tokens[k] = fresh
+		rotated = true
+	}
+	if !rotated {
+		return false, nil
+	}
+	if werr := writeHubTokensLocked(tbl); werr != nil {
+		return false, werr
+	}
+	publishTokenTable(tbl)
+	return true, nil
+}
+
 // ensureHubTokensLocked is the in-flock half. Caller MUST already
 // hold hub-mcp.lock. The supplied list is a set of SCOPE KEYS — bare
 // client ids from EnsureHubTokens, or kind-namespaced "g:<group>" keys

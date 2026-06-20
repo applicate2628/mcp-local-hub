@@ -146,17 +146,58 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 
 	// 10. Re-open destination via SAME dirFd to re-verify. Path-based
 	// re-open here would be TOCTOU; the dirFd anchor closes the window.
+	//
+	// "No file on error" contract (secure_write_client_config.go package
+	// doc): after step 8's atomic renameat a COMPLETE owner-only file is
+	// published at `base`. If the re-open OR the mode/owner re-verify
+	// below fails, the function returns an error, and the caller
+	// (client_write_init.go) treats ANY error as refuse-and-fall-back —
+	// believing nothing was written. A published-but-error path would
+	// violate the contract. So a post-rename failure best-effort UNLINKs
+	// the published file via a dirFd-relative unlinkat (same dirFd anchor
+	// as the rename — never a path-based os.Remove that could race a
+	// swapped symlink). An unlink-failure is surfaced in the returned
+	// error, not swallowed, because then the file genuinely remains.
 	verifyFd, err := unix.Openat(dirFd, base, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return fmt.Errorf("secure write: re-open %s: %w", base, err)
+		return postRenameFailurePosix(dirFd, base,
+			fmt.Errorf("secure write: re-open %s: %w", base, err))
 	}
 	defer unix.Close(verifyFd)
 
+	// Test-only seam (secure_write_client_config.go): force a post-rename
+	// verify failure so the "no file on error" cleanup path is
+	// exercisable without engineering a real mode/owner mismatch on the
+	// persisted inode. nil in production → the real verify below runs.
+	if postRenameVerifyFailHook != nil {
+		if herr := postRenameVerifyFailHook(); herr != nil {
+			return postRenameFailurePosix(dirFd, base,
+				fmt.Errorf("secure write: post-rename verify %s: %w", base, herr))
+		}
+	}
+
 	// 11. Re-verify mode + ownership on the persisted file.
 	if err := verifyPosixFileFromFd(verifyFd); err != nil {
-		return fmt.Errorf("secure write: post-rename verify %s: %w", base, err)
+		return postRenameFailurePosix(dirFd, base,
+			fmt.Errorf("secure write: post-rename verify %s: %w", base, err))
 	}
 	return nil
+}
+
+// postRenameFailurePosix is the "no file on error" cleanup for a
+// post-rename failure (step 10 re-open or step 11 verify). It best-
+// effort UNLINKs the just-published `base` via a dirFd-relative
+// unlinkat (anchored to the same dirFd the rename used — not a path
+// re-walk that could race a swapped symlink) so the contract "On any
+// error, no partial file is left at path" holds. ENOENT (already gone)
+// is success. If the unlink fails the published file genuinely REMAINS,
+// so that fact is folded into the returned error rather than hidden.
+// origErr is always preserved as the primary cause.
+func postRenameFailurePosix(dirFd int, base string, origErr error) error {
+	if derr := unix.Unlinkat(dirFd, base, 0); derr != nil && !errors.Is(derr, unix.ENOENT) {
+		return fmt.Errorf("%w; AND the published file could not be removed (it may remain at the destination): %v", origErr, derr)
+	}
+	return origErr
 }
 
 // writeAllUnix retries unix.Write until every byte in p is committed
