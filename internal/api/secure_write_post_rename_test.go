@@ -50,6 +50,37 @@ func TestSecureWritePostRenameVerifyFailureLeavesNoFile(t *testing.T) {
 	}
 }
 
+// TestSecureWritePostRenameTransientReopenFailureKeepsPublishedFile pins the
+// distinction between "could not re-open right now" and "re-opened and proved
+// the published file is unsafe." A transient post-rename re-open failure must
+// surface the error without erasing the just-published config.
+func TestSecureWritePostRenameTransientReopenFailureKeepsPublishedFile(t *testing.T) {
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "client-config.json")
+	payload := []byte(`{"v":1}`)
+
+	prev := postRenameOpenFailHook
+	t.Cleanup(func() { postRenameOpenFailHook = prev })
+	postRenameOpenFailHook = func() error {
+		return fmt.Errorf("synthetic transient re-open failure")
+	}
+
+	err := SecureWriteClientConfig(target, payload)
+	if err == nil {
+		t.Fatalf("SecureWriteClientConfig must return the transient re-open error")
+	}
+	if !strings.Contains(err.Error(), "re-open") {
+		t.Errorf("error %q should name the post-rename re-open failure", err.Error())
+	}
+	got, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("transient re-open failure must not erase the published file: %v", readErr)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("published payload = %q, want %q", got, payload)
+	}
+}
+
 // TestSecureWritePostRenameVerifyFailureSucceedsOnFreshSlot is the
 // companion that proves the cleanup path is reached even when the
 // destination did NOT pre-exist (the slot was empty before the write).

@@ -33,7 +33,10 @@
 // on error; that would defeat the entire guarantee.
 package api
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // ErrSecureWriteParentInsecure is the typed error returned by
 // SecureWriteClientConfig when the destination's IMMEDIATE parent
@@ -57,11 +60,20 @@ import "errors"
 // is operator-explicit, observable, and always logged.
 var ErrSecureWriteParentInsecure = errors.New("secure write: parent directory not single-user safe")
 
+const (
+	postRenameOpenMaxAttempts = 3
+	postRenameOpenRetryDelay  = 10 * time.Millisecond
+)
+
 // SecureWriteClientConfig writes contents to path atomically via a
 // handle-relative pipeline. See the package doc for the sequence and
 // the spec / plan references. Returns the first error from any step.
-// On any error, no partial file is left at path; the temp file (if
-// created) is unlinked.
+// On errors before the atomic rename, no partial file is left at path
+// and the temp file (if created) is unlinked. After the atomic rename,
+// a definitive owner/mode/DACL verification failure removes the
+// just-published file. A transient post-rename re-open failure is returned
+// without erasing the complete published file, because the writer has not
+// proved that file is unsafe.
 //
 // On POSIX: openat(parentDir) + Openat(O_CREAT|O_EXCL|O_NOFOLLOW|0600)
 // + Fchmod(0600) + Write + Fsync + Renameat + post-rename re-Openat +
@@ -108,3 +120,10 @@ func secureWriteClientConfigSkipParentGate(path string, contents []byte) error {
 // the post-rename cleanup contract without synthesizing a real
 // mode/DACL mismatch on the persisted inode. Never set in production.
 var postRenameVerifyFailHook func() error
+
+// postRenameOpenFailHook is a TEST-ONLY seam consulted by both platform legs
+// immediately before the post-rename re-open. When nil, production opens the
+// renamed destination normally. Tests set it to synthesize transient re-open
+// failures that are otherwise timing-dependent and difficult to force
+// deterministically across platforms. Never set in production.
+var postRenameOpenFailHook func() error

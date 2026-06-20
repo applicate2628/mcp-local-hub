@@ -210,6 +210,31 @@ func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]
 	return true, nil
 }
 
+// groupTokensAlreadyPublished reports whether PublishGroupsSnapshotLocked can
+// skip touching hub-mcp-tokens.json for declared group rows. It is intentionally
+// stricter than "key exists in the live token table": the group must have been
+// active in the prior resolver snapshot (so it is not a re-created stale row),
+// and its live token must pass the same 64-hex shape gate used on disk loads.
+func groupTokensAlreadyPublished(declaredKeys []string, activeKeys map[string]bool) bool {
+	if len(declaredKeys) == 0 || len(activeKeys) == 0 {
+		return false
+	}
+	tbl := CurrentTokenTable()
+	if len(tbl.Tokens) == 0 {
+		return false
+	}
+	for _, k := range declaredKeys {
+		if !activeKeys[k] {
+			return false
+		}
+		tok, ok := tbl.Tokens[k]
+		if !ok || !isValidHexToken(tok) {
+			return false
+		}
+	}
+	return true
+}
+
 // ensureHubTokensLocked is the in-flock half. Caller MUST already
 // hold hub-mcp.lock. The supplied list is a set of SCOPE KEYS — bare
 // client ids from EnsureHubTokens, or kind-namespaced "g:<group>" keys

@@ -437,23 +437,25 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	// publishes even when the token-ensure fails.
 	var tokenEnsureErr error
 	if groupKeys := GroupScopeKeys(cfg.Groups); len(groupKeys) > 0 {
-		// First, ROTATE any declared group whose token row pre-exists but was
-		// not in this process's prior published active set. Still-active rows
-		// are preserved so live /g/ sessions survive; cold-start rows are
-		// trusted as current declared state. A rotation failure is fail-closed
-		// for this publish: serving the re-created group with the old row would
-		// expose the stale secret this path is specifically trying to retire.
-		if _, rerr := rotateReusedGroupTokensLocked(groupKeys, activeGroupKeys, prev != nil); rerr != nil {
-			_ = LogHubMcpEvent("warn", "group-tokens-rotate-reintroduced-failed", map[string]any{
-				"err": rerr.Error(),
-			})
-			return fmt.Errorf("rotate reintroduced group token rows: %w", rerr)
-		}
-		if _, terr := ensureHubTokensLocked(groupKeys); terr != nil {
-			_ = LogHubMcpEvent("warn", "group-tokens-ensure-failed", map[string]any{
-				"err": terr.Error(),
-			})
-			tokenEnsureErr = fmt.Errorf("ensure group token rows: %w", terr)
+		if !groupTokensAlreadyPublished(groupKeys, activeGroupKeys) {
+			// First, ROTATE any declared group whose token row pre-exists but was
+			// not in this process's prior published active set. Still-active rows
+			// are preserved so live /g/ sessions survive; cold-start rows are
+			// trusted as current declared state. A rotation failure is fail-closed
+			// for this publish: serving the re-created group with the old row would
+			// expose the stale secret this path is specifically trying to retire.
+			if _, rerr := rotateReusedGroupTokensLocked(groupKeys, activeGroupKeys, prev != nil); rerr != nil {
+				_ = LogHubMcpEvent("warn", "group-tokens-rotate-reintroduced-failed", map[string]any{
+					"err": rerr.Error(),
+				})
+				return fmt.Errorf("rotate reintroduced group token rows: %w", rerr)
+			}
+			if _, terr := ensureHubTokensLocked(groupKeys); terr != nil {
+				_ = LogHubMcpEvent("warn", "group-tokens-ensure-failed", map[string]any{
+					"err": terr.Error(),
+				})
+				tokenEnsureErr = fmt.Errorf("ensure group token rows: %w", terr)
+			}
 		}
 	}
 

@@ -70,9 +70,11 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -281,28 +283,15 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	//    GENERIC_READ + READ_CONTROL is needed for GetSecurityInfo to
 	//    read the DACL.
 	//
-	//    "No file on error" contract (secure_write_client_config.go
-	//    package doc): after step 7's atomic rename a COMPLETE
-	//    owner-only file is published at `base`. If the re-open OR the
-	//    DACL verify below fails, the function returns an error, and the
-	//    caller (client_write_init.go) treats ANY error as refuse-and-
-	//    fall-back-to-per-daemon-URLs — believing nothing was written.
-	//    A published-but-error path therefore violates the contract: a
-	//    correct file sits at `base` while the caller assumes none does.
-	//    So a post-rename failure best-effort DELETEs the published file
-	//    via a dirHandle-relative delete (same handle-relative,
-	//    no-symlink-follow discipline as the write — never a path-based
-	//    os.Remove that could race a swapped reparse point). A
-	//    delete-failure is surfaced in the returned error rather than
-	//    swallowed, because then the file genuinely DOES remain.
-	verifyHandle, err := ntOpenRelative(
-		dirHandle,
-		base,
-		windows.GENERIC_READ|windows.READ_CONTROL,
-	)
+	//    After step 7's atomic rename a COMPLETE owner-only file is published
+	//    at `base`. Re-open can fail transiently (sharing violation, momentary
+	//    access-denied, scanner hiccup), so do not erase the published file
+	//    unless we actually re-open it and prove the DACL is wrong. A
+	//    definitive DACL verify failure below still uses the handle-relative
+	//    cleanup path.
+	verifyHandle, err := openPostRenameVerifyHandleWindows(dirHandle, base)
 	if err != nil {
-		return postRenameFailureWindows(dirHandle, base,
-			fmt.Errorf("secure write: re-open %s: %w", base, err))
+		return fmt.Errorf("secure write: re-open %s: %w", base, err)
 	}
 	defer windows.CloseHandle(verifyHandle)
 	// Test-only seam (secure_write_client_config.go): force a post-rename
@@ -322,15 +311,54 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	return nil
 }
 
+func openPostRenameVerifyHandleWindows(dirHandle windows.Handle, base string) (windows.Handle, error) {
+	var lastErr error
+	for attempt := 1; attempt <= postRenameOpenMaxAttempts; attempt++ {
+		if postRenameOpenFailHook != nil {
+			if herr := postRenameOpenFailHook(); herr != nil {
+				lastErr = herr
+				if !isRetryablePostRenameOpenErrWindows(herr) || attempt == postRenameOpenMaxAttempts {
+					return windows.InvalidHandle, postRenameOpenErrAfterAttempts(attempt, herr)
+				}
+				time.Sleep(postRenameOpenRetryDelay)
+				continue
+			}
+		}
+		h, err := ntOpenRelative(dirHandle, base, windows.GENERIC_READ|windows.READ_CONTROL)
+		if err == nil {
+			return h, nil
+		}
+		lastErr = err
+		if !isRetryablePostRenameOpenErrWindows(err) || attempt == postRenameOpenMaxAttempts {
+			return windows.InvalidHandle, postRenameOpenErrAfterAttempts(attempt, err)
+		}
+		time.Sleep(postRenameOpenRetryDelay)
+	}
+	return windows.InvalidHandle, lastErr
+}
+
+func postRenameOpenErrAfterAttempts(attempts int, err error) error {
+	if attempts <= 1 {
+		return err
+	}
+	return fmt.Errorf("still failing after %d attempts: %w", attempts, err)
+}
+
+func isRetryablePostRenameOpenErrWindows(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) ||
+		errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
+		errors.Is(err, windows.ERROR_LOCK_VIOLATION) ||
+		errors.Is(err, windows.ERROR_BUSY)
+}
+
 // postRenameFailureWindows is the "no file on error" cleanup for a
-// post-rename failure (step 9 re-open or DACL verify). It best-effort
-// DELETEs the just-published `base` file via a dirHandle-relative open
+// definitive post-rename DACL verify failure. It best-effort DELETEs the
+// just-published `base` file via a dirHandle-relative open
 // (FILE_OPEN_REPARSE_POINT so a swapped reparse point is NOT followed —
-// same anti-TOCTOU discipline the write pipeline uses) so the contract
-// "On any error, no partial file is left at path" holds. If the delete
-// itself fails the published file genuinely REMAINS, so that fact is
-// folded into the returned error rather than hidden. origErr is always
-// preserved as the primary cause.
+// same anti-TOCTOU discipline the write pipeline uses). If the delete itself
+// fails the published file genuinely REMAINS, so that fact is folded into
+// the returned error rather than hidden. origErr is always preserved as the
+// primary cause.
 func postRenameFailureWindows(dirHandle windows.Handle, base string, origErr error) error {
 	if derr := deleteRelative(dirHandle, base); derr != nil {
 		return fmt.Errorf("%w; AND the published file could not be removed (it may remain at the destination): %v", origErr, derr)

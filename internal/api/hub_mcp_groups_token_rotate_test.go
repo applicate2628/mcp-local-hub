@@ -131,6 +131,44 @@ func TestGroups_StillActiveTokenNotRotated(t *testing.T) {
 	}
 }
 
+// TestGroups_AllActiveTokensPresentPublishSkipsTokenReload verifies the no-op
+// publish path for an already-active group whose live token row is present and
+// valid. The corrupt on-disk table is a tripwire: this publish has nothing to
+// add or rotate, so it must not reload or rewrite hub-mcp-tokens.json.
+func TestGroups_AllActiveTokensPresentPublishSkipsTokenReload(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	resetResolverForTest(t)
+
+	const key = "g:backend"
+	publishWithGroups(t, []Group{{Name: "backend", Servers: []string{"memory"}}})
+	seeded := CurrentTokenTable().Tokens[key]
+	if !isValidHexToken(seeded) {
+		t.Fatalf("seeded token invalid: %q", seeded)
+	}
+
+	corrupt := []byte(`{"tokens":{"g:backend":"short"}}`)
+	if err := writeHubMcpStateFile(hubMcpTokensFileLeaf, corrupt); err != nil {
+		t.Fatalf("install corrupt reload tripwire: %v", err)
+	}
+	before, err := readHubMcpStateFile(hubMcpTokensFileLeaf)
+	if err != nil {
+		t.Fatalf("read corrupt tripwire: %v", err)
+	}
+
+	publishCurrentGroups(t)
+
+	after, err := readHubMcpStateFile(hubMcpTokensFileLeaf)
+	if err != nil {
+		t.Fatalf("read after publish: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("no-op publish rewrote token file: before %q after %q", before, after)
+	}
+	if got := CurrentTokenTable().Tokens[key]; got != seeded {
+		t.Fatalf("live token changed on no-op publish: got %q want %q", got, seeded)
+	}
+}
+
 // TestGroups_CleanRestartDeclaredGroupKeepsTokenWithoutTombstone pins the
 // cold-start rule: a normal restart has the group declared in groups.yaml and
 // its token row present. With no prior in-memory publish in this process, that
