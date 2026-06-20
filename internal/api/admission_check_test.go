@@ -167,7 +167,7 @@ func TestAdmissionCheckPoolExhaustionIsAdvisory(t *testing.T) {
 		Command:   "go",
 		DaemonTemplate: &config.DaemonTemplate{
 			Context:  "workspace",
-			PortPool: &config.PortPool{Start: 56000, End: 56000},
+			PortPool: &config.PortPool{Start: 55000, End: 55000},
 		},
 	}
 
@@ -183,6 +183,68 @@ func TestAdmissionCheckPoolExhaustionIsAdvisory(t *testing.T) {
 	}
 	if !f.Optional {
 		t.Fatal("port-pool-free finding is non-optional; it must be advisory so install/reinstall is not blocked")
+	}
+}
+
+func TestAdmissionCheckTopLevelPoolExhaustionIsBlocking(t *testing.T) {
+	setupAdmissionParityTest(t)
+	// The legacy workspace-scoped LSP shape allocates from m.PortPool during
+	// workspace registration, so a fully occupied top-level pool is not ready.
+	portAvailable = func(int) bool { return false }
+
+	m := &config.ServerManifest{
+		Name:      "legacy-lsp-exhausted-pool",
+		Kind:      config.KindWorkspaceScoped,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		PortPool:  &config.PortPool{Start: 55000, End: 55000},
+		Languages: []config.LanguageSpec{
+			{Name: "go", RequiredBinaries: []string{"go"}},
+		},
+	}
+
+	if err := Preflight(m, ""); err == nil {
+		t.Fatal("Preflight accepted an exhausted top-level workspace pool; want blocking rejection")
+	}
+	if CheckServerReadiness(m).Ready {
+		t.Fatal("CheckServerReadiness.Ready=true on exhausted top-level workspace pool; want false")
+	}
+	f, ok := admissionFindingByID(AdmissionCheck(m, AdmissionScope{}), "port-pool-free")
+	if !ok {
+		t.Fatal("port-pool-free finding missing for exhausted top-level pool")
+	}
+	if f.Optional {
+		t.Fatal("top-level port-pool-free finding is optional; want blocking")
+	}
+}
+
+func TestAdmissionCheckNativeHTTPPoolOverflowIsBlocking(t *testing.T) {
+	setupAdmissionParityTest(t)
+
+	m := &config.ServerManifest{
+		Name:      "native-http-overflow-pool",
+		Kind:      config.KindWorkspaceScoped,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		DaemonTemplate: &config.DaemonTemplate{
+			Context:  "workspace",
+			PortPool: &config.PortPool{Start: 56000, End: 56000},
+		},
+	}
+
+	if err := Preflight(m, ""); err == nil {
+		t.Fatal("Preflight accepted a native-http pool whose upstream port exceeds 65535; want blocking rejection")
+	}
+	rep := CheckServerReadiness(m)
+	if rep.Ready {
+		t.Fatalf("CheckServerReadiness.Ready=true on native-http pool overflow; want false; requirements: %#v", rep.Requirements)
+	}
+	f, ok := admissionFindingByID(AdmissionCheck(m, AdmissionScope{}), "port-pool-native-overflow")
+	if !ok {
+		t.Fatal("port-pool-native-overflow finding missing for native-http pool overflow")
+	}
+	if f.Optional {
+		t.Fatal("port-pool-native-overflow finding is optional; want blocking")
 	}
 }
 

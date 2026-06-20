@@ -631,13 +631,23 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// accepting reads as free to a dial yet fails the allocator's bind, so use
 	// the SAME portAvailable probe (Codex #377 r7).
 	portTaken := func(port int) bool { return !portAvailable(port) || registryTaken[port] }
-	checkPool := func(p *config.PortPool, nativeHTTP bool) {
+	checkPool := func(pp manifestPortPool, nativeHTTP bool) {
+		p := pp.pool
 		if p == nil || p.End < p.Start {
 			return
 		}
+		overflow := nativeHTTPPoolOverflows(p, nativeHTTP)
+		if overflow {
+			add(ReadinessRequirement{
+				Name:   portPoolName(p),
+				OK:     false,
+				Reason: nativeHTTPPoolOverflowReason(p),
+				Fix:    nativeHTTPPoolOverflowFix(),
+			})
+		}
 		if registryLoadErr != nil {
 			add(ReadinessRequirement{
-				Name: fmt.Sprintf("port pool %d-%d", p.Start, p.End),
+				Name: portPoolName(p),
 				OK:   false,
 				// Reason is GUI-rendered — do not echo registryLoadErr, which
 				// wraps the absolute workspaces.yaml path (Codex pre-catch r9).
@@ -646,7 +656,10 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			})
 			return
 		}
-		name := fmt.Sprintf("port pool %d-%d", p.Start, p.End)
+		if overflow {
+			return
+		}
+		name := portPoolName(p)
 		for port := p.Start; port <= p.End; port++ {
 			if portTaken(port) {
 				continue
@@ -657,23 +670,23 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			add(ReadinessRequirement{Name: name, OK: true})
 			return
 		}
-		// ADVISORY (Optional), NOT a Ready-blocker: a dynamic-pool SERVER
-		// install/reinstall allocates no pool port (workspaces allocate lazily at
-		// registration), so an exhausted pool must not mark the server not-ready —
-		// it only means a NEW workspace cannot register until a port frees, and a
-		// reinstall whose own existing workspaces hold every port stays installable
-		// (Codex #382 r3). Mirrors admissionPortPoolFindings so Preflight ⟺ Ready.
-		add(ReadinessRequirement{Name: name, OK: false, Optional: true,
-			Reason: "no port in the workspace pool is free for a NEW workspace (OS-bound or registry-allocated); existing workspaces and reinstall are unaffected",
+		optional := pp.daemonTemplate
+		reason := "no port in the workspace pool is free (OS-bound or registry-allocated)"
+		if optional {
+			// ADVISORY only for daemon-template dynamic-pool installs/reinstalls:
+			// those allocate no new pool port; workspace registration does.
+			reason = "no port in the workspace pool is free for a NEW workspace (OS-bound or registry-allocated); existing workspaces and reinstall are unaffected"
+		}
+		add(ReadinessRequirement{Name: name, OK: false, Optional: optional,
+			Reason: reason,
 			Fix:    "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest, before registering a new workspace."})
 	}
 	// Serena's dynamic-pool manifest is transport: native-http, so its
 	// materialized proxies bind external+offset upstream — mNative drives the
 	// offset check for both the server pool and the daemon-template pool.
 	mNative := m.Transport == config.TransportNativeHTTP
-	checkPool(m.PortPool, mNative)
-	if m.DaemonTemplate != nil {
-		checkPool(m.DaemonTemplate.PortPool, mNative)
+	for _, pp := range manifestPortPools(m) {
+		checkPool(pp, mNative)
 	}
 
 	// A vault that EXISTS but is unreadable/undecryptable is BLOCKING for a

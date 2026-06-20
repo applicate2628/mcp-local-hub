@@ -175,14 +175,45 @@ func scopeForPreflight(daemonFilter string) AdmissionScope {
 	return AdmissionScope{DaemonFilter: daemonFilter}
 }
 
-func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
-	var pools []*config.PortPool
+type manifestPortPool struct {
+	pool           *config.PortPool
+	daemonTemplate bool
+}
+
+func manifestPortPools(m *config.ServerManifest) []manifestPortPool {
+	var pools []manifestPortPool
 	if m.PortPool != nil {
-		pools = append(pools, m.PortPool)
+		pools = append(pools, manifestPortPool{pool: m.PortPool})
 	}
 	if m.DaemonTemplate != nil && m.DaemonTemplate.PortPool != nil {
-		pools = append(pools, m.DaemonTemplate.PortPool)
+		pools = append(pools, manifestPortPool{pool: m.DaemonTemplate.PortPool, daemonTemplate: true})
 	}
+	return pools
+}
+
+func portPoolName(p *config.PortPool) string {
+	return fmt.Sprintf("port pool %d-%d", p.Start, p.End)
+}
+
+func nativeHTTPPoolExternalCeiling() int {
+	return 65535 - config.NativeHTTPInternalPortOffset
+}
+
+func nativeHTTPPoolOverflows(p *config.PortPool, nativeHTTP bool) bool {
+	return nativeHTTP && p != nil && p.End >= p.Start && p.End > nativeHTTPPoolExternalCeiling()
+}
+
+func nativeHTTPPoolOverflowReason(p *config.PortPool) string {
+	highestUpstream := int64(p.End) + int64(config.NativeHTTPInternalPortOffset)
+	return fmt.Sprintf("native-http port pool %d-%d exceeds the external port ceiling %d; the highest upstream port would be %d (external+%d) outside 1..65535", p.Start, p.End, nativeHTTPPoolExternalCeiling(), highestUpstream, config.NativeHTTPInternalPortOffset)
+}
+
+func nativeHTTPPoolOverflowFix() string {
+	return fmt.Sprintf("Keep the pool's ports at or below %d so external+%d stays within 1..65535.", nativeHTTPPoolExternalCeiling(), config.NativeHTTPInternalPortOffset)
+}
+
+func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
+	pools := manifestPortPools(m)
 	if len(pools) == 0 {
 		return nil
 	}
@@ -192,23 +223,36 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 		findings = append(findings, AdmissionFinding{ID: id, Name: name, Reason: reason, Fix: fix, Optional: optional})
 	}
 
+	nativeHTTP := m.Transport == config.TransportNativeHTTP
+	for _, pp := range pools {
+		p := pp.pool
+		if p == nil || p.End < p.Start {
+			continue
+		}
+		if nativeHTTPPoolOverflows(p, nativeHTTP) {
+			add("port-pool-native-overflow", portPoolName(p), nativeHTTPPoolOverflowReason(p), nativeHTTPPoolOverflowFix(), false)
+		}
+	}
+
 	var registryTaken map[int]bool
 	if regPath, err := DefaultRegistryPath(); err != nil {
-		for _, p := range pools {
+		for _, pp := range pools {
+			p := pp.pool
 			if p == nil || p.End < p.Start {
 				continue
 			}
-			add("port-pool-registry", fmt.Sprintf("port pool %d-%d", p.Start, p.End), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
+			add("port-pool-registry", portPoolName(p), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
 		}
 		return findings
 	} else {
 		reg := NewRegistry(regPath)
 		if err := reg.Load(); err != nil {
-			for _, p := range pools {
+			for _, pp := range pools {
+				p := pp.pool
 				if p == nil || p.End < p.Start {
 					continue
 				}
-				add("port-pool-registry", fmt.Sprintf("port pool %d-%d", p.Start, p.End), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
+				add("port-pool-registry", portPoolName(p), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
 			}
 			return findings
 		}
@@ -216,12 +260,15 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 	}
 
 	portTaken := func(port int) bool { return !portAvailable(port) || registryTaken[port] }
-	nativeHTTP := m.Transport == config.TransportNativeHTTP
-	for _, p := range pools {
+	for _, pp := range pools {
+		p := pp.pool
 		if p == nil || p.End < p.Start {
 			continue
 		}
-		name := fmt.Sprintf("port pool %d-%d", p.Start, p.End)
+		if nativeHTTPPoolOverflows(p, nativeHTTP) {
+			continue
+		}
+		name := portPoolName(p)
 		free := false
 		for port := p.Start; port <= p.End; port++ {
 			if portTaken(port) {
@@ -234,14 +281,14 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 			break
 		}
 		if !free {
-			// ADVISORY (not blocking): a dynamic-pool SERVER install/reinstall
-			// allocates NO pool port — workspaces allocate lazily at registration
-			// (BuildSupervisorDaemonsForSerena materializes from each existing
-			// WorkspaceEntry.Port). So an exhausted pool must NOT block reinstalling
-			// a server whose own existing workspaces hold every port (Codex #382 r3);
-			// it only means a NEW workspace cannot register until a port frees. The
-			// row stays visible so the operator sees the pool is full.
-			add("port-pool-free", name, "no port in the workspace pool is free for a NEW workspace (OS-bound or registry-allocated); existing workspaces and reinstall are unaffected", "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest, before registering a new workspace.", true)
+			optional := pp.daemonTemplate
+			reason := "no port in the workspace pool is free (OS-bound or registry-allocated)"
+			if optional {
+				// ADVISORY only for daemon-template dynamic-pool installs/reinstalls:
+				// those allocate no new pool port; workspace registration does.
+				reason = "no port in the workspace pool is free for a NEW workspace (OS-bound or registry-allocated); existing workspaces and reinstall are unaffected"
+			}
+			add("port-pool-free", name, reason, "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest, before registering a new workspace.", optional)
 		}
 	}
 	return findings
