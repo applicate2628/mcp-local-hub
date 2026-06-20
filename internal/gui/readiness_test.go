@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -392,6 +393,22 @@ func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
 	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
 	if rr.Code != 400 {
 		t.Fatalf("got %d, want 400 for an unparseable draft: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestReadinessHandler_DraftPOST_TrailingGarbageRejected(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	yaml := "name: drafttrail\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
+		"daemons:\n  - name: default\n    port: 9327\n" +
+		"client_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n"
+	body, err := json.Marshal(map[string]string{"yaml": yaml})
+	if err != nil {
+		t.Fatalf("marshal readiness request: %v", err)
+	}
+	body = append(body, []byte(strings.Repeat("Z", int(maxManifestBodyBytes)+1))...)
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != http.StatusBadRequest && rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("got %d, want 400 or 413 for trailing garbage; body=%q", rr.Code, rr.Body.String())
 	}
 }
 

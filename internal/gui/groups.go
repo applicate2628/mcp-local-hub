@@ -315,7 +315,7 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 		Servers     []string            `json:"servers"`
 		ToolsHidden map[string][]string `json:"tools_hidden"`
 	}
-	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+	if err := decodeJSONBodyLimited(w, r, &body, maxManifestBodyBytes); err != nil {
 		writeDecodeBodyError(w, err, "GROUPS_INVALID_JSON")
 		return
 	}

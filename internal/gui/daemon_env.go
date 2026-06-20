@@ -88,8 +88,8 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	var req daemonEnvRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req); err != nil {
-		writeAPIError(w, fmt.Errorf("decode body: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
 	taskName := daemon_env_overlay.NormalizeOverlayKey(strings.TrimSpace(req.TaskName))
@@ -293,7 +293,11 @@ func (s *Server) discoveryRefreshHandler(w http.ResponseWriter, r *http.Request)
 
 	// Decode-and-discard so a missing/empty body is accepted without
 	// 400; future shape changes only need to populate fields here.
-	_ = json.NewDecoder(io.LimitReader(r.Body, 4*1024)).Decode(&discoveryRefreshRequest{})
+	var req discoveryRefreshRequest
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil && !errors.Is(err, io.EOF) {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
+		return
+	}
 
 	manifests, err := s.loadAllManifestsForOverlay()
 	if err != nil {
@@ -339,8 +343,8 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	var req daemonRespawnRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req); err != nil {
-		writeAPIError(w, fmt.Errorf("decode body: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
 	taskName := daemon_env_overlay.NormalizeOverlayKey(strings.TrimSpace(req.TaskName))
