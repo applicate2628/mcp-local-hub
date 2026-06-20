@@ -88,10 +88,18 @@ const (
 //     events distinguish parent vs file broadening so operators can
 //     audit the relaxed read-only cases.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
-	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
+	return readStateFileInodeAnchoredWithMaxBytes(path, maxStateFileBytes)
+}
+
+func readStateFileInodeAnchoredWithMaxBytes(path string, maxBytes int64) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, operatorRequiresSingleUserHome, maxBytes)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, requiresStrict, maxStateFileBytes)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requiresStrict func() bool, maxBytes int64) ([]byte, error) {
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -216,8 +224,8 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 	// Pre-allocate based on the file size we already have from
 	// GetFileInformationByHandle to avoid reslicing.
 	fileSize := int64(fi.FileSizeHigh)<<32 | int64(fi.FileSizeLow)
-	if fileSize > maxStateFileBytes {
-		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, fileSize, maxStateFileBytes)
+	if fileSize > maxBytes {
+		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, fileSize, maxBytes)
 	}
 	if fileSize < 0 {
 		return nil, fmt.Errorf("hub-mcp state read %s: invalid file size %d", path, fileSize)
@@ -239,8 +247,8 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 			break
 		}
 		buf = append(buf, chunk[:read]...)
-		if int64(len(buf)) > maxStateFileBytes {
-			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxStateFileBytes)
+		if int64(len(buf)) > maxBytes {
+			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxBytes)
 		}
 	}
 	// io.ReadAll-style invariant: a successful read of an empty

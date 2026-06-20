@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -283,6 +284,31 @@ func TestWriteStateFileAtomic_DefaultRelaxLaneSucceeds(t *testing.T) {
 	}
 	if path, _ := body["path"].(string); path != dst {
 		t.Errorf("event body.path = %v, want %q", body["path"], dst)
+	}
+}
+
+func TestStateFileRelaxLane_WrongOwnerGateCauseDoesNotRelax(t *testing.T) {
+	gateErr := errors.Join(ErrSecureWriteParentInsecure, ErrWrongOwner)
+
+	if stateFileParentGateAllowsDefaultRelax(gateErr) {
+		t.Fatalf("wrong-owner parent gate error entered the default-relax lane; want refusal")
+	}
+}
+
+func TestStateFileRelaxLane_BroadenedOwnerCorrectGateCauseRelaxes(t *testing.T) {
+	gateErr := ErrSecureWriteParentInsecure
+
+	if !stateFileParentGateAllowsDefaultRelax(gateErr) {
+		t.Fatalf("broadened owner-correct parent gate error did not enter the default-relax lane")
+	}
+}
+
+func TestStateFileRelaxLane_NonParentGateCauseDoesNotRelax(t *testing.T) {
+	if stateFileParentGateAllowsDefaultRelax(nil) {
+		t.Fatalf("nil error entered the default-relax lane; want refusal")
+	}
+	if stateFileParentGateAllowsDefaultRelax(ErrWrongOwner) {
+		t.Fatalf("wrong-owner error without parent-gate sentinel entered the default-relax lane; want refusal")
 	}
 }
 

@@ -600,7 +600,7 @@ func daemonIntentRecordMergedOrSuperseded(subBlock, legacy DaemonIntent) bool {
 // corrupt stop file must NOT silently merge to "no stops" and un-suppress a
 // stopped daemon.
 func readDaemonIntentForMerge(path string) (*DaemonIntentFile, error) {
-	raw, err := readStateFileInodeAnchored(path)
+	raw, err := readDaemonIntentFileInodeAnchored(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil

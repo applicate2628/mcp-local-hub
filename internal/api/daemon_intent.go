@@ -95,6 +95,10 @@ const (
 	// byte length. Per plan §35: real TS task names are <100 bytes; 1KB
 	// gives ample headroom while still rejecting accidental binary blobs.
 	IdentityFieldByteCap = 1024
+	// maxDaemonIntentFileBytes is the daemon-intent.json read ceiling. It is
+	// intentionally larger than maxStateFileBytes because daemon-intent.json is
+	// a per-task map and can legitimately exceed the small hub-state cap.
+	maxDaemonIntentFileBytes = 16 << 20
 )
 
 // ---------------------------------------------------------------------------
@@ -357,6 +361,10 @@ func ParseDaemonIntentFile(raw []byte) (DaemonIntentFile, error) {
 	return parseAndValidateIntent(raw)
 }
 
+func readDaemonIntentFileInodeAnchored(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredWithMaxBytes(path, maxDaemonIntentFileBytes)
+}
+
 // ---------------------------------------------------------------------------
 // ReadDaemonIntent — three-state file read with quarantine-on-corrupt.
 // ---------------------------------------------------------------------------
@@ -570,7 +578,7 @@ func readDaemonIntentPathWithTimeout(statePath, lockPath string, timeout time.Du
 // invariants (corrupt-rename under flock, prune best-effort,
 // QuarantinePath surfaced to caller) are preserved exactly.
 func readIntentParseAndQuarantine(statePath string) IntentReadResult {
-	raw, err := readStateFileInodeAnchored(statePath)
+	raw, err := readDaemonIntentFileInodeAnchored(statePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || isHubMcpStateMissingErr(err) {
 			return IntentReadResult{
@@ -955,7 +963,7 @@ func (a *API) ClearDaemonIntent(taskName string, who string) error {
 // here triggers a quarantine rename so the next write lands on a
 // clean canonical path.
 func readIntentLocked(statePath string) DaemonIntentFile {
-	raw, err := readStateFileInodeAnchored(statePath)
+	raw, err := readDaemonIntentFileInodeAnchored(statePath)
 	if err != nil {
 		return DaemonIntentFile{Tasks: map[string]DaemonIntent{}}
 	}

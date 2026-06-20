@@ -17,6 +17,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -32,16 +33,24 @@ import (
 // Returns up to maxStateFileBytes (defined in hub_mcp_state.go)
 // of content.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
-	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
+	return readStateFileInodeAnchoredWithMaxBytes(path, maxStateFileBytes)
+}
+
+func readStateFileInodeAnchoredWithMaxBytes(path string, maxBytes int64) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, operatorRequiresSingleUserHome, maxBytes)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, requiresStrict, maxStateFileBytes)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requiresStrict func() bool, maxBytes int64) ([]byte, error) {
 	parentPath := filepath.Dir(path)
 	basename := filepath.Base(path)
 
 	pfd, err := unix.Open(parentPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ENOTDIR) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, &os.PathError{Op: "open", Path: parentPath, Err: os.ErrNotExist}
 		}
 		return nil, fmt.Errorf("open parent %s: %w", parentPath, err)
@@ -90,7 +99,7 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 
 	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ENOTDIR) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
 		}
 		if errors.Is(err, syscall.ELOOP) {
@@ -136,8 +145,8 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 
 	// Read via the verified fd. unix.Read in a loop until EOF or
 	// the cap fires. Pre-allocate based on Stat_t.Size.
-	if st.Size > maxStateFileBytes {
-		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, st.Size, maxStateFileBytes)
+	if st.Size > maxBytes {
+		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, st.Size, maxBytes)
 	}
 	if st.Size < 0 {
 		return nil, fmt.Errorf("hub-mcp state read %s: invalid file size %d", path, st.Size)
@@ -153,8 +162,8 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 			break
 		}
 		buf = append(buf, chunk[:n]...)
-		if int64(len(buf)) > maxStateFileBytes {
-			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxStateFileBytes)
+		if int64(len(buf)) > maxBytes {
+			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxBytes)
 		}
 	}
 	if buf == nil {

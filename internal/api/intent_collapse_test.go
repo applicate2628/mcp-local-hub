@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -32,6 +33,39 @@ func readSupervisorStopsFromDisk(t *testing.T, stateDir string) map[string]Daemo
 		return map[string]DaemonIntent{}
 	}
 	return got.Stops
+}
+
+func TestReadDaemonIntentForMerge_LargeLegacyDaemonIntentAboveHubStateCap(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	tasks := make(map[string]DaemonIntent, 12000)
+	for i := 0; i < 12000; i++ {
+		tasks[fmt.Sprintf("\\mcp-local-hub-large-%05d", i)] = DaemonIntent{
+			Desired:   IntentDesiredStopped,
+			Reason:    IntentReasonUserStop,
+			UpdatedAt: now,
+		}
+	}
+	raw, err := json.Marshal(DaemonIntentFile{Tasks: tasks})
+	if err != nil {
+		t.Fatalf("marshal large daemon-intent: %v", err)
+	}
+	if len(raw) <= maxStateFileBytes {
+		t.Fatalf("test fixture is only %d bytes; want above hub-state cap %d", len(raw), maxStateFileBytes)
+	}
+
+	path := filepath.Join(stateDir, intentFileLeaf)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write large daemon-intent: %v", err)
+	}
+
+	got, err := readDaemonIntentForMerge(path)
+	if err != nil {
+		t.Fatalf("readDaemonIntentForMerge over hub-state cap returned error: %v", err)
+	}
+	if got == nil || len(got.Tasks) != len(tasks) {
+		t.Fatalf("readDaemonIntentForMerge tasks = %d, want %d", len(got.Tasks), len(tasks))
+	}
 }
 
 // ---------------------------------------------------------------------------

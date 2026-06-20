@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -53,5 +54,24 @@ func TestReadStateFileInodeAnchored_FileModeWriteBroadenedDefaultRejects(t *test
 	}
 	if !errors.Is(err, ErrTooLoose) {
 		t.Fatalf("err = %v, want ErrTooLoose", err)
+	}
+}
+
+func TestReadStateFileInodeAnchored_ENOTDIRPreserved(t *testing.T) {
+	dir := hardenedTempDir(t)
+	notDir := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write non-directory component: %v", err)
+	}
+
+	_, err := readStateFileInodeAnchoredWithStrictPolicy(filepath.Join(notDir, "supervisor-intent.json"), func() bool { return false })
+	if err == nil {
+		t.Fatal("read through a non-directory path component returned nil; want ENOTDIR")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ENOTDIR was reported as missing-file absent semantics: %v", err)
+	}
+	if !errors.Is(err, syscall.ENOTDIR) {
+		t.Fatalf("err = %v, want errors.Is(syscall.ENOTDIR)", err)
 	}
 }
