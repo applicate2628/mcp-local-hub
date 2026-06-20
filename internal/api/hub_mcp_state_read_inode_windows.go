@@ -1,30 +1,21 @@
 //go:build windows
 
 // hub_mcp_state_read_inode_windows.go — inode-anchored secure read
-// for hub-mcp state files, mirroring the verify pipeline in
-// hub_mcp_state_dacl_windows.go but eliminating the TOCTOU swap
-// window the old verify→os.ReadFile chain left open on hosts whose
-// parent directory granted write/delete/DAC-edit access to a
-// non-allowlisted SID.
+// for hub-mcp state files. It opens and reads through the same verified
+// file handle so no path-based read can race after verification.
 //
 // Why this exists (work-items/bugs/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md):
 //
-//   The old readHubMcpStateFile called VerifyHubMcpStateDACL (which
-//   opens a parent-handle, opens the file relative to it, verifies
-//   the file's DACL, then CLOSES the handle), and then performed a
-//   path-based os.ReadFile. Between the verify-close and the
-//   os.ReadFile path resolution, a co-resident principal with
-//   FILE_DELETE_CHILD on the parent could replace the file with
-//   attacker-controlled content; the hub would then read attacker
-//   bytes that the verify never saw. To mitigate that window
-//   without a re-open, hub_mcp_state_dacl_windows.go:143-145
-//   refused parent DACLs that granted WRITE/DAC-edit to
-//   non-allowlisted SIDs even in default-relax mode. The side
-//   effect: on solo-developer Windows hosts whose %LOCALAPPDATA%
-//   parent had a CodexSandboxUsers or orphan AD SID ACE (common
-//   on third-party-installer-managed boxes), every state-file
-//   read failed, blocking demigrate / strict-mode --recover /
-//   any other operator action that consults managed-entries.json.
+//   The old read path verified one handle and then performed a path-based
+//   os.ReadFile. Between verify-close and os.ReadFile path resolution, a
+//   co-resident principal with FILE_DELETE_CHILD on the parent could replace
+//   the file with attacker-controlled content; the hub would then read bytes
+//   that the verifier never saw. The former mitigation refused parent DACLs
+//   that granted WRITE/DAC-edit to non-allowlisted SIDs even in default-relax
+//   mode. The side effect: on solo-developer Windows hosts whose
+//   %LOCALAPPDATA% parent had a CodexSandboxUsers or orphan AD SID ACE, every
+//   state-file read failed, blocking demigrate / strict-mode --recover / any
+//   other operator action that consults managed-entries.json.
 //
 // Fix design:
 //
@@ -46,37 +37,58 @@ package api
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"golang.org/x/sys/windows"
 )
 
+const (
+	statusNoSuchFile        windows.NTStatus = 0xC000000F
+	statusObjectNameMissing windows.NTStatus = 0xC0000034
+	statusObjectPathMissing windows.NTStatus = 0xC000003A
+)
+
 // readStateFileInodeAnchoredWindows opens parent + file under the
 // verified parent handle, asserts the file is single-user-safe via
-// the same allowlist gate as VerifyHubMcpStateDACL, and reads the
+// the shared Windows DACL allowlist gate, and reads the
 // content via the same handle. No path-based read between verify
 // and read, so the TOCTOU swap window the old chain left open is
 // closed at the kernel level.
 //
-// Returns up to maxStateFileBytes of content. Files larger than the
-// cap cause the read to surface an error rather than truncate
-// silently (the cap is OOM protection; legitimate state files are
-// well under it).
+// The byte cap is resolved from the state-file kind. Files larger than the
+// resolved cap cause the read to surface an error rather than truncate
+// silently (the cap is OOM protection).
 //
 // Parent-DACL gate semantics:
 //
 //   - Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1): any
-//     non-allowlisted ACE on the parent rejects. Matches strict-mode
-//     behavior in verifyHubMcpStateDACLImpl.
+//     non-allowlisted ACE on the parent rejects.
 //   - Default-relax mode: read-only broadening logs a warn event
 //     and proceeds. Write/DAC-edit broadening ALSO proceeds (the
-//     swap window the old verifyHubMcpStateDACLImpl rejected on is
-//     closed by the inode-anchored read in this function — the
+//     swap window the old verifier rejected on is closed by the
+//     inode-anchored read in this function — the
 //     attacker can replace the directory entry but not the inode
-//     our handle points to). A separate warn event distinguishes
-//     write-broadening proceed from read-only-broadening proceed so
-//     operators can audit the more-permissive case.
+//     our handle points to). File-DACL broadening is stricter:
+//     read-only grants warn and proceed in default-relax mode, while
+//     WRITE/DAC/DELETE/owner grants are refused in every mode because
+//     a non-allowlisted SID could have modified the file before this
+//     read. Strict mode keeps both DACL gates hard. Separate warn
+//     events distinguish parent vs file broadening so operators can
+//     audit the relaxed read-only cases.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false)
+}
+
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks bool) ([]byte, error) {
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -94,6 +106,9 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		0,
 	)
 	if err != nil {
+		if windowsAnchoredReadErrIsNotExist(err) {
+			return nil, &os.PathError{Op: "open", Path: parentDir, Err: os.ErrNotExist}
+		}
 		return nil, fmt.Errorf("open parent %s: %w", parentDir, err)
 	}
 	defer windows.CloseHandle(parentHandle)
@@ -103,11 +118,11 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 	// read-only and write/DAC-edit broadening because the read
 	// below is inode-anchored.
 	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
-		if operatorRequiresSingleUserHome() {
+		if requiresStrict() {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				parentDir, err, RequireSingleUserHomeEnv)
 		}
-		if errors.Is(err, ErrWrongOwner) {
+		if !stateFileParentGateAllowsDefaultRelax(err) {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
 		}
 		// Default-relax. Distinguish write-broadening from
@@ -117,13 +132,15 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(parentHandle); wrErr != nil {
 			reason = "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read because subsequent ReadFile is bound to the file handle, not the path)"
 		}
-		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
-			"path":   path,
-			"parent": parentDir,
-			"reason": reason,
-			"err":    err.Error(),
-			"note":   "file's own DACL verified below; ReadFile is handle-bound so TOCTOU swap window is closed at the kernel level",
-		})
+		if auditFallbacks {
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+				"path":   path,
+				"parent": parentDir,
+				"reason": reason,
+				"err":    err.Error(),
+				"note":   "file's own DACL verified below; ReadFile is handle-bound so TOCTOU swap window is closed at the kernel level",
+			})
+		}
 	}
 
 	// Open the file RELATIVE to the parent handle, with
@@ -136,6 +153,9 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		windows.FILE_READ_DATA|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
 	)
 	if err != nil {
+		if windowsAnchoredReadErrIsNotExist(err) {
+			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+		}
 		// FILE_NON_DIRECTORY_FILE inside ntOpenRelative makes NT
 		// fail the open with STATUS_FILE_IS_A_DIRECTORY (0xC00000BA)
 		// when the target is a directory. Map that to our portable
@@ -162,9 +182,34 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		return nil, ErrIrregularFile
 	}
 
-	// File-DACL gate (same allowlist as the old verify).
+	// File-DACL gate. Strict mode preserves the single-user DACL
+	// invariant. Default-relax mirrors the write side: inherited
+	// non-allowlisted principals on normal temp/state files warn but
+	// do not block the handle-bound read. Wrong-owner remains hard.
 	if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
-		return nil, err
+		if requiresStrict() {
+			return nil, fmt.Errorf("file %s not single-user safe: %w; %s=1 is set, so the strict file-DACL gate is enforced (unset that env var, or tighten the file's DACL to remove the offending principal, to proceed)",
+				path, err, RequireSingleUserHomeEnv)
+		}
+		if errors.Is(err, ErrWrongOwner) {
+			return nil, err
+		}
+		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
+			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable", path, wrErr)
+		}
+		if isSecretBearingStateFilePath(path) {
+			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing", path, err)
+		}
+		if auditFallbacks {
+			reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
+				"path":   path,
+				"parent": parentDir,
+				"reason": reason,
+				"err":    err.Error(),
+				"note":   "ReadFile is handle-bound; symlink/reparse refusal and inode anchoring remain enforced",
+			})
+		}
 	}
 
 	// Read the content via the verified handle. windows.ReadFile
@@ -172,8 +217,8 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 	// Pre-allocate based on the file size we already have from
 	// GetFileInformationByHandle to avoid reslicing.
 	fileSize := int64(fi.FileSizeHigh)<<32 | int64(fi.FileSizeLow)
-	if fileSize > maxStateFileBytes {
-		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, fileSize, maxStateFileBytes)
+	if fileSize > maxBytes {
+		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, fileSize, maxBytes)
 	}
 	if fileSize < 0 {
 		return nil, fmt.Errorf("hub-mcp state read %s: invalid file size %d", path, fileSize)
@@ -195,8 +240,8 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 			break
 		}
 		buf = append(buf, chunk[:read]...)
-		if int64(len(buf)) > maxStateFileBytes {
-			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxStateFileBytes)
+		if int64(len(buf)) > maxBytes {
+			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxBytes)
 		}
 	}
 	// io.ReadAll-style invariant: a successful read of an empty
@@ -205,4 +250,19 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		buf = []byte{}
 	}
 	return buf, nil
+}
+
+func windowsAnchoredReadErrIsNotExist(err error) bool {
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) ||
+		errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		return true
+	}
+	var status windows.NTStatus
+	if errors.As(err, &status) {
+		switch status {
+		case statusNoSuchFile, statusObjectNameMissing, statusObjectPathMissing:
+			return true
+		}
+	}
+	return false
 }

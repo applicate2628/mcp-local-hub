@@ -1,83 +1,23 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
-
-// TestVerifyHubMcpStateDACLAcceptsFreshlyCreatedFile is the happy-path
-// gate: a file just written by SecureWriteClientConfig must pass the
-// allowlist check. Build-neutral — the POSIX impl checks owner-uid +
-// mode mask, the Windows impl checks the canonical DACL on both the
-// file and its immediate parent dir.
-//
-// Uses hardenedTempDir so the parent-dir DACL gate (added in the
-// parent-dir-dacl-missing fix) doesn't reject %TEMP%'s inherited
-// Authenticated Users ACE on Windows. POSIX shim is pass-through.
-func TestVerifyHubMcpStateDACLAcceptsFreshlyCreatedFile(t *testing.T) {
-	dir := hardenedTempDir(t)
-	target := filepath.Join(dir, "hub-mcp-tokens.json")
-	if err := SecureWriteClientConfig(target, []byte("{}")); err != nil {
-		t.Fatalf("SecureWriteClientConfig: %v", err)
-	}
-	if err := VerifyHubMcpStateDACL(target); err != nil {
-		t.Errorf("VerifyHubMcpStateDACL = %v, want nil for own freshly created file", err)
-	}
-}
-
-// TestVerifyHubMcpStateDACLRejectsBroadlyReadable: POSIX-side check
-// that 0644 (group+other readable) is refused. The Windows-side broad-
-// SID test lives in the Windows-build-tagged synthesis test that
-// applies an Authenticated Users ALLOW ACE via SetNamedSecurityInfo.
-func TestVerifyHubMcpStateDACLRejectsBroadlyReadable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("posix-specific; windows broad-SID case covered in the synthesis test")
-	}
-	dir := t.TempDir()
-	target := filepath.Join(dir, "loose.json")
-	if err := os.WriteFile(target, []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	err := VerifyHubMcpStateDACL(target)
-	if err == nil {
-		t.Errorf("VerifyHubMcpStateDACL must reject 0644 mode (group/other readable)")
-	}
-}
-
-// TestVerifyHubMcpStateDACLRejectsSymlink confirms the
-// O_NOFOLLOW / FILE_FLAG_OPEN_REPARSE_POINT invariant: the verifier
-// must refuse to follow a symlink to confirm the target file's
-// attributes. Otherwise an attacker could swap the target between
-// stat and read.
-func TestVerifyHubMcpStateDACLRejectsSymlink(t *testing.T) {
-	dir := t.TempDir()
-	real := filepath.Join(dir, "real.json")
-	if err := os.WriteFile(real, []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(dir, "link.json")
-	if err := os.Symlink(real, link); err != nil {
-		t.Skipf("symlink unsupported on this host: %v", err)
-	}
-	err := VerifyHubMcpStateDACL(link)
-	if err == nil {
-		t.Errorf("VerifyHubMcpStateDACL must refuse to follow a symlink target")
-	}
-}
 
 // TestReadStateFileInodeAnchored_WriteBroadenedParent_DefaultMode pins
 // the v0.4.6 inode-anchored-read invariant: a parent directory whose
 // mode grants group/world WRITE permission no longer blocks the read
 // under default-relax (POSIX mode 0o022 mirrors the Windows
 // CodexSandboxUsers / orphan-SID DACL pattern that motivated this
-// change). Pre-fix this case rejected at hub_mcp_state_dacl_posix.go:63
-// because the path-based os.ReadFile that followed the verify left a
-// TOCTOU swap window. The new readStateFileInodeAnchored reads via
-// the openat fd directly, closing that window — so the rejection is
-// no longer needed and demigrate / managed-entries-marker reads
-// succeed on solo-developer hosts with broadened parent ACLs.
+// change). The inode-anchored reader uses the openat fd directly,
+// closing the path-read swap window — so the old rejection is no longer
+// needed and demigrate / managed-entries-marker reads succeed on
+// solo-developer hosts with broadened parent ACLs.
 func TestReadStateFileInodeAnchored_WriteBroadenedParent_DefaultMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only mode probe; Windows-side coverage is the synthesis test in hub_mcp_state_dacl_windows_test.go")
@@ -153,11 +93,41 @@ func TestReadStateFileInodeAnchored_TightParent_DefaultMode(t *testing.T) {
 	}
 }
 
+func TestReadStateFileInodeAnchored_FileReadBroadenedDefaultModeRefusesSecretState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only mode probe; Windows DACL case lives in hub_mcp_state_dacl_windows_test.go")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod parent: %v", err)
+	}
+
+	nonSecret := filepath.Join(dir, supervisorIntentFileLeaf)
+	if err := os.WriteFile(nonSecret, []byte(`{"strict_mode":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readStateFileInodeAnchored(nonSecret); err != nil {
+		t.Fatalf("default mode must still relax read-broadened non-secret state file: %v", err)
+	} else if string(got) != `{"strict_mode":false}` {
+		t.Fatalf("non-secret payload = %q", got)
+	}
+
+	secret := filepath.Join(dir, hubMcpTokensFileLeaf)
+	if err := os.WriteFile(secret, []byte(`{"tokens":{"claude-code":"`+strings.Repeat("a", 64)+`"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readStateFileInodeAnchored(secret); err == nil {
+		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
+	} else if !errors.Is(err, ErrTooLoose) {
+		t.Fatalf("secret read-broadened error = %v, want ErrTooLoose", err)
+	}
+}
+
 // TestReadStateFileInodeAnchored_RejectsSymlinkTarget pins the
 // symlink-refusal invariant on the inode-anchored read: an openat
 // with O_NOFOLLOW fails on a symlink, so the function returns
-// ErrIrregularFile. Mirror of the older
-// TestVerifyHubMcpStateDACLRejectsSymlink for the new code path.
+// ErrIrregularFile.
 func TestReadStateFileInodeAnchored_RejectsSymlinkTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only path; Windows symlink test in hub_mcp_state_dacl_windows_test.go")

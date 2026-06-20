@@ -1,6 +1,8 @@
 package secrets
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,6 +49,159 @@ func TestVault_InitSetGet(t *testing.T) {
 	}
 	if got2 != "super-secret-value" {
 		t.Errorf("persisted value = %q, want super-secret-value", got2)
+	}
+}
+
+func TestVaultSaveAtomicRenameFailurePreservesExistingVault(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+	if err := InitVault(keyPath, vaultPath); err != nil {
+		t.Fatalf("InitVault: %v", err)
+	}
+	v, err := OpenVault(keyPath, vaultPath)
+	if err != nil {
+		t.Fatalf("OpenVault: %v", err)
+	}
+	before, err := os.ReadFile(vaultPath)
+	if err != nil {
+		t.Fatalf("read existing vault: %v", err)
+	}
+
+	sentinel := errors.New("synthetic rename failure")
+	previousRename := vaultAtomicRenameFile
+	var tempPath string
+	vaultAtomicRenameFile = func(src, dst string) error {
+		if dst != vaultPath {
+			return previousRename(src, dst)
+		}
+		tempPath = src
+		if filepath.Dir(src) != dir {
+			t.Fatalf("atomic temp dir = %q, want sibling dir %q", filepath.Dir(src), dir)
+		}
+		if src == vaultPath {
+			t.Fatalf("atomic temp path reused destination %q", vaultPath)
+		}
+		if _, statErr := os.Stat(src); statErr != nil {
+			t.Fatalf("atomic temp missing before rename: %v", statErr)
+		}
+		return sentinel
+	}
+	t.Cleanup(func() { vaultAtomicRenameFile = previousRename })
+
+	err = v.Set("API_KEY", "new-value")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Set err = %v, want synthetic rename failure", err)
+	}
+	if tempPath == "" {
+		t.Fatalf("vault save did not attempt sibling temp rename")
+	}
+	after, err := os.ReadFile(vaultPath)
+	if err != nil {
+		t.Fatalf("read vault after failed save: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("vault destination changed after failed atomic rename")
+	}
+	if _, statErr := os.Stat(tempPath); !os.IsNotExist(statErr) {
+		t.Fatalf("atomic temp %q was not cleaned up after failed rename: %v", tempPath, statErr)
+	}
+}
+
+func TestVaultSaveAtomicParentSyncFailureIsReturned(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+	if err := InitVault(keyPath, vaultPath); err != nil {
+		t.Fatalf("InitVault: %v", err)
+	}
+	v, err := OpenVault(keyPath, vaultPath)
+	if err != nil {
+		t.Fatalf("OpenVault: %v", err)
+	}
+
+	sentinel := errors.New("synthetic parent sync failure")
+	previousSync := vaultAtomicSyncParentDir
+	var syncedDir string
+	vaultAtomicSyncParentDir = func(dir string) error {
+		syncedDir = dir
+		return sentinel
+	}
+	t.Cleanup(func() { vaultAtomicSyncParentDir = previousSync })
+
+	err = v.Set("API_KEY", "new-value")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Set err = %v, want synthetic parent sync failure", err)
+	}
+	if syncedDir != dir {
+		t.Fatalf("synced parent dir = %q, want %q", syncedDir, dir)
+	}
+}
+
+func TestInitVaultIdentityWriteUsesAtomicSiblingTemp(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+
+	sentinel := errors.New("synthetic identity rename failure")
+	previousRename := vaultAtomicRenameFile
+	var identityTemp string
+	vaultAtomicRenameFile = func(src, dst string) error {
+		if dst != keyPath {
+			return previousRename(src, dst)
+		}
+		identityTemp = src
+		if filepath.Dir(src) != dir {
+			t.Fatalf("identity temp dir = %q, want sibling dir %q", filepath.Dir(src), dir)
+		}
+		if src == keyPath {
+			t.Fatalf("identity temp path reused destination %q", keyPath)
+		}
+		if _, statErr := os.Stat(src); statErr != nil {
+			t.Fatalf("identity temp missing before rename: %v", statErr)
+		}
+		return sentinel
+	}
+	t.Cleanup(func() { vaultAtomicRenameFile = previousRename })
+
+	err := InitVault(keyPath, vaultPath)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("InitVault err = %v, want synthetic identity rename failure", err)
+	}
+	if identityTemp == "" {
+		t.Fatalf("identity write did not attempt sibling temp rename")
+	}
+	if _, statErr := os.Stat(keyPath); !os.IsNotExist(statErr) {
+		t.Fatalf("identity destination exists after failed atomic rename: %v", statErr)
+	}
+	if _, statErr := os.Stat(vaultPath); !os.IsNotExist(statErr) {
+		t.Fatalf("vault destination exists even though identity write failed first: %v", statErr)
+	}
+	if _, statErr := os.Stat(identityTemp); !os.IsNotExist(statErr) {
+		t.Fatalf("identity temp %q was not cleaned up after failed rename: %v", identityTemp, statErr)
+	}
+}
+
+func TestInitVaultIdentityWriteParentSyncFailureIsReturned(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+
+	sentinel := errors.New("synthetic identity parent sync failure")
+	previousSync := vaultAtomicSyncParentDir
+	var syncedDir string
+	vaultAtomicSyncParentDir = func(dir string) error {
+		syncedDir = dir
+		return sentinel
+	}
+	t.Cleanup(func() { vaultAtomicSyncParentDir = previousSync })
+
+	err := InitVault(keyPath, vaultPath)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("InitVault err = %v, want synthetic parent sync failure", err)
+	}
+	if syncedDir != dir {
+		t.Fatalf("synced parent dir = %q, want %q", syncedDir, dir)
 	}
 }
 

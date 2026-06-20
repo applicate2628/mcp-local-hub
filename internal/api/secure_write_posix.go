@@ -76,7 +76,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	// the new file regardless of how loose the parent dir mode is.
 	if !skipParentGate {
 		if err := verifyPosixParentDirFromFd(dirFd); err != nil {
-			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDir, err)
 		}
 	}
 
@@ -295,7 +295,7 @@ func verifyPosixParentDirFromFd(fd int) error {
 	return verifyPosixOwnerAndModeFromFd(
 		fd,
 		func(uid, want int) error {
-			return fmt.Errorf("parent owned by uid %d, want %d", uid, want)
+			return fmt.Errorf("%w: parent owned by uid %d, want %d", ErrWrongOwner, uid, want)
 		},
 		func(mode uint32) error {
 			// 0o077 = ANY group/world bit (read OR write OR execute). A
@@ -312,7 +312,7 @@ func verifyPosixFileFromFd(fd int) error {
 	return verifyPosixOwnerAndModeFromFd(
 		fd,
 		func(uid, want int) error {
-			return fmt.Errorf("file owned by uid %d, want %d", uid, want)
+			return fmt.Errorf("%w: file owned by uid %d, want %d", ErrWrongOwner, uid, want)
 		},
 		func(mode uint32) error {
 			return fmt.Errorf("file mode %#o is group- or other-accessible", mode)

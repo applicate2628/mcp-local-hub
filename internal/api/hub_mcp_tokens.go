@@ -444,9 +444,9 @@ func isValidHexToken(s string) bool {
 }
 
 // loadHubTokensLocked reads + parses the tokens file. Returns a zero
-// table + error when the file is missing OR fails the
-// VerifyHubMcpStateDACL gate. Callers MUST already hold hub-mcp.lock
-// when composing read-modify-write semantics.
+// table + error when the file is missing OR fails the inode-anchored
+// read gate. Callers MUST already hold hub-mcp.lock when composing
+// read-modify-write semantics.
 func loadHubTokensLocked() (HubTokenTable, error) {
 	raw, err := readHubMcpStateFile(hubMcpTokensFileLeaf)
 	if err != nil {

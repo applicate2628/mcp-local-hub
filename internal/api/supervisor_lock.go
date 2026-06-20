@@ -156,7 +156,7 @@ func (l *SupervisorLock) Owner() SupervisorLockOwner {
 // file.
 func ReadSupervisorLockOwner(path string) (SupervisorLockOwner, error) {
 	var o SupervisorLockOwner
-	raw, err := os.ReadFile(path + ".owner.json")
+	raw, err := readStateFileInodeAnchored(path + ".owner.json")
 	if err != nil {
 		return o, err
 	}

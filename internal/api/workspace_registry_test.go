@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -62,14 +63,63 @@ func TestRegistry_RoundtripWithEntries(t *testing.T) {
 	}
 }
 
+func TestRegistry_LoadAcceptsLargeWorkspacesFile(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "workspaces.yaml")
+	raw, wantEntries := largeWorkspaceRegistryYAML(t)
+	if len(raw) <= maxStateFileBytes {
+		t.Fatalf("large workspace registry fixture is only %d bytes; want above hub-state cap %d", len(raw), maxStateFileBytes)
+	}
+	if int64(len(raw)) > maxIntentFileBytes {
+		t.Fatalf("large workspace registry fixture grew past established large-state cap: %d > %d", len(raw), maxIntentFileBytes)
+	}
+	if got := stateFileReadCapBytes(path); got <= maxStateFileBytes {
+		t.Errorf("stateFileReadCapBytes(%q) = %d, want a workspaces.yaml-specific cap above %d", path, got, maxStateFileBytes)
+	}
+	if err := WriteStateFileBytesLockHeld(path, raw); err != nil {
+		t.Fatalf("seed large workspace registry: %v", err)
+	}
+
+	reg := NewRegistry(path)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load rejected %d-byte workspaces.yaml: %v", len(raw), err)
+	}
+	if len(reg.Workspaces) != wantEntries {
+		t.Fatalf("Workspaces len = %d, want %d", len(reg.Workspaces), wantEntries)
+	}
+}
+
+func largeWorkspaceRegistryYAML(t *testing.T) ([]byte, int) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("version: 1\nworkspaces:\n")
+	entries := 0
+	for b.Len() <= maxStateFileBytes+4096 {
+		i := strconv.Itoa(entries)
+		b.WriteString("  - workspace_key: ws")
+		b.WriteString(i)
+		b.WriteString("\n    workspace_path: C:/workspace/")
+		b.WriteString(i)
+		b.WriteString("/")
+		b.WriteString(strings.Repeat("x", 96))
+		b.WriteString("\n    language: python\n    backend: mcp-language-server\n    port: 9")
+		b.WriteString(i)
+		b.WriteString("\n    task_name: mcp-local-hub-lsp-ws")
+		b.WriteString(i)
+		b.WriteString("-python\n    client_entries:\n      codex-cli: mcp-language-server-python\n    weekly_refresh: true\n")
+		entries++
+	}
+	return []byte(b.String()), entries
+}
+
 // TestRegistry_SaveBacksUpPreMutationFile verifies that Save() preserves the
 // prior file contents as a rolling .bak before overwriting. This is the
 // recovery mechanism; it does not simulate a crash — it simply asserts the
 // backup-before-write primitive that makes crash recovery possible.
 func TestRegistry_SaveBacksUpPreMutationFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "workspaces.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\nworkspaces:\n  - workspace_key: oldentry\n    language: python\n    port: 9200\n"), 0600); err != nil {
+	if err := WriteStateFileBytesLockHeld(path, []byte("version: 1\nworkspaces:\n  - workspace_key: oldentry\n    language: python\n    port: 9200\n")); err != nil {
 		t.Fatal(err)
 	}
 	// Attempt to write invalid YAML via the atomic helper — simulate by passing
@@ -263,7 +313,6 @@ func TestRegistry_LastErrorTruncation(t *testing.T) {
 	}
 }
 
-
 // B.1 (serena sentinel + dual-gate) test contract.
 // Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md B.1.
 
@@ -320,15 +369,15 @@ func TestRegistry_SerenaSentinel_RoundTripsNewFields(t *testing.T) {
 	registeredAt := time.Now().UTC().Truncate(time.Second)
 	languages := []string{"go", "typescript", "markdown"}
 	if err := reg.PutSerena(WorkspaceEntry{
-		WorkspaceKey: "abcd1234",
+		WorkspaceKey:  "abcd1234",
 		WorkspacePath: "c:/ws/foo",
-		Language: SerenaLanguageSentinel,
-		Backend: "serena",
-		Port: 9500,
-		TaskName: "mcp-local-hub-serena-abcd1234",
-		RegisteredAt: registeredAt,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9500,
+		TaskName:      "mcp-local-hub-serena-abcd1234",
+		RegisteredAt:  registeredAt,
 		RegisteredVia: "manual",
-		Languages: languages,
+		Languages:     languages,
 	}); err != nil {
 		t.Fatalf("PutSerena: %v", err)
 	}
@@ -489,7 +538,7 @@ func TestRegistry_AllocateSerenaPort_ExhaustionReturnsError(t *testing.T) {
 }
 
 func TestRegistry_LegacyEntryReadAccepted(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "workspaces.yaml")
 	legacy := []byte(`version: 1
 workspaces:
@@ -503,7 +552,7 @@ workspaces:
       codex-cli: mcp-language-server-python
     weekly_refresh: true
 `)
-	if err := os.WriteFile(path, legacy, 0600); err != nil {
+	if err := WriteStateFileBytesLockHeld(path, legacy); err != nil {
 		t.Fatal(err)
 	}
 	reg := NewRegistry(path)

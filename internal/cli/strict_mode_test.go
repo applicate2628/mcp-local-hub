@@ -16,8 +16,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
@@ -950,6 +953,112 @@ func TestStrictModeRecover_InProgressMarkerReconciles(t *testing.T) {
 	}
 }
 
+func TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode(t *testing.T) {
+	t.Setenv(api.RequireSingleUserHomeEnv, "")
+	stateDir := t.TempDir()
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(stateDir, 0o755); err != nil {
+			t.Fatalf("chmod state dir read-broadened: %v", err)
+		}
+	}
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	api.ResetStrictModeIntentCacheForTest()
+	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
+
+	tmp := &strictModeFixture{
+		t:              t,
+		stateDir:       stateDir,
+		intentPath:     filepath.Join(stateDir, "supervisor-intent.json"),
+		breadcrumbPath: filepath.Join(stateDir, "strict-mode-mutation-incomplete.json"),
+		backend:        &fakeAutostartBackend{},
+	}
+	timerEnabled := true
+	initial := &api.SupervisorIntentFile{
+		Version:   11,
+		UpdatedAt: "1970-01-01T00:00:00Z",
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:     `\mcp-local-hub-memory-default`,
+			Server:       "memory",
+			Daemon:       "default",
+			Command:      "node",
+			Args:         []string{"memory-server.js"},
+			Port:         9128,
+			ManifestHash: "sha256:memory",
+		}},
+		MaintenanceTimers: []api.MaintenanceTimer{{
+			Name:    `\mcp-local-hub-maintenance-memory`,
+			Kind:    "server-weekly-refresh",
+			Server:  "memory",
+			Command: "mcphub",
+			Args:    []string{"maintenance", "refresh", "memory"},
+			Enabled: &timerEnabled,
+		}},
+		StrictMode: false,
+		Stops: map[string]api.DaemonIntent{
+			`\mcp-local-hub-memory-default`: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Date(2026, 6, 20, 14, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+	if err := api.WriteSupervisorIntent(tmp.intentPath, initial); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+
+	bc := strictModeBreadcrumb{
+		Intended:          true,
+		ActualIntentState: false,
+		ActualShimState:   false,
+		TS:                "2026-06-20T10:00:00Z",
+		Phase:             strictModeBreadcrumbPhaseInProgress,
+	}
+	raw, _ := json.MarshalIndent(bc, "", "  ")
+	if err := api.WriteStateFileBytesAtomic(tmp.BreadcrumbPath(), raw); err != nil {
+		t.Fatalf("seed breadcrumb: %v", err)
+	}
+	liveIntent := *initial
+	liveIntent.StrictMode = true
+	if err := api.WriteSupervisorIntent(tmp.IntentPath(), &liveIntent); err != nil {
+		t.Fatalf("seed live strict intent: %v", err)
+	}
+	tmp.backend.installed = true
+	tmp.backend.currentStrict = false
+	api.ResetStrictModeIntentCacheForTest()
+
+	deps := tmp.Deps()
+	deps.PromptOperator = func() (string, error) { return "B", nil }
+	if err := RunStrictModeRecover(deps); err != nil {
+		t.Fatalf("recover must read breadcrumb even when persisted strict_mode=true and parent is read-broadened: %v", err)
+	}
+	api.ResetStrictModeIntentCacheForTest()
+	intent, err := api.ReadSupervisorIntent(tmp.IntentPath())
+	if err != nil {
+		t.Fatalf("read recovered intent: %v", err)
+	}
+	if intent.StrictMode {
+		t.Fatal("recover branch B did not roll intent back to strict_mode=false")
+	}
+	if tmp.backend.currentStrict {
+		t.Fatal("recover branch B unexpectedly left shim strict_mode=true")
+	}
+	if intent.Version != initial.Version {
+		t.Fatalf("version = %d, want %d", intent.Version, initial.Version)
+	}
+	if intent.UpdatedAt != initial.UpdatedAt {
+		t.Fatalf("updated_at = %q, want %q", intent.UpdatedAt, initial.UpdatedAt)
+	}
+	if !reflect.DeepEqual(intent.Daemons, initial.Daemons) {
+		t.Fatalf("daemons changed: got %+v want %+v", intent.Daemons, initial.Daemons)
+	}
+	if !reflect.DeepEqual(intent.MaintenanceTimers, initial.MaintenanceTimers) {
+		t.Fatalf("maintenance_timers changed: got %+v want %+v", intent.MaintenanceTimers, initial.MaintenanceTimers)
+	}
+	if !reflect.DeepEqual(intent.Stops, initial.Stops) {
+		t.Fatalf("stops changed: got %+v want %+v", intent.Stops, initial.Stops)
+	}
+}
+
 // ============================================================================
 // Disable path (parallel to enable): true → false atomic mutation.
 // ============================================================================
@@ -971,6 +1080,71 @@ func TestStrictModeDisable_AtomicTwoResource(t *testing.T) {
 	shimArgs := tmp.ReadShimArgs()
 	if strings.Contains(shimArgs, "--strict-mode") {
 		t.Fatalf("shim args should not contain --strict-mode after disable: got %q", shimArgs)
+	}
+}
+
+func TestStrictModeDisable_PreservesNonStrictIntentFields(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	enabled := false
+	original := &api.SupervisorIntentFile{
+		Version:   7,
+		UpdatedAt: "2026-06-20T12:34:56Z",
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:     `\mcp-local-hub-time-default`,
+			Server:       "time",
+			Daemon:       "default",
+			Command:      "mcphub",
+			Args:         []string{"daemon", "--server", "time"},
+			Port:         9129,
+			ManifestHash: "sha256:time",
+		}},
+		MaintenanceTimers: []api.MaintenanceTimer{{
+			Name:    `\mcp-local-hub-maintenance-time`,
+			Kind:    "server-weekly-refresh",
+			Server:  "time",
+			Command: "mcphub",
+			Args:    []string{"maintenance", "refresh", "time"},
+			Enabled: &enabled,
+		}},
+		StrictMode: true,
+		Stops: map[string]api.DaemonIntent{
+			`\mcp-local-hub-time-default`: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+	if err := api.WriteSupervisorIntent(tmp.IntentPath(), original); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+	tmp.backend.installed = true
+	tmp.backend.currentStrict = true
+
+	if err := RunStrictMode([]string{"disable"}, tmp.Deps()); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	got, err := api.ReadSupervisorIntent(tmp.IntentPath())
+	if err != nil {
+		t.Fatalf("read intent: %v", err)
+	}
+	if got.StrictMode {
+		t.Fatal("strict_mode should be false after disable")
+	}
+	if got.Version != original.Version {
+		t.Fatalf("version = %d, want %d", got.Version, original.Version)
+	}
+	if got.UpdatedAt != original.UpdatedAt {
+		t.Fatalf("updated_at = %q, want %q", got.UpdatedAt, original.UpdatedAt)
+	}
+	if !reflect.DeepEqual(got.Daemons, original.Daemons) {
+		t.Fatalf("daemons changed: got %+v want %+v", got.Daemons, original.Daemons)
+	}
+	if !reflect.DeepEqual(got.MaintenanceTimers, original.MaintenanceTimers) {
+		t.Fatalf("maintenance_timers changed: got %+v want %+v", got.MaintenanceTimers, original.MaintenanceTimers)
+	}
+	if !reflect.DeepEqual(got.Stops, original.Stops) {
+		t.Fatalf("stops changed: got %+v want %+v", got.Stops, original.Stops)
 	}
 }
 
@@ -1019,6 +1193,85 @@ func TestStrictModeRecover_BranchA(t *testing.T) {
 	// Breadcrumb must be deleted on success.
 	if _, err := os.Stat(tmp.BreadcrumbPath()); err == nil {
 		t.Error("breadcrumb not deleted after successful recover")
+	}
+}
+
+func TestStrictModeRecover_PreservesNonStrictIntentFields(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	enabled := true
+	original := &api.SupervisorIntentFile{
+		Version:   9,
+		UpdatedAt: "2026-06-20T13:00:00Z",
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:     `\mcp-local-hub-memory-default`,
+			Server:       "memory",
+			Daemon:       "default",
+			Command:      "node",
+			Args:         []string{"./mcp-memory-server.js"},
+			Port:         9128,
+			ManifestHash: "sha256:memory",
+		}},
+		MaintenanceTimers: []api.MaintenanceTimer{{
+			Name:    `\mcp-local-hub-maintenance-memory`,
+			Kind:    "server-weekly-refresh",
+			Server:  "memory",
+			Command: "mcphub",
+			Args:    []string{"maintenance", "refresh", "memory"},
+			Enabled: &enabled,
+		}},
+		StrictMode: false,
+		Stops: map[string]api.DaemonIntent{
+			`\mcp-local-hub-memory-default`: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Date(2026, 6, 20, 13, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+	if err := api.WriteSupervisorIntent(tmp.IntentPath(), original); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+	tmp.backend.installed = true
+	tmp.backend.currentStrict = false
+	bc := strictModeBreadcrumb{
+		Intended:          true,
+		ActualIntentState: false,
+		ActualShimState:   false,
+		Step2Error:        "post-step1 shim install error",
+		RevertError:       "revert write hit ENOSPC",
+		TS:                "2026-06-20T13:01:00Z",
+	}
+	raw, _ := json.MarshalIndent(bc, "", "  ")
+	if err := os.WriteFile(tmp.BreadcrumbPath(), raw, 0o600); err != nil {
+		t.Fatalf("seed breadcrumb: %v", err)
+	}
+
+	deps := tmp.Deps()
+	deps.PromptOperator = func() (string, error) { return "A", nil }
+	if err := RunStrictModeRecover(deps); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	got, err := api.ReadSupervisorIntent(tmp.IntentPath())
+	if err != nil {
+		t.Fatalf("read intent: %v", err)
+	}
+	if !got.StrictMode {
+		t.Fatal("strict_mode should be true after branch A recover")
+	}
+	if got.Version != original.Version {
+		t.Fatalf("version = %d, want %d", got.Version, original.Version)
+	}
+	if got.UpdatedAt != original.UpdatedAt {
+		t.Fatalf("updated_at = %q, want %q", got.UpdatedAt, original.UpdatedAt)
+	}
+	if !reflect.DeepEqual(got.Daemons, original.Daemons) {
+		t.Fatalf("daemons changed: got %+v want %+v", got.Daemons, original.Daemons)
+	}
+	if !reflect.DeepEqual(got.MaintenanceTimers, original.MaintenanceTimers) {
+		t.Fatalf("maintenance_timers changed: got %+v want %+v", got.MaintenanceTimers, original.MaintenanceTimers)
+	}
+	if !reflect.DeepEqual(got.Stops, original.Stops) {
+		t.Fatalf("stops changed: got %+v want %+v", got.Stops, original.Stops)
 	}
 }
 

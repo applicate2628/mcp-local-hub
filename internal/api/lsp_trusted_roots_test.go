@@ -430,14 +430,11 @@ func TestLSPTrustedRoots_RemoveNonCanonicalInputMatches(t *testing.T) {
 
 func writeTrustedRootsFile(t *testing.T, path string, f LSPTrustedRootsFile) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir state dir: %v", err)
-	}
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	if err := WriteStateFileBytesAtomic(path, raw); err != nil {
 		t.Fatalf("write trusted-roots file: %v", err)
 	}
 }

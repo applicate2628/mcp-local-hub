@@ -178,14 +178,11 @@ type MaintenanceTimer struct {
 //
 // See also: filterSupervisorIntentOneshotDaemons() for the criteria.
 func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
-	if !operatorAllowsUnhardenedStateRead() {
-		if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
-			return nil, fmt.Errorf("read %s: insecure parent directory (set %s=1 to opt into the relax lane on operator-managed Windows hosts whose %%LOCALAPPDATA%% inherits AD-pushed groups, or tighten the parent's DACL): %w",
-				path, AllowUnhardenedStateReadEnv, err)
-		}
-	}
-	raw, err := os.ReadFile(path)
+	raw, err := readSupervisorIntentFileInodeAnchored(path)
 	if err != nil {
+		if isHubMcpStateMissingErr(err) {
+			return nil, fmt.Errorf("read %s: %w", path, os.ErrNotExist)
+		}
 		// Include the path in the error so callers (and Sentry-style
 		// log aggregators) can correlate failures to a specific
 		// installation's file location without having to prepend a
@@ -198,6 +195,10 @@ func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 	}
 	filterSupervisorIntentOneshotDaemons(&f)
 	return &f, nil
+}
+
+func readSupervisorIntentFileInodeAnchored(path string) ([]byte, error) {
+	return readStateFileInodeAnchored(path)
 }
 
 // filterSupervisorIntentOneshotDaemons strips legacy one-shot command

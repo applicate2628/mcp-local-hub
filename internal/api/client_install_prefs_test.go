@@ -1,7 +1,6 @@
 package api
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -111,7 +110,7 @@ func TestDefaultInstallClientNames_StaleUnknownNameDropped(t *testing.T) {
 	// Hand-write a CSV containing an unknown name alongside a valid one,
 	// simulating a stale gui-preferences.yaml from a build that knew a
 	// client this build no longer understands.
-	if err := os.WriteFile(path, []byte("clients.default_install: cursor,ghost-client\n"), 0600); err != nil {
+	if err := WriteStateFileBytesAtomic(path, []byte("clients.default_install: cursor,ghost-client\n")); err != nil {
 		t.Fatalf("write stale prefs: %v", err)
 	}
 	got, err := a.DefaultInstallClientNamesOverrideIn(path)
@@ -126,7 +125,7 @@ func TestDefaultInstallClientNames_StaleUnknownNameDropped(t *testing.T) {
 func TestDefaultInstallClientNames_AllUnknownFallsBackToCompileDefault(t *testing.T) {
 	a := NewAPI()
 	path := tempPrefsPath(t)
-	if err := os.WriteFile(path, []byte("clients.default_install: ghost-a,ghost-b\n"), 0600); err != nil {
+	if err := WriteStateFileBytesAtomic(path, []byte("clients.default_install: ghost-a,ghost-b\n")); err != nil {
 		t.Fatalf("write stale prefs: %v", err)
 	}
 	override, err := a.DefaultInstallClientNamesOverrideIn(path)

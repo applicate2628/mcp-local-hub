@@ -378,7 +378,15 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// Read current intent so we know the original value to revert to
 	// on failure. Missing file is treated as default StrictMode=false.
 	var originalStrict bool
-	original, err := api.ReadSupervisorIntent(deps.IntentPath)
+	var original *api.SupervisorIntentFile
+	var err error
+	readErr := api.WithStrictModeMutationGateBypass(func() error {
+		original, err = api.ReadSupervisorIntent(deps.IntentPath)
+		return nil
+	})
+	if readErr != nil {
+		return fmt.Errorf("strict-mode: read intent bypass: %w", readErr)
+	}
 	if err == nil {
 		originalStrict = original.StrictMode
 	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") && !strings.Contains(err.Error(), "cannot find the file") {
@@ -424,24 +432,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	}
 
 	// Step 1: write intent with new strict_mode value.
-	newIntent := &api.SupervisorIntentFile{
-		Version:    1,
-		UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-		StrictMode: desired,
-	}
-	if original != nil {
-		// Preserve fields we don't own — daemons, maintenance timers AND
-		// the E2 stops sub-block (the sole per-daemon stop source; dropping
-		// it here would wipe every operator stop on a strict-mode flip).
-		// We only flip the strict_mode bit.
-		newIntent.Version = original.Version
-		if newIntent.Version == 0 {
-			newIntent.Version = 1
-		}
-		newIntent.Daemons = original.Daemons
-		newIntent.MaintenanceTimers = original.MaintenanceTimers
-		newIntent.Stops = original.Stops
-	}
+	newIntent := supervisorIntentWithStrictMode(original, desired)
 	// #301-3: intent writes run inside the env-only mutation-gate bypass so the
 	// OLD intent.strict_mode cannot self-gate the write of the NEW value.
 	writeFn := resolveStrictModeIntentWriteFn(deps)
@@ -621,6 +612,22 @@ func resolveStrictModeIntentWriteFn(deps StrictModeDeps) func(string, *api.Super
 	}
 }
 
+func supervisorIntentWithStrictMode(existing *api.SupervisorIntentFile, strict bool) *api.SupervisorIntentFile {
+	if existing == nil {
+		return &api.SupervisorIntentFile{
+			Version:    1,
+			UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			StrictMode: strict,
+		}
+	}
+	next := *existing
+	if next.Version == 0 {
+		next.Version = 1
+	}
+	next.StrictMode = strict
+	return &next
+}
+
 // writeStrictModeBreadcrumb writes the breadcrumb through
 // WriteStateFileAtomic to keep the same fsync + atomic-rename guarantees
 // the supervisor-intent.json write uses.
@@ -674,7 +681,7 @@ func readStrictModeRecoverChoiceStdin() (string, error) {
 // the breadcrumb on success.
 func RunStrictModeRecover(deps StrictModeDeps) error {
 	// Read breadcrumb.
-	raw, err := os.ReadFile(deps.BreadcrumbPath)
+	raw, err := api.ReadStateFileInodeAnchoredEnvStrictOnly(deps.BreadcrumbPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("strict-mode --recover: no breadcrumb at %s (nothing to reconcile)", deps.BreadcrumbPath)
@@ -772,26 +779,20 @@ reconcile:
 // sequence of runStrictModeUnderLocks but without revert (recover is
 // the revert path, so a failure here is terminal).
 func reconcileBothResources(target bool, deps StrictModeDeps) error {
-	// Preserve daemons + maintenance timers from existing intent.
+	// Preserve fields we don't own from existing intent.
 	var preserved *api.SupervisorIntentFile
-	if existing, err := api.ReadSupervisorIntent(deps.IntentPath); err == nil {
+	var existing *api.SupervisorIntentFile
+	var existingErr error
+	if bypassErr := api.WithStrictModeMutationGateBypass(func() error {
+		existing, existingErr = api.ReadSupervisorIntent(deps.IntentPath)
+		return nil
+	}); bypassErr != nil {
+		return fmt.Errorf("intent read bypass: %w", bypassErr)
+	}
+	if existingErr == nil {
 		preserved = existing
 	}
-	newIntent := &api.SupervisorIntentFile{
-		Version:    1,
-		UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-		StrictMode: target,
-	}
-	if preserved != nil {
-		newIntent.Version = preserved.Version
-		if newIntent.Version == 0 {
-			newIntent.Version = 1
-		}
-		newIntent.Daemons = preserved.Daemons
-		newIntent.MaintenanceTimers = preserved.MaintenanceTimers
-		// E2 stops sub-block — preserve, same as the step-1 writer above.
-		newIntent.Stops = preserved.Stops
-	}
+	newIntent := supervisorIntentWithStrictMode(preserved, target)
 	// #301-3: --recover also writes the gate-controlling intent; run it inside
 	// the env-only mutation-gate bypass so a broadened parent + stale strict
 	// intent cannot refuse the reconcile write.

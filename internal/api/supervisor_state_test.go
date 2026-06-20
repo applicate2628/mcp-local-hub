@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -42,6 +44,27 @@ func TestSupervisorState_RoundTrip(t *testing.T) {
 	}
 	if len(got.TransientPIDs) != 1 {
 		t.Fatalf("transient_pids lost")
+	}
+}
+
+func TestSupervisorState_ReadRejectsSymlinkTarget(t *testing.T) {
+	dir := hardenedTempDir(t)
+	realPath := filepath.Join(dir, "real-supervisor-state.json")
+	linkPath := filepath.Join(dir, "supervisor-state.json")
+
+	if err := WriteStateFileAtomic(realPath, &SupervisorStateFile{Version: 1}); err != nil {
+		t.Fatalf("seed real state: %v", err)
+	}
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+
+	_, err := ReadSupervisorState(linkPath)
+	if err == nil {
+		t.Fatalf("ReadSupervisorState followed symlink target; want refusal")
+	}
+	if !errors.Is(err, ErrIrregularFile) {
+		t.Fatalf("ReadSupervisorState err = %v, want ErrIrregularFile", err)
 	}
 }
 

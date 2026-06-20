@@ -6,9 +6,8 @@
 // codex r1 P1 closure: cache writes route through
 // writeHubMcpStateFile (G4 SecureWriteClientConfig: atomic tempfile
 // + rename + post-rename DACL re-verify; best-effort, no cross-process
-// flock). Reads route through readHubMcpStateFile
-// (VerifyHubMcpStateDACL gates the open). Future fetched_at and
-// negative ages are clamped (P2 closure).
+// flock). Reads route through readHubMcpStateFile's inode-anchored
+// read gate. Future fetched_at and negative ages are clamped (P2 closure).
 //
 // codex r5 P1 closure: cache entries carry the source URL they were
 // fetched from. A read with a different rawURL (e.g. operator

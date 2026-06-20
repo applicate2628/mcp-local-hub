@@ -702,9 +702,10 @@ func strictModeFromIntentCached() bool {
 //     and does not prove the intent absent-or-false; failing closed keeps a read
 //     fault from silently disabling a persisted strict intent.
 //
-//   - JSON parse error → TRUE (strict), with a debug breadcrumb. A present-but-
-//     corrupt intent may be a strict-enabled intent whose body was clobbered;
-//     relaxing on corruption would silently downgrade an operator-enabled posture.
+//   - JSON parse error → TRUE (strict). A present-but-corrupt intent may be a
+//     strict-enabled intent whose body was clobbered; relaxing on corruption
+//     would silently downgrade an operator-enabled posture. The posture read is
+//     side-effect-free, so this branch does not emit diagnostics.
 //
 //   - parsed → return intent.StrictMode verbatim (true → strict, false → relax).
 //
@@ -758,11 +759,26 @@ func readStrictModeFromIntentBestEffort() bool {
 		return true
 	}
 	path := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
-	// GATE-FREE read: deliberately os.ReadFile, NOT ReadSupervisorIntent. The
-	// latter runs the parent-dir WRITE-protection gate before reading, which
-	// on a broadened parent rejects and would force strict=TRUE on a host whose
-	// strict_mode is actually false — the pr301 r10 fleet-safety regression.
-	raw, err := os.ReadFile(path)
+	// Absent intent is the fresh-install "no strict_mode declared" case. Check
+	// that side-effect-free before the anchored reader so a missing file under a
+	// broadened state dir does not emit fallback audit logs or create log files
+	// while merely probing operator posture.
+	if _, err := os.Lstat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false
+		}
+		return true
+	}
+	// Inode-anchored read with ENV-only strict policy: deliberately NOT
+	// ReadSupervisorIntent, and deliberately NOT the normal anchored reader's
+	// persisted-strict policy. ReadSupervisorIntent runs the parent-dir
+	// WRITE-protection gate before reading; the normal anchored reader asks
+	// OperatorRequiresSingleUserHome, which would recurse into this very
+	// persisted strict-mode resolution. This variant still rejects
+	// symlink/reparse swaps and preserves the pr301 r10 fleet-safety behavior:
+	// a broadened parent with strict_mode=false on disk relaxes unless the
+	// MCPHUB_REQUIRE_SINGLE_USER_HOME env var itself is set.
+	raw, err := readStateFileInodeAnchoredEnvStrictOnlyNoAudit(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// ABSENT intent → RELAX (canon-aligned; pr301 r9/r10). An absent
@@ -788,15 +804,9 @@ func readStrictModeFromIntentBestEffort() bool {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		// Corrupt/unparseable intent → fail closed to STRICT (pr304 hybrid). A
 		// present-but-corrupt supervisor-intent.json may be a strict-enabled
-		// intent whose body was truncated/clobbered; relaxing on corruption
-		// would silently downgrade an operator-enabled strict posture. Emit a
-		// debug breadcrumb — never let a log failure change the verdict.
-		if logErr := LogHubMcpEvent("debug", "strict-mode-intent-parse-failed", map[string]any{
-			"path": path,
-			"err":  err.Error(),
-		}); logErr != nil {
-			_ = logErr
-		}
+		// intent whose body was truncated/clobbered; relaxing on corruption would
+		// silently downgrade an operator-enabled strict posture. This posture read
+		// is deliberately side-effect-free, so it does not emit diagnostics here.
 		return true
 	}
 	return f.StrictMode

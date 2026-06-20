@@ -191,7 +191,7 @@ func migrateLegacyKeys(raw map[string]string) {
 // the file does not exist.
 func readRawSettingsMap(path string) (map[string]string, error) {
 	out := map[string]string{}
-	data, err := os.ReadFile(path)
+	data, err := readStateFileInodeAnchored(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return out, nil

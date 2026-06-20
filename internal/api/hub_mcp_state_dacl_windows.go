@@ -1,38 +1,11 @@
 //go:build windows
 
-// hub_mcp_state_dacl_windows.go — Windows leg of VerifyHubMcpStateDACL.
-//
-// Sequence:
-//
-//  1. CreateFile(path, READ_CONTROL, FILE_FLAG_OPEN_REPARSE_POINT |
-//     FILE_FLAG_BACKUP_SEMANTICS). REPARSE_POINT here means "open the
-//     reparse point's metadata WITHOUT following it"; combined with
-//     the FILE_ATTRIBUTE_REPARSE_POINT check below, any symlink /
-//     junction at `path` is refused outright. BACKUP_SEMANTICS is
-//     required so the open works on directories too.
-//  2. GetSecurityInfo(handle, SE_FILE_OBJECT,
-//     OWNER | DACL_SECURITY_INFORMATION) — fetches owner SID + DACL.
-//  3. Owner SID is in the allowlist {current-user, SYSTEM,
-//     BuiltinAdministrators} (else ErrWrongOwner). Default Windows
-//     home directories (C:\Users\<name>) are owned by SYSTEM with
-//     the user as a DACL grantee — those must pass; the DACL gate
-//     below still rejects any third-party ALLOW ACE.
-//  4. Iterate DACL ACEs via GetAce. For each ALLOW ACE whose mask,
-//     after MapGenericMask, contains FILE_GENERIC_READ or
-//     GENERIC_READ, resolve the SID and check it against the allowlist
-//     {current-user, S-1-5-18 (LocalSystem), S-1-5-32-544 (BuiltinAdministrators)}.
-//     Any read-capable ALLOW outside the allowlist → ErrDaclOutsideAllowlist.
-//  5. DENY ACEs are skipped — they cannot widen access.
-//  6. Open the immediate parent dir via FILE_LIST_DIRECTORY +
-//     FILE_FLAG_BACKUP_SEMANTICS + FILE_FLAG_OPEN_REPARSE_POINT and
-//     apply the SAME allowlist check via verifyWindowsParentDACL.
-//     Spec lines 277-281: a state file whose parent dir is broadened
-//     (Group Policy, MDM) leaks the directory listing to every
-//     domain user, even if the file's own DACL is tight. Mirror of
-//     the POSIX leg's verifyPosixParentDirFromFd (secure_write_posix.go).
+// hub_mcp_state_dacl_windows.go — shared Windows DACL primitives for
+// secure writes and inode-anchored state reads.
 //
 // The per-package helper verifyWindowsDACLFromHandle is reused by
-// secure_write_windows.go's post-rename re-verify step.
+// secure_write_windows.go's post-rename re-verify step and by
+// hub_mcp_state_read_inode_windows.go's handle-bound read gate.
 //
 // Spec: §"Windows DACL verification" (allowlist form, codex r3 F-S3
 // closure) and §"Enterprise stance — Group Policy / MDM-managed ACLs"
@@ -41,9 +14,7 @@
 package api
 
 import (
-	"errors"
 	"fmt"
-	"path/filepath"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -65,142 +36,6 @@ const (
 	aceTypeDeniedCallbackObj     uint8 = 0x0C
 	aceTypeMandatoryLabel        uint8 = 0x11
 )
-
-func verifyHubMcpStateDACLImpl(path string) error {
-	// Open + verify parent FIRST, then open the file relative to the
-	// parent dir handle. This binds the parent-DACL gate to the same
-	// directory object the file is reached through and eliminates the
-	// "swap parent between file-open and parent-open" TOCTOU window
-	// (codex bot r8 P1 closure — earlier sequence opened the file via
-	// path, then re-opened the parent via `filepath.Dir(path)` as a
-	// fresh path lookup, which could resolve to a different directory
-	// object than the one containing the file).
-	parentDir := filepath.Dir(path)
-	basename := filepath.Base(path)
-
-	parentW, err := windows.UTF16PtrFromString(parentDir)
-	if err != nil {
-		return fmt.Errorf("utf16 parent %q: %w", parentDir, err)
-	}
-	parentHandle, err := windows.CreateFile(
-		parentW,
-		windows.FILE_LIST_DIRECTORY|windows.READ_CONTROL|windows.SYNCHRONIZE,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS,
-		0,
-	)
-	if err != nil {
-		return fmt.Errorf("open parent %s: %w", parentDir, err)
-	}
-	defer windows.CloseHandle(parentHandle)
-
-	// Verify parent DACL via handle (allowlist gate).
-	//
-	// Default-relax (v0.4.2): mirror the secure-write relax-lane from
-	// PR #185 (v0.4.0). If the parent DACL fails the allowlist (e.g.
-	// %LOCALAPPDATA%\mcp-local-hub broadened by GPO / MDM / a third-
-	// party installer to grant read access to a non-{user,
-	// LocalSystem, BuiltinAdmins} SID), the file's OWN DACL — verified
-	// at step (5) below — is the load-bearing safety layer. The file
-	// is owner-only because the state-file write pipeline installed a
-	// restrictive DACL on the file handle at create time, BEFORE any
-	// bytes hit disk. The parent handle still binds the file open via
-	// ntOpenRelative, so the TOCTOU-safe inode anchoring is preserved
-	// even when the parent-DACL check is skipped.
-	//
-	// Operators on multi-tenant / corp-managed hosts who require the
-	// strict parent gate must opt IN via
-	// MCPHUB_REQUIRE_SINGLE_USER_HOME=1; the env var semantic matches
-	// the write path so a single setting controls both directions.
-	//
-	// Concrete failure that motivated this change: manual smoke on
-	// workstation with %LOCALAPPDATA%\mcp-local-hub grant to SID
-	// S-1-5-21-...-1010 (Win11 user group surfaced via a third-party
-	// installer) — Apply/demigrate from the GUI matrix failed because
-	// managed-entries.json read fell through to strict parent gate.
-	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
-		if operatorRequiresSingleUserHome() {
-			return fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
-				parentDir, err, RequireSingleUserHomeEnv)
-		}
-		// Default-relax mode: the strict gate failed because some
-		// ACE grants access (read OR write/admin) to a non-
-		// allowlisted SID. The relax is ONLY safe for read-broadened
-		// parents — codex bot r4 P1 on PR #192: write/delete/DAC-edit
-		// access on the PARENT lets a co-resident principal replace
-		// the target file's directory entry between the fd-bound
-		// verify above and the path-based os.ReadFile that
-		// readHubMcpStateFile performs next. That's a TOCTOU swap —
-		// the hub then reads attacker bytes that the verify never
-		// saw.
-		//
-		// Re-check with the narrower write/admin mask. If THAT
-		// also fails, the broadening is write-bearing and we must
-		// reject regardless of mode. Otherwise the broadening is
-		// read-only and tolerable on solo-dev hosts.
-		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(parentHandle); wrErr != nil {
-			return fmt.Errorf("parent %s grants write/delete/DAC-edit access to non-allowlisted SID (TOCTOU swap risk during fd-verify → path-read window): %w", parentDir, wrErr)
-		}
-		// Read-only broadening + default mode → log warn + proceed.
-		// Best-effort audit log; never block the read on log failure.
-		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
-			"path":   path,
-			"parent": parentDir,
-			"reason": "default-relax-on-solo-host (parent grants read-only access to non-allowlisted SID; write/delete/DAC bits cleared)",
-			"err":    err.Error(),
-			"note":   "file's own DACL verified below; parent-handle binds open via ntOpenRelative so TOCTOU safety preserved",
-		})
-	}
-
-	// Open the file RELATIVE to the parent handle via NT API so the
-	// open resolves through the verified parent inode, not a fresh
-	// path walk. ntOpenRelative is the existing helper from
-	// secure_write_windows.go; it adds SYNCHRONIZE + FILE_OPEN
-	// (OPEN_EXISTING semantic) AND FILE_NON_DIRECTORY_FILE internally.
-	// We need FILE_READ_ATTRIBUTES so GetFileInformationByHandle can
-	// probe the file-type flags below, plus READ_CONTROL so
-	// verifyWindowsDACLFromHandle can read the DACL.
-	h, err := ntOpenRelative(parentHandle, basename, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES)
-	if err != nil {
-		// FILE_NON_DIRECTORY_FILE inside ntOpenRelative makes NT
-		// fail the open with STATUS_FILE_IS_A_DIRECTORY (0xC00000BA)
-		// when the target is a directory. Map that to our portable
-		// ErrIrregularFile sentinel so callers can `errors.Is` it
-		// uniformly across the redundant FILE_ATTRIBUTE_DIRECTORY
-		// check below (which now serves as defense-in-depth in case
-		// some future Windows version stops enforcing
-		// FILE_NON_DIRECTORY_FILE at create time).
-		if ns, ok := err.(windows.NTStatus); ok && ns == 0xC00000BA {
-			return ErrIrregularFile
-		}
-		// Errno wrapper variant — Windows sometimes maps the NTSTATUS
-		// to ERROR_DIRECTORY (267) at the Win32 layer.
-		if errors.Is(err, windows.ERROR_DIRECTORY) {
-			return ErrIrregularFile
-		}
-		return fmt.Errorf("open %s: %w", path, err)
-	}
-	defer windows.CloseHandle(h)
-
-	// Reject reparse points / symlinks via the file attributes.
-	var fi windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(h, &fi); err != nil {
-		return fmt.Errorf("file info %s: %w", path, err)
-	}
-	if fi.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		return ErrIrregularFile
-	}
-	// Directory rejection (codex bot r2 P2 closure): see codex r2.
-	if fi.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
-		return ErrIrregularFile
-	}
-	if err := verifyWindowsDACLFromHandle(h); err != nil {
-		return err
-	}
-	return nil
-}
 
 // verifyWindowsParentDACL opens parentDir with FILE_LIST_DIRECTORY +
 // FILE_FLAG_BACKUP_SEMANTICS + FILE_FLAG_OPEN_REPARSE_POINT and applies
@@ -248,11 +83,11 @@ func verifyWindowsParentDACL(parentDir string) error {
 // using verifyWindowsDACLFromHandle on a directory still refuses
 // child-delete grants).
 var windowsDACLSignificantBits = uint32(
-	windows.FILE_READ_DATA | windows.FILE_READ_EA |
-		windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
-		windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
-		windows.FILE_EXECUTE |
-		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
+	windows.FILE_READ_DATA|windows.FILE_READ_EA|
+		windows.FILE_WRITE_DATA|windows.FILE_APPEND_DATA|
+		windows.FILE_WRITE_EA|windows.FILE_WRITE_ATTRIBUTES|
+		windows.FILE_EXECUTE|
+		windows.DELETE|windows.WRITE_DAC|windows.WRITE_OWNER,
 ) | windowsFileDeleteChild
 
 // windowsFileDeleteChild is the directory-specific access right
@@ -287,9 +122,9 @@ const windowsFileDeleteChild uint32 = 0x40
 // FILE_EXECUTE only) do NOT enable swap and are tolerable under
 // default-relax mode.
 var windowsDACLWriteOrAdminBits = uint32(
-	windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
-		windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES |
-		windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER,
+	windows.FILE_WRITE_DATA|windows.FILE_APPEND_DATA|
+		windows.FILE_WRITE_EA|windows.FILE_WRITE_ATTRIBUTES|
+		windows.DELETE|windows.WRITE_DAC|windows.WRITE_OWNER,
 ) | windowsFileDeleteChild
 
 // verifyWindowsDACLFromHandle reads the owner SID + DACL from `h` via
@@ -406,20 +241,20 @@ func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32)
 		case windows.ACCESS_ALLOWED_ACE_TYPE:
 			// Basic ALLOW — falls through to inspection below.
 		case windows.ACCESS_DENIED_ACE_TYPE,
-			aceTypeDeniedObject,        // 0x06
-			aceTypeAuditBasic,          // 0x02
-			aceTypeAlarmBasic,          // 0x03
-			aceTypeAuditObject,         // 0x07
-			aceTypeAlarmObject,         // 0x08
-			aceTypeDeniedCallback,      // 0x0A
-			aceTypeDeniedCallbackObj,   // 0x0C
-			aceTypeMandatoryLabel:      // 0x11
+			aceTypeDeniedObject,      // 0x06
+			aceTypeAuditBasic,        // 0x02
+			aceTypeAlarmBasic,        // 0x03
+			aceTypeAuditObject,       // 0x07
+			aceTypeAlarmObject,       // 0x08
+			aceTypeDeniedCallback,    // 0x0A
+			aceTypeDeniedCallbackObj, // 0x0C
+			aceTypeMandatoryLabel:    // 0x11
 			// DENY / audit / alarm / mandatory-label ACEs cannot widen
 			// access; safe to skip.
 			continue
-		case aceTypeAllowedObject,         // 0x05
-			aceTypeAllowedCallback,        // 0x09
-			aceTypeAllowedCallbackObject:  // 0x0B
+		case aceTypeAllowedObject, // 0x05
+			aceTypeAllowedCallback,       // 0x09
+			aceTypeAllowedCallbackObject: // 0x0B
 			// Object/callback ALLOW variants have a different on-the-
 			// wire layout (extra ObjectType + InheritedObjectType GUIDs
 			// before the SID). The basic ACCESS_ALLOWED_ACE struct's
@@ -514,13 +349,19 @@ func mapGenericReadRights(mask uint32) uint32 {
 // allowlist gate).
 //
 // FILE_GENERIC_READ    = STANDARD_RIGHTS_READ | FILE_READ_DATA |
-//                        FILE_READ_ATTRIBUTES | FILE_READ_EA |
-//                        SYNCHRONIZE
+//
+//	FILE_READ_ATTRIBUTES | FILE_READ_EA |
+//	SYNCHRONIZE
+//
 // FILE_GENERIC_WRITE   = STANDARD_RIGHTS_WRITE | FILE_WRITE_DATA |
-//                        FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA |
-//                        FILE_APPEND_DATA | SYNCHRONIZE
+//
+//	FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA |
+//	FILE_APPEND_DATA | SYNCHRONIZE
+//
 // FILE_GENERIC_EXECUTE = STANDARD_RIGHTS_EXECUTE | FILE_READ_ATTRIBUTES |
-//                        FILE_EXECUTE | SYNCHRONIZE
+//
+//	FILE_EXECUTE | SYNCHRONIZE
+//
 // FILE_ALL_ACCESS      = STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0x1FF
 func mapGenericRights(mask uint32) uint32 {
 	if mask&windows.GENERIC_READ != 0 {

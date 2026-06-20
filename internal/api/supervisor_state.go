@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // SupervisorStateFile is the on-disk schema for <state-dir>/supervisor-state.json.
@@ -105,14 +104,11 @@ type TransientPID struct {
 // and a rollback must not brick supervisor startup just because it sees a
 // future additive field. JSON type/shape errors still fail through Unmarshal.
 func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
-	if !operatorAllowsUnhardenedStateRead() {
-		if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
-			return nil, fmt.Errorf("read %s: insecure parent directory (set %s=1 to opt into the relax lane on operator-managed Windows hosts whose %%LOCALAPPDATA%% inherits AD-pushed groups, or tighten the parent's DACL): %w",
-				path, AllowUnhardenedStateReadEnv, err)
-		}
-	}
-	raw, err := os.ReadFile(path)
+	raw, err := readStateFileInodeAnchored(path)
 	if err != nil {
+		if isHubMcpStateMissingErr(err) {
+			return nil, fmt.Errorf("read %s: %w", path, os.ErrNotExist)
+		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var f SupervisorStateFile

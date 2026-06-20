@@ -409,7 +409,9 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	td := api.PruneWorkspaceTeardown{
 		// The CLI seam takes the operator-supplied rawPath (not the resolved
 		// canonical) so api.Unregister can compute its own legacy-key fallback.
-		LSPUnregister:      func(_ string, langs []string) (*api.UnregisterReport, error) { return unregisterLSPWorkspaceFn(rawPath, langs) },
+		LSPUnregister: func(_ string, langs []string) (*api.UnregisterReport, error) {
+			return unregisterLSPWorkspaceFn(rawPath, langs)
+		},
 		RemoveSerenaIntent: removeSerenaSupervisorIntentFn,
 		DeleteSerenaRow: func() (int, error) {
 			reg := api.NewRegistry(regPath)
@@ -952,22 +954,14 @@ func writeDefaultWorkspace(stateDir, canonical string) error {
 		return err
 	}
 	path := filepath.Join(stateDir, defaultWorkspaceFilename)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(canonical), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return api.WriteStateFileBytesAtomic(path, []byte(canonical))
 }
 
 // readDefaultWorkspace returns the persisted default workspace path, or
 // the empty string when the marker file is absent or empty.
 func readDefaultWorkspace(stateDir string) (string, error) {
 	path := filepath.Join(stateDir, defaultWorkspaceFilename)
-	data, err := os.ReadFile(path)
+	data, err := api.ReadStateFileInodeAnchored(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil

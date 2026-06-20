@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,6 +179,42 @@ func TestWriteStateFileAtomic_HonorsStrictModeWhenParentInsecure(t *testing.T) {
 	}
 }
 
+func TestWriteStateFileAtomic_HonorsPersistedStrictModeWhenParentInsecure(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := hardenedTempDir(t)
+	daemonStateRootOverride = stateDir
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowUnhardenedClientWriteEnv, "")
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"strict_mode":true}`), 0o600); err != nil {
+		t.Fatalf("seed persisted strict intent: %v", err)
+	}
+	resetStrictModeIntentCacheForTest()
+	if !OperatorRequiresSingleUserHome() {
+		t.Fatal("precondition: persisted strict_mode=true with env unset must enable the strict gate")
+	}
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	broadenParentForStateFileTest(t, parent)
+
+	dst := filepath.Join(parent, "supervisor-intent.json")
+	err := WriteStateFileAtomic(dst, map[string]string{"v": "1"})
+	if err == nil {
+		t.Fatalf("persisted strict_mode=true must reject permissive parent even when %s is unset", RequireSingleUserHomeEnv)
+	}
+	if !strings.Contains(err.Error(), "persisted supervisor-intent.json") {
+		t.Errorf("error must mention persisted strict-mode intent; got %v", err)
+	}
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Errorf("persisted strict-mode rejection leaked a write at %s (stat err = %v)", dst, statErr)
+	}
+}
+
 // TestWriteStateFileAtomic_DefaultRelaxLaneSucceeds pins
 // falsifiable claim #5: when the env vars are unset and the parent
 // gate rejects, the relax lane fires, the write succeeds, and the
@@ -247,6 +284,31 @@ func TestWriteStateFileAtomic_DefaultRelaxLaneSucceeds(t *testing.T) {
 	}
 	if path, _ := body["path"].(string); path != dst {
 		t.Errorf("event body.path = %v, want %q", body["path"], dst)
+	}
+}
+
+func TestStateFileRelaxLane_WrongOwnerGateCauseDoesNotRelax(t *testing.T) {
+	gateErr := errors.Join(ErrSecureWriteParentInsecure, ErrWrongOwner)
+
+	if stateFileParentGateAllowsDefaultRelax(gateErr) {
+		t.Fatalf("wrong-owner parent gate error entered the default-relax lane; want refusal")
+	}
+}
+
+func TestStateFileRelaxLane_BroadenedOwnerCorrectGateCauseRelaxes(t *testing.T) {
+	gateErr := ErrSecureWriteParentInsecure
+
+	if !stateFileParentGateAllowsDefaultRelax(gateErr) {
+		t.Fatalf("broadened owner-correct parent gate error did not enter the default-relax lane")
+	}
+}
+
+func TestStateFileRelaxLane_NonParentGateCauseDoesNotRelax(t *testing.T) {
+	if stateFileParentGateAllowsDefaultRelax(nil) {
+		t.Fatalf("nil error entered the default-relax lane; want refusal")
+	}
+	if stateFileParentGateAllowsDefaultRelax(ErrWrongOwner) {
+		t.Fatalf("wrong-owner error without parent-gate sentinel entered the default-relax lane; want refusal")
 	}
 }
 
@@ -367,30 +429,14 @@ func findSupervisorEventByName(t *testing.T, path, name string) (map[string]any,
 	return nil, ""
 }
 
-// TestWriteStateFileAtomic_StrictModeWithWriteCapableParent pins
-// falsifiable claim #6: even when strict mode is OFF (default
-// relax), a parent that grants write/delete to a non-allowlisted
-// principal is refused with a "TOCTOU swap risk" error. The
-// asymmetry between accepting the write (under default-relax) and
-// having the read side refuse the same parent would strand state
-// files in unreadable directories; this test guards the symmetry.
-//
-// Test-name "StrictMode" in the design memo is the public test
-// name — the actual scenario is default-relax + write-capable
-// parent (per memo step 5 description). The check fires from
-// secureWriteStateFileWithOperatorOpt's relax branch via
-// checkStateDirParentWriteSafe.
+// TestWriteStateFileAtomic_StrictModeWithWriteCapableParent pins the default
+// relax posture after inode-anchored reads closed the swap window: when the env
+// strict flag is OFF, a write-capable parent no longer hard-fails. The hardened
+// skip-parent-gate writer still creates an owner-only file and emits the state
+// fallback audit event.
 func TestWriteStateFileAtomic_StrictModeWithWriteCapableParent(t *testing.T) {
 	t.Setenv(RequireSingleUserHomeEnv, "") // default relax
 	t.Setenv(AllowUnhardenedClientWriteEnv, "")
-	// Pin the state-write TOCTOU bypass OFF. This test asserts that
-	// even in the default-relax lane a write/delete-capable parent is
-	// refused with "TOCTOU swap risk" (the checkStateDirParentWriteSafe
-	// gate in secureWriteStateFileWithOperatorOpt). If the operator's
-	// shell has MCPHUB_ALLOW_UNHARDENED_STATE_WRITE=1 set,
-	// operatorAllowsUnhardenedStateWrite() returns true and that gate
-	// is skipped — the write succeeds and returns nil, failing this
-	// assertion. t.Setenv isolates the test from that leaked opt-in.
 	t.Setenv(AllowUnhardenedStateWriteEnv, "")
 
 	parent := filepath.Join(t.TempDir(), "writable-parent")
@@ -400,16 +446,14 @@ func TestWriteStateFileAtomic_StrictModeWithWriteCapableParent(t *testing.T) {
 	broadenParentForStateFileWriteCapableTest(t, parent)
 
 	dst := filepath.Join(parent, "supervisor-intent.json")
-	err := WriteStateFileAtomic(dst, map[string]string{"v": "1"})
-	if err == nil {
-		t.Fatalf("default-relax must still refuse write-capable parent (TOCTOU swap risk); got nil")
+	if err := WriteStateFileAtomic(dst, map[string]string{"v": "1"}); err != nil {
+		t.Fatalf("default-relax write-capable parent must proceed through hardened fallback, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "TOCTOU swap risk") {
-		t.Errorf("error must mention \"TOCTOU swap risk\"; got %v", err)
+	raw, err := readStateFileInodeAnchoredEnvStrictOnly(dst)
+	if err != nil {
+		t.Fatalf("written state file must be readable by the anchored reader: %v", err)
 	}
-	// File must NOT exist — refusing then leaking is the worst of
-	// both worlds.
-	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
-		t.Errorf("write-capable rejection leaked a file at %s (stat err = %v)", dst, statErr)
+	if !strings.Contains(string(raw), `"v": "1"`) {
+		t.Fatalf("written payload = %q, want v=1", raw)
 	}
 }

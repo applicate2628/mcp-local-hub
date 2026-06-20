@@ -178,10 +178,9 @@ func removeHubMcpControlTokenLockedContext(ctx context.Context) error {
 // SecureWriteClientConfig pre-write verify failed at constructor
 // time — r24 P2 closure: the file is cleaned up on persist failure).
 //
-// The read goes through readHubMcpStateFile which gates on
-// VerifyHubMcpStateDACL first — refuses symlinks, foreign owners,
-// non-allowlist DACL ACEs. Same secure-read pipeline the listener
-// uses on startup.
+// The read goes through readHubMcpStateFile, which uses the inode-anchored
+// reader to refuse symlinks, foreign owners, and non-allowlist DACL ACEs.
+// Same secure-read pipeline the listener uses on startup.
 func ReadHubMcpControlToken() (string, error) {
 	raw, err := readHubMcpStateFile(hubMcpControlTokenFileLeaf)
 	if err != nil {

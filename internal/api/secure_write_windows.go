@@ -164,7 +164,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 			// Wrap with ErrSecureWriteParentInsecure so the cross-package
 			// wrapper in client_write_init.go can match via errors.Is
 			// (issue #161 P1).
-			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDir, err)
 		}
 	}
 

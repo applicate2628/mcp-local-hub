@@ -5,8 +5,8 @@
 // The default Go test TempDir on Windows lives under %TEMP%, whose
 // DACL inherits Authenticated Users (S-1-5-11) read access from the
 // per-machine \Users tree. That's outside the spec's allowlist, so
-// SecureWriteClientConfig and VerifyHubMcpStateDACL both reject any
-// path under t.TempDir() at the parent-dir gate.
+// SecureWriteClientConfig and the inode-anchored state reader both reject
+// any path under t.TempDir() at the parent-dir gate.
 //
 // Tests that exercise the happy path (round-trip writes, fresh-file
 // verifies) need a parent whose DACL is allowlist-conforming. This

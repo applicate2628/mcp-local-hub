@@ -4,7 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"sort"
 	"testing"
 
 	"mcp-local-hub/internal/api/apitest"
@@ -79,6 +81,7 @@ func TestReadStrictModeFromIntent_PathUnresolvable_FailsClosed(t *testing.T) {
 	// Clear the override (statePathsHelper restores it) so the REAL resolver runs.
 	statePathsHelper(t)
 	daemonStateRootOverride = ""
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", "")
 
 	if runtime.GOOS == "windows" {
 		// Force the KnownFolder resolver and BOTH env fallbacks to fail.
@@ -147,6 +150,56 @@ func TestReadStrictModeFromIntent_PresentValues(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReadStrictModeFromIntent_PresentRelaxedBroadenedParentIsSideEffectFree(t *testing.T) {
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowUnhardenedStateReadEnv, "")
+	stateDir := apitest.HardenedTempDir(t)
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"strict_mode":false}`), 0o600); err != nil {
+		t.Fatalf("write relaxed intent: %v", err)
+	}
+	broadenParentForStateFileTest(t, stateDir)
+
+	beforeEntries := readDirNamesSorted(t, stateDir)
+	beforeInfo, err := os.Stat(stateDir)
+	if err != nil {
+		t.Fatalf("stat state dir before: %v", err)
+	}
+
+	if got := readStrictModeFromIntentBestEffort(); got {
+		t.Fatal("present strict_mode=false should relax even on a broadened parent")
+	}
+
+	afterEntries := readDirNamesSorted(t, stateDir)
+	if !reflect.DeepEqual(afterEntries, beforeEntries) {
+		t.Fatalf("posture read mutated state dir entries: before=%v after=%v", beforeEntries, afterEntries)
+	}
+	afterInfo, err := os.Stat(stateDir)
+	if err != nil {
+		t.Fatalf("stat state dir after: %v", err)
+	}
+	if runtime.GOOS != "windows" && afterInfo.Mode().Perm() != beforeInfo.Mode().Perm() {
+		t.Fatalf("posture read mutated state dir mode from %o to %o", beforeInfo.Mode().Perm(), afterInfo.Mode().Perm())
+	}
+}
+
+func readDirNamesSorted(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir %s: %v", dir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	return names
 }
 
 // ---------------------------------------------------------------------------

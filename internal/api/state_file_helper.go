@@ -16,10 +16,12 @@
 //      Fchmod(0600). The post-rename re-verify catches policy ACLs
 //      that may auto-apply on some Windows paths.
 //
-//   3. MCPHUB_REQUIRE_SINGLE_USER_HOME=1 enforcement. On corp-managed
-//      Windows hosts the operator can demand the strict parent-dir
-//      gate; absent that env var, the default-relax lane proceeds —
-//      but never silently. A warn event
+//   3. Strict-mode enforcement. On corp-managed Windows hosts the
+//      operator can demand the strict parent-dir gate either via
+//      MCPHUB_REQUIRE_SINGLE_USER_HOME=1 or persisted
+//      supervisor-intent.json strict_mode=true. When neither strict
+//      source is active, the default-relax lane proceeds — but never
+//      silently. A warn event
 //      "state-file-write-unhardened-fallback" lands in hub-mcp.log
 //      (distinct from "client-write-unhardened-fallback" so audit
 //      filters can separate the two policy domains).
@@ -127,19 +129,13 @@ func WriteStateFileBytesLockHeld(path string, raw []byte) error {
 //     a. If operatorRequiresSingleUserHome() returns true, return
 //     the strict error verbatim (with an env-var hint appended
 //     so the operator knows which knob to flip).
-//     b. Else, run checkStateDirParentWriteSafe(filepath.Dir(path)).
-//     If that returns non-nil — the parent grants write/delete
-//     access to a non-allowlisted principal — surface the
-//     "TOCTOU swap risk" error and refuse the write. This
-//     mirrors the writeHubMcpStateFile defense (codex bot r6 P1
-//     on PR #192) so the WRITE side and the future hardened
-//     READ side stay symmetric.
-//     c. Else, log the warn event
+//     b. Else, log the warn event
 //     "state-file-write-unhardened-fallback" and re-run the
 //     pipeline via secureWriteClientConfigSkipParentGate(path,
 //     payload). The per-file DACL/mode hardening still applies
-//     at temp-create time (handle-bound), so the published file
-//     is owner-only regardless of parent DACL.
+//     at temp-create time (handle-bound), and the publish path is
+//     dir-handle-relative, so the published file is owner-only
+//     regardless of parent DACL/mode.
 //
 // All other secure-write failures (open temp, write, rename, post-
 // rename DACL re-verify, pre-existing symlink/reparse-point at
@@ -156,33 +152,16 @@ func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
 		return fmt.Errorf("state-file secure write %s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 			path, err, RequireSingleUserHomeEnv)
 	}
-
-	// Default-relax lane: the parent-dir gate rejected. Before
-	// proceeding to the skip-gate writer, run the narrower write-
-	// bits check — a parent that grants write/delete to a non-
-	// allowlisted principal is a TOCTOU swap risk regardless of
-	// strict mode. Symmetric with writeHubMcpStateFile's defense.
-	//
-	// MCPHUB_ALLOW_UNHARDENED_STATE_WRITE=1 bypasses this TOCTOU
-	// check for operators whose %LOCALAPPDATA% inherits non-removable
-	// orphan SIDs or AD-pushed groups (e.g. Codex CLI's
-	// CodexSandboxUsers sandbox install) and who cannot run an
-	// elevated shell to tighten the parent ACL. The per-file DACL
-	// still applies at temp-create time (handle-bound) so the
-	// published file remains owner-only regardless of parent DACL.
-	// Mirrors AllowUnhardenedClientWriteEnv pattern.
-	parentDir := filepath.Dir(path)
-	if !operatorAllowsUnhardenedStateWrite() {
-		if wsErr := checkStateDirParentWriteSafe(parentDir); wsErr != nil {
-			return fmt.Errorf("state-file secure write %s: parent %s grants write/delete access to non-allowlisted principal (TOCTOU swap risk; the read side would refuse this parent regardless of mode; set %s=1 to opt into the relax lane explicitly, or tighten the parent's DACL): %w",
-				path, parentDir, AllowUnhardenedStateWriteEnv, wsErr)
-		}
+	if !stateFileParentGateAllowsDefaultRelax(err) {
+		return err
 	}
 
-	// Read-only broadening: emit the distinct state-file audit event
-	// and proceed via the skip-parent-gate hardened writer. The
-	// per-file DACL apply at create time still produces an owner-
-	// only file.
+	parentDir := filepath.Dir(path)
+
+	// Default-relax lane: emit the distinct state-file audit event and proceed
+	// via the skip-parent-gate hardened writer. The per-file DACL/mode applies
+	// at temp-create time, and the publish path is dir-handle-relative, so the
+	// destination file remains owner-only even when the parent gate rejected.
 	//
 	// Audit channel: supervisor-events.log (NOT hub-mcp.log). State-
 	// file fallbacks are supervisor-domain events — operators
@@ -197,6 +176,19 @@ func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
 	// body, _truncated} envelope.
 	emitStateFileFallbackEvent(path, parentDir, err)
 	return secureWriteClientConfigSkipParentGate(path, payload)
+}
+
+// stateFileParentGateAllowsDefaultRelax is the single parent-relax decision for
+// state-file read/write lanes. Call it only with parent-gate errors: wrong-owner
+// parents never relax, while owner-correct broadened parents may enter the
+// default solo-host relax lane when the caller's stricter mode permits it.
+func stateFileParentGateAllowsDefaultRelax(err error) bool {
+	if err == nil || errors.Is(err, ErrWrongOwner) {
+		return false
+	}
+	return errors.Is(err, ErrSecureWriteParentInsecure) ||
+		errors.Is(err, ErrTooLoose) ||
+		errors.Is(err, ErrDaclOutsideAllowlist)
 }
 
 // emitStateFileFallbackEvent records the audit warning for the
@@ -219,9 +211,9 @@ func emitStateFileFallbackEvent(path, parentDir string, gateErr error) {
 	body := map[string]any{
 		"path":   path,
 		"parent": parentDir,
-		"reason": "parent-dir-DACL-relax-lane (parent grants only read/exec to non-allowlisted principal; write/delete bits cleared)",
+		"reason": "default-relax-on-solo-host (parent-dir gate rejected; hardened skip-parent-gate writer still applies per-file owner-only permissions at temp-create and publishes via a dir-handle-relative atomic rename)",
 		"err":    gateErr.Error(),
-		"note":   "per-file DACL/mode still applied at temp-create time (handle-bound), so the published file is owner-only regardless of parent DACL",
+		"note":   "strict mode still hard-fails; default-relax preserves the hardened writer while skipping only the parent gate",
 	}
 
 	stateDir, sdErr := DaemonStateDir()

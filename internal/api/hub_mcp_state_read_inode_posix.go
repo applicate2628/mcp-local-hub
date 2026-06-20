@@ -4,19 +4,16 @@
 // for hub-mcp state files on POSIX, mirror of the Windows leg in
 // hub_mcp_state_read_inode_windows.go.
 //
-// POSIX is structurally less exposed to the TOCTOU swap window the
-// Windows leg's old verifyHubMcpStateDACLImpl→os.ReadFile chain
-// left open (POSIX openat with O_NOFOLLOW already gives us an
-// inode-bound fd) — but the existing readHubMcpStateFile still
-// dropped the fd between verify and read, then path-resolved the
-// read. This file collapses verify + read onto a single openat fd
-// so the contract matches the Windows leg.
+// POSIX openat with O_NOFOLLOW gives us an inode-bound fd. This file
+// keeps verify + read on that single fd so the contract matches the
+// Windows leg and no path-based read occurs after verification.
 
 package api
 
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -25,18 +22,32 @@ import (
 )
 
 // readStateFileInodeAnchored opens the file via openat against
-// the verified parent fd, runs the same allowlist gate as
-// verifyHubMcpStateDACLImpl, and reads the content via the same
-// fd. No path-based read between verify and read.
+// the verified parent fd, runs the owner/mode allowlist gate, and reads
+// the content via the same fd. No path-based read between verify and read.
 //
-// Returns up to maxStateFileBytes (defined in hub_mcp_state.go)
-// of content.
+// The byte cap is resolved from the state-file kind so intent/vault reads do
+// not inherit the small hub-state ceiling.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false)
+}
+
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks bool) ([]byte, error) {
 	parentPath := filepath.Dir(path)
 	basename := filepath.Base(path)
 
 	pfd, err := unix.Open(parentPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, &os.PathError{Op: "open", Path: parentPath, Err: os.ErrNotExist}
+		}
 		return nil, fmt.Errorf("open parent %s: %w", parentPath, err)
 	}
 	defer unix.Close(pfd)
@@ -47,9 +58,13 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 	}
 	pmode := uint32(pst.Mode)
 	if int(pst.Uid) != os.Getuid() {
-		return nil, fmt.Errorf("%w: parent=%s uid=%d (need current uid %d)", ErrWrongOwner, parentPath, pst.Uid, os.Getuid())
+		parentErr := fmt.Errorf("%w: parent=%s uid=%d (need current uid %d)", ErrWrongOwner, parentPath, pst.Uid, os.Getuid())
+		if !stateFileParentGateAllowsDefaultRelax(parentErr) {
+			return nil, parentErr
+		}
 	}
 	if pmode&0o022 != 0 {
+		parentErr := fmt.Errorf("%w: parent=%s mode=%04o grants group/world write", ErrTooLoose, parentPath, pmode&0o777)
 		// Write/DAC-edit broadening on parent — safe under the
 		// inode-anchored read (the openat below pins the fd to the
 		// verified inode regardless of subsequent directory-entry
@@ -59,30 +74,44 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		// refuses any parent broadening because the underlying mode
 		// diverges from the single-user invariant strict mode
 		// promises.
-		if operatorRequiresSingleUserHome() {
+		if requiresStrict() {
 			return nil, fmt.Errorf("%w: parent=%s mode=%04o grants group/world write; %s=1 enforces refusal", ErrTooLoose, parentPath, pmode&0o777, RequireSingleUserHomeEnv)
 		}
-		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
-			"path":        path,
-			"parent":      parentPath,
-			"reason":      "default-relax-on-solo-host (parent grants group/world write; safe under inode-anchored read because subsequent read(2) is bound to the openat fd, not the path)",
-			"parent_mode": fmt.Sprintf("%04o", pmode&0o777),
-		})
+		if !stateFileParentGateAllowsDefaultRelax(parentErr) {
+			return nil, parentErr
+		}
+		if auditFallbacks {
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+				"path":        path,
+				"parent":      parentPath,
+				"reason":      "default-relax-on-solo-host (parent grants group/world write; safe under inode-anchored read because subsequent read(2) is bound to the openat fd, not the path)",
+				"parent_mode": fmt.Sprintf("%04o", pmode&0o777),
+			})
+		}
 	}
 	if pmode&0o055 != 0 {
-		if operatorRequiresSingleUserHome() {
-			return nil, fmt.Errorf("%w: parent=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, parentPath, pmode&0o777)
+		parentErr := fmt.Errorf("%w: parent=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, parentPath, pmode&0o777)
+		if requiresStrict() {
+			return nil, parentErr
 		}
-		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
-			"path":        path,
-			"parent":      parentPath,
-			"reason":      "default-relax-on-solo-host (parent group/world read/exec bits set; write bits cleared)",
-			"parent_mode": fmt.Sprintf("%04o", pmode&0o777),
-		})
+		if !stateFileParentGateAllowsDefaultRelax(parentErr) {
+			return nil, parentErr
+		}
+		if auditFallbacks {
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+				"path":        path,
+				"parent":      parentPath,
+				"reason":      "default-relax-on-solo-host (parent group/world read/exec bits set; write bits cleared)",
+				"parent_mode": fmt.Sprintf("%04o", pmode&0o777),
+			})
+		}
 	}
 
-	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+		}
 		if errors.Is(err, syscall.ELOOP) {
 			return nil, ErrIrregularFile
 		}
@@ -106,14 +135,30 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 	if int(st.Uid) != os.Getuid() {
 		return nil, fmt.Errorf("%w: path=%s uid=%d (need current uid %d)", ErrWrongOwner, path, st.Uid, os.Getuid())
 	}
-	if mode&0o077 != 0 {
-		return nil, fmt.Errorf("%w: path=%s mode=%04o", ErrTooLoose, path, mode)
+	if mode&0o022 != 0 {
+		return nil, fmt.Errorf("%w: path=%s mode=%04o grants group/world write", ErrTooLoose, path, mode)
+	}
+	if mode&0o055 != 0 {
+		if requiresStrict() {
+			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, path, mode)
+		}
+		if isSecretBearingStateFilePath(path) {
+			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world on secret-bearing state file", ErrTooLoose, path, mode)
+		}
+		if auditFallbacks {
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
+				"path":      path,
+				"parent":    parentPath,
+				"reason":    "default-relax-on-solo-host (file group/world read/exec bits set; write bits cleared)",
+				"file_mode": fmt.Sprintf("%04o", mode),
+			})
+		}
 	}
 
 	// Read via the verified fd. unix.Read in a loop until EOF or
 	// the cap fires. Pre-allocate based on Stat_t.Size.
-	if st.Size > maxStateFileBytes {
-		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, st.Size, maxStateFileBytes)
+	if st.Size > maxBytes {
+		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, st.Size, maxBytes)
 	}
 	if st.Size < 0 {
 		return nil, fmt.Errorf("hub-mcp state read %s: invalid file size %d", path, st.Size)
@@ -129,8 +174,8 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 			break
 		}
 		buf = append(buf, chunk[:n]...)
-		if int64(len(buf)) > maxStateFileBytes {
-			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxStateFileBytes)
+		if int64(len(buf)) > maxBytes {
+			return nil, fmt.Errorf("hub-mcp state read %s: content exceeds cap %d (OOM-protection)", path, maxBytes)
 		}
 	}
 	if buf == nil {

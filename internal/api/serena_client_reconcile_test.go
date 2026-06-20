@@ -32,7 +32,7 @@ func seedPidport(t *testing.T, pid, port int) string {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "gui.pidport")
 	body := strconv.Itoa(pid) + " " + strconv.Itoa(port) + "\n"
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+	if err := WriteStateFileBytesAtomic(p, []byte(body)); err != nil {
 		t.Fatalf("seed pidport: %v", err)
 	}
 	return p
