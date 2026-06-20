@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-20
 slug: serena-backend-loss-event-delegates-to-reconcile
 ---
@@ -43,20 +43,19 @@ a second wake source in its `select`. `ReconcileSerenaBackendLossViaIPC` (and
 `terminateSerenaSessionsForWorkspace`, `serenaTaskHasActiveIdleStop`, the forward-failure
 floor) remain the only teardown decision path. The event collapses the latency from 30s to
 ~event-latency while reusing the one correct owner; the 30s tick remains the always-on
-floor. The poller keeps a precise per-key `lastSerenaLivePID` tracker and emits
-`prev_pid` only from that prior-generation source; it still does not make teardown
-decisions.
+floor. The poller emits `daemon-backend-lost` only as a coarse wake trigger with
+`{server, daemon, port, state}`; it does not send a prior PID, track prior PID for the
+event, or make teardown decisions.
 
 ## Consequences
 
 - All 4 bot edges dissolve by construction (the re-derived logic is deleted, ~50 net lines
   removed); the idle-stop regression cannot recur because there is no second teardown path.
-- The poller remains a precise PID-change edge detector: `lastSerenaLivePID` is a per-key
-  last-live-PID tracker that supplies the wire-level `prev_pid` for the event. That tracker
-  is a source of prior-generation evidence for `ReconcileSerenaBackendLossViaIPC`, not a
-  competing owner of the teardown decision.
-- The GUI-started-after-daemon case, where `lastSerenaLivePID==0` because the live PID was
-  never observed by this GUI poller instance, is handled by the 30s reconcile floor plus the
+- The poller is only a coarse wake source. It may wake the reconcile owner on directly
+  observed live-PID changes, confirmed-dead rows, or removed serena rows, but the event body
+  carries no prior-generation evidence.
+- The GUI-started-after-daemon case, where this GUI instance never observed the old live
+  PID, is handled by the 30s reconcile floor plus the
   forward-failure floor. `serenaBackendLastPID` is seeded at session bind, so the floor still
   detects a later A->B PID change; this is an accepted speed fallback, not a correctness
   fallback.
@@ -67,37 +66,22 @@ decisions.
 
 Referenced from PR #384. Promotion to `accepted` is the architecture-reviewer's call.
 
-## Follow-up: baseline-absent prev-PID hint
+## Superseding follow-up: prev-PID hint removed
 
-Round 4 kept the same delegation rule while closing the baseline-absent restart gap:
-the `daemon-backend-lost` subscriber may record the event's `daemon` workspace key plus
-raw `port` and `prev_pid` as an identity-keyed per-port hint, but only
-`ReconcileSerenaBackendLossViaIPC` consumes that hint.
-The hint is used solely inside the reconcile owner's baseline-absent first-observation
-path, after idle-stop, restarting, absent-row, and dead-row cases have already been
-classified by the owner. The subscriber still does not map ports to workspaces, inspect
-IPC status, or call teardown.
-On consume, the hint is usable only when its stored workspace key matches the reconcile
-path's current `pathToKey[path]`; a mismatch means the port was reassigned to another
-workspace, so the stale hint is deleted without marking backend loss.
+The baseline-absent prev-PID hint is removed. It was a latency optimization, not a
+correctness requirement, and it created a separate edge class around contamination, idle
+grace, stale clearing, baseline absence, and races. The accepted owner model is now:
 
-The accepted retain/clear lifecycle is:
+| Surface | Current owner |
+|---|---|
+| Known-prior daemon generation | `serenaBackendLastPID`, seeded only when missing at bind time (`internal/gui/serena_router_session.go:762-798`). |
+| Baseline-present restart/death teardown | `ReconcileSerenaBackendLossViaIPC` compares the current supervisor PID against `serenaBackendLastPID`; no event hint participates. |
+| Baseline-absent stale daemon session | The next forwarded request reaches the live replacement daemon with the cached old daemon session id. A live native HTTP MCP daemon returns HTTP 404 for that unknown session; the relay records this as the repo's 404 session-loss contract (`internal/daemon/relay.go:250`), and the router's `doErr==nil` path copies the upstream status and body to the client (`internal/gui/serena_router.go:1107-1163`). The client re-handshakes. |
+| Fresh daemon sessions | Native HTTP initialize is not replayed from cache; each initialize reaches upstream and mints a distinct session (`internal/daemon/http_host.go:452-464`). |
+| Event acceleration | `daemon-backend-lost` remains a coarse wake trigger only; the body is `{server, daemon, port, state}` and carries no prior PID. |
 
-| Case | Condition | Hint action |
-|---|---|---|
-| (a) | IPC status read failed | RETAIN wanted-port hints; clear only non-wanted ports because a transient IPC failure leaves the prev-PID as the only old-generation witness. |
-| (b) | Successful reconcile has zero tracked workspaces (`knownKeys==0` or `wantPaths==0`) | CLEAR all hints because no bound session can consume them, and a survivor could misfire on a future fresh bind. |
-| (c) | Successful reconcile maps the port to a tracked workspace with a prior PID baseline | CLEAR because the stored baseline is the prior-generation source. |
-| (d) | Successful reconcile is baseline-absent and falls through to a present healthy PID | CLEAR by consumption in `consumeSerenaBackendPrevPIDHintLocked`; mark backend loss only when the hint's workspace key matches `pathToKey[path]` and `hintPrev != newPID`. |
-| (e) | Successful reconcile is baseline-absent and observes restarting (`StalePID!=0`) or idle-stopped without consuming this tick | RETAIN, bounded by router-session liveness for that workspace. |
-| (f) | Successful reconcile maps the port to no tracked workspace | CLEAR because no current router-bound workspace can consume that hint. |
-
-Case (e)'s bound is the existing liveness predicate:
-`s.serenaRouterSessions.withWorkspaceCount(pathToKey[path]) > 0`. The moment the
-workspace has zero router sessions bound, the per-port hint is cleared. This adds no
-tick counter and does not add a PID field to `routerSessionBinding`; the session-bound-PID
-alternative remains rejected because the bind site cannot obtain the PID without the same
-fallible IPC read, which would invert ownership back out of the reconcile owner.
+Therefore the baseline-absent first healthy observation simply establishes the current PID
+as the baseline. It must not mark backend loss without an accepted prior-generation owner.
 
 ## Terms and Abbreviations
 

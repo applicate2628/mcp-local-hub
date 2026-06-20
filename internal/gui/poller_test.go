@@ -535,28 +535,6 @@ func TestPoller_EmitsDaemonRecoveredOnFallingEdge(t *testing.T) {
 }
 
 func TestPoller_DaemonBackendLostEvent(t *testing.T) {
-	t.Run("emits-on-live-pid-change-after-stale-window", func(t *testing.T) {
-		const pidA = 4242
-		const pidB = 5151
-		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
-			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
-			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: pidA}},
-			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
-		}, 3)
-
-		bodies := backendLostBodies(events)
-		if len(bodies) != 1 {
-			t.Fatalf("daemon-backend-lost fired %d times, want exactly 1 for live PID generation change across stale window; bodies=%v events=%v", len(bodies), bodies, events)
-		}
-		body := bodies[0]
-		if got, _ := body["state"].(string); got != "Running" {
-			t.Errorf("state = %q, want Running", got)
-		}
-		if got, _ := body["prev_pid"].(int); got != pidA {
-			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
-		}
-	})
-
 	t.Run("emits-on-confirmed-dead-after-stale-window", func(t *testing.T) {
 		const pidA = 4242
 		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
@@ -569,8 +547,8 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		if len(bodies) != 1 {
 			t.Fatalf("daemon-backend-lost fired %d times, want exactly 1 for confirmed-dead row after stale window; bodies=%v events=%v", len(bodies), bodies, events)
 		}
-		if got, _ := bodies[0]["prev_pid"].(int); got != pidA {
-			t.Errorf("prev_pid = %v, want %d", bodies[0]["prev_pid"], pidA)
+		if got, _ := bodies[0]["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
 		}
 	})
 
@@ -590,9 +568,6 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		body := bodies[0]
 		if got, _ := body["state"].(string); got != "Quarantined" {
 			t.Errorf("state = %q, want Quarantined", got)
-		}
-		if got, _ := body["prev_pid"].(int); got != pidA {
-			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
 		}
 	})
 
@@ -622,8 +597,8 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		if len(bodies) != 1 {
 			t.Fatalf("long confirmed-dead spell emitted daemon-backend-lost %d times, want exactly 1; bodies=%v events=%v", len(bodies), bodies, events)
 		}
-		if got, _ := bodies[0]["prev_pid"].(int); got != pidA {
-			t.Errorf("prev_pid = %v, want %d", bodies[0]["prev_pid"], pidA)
+		if got, _ := bodies[0]["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
 		}
 	})
 
@@ -639,8 +614,8 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		if len(bodies) != 1 {
 			t.Fatalf("direct live PID change emitted daemon-backend-lost %d times, want exactly 1; bodies=%v events=%v", len(bodies), bodies, events)
 		}
-		if got, _ := bodies[0]["prev_pid"].(int); got != pidA {
-			t.Errorf("prev_pid = %v, want %d", bodies[0]["prev_pid"], pidA)
+		if got, _ := bodies[0]["state"].(string); got != "Running" {
+			t.Errorf("state = %q, want Running", got)
 		}
 	})
 
@@ -660,9 +635,6 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		body := bodies[0]
 		if got, _ := body["state"].(string); got != "Gone" {
 			t.Errorf("state = %q, want Gone", got)
-		}
-		if got, _ := body["prev_pid"].(int); got != pidA {
-			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
 		}
 	})
 
@@ -751,11 +723,8 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		if got, _ := body["state"].(string); got != "Quarantined" {
 			t.Errorf("state = %q, want Quarantined", got)
 		}
-		if got, _ := body["prev_pid"].(int); got != 4242 {
-			t.Errorf("prev_pid = %v, want 4242", body["prev_pid"])
-		}
 		if _, ok := body["pid"]; ok {
-			t.Errorf("daemon-backend-lost body carried pid=%v; want only prev_pid as stale-guard anchor", body["pid"])
+			t.Errorf("daemon-backend-lost body carried pid=%v; want coarse wake body only", body["pid"])
 		}
 	})
 
@@ -809,9 +778,6 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		if got, _ := body["state"].(string); got != "Quarantined" {
 			t.Errorf("state = %q, want Quarantined", got)
 		}
-		if got, _ := body["prev_pid"].(int); got != pidA {
-			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
-		}
 
 		if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
 			t.Fatalf("reconcile after stale-crash wake tore down %d sessions; want 1", n)
@@ -854,9 +820,6 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		}
 		if got, _ := body["state"].(string); got != "Gone" {
 			t.Errorf("state = %q, want Gone", got)
-		}
-		if got, _ := body["prev_pid"].(int); got != 4242 {
-			t.Errorf("prev_pid = %v, want 4242", body["prev_pid"])
 		}
 	})
 }

@@ -1044,78 +1044,7 @@ func (s *Server) consumeSerenaBackendLossEvents(ctx context.Context, ch <-chan E
 		if srv, _ := ev.Body["server"].(string); srv != "serena" {
 			continue
 		}
-		workspaceKey, _ := ev.Body["daemon"].(string)
-		eventInt := func(v any) (int, bool) {
-			switch n := v.(type) {
-			case float64:
-				return int(n), n > 0
-			case int:
-				return n, n > 0
-			default:
-				return 0, false
-			}
-		}
-		if port, ok := eventInt(ev.Body["port"]); ok {
-			if prev, ok := eventInt(ev.Body["prev_pid"]); ok {
-				s.recordSerenaBackendPrevPIDHint(workspaceKey, port, prev)
-			}
-		}
 		s.triggerSerenaBackendLossReconcile()
-	}
-}
-
-type serenaPrevPIDHint struct {
-	workspaceKey string
-	prevPID      int
-}
-
-func (s *Server) recordSerenaBackendPrevPIDHint(workspaceKey string, port, prev int) {
-	if s == nil || workspaceKey == "" || port <= 0 || prev <= 0 {
-		return
-	}
-	s.serenaBackendPIDMu.Lock()
-	defer s.serenaBackendPIDMu.Unlock()
-	if s.serenaBackendPrevPIDHint == nil {
-		s.serenaBackendPrevPIDHint = map[int]serenaPrevPIDHint{}
-	}
-	s.serenaBackendPrevPIDHint[port] = serenaPrevPIDHint{workspaceKey: workspaceKey, prevPID: prev}
-}
-
-func (s *Server) consumeSerenaBackendPrevPIDHintLocked(port int, workspaceKey string) (int, bool) {
-	if s == nil || port <= 0 || s.serenaBackendPrevPIDHint == nil {
-		return 0, false
-	}
-	hint, ok := s.serenaBackendPrevPIDHint[port]
-	if !ok {
-		return 0, false
-	}
-	if hint.workspaceKey != workspaceKey {
-		delete(s.serenaBackendPrevPIDHint, port)
-		return 0, false
-	}
-	delete(s.serenaBackendPrevPIDHint, port)
-	return hint.prevPID, true
-}
-
-// clearSerenaPrevPIDHintsExcept assumes serenaBackendPIDMu is held.
-func (s *Server) clearSerenaPrevPIDHintsExcept(wantPorts map[int]struct{}) {
-	if s == nil || len(s.serenaBackendPrevPIDHint) == 0 {
-		return
-	}
-	for port := range s.serenaBackendPrevPIDHint {
-		if _, want := wantPorts[port]; !want {
-			delete(s.serenaBackendPrevPIDHint, port)
-		}
-	}
-}
-
-// clearAllSerenaPrevPIDHints assumes serenaBackendPIDMu is held.
-func (s *Server) clearAllSerenaPrevPIDHints() {
-	if s == nil || len(s.serenaBackendPrevPIDHint) == 0 {
-		return
-	}
-	for port := range s.serenaBackendPrevPIDHint {
-		delete(s.serenaBackendPrevPIDHint, port)
 	}
 }
 
@@ -1164,9 +1093,6 @@ func SetSerenaBackendStatusFn(fn func(ctx context.Context) ([]api.DaemonStatus, 
 func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	knownKeys := s.serenaRouterSessions.knownWorkspaceKeys()
 	if len(knownKeys) == 0 {
-		s.serenaBackendPIDMu.Lock()
-		s.clearAllSerenaPrevPIDHints()
-		s.serenaBackendPIDMu.Unlock()
 		return 0
 	}
 	statusFn := serenaBackendStatusFn
@@ -1185,9 +1111,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// Map the router's known workspace KEYS -> their PATHS (the IPC status key).
 	pathToKey := make(map[string]string, len(knownKeys))
 	pathToTaskName := make(map[string]string, len(knownKeys))
-	pathToPort := make(map[string]int, len(knownKeys))
 	wantPaths := make(map[string]struct{}, len(knownKeys))
-	wantPorts := make(map[int]struct{}, len(knownKeys))
 	knownSet := make(map[string]struct{}, len(knownKeys))
 	for _, k := range knownKeys {
 		knownSet[k] = struct{}{}
@@ -1202,16 +1126,9 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		s.rememberSerenaBackendWorkspacePath(ws)
 		pathToKey[ws.WorkspacePath] = ws.WorkspaceKey
 		pathToTaskName[ws.WorkspacePath] = ws.TaskName
-		pathToPort[ws.WorkspacePath] = ws.Port
 		wantPaths[ws.WorkspacePath] = struct{}{}
-		if ws.Port > 0 {
-			wantPorts[ws.Port] = struct{}{}
-		}
 	}
 	if len(wantPaths) == 0 {
-		s.serenaBackendPIDMu.Lock()
-		s.clearAllSerenaPrevPIDHints()
-		s.serenaBackendPIDMu.Unlock()
 		return 0
 	}
 
@@ -1222,30 +1139,21 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	for path := range wantPaths {
 		if pid, ok := s.serenaBackendLastPID[path]; ok {
 			prior[path] = pid
-			if port := pathToPort[path]; port > 0 {
-				delete(s.serenaBackendPrevPIDHint, port)
-			}
 		}
 		if ticks, ok := s.serenaBackendIdlePaths[path]; ok {
 			priorIdle[path] = ticks
 		}
 		dropGenAtSnapshot[path] = s.serenaBackendDropGen[path]
 	}
-	s.clearSerenaPrevPIDHintsExcept(wantPorts)
 	s.serenaBackendPIDMu.Unlock()
 
 	rows, err := statusFn(ctx)
 	if err != nil {
-		s.serenaBackendPIDMu.Lock()
-		s.clearSerenaPrevPIDHintsExcept(wantPorts)
-		s.serenaBackendPIDMu.Unlock()
 		// IPC unavailable / transient: do NOT tear down sessions on a status
 		// READ failure (that would be a false positive — the daemons may be
 		// fine and only the supervisor IPC momentarily unreachable). The
 		// always-on forward-failure floor still covers real backend loss; this
-		// fallback simply skips this tick. Wanted-port prev-PID hints are left
-		// UNCHANGED too: during a baseline-absent restart, that hint is still the
-		// only old-generation witness the next successful tick can consume.
+		// fallback simply skips this tick.
 		return 0
 	}
 
@@ -1370,18 +1278,6 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 				delete(persisted, path)
 				continue
 			}
-			if newPID != 0 && (priorIdle[path] > 0 || serenaTaskHasActiveIdleStop(pathToTaskName[path], now)) {
-				s.serenaBackendPIDMu.Lock()
-				s.consumeSerenaBackendPrevPIDHintLocked(pathToPort[path], pathToKey[path])
-				s.serenaBackendPIDMu.Unlock()
-				continue
-			}
-			s.serenaBackendPIDMu.Lock()
-			hintPrev, ok := s.consumeSerenaBackendPrevPIDHintLocked(pathToPort[path], pathToKey[path])
-			s.serenaBackendPIDMu.Unlock()
-			if ok && newPID != 0 && hintPrev != newPID {
-				markLost(path)
-			}
 			continue
 		}
 		// A port-stale Restarting row (StalePID!=0: alive daemon, real PID parked
@@ -1444,17 +1340,6 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	skippedByDropGeneration := map[string]struct{}{}
 	dropGenerationAdvanced := func(path string) bool {
 		return s.serenaBackendDropGen[path] != dropGenAtSnapshot[path]
-	}
-	s.clearSerenaPrevPIDHintsExcept(wantPorts)
-	for path := range wantPaths {
-		if port := pathToPort[path]; port > 0 {
-			_, hadPrior := prior[path]
-			_, lost := lostByPath[path]
-			if !hadPrior && !lost && s.serenaRouterSessions.withWorkspaceCount(pathToKey[path]) > 0 {
-				continue
-			}
-			delete(s.serenaBackendPrevPIDHint, port)
-		}
 	}
 	for path := range persisted {
 		if dropGenerationAdvanced(path) {

@@ -3,7 +3,6 @@ package gui
 import (
 	"bytes"
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -226,12 +225,6 @@ func serenaBackendIdleMarkerForTest(s *Server, wsPath string) (int, bool) {
 	return ticks, ok
 }
 
-func serenaBackendPrevPIDHintLenForTest(s *Server) int {
-	s.serenaBackendPIDMu.Lock()
-	defer s.serenaBackendPIDMu.Unlock()
-	return len(s.serenaBackendPrevPIDHint)
-}
-
 func assertSerenaSessionLive(t *testing.T, s *Server, sessions *InMemorySessionRouter, wsKey, sid string) {
 	t.Helper()
 	if !s.serenaRouterSessions.known(sid) {
@@ -292,11 +285,11 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 			"server": "serena", "daemon": ws.WorkspaceKey,
 		}}
 		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "mcp-language-server", "daemon": ws.WorkspaceKey, "prev_pid": 1234, "port": 9308,
+			"server": "mcp-language-server", "daemon": ws.WorkspaceKey, "port": 9308, "state": "Stopped",
 		}}
 		for i := 0; i < 5; i++ {
 			ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-				"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": 1234, "port": 9308,
+				"server": "serena", "daemon": ws.WorkspaceKey, "port": 9308, "state": "Stopped",
 			}}
 		}
 		close(ch)
@@ -326,7 +319,7 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 
 		ch := make(chan Event, 1)
 		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": pidA, "port": 9306,
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9306, "state": "Stopped",
 		}}
 		close(ch)
 		s.consumeSerenaBackendLossEvents(context.Background(), ch)
@@ -360,7 +353,7 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 
 		ch := make(chan Event, 1)
 		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": pidA, "port": 9307,
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9307, "state": "Running",
 		}}
 		close(ch)
 		s.consumeSerenaBackendLossEvents(context.Background(), ch)
@@ -393,7 +386,7 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 
 		ch := make(chan Event, 1)
 		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "serena", "daemon": "default", "prev_pid": pidA, "port": 9305,
+			"server": "serena", "daemon": "default", "port": 9305, "state": "Stopped",
 		}}
 		close(ch)
 		s.consumeSerenaBackendLossEvents(context.Background(), ch)
@@ -553,427 +546,6 @@ func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickRunningRowEstablishesBase
 	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
 		t.Fatalf("baseline after first running-row observation = (%d,%v), want (%d,true)", got, ok, pid)
 	}
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickRunningRowWithPrevPIDHintTearsDown(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hinted-alpha"
-	const sid = "sid-running-hinted-alpha"
-	const pidA = 3333
-	const pidB = 4444
-	ws := serenaWS("running-hinted-alpha", wsPath, 9302)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-restart")
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{
-			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port},
-		}, nil
-	}
-
-	ch := make(chan Event, 1)
-	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-		"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": float64(pidA), "port": float64(ws.Port),
-	}}
-	close(ch)
-	s.consumeSerenaBackendLossEvents(context.Background(), ch)
-
-	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
-		t.Fatalf("precondition: backend PID baseline for %q should be absent on the first tick", wsPath)
-	}
-	if got := len(s.serenaBackendLossTrigger); got != 1 {
-		t.Fatalf("backend-loss trigger depth = %d, want 1", got)
-	}
-	<-s.serenaBackendLossTrigger
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
-		t.Fatalf("first running-row observation with prev-PID hint %d -> %d tore down %d sessions; want 1", pidA, pidB, n)
-	}
-	assertSerenaSessionGone(t, s, sessions, sid)
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintRespectsIdleStopGrace(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-idle-alpha"
-	const sid = "sid-running-hint-idle-alpha"
-	const pidA = 3333
-	ws := serenaWS("running-hint-idle-alpha", wsPath, 9303)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-idle")
-	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
-		t.Fatalf("seed idle stop: %v", err)
-	}
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{
-			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Stopped", PID: 0, StalePID: 0, Port: ws.Port},
-		}, nil
-	}
-
-	ch := make(chan Event, 1)
-	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-		"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": float64(pidA), "port": float64(ws.Port),
-	}}
-	close(ch)
-	s.consumeSerenaBackendLossEvents(context.Background(), ch)
-	<-s.serenaBackendLossTrigger
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("first stopped-row observation with active idle stop and prev-PID hint tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintIdleWakeWithoutBaselineSurvives(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-idle-wake-alpha"
-	const sid = "sid-running-hint-idle-wake-alpha"
-	const pidA = 3333
-	const pidB = 4444
-	ws := serenaWS("running-hint-idle-wake-alpha", wsPath, 9305)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-idle")
-	if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
-		t.Fatalf("seed idle stop: %v", err)
-	}
-	row := api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Stopped", PID: 0, StalePID: 0, Port: ws.Port}
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{row}, nil
-	}
-
-	ch := make(chan Event, 1)
-	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-		"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": float64(pidA), "port": float64(ws.Port),
-	}}
-	close(ch)
-	s.consumeSerenaBackendLossEvents(context.Background(), ch)
-	<-s.serenaBackendLossTrigger
-
-	if _, ok := serenaBackendBaselineForTest(s, wsPath); ok {
-		t.Fatalf("precondition: backend PID baseline for %q should be absent before idle wake", wsPath)
-	}
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("stopped-row observation with active idle stop and prev-PID hint tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 1 {
-		t.Fatalf("prev-PID hint count after stopped idle row = %d, want 1 retained for wake", got)
-	}
-
-	row = api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port}
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("baseline-absent idle wake with prev-PID hint %d -> %d tore down %d sessions; want 0", pidA, pidB, n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
-		t.Fatalf("prev-PID hint count after idle wake = %d, want 0 consumed without teardown", got)
-	}
-	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidB {
-		t.Fatalf("baseline after idle wake = (%d,%v), want (%d,true)", got, ok, pidB)
-	}
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintEqualNewPIDEstablishesBaseline(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-same-alpha"
-	const sid = "sid-running-hint-same-alpha"
-	const pid = 3333
-	ws := serenaWS("running-hint-same-alpha", wsPath, 9304)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-unchanged")
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{
-			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pid, Port: ws.Port},
-		}, nil
-	}
-
-	ch := make(chan Event, 1)
-	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-		"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": float64(pid), "port": float64(ws.Port),
-	}}
-	close(ch)
-	s.consumeSerenaBackendLossEvents(context.Background(), ch)
-	<-s.serenaBackendLossTrigger
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("first running-row observation with unchanged prev-PID hint tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pid {
-		t.Fatalf("baseline after unchanged prev-PID hint = (%d,%v), want (%d,true)", got, ok, pid)
-	}
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
-		t.Fatalf("prev-PID hint map length after same-PID first tick = %d, want 0", got)
-	}
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintDoesNotFireLate(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-once-alpha"
-	const sid1 = "sid-running-hint-once-alpha-1"
-	const sid2 = "sid-running-hint-once-alpha-2"
-	const pidA = 3333
-	const pidB = 4444
-	ws := serenaWS("running-hint-once-alpha", wsPath, 9305)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid1, "daemon-before-restart")
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{
-			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port},
-		}, nil
-	}
-
-	ch := make(chan Event, 1)
-	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-		"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": float64(pidA), "port": float64(ws.Port),
-	}}
-	close(ch)
-	s.consumeSerenaBackendLossEvents(context.Background(), ch)
-	<-s.serenaBackendLossTrigger
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
-		t.Fatalf("first running-row observation with prev-PID hint %d -> %d tore down %d sessions; want 1", pidA, pidB, n)
-	}
-	assertSerenaSessionGone(t, s, sessions, sid1)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
-		t.Fatalf("prev-PID hint map length after first hinted tick = %d, want 0", got)
-	}
-
-	seedBoundSerenaSession(s, sessions, ws, sid2, "daemon-after-restart")
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("second running-row observation after consumed prev-PID hint tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid2)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
-		t.Fatalf("prev-PID hint map length after second tick = %d, want 0", got)
-	}
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintRetainedAcrossStatusError(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-status-error-alpha"
-	const sid = "sid-running-hint-status-error-alpha"
-	const pidA = 3333
-	const pidB = 4444
-	ws := serenaWS("running-hint-status-error-alpha", wsPath, 9306)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-restart")
-	var calls int
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		calls++
-		if calls == 1 {
-			return nil, errors.New("boom")
-		}
-		return []api.DaemonStatus{
-			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port},
-		}, nil
-	}
-
-	ch := make(chan Event, 1)
-	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-		"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": float64(pidA), "port": float64(ws.Port),
-	}}
-	close(ch)
-	s.consumeSerenaBackendLossEvents(context.Background(), ch)
-	<-s.serenaBackendLossTrigger
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("status-error tick with prev-PID hint tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 1 {
-		t.Fatalf("prev-PID hint map length after status-error tick = %d, want 1", got)
-	}
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
-		t.Fatalf("healthy tick after retained prev-PID hint %d -> %d tore down %d sessions; want 1", pidA, pidB, n)
-	}
-	assertSerenaSessionGone(t, s, sessions, sid)
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintDropsReusedPortFromDifferentWorkspace(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const port = 9307
-	const wsAPath = "/proj/running-hint-reused-port-alpha"
-	const wsBPath = "/proj/running-hint-reused-port-beta"
-	const sidA = "sid-running-hint-reused-port-alpha"
-	const sidB = "sid-running-hint-reused-port-beta"
-	const pidA = 3333
-	const pidB = 4444
-	wsA := serenaWS("running-hint-reused-port-alpha", wsAPath, port)
-	wsB := serenaWS("running-hint-reused-port-beta", wsBPath, port)
-	sessions := NewInMemorySessionRouter()
-	resolver := &listerStubResolver{
-		stubResolver: stubResolver{entries: []*api.WorkspaceEntry{wsA}},
-		list:         []*api.WorkspaceEntry{wsA},
-	}
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
-	s.SetSerenaRouterDeps(&serenaRouterDeps{
-		Resolver: resolver,
-		Sessions: sessions,
-		AuditFn:  func(string, string, map[string]any) error { return nil },
-	})
-	seedBoundSerenaSession(s, sessions, wsA, sidA, "daemon-before-reused-port")
-
-	ch := make(chan Event, 1)
-	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-		"server": "serena", "daemon": wsA.WorkspaceKey, "prev_pid": float64(pidA), "port": float64(port),
-	}}
-	close(ch)
-	s.consumeSerenaBackendLossEvents(context.Background(), ch)
-	<-s.serenaBackendLossTrigger
-
-	s.coordinateBackendLossUnbind(sidA, sessions)
-	resolver.entries = []*api.WorkspaceEntry{wsB}
-	resolver.list = []*api.WorkspaceEntry{wsB}
-	seedBoundSerenaSession(s, sessions, wsB, sidB, "daemon-after-reused-port")
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{
-			{Server: "serena", Workspace: wsBPath, TaskName: wsB.TaskName, State: "Running", PID: pidB, Port: port},
-		}, nil
-	}
-
-	if _, ok := serenaBackendBaselineForTest(s, wsBPath); ok {
-		t.Fatalf("precondition: backend PID baseline for reused-port workspace %q should be absent", wsBPath)
-	}
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("baseline-absent reused-port workspace consumed prior workspace hint %d -> %d and tore down %d sessions; want 0", pidA, pidB, n)
-	}
-	assertSerenaSessionLive(t, s, sessions, wsB.WorkspaceKey, sidB)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
-		t.Fatalf("prev-PID hint map length after reused-port mismatch = %d, want 0 stale hint dropped", got)
-	}
-	if got, ok := serenaBackendBaselineForTest(s, wsBPath); !ok || got != pidB {
-		t.Fatalf("baseline after reused-port first observation = (%d,%v), want (%d,true)", got, ok, pidB)
-	}
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcileZeroSessionReconcileClearsStaleHint(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-zero-session-alpha"
-	const sid = "sid-running-hint-zero-session-alpha"
-	const pidA = 3333
-	const pidB = 4444
-	ws := serenaWS("running-hint-zero-session-alpha", wsPath, 9307)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	s.recordSerenaBackendPrevPIDHint(ws.WorkspaceKey, ws.Port, pidA)
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		t.Fatal("zero-session reconcile read IPC status; want knownKeys==0 early return")
-		return nil, nil
-	}
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("zero-session reconcile tore down %d sessions; want 0", n)
-	}
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
-		t.Fatalf("prev-PID hint map length after zero-session reconcile = %d, want 0", got)
-	}
-
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-after-zero-session")
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{
-			{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port},
-		}, nil
-	}
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("fresh bind after zero-session stale hint cleanup tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-	if got, ok := serenaBackendBaselineForTest(s, wsPath); !ok || got != pidB {
-		t.Fatalf("baseline after fresh bind = (%d,%v), want (%d,true)", got, ok, pidB)
-	}
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintRetainedWhileRestartingThenConsumed(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-restarting-alpha"
-	const sid = "sid-running-hint-restarting-alpha"
-	const pidA = 3333
-	const pidB = 4444
-	ws := serenaWS("running-hint-restarting-alpha", wsPath, 9308)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-restart")
-	s.recordSerenaBackendPrevPIDHint(ws.WorkspaceKey, ws.Port, pidA)
-	row := api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Restarting", PID: 0, StalePID: pidA, Port: ws.Port}
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{row}, nil
-	}
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("baseline-absent restarting tick tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 1 {
-		t.Fatalf("prev-PID hint map length after restarting tick = %d, want 1", got)
-	}
-	if got, ok := serenaBackendBaselineForTest(s, wsPath); ok {
-		t.Fatalf("baseline after restarting tick = (%d,%v), want absent", got, ok)
-	}
-
-	row = api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port}
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
-		t.Fatalf("running tick after retained restarting hint %d -> %d tore down %d sessions; want 1", pidA, pidB, n)
-	}
-	assertSerenaSessionGone(t, s, sessions, sid)
-}
-
-func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintDroppedWhenSessionUnbindsDuringRestart(t *testing.T) {
-	withSerenaIdleReconcileGlobals(t)
-	withTempSerenaStateRoot(t)
-
-	const wsPath = "/proj/running-hint-restarting-unbind-alpha"
-	const sid = "sid-running-hint-restarting-unbind-alpha"
-	const freshSID = "sid-running-hint-restarting-unbind-fresh-alpha"
-	const pidA = 3333
-	const pidB = 4444
-	ws := serenaWS("running-hint-restarting-unbind-alpha", wsPath, 9309)
-	s, sessions := newSerenaStoreSeedServer(t, ws)
-	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-restart")
-	s.recordSerenaBackendPrevPIDHint(ws.WorkspaceKey, ws.Port, pidA)
-	row := api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Restarting", PID: 0, StalePID: pidA, Port: ws.Port}
-	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-		return []api.DaemonStatus{row}, nil
-	}
-
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("baseline-absent restarting tick tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 1 {
-		t.Fatalf("prev-PID hint map length after restarting tick = %d, want 1", got)
-	}
-
-	s.coordinateBackendLossUnbind(sid, sessions)
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("zero-session reconcile after restarting unbind tore down %d sessions; want 0", n)
-	}
-	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
-		t.Fatalf("prev-PID hint map length after last session unbound = %d, want 0", got)
-	}
-
-	seedBoundSerenaSession(s, sessions, ws, freshSID, "daemon-after-restart")
-	row = api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port}
-	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
-		t.Fatalf("fresh bind after unbound restarting hint cleanup tore down %d sessions; want 0", n)
-	}
-	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, freshSID)
 }
 
 func TestSerenaRouter_BackendLoss_IPCReconcilePreservesIdleStoppedAndPostWakePID(t *testing.T) {

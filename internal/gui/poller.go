@@ -35,13 +35,12 @@ import (
 // deltas on the next cycle. An empty Daemon falls back to "default" so
 // single-daemon servers stay correct.
 type StatusPoller struct {
-	status            statusProvider
-	events            *Broadcaster
-	interval          time.Duration
-	last              map[string]api.DaemonStatus // key: "<server>/<daemon>"
-	lastSerenaLivePID map[string]int              // key: "<server>/<daemon>"; carries the last non-zero PID across stale rows
-	snapshotCh        chan<- []api.DaemonStatus   // optional, see SetSnapshotChannel
-	errorCh           chan<- error                // optional, see SetErrorChannel
+	status     statusProvider
+	events     *Broadcaster
+	interval   time.Duration
+	last       map[string]api.DaemonStatus // key: "<server>/<daemon>"
+	snapshotCh chan<- []api.DaemonStatus   // optional, see SetSnapshotChannel
+	errorCh    chan<- error                // optional, see SetErrorChannel
 }
 
 // SetSnapshotChannel installs an optional sink that receives the full
@@ -83,11 +82,10 @@ func (p *StatusPoller) SetErrorChannel(ch chan<- error) {
 // goroutines; call Run(ctx) to begin polling.
 func NewStatusPoller(status statusProvider, events *Broadcaster, interval time.Duration) *StatusPoller {
 	return &StatusPoller{
-		status:            status,
-		events:            events,
-		interval:          interval,
-		last:              map[string]api.DaemonStatus{},
-		lastSerenaLivePID: map[string]int{},
+		status:   status,
+		events:   events,
+		interval: interval,
+		last:     map[string]api.DaemonStatus{},
 	}
 }
 
@@ -211,23 +209,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		// failed on first observation still emits once.
 		nowFailed := isFailedDaemonState(r)
 		failedEdge := nowFailed && !isFailedDaemonState(prev)
-		backendLostPrevPID := 0
-		backendLostEdge := false
-		if isSerenaBackendLossRow(r) {
-			lastLivePID := p.lastSerenaLivePID[k]
-			switch {
-			case r.PID > 0 && lastLivePID > 0 && r.PID != lastLivePID:
-				backendLostEdge = true
-				backendLostPrevPID = lastLivePID
-			case isConfirmedDeadDaemonRow(r) && lastLivePID > 0 && !(ok && isConfirmedDeadDaemonRow(prev)):
-				backendLostEdge = true
-				backendLostPrevPID = lastLivePID
-				delete(p.lastSerenaLivePID, k)
-			}
-			if r.PID > 0 {
-				p.lastSerenaLivePID[k] = r.PID
-			}
-		}
+		backendLostEdge := isSerenaBackendLossRow(r) && ((ok && prev.PID > 0 && r.PID > 0 && prev.PID != r.PID) || (isConfirmedDeadDaemonRow(r) && !(ok && isConfirmedDeadDaemonRow(prev))))
 		// Falling edge: was failed, now healthy — the supervisor's auto-restart
 		// (or a manual restart) succeeded. The `ok` guard means a daemon
 		// first-seen healthy does NOT spuriously announce a recovery; only a
@@ -287,11 +269,10 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			p.events.Publish(Event{
 				Type: "daemon-backend-lost",
 				Body: map[string]any{
-					"server":   r.Server,
-					"daemon":   r.Daemon,
-					"state":    r.State,
-					"prev_pid": backendLostPrevPID,
-					"port":     r.Port,
+					"server": r.Server,
+					"daemon": r.Daemon,
+					"port":   r.Port,
+					"state":  r.State,
 				},
 			})
 		}
@@ -316,10 +297,6 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		if _, still := seen[k]; !still {
 			gone := p.last[k]
 			delete(p.last, k)
-			lastLivePID := p.lastSerenaLivePID[k]
-			if isSerenaBackendLossRow(gone) {
-				delete(p.lastSerenaLivePID, k)
-			}
 			p.events.Publish(Event{
 				Type: "daemon-state",
 				Body: map[string]any{
@@ -328,15 +305,14 @@ func (p *StatusPoller) poll(ctx context.Context) {
 					"state":  "Gone",
 				},
 			})
-			if isSerenaBackendLossRow(gone) && lastLivePID > 0 {
+			if isSerenaBackendLossRow(gone) {
 				p.events.Publish(Event{
 					Type: "daemon-backend-lost",
 					Body: map[string]any{
-						"server":   gone.Server,
-						"daemon":   gone.Daemon,
-						"state":    "Gone",
-						"prev_pid": lastLivePID,
-						"port":     gone.Port,
+						"server": gone.Server,
+						"daemon": gone.Daemon,
+						"port":   gone.Port,
+						"state":  "Gone",
 					},
 				})
 			}
