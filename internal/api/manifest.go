@@ -505,6 +505,10 @@ func (a *API) validateManifestForStorageName(name, yaml string) []string {
 }
 
 // manifestValidationWarnings returns the BLOCKING warnings only.
+// Draft readiness currently mirrors the write gate by calling
+// ManifestValidateMode(Strict), so this alias to manifestBlockingWarnings is a
+// temporary drift-sensitive dependency, not an incidental implementation detail
+// (see work-items/decisions/2026-06-20-draft-readiness-mirrors-write-gate-follow-up.md).
 // Pre-r10 it returned blocking + advisory combined; codex bot r10
 // P2 closure (PR #169) flagged that the GUI save flow
 // (AddServer.tsx) treats ANY warnings.length > 0 as fatal, so

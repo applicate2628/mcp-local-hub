@@ -79,12 +79,14 @@ function isManifestNotFoundError(err: unknown): boolean {
   const status = (err as { status?: unknown } | null)?.status;
   const code = (err as { code?: unknown } | null)?.code;
   const message = err instanceof Error ? err.message : String(err ?? "");
-  return (
-    status === 404 ||
-    code === "MANIFEST_NOT_FOUND" ||
-    /\b404\b/i.test(message) ||
-    /manifest_not_found|not found|does not exist/i.test(message)
-  );
+  // A typed APIError (status/code present) is AUTHORITATIVE — do not fall through
+  // to the brittle message regex, which could wrongly match a coded
+  // non-not-found error whose message happens to contain "not found".
+  if (typeof status === "number" || typeof code === "string") {
+    return status === 404 || code === "MANIFEST_NOT_FOUND";
+  }
+  // Legacy untyped error (no status/code): the message heuristic is the only signal.
+  return /\b404\b/i.test(message) || /manifest_not_found|not found|does not exist/i.test(message);
 }
 
 export function AddServerScreen(props: {
@@ -617,7 +619,10 @@ export function AddServerScreen(props: {
       if (version !== validateCounter.current) return;
       setBanner({ kind: "error", text: `/api/manifest/validate: ${(err as Error).message}` });
     } finally {
-      setBusy("");
+      // A preempted validation (a newer runValidate bumped validateCounter)
+      // must NOT clear busy — that would re-enable Save/Install while the newer
+      // validation is still in flight. Only the current validation owns the clear.
+      if (version === validateCounter.current) setBusy("");
     }
   }
 
@@ -1004,7 +1009,10 @@ export function AddServerScreen(props: {
       if (version !== validateCounter.current) return;
       setBanner({ kind: "error", text: `/api/manifest/validate: ${(err as Error).message}` });
     } finally {
-      setBusy("");
+      // A preempted validation (a newer runValidate bumped validateCounter)
+      // must NOT clear busy — that would re-enable Save/Install while the newer
+      // validation is still in flight. Only the current validation owns the clear.
+      if (version === validateCounter.current) setBusy("");
     }
   }
 
