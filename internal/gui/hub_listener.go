@@ -152,7 +152,9 @@ func runHubListenerRestartDriver(ctx context.Context, s *Server, opts hubListene
 func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestartDriverOptions) hubListenerRestartDriverOptions {
 	if opts.startFn == nil {
 		opts.startFn = func(ctx context.Context) (*HubListenerComponents, error) {
-			return startHubMcpListener(ctx, true, s.api)
+			return startHubMcpListenerWithOptions(ctx, true, s.api, startHubMcpListenerOptions{
+				preservePortOnReloadHandlerFailure: true,
+			})
 		}
 	}
 	if opts.shutdownFn == nil {
@@ -245,6 +247,12 @@ func restartHubListener(ctx context.Context, s *Server, opts hubListenerRestartD
 			opts.shutdownFn(context.Background(), newComp)
 			return false
 		}
+		if ctx.Err() != nil {
+			if s.hubMcpComp.CompareAndSwap(newComp, nil) {
+				opts.shutdownFn(context.Background(), newComp)
+			}
+			return false
+		}
 		restartPort = newComp.port
 		s.hubRestartLastSuccess = opts.nowFn()
 		_ = opts.emitFn("info", "hub-listener-restarted", map[string]any{
@@ -329,8 +337,20 @@ func readHubEndpointGateFromSettings() bool {
 // error so no traffic is accepted without a published endpoint file
 // (spec §"Bind ordering" rollback note).
 func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubListenerComponents, error) {
+	return startHubMcpListenerWithOptions(ctx, enabled, a, startHubMcpListenerOptions{})
+}
+
+type startHubMcpListenerOptions struct {
+	preservePortOnReloadHandlerFailure bool
+	reloadHandlerFn                    func(context.Context) (*api.InternalReloadHandler, error)
+}
+
+func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.API, opts startHubMcpListenerOptions) (*HubListenerComponents, error) {
 	if !enabled {
 		return nil, nil
+	}
+	if opts.reloadHandlerFn == nil {
+		opts.reloadHandlerFn = api.NewInternalReloadHandler
 	}
 
 	// codex bot phase4 r10 P1 closure on PR #158: short-circuit if
@@ -412,7 +432,7 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// listener refuses to come up with a silently-broken
 	// /internal/reload-tokens. Rollback the bound listener so we
 	// don't leave a half-initialized hub server running.
-	reload, reloadErr := api.NewInternalReloadHandler(ctx)
+	reload, reloadErr := opts.reloadHandlerFn(ctx)
 	if reloadErr != nil {
 		_ = ln.Close()
 		store.Close()
@@ -436,10 +456,19 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		// on disk and the operator runs `mcphub gui --reset-port`
 		// manually. That's strictly better than the goroutine
 		// blocking past Start's return and mutating state after.
-		if rerr := api.ResetHubPortContext(ctx); rerr != nil {
-			_ = api.LogHubMcpEvent("error", "hub-endpoint-rollback-failed", map[string]any{
-				"err": rerr.Error(),
-			})
+		//
+		// Auto-restart opts out of this rollback. Installed client
+		// configs already hold /clients/ and /g/ URLs with the
+		// persisted port; clearing it would make the retry choose a
+		// fresh OS port and orphan those gated URLs. The restart
+		// driver emits hub-listener-restart-failed and retries against
+		// the same persisted port instead.
+		if !opts.preservePortOnReloadHandlerFailure {
+			if rerr := api.ResetHubPortContext(ctx); rerr != nil {
+				_ = api.LogHubMcpEvent("error", "hub-endpoint-rollback-failed", map[string]any{
+					"err": rerr.Error(),
+				})
+			}
 		}
 		return nil, fmt.Errorf("hub-mcp: %w", reloadErr)
 	}
