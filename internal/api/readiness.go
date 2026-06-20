@@ -343,39 +343,21 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 // KNOWN-TOLERATED non-convergences (correct to keep as advisory, not bugs): a
 // RELATIVE base_args[0] under a daemon with no absolute cwd cannot be verified
 // from this process (the daemon inherits an unpredictable launch cwd) — surfaced
-// Optional, never resolved against os.Getwd() (Codex #377 r18). Port probing
-// differs intentionally between the two gates: readiness uses a bind probe
-// (portAvailable, the allocator's own truth) while Preflight uses a dial probe
-// plus supervisor-intent awareness (portHeldByOurDaemonForPortArm) — Preflight's
-// is the richer authoritative collision check, readiness's the simpler advisory.
+// Optional, never resolved against os.Getwd() (Codex #377 r18). The fixed-port
+// detail rows still use the readiness bind probe (portAvailable, the allocator's
+// own truth) while AdmissionCheck preserves Preflight's dial probe plus
+// supervisor-intent awareness (portHeldByOurDaemonForPortArm); Ready follows the
+// AdmissionCheck owner, and the bind-probe rows remain richer GUI diagnostics.
 //
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
-// failing fast and returns a structured, GUI-renderable report. It is the
-// non-fatal, all-requirements companion to Preflight (which fails fast at the
-// first blocker for the install gate). It MIRRORS what install + run actually
-// require, so /api/server/readiness never reports Ready while the install gate
-// (or the running server) would fail (Codex #377): the launcher on PATH + the
-// runtime behind it, the canonical mcphub binary, declared required_binaries
-// (incl. per-language), foreign daemon-port collisions, optional stdio env
-// `secret:` refs (advisory), and required remote-http url/header
-// ${secret:KEY} placeholders (blocking).
-//
-// NOTE (architecture, #377): the authoritative "will this install be admitted"
-// decision is currently an implicit SEQUENCE (Preflight + BuildPlan +
-// validateDynamicPoolManifest) re-spelled at each install site and approximated
-// here. A follow-up extracts that into one pure AdmissionCheck both gates adapt
-// (see work-items/decisions/2026-06-19-admission-check-single-gate.md) so the
-// two can never diverge by construction; until then the shared predicates below
-// keep them in sync.
+// failing fast and returns a structured, GUI-renderable report. AdmissionCheck is
+// the authoritative "will this install be admitted" owner; Ready is true iff
+// AdmissionCheck returns no non-optional findings. The requirement rows below
+// are the rich rendering layer on top: launcher/runtime guidance, per-key secret
+// prompts, port detail rows, and install-plan explanations for the GUI.
 func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
-	rep := &ReadinessReport{Server: m.Name, Ready: true}
+	rep := &ReadinessReport{Server: m.Name, Ready: !containsNonOptional(AdmissionCheck(m, AdmissionScope{}))}
 	add := func(r ReadinessRequirement) {
-		// An unmet OPTIONAL requirement (an unset secret) is advisory — it
-		// prompts the operator but does not block install/spawn, so it does
-		// NOT flip Ready.
-		if !r.OK && !r.Optional {
-			rep.Ready = false
-		}
 		rep.Requirements = append(rep.Requirements, r)
 	}
 
