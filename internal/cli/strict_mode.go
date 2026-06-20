@@ -358,7 +358,7 @@ func strictModeShimDriftFingerprint(snapshot autostart.StatusSnapshot) strictMod
 	case autostart.StateAbsent:
 		return strictModeShimFingerprint{kind: strictModeShimFingerprintAbsent}
 	case autostart.StateEnabledRunning, autostart.StateEnabledStopped:
-		return strictModeShimFingerprint{kind: strictModeShimFingerprintEnabledMatching}
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintEnabledMatching, spec: snapshot.SpecFingerprint}
 	case autostart.StateDrifted:
 		return strictModeShimFingerprint{kind: strictModeShimFingerprintDrifted, spec: snapshot.SpecFingerprint}
 	case autostart.StateStaleResidue:

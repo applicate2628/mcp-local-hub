@@ -592,6 +592,31 @@ func TestStrictModeEnable_DriftedLivenessOnlyChangeDeletesBreadcrumb(t *testing.
 	}
 }
 
+func TestStrictModeShimDriftFingerprintEnabledMatchingComparesSpec(t *testing.T) {
+	matchingA := strictModeShimDriftFingerprint(autostart.StatusSnapshot{
+		State:           autostart.StateEnabledRunning,
+		SpecFingerprint: "installed=true enabled=true args=gui",
+	})
+	matchingB := strictModeShimDriftFingerprint(autostart.StatusSnapshot{
+		State:           autostart.StateEnabledStopped,
+		SpecFingerprint: "installed=true enabled=true args=gui",
+	})
+	if matchingA != matchingB {
+		t.Fatalf("identical enabled-matching specs compared different: running=%v stopped=%v", matchingA, matchingB)
+	}
+	if matchingA.spec == "" {
+		t.Fatal("enabled-matching fingerprint dropped the populated shim spec")
+	}
+
+	changed := strictModeShimDriftFingerprint(autostart.StatusSnapshot{
+		State:           autostart.StateEnabledRunning,
+		SpecFingerprint: "installed=true enabled=true args=gui --strict-mode",
+	})
+	if changed == matchingA {
+		t.Fatalf("different enabled-matching specs collapsed to unchanged: base=%v changed=%v", matchingA, changed)
+	}
+}
+
 // TestStrictModeEnable_LivenessOnlyReprobeChangeDeletesBreadcrumb pins the
 // drift fingerprint distinction: enabled-running and enabled-stopped differ
 // only by supervisor liveness, not by the installed shim shape. A liveness tick

@@ -456,6 +456,39 @@ func TestWindowsBackend_StatusSchedulerFactoryError(t *testing.T) {
 	}
 }
 
+func TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		xml    []byte
+		xmlErr error
+	}{
+		{name: "export-error", xmlErr: errors.New("schtasks export failed")},
+		{name: "empty-xml", xml: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{
+				statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
+				xmlReturn:    tc.xml,
+				xmlErr:       tc.xmlErr,
+			}
+			withFakeScheduler(t, f)
+
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			snapshot, err := b.StatusSnapshot(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+			if err == nil {
+				t.Fatalf("StatusSnapshot returned nil err and snapshot=%+v; XML uncertainty must fail closed", snapshot)
+			}
+			if snapshot.SpecFingerprint != "" {
+				t.Fatalf("StatusSnapshot returned fingerprint %q on unavailable XML, want no comparable spec", snapshot.SpecFingerprint)
+			}
+		})
+	}
+}
+
 func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testing.T) {
 	baseXML := buildWindowsStatusSnapshotXML(
 		`C:\mcp\mcphub.exe`,

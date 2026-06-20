@@ -295,7 +295,10 @@ func (l *linuxBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
 		}
 		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("read unit: %w", err)
 	}
-	enabled := linuxUnitEnabledStatus()
+	enabled, err := linuxUnitEnabledStatus()
+	if err != nil {
+		return StatusSnapshot{State: StateAbsent}, err
+	}
 	spec := shimSpecFingerprint("linux", "installed=true", "enabled="+enabled, "unit="+string(body))
 	want, err := resolveMCPHubPath(opts)
 	if err != nil {
@@ -315,16 +318,16 @@ func (l *linuxBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
 	return StatusSnapshot{State: StateEnabledStopped, SpecFingerprint: spec}, nil
 }
 
-func linuxUnitEnabledStatus() string {
+func linuxUnitEnabledStatus() (string, error) {
 	stdout, _, err := systemctlFn([]string{"--user", "is-enabled", linuxUnitName})
-	if err != nil {
-		return "unknown"
-	}
 	status := strings.TrimSpace(stdout)
 	if status == "" {
-		return "unknown"
+		if err != nil {
+			return "", fmt.Errorf("systemctl is-enabled: %w", err)
+		}
+		return "unknown", nil
 	}
-	return status
+	return status, nil
 }
 
 // isSystemctlMissing returns true when realSystemctl's exec.LookPath

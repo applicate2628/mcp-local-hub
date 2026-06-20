@@ -164,7 +164,7 @@ func (w *windowsBackend) Disable() error {
 // Delete) is treated the same way — keep the running/stopped verdict
 // rather than flipping to StateDrifted on best-effort failure.
 func (w *windowsBackend) Status(opts Options) (State, error) {
-	snapshot, err := w.StatusSnapshot(opts)
+	snapshot, err := w.statusSnapshot(opts, false)
 	return snapshot.State, err
 }
 
@@ -173,6 +173,10 @@ func (w *windowsBackend) Status(opts Options) (State, error) {
 // only for running-vs-stopped classification and is deliberately excluded from
 // the fingerprint.
 func (w *windowsBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
+	return w.statusSnapshot(opts, true)
+}
+
+func (w *windowsBackend) statusSnapshot(opts Options, failClosedXML bool) (StatusSnapshot, error) {
 	sched, err := schedulerFactoryFn()
 	if err != nil {
 		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("scheduler factory: %w", err)
@@ -195,25 +199,31 @@ func (w *windowsBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
 		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("scheduler status: %w", err)
 	}
 
-	// Drift detection — best-effort. If ExportXML fails for any
-	// reason, we keep the running/stopped verdict from above.
 	drift := false
 	spec := ""
 	xmlBlob, xmlErr := sched.ExportXML(WindowsTaskName)
-	if xmlErr == nil {
-		if taskSpec, ok := parseWindowsTaskSpec(xmlBlob); ok {
-			spec = windowsShimSpecFingerprint(taskSpec)
-			drift = windowsTaskSpecDrifted(taskSpec, opts)
+	if xmlErr != nil {
+		if failClosedXML {
+			return StatusSnapshot{State: windowsTaskStatusState(st)}, fmt.Errorf("scheduler task XML snapshot: %w", xmlErr)
 		}
+	} else if taskSpec, ok := parseWindowsTaskSpec(xmlBlob); ok {
+		spec = windowsShimSpecFingerprint(taskSpec)
+		drift = windowsTaskSpecDrifted(taskSpec, opts)
+	} else if failClosedXML {
+		return StatusSnapshot{State: windowsTaskStatusState(st)}, fmt.Errorf("scheduler task XML snapshot unavailable")
 	}
 
 	if drift {
 		return StatusSnapshot{State: StateDrifted, SpecFingerprint: spec}, nil
 	}
+	return StatusSnapshot{State: windowsTaskStatusState(st), SpecFingerprint: spec}, nil
+}
+
+func windowsTaskStatusState(st scheduler.TaskStatus) State {
 	if strings.EqualFold(st.State, "Running") {
-		return StatusSnapshot{State: StateEnabledRunning, SpecFingerprint: spec}, nil
+		return StateEnabledRunning
 	}
-	return StatusSnapshot{State: StateEnabledStopped, SpecFingerprint: spec}, nil
+	return StateEnabledStopped
 }
 
 // isAbsentErrorMsg matches the schtasks "task not found" failure mode
