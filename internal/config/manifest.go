@@ -450,6 +450,17 @@ func (m *ServerManifest) validateCompanion() error {
 	if !filepath.IsAbs(d.Cwd) {
 		return fmt.Errorf("manifest %s: kind=companion daemons[0].cwd %q must be an absolute path", m.Name, d.Cwd)
 	}
+	// A companion daemon must carry NO port (Port==0). The companion process binds
+	// its own listener directly (e.g. the excalidraw canvas on its own port); it is
+	// NOT an mcphub MCP port. If an operator records the companion's own port here,
+	// supervisorDaemonsFromPlan copies it into SupervisorDaemon.Port and the liveness
+	// sweep treats it as a port the `mcphub daemon` wrapper owns — but the real
+	// listener belongs to the raw child, so supervisorDaemonEntryLiveWithProbe
+	// returns port_owner_mismatch and restarts an otherwise-healthy companion
+	// (Codex #381). Reject a non-zero port so that can never be recorded.
+	if d.Port != 0 {
+		return fmt.Errorf("manifest %s: kind=companion daemons[0].port must be 0 (the companion binds its own port directly; a non-zero value is mis-owned by the liveness probe and would restart a healthy companion)", m.Name)
+	}
 	return nil
 }
 

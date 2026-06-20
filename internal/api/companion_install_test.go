@@ -39,3 +39,25 @@ func TestCompanionInstallAdmission(t *testing.T) {
 		t.Fatalf("supervisorDaemonsFromPlan = %d rows, want 1 (companion must register to spawn)", len(rows))
 	}
 }
+
+// TestCompanionValidateRejectsNonZeroPort is the #381 liveness guard: a companion
+// daemon must carry Port==0 (it binds its own listener directly; a non-zero value
+// is mis-owned by the mcphub-daemon liveness probe → port_owner_mismatch → a
+// healthy companion gets restarted). Validate must reject a non-zero port.
+func TestCompanionValidateRejectsNonZeroPort(t *testing.T) {
+	absCwd := "/opt/excalidraw-canvas"
+	if runtime.GOOS == "windows" {
+		absCwd = "C:/opt/excalidraw-canvas"
+	}
+	m := &config.ServerManifest{
+		Name:      "excalidraw-canvas",
+		Kind:      config.KindCompanion,
+		Transport: config.TransportProcess,
+		Command:   "node",
+		BaseArgs:  []string{"dist/server.js"},
+		Daemons:   []config.DaemonSpec{{Name: "default", Cwd: absCwd, Port: 3000}},
+	}
+	if err := m.Validate(); err == nil {
+		t.Fatal("companion with a non-zero daemon port must be rejected (liveness port-owner mismatch)")
+	}
+}
