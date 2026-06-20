@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
+	"time"
 
 	"filippo.io/age"
 	"gopkg.in/yaml.v3"
@@ -37,7 +39,7 @@ func InitVault(keyPath, vaultPath string) error {
 	}
 	// Write identity file — plain text so launcher can read it.
 	// Filesystem permissions are the only protection in MVP.
-	if err := os.WriteFile(keyPath, []byte(id.String()+"\n"), 0600); err != nil {
+	if err := writeVaultFileAtomic(keyPath, []byte(id.String()+"\n"), 0600); err != nil {
 		return fmt.Errorf("write identity: %w", err)
 	}
 	v := &Vault{
@@ -114,7 +116,7 @@ func (v *Vault) List() []string {
 	return keys
 }
 
-// save encrypts v.data as JSON and writes to v.vaultPath.
+// save encrypts v.data as JSON and atomically writes to v.vaultPath.
 func (v *Vault) save() error {
 	raw, err := json.Marshal(v.data)
 	if err != nil {
@@ -131,7 +133,50 @@ func (v *Vault) save() error {
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("age encrypt close: %w", err)
 	}
-	return os.WriteFile(v.vaultPath, buf.Bytes(), 0600)
+	return writeVaultFileAtomic(v.vaultPath, buf.Bytes(), 0600)
+}
+
+var vaultAtomicRenameFile = os.Rename
+
+func writeVaultFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	tempName := filepath.Join(dir, fmt.Sprintf(".%s.tmp-%d-%d", base, os.Getpid(), time.Now().UnixNano()))
+	tempFile, err := os.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return fmt.Errorf("open temp: %w", err)
+	}
+	tempOpen := true
+	cleanupTemp := func() {
+		if tempOpen {
+			_ = tempFile.Close()
+		}
+		_ = os.Remove(tempName)
+	}
+
+	if _, err := tempFile.Write(data); err != nil {
+		cleanupTemp()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tempFile.Sync(); err != nil {
+		cleanupTemp()
+		return fmt.Errorf("sync temp: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		tempOpen = false
+		_ = os.Remove(tempName)
+		return fmt.Errorf("close temp: %w", err)
+	}
+	tempOpen = false
+	if err := os.Chmod(tempName, perm); err != nil {
+		_ = os.Remove(tempName)
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := vaultAtomicRenameFile(tempName, path); err != nil {
+		_ = os.Remove(tempName)
+		return fmt.Errorf("rename temp: %w", err)
+	}
+	return nil
 }
 
 // load reads v.vaultPath, decrypts with v.identity, unmarshals JSON into v.data.

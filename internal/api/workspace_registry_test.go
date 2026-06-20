@@ -67,9 +67,9 @@ func TestRegistry_RoundtripWithEntries(t *testing.T) {
 // recovery mechanism; it does not simulate a crash — it simply asserts the
 // backup-before-write primitive that makes crash recovery possible.
 func TestRegistry_SaveBacksUpPreMutationFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "workspaces.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\nworkspaces:\n  - workspace_key: oldentry\n    language: python\n    port: 9200\n"), 0600); err != nil {
+	if err := WriteStateFileBytesLockHeld(path, []byte("version: 1\nworkspaces:\n  - workspace_key: oldentry\n    language: python\n    port: 9200\n")); err != nil {
 		t.Fatal(err)
 	}
 	// Attempt to write invalid YAML via the atomic helper — simulate by passing
@@ -489,7 +489,7 @@ func TestRegistry_AllocateSerenaPort_ExhaustionReturnsError(t *testing.T) {
 }
 
 func TestRegistry_LegacyEntryReadAccepted(t *testing.T) {
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "workspaces.yaml")
 	legacy := []byte(`version: 1
 workspaces:
@@ -503,7 +503,7 @@ workspaces:
       codex-cli: mcp-language-server-python
     weekly_refresh: true
 `)
-	if err := os.WriteFile(path, legacy, 0600); err != nil {
+	if err := WriteStateFileBytesLockHeld(path, legacy); err != nil {
 		t.Fatal(err)
 	}
 	reg := NewRegistry(path)

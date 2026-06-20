@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -48,6 +50,27 @@ func TestSupervisorIntent_RoundTrip(t *testing.T) {
 	}
 	if got.Daemons[0].Port != 9128 {
 		t.Fatalf("port not preserved: %d", got.Daemons[0].Port)
+	}
+}
+
+func TestSupervisorIntent_ReadRejectsSymlinkTarget(t *testing.T) {
+	dir := hardenedTempDir(t)
+	realPath := filepath.Join(dir, "real-supervisor-intent.json")
+	linkPath := filepath.Join(dir, "supervisor-intent.json")
+
+	if err := WriteStateFileAtomic(realPath, &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed real intent: %v", err)
+	}
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+
+	_, err := ReadSupervisorIntent(linkPath)
+	if err == nil {
+		t.Fatalf("ReadSupervisorIntent followed symlink target; want refusal")
+	}
+	if !errors.Is(err, ErrIrregularFile) {
+		t.Fatalf("ReadSupervisorIntent err = %v, want ErrIrregularFile", err)
 	}
 }
 

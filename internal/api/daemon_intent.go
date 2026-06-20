@@ -570,9 +570,9 @@ func readDaemonIntentPathWithTimeout(statePath, lockPath string, timeout time.Du
 // invariants (corrupt-rename under flock, prune best-effort,
 // QuarantinePath surfaced to caller) are preserved exactly.
 func readIntentParseAndQuarantine(statePath string) IntentReadResult {
-	raw, err := os.ReadFile(statePath)
+	raw, err := readStateFileInodeAnchored(statePath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || isHubMcpStateMissingErr(err) {
 			return IntentReadResult{
 				State: IntentStateMissing,
 				File:  DaemonIntentFile{Tasks: map[string]DaemonIntent{}},
@@ -955,7 +955,7 @@ func (a *API) ClearDaemonIntent(taskName string, who string) error {
 // here triggers a quarantine rename so the next write lands on a
 // clean canonical path.
 func readIntentLocked(statePath string) DaemonIntentFile {
-	raw, err := os.ReadFile(statePath)
+	raw, err := readStateFileInodeAnchored(statePath)
 	if err != nil {
 		return DaemonIntentFile{Tasks: map[string]DaemonIntent{}}
 	}

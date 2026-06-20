@@ -454,7 +454,7 @@ func TestStopTaskNamesForServer_UnknownServer_Errors(t *testing.T) {
 // on Windows and XDG_STATE_HOME on Linux/macOS.
 func pointRegistryAtTempDir(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := hardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", root)
 	t.Setenv("XDG_STATE_HOME", root)
 	regPath, err := DefaultRegistryPath()

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,9 +126,9 @@ func DefaultRegistryPath() (string, error) {
 // Load reads the registry file. A missing file is not an error — the registry
 // stays empty, ready for the first Save.
 func (r *Registry) Load() error {
-	data, err := os.ReadFile(r.path)
+	data, err := readStateFileInodeAnchored(r.path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) || isHubMcpStateMissingErr(err) {
 			r.Version = registryVersion
 			r.Workspaces = nil
 			return nil
@@ -162,11 +163,11 @@ func (r *Registry) Save() error {
 		return fmt.Errorf("mkdir registry dir: %w", err)
 	}
 	// Backup existing file (overwrite previous .bak — one rolling copy).
-	if existing, err := os.ReadFile(r.path); err == nil {
+	if existing, err := readStateFileInodeAnchored(r.path); err == nil {
 		if werr := os.WriteFile(r.path+".bak", existing, 0600); werr != nil {
 			return fmt.Errorf("write .bak: %w", werr)
 		}
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) && !isHubMcpStateMissingErr(err) {
 		return fmt.Errorf("read existing: %w", err)
 	}
 	if r.Version == 0 {
