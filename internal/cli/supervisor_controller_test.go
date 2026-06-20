@@ -151,8 +151,8 @@ func TestSupervisorController_IntentCacheRefreshOnWatcherEvent(t *testing.T) {
 
 // TestSupervisorController_PersistedStateMatchesSpec verifies that
 // after a transition with persistBefore=true, the supervisor-state.json
-// file carries the expected SM state and the daemon's restart_history
-// field reflects the failure count (via tracker hydration).
+// file is re-persisted (mtime-fresh) — the controller's persist seam
+// actually runs on the EvChildExit transition.
 func TestSupervisorController_PersistedStateMatchesSpec(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")

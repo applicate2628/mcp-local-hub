@@ -188,6 +188,7 @@ var (
 	productionTerminatePIDWithIdentityFn = process.TerminatePIDWithIdentity
 	currentRunningVerifyPIDIdentityFn    = process.VerifyPIDIdentity
 	currentRunningIsPIDAliveFn           = process.IsPidAlive
+	closeDaemonJobAfterWaitFn            = func(job *process.Job) error { return job.Close() }
 )
 
 // setReconcileSpawnFnForTest installs a test spawn closure. Returns
@@ -926,7 +927,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	oneAPIInj := buildOneAPIInjector(events)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, oneAPIInj, strictJobProtection)
+		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx.Done(), oneAPIInj, strictJobProtection)
 	}
 	terminateFn := reconcileTerminateFn
 	if terminateFn == nil {
@@ -2974,7 +2975,7 @@ func resolveSpawnIntentChannelPath(statePath string) (string, error) {
 // PR #241 (separator comment between the two doc blocks meant godoc
 // rendered only the second).
 func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, nil, false)
+	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, nil, nil, false)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -3012,7 +3013,7 @@ type crashEvent struct {
 // without orphan-protection). When true the closure refuses the spawn
 // BEFORE cmd.Start and returns errSpawnJobProtectionRefused so the
 // controller quarantines the daemon directly. ROADMAP §11.3.
-func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, oneAPIInj *oneAPIInjector, strictJobProtection bool) SpawnFunc {
+func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, crashShutdown <-chan struct{}, oneAPIInj *oneAPIInjector, strictJobProtection bool) SpawnFunc {
 	return func(d api.SupervisorDaemon) error {
 		// NOTE (bot PR #246 r2 P2): the legacy nil-RuntimeSpec serena-proxy SKIP
 		// no longer lives here. r1 expressed it as `return nil` inside this
@@ -3453,18 +3454,18 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// Transfer Job-handle ownership to the wait goroutine BEFORE
 		// launching it. After this assignment, the parent spawn
 		// closure's deferred close is a no-op (handedOff==true) and
-		// the goroutine alone owns daemonJob.Close() after cmd.Wait()
-		// returns. ADR step 1 constraint (b).
+		// the goroutine alone owns daemonJob.Close(), which it releases
+		// as soon as cmd.Wait() observes child exit and before posting
+		// any crashCh event that may block. ADR step 1 constraint (b).
 		handedOff = true
 		jobForWait := daemonJob // capture before goroutine launch
 		go func() {
-			defer func() {
-				if jobForWait != nil {
-					_ = jobForWait.Close()
-				}
-			}()
 			<-spawnLogged
 			waitErr := cmd.Wait()
+			if jobForWait != nil {
+				_ = closeDaemonJobAfterWaitFn(jobForWait)
+				jobForWait = nil
+			}
 			// Diagnostic emit: without this, a wrapper that exits
 			// immediately (e.g. uvx fails to fetch package, port
 			// already bound, env vars missing) leaves no trace —
@@ -3526,17 +3527,42 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			//
 			// The dispatcher channel may be nil for legacy / test callers
 			// — guard with nil-check.
+			//
+			// BLOCKING send (audit P3, 2026-06-20): a real child-exit must
+			// NEVER be dropped. The earlier non-blocking
+			// select{...default: audit+drop} silently lost the respawn
+			// signal whenever 64+ exits were pending on the buffered
+			// crashCh, so the controller's restart-policy SM never saw that
+			// daemon's crash — the daemon stayed dead with only a warn-log
+			// trace. A blocking send is safe here because this is a
+			// PER-CHILD wait goroutine (one per running daemon): blocking it
+			// stalls only this daemon's wait, never the supervisor's event
+			// loop. The sole crashCh drainer, runCrashEventBridge, runs on
+			// its own goroutine and forwards to the event loop (cap 1024)
+			// independently; the loop never waits on a wait goroutine
+			// (c.spawn launches the next wait goroutine and returns;
+			// c.terminate issues a kill syscall and returns), so there is no
+			// dependency cycle and back-pressure always drains. The only
+			// abandon path is supervisor shutdown: once crashShutdown is
+			// closed the bridge has stopped draining crashCh, so a blocking
+			// send would leak this goroutine — select on crashShutdown to
+			// abandon cleanly instead. crashShutdown is nil for the
+			// compat/test wrapper, which makes that case a pure blocking
+			// send (the historical behavior when no shutdown signal exists).
 			if crashCh != nil {
 				select {
 				case crashCh <- crashEvent{Daemon: d, ExitCode: exitCode, WaitErr: waitErr}:
-				default:
-					// Dispatcher backlog full (>64 concurrent exits
-					// pending). Drop this respawn signal and audit-log
-					// it. Operator must restart supervisor to recover.
+				case <-crashShutdown:
+					// Supervisor is shutting down; the bridge has stopped
+					// draining crashCh. Abandon the send so this wait
+					// goroutine does not leak. Audit-log so the abandoned
+					// exit is still observable (it is not lost to a
+					// restart-policy decision because the supervisor itself
+					// is exiting — there is nothing to respawn into).
 					_ = events.Emit(api.SupervisorEvent{
-						Severity: "warn",
+						Severity: "info",
 						Source:   "lifecycle",
-						Event:    "respawn-dispatcher-backlog-full",
+						Event:    "child-exit-abandoned-on-shutdown",
 						TaskName: taskName,
 						Body: map[string]any{
 							"exit_code": exitCode,

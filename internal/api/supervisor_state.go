@@ -17,15 +17,27 @@ type SupervisorStateFile struct {
 }
 
 // SupervisorDaemonState is per-daemon Hybrid C state.
+//
+// Restart-policy runtime state (the 30-min crash sliding window, the
+// active backoff deadline, the quarantine timestamp, and any queued
+// post-exit action) is deliberately NOT persisted here: it lives only
+// in-memory in DaemonRuntimeTracker (the sliding window in
+// `failures map[string][]time.Time`, the backoff in a live time.Timer,
+// the quarantine/queued-action in the SM's in-memory SMContext) and is
+// RESET on every supervisor cold restart. That is the documented design
+// intent — pre-restart crashes are not relevant to runtime respawn
+// decisions, because a cold restart is an operator-initiated reset of
+// runtime state (see DaemonRuntimeTracker.RecordCrashAndCountInWindow).
+// Earlier revisions carried vestigial restart_history / backoff_until /
+// quarantine_since / queued_action fields here, but no production path
+// ever wrote a non-empty value into them; they were removed (2026-06-20
+// supervisor audit P3) so the persisted schema matches what the code
+// actually writes.
 type SupervisorDaemonState struct {
-	State           string         `json:"state"` // idle|spawning|running|exiting|backoff-waiting|quarantined
-	CurrentPID      int            `json:"current_pid"`
-	PIDGeneration   int            `json:"pid_generation"`
-	StartedAt       string         `json:"started_at,omitempty"`
-	RestartHistory  []RestartEvent `json:"restart_history,omitempty"`
-	BackoffUntil    string         `json:"backoff_until,omitempty"`
-	QuarantineSince string         `json:"quarantine_since,omitempty"`
-	QueuedAction    *QueuedAction  `json:"queued_action,omitempty"`
+	State         string `json:"state"` // durable persisted state: idle|running
+	CurrentPID    int    `json:"current_pid"`
+	PIDGeneration int    `json:"pid_generation"`
+	StartedAt     string `json:"started_at,omitempty"`
 	// OrphanPID records a Windows post-create orphan PID when the
 	// supervisor's best-effort kill failed. Operator-visible via
 	// supervisor-state.json AND IPC status response; SEPARATE from
@@ -77,21 +89,6 @@ type SupervisorDaemonState struct {
 	//                 entry (post-incident only) and the actual daemon
 	//                 state.
 	JobProtection *bool `json:"job_protection,omitempty"`
-}
-
-// RestartEvent is one entry in the 30-min sliding window failure-count
-// store. Pruned on every state persist to entries with at >= now-30m.
-type RestartEvent struct {
-	At       string `json:"at"`
-	ExitCode int    `json:"exit_code"`
-	Signal   *int   `json:"signal,omitempty"`
-}
-
-// QueuedAction records the pending side-effect after the current
-// `exiting` transition completes. Cleared on transition out of exiting.
-type QueuedAction struct {
-	Kind   string `json:"kind"` // "respawn" | "none"
-	Reason string `json:"reason"`
 }
 
 // TransientPID tracks maintenance-timer fire-and-forget children that

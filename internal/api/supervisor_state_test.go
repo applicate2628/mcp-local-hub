@@ -17,13 +17,10 @@ func TestSupervisorState_RoundTrip(t *testing.T) {
 		Version: 1,
 		Daemons: map[string]SupervisorDaemonState{
 			`\mcp-local-hub-memory-default`: {
-				State:          "running",
-				CurrentPID:     12345,
-				PIDGeneration:  7,
-				StartedAt:      "2026-05-16T18:00:00.000000000Z",
-				RestartHistory: []RestartEvent{{At: "2026-05-16T17:50:00.000000000Z", ExitCode: 1}},
-				BackoffUntil:   "",
-				QueuedAction:   nil,
+				State:         "running",
+				CurrentPID:    12345,
+				PIDGeneration: 7,
+				StartedAt:     "2026-05-16T18:00:00.000000000Z",
 			},
 		},
 		TransientPIDs: []TransientPID{
@@ -48,29 +45,32 @@ func TestSupervisorState_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestSupervisorState_QueuedActionRoundTrip(t *testing.T) {
+// TestSupervisorState_IgnoresRemovedRestartPolicyFields proves a
+// pre-audit-P3 supervisor-state.json carrying restart_history /
+// backoff_until / quarantine_since / queued_action still reads cleanly
+// after those fields were removed from the Go struct: they fall under the
+// "ignore unknown fields" contract, so an in-place binary downgrade or a
+// stale on-disk file never bricks supervisor startup. The known fields are
+// preserved.
+func TestSupervisorState_IgnoresRemovedRestartPolicyFields(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-state.json")
-	respawn := QueuedAction{Kind: "respawn", Reason: "manual_restart"}
-	want := SupervisorStateFile{
-		Version: 1,
-		Daemons: map[string]SupervisorDaemonState{
-			`\mcp-local-hub-memory-default`: {
-				State:        "exiting",
-				QueuedAction: &respawn,
-			},
-		},
-	}
-	if err := WriteSupervisorState(path, &want); err != nil {
+	body := `{"version":1,"daemons":{"\\mcp-local-hub-memory-default":{` +
+		`"state":"backoff-waiting","current_pid":0,"pid_generation":4,` +
+		`"restart_history":[{"at":"2026-06-09T09:50:00.000000000Z","exit_code":1}],` +
+		`"backoff_until":"2026-06-09T10:05:00.000000000Z",` +
+		`"quarantine_since":"2026-06-09T09:30:00.000000000Z",` +
+		`"queued_action":{"kind":"respawn","reason":"manual-restart"}}}}`
+	if err := WriteStateFileAtomic(path, json.RawMessage(body)); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadSupervisorState(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("read state with removed restart-policy fields: %v", err)
 	}
-	qa := got.Daemons[`\mcp-local-hub-memory-default`].QueuedAction
-	if qa == nil || qa.Kind != "respawn" {
-		t.Fatalf("queued_action lost: %+v", qa)
+	daemon := got.Daemons[`\mcp-local-hub-memory-default`]
+	if daemon.State != "backoff-waiting" || daemon.PIDGeneration != 4 {
+		t.Fatalf("known daemon fields lost: %+v", daemon)
 	}
 }
 
