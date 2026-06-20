@@ -2,7 +2,7 @@
 
 // hub_mcp_state_windows.go — Phase 2 Task 2.2 Windows leg.
 //
-// On Windows, the NT relative-open inside VerifyHubMcpStateDACL
+// On Windows, the NT relative-open inside readStateFileInodeAnchored
 // surfaces STATUS_OBJECT_NAME_NOT_FOUND / STATUS_OBJECT_PATH_NOT_FOUND
 // as `windows.NTStatus` values when the target file is missing. These
 // do NOT match `errors.Is(err, os.ErrNotExist)` directly, so the
@@ -19,8 +19,8 @@ import (
 )
 
 // isHubMcpStateMissingErrPlatform recognizes Windows-specific
-// not-found sentinels that flow up from the VerifyHubMcpStateDACL
-// open path. The portable layer already covered os.ErrNotExist; this
+// not-found sentinels that flow up from the inode-anchored read open
+// path. The portable layer already covered os.ErrNotExist; this
 // adds NTStatus + Win32 errno matches.
 //
 // Match list:

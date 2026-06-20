@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"filippo.io/age"
@@ -21,7 +22,75 @@ type Vault struct {
 	identity  age.Identity
 	recipient age.Recipient
 	vaultPath string
+	readFile  VaultFileReader
 	data      map[string]string
+}
+
+// VaultFileReader is the injected read gate used for vault files. The api
+// composition layer installs its inode-anchored state-file reader; standalone
+// secrets package use falls back to os.ReadFile when no reader is configured.
+type VaultFileReader func(path string) ([]byte, error)
+
+// VaultFileWriter is the injected write gate used for vault files. The api
+// composition layer installs its secure state-file writer; standalone secrets
+// package use falls back to the package-local atomic writer.
+type VaultFileWriter func(path string, data []byte, perm os.FileMode) error
+
+var (
+	vaultFileReaderMu sync.RWMutex
+	vaultFileReader   VaultFileReader
+	vaultFileWriterMu sync.RWMutex
+	vaultFileWriter   VaultFileWriter
+)
+
+// SetVaultFileReader installs the read gate OpenVault uses for both the age
+// identity and the encrypted vault blob. Passing nil restores the standalone
+// os.ReadFile fallback. The returned function restores the previous reader.
+func SetVaultFileReader(reader VaultFileReader) func() {
+	vaultFileReaderMu.Lock()
+	previous := vaultFileReader
+	vaultFileReader = reader
+	vaultFileReaderMu.Unlock()
+	return func() {
+		vaultFileReaderMu.Lock()
+		vaultFileReader = previous
+		vaultFileReaderMu.Unlock()
+	}
+}
+
+func currentVaultFileReader() VaultFileReader {
+	vaultFileReaderMu.RLock()
+	reader := vaultFileReader
+	vaultFileReaderMu.RUnlock()
+	if reader == nil {
+		return os.ReadFile
+	}
+	return reader
+}
+
+// SetVaultFileWriter installs the write gate InitVault and save use for the age
+// identity and encrypted vault blob. Passing nil restores the standalone atomic
+// writer fallback. The returned function restores the previous writer.
+func SetVaultFileWriter(writer VaultFileWriter) func() {
+	vaultFileWriterMu.Lock()
+	previous := vaultFileWriter
+	vaultFileWriter = writer
+	vaultFileWriterMu.Unlock()
+	return func() {
+		vaultFileWriterMu.Lock()
+		vaultFileWriter = previous
+		vaultFileWriterMu.Unlock()
+	}
+}
+
+func currentVaultFileWriter() VaultFileWriter {
+	vaultFileWriterMu.RLock()
+	writer := vaultFileWriter
+	vaultFileWriterMu.RUnlock()
+	if writer == nil {
+		return writeVaultFileAtomic
+	}
+	return writer
 }
 
 // InitVault generates a new X25519 identity at keyPath and writes an empty
@@ -38,8 +107,7 @@ func InitVault(keyPath, vaultPath string) error {
 		return fmt.Errorf("generate identity: %w", err)
 	}
 	// Write identity file — plain text so launcher can read it.
-	// Filesystem permissions are the only protection in MVP.
-	if err := writeVaultFileAtomic(keyPath, []byte(id.String()+"\n"), 0600); err != nil {
+	if err := writeVaultFile(keyPath, []byte(id.String()+"\n"), 0600); err != nil {
 		return fmt.Errorf("write identity: %w", err)
 	}
 	v := &Vault{
@@ -53,7 +121,8 @@ func InitVault(keyPath, vaultPath string) error {
 
 // OpenVault reads the identity from keyPath and opens the encrypted vault at vaultPath.
 func OpenVault(keyPath, vaultPath string) (*Vault, error) {
-	keyBytes, err := os.ReadFile(keyPath)
+	readFile := currentVaultFileReader()
+	keyBytes, err := readFile(keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("read identity: %w", err)
 	}
@@ -74,6 +143,7 @@ func OpenVault(keyPath, vaultPath string) (*Vault, error) {
 		identity:  id,
 		recipient: x25519.Recipient(),
 		vaultPath: vaultPath,
+		readFile:  readFile,
 		data:      map[string]string{},
 	}
 	if err := v.load(); err != nil {
@@ -133,7 +203,7 @@ func (v *Vault) save() error {
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("age encrypt close: %w", err)
 	}
-	return writeVaultFileAtomic(v.vaultPath, buf.Bytes(), 0600)
+	return writeVaultFile(v.vaultPath, buf.Bytes(), 0600)
 }
 
 var (
@@ -185,9 +255,13 @@ func writeVaultFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+func writeVaultFile(path string, data []byte, perm os.FileMode) error {
+	return currentVaultFileWriter()(path, data, perm)
+}
+
 // load reads v.vaultPath, decrypts with v.identity, unmarshals JSON into v.data.
 func (v *Vault) load() error {
-	raw, err := os.ReadFile(v.vaultPath)
+	raw, err := v.readVaultFile(v.vaultPath)
 	if err != nil {
 		return fmt.Errorf("read vault: %w", err)
 	}
@@ -209,6 +283,13 @@ func (v *Vault) load() error {
 		return fmt.Errorf("unmarshal vault: %w", err)
 	}
 	return nil
+}
+
+func (v *Vault) readVaultFile(path string) ([]byte, error) {
+	if v.readFile != nil {
+		return v.readFile(path)
+	}
+	return os.ReadFile(path)
 }
 
 // ExportYAML returns the current vault contents as YAML bytes (for editor workflow).

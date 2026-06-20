@@ -4,7 +4,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"mcp-local-hub/internal/secrets"
 )
+
+func init() {
+	secrets.SetVaultFileReader(ReadStateFileInodeAnchored)
+	secrets.SetVaultFileWriter(func(path string, data []byte, _ os.FileMode) error {
+		return WriteStateFileBytesLockHeld(path, data)
+	})
+}
 
 // ReadStateFileInodeAnchored exposes the internal state-file anchored reader to
 // sibling packages that own trust-sensitive state reads but cannot import

@@ -9,8 +9,8 @@
 // Spec: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md
 // §"Read-side hardening" (B-V4-4).
 //
-// Pattern mirrored from internal/api/hub_mcp_state_dacl_windows.go
-// (verifyHubMcpStateDACLImpl):
+// Pattern mirrored from the reparse-point refusal in
+// internal/api/hub_mcp_state_read_inode_windows.go:
 //
 //  1. CreateFile with FILE_FLAG_OPEN_REPARSE_POINT so the kernel
 //     opens the reparse-point entry itself instead of following it.

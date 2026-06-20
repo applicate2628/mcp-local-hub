@@ -1,11 +1,11 @@
 //go:build windows
 
 // hub_mcp_state_dacl_windows_test.go — Windows-specific DACL synthesis
-// test (Task 1.5 step 7).
+// tests for the shared DACL primitives used by inode-anchored reads.
 //
 // Builds a DACL that includes a read-capable ALLOW ACE for the
 // Authenticated Users SID (S-1-5-11), applies it to a fresh file via
-// SetNamedSecurityInfo, and asserts that VerifyHubMcpStateDACL rejects
+// SetNamedSecurityInfo, and asserts that the inode-anchored reader rejects
 // the file with ErrDaclOutsideAllowlist.
 
 package api
@@ -20,27 +20,27 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow builds a
+// TestReadStateFileInodeAnchoredRejectsAuthenticatedUsersAllow builds a
 // DACL granting GENERIC_READ to S-1-5-11 (Authenticated Users) on a
-// freshly-created file, then asserts the verifier rejects it with
+// freshly-created file, then asserts the reader rejects it with
 // ErrDaclOutsideAllowlist. This is the canonical enterprise-stance
 // test: Group-Policy ACLs that grant read to Domain Users / Auth
 // Users / corporate management SIDs must fail closed.
 //
 // Uses hardenedTempDir so the parent-dir DACL gate accepts the
 // parent; the only failure signal under test is the FILE's own DACL.
-func TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow(t *testing.T) {
+func TestReadStateFileInodeAnchoredRejectsAuthenticatedUsersAllow(t *testing.T) {
 	dir := hardenedTempDir(t)
-	target := filepath.Join(dir, "loose.json")
+	target := filepath.Join(dir, hubMcpTokensFileLeaf)
 	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	applyFileDACLWithAuthUsersReadACE(t, target)
 
-	err := VerifyHubMcpStateDACL(target)
+	_, err := readStateFileInodeAnchored(target)
 	if err == nil {
-		t.Fatalf("VerifyHubMcpStateDACL must reject Authenticated Users read ALLOW; got nil")
+		t.Fatalf("readStateFileInodeAnchored must reject Authenticated Users read ALLOW; got nil")
 	}
 	if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Errorf("expected ErrDaclOutsideAllowlist, got %v", err)
@@ -88,16 +88,16 @@ func applyFileDACLWithAuthUsersWriteACE(t *testing.T, target string) {
 	applyProtectedDACLFromEntries(t, target, entries)
 }
 
-// TestVerifyHubMcpStateDACLAcceptsAllowlistOnly synthesizes the
+// TestReadStateFileInodeAnchoredAcceptsAllowlistOnly synthesizes the
 // happy-path DACL (current-user + LocalSystem + BuiltinAdministrators
-// GENERIC_ALL) and asserts the verifier accepts. Symmetric coverage
-// for the synthesis suite — without this case we can't tell the
-// reject test passed for the right reason.
+// GENERIC_ALL) and asserts the reader accepts. Symmetric coverage for
+// the synthesis suite — without this case we can't tell the reject test
+// passed for the right reason.
 //
 // Uses hardenedTempDir so both the parent-dir AND the file-DACL gates
 // pass; if either failed for a different reason, this test would
 // surface that ambiguity.
-func TestVerifyHubMcpStateDACLAcceptsAllowlistOnly(t *testing.T) {
+func TestReadStateFileInodeAnchoredAcceptsAllowlistOnly(t *testing.T) {
 	dir := hardenedTempDir(t)
 	target := filepath.Join(dir, "tight.json")
 	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
@@ -110,8 +110,8 @@ func TestVerifyHubMcpStateDACLAcceptsAllowlistOnly(t *testing.T) {
 	}
 	applyProtectedDACLFromEntries(t, target, entries)
 
-	if err := VerifyHubMcpStateDACL(target); err != nil {
-		t.Errorf("VerifyHubMcpStateDACL must accept allowlist-only DACL; got %v", err)
+	if _, err := readStateFileInodeAnchored(target); err != nil {
+		t.Errorf("readStateFileInodeAnchored must accept allowlist-only DACL; got %v", err)
 	}
 }
 
@@ -128,16 +128,16 @@ func applyAllowlistOnlyDACL(t *testing.T, target string) {
 	applyProtectedDACLFromEntries(t, target, entries)
 }
 
-// TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL pins the
+// TestReadStateFileInodeAnchoredRejectsPermissiveParentDACL pins the
 // STRICT-mode behavior (MCPHUB_REQUIRE_SINGLE_USER_HOME=1): a
 // parent dir with an Authenticated Users:GenericRead ACE is
 // rejected even when the file's own DACL is allowlist-conforming.
 //
 // v0.4.2 inverts the default — see
-// TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax
+// TestReadStateFileInodeAnchoredAcceptsPermissiveParentDACL_DefaultRelax
 // below. Strict mode preserves the v0.4.0-v0.4.1 refuse-on-broadened-
 // parent posture for corp-managed / multi-tenant hosts.
-func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
+func TestReadStateFileInodeAnchoredRejectsPermissiveParentDACL(t *testing.T) {
 	t.Setenv(RequireSingleUserHomeEnv, "1") // STRICT mode
 
 	parent := filepath.Join(t.TempDir(), "leaky-parent")
@@ -152,9 +152,9 @@ func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
 	}
 	applyAllowlistOnlyDACL(t, target)
 
-	err := VerifyHubMcpStateDACL(target)
+	_, err := readStateFileInodeAnchored(target)
 	if err == nil {
-		t.Fatalf("VerifyHubMcpStateDACL must reject permissive parent dir under strict mode; got nil")
+		t.Fatalf("readStateFileInodeAnchored must reject permissive parent dir under strict mode; got nil")
 	}
 	if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Errorf("expected ErrDaclOutsideAllowlist (wrapped), got %v", err)
@@ -168,18 +168,17 @@ func TestVerifyHubMcpStateDACLRejectsPermissiveParentDACL(t *testing.T) {
 	}
 }
 
-// TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax
+// TestReadStateFileInodeAnchoredAcceptsPermissiveParentDACL_DefaultRelax
 // covers v0.4.2's new default: when MCPHUB_REQUIRE_SINGLE_USER_HOME
 // is NOT set, a permissive parent dir is tolerated. The file's own
-// DACL is the load-bearing safety layer (verified post-parent
-// inside verifyHubMcpStateDACLImpl); the parent handle still binds
-// the file open via ntOpenRelative so TOCTOU safety is preserved.
+// DACL is the load-bearing safety layer; the file handle is opened
+// relative to the parent handle and read directly.
 //
 // Manual-smoke motivation: workstation %LOCALAPPDATA%\mcp-local-hub
 // broadened to a third-party installer SID. Without this relax, B4
 // marker reads (PR #187) and other state-file operations failed
 // closed, breaking every matrix Apply on the GUI.
-func TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax(t *testing.T) {
+func TestReadStateFileInodeAnchoredAcceptsPermissiveParentDACL_DefaultRelax(t *testing.T) {
 	t.Setenv(RequireSingleUserHomeEnv, "") // DEFAULT mode
 
 	parent := filepath.Join(t.TempDir(), "leaky-parent")
@@ -194,7 +193,7 @@ func TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax(t *testin
 	}
 	applyAllowlistOnlyDACL(t, target)
 
-	if err := VerifyHubMcpStateDACL(target); err != nil {
+	if _, err := readStateFileInodeAnchored(target); err != nil {
 		t.Errorf("default-relax: expected nil (file DACL is allowlist-clean); got %v", err)
 	}
 }
@@ -344,7 +343,7 @@ func TestReadStateFileInodeAnchored_RejectsSymlinkTarget_DefaultAndStrict(t *tes
 // current-user, SYSTEM, and BuiltinAdministrators — anything else
 // (Authenticated Users, Domain Users, a random Group Policy SID) is
 // rejected. The DACL gate (covered by the existing
-// TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow test) is the
+// TestReadStateFileInodeAnchoredRejectsAuthenticatedUsersAllow test) is the
 // confidentiality boundary; owner is the integrity boundary, and a
 // pure unit test is cheaper to maintain than provisioning admin in CI.
 func TestOwnerSIDAllowed(t *testing.T) {
@@ -387,15 +386,15 @@ func TestOwnerSIDAllowed(t *testing.T) {
 	}
 }
 
-// TestVerifyHubMcpStateDACLRejectsDirectoryTarget asserts that the
-// verifier refuses a directory at the state-file path — a defense
+// TestReadStateFileInodeAnchoredRejectsDirectoryTarget asserts that the
+// reader refuses a directory at the state-file path — a defense
 // against attacker-controlled directory substitutions on a path that
 // should hold a regular file. FILE_FLAG_BACKUP_SEMANTICS in the
 // CreateFile call (required to also open parent dirs) would otherwise
 // let the directory pass through to the DACL gate.
 //
 // codex bot r2 P2 closure.
-func TestVerifyHubMcpStateDACLRejectsDirectoryTarget(t *testing.T) {
+func TestReadStateFileInodeAnchoredRejectsDirectoryTarget(t *testing.T) {
 	dir := hardenedTempDir(t)
 	// Create a directory at the state-file path. Production callers
 	// expect this path to be a regular file.
@@ -403,9 +402,9 @@ func TestVerifyHubMcpStateDACLRejectsDirectoryTarget(t *testing.T) {
 	if err := os.Mkdir(target, 0o700); err != nil {
 		t.Fatalf("mkdir target as dir: %v", err)
 	}
-	err := VerifyHubMcpStateDACL(target)
+	_, err := readStateFileInodeAnchored(target)
 	if err == nil {
-		t.Fatalf("VerifyHubMcpStateDACL must reject directory target; got nil")
+		t.Fatalf("readStateFileInodeAnchored must reject directory target; got nil")
 	}
 	if !errors.Is(err, ErrIrregularFile) {
 		t.Errorf("expected ErrIrregularFile for directory; got %v", err)

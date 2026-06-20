@@ -20,8 +20,7 @@ import (
 // checkStateDirParentWriteSafe stat-fd's parent and refuses if the
 // parent grants group/world write bits (0o022). Read+exec bits
 // (0o055) are tolerated.
-// Symmetric with the read-side gate in verifyHubMcpStateDACLImpl
-// (POSIX leg).
+// Symmetric with the POSIX read-side gate in readStateFileInodeAnchored.
 func checkStateDirParentWriteSafe(parentDir string) error {
 	pfd, err := unix.Open(parentDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {

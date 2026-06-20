@@ -4,13 +4,9 @@
 // for hub-mcp state files on POSIX, mirror of the Windows leg in
 // hub_mcp_state_read_inode_windows.go.
 //
-// POSIX is structurally less exposed to the TOCTOU swap window the
-// Windows leg's old verifyHubMcpStateDACLImpl→os.ReadFile chain
-// left open (POSIX openat with O_NOFOLLOW already gives us an
-// inode-bound fd) — but the existing readHubMcpStateFile still
-// dropped the fd between verify and read, then path-resolved the
-// read. This file collapses verify + read onto a single openat fd
-// so the contract matches the Windows leg.
+// POSIX openat with O_NOFOLLOW gives us an inode-bound fd. This file
+// keeps verify + read on that single fd so the contract matches the
+// Windows leg and no path-based read occurs after verification.
 
 package api
 
@@ -26,9 +22,8 @@ import (
 )
 
 // readStateFileInodeAnchored opens the file via openat against
-// the verified parent fd, runs the same allowlist gate as
-// verifyHubMcpStateDACLImpl, and reads the content via the same
-// fd. No path-based read between verify and read.
+// the verified parent fd, runs the owner/mode allowlist gate, and reads
+// the content via the same fd. No path-based read between verify and read.
 //
 // Returns up to maxStateFileBytes (defined in hub_mcp_state.go)
 // of content.

@@ -100,8 +100,7 @@ func TestStateFileReadPaths_WrongOwnerParentDefaultModeRefuse(t *testing.T) {
 	if err := os.WriteFile(daemonPath, []byte(`{"tasks":{}}`), 0o600); err != nil {
 		t.Fatalf("write daemon intent: %v", err)
 	}
-	hubPath := filepath.Join(parent, hubMcpEndpointFileLeaf)
-	if err := os.WriteFile(hubPath, []byte(`{"url":"http://127.0.0.1:1234/mcp"}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(parent, hubMcpEndpointFileLeaf), []byte(`{"url":"http://127.0.0.1:1234/mcp"}`), 0o600); err != nil {
 		t.Fatalf("write hub endpoint: %v", err)
 	}
 
@@ -145,12 +144,6 @@ func TestStateFileReadPaths_WrongOwnerParentDefaultModeRefuse(t *testing.T) {
 				t.Cleanup(SetDaemonStateRootForTest(parent))
 				_, err := readHubMcpStateFile(hubMcpEndpointFileLeaf)
 				return err
-			},
-		},
-		{
-			name: "legacy hub-mcp dacl verifier",
-			read: func() error {
-				return VerifyHubMcpStateDACL(hubPath)
 			},
 		},
 	}

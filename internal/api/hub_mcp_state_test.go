@@ -4,8 +4,8 @@
 // (hub-mcp.endpoint.json, hub-mcp-tokens.json, hub-mcp-control.token,
 // hub-mcp.log). The write path delegates to SecureWriteClientConfig
 // (Phase 1 Task 1.3/1.4) so callers inherit the handle-relative,
-// DACL-verified pipeline. The read path delegates to
-// VerifyHubMcpStateDACL (Phase 1 Task 1.5) before any bytes are read.
+// DACL-verified pipeline. The read path delegates to the inode-anchored
+// reader before any bytes are returned.
 //
 // Tests use the daemonStateRootOverride seam (state_paths.go) + the
 // hardenedTempDir test fixture (hardened_tempdir_*_test.go) so the
@@ -94,8 +94,8 @@ func TestWriteHubMcpStateAtomicRoundTrip(t *testing.T) {
 }
 
 // TestReadHubMcpStateRejectsSymlink asserts the load-time gate refuses
-// to read a state-file whose target is a symlink. The reparse-defeat
-// flag in VerifyHubMcpStateDACL is the relevant defense.
+// to read a state-file whose target is a symlink. The inode-anchored
+// reader's reparse-defeat flags are the relevant defense.
 //
 // Symlink creation on Windows requires SeCreateSymbolicLinkPrivilege;
 // the test skips when the OS denies the call.
@@ -115,8 +115,8 @@ func TestReadHubMcpStateRejectsSymlink(t *testing.T) {
 	if err == nil {
 		t.Fatalf("readHubMcpStateFile must reject symlink target")
 	}
-	// VerifyHubMcpStateDACL surfaces ErrIrregularFile (POSIX leg) or a
-	// reparse-point error (Windows leg). Either is acceptable here —
+	// The inode-anchored reader surfaces ErrIrregularFile (POSIX leg) or
+	// a reparse-point error (Windows leg). Either is acceptable here —
 	// the contract is "non-nil err".
 	_ = errors.Is(err, ErrIrregularFile)
 }

@@ -1,30 +1,21 @@
 //go:build windows
 
 // hub_mcp_state_read_inode_windows.go — inode-anchored secure read
-// for hub-mcp state files, mirroring the verify pipeline in
-// hub_mcp_state_dacl_windows.go but eliminating the TOCTOU swap
-// window the old verify→os.ReadFile chain left open on hosts whose
-// parent directory granted write/delete/DAC-edit access to a
-// non-allowlisted SID.
+// for hub-mcp state files. It opens and reads through the same verified
+// file handle so no path-based read can race after verification.
 //
 // Why this exists (work-items/bugs/2026-05-19-state-file-verify-rejects-write-broadened-parent-dacl.md):
 //
-//   The old readHubMcpStateFile called VerifyHubMcpStateDACL (which
-//   opens a parent-handle, opens the file relative to it, verifies
-//   the file's DACL, then CLOSES the handle), and then performed a
-//   path-based os.ReadFile. Between the verify-close and the
-//   os.ReadFile path resolution, a co-resident principal with
-//   FILE_DELETE_CHILD on the parent could replace the file with
-//   attacker-controlled content; the hub would then read attacker
-//   bytes that the verify never saw. To mitigate that window
-//   without a re-open, hub_mcp_state_dacl_windows.go:143-145
-//   refused parent DACLs that granted WRITE/DAC-edit to
-//   non-allowlisted SIDs even in default-relax mode. The side
-//   effect: on solo-developer Windows hosts whose %LOCALAPPDATA%
-//   parent had a CodexSandboxUsers or orphan AD SID ACE (common
-//   on third-party-installer-managed boxes), every state-file
-//   read failed, blocking demigrate / strict-mode --recover /
-//   any other operator action that consults managed-entries.json.
+//   The old read path verified one handle and then performed a path-based
+//   os.ReadFile. Between verify-close and os.ReadFile path resolution, a
+//   co-resident principal with FILE_DELETE_CHILD on the parent could replace
+//   the file with attacker-controlled content; the hub would then read bytes
+//   that the verifier never saw. The former mitigation refused parent DACLs
+//   that granted WRITE/DAC-edit to non-allowlisted SIDs even in default-relax
+//   mode. The side effect: on solo-developer Windows hosts whose
+//   %LOCALAPPDATA% parent had a CodexSandboxUsers or orphan AD SID ACE, every
+//   state-file read failed, blocking demigrate / strict-mode --recover / any
+//   other operator action that consults managed-entries.json.
 //
 // Fix design:
 //
@@ -60,7 +51,7 @@ const (
 
 // readStateFileInodeAnchoredWindows opens parent + file under the
 // verified parent handle, asserts the file is single-user-safe via
-// the same allowlist gate as VerifyHubMcpStateDACL, and reads the
+// the shared Windows DACL allowlist gate, and reads the
 // content via the same handle. No path-based read between verify
 // and read, so the TOCTOU swap window the old chain left open is
 // closed at the kernel level.
@@ -73,12 +64,11 @@ const (
 // Parent-DACL gate semantics:
 //
 //   - Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1): any
-//     non-allowlisted ACE on the parent rejects. Matches strict-mode
-//     behavior in verifyHubMcpStateDACLImpl.
+//     non-allowlisted ACE on the parent rejects.
 //   - Default-relax mode: read-only broadening logs a warn event
 //     and proceeds. Write/DAC-edit broadening ALSO proceeds (the
-//     swap window the old verifyHubMcpStateDACLImpl rejected on is
-//     closed by the inode-anchored read in this function — the
+//     swap window the old verifier rejected on is closed by the
+//     inode-anchored read in this function — the
 //     attacker can replace the directory entry but not the inode
 //     our handle points to). File-DACL broadening is stricter:
 //     read-only grants warn and proceed in default-relax mode, while
