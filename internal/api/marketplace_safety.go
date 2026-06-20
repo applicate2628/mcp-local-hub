@@ -152,9 +152,52 @@ func rejectMarketplaceLocalOrPrivateHost(host string) error {
 	}
 	addr, err := netip.ParseAddr(hostForIP)
 	if err != nil {
+		if isNonCanonicalNumericIPHost(hostForIP) {
+			return fmt.Errorf("host %q is a non-canonical numeric IP address", host)
+		}
 		return nil
 	}
 	return rejectMarketplaceLocalOrPrivateAddr(fmt.Sprintf("host %q", host), addr)
+}
+
+func isNonCanonicalNumericIPHost(host string) bool {
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || strings.Contains(host, ":") {
+		return false
+	}
+	if isNumericIPHostPart(host) {
+		return true
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 || len(parts) > 4 {
+		return false
+	}
+	for _, part := range parts {
+		if !isNumericIPHostPart(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func isNumericIPHostPart(part string) bool {
+	if part == "" {
+		return false
+	}
+	if len(part) > 2 && part[0] == '0' && (part[1] == 'x' || part[1] == 'X') {
+		for _, r := range part[2:] {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, r := range part {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 var marketplaceNonPublicSpecialAddrPrefixes = []struct {

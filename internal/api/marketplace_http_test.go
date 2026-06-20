@@ -293,8 +293,35 @@ func TestMarketplaceHTTPClient_RejectsEmbeddedCredentials(t *testing.T) {
 	if !strings.Contains(err.Error(), "must not embed credentials") {
 		t.Errorf("error missing 'must not embed credentials' text: %v", err)
 	}
+	for _, leaked := range []string{"attacker:hunter2", "attacker@", "hunter2@"} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Fatalf("credential material leaked in error %q", err.Error())
+		}
+	}
 	if seenAuth != "" {
 		t.Errorf("server received Authorization header despite rejection: %q (rejection bypassed)", seenAuth)
+	}
+}
+
+func TestMarketplaceHTTPClient_RedactsCredentialedRedirectLocation(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://redirect-user:redirect-pass@mcp.context7.com/catalog.json", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	client := injectTLSTestClient(srv)
+	_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", nil)
+	if err == nil {
+		t.Fatal("expected credentialed redirect rejection")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"redirect-user:redirect-pass", "redirect-user@", "redirect-pass@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in redirect error %q", msg)
+		}
+	}
+	if !strings.Contains(msg, "https://mcp.context7.com/catalog.json") {
+		t.Fatalf("redirect error should retain redacted target URL context; got %q", msg)
 	}
 }
 
@@ -312,6 +339,9 @@ func TestMarketplaceHTTPClient_RejectsLocalAndPrivateRegistryURLsBeforeRequest(t
 		"https://LOCALHOST./catalog.json",
 		"https://127.0.0.1/catalog.json",
 		"https://[::1]/catalog.json",
+		"https://0177.0.0.1/catalog.json",
+		"https://2130706433/catalog.json",
+		"https://0x7f000001/catalog.json",
 		"https://0.0.0.0/catalog.json",
 		"https://10.0.0.1/catalog.json",
 		"https://172.16.0.1/catalog.json",

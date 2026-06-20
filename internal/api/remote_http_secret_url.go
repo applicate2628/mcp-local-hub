@@ -2,9 +2,12 @@ package api
 
 import (
 	"fmt"
+	"net/netip"
 	"net/url"
+	"strings"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/urlredact"
 )
 
 func expandRemoteHTTPURLSecrets(raw string, lookup SecretLookup) (string, error) {
@@ -36,7 +39,20 @@ func validateExpandedRemoteHTTPPlaceholderHost(displayURL, expandedURL string) e
 		return fmt.Errorf("expanded remote-http url must not embed credentials")
 	}
 	if err := rejectMarketplaceLocalOrPrivateHost(u.Hostname()); err != nil {
-		return fmt.Errorf("expanded remote-http url host rejected: %w", err)
+		return fmt.Errorf("expanded remote-http url host rejected for %s: %s", urlredact.MarketplaceURLForError(expandedURL, displayURL), redactExpandedSecretHostReason(err.Error(), u.Hostname()))
 	}
 	return nil
+}
+
+func redactExpandedSecretHostReason(reason, host string) string {
+	redacted := strings.ReplaceAll(reason, host, "<redacted-host>")
+	hostForIP := host
+	if i := strings.LastIndexByte(hostForIP, '%'); i >= 0 {
+		hostForIP = hostForIP[:i]
+	}
+	if addr, err := netip.ParseAddr(hostForIP); err == nil {
+		redacted = strings.ReplaceAll(redacted, addr.String(), "<redacted-host>")
+		redacted = strings.ReplaceAll(redacted, addr.Unmap().String(), "<redacted-host>")
+	}
+	return redacted
 }

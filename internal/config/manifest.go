@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/secrets"
+	"mcp-local-hub/internal/urlredact"
 
 	"gopkg.in/yaml.v3"
 )
@@ -616,7 +617,7 @@ func (m *ServerManifest) Validate() error {
 			return fmt.Errorf("manifest %s: transport=remote-http requires url:", m.Name)
 		}
 		if err := ValidateRemoteHTTPURL(m.URL); err != nil {
-			return fmt.Errorf("manifest %s: transport=remote-http url must be valid https:// without embedded credentials (got %q; plaintext rejected — operator must TLS-terminate): %w", m.Name, m.URL, err)
+			return fmt.Errorf("manifest %s: transport=remote-http url must be valid https:// without embedded credentials (got %q; plaintext rejected — operator must TLS-terminate): %w", m.Name, urlredact.MarketplaceURLForError(m.URL), err)
 		}
 		if m.Command != "" {
 			return fmt.Errorf("manifest %s: transport=remote-http rejects command (no local subprocess; remove the field)", m.Name)

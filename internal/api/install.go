@@ -1140,8 +1140,8 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 			// removed manually or the client never received it.
 			continue
 		}
-		expectedURL := expectedHubURL(m, b)
-		if !isHubOwnedEntry(entry, m.Name, b.Daemon, expectedURL) {
+		expectedURLs := expectedHubURLs(m, b)
+		if !isHubOwnedEntryForAnyExpectedURL(entry, m.Name, b.Daemon, expectedURLs) {
 			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("refusing to remove %s from %s: entry is not hub-managed (neither relay tuple nor URL matches what this manifest would install)", m.Name, b.Client))
 			continue
 		}
@@ -1172,16 +1172,31 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 // vs adding new state-file machinery; URL-as-secret-bearer is rare
 // (headers are the dominant credential surface).
 func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
+	urls := expectedHubURLs(m, b)
+	if len(urls) == 0 {
+		return ""
+	}
+	return urls[0]
+}
+
+func expectedHubURLs(m *config.ServerManifest, b config.ClientBinding) []string {
 	if m.Transport == config.TransportRemoteHTTP {
+		urls := make([]string, 0, 2)
+		if config.RemoteHTTPURLHasSecretPlaceholderHost(m.URL) {
+			urls = append(urls, m.URL)
+		}
 		expanded, err := expandRemoteHTTPURLSecrets(m.URL, nil)
 		if err != nil {
-			return "" // missing secrets at uninstall — caller treats as no-match
+			return urls // missing non-host secrets at uninstall leave no expanded match
 		}
-		return expanded
+		if expanded != "" && !stringSliceContains(urls, expanded) {
+			urls = append(urls, expanded)
+		}
+		return urls
 	}
 	daemon, ok := findDaemon(m, b.Daemon)
 	if !ok {
-		return ""
+		return nil
 	}
 	urlPath := b.URLPath
 	if urlPath == "" {
@@ -1189,7 +1204,16 @@ func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
 	}
 	// Single owner of the loopback-host literal (127.0.0.1, NOT "localhost") —
 	// see clients.HubLoopbackURL for the IPv6-fallback / VPN-rerouting rationale.
-	return clients.HubLoopbackURL(daemon.Port, urlPath)
+	return []string{clients.HubLoopbackURL(daemon.Port, urlPath)}
+}
+
+func stringSliceContains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // isHubOwnedEntry reports whether the client entry was placed by this
@@ -1237,6 +1261,18 @@ func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon, expectedURL string
 	// "not hub-managed" (serena-client-revert-on-manifest-sync uninstall-side).
 	if IsSerenaServer(server) && IsHubOwnedSerenaRouterEntry(entry) {
 		return true
+	}
+	return false
+}
+
+func isHubOwnedEntryForAnyExpectedURL(entry *clients.MCPEntry, server, daemon string, expectedURLs []string) bool {
+	if len(expectedURLs) == 0 {
+		return isHubOwnedEntry(entry, server, daemon, "")
+	}
+	for _, expectedURL := range expectedURLs {
+		if isHubOwnedEntry(entry, server, daemon, expectedURL) {
+			return true
+		}
 	}
 	return false
 }

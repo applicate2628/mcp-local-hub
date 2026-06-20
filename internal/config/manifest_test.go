@@ -456,6 +456,28 @@ func TestValidateRemoteHTTP_RejectsMalformedHTTPSURL(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteHTTP_RedactsEmbeddedCredentialsInURLError(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "ctx7-bad",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "https://user:pass@mcp.context7.com/mcp",
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected embedded-credentials URL rejection")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:pass", "user@", "pass@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in error %q", msg)
+		}
+	}
+	if !strings.Contains(msg, "https://mcp.context7.com/mcp") {
+		t.Fatalf("error should retain redacted URL context; got %q", msg)
+	}
+}
+
 func TestValidateRemoteHTTP_AllowsSecretPlaceholderHost(t *testing.T) {
 	m := &ServerManifest{
 		Name:      "secret-host",

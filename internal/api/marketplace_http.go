@@ -22,6 +22,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"mcp-local-hub/internal/urlredact"
 )
 
 const (
@@ -53,7 +55,13 @@ func rejectUnsafeMarketplaceRedirect(req *http.Request, via []*http.Request) err
 		return errors.New("too many redirects")
 	}
 	if err := validateMarketplacePublicHTTPSParsedURL(req.URL); err != nil {
-		return fmt.Errorf("refusing redirect from %s to unsafe marketplace URL %s: %w", via[len(via)-1].URL, req.URL, err)
+		redactedTarget := urlredact.MarketplaceURLForError(req.URL.String())
+		if req.URL.User != nil {
+			safeURL := *req.URL
+			safeURL.User = nil
+			req.URL = &safeURL
+		}
+		return fmt.Errorf("refusing redirect from %s to unsafe marketplace URL %s: %w", urlredact.MarketplaceURLForError(via[len(via)-1].URL.String()), redactedTarget, err)
 	}
 	return nil
 }
@@ -261,7 +269,7 @@ var forbiddenMarketplaceHeaders = map[string]struct{}{
 func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL, ifNoneMatch string, extraHeaders map[string]string) (*MarketplaceFetchResult, error) {
 	u, err := parseMarketplacePublicHTTPSURL(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("marketplace url must be public https:// without embedded credentials or unsafe characters (got %q): %w", rawURL, err)
+		return nil, fmt.Errorf("marketplace url must be public https:// without embedded credentials or unsafe characters (got %q): %w", urlredact.MarketplaceURLForError(rawURL), err)
 	}
 	// Reject credential-bearing headers BEFORE building the request
 	// (defense-in-depth: if a future caller passes Authorization,
@@ -287,7 +295,7 @@ func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, redactMarketplaceHTTPError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotModified {
@@ -314,4 +322,15 @@ func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL
 		Body:   body,
 		ETag:   resp.Header.Get("ETag"),
 	}, nil
+}
+
+func redactMarketplaceHTTPError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.URL != "" {
+		return &scrubbedURLError{
+			msg: fmt.Sprintf("%s %q: %v", urlErr.Op, urlredact.MarketplaceURLForError(urlErr.URL), urlErr.Err),
+			err: err,
+		}
+	}
+	return err
 }

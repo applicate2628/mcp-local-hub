@@ -103,6 +103,24 @@ func TestIsHubOwnedEntry_SerenaRouter(t *testing.T) {
 	}
 }
 
+func TestUninstallSecretPlaceholderHostURLMatchesHubOwnedEntry(t *testing.T) {
+	rawURL := "https://${secret:REMOTE_MCP_HOST}/mcp"
+	m := &config.ServerManifest{
+		Name:      "secret-host",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       rawURL,
+	}
+	expected := expectedHubURL(m, config.ClientBinding{Client: "claude-code"})
+	if expected != rawURL {
+		t.Fatalf("expectedHubURL = %q, want raw placeholder URL %q", expected, rawURL)
+	}
+	entry := &clients.MCPEntry{Name: "secret-host", URL: rawURL}
+	if !isHubOwnedEntry(entry, "secret-host", "", expected) {
+		t.Fatal("uninstall ownership should match legacy secret-placeholder-host URL")
+	}
+}
+
 // stubMigrateClient is a non-nil clients.Client whose methods are never called:
 // the migrateOneBinding dry-run path returns after computing the URL, before any
 // adapter method runs. Embedding the interface satisfies it without implementing

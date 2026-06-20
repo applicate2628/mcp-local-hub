@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"mcp-local-hub/internal/urlredact"
 )
 
 const MarketplaceCatalogSchemaVersion = "1"
@@ -106,7 +108,7 @@ func validateMarketplaceEntry(e *MarketplaceEntry) error {
 			return fmt.Errorf("http entry must declare url")
 		}
 		if _, err := parseMarketplacePublicHTTPSURL(e.URL); err != nil {
-			return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", e.URL, err)
+			return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", urlredact.MarketplaceURLForError(e.URL), err)
 		}
 	default:
 		return fmt.Errorf("unknown transport %q (want stdio, native-http, or http)", e.Transport)

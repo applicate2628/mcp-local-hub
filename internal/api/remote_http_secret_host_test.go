@@ -60,6 +60,12 @@ func TestBuildPlanWithOpts_RemoteHTTPSecretPlaceholderHostRejectsLoopbackExpansi
 	if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
 		t.Fatalf("error = %v, want loopback rejection", err)
 	}
+	if strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("expanded secret host leaked in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "${secret:REMOTE_MCP_HOST}") {
+		t.Fatalf("error should reference placeholder host, got %v", err)
+	}
 }
 
 func TestManifestTestRemote_SecretPlaceholderHostRejectsLoopbackExpansionBeforeDial(t *testing.T) {

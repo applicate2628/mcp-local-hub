@@ -130,6 +130,25 @@ func TestParseCatalog_RejectsMalformedHTTPSURL(t *testing.T) {
 	}
 }
 
+func TestParseCatalog_RedactsEmbeddedCredentialsInHTTPEntryError(t *testing.T) {
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://user:pass@mcp.context7.com/mcp"}
+	]}`
+	_, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil {
+		t.Fatal("expected rejection for embedded credentials")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:pass", "user@", "pass@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in error %q", msg)
+		}
+	}
+	if !strings.Contains(msg, "https://mcp.context7.com/mcp") {
+		t.Fatalf("error should retain redacted URL context; got %q", msg)
+	}
+}
+
 func TestParseCatalog_RejectsMarketplaceLocalAndPrivateHTTPEntryURLs(t *testing.T) {
 	for _, tc := range []struct {
 		name string
