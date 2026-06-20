@@ -31,6 +31,13 @@ async function expandEnvironmentSection() {
   await userEvent.click(envHeader);
 }
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 describe("AddServerScreen — A3-b SecretPicker integration (Codex plan-R1 P2-1 + plan-R2 P2)", () => {
   it("hosts EXACTLY ONE useSecretsSnapshot per form mount (one and only one GET /api/secrets)", async () => {
     mockSecretsResponse({ vault_state: "ok", secrets: [], manifest_errors: [] });
@@ -101,5 +108,68 @@ describe("AddServerScreen — A3-b SecretPicker integration (Codex plan-R1 P2-1 
 
     const allModals = document.querySelectorAll('[data-testid="add-secret-modal"]');
     expect(allModals.length).toBe(1);
+  });
+});
+
+describe("AddServerScreen — create save follow-up edits", () => {
+  it("uses manifest edit after a create-mode save has committed", async () => {
+    const requests: Array<{ url: string; body?: string }> = [];
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      requests.push({ url, body: init?.body as string | undefined });
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        return Promise.resolve(jsonResponse({
+          yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n",
+          hash: "hash-after-create",
+        }));
+      }
+      if (url === "/api/manifest/edit") {
+        return Promise.resolve(jsonResponse({ hash: "hash-after-edit", restart_required: false, hub_live: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(1);
+    });
+
+    await user.clear(screen.getByLabelText("Command"));
+    await user.type(screen.getByLabelText("Command"), "node2");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/edit")).toHaveLength(1);
+    });
+    expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(1);
+    const editBody = JSON.parse(requests.find((r) => r.url === "/api/manifest/edit")?.body ?? "{}") as {
+      expected_hash?: string;
+      name?: string;
+      yaml?: string;
+    };
+    expect(editBody.name).toBe("demo");
+    expect(editBody.expected_hash).toBe("hash-after-create");
+    expect(editBody.yaml).toContain("command: 'node2'");
   });
 });

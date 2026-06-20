@@ -20,7 +20,7 @@ import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
 import { ReadinessPanel } from "../components/ReadinessPanel";
 import { addSecret, secretsInit } from "../lib/secrets-api";
-import { inlineSecretsToWrite } from "../lib/inline-secrets";
+import { inlineSecretsToWrite, secretRefKeys } from "../lib/inline-secrets";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
 import { pushToast } from "../lib/toast-store";
@@ -87,6 +87,7 @@ export function AddServerScreen(props: {
   // successful Save. Critically NOT updated on Paste YAML import (Q8
   // anti-silent-data-loss: paste must not move the baseline).
   const [initialSnapshot, setInitialSnapshot] = useState<ManifestFormState>(BLANK_FORM);
+  const [committedCreate, setCommittedCreate] = useState<{ name: string; hash: string } | null>(null);
   const debouncedState = useDebouncedValue(formState, 150);
   const yamlPreview = toYAML(debouncedState);
 
@@ -118,6 +119,7 @@ export function AddServerScreen(props: {
   // inline secret field is unsaved data too, so warn before discarding it (r4),
   // but only while it is still a live ref (r6).
   const isDirty = manifestDirty || hasPendingInlineSecret;
+  const currentSecretRefToken = useMemo(() => JSON.stringify(secretRefKeys(formState)), [formState]);
   useEffect(() => {
     if (!yamlPreview || !debouncedState.name.trim()) {
       // Invalidate any in-flight check AND clear loading, so a late response for
@@ -159,8 +161,24 @@ export function AddServerScreen(props: {
     const present = new Set(
       (snapshot.data?.secrets ?? []).filter((s) => s.state === "present").map((s) => s.name),
     );
-    return inlineSecretsToWrite(inlineSecrets, state.env).filter(([key]) => !present.has(key));
+    return inlineSecretsToWrite(inlineSecrets, state).filter(([key]) => !present.has(key));
   }
+
+  useEffect(() => {
+    const refs = new Set(JSON.parse(currentSecretRefToken) as string[]);
+    setInlineSecrets((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (refs.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [currentSecretRefToken]);
 
   async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
     const entries = pendingInlineSecretEntries(state);
@@ -281,6 +299,7 @@ export function AddServerScreen(props: {
     setReadOnlyReason(null);
     setFormState(BLANK_FORM);
     setInitialSnapshot(BLANK_FORM);
+    setCommittedCreate(null);
     // Clear inline secrets typed for the PRIOR draft so a value entered for
     // manifest a cannot reappear prefilled in manifest b that references the
     // same missing key (Codex #378 r4 — a→b edit navigation would otherwise
@@ -595,10 +614,25 @@ export function AddServerScreen(props: {
           throw err;
         }
       } else {
-        const { restartRequired } = await postManifestCreate(name, payload);
-        if (version !== submissionCounter.current) return;
-        restartHub = restartRequired;
-        setInitialSnapshot(formState);
+        if (committedCreate?.name === name) {
+          const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, committedCreate.hash);
+          if (version !== submissionCounter.current) return;
+          restartHub = restartRequired;
+          setCommittedCreate({ name, hash: newHash });
+          const postSave: ManifestFormState = { ...payloadState, loadedHash: newHash };
+          setFormState(postSave);
+          setInitialSnapshot(postSave);
+        } else {
+          const { restartRequired } = await postManifestCreate(name, payload);
+          if (version !== submissionCounter.current) return;
+          const { hash } = await getManifest(name);
+          if (version !== submissionCounter.current) return;
+          restartHub = restartRequired;
+          setCommittedCreate({ name, hash });
+          const postSave: ManifestFormState = { ...payloadState, loadedHash: hash };
+          setFormState(postSave);
+          setInitialSnapshot(postSave);
+        }
       }
       setWarnings(null);
       if (!opts.install) {

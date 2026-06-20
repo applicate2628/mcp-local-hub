@@ -78,6 +78,21 @@ describe("ReadinessPanel", () => {
     expect(onChange).toHaveBeenCalledWith("OPENAI_API_KEY", "sk-123");
   });
 
+  it("renders an inline password field for an unset blocking remote secret", () => {
+    const onChange = vi.fn();
+    const rep = report(
+      [{ name: "secret (remote): REMOTE_TOKEN", ok: false, optional: false, reason: "not set" }],
+      false,
+    );
+    render(
+      <ReadinessPanel report={rep} loading={false} error={null} inlineSecrets={{}} onInlineSecretChange={onChange} />,
+    );
+    const input = screen.getByTestId("readiness-secret-input-REMOTE_TOKEN") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    fireEvent.input(input, { target: { value: "token-123" } });
+    expect(onChange).toHaveBeenCalledWith("REMOTE_TOKEN", "token-123");
+  });
+
   it("does not render an inline field for a secret that is already set", () => {
     const rep = report([{ name: "secret: SET_KEY", ok: true, optional: true }], true);
     render(
