@@ -988,16 +988,86 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 			continue
 		}
 		candidateLive := func() bool {
-			gate := s.tryEnterSerenaForward(ws.WorkspaceKey)
-			if !gate.entered {
-				if gate.phaseActive {
+			live := false
+			entered, aborted, err := s.withSerenaWorkspaceGate(
+				context.Background(),
+				ws.WorkspaceKey,
+				serenaWorkspaceGatePolicyTryOnly,
+				func(string) *api.WorkspaceEntry {
+					return ws
+				},
+				nil,
+				func(out *serenaWorkspaceGateOutcome) bool {
 					excludeCandidate(ws)
 					_ = auditFn("info", "serena-tools-list-wake-candidate-gated", map[string]any{
 						"workspace_key":        ws.WorkspaceKey,
 						"task_name":            ws.TaskName,
 						"port":                 ws.Port,
-						"waited_through_prune": gate.waitedThroughPrune,
+						"waited_through_prune": out.gate.waitedThroughPrune,
 					})
+					return true
+				},
+				func(out *serenaWorkspaceGateOutcome) (err error) {
+					candidate := out.ws
+					if candidate == nil {
+						return
+					}
+					if out.gate.waitedThroughPrune {
+						candidate = s.resolveWorkspaceByKey(deps, ws.WorkspaceKey)
+						if candidate == nil || candidate.TaskName == "" || candidate.Port == 0 || !isSerenaWorkspaceEntry(candidate) {
+							return
+						}
+					}
+					hadActiveIdleStop := serenaTaskHasActiveIdleStop(candidate.TaskName, time.Now())
+					if wakeErr := deps.WakeIdleFn(wakeCtx, candidate.TaskName, candidate.Port, "serena-tools-list-wake"); wakeErr != nil {
+						// r37-2 P2: classify the wake error. An operator-stop refusal is
+						// TERMINAL — record the TaskName so handleToolsList excludes this
+						// candidate from the fetch loop (its freed port must never be probed,
+						// or a foreign rebind could poison the cached catalog). The tool-call
+						// path applies the same terminal exclusion (serena_router.go). A
+						// transient (not-ready) wake error is NON-terminal: leave the
+						// candidate eligible so the fetch loop can still try it (back-compat
+						// optimization posture). Either way, CONTINUE to the next candidate so
+						// a wakeable idle sibling can still satisfy this tools/list.
+						if errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
+							excludeCandidate(candidate)
+							_ = auditFn("info", "serena-tools-list-wake-operator-stopped", map[string]any{
+								"workspace_key": candidate.WorkspaceKey,
+								"task_name":     candidate.TaskName,
+								"port":          candidate.Port,
+								"err":           wakeErr.Error(),
+							})
+							return
+						}
+						_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
+							"workspace_key": candidate.WorkspaceKey,
+							"task_name":     candidate.TaskName,
+							"port":          candidate.Port,
+							"err":           wakeErr.Error(),
+						})
+						return
+					}
+					if hadActiveIdleStop {
+						s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, candidate)
+					}
+					if serenaToolsListPortLiveFn(wakeCtx, candidate.Port) {
+						live = true
+						return
+					}
+					_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
+						"workspace_key": candidate.WorkspaceKey,
+						"task_name":     candidate.TaskName,
+						"port":          candidate.Port,
+						"err":           "wake returned nil but candidate port is not accepting TCP connections",
+					})
+					return
+				},
+			)
+			if err != nil {
+				return false
+			}
+			if !entered {
+				if aborted {
 					return false
 				}
 				_ = auditFn("info", "serena-tools-list-wake-gate-timeout", map[string]any{
@@ -1007,56 +1077,7 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 				})
 				return false
 			}
-			defer s.exitSerenaForward(ws.WorkspaceKey)
-			candidate := ws
-			if gate.waitedThroughPrune {
-				candidate = s.resolveWorkspaceByKey(deps, ws.WorkspaceKey)
-				if candidate == nil || candidate.TaskName == "" || candidate.Port == 0 || !isSerenaWorkspaceEntry(candidate) {
-					return false
-				}
-			}
-			hadActiveIdleStop := serenaTaskHasActiveIdleStop(candidate.TaskName, time.Now())
-			if err := deps.WakeIdleFn(wakeCtx, candidate.TaskName, candidate.Port, "serena-tools-list-wake"); err != nil {
-				// r37-2 P2: classify the wake error. An operator-stop refusal is
-				// TERMINAL — record the TaskName so handleToolsList excludes this
-				// candidate from the fetch loop (its freed port must never be probed,
-				// or a foreign rebind could poison the cached catalog). The tool-call
-				// path applies the same terminal exclusion (serena_router.go). A
-				// transient (not-ready) wake error is NON-terminal: leave the
-				// candidate eligible so the fetch loop can still try it (back-compat
-				// optimization posture). Either way, CONTINUE to the next candidate so
-				// a wakeable idle sibling can still satisfy this tools/list.
-				if errors.Is(err, api.ErrWakeRefusedOperatorStop) {
-					excludeCandidate(candidate)
-					_ = auditFn("info", "serena-tools-list-wake-operator-stopped", map[string]any{
-						"workspace_key": candidate.WorkspaceKey,
-						"task_name":     candidate.TaskName,
-						"port":          candidate.Port,
-						"err":           err.Error(),
-					})
-					return false
-				}
-				_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
-					"workspace_key": candidate.WorkspaceKey,
-					"task_name":     candidate.TaskName,
-					"port":          candidate.Port,
-					"err":           err.Error(),
-				})
-				return false
-			}
-			if hadActiveIdleStop {
-				s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, candidate)
-			}
-			if serenaToolsListPortLiveFn(wakeCtx, candidate.Port) {
-				return true
-			}
-			_ = auditFn("info", "serena-tools-list-wake-noted", map[string]any{
-				"workspace_key": candidate.WorkspaceKey,
-				"task_name":     candidate.TaskName,
-				"port":          candidate.Port,
-				"err":           "wake returned nil but candidate port is not accepting TCP connections",
-			})
-			return false
+			return live
 		}()
 		if candidateLive {
 			return excluded
@@ -1214,61 +1235,100 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 		outcome, _, _, perr := func() (proxyToolsListResult, string, string, error) {
 			gateCtx, gateCancel := upstreamReadContext(ctx, upstreamTimeout)
 			defer gateCancel()
-			gate := s.enterSerenaForwardCtx(gateCtx, ws.WorkspaceKey)
-			if !gate.entered {
+			var outcome proxyToolsListResult
+			var daemonSessionID string
+			var daemonProtocolVersion string
+			var perr error
+			var gateErr error
+			entered, aborted, err := s.withSerenaWorkspaceGate(
+				gateCtx,
+				ws.WorkspaceKey,
+				serenaWorkspaceGatePolicyBlock,
+				func(wsKey string) *api.WorkspaceEntry {
+					if resolveWorkspaceByKeyFn == nil {
+						gateErr = fmt.Errorf("workspace %q: pruned during stop gate wait", wsKey)
+						return nil
+					}
+					candidate := resolveWorkspaceByKeyFn(wsKey)
+					if candidate == nil {
+						gateErr = fmt.Errorf("workspace %q: pruned during stop gate wait", wsKey)
+					}
+					return candidate
+				},
+				upstreamURLFn,
+				func(out *serenaWorkspaceGateOutcome) bool {
+					candidate := out.ws
+					if wakeIdleFn == nil || candidate == nil || candidate.TaskName == "" || candidate.Port == 0 {
+						return false
+					}
+					hadActiveIdleStop := serenaTaskHasActiveIdleStop(candidate.TaskName, time.Now())
+					if err := wakeIdleFn(gateCtx, candidate.TaskName, candidate.Port, "serena-tools-list-rewake"); err != nil {
+						gateErr = fmt.Errorf("workspace %q: re-wake after idle-stop: %w", candidate.WorkspaceKey, err)
+						return true
+					}
+					if hadActiveIdleStop {
+						s.reseedSerenaBackendPIDAfterConfirmedWake(gateCtx, candidate)
+					}
+					out.rewoke = true
+					return false
+				},
+				func(out *serenaWorkspaceGateOutcome) (err error) {
+					candidate := out.ws
+					upstreamURL := out.upstreamURL
+					if candidate == nil {
+						if gateErr != nil {
+							perr = gateErr
+							return
+						}
+						perr = fmt.Errorf("workspace %q: pruned during stop gate wait", ws.WorkspaceKey)
+						return
+					}
+					if upstreamURL == "" {
+						perr = fmt.Errorf("workspace %q: upstream URL resolution failed", candidate.WorkspaceKey)
+						return
+					}
+					outcome, daemonSessionID, daemonProtocolVersion, perr = proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion, upstreamTimeout)
+					// Finding C: release the one-shot upstream session regardless of the
+					// proxy outcome, whenever the handshake established one. Detach the
+					// context so a done tools/list request context cannot abort it.
+					//
+					// Invariant D (#4): bound the teardown by the SHORT cleanup budget,
+					// NOT serenaUpstreamTimeout (60s). This teardown runs synchronously
+					// before the tools/list result returns to the client, so a hung daemon
+					// would otherwise delay the client's tools/list by up to a minute per
+					// candidate. cleanupContext keeps it detached (Finding C) AND bounded
+					// to <=5s (or the configured upstreamTimeout when shorter, for test
+					// determinism).
+					//
+					// Finding #8 + Finding 2 (V-forward): the teardown DELETE carries the
+					// version the DAEMON negotiated for this one-shot session (the version
+					// it was established + advanced under), not merely the requested
+					// version, so a strict daemon that binds the header to its session's
+					// initialized version does not 400 the teardown and leak the one-shot
+					// session. effectiveHandshakeProtocolVersion fills the router default
+					// only if the daemon returned an empty version.
+					if daemonSessionID != "" {
+						// Invariant D (#4): the teardown still uses the SHORT cleanup budget
+						// (cleanupContext derives min(serenaCleanupTimeout, upstreamTimeout)),
+						// independent of the longer Finding-3 read deadline on the proxy above.
+						delCtx, delCancel := cleanupContext(upstreamTimeout)
+						s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(daemonProtocolVersion), candidate.WorkspaceKey, candidate, auditFn)
+						delCancel()
+					}
+					return
+				},
+			)
+			if err != nil {
+				return proxyToolsListResult{}, "", "", err
+			}
+			if !entered {
 				return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: stop gate wait exceeded tools/list budget", ws.WorkspaceKey)
 			}
-			defer s.exitSerenaForward(ws.WorkspaceKey)
-			candidate := ws
-			if gate.waitedThroughPrune {
-				if resolveWorkspaceByKeyFn == nil {
-					return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: pruned during stop gate wait", ws.WorkspaceKey)
+			if aborted {
+				if gateErr != nil {
+					return proxyToolsListResult{}, "", "", gateErr
 				}
-				candidate = resolveWorkspaceByKeyFn(ws.WorkspaceKey)
-				if candidate == nil {
-					return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: pruned during stop gate wait", ws.WorkspaceKey)
-				}
-				upstreamURL = upstreamURLFn(candidate)
-				if upstreamURL == "" {
-					return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: upstream URL resolution failed", candidate.WorkspaceKey)
-				}
-			}
-			if gate.phaseActive && !gate.waitedThroughPrune && wakeIdleFn != nil && candidate.TaskName != "" && candidate.Port != 0 {
-				hadActiveIdleStop := serenaTaskHasActiveIdleStop(candidate.TaskName, time.Now())
-				if err := wakeIdleFn(gateCtx, candidate.TaskName, candidate.Port, "serena-tools-list-rewake"); err != nil {
-					return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: re-wake after idle-stop: %w", candidate.WorkspaceKey, err)
-				}
-				if hadActiveIdleStop {
-					s.reseedSerenaBackendPIDAfterConfirmedWake(gateCtx, candidate)
-				}
-			}
-			outcome, daemonSessionID, daemonProtocolVersion, perr := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion, upstreamTimeout)
-			// Finding C: release the one-shot upstream session regardless of the
-			// proxy outcome, whenever the handshake established one. Detach the
-			// context so a done tools/list request context cannot abort it.
-			//
-			// Invariant D (#4): bound the teardown by the SHORT cleanup budget,
-			// NOT serenaUpstreamTimeout (60s). This teardown runs synchronously
-			// before the tools/list result returns to the client, so a hung daemon
-			// would otherwise delay the client's tools/list by up to a minute per
-			// candidate. cleanupContext keeps it detached (Finding C) AND bounded
-			// to <=5s (or the configured upstreamTimeout when shorter, for test
-			// determinism).
-			//
-			// Finding #8 + Finding 2 (V-forward): the teardown DELETE carries the
-			// version the DAEMON negotiated for this one-shot session (the version
-			// it was established + advanced under), not merely the requested
-			// version, so a strict daemon that binds the header to its session's
-			// initialized version does not 400 the teardown and leak the one-shot
-			// session. effectiveHandshakeProtocolVersion fills the router default
-			// only if the daemon returned an empty version.
-			if daemonSessionID != "" {
-				// Invariant D (#4): the teardown still uses the SHORT cleanup budget
-				// (cleanupContext derives min(serenaCleanupTimeout, upstreamTimeout)),
-				// independent of the longer Finding-3 read deadline on the proxy above.
-				delCtx, delCancel := cleanupContext(upstreamTimeout)
-				s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(daemonProtocolVersion), candidate.WorkspaceKey, candidate, auditFn)
-				delCancel()
+				return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: stop gate aborted tools/list candidate", ws.WorkspaceKey)
 			}
 			return outcome, daemonSessionID, daemonProtocolVersion, perr
 		}()

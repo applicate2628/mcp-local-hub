@@ -730,37 +730,13 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	inFlightWorkspaceKey := ""
-	restampSerenaForwardOnExit := false
-	upstreamReached := false
-	defer func() {
-		if inFlightWorkspaceKey == "" {
-			return
-		}
-		if restampSerenaForwardOnExit {
-			// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
-			// protection. The sweeper reads counter-then-activity unsynchronized;
-			// exit-first would open a window where counter==0 while last-activity
-			// is still the stale request-START stamp — a sweep tick landing there
-			// idle-stops a daemon that finished a >threshold call nanoseconds ago
-			// (focused re-review P3, both lenses).
-			now := time.Now()
-			s.recordSerenaActivity(inFlightWorkspaceKey, now)
-			// Only make the activity restart-durable after the HTTP request reached
-			// the daemon. Wake refusals, request-build failures, and transport errors
-			// must not refresh durable idle-prune state or imply healthy daemon
-			// activity in status views.
-			if upstreamReached {
-				s.maybePersistSerenaActivity(inFlightWorkspaceKey, now)
-			}
-		}
-		s.exitSerenaForward(inFlightWorkspaceKey)
-	}()
-
-	for {
-		gate := s.enterSerenaForward(ws.WorkspaceKey)
-		inFlightWorkspaceKey = ws.WorkspaceKey
-
+	resolverCanList := false
+	if _, ok := deps.Resolver.(workspaceLister); ok {
+		resolverCanList = true
+	}
+	gateCtx, gateCancel := upstreamReadContext(r.Context(), upstreamTimeout)
+	defer gateCancel()
+	resolveToolCallWorkspace := func(gateKey string) *api.WorkspaceEntry {
 		var refreshed *api.WorkspaceEntry
 		if hasPath {
 			if workspaceResolvedByPath {
@@ -769,17 +745,17 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 					if errors.Is(resolveErr, ErrWorkspaceNotFound) {
 						refreshed = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
 						if refreshed == nil {
-							return
+							return nil
 						}
 						workspaceResolvedByPath = false
 					} else {
 						http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
-						return
+						return nil
 					}
 				} else if resolved == nil {
 					refreshed = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
 					if refreshed == nil {
-						return
+						return nil
 					}
 					workspaceResolvedByPath = false
 				} else {
@@ -793,474 +769,524 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				bindSessionAfterUpstream = true
 			}
 		} else {
-			if _, ok := deps.Resolver.(workspaceLister); ok {
-				refreshed = s.resolveWorkspaceByKey(deps, ws.WorkspaceKey)
+			if resolverCanList {
+				refreshed = s.resolveWorkspaceByKey(deps, gateKey)
 				if refreshed == nil {
 					writeWorkspaceNotFound(w, "", true)
-					return
+					return nil
 				}
 			} else {
-				if gate.phaseActive || gate.waitedThroughPrune {
-					writeWorkspaceNotFound(w, "", true)
-					return
-				}
 				refreshed = ws
 			}
 		}
-
-		if refreshed.WorkspaceKey == ws.WorkspaceKey {
-			ws = refreshed
-			break
-		}
-		s.exitSerenaForward(inFlightWorkspaceKey)
-		inFlightWorkspaceKey = ""
-		ws = refreshed
+		return refreshed
 	}
-
-	upstreamURL := upstreamURLFn(ws)
-	if upstreamURL == "" {
-		http.Error(w, "upstream URL resolution failed", http.StatusInternalServerError)
-		return
-	}
-
-	// v0.6 idle-shutdown (#6, spec §6) — record this tool-call as activity for
-	// the resolved workspace BEFORE the wake/forward. Stamping last-activity
-	// first guarantees a daemon currently servicing this call has a fresh
-	// timestamp, so the 60s sweeper can never idle a daemon mid-call (the
-	// falsification test). A freshly auto-registered workspace (above) records
-	// here too, so its first call already counts as activity.
-	s.recordSerenaActivity(ws.WorkspaceKey, time.Now())
-
-	// v0.6 idle-shutdown wake — if this daemon was idle-stopped, clear the idle
-	// stop and trigger a respawn before forwarding. WakeIdleFn is a fast no-op
-	// when the daemon is already up (the steady-state hot path). On an OPERATOR
-	// stop (user-stop/user-disabled) the wake REFUSES
-	// (api.ErrWakeRefusedOperatorStop), which is terminal for this request: do
-	// not forward to a port that may now be rebound by a foreign process. Any
-	// other wake error (respawn not ready in time) → 503 so the client retries
-	// while the supervisor brings the daemon up (the SAME retry the router
-	// already uses for not-yet-ready daemons). A nil WakeIdleFn
-	// (partially-wired routing) skips the wake entirely.
-	if deps.WakeIdleFn != nil && ws.TaskName != "" {
-		hadActiveIdleStop := serenaTaskHasActiveIdleStop(ws.TaskName, time.Now())
-		// Detach from r.Context() cancellation (a client disconnect must not
-		// abort the supervisor nudge mid-flight, mirroring the auto-register
-		// posture) but BOUND the whole wake so a wedged respawn cannot hang the
-		// handler. 30s covers clear + reconcile-nudge + the ~20s readiness probe.
-		wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-		wakeErr := deps.WakeIdleFn(wakeCtx, ws.TaskName, ws.Port, "serena-router-wake")
-		if wakeErr == nil && hadActiveIdleStop {
-			s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, ws)
+	recordAndWakeToolCall := func(out *serenaWorkspaceGateOutcome) bool {
+		if out == nil || out.ws == nil {
+			return true
 		}
-		wakeCancel()
-		if wakeErr != nil {
-			if errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
-				_ = auditFn("info", "serena-idle-wake-operator-stopped", map[string]any{
-					"workspace_key": ws.WorkspaceKey,
-					"task_name":     ws.TaskName,
-					"port":          ws.Port,
+		if !hasPath && !resolverCanList && (out.gate.phaseActive || out.gate.waitedThroughPrune) {
+			writeWorkspaceNotFound(w, "", true)
+			return true
+		}
+		// v0.6 idle-shutdown (#6, spec §6) — record this tool-call as activity for
+		// the resolved workspace BEFORE the wake/forward. Stamping last-activity
+		// first guarantees a daemon currently servicing this call has a fresh
+		// timestamp, so the 60s sweeper can never idle a daemon mid-call (the
+		// falsification test). A freshly auto-registered workspace (above) records
+		// here too, so its first call already counts as activity.
+		s.recordSerenaActivity(out.ws.WorkspaceKey, time.Now())
+
+		// v0.6 idle-shutdown wake — if this daemon was idle-stopped, clear the idle
+		// stop and trigger a respawn before forwarding. WakeIdleFn is a fast no-op
+		// when the daemon is already up (the steady-state hot path). On an OPERATOR
+		// stop (user-stop/user-disabled) the wake REFUSES
+		// (api.ErrWakeRefusedOperatorStop), which is terminal for this request: do
+		// not forward to a port that may now be rebound by a foreign process. Any
+		// other wake error (respawn not ready in time) → 503 so the client retries
+		// while the supervisor brings the daemon up (the SAME retry the router
+		// already uses for not-yet-ready daemons). A nil WakeIdleFn
+		// (partially-wired routing) skips the wake entirely.
+		if deps.WakeIdleFn != nil && out.ws.TaskName != "" {
+			hadActiveIdleStop := serenaTaskHasActiveIdleStop(out.ws.TaskName, time.Now())
+			// Detach from r.Context() cancellation (a client disconnect must not
+			// abort the supervisor nudge mid-flight, mirroring the auto-register
+			// posture) but BOUND the whole wake so a wedged respawn cannot hang the
+			// handler. 30s covers clear + reconcile-nudge + the ~20s readiness probe.
+			wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+			wakeErr := deps.WakeIdleFn(wakeCtx, out.ws.TaskName, out.ws.Port, "serena-router-wake")
+			if wakeErr == nil && hadActiveIdleStop {
+				s.reseedSerenaBackendPIDAfterConfirmedWake(wakeCtx, out.ws)
+			}
+			wakeCancel()
+			if wakeErr != nil {
+				if errors.Is(wakeErr, api.ErrWakeRefusedOperatorStop) {
+					_ = auditFn("info", "serena-idle-wake-operator-stopped", map[string]any{
+						"workspace_key": out.ws.WorkspaceKey,
+						"task_name":     out.ws.TaskName,
+						"port":          out.ws.Port,
+						"err":           wakeErr.Error(),
+					})
+					writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+						"serena daemon stopped by operator stop; request not forwarded", nil)
+					return true
+				}
+				_ = auditFn("warn", "serena-idle-wake-not-ready", map[string]any{
+					"workspace_key": out.ws.WorkspaceKey,
+					"task_name":     out.ws.TaskName,
+					"port":          out.ws.Port,
 					"err":           wakeErr.Error(),
 				})
 				writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
-					"serena daemon stopped by operator stop; request not forwarded", nil)
+					"serena daemon waking from idle; retry: "+wakeErr.Error(), nil)
+				return true
+			}
+		}
+		out.rewoke = true
+		return false
+	}
+	enteredGate, abortedGate, gateCallErr := s.withSerenaWorkspaceGate(
+		gateCtx,
+		ws.WorkspaceKey,
+		serenaWorkspaceGatePolicyBlock,
+		resolveToolCallWorkspace,
+		upstreamURLFn,
+		recordAndWakeToolCall,
+		func(out *serenaWorkspaceGateOutcome) (err error) {
+			ws = out.ws
+			upstreamURL := out.upstreamURL
+			if !hasPath && !resolverCanList && (out.gate.phaseActive || out.gate.waitedThroughPrune) {
+				writeWorkspaceNotFound(w, "", true)
 				return
 			}
-			_ = auditFn("warn", "serena-idle-wake-not-ready", map[string]any{
-				"workspace_key": ws.WorkspaceKey,
-				"task_name":     ws.TaskName,
-				"port":          ws.Port,
-				"err":           wakeErr.Error(),
-			})
-			writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
-				"serena daemon waking from idle; retry: "+wakeErr.Error(), nil)
-			return
-		}
-	}
-
-	// Bind the client session to a REAL upstream daemon session (P1).
-	// The router synthesized `initialize` for the client and minted the
-	// client-facing Mcp-Session-Id; the workspace daemon has never seen
-	// that id. Establish (lazily, once per client-session×workspace) an
-	// upstream MCP session WITH the daemon — initialize →
-	// notifications/initialized — and forward this and subsequent tool
-	// calls with the daemon-issued id, NOT the router-minted client id.
-	// A handshake transport failure is the same failure class as an
-	// unreachable tool-call forward (502/504), audited identically so a
-	// dead/slow daemon is diagnosable rather than yielding an opaque
-	// "unknown session" rejection.
-	//
-	// The negotiated MCP-Protocol-Version (P1 finding 1 + Finding G) is
-	// threaded into the handshake so the daemon session's initialized
-	// version matches the version this same request (and subsequent
-	// tool-calls) forward verbatim below — otherwise a strict daemon that
-	// binds the header to the session's initialized version rejects the
-	// first tool-call as a protocol-version mismatch when the client
-	// negotiated a non-default supported revision.
-	//
-	// Finding G (mirror internal/api/hub_mcp_handler.go gate 7): when the
-	// id was minted by a prior initialize at this router, the session's
-	// NEGOTIATED version — not the raw per-request header — is the source
-	// of truth. A request header that conflicts with the known session's
-	// negotiated version is a "protocol-version mismatch" (-32600 at HTTP
-	// 400, the hub's exact wording); a missing header is fine (the session
-	// version is used). When there is NO router session for the id (a
-	// tool-call that never initialized at this router — e.g. an older
-	// direct caller), today's behavior is preserved: the raw request header
-	// drives the handshake.
-	clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
-	// Finding 4 (this round — store-vs-DELETE TOCTOU): routerSessionKnown records
-	// whether this id was minted by a prior initialize at THIS router. It is used
-	// below to decide whether to install the post-handshake liveness recheck: only
-	// a router-minted session has a router-session entry a DELETE/sweep could
-	// terminate mid-handshake. A legacy/path-only caller (no router session) keeps
-	// today's behavior (no recheck).
-	routerSessionKnown := false
-	// Finding 4 (round-10): PEEK the session's negotiated version (no lastSeen
-	// refresh) for this PRE-gate validation — a request rejected for a version
-	// mismatch below must NOT keep the session alive. lastSeen is refreshed via
-	// touch only AFTER the gate passes.
-	//
-	// Finding 4 (P2, Codex PR #249 round-2 — distinguish EXPIRED from absent on
-	// the PATH-BEARING branch, mirroring the pathless branch above): use the
-	// tri-state peekVersionState, NOT the boolean peekNegotiatedVersion (which
-	// collapses an expired session into known=false and so would treat a stale id
-	// as TRUE-legacy — fresh handshake + re-bind, letting an expired router
-	// session continue simply by including a path argument). The pathless branch
-	// (Round-13) already does this; the path-bearing branch did not, leaving the
-	// expired-session reanimation class open here. On routerSessionExpired (the
-	// id WAS minted here but idle-expired on this read; peekVersionState deleted
-	// the routerSessionStore entry), coordinate the sticky + daemon unbind for the
-	// id and abort with the router's "session terminated" -32600 — consistent with
-	// the pathless branch and the round-10 post-gate-touch abort. On
-	// routerSessionAbsent (never minted here → a TRUE-legacy / path-only caller),
-	// keep today's behavior: routerSessionKnown stays false, the raw header drives
-	// a fresh handshake. On routerSessionLive, today's behavior (the version gate
-	// + post-gate touch below run for the known session).
-	sessionVersion, sessionState := s.serenaRouterSessions.peekVersionState(sessionID)
-	if sessionState == routerSessionExpired {
-		s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
-		writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
-			"session terminated", nil)
-		return
-	}
-	if sessionState == routerSessionLive {
-		routerSessionKnown = true
-		if clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
-			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
-				"protocol-version mismatch", nil)
-			return
-		}
-		// Round-10 (Finding 1 — re-check liveness AFTER the gate, mirroring the
-		// hub's post-gate Touch, internal/api/hub_mcp_handler.go:402-409). The
-		// peek above was PRE-gate; the cleanup ticker or a client DELETE can
-		// sweep/terminate the session between that peek and now. touch refreshes
-		// lastSeen ONLY for a still-live binding and reports whether it did. A
-		// false return means the session was swept/terminated mid-flight, so
-		// ABORT here — return the router's "session terminated" -32600 and do NOT
-		// proxy upstream or let resolveDaemonSession RECREATE a daemon/sticky
-		// binding for a dead session (which would defeat immediate-revocation +
-		// idle-sweep).
-		if !s.serenaRouterSessions.touch(sessionID) {
-			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
-				"session terminated", nil)
-			return
-		}
-		// Use the session's negotiated version for the upstream handshake so
-		// the daemon session is established under the consistent version even
-		// when this request omitted the header.
-		clientProtocolVersion = sessionVersion
-	}
-	// Round-9 (Finding 4): a workspace switch on this client session no
-	// longer eagerly tears down the OLD workspace's daemon session. The
-	// rounds 7+8 displaced-teardown raced a still-in-flight tool call in the
-	// old workspace (the router tracks no per-daemon in-flight requests), so
-	// per the reviewer's round-9 guidance we revert to TTL-based reclaim:
-	// resolveDaemonSession overwrites the LOCAL binding immediately (no local
-	// leak) and the orphaned UPSTREAM session ages out on the daemon's idle
-	// clock. The explicit client-origin DELETE (handleSerenaDelete) and the
-	// partial-handshake cleanup remain — only the switch-time teardown is gone.
-	//
-	// Finding 4 (this round — store-vs-DELETE TOCTOU): pass a liveness recheck
-	// so resolveDaemonSession does NOT store a daemon binding for a router
-	// session that a concurrent DELETE/sweep terminated DURING the slow
-	// handshake. The callback is installed ONLY for a router-minted session
-	// (routerSessionKnown); a sessionless/path-only call has no router session
-	// to check, so it passes nil and keeps today's behavior. known() is a peek
-	// (no lastSeen refresh): the post-gate touch above already refreshed a live
-	// session, so this reports false ONLY when the entry was actually removed.
-	var sessionLive func() bool
-	if routerSessionKnown {
-		sid := sessionID
-		sessionLive = func() bool { return s.serenaRouterSessions.known(sid) }
-	}
-	daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
-	if hsErr != nil {
-		// Finding 4: the router session was DELETEd/swept during the handshake.
-		// resolveDaemonSession already best-effort-released the just-minted daemon
-		// session and stored NO binding; abort with the router's "session
-		// terminated" -32600 (consistent with the round-10 post-gate touch abort,
-		// above) BEFORE the post-response sticky BindSession runs — so a later
-		// pathless call with this id is NOT routed. This is checked before the
-		// transport-error branches because it is NOT a 502/504 (the handshake
-		// itself succeeded).
-		if errors.Is(hsErr, errRouterSessionTerminated) {
-			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
-				"session terminated", nil)
-			return
-		}
-		if errors.Is(hsErr, errDaemonSessionStoreFull) {
-			writeJSONRPCErrorStatus(w, tb.ID, http.StatusTooManyRequests, jsonrpcInvalidRequest,
-				"too many serena daemon sessions", nil)
-			return
-		}
-		if errors.Is(hsErr, errDaemonSessionHandshakeInFlight) {
-			// bot PR #251 r2 P1: a concurrent first handshake for this session id is in
-			// flight; reject this duplicate (retry-able) so it does not mint a second
-			// upstream daemon session. The client's retry hits the completed binding.
-			writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInvalidRequest,
-				"serena daemon session handshake already in progress for this session id; retry", nil)
-			return
-		}
-		if isTimeoutErr(hsErr) {
-			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
-				"workspace_key": ws.WorkspaceKey,
-				"port":          ws.Port,
-				"upstream_url":  upstreamURL,
-				"timeout_secs":  int(upstreamTimeout / time.Second),
-				"phase":         "handshake",
-				"err":           hsErr.Error(),
-			})
-			http.Error(w, fmt.Sprintf("upstream serena daemon at port %d did not respond to MCP handshake within %ds", ws.Port, int(upstreamTimeout/time.Second)), http.StatusGatewayTimeout)
-			return
-		}
-		_ = auditFn("warn", "serena-upstream-unreachable", map[string]any{
-			"workspace_key": ws.WorkspaceKey,
-			"port":          ws.Port,
-			"upstream_url":  upstreamURL,
-			"phase":         "handshake",
-			"err":           hsErr.Error(),
-		})
-		// §3 fail-loud (always-on floor): a CONNECTION failure on the handshake
-		// (dial refused / dead backend) — as opposed to a timeout on a slow-but-
-		// live daemon, or a protocol-level handshake error on a live daemon — is
-		// a backend-loss signal. Tear every session bound to this workspace out
-		// of all three stores so the next request fails loud (-32600 / 503) and
-		// the client re-initializes, instead of a zombie.
-		if isConnectionLossErr(hsErr) {
-			s.handleSerenaBackendLossOnForwardFailure(ws.WorkspaceKey, sessionID, hsErr, auditFn)
-		}
-		http.Error(w, fmt.Sprintf("upstream serena daemon at port %d MCP handshake failed: %s", ws.Port, hsErr.Error()), http.StatusBadGateway)
-		return
-	}
-
-	// §3 fail-loud: the handshake (fresh or cache-hit-reuse) succeeded, so this
-	// client session is genuinely routed to ws. Record the workspace→session
-	// edge in the router store's reverse index so a later backend-loss event
-	// for this workspace can enumerate + tear down every bound session. Keyed
-	// on a known router session only (bindWorkspace no-ops an unknown id), so a
-	// legacy/path-only caller with no router session is not indexed.
-	if sessionID != "" {
-		// Bind BEFORE seeding the PID baseline: bindWorkspace indexes
-		// ws.WorkspaceKey into knownWorkspaceKeys, and the 30s reconcile tick
-		// only builds wantPaths from bound workspaces. Seeding the baseline
-		// first left a window where a tick firing between seed and bind would
-		// rebuild serenaBackendLastPID without this (not-yet-bound) workspace,
-		// dropping the just-seeded baseline (PR #288 r5 adversarial review).
-		//
-		s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
-		s.seedSerenaBackendPIDBaseline(r.Context(), ws)
-	}
-
-	// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO
-	// client Mcp-Session-Id handshakes a daemon session that
-	// resolveDaemonSession could NOT persist (it stores only when the client
-	// session id is non-empty), and no later DELETE would ever follow — the
-	// session leaks until the daemon's idle expiry. Best-effort DELETE it
-	// upstream after the forwarded response completes, exactly like the
-	// tools/list one-shot path (fetchToolsListFromAnyDaemon → Finding C). The
-	// DELETE is deferred so it fires on EVERY path after the handshake (SSE
-	// completion, plain-body completion, AND the post-handshake error returns
-	// below), and context-detached so a finished/cancelled request context
-	// does not abort the teardown.
-	//
-	// Guard: only when sessionID == "" (the unpersisted one-shot case). A
-	// non-empty sessionID means resolveDaemonSession stored the daemon
-	// session against the client session; it is REUSED on later calls and the
-	// client-origin DELETE (handleSerenaDelete) tears it down — tearing it
-	// down here would break the next tool-call on the same client session.
-	if sessionID == "" && daemonSessionID != "" {
-		oneShotDaemonSessionID := daemonSessionID
-		oneShotURL := upstreamURL
-		oneShotWS := ws
-		// Finding #8: the one-shot session was established under the
-		// daemon-negotiated version; the teardown DELETE carries THAT version
-		// (effectiveHandshakeProtocolVersion fills the router default only if
-		// the daemon somehow returned an empty version).
-		oneShotVersion := effectiveHandshakeProtocolVersion(daemonProtocolVersion)
-		defer func() {
-			// Invariant D (#6): bound the one-shot teardown by the SHORT
-			// cleanup budget, NOT upstreamTimeout (60s default). The tool
-			// result is already copied to the client; this teardown must not
-			// hold the handler for up to a minute on a hung daemon. Detached
-			// from r.Context() (via cleanupContext) so a finished/cancelled
-			// request context does not abort the teardown.
-			delCtx, delCancel := cleanupContext(upstreamTimeout)
-			s.forwardSerenaDeleteUpstream(delCtx, httpClient, oneShotURL, oneShotDaemonSessionID, oneShotVersion, oneShotWS.WorkspaceKey, oneShotWS, auditFn)
-			delCancel()
-		}()
-	}
-
-	// The request entered the per-workspace stop/forward gate before wake and
-	// daemon-session resolution. From here through the upstream POST/SSE copy,
-	// the completion path also re-stamps last-activity so the just-finished call
-	// resets the daemon's idle clock (recordSerenaActivity was stamped ONCE at
-	// request start; a long call would otherwise leave a stale timestamp, and the
-	// next sweep right after a long call could idle a daemon that was busy until
-	// seconds ago).
-	restampSerenaForwardOnExit = true
-
-	upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
-	if ureqErr != nil {
-		http.Error(w, "build upstream request: "+ureqErr.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Thread Content-Type/Accept through verbatim, but NOT the client's
-	// Mcp-Session-Id: the daemon does not know the router-minted client id.
-	// Set the daemon-issued session id instead (omit it entirely when the
-	// daemon is sessionless and issued none).
-	for _, h := range []string{"Content-Type", "Accept"} {
-		if v := r.Header.Get(h); v != "" {
-			upstreamReq.Header.Set(h, v)
-		}
-	}
-	// Finding 1 + Finding #8 (V-forward): forward the version the DAEMON
-	// SESSION was established under, not the raw r.Header and not merely the
-	// requested version. The tools/call POST is a non-initialize request, so a
-	// strict daemon binds the MCP-Protocol-Version header to the version IT
-	// negotiated at initialize (internal/api/hub_mcp_handler.go gate 7);
-	// daemonProtocolVersion (from resolveDaemonSession) is exactly that version
-	// — it may differ from clientProtocolVersion when the daemon negotiated a
-	// different supported revision (Finding #8).
-	//
-	// Round-9 (Finding 1 — presence gate fix): the PRESENCE gate is the
-	// RESOLVED forwardVersion, NOT the ORIGINAL clientProtocolVersion. A
-	// path-only / older caller that omits MCP-Protocol-Version still drives a
-	// daemon handshake (resolveDaemonSession handshakes under the router
-	// default when the client header is empty), so daemonProtocolVersion — and
-	// hence forwardVersion — is non-empty even though clientProtocolVersion is
-	// empty. Gating on clientProtocolVersion != "" suppressed the header in
-	// exactly that case, and a strict daemon then 400s the non-initialize
-	// tool-call as "session present, no version header". Gating on
-	// forwardVersion != "" forwards the resolved version whenever one exists.
-	// A truly sessionless daemon issues no session id AND no negotiated version
-	// (daemonProtocolVersion == ""), so forwardVersion stays "" when the client
-	// also omitted the header → still NO header (the raw-header back-compat for
-	// a sessionless/direct caller is preserved).
-	forwardVersion := clientProtocolVersion
-	if daemonProtocolVersion != "" {
-		forwardVersion = daemonProtocolVersion
-	}
-	if forwardVersion != "" {
-		upstreamReq.Header.Set("MCP-Protocol-Version", forwardVersion)
-	}
-	if daemonSessionID != "" {
-		upstreamReq.Header.Set("Mcp-Session-Id", daemonSessionID)
-	}
-	if upstreamReq.Header.Get("Content-Type") == "" {
-		upstreamReq.Header.Set("Content-Type", "application/json")
-	}
-
-	upstreamResp, doErr := httpClient.Do(upstreamReq)
-	if doErr == nil {
-		upstreamReached = true
-	}
-	if doErr != nil {
-		if isTimeoutErr(doErr) {
-			_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
-				"workspace_key": ws.WorkspaceKey,
-				"port":          ws.Port,
-				"upstream_url":  upstreamURL,
-				"timeout_secs":  int(upstreamTimeout / time.Second),
-				"err":           doErr.Error(),
-			})
-			http.Error(w, fmt.Sprintf("upstream serena daemon at port %d did not respond within %ds", ws.Port, int(upstreamTimeout/time.Second)), http.StatusGatewayTimeout)
-			return
-		}
-		_ = auditFn("warn", "serena-upstream-unreachable", map[string]any{
-			"workspace_key": ws.WorkspaceKey,
-			"port":          ws.Port,
-			"upstream_url":  upstreamURL,
-			"err":           doErr.Error(),
-		})
-		// §3 fail-loud (always-on floor): the tool-call forward to this
-		// workspace's daemon got a CONNECTION error (dead backend / dial
-		// refused). This is the zombie path — the daemon binding cache-hit
-		// above means a prior call established the session, and the daemon then
-		// died. Tear down every session bound to this workspace so the next
-		// request fails loud instead of re-forwarding to a dead daemon. Gate on
-		// a genuine connection loss so a non-connection transport error does not
-		// over-eagerly evict a workspace's sessions.
-		if isConnectionLossErr(doErr) {
-			s.handleSerenaBackendLossOnForwardFailure(ws.WorkspaceKey, sessionID, doErr, auditFn)
-		}
-		http.Error(w, fmt.Sprintf("upstream serena daemon at port %d unreachable: %s", ws.Port, doErr.Error()), http.StatusBadGateway)
-		return
-	}
-	defer upstreamResp.Body.Close()
-
-	copyHeaders(w.Header(), upstreamResp.Header)
-
-	// The daemon's response carries the DAEMON's Mcp-Session-Id, which is
-	// an internal router↔daemon detail (P1 multiplexing). The client must
-	// keep using its OWN router-minted session id, so we never surface the
-	// daemon id downstream: re-assert the client's id when it sent one,
-	// else drop the header entirely. Leaking the daemon id would make the
-	// client switch session ids mid-stream and break the router's
-	// client-session→daemon-session map on the next call.
-	if sessionID != "" {
-		w.Header().Set("Mcp-Session-Id", sessionID)
-	} else {
-		w.Header().Del("Mcp-Session-Id")
-	}
-
-	contentType := upstreamResp.Header.Get("Content-Type")
-	isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
-
-	w.WriteHeader(upstreamResp.StatusCode)
-	if bindSessionAfterUpstream {
-		// Finding 4 (store-vs-DELETE TOCTOU — the post-response sticky bind site):
-		// the tool-call forward above is a SECOND slow upstream op; a client DELETE
-		// (or the sweeper) can terminate the router session WHILE it was in flight.
-		// Re-binding the sticky session for a now-terminated id would let a later
-		// pathless call route as a legacy sticky session, defeating the DELETE — the
-		// same class the resolveDaemonSession recheck closes for the store. So, for a
-		// router-minted session, recheck liveness (a peek — known()) before the
-		// sticky bind: if the router session is gone, SKIP BindSession and
-		// best-effort tear down the daemon binding + the upstream daemon session
-		// (which a coordinated DELETE/sweep already removes locally; this also covers
-		// the residual store-after-snapshot micro-window where the daemon binding
-		// outlived the DELETE). The response is already committed (200 written
-		// above), so this site cannot -32600 like the pre-forward store site; it
-		// converges the session state instead. A non-router-minted (legacy)
-		// session keeps today's unconditional bind.
-		if routerSessionKnown && !s.serenaRouterSessions.known(sessionID) {
-			if wsKey, daemonSID, daemonPV, ok := s.serenaDaemonSessions.bindingFor(sessionID); ok {
-				s.serenaDaemonSessions.unbind(sessionID)
-				delCtx, delCancel := cleanupContext(upstreamTimeout)
-				s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSID, effectiveHandshakeProtocolVersion(daemonPV), wsKey, ws, auditFn)
-				delCancel()
+			if upstreamURL == "" {
+				http.Error(w, "upstream URL resolution failed", http.StatusInternalServerError)
+				return
 			}
-		} else {
-			deps.Sessions.BindSession(sessionID, ws)
-		}
-	}
+			if !out.rewoke && recordAndWakeToolCall(out) {
+				return
+			}
+			restampSerenaForwardOnExit := false
+			upstreamReached := false
+			defer func() {
+				if restampSerenaForwardOnExit {
+					// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
+					// protection. The sweeper reads counter-then-activity unsynchronized;
+					// exit-first would open a window where counter==0 while last-activity
+					// is still the stale request-START stamp — a sweep tick landing there
+					// idle-stops a daemon that finished a >threshold call nanoseconds ago
+					// (focused re-review P3, both lenses).
+					now := time.Now()
+					s.recordSerenaActivity(ws.WorkspaceKey, now)
+					// Only make the activity restart-durable after the HTTP request reached
+					// the daemon. Wake refusals, request-build failures, and transport errors
+					// must not refresh durable idle-prune state or imply healthy daemon
+					// activity in status views.
+					if upstreamReached {
+						s.maybePersistSerenaActivity(ws.WorkspaceKey, now)
+					}
+				}
+			}()
 
-	if isSSE {
-		streamSSE(w, upstreamResp.Body)
+			// Bind the client session to a REAL upstream daemon session (P1).
+			// The router synthesized `initialize` for the client and minted the
+			// client-facing Mcp-Session-Id; the workspace daemon has never seen
+			// that id. Establish (lazily, once per client-session×workspace) an
+			// upstream MCP session WITH the daemon — initialize →
+			// notifications/initialized — and forward this and subsequent tool
+			// calls with the daemon-issued id, NOT the router-minted client id.
+			// A handshake transport failure is the same failure class as an
+			// unreachable tool-call forward (502/504), audited identically so a
+			// dead/slow daemon is diagnosable rather than yielding an opaque
+			// "unknown session" rejection.
+			//
+			// The negotiated MCP-Protocol-Version (P1 finding 1 + Finding G) is
+			// threaded into the handshake so the daemon session's initialized
+			// version matches the version this same request (and subsequent
+			// tool-calls) forward verbatim below — otherwise a strict daemon that
+			// binds the header to the session's initialized version rejects the
+			// first tool-call as a protocol-version mismatch when the client
+			// negotiated a non-default supported revision.
+			//
+			// Finding G (mirror internal/api/hub_mcp_handler.go gate 7): when the
+			// id was minted by a prior initialize at this router, the session's
+			// NEGOTIATED version — not the raw per-request header — is the source
+			// of truth. A request header that conflicts with the known session's
+			// negotiated version is a "protocol-version mismatch" (-32600 at HTTP
+			// 400, the hub's exact wording); a missing header is fine (the session
+			// version is used). When there is NO router session for the id (a
+			// tool-call that never initialized at this router — e.g. an older
+			// direct caller), today's behavior is preserved: the raw request header
+			// drives the handshake.
+			clientProtocolVersion := r.Header.Get("MCP-Protocol-Version")
+			// Finding 4 (this round — store-vs-DELETE TOCTOU): routerSessionKnown records
+			// whether this id was minted by a prior initialize at THIS router. It is used
+			// below to decide whether to install the post-handshake liveness recheck: only
+			// a router-minted session has a router-session entry a DELETE/sweep could
+			// terminate mid-handshake. A legacy/path-only caller (no router session) keeps
+			// today's behavior (no recheck).
+			routerSessionKnown := false
+			// Finding 4 (round-10): PEEK the session's negotiated version (no lastSeen
+			// refresh) for this PRE-gate validation — a request rejected for a version
+			// mismatch below must NOT keep the session alive. lastSeen is refreshed via
+			// touch only AFTER the gate passes.
+			//
+			// Finding 4 (P2, Codex PR #249 round-2 — distinguish EXPIRED from absent on
+			// the PATH-BEARING branch, mirroring the pathless branch above): use the
+			// tri-state peekVersionState, NOT the boolean peekNegotiatedVersion (which
+			// collapses an expired session into known=false and so would treat a stale id
+			// as TRUE-legacy — fresh handshake + re-bind, letting an expired router
+			// session continue simply by including a path argument). The pathless branch
+			// (Round-13) already does this; the path-bearing branch did not, leaving the
+			// expired-session reanimation class open here. On routerSessionExpired (the
+			// id WAS minted here but idle-expired on this read; peekVersionState deleted
+			// the routerSessionStore entry), coordinate the sticky + daemon unbind for the
+			// id and abort with the router's "session terminated" -32600 — consistent with
+			// the pathless branch and the round-10 post-gate-touch abort. On
+			// routerSessionAbsent (never minted here → a TRUE-legacy / path-only caller),
+			// keep today's behavior: routerSessionKnown stays false, the raw header drives
+			// a fresh handshake. On routerSessionLive, today's behavior (the version gate
+			// + post-gate touch below run for the known session).
+			sessionVersion, sessionState := s.serenaRouterSessions.peekVersionState(sessionID)
+			if sessionState == routerSessionExpired {
+				s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
+				writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+					"session terminated", nil)
+				return
+			}
+			if sessionState == routerSessionLive {
+				routerSessionKnown = true
+				if clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
+					writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+						"protocol-version mismatch", nil)
+					return
+				}
+				// Round-10 (Finding 1 — re-check liveness AFTER the gate, mirroring the
+				// hub's post-gate Touch, internal/api/hub_mcp_handler.go:402-409). The
+				// peek above was PRE-gate; the cleanup ticker or a client DELETE can
+				// sweep/terminate the session between that peek and now. touch refreshes
+				// lastSeen ONLY for a still-live binding and reports whether it did. A
+				// false return means the session was swept/terminated mid-flight, so
+				// ABORT here — return the router's "session terminated" -32600 and do NOT
+				// proxy upstream or let resolveDaemonSession RECREATE a daemon/sticky
+				// binding for a dead session (which would defeat immediate-revocation +
+				// idle-sweep).
+				if !s.serenaRouterSessions.touch(sessionID) {
+					writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+						"session terminated", nil)
+					return
+				}
+				// Use the session's negotiated version for the upstream handshake so
+				// the daemon session is established under the consistent version even
+				// when this request omitted the header.
+				clientProtocolVersion = sessionVersion
+			}
+			// Round-9 (Finding 4): a workspace switch on this client session no
+			// longer eagerly tears down the OLD workspace's daemon session. The
+			// rounds 7+8 displaced-teardown raced a still-in-flight tool call in the
+			// old workspace (the router tracks no per-daemon in-flight requests), so
+			// per the reviewer's round-9 guidance we revert to TTL-based reclaim:
+			// resolveDaemonSession overwrites the LOCAL binding immediately (no local
+			// leak) and the orphaned UPSTREAM session ages out on the daemon's idle
+			// clock. The explicit client-origin DELETE (handleSerenaDelete) and the
+			// partial-handshake cleanup remain — only the switch-time teardown is gone.
+			//
+			// Finding 4 (this round — store-vs-DELETE TOCTOU): pass a liveness recheck
+			// so resolveDaemonSession does NOT store a daemon binding for a router
+			// session that a concurrent DELETE/sweep terminated DURING the slow
+			// handshake. The callback is installed ONLY for a router-minted session
+			// (routerSessionKnown); a sessionless/path-only call has no router session
+			// to check, so it passes nil and keeps today's behavior. known() is a peek
+			// (no lastSeen refresh): the post-gate touch above already refreshed a live
+			// session, so this reports false ONLY when the entry was actually removed.
+			var sessionLive func() bool
+			if routerSessionKnown {
+				sid := sessionID
+				sessionLive = func() bool { return s.serenaRouterSessions.known(sid) }
+			}
+			daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
+			if hsErr != nil {
+				// Finding 4: the router session was DELETEd/swept during the handshake.
+				// resolveDaemonSession already best-effort-released the just-minted daemon
+				// session and stored NO binding; abort with the router's "session
+				// terminated" -32600 (consistent with the round-10 post-gate touch abort,
+				// above) BEFORE the post-response sticky BindSession runs — so a later
+				// pathless call with this id is NOT routed. This is checked before the
+				// transport-error branches because it is NOT a 502/504 (the handshake
+				// itself succeeded).
+				if errors.Is(hsErr, errRouterSessionTerminated) {
+					writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+						"session terminated", nil)
+					return
+				}
+				if errors.Is(hsErr, errDaemonSessionStoreFull) {
+					writeJSONRPCErrorStatus(w, tb.ID, http.StatusTooManyRequests, jsonrpcInvalidRequest,
+						"too many serena daemon sessions", nil)
+					return
+				}
+				if errors.Is(hsErr, errDaemonSessionHandshakeInFlight) {
+					// bot PR #251 r2 P1: a concurrent first handshake for this session id is in
+					// flight; reject this duplicate (retry-able) so it does not mint a second
+					// upstream daemon session. The client's retry hits the completed binding.
+					writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInvalidRequest,
+						"serena daemon session handshake already in progress for this session id; retry", nil)
+					return
+				}
+				if isTimeoutErr(hsErr) {
+					_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
+						"workspace_key": ws.WorkspaceKey,
+						"port":          ws.Port,
+						"upstream_url":  upstreamURL,
+						"timeout_secs":  int(upstreamTimeout / time.Second),
+						"phase":         "handshake",
+						"err":           hsErr.Error(),
+					})
+					http.Error(w, fmt.Sprintf("upstream serena daemon at port %d did not respond to MCP handshake within %ds", ws.Port, int(upstreamTimeout/time.Second)), http.StatusGatewayTimeout)
+					return
+				}
+				_ = auditFn("warn", "serena-upstream-unreachable", map[string]any{
+					"workspace_key": ws.WorkspaceKey,
+					"port":          ws.Port,
+					"upstream_url":  upstreamURL,
+					"phase":         "handshake",
+					"err":           hsErr.Error(),
+				})
+				// §3 fail-loud (always-on floor): a CONNECTION failure on the handshake
+				// (dial refused / dead backend) — as opposed to a timeout on a slow-but-
+				// live daemon, or a protocol-level handshake error on a live daemon — is
+				// a backend-loss signal. Tear every session bound to this workspace out
+				// of all three stores so the next request fails loud (-32600 / 503) and
+				// the client re-initializes, instead of a zombie.
+				if isConnectionLossErr(hsErr) {
+					s.handleSerenaBackendLossOnForwardFailure(ws.WorkspaceKey, sessionID, hsErr, auditFn)
+				}
+				http.Error(w, fmt.Sprintf("upstream serena daemon at port %d MCP handshake failed: %s", ws.Port, hsErr.Error()), http.StatusBadGateway)
+				return
+			}
+
+			// §3 fail-loud: the handshake (fresh or cache-hit-reuse) succeeded, so this
+			// client session is genuinely routed to ws. Record the workspace→session
+			// edge in the router store's reverse index so a later backend-loss event
+			// for this workspace can enumerate + tear down every bound session. Keyed
+			// on a known router session only (bindWorkspace no-ops an unknown id), so a
+			// legacy/path-only caller with no router session is not indexed.
+			if sessionID != "" {
+				// Bind BEFORE seeding the PID baseline: bindWorkspace indexes
+				// ws.WorkspaceKey into knownWorkspaceKeys, and the 30s reconcile tick
+				// only builds wantPaths from bound workspaces. Seeding the baseline
+				// first left a window where a tick firing between seed and bind would
+				// rebuild serenaBackendLastPID without this (not-yet-bound) workspace,
+				// dropping the just-seeded baseline (PR #288 r5 adversarial review).
+				//
+				s.serenaRouterSessions.bindWorkspace(sessionID, ws.WorkspaceKey)
+				s.seedSerenaBackendPIDBaseline(r.Context(), ws)
+			}
+
+			// Finding 5 (S — one-shot teardown): a path-bearing tool-call with NO
+			// client Mcp-Session-Id handshakes a daemon session that
+			// resolveDaemonSession could NOT persist (it stores only when the client
+			// session id is non-empty), and no later DELETE would ever follow — the
+			// session leaks until the daemon's idle expiry. Best-effort DELETE it
+			// upstream after the forwarded response completes, exactly like the
+			// tools/list one-shot path (fetchToolsListFromAnyDaemon → Finding C). The
+			// DELETE is deferred so it fires on EVERY path after the handshake (SSE
+			// completion, plain-body completion, AND the post-handshake error returns
+			// below), and context-detached so a finished/cancelled request context
+			// does not abort the teardown.
+			//
+			// Guard: only when sessionID == "" (the unpersisted one-shot case). A
+			// non-empty sessionID means resolveDaemonSession stored the daemon
+			// session against the client session; it is REUSED on later calls and the
+			// client-origin DELETE (handleSerenaDelete) tears it down — tearing it
+			// down here would break the next tool-call on the same client session.
+			if sessionID == "" && daemonSessionID != "" {
+				oneShotDaemonSessionID := daemonSessionID
+				oneShotURL := upstreamURL
+				oneShotWS := ws
+				// Finding #8: the one-shot session was established under the
+				// daemon-negotiated version; the teardown DELETE carries THAT version
+				// (effectiveHandshakeProtocolVersion fills the router default only if
+				// the daemon somehow returned an empty version).
+				oneShotVersion := effectiveHandshakeProtocolVersion(daemonProtocolVersion)
+				defer func() {
+					// Invariant D (#6): bound the one-shot teardown by the SHORT
+					// cleanup budget, NOT upstreamTimeout (60s default). The tool
+					// result is already copied to the client; this teardown must not
+					// hold the handler for up to a minute on a hung daemon. Detached
+					// from r.Context() (via cleanupContext) so a finished/cancelled
+					// request context does not abort the teardown.
+					delCtx, delCancel := cleanupContext(upstreamTimeout)
+					s.forwardSerenaDeleteUpstream(delCtx, httpClient, oneShotURL, oneShotDaemonSessionID, oneShotVersion, oneShotWS.WorkspaceKey, oneShotWS, auditFn)
+					delCancel()
+				}()
+			}
+
+			// The request entered the per-workspace stop/forward gate before wake and
+			// daemon-session resolution. From here through the upstream POST/SSE copy,
+			// the completion path also re-stamps last-activity so the just-finished call
+			// resets the daemon's idle clock (recordSerenaActivity was stamped ONCE at
+			// request start; a long call would otherwise leave a stale timestamp, and the
+			// next sweep right after a long call could idle a daemon that was busy until
+			// seconds ago).
+			restampSerenaForwardOnExit = true
+
+			upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
+			if ureqErr != nil {
+				http.Error(w, "build upstream request: "+ureqErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			// Thread Content-Type/Accept through verbatim, but NOT the client's
+			// Mcp-Session-Id: the daemon does not know the router-minted client id.
+			// Set the daemon-issued session id instead (omit it entirely when the
+			// daemon is sessionless and issued none).
+			for _, h := range []string{"Content-Type", "Accept"} {
+				if v := r.Header.Get(h); v != "" {
+					upstreamReq.Header.Set(h, v)
+				}
+			}
+			// Finding 1 + Finding #8 (V-forward): forward the version the DAEMON
+			// SESSION was established under, not the raw r.Header and not merely the
+			// requested version. The tools/call POST is a non-initialize request, so a
+			// strict daemon binds the MCP-Protocol-Version header to the version IT
+			// negotiated at initialize (internal/api/hub_mcp_handler.go gate 7);
+			// daemonProtocolVersion (from resolveDaemonSession) is exactly that version
+			// — it may differ from clientProtocolVersion when the daemon negotiated a
+			// different supported revision (Finding #8).
+			//
+			// Round-9 (Finding 1 — presence gate fix): the PRESENCE gate is the
+			// RESOLVED forwardVersion, NOT the ORIGINAL clientProtocolVersion. A
+			// path-only / older caller that omits MCP-Protocol-Version still drives a
+			// daemon handshake (resolveDaemonSession handshakes under the router
+			// default when the client header is empty), so daemonProtocolVersion — and
+			// hence forwardVersion — is non-empty even though clientProtocolVersion is
+			// empty. Gating on clientProtocolVersion != "" suppressed the header in
+			// exactly that case, and a strict daemon then 400s the non-initialize
+			// tool-call as "session present, no version header". Gating on
+			// forwardVersion != "" forwards the resolved version whenever one exists.
+			// A truly sessionless daemon issues no session id AND no negotiated version
+			// (daemonProtocolVersion == ""), so forwardVersion stays "" when the client
+			// also omitted the header → still NO header (the raw-header back-compat for
+			// a sessionless/direct caller is preserved).
+			forwardVersion := clientProtocolVersion
+			if daemonProtocolVersion != "" {
+				forwardVersion = daemonProtocolVersion
+			}
+			if forwardVersion != "" {
+				upstreamReq.Header.Set("MCP-Protocol-Version", forwardVersion)
+			}
+			if daemonSessionID != "" {
+				upstreamReq.Header.Set("Mcp-Session-Id", daemonSessionID)
+			}
+			if upstreamReq.Header.Get("Content-Type") == "" {
+				upstreamReq.Header.Set("Content-Type", "application/json")
+			}
+
+			upstreamResp, doErr := httpClient.Do(upstreamReq)
+			if doErr == nil {
+				upstreamReached = true
+			}
+			if doErr != nil {
+				if isTimeoutErr(doErr) {
+					_ = auditFn("warn", "serena-upstream-timeout", map[string]any{
+						"workspace_key": ws.WorkspaceKey,
+						"port":          ws.Port,
+						"upstream_url":  upstreamURL,
+						"timeout_secs":  int(upstreamTimeout / time.Second),
+						"err":           doErr.Error(),
+					})
+					http.Error(w, fmt.Sprintf("upstream serena daemon at port %d did not respond within %ds", ws.Port, int(upstreamTimeout/time.Second)), http.StatusGatewayTimeout)
+					return
+				}
+				_ = auditFn("warn", "serena-upstream-unreachable", map[string]any{
+					"workspace_key": ws.WorkspaceKey,
+					"port":          ws.Port,
+					"upstream_url":  upstreamURL,
+					"err":           doErr.Error(),
+				})
+				// §3 fail-loud (always-on floor): the tool-call forward to this
+				// workspace's daemon got a CONNECTION error (dead backend / dial
+				// refused). This is the zombie path — the daemon binding cache-hit
+				// above means a prior call established the session, and the daemon then
+				// died. Tear down every session bound to this workspace so the next
+				// request fails loud instead of re-forwarding to a dead daemon. Gate on
+				// a genuine connection loss so a non-connection transport error does not
+				// over-eagerly evict a workspace's sessions.
+				if isConnectionLossErr(doErr) {
+					s.handleSerenaBackendLossOnForwardFailure(ws.WorkspaceKey, sessionID, doErr, auditFn)
+				}
+				http.Error(w, fmt.Sprintf("upstream serena daemon at port %d unreachable: %s", ws.Port, doErr.Error()), http.StatusBadGateway)
+				return
+			}
+			defer upstreamResp.Body.Close()
+
+			copyHeaders(w.Header(), upstreamResp.Header)
+
+			// The daemon's response carries the DAEMON's Mcp-Session-Id, which is
+			// an internal router↔daemon detail (P1 multiplexing). The client must
+			// keep using its OWN router-minted session id, so we never surface the
+			// daemon id downstream: re-assert the client's id when it sent one,
+			// else drop the header entirely. Leaking the daemon id would make the
+			// client switch session ids mid-stream and break the router's
+			// client-session→daemon-session map on the next call.
+			if sessionID != "" {
+				w.Header().Set("Mcp-Session-Id", sessionID)
+			} else {
+				w.Header().Del("Mcp-Session-Id")
+			}
+
+			contentType := upstreamResp.Header.Get("Content-Type")
+			isSSE := strings.Contains(strings.ToLower(contentType), "text/event-stream")
+
+			w.WriteHeader(upstreamResp.StatusCode)
+			if bindSessionAfterUpstream {
+				// Finding 4 (store-vs-DELETE TOCTOU — the post-response sticky bind site):
+				// the tool-call forward above is a SECOND slow upstream op; a client DELETE
+				// (or the sweeper) can terminate the router session WHILE it was in flight.
+				// Re-binding the sticky session for a now-terminated id would let a later
+				// pathless call route as a legacy sticky session, defeating the DELETE — the
+				// same class the resolveDaemonSession recheck closes for the store. So, for a
+				// router-minted session, recheck liveness (a peek — known()) before the
+				// sticky bind: if the router session is gone, SKIP BindSession and
+				// best-effort tear down the daemon binding + the upstream daemon session
+				// (which a coordinated DELETE/sweep already removes locally; this also covers
+				// the residual store-after-snapshot micro-window where the daemon binding
+				// outlived the DELETE). The response is already committed (200 written
+				// above), so this site cannot -32600 like the pre-forward store site; it
+				// converges the session state instead. A non-router-minted (legacy)
+				// session keeps today's unconditional bind.
+				if routerSessionKnown && !s.serenaRouterSessions.known(sessionID) {
+					if wsKey, daemonSID, daemonPV, ok := s.serenaDaemonSessions.bindingFor(sessionID); ok {
+						s.serenaDaemonSessions.unbind(sessionID)
+						delCtx, delCancel := cleanupContext(upstreamTimeout)
+						s.forwardSerenaDeleteUpstream(delCtx, httpClient, upstreamURL, daemonSID, effectiveHandshakeProtocolVersion(daemonPV), wsKey, ws, auditFn)
+						delCancel()
+					}
+				} else {
+					deps.Sessions.BindSession(sessionID, ws)
+				}
+			}
+
+			if isSSE {
+				streamSSE(w, upstreamResp.Body)
+				return
+			}
+
+			_, _ = io.Copy(w, upstreamResp.Body)
+			return
+		},
+	)
+	if gateCallErr != nil {
+		http.Error(w, "serena stop gate: "+gateCallErr.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	_, _ = io.Copy(w, upstreamResp.Body)
+	if !enteredGate {
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+			"serena daemon stop gate wait exceeded; retry", nil)
+		return
+	}
+	if abortedGate {
+		return
+	}
 }
 
 // attemptSerenaAutoRegister runs the Phase-5 auto-register-on-miss path.
@@ -1631,27 +1657,38 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 			}
 			fwdCtx, fwdCancel := context.WithTimeout(context.Background(), serenaDeleteTimeout)
 			defer fwdCancel()
-			gate := s.enterSerenaForwardCtx(fwdCtx, gateKey)
-			if !gate.entered {
+			resolvedForwardByKey := false
+			entered, aborted, err := s.withSerenaWorkspaceGate(
+				fwdCtx,
+				gateKey,
+				serenaWorkspaceGatePolicyBlock,
+				func(key string) *api.WorkspaceEntry {
+					if resolved := s.resolveWorkspaceByKey(deps, key); resolved != nil {
+						resolvedForwardByKey = true
+						return resolved
+					}
+					resolvedForwardByKey = false
+					if key == gateKey {
+						return delWS
+					}
+					return nil
+				},
+				upstreamURLFn,
+				nil,
+				func(out *serenaWorkspaceGateOutcome) (err error) {
+					if out.gate.waitedThroughPrune && !resolvedForwardByKey {
+						return
+					}
+					if out.ws == nil || out.upstreamURL == "" {
+						return
+					}
+					s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, out.upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, out.ws, auditFn)
+					return
+				},
+			)
+			if !entered || aborted || err != nil {
 				return
 			}
-			defer s.exitSerenaForward(gateKey)
-
-			fwdWS := delWS
-			if gate.waitedThroughPrune {
-				if wsKey == "" {
-					return
-				}
-				fwdWS = s.resolveWorkspaceByKey(deps, wsKey)
-				if fwdWS == nil {
-					return
-				}
-			}
-			upstreamURL := upstreamURLFn(fwdWS)
-			if upstreamURL == "" {
-				return
-			}
-			s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, fwdWS, auditFn)
 		}()
 	}
 
@@ -1910,28 +1947,39 @@ func (s *Server) handleSerenaCancelled(
 					go func() {
 						fwdCtx, fwdCancel := cleanupContext(fwdTimeout)
 						defer fwdCancel()
-						gate := s.enterSerenaForwardCtx(fwdCtx, fwdGateKey)
-						if !gate.entered {
-							return
-						}
-						defer s.exitSerenaForward(fwdGateKey)
-
-						forwardWS := fwdWS
-						forwardURL := fwdURL
-						if gate.waitedThroughPrune {
-							if fwdWSKey == "" {
+						resolvedForwardByKey := false
+						_, _, _ = s.withSerenaWorkspaceGate(
+							fwdCtx,
+							fwdGateKey,
+							serenaWorkspaceGatePolicyBlock,
+							func(key string) *api.WorkspaceEntry {
+								if resolved := s.resolveWorkspaceByKey(fwdDeps, key); resolved != nil {
+									resolvedForwardByKey = true
+									return resolved
+								}
+								resolvedForwardByKey = false
+								if key == fwdGateKey {
+									return fwdWS
+								}
+								return nil
+							},
+							upstreamURLFn,
+							nil,
+							func(out *serenaWorkspaceGateOutcome) (err error) {
+								if out.gate.waitedThroughPrune && !resolvedForwardByKey {
+									return
+								}
+								forwardURL := out.upstreamURL
+								if forwardURL == "" && out.ws == fwdWS {
+									forwardURL = fwdURL
+								}
+								if out.ws == nil || forwardURL == "" {
+									return
+								}
+								s.forwardSerenaCancelledUpstream(fwdCtx, fwdClient, forwardURL, fwdDaemonSID, fwdVersion, fwdWSKey, out.ws, cancelBody, fwdAudit)
 								return
-							}
-							forwardWS = s.resolveWorkspaceByKey(fwdDeps, fwdWSKey)
-							if forwardWS == nil {
-								return
-							}
-							forwardURL = upstreamURLFn(forwardWS)
-							if forwardURL == "" {
-								return
-							}
-						}
-						s.forwardSerenaCancelledUpstream(fwdCtx, fwdClient, forwardURL, fwdDaemonSID, fwdVersion, fwdWSKey, forwardWS, cancelBody, fwdAudit)
+							},
+						)
 					}()
 				}
 			}

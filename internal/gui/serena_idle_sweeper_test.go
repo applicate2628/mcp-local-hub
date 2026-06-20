@@ -330,6 +330,252 @@ func TestSerenaStopGate_PrunesIdleEntryAfterLastExit(t *testing.T) {
 	}
 }
 
+func TestSerenaStopGate_WaitingForwardBlocksNewPhase(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	const wsKey = "waiting-forward"
+
+	if !s.beginSerenaIdleStop(wsKey) {
+		t.Fatalf("precondition: could not hold idle-stop gate for %s", wsKey)
+	}
+
+	entered := make(chan serenaWorkspaceStopGateEnterResult, 1)
+	go func() {
+		entered <- s.enterSerenaForwardCtx(context.Background(), wsKey)
+	}()
+	waitForSerenaStopGateWaiters(t, s, wsKey, 1)
+
+	s.serenaStopGate.mu.Lock()
+	entry := s.serenaStopGate.byWorkspace[wsKey]
+	if entry == nil {
+		s.serenaStopGate.mu.Unlock()
+		t.Fatalf("missing stop-gate entry for %s", wsKey)
+	}
+	entry.phase = serenaWorkspaceStopGatePhaseNone
+	s.serenaStopGate.mu.Unlock()
+
+	if s.beginSerenaIdleStop(wsKey) {
+		s.endSerenaIdleStop(wsKey)
+		releaseWaitingSerenaForward(t, s, wsKey, entered)
+		t.Fatalf("beginSerenaIdleStop succeeded while a forward was waiting on the gate")
+	}
+	if s.beginSerenaPrune(wsKey) {
+		s.endSerenaPrune(wsKey)
+		releaseWaitingSerenaForward(t, s, wsKey, entered)
+		t.Fatalf("beginSerenaPrune succeeded while a forward was waiting on the gate")
+	}
+
+	releaseWaitingSerenaForward(t, s, wsKey, entered)
+
+	if !s.beginSerenaIdleStop(wsKey) {
+		t.Fatalf("beginSerenaIdleStop should succeed after the waiter enters and exits")
+	}
+	s.endSerenaIdleStop(wsKey)
+	if !s.beginSerenaPrune(wsKey) {
+		t.Fatalf("beginSerenaPrune should succeed after the waiter enters and exits")
+	}
+	s.endSerenaPrune(wsKey)
+}
+
+func TestWithSerenaWorkspaceGatePolicies(t *testing.T) {
+	type gateResult struct {
+		entered bool
+		aborted bool
+		err     error
+	}
+
+	tests := []struct {
+		name               string
+		policy             serenaWorkspaceGatePolicy
+		phase              serenaWorkspaceStopGatePhase
+		resolveNil         bool
+		onPhaseActiveAbort bool
+		wantEntered        bool
+		wantAborted        bool
+		wantResolveCalls   int
+		wantOnPhaseCalls   int
+		wantFnCalls        int
+	}{
+		{
+			name:             "block phaseActive rewakes then runs",
+			policy:           serenaWorkspaceGatePolicyBlock,
+			phase:            serenaWorkspaceStopGatePhaseIdleStop,
+			wantEntered:      true,
+			wantResolveCalls: 1,
+			wantOnPhaseCalls: 1,
+			wantFnCalls:      1,
+		},
+		{
+			name:             "block waitedThroughPrune resolve nil aborts",
+			policy:           serenaWorkspaceGatePolicyBlock,
+			phase:            serenaWorkspaceStopGatePhasePrune,
+			resolveNil:       true,
+			wantEntered:      true,
+			wantAborted:      true,
+			wantResolveCalls: 1,
+		},
+		{
+			name:               "tryOnly gated excludes candidate",
+			policy:             serenaWorkspaceGatePolicyTryOnly,
+			phase:              serenaWorkspaceStopGatePhaseIdleStop,
+			onPhaseActiveAbort: true,
+			wantAborted:        true,
+			wantResolveCalls:   1,
+			wantOnPhaseCalls:   1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+			wsKey := "gate-" + strings.ReplaceAll(tc.name, " ", "-")
+			ws := serenaWS(wsKey, "/proj/"+wsKey, 9126)
+			switch tc.phase {
+			case serenaWorkspaceStopGatePhaseIdleStop:
+				if !s.beginSerenaIdleStop(wsKey) {
+					t.Fatalf("precondition: could not hold idle-stop gate for %s", wsKey)
+				}
+				defer s.endSerenaIdleStop(wsKey)
+			case serenaWorkspaceStopGatePhasePrune:
+				if !s.beginSerenaPrune(wsKey) {
+					t.Fatalf("precondition: could not hold prune gate for %s", wsKey)
+				}
+				defer s.endSerenaPrune(wsKey)
+			default:
+				t.Fatalf("unsupported test phase %d", tc.phase)
+			}
+
+			resolveCalls := 0
+			onPhaseCalls := 0
+			fnCalls := 0
+			resolve := func(gotKey string) *api.WorkspaceEntry {
+				resolveCalls++
+				if gotKey != wsKey {
+					t.Fatalf("resolve key = %q, want %q", gotKey, wsKey)
+				}
+				if tc.resolveNil {
+					return nil
+				}
+				return ws
+			}
+			urlFn := func(got *api.WorkspaceEntry) string {
+				if got == nil {
+					return ""
+				}
+				return "http://127.0.0.1:9126"
+			}
+			onPhaseActive := func(out *serenaWorkspaceGateOutcome) bool {
+				onPhaseCalls++
+				if out.ws != ws {
+					t.Fatalf("onPhaseActive ws = %#v, want %#v", out.ws, ws)
+				}
+				if out.upstreamURL == "" {
+					t.Fatalf("onPhaseActive missing upstreamURL")
+				}
+				out.rewoke = true
+				return tc.onPhaseActiveAbort
+			}
+			fn := func(out *serenaWorkspaceGateOutcome) error {
+				fnCalls++
+				if out.ws != ws {
+					t.Fatalf("fn ws = %#v, want %#v", out.ws, ws)
+				}
+				if out.upstreamURL == "" {
+					t.Fatalf("fn missing upstreamURL")
+				}
+				if tc.wantOnPhaseCalls > 0 && !out.rewoke {
+					t.Fatalf("fn saw rewoke=false after onPhaseActive")
+				}
+				return nil
+			}
+
+			var got gateResult
+			if tc.policy == serenaWorkspaceGatePolicyBlock {
+				done := make(chan gateResult, 1)
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				go func() {
+					entered, aborted, err := s.withSerenaWorkspaceGate(ctx, wsKey, tc.policy, resolve, urlFn, onPhaseActive, fn)
+					done <- gateResult{entered: entered, aborted: aborted, err: err}
+				}()
+				waitForSerenaStopGateWaiters(t, s, wsKey, 1)
+				switch tc.phase {
+				case serenaWorkspaceStopGatePhaseIdleStop:
+					s.endSerenaIdleStop(wsKey)
+				case serenaWorkspaceStopGatePhasePrune:
+					s.endSerenaPrune(wsKey)
+				}
+				select {
+				case got = <-done:
+				case <-time.After(2 * time.Second):
+					t.Fatalf("withSerenaWorkspaceGate did not return after phase release")
+				}
+			} else {
+				entered, aborted, err := s.withSerenaWorkspaceGate(context.Background(), wsKey, tc.policy, resolve, urlFn, onPhaseActive, fn)
+				got = gateResult{entered: entered, aborted: aborted, err: err}
+			}
+
+			if got.err != nil {
+				t.Fatalf("withSerenaWorkspaceGate err = %v", got.err)
+			}
+			if got.entered != tc.wantEntered {
+				t.Fatalf("entered = %v, want %v", got.entered, tc.wantEntered)
+			}
+			if got.aborted != tc.wantAborted {
+				t.Fatalf("aborted = %v, want %v", got.aborted, tc.wantAborted)
+			}
+			if resolveCalls != tc.wantResolveCalls {
+				t.Fatalf("resolve calls = %d, want %d", resolveCalls, tc.wantResolveCalls)
+			}
+			if onPhaseCalls != tc.wantOnPhaseCalls {
+				t.Fatalf("onPhaseActive calls = %d, want %d", onPhaseCalls, tc.wantOnPhaseCalls)
+			}
+			if fnCalls != tc.wantFnCalls {
+				t.Fatalf("fn calls = %d, want %d", fnCalls, tc.wantFnCalls)
+			}
+		})
+	}
+}
+
+func waitForSerenaStopGateWaiters(t *testing.T, s *Server, wsKey string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.serenaStopGate.mu.Lock()
+		got := 0
+		if entry := s.serenaStopGate.byWorkspace[wsKey]; entry != nil {
+			got = entry.waiters
+		}
+		s.serenaStopGate.mu.Unlock()
+		if got >= want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("stop gate waiters for %s did not reach %d", wsKey, want)
+}
+
+func releaseWaitingSerenaForward(t *testing.T, s *Server, wsKey string, entered <-chan serenaWorkspaceStopGateEnterResult) {
+	t.Helper()
+	s.serenaStopGate.mu.Lock()
+	if entry := s.serenaStopGate.byWorkspace[wsKey]; entry != nil {
+		entry.phase = serenaWorkspaceStopGatePhaseNone
+		entry.ready.Broadcast()
+	}
+	s.serenaStopGate.mu.Unlock()
+	select {
+	case gate := <-entered:
+		if !gate.entered {
+			t.Fatalf("waiting forward did not enter after release: %#v", gate)
+		}
+		if !gate.phaseActive {
+			t.Fatalf("waiting forward did not report phaseActive after waiting")
+		}
+		s.exitSerenaForward(wsKey)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("waiting forward did not return after release")
+	}
+}
+
 // A non-running (Stopped/Restarting) daemon is never idle-stopped.
 func TestIdleSweeper_NotRunning_Skipped(t *testing.T) {
 	const wsPath = "/proj/zeta"

@@ -173,6 +173,20 @@ type serenaWorkspaceStopGateEnterResult struct {
 	phaseActive        bool
 }
 
+type serenaWorkspaceGatePolicy uint8
+
+const (
+	serenaWorkspaceGatePolicyBlock serenaWorkspaceGatePolicy = iota
+	serenaWorkspaceGatePolicyTryOnly
+)
+
+type serenaWorkspaceGateOutcome struct {
+	ws          *api.WorkspaceEntry
+	upstreamURL string
+	rewoke      bool
+	gate        serenaWorkspaceStopGateEnterResult
+}
+
 func (g *serenaWorkspaceStopGate) enter(wsKey string) serenaWorkspaceStopGateEnterResult {
 	return g.enterCtx(context.Background(), wsKey)
 }
@@ -291,7 +305,7 @@ func (g *serenaWorkspaceStopGate) beginPhase(wsKey string, phase serenaWorkspace
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	entry := g.entryLocked(wsKey)
-	if entry.inFlight > 0 || entry.phase != serenaWorkspaceStopGatePhaseNone {
+	if entry.inFlight > 0 || entry.waiters > 0 || entry.phase != serenaWorkspaceStopGatePhaseNone {
 		return false
 	}
 	entry.phase = phase
@@ -377,6 +391,81 @@ func (s *Server) exitSerenaForward(wsKey string) {
 		return
 	}
 	s.serenaStopGate.exit(wsKey)
+}
+
+func (s *Server) withSerenaWorkspaceGate(
+	ctx context.Context,
+	wsKey string,
+	policy serenaWorkspaceGatePolicy,
+	resolve func(string) *api.WorkspaceEntry,
+	urlFn func(*api.WorkspaceEntry) string,
+	onPhaseActive func(*serenaWorkspaceGateOutcome) bool,
+	fn func(*serenaWorkspaceGateOutcome) error,
+) (entered bool, aborted bool, err error) {
+	ctxProvided := ctx != nil
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	currentKey := wsKey
+	for {
+		var gate serenaWorkspaceStopGateEnterResult
+		switch policy {
+		case serenaWorkspaceGatePolicyTryOnly:
+			gate = s.tryEnterSerenaForward(currentKey)
+		default:
+			if ctxProvided {
+				gate = s.enterSerenaForwardCtx(ctx, currentKey)
+			} else {
+				gate = s.enterSerenaForward(currentKey)
+			}
+		}
+		if !gate.entered {
+			out := &serenaWorkspaceGateOutcome{gate: gate}
+			if resolve != nil {
+				out.ws = resolve(currentKey)
+			}
+			if urlFn != nil {
+				out.upstreamURL = urlFn(out.ws)
+			}
+			if gate.phaseActive && onPhaseActive != nil {
+				aborted = onPhaseActive(out)
+			}
+			return false, aborted, nil
+		}
+
+		entered = true
+		exitKey := currentKey
+		retry, innerAborted, innerErr := func() (bool, bool, error) {
+			defer s.exitSerenaForward(exitKey)
+			out := &serenaWorkspaceGateOutcome{gate: gate}
+			if resolve != nil {
+				out.ws = resolve(currentKey)
+				if out.ws == nil {
+					return false, true, nil
+				}
+				if out.ws.WorkspaceKey != "" && out.ws.WorkspaceKey != currentKey {
+					currentKey = out.ws.WorkspaceKey
+					return true, false, nil
+				}
+			}
+			if urlFn != nil {
+				out.upstreamURL = urlFn(out.ws)
+			}
+			if gate.phaseActive && !gate.waitedThroughPrune && onPhaseActive != nil {
+				if onPhaseActive(out) {
+					return false, true, nil
+				}
+			}
+			if fn != nil {
+				return false, false, fn(out)
+			}
+			return false, false, nil
+		}()
+		if retry {
+			continue
+		}
+		return true, innerAborted, innerErr
+	}
 }
 
 // hasSerenaForwardInFlight reports whether at least one /serena/mcp forward is
