@@ -896,8 +896,9 @@ func runSessionCleanupTicker(ctx context.Context, s *gui.Server, sessions *seren
 }
 
 // runSerenaBackendLossReconcileTicker is the §3.x backend-loss FALLBACK
-// signal's driver. Every `interval` it calls s.ReconcileSerenaBackendLossViaIPC,
-// which polls the supervisor IPC status and, for any serena workspace the
+// signal's driver. Every `interval`, or sooner when a daemon-backend-lost event
+// coalesces a trigger, it calls s.ReconcileSerenaBackendLossViaIPC, which polls
+// the supervisor IPC status and, for any serena workspace the
 // router has live sessions for whose daemon restarted (PID changed) or vanished
 // since the last tick, tears those sessions out of all three router stores so
 // the next /serena/mcp request fails loud instead of zombie-200-ing a dead
@@ -913,13 +914,14 @@ func runSerenaBackendLossReconcileTicker(ctx context.Context, s *gui.Server, int
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if s == nil {
-				continue
-			}
-			tickCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			_ = s.ReconcileSerenaBackendLossViaIPC(tickCtx)
-			cancel()
+		case <-s.SerenaBackendLossReconcileTrigger():
 		}
+		if s == nil {
+			continue
+		}
+		tickCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_ = s.ReconcileSerenaBackendLossViaIPC(tickCtx)
+		cancel()
 	}
 }
 

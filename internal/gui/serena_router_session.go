@@ -970,9 +970,8 @@ func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
 // §3.x signal #1 (the event-driven faster path that observes a daemon death
 // even when NO client request is in flight) now ships as
 // RunSerenaBackendLossEventSubscriber below — it subscribes to the GUI event
-// bus's `daemon-backend-lost` event and tears the workspace down instantly,
-// ahead of the 30s IPC reconcile fallback. This floor stays the always-on
-// backstop.
+// bus's `daemon-backend-lost` event and wakes the IPC reconcile immediately,
+// ahead of the 30s fallback interval. This floor stays the always-on backstop.
 func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID string, cause error, auditFn func(level, event string, fields map[string]any) error) {
 	var sticky sessionRouter
 	if deps := s.serenaRouterDepsProd(); deps != nil {
@@ -1000,72 +999,29 @@ func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID 
 	}
 }
 
-// serenaWorkspaceForBackendLostEvent resolves a `daemon-backend-lost` GUI event
-// body to the registered serena pool workspace it belongs to, or nil when the
-// event is not a serena backend loss the router cares about.
-func (s *Server) serenaWorkspaceForBackendLostEvent(body map[string]any) *api.WorkspaceEntry {
-	if body == nil {
+// SerenaBackendLossReconcileTrigger returns the coalesced wake channel consumed
+// by the GUI lifecycle ticker. Nil means no event wake source is configured.
+func (s *Server) SerenaBackendLossReconcileTrigger() <-chan struct{} {
+	if s == nil {
 		return nil
 	}
-	if srv, _ := body["server"].(string); srv != "serena" {
-		return nil
-	}
-	deps := s.serenaRouterDepsProd()
-	if deps == nil || deps.Resolver == nil {
-		return nil
-	}
-	lister, ok := deps.Resolver.(workspaceLister)
-	if !ok {
-		return nil
-	}
-
-	daemonKey := strings.TrimSpace(asEventString(body["daemon"]))
-	port := eventBodyInt(body["port"])
-	for _, ws := range lister.ListWorkspaces() {
-		if ws == nil || !isSerenaWorkspaceEntry(ws) {
-			continue
-		}
-		if daemonKey != "" {
-			if ws.WorkspaceKey == daemonKey {
-				return ws
-			}
-			continue
-		}
-		if port > 0 && ws.Port == port {
-			return ws
-		}
-	}
-	return nil
+	return s.serenaBackendLossTrigger
 }
 
-func asEventString(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
-// eventBodyInt coerces a GUI event-body numeric field to int. The bus body is
-// map[string]any; an in-process Publish carries native ints, while a value that
-// round-tripped through JSON decodes as float64. Both are handled; any other
-// type yields 0.
-func eventBodyInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
+func (s *Server) triggerSerenaBackendLossReconcile() {
+	if s == nil || s.serenaBackendLossTrigger == nil {
+		return
+	}
+	select {
+	case s.serenaBackendLossTrigger <- struct{}{}:
 	default:
-		return 0
 	}
 }
 
 // RunSerenaBackendLossEventSubscriber is §3.x signal #1: the event-driven
-// backend-loss teardown. It subscribes to the GUI event bus and, on each
-// `daemon-backend-lost` event that maps to a registered serena pool workspace,
-// tears down that workspace's router sessions immediately via
-// terminateSerenaSessionsForWorkspace instead of waiting up to 30s for the IPC
-// reconcile fallback.
+// backend-loss trigger. It subscribes to the GUI event bus and, on each serena
+// `daemon-backend-lost` event, wakes ReconcileSerenaBackendLossViaIPC instead
+// of duplicating the reconcile owner's teardown decisions.
 func (s *Server) RunSerenaBackendLossEventSubscriber(ctx context.Context) {
 	if s == nil {
 		return
@@ -1080,28 +1036,15 @@ func (s *Server) RunSerenaBackendLossEventSubscriber(ctx context.Context) {
 }
 
 func (s *Server) consumeSerenaBackendLossEvents(ctx context.Context, ch <-chan Event) {
+	_ = ctx
 	for ev := range ch {
 		if ev.Type != "daemon-backend-lost" {
 			continue
 		}
-		ws := s.serenaWorkspaceForBackendLostEvent(ev.Body)
-		if ws == nil {
+		if srv, _ := ev.Body["server"].(string); srv != "serena" {
 			continue
 		}
-		prevPID := eventBodyInt(ev.Body["prev_pid"])
-		if prevPID > 0 {
-			if live := serenaBackendLivePIDForWorkspace(ctx, ws.WorkspacePath); live > 0 && live != prevPID {
-				continue
-			}
-		}
-		n := s.terminateSerenaSessionsForWorkspace(ws.WorkspaceKey)
-		if deps := s.serenaRouterDepsProd(); deps != nil && deps.AuditFn != nil && n > 0 {
-			_ = deps.AuditFn("warn", "serena-backend-loss-session-teardown", map[string]any{
-				"workspace_key":     ws.WorkspaceKey,
-				"sessions_torndown": n,
-				"trigger":           "daemon-backend-lost-event",
-			})
-		}
+		s.triggerSerenaBackendLossReconcile()
 	}
 }
 

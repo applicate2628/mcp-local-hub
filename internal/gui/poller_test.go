@@ -591,6 +591,66 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		}
 	})
 
+	t.Run("emits-after-port-stale-crash-clears-stale-pid", func(t *testing.T) {
+		withSerenaIdleReconcileGlobals(t)
+
+		const wsPath = "/proj/poller-stale-crash"
+		const sid = "sid-poller-stale-crash"
+		const pidA = 4242
+		ws := serenaWS("poller-stale-crash", wsPath, 9301)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-poller-stale-crash")
+		seedSerenaBackendBaseline(s, wsPath, pidA)
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{
+				{Server: "serena", Daemon: "alpha", Workspace: wsPath, TaskName: ws.TaskName, State: "Quarantined", Port: 9301, PID: 0, StalePID: 0},
+			}, nil
+		}
+
+		frames := [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0}},
+		}
+		status := &scriptedStatus{frames: frames}
+		b := NewBroadcaster()
+		b.DisableGUIEventLog = true
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := b.Subscribe(ctx)
+
+		p := NewStatusPoller(status, b, 50*time.Millisecond)
+		go p.Run(ctx)
+
+		var body map[string]any
+		daemonStates := 0
+		deadline := time.After(2 * time.Second)
+		for daemonStates < 3 || body == nil {
+			select {
+			case ev := <-ch:
+				switch ev.Type {
+				case "daemon-state":
+					daemonStates++
+				case "daemon-backend-lost":
+					body = ev.Body
+				}
+			case <-deadline:
+				t.Fatalf("did not observe stale-crash backend-loss wake; daemonStates=%d body=%v", daemonStates, body)
+			}
+		}
+		if got, _ := body["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
+		}
+		if got, _ := body["prev_pid"].(int); got != pidA {
+			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
+		}
+
+		if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+			t.Fatalf("reconcile after stale-crash wake tore down %d sessions; want 1", n)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+	})
+
 	t.Run("emits-on-removed-row", func(t *testing.T) {
 		frames := [][]api.DaemonStatus{
 			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: 4242}},

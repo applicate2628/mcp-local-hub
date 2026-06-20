@@ -201,7 +201,18 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		// failed on first observation still emits once.
 		nowFailed := isFailedDaemonState(r)
 		failedEdge := nowFailed && !isFailedDaemonState(prev)
+		backendLostPrevPID := prev.PID
 		backendLostEdge := ok && prev.PID > 0 && r.PID != prev.PID && r.StalePID == 0
+		if ok &&
+			strings.EqualFold(r.Server, "serena") &&
+			prev.PID == 0 &&
+			prev.StalePID > 0 &&
+			r.PID == 0 &&
+			r.StalePID == 0 &&
+			!strings.EqualFold(r.State, "Running") {
+			backendLostEdge = true
+			backendLostPrevPID = prev.StalePID
+		}
 		// Falling edge: was failed, now healthy — the supervisor's auto-restart
 		// (or a manual restart) succeeded. The `ok` guard means a daemon
 		// first-seen healthy does NOT spuriously announce a recovery; only a
@@ -264,7 +275,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 					"server":   r.Server,
 					"daemon":   r.Daemon,
 					"state":    r.State,
-					"prev_pid": prev.PID,
+					"prev_pid": backendLostPrevPID,
 					"port":     r.Port,
 				},
 			})
