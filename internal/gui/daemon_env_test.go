@@ -13,6 +13,16 @@ import (
 	"mcp-local-hub/internal/api/daemon_env_overlay"
 )
 
+func postDaemonEnvRaw(t *testing.T, s *Server, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9125"+path, strings.NewReader(body))
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.httpHandler().ServeHTTP(rec, req)
+	return rec
+}
+
 func TestDaemonEnvGETListsCurrentIntentWithOverrides(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := api.SetDaemonStateRootForTest(stateDir)
@@ -134,6 +144,50 @@ func TestDaemonRespawnRejectsMaintenanceTask(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "MAINTENANCE_TASK") {
 		t.Fatalf("body = %s, want MAINTENANCE_TASK error code", rec.Body.String())
+	}
+}
+
+func TestDaemonEnvBodyLimit_OversizedEnvPostRejected(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	body := `{"task_name":"\\mcp-local-hub-memory-default","env":{"PATH":"` + strings.Repeat("A", int(maxControlBodyBytes)+1) + `"}}`
+	rec := postDaemonEnvRaw(t, s, "/api/daemon/env", body)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "request body too large") {
+		t.Fatalf("body = %s, want shared helper body-too-large error", rec.Body.String())
+	}
+}
+
+func TestDiscoveryRefreshBodyLimit_TrailingGarbageRejected(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	body := `{}` + strings.Repeat("Z", int(maxControlBodyBytes)+1)
+	rec := postDaemonEnvRaw(t, s, "/api/discovery/refresh", body)
+	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 400 or 413; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "request body") {
+		t.Fatalf("body = %s, want shared helper request-body error", rec.Body.String())
+	}
+}
+
+func TestDiscoveryRefreshBodyLimit_EmptyBodyStillAccepted(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	rec := postDaemonEnvRaw(t, s, "/api/discovery/refresh", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for empty discovery refresh body; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDaemonRespawnBodyLimit_TrailingGarbageRejected(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	body := `{"task_name":"\\mcp-local-hub-memory-weekly-refresh"}` + strings.Repeat("Z", int(maxControlBodyBytes)+1)
+	rec := postDaemonEnvRaw(t, s, "/api/daemon/respawn", body)
+	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 400 or 413; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "request body") {
+		t.Fatalf("body = %s, want shared helper request-body error", rec.Body.String())
 	}
 }
 

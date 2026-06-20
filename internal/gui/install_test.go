@@ -36,6 +36,12 @@ func newUninstallTestServer(u *fakeUninstaller) *Server {
 	return s
 }
 
+func newInstallTestServer(installer *fakeInstaller) *Server {
+	s := &Server{mux: http.NewServeMux(), installer: installer, uninstaller: &fakeUninstaller{}, installBulk: &fakeInstallBulk{}}
+	registerInstallRoutes(s)
+	return s
+}
+
 // deleteReq builds a same-origin DELETE request through the mux.
 func deleteReq(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -44,6 +50,23 @@ func deleteReq(t *testing.T, s *Server, path string) *httptest.ResponseRecorder 
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestInstallHandler_OversizedBodyRejected(t *testing.T) {
+	inst := &fakeInstaller{}
+	s := newInstallTestServer(inst)
+	body := `{"name":"` + strings.Repeat("A", int(maxControlBodyBytes)+1) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/install", strings.NewReader(body))
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%q", rec.Code, rec.Body.String())
+	}
+	if inst.called {
+		t.Fatalf("installer called with %q; oversized body must be rejected before install", inst.seenName)
+	}
 }
 
 func TestUninstallHandler_RejectsNonDELETE(t *testing.T) {

@@ -25,9 +25,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -52,6 +55,46 @@ func postSerenaCtx(t *testing.T, s *Server, ctx context.Context, body []byte, he
 	rr := httptest.NewRecorder()
 	s.mux.ServeHTTP(rr, req)
 	return rr
+}
+
+type pruneRecheckResolver struct {
+	mu       sync.Mutex
+	entries  []*api.WorkspaceEntry
+	resolved chan struct{}
+	once     sync.Once
+	calls    int
+}
+
+func (r *pruneRecheckResolver) ResolveByPath(path string) (*api.WorkspaceEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	defer r.once.Do(func() { close(r.resolved) })
+
+	var best *api.WorkspaceEntry
+	bestLen := -1
+	for _, e := range r.entries {
+		if e != nil && strings.HasPrefix(path, e.WorkspacePath) && len(e.WorkspacePath) > bestLen {
+			best = e
+			bestLen = len(e.WorkspacePath)
+		}
+	}
+	if best == nil {
+		return nil, ErrWorkspaceNotFound
+	}
+	return best, nil
+}
+
+func (r *pruneRecheckResolver) replaceEntries(entries []*api.WorkspaceEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = entries
+}
+
+func (r *pruneRecheckResolver) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
 }
 
 // ---------------------------------------------------------------------
@@ -162,6 +205,344 @@ func TestSerenaRouter_NotificationCancelled_DetachedFromInboundContext(t *testin
 	}
 }
 
+func TestSerenaRouter_NotificationCancelledForwardBlocksIdleStop(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
+
+	const wsPath = "/proj/cancel-forward-gate"
+	ws := serenaWS("cancel-forward-gate", wsPath, 9321)
+	daemon := newFakeSerenaDaemon("cancel-forward-gate")
+
+	cancelStarted := make(chan struct{})
+	releaseCancel := make(chan struct{})
+	var cancelOnce, releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseCancel) }) })
+
+	base := daemon.handler()
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			if strings.Contains(string(body), `"notifications/cancelled"`) {
+				cancelOnce.Do(func() { close(cancelStarted) })
+				select {
+				case <-releaseCancel:
+				case <-r.Context().Done():
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+		}
+		base(w, r)
+	})
+	ts := httptest.NewServer(wrapped)
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Nanosecond, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+		},
+	)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-45*time.Minute))
+
+	cancelBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  map[string]any{"requestId": 7},
+	})
+	if rr := postSerena(t, s, cancelBody, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusAccepted {
+		t.Fatalf("cancel status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+
+	select {
+	case <-cancelStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancel forward never reached the daemon")
+	}
+
+	n := s.SweepIdleSerenaDaemons(context.Background(), now)
+	stoppedDuringCancel := n != 0 || len(*captured) != 0
+
+	releaseOnce.Do(func() { close(releaseCancel) })
+	waitForDaemonCancelHits(t, daemon, 1)
+
+	if stoppedDuringCancel {
+		t.Fatalf("idle sweep stopped a workspace with a notifications/cancelled forward in flight: n=%d captured=%v", n, *captured)
+	}
+}
+
+func TestSerenaRouter_NotificationCancelled202NotBlockedByHeldStopGate(t *testing.T) {
+	const wsPath = "/proj/cancel-held-gate"
+	ws := serenaWS("cancel-held-gate", wsPath, 9323)
+	daemon := newFakeSerenaDaemon("cancel-held-gate")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	if !s.beginSerenaIdleStop(ws.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold stop gate for %s", ws.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaIdleStop(ws.WorkspaceKey)
+		}
+	}()
+
+	cancelBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  map[string]any{"requestId": 7},
+	})
+	done := make(chan *httptest.ResponseRecorder, 1)
+	start := time.Now()
+	go func() {
+		done <- postSerena(t, s, cancelBody, map[string]string{"Mcp-Session-Id": sid})
+	}()
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("cancel status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("cancel 202 took %v; want immediate even while the daemon-side forward waits on the stop gate", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancel 202 blocked behind a held stop gate; only the async daemon-side forward may wait")
+	}
+
+	s.endSerenaIdleStop(ws.WorkspaceKey)
+	gateHeld = false
+	waitForDaemonCancelHits(t, daemon, 1)
+}
+
+func TestSerenaRouter_DeleteForwardBlocksIdleStop(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
+
+	const wsPath = "/proj/delete-forward-gate"
+	ws := serenaWS("delete-forward-gate", wsPath, 9322)
+	daemon := newFakeSerenaDaemon("delete-forward-gate")
+
+	deleteStarted := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var deleteOnce, releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseDelete) }) })
+
+	base := daemon.handler()
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteOnce.Do(func() { close(deleteStarted) })
+			select {
+			case <-releaseDelete:
+			case <-r.Context().Done():
+			}
+		}
+		base(w, r)
+	})
+	ts := httptest.NewServer(wrapped)
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Nanosecond, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+		},
+	)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-45*time.Minute))
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- deleteSerena(t, s, map[string]string{"Mcp-Session-Id": sid, "MCP-Protocol-Version": "2025-11-25"})
+	}()
+
+	select {
+	case <-deleteStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("DELETE forward never reached the daemon")
+	}
+
+	n := s.SweepIdleSerenaDaemons(context.Background(), now)
+	stoppedDuringDelete := n != 0 || len(*captured) != 0
+
+	releaseOnce.Do(func() { close(releaseDelete) })
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("DELETE status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DELETE did not complete after releasing upstream forward")
+	}
+
+	if stoppedDuringDelete {
+		t.Fatalf("idle sweep stopped a workspace with a client DELETE upstream forward in flight: n=%d captured=%v", n, *captured)
+	}
+}
+
+func TestSerenaRouter_DeleteHeldStopGateBoundedByDeleteBudget(t *testing.T) {
+	const wsPath = "/proj/delete-held-gate"
+	ws := serenaWS("delete-held-gate", wsPath, 9324)
+	daemon := newFakeSerenaDaemon("delete-held-gate")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	if !s.beginSerenaIdleStop(ws.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold stop gate for %s", ws.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaIdleStop(ws.WorkspaceKey)
+		}
+	}()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	start := time.Now()
+	go func() {
+		done <- deleteSerena(t, s, map[string]string{"Mcp-Session-Id": sid, "MCP-Protocol-Version": "2025-11-25"})
+	}()
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("DELETE status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+		}
+		if elapsed := time.Since(start); elapsed > serenaDeleteTimeout+2*time.Second {
+			t.Fatalf("DELETE took %v; want bounded by the existing %v DELETE budget while the stop gate is held", elapsed, serenaDeleteTimeout)
+		}
+	case <-time.After(serenaDeleteTimeout + 2*time.Second):
+		t.Fatal("DELETE exceeded the existing DELETE budget while waiting for the stop gate")
+	}
+
+	s.endSerenaIdleStop(ws.WorkspaceKey)
+	gateHeld = false
+}
+
+func TestSerenaRouter_ToolCall_WaitedThroughPruneReResolvesWorkspace(t *testing.T) {
+	const wsPath = "/proj/prune-reresolve"
+	ws := serenaWS("prune-reresolve", wsPath, 9330)
+
+	daemon := newFakeSerenaDaemon("prune-reresolve")
+	daemon.tool = func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	ws.Port = testServerPort(t, ts)
+
+	resolver := &pruneRecheckResolver{
+		entries:  []*api.WorkspaceEntry{ws},
+		resolved: make(chan struct{}),
+	}
+	deps := &serenaRouterDeps{
+		Resolver:      resolver,
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	if !s.beginSerenaPrune(ws.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold prune gate for %s", ws.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaPrune(ws.WorkspaceKey)
+		}
+	}()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), nil)
+	}()
+
+	select {
+	case <-resolver.resolved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool call did not complete its initial workspace resolution")
+	}
+
+	resolver.replaceEntries(nil)
+	s.endSerenaPrune(ws.WorkspaceKey)
+	gateHeld = false
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("tool call after prune wait status = %d, want 503 workspace-not-found; body=%s", rr.Code, rr.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool call did not complete after prune gate released")
+	}
+	if calls := resolver.callCount(); calls < 2 {
+		t.Fatalf("tool call made %d resolver call(s), want re-resolution after waiting through prune", calls)
+	}
+	daemon.mu.Lock()
+	toolHits := daemon.toolHits
+	daemon.mu.Unlock()
+	if toolHits != 0 {
+		t.Fatalf("tool call forwarded to stale pruned workspace %d time(s); want no upstream forward", toolHits)
+	}
+}
+
 // Note on #6 (path-only one-shot teardown) D-detach coverage: the one-shot
 // teardown is a synchronous `defer` that runs INSIDE the handler, while the
 // MAIN tool-call forward legitimately uses r.Context(). There is no clean
@@ -236,6 +617,73 @@ func TestSerenaRouter_ToolsList_OneShotTeardownBoundedNotSixtySeconds(t *testing
 		// PRE-fix #4 would block ~60s on the hung teardown -> this fires.
 		t.Fatalf("tools/list did not return within 10s; the one-shot teardown is NOT bounded by the short cleanup budget (Invariant D-bound regression: a 60s default would hang here)")
 	}
+}
+
+func TestSerenaRouter_ToolsList_UnrelatedHeldStopGateDoesNotBlockLiveCandidate(t *testing.T) {
+	blocked := serenaWS("tools-list-held-gate", "/proj/tools-list-held-gate", 0)
+	live := serenaWS("tools-list-live", "/proj/tools-list-live", 9325)
+
+	daemon := newFakeSerenaDaemon("tools-list-live")
+	daemon.tool = func(w http.ResponseWriter, _ *http.Request, b []byte) {
+		if !strings.Contains(string(b), `"tools/list"`) {
+			t.Errorf("upstream body did not carry tools/list; got %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	live.Port = ts.Listener.Addr().(*net.TCPAddr).Port
+
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{blocked, live}},
+			list:         []*api.WorkspaceEntry{blocked, live},
+		},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws != nil && ws.WorkspaceKey == live.WorkspaceKey {
+				return ts.URL
+			}
+			return ""
+		},
+		AuditFn: func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	if !s.beginSerenaIdleStop(blocked.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold stop gate for %s", blocked.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaIdleStop(blocked.WorkspaceKey)
+		}
+	}()
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	done := make(chan *httptest.ResponseRecorder, 1)
+	start := time.Now()
+	go func() {
+		done <- postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	}()
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusOK {
+			t.Fatalf("tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("tools/list took %v; workspace %s is not woken/proxied and must not block live candidate %s", elapsed, blocked.WorkspaceKey, live.WorkspaceKey)
+		}
+		assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+	case <-time.After(2 * time.Second):
+		t.Fatalf("tools/list blocked behind unrelated workspace %s instead of using live candidate %s", blocked.WorkspaceKey, live.WorkspaceKey)
+	}
+
+	s.endSerenaIdleStop(blocked.WorkspaceKey)
+	gateHeld = false
 }
 
 // ---------------------------------------------------------------------
@@ -430,6 +878,93 @@ func TestSerenaRouter_ToolCall_UsesDaemonNegotiatedVersionForForwards(t *testing
 	if gotDelPV != daemonNegotiated {
 		t.Errorf("teardown DELETE MCP-Protocol-Version = %q, want the daemon-negotiated %q (#8: persisted on the binding)", gotDelPV, daemonNegotiated)
 	}
+}
+
+func TestSerenaRouter_ToolsList_HeldGateCandidateSkippedWithinTimeout(t *testing.T) {
+	blocked := serenaWS("tools-list-held-fetch-gate", "/proj/tools-list-held-fetch-gate", 9331)
+	live := serenaWS("tools-list-held-fetch-live", "/proj/tools-list-held-fetch-live", 9332)
+
+	blockedDaemon := newFakeSerenaDaemon("tools-list-held-fetch-gate")
+	blockedDaemon.tool = func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	blockedTS := httptest.NewServer(blockedDaemon.handler())
+	t.Cleanup(blockedTS.Close)
+	blocked.Port = testServerPort(t, blockedTS)
+
+	liveDaemon := newFakeSerenaDaemon("tools-list-held-fetch-live")
+	liveDaemon.tool = func(w http.ResponseWriter, _ *http.Request, b []byte) {
+		if !strings.Contains(string(b), `"tools/list"`) {
+			t.Errorf("upstream body did not carry tools/list; got %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	liveTS := httptest.NewServer(liveDaemon.handler())
+	t.Cleanup(liveTS.Close)
+	live.Port = testServerPort(t, liveTS)
+
+	const upstreamTimeout = 120 * time.Millisecond
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{blocked, live}},
+			list:         []*api.WorkspaceEntry{blocked, live},
+		},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			switch {
+			case ws != nil && ws.WorkspaceKey == blocked.WorkspaceKey:
+				return blockedTS.URL
+			case ws != nil && ws.WorkspaceKey == live.WorkspaceKey:
+				return liveTS.URL
+			default:
+				return ""
+			}
+		},
+		AuditFn:         func(string, string, map[string]any) error { return nil },
+		UpstreamTimeout: upstreamTimeout,
+	}
+	s := newSerenaTestServer(t, deps)
+
+	if !s.beginSerenaIdleStop(blocked.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold stop gate for %s", blocked.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaIdleStop(blocked.WorkspaceKey)
+		}
+	}()
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	done := make(chan *httptest.ResponseRecorder, 1)
+	start := time.Now()
+	go func() {
+		done <- postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	}()
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusOK {
+			t.Fatalf("tools/list status = %d, want 200 from live candidate; body=%s", rr.Code, rr.Body.String())
+		}
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Fatalf("tools/list took %v; held candidate should be skipped within the %v gate budget", elapsed, upstreamTimeout)
+		}
+		assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+	case <-time.After(time.Second):
+		s.endSerenaIdleStop(blocked.WorkspaceKey)
+		gateHeld = false
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+		t.Fatalf("tools/list did not skip held candidate within %v", upstreamTimeout)
+	}
+
+	s.endSerenaIdleStop(blocked.WorkspaceKey)
+	gateHeld = false
 }
 
 // #8 — the one-shot tools/list path also forwards under the daemon-negotiated

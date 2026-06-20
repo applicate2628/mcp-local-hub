@@ -280,6 +280,51 @@ func TestGroups_PostDuplicateUpdatesInPlace(t *testing.T) {
 	}
 }
 
+func TestGroups_PostLargeManifestClassBodySucceeds(t *testing.T) {
+	const serverCount = 1800
+	available := make([]string, 0, serverCount)
+	servers := make([]string, 0, serverCount)
+	toolsHidden := make(map[string][]string, serverCount)
+	for i := 0; i < serverCount; i++ {
+		name := fmt.Sprintf("srv%04d", i)
+		available = append(available, name)
+		servers = append(servers, name)
+		toolsHidden[name] = []string{"tool_alpha", "tool_beta", "tool_gamma"}
+	}
+	body := map[string]any{
+		"name":         "large",
+		"description":  "large group body above the control cap",
+		"servers":      servers,
+		"tools_hidden": toolsHidden,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	if int64(len(raw)) <= maxControlBodyBytes {
+		t.Fatalf("test body len=%d must exceed maxControlBodyBytes=%d", len(raw), maxControlBodyBytes)
+	}
+	if int64(len(raw)) >= maxManifestBodyBytes {
+		t.Fatalf("test body len=%d must stay below maxManifestBodyBytes=%d", len(raw), maxManifestBodyBytes)
+	}
+
+	g := &fakeGroupsAPI{available: available}
+	s := groupsTestServer(t, g)
+	rec := doJSON(t, s, http.MethodPost, "/api/groups", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q, want 200 for manifest-class group body len=%d", rec.Code, rec.Body.String(), len(raw))
+	}
+	if g.writeCalls != 1 {
+		t.Fatalf("WriteGroups calls=%d, want 1", g.writeCalls)
+	}
+	if len(g.lastWrite.Groups) != 1 || g.lastWrite.Groups[0].Name != "large" {
+		t.Fatalf("lastWrite groups=%+v, want one large group", g.lastWrite.Groups)
+	}
+	if got := len(g.lastWrite.Groups[0].ToolsHidden); got != serverCount {
+		t.Fatalf("tools_hidden entries=%d, want %d", got, serverCount)
+	}
+}
+
 // --- method + same-origin guards ---
 
 func TestGroups_MethodNotAllowed(t *testing.T) {

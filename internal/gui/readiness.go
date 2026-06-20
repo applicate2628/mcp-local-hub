@@ -71,8 +71,8 @@ func (s *Server) readinessByName(w http.ResponseWriter, r *http.Request) {
 // manifest exists on disk.
 func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 	var req readinessDraftRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	if err := decodeJSONBodyLimited(w, r, &req, maxManifestBodyBytes); err != nil {
+		http.Error(w, decodeBodyErrorText(err), decodeBodyStatusCode(err))
 		return
 	}
 	m, err := config.ParseManifest(strings.NewReader(req.YAML))

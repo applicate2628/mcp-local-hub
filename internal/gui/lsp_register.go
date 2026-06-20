@@ -2,7 +2,6 @@ package gui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -115,8 +114,8 @@ func (s *Server) lspRegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req lspRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
 

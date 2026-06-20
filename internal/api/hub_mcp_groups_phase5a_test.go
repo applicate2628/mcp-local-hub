@@ -248,6 +248,77 @@ func TestGroupsPhase5a_RepublishedHiddenToolRevokesExistingSession(t *testing.T)
 	}
 }
 
+func TestGroupsPhase5a_RepublishedHiddenToolDropsFromNextToolsList(t *testing.T) {
+	memSD, timeSD, _ := frontendSnapshotWithHiddenFixture(t, nil)
+
+	h := newTestHandler(t)
+	publishGroupTokenTable(t, "frontend")
+
+	initBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`)
+	req := authedRequest(t, http.MethodPost, "/g/frontend/mcp", initBody)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("initialize status=%d want 200; body=%s", w.Code, w.Body.String())
+	}
+	sid := w.Header().Get("Mcp-Session-Id")
+
+	listBody := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	reqL := authedRequest(t, http.MethodPost, "/g/frontend/mcp", listBody)
+	reqL.Header.Set("Mcp-Session-Id", sid)
+	reqL.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	wL := httptest.NewRecorder()
+	h.ServeHTTP(wL, reqL)
+	if wL.Code != http.StatusOK {
+		t.Fatalf("initial tools/list status=%d want 200; body=%s", wL.Code, wL.Body.String())
+	}
+	if !toolNamesFromListResponse(t, wL.Body.Bytes())["memory__write"] {
+		t.Fatalf("pre-republish tools/list did not expose memory__write; body=%s", wL.Body.String())
+	}
+
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			GroupScopeKey("frontend"): {
+				{Server: "memory", Daemon: "claude-code", Port: memSD.port},
+				{Server: "time", Daemon: "claude-code", Port: timeSD.port},
+			},
+		},
+		ToolsHidden: map[string]map[string][]string{
+			GroupScopeKey("frontend"): {"memory": {"write"}},
+		},
+		Groups: map[string]bool{GroupScopeKey("frontend"): true},
+	})
+
+	reqNext := authedRequest(t, http.MethodPost, "/g/frontend/mcp", []byte(`{"jsonrpc":"2.0","id":3,"method":"tools/list"}`))
+	reqNext.Header.Set("Mcp-Session-Id", sid)
+	reqNext.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	wNext := httptest.NewRecorder()
+	h.ServeHTTP(wNext, reqNext)
+	if wNext.Code != http.StatusOK {
+		t.Fatalf("next tools/list status=%d want 200; body=%s", wNext.Code, wNext.Body.String())
+	}
+	names := toolNamesFromListResponse(t, wNext.Body.Bytes())
+	if names["memory__write"] {
+		t.Fatalf("next tools/list leaked freshly hidden memory__write; got %v", names)
+	}
+	if !names["memory__read"] || !names["time__read"] || !names["time__write"] {
+		t.Fatalf("next tools/list dropped visible tools; got %v", names)
+	}
+
+	sess, ok := h.sessions.Get(sid)
+	if !ok {
+		t.Fatalf("session %q missing after tools/list", sid)
+	}
+	rm := sess.RouteMap.Load()
+	if rm == nil {
+		t.Fatalf("RouteMap missing after tools/list")
+	}
+	if _, ok := (*rm)["memory__write"]; ok {
+		t.Fatalf("RouteMap retained freshly hidden memory__write: %+v", *rm)
+	}
+}
+
 // ----------------------------------------------------------------------
 // The /clients/ FENCE — a CLIENT route is NEVER filtered.
 // ----------------------------------------------------------------------

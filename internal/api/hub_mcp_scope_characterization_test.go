@@ -33,10 +33,10 @@ import (
 )
 
 // ----------------------------------------------------------------------
-// daemonStillBound — snap.Bindings[client] membership predicate.
+// daemonStillBound — snap.Bindings[client] stable daemon membership predicate.
 //
 // The ScopeKey rename changes the `client` parameter name; this pins the
-// exact lookup-then-tuple-match contract so the rename can't alter it.
+// exact lookup-then-stable-identity-match contract so the rename can't alter it.
 // ----------------------------------------------------------------------
 
 func TestCharacterizeDaemonStillBound(t *testing.T) {
@@ -85,11 +85,11 @@ func TestCharacterizeDaemonStillBound(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "port-mismatch-false",
+			name:   "moved-port-same-stable-identity-true",
 			snap:   &ResolverSnapshot{Gen: 1, Bindings: bindingsWith(wrongPort)},
 			client: "claude-code",
 			ref:    refA,
-			want:   false,
+			want:   true,
 		},
 		{
 			name:   "server-mismatch-false",
@@ -215,7 +215,7 @@ func decodeJSONRPCErr(t *testing.T, body []byte) (int, string) {
 func TestCharacterizeResolveToolsCallRouteMissingName(t *testing.T) {
 	sess := &hubSession{ScopeKey: "claude-code"}
 	// params with no "name".
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`1`), json.RawMessage(`{"arguments":{}}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`1`), json.RawMessage(`{"arguments":{}}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestCharacterizeResolveToolsCallRouteMissingName(t *testing.T) {
 func TestCharacterizeResolveToolsCallRouteInvalidParams(t *testing.T) {
 	sess := &hubSession{ScopeKey: "claude-code"}
 	// malformed JSON params → -32602 Invalid params.
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`1`), json.RawMessage(`{not json`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`1`), json.RawMessage(`{not json`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestCharacterizeResolveToolsCallRouteInvalidParams(t *testing.T) {
 func TestCharacterizeResolveToolsCallRouteNilRouteMap(t *testing.T) {
 	// RouteMap never Stored → nil pointer → -32601 Method not found.
 	sess := &hubSession{ScopeKey: "claude-code"}
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`1`), json.RawMessage(`{"name":"srv1__read"}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`1`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestCharacterizeResolveToolsCallRouteUnknownName(t *testing.T) {
 	sess.RouteMap.Store(&map[string]canonicalToolRef{
 		"srv1__read": {Server: "srv1", Daemon: "claude-code", Port: 9101, RawName: "read"},
 	})
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`1`), json.RawMessage(`{"name":"srv1__missing"}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`1`), json.RawMessage(`{"name":"srv1__missing"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestCharacterizeResolveToolsCallRouteOutOfScopeKeysOnSessClient(t *testing.
 	}}
 	PublishResolverSnapshot(current)
 
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestCharacterizeResolveToolsCallRouteSameClientKeyStillBound(t *testing.T) 
 	}}
 	PublishResolverSnapshot(current)
 
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestCharacterizeResolveToolsCallRouteSamePointerSkipsRevalidation(t *testin
 	// SnapshotAtInit is the SAME pointer the live snapshot holds.
 	sess.SnapshotAtInit = LoadResolverSnapshot()
 
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestCharacterizeResolveToolsCallRouteResolvesTargetPort(t *testing.T) {
 	PublishResolverSnapshot(snap)
 	sess.SnapshotAtInit = LoadResolverSnapshot()
 
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestCharacterizeResolveToolsCallRouteNoDaemonSID(t *testing.T) {
 	PublishResolverSnapshot(snap)
 	sess.SnapshotAtInit = LoadResolverSnapshot()
 
-	target, err := resolveToolsCallRoute(sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
+	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}

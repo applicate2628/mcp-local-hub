@@ -25,7 +25,6 @@ package api
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"mcp-local-hub/internal/secrets"
@@ -36,7 +35,7 @@ import (
 // key-name policy (alphanumeric + underscore + hyphen + period).
 // The vault's own Get/Set surface is the authoritative gate on key
 // shape — this regex defines what counts as a placeholder to expand.
-var SecretPlaceholderRE = regexp.MustCompile(`\$\{secret:([A-Za-z0-9_\-.]+)\}`)
+var SecretPlaceholderRE = secrets.SecretPlaceholderRE
 
 // malformedSecretPrefixRE matches `${secret:` followed by anything
 // that ISN'T a well-formed key terminated by `}`. Used to detect
@@ -47,7 +46,7 @@ var SecretPlaceholderRE = regexp.MustCompile(`\$\{secret:([A-Za-z0-9_\-.]+)\}`)
 // downstream be the first signal an operator sees.
 //
 // codex bot r7 P2 closure (PR #169).
-var malformedSecretPrefixRE = regexp.MustCompile(`\$\{secret:`)
+var malformedSecretPrefixRE = secrets.MalformedSecretPrefixRE
 
 // SecretLookup is the vault accessor contract used by ExpandSecrets.
 // The default production resolver opens the encrypted vault at

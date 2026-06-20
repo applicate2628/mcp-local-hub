@@ -25,11 +25,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,12 +62,14 @@ type stubDaemon struct {
 	onList   func(w http.ResponseWriter, r *http.Request)
 	onCall   func(w http.ResponseWriter, r *http.Request)
 	onNotify func(w http.ResponseWriter, r *http.Request, body []byte)
+	onDelete func(w http.ResponseWriter, r *http.Request)
 
 	// counters
 	initCount   atomic.Int32
 	listCount   atomic.Int32
 	callCount   atomic.Int32
 	notifyCount atomic.Int32
+	deleteCount atomic.Int32
 
 	// bodyMu guards capture fields below. Updated by the dispatch
 	// loop AFTER reading r.Body, BEFORE delegating to the per-method
@@ -81,6 +89,15 @@ func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
 	sd.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/mcp" {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			sd.deleteCount.Add(1)
+			if sd.onDelete != nil {
+				sd.onDelete(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
 			return
 		}
 		body, _ := readAllBody(r)
@@ -274,7 +291,7 @@ func TestAggregateToolsListMergesAndNamespaces(t *testing.T) {
 		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -336,7 +353,7 @@ func TestAggregateToolsListReportsAllFailedAsErrorMinus32000(t *testing.T) {
 	if len(sess.InitSuccesses) != 0 {
 		t.Fatalf("expected 0 init successes, got %d", len(sess.InitSuccesses))
 	}
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -421,7 +438,7 @@ func TestAggregateToolsListAllListFailedReturnsMinus32000(t *testing.T) {
 		t.Fatalf("want 0 init failures, got %d: %+v", len(sess.InitFailures), sess.InitFailures)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -468,7 +485,7 @@ func TestAggregateToolsCallCanonicalRewrite(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -509,7 +526,7 @@ func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -553,6 +570,1154 @@ func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 	}
 }
 
+func TestAggregateToolsListFiltersRemovedLiveBinding(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("removed-live-binding")
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+	sess.ScopeKey = scope
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+
+	resetResolverForTest(t)
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: sess.IntendedParticipants},
+		Groups:   map[string]bool{scope: true},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{scope: nil},
+		Groups:   map[string]bool{scope: true},
+	}
+	PublishResolverSnapshot(current)
+
+	listBefore := d1.listCount.Load()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	names := decodeToolsListNames(t, body)
+	for _, name := range names {
+		if strings.HasPrefix(name, "srv1__") {
+			t.Fatalf("removed daemon tool %q leaked into tools/list; names=%v body=%s", name, names, string(body))
+		}
+	}
+	if got := d1.listCount.Load(); got != listBefore {
+		t.Fatalf("tools/list fanned out to removed daemon; listCount %d -> %d", listBefore, got)
+	}
+	rm := sess.RouteMap.Load()
+	if rm == nil {
+		t.Fatalf("RouteMap not published after live binding removal")
+	}
+	if len(*rm) != 0 {
+		t.Fatalf("RouteMap retained removed daemon routes: %+v", *rm)
+	}
+
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	callBody, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	code, _ := decodeRPCError(t, callBody)
+	if code != -32601 {
+		t.Fatalf("tools/call code=%d want -32601 after matching list removal; body=%s", code, string(callBody))
+	}
+}
+
+// TestAggregateToolsListDropsMovedBindingWithNoCachedSession pins the OPTION B'
+// tools/list behavior: when a participant's live binding MOVED to a new port and
+// has NO cached fresh session, the daemon is DROPPED from this tools/list response
+// (its tools simply do not appear), the same outcome as a removed binding. A
+// SECOND participant whose binding is unchanged still contributes its tools. The
+// moved-to port is NEVER contacted (no synchronous reinit / list), and one
+// `moved-binding-dropped-rediscover` info event is emitted to hub-mcp.log naming
+// the old + new port so the drop is observable.
+func TestAggregateToolsListDropsMovedBindingWithNoCachedSession(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+	stateDir := hubMcpStateTestHelper(t)
+
+	movingDaemon := newStubDaemon(t, "d1-sid")     // srv1: moves to a new port, no cached session → dropped
+	stableDaemon := newStubDaemon(t, "d2-sid")     // srv2: unchanged binding → its tools survive
+	newPortDaemon := newStubDaemon(t, "fresh-sid") // the moved-to port; must NEVER be contacted
+
+	sess := sessionWithParticipants(movingDaemon, stableDaemon)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	// srv1 moves to newPortDaemon.port; srv2 stays on its original port.
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {
+				{Server: sess.IntendedParticipants[0].Server, Daemon: sess.IntendedParticipants[0].Daemon, Port: newPortDaemon.port},
+				sess.IntendedParticipants[1],
+			},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	movingListBefore := movingDaemon.listCount.Load()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	names := decodeToolsListNames(t, body)
+	// srv2 (stable) contributes read + write; srv1 (moved, dropped) contributes nothing.
+	for _, name := range names {
+		if strings.HasPrefix(name, "srv1__") {
+			t.Fatalf("dropped moved daemon's tool %q leaked into tools/list; names=%v body=%s", name, names, string(body))
+		}
+	}
+	hasStable := false
+	for _, name := range names {
+		if strings.HasPrefix(name, "srv2__") {
+			hasStable = true
+		}
+	}
+	if !hasStable {
+		t.Fatalf("stable daemon's tools missing from tools/list; names=%v body=%s", names, string(body))
+	}
+	// The moved-from port is not re-listed; the moved-to port is NEVER contacted.
+	if got := movingDaemon.listCount.Load(); got != movingListBefore {
+		t.Fatalf("moved-from daemon received tools/list; listCount %d -> %d", movingListBefore, got)
+	}
+	if got := newPortDaemon.listCount.Load(); got != 0 {
+		t.Fatalf("moved-to port received tools/list (synchronous reinit?); listCount=%d want 0", got)
+	}
+	if got := newPortDaemon.initCount.Load(); got != 0 {
+		t.Fatalf("moved-to port was initialized inside tools/list; initCount=%d want 0", got)
+	}
+	rm := sess.RouteMap.Load()
+	if rm == nil {
+		t.Fatalf("RouteMap not published")
+	}
+	for key := range *rm {
+		if strings.HasPrefix(key, "srv1__") {
+			t.Fatalf("RouteMap retained dropped moved-daemon route %q in %+v", key, *rm)
+		}
+	}
+
+	// The drop event must be observable in hub-mcp.log, naming old + new port.
+	logBytes, rerr := os.ReadFile(filepath.Join(stateDir, "hub-mcp.log"))
+	if rerr != nil {
+		t.Fatalf("read hub-mcp.log: %v", rerr)
+	}
+	if !bytes.Contains(logBytes, []byte(`"event":"moved-binding-dropped-rediscover"`)) {
+		t.Fatalf("moved-binding-dropped-rediscover event not emitted; log=%s", logBytes)
+	}
+	if !bytes.Contains(logBytes, []byte(`"old_port":`)) || !bytes.Contains(logBytes, []byte(`"new_port":`)) {
+		t.Fatalf("drop event missing old_port/new_port fields; log=%s", logBytes)
+	}
+
+	// A tools/call for the dropped daemon's tool returns -32601 (rediscover),
+	// never dispatching to the dead old port or the moved-to port.
+	callBody, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read","arguments":{}}`))
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	code, _ := decodeRPCError(t, callBody)
+	if code != -32601 {
+		t.Fatalf("tools/call for dropped moved daemon code=%d want -32601; body=%s", code, string(callBody))
+	}
+	if got := movingDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("moved-from daemon received tools/call; callCount=%d", got)
+	}
+	if got := newPortDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("moved-to port received tools/call; callCount=%d", got)
+	}
+}
+
+// TestReinitDetachedCachesSessionWhenCallerCancels pins the detached-reinit
+// session-lifecycle invariant (bot findings #1/#2/#3): the shared singleflight
+// reinit runs on a DETACHED ctx, so it COMPLETES a full MCP handshake (initialize
+// + notifications/initialized) and produces a live daemon session even when the
+// triggering caller's ctx was cancelled and that caller walked away. With no live
+// consumer the daemon session would ORPHAN. The fix drains the detached result and
+// CACHES it (the natural consumer — the next request reuses it) so it never leaks.
+//
+// Drive: cancel the caller's ctx WHILE the work fn is blocked inside the daemon's
+// initialize, then release the daemon. Assert (a) the caller saw ctx.Canceled,
+// (b) the detached reinit still ran the FULL lifecycle — the daemon received both
+// the initialize and the notifications/initialized (#2), and (c) the fresh session
+// is CACHED in InitSuccesses (#1/#3 — cached, not orphaned). The daemon's idle-GC
+// would otherwise be the only reaper; here a follow-up request reuses the session.
+func TestReinitDetachedCachesSessionWhenCallerCancels(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const freshSID = "detached-fresh-sid"
+	gate := make(chan struct{})
+	d := newStubDaemon(t, freshSID)
+	d.onInit = func(w http.ResponseWriter, r *http.Request) {
+		<-gate // block the detached work fn inside initialize until released
+		w.Header().Set("Mcp-Session-Id", freshSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+
+	sess := sessionWithParticipants(d)
+	ref := sess.IntendedParticipants[0]
+
+	// Caller ctx that we cancel while the detached work fn is gated.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct {
+		state daemonInitState
+		err   error
+	}, 1)
+	go func() {
+		st, err := sess.reinitializeDaemonBinding(ctx, ref)
+		done <- struct {
+			state daemonInitState
+			err   error
+		}{st, err}
+	}()
+
+	// Wait until the work fn has reached the daemon's initialize (it is now
+	// blocked on the gate), then cancel the caller's ctx so the select takes
+	// the ctx.Done() branch.
+	deadline := time.Now().Add(3 * time.Second)
+	for d.initCount.Load() == 0 {
+		if time.Now().After(deadline) {
+			close(gate)
+			t.Fatal("work fn never reached daemon initialize")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cancel()
+
+	// The caller returns promptly with ctx.Canceled (it did NOT wait for the
+	// detached work to finish).
+	select {
+	case res := <-done:
+		if res.err == nil {
+			t.Fatalf("reinit returned nil err on caller-cancel; want ctx.Canceled (state=%+v)", res.state)
+		}
+		if res.state.SessionID != "" {
+			t.Fatalf("reinit returned a session id on caller-cancel; want empty (state=%+v)", res.state)
+		}
+	case <-time.After(2 * time.Second):
+		close(gate)
+		t.Fatal("reinit did not return promptly after caller-cancel")
+	}
+
+	// Release the daemon so the DETACHED work fn completes the full handshake.
+	close(gate)
+
+	// The detached drain caches the fresh session. Poll until it lands.
+	cacheDeadline := time.Now().Add(3 * time.Second)
+	var cachedOK bool
+	var cached daemonInitState
+	for time.Now().Before(cacheDeadline) {
+		if cached, cachedOK = sess.cachedDaemonInitState(ref); cachedOK {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if !cachedOK {
+		t.Fatalf("detached reinit did not cache its session after caller-cancel (orphan leak); InitSuccesses=%v", sess.InitSuccesses)
+	}
+	if cached.SessionID != freshSID {
+		t.Fatalf("cached session id=%q want %q", cached.SessionID, freshSID)
+	}
+
+	// #2: the detached reinit completed the FULL lifecycle — notifications/initialized
+	// was sent under the detached ctx, not stopped at initialize.
+	notifyDeadline := time.Now().Add(3 * time.Second)
+	for d.notifyCount.Load() == 0 && time.Now().Before(notifyDeadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := d.notifyCount.Load(); got == 0 {
+		t.Fatalf("detached reinit did not send notifications/initialized (half-initialized cached session); notifyCount=%d", got)
+	}
+	// The handshake produced exactly one live session; it was cached, never DELETEd.
+	if got := d.deleteCount.Load(); got != 0 {
+		t.Fatalf("detached reinit DELETEd a fully-initialized session it should have cached; deleteCount=%d", got)
+	}
+}
+
+func TestReinitDetachedCacheClearsCachedSessionStaleMarkerForProactiveConsumer(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "detached-old-sid"
+	const freshSID = "detached-fresh-sid"
+	const oldPort = 49152
+
+	gate := make(chan struct{})
+	d := newStubDaemon(t, freshSID)
+	d.onInit = func(w http.ResponseWriter, r *http.Request) {
+		<-gate
+		w.Header().Set("Mcp-Session-Id", freshSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+
+	sess := sessionWithParticipants(d)
+	freshRef := sess.IntendedParticipants[0]
+	oldRef := canonicalDaemonRef{Server: freshRef.Server, Daemon: freshRef.Daemon, Port: oldPort}
+	sess.SnapshotAtInit = &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {oldRef, freshRef}},
+	}
+	sess.InitSuccesses[oldRef] = oldSID
+	sess.DaemonProtoVer[oldRef] = "2025-11-25"
+	if !sess.markStalePort(oldPort) {
+		t.Fatalf("setup: old daemon port %d was not tracked as stale", oldPort)
+	}
+	if !sess.markStalePort(freshRef.Port) {
+		t.Fatalf("setup: fresh daemon port %d was not tracked as stale", freshRef.Port)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := sess.reinitializeDaemonBinding(ctx, freshRef)
+		done <- err
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for d.initCount.Load() == 0 {
+		if time.Now().After(deadline) {
+			close(gate)
+			t.Fatal("detached reinit never reached daemon initialize")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			close(gate)
+			t.Fatal("reinit returned nil err on caller-cancel; want ctx.Canceled")
+		}
+	case <-time.After(2 * time.Second):
+		close(gate)
+		t.Fatal("reinit did not return promptly after caller-cancel")
+	}
+
+	close(gate)
+	cacheDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(cacheDeadline) {
+		if cached, ok := sess.cachedDaemonInitState(freshRef); ok && cached.SessionID == freshSID {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cached, ok := sess.cachedDaemonInitState(freshRef)
+	if !ok || cached.SessionID != freshSID {
+		t.Fatalf("detached reinit did not cache fresh session %q; cached=%+v ok=%v", freshSID, cached, ok)
+	}
+	if _, ok := sess.cachedDaemonInitState(oldRef); ok {
+		t.Fatalf("detached reinit left stale cached init entry for old port %d", oldPort)
+	}
+	if state, ok := sess.stalePortStateFor(oldPort); ok {
+		state.mu.Lock()
+		stale := state.stale
+		state.mu.Unlock()
+		if !stale {
+			t.Fatalf("detached reinit cleared stale port marker for old port %d; only proactive dispatch may consume markers", oldPort)
+		}
+	}
+	if state, ok := sess.stalePortStateFor(freshRef.Port); ok {
+		state.mu.Lock()
+		stale := state.stale
+		state.mu.Unlock()
+		if stale {
+			t.Fatalf("detached reinit left stale port marker set for cached fresh port %d", freshRef.Port)
+		}
+	}
+	initAfterCache := d.initCount.Load()
+	sid, proto := sess.refreshStalePortBeforeDispatch(
+		context.Background(),
+		canonicalToolRef{Server: freshRef.Server, Daemon: freshRef.Daemon, Port: freshRef.Port, RawName: "read"},
+		oldSID,
+		"2025-11-25",
+	)
+	if sid != freshSID {
+		t.Fatalf("post-cache dispatch resolved session id=%q want cached fresh id %q", sid, freshSID)
+	}
+	if proto != "2025-11-25" {
+		t.Fatalf("post-cache dispatch proto=%q want %q", proto, "2025-11-25")
+	}
+	if got := d.initCount.Load(); got != initAfterCache {
+		t.Fatalf("post-cache dispatch reinitialized stale-cleared cached session: initCount %d -> %d", initAfterCache, got)
+	}
+}
+
+func TestReinitPreservesNewerSamePortStaleMarker(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "reactive-old-sid"
+	const freshSID = "reactive-fresh-sid"
+
+	d := newStubDaemon(t, freshSID)
+	reinitStarted := make(chan struct{})
+	releaseReinit := make(chan struct{})
+	var reinitStartedOnce sync.Once
+	d.onInit = func(w http.ResponseWriter, r *http.Request) {
+		if d.initCount.Load() >= 1 {
+			reinitStartedOnce.Do(func() { close(reinitStarted) })
+			select {
+			case <-releaseReinit:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		w.Header().Set("Mcp-Session-Id", freshSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	sess := sessionWithParticipants(d)
+	ref := sess.IntendedParticipants[0]
+	sess.SnapshotAtInit = &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {ref}},
+	}
+	sess.InitSuccesses[ref] = oldSID
+	sess.DaemonProtoVer[ref] = "2025-11-25"
+	if !sess.markStalePort(ref.Port) {
+		t.Fatalf("setup: daemon port %d was not tracked as stale", ref.Port)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan struct {
+		state daemonInitState
+		err   error
+	}, 1)
+	go func() {
+		state, err := sess.reinitializeDaemonBinding(ctx, ref)
+		done <- struct {
+			state daemonInitState
+			err   error
+		}{state: state, err: err}
+	}()
+
+	select {
+	case <-reinitStarted:
+	case <-ctx.Done():
+		close(releaseReinit)
+		t.Fatalf("timed out waiting for reinitializeDaemonBinding to start: %v", ctx.Err())
+	}
+	if !sess.markStalePort(ref.Port) {
+		close(releaseReinit)
+		t.Fatalf("concurrent stale mark for daemon port %d was not tracked", ref.Port)
+	}
+	close(releaseReinit)
+
+	var result struct {
+		state daemonInitState
+		err   error
+	}
+	select {
+	case result = <-done:
+	case <-ctx.Done():
+		t.Fatalf("reinitializeDaemonBinding did not finish: %v", ctx.Err())
+	}
+	if result.err != nil {
+		t.Fatalf("reinitializeDaemonBinding: %v", result.err)
+	}
+	if result.state.SessionID != freshSID {
+		t.Fatalf("reinitialized session id=%q want %q", result.state.SessionID, freshSID)
+	}
+
+	staleState, ok := sess.stalePortStateFor(ref.Port)
+	if !ok {
+		t.Fatalf("stale port state for port %d missing", ref.Port)
+	}
+	staleState.mu.Lock()
+	stale := staleState.stale
+	staleState.mu.Unlock()
+	if !stale {
+		t.Fatalf("newer same-port stale marker was cleared by restart-A reinit")
+	}
+}
+
+func TestReinitDetachedDoesNotCacheAfterDelete(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "detached-old-sid"
+	const freshSID = "detached-fresh-sid"
+	gate := make(chan struct{})
+	d := newStubDaemon(t, freshSID)
+	d.onInit = func(w http.ResponseWriter, r *http.Request) {
+		<-gate
+		w.Header().Set("Mcp-Session-Id", freshSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	var freshDeletes atomic.Int32
+	d.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Mcp-Session-Id") == freshSID {
+			freshDeletes.Add(1)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d)
+	ref := sess.IntendedParticipants[0]
+	sess.InitSuccesses[ref] = oldSID
+	sess.DaemonProtoVer[ref] = "2025-11-25"
+
+	store := NewHubSessionStore(SessionStoreOpts{MaxPerClient: 16, MaxGlobal: 256})
+	t.Cleanup(store.Close)
+	store.mu.Lock()
+	store.sessions[sess.ClientSessionID] = sess
+	store.perClient[sess.ScopeKey]++
+	store.lruIndex[sess.ClientSessionID] = store.lru.PushFront(sess.ClientSessionID)
+	store.mu.Unlock()
+	h := &HubMcpHandler{sessions: store}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := sess.reinitializeDaemonBinding(ctx, ref)
+		done <- err
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for d.initCount.Load() == 0 {
+		if time.Now().After(deadline) {
+			close(gate)
+			t.Fatal("detached reinit never reached daemon initialize")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			close(gate)
+			t.Fatal("reinit returned nil err on caller-cancel; want ctx.Canceled")
+		}
+	case <-time.After(2 * time.Second):
+		close(gate)
+		t.Fatal("reinit did not return promptly after caller-cancel")
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/clients/claude-code/mcp", nil)
+	req.Header.Set("Mcp-Session-Id", sess.ClientSessionID)
+	req.Header.Set("MCP-Protocol-Version", sess.ProtocolVersion)
+	rr := httptest.NewRecorder()
+	h.handleDelete(rr, req, sess.ScopeKey)
+	if rr.Code != http.StatusNoContent {
+		close(gate)
+		t.Fatalf("handleDelete status=%d want 204", rr.Code)
+	}
+
+	close(gate)
+
+	deleteDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deleteDeadline) {
+		if freshDeletes.Load() > 0 {
+			break
+		}
+		if cached, ok := sess.cachedDaemonInitState(ref); ok && cached.SessionID == freshSID {
+			t.Fatalf("detached reinit cached fresh session %q after DELETE", freshSID)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := freshDeletes.Load(); got == 0 {
+		t.Fatalf("detached reinit did not DELETE fresh session %q after DELETE", freshSID)
+	}
+	if cached, ok := sess.cachedDaemonInitState(ref); ok && cached.SessionID == freshSID {
+		t.Fatalf("detached reinit cached fresh session %q after DELETE", freshSID)
+	}
+}
+
+// TestEmptyKnownGroupWhenLastParticipantMovedAndDropped pins bot finding #4: a
+// binding that MOVED to a new port with NO cached fresh session is DROPPED from
+// tools/list (moved-no-cache → rediscover). When it is the ONLY participant, the
+// empty-known decision must NOT count it as live — otherwise the group wrongly
+// returns the -32000 all-failed envelope instead of the empty-known success the
+// dropped-and-rediscover contract intends. countLiveParticipants must use the SAME
+// keep/drop predicate as filterToolsListSuccessesByLiveSnapshot.
+func TestEmptyKnownGroupWhenLastParticipantMovedAndDropped(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("moved-emptied")
+	oldDaemon := newStubDaemon(t, "old-sid")
+	newPortDaemon := newStubDaemon(t, "fresh-sid") // moved-to port; never contacted (no cached session)
+
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: oldDaemon.port}
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
+		Groups:   map[string]bool{scope: true},
+	}
+	// The sole participant MOVED to newPortDaemon.port (still bound in the group,
+	// just at a new port) — distinct from the removed-binding case where the scope
+	// has zero bindings. No fresh session is cached for the new port → dropped.
+	movedRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: newPortDaemon.port}
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{scope: {movedRef}},
+		Groups:   map[string]bool{scope: true},
+	})
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-moved-emptied",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       atInit,
+		IntendedParticipants: []canonicalDaemonRef{ref},
+		InitSuccesses:        map[canonicalDaemonRef]string{ref: "old-sid"},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{ref: "2025-11-25"},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	// The moved-and-dropped sole participant must yield an empty-KNOWN success,
+	// not a -32000 all-failed envelope.
+	assertEmptyKnownToolsList(t, body)
+	// Neither port is contacted for tools/list: old binding is gone (moved),
+	// new port has no cached session (dropped, rediscover later).
+	if got := oldDaemon.listCount.Load(); got != 0 {
+		t.Fatalf("moved-from daemon received tools/list; listCount=%d", got)
+	}
+	if got := newPortDaemon.listCount.Load(); got != 0 {
+		t.Fatalf("moved-to port received tools/list (synchronous reinit?); listCount=%d", got)
+	}
+	if got := newPortDaemon.initCount.Load(); got != 0 {
+		t.Fatalf("moved-to port was initialized inside tools/list; initCount=%d", got)
+	}
+}
+
+func TestEmptyKnownGroupDropsMovedInitFailureBeforeDecision(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("moved-failure-emptied")
+	oldRef := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: 40123}
+	movedDaemon := newStubDaemon(t, "fresh-sid")
+	movedRef := canonicalDaemonRef{Server: oldRef.Server, Daemon: oldRef.Daemon, Port: movedDaemon.port}
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: {oldRef}},
+		Groups:   map[string]bool{scope: true},
+	}
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{scope: {movedRef}},
+		Groups:   map[string]bool{scope: true},
+	})
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-moved-failure-emptied",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       atInit,
+		IntendedParticipants: []canonicalDaemonRef{oldRef},
+		InitSuccesses:        map[canonicalDaemonRef]string{},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{},
+		InitFailures: []DaemonFailure{{
+			Server: oldRef.Server,
+			Daemon: oldRef.Daemon,
+			Stage:  "initialize",
+			Err:    "old port initialize failed",
+		}},
+		InFlightRequests: map[requestIDKey]inflightEntry{},
+		InitAt:           time.Now(),
+		LastUsedAt:       time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	assertEmptyKnownToolsList(t, body)
+	if got := movedDaemon.initCount.Load(); got != 0 {
+		t.Fatalf("moved-to port was initialized inside tools/list; initCount=%d", got)
+	}
+}
+
+func TestAggregateToolsListLiveEmptiedClientReturnsAllFailed(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: nil},
+	})
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	code, msg := decodeRPCError(t, body)
+	if code != -32000 {
+		t.Fatalf("live-emptied client code=%d want -32000; msg=%q body=%s", code, msg, string(body))
+	}
+	if got := d1.listCount.Load(); got != 0 {
+		t.Fatalf("removed client daemon received tools/list; listCount=%d", got)
+	}
+}
+
+func TestAggregateToolsListUsesOneResolverSnapshotForHiddenTools(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("frontend")
+	d1 := newStubDaemon(t, "d1-sid")
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: d1.port}
+
+	initial := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
+		ToolsHidden: map[string]map[string][]string{
+			scope: {"srv1": {"read"}},
+		},
+		Groups: map[string]bool{scope: true},
+	}
+	republished := &ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
+		Groups:   map[string]bool{scope: true},
+	}
+	PublishResolverSnapshot(initial)
+
+	d1.onList = func(w http.ResponseWriter, r *http.Request) {
+		PublishResolverSnapshot(republished)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","description":"must stay hidden"}]}}`))
+	}
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-snapshot-once",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       initial,
+		IntendedParticipants: []canonicalDaemonRef{ref},
+		InitSuccesses:        map[canonicalDaemonRef]string{ref: "d1-sid"},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{ref: "2025-11-25"},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	if names := decodeToolsListNames(t, body); len(names) != 0 {
+		t.Fatalf("tools/list used a later resolver snapshot for hidden tools; names=%v body=%s", names, string(body))
+	}
+	if rm := sess.RouteMap.Load(); rm == nil {
+		t.Fatalf("RouteMap not published")
+	} else if len(*rm) != 0 {
+		t.Fatalf("hidden tool leaked into RouteMap after resolver republish: %+v", *rm)
+	}
+}
+
+// TestAggregateToolsCallMovedNoCachedSessionReturnsMinus32601 pins the OPTION B'
+// behavior: a tools/call whose live binding MOVED to a new port and has NO cached
+// fresh session does NOT synchronously re-initialize inside tools/call. It returns
+// the existing -32601 "tool moved out of scope; reinitialize session" (the same
+// error a removed binding returns). The client re-handshakes / re-lists and
+// rediscovers the tool at its new port. CRITICAL (r5 regression guard): NO
+// outbound tools/call is dispatched to the dead old port (oldDaemon.callCount==0),
+// AND nothing is dispatched to the new port either (newDaemon.callCount==0) — the
+// hub does not reach for the moved daemon at all on this path.
+func TestAggregateToolsCallMovedNoCachedSessionReturnsMinus32601(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "d1-old-sid"
+	const freshSID = "d1-fresh-sid"
+
+	oldDaemon := newStubDaemon(t, oldSID)
+	newDaemon := newStubDaemon(t, freshSID)
+
+	sess := sessionWithParticipants(oldDaemon)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {{
+				Server: sess.IntendedParticipants[0].Server,
+				Daemon: sess.IntendedParticipants[0].Daemon,
+				Port:   newDaemon.port,
+			}},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	initBefore := newDaemon.initCount.Load()
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read","arguments":{}}`))
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	code, msg := decodeRPCError(t, body)
+	if code != -32601 {
+		t.Fatalf("tools/call code=%d msg=%q want -32601 for moved binding with no cached session; body=%s", code, msg, string(body))
+	}
+	if !strings.Contains(msg, "moved out of scope") {
+		t.Fatalf("tools/call msg=%q want rediscover-prompt 'moved out of scope'; body=%s", msg, string(body))
+	}
+	// r5 regression guard: NO outbound dispatch to the dead old port.
+	if got := oldDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("old moved-from daemon received tools/call (dispatch to dead old port); callCount=%d", got)
+	}
+	// And no synchronous re-initialize / dispatch to the new port either.
+	if got := newDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("new moved-to daemon received tools/call; callCount=%d want 0 (no synchronous reinit)", got)
+	}
+	if got := newDaemon.initCount.Load(); got != initBefore {
+		t.Fatalf("new moved-to daemon was re-initialized inside tools/call; initCount %d -> %d want unchanged", initBefore, got)
+	}
+}
+
+// TestAggregateToolsCallMovedWithCachedFreshSessionDispatches pins the RETAINED
+// fast path: when a same-port restart consumer already re-handshook the moved
+// daemon (a fresh session for the new port is cached in InitSuccesses), a
+// tools/call for the moved binding dispatches straight to the NEW port with the
+// fresh session — no -32601, no extra initialize.
+func TestAggregateToolsCallMovedWithCachedFreshSessionDispatches(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "d1-old-sid"
+	const freshSID = "d1-fresh-sid"
+
+	oldDaemon := newStubDaemon(t, oldSID)
+	newDaemon := newStubDaemon(t, freshSID)
+	newDaemon.onCall = func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Mcp-Session-Id"); got != freshSID {
+			http.Error(w, "stale moved-binding session", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"called=read"}]}}`))
+	}
+
+	sess := sessionWithParticipants(oldDaemon)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	movedRef := canonicalDaemonRef{
+		Server: sess.IntendedParticipants[0].Server,
+		Daemon: sess.IntendedParticipants[0].Daemon,
+		Port:   newDaemon.port,
+	}
+	current := &ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": {movedRef}},
+	}
+	PublishResolverSnapshot(current)
+
+	// Simulate the same-port restart consumers having already re-handshook the
+	// moved daemon: seed a fresh cached session for the NEW port.
+	sess.mu.Lock()
+	sess.InitSuccesses[movedRef] = freshSID
+	sess.DaemonProtoVer[movedRef] = "2025-11-25"
+	sess.mu.Unlock()
+
+	initBefore := newDaemon.initCount.Load()
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read","arguments":{}}`))
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	if !strings.Contains(string(body), `called=read`) {
+		t.Fatalf("tools/call did not dispatch through moved route with cached fresh session; body=%s", string(body))
+	}
+	if got := oldDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("old moved-from daemon received tools/call; callCount=%d", got)
+	}
+	if got := newDaemon.callCount.Load(); got != 1 {
+		t.Fatalf("new moved-to daemon callCount=%d want 1", got)
+	}
+	if got := newDaemon.initCount.Load(); got != initBefore {
+		t.Fatalf("cached fast path re-initialized the moved daemon; initCount %d -> %d want unchanged", initBefore, got)
+	}
+}
+
+// TestAggregateToolsCallMovedRaceWithDeleteNoResurrection pins the OPTION B'
+// safety property: a session DELETE concurrent with a tools/call whose binding
+// MOVED to a new port can never resurrect a daemon session. In the old model the
+// moved tools/call synchronously re-initialized the daemon, which could race
+// handleDelete and resurrect a session after the DELETE. In the new model the
+// moved-with-no-cached-session path returns -32601 WITHOUT contacting the daemon
+// at all, so there is nothing to resurrect: DELETE always wins. This test drives
+// the store DELETE and the moved tools/call concurrently and asserts -32601, no
+// outbound dispatch to the moved-to port, and no fresh InitSuccesses entry.
+func TestAggregateToolsCallMovedRaceWithDeleteNoResurrection(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	oldDaemon := newStubDaemon(t, "d1-sid")
+	newPortDaemon := newStubDaemon(t, "fresh-sid") // moved-to port; must NEVER be contacted
+
+	sess := sessionWithParticipants(oldDaemon)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Register the session in a store so the concurrent DELETE is a real removal.
+	store := NewHubSessionStore(SessionStoreOpts{MaxPerClient: 16, MaxGlobal: 256})
+	t.Cleanup(store.Close)
+	store.mu.Lock()
+	store.sessions[sess.ClientSessionID] = sess
+	store.perClient[sess.ScopeKey]++
+	store.lruIndex[sess.ClientSessionID] = store.lru.PushFront(sess.ClientSessionID)
+	store.mu.Unlock()
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	movedRef := canonicalDaemonRef{
+		Server: sess.IntendedParticipants[0].Server,
+		Daemon: sess.IntendedParticipants[0].Daemon,
+		Port:   newPortDaemon.port,
+	}
+	current := &ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": {movedRef}},
+	}
+	PublishResolverSnapshot(current)
+
+	// Race the DELETE against the moved tools/call.
+	var wg sync.WaitGroup
+	var callBody []byte
+	var callErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		store.Delete(sess.ClientSessionID)
+	}()
+	go func() {
+		defer wg.Done()
+		callBody, callErr = AggregateToolsCall(ctx, sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read","arguments":{}}`))
+	}()
+	wg.Wait()
+
+	if callErr != nil {
+		t.Fatalf("AggregateToolsCall: %v", callErr)
+	}
+	code, _ := decodeRPCError(t, callBody)
+	if code != -32601 {
+		t.Fatalf("moved tools/call racing DELETE code=%d want -32601; body=%s", code, string(callBody))
+	}
+	// No resurrection: the moved-to port is never contacted on any path.
+	if got := newPortDaemon.initCount.Load(); got != 0 {
+		t.Fatalf("moved-to port was initialized (session resurrection); initCount=%d want 0", got)
+	}
+	if got := newPortDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("moved-to port received tools/call; callCount=%d want 0", got)
+	}
+	// And no fresh InitSuccesses entry was written for the moved port.
+	sess.mu.Lock()
+	_, resurrected := sess.InitSuccesses[movedRef]
+	sess.mu.Unlock()
+	if resurrected {
+		t.Fatalf("InitSuccesses gained a fresh entry for the moved port after DELETE — session resurrected")
+	}
+}
+
+func TestAggregateToolsListRemovedSuccessWithRetainedFailureReturnsAllFailed(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	d1 := newStubDaemon(t, "d1-sid")
+	d2 := newStubDaemon(t, "d2-sid")
+	d2.onInit = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	sess := sessionWithParticipants(d1, d2)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 1 {
+		t.Fatalf("InitSuccesses=%d want 1: %+v", len(sess.InitSuccesses), sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {sess.IntendedParticipants[1]},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	code, msg := decodeRPCError(t, body)
+	if code != -32000 {
+		t.Fatalf("code=%d want -32000 all-failed after live filter removed only success; msg=%q body=%s", code, msg, string(body))
+	}
+	failures := decodeRPCPartialFailures(t, body)
+	if len(failures) != 1 || failures[0].Server != "srv2" {
+		t.Fatalf("partialFailures=%+v want only retained failed daemon srv2", failures)
+	}
+	if got := d1.listCount.Load(); got != 0 {
+		t.Fatalf("removed successful daemon received tools/list; listCount=%d", got)
+	}
+}
+
+func TestAggregateToolsListLiveFilterDropsRemovedRoutesAndInitFailures(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	d1 := newStubDaemon(t, "d1-sid")
+	d2 := newStubDaemon(t, "d2-sid")
+	d3 := newStubDaemon(t, "d3-sid")
+	d2.onInit = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	sess := sessionWithParticipants(d1, d2, d3)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 2 {
+		t.Fatalf("InitSuccesses=%d want 2: %+v", len(sess.InitSuccesses), sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {sess.IntendedParticipants[2]},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	names := decodeToolsListNames(t, body)
+	for _, name := range names {
+		if strings.HasPrefix(name, "srv1__") || strings.HasPrefix(name, "srv2__") {
+			t.Fatalf("removed daemon tool %q leaked into tools/list; names=%v body=%s", name, names, string(body))
+		}
+	}
+	if got := d1.listCount.Load(); got != 0 {
+		t.Fatalf("removed successful daemon received tools/list; listCount=%d", got)
+	}
+	if got := d3.listCount.Load(); got != 1 {
+		t.Fatalf("retained successful daemon listCount=%d want 1", got)
+	}
+	failures := decodeToolsListPartialFailures(t, body)
+	if len(failures) != 0 {
+		t.Fatalf("removed init failure leaked into partialFailures: %+v", failures)
+	}
+	rm := sess.RouteMap.Load()
+	if rm == nil {
+		t.Fatalf("RouteMap not published after retained daemon tools/list")
+	}
+	for key := range *rm {
+		if strings.HasPrefix(key, "srv1__") || strings.HasPrefix(key, "srv2__") {
+			t.Fatalf("RouteMap retained removed daemon route %q in %+v", key, *rm)
+		}
+	}
+	if _, ok := (*rm)["srv3__read"]; !ok {
+		t.Fatalf("RouteMap missing retained daemon route srv3__read: %+v", *rm)
+	}
+}
+
 func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	sess := sessionWithParticipants(d1)
@@ -561,7 +1726,7 @@ func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	// publish a non-stale resolver.
@@ -894,7 +2059,7 @@ func TestPostToolsListIncludesProtocolVersionHeader(t *testing.T) {
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if protoHeader != "2025-11-25" {
@@ -953,6 +2118,82 @@ func TestAggregateInitializeFailsOnInitializedNotificationError(t *testing.T) {
 	}
 }
 
+func TestAggregateInitializeDeletesDaemonSessionWhenInitializedNotificationFails(t *testing.T) {
+	const daemonSID = "d1-sid"
+	d1 := newStubDaemon(t, daemonSID)
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	// DELETE is fire-and-forget (detached goroutine); guard captures for -race
+	// and read them only after waitForCount confirms the DELETE landed.
+	var deleteMu sync.Mutex
+	var deleteSID string
+	var deleteProto string
+	d1.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteMu.Lock()
+		deleteSID = r.Header.Get("Mcp-Session-Id")
+		deleteProto = r.Header.Get("MCP-Protocol-Version")
+		deleteMu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Fatalf("notification-failed daemon must not be retained in InitSuccesses: %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	if got := waitForCount(&d1.deleteCount, 1); got != 1 {
+		t.Fatalf("daemon DELETE count=%d want 1", got)
+	}
+	deleteMu.Lock()
+	gotSID, gotProto := deleteSID, deleteProto
+	deleteMu.Unlock()
+	if gotSID != daemonSID {
+		t.Fatalf("daemon DELETE Mcp-Session-Id=%q want %q", gotSID, daemonSID)
+	}
+	if gotProto != "2025-11-25" {
+		t.Fatalf("daemon DELETE MCP-Protocol-Version=%q want %q", gotProto, "2025-11-25")
+	}
+}
+
+func TestAggregateInitializeCleanupSurvivesCanceledClientContext(t *testing.T) {
+	const daemonSID = "d1-sid"
+	d1 := newStubDaemon(t, daemonSID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		cancel()
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	deleteSeen := make(chan struct{}, 1)
+	d1.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteSeen <- struct{}{}
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Fatalf("notification-failed daemon must not be retained in InitSuccesses: %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	select {
+	case <-deleteSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("daemon DELETE was not attempted after client context cancellation")
+	}
+}
+
 // TestRewriteResponseIDRejectsNullBody pins the codex bot r5 P1
 // closure: a daemon returning body=`null` (HTTP 200) must NOT panic
 // the request path. Earlier code would crash with "assignment to
@@ -1001,7 +2242,7 @@ func TestAggregateInitializePersistsFallbackProtocolVersion(t *testing.T) {
 	// And the subsequent tools/list call MUST carry the same fallback in
 	// the MCP-Protocol-Version header — proves the persistence is wired
 	// into the read paths that fanOutToolsList + postToolsList exercise.
-	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
 	if listProtoHeader != hubProtocolVersionFallback {
@@ -1027,7 +2268,7 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("list#1: %v", err)
 	}
 	before := sess.RouteMap.Load()
@@ -1044,7 +2285,7 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`3`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`3`), "")
 	if err != nil {
 		t.Fatalf("list#2: %v", err)
 	}
@@ -1280,7 +2521,7 @@ func TestAggregateToolsListDeterministicOrdering(t *testing.T) {
 			cancel()
 			t.Fatalf("iter %d: init: %v", i, err)
 		}
-		body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+		body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 		cancel()
 		if err != nil {
 			t.Fatalf("iter %d: list: %v", i, err)
@@ -1349,7 +2590,7 @@ func TestAggregateToolsListRejectsMalformedDaemonResponse(t *testing.T) {
 				t.Fatalf("init: %v", err)
 			}
 
-			body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+			body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 			if err != nil {
 				t.Fatalf("AggregateToolsList: %v", err)
 			}
@@ -1478,7 +2719,7 @@ func TestNegotiatedProtocolVersionPropagates(t *testing.T) {
 	}
 
 	// tools/list uses the per-daemon negotiated version.
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	hdrMu.Lock()
@@ -1558,7 +2799,7 @@ func TestAggregateToolsListIntraDaemonDuplicateNotCollision(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -1673,7 +2914,7 @@ func TestAggregateToolsListNamespaceCollision(t *testing.T) {
 		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -2038,6 +3279,137 @@ func decodeRPCError(t *testing.T, body []byte) (int, string) {
 	return env.Error.Code, env.Error.Message
 }
 
+func decodeRPCPartialFailures(t *testing.T, body []byte) []DaemonFailure {
+	t.Helper()
+	var env struct {
+		Error *struct {
+			Data struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse error envelope: %v body=%s", err, string(body))
+	}
+	if env.Error == nil {
+		t.Fatalf("expected JSON-RPC error envelope, got: %s", string(body))
+	}
+	return env.Error.Data.Mcphub.PartialFailures
+}
+
+func decodeToolsListNames(t *testing.T, body []byte) []string {
+	t.Helper()
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result *struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse tools/list envelope: %v body=%s", err, string(body))
+	}
+	if env.Error != nil {
+		t.Fatalf("expected tools/list result envelope, got error code=%d message=%q body=%s", env.Error.Code, env.Error.Message, string(body))
+	}
+	if env.Result == nil {
+		t.Fatalf("expected tools/list result, got body=%s", string(body))
+	}
+	names := make([]string, 0, len(env.Result.Tools))
+	for _, tool := range env.Result.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func decodeToolsListPartialFailures(t *testing.T, body []byte) []DaemonFailure {
+	t.Helper()
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result *struct {
+			Meta struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse tools/list envelope: %v body=%s", err, string(body))
+	}
+	if env.Error != nil {
+		t.Fatalf("expected tools/list result envelope, got error code=%d message=%q body=%s", env.Error.Code, env.Error.Message, string(body))
+	}
+	if env.Result == nil {
+		t.Fatalf("expected tools/list result, got body=%s", string(body))
+	}
+	return env.Result.Meta.Mcphub.PartialFailures
+}
+
+// waitForCount polls an atomic counter until it reaches want or a bounded
+// deadline elapses, returning the final observed value. The orphaned-session
+// cleanup DELETE on a failed notifications/initialized is fire-and-forget (it
+// runs on a detached goroutine so it does not block the request response), so a
+// test that asserts the DELETE happened must wait for the detached goroutine
+// instead of reading the counter synchronously right after the call returns.
+func waitForCount(c *atomic.Int32, want int32) int32 {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got := c.Load()
+		if got >= want || time.Now().After(deadline) {
+			return got
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func findFuncDeclForTest(file *ast.File, name string) *ast.FuncDecl {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name {
+			return fn
+		}
+	}
+	return nil
+}
+
+func hasPerDaemonInitTimeoutWithTimeoutForTest(fn *ast.FuncDecl) bool {
+	return countPerDaemonInitTimeoutWithTimeoutForTest(fn) > 0
+}
+
+func countPerDaemonInitTimeoutWithTimeoutForTest(fn *ast.FuncDecl) int {
+	count := 0
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) < 2 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "WithTimeout" {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || pkg.Name != "context" {
+			return true
+		}
+		arg, ok := call.Args[1].(*ast.Ident)
+		if ok && arg.Name == "PerDaemonInitTimeout" {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
 // TestAggregateToolsCall_TransportFailureReturnsMinus32000 pins CURRENT behavior
 // when the upstream daemon is unreachable (connection refused): the hub returns a
 // -32000 "tools/call failed" envelope. Regression baseline for the hot-swap (a)
@@ -2053,7 +3425,7 @@ func TestAggregateToolsCall_TransportFailureReturnsMinus32000(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)
@@ -2100,7 +3472,7 @@ func TestAggregateToolsCall_DaemonHTTPErrorReturnsMinus32000(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)
@@ -2146,7 +3518,7 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2182,6 +3554,110 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	}
 	if got := sess.InFlightCount(); got != 0 {
 		t.Errorf("inFlight=%d after self-heal want 0", got)
+	}
+}
+
+func TestReinitDeadlineCapOwnedByInitializeDaemonSession(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "hub_mcp_aggregator.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse hub_mcp_aggregator.go: %v", err)
+	}
+
+	reinit := findFuncDeclForTest(file, "reinitializeDaemonBinding")
+	if reinit == nil {
+		t.Fatal("reinitializeDaemonBinding not found")
+	}
+	if hasPerDaemonInitTimeoutWithTimeoutForTest(reinit) {
+		t.Fatal("reinitializeDaemonBinding must not add a second PerDaemonInitTimeout; initializeDaemonSession owns the daemon init cap used by same-port self-heal and detached moved-reinit")
+	}
+
+	initFn := findFuncDeclForTest(file, "initializeDaemonSession")
+	if initFn == nil {
+		t.Fatal("initializeDaemonSession not found")
+	}
+	if got := countPerDaemonInitTimeoutWithTimeoutForTest(initFn); got == 0 {
+		t.Fatal("initializeDaemonSession must own the PerDaemonInitTimeout cap for reinit callers")
+	}
+}
+
+func TestAggregateToolsCall_SelfHealDeletesReinitSessionWhenInitializedFails(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "d1-old-sid"
+	const freshSID = "d2-fresh-sid"
+
+	d1 := newStubDaemon(t, oldSID)
+	d2 := newStubDaemon(t, freshSID)
+	d2.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	// The orphaned-session DELETE runs on a detached goroutine (fire-and-forget),
+	// so the test reads these captures only after waitForCount confirms the
+	// DELETE landed. Guard them so the goroutine write + test read are race-safe.
+	var deleteMu sync.Mutex
+	var deleteSID string
+	var deleteProto string
+	d2.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteMu.Lock()
+		deleteSID = r.Header.Get("Mcp-Session-Id")
+		deleteProto = r.Header.Get("MCP-Protocol-Version")
+		deleteMu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: d2.port}}},
+	}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	d1.server.Close()
+
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall returned Go error (want JSON-RPC error envelope): %v", err)
+	}
+	code, _ := decodeRPCError(t, body)
+	if code != -32000 {
+		t.Fatalf("tools/call code=%d want -32000 when self-heal reinit notification fails; body=%s", code, string(body))
+	}
+	// DELETE is fire-and-forget: wait for the detached cleanup goroutine.
+	if got := waitForCount(&d2.deleteCount, 1); got != 1 {
+		t.Fatalf("replacement daemon DELETE count=%d want 1", got)
+	}
+	deleteMu.Lock()
+	gotSID, gotProto := deleteSID, deleteProto
+	deleteMu.Unlock()
+	if gotSID != freshSID {
+		t.Fatalf("replacement daemon DELETE Mcp-Session-Id=%q want %q", gotSID, freshSID)
+	}
+	if gotProto != "2025-11-25" {
+		t.Fatalf("replacement daemon DELETE MCP-Protocol-Version=%q want %q", gotProto, "2025-11-25")
+	}
+	if got := d2.callCount.Load(); got != 0 {
+		t.Fatalf("replacement daemon callCount=%d want 0 after failed initialized notification", got)
+	}
+	daemonKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port}
+	if got := sess.InitSuccesses[daemonKey]; got != oldSID {
+		t.Fatalf("reinit failure changed cached daemon session for stale route to %q, want original %q", got, oldSID)
+	}
+	if got := sess.DaemonProtoVer[daemonKey]; got != "2025-11-25" {
+		t.Fatalf("reinit failure changed cached daemon proto for stale route to %q, want %q", got, "2025-11-25")
 	}
 }
 
@@ -2291,7 +3767,7 @@ func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)
@@ -2324,6 +3800,105 @@ func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
 	}
 	if d1.initCount.Load() != initAfterFirst {
 		t.Errorf("stale mark not consumed: second call re-initialized again (initCount %d -> %d)", initAfterFirst, d1.initCount.Load())
+	}
+}
+
+func TestAggregateToolsCall_ProactiveReinitDeletesSessionWhenInitializedFails(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "d1-old-sid"
+	const freshSID = "d1-fresh-sid"
+
+	d1 := newStubDaemon(t, oldSID)
+	d1.onInit = func(w http.ResponseWriter, r *http.Request) {
+		if d1.initCount.Load() >= 2 {
+			w.Header().Set("Mcp-Session-Id", freshSID)
+		} else {
+			w.Header().Set("Mcp-Session-Id", oldSID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		if d1.notifyCount.Load() >= 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}
+	// DELETE is fire-and-forget (detached goroutine), so these captures are
+	// read only after waitForCount confirms it landed; guard for -race safety.
+	var deleteMu sync.Mutex
+	var deleteSID string
+	var deleteProto string
+	d1.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteMu.Lock()
+		deleteSID = r.Header.Get("Mcp-Session-Id")
+		deleteProto = r.Header.Get("MCP-Protocol-Version")
+		deleteMu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}
+	var callMu sync.Mutex
+	var callSID string
+	d1.onCall = func(w http.ResponseWriter, r *http.Request) {
+		callMu.Lock()
+		callSID = r.Header.Get("Mcp-Session-Id")
+		callMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"called=read"}]}}`))
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	sess.markStalePort(d1.port)
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	if !strings.Contains(string(body), "called=read") {
+		t.Fatalf("proactive reinit fallback call did not succeed with original session; body=%s", string(body))
+	}
+	// DELETE is fire-and-forget: wait for the detached cleanup goroutine.
+	if got := waitForCount(&d1.deleteCount, 1); got != 1 {
+		t.Fatalf("daemon DELETE count=%d want 1", got)
+	}
+	deleteMu.Lock()
+	gotDeleteSID, gotDeleteProto := deleteSID, deleteProto
+	deleteMu.Unlock()
+	if gotDeleteSID != freshSID {
+		t.Fatalf("daemon DELETE Mcp-Session-Id=%q want %q", gotDeleteSID, freshSID)
+	}
+	if gotDeleteProto != "2025-11-25" {
+		t.Fatalf("daemon DELETE MCP-Protocol-Version=%q want %q", gotDeleteProto, "2025-11-25")
+	}
+	callMu.Lock()
+	gotCallSID := callSID
+	callMu.Unlock()
+	if gotCallSID != oldSID {
+		t.Fatalf("tools/call Mcp-Session-Id=%q want original %q after failed proactive reinit", gotCallSID, oldSID)
+	}
+	daemonKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port}
+	if got := sess.InitSuccesses[daemonKey]; got != oldSID {
+		t.Fatalf("failed proactive reinit cached sid=%q want original %q", got, oldSID)
+	}
+	if got := sess.DaemonProtoVer[daemonKey]; got != "2025-11-25" {
+		t.Fatalf("failed proactive reinit cached proto=%q want %q", got, "2025-11-25")
 	}
 }
 
@@ -2374,7 +3949,7 @@ func TestAggregateToolsCall_ConcurrentProactiveReinitRereadsFreshSID(t *testing.
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)

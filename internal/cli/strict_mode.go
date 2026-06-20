@@ -13,11 +13,23 @@
 //  1. Acquire `migration.lock` (refuse-if-held → exit 9 STRICT_MODE_BUSY).
 //  2. Acquire `--once.lock` (LIFO release).
 //  3. Refuse-if-held on the breadcrumb file (operator must run --recover).
-//  4. Write supervisor-intent.json with the new strict_mode value.
-//  5. Call autostart.Backend.Enable(Options{StrictMode: newValue}).
-//  6. On step 5 failure: revert step 4 (re-write intent with original).
-//  7. On step 6 failure: write breadcrumb + emit to stderr + exit 10.
-//  8. LIFO release.
+//  4. Snapshot the autostart shim's observable Status before mutating it.
+//  5. Write supervisor-intent.json with the new strict_mode value.
+//  6. Call autostart.Backend.Enable(Options{StrictMode: newValue}).
+//  7. On step 6 failure: revert step 5 (re-write intent with original).
+//  8. On step 7 failure (both writes failed): write breadcrumb + exit 10.
+//  9. On step 7 success: re-probe the shim. The per-OS backends are NOT
+//     all-or-nothing — they mutate the shim (delete-before-create on
+//     Windows, write-before-enable on Linux, bootout+write-before-bootstrap
+//     on macOS) before the OS step can error, so a failed Enable can leave
+//     the shim torn or out of sync with the reverted intent. Only when the
+//     re-probe PROVES the shim is unchanged from the step-4 snapshot is the
+//     breadcrumb deleted; otherwise a torn-shape breadcrumb is KEPT and the
+//     command exits 10 so `--recover` can drive both resources back in sync.
+//  10. LIFO release.
+//
+// Invariant: strict-mode never deletes the breadcrumb / returns clean while
+// the autostart shim might be torn or out of sync with the intent.
 //
 // `--recover` reads the breadcrumb, prompts the operator with two
 // exhaustive branches (drive both to `intended` or drive both to
@@ -314,6 +326,51 @@ func acquireStrictModeStateLocks(stateDir string) (*api.StateDirLockSet, error) 
 	return locks, err
 }
 
+type strictModeShimFingerprintKind string
+
+const (
+	strictModeShimFingerprintAbsent          strictModeShimFingerprintKind = "absent"
+	strictModeShimFingerprintEnabledMatching strictModeShimFingerprintKind = "enabled-matching"
+	strictModeShimFingerprintDrifted         strictModeShimFingerprintKind = "drifted"
+	strictModeShimFingerprintStaleResidue    strictModeShimFingerprintKind = "stale-residue"
+)
+
+type strictModeShimFingerprint struct {
+	kind strictModeShimFingerprintKind
+	spec string
+}
+
+func (f strictModeShimFingerprint) String() string {
+	if f.spec == "" {
+		return string(f.kind)
+	}
+	return string(f.kind) + ":" + f.spec
+}
+
+// strictModeShimDriftFingerprint keeps only the shim-shape facts strict-mode
+// needs for rollback safety. Status distinguishes enabled-running from
+// enabled-stopped for operator liveness reporting, but both mean the same
+// installed shim matched the StrictMode probe options. Drifted/stale-residue
+// include the backend-owned spec fingerprint so distinct drifted shims do not
+// collapse into one coarse bucket.
+func strictModeShimDriftFingerprint(snapshot autostart.StatusSnapshot) strictModeShimFingerprint {
+	switch snapshot.State {
+	case autostart.StateAbsent:
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintAbsent}
+	case autostart.StateEnabledRunning, autostart.StateEnabledStopped:
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintEnabledMatching, spec: snapshot.SpecFingerprint}
+	case autostart.StateDrifted:
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintDrifted, spec: snapshot.SpecFingerprint}
+	case autostart.StateStaleResidue:
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintStaleResidue, spec: snapshot.SpecFingerprint}
+	default:
+		return strictModeShimFingerprint{
+			kind: strictModeShimFingerprintKind(fmt.Sprintf("unknown:%d", snapshot.State)),
+			spec: snapshot.SpecFingerprint,
+		}
+	}
+}
+
 // runStrictModeUnderLocks performs the two-resource mutation with the
 // locks already held. Extracted so RunStrictMode and the test seam can
 // share the body without duplicating the lock + breadcrumb scaffolding.
@@ -344,6 +401,13 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// the recorded args gets reconciled. Intent re-write is also
 	// idempotent (atomic rename of identical bytes is a no-op
 	// observed by readers).
+
+	// Snapshot the shim BEFORE mutating either owned resource. The Status
+	// value still carries liveness-only noise (enabled-running vs
+	// enabled-stopped), so the revert branch compares the drift fingerprint
+	// derived from this baseline instead of raw State equality.
+	shimSnapshot, snapshotErr := deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict})
+	shimSnapshotFingerprint := strictModeShimDriftFingerprint(shimSnapshot)
 
 	// Forward-progress breadcrumb for the SIGKILL/power-loss window
 	// (opus-3 F11). Write an IN-PROGRESS marker BEFORE step 1 and delete
@@ -435,16 +499,75 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 			fmt.Fprintln(stderrOrDefault(deps), string(body))
 			return &forceExitError{code: ExitStrictModeRevertFailed}
 		}
-		// Revert succeeded — both resources are back at their original
-		// strict-mode value, so there is no torn state and no drift: delete
-		// the in-progress breadcrumb (best-effort; a stale crumb would
-		// otherwise force the operator to --recover a non-existent drift).
-		// Surface the step 2 error so the operator can investigate the
-		// underlying shim failure.
-		if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-			fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after revert: %v\n", rmErr)
+		// Revert of step 1 (intent) succeeded — intent is back at
+		// originalStrict. But the autostart shim is NOT proven to be back
+		// at originalStrict: the per-OS backends mutate the shim before the
+		// OS step can error, so `Enable` failing means the shim may be torn
+		// (Windows: prior task deleted, new one never created; Linux/macOS:
+		// unit/plist already overwritten with the NEW flag, enable/bootstrap
+		// failed). Re-probe the shim and only delete the breadcrumb when the
+		// shim drift fingerprint is PROVABLY unchanged from the pre-mutation
+		// snapshot. Any uncertainty (snapshot unavailable, re-probe error, or
+		// a fingerprint that differs from the snapshot) must KEEP a torn-shape
+		// breadcrumb so `mcphub strict-mode --recover` can drive intent + shim
+		// back into sync. The invariant: strict-mode never reports clean while
+		// the shim might be out of sync with the (reverted) intent.
+		shimProvenUnchanged := false
+		var reprobe autostart.StatusSnapshot
+		var reprobeErr error
+		if snapshotErr == nil {
+			reprobe, reprobeErr = deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict})
+			if reprobeErr == nil && strictModeShimDriftFingerprint(reprobe) == shimSnapshotFingerprint {
+				shimProvenUnchanged = true
+			}
 		}
-		return fmt.Errorf("strict-mode: step 2 (autostart shim): %w (intent reverted to %v)", err, originalStrict)
+		if shimProvenUnchanged {
+			// Shim is provably back at (== never left) originalStrict and
+			// intent was reverted to originalStrict: no torn state, no drift.
+			// Delete the in-progress breadcrumb (best-effort; a stale crumb
+			// would otherwise force the operator to --recover a non-existent
+			// drift). Surface the step 2 error so the operator can investigate
+			// the underlying shim failure.
+			if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after revert: %v\n", rmErr)
+			}
+			return fmt.Errorf("strict-mode: step 2 (autostart shim): %w (intent reverted to %v, shim unchanged)", err, originalStrict)
+		}
+
+		// Shim state could NOT be proven unchanged after the failed Enable.
+		// Intent was reverted to originalStrict, but the shim may be torn or
+		// out of sync. Overwrite the in-progress breadcrumb with the torn
+		// shape so `--recover` reconciles both resources. ActualIntentState
+		// records where intent actually is now (originalStrict, since the
+		// revert succeeded); --recover branch A drives both to Intended,
+		// branch B drives both to ActualIntentState — either re-runs Enable
+		// and repairs the shim.
+		shimDetail := fmt.Sprintf("shim state could not be proven unchanged after failed Enable (snapshot=%v snapshotFingerprint=%v snapshotErr=%v reprobe=%v reprobeFingerprint=%v reprobeErr=%v)",
+			shimSnapshot, shimSnapshotFingerprint, snapshotErr, reprobe, strictModeShimDriftFingerprint(reprobe), reprobeErr)
+		bc := strictModeBreadcrumb{
+			Intended:          desired,
+			ActualIntentState: originalStrict, // revert succeeded, so intent IS back at original
+			ActualShimState:   originalStrict, // best-effort: target the shim should hold; recover re-Enables regardless
+			Step1Error:        "",
+			Step2Error:        err.Error() + "; " + shimDetail,
+			RevertError:       "",
+			TS:                time.Now().UTC().Format(time.RFC3339Nano),
+			Phase:             strictModeBreadcrumbPhaseTorn,
+		}
+		if writeBCErr := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &bc); writeBCErr != nil {
+			// Cannot even overwrite the breadcrumb — the in-progress marker
+			// written before step 1 still survives on disk (it was never
+			// deleted on this path), so `--recover` still has a marker to act
+			// on. Emit the intended torn body + the write error to stderr so
+			// the operator sees the full state immediately.
+			body, _ := json.MarshalIndent(bc, "", "  ")
+			fmt.Fprintln(stderrOrDefault(deps), string(body))
+			fmt.Fprintf(stderrOrDefault(deps), "strict-mode: shim possibly torn AND torn-breadcrumb write failed: %v\n", writeBCErr)
+			return &forceExitError{code: ExitStrictModeRevertFailed}
+		}
+		body, _ := json.MarshalIndent(bc, "", "  ")
+		fmt.Fprintln(stderrOrDefault(deps), string(body))
+		return &forceExitError{code: ExitStrictModeRevertFailed}
 	}
 	// Clean success: both resources reached `desired`. Delete the
 	// in-progress breadcrumb so the next strict-mode invocation does not

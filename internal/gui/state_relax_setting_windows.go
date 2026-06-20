@@ -84,8 +84,8 @@ func (s *Server) stateRelaxSettingGet(w http.ResponseWriter) {
 func (s *Server) stateRelaxSettingPost(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var req stateRelaxSettingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, fmt.Errorf("decode body: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
 

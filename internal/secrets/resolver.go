@@ -3,8 +3,17 @@ package secrets
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
+
+// SecretPlaceholderRE matches well-formed `${secret:KEY}` tokens used by
+// remote-http URL and header placeholders. Capture group 1 is the vault key.
+var SecretPlaceholderRE = regexp.MustCompile(`\$\{secret:([A-Za-z0-9_\-.]+)\}`)
+
+// MalformedSecretPrefixRE matches any `${secret:` prefix so callers can detect
+// intended placeholders that failed the stricter SecretPlaceholderRE shape.
+var MalformedSecretPrefixRE = regexp.MustCompile(`\$\{secret:`)
 
 // Resolver turns manifest env values (which may contain prefixes like `secret:`,
 // `file:`, or `$VAR`) into plaintext for use in a child process environment.

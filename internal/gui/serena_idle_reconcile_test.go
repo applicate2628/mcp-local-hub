@@ -680,6 +680,81 @@ func TestIdleSweeper_InvalidatesDaemonSessionOnlyAfterIdleStop(t *testing.T) {
 	assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
 }
 
+func TestSerenaRouter_IdleStopConcurrentWakeDoesNotReuseStaleDaemonSession(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	daemon := newFakeSerenaDaemon("idle-stop-concurrent-wake")
+	ts := newSafeSerenaHTTPTestServer(t, daemon.handler())
+	port := testServerPort(t, ts)
+
+	const wsPath = "/proj/idle-stop-concurrent-wake"
+	const sid = "sid-idle-stop-concurrent-wake"
+	const staleDaemonSession = "stale-daemon-session-before-concurrent-wake"
+	ws := serenaWS("idle-stop-concurrent-wake", wsPath, port)
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:        sessions,
+		UpstreamURLFn:   func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:         func(string, string, map[string]any) error { return nil },
+		UpstreamTimeout: 2 * time.Second,
+		WakeIdleFn:      func(context.Context, string, int, string) error { return nil },
+	}
+	s := NewServer(Config{Port: 9300, Version: "test", PID: 1})
+	s.SetSerenaRouterDeps(deps)
+	seedBoundSerenaSession(s, sessions, ws, sid, staleDaemonSession)
+
+	statusRow := api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: port, UptimeSec: 7200}
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{statusRow}, nil
+	}
+	serenaIdleThresholdFn = func() (time.Duration, bool) { return 30 * time.Minute, true }
+	serenaIdleStopFn = func(taskName string, now time.Time) (bool, error) {
+		wrote, err := api.NewAPI().WriteSerenaIdleStopResult(taskName, now)
+		if err != nil || !wrote {
+			return wrote, err
+		}
+		allowed, err := api.NewAPI().ClearStopIntentIfReason(taskName, api.IntentReasonIdle, "test-concurrent-wake")
+		if err != nil {
+			return wrote, err
+		}
+		if !allowed {
+			t.Fatalf("test concurrent wake could not clear the idle stop it just wrote")
+		}
+		return wrote, nil
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-45*time.Minute))
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
+		t.Fatalf("idle sweep stopped %d daemons; want 1", n)
+	}
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.py"})
+	rr := postSerenaOnGUIOrigin(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("post-wake request status = %d, want 200 with a fresh daemon session; body=%s", rr.Code, rr.Body.String())
+	}
+	if dsid, _, ok := s.serenaDaemonSessions.lookup(sid, ws.WorkspaceKey); !ok || dsid == staleDaemonSession {
+		t.Fatalf("post-wake daemon-session lookup = (%q,%v), want fresh re-handshaken id", dsid, ok)
+	}
+
+	daemon.mu.Lock()
+	mintCount := daemon.mintCount
+	lastToolSession := daemon.lastToolSession
+	daemon.mu.Unlock()
+	if mintCount != 1 {
+		t.Fatalf("daemon initialize count = %d, want 1 fresh handshake after concurrent wake cleared idle stop", mintCount)
+	}
+	if lastToolSession == "" || lastToolSession == staleDaemonSession {
+		t.Fatalf("forward used daemon session %q, want fresh post-wake session", lastToolSession)
+	}
+}
+
 func TestSerenaRouter_BackendLoss_UnboundWindowRestartSeedsNewGeneration(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 	withTempSerenaStateRoot(t)

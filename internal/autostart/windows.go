@@ -164,14 +164,27 @@ func (w *windowsBackend) Disable() error {
 // Delete) is treated the same way — keep the running/stopped verdict
 // rather than flipping to StateDrifted on best-effort failure.
 func (w *windowsBackend) Status(opts Options) (State, error) {
+	snapshot, err := w.statusSnapshot(opts, false)
+	return snapshot.State, err
+}
+
+// StatusSnapshot reports State plus a spec fingerprint derived from the Task
+// Scheduler XML's non-liveness shim fields. The live Status() state is used
+// only for running-vs-stopped classification and is deliberately excluded from
+// the fingerprint.
+func (w *windowsBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
+	return w.statusSnapshot(opts, true)
+}
+
+func (w *windowsBackend) statusSnapshot(opts Options, failClosedXML bool) (StatusSnapshot, error) {
 	sched, err := schedulerFactoryFn()
 	if err != nil {
-		return StateAbsent, fmt.Errorf("scheduler factory: %w", err)
+		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("scheduler factory: %w", err)
 	}
 	st, err := sched.Status(WindowsTaskName)
 	if err != nil {
 		if errors.Is(err, scheduler.ErrTaskNotFound) {
-			return StateAbsent, nil
+			return StatusSnapshot{State: StateAbsent}, nil
 		}
 		// Windows schtasks /Query reports "cannot find the file
 		// specified" via exit-non-zero rather than mapping to
@@ -181,26 +194,36 @@ func (w *windowsBackend) Status(opts Options) (State, error) {
 		// message contains "cannot find" or "does not exist" is
 		// the absent-task signal in disguise.
 		if isAbsentErrorMsg(err) {
-			return StateAbsent, nil
+			return StatusSnapshot{State: StateAbsent}, nil
 		}
-		return StateAbsent, fmt.Errorf("scheduler status: %w", err)
+		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("scheduler status: %w", err)
 	}
 
-	// Drift detection — best-effort. If ExportXML fails for any
-	// reason, we keep the running/stopped verdict from above.
 	drift := false
+	spec := ""
 	xmlBlob, xmlErr := sched.ExportXML(WindowsTaskName)
-	if xmlErr == nil {
-		drift = detectDrift(xmlBlob, opts)
+	if xmlErr != nil {
+		if failClosedXML {
+			return StatusSnapshot{State: windowsTaskStatusState(st)}, fmt.Errorf("scheduler task XML snapshot: %w", xmlErr)
+		}
+	} else if taskSpec, ok := parseWindowsTaskSpec(xmlBlob); ok {
+		spec = windowsShimSpecFingerprint(taskSpec)
+		drift = windowsTaskSpecDrifted(taskSpec, opts)
+	} else if failClosedXML {
+		return StatusSnapshot{State: windowsTaskStatusState(st)}, fmt.Errorf("scheduler task XML snapshot unavailable")
 	}
 
 	if drift {
-		return StateDrifted, nil
+		return StatusSnapshot{State: StateDrifted, SpecFingerprint: spec}, nil
 	}
+	return StatusSnapshot{State: windowsTaskStatusState(st), SpecFingerprint: spec}, nil
+}
+
+func windowsTaskStatusState(st scheduler.TaskStatus) State {
 	if strings.EqualFold(st.State, "Running") {
-		return StateEnabledRunning, nil
+		return StateEnabledRunning
 	}
-	return StateEnabledStopped, nil
+	return StateEnabledStopped
 }
 
 // isAbsentErrorMsg matches the schtasks "task not found" failure mode
@@ -238,6 +261,20 @@ func isAbsentErrorMsg(err error) bool {
 // encoding/xml refuses to decode any non-UTF-8 declaration without
 // an explicit reader override.
 func detectDrift(xmlBlob []byte, opts Options) bool {
+	taskSpec, ok := parseWindowsTaskSpec(xmlBlob)
+	if !ok {
+		return false
+	}
+	return windowsTaskSpecDrifted(taskSpec, opts)
+}
+
+type windowsTaskSpec struct {
+	Command   string
+	Arguments string
+	Enabled   string
+}
+
+func parseWindowsTaskSpec(xmlBlob []byte) (windowsTaskSpec, bool) {
 	type execNode struct {
 		Command   string `xml:"Command"`
 		Arguments string `xml:"Arguments"`
@@ -245,8 +282,12 @@ func detectDrift(xmlBlob []byte, opts Options) bool {
 	type actionsNode struct {
 		Exec execNode `xml:"Exec"`
 	}
+	type settingsNode struct {
+		Enabled string `xml:"Enabled"`
+	}
 	type taskRoot struct {
-		Actions actionsNode `xml:"Actions"`
+		Actions  actionsNode  `xml:"Actions"`
+		Settings settingsNode `xml:"Settings"`
 	}
 	dec := xml.NewDecoder(bytes.NewReader(xmlBlob))
 	dec.CharsetReader = func(_ string, r io.Reader) (io.Reader, error) {
@@ -260,13 +301,21 @@ func detectDrift(xmlBlob []byte, opts Options) bool {
 	if err := dec.Decode(&t); err != nil {
 		// Drift detection unavailable — fall back to non-drift so
 		// the running/stopped verdict still surfaces to the caller.
-		return false
+		return windowsTaskSpec{}, false
 	}
+	return windowsTaskSpec{
+		Command:   t.Actions.Exec.Command,
+		Arguments: t.Actions.Exec.Arguments,
+		Enabled:   t.Settings.Enabled,
+	}, true
+}
+
+func windowsTaskSpecDrifted(spec windowsTaskSpec, opts Options) bool {
 	want, err := resolveMCPHubPath(opts)
 	if err != nil {
 		return false
 	}
-	if !strings.EqualFold(strings.TrimSpace(t.Actions.Exec.Command), strings.TrimSpace(want)) {
+	if !strings.EqualFold(strings.TrimSpace(spec.Command), strings.TrimSpace(want)) {
 		return true
 	}
 	// Subcommand drift check: the PR that switched the autostart
@@ -281,11 +330,25 @@ func detectDrift(xmlBlob []byte, opts Options) bool {
 	// architecture-review finding 2.
 	wantArgs := superviseArgs(opts)
 	if len(wantArgs) > 0 {
-		argTokens := strings.Fields(t.Actions.Exec.Arguments)
+		argTokens := strings.Fields(spec.Arguments)
 		if len(argTokens) == 0 || !strings.EqualFold(argTokens[0], wantArgs[0]) {
 			return true
 		}
 	}
-	hasStrictFlag := strings.Contains(t.Actions.Exec.Arguments, "--strict-mode")
+	hasStrictFlag := strings.Contains(spec.Arguments, "--strict-mode")
 	return hasStrictFlag != opts.StrictMode
+}
+
+func windowsShimSpecFingerprint(spec windowsTaskSpec) string {
+	enabled := strings.ToLower(strings.TrimSpace(spec.Enabled))
+	if enabled == "" {
+		enabled = "unknown"
+	}
+	return shimSpecFingerprint(
+		"windows",
+		"installed=true",
+		"enabled="+enabled,
+		"command="+strings.ToLower(strings.TrimSpace(spec.Command)),
+		"args="+strings.Join(strings.Fields(spec.Arguments), " "),
+	)
 }

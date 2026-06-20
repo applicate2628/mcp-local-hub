@@ -183,8 +183,8 @@ func registerInitClientConfigRoutes(s *Server) {
 			return
 		}
 		var req initClientConfigRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+		if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "BAD_REQUEST")
 			return
 		}
 		if req.Client == "" {

@@ -592,6 +592,17 @@ type Server struct {
 	// pointer read would race the assignment).
 	hubMcpComp atomic.Pointer[HubListenerComponents]
 
+	// hubRestartCh is the buffered-1 signal channel from the detect-only
+	// HubListenerHealthWatcher to the Server-owned restart driver. The
+	// restart counters and last-success timestamp are owned by that driver
+	// goroutine; they discriminate flapping from a fresh outage and cap
+	// rolling restart attempts.
+	hubRestartCh             chan struct{}
+	hubRestartConsecutive    int
+	hubRestartLastSuccess    time.Time
+	hubRestartWindowStart    time.Time
+	hubRestartWindowAttempts int
+
 	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
 	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
 	// future hot-reload of the workspace registry can swap the bundle
@@ -703,15 +714,14 @@ type Server struct {
 	// fable's coupled-hazard insight). Read-only after construction.
 	guiProcessStart time.Time
 
-	// serenaInFlightMu guards serenaInFlight: WorkspaceKey -> count of
-	// /serena/mcp forwards currently in flight to that workspace's daemon
-	// (incremented around the WHOLE forward, including the SSE stream copy;
-	// decremented on completion). The idle sweeper SKIPS any daemon with an
-	// open forward so a single long-lived streaming call past the threshold is
-	// never idle-killed MID-CALL (FIX-3). A zero/absent count means no forward
-	// is open. The map prunes entries back to absent when the count hits 0.
-	serenaInFlightMu sync.Mutex
-	serenaInFlight   map[string]int
+	// serenaStopGate owns the per-workspace stop/forward gate. A path-bound
+	// /serena/mcp request enters it immediately after workspace resolution and
+	// before wake/daemon-session resolution; the idle sweeper starts the same
+	// workspace gate while deciding to stop and releases later entrants only
+	// after the stop write plus stale daemon-session invalidation finish. A
+	// non-zero count means a request has started for that workspace, even if it
+	// has not reached the upstream POST yet.
+	serenaStopGate serenaWorkspaceStopGate
 
 	// pruneEnoentMu guards pruneEnoentTicks: WorkspaceKey -> number of
 	// CONSECUTIVE prune-sweep ticks that observed the workspace directory as
@@ -738,7 +748,14 @@ func NewServer(cfg Config) *Server {
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now(), pruneEnoentTicks: map[string]int{}, serenaBackendLossTrigger: make(chan struct{}, 1)}
+	s := &Server{
+		cfg:                      cfg,
+		mux:                      http.NewServeMux(),
+		hubRestartCh:             make(chan struct{}, 1),
+		serenaBackendLossTrigger: make(chan struct{}, 1),
+		guiProcessStart:          time.Now(),
+		pruneEnoentTicks:         map[string]int{},
+	}
 	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the
 	// TTL+singleflight HealthSnapshot cache here so concurrent requests
@@ -968,7 +985,9 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	hubInitDone := make(chan struct{})
 	go func() {
 		defer close(hubInitDone)
-		hubComp, hubErr := startHubMcpListener(hubInitCtx, hubEnabled, s.api)
+		hubComp, hubErr := startHubMcpListenerWithOptions(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
+			onUnresponsive: s.signalHubListenerRestart,
+		})
 		if hubErr != nil {
 			// codex bot phase4 r1 P2 closure on PR #158: surface
 			// non-bind hub failures (token gen/persist, endpoint
@@ -1015,6 +1034,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// else: shutdown path already swapped — it owns teardown.
 		}
 	}()
+	go runHubListenerRestartDriver(hubInitCtx, s, hubListenerRestartDriverOptions{})
 
 	select {
 	case <-ctx.Done():

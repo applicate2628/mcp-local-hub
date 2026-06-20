@@ -11,8 +11,8 @@
 // Spec §"Cold-restart upgrade flow (detail)" / §"Windows binary
 // replacement (rename-aside)" §step 4:
 //   "glob <install-dir>/mcphub.exe.old-* and os.Remove each whose
-//    name parses as .old-<RFC3339> form AND whose mtime is older
-//    than 7 days. os.Remove failures (file still mapped, AV scan,
+//    name parses as .old-<RFC3339> form AND whose encoded timestamp
+//    is older than 7 days. os.Remove failures (file still mapped, AV scan,
 //    ACL flip) logged warn + retried on next pass."
 
 package api
@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -50,17 +51,18 @@ const renameAsideMaxKeep = 5
 // expected to log warn and retry on the next pass.
 //
 // Returns a non-nil error only if filepath.Glob itself fails (a
-// programming error in the pattern, not a runtime condition).
-func SweepOldBinaries(dir string) error {
+// programming error in the pattern, not a runtime condition). Optional warn
+// callbacks receive per-file remove failures; those failures remain non-fatal.
+func SweepOldBinaries(dir string, warn ...func(string, error)) error {
 	patterns := []string{
 		filepath.Join(dir, "mcphub.exe.old-*"),
 		filepath.Join(dir, "mcphub.old-*"),
 	}
-	// Collect every aside (across both patterns) with its mtime so the count
+	// Collect every aside (across both patterns) with its encoded timestamp so the count
 	// cap can rank them newest-first independent of which pattern matched.
 	type aside struct {
-		path  string
-		mtime time.Time
+		path      string
+		createdAt time.Time
 	}
 	var asides []aside
 	for _, pattern := range patterns {
@@ -69,6 +71,10 @@ func SweepOldBinaries(dir string) error {
 			return err
 		}
 		for _, m := range matches {
+			createdAt, ok := generatedRenameAsideTime(m)
+			if !ok {
+				continue
+			}
 			info, err := os.Stat(m)
 			if err != nil {
 				// Race: file vanished between Glob and Stat, or perms flip.
@@ -82,18 +88,37 @@ func SweepOldBinaries(dir string) error {
 				// it does. Skip.
 				continue
 			}
-			asides = append(asides, aside{path: m, mtime: info.ModTime()})
+			asides = append(asides, aside{path: m, createdAt: createdAt})
 		}
 	}
 	// Newest first, so indices >= renameAsideMaxKeep are the surplus to trim.
 	sort.Slice(asides, func(i, j int) bool {
-		return asides[i].mtime.After(asides[j].mtime)
+		return asides[i].createdAt.After(asides[j].createdAt)
 	})
 	cutoff := time.Now().Add(-renameAsideRetention)
 	for i, a := range asides {
-		if a.mtime.Before(cutoff) || i >= renameAsideMaxKeep {
-			_ = os.Remove(a.path) // best-effort per spec
+		if a.createdAt.Before(cutoff) || i >= renameAsideMaxKeep {
+			if err := os.Remove(a.path); err != nil {
+				for _, fn := range warn {
+					if fn != nil {
+						fn(a.path, err)
+					}
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func generatedRenameAsideTime(path string) (time.Time, bool) {
+	base := filepath.Base(path)
+	for _, prefix := range []string{"mcphub.exe.old-", "mcphub.old-"} {
+		if !strings.HasPrefix(base, prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(base, prefix)
+		ts, err := time.Parse(renameAsideTimestampLayout, suffix)
+		return ts, err == nil
+	}
+	return time.Time{}, false
 }

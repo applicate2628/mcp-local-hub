@@ -39,7 +39,7 @@ func TestMarketplaceSearch_HappyPath(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"search", "fs", "--registry", srv.URL})
+	c.SetArgs([]string{"search", "fs", "--registry", api.MarketplaceTestRegistryURL("/search-happy.json")})
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("search: %v\nstderr: %s", err, stderr.String())
 	}
@@ -60,7 +60,7 @@ func TestMarketplaceShow_PrintsMetadataNotReadmeBody(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"show", "filesystem", "--registry", srv.URL})
+	c.SetArgs([]string{"show", "filesystem", "--registry", api.MarketplaceTestRegistryURL("/show-metadata.json")})
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("show: %v\nstderr: %s", err, stderr.String())
 	}
@@ -100,6 +100,13 @@ func TestSanitizeCatalogField_StripsControlAndEscape(t *testing.T) {
 		// utf8.DecodeRuneInString path catches it as RuneError/size=1
 		// and replaces with '?'.
 		{"high\x9Boops", "high?oops", "raw c1 byte"},
+		{"spoof\u202Etxt", "spoof?txt", "bidi rlo"},
+		{"alm\u061Cmark", "alm?mark", "arabic letter mark"},
+		{"mark\u200Etext", "mark?text", "left-to-right mark"},
+		{"isolate\u2066text\u2069", "isolate?text?", "bidi isolate"},
+		{"line\u2028next", "line?next", "unicode line separator"},
+		{"paragraph\u2029next", "paragraph?next", "unicode paragraph separator"},
+		{"nel\u0085next", "nel?next", "unicode next-line"},
 		{"emoji✓ check", "emoji✓ check", "utf8 preserved"},
 		{"кириллица", "кириллица", "cyrillic preserved"},
 		{"em—dash", "em—dash", "em-dash preserved"},
@@ -128,7 +135,7 @@ func TestMarketplaceSearch_SanitizesHostileCatalogFields(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"search", "hostile", "--registry", srv.URL})
+	c.SetArgs([]string{"search", "hostile", "--registry", api.MarketplaceTestRegistryURL("/hostile-fields.json")})
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("search: %v\nstderr: %s", err, stderr.String())
 	}
@@ -160,7 +167,7 @@ func TestMarketplaceShow_RendersEnvSection(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"show", "envful", "--registry", srv.URL})
+	c.SetArgs([]string{"show", "envful", "--registry", api.MarketplaceTestRegistryURL("/envful.json")})
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("show: %v\nstderr: %s", err, stderr.String())
 	}
@@ -216,7 +223,7 @@ func TestMarketplaceGenerate_HttpEntryEmitsRemoteHTTPDraft(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	c.SetOut(&stdout)
 	c.SetErr(&stderr)
-	c.SetArgs([]string{"generate", "ctx7", "--registry", srv.URL})
+	c.SetArgs([]string{"generate", "ctx7", "--registry", api.MarketplaceTestRegistryURL("/generate-http.json")})
 	if err := c.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("generate: %v\nstderr: %s", err, stderr.String())
 	}

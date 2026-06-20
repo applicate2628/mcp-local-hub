@@ -185,28 +185,37 @@ func (d *darwinBackend) Disable() error {
 //
 //   - Plist absent → StateAbsent.
 //   - Plist present + `launchctl print` stdout contains "state = running"
-//     + body matches opts → StateEnabledRunning.
+//   - body matches opts → StateEnabledRunning.
 //   - Plist present + body matches + not running → StateEnabledStopped.
 //   - Plist present + body mismatch → StateDrifted regardless of liveness.
 func (d *darwinBackend) Status(opts Options) (State, error) {
+	snapshot, err := d.StatusSnapshot(opts)
+	return snapshot.State, err
+}
+
+// StatusSnapshot reports State plus a spec fingerprint derived from the plist
+// body. It excludes launchctl liveness so running↔stopped ticks do not change
+// the fingerprint.
+func (d *darwinBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
 	plistPath, err := plistPathFn()
 	if err != nil {
-		return StateAbsent, fmt.Errorf("resolve plist path: %w", err)
+		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("resolve plist path: %w", err)
 	}
 	body, err := os.ReadFile(plistPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return StateAbsent, nil
+			return StatusSnapshot{State: StateAbsent}, nil
 		}
-		return StateAbsent, fmt.Errorf("read plist: %w", err)
+		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("read plist: %w", err)
 	}
+	spec := shimSpecFingerprint("darwin", "installed=true", "enabled=true", "plist="+string(body))
 	want, err := resolveMCPHubPath(opts)
 	if err != nil {
-		return StateAbsent, err
+		return StatusSnapshot{State: StateAbsent, SpecFingerprint: spec}, err
 	}
 	expected := renderDarwinPlist(want, opts.StrictMode)
 	if string(body) != expected {
-		return StateDrifted, nil
+		return StatusSnapshot{State: StateDrifted, SpecFingerprint: spec}, nil
 	}
 	uid := currentUIDFn()
 	stdout, _, _ := launchctlFn([]string{"print", "gui/" + uid + "/" + DarwinLabel})
@@ -216,7 +225,7 @@ func (d *darwinBackend) Status(opts Options) (State, error) {
 	// against indentation/whitespace differences across macOS
 	// releases.
 	if strings.Contains(stdout, "state = running") {
-		return StateEnabledRunning, nil
+		return StatusSnapshot{State: StateEnabledRunning, SpecFingerprint: spec}, nil
 	}
-	return StateEnabledStopped, nil
+	return StatusSnapshot{State: StateEnabledStopped, SpecFingerprint: spec}, nil
 }

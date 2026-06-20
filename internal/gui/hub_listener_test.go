@@ -108,6 +108,22 @@ func TestHubListenerComponents_AliveTransitionsOnExit(t *testing.T) {
 	t.Errorf("Alive() stuck true 2s after Serve exited; the defer must clear it on any exit path")
 }
 
+func TestHubMcpHTTPServerHasSlowClientTimeouts(t *testing.T) {
+	srv := newHubMcpHTTPServer(http.NewServeMux())
+	if srv.ReadHeaderTimeout != 10*time.Second {
+		t.Fatalf("ReadHeaderTimeout=%v want 10s", srv.ReadHeaderTimeout)
+	}
+	if srv.ReadTimeout <= 0 {
+		t.Fatalf("ReadTimeout must bound slow request bodies")
+	}
+	if srv.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout=%v want 0 so large fan-out compute is not capped by server write timeout", srv.WriteTimeout)
+	}
+	if srv.IdleTimeout != 120*time.Second {
+		t.Fatalf("IdleTimeout=%v want 120s", srv.IdleTimeout)
+	}
+}
+
 // TestHubListenerSkippedWithGateOff — gate OFF, no listener bound,
 // no state files written. Runs on every platform.
 func TestHubListenerSkippedWithGateOff(t *testing.T) {

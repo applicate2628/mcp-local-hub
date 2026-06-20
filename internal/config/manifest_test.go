@@ -431,6 +431,185 @@ func TestValidateRemoteHTTP_RejectsPlaintextURL(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteHTTP_AllowsUppercaseHTTPSScheme(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "ctx7-uppercase",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "HTTPS://mcp.context7.com/mcp",
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("uppercase HTTPS scheme should parse as https; got %v", err)
+	}
+}
+
+func TestValidateRemoteHTTP_RejectsMalformedHTTPSURL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"empty host", "https:///mcp"},
+		{"hostless with port", "https://:443/mcp"},
+		{"mixed literal and secret-placeholder host", "https://127.0.0.1${secret:REMOTE_MCP_HOST}/mcp"},
+		{"embedded credentials", "https://user:pass@mcp.context7.com/mcp"},
+		{"control byte", "https://mcp.context7.com/\x00mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "ctx7-bad",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       tc.url,
+			}
+			if err := m.Validate(); err == nil {
+				t.Fatalf("expected malformed URL rejection for %q", tc.url)
+			}
+		})
+	}
+}
+
+func TestValidateRemoteHTTP_RedactsEmbeddedCredentialsInURLError(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "ctx7-bad",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "https://user:pass@mcp.context7.com/mcp",
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected embedded-credentials URL rejection")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:pass", "user@", "pass@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in error %q", msg)
+		}
+	}
+	if !strings.Contains(msg, "https://mcp.context7.com/mcp") {
+		t.Fatalf("error should retain redacted URL context; got %q", msg)
+	}
+}
+
+func TestValidateRemoteHTTP_RedactsCredentialsInMalformedParseError(t *testing.T) {
+	// A credentialed URL malformed enough that url.Parse fails BEFORE the
+	// u.User check (invalid port `:abc`). The wrapped *url.Error embeds the
+	// raw input, so without ScrubParseError the token leaks via %w even
+	// though the outer "got" value is redacted (bot PR #388 r10).
+	m := &ServerManifest{
+		Name:      "ctx7-bad",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "https://user:pass@example.com:abc/mcp",
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected malformed credentialed URL rejection")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:pass", "user:pass@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in parse error %q", msg)
+		}
+	}
+}
+
+func TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"port above 65535", "https://${secret:REMOTE_MCP_HOST}:99999/mcp"},
+		{"port zero", "https://${secret:REMOTE_MCP_HOST}:0/mcp"},
+		{"leading-zero non-canonical port", "https://${secret:REMOTE_MCP_HOST}:080/mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if RemoteHTTPURLHasSecretPlaceholderHost(tc.url) {
+				t.Fatalf("placeholder-host predicate accepted out-of-range port for %q", tc.url)
+			}
+			m := &ServerManifest{
+				Name:      "secret-host-badport",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       tc.url,
+			}
+			if err := m.Validate(); err == nil {
+				t.Fatalf("expected rejection of out-of-range placeholder-host port for %q", tc.url)
+			}
+		})
+	}
+}
+
+func TestValidateRemoteHTTP_AllowsInRangePlaceholderHostPort(t *testing.T) {
+	for _, raw := range []string{
+		"https://${secret:REMOTE_MCP_HOST}:443/mcp",
+		"https://${secret:REMOTE_MCP_HOST}:65535/mcp",
+		"https://${secret:REMOTE_MCP_HOST}:1/mcp",
+	} {
+		if !RemoteHTTPURLHasSecretPlaceholderHost(raw) {
+			t.Fatalf("placeholder-host predicate rejected valid in-range port for %q", raw)
+		}
+	}
+}
+
+func TestValidateRemoteHTTP_AllowsSecretPlaceholderHost(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "secret-host",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "https://${secret:REMOTE_MCP_HOST}/mcp",
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("secret-placeholder host should defer host validation to use time; got %v", err)
+	}
+}
+
+func TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"non-https scheme", "http://${secret:REMOTE_MCP_HOST}/mcp", "https://"},
+		{"unsafe path byte", "https://${secret:REMOTE_MCP_HOST}/\x00mcp", "control"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "secret-host-bad",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       tc.url,
+			}
+			err := m.Validate()
+			if err == nil {
+				t.Fatalf("expected URL-shape rejection for %q; got nil", tc.url)
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.want)) {
+				t.Fatalf("error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest(t *testing.T) {
+	for _, rawURL := range []string{
+		"https://localhost/mcp",
+		"https://127.0.0.1/mcp",
+		"https://[::1]/mcp",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "local-remote",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       rawURL,
+			}
+			if err := m.Validate(); err != nil {
+				t.Fatalf("handwritten remote-http manifest should allow %q; got %v", rawURL, err)
+			}
+		})
+	}
+}
+
 // TestValidateRemoteHTTP_RejectsWorkspaceScoped pins codex bot r8
 // P2 closure (PR #169): the workspace-scoped kind is per-(workspace,
 // language) lazy-proxy with required local LSP backends +
