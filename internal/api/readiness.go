@@ -657,9 +657,15 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			add(ReadinessRequirement{Name: name, OK: true})
 			return
 		}
-		add(ReadinessRequirement{Name: name, OK: false,
-			Reason: "no port in the workspace pool is free (OS-bound or registry-allocated)",
-			Fix:    "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest."})
+		// ADVISORY (Optional), NOT a Ready-blocker: a dynamic-pool SERVER
+		// install/reinstall allocates no pool port (workspaces allocate lazily at
+		// registration), so an exhausted pool must not mark the server not-ready —
+		// it only means a NEW workspace cannot register until a port frees, and a
+		// reinstall whose own existing workspaces hold every port stays installable
+		// (Codex #382 r3). Mirrors admissionPortPoolFindings so Preflight ⟺ Ready.
+		add(ReadinessRequirement{Name: name, OK: false, Optional: true,
+			Reason: "no port in the workspace pool is free for a NEW workspace (OS-bound or registry-allocated); existing workspaces and reinstall are unaffected",
+			Fix:    "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest, before registering a new workspace."})
 	}
 	// Serena's dynamic-pool manifest is transport: native-http, so its
 	// materialized proxies bind external+offset upstream — mNative drives the

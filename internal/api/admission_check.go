@@ -188,8 +188,8 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 	}
 
 	var findings []AdmissionFinding
-	add := func(id, name, reason, fix string) {
-		findings = append(findings, AdmissionFinding{ID: id, Name: name, Reason: reason, Fix: fix})
+	add := func(id, name, reason, fix string, optional bool) {
+		findings = append(findings, AdmissionFinding{ID: id, Name: name, Reason: reason, Fix: fix, Optional: optional})
 	}
 
 	var registryTaken map[int]bool
@@ -198,7 +198,7 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 			if p == nil || p.End < p.Start {
 				continue
 			}
-			add("port-pool-registry", fmt.Sprintf("port pool %d-%d", p.Start, p.End), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).")
+			add("port-pool-registry", fmt.Sprintf("port pool %d-%d", p.Start, p.End), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
 		}
 		return findings
 	} else {
@@ -208,7 +208,7 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 				if p == nil || p.End < p.Start {
 					continue
 				}
-				add("port-pool-registry", fmt.Sprintf("port pool %d-%d", p.Start, p.End), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).")
+				add("port-pool-registry", fmt.Sprintf("port pool %d-%d", p.Start, p.End), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
 			}
 			return findings
 		}
@@ -234,7 +234,14 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 			break
 		}
 		if !free {
-			add("port-pool-free", name, "no port in the workspace pool is free (OS-bound or registry-allocated)", "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest.")
+			// ADVISORY (not blocking): a dynamic-pool SERVER install/reinstall
+			// allocates NO pool port — workspaces allocate lazily at registration
+			// (BuildSupervisorDaemonsForSerena materializes from each existing
+			// WorkspaceEntry.Port). So an exhausted pool must NOT block reinstalling
+			// a server whose own existing workspaces hold every port (Codex #382 r3);
+			// it only means a NEW workspace cannot register until a port frees. The
+			// row stays visible so the operator sees the pool is full.
+			add("port-pool-free", name, "no port in the workspace pool is free for a NEW workspace (OS-bound or registry-allocated); existing workspaces and reinstall are unaffected", "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest, before registering a new workspace.", true)
 		}
 	}
 	return findings

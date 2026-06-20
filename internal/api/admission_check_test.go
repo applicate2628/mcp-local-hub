@@ -149,6 +149,43 @@ func TestPreflightSkipsCallerDependentClientBindingValidation(t *testing.T) {
 	}
 }
 
+// TestAdmissionCheckPoolExhaustionIsAdvisory is the #382 r3 guard: a dynamic-pool
+// SERVER install/reinstall allocates NO pool port (workspaces allocate lazily at
+// registration), so an exhausted pool must NOT block the install — it only means a
+// NEW workspace cannot register until a port frees, and a reinstall whose own
+// existing workspaces hold every port stays installable. The pool-free finding is
+// still surfaced (operator sees the pool is full) but Optional, in BOTH gates.
+func TestAdmissionCheckPoolExhaustionIsAdvisory(t *testing.T) {
+	setupAdmissionParityTest(t)
+	// Every pool port appears OS-bound — the exhausted-pool reinstall case.
+	portAvailable = func(int) bool { return false }
+
+	m := &config.ServerManifest{
+		Name:      "exhausted-pool",
+		Kind:      config.KindWorkspaceScoped,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		DaemonTemplate: &config.DaemonTemplate{
+			Context:  "workspace",
+			PortPool: &config.PortPool{Start: 56000, End: 56000},
+		},
+	}
+
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("Preflight rejected an exhausted-pool reinstall: %v (pool exhaustion must be advisory)", err)
+	}
+	if !CheckServerReadiness(m).Ready {
+		t.Fatal("CheckServerReadiness.Ready=false on pool exhaustion; pool exhaustion must be advisory")
+	}
+	f, ok := admissionFindingByID(AdmissionCheck(m, AdmissionScope{}), "port-pool-free")
+	if !ok {
+		t.Fatal("port-pool-free finding missing; the exhausted pool must still be surfaced (advisory)")
+	}
+	if !f.Optional {
+		t.Fatal("port-pool-free finding is non-optional; it must be advisory so install/reinstall is not blocked")
+	}
+}
+
 type admissionCorpusCase struct {
 	name     string
 	manifest *config.ServerManifest
