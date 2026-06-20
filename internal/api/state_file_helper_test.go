@@ -178,6 +178,42 @@ func TestWriteStateFileAtomic_HonorsStrictModeWhenParentInsecure(t *testing.T) {
 	}
 }
 
+func TestWriteStateFileAtomic_HonorsPersistedStrictModeWhenParentInsecure(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := hardenedTempDir(t)
+	daemonStateRootOverride = stateDir
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowUnhardenedClientWriteEnv, "")
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"strict_mode":true}`), 0o600); err != nil {
+		t.Fatalf("seed persisted strict intent: %v", err)
+	}
+	resetStrictModeIntentCacheForTest()
+	if !OperatorRequiresSingleUserHome() {
+		t.Fatal("precondition: persisted strict_mode=true with env unset must enable the strict gate")
+	}
+
+	parent := filepath.Join(t.TempDir(), "leaky-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	broadenParentForStateFileTest(t, parent)
+
+	dst := filepath.Join(parent, "supervisor-intent.json")
+	err := WriteStateFileAtomic(dst, map[string]string{"v": "1"})
+	if err == nil {
+		t.Fatalf("persisted strict_mode=true must reject permissive parent even when %s is unset", RequireSingleUserHomeEnv)
+	}
+	if !strings.Contains(err.Error(), "persisted supervisor-intent.json") {
+		t.Errorf("error must mention persisted strict-mode intent; got %v", err)
+	}
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Errorf("persisted strict-mode rejection leaked a write at %s (stat err = %v)", dst, statErr)
+	}
+}
+
 // TestWriteStateFileAtomic_DefaultRelaxLaneSucceeds pins
 // falsifiable claim #5: when the env vars are unset and the parent
 // gate rejects, the relax lane fires, the write succeeds, and the

@@ -131,8 +131,8 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 		if !errors.Is(err, ErrSecureWriteParentInsecure) {
 			return fmt.Errorf("hub-mcp state write %s: %w", name, err)
 		}
-		if operatorRequiresSingleUserHomeEnvOnly() {
-			return fmt.Errorf("hub-mcp state write %s: %w; strict mode is active via %s=1, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+		if operatorRequiresSingleUserHome() {
+			return fmt.Errorf("hub-mcp state write %s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				name, err, RequireSingleUserHomeEnv)
 		}
 		// Best-effort audit log; never block the write on log failure. Default

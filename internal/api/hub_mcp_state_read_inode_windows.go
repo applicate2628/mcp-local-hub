@@ -80,12 +80,13 @@ const (
 //     swap window the old verifyHubMcpStateDACLImpl rejected on is
 //     closed by the inode-anchored read in this function — the
 //     attacker can replace the directory entry but not the inode
-//     our handle points to). File-DACL broadening also warns and
-//     proceeds in default-relax mode so inherited solo-host principals
-//     do not make read-side probes fail closed. Strict mode keeps both
-//     DACL gates hard. Separate warn events distinguish parent vs file
-//     broadening and write-broadening vs read-only-broadening so
-//     operators can audit the more-permissive cases.
+//     our handle points to). File-DACL broadening is stricter:
+//     read-only grants warn and proceed in default-relax mode, while
+//     WRITE/DAC/DELETE/owner grants are refused in every mode because
+//     a non-allowlisted SID could have modified the file before this
+//     read. Strict mode keeps both DACL gates hard. Separate warn
+//     events distinguish parent vs file broadening so operators can
+//     audit the relaxed read-only cases.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
 	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
 }
@@ -194,10 +195,10 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 		if errors.Is(err, ErrWrongOwner) {
 			return nil, err
 		}
-		reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
 		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
-			reason = "default-relax-on-solo-host (file grants WRITE/DAC-edit access to non-allowlisted SID; continuing because default read-side posture is advisory unless strict mode is enabled)"
+			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable", path, wrErr)
 		}
+		reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
 			"path":   path,
 			"parent": parentDir,

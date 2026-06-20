@@ -68,6 +68,13 @@ func withTempStateDir(t *testing.T) string {
 	return root
 }
 
+func writeStateSidecarBytes(t *testing.T, path string, raw []byte) {
+	t.Helper()
+	if err := api.WriteStateFileBytesAtomic(path, raw); err != nil {
+		t.Fatalf("seed state sidecar: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // codex round-3 Lane C P1 #3: runV5UpgradeWindows fails closed on
 // unreadable intent.
@@ -86,9 +93,7 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 
 	// Seed a corrupt supervisor-intent.json (not valid JSON).
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	if err := os.WriteFile(intentPath, []byte("not-valid-json{{{"), 0600); err != nil {
-		t.Fatalf("seed corrupt intent: %v", err)
-	}
+	writeStateSidecarBytes(t, intentPath, []byte("not-valid-json{{{"))
 
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
@@ -137,9 +142,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_PermissionDeniedPropagates(t *testing
 
 	// Write a corrupt sidecar — json.Unmarshal will fail, which is a
 	// non-IsNotExist error path through ReadSupervisorLockOwner.
-	if err := os.WriteFile(ownerPath, []byte("not-valid-json{{{"), 0o600); err != nil {
-		t.Fatalf("seed corrupt sidecar: %v", err)
-	}
+	writeStateSidecarBytes(t, ownerPath, []byte("not-valid-json{{{"))
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
 	err := d.ForceKillSupervisor("")
@@ -163,9 +166,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_InvalidPIDPropagates(t *testing.T) {
 	ownerPath := lockDir + ".owner.json"
 
 	body := `{"pid":0,"started_at":"2026-05-17T00:00:00Z"}`
-	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
-		t.Fatalf("seed PID-0 sidecar: %v", err)
-	}
+	writeStateSidecarBytes(t, ownerPath, []byte(body))
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
 	err := d.ForceKillSupervisor("")
@@ -494,9 +495,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID(t *testin
 
 	const reusedPID = 31337
 	body := `{"pid":31337,"started_at":"2026-05-17T00:00:00Z"}`
-	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
-		t.Fatalf("seed reused-PID sidecar: %v", err)
-	}
+	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{
 		Basename:    "node.exe",
 		CommandLine: `C:\Program Files\nodejs\node.exe server.js`,
@@ -522,9 +521,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
 
 	const supPID = 4242
 	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
-	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
-		t.Fatalf("seed supervisor sidecar: %v", err)
-	}
+	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{
 		Basename:         "mcphub.exe",
 		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`,
@@ -555,9 +552,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar(t *testin
 
 	const reusedPID = 31337
 	body := `{"pid":31337,"started_at":"` + liveSupervisorStartedAt + `"}`
-	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
-		t.Fatalf("seed reused-PID sidecar: %v", err)
-	}
+	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{
 		Basename:         "mcphub.exe",
 		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise`,
@@ -587,9 +582,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_TransientProbeError_Propagates(t *tes
 	ownerPath := lockDir + ".owner.json"
 
 	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
-	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
-		t.Fatalf("seed supervisor sidecar: %v", err)
-	}
+	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{}, errors.New("simulated transient WMI stall"))
 	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
@@ -613,9 +606,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_NotFoundIsBenign(t *testing.T) {
 	ownerPath := lockDir + ".owner.json"
 
 	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
-	if err := os.WriteFile(ownerPath, []byte(body), 0o600); err != nil {
-		t.Fatalf("seed supervisor sidecar: %v", err)
-	}
+	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{}, process.ErrProcessNotFound)
 	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)

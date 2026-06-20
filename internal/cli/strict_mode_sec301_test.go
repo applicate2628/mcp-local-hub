@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
@@ -119,11 +120,11 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 	}
 }
 
-// TestStrictModeDisable_BroadenedParent_NonMutationWriteDefaultRelaxes is the
-// default-relax control: with the same broadened parent and persisted strict
-// intent cache, a non-mutation secure state-file write still proceeds unless
-// MCPHUB_REQUIRE_SINGLE_USER_HOME=1 is set. Persisted strict intent alone no
-// longer hard-fails the parent gate for writes.
+// TestStrictModeDisable_BroadenedParent_NonMutationWritePersistedStrictRejects
+// is the strict-scope control: with the same broadened parent and persisted
+// strict intent cache, a non-mutation secure state-file write is refused even
+// when MCPHUB_REQUIRE_SINGLE_USER_HOME is unset. Only the strict-mode
+// mutation write itself gets the bounded bypass.
 //
 // SELF-HEAL HAZARD (pr301 r3 Finding 1): the negative-control write target's
 // PARENT must be a directory that DaemonStateDir()'s ensureStateRoot chmod
@@ -140,7 +141,7 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 // (On Windows ensureStateRoot is MkdirAll-only — it never touches DACLs — so
 // the root would survive too, but the child structure keeps both platforms on
 // one code path.)
-func TestStrictModeDisable_BroadenedParent_NonMutationWriteDefaultRelaxes(t *testing.T) {
+func TestStrictModeDisable_BroadenedParent_NonMutationWritePersistedStrictRejects(t *testing.T) {
 	dir := broadenedParentForGate(t)
 	t.Setenv(api.AllowUnhardenedStateReadEnv, "1")
 	t.Setenv(api.RequireSingleUserHomeEnv, "")
@@ -189,13 +190,16 @@ func TestStrictModeDisable_BroadenedParent_NonMutationWriteDefaultRelaxes(t *tes
 	}
 
 	// A non-mutation state-file write inside the broadened child parent, with no
-	// bypass window open, now proceeds because the write fallback hard-fails only
-	// on MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
+	// bypass window open, must still honor the persisted strict intent.
 	unrelated := filepath.Join(childParent, "unrelated-state.json")
-	if err := api.WriteStateFileAtomic(unrelated, map[string]any{"not": "a strict-mode mutation"}); err != nil {
-		t.Fatalf("default-relax non-mutation write on broadened parent must proceed; got %v", err)
+	err := api.WriteStateFileAtomic(unrelated, map[string]any{"not": "a strict-mode mutation"})
+	if err == nil {
+		t.Fatalf("non-mutation write on broadened parent must reject while persisted strict_mode=true is cached")
 	}
-	if _, statErr := os.Stat(unrelated); statErr != nil {
-		t.Errorf("default-relax write did not leave the target file: %v", statErr)
+	if !strings.Contains(err.Error(), "persisted supervisor-intent.json") {
+		t.Errorf("error must mention persisted strict-mode intent; got %v", err)
+	}
+	if _, statErr := os.Stat(unrelated); !os.IsNotExist(statErr) {
+		t.Errorf("persisted strict-mode rejection leaked the non-mutation target (stat err=%v)", statErr)
 	}
 }

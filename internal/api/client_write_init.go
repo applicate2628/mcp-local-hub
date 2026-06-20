@@ -758,6 +758,16 @@ func readStrictModeFromIntentBestEffort() bool {
 		return true
 	}
 	path := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+	// Absent intent is the fresh-install "no strict_mode declared" case. Check
+	// that side-effect-free before the anchored reader so a missing file under a
+	// broadened state dir does not emit fallback audit logs or create log files
+	// while merely probing operator posture.
+	if _, err := os.Lstat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false
+		}
+		return true
+	}
 	// Inode-anchored read with ENV-only strict policy: deliberately NOT
 	// ReadSupervisorIntent, and deliberately NOT the normal anchored reader's
 	// persisted-strict policy. ReadSupervisorIntent runs the parent-dir

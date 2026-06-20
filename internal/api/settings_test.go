@@ -1,6 +1,7 @@
 package api
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -33,6 +34,21 @@ func TestSettings_DefaultsResolve(t *testing.T) {
 	}
 	if _, has := all["advanced.open_app_data_folder"]; has {
 		t.Error("action keys must not appear in SettingsList output")
+	}
+}
+
+func TestSettings_MissingParentDirReturnsDefaults(t *testing.T) {
+	a := &API{}
+	path := filepath.Join(t.TempDir(), "missing", "mcp-local-hub", "gui-preferences.yaml")
+	all, err := a.SettingsListIn(path)
+	if err != nil {
+		t.Fatalf("SettingsListIn missing parent dir err = %v, want defaults", err)
+	}
+	if all["appearance.theme"] != "system" {
+		t.Errorf("expected default 'system', got %q", all["appearance.theme"])
+	}
+	if _, statErr := os.Stat(filepath.Dir(path)); !os.IsNotExist(statErr) {
+		t.Errorf("missing settings read created or touched parent dir %s (stat err = %v)", filepath.Dir(path), statErr)
 	}
 }
 

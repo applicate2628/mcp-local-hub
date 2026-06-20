@@ -24,6 +24,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,38 @@ func TestWriteHubMcpStateRejectsBadName(t *testing.T) {
 				t.Fatalf("readHubMcpStateFile(%q) err = %v, want errStateNameInvalid", bad, rerr)
 			}
 		})
+	}
+}
+
+func TestWriteHubMcpStateFile_HonorsPersistedStrictModeWhenParentInsecure(t *testing.T) {
+	statePathsHelper(t)
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+
+	stateDir := filepath.Join(t.TempDir(), "leaky-state")
+	if err := os.Mkdir(stateDir, 0o700); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"strict_mode":true}`), 0o600); err != nil {
+		t.Fatalf("seed persisted strict intent: %v", err)
+	}
+	broadenParentForStateFileTest(t, stateDir)
+	daemonStateRootOverride = stateDir
+	resetStrictModeIntentCacheForTest()
+	if !OperatorRequiresSingleUserHome() {
+		t.Fatal("precondition: persisted strict_mode=true with env unset must enable the strict gate")
+	}
+
+	err := writeHubMcpStateFile(hubMcpEndpointFileLeaf, []byte(`{"port":9125}`))
+	if err == nil {
+		t.Fatalf("persisted strict_mode=true must reject hub-mcp write under permissive state dir even when %s is unset", RequireSingleUserHomeEnv)
+	}
+	if !strings.Contains(err.Error(), "persisted supervisor-intent.json") {
+		t.Errorf("error must mention persisted strict-mode intent; got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, hubMcpEndpointFileLeaf)); !os.IsNotExist(statErr) {
+		t.Errorf("persisted strict-mode rejection leaked hub-mcp state file (stat err = %v)", statErr)
 	}
 }
 

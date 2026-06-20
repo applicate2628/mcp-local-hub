@@ -70,6 +70,24 @@ func applyFileDACLWithAuthUsersReadACE(t *testing.T, target string) {
 	applyProtectedDACLFromEntries(t, target, entries)
 }
 
+func applyFileDACLWithAuthUsersWriteACE(t *testing.T, target string) {
+	t.Helper()
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	authUsersSID, err := windows.StringToSid("S-1-5-11")
+	if err != nil {
+		t.Fatalf("Authenticated Users sid: %v", err)
+	}
+
+	entries := []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_WRITE),
+	}
+	applyProtectedDACLFromEntries(t, target, entries)
+}
+
 // TestVerifyHubMcpStateDACLAcceptsAllowlistOnly synthesizes the
 // happy-path DACL (current-user + LocalSystem + BuiltinAdministrators
 // GENERIC_ALL) and asserts the verifier accepts. Symmetric coverage
@@ -233,6 +251,29 @@ func TestReadStateFileInodeAnchored_FileDACLDefaultRelaxesStrictRejects(t *testi
 		t.Fatalf("strict mode must reject file with broadened DACL")
 	} else if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("strict mode err = %v, want ErrDaclOutsideAllowlist", err)
+	}
+}
+
+func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := hardenedTempDir(t)
+	daemonStateRootOverride = stateDir
+	resetStrictModeIntentCacheForTest()
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "supervisor-intent.json")
+	if err := os.WriteFile(target, []byte(`{"strict_mode":false}`), 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	applyFileDACLWithAuthUsersWriteACE(t, target)
+
+	_, err := readStateFileInodeAnchoredWithStrictPolicy(target, func() bool { return false })
+	if err == nil {
+		t.Fatalf("default mode must reject file DACL that grants write access to a non-allowlisted SID")
+	}
+	if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Fatalf("err = %v, want ErrDaclOutsideAllowlist", err)
 	}
 }
 

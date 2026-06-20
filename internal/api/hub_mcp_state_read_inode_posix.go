@@ -41,6 +41,9 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 
 	pfd, err := unix.Open(parentPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
+		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ENOTDIR) {
+			return nil, &os.PathError{Op: "open", Path: parentPath, Err: os.ErrNotExist}
+		}
 		return nil, fmt.Errorf("open parent %s: %w", parentPath, err)
 	}
 	defer unix.Close(pfd)
@@ -87,6 +90,9 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 
 	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
+		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ENOTDIR) {
+			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+		}
 		if errors.Is(err, syscall.ELOOP) {
 			return nil, ErrIrregularFile
 		}
@@ -110,8 +116,19 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 	if int(st.Uid) != os.Getuid() {
 		return nil, fmt.Errorf("%w: path=%s uid=%d (need current uid %d)", ErrWrongOwner, path, st.Uid, os.Getuid())
 	}
-	if mode&0o077 != 0 {
-		return nil, fmt.Errorf("%w: path=%s mode=%04o", ErrTooLoose, path, mode)
+	if mode&0o022 != 0 {
+		return nil, fmt.Errorf("%w: path=%s mode=%04o grants group/world write", ErrTooLoose, path, mode)
+	}
+	if mode&0o055 != 0 {
+		if requiresStrict() {
+			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, path, mode)
+		}
+		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
+			"path":      path,
+			"parent":    parentPath,
+			"reason":    "default-relax-on-solo-host (file group/world read/exec bits set; write bits cleared)",
+			"file_mode": fmt.Sprintf("%04o", mode),
+		})
 	}
 
 	// Read via the verified fd. unix.Read in a loop until EOF or

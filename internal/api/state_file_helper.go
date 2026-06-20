@@ -16,10 +16,12 @@
 //      Fchmod(0600). The post-rename re-verify catches policy ACLs
 //      that may auto-apply on some Windows paths.
 //
-//   3. MCPHUB_REQUIRE_SINGLE_USER_HOME=1 enforcement. On corp-managed
-//      Windows hosts the operator can demand the strict parent-dir
-//      gate; absent that env var, the default-relax lane proceeds —
-//      but never silently. A warn event
+//   3. Strict-mode enforcement. On corp-managed Windows hosts the
+//      operator can demand the strict parent-dir gate either via
+//      MCPHUB_REQUIRE_SINGLE_USER_HOME=1 or persisted
+//      supervisor-intent.json strict_mode=true. When neither strict
+//      source is active, the default-relax lane proceeds — but never
+//      silently. A warn event
 //      "state-file-write-unhardened-fallback" lands in hub-mcp.log
 //      (distinct from "client-write-unhardened-fallback" so audit
 //      filters can separate the two policy domains).
@@ -146,8 +148,8 @@ func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
 	if !errors.Is(err, ErrSecureWriteParentInsecure) {
 		return err
 	}
-	if operatorRequiresSingleUserHomeEnvOnly() {
-		return fmt.Errorf("state-file secure write %s: %w; strict mode is active via %s=1, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
+	if operatorRequiresSingleUserHome() {
+		return fmt.Errorf("state-file secure write %s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 			path, err, RequireSingleUserHomeEnv)
 	}
 

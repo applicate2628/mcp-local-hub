@@ -105,6 +105,17 @@ func TestReadStrictModeFromIntent_DeleteCapableStateDirAbsentFile_Relaxes_NotHea
 			"the state dir from 0o722 to %o — it must use the READ-ONLY resolver and leave the "+
 			"mode untouched (a read/posture path must never mutate the state dir)", afterMode)
 	}
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		t.Fatalf("readdir state dir after absent-intent read: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Fatalf("read-path no-side-effect regression: absent-intent read created state-dir entries %v; want empty dir", names)
+	}
 }
 
 // TestReadStrictModeFromIntent_SafeStateDirAbsentFile_Relaxes is the

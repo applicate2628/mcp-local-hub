@@ -421,7 +421,7 @@ func TestHasSupervisorIntent_EmptyObjectReturnsFalse(t *testing.T) {
 		t.Fatalf("DaemonStateDir: %v", err)
 	}
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	if err := os.WriteFile(intentPath, []byte("{}"), 0o600); err != nil {
+	if err := api.WriteStateFileBytesAtomic(intentPath, []byte("{}")); err != nil {
 		t.Fatalf("write intent: %v", err)
 	}
 
@@ -447,7 +447,7 @@ func TestHasSupervisorIntent_UnreadableReturnsError(t *testing.T) {
 		t.Fatalf("DaemonStateDir: %v", err)
 	}
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	if err := os.WriteFile(intentPath, []byte("not-valid-json{{{"), 0o600); err != nil {
+	if err := api.WriteStateFileBytesAtomic(intentPath, []byte("not-valid-json{{{")); err != nil {
 		t.Fatalf("write corrupt intent: %v", err)
 	}
 
