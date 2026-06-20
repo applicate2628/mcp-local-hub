@@ -801,6 +801,65 @@ func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintRetainedAcrossStatusErr
 	assertSerenaSessionGone(t, s, sessions, sid)
 }
 
+func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintDropsReusedPortFromDifferentWorkspace(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	const port = 9307
+	const wsAPath = "/proj/running-hint-reused-port-alpha"
+	const wsBPath = "/proj/running-hint-reused-port-beta"
+	const sidA = "sid-running-hint-reused-port-alpha"
+	const sidB = "sid-running-hint-reused-port-beta"
+	const pidA = 3333
+	const pidB = 4444
+	wsA := serenaWS("running-hint-reused-port-alpha", wsAPath, port)
+	wsB := serenaWS("running-hint-reused-port-beta", wsBPath, port)
+	sessions := NewInMemorySessionRouter()
+	resolver := &listerStubResolver{
+		stubResolver: stubResolver{entries: []*api.WorkspaceEntry{wsA}},
+		list:         []*api.WorkspaceEntry{wsA},
+	}
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.SetSerenaRouterDeps(&serenaRouterDeps{
+		Resolver: resolver,
+		Sessions: sessions,
+		AuditFn:  func(string, string, map[string]any) error { return nil },
+	})
+	seedBoundSerenaSession(s, sessions, wsA, sidA, "daemon-before-reused-port")
+
+	ch := make(chan Event, 1)
+	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+		"server": "serena", "daemon": wsA.WorkspaceKey, "prev_pid": float64(pidA), "port": float64(port),
+	}}
+	close(ch)
+	s.consumeSerenaBackendLossEvents(context.Background(), ch)
+	<-s.serenaBackendLossTrigger
+
+	s.coordinateBackendLossUnbind(sidA, sessions)
+	resolver.entries = []*api.WorkspaceEntry{wsB}
+	resolver.list = []*api.WorkspaceEntry{wsB}
+	seedBoundSerenaSession(s, sessions, wsB, sidB, "daemon-after-reused-port")
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{Server: "serena", Workspace: wsBPath, TaskName: wsB.TaskName, State: "Running", PID: pidB, Port: port},
+		}, nil
+	}
+
+	if _, ok := serenaBackendBaselineForTest(s, wsBPath); ok {
+		t.Fatalf("precondition: backend PID baseline for reused-port workspace %q should be absent", wsBPath)
+	}
+	if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+		t.Fatalf("baseline-absent reused-port workspace consumed prior workspace hint %d -> %d and tore down %d sessions; want 0", pidA, pidB, n)
+	}
+	assertSerenaSessionLive(t, s, sessions, wsB.WorkspaceKey, sidB)
+	if got := serenaBackendPrevPIDHintLenForTest(s); got != 0 {
+		t.Fatalf("prev-PID hint map length after reused-port mismatch = %d, want 0 stale hint dropped", got)
+	}
+	if got, ok := serenaBackendBaselineForTest(s, wsBPath); !ok || got != pidB {
+		t.Fatalf("baseline after reused-port first observation = (%d,%v), want (%d,true)", got, ok, pidB)
+	}
+}
+
 func TestSerenaRouter_BackendLoss_IPCReconcileZeroSessionReconcileClearsStaleHint(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 	withTempSerenaStateRoot(t)
@@ -811,7 +870,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcileZeroSessionReconcileClearsStaleHin
 	const pidB = 4444
 	ws := serenaWS("running-hint-zero-session-alpha", wsPath, 9307)
 	s, sessions := newSerenaStoreSeedServer(t, ws)
-	s.recordSerenaBackendPrevPIDHint(ws.Port, pidA)
+	s.recordSerenaBackendPrevPIDHint(ws.WorkspaceKey, ws.Port, pidA)
 	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
 		t.Fatal("zero-session reconcile read IPC status; want knownKeys==0 early return")
 		return nil, nil
@@ -851,7 +910,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintRetainedWhileRestarting
 	ws := serenaWS("running-hint-restarting-alpha", wsPath, 9308)
 	s, sessions := newSerenaStoreSeedServer(t, ws)
 	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-restart")
-	s.recordSerenaBackendPrevPIDHint(ws.Port, pidA)
+	s.recordSerenaBackendPrevPIDHint(ws.WorkspaceKey, ws.Port, pidA)
 	row := api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Restarting", PID: 0, StalePID: pidA, Port: ws.Port}
 	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
 		return []api.DaemonStatus{row}, nil
@@ -887,7 +946,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcilePrevPIDHintDroppedWhenSessionUnbin
 	ws := serenaWS("running-hint-restarting-unbind-alpha", wsPath, 9309)
 	s, sessions := newSerenaStoreSeedServer(t, ws)
 	seedBoundSerenaSession(s, sessions, ws, sid, "daemon-before-restart")
-	s.recordSerenaBackendPrevPIDHint(ws.Port, pidA)
+	s.recordSerenaBackendPrevPIDHint(ws.WorkspaceKey, ws.Port, pidA)
 	row := api.DaemonStatus{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Restarting", PID: 0, StalePID: pidA, Port: ws.Port}
 	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
 		return []api.DaemonStatus{row}, nil
