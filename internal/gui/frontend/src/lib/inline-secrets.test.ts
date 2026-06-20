@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inlineSecretsToWrite } from "./inline-secrets";
+import { inlineSecretsToWrite, secretRefKeys } from "./inline-secrets";
 import { BLANK_FORM } from "./manifest-yaml";
 import type { ManifestFormState } from "../types";
 
@@ -59,29 +59,17 @@ describe("inlineSecretsToWrite", () => {
     expect(inlineSecretsToWrite({ init: "v" }, form({ env: [{ key: "INIT", value: "secret:init" }] }))).toEqual([]);
   });
 
-  it("writes a value for a remote url ${secret:KEY} placeholder", () => {
-    const out = inlineSecretsToWrite(
-      { TOKEN: "remote-token", unused: "drop" },
-      form({ _preservedRaw: { url: "https://api.example.test/mcp?token=${secret:TOKEN}" } }),
-    );
-    expect(out).toEqual([["TOKEN", "remote-token"]]);
-  });
+});
 
-  it("writes values for remote header ${secret:KEY} placeholders", () => {
-    const out = inlineSecretsToWrite(
-      { TOKEN: "remote-token", OTHER: "other" },
-      form({
-        _preservedRaw: {
-          headers: {
-            Authorization: "Bearer ${secret:TOKEN}",
-            "X-Other": "${secret:OTHER}",
-          },
-        },
-      }),
-    );
-    expect(out).toEqual([
-      ["TOKEN", "remote-token"],
-      ["OTHER", "other"],
-    ]);
+describe("secretRefKeys", () => {
+  it("ignores remote placeholders preserved from unsupported Add Server manifests", () => {
+    expect(
+      secretRefKeys(
+        form({
+          env: [],
+          _preservedRaw: { url: "https://x/${secret:FOO}/mcp" },
+        }),
+      ),
+    ).toEqual([]);
   });
 });

@@ -172,4 +172,76 @@ describe("AddServerScreen — create save follow-up edits", () => {
     expect(editBody.expected_hash).toBe("hash-after-create");
     expect(editBody.yaml).toContain("command: 'node2'");
   });
+
+  it("offers Force Save after a create-mode follow-up edit hits a stale hash", async () => {
+    const requests: Array<{ url: string; body?: string }> = [];
+    let getCalls = 0;
+    let editCalls = 0;
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      requests.push({ url, body: init?.body as string | undefined });
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        getCalls++;
+        return Promise.resolve(jsonResponse({
+          yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'disk-node'\n",
+          hash: getCalls === 1 ? "hash-after-create" : "hash-external",
+        }));
+      }
+      if (url === "/api/manifest/edit") {
+        editCalls++;
+        if (editCalls === 1) {
+          return Promise.resolve(jsonResponse({
+            code: "MANIFEST_HASH_MISMATCH",
+            error: "manifest hash mismatch",
+          }, 409));
+        }
+        return Promise.resolve(jsonResponse({ hash: "hash-after-force", restart_required: false, hub_live: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(1);
+    });
+
+    await user.clear(screen.getByLabelText("Command"));
+    await user.type(screen.getByLabelText("Command"), "node2");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+
+    await screen.findByText(/Manifest changed on disk since you opened it/i);
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Force Save" }));
+
+    await screen.findByText("Force-saved.");
+    const editBodies = requests
+      .filter((r) => r.url === "/api/manifest/edit")
+      .map((r) => JSON.parse(r.body ?? "{}") as { expected_hash?: string; yaml?: string; name?: string });
+    expect(editBodies).toHaveLength(2);
+    expect(editBodies[0].expected_hash).toBe("hash-after-create");
+    expect(editBodies[1].name).toBe("demo");
+    expect(editBodies[1].expected_hash).toBe("hash-external");
+    expect(editBodies[1].yaml).toContain("command: 'node2'");
+  });
 });

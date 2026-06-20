@@ -2,18 +2,10 @@ import { isSecretRef } from "./secret-ref";
 import { SECRET_NAME_RE, isReservedName } from "./reserved-names";
 import type { ManifestFormState } from "../types";
 
-const SECRET_PLACEHOLDER_RE = /\$\{secret:([A-Za-z_][A-Za-z0-9_]*)\}/g;
-
-function collectPlaceholders(value: string, out: Set<string>) {
-  for (const match of value.matchAll(SECRET_PLACEHOLDER_RE)) {
-    if (match[1]) out.add(match[1]);
-  }
-}
-
 // secretRefKeys is the single owner of current inline-secret ref discovery for
-// the Add Server draft. Env refs use the bare `secret:KEY` form; remote-http
-// manifests keep `url`/`headers` as preserved top-level fields in this frontend
-// state and embed placeholders as `${secret:KEY}`.
+// the Add Server draft. The Add Server form supports only env refs in the bare
+// `secret:KEY` form; preserved remote-http placeholders are intentionally not
+// inlineable because this screen cannot persist remote-http manifests.
 export function secretRefKeys(state: ManifestFormState): string[] {
   const refKeys = new Set<string>();
   for (const row of state.env) {
@@ -22,19 +14,6 @@ export function secretRefKeys(state: ManifestFormState): string[] {
       if (key) refKeys.add(key);
     }
   }
-
-  const raw = state as ManifestFormState & { url?: unknown; headers?: unknown };
-  const preserved = state._preservedRaw ?? {};
-  const url = raw.url ?? preserved.url;
-  if (typeof url === "string") collectPlaceholders(url, refKeys);
-
-  const headers = raw.headers ?? preserved.headers;
-  if (headers && typeof headers === "object" && !Array.isArray(headers)) {
-    for (const value of Object.values(headers as Record<string, unknown>)) {
-      if (typeof value === "string") collectPlaceholders(value, refKeys);
-    }
-  }
-
   return Array.from(refKeys).sort();
 }
 

@@ -285,6 +285,7 @@ export function AddServerScreen(props: {
     const params = new URLSearchParams(props.route?.query ?? "");
     return params.get("name") ?? "";
   }, [props.mode, props.route?.query]);
+  const staleRecoveryName = editName || committedCreate?.name || "";
 
   // Mount effect for edit mode: reset per-manifest state BEFORE the new load
   // (R3 invariant) then fetch, apply hash, and detect nested-unknown fields.
@@ -529,6 +530,15 @@ export function AddServerScreen(props: {
   // so stale warnings don't paint over fresh state. (Q5.)
   const validateCounter = useRef(0);
 
+  function showStaleHashRecovery() {
+    setBanner({
+      kind: "error",
+      text: "Manifest changed on disk since you opened it. Reload will discard your edits and show the new version. Force Save will overwrite with your version.",
+      staleReload: true,
+      staleForceSave: true,
+    });
+  }
+
   async function runValidate() {
     const version = ++validateCounter.current;
     setBusy("validate");
@@ -603,25 +613,29 @@ export function AddServerScreen(props: {
         } catch (err) {
           if (version !== submissionCounter.current) return;
           if (err instanceof ManifestHashMismatchError) {
-            setBanner({
-              kind: "error",
-              text: "Manifest changed on disk since you opened it. Reload will discard your edits and show the new version. Force Save will overwrite with your version.",
-              staleReload: true,
-              staleForceSave: true,
-            });
+            showStaleHashRecovery();
             return;
           }
           throw err;
         }
       } else {
         if (committedCreate?.name === name) {
-          const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, committedCreate.hash);
-          if (version !== submissionCounter.current) return;
-          restartHub = restartRequired;
-          setCommittedCreate({ name, hash: newHash });
-          const postSave: ManifestFormState = { ...payloadState, loadedHash: newHash };
-          setFormState(postSave);
-          setInitialSnapshot(postSave);
+          try {
+            const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, committedCreate.hash);
+            if (version !== submissionCounter.current) return;
+            restartHub = restartRequired;
+            setCommittedCreate({ name, hash: newHash });
+            const postSave: ManifestFormState = { ...payloadState, loadedHash: newHash };
+            setFormState(postSave);
+            setInitialSnapshot(postSave);
+          } catch (err) {
+            if (version !== submissionCounter.current) return;
+            if (err instanceof ManifestHashMismatchError) {
+              showStaleHashRecovery();
+              return;
+            }
+            throw err;
+          }
         } else {
           const { restartRequired } = await postManifestCreate(name, payload);
           if (version !== submissionCounter.current) return;
@@ -684,11 +698,12 @@ export function AddServerScreen(props: {
   }
 
   async function runReload() {
-    if (!editName) return;
+    const name = staleRecoveryName;
+    if (!name) return;
     setBusy("save");
     setBanner(null);
     try {
-      const { yaml, hash } = await getManifest(editName);
+      const { yaml, hash } = await getManifest(name);
       // Codex R1 correction: re-run hasNestedUnknown on the reloaded YAML.
       // The external write that caused the stale-hash mismatch may have
       // introduced unsupported nested fields (e.g. a new daemons[].extra_*
@@ -700,6 +715,9 @@ export function AddServerScreen(props: {
       parsed.loadedHash = hash;
       setFormState(parsed);
       setInitialSnapshot(parsed);
+      if (committedCreate?.name === name) {
+        setCommittedCreate({ name, hash });
+      }
       // Reload replaces the draft from disk → drop inline secrets typed for the
       // REJECTED local draft so a value entered for the old version cannot linger
       // and later reappear/be written if the reloaded manifest references the same
@@ -728,10 +746,9 @@ export function AddServerScreen(props: {
     setBusy("save");
     setBanner(null);
     try {
-      // Codex R1 correction: Force Save is only reachable in edit mode;
-      // anchor to editName (URL-derived, immutable) rather than
-      // formState.name which a Paste YAML could have retargeted.
-      const name = editName;
+      // Anchor to the persisted manifest identity (edit URL name or the
+      // create-mode name already committed), not mutable formState.name.
+      const name = staleRecoveryName;
       if (!name) return;
       // 1. Re-read disk to get fresh hash + fresh _preservedRaw.
       const fresh = await getManifest(name);
@@ -766,6 +783,9 @@ export function AddServerScreen(props: {
       const postSave: ManifestFormState = { ...merged, loadedHash: newHash };
       setFormState(postSave);
       setInitialSnapshot(postSave);
+      if (committedCreate?.name === name) {
+        setCommittedCreate({ name, hash: newHash });
+      }
       const preservedKeys = Object.keys(freshParsed._preservedRaw);
       setBanner({
         kind: "success",

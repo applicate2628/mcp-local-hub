@@ -2,14 +2,10 @@ import type { ReadinessReport, ReadinessRequirement } from "../api";
 import { SECRET_NAME_RE, isReservedName } from "../lib/reserved-names";
 
 const SECRET_PREFIX = "secret: ";
-const SECRET_REMOTE_PREFIX = "secret (remote): ";
 
 // secretKeyOf returns the vault key a secret requirement names, or "".
 export function secretKeyOf(req: ReadinessRequirement): string {
   if (req.name.startsWith(SECRET_PREFIX)) return req.name.slice(SECRET_PREFIX.length);
-  if (req.name.startsWith(SECRET_REMOTE_PREFIX)) {
-    return req.name.slice(SECRET_REMOTE_PREFIX.length);
-  }
   return "";
 }
 
@@ -100,6 +96,7 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
           // unusable input (Codex #378 r2).
           const inlineable =
             key !== "" &&
+            !!req.optional &&
             !req.ok &&
             SECRET_NAME_RE.test(key) &&
             !isReservedName(key) &&
