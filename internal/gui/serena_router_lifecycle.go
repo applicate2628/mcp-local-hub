@@ -854,31 +854,25 @@ func (s *Server) handleToolsList(
 	// to answer. A nil WakeIdleFn (partially-wired routing) skips the wake
 	// (back-compat). The wake is bounded + detached, mirroring the tool-call wake.
 	//
-	// r37-2 P2: the wake returns the set of candidates whose wake was REFUSED with
-	// ErrWakeRefusedOperatorStop (an operator deliberately stopped that serena
-	// daemon). That refusal is TERMINAL for the candidate — mirroring the
-	// tool-call path's terminal handling (serena_router.go: an operator-stop
-	// refusal must NOT forward to a port that may now be rebound by a foreign
-	// process). EXCLUDE those candidates from the fetch loop below so an
-	// operator-stopped serena port is never probed — otherwise a foreign service
-	// that rebound the freed registry port could answer tools/list and the router
-	// would accept + CACHE a FOREIGN tool catalog (a correctness + trust-boundary
-	// defect). A merely-transient wake error (respawn not ready yet) is NOT
-	// terminal — those candidates stay eligible so the existing wake-as-an-
-	// optimization posture is preserved (a not-ready daemon may have come up by
-	// the time the fetch loop reaches it, or another live daemon answers).
-	operatorStopped := s.wakeOneSerenaCandidateForToolsList(r, deps, entries, auditFn)
-	fetchEntries := excludeOperatorStoppedSerenaCandidates(entries, operatorStopped)
+	// The wake returns the set of candidates that must not be probed by the
+	// fetch loop: operator-stop refusals and candidates already inside a
+	// stop/prune gate when the wake selector reached them. A merely-transient
+	// wake error (respawn not ready yet) is NOT terminal — those candidates stay
+	// eligible so the existing wake-as-an-optimization posture is preserved (a
+	// not-ready daemon may have come up by the time the fetch loop reaches it,
+	// or another live daemon answers).
+	wakeExcluded := s.wakeOneSerenaCandidateForToolsList(r, deps, entries, auditFn)
+	fetchEntries := excludeSerenaToolsListWakeCandidates(entries, wakeExcluded)
 	if len(fetchEntries) == 0 {
-		// Every candidate was operator-stopped: there is no eligible daemon to
-		// probe (probing the freed ports could accept a foreign catalog). Fail
-		// loud + retryable, the same honest signal the no-daemon-answered path
-		// uses, rather than fabricating a tool list or probing a stopped port.
-		_ = auditFn("info", "serena-tools-list-all-operator-stopped", map[string]any{
+		// Every candidate was excluded by the wake gate/refusal path: there is
+		// no eligible daemon to probe (probing a stopped/pruning port could
+		// accept a foreign catalog). Fail loud + retryable, the same honest
+		// signal the no-daemon-answered path uses.
+		_ = auditFn("info", "serena-tools-list-all-wake-excluded", map[string]any{
 			"workspace_count": len(entries),
 		})
 		writeJSONRPCError(w, tb.ID, jsonrpcInternalError,
-			"serena tools/list: every registered workspace daemon is stopped by an operator stop; start one with `mcphub start` (or the GUI) and retry")
+			"serena tools/list: every registered workspace daemon is stopped by an operator stop or currently pruning/stopping; start one with `mcphub start` (or the GUI) and retry")
 		return
 	}
 
@@ -897,6 +891,7 @@ func (s *Server) handleToolsList(
 		httpClient,
 		upstreamURLFn,
 		func(wsKey string) *api.WorkspaceEntry { return s.resolveWorkspaceByKey(deps, wsKey) },
+		deps.WakeIdleFn,
 		auditFn,
 		negotiatedVersion,
 		deps.UpstreamTimeout,
@@ -945,7 +940,8 @@ func (s *Server) handleToolsList(
 //     nudge mid-flight), mirroring the tool-call wake posture.
 //
 // It distinguishes two wake-error classes (r37-2 P2), mirroring the tool-call
-// path's terminal handling (serena_router.go):
+// path's terminal handling (serena_router.go), and also skips candidates that
+// are already inside a stop/prune gate:
 //
 //   - ErrWakeRefusedOperatorStop (an operator deliberately stopped that serena
 //     daemon) is TERMINAL for that candidate. The candidate's TaskName is added
@@ -962,7 +958,7 @@ func (s *Server) handleToolsList(
 //     candidate nor gates the tools/list response on its own.
 //
 // The returned map is keyed by TaskName (the same key handleToolsList filters
-// entries on); it is nil when no candidate was operator-stop-refused.
+// entries on); it is nil when no candidate was excluded.
 func (s *Server) wakeOneSerenaCandidateForToolsList(
 	r *http.Request,
 	deps *serenaRouterDeps,
@@ -972,7 +968,16 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 	if s == nil || deps == nil || deps.WakeIdleFn == nil {
 		return nil
 	}
-	var operatorStopped map[string]struct{}
+	var excluded map[string]struct{}
+	excludeCandidate := func(ws *api.WorkspaceEntry) {
+		if ws == nil || ws.TaskName == "" {
+			return
+		}
+		if excluded == nil {
+			excluded = make(map[string]struct{})
+		}
+		excluded[ws.TaskName] = struct{}{}
+	}
 	wakeCtx, wakeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 	defer wakeCancel()
 	for _, ws := range entries {
@@ -983,8 +988,18 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 			continue
 		}
 		candidateLive := func() bool {
-			gate := s.enterSerenaForwardCtx(wakeCtx, ws.WorkspaceKey)
+			gate := s.tryEnterSerenaForward(ws.WorkspaceKey)
 			if !gate.entered {
+				if gate.phaseActive {
+					excludeCandidate(ws)
+					_ = auditFn("info", "serena-tools-list-wake-candidate-gated", map[string]any{
+						"workspace_key":        ws.WorkspaceKey,
+						"task_name":            ws.TaskName,
+						"port":                 ws.Port,
+						"waited_through_prune": gate.waitedThroughPrune,
+					})
+					return false
+				}
 				_ = auditFn("info", "serena-tools-list-wake-gate-timeout", map[string]any{
 					"workspace_key": ws.WorkspaceKey,
 					"task_name":     ws.TaskName,
@@ -1012,10 +1027,7 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 				// optimization posture). Either way, CONTINUE to the next candidate so
 				// a wakeable idle sibling can still satisfy this tools/list.
 				if errors.Is(err, api.ErrWakeRefusedOperatorStop) {
-					if operatorStopped == nil {
-						operatorStopped = make(map[string]struct{})
-					}
-					operatorStopped[candidate.TaskName] = struct{}{}
+					excludeCandidate(candidate)
 					_ = auditFn("info", "serena-tools-list-wake-operator-stopped", map[string]any{
 						"workspace_key": candidate.WorkspaceKey,
 						"task_name":     candidate.TaskName,
@@ -1047,29 +1059,25 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 			return false
 		}()
 		if candidateLive {
-			return operatorStopped
+			return excluded
 		}
 	}
-	return operatorStopped
+	return excluded
 }
 
-// excludeOperatorStoppedSerenaCandidates returns the subset of entries whose
-// TaskName is NOT in operatorStopped (r37-2 P2). It is the filter handleToolsList
-// applies to the candidate pool before fetchToolsListFromAnyDaemon so an
-// operator-stopped serena daemon's registry port is never probed for a
-// tools/list catalog — a foreign service that rebound that freed port could
-// otherwise have its tool list accepted + cached. When operatorStopped is empty
-// the original slice is returned unchanged (the common no-operator-stop path
-// allocates nothing). Entries with an empty TaskName (never a wake candidate,
-// so never operator-stop-refused) are always retained.
-func excludeOperatorStoppedSerenaCandidates(entries []*api.WorkspaceEntry, operatorStopped map[string]struct{}) []*api.WorkspaceEntry {
-	if len(operatorStopped) == 0 {
+// excludeSerenaToolsListWakeCandidates returns the subset of entries whose
+// TaskName was not excluded by the tools/list wake gate/refusal path. The
+// excluded set covers operator-stop refusals and candidates already in an
+// idle-stop/prune phase when the wake selector reached them; those ports must
+// not be probed by fetchToolsListFromAnyDaemon.
+func excludeSerenaToolsListWakeCandidates(entries []*api.WorkspaceEntry, excluded map[string]struct{}) []*api.WorkspaceEntry {
+	if len(excluded) == 0 {
 		return entries
 	}
 	out := make([]*api.WorkspaceEntry, 0, len(entries))
 	for _, ws := range entries {
 		if ws != nil && ws.TaskName != "" {
-			if _, stopped := operatorStopped[ws.TaskName]; stopped {
+			if _, skip := excluded[ws.TaskName]; skip {
 				continue
 			}
 		}
@@ -1178,6 +1186,7 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 	httpClient *http.Client,
 	upstreamURLFn func(ws *api.WorkspaceEntry) string,
 	resolveWorkspaceByKeyFn func(wsKey string) *api.WorkspaceEntry,
+	wakeIdleFn func(context.Context, string, int, string) error,
 	auditFn func(level, event string, fields map[string]any) error,
 	clientProtocolVersion string,
 	upstreamTimeout time.Duration,
@@ -1204,8 +1213,8 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 		// longer hangs this candidate forever, so the loop can advance.
 		outcome, _, _, perr := func() (proxyToolsListResult, string, string, error) {
 			gateCtx, gateCancel := upstreamReadContext(ctx, upstreamTimeout)
+			defer gateCancel()
 			gate := s.enterSerenaForwardCtx(gateCtx, ws.WorkspaceKey)
-			gateCancel()
 			if !gate.entered {
 				return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: stop gate wait exceeded tools/list budget", ws.WorkspaceKey)
 			}
@@ -1222,6 +1231,15 @@ func (s *Server) fetchToolsListFromAnyDaemon(
 				upstreamURL = upstreamURLFn(candidate)
 				if upstreamURL == "" {
 					return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: upstream URL resolution failed", candidate.WorkspaceKey)
+				}
+			}
+			if gate.phaseActive && !gate.waitedThroughPrune && wakeIdleFn != nil && candidate.TaskName != "" && candidate.Port != 0 {
+				hadActiveIdleStop := serenaTaskHasActiveIdleStop(candidate.TaskName, time.Now())
+				if err := wakeIdleFn(gateCtx, candidate.TaskName, candidate.Port, "serena-tools-list-rewake"); err != nil {
+					return proxyToolsListResult{}, "", "", fmt.Errorf("workspace %q: re-wake after idle-stop: %w", candidate.WorkspaceKey, err)
+				}
+				if hadActiveIdleStop {
+					s.reseedSerenaBackendPIDAfterConfirmedWake(gateCtx, candidate)
 				}
 			}
 			outcome, daemonSessionID, daemonProtocolVersion, perr := proxyToolsListOnce(ctx, httpClient, upstreamURL, body, clientProtocolVersion, upstreamTimeout)

@@ -652,6 +652,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 
 	var ws *api.WorkspaceEntry
 	bindSessionAfterUpstream := false
+	workspaceResolvedByPath := false
 	if hasPath {
 		resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
 		if resolveErr != nil {
@@ -679,6 +680,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			ws = resolved
+			workspaceResolvedByPath = true
 		}
 		// A resolved OR freshly auto-registered workspace binds the sticky
 		// session after the upstream forward, exactly as before — auto-register
@@ -758,39 +760,51 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		gate := s.enterSerenaForward(ws.WorkspaceKey)
 		inFlightWorkspaceKey = ws.WorkspaceKey
-		if !gate.waitedThroughPrune {
-			break
-		}
 
 		var refreshed *api.WorkspaceEntry
 		if hasPath {
-			resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
-			if resolveErr != nil {
-				if errors.Is(resolveErr, ErrWorkspaceNotFound) {
+			if workspaceResolvedByPath {
+				resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
+				if resolveErr != nil {
+					if errors.Is(resolveErr, ErrWorkspaceNotFound) {
+						refreshed = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
+						if refreshed == nil {
+							return
+						}
+						workspaceResolvedByPath = false
+					} else {
+						http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
+						return
+					}
+				} else if resolved == nil {
 					refreshed = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
 					if refreshed == nil {
 						return
 					}
+					workspaceResolvedByPath = false
 				} else {
-					http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
-					return
-				}
-			} else if resolved == nil {
-				refreshed = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
-				if refreshed == nil {
-					return
+					refreshed = resolved
+					workspaceResolvedByPath = true
 				}
 			} else {
-				refreshed = resolved
+				refreshed = ws
 			}
 			if sessionID != "" && deps.Sessions != nil {
 				bindSessionAfterUpstream = true
 			}
 		} else {
-			refreshed = s.resolveWorkspaceByKey(deps, ws.WorkspaceKey)
-			if refreshed == nil {
-				writeWorkspaceNotFound(w, "", true)
-				return
+			if _, ok := deps.Resolver.(workspaceLister); ok {
+				refreshed = s.resolveWorkspaceByKey(deps, ws.WorkspaceKey)
+				if refreshed == nil {
+					writeWorkspaceNotFound(w, "", true)
+					return
+				}
+			} else {
+				if gate.phaseActive || gate.waitedThroughPrune {
+					writeWorkspaceNotFound(w, "", true)
+					return
+				}
+				refreshed = ws
 			}
 		}
 
