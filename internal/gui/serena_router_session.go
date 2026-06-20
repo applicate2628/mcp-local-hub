@@ -1131,6 +1131,11 @@ func SetSerenaBackendStatusFn(fn func(ctx context.Context) ([]api.DaemonStatus, 
 func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	knownKeys := s.serenaRouterSessions.knownWorkspaceKeys()
 	if len(knownKeys) == 0 {
+		s.serenaBackendPIDMu.Lock()
+		for port := range s.serenaBackendPrevPIDHint {
+			delete(s.serenaBackendPrevPIDHint, port)
+		}
+		s.serenaBackendPIDMu.Unlock()
 		return 0
 	}
 	statusFn := serenaBackendStatusFn
@@ -1212,18 +1217,14 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 				delete(s.serenaBackendPrevPIDHint, port)
 			}
 		}
-		for path := range wantPaths {
-			if port := pathToPort[path]; port > 0 {
-				delete(s.serenaBackendPrevPIDHint, port)
-			}
-		}
 		s.serenaBackendPIDMu.Unlock()
 		// IPC unavailable / transient: do NOT tear down sessions on a status
 		// READ failure (that would be a false positive — the daemons may be
 		// fine and only the supervisor IPC momentarily unreachable). The
 		// always-on forward-failure floor still covers real backend loss; this
-		// fallback simply skips this tick. The snapshot is left UNCHANGED so the
-		// next successful tick compares against the last known-good PIDs.
+		// fallback simply skips this tick. Wanted-port prev-PID hints are left
+		// UNCHANGED too: during a baseline-absent restart, that hint is still the
+		// only old-generation witness the next successful tick can consume.
 		return 0
 	}
 
@@ -1424,6 +1425,11 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	}
 	for path := range wantPaths {
 		if port := pathToPort[path]; port > 0 {
+			_, hadPrior := prior[path]
+			_, lost := lostByPath[path]
+			if !hadPrior && !lost && s.serenaRouterSessions.withWorkspaceCount(pathToKey[path]) > 0 {
+				continue
+			}
 			delete(s.serenaBackendPrevPIDHint, port)
 		}
 	}

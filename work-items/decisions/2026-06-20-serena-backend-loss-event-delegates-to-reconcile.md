@@ -67,3 +67,21 @@ The hint is used solely inside the reconcile owner's baseline-absent first-obser
 path, after idle-stop, restarting, absent-row, and dead-row cases have already been
 classified by the owner. The subscriber still does not map ports to workspaces, inspect
 IPC status, or call teardown.
+
+The accepted retain/clear lifecycle is:
+
+| Case | Condition | Hint action |
+|---|---|---|
+| (a) | IPC status read failed | RETAIN wanted-port hints; clear only non-wanted ports because a transient IPC failure leaves the prev-PID as the only old-generation witness. |
+| (b) | Successful reconcile has zero tracked workspaces (`knownKeys==0` or `wantPaths==0`) | CLEAR all hints because no bound session can consume them, and a survivor could misfire on a future fresh bind. |
+| (c) | Successful reconcile maps the port to a tracked workspace with a prior PID baseline | CLEAR because the stored baseline is the prior-generation source. |
+| (d) | Successful reconcile is baseline-absent and falls through to a present healthy PID | CLEAR by consumption in `consumeSerenaBackendPrevPIDHintLocked`; mark backend loss only when `hintPrev != newPID`. |
+| (e) | Successful reconcile is baseline-absent and observes restarting (`StalePID!=0`) or idle-stopped without consuming this tick | RETAIN, bounded by router-session liveness for that workspace. |
+| (f) | Successful reconcile maps the port to no tracked workspace | CLEAR because no current router-bound workspace can consume that hint. |
+
+Case (e)'s bound is the existing liveness predicate:
+`s.serenaRouterSessions.withWorkspaceCount(pathToKey[path]) > 0`. The moment the
+workspace has zero router sessions bound, the port-keyed hint is cleared. This adds no
+tick counter and does not add a PID field to `routerSessionBinding`; the session-bound-PID
+alternative remains rejected because the bind site cannot obtain the PID without the same
+fallible IPC read, which would invert ownership back out of the reconcile owner.
