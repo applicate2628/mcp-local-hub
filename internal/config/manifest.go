@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"mcp-local-hub/internal/secrets"
+	"mcp-local-hub/internal/urlredact"
 
 	"gopkg.in/yaml.v3"
 )
@@ -86,9 +91,10 @@ type ServerManifest struct {
 
 	// URL is the remote HTTPS endpoint for TransportRemoteHTTP servers.
 	// REQUIRED for transport="remote-http"; REJECTED if set with any
-	// other transport. Must start with "https://" (G6 §"Validation
-	// rules": plain http:// rejected — plaintext credentials over the
-	// wire are out of scope).
+	// other transport. Must parse as https:// with a non-empty host and
+	// no URL-embedded credentials (G6 §"Validation rules": plain
+	// http:// rejected — plaintext credentials over the wire are out of
+	// scope).
 	URL string `yaml:"url"`
 
 	// Headers carries HTTP headers sent on every request to the remote
@@ -472,6 +478,103 @@ func (m *ServerManifest) validateCompanion() error {
 	return nil
 }
 
+// ValidateRemoteHTTPURL validates the remote-http endpoint URL shape shared by
+// manifests and marketplace catalog http entries.
+func ValidateRemoteHTTPURL(raw string) error {
+	parseRaw := raw
+	if remoteHTTPURLHasSecretPlaceholderHost(raw) {
+		parseRaw = remoteHTTPURLPlaceholderHostShapeURL(raw)
+	}
+	u, err := url.Parse(parseRaw)
+	if err != nil {
+		// net/url's *url.Error embeds parseRaw verbatim. For the
+		// non-placeholder path parseRaw == raw, so a credentialed input
+		// like https://user:pass@example.com:abc/mcp would otherwise
+		// leak the credential through %w even though the outer caller
+		// redacts its own "got" value (bot PR #388 r10: manifest.go:489).
+		return fmt.Errorf("parse url: %w", urlredact.ScrubParseError(err))
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("must use https:// (got scheme %q)", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("must include a host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("must not embed credentials")
+	}
+	return nil
+}
+
+func remoteHTTPURLPlaceholderHostShapeURL(raw string) string {
+	const prefix = "https://"
+	rest := raw[len(prefix):]
+	end := strings.IndexAny(rest, "/?#")
+	authority := rest
+	suffix := ""
+	if end >= 0 {
+		authority = rest[:end]
+		suffix = rest[end:]
+	}
+	matches := secrets.SecretPlaceholderRE.FindStringIndex(authority)
+	tail := authority[matches[1]:]
+	return prefix + "placeholder.example" + tail + suffix
+}
+
+// RemoteHTTPURLHasSecretPlaceholderHost reports whether raw has a remote-http
+// URL authority made only from a ${secret:KEY} placeholder plus optional port.
+func RemoteHTTPURLHasSecretPlaceholderHost(raw string) bool {
+	return remoteHTTPURLHasSecretPlaceholderHost(raw)
+}
+
+func remoteHTTPURLHasSecretPlaceholderHost(raw string) bool {
+	const prefix = "https://"
+	if !strings.HasPrefix(raw, prefix) {
+		return false
+	}
+	rest := raw[len(prefix):]
+	end := strings.IndexAny(rest, "/?#")
+	authority := rest
+	if end >= 0 {
+		authority = rest[:end]
+	}
+	if authority == "" || strings.Contains(authority, "@") {
+		return false
+	}
+	matches := secrets.SecretPlaceholderRE.FindAllStringIndex(authority, -1)
+	if len(matches) != 1 || matches[0][0] != 0 {
+		return false
+	}
+	tail := authority[matches[0][1]:]
+	if tail == "" {
+		return true
+	}
+	if !strings.HasPrefix(tail, ":") || len(tail) == 1 {
+		return false
+	}
+	portText := tail[1:]
+	for _, r := range portText {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	// Range-check the port. url.Parse accepts the shaped form
+	// (https://placeholder.example:99999/mcp) without complaint, and the
+	// later expanded-secret-host validation only checks the secret value,
+	// so an out-of-range port like :99999 would be persisted as a
+	// placeholder-host URL no client can dial (bot PR #388 r10:
+	// manifest.go:554). A leading-zero port (e.g. :080) is also
+	// non-canonical and rejected.
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return false
+	}
+	if len(portText) > 1 && portText[0] == '0' {
+		return false
+	}
+	return true
+}
+
 func (m *ServerManifest) Validate() error {
 	if m.Name == "" {
 		return fmt.Errorf("manifest: name is required")
@@ -509,7 +612,8 @@ func (m *ServerManifest) Validate() error {
 	}
 
 	// G6 remote-http branch (spec §"Validation rules"):
-	//   - URL required and must be https://
+	//   - URL required and must parse as https:// with host and no
+	//     embedded credentials
 	//   - Command / BaseArgs / BaseArgsTemplate / Env / Daemons /
 	//     PortPool / Languages / IdleTimeoutMin REJECTED if non-zero
 	//     (silent ignore would let malformed manifests slip through
@@ -533,8 +637,8 @@ func (m *ServerManifest) Validate() error {
 		if m.URL == "" {
 			return fmt.Errorf("manifest %s: transport=remote-http requires url:", m.Name)
 		}
-		if !strings.HasPrefix(m.URL, "https://") {
-			return fmt.Errorf("manifest %s: transport=remote-http url must start with https:// (got %q; plaintext rejected — operator must TLS-terminate)", m.Name, m.URL)
+		if err := ValidateRemoteHTTPURL(m.URL); err != nil {
+			return fmt.Errorf("manifest %s: transport=remote-http url must be valid https:// without embedded credentials (got %q; plaintext rejected — operator must TLS-terminate): %w", m.Name, urlredact.MarketplaceURLForError(m.URL), err)
 		}
 		if m.Command != "" {
 			return fmt.Errorf("manifest %s: transport=remote-http rejects command (no local subprocess; remove the field)", m.Name)

@@ -103,6 +103,80 @@ func TestIsHubOwnedEntry_SerenaRouter(t *testing.T) {
 	}
 }
 
+func TestUninstallSecretPlaceholderHostURLMatchesHubOwnedEntry(t *testing.T) {
+	rawURL := "https://${secret:REMOTE_MCP_HOST}/mcp"
+	m := &config.ServerManifest{
+		Name:      "secret-host",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       rawURL,
+	}
+	expected := expectedHubURL(m, config.ClientBinding{Client: "claude-code"})
+	if expected != rawURL {
+		t.Fatalf("expectedHubURL = %q, want raw placeholder URL %q", expected, rawURL)
+	}
+	entry := &clients.MCPEntry{Name: "secret-host", URL: rawURL}
+	if !isHubOwnedEntry(entry, "secret-host", "", expected) {
+		t.Fatal("uninstall ownership should match legacy secret-placeholder-host URL")
+	}
+}
+
+func TestUninstallSecretPlaceholderHostURLMatchesExpandedHubOwnedEntry(t *testing.T) {
+	seedDefaultSecretForTest(t, "REMOTE_MCP_HOST", "mcp.context7.com")
+
+	rawURL := "https://${secret:REMOTE_MCP_HOST}/mcp"
+	expandedURL := "https://mcp.context7.com/mcp"
+	m := &config.ServerManifest{
+		Name:      "secret-host",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       rawURL,
+	}
+	expectedURLs := expectedHubURLs(m, config.ClientBinding{Client: "claude-code"})
+	if !stringSliceContains(expectedURLs, rawURL) {
+		t.Fatalf("expectedHubURLs = %v, want placeholder URL %q", expectedURLs, rawURL)
+	}
+	if !stringSliceContains(expectedURLs, expandedURL) {
+		t.Fatalf("expectedHubURLs = %v, want expanded URL %q", expectedURLs, expandedURL)
+	}
+	entry := &clients.MCPEntry{Name: "secret-host", URL: expandedURL}
+	if !isHubOwnedEntryForAnyExpectedURL(entry, "secret-host", "", expectedURLs) {
+		t.Fatal("uninstall ownership should match expanded secret-placeholder-host URL")
+	}
+}
+
+// TestUninstallSecretPlaceholderHostURLMatchesLegacyPrivateExpandedEntry covers
+// the upgrade case (bot PR #388 r10: install.go:1190): an older build installed
+// an entry from https://${secret:HOST}/mcp while the secret was a private IP
+// (e.g. 127.0.0.1). The NEW strict expander rejects that host, so the
+// strict-expansion candidate is absent — but the lenient uninstall-matching
+// expansion must still reproduce the verbatim wire URL so the stale entry can
+// be cleaned up.
+func TestUninstallSecretPlaceholderHostURLMatchesLegacyPrivateExpandedEntry(t *testing.T) {
+	seedDefaultSecretForTest(t, "REMOTE_MCP_HOST", "127.0.0.1")
+
+	rawURL := "https://${secret:REMOTE_MCP_HOST}/mcp"
+	expandedURL := "https://127.0.0.1/mcp"
+	m := &config.ServerManifest{
+		Name:      "secret-host",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       rawURL,
+	}
+	// Strict expansion (install-time gate) must reject the now-private host.
+	if _, err := expandRemoteHTTPURLSecrets(rawURL, nil); err == nil {
+		t.Fatal("strict expander should reject the now-private secret host")
+	}
+	expectedURLs := expectedHubURLs(m, config.ClientBinding{Client: "claude-code"})
+	if !stringSliceContains(expectedURLs, expandedURL) {
+		t.Fatalf("expectedHubURLs = %v, want lenient expanded URL %q for legacy uninstall match", expectedURLs, expandedURL)
+	}
+	entry := &clients.MCPEntry{Name: "secret-host", URL: expandedURL}
+	if !isHubOwnedEntryForAnyExpectedURL(entry, "secret-host", "", expectedURLs) {
+		t.Fatal("uninstall ownership should match the legacy private-host expanded URL via lenient expansion")
+	}
+}
+
 // stubMigrateClient is a non-nil clients.Client whose methods are never called:
 // the migrateOneBinding dry-run path returns after computing the URL, before any
 // adapter method runs. Embedding the interface satisfies it without implementing

@@ -110,6 +110,125 @@ func TestParseCatalog_HttpEntryAllowedNoCommand(t *testing.T) {
 	}
 }
 
+func TestParseCatalog_RejectsMalformedHTTPSURL(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		urlJSON string
+	}{
+		{"empty host", `"https:///mcp"`},
+		{"embedded credentials", `"https://user:pass@mcp.context7.com/mcp"`},
+		{"control byte", `"https://mcp.context7.com/\u0000mcp"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"schema_version": "1", "entries": [
+				{"id": "ctx7", "name": "Context7", "transport": "http", "url": ` + tc.urlJSON + `}
+			]}`
+			if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil {
+				t.Fatalf("expected rejection for url %s", tc.urlJSON)
+			}
+		})
+	}
+}
+
+func TestParseCatalog_RedactsEmbeddedCredentialsInHTTPEntryError(t *testing.T) {
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://user:pass@mcp.context7.com/mcp"}
+	]}`
+	_, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil {
+		t.Fatal("expected rejection for embedded credentials")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:pass", "user@", "pass@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in error %q", msg)
+		}
+	}
+	if !strings.Contains(msg, "https://mcp.context7.com/mcp") {
+		t.Fatalf("error should retain redacted URL context; got %q", msg)
+	}
+}
+
+func TestParseCatalog_RedactsCredentialsInMalformedParseError(t *testing.T) {
+	// bot PR #388 r10 (marketplace_safety.go:99): a credentialed URL
+	// malformed enough that url.Parse fails (bad %-escape). The wrapped
+	// *url.Error embeds the raw input, so without ScrubParseError the token
+	// leaks via %w even though the catalog-entry error redacts its "got".
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://user:token@example.com/%zz"}
+	]}`
+	_, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil {
+		t.Fatal("expected rejection for malformed credentialed URL")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:token", "user:token@", "token@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in parse error %q", msg)
+		}
+	}
+}
+
+func TestParseCatalog_SanitizesUnsafeHTTPEntryURLInError(t *testing.T) {
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://user:pass@mcp.context7.com/\u001b[31m"}
+	]}`
+	_, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil {
+		t.Fatal("expected rejection for unsafe URL")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:pass", "user@", "pass@", "\x1b", `\x1b`, `\u001b`} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("unsafe catalog URL detail %q leaked in error %q", leaked, msg)
+		}
+	}
+	if !strings.Contains(msg, "https://mcp.context7.com/") {
+		t.Fatalf("error should retain sanitized redacted URL context; got %q", msg)
+	}
+}
+
+func TestParseCatalog_RejectsMarketplaceLocalAndPrivateHTTPEntryURLs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"localhost", "https://localhost/mcp"},
+		{"localhost fqdn", "https://localhost./mcp"},
+		{"localhost fqdn uppercase", "https://LOCALHOST./mcp"},
+		{"ipv4 loopback", "https://127.0.0.1/mcp"},
+		{"ipv6 loopback", "https://[::1]/mcp"},
+		{"ipv4 unspecified", "https://0.0.0.0/mcp"},
+		{"ipv6 unspecified", "https://[::]/mcp"},
+		{"private 10/8", "https://10.0.0.1/mcp"},
+		{"private 172.16/12", "https://172.16.0.1/mcp"},
+		{"private 192.168/16", "https://192.168.1.1/mcp"},
+		{"ipv6 unique local", "https://[fc00::1]/mcp"},
+		{"ipv4 link local", "https://169.254.1.1/mcp"},
+		{"ipv6 link local", "https://[fe80::1]/mcp"},
+		{"ipv6 deprecated site-local fec0::/10", "https://[fec0::1]/mcp"},
+		{"ipv6 deprecated site-local upper bound", "https://[feff::1]/mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"schema_version": "1", "entries": [
+				{"id": "ctx7", "name": "Context7", "transport": "http", "url": "` + tc.url + `"}
+			]}`
+			if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil {
+				t.Fatalf("expected marketplace SSRF URL rejection for %q", tc.url)
+			}
+		})
+	}
+}
+
+func TestParseCatalog_RejectsLiteralLoopbackHTTPEntryHost(t *testing.T) {
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://127.0.0.1/mcp"}
+	]}`
+	if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil {
+		t.Fatal("expected catalog entry literal loopback host rejection")
+	}
+}
+
 func TestParseCatalog_NativeHTTPEntryAllowedWithCommand(t *testing.T) {
 	raw := `{"schema_version": "1", "entries": [
 		{"id": "serena", "name": "Serena", "transport": "native-http", "command": "uvx",

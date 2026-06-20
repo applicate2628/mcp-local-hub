@@ -20,7 +20,7 @@ func TestLoadMarketplaceCatalog_FreshFetch(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := injectTLSTestClient(srv)
-	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"))
 	if err != nil {
 		t.Fatalf("LoadMarketplaceCatalog: %v", err)
 	}
@@ -47,11 +47,12 @@ func TestLoadMarketplaceCatalog_StaleHits304KeepsBody(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := injectTLSTestClient(srv)
-	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL); err != nil {
+	registryURL := MarketplaceTestRegistryURL("/catalog.json")
+	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, registryURL); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
 	forceMarketplaceCacheStaleForTest(t, time.Now().Add(-48*time.Hour))
-	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, registryURL)
 	if err != nil {
 		t.Fatalf("revalidate: %v", err)
 	}
@@ -73,12 +74,13 @@ func TestLoadMarketplaceCatalog_NetworkErrorFallsBackToStaleWithWarn(t *testing.
 		_, _ = w.Write([]byte(body))
 	}))
 	client := injectTLSTestClient(srv)
-	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL); err != nil {
+	registryURL := MarketplaceTestRegistryURL("/catalog.json")
+	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, registryURL); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
 	srv.Close()
 	forceMarketplaceCacheStaleForTest(t, time.Now().Add(-48*time.Hour))
-	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, registryURL)
 	if err != nil {
 		t.Fatalf("offline fallback: %v", err)
 	}
@@ -87,6 +89,57 @@ func TestLoadMarketplaceCatalog_NetworkErrorFallsBackToStaleWithWarn(t *testing.
 	}
 	if src != MarketplaceSourceStaleFallback {
 		t.Errorf("source = %v, want stale-fallback", src)
+	}
+}
+
+// TestReadMarketplaceCache_RejectsTamperedInvalidCatalog pins the
+// cache trust boundary: cache JSON can be written or tampered after the
+// original fetch validation, so the read path must re-validate the
+// embedded catalog before any cached return path can serve it.
+func TestReadMarketplaceCache_RejectsTamperedInvalidCatalog(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	payload := `{"schema_version":"1","fetched_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","source_url":"https://registry.example/catalog.json","catalog":{"schema_version":"1","entries":[{"id":"evil","name":"Evil","transport":"http","url":"http://evil.example/mcp"}]}}`
+	if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(payload)); err != nil {
+		t.Fatalf("write tampered cache: %v", err)
+	}
+	cf, err := readMarketplaceCache()
+	if err == nil {
+		t.Fatalf("expected tampered cache rejection; got cache %+v", cf)
+	}
+	if cf != nil {
+		t.Fatalf("tampered cache returned alongside error: %+v", cf)
+	}
+	if !strings.Contains(err.Error(), "cache") || !strings.Contains(err.Error(), "https://") {
+		t.Fatalf("error should identify cache validation and https invariant; got %v", err)
+	}
+}
+
+func TestLoadMarketplaceCatalog_RejectsCachedDisallowedSourceURL(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	rawURL := "https://127.0.0.1/catalog.json"
+	payload := `{"schema_version":"1","fetched_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","source_url":"` + rawURL + `","catalog":{"schema_version":"1","entries":[{"id":"cached","name":"Cached","transport":"stdio","command":"npx"}]}}`
+	if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(payload)); err != nil {
+		t.Fatalf("write tampered cache: %v", err)
+	}
+	client := &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("fresh fetch transport must not be reached for a statically disallowed source URL")
+			return nil, nil
+		}),
+	}
+
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, rawURL)
+	if err == nil {
+		t.Fatalf("expected cached disallowed source_url to be rejected; got catalog=%+v src=%v", cat, src)
+	}
+	if cat != nil {
+		t.Fatalf("poisoned cache was returned: %+v", cat)
+	}
+	if src != 0 {
+		t.Fatalf("source = %v, want zero value on rejected poisoned cache", src)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
+		t.Fatalf("error = %v, want loopback source_url rejection", err)
 	}
 }
 
@@ -108,12 +161,13 @@ func TestLoadMarketplaceCatalog_FutureFetchedAtForcesRevalidate(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := injectTLSTestClient(srv)
-	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL); err != nil {
+	registryURL := MarketplaceTestRegistryURL("/catalog.json")
+	if _, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, registryURL); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
 	// Plant a future fetched_at — must NOT be treated as fresh.
 	forceMarketplaceCacheStaleForTest(t, time.Now().Add(24*time.Hour))
-	_, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
+	_, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, registryURL)
 	if err != nil {
 		t.Fatalf("revalidate: %v", err)
 	}
@@ -148,8 +202,10 @@ func TestLoadMarketplaceCatalog_RegistryURLSwitchForcesFresh(t *testing.T) {
 	defer srvB.Close()
 	clientA := injectTLSTestClient(srvA)
 	clientB := injectTLSTestClient(srvB)
+	registryA := MarketplaceTestRegistryURL("/catalog-a.json")
+	registryB := MarketplaceTestRegistryURL("/catalog-b.json")
 	// Prime with registry A.
-	catA, srcA, err := LoadMarketplaceCatalogWithClient(context.Background(), clientA, srvA.URL)
+	catA, srcA, err := LoadMarketplaceCatalogWithClient(context.Background(), clientA, registryA)
 	if err != nil {
 		t.Fatalf("primeA: %v", err)
 	}
@@ -159,7 +215,7 @@ func TestLoadMarketplaceCatalog_RegistryURLSwitchForcesFresh(t *testing.T) {
 	// Switch to registry B WITHOUT TTL expiry. The cache is fresh
 	// by age, so without the SourceURL gate the prior alpha entry
 	// would be returned for the beta query.
-	catB, srcB, err := LoadMarketplaceCatalogWithClient(context.Background(), clientB, srvB.URL)
+	catB, srcB, err := LoadMarketplaceCatalogWithClient(context.Background(), clientB, registryB)
 	if err != nil {
 		t.Fatalf("switchB: %v", err)
 	}
@@ -189,7 +245,7 @@ func TestLoadMarketplaceCatalog_RejectsOversizePayload(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := injectTLSTestClient(srv)
-	_, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, srv.URL)
+	_, _, err := LoadMarketplaceCatalogWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"))
 	if err == nil || !strings.Contains(err.Error(), "cap") {
 		t.Errorf("want size cap error; got %v", err)
 	}

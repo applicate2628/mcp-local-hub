@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"mcp-local-hub/internal/urlredact"
 )
 
 const MarketplaceCatalogSchemaVersion = "1"
@@ -58,22 +60,29 @@ func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
 		}
 		return nil, fmt.Errorf("decode catalog: trailing bytes after top-level JSON object: %w", err)
 	}
+	if err := validateMarketplaceCatalog(&cat); err != nil {
+		return nil, err
+	}
+	return &cat, nil
+}
+
+func validateMarketplaceCatalog(cat *MarketplaceCatalog) error {
 	if cat.SchemaVersion != MarketplaceCatalogSchemaVersion {
-		return nil, fmt.Errorf("schema_version %q: this build only accepts %q",
+		return fmt.Errorf("schema_version %q: this build only accepts %q",
 			cat.SchemaVersion, MarketplaceCatalogSchemaVersion)
 	}
 	seen := map[string]bool{}
 	for i := range cat.Entries {
 		e := &cat.Entries[i]
 		if err := validateMarketplaceEntry(e); err != nil {
-			return nil, fmt.Errorf("entry %d (id=%q): %w", i, e.ID, err)
+			return fmt.Errorf("entry %d (id=%q): %w", i, e.ID, err)
 		}
 		if seen[e.ID] {
-			return nil, fmt.Errorf("entry %d: duplicate id %q", i, e.ID)
+			return fmt.Errorf("entry %d: duplicate id %q", i, e.ID)
 		}
 		seen[e.ID] = true
 	}
-	return &cat, nil
+	return nil
 }
 
 func validateMarketplaceEntry(e *MarketplaceEntry) error {
@@ -98,11 +107,27 @@ func validateMarketplaceEntry(e *MarketplaceEntry) error {
 		if e.URL == "" {
 			return fmt.Errorf("http entry must declare url")
 		}
-		if !strings.HasPrefix(e.URL, "https://") {
-			return fmt.Errorf("http entry url must be https:// (got %q)", e.URL)
+		if _, err := parseMarketplacePublicHTTPSURL(e.URL); err != nil {
+			return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", marketplaceCatalogURLForError(e.URL), err)
 		}
 	default:
 		return fmt.Errorf("unknown transport %q (want stdio, native-http, or http)", e.Transport)
 	}
 	return nil
+}
+
+func marketplaceCatalogURLForError(raw string) string {
+	return sanitizeMarketplaceErrorText(urlredact.MarketplaceURLForError(raw))
+}
+
+func sanitizeMarketplaceErrorText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if IsUnsafeMarketplaceTextRune(r) {
+			b.WriteRune('\uFFFD')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

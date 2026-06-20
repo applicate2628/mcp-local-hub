@@ -49,17 +49,18 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 		return "", nil, fmt.Errorf("entry %q transport=http but url is empty", e.ID)
 	}
 	// Bot r2 P1 closure (PR #172): catalog URLs/IDs are untrusted
-	// strings validated only at `https://` prefix upstream. A value
-	// containing CR/LF or other C0 controls embedded in a YAML
-	// comment line would break out of `#` and inject real keys (e.g.
+	// strings. URL parsing rejects malformed https endpoints upstream,
+	// but any value containing CR/LF or other line-breaking controls
+	// embedded in a YAML comment line would break out of `#` and inject
+	// real keys (e.g.
 	// `https://x\ntransport: stdio-bridge\ncommand: cmd.exe`). Reject
 	// the entry instead of mangling it so the operator sees the
 	// hostile registry rather than a silently-altered draft.
-	if containsUnsafeYAMLCommentRunes(e.URL) {
-		return "", nil, fmt.Errorf("entry %q url contains control/line-break characters unsafe for YAML comments — refusing to emit draft (registry may be hostile)", e.ID)
+	if err := rejectUnsafeMarketplaceDraftString("url", e.URL); err != nil {
+		return "", nil, fmt.Errorf("entry %q url contains characters unsafe for YAML comments or draft fields — refusing to emit draft (registry may be hostile): %w", e.ID, err)
 	}
-	if containsUnsafeYAMLCommentRunes(e.ID) {
-		return "", nil, fmt.Errorf("entry id %q contains control/line-break characters unsafe for YAML comments — refusing to emit draft (registry may be hostile)", e.ID)
+	if err := rejectUnsafeMarketplaceDraftString("entry id", e.ID); err != nil {
+		return "", nil, fmt.Errorf("entry id %q contains characters unsafe for YAML comments or draft fields — refusing to emit draft (registry may be hostile): %w", e.ID, err)
 	}
 	draft := map[string]any{
 		"name":      e.ID,
@@ -100,6 +101,18 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 }
 
 func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransport string) (string, []string, error) {
+	if err := rejectUnsafeMarketplaceDraftString("entry id", e.ID); err != nil {
+		return "", nil, fmt.Errorf("refusing to emit marketplace draft: %w", err)
+	}
+	if err := rejectUnsafeMarketplaceDraftString("command", e.Command); err != nil {
+		return "", nil, fmt.Errorf("refusing to emit marketplace draft: %w", err)
+	}
+	if err := rejectUnsafeMarketplaceDraftStringSlice("args", e.Args); err != nil {
+		return "", nil, fmt.Errorf("refusing to emit marketplace draft: %w", err)
+	}
+	if err := rejectUnsafeMarketplaceDraftStringMap("env", e.Env); err != nil {
+		return "", nil, fmt.Errorf("refusing to emit marketplace draft: %w", err)
+	}
 	workspace := opts.WorkspaceFolder
 	if workspace == "" {
 		// codex deep-sec PR #163 lane 3 P3 closure: surface
@@ -133,6 +146,12 @@ func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransp
 	for k, v := range e.Env {
 		env[k] = exp.Expand(v)
 	}
+	if err := rejectUnsafeMarketplaceDraftStringSlice("base_args", args); err != nil {
+		return "", nil, fmt.Errorf("refusing to emit marketplace draft: %w", err)
+	}
+	if err := rejectUnsafeMarketplaceDraftStringMap("env", env); err != nil {
+		return "", nil, fmt.Errorf("refusing to emit marketplace draft: %w", err)
+	}
 	warnings := exp.WarningsForSensitive()
 	// Surface non-sensitive empty-resolution placeholders too: the
 	// operator should see exactly which ${env:*} substituted to empty
@@ -159,6 +178,9 @@ func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransp
 		if traversalSuffixContainsParentRef(raw) {
 			warnings = append(warnings, fmt.Sprintf("catalog string %q uses ${workspaceFolder} followed by a parent-directory reference (..); the expanded path escapes the workspace — review before saving", raw))
 		}
+	}
+	if err := rejectUnsafeMarketplaceWarnings(warnings); err != nil {
+		return "", nil, fmt.Errorf("refusing to emit marketplace draft: %w", err)
 	}
 	draft := map[string]any{
 		"name":      e.ID,
@@ -260,15 +282,8 @@ func traversalSuffixContainsParentRef(s string) bool {
 	return false
 }
 
-// containsUnsafeYAMLCommentRunes reports whether s holds any rune that can
-// break a YAML comment line when interpolated into comment text. Reject:
-//   - ASCII controls + DEL (C0/DEL)
-//   - Unicode NEL (U+0085), line separator (U+2028), paragraph separator (U+2029)
+// containsUnsafeYAMLCommentRunes reports whether s holds any terminal/draft
+// unsafe rune when interpolated into YAML comment text.
 func containsUnsafeYAMLCommentRunes(s string) bool {
-	for _, r := range s {
-		if (r >= 0x00 && r <= 0x1f) || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029 {
-			return true
-		}
-	}
-	return false
+	return containsUnsafeMarketplaceText(s)
 }

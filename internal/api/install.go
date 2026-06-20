@@ -1140,8 +1140,8 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 			// removed manually or the client never received it.
 			continue
 		}
-		expectedURL := expectedHubURL(m, b)
-		if !isHubOwnedEntry(entry, m.Name, b.Daemon, expectedURL) {
+		expectedURLs := expectedHubURLs(m, b)
+		if !isHubOwnedEntryForAnyExpectedURL(entry, m.Name, b.Daemon, expectedURLs) {
 			report.ClientWarns = append(report.ClientWarns, fmt.Sprintf("refusing to remove %s from %s: entry is not hub-managed (neither relay tuple nor URL matches what this manifest would install)", m.Name, b.Client))
 			continue
 		}
@@ -1172,16 +1172,47 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 // vs adding new state-file machinery; URL-as-secret-bearer is rare
 // (headers are the dominant credential surface).
 func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
+	urls := expectedHubURLs(m, b)
+	if len(urls) == 0 {
+		return ""
+	}
+	return urls[0]
+}
+
+func expectedHubURLs(m *config.ServerManifest, b config.ClientBinding) []string {
 	if m.Transport == config.TransportRemoteHTTP {
-		expanded, err := ExpandSecrets(m.URL, nil)
-		if err != nil {
-			return "" // missing secrets at uninstall — caller treats as no-match
+		urls := make([]string, 0, 3)
+		if config.RemoteHTTPURLHasSecretPlaceholderHost(m.URL) {
+			urls = append(urls, m.URL)
 		}
-		return expanded
+		// Strict expansion mirrors what install/test-remote accept today.
+		// It rejects a placeholder host that now expands to a
+		// private/loopback/credentialed value, so an entry an OLDER build
+		// installed (when the secret was e.g. 127.0.0.1) would no longer be
+		// matchable through this path.
+		if expanded, err := expandRemoteHTTPURLSecrets(m.URL, nil); err == nil && expanded != "" {
+			if !stringSliceContains(urls, expanded) {
+				urls = append(urls, expanded)
+			}
+		}
+		// Lenient expansion for UNINSTALL OWNERSHIP MATCHING ONLY. It does
+		// the raw ${secret:KEY} substitution (so it reproduces the exact
+		// wire URL an older build wrote into the client config) WITHOUT the
+		// install-time public-host rejection. This lets upgraded users
+		// clean up an entry whose secret host is now disallowed for new
+		// installs; the stricter validation still gates install/test-remote
+		// (bot PR #388 r10: install.go:1190). Best-effort: a lookup failure
+		// (missing non-host secret) simply yields no extra candidate.
+		if lenient, err := ExpandSecrets(m.URL, nil); err == nil && lenient != "" {
+			if !stringSliceContains(urls, lenient) {
+				urls = append(urls, lenient)
+			}
+		}
+		return urls
 	}
 	daemon, ok := findDaemon(m, b.Daemon)
 	if !ok {
-		return ""
+		return nil
 	}
 	urlPath := b.URLPath
 	if urlPath == "" {
@@ -1189,7 +1220,16 @@ func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
 	}
 	// Single owner of the loopback-host literal (127.0.0.1, NOT "localhost") —
 	// see clients.HubLoopbackURL for the IPv6-fallback / VPN-rerouting rationale.
-	return clients.HubLoopbackURL(daemon.Port, urlPath)
+	return []string{clients.HubLoopbackURL(daemon.Port, urlPath)}
+}
+
+func stringSliceContains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // isHubOwnedEntry reports whether the client entry was placed by this
@@ -1237,6 +1277,18 @@ func isHubOwnedEntry(entry *clients.MCPEntry, server, daemon, expectedURL string
 	// "not hub-managed" (serena-client-revert-on-manifest-sync uninstall-side).
 	if IsSerenaServer(server) && IsHubOwnedSerenaRouterEntry(entry) {
 		return true
+	}
+	return false
+}
+
+func isHubOwnedEntryForAnyExpectedURL(entry *clients.MCPEntry, server, daemon string, expectedURLs []string) bool {
+	if len(expectedURLs) == 0 {
+		return isHubOwnedEntry(entry, server, daemon, "")
+	}
+	for _, expectedURL := range expectedURLs {
+		if isHubOwnedEntry(entry, server, daemon, expectedURL) {
+			return true
+		}
 	}
 	return false
 }
@@ -1638,7 +1690,7 @@ func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, e
 	// BEFORE any client config write so the operator sees a clear
 	// error rather than half-installed entries with placeholder
 	// strings.
-	expandedURL, err := ExpandSecrets(m.URL, nil)
+	expandedURL, err := expandRemoteHTTPURLSecrets(m.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("install remote-http manifest %s: expand url: %w", m.Name, err)
 	}
