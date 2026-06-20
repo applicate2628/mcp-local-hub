@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"mcp-local-hub/internal/secrets"
@@ -486,7 +487,12 @@ func ValidateRemoteHTTPURL(raw string) error {
 	}
 	u, err := url.Parse(parseRaw)
 	if err != nil {
-		return fmt.Errorf("parse url: %w", err)
+		// net/url's *url.Error embeds parseRaw verbatim. For the
+		// non-placeholder path parseRaw == raw, so a credentialed input
+		// like https://user:pass@example.com:abc/mcp would otherwise
+		// leak the credential through %w even though the outer caller
+		// redacts its own "got" value (bot PR #388 r10: manifest.go:489).
+		return fmt.Errorf("parse url: %w", urlredact.ScrubParseError(err))
 	}
 	if u.Scheme != "https" {
 		return fmt.Errorf("must use https:// (got scheme %q)", u.Scheme)
@@ -546,10 +552,25 @@ func remoteHTTPURLHasSecretPlaceholderHost(raw string) bool {
 	if !strings.HasPrefix(tail, ":") || len(tail) == 1 {
 		return false
 	}
-	for _, r := range tail[1:] {
+	portText := tail[1:]
+	for _, r := range portText {
 		if r < '0' || r > '9' {
 			return false
 		}
+	}
+	// Range-check the port. url.Parse accepts the shaped form
+	// (https://placeholder.example:99999/mcp) without complaint, and the
+	// later expanded-secret-host validation only checks the secret value,
+	// so an out-of-range port like :99999 would be persisted as a
+	// placeholder-host URL no client can dial (bot PR #388 r10:
+	// manifest.go:554). A leading-zero port (e.g. :080) is also
+	// non-canonical and rejected.
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return false
+	}
+	if len(portText) > 1 && portText[0] == '0' {
+		return false
 	}
 	return true
 }

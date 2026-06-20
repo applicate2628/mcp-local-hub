@@ -149,6 +149,26 @@ func TestParseCatalog_RedactsEmbeddedCredentialsInHTTPEntryError(t *testing.T) {
 	}
 }
 
+func TestParseCatalog_RedactsCredentialsInMalformedParseError(t *testing.T) {
+	// bot PR #388 r10 (marketplace_safety.go:99): a credentialed URL
+	// malformed enough that url.Parse fails (bad %-escape). The wrapped
+	// *url.Error embeds the raw input, so without ScrubParseError the token
+	// leaks via %w even though the catalog-entry error redacts its "got".
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://user:token@example.com/%zz"}
+	]}`
+	_, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil {
+		t.Fatal("expected rejection for malformed credentialed URL")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:token", "user:token@", "token@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in parse error %q", msg)
+		}
+	}
+}
+
 func TestParseCatalog_SanitizesUnsafeHTTPEntryURLInError(t *testing.T) {
 	raw := `{"schema_version": "1", "entries": [
 		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://user:pass@mcp.context7.com/\u001b[31m"}
@@ -186,6 +206,8 @@ func TestParseCatalog_RejectsMarketplaceLocalAndPrivateHTTPEntryURLs(t *testing.
 		{"ipv6 unique local", "https://[fc00::1]/mcp"},
 		{"ipv4 link local", "https://169.254.1.1/mcp"},
 		{"ipv6 link local", "https://[fe80::1]/mcp"},
+		{"ipv6 deprecated site-local fec0::/10", "https://[fec0::1]/mcp"},
+		{"ipv6 deprecated site-local upper bound", "https://[feff::1]/mcp"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := `{"schema_version": "1", "entries": [

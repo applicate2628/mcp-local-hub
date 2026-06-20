@@ -1181,16 +1181,32 @@ func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
 
 func expectedHubURLs(m *config.ServerManifest, b config.ClientBinding) []string {
 	if m.Transport == config.TransportRemoteHTTP {
-		urls := make([]string, 0, 2)
+		urls := make([]string, 0, 3)
 		if config.RemoteHTTPURLHasSecretPlaceholderHost(m.URL) {
 			urls = append(urls, m.URL)
 		}
-		expanded, err := expandRemoteHTTPURLSecrets(m.URL, nil)
-		if err != nil {
-			return urls // missing non-host secrets at uninstall leave no expanded match
+		// Strict expansion mirrors what install/test-remote accept today.
+		// It rejects a placeholder host that now expands to a
+		// private/loopback/credentialed value, so an entry an OLDER build
+		// installed (when the secret was e.g. 127.0.0.1) would no longer be
+		// matchable through this path.
+		if expanded, err := expandRemoteHTTPURLSecrets(m.URL, nil); err == nil && expanded != "" {
+			if !stringSliceContains(urls, expanded) {
+				urls = append(urls, expanded)
+			}
 		}
-		if expanded != "" && !stringSliceContains(urls, expanded) {
-			urls = append(urls, expanded)
+		// Lenient expansion for UNINSTALL OWNERSHIP MATCHING ONLY. It does
+		// the raw ${secret:KEY} substitution (so it reproduces the exact
+		// wire URL an older build wrote into the client config) WITHOUT the
+		// install-time public-host rejection. This lets upgraded users
+		// clean up an entry whose secret host is now disallowed for new
+		// installs; the stricter validation still gates install/test-remote
+		// (bot PR #388 r10: install.go:1190). Best-effort: a lookup failure
+		// (missing non-host secret) simply yields no extra candidate.
+		if lenient, err := ExpandSecrets(m.URL, nil); err == nil && lenient != "" {
+			if !stringSliceContains(urls, lenient) {
+				urls = append(urls, lenient)
+			}
 		}
 		return urls
 	}

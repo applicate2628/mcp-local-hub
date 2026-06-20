@@ -302,7 +302,11 @@ func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL
 		return &MarketplaceFetchResult{Status: resp.StatusCode, NotMod: true, ETag: resp.Header.Get("ETag")}, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return &MarketplaceFetchResult{Status: resp.StatusCode}, fmt.Errorf("fetch %s: HTTP %d", rawURL, resp.StatusCode)
+		// rawURL was already accepted by parseMarketplacePublicHTTPSURL
+		// (no userinfo), but redact unconditionally so this error site can
+		// never become a new credential-leak path if the validator is ever
+		// loosened (structural: every URL-in-error goes through urlredact).
+		return &MarketplaceFetchResult{Status: resp.StatusCode}, fmt.Errorf("fetch %s: HTTP %d", urlredact.MarketplaceURLForError(rawURL), resp.StatusCode)
 	}
 	// Reject unexpected Content-Encoding (defense-in-depth — should
 	// not appear because we sent Accept-Encoding: identity and the
@@ -325,12 +329,9 @@ func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL
 }
 
 func redactMarketplaceHTTPError(err error) error {
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) && urlErr.URL != "" {
-		return &scrubbedURLError{
-			msg: fmt.Sprintf("%s %q: %v", urlErr.Op, urlredact.MarketplaceURLForError(urlErr.URL), urlErr.Err),
-			err: err,
-		}
-	}
-	return err
+	// urlredact.ScrubParseError is the single owner of *url.Error
+	// credential scrubbing (also used by every url.Parse failure in the
+	// marketplace + remote-http validators). net/http wraps transport
+	// failures as *url.Error too, so the same primitive covers them.
+	return urlredact.ScrubParseError(err)
 }

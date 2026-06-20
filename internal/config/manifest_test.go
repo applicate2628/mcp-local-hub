@@ -490,6 +490,67 @@ func TestValidateRemoteHTTP_RedactsEmbeddedCredentialsInURLError(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteHTTP_RedactsCredentialsInMalformedParseError(t *testing.T) {
+	// A credentialed URL malformed enough that url.Parse fails BEFORE the
+	// u.User check (invalid port `:abc`). The wrapped *url.Error embeds the
+	// raw input, so without ScrubParseError the token leaks via %w even
+	// though the outer "got" value is redacted (bot PR #388 r10).
+	m := &ServerManifest{
+		Name:      "ctx7-bad",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "https://user:pass@example.com:abc/mcp",
+	}
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("expected malformed credentialed URL rejection")
+	}
+	msg := err.Error()
+	for _, leaked := range []string{"user:pass", "user:pass@"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("credential material leaked in parse error %q", msg)
+		}
+	}
+}
+
+func TestValidateRemoteHTTP_RejectsOutOfRangePlaceholderHostPort(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"port above 65535", "https://${secret:REMOTE_MCP_HOST}:99999/mcp"},
+		{"port zero", "https://${secret:REMOTE_MCP_HOST}:0/mcp"},
+		{"leading-zero non-canonical port", "https://${secret:REMOTE_MCP_HOST}:080/mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if RemoteHTTPURLHasSecretPlaceholderHost(tc.url) {
+				t.Fatalf("placeholder-host predicate accepted out-of-range port for %q", tc.url)
+			}
+			m := &ServerManifest{
+				Name:      "secret-host-badport",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       tc.url,
+			}
+			if err := m.Validate(); err == nil {
+				t.Fatalf("expected rejection of out-of-range placeholder-host port for %q", tc.url)
+			}
+		})
+	}
+}
+
+func TestValidateRemoteHTTP_AllowsInRangePlaceholderHostPort(t *testing.T) {
+	for _, raw := range []string{
+		"https://${secret:REMOTE_MCP_HOST}:443/mcp",
+		"https://${secret:REMOTE_MCP_HOST}:65535/mcp",
+		"https://${secret:REMOTE_MCP_HOST}:1/mcp",
+	} {
+		if !RemoteHTTPURLHasSecretPlaceholderHost(raw) {
+			t.Fatalf("placeholder-host predicate rejected valid in-range port for %q", raw)
+		}
+	}
+}
+
 func TestValidateRemoteHTTP_AllowsSecretPlaceholderHost(t *testing.T) {
 	m := &ServerManifest{
 		Name:      "secret-host",

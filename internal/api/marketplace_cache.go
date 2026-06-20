@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"mcp-local-hub/internal/urlredact"
 )
 
 const marketplaceCacheTTL = 24 * time.Hour
@@ -231,7 +233,12 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	}
 	if cf.SourceURL != "" {
 		if _, err := parseMarketplacePublicHTTPSURL(cf.SourceURL); err != nil {
-			return nil, fmt.Errorf("validate cache source_url %q: %w", cf.SourceURL, err)
+			// A tampered/older cache file may carry a credentialed
+			// source_url; redact it in the %q before logging (the %w is
+			// already scrubbed by parseMarketplacePublicHTTPSURL). Keeps
+			// the SourceURL leak class closed on the cache-read path too
+			// (structural: every URL-in-error goes through urlredact).
+			return nil, fmt.Errorf("validate cache source_url %q: %w", urlredact.MarketplaceURLForError(cf.SourceURL), err)
 		}
 	}
 	return &cf, nil

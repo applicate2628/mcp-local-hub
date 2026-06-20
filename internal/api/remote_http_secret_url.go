@@ -19,16 +19,55 @@ func expandRemoteHTTPURLSecrets(raw string, lookup SecretLookup) (string, error)
 	if !config.RemoteHTTPURLHasSecretPlaceholderHost(raw) {
 		return expanded, nil
 	}
-	if err := validateExpandedRemoteHTTPPlaceholderHost(raw, expanded); err != nil {
+	// Validate the HOST SECRET VALUE directly, by expanding ONLY the leading
+	// host placeholder. Earlier code derived the host by positional
+	// comparison of the display and fully-expanded URLs, which broke when a
+	// SECOND ${secret:...} elsewhere in the path/query also expanded (bot PR
+	// #388 r10: remote_http_secret_url.go:75) — the suffix no longer matched
+	// the unexpanded display suffix. Isolating and validating the host value
+	// alone both fixes that false rejection AND keeps catching a host secret
+	// that injects an authority delimiter (e.g. expands to "host/evil"),
+	// because that delimiter is now inspected as part of the host value
+	// rather than being silently truncated into the path.
+	hostValue, err := expandRemoteHTTPPlaceholderHostValue(raw, lookup)
+	if err != nil {
+		return "", err
+	}
+	if err := validateExpandedRemoteHTTPPlaceholderHost(raw, expanded, hostValue); err != nil {
 		return "", err
 	}
 	return expanded, nil
 }
 
-func validateExpandedRemoteHTTPPlaceholderHost(displayURL, expandedURL string) error {
-	expandedHost, err := expandedRemoteHTTPPlaceholderHostValue(displayURL, expandedURL)
+// expandRemoteHTTPPlaceholderHostValue expands ONLY the leading
+// ${secret:KEY} host placeholder of a placeholder-host remote-http URL and
+// returns the secret's value (the bare host the operator stored in the
+// vault). Caller has already established via RemoteHTTPURLHasSecretPlaceholderHost
+// that the authority is exactly one leading placeholder plus an optional
+// literal :port tail, so the leading placeholder is the host.
+func expandRemoteHTTPPlaceholderHostValue(displayURL string, lookup SecretLookup) (string, error) {
+	const prefix = "https://"
+	rest := displayURL[len(prefix):]
+	authority := rest
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		authority = rest[:end]
+	}
+	match := SecretPlaceholderRE.FindStringSubmatch(authority)
+	if len(match) < 2 {
+		return "", fmt.Errorf("placeholder host is malformed")
+	}
+	// Expand the single host placeholder through ExpandSecrets so it shares
+	// the missing-key and CRLF-injection guards with the rest of the URL.
+	hostValue, err := ExpandSecrets(match[0], lookup)
 	if err != nil {
-		return fmt.Errorf("expanded remote-http host for %s is invalid: %w", urlredact.MarketplaceURLForError(expandedURL, displayURL), err)
+		return "", err
+	}
+	return hostValue, nil
+}
+
+func validateExpandedRemoteHTTPPlaceholderHost(displayURL, expandedURL, expandedHost string) error {
+	if expandedHost == "" {
+		return fmt.Errorf("expanded remote-http host for %s is invalid: expanded host is empty", urlredact.MarketplaceURLForError(expandedURL, displayURL))
 	}
 	if err := validateExpandedRemoteHTTPHostAuthority(expandedHost); err != nil {
 		return fmt.Errorf("expanded remote-http host for %s is invalid: %w", urlredact.MarketplaceURLForError(expandedURL, displayURL), err)
@@ -50,35 +89,6 @@ func validateExpandedRemoteHTTPPlaceholderHost(displayURL, expandedURL string) e
 		return fmt.Errorf("expanded remote-http url host rejected for %s: %s", urlredact.MarketplaceURLForError(expandedURL, displayURL), redactExpandedSecretHostReason(err.Error(), u.Hostname()))
 	}
 	return nil
-}
-
-func expandedRemoteHTTPPlaceholderHostValue(displayURL, expandedURL string) (string, error) {
-	const prefix = "https://"
-	if !strings.HasPrefix(displayURL, prefix) || !strings.HasPrefix(expandedURL, prefix) {
-		return "", fmt.Errorf("placeholder URL must use https://")
-	}
-	rawRest := displayURL[len(prefix):]
-	rawAuthority := rawRest
-	rawSuffix := ""
-	if end := strings.IndexAny(rawRest, "/?#"); end >= 0 {
-		rawAuthority = rawRest[:end]
-		rawSuffix = rawRest[end:]
-	}
-	closeBrace := strings.IndexByte(rawAuthority, '}')
-	if closeBrace < 0 {
-		return "", fmt.Errorf("placeholder host is malformed")
-	}
-	rawAuthorityTail := rawAuthority[closeBrace+1:]
-	expandedRest := expandedURL[len(prefix):]
-	expectedSuffix := rawAuthorityTail + rawSuffix
-	if !strings.HasSuffix(expandedRest, expectedSuffix) {
-		return "", fmt.Errorf("expanded URL shape changed")
-	}
-	expandedHost := strings.TrimSuffix(expandedRest, expectedSuffix)
-	if expandedHost == "" {
-		return "", fmt.Errorf("expanded host is empty")
-	}
-	return expandedHost, nil
 }
 
 func validateExpandedRemoteHTTPHostAuthority(authority string) error {

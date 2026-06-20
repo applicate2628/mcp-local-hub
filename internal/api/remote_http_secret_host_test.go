@@ -109,6 +109,46 @@ func TestExpandRemoteHTTPURLSecretsPreservesPlaceholderHostPathAndQuery(t *testi
 	}
 }
 
+func TestExpandRemoteHTTPURLSecretsExpandsNonHostSecretWithPlaceholderHost(t *testing.T) {
+	// bot PR #388 r10 (remote_http_secret_url.go:75): a placeholder host
+	// PLUS a second ${secret:...} in the query must both expand without the
+	// suffix-comparison tripping a false "expanded URL shape changed".
+	got, err := expandRemoteHTTPURLSecrets(
+		"https://${secret:REMOTE_MCP_HOST}/mcp?token=${secret:REMOTE_TOKEN}",
+		fakeSecretLookup(map[string]string{
+			"REMOTE_MCP_HOST": "remote.example",
+			"REMOTE_TOKEN":    "abc123",
+		}),
+	)
+	if err != nil {
+		t.Fatalf("expandRemoteHTTPURLSecrets with non-host secret: %v", err)
+	}
+	if got != "https://remote.example/mcp?token=abc123" {
+		t.Fatalf("expanded URL = %q, want host + query secret both expanded", got)
+	}
+}
+
+func TestExpandRemoteHTTPURLSecretsNonHostSecretStillValidatesExpandedHost(t *testing.T) {
+	// The non-host secret must not let a private/loopback expanded host slip
+	// through: host validation still runs after isolating the authority.
+	_, err := expandRemoteHTTPURLSecrets(
+		"https://${secret:REMOTE_MCP_HOST}/mcp?token=${secret:REMOTE_TOKEN}",
+		fakeSecretLookup(map[string]string{
+			"REMOTE_MCP_HOST": "127.0.0.1",
+			"REMOTE_TOKEN":    "abc123",
+		}),
+	)
+	if err == nil {
+		t.Fatal("expected loopback host rejection even with a non-host secret present")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
+		t.Fatalf("error = %v, want loopback rejection", err)
+	}
+	if strings.Contains(err.Error(), "abc123") {
+		t.Fatalf("non-host secret value leaked in error: %v", err)
+	}
+}
+
 func TestManifestTestRemote_SecretPlaceholderHostRejectsLoopbackExpansionBeforeDial(t *testing.T) {
 	seedDefaultSecretForTest(t, "REMOTE_MCP_HOST", "127.0.0.1")
 

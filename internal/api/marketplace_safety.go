@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"golang.org/x/net/idna"
+
+	"mcp-local-hub/internal/urlredact"
 )
 
 // IsUnsafeMarketplaceTextRune is the single terminal/draft safety predicate for
@@ -96,7 +98,15 @@ func parseMarketplacePublicHTTPSURL(raw string) (*url.URL, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("parse url: %w", err)
+		// net/url's *url.Error embeds the raw input verbatim, so a
+		// credentialed-but-malformed registry/cache/catalog URL like
+		// https://user:token@example.com/%zz would leak the token through
+		// %w even after callers redact their own "got" value. This helper
+		// is the single owner of url.Parse for the marketplace path
+		// (MarketplaceFetchWithClient, cache source_url, catalog http
+		// entries all flow through here), so scrubbing once here covers
+		// every caller (bot PR #388 r10: marketplace_safety.go:99).
+		return nil, fmt.Errorf("parse url: %w", urlredact.ScrubParseError(err))
 	}
 	if err := validateMarketplacePublicHTTPSParsedURL(u); err != nil {
 		return nil, err
@@ -251,6 +261,12 @@ var marketplaceNonPublicSpecialAddrPrefixes = []struct {
 	{"as112", netip.MustParsePrefix("2620:4f:8000::/48")},
 	{"documentation", netip.MustParsePrefix("3fff::/20")},
 	{"segment routing", netip.MustParsePrefix("5f00::/16")},
+	// Deprecated IPv6 site-local (RFC 3879). Still routable on some
+	// networks and not covered by IsPrivate/IsLinkLocalUnicast/the special
+	// ranges above, so addr.IsGlobalUnicast() returns true and a
+	// https://[fec0::1]/mcp registry/catalog target would otherwise slip
+	// through (bot PR #388 r10: marketplace_safety.go:280).
+	{"deprecated site-local", netip.MustParsePrefix("fec0::/10")},
 }
 
 func rejectMarketplaceLocalOrPrivateAddr(subject string, addr netip.Addr) error {
