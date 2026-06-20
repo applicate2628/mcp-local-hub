@@ -91,9 +91,13 @@ func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 	//      (Windows `con` / `nul.txt` / `aux`).
 	//   2. create-mode existence — ManifestCreateIn rejects an already-saved disk
 	//      manifest, while edit mode must allow the edit target to exist.
+	//   2b. edit-mode existence — ManifestEditInWithHash rejects a missing edit
+	//      target, so a deleted-after-load manifest must block draft readiness too.
 	//   3. ManifestValidateMode(Strict) warnings/errors — the storage path treats
 	//      manifestBlockingWarnings as hard errors even when strictErr is nil.
 	nameErr := api.CheckManifestName(m.Name)
+	mode := strings.TrimSpace(req.Mode)
+	editName := strings.TrimSpace(req.EditName)
 	var blockers []api.ReadinessRequirement
 	if nameErr != nil {
 		blockers = append(blockers, api.ReadinessRequirement{
@@ -102,17 +106,31 @@ func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 			Reason: nameErr.Error(),
 			Fix:    "choose a name the backend accepts (avoid reserved names like con/nul/aux and a `__` substring)",
 		})
-	} else if strings.TrimSpace(req.Mode) == "create" && m.Name != strings.TrimSpace(req.EditName) && s.manifestPresence != nil {
-		exists, err := s.manifestPresence.ManifestExists(m.Name)
-		if err != nil {
-			log.Printf("readiness: check manifest existence %q: %v", m.Name, err)
-		} else if exists {
-			blockers = append(blockers, api.ReadinessRequirement{
-				Name:   "manifest exists",
-				OK:     false,
-				Reason: fmt.Sprintf("manifest %q already exists; use edit instead", m.Name),
-				Fix:    "choose a new server name, or open the saved manifest in edit mode",
-			})
+	} else if s.manifestPresence != nil {
+		if mode == "create" && m.Name != editName {
+			exists, err := s.manifestPresence.ManifestExists(m.Name)
+			if err != nil {
+				log.Printf("readiness: check manifest existence %q: %v", m.Name, err)
+			} else if exists {
+				blockers = append(blockers, api.ReadinessRequirement{
+					Name:   "manifest exists",
+					OK:     false,
+					Reason: fmt.Sprintf("manifest %q already exists; use edit instead", m.Name),
+					Fix:    "choose a new server name, or open the saved manifest in edit mode",
+				})
+			}
+		} else if mode == "edit" && editName != "" {
+			exists, err := s.manifestPresence.ManifestExists(editName)
+			if err != nil {
+				log.Printf("readiness: check edit manifest existence %q: %v", editName, err)
+			} else if !exists {
+				blockers = append(blockers, api.ReadinessRequirement{
+					Name:   "manifest missing",
+					OK:     false,
+					Reason: fmt.Sprintf("manifest %q no longer exists — it was deleted after this edit screen loaded; reload or recreate", editName),
+					Fix:    "reload the edit screen or recreate the server manifest before saving",
+				})
+			}
 		}
 	}
 	warnings, strictErr := api.NewAPI().ManifestValidateMode(req.YAML, api.ValidateModeStrict)

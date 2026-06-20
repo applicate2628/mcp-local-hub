@@ -200,6 +200,35 @@ func TestReadinessHandler_DraftPOST_EditTargetExistingManifestDoesNotBlock(t *te
 	}
 }
 
+func TestReadinessHandler_DraftPOST_EditTargetMissingManifestBlocks(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.manifestPresence = fakeManifestPresence{}
+	yaml := "name: saved\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
+		"daemons:\n  - name: default\n    port: 9326\n" +
+		"client_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n"
+	body, _ := json.Marshal(map[string]string{"yaml": yaml, "mode": "edit", "edit_name": "saved"})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	var rep api.ReadinessReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Error("edit draft for a missing manifest reported Ready=true; edit would reject it")
+	}
+	found := false
+	for _, r := range rep.Requirements {
+		if r.Name == "manifest missing" && !r.OK && !r.Optional && strings.Contains(r.Reason, `manifest "saved" no longer exists`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no missing-manifest blocker in report; requirements=%+v", rep.Requirements)
+	}
+}
+
 func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	body, _ := json.Marshal(map[string]string{"yaml": ":::not a manifest:::"})
