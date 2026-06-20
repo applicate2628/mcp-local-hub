@@ -965,12 +965,13 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// the explicit cancel + defer below covers both shutdown paths.
 	hubEnabled := readHubEndpointGateFromSettings()
 	hubInitCtx, hubInitCancel := context.WithCancel(ctx)
-	hubInitCtx = contextWithHubListenerRestartSignal(hubInitCtx, s)
 	defer hubInitCancel()
 	hubInitDone := make(chan struct{})
 	go func() {
 		defer close(hubInitDone)
-		hubComp, hubErr := startHubMcpListener(hubInitCtx, hubEnabled, s.api)
+		hubComp, hubErr := startHubMcpListenerWithOptions(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
+			onUnresponsive: s.signalHubListenerRestart,
+		})
 		if hubErr != nil {
 			// codex bot phase4 r1 P2 closure on PR #158: surface
 			// non-bind hub failures (token gen/persist, endpoint

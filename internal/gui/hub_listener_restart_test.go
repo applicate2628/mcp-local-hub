@@ -47,7 +47,32 @@ func waitRestartDriverDone(t *testing.T, done <-chan struct{}) {
 	}
 }
 
+func waitHubRestartTestLogEvent(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := api.RecentHubMcpEvents(16)
+		if err == nil {
+			for _, ev := range events {
+				if ev["event"] == want {
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for hub-mcp log event %q", want)
+}
+
 func TestHubListenerRestartDriverRestartsAndPublishesNewBundle(t *testing.T) {
+	stateDir := t.TempDir()
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	if _, err := api.EnsureHubEndpoint(3439, 111); err != nil {
+		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
+	}
+
 	s := NewServer(Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	newComp := liveRestartTestComp(3439)
@@ -112,8 +137,8 @@ func TestHubListenerRestartDriverRestartsAndPublishesNewBundle(t *testing.T) {
 	if ev.fields["instance_id_preserved"] != true {
 		t.Fatalf("restart event instance_id_preserved = %v, want true", ev.fields["instance_id_preserved"])
 	}
-	if len(sleeps) != 1 {
-		t.Fatalf("backoff sleeps = %d, want 1", len(sleeps))
+	if len(sleeps) != 0 {
+		t.Fatalf("backoff sleeps before first recovery = %d, want 0", len(sleeps))
 	}
 }
 
@@ -126,7 +151,7 @@ func TestHubListenerRestartDriverBackoffAndExhaustion(t *testing.T) {
 	var sleeps []time.Duration
 	var failed int
 	events := make(chan hubRestartTestEvent, 16)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
 	go func() {
@@ -156,6 +181,7 @@ func TestHubListenerRestartDriverBackoffAndExhaustion(t *testing.T) {
 
 	s.signalHubListenerRestart()
 	ev := waitRestartTestEvent(t, events, "hub-listener-restart-exhausted")
+	cancel()
 	waitRestartDriverDone(t, done)
 
 	if starts != hubListenerRestartMaxConsecutiveRestarts {
@@ -172,7 +198,6 @@ func TestHubListenerRestartDriverBackoffAndExhaustion(t *testing.T) {
 		10 * time.Second,
 		20 * time.Second,
 		40 * time.Second,
-		80 * time.Second,
 	}
 	if !reflect.DeepEqual(sleeps, wantSleeps) {
 		t.Fatalf("backoff sleeps = %v, want %v", sleeps, wantSleeps)
@@ -323,6 +348,81 @@ func TestHubListenerRestartDriverImmediateRefailAfterWatcherLatencyExhausts(t *t
 	}
 }
 
+func TestHubListenerRestartDriverContinuesAfterExhaustionForFreshOutage(t *testing.T) {
+	s := NewServer(Config{Port: 0})
+	s.hubMcpComp.Store(liveRestartTestComp(3439))
+
+	var nowMu sync.Mutex
+	now := time.Unix(2000, 0)
+	advanceNow := func(d time.Duration) {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		now = now.Add(d)
+	}
+	readNow := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return now
+	}
+
+	var starts int
+	events := make(chan hubRestartTestEvent, 16)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	defer func() {
+		cancel()
+		waitRestartDriverDone(t, done)
+	}()
+
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
+			startFn: func(context.Context) (*HubListenerComponents, error) {
+				starts++
+				return liveRestartTestComp(3439), nil
+			},
+			shutdownFn: func(context.Context, *HubListenerComponents) {},
+			emitFn: func(level, event string, fields map[string]any) error {
+				events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+				return nil
+			},
+			sleepFn: func(context.Context, time.Duration) bool { return true },
+			nowFn:   readNow,
+		})
+	}()
+
+	detectionLatency := api.DefaultHubHealthProbeInterval * time.Duration(api.DefaultHubHealthUnresponsiveThreshold)
+	for wantAttempt := 1; wantAttempt <= hubListenerRestartMaxConsecutiveRestarts; wantAttempt++ {
+		s.signalHubListenerRestart()
+		ev := waitRestartTestEvent(t, events, "hub-listener-restarted")
+		if ev.fields["attempt"] != wantAttempt {
+			t.Fatalf("restart attempt before exhaustion = %v, want %d", ev.fields["attempt"], wantAttempt)
+		}
+		advanceNow(detectionLatency)
+	}
+
+	s.signalHubListenerRestart()
+	ev := waitRestartTestEvent(t, events, "hub-listener-restart-exhausted")
+	if ev.fields["attempts"] != hubListenerRestartMaxConsecutiveRestarts {
+		t.Fatalf("exhausted attempts = %v, want %d", ev.fields["attempts"], hubListenerRestartMaxConsecutiveRestarts)
+	}
+	select {
+	case <-done:
+		t.Fatal("restart driver exited after one exhausted outage; want it to stay armed for future signals")
+	default:
+	}
+
+	advanceNow(hubListenerRestartStableWindow)
+	s.signalHubListenerRestart()
+	fresh := waitRestartTestEvent(t, events, "hub-listener-restarted")
+	if fresh.fields["attempt"] != 1 {
+		t.Fatalf("fresh outage restart attempt = %v, want reset to 1", fresh.fields["attempt"])
+	}
+	if starts != hubListenerRestartMaxConsecutiveRestarts+1 {
+		t.Fatalf("start calls after fresh outage = %d, want %d", starts, hubListenerRestartMaxConsecutiveRestarts+1)
+	}
+}
+
 func TestHubListenerRestartDriverStableResetDoesNotDisableFailureExhaustion(t *testing.T) {
 	s := NewServer(Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
@@ -378,7 +478,7 @@ func TestHubListenerRestartDriverCancelDuringBackoffDoesNotRestart(t *testing.T)
 		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
 			startFn: func(context.Context) (*HubListenerComponents, error) {
 				starts++
-				return liveRestartTestComp(3439), nil
+				return nil, errors.New("bind failed")
 			},
 			shutdownFn: func(context.Context, *HubListenerComponents) {
 				shutdowns++
@@ -402,14 +502,14 @@ func TestHubListenerRestartDriverCancelDuringBackoffDoesNotRestart(t *testing.T)
 	cancel()
 	waitRestartDriverDone(t, done)
 
-	if starts != 0 {
-		t.Fatalf("start calls after cancel during backoff = %d, want 0", starts)
+	if starts != 1 {
+		t.Fatalf("start calls before canceled retry backoff = %d, want 1", starts)
 	}
-	if shutdowns != 0 {
-		t.Fatalf("shutdown calls after cancel during backoff = %d, want 0", shutdowns)
+	if shutdowns != 1 {
+		t.Fatalf("shutdown calls before canceled retry backoff = %d, want 1", shutdowns)
 	}
-	if got := s.hubMcpComp.Load(); got != oldComp {
-		t.Fatalf("component after canceled pending restart = %#v, want original", got)
+	if got := s.hubMcpComp.Load(); got != nil {
+		t.Fatalf("component after canceled retry backoff = %#v, want nil", got)
 	}
 }
 
@@ -699,6 +799,159 @@ func TestHubListenerRestartStartPreservesPortOnReloadHandlerFailure(t *testing.T
 	}
 }
 
+func TestHubListenerRestartDriverPreservesEndpointInstanceIDAcrossRealRestart(t *testing.T) {
+	seedManifestDir(t)
+	resetResolverSnapshot(t)
+	t.Cleanup(func() { api.PublishResolverSnapshot(nil) })
+	stateDir := t.TempDir()
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+
+	a := api.NewAPI()
+	firstCtx, firstCancel := context.WithCancel(context.Background())
+	firstComp, err := startHubMcpListenerWithOptions(firstCtx, true, a, startHubMcpListenerOptions{})
+	if err != nil {
+		firstCancel()
+		t.Fatalf("initial startHubMcpListenerWithOptions: %v", err)
+	}
+	before, err := api.LoadHubEndpoint()
+	if err != nil {
+		firstCancel()
+		ShutdownHubListener(context.Background(), firstComp)
+		t.Fatalf("LoadHubEndpoint before restart: %v", err)
+	}
+
+	s := NewServer(Config{Port: 0})
+	s.hubMcpComp.Store(firstComp)
+	events := make(chan hubRestartTestEvent, 4)
+	restartCtx, restartCancel := context.WithCancel(context.Background())
+	defer restartCancel()
+
+	restarted := restartHubListener(restartCtx, s, hubListenerRestartDriverOptions{
+		startFn: func(ctx context.Context) (*HubListenerComponents, error) {
+			return startHubMcpListenerWithOptions(ctx, true, a, startHubMcpListenerOptions{
+				preservePortOnReloadHandlerFailure: true,
+			})
+		},
+		shutdownFn: ShutdownHubListener,
+		emitFn: func(level, event string, fields map[string]any) error {
+			events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+			return nil
+		},
+		sleepFn: func(context.Context, time.Duration) bool { return true },
+		nowFn:   func() time.Time { return time.Unix(100, 0) },
+	})
+	firstCancel()
+	if !restarted {
+		t.Fatal("restartHubListener returned false")
+	}
+	t.Cleanup(func() {
+		if comp := s.hubMcpComp.Load(); comp != nil {
+			ShutdownHubListener(context.Background(), comp)
+		}
+	})
+
+	after, err := api.LoadHubEndpoint()
+	if err != nil {
+		t.Fatalf("LoadHubEndpoint after restart: %v", err)
+	}
+	if after.InstanceID != before.InstanceID {
+		t.Fatalf("InstanceID after restart = %q, want preserved %q", after.InstanceID, before.InstanceID)
+	}
+	ev := waitRestartTestEvent(t, events, "hub-listener-restarted")
+	if ev.level != "info" {
+		t.Fatalf("restart event level = %q, want info", ev.level)
+	}
+	if ev.fields["instance_id_preserved"] != true {
+		t.Fatalf("restart event instance_id_preserved = %v, want true", ev.fields["instance_id_preserved"])
+	}
+}
+
+func TestHubListenerRestartEventReportsInstanceIDMismatch(t *testing.T) {
+	stateDir := t.TempDir()
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+
+	before, err := api.EnsureHubEndpoint(3439, 111)
+	if err != nil {
+		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
+	}
+	s := NewServer(Config{Port: 0})
+	oldComp := liveRestartTestComp(before.Port)
+	newComp := liveRestartTestComp(before.Port)
+	s.hubMcpComp.Store(oldComp)
+	events := make(chan hubRestartTestEvent, 4)
+
+	restarted := restartHubListener(context.Background(), s, hubListenerRestartDriverOptions{
+		startFn: func(context.Context) (*HubListenerComponents, error) {
+			if _, err := api.RotateHubInstanceID(); err != nil {
+				return nil, err
+			}
+			return newComp, nil
+		},
+		shutdownFn: func(context.Context, *HubListenerComponents) {},
+		emitFn: func(level, event string, fields map[string]any) error {
+			events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+			return nil
+		},
+		sleepFn: func(context.Context, time.Duration) bool { return true },
+		nowFn:   func() time.Time { return time.Unix(100, 0) },
+	})
+	if !restarted {
+		t.Fatal("restartHubListener returned false")
+	}
+	ev := waitRestartTestEvent(t, events, "hub-listener-restarted")
+	if ev.level != "warn" {
+		t.Fatalf("restart event level = %q, want warn on InstanceID mismatch", ev.level)
+	}
+	if ev.fields["instance_id_preserved"] != false {
+		t.Fatalf("restart event instance_id_preserved = %v, want false", ev.fields["instance_id_preserved"])
+	}
+}
+
+func TestHubListenerStartOptionsInstallWatcherCallback(t *testing.T) {
+	seedManifestDir(t)
+	resetResolverSnapshot(t)
+	t.Cleanup(func() { api.PublishResolverSnapshot(nil) })
+	stateDir := t.TempDir()
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+
+	a := api.NewAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	signaled := make(chan struct{}, 1)
+	comp, err := startHubMcpListenerWithOptions(ctx, true, a, startHubMcpListenerOptions{
+		onUnresponsive: func() {
+			select {
+			case signaled <- struct{}{}:
+			default:
+			}
+		},
+		healthProbeInterval: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("startHubMcpListenerWithOptions: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		ShutdownHubListener(context.Background(), comp)
+	})
+
+	if err := comp.srv.Close(); err != nil {
+		t.Fatalf("force-close hub listener server: %v", err)
+	}
+	select {
+	case <-signaled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("health watcher did not invoke explicit onUnresponsive option")
+	}
+	waitHubRestartTestLogEvent(t, "hub-listener-unresponsive")
+}
+
 func TestHubListenerRestartSignalIsNonBlockingAndCoalesced(t *testing.T) {
 	s := NewServer(Config{Port: 0})
 	s.signalHubListenerRestart()
@@ -713,20 +966,5 @@ func TestHubListenerRestartSignalIsNonBlockingAndCoalesced(t *testing.T) {
 	case <-s.hubRestartCh:
 		t.Fatal("restart signal channel accepted duplicate pending signal; want coalesced buffered-1")
 	default:
-	}
-}
-
-func TestHubListenerRestartContextCarriesWatcherCallback(t *testing.T) {
-	s := NewServer(Config{Port: 0})
-	ctx := contextWithHubListenerRestartSignal(context.Background(), s)
-	cb := hubListenerRestartSignalFromContext(ctx)
-	if cb == nil {
-		t.Fatal("restart callback missing from hub listener context")
-	}
-	cb()
-	select {
-	case <-s.hubRestartCh:
-	default:
-		t.Fatal("restart callback did not signal server channel")
 	}
 }

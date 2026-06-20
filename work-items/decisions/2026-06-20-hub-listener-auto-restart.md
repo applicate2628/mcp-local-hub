@@ -149,9 +149,9 @@ outage class.
   restart }`. On a restart request it:
   1. Re-check `ctx.Err()` — if the Server is shutting down, return without
      restarting (do NOT restart during a real shutdown).
-  2. Apply the backoff gate (below). If backoff says "give up", emit
-     `hub-listener-restart-exhausted` (error) and return — the host falls back to
-     the existing manual-restart runbook.
+  2. Apply the backoff gate (below). If this outage exhausts, emit
+     `hub-listener-restart-exhausted` (error), stop retrying this outage, and
+     keep the driver goroutine alive for future `hubRestartCh` signals.
   3. `old := s.hubMcpComp.Swap(nil)` — atomically take ownership of the current
      bundle (the same Swap the shutdown path uses). If `old == nil`, the shutdown
      path already took it; return.
@@ -163,12 +163,18 @@ outage class.
      health watcher + DaemonRestartWatcher on `ctx`.
   6. On success: `s.hubMcpComp.CompareAndSwap(nil, newComp)` (mirror the start
      protocol; on CAS failure tear `newComp` down — the shutdown path won the
-     race). Emit `hub-listener-restarted` (info) with `port`, `attempt`,
-     `instance_id_preserved: true`. Reset the consecutive-restart counter on a
-     restart that subsequently STAYS healthy (see backoff).
+     race). Read `LoadHubEndpoint().InstanceID` before shutdown and after
+     re-bind, then emit `hub-listener-restarted` with `port`, `attempt`, and the
+     actual `instance_id_preserved` comparison (`info` when true, `warn` when
+     false or unverifiable). Reset the consecutive-restart counter on a restart
+     that subsequently STAYS healthy (see backoff).
   7. On bind failure: emit `hub-listener-restart-failed` (warn), leave
      `s.hubMcpComp == nil` (gate-OFF for this process until the next successful
-     pass), and let backoff schedule the next attempt.
+     pass), and let backoff schedule the next attempt. On Windows,
+     `WSAEADDRINUSE` / `WSAEACCES` during same-port re-bind is treated as the
+     kernel's temporary `SO_EXCLUSIVEADDRUSE` reservation and uses the separate
+     same-port schedule below instead of consuming the normal five-attempt
+     outage budget.
 
 **Concurrency safety:** the driver and the start/shutdown paths all rendezvous
 ONLY through `s.hubMcpComp` Swap/CAS — the same single atomic the existing code
@@ -189,9 +195,16 @@ on every request) must NOT restart-loop forever burning CPU and dropping session
 - **Bounded consecutive-restart counter with exponential backoff**:
   `restartBackoff = min(baseBackoff << (attempt-1), maxBackoff)`, e.g.
   `base = 5 s`, `max = 5 min`, `maxConsecutiveRestarts = 5`. After
-  `maxConsecutiveRestarts` failed-or-immediately-re-unhealthy restarts, the driver
-  STOPS and emits `hub-listener-restart-exhausted` (error) — terminal until the
-  GUI is manually restarted (the existing runbook).
+  `maxConsecutiveRestarts` failed-or-immediately-re-unhealthy restarts, this
+  outage is exhausted and `hub-listener-restart-exhausted` (error) is emitted.
+  The driver remains alive; a later signal after the stable window resets the
+  counter and is treated as a fresh outage.
+- **Windows same-port reservation backoff**: wrapped `WSAEADDRINUSE` /
+  `WSAEACCES` from same-port re-bind is not counted as a normal failed attempt.
+  It retries every 30 s under a separate 6 min budget, which outlasts the usual
+  Windows TCP `TIME_WAIT`/exclusive-bind reservation without burning the normal
+  five-attempt outage budget. If that separate budget expires, the outage emits
+  `hub-listener-restart-exhausted` with same-port timeout fields.
 - **"Stable-healthy resets the counter."** A restart counts as SUCCESSFUL only if
   the listener stays reachable for a stability window (e.g. one full health-probe
   interval, 15 s, with no new `onUnresponsive`). The driver tracks the time of the
@@ -217,7 +230,8 @@ on every request) must NOT restart-loop forever burning CPU and dropping session
    installed clients are not 401'd; single-owner: ensureHubEndpointLocked
    (hub_mcp_instance.go:104-113 — generates only when missing, refuses blank);
    enforcement-probe: a test asserting LoadHubEndpoint().InstanceID is unchanged
-   across restart + the hub-listener-restarted event carries instance_id_preserved:true }`
+   across restart + the hub-listener-restarted event carries the actual
+   instance_id_preserved comparison and warns on mismatch }`
 3. `{ guarantee: auto-restart NEVER fires during a real Server shutdown;
    single-owner: the restart driver's ctx.Done() select arm + the step-1 ctx.Err()
    re-check before Swap; enforcement-probe: a test that cancels the Server ctx then
@@ -266,8 +280,16 @@ raced:
   (i) happy restart → fresh bundle CAS'd in, `hub-listener-restarted` emitted;
   (ii) ctx cancelled before signal → no restart;
   (iii) `startFn` always errors → backoff increments, exhausts after N,
-  `hub-listener-restart-exhausted` emitted;
-  (iv) -race: concurrent ctx-cancel + signal → exactly one teardown per bundle.
+  `hub-listener-restart-exhausted` emitted while the driver remains armed;
+  (iv) repeated successful restarts inside the stable window exhaust one outage,
+  then a later signal after the stable window resets to attempt 1;
+  (v) -race: concurrent ctx-cancel + signal → exactly one teardown per bundle.
+- **Windows same-port reservation coverage:** a Windows-only driver test injects
+  wrapped `WSAEADDRINUSE` to prove same-port re-bind failures retry beyond the
+  normal five-attempt budget and use the documented 30 s schedule. A real
+  socket/TIME_WAIT integration test is not kept in default CI because the
+  documented 6 min worst-case wait exceeds the 200 s state-safe race-test budget;
+  the schedule proof is the CI-safe enforcement probe.
 - **End-to-end (1 integration test, Windows-gated like the other hub tests):**
   stand up a real gate-ON listener via the existing hub test harness, capture the
   bound port + InstanceID, replace the live `srv` with a deliberately-wedged
