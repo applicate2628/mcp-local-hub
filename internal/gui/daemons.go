@@ -120,7 +120,10 @@ func (s *Server) weeklyRefreshMembershipList(w http.ResponseWriter, _ *http.Requ
 // Memo D5 contract: idempotent partial update; entries not in body unchanged.
 func (s *Server) weeklyRefreshMembershipPut(w http.ResponseWriter, r *http.Request) {
 	var body []api.MembershipDelta
-	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+	// Membership deltas can carry one entry per (workspace, client) across a
+	// large registry, so they use the generous manifest-class cap rather than
+	// the tight control cap a small key/value control body uses.
+	if err := decodeJSONBodyLimited(w, r, &body, maxManifestBodyBytes); err != nil {
 		writeJSON(w, decodeBodyStatusCode(err), map[string]string{
 			"error":  decodeBodyErrorCode(err),
 			"detail": decodeBodyErrorText(err),
