@@ -432,6 +432,14 @@ func (m *ServerManifest) validateCompanion() error {
 	if m.Headers != nil {
 		return fmt.Errorf("manifest %s: kind=companion rejects headers (only valid with transport=remote-http)", m.Name)
 	}
+	// A companion has NO per-workspace materialization — the launch path
+	// (cli/daemon.go) builds childArgs from base_args + the daemon's extra_args
+	// VERBATIM and never expands a *_template. Accepting a template would let the
+	// manifest install successfully while silently dropping those args at spawn
+	// (Codex #381). Reject both template surfaces.
+	if len(m.BaseArgsTemplate) != 0 {
+		return fmt.Errorf("manifest %s: kind=companion rejects base_args_template (no per-workspace materialization; use base_args — a template is silently dropped at spawn)", m.Name)
+	}
 	if len(m.Daemons) != 1 {
 		return fmt.Errorf("manifest %s: kind=companion requires exactly one daemons[] entry carrying the working directory (got %d)", m.Name, len(m.Daemons))
 	}
