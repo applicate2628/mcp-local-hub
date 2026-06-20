@@ -328,6 +328,21 @@ See also: install, logs, restart, status.`,
 					}
 					return fmt.Errorf("stdio child exited unexpectedly")
 				}
+			} else if m.Transport == config.TransportProcess {
+				// Companion (kind=companion): a hub-managed NON-MCP process (e.g.
+				// the excalidraw canvas Express server). No MCP host, no HTTP
+				// listener, no port bind — run it raw from its package cwd
+				// (spec.Cwd) and surface its exit to the supervisor for restart.
+				// internal/daemon owns the env/console/log conventions
+				// (RunProcess) so this stays a thin call.
+				return daemon.RunProcess(cmd.Context(), daemon.ProcessConfig{
+					Command:    cmdPath,
+					Args:       childArgs,
+					Env:        env,
+					UnsetEnv:   unsetEnv,
+					WorkingDir: spec.Cwd,
+					LogPath:    logPath,
+				})
 			} else {
 				return fmt.Errorf("unsupported transport %q", m.Transport)
 			}
