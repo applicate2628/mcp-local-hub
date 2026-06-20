@@ -56,10 +56,9 @@ const (
 // and read, so the TOCTOU swap window the old chain left open is
 // closed at the kernel level.
 //
-// Returns up to maxStateFileBytes of content. Files larger than the
-// cap cause the read to surface an error rather than truncate
-// silently (the cap is OOM protection; legitimate state files are
-// well under it).
+// The byte cap is resolved from the state-file kind. Files larger than the
+// resolved cap cause the read to surface an error rather than truncate
+// silently (the cap is OOM protection).
 //
 // Parent-DACL gate semantics:
 //
@@ -78,23 +77,15 @@ const (
 //     events distinguish parent vs file broadening so operators can
 //     audit the relaxed read-only cases.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
-	return readStateFileInodeAnchoredWithMaxBytes(path, maxStateFileBytes)
-}
-
-func readStateFileInodeAnchoredWithMaxBytes(path string, maxBytes int64) ([]byte, error) {
-	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, operatorRequiresSingleUserHome, maxBytes)
+	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, requiresStrict, maxStateFileBytes)
-}
-
-func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requiresStrict func() bool, maxBytes int64) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, maxBytes, true)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, maxStateFileBytes, false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false)
 }
 
 func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks bool) ([]byte, error) {

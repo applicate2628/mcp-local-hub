@@ -154,16 +154,6 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 	return nil
 }
 
-// maxStateFileBytes caps a single state-file read at 1 MiB. The
-// hub-mcp state files (tokens.json, control.token, endpoint.json,
-// the various supervisor-*.json files, managed-entries.json) all
-// fit comfortably under a few KiB in practice — managed-entries
-// scales with the daemon count and was sized to <100 KiB even on
-// pathological setups. 1 MiB is the OOM-protection ceiling: an
-// attacker who replaces the file with a multi-GiB payload cannot
-// exhaust process memory before the read errors out.
-const maxStateFileBytes = 1 << 20
-
 // readHubMcpStateFile reads a hub-mcp state file via the inode-
 // anchored verify+read pipeline (hub_mcp_state_read_inode_{windows,posix}.go).
 // The verify and read steps share the same parent-directory handle

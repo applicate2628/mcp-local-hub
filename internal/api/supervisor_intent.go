@@ -198,7 +198,7 @@ func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 }
 
 func readSupervisorIntentFileInodeAnchored(path string) ([]byte, error) {
-	return readStateFileInodeAnchoredWithMaxBytes(path, maxIntentFileBytes)
+	return readStateFileInodeAnchored(path)
 }
 
 // filterSupervisorIntentOneshotDaemons strips legacy one-shot command

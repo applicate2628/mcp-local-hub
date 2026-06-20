@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/secrets"
@@ -49,6 +50,54 @@ func TestOpenVaultRefusesReadBroadenedVaultBlobDefaultMode(t *testing.T) {
 	}
 	if !errors.Is(err, vaultReadBroadeningErrorForTest()) {
 		t.Fatalf("OpenVault read-broadened secrets.age err = %v, want %v", err, vaultReadBroadeningErrorForTest())
+	}
+}
+
+func TestOpenVaultAllowsVaultBlobAboveHubStateCap(t *testing.T) {
+	keyPath, vaultPath := newVaultReadHardeningFixture(t)
+	vault, err := secrets.OpenVault(keyPath, vaultPath)
+	if err != nil {
+		t.Fatalf("OpenVault initial: %v", err)
+	}
+	want := strings.Repeat("x", int(maxStateFileBytes)+1)
+	if err := vault.Set("BIG", want); err != nil {
+		t.Fatalf("set large vault value: %v", err)
+	}
+	info, err := os.Stat(vaultPath)
+	if err != nil {
+		t.Fatalf("stat large vault: %v", err)
+	}
+	if info.Size() <= maxStateFileBytes {
+		t.Fatalf("large vault fixture size = %d, want above hub-state cap %d", info.Size(), maxStateFileBytes)
+	}
+
+	reopened, err := secrets.OpenVault(keyPath, vaultPath)
+	if err != nil {
+		t.Fatalf("OpenVault rejected vault blob above hub-state cap: %v", err)
+	}
+	got, err := reopened.Get("BIG")
+	if err != nil {
+		t.Fatalf("Get BIG after reopen: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("BIG value length = %d, want %d", len(got), len(want))
+	}
+}
+
+func TestReadHubEndpointRefusesReadBroadenedDefaultMode(t *testing.T) {
+	stateDir := hubMcpStateTestHelper(t)
+	target := filepath.Join(stateDir, hubMcpEndpointFileLeaf)
+	if err := os.WriteFile(target, []byte(`{"port":9125,"instance_id":"secret-instance","pid":123,"started_at":"2026-06-20T12:00:00Z"}`), 0o600); err != nil {
+		t.Fatalf("write endpoint: %v", err)
+	}
+	broadenVaultReadForTest(t, target)
+
+	_, err := readHubMcpStateFile(hubMcpEndpointFileLeaf)
+	if err == nil {
+		t.Fatalf("readHubMcpStateFile read-broadened %s; want fail-closed", hubMcpEndpointFileLeaf)
+	}
+	if !errors.Is(err, vaultReadBroadeningErrorForTest()) {
+		t.Fatalf("read-broadened endpoint err = %v, want %v", err, vaultReadBroadeningErrorForTest())
 	}
 }
 

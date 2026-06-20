@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -106,6 +107,37 @@ func TestWritePreCollapseBackup_LargeLegacyDaemonIntentAboveHubStateCap(t *testi
 	}
 	if string(gotRaw) != string(daemonRaw) {
 		t.Fatalf("daemon-intent backup bytes changed: got %d bytes, want %d", len(gotRaw), len(daemonRaw))
+	}
+}
+
+func TestWritePreCollapseBackup_LargeSupervisorIntentAboveHubStateCap(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	supervisorRaw := append([]byte(`{"version":1,"padding":"`), bytes.Repeat([]byte("x"), int(maxStateFileBytes)+1)...)
+	supervisorRaw = append(supervisorRaw, []byte(`"}`)...)
+	if len(supervisorRaw) <= int(maxStateFileBytes) {
+		t.Fatalf("test fixture is only %d bytes; want above hub-state cap %d", len(supervisorRaw), maxStateFileBytes)
+	}
+	if int64(len(supervisorRaw)) > maxIntentFileBytes {
+		t.Fatalf("test fixture grew past supervisor intent cap: %d > %d", len(supervisorRaw), maxIntentFileBytes)
+	}
+
+	supervisorPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := os.WriteFile(supervisorPath, supervisorRaw, 0o600); err != nil {
+		t.Fatalf("write supervisor-intent: %v", err)
+	}
+	daemonPath := filepath.Join(stateDir, intentFileLeaf)
+
+	backupDir, err := writePreCollapseBackup(stateDir, supervisorPath, daemonPath, now)
+	if err != nil {
+		t.Fatalf("writePreCollapseBackup rejected large supervisor-intent source: %v", err)
+	}
+	gotRaw, err := os.ReadFile(filepath.Join(backupDir, supervisorIntentFileLeaf))
+	if err != nil {
+		t.Fatalf("read supervisor-intent backup: %v", err)
+	}
+	if !bytes.Equal(gotRaw, supervisorRaw) {
+		t.Fatalf("supervisor-intent backup bytes changed: got %d bytes, want %d", len(gotRaw), len(supervisorRaw))
 	}
 }
 

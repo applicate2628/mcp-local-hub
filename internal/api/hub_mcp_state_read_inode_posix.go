@@ -25,26 +25,18 @@ import (
 // the verified parent fd, runs the owner/mode allowlist gate, and reads
 // the content via the same fd. No path-based read between verify and read.
 //
-// Returns up to maxStateFileBytes (defined in hub_mcp_state.go)
-// of content.
+// The byte cap is resolved from the state-file kind so intent/vault reads do
+// not inherit the small hub-state ceiling.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
-	return readStateFileInodeAnchoredWithMaxBytes(path, maxStateFileBytes)
-}
-
-func readStateFileInodeAnchoredWithMaxBytes(path string, maxBytes int64) ([]byte, error) {
-	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, operatorRequiresSingleUserHome, maxBytes)
+	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path, requiresStrict, maxStateFileBytes)
-}
-
-func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requiresStrict func() bool, maxBytes int64) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, maxBytes, true)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, maxStateFileBytes, false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false)
 }
 
 func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks bool) ([]byte, error) {

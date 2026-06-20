@@ -43,6 +43,7 @@ func isSecretBearingStateFilePath(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	switch base {
 	case hubMcpTokensFileLeaf,
+		hubMcpEndpointFileLeaf,
 		hubMcpControlTokenFileLeaf,
 		"hub-mcp-control.tok",
 		"secrets.age",
