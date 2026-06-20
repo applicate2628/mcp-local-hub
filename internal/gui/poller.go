@@ -222,6 +222,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			case isConfirmedDeadDaemonRow(r) && lastLivePID > 0 && !(ok && isConfirmedDeadDaemonRow(prev)):
 				backendLostEdge = true
 				backendLostPrevPID = lastLivePID
+				delete(p.lastSerenaLivePID, k)
 			}
 			if r.PID > 0 {
 				p.lastSerenaLivePID[k] = r.PID

@@ -1349,6 +1349,12 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 				delete(persisted, path)
 				continue
 			}
+			if newPID != 0 && (priorIdle[path] > 0 || serenaTaskHasActiveIdleStop(pathToTaskName[path], now)) {
+				s.serenaBackendPIDMu.Lock()
+				s.consumeSerenaBackendPrevPIDHintLocked(pathToPort[path])
+				s.serenaBackendPIDMu.Unlock()
+				continue
+			}
 			s.serenaBackendPIDMu.Lock()
 			hintPrev, ok := s.consumeSerenaBackendPrevPIDHintLocked(pathToPort[path])
 			s.serenaBackendPIDMu.Unlock()

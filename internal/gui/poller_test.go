@@ -574,6 +574,28 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 		}
 	})
 
+	t.Run("confirmed-dead-recovery-does-not-reemit-stale-prev-pid", func(t *testing.T) {
+		const pidA = 4242
+		const pidB = 5151
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
+		}, 3)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("confirmed-dead recovery emitted daemon-backend-lost %d times, want exactly 1 for A->dead only; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		body := bodies[0]
+		if got, _ := body["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
+		}
+		if got, _ := body["prev_pid"].(int); got != pidA {
+			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
+		}
+	})
+
 	t.Run("skips-stable-serena-pid", func(t *testing.T) {
 		const pidA = 4242
 		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
