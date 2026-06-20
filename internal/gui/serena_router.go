@@ -1566,10 +1566,11 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 				if gateKey == "" {
 					gateKey = wsKey
 				}
-				s.enterSerenaForward(gateKey)
-				defer s.exitSerenaForward(gateKey)
 				fwdCtx, fwdCancel := context.WithTimeout(context.Background(), serenaDeleteTimeout)
 				defer fwdCancel()
+				if entered := s.enterSerenaForwardCtx(fwdCtx, gateKey); entered {
+					defer s.exitSerenaForward(gateKey)
+				}
 				s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, delWS, auditFn)
 			}()
 		}
@@ -1826,8 +1827,8 @@ func (s *Server) handleSerenaCancelled(
 					fwdClient := httpClient
 					fwdAudit := auditFn
 					fwdTimeout := deps.UpstreamTimeout
-					s.enterSerenaForward(fwdGateKey)
 					go func() {
+						s.enterSerenaForward(fwdGateKey)
 						defer s.exitSerenaForward(fwdGateKey)
 						fwdCtx, fwdCancel := cleanupContext(fwdTimeout)
 						defer fwdCancel()

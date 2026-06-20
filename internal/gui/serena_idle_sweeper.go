@@ -167,16 +167,45 @@ type serenaWorkspaceStopGateEntry struct {
 }
 
 func (g *serenaWorkspaceStopGate) enter(wsKey string) {
+	_ = g.enterCtx(context.Background(), wsKey)
+}
+
+func (g *serenaWorkspaceStopGate) enterCtx(ctx context.Context, wsKey string) bool {
 	if g == nil || wsKey == "" {
-		return
+		return true
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	entry := g.entryLocked(wsKey)
+	var stopWake func() bool
 	for entry.phase != serenaWorkspaceStopGatePhaseNone {
+		if err := ctx.Err(); err != nil {
+			if stopWake != nil {
+				stopWake()
+			}
+			return false
+		}
+		if stopWake == nil {
+			stopWake = context.AfterFunc(ctx, func() {
+				g.mu.Lock()
+				entry.ready.Broadcast()
+				g.mu.Unlock()
+			})
+			defer stopWake()
+		}
 		entry.ready.Wait()
 	}
+	if err := ctx.Err(); err != nil {
+		return false
+	}
 	entry.inFlight++
+	return true
 }
 
 func (g *serenaWorkspaceStopGate) exit(wsKey string) {
@@ -270,6 +299,15 @@ func (s *Server) enterSerenaForward(wsKey string) {
 		return
 	}
 	s.serenaStopGate.enter(wsKey)
+}
+
+// enterSerenaForwardCtx is the bounded form of enterSerenaForward. It returns
+// false when ctx expires before the current idle-stop/prune phase releases.
+func (s *Server) enterSerenaForwardCtx(ctx context.Context, wsKey string) bool {
+	if s == nil || wsKey == "" {
+		return true
+	}
+	return s.serenaStopGate.enterCtx(ctx, wsKey)
 }
 
 // exitSerenaForward marks the end of a /serena/mcp request to wsKey's daemon

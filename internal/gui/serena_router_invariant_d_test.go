@@ -25,6 +25,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -244,6 +245,64 @@ func TestSerenaRouter_NotificationCancelledForwardBlocksIdleStop(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_NotificationCancelled202NotBlockedByHeldStopGate(t *testing.T) {
+	const wsPath = "/proj/cancel-held-gate"
+	ws := serenaWS("cancel-held-gate", wsPath, 9323)
+	daemon := newFakeSerenaDaemon("cancel-held-gate")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	if !s.beginSerenaIdleStop(ws.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold stop gate for %s", ws.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaIdleStop(ws.WorkspaceKey)
+		}
+	}()
+
+	cancelBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  map[string]any{"requestId": 7},
+	})
+	done := make(chan *httptest.ResponseRecorder, 1)
+	start := time.Now()
+	go func() {
+		done <- postSerena(t, s, cancelBody, map[string]string{"Mcp-Session-Id": sid})
+	}()
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("cancel status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("cancel 202 took %v; want immediate even while the daemon-side forward waits on the stop gate", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancel 202 blocked behind a held stop gate; only the async daemon-side forward may wait")
+	}
+
+	s.endSerenaIdleStop(ws.WorkspaceKey)
+	gateHeld = false
+	waitForDaemonCancelHits(t, daemon, 1)
+}
+
 func TestSerenaRouter_DeleteForwardBlocksIdleStop(t *testing.T) {
 	tmpState := t.TempDir()
 	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
@@ -322,6 +381,58 @@ func TestSerenaRouter_DeleteForwardBlocksIdleStop(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_DeleteHeldStopGateBoundedByDeleteBudget(t *testing.T) {
+	const wsPath = "/proj/delete-held-gate"
+	ws := serenaWS("delete-held-gate", wsPath, 9324)
+	daemon := newFakeSerenaDaemon("delete-held-gate")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	if !s.beginSerenaIdleStop(ws.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold stop gate for %s", ws.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaIdleStop(ws.WorkspaceKey)
+		}
+	}()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	start := time.Now()
+	go func() {
+		done <- deleteSerena(t, s, map[string]string{"Mcp-Session-Id": sid, "MCP-Protocol-Version": "2025-11-25"})
+	}()
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("DELETE status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+		}
+		if elapsed := time.Since(start); elapsed > serenaDeleteTimeout+2*time.Second {
+			t.Fatalf("DELETE took %v; want bounded by the existing %v DELETE budget while the stop gate is held", elapsed, serenaDeleteTimeout)
+		}
+	case <-time.After(serenaDeleteTimeout + 2*time.Second):
+		t.Fatal("DELETE exceeded the existing DELETE budget while waiting for the stop gate")
+	}
+
+	s.endSerenaIdleStop(ws.WorkspaceKey)
+	gateHeld = false
+}
+
 // Note on #6 (path-only one-shot teardown) D-detach coverage: the one-shot
 // teardown is a synchronous `defer` that runs INSIDE the handler, while the
 // MAIN tool-call forward legitimately uses r.Context(). There is no clean
@@ -396,6 +507,73 @@ func TestSerenaRouter_ToolsList_OneShotTeardownBoundedNotSixtySeconds(t *testing
 		// PRE-fix #4 would block ~60s on the hung teardown -> this fires.
 		t.Fatalf("tools/list did not return within 10s; the one-shot teardown is NOT bounded by the short cleanup budget (Invariant D-bound regression: a 60s default would hang here)")
 	}
+}
+
+func TestSerenaRouter_ToolsList_UnrelatedHeldStopGateDoesNotBlockLiveCandidate(t *testing.T) {
+	blocked := serenaWS("tools-list-held-gate", "/proj/tools-list-held-gate", 0)
+	live := serenaWS("tools-list-live", "/proj/tools-list-live", 9325)
+
+	daemon := newFakeSerenaDaemon("tools-list-live")
+	daemon.tool = func(w http.ResponseWriter, _ *http.Request, b []byte) {
+		if !strings.Contains(string(b), `"tools/list"`) {
+			t.Errorf("upstream body did not carry tools/list; got %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+	live.Port = ts.Listener.Addr().(*net.TCPAddr).Port
+
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{blocked, live}},
+			list:         []*api.WorkspaceEntry{blocked, live},
+		},
+		Sessions: NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string {
+			if ws != nil && ws.WorkspaceKey == live.WorkspaceKey {
+				return ts.URL
+			}
+			return ""
+		},
+		AuditFn: func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	if !s.beginSerenaIdleStop(blocked.WorkspaceKey) {
+		t.Fatalf("precondition: could not hold stop gate for %s", blocked.WorkspaceKey)
+	}
+	gateHeld := true
+	defer func() {
+		if gateHeld {
+			s.endSerenaIdleStop(blocked.WorkspaceKey)
+		}
+	}()
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	done := make(chan *httptest.ResponseRecorder, 1)
+	start := time.Now()
+	go func() {
+		done <- postSerena(t, s, buildLifecycleBody(t, "tools/list", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	}()
+
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusOK {
+			t.Fatalf("tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("tools/list took %v; workspace %s is not woken/proxied and must not block live candidate %s", elapsed, blocked.WorkspaceKey, live.WorkspaceKey)
+		}
+		assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
+	case <-time.After(2 * time.Second):
+		t.Fatalf("tools/list blocked behind unrelated workspace %s instead of using live candidate %s", blocked.WorkspaceKey, live.WorkspaceKey)
+	}
+
+	s.endSerenaIdleStop(blocked.WorkspaceKey)
+	gateHeld = false
 }
 
 // ---------------------------------------------------------------------
