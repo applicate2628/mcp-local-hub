@@ -30,8 +30,6 @@
 package gui
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -124,8 +122,8 @@ func (s *Server) clientInstallPrefsSet(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Clients []string `json:"clients"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "CLIENT_INSTALL_PREFS_INVALID_JSON")
+	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "CLIENT_INSTALL_PREFS_INVALID_JSON")
 		return
 	}
 	if err := clientInstallPrefsSetNames(body.Clients); err != nil {

@@ -2,7 +2,6 @@
 package gui
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -139,8 +138,8 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	var req aggressiveCleanupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		http.Error(w, decodeBodyErrorText(err), decodeBodyStatusCode(err))
 		return
 	}
 	if req.MinAgeSec < 0 {

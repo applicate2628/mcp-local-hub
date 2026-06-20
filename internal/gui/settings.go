@@ -2,8 +2,6 @@
 package gui
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -169,8 +167,8 @@ func (s *Server) settingsPut(w http.ResponseWriter, r *http.Request, def *api.Se
 	var body struct {
 		Value string `json:"value"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "SETTINGS_INVALID_JSON")
+	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "SETTINGS_INVALID_JSON")
 		return
 	}
 	if err := s.settings.Set(def.Key, body.Value); err != nil {

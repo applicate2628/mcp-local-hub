@@ -18,7 +18,6 @@
 package gui
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -126,8 +125,8 @@ func decodeTrustedRootBody(w http.ResponseWriter, r *http.Request) (string, bool
 	var body struct {
 		Root string `json:"root"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "LSP_TRUSTED_ROOTS_INVALID_JSON")
+	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "LSP_TRUSTED_ROOTS_INVALID_JSON")
 		return "", false
 	}
 	return strings.TrimSpace(body.Root), true

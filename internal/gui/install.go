@@ -143,8 +143,8 @@ func registerInstallRoutes(s *Server) {
 		name := strings.TrimSpace(r.URL.Query().Get("name"))
 		if name == "" {
 			var req installRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+			if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+				writeDecodeBodyError(w, err, "BAD_REQUEST")
 				return
 			}
 			name = strings.TrimSpace(req.Name)

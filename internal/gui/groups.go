@@ -49,7 +49,6 @@ package gui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -316,8 +315,8 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 		Servers     []string            `json:"servers"`
 		ToolsHidden map[string][]string `json:"tools_hidden"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "GROUPS_INVALID_JSON")
+	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "GROUPS_INVALID_JSON")
 		return
 	}
 

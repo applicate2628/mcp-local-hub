@@ -2,7 +2,6 @@
 package gui
 
 import (
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -121,10 +120,10 @@ func (s *Server) weeklyRefreshMembershipList(w http.ResponseWriter, _ *http.Requ
 // Memo D5 contract: idempotent partial update; entries not in body unchanged.
 func (s *Server) weeklyRefreshMembershipPut(w http.ResponseWriter, r *http.Request) {
 	var body []api.MembershipDelta
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":  "bad_json",
-			"detail": err.Error(),
+	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+		writeJSON(w, decodeBodyStatusCode(err), map[string]string{
+			"error":  decodeBodyErrorCode(err),
+			"detail": decodeBodyErrorText(err),
 		})
 		return
 	}
@@ -205,10 +204,10 @@ func (s *Server) weeklyScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Schedule string `json:"schedule"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":   "bad_json",
-			"detail":  err.Error(),
+	if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+		writeJSON(w, decodeBodyStatusCode(err), map[string]string{
+			"error":   decodeBodyErrorCode(err),
+			"detail":  decodeBodyErrorText(err),
 			"example": "weekly Sun 03:00",
 		})
 		return

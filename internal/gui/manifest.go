@@ -214,8 +214,8 @@ func registerManifestRoutes(s *Server) {
 			return
 		}
 		var req manifestCreateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+		if err := decodeJSONBodyLimited(w, r, &req, maxManifestBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "BAD_REQUEST")
 			return
 		}
 		name := strings.TrimSpace(req.Name)
@@ -250,8 +250,8 @@ func registerManifestRoutes(s *Server) {
 			return
 		}
 		var req manifestValidateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+		if err := decodeJSONBodyLimited(w, r, &req, maxManifestBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "BAD_REQUEST")
 			return
 		}
 		warnings := s.manifestValidator.ManifestValidate(req.YAML)
@@ -290,8 +290,8 @@ func registerManifestRoutes(s *Server) {
 			return
 		}
 		var req manifestEditRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+		if err := decodeJSONBodyLimited(w, r, &req, maxManifestBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "BAD_REQUEST")
 			return
 		}
 		name := strings.TrimSpace(req.Name)

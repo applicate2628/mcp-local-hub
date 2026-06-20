@@ -31,8 +31,8 @@ func registerDismissRoutes(s *Server) {
 			return
 		}
 		var req dismissRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+		if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "BAD_REQUEST")
 			return
 		}
 		// Normalize before both the empty-check and the persist call so
