@@ -55,6 +55,10 @@ const hubHealthProbeTimeout = 2 * time.Second
 // a legitimate burst) so the warn fires only on a sustained outage.
 const hubHealthUnresponsiveThreshold = 3
 
+// DefaultHubHealthUnresponsiveThreshold is the default number of failed
+// probes needed before a hub listener is declared unresponsive.
+const DefaultHubHealthUnresponsiveThreshold = hubHealthUnresponsiveThreshold
+
 // HubListenerHealthWatcher periodically TCP-dials the bound hub port and
 // emits structured observability events when the listener becomes
 // unresponsive (and when it recovers). It is the B1 observability
@@ -172,15 +176,15 @@ func (w *HubListenerHealthWatcher) probeOnce(ctx context.Context) {
 		w.consecutiveFailures++
 		if !w.unresponsive && w.consecutiveFailures >= hubHealthUnresponsiveThreshold {
 			w.unresponsive = true
+			if w.onUnresponsive != nil {
+				w.onUnresponsive()
+			}
 			_ = w.emit("warn", "hub-listener-unresponsive", map[string]any{
 				"port":                 w.port,
 				"consecutive_failures": w.consecutiveFailures,
 				"err":                  err.Error(),
 				"note":                 "hub aggregate listener not accepting connections; GUI auto-recovery restart requested",
 			})
-			if w.onUnresponsive != nil {
-				w.onUnresponsive()
-			}
 		}
 		return
 	}

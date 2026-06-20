@@ -66,6 +66,11 @@ type HubListenerComponents struct {
 	reload  *api.InternalReloadHandler
 	port    int
 
+	// listenerCancel stops per-listener background watchers. It is
+	// derived from the long-lived hub init context so shutdown/restart can
+	// cancel the old listener's watchers without stopping the restart driver.
+	listenerCancel context.CancelFunc
+
 	// alive is true between the serve goroutine's start and exit.
 	// Server.HubMcpEndpointActive consults this AND the
 	// hubMcpComp.Load() result so the `actual_hub_endpoint_enabled`
@@ -94,7 +99,7 @@ const (
 	hubListenerRestartBaseBackoff            = 5 * time.Second
 	hubListenerRestartMaxBackoff             = 5 * time.Minute
 	hubListenerRestartMaxConsecutiveRestarts = 5
-	hubListenerRestartStableWindow           = api.DefaultHubHealthProbeInterval
+	hubListenerRestartStableWindow           = api.DefaultHubHealthProbeInterval*time.Duration(api.DefaultHubHealthUnresponsiveThreshold) + api.DefaultHubHealthProbeInterval
 )
 
 type hubListenerRestartSignalContextKey struct{}
@@ -539,12 +544,14 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	// goroutine so the goroutine can mark `alive=false` on exit
 	// (codex bot r2 P2 closure on PR #168 — accurate live-state
 	// for the persisted-vs-runtime hub-endpoint badge).
+	listenerCtx, listenerCancel := context.WithCancel(ctx)
 	comp := &HubListenerComponents{
-		srv:     srv,
-		store:   store,
-		handler: handler,
-		reload:  reload,
-		port:    port,
+		srv:            srv,
+		store:          store,
+		handler:        handler,
+		reload:         reload,
+		port:           port,
+		listenerCancel: listenerCancel,
 	}
 	comp.alive.Store(true)
 
@@ -558,7 +565,7 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	// shutdown), so it needs no explicit join. (a)'s failure-driven self-heal
 	// remains the backstop for the window between a restart and the next
 	// observation (and for the astronomically-unlikely same-PID-recycle case).
-	go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(ctx)
+	go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(listenerCtx)
 
 	// B1 footgun observability + v1 auto-restart trigger:
 	// a HUNG (not crashed) hub listener with the GUI process still alive
@@ -574,8 +581,8 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	// Fire-and-forget on the listener ctx: unwinds solely on ctx
 	// cancellation (hub stop / shutdown), same as the watcher above.
 	healthWatcher := api.NewHubListenerHealthWatcher(port, 0)
-	healthWatcher.SetOnUnresponsive(hubListenerRestartSignalFromContext(ctx))
-	go healthWatcher.Run(ctx)
+	healthWatcher.SetOnUnresponsive(hubListenerRestartSignalFromContext(listenerCtx))
+	go healthWatcher.Run(listenerCtx)
 
 	go func() {
 		// Mark the listener dead on any exit path (clean shutdown via
@@ -618,6 +625,9 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 func ShutdownHubListener(parentCtx context.Context, c *HubListenerComponents) {
 	if c == nil {
 		return
+	}
+	if c.listenerCancel != nil {
+		c.listenerCancel()
 	}
 	shutCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 	defer cancel()

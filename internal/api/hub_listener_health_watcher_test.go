@@ -109,6 +109,66 @@ func TestHealthWatcherOnUnresponsiveCallbackFiresOnTransition(t *testing.T) {
 	}
 }
 
+func TestHealthWatcherSignalsRestartBeforeUnresponsiveWarnEmit(t *testing.T) {
+	w, _, setDial := newTestHealthWatcher(3439)
+	ctx := context.Background()
+	fail := errors.New("connection refused")
+	(*setDial)(fail)
+
+	callbackStarted := make(chan struct{})
+	allowCallbackReturn := make(chan struct{})
+	emitStarted := make(chan struct{})
+	allowEmitReturn := make(chan struct{})
+	w.onUnresponsive = func() {
+		close(callbackStarted)
+		<-allowCallbackReturn
+	}
+	w.emit = func(level, event string, fields map[string]any) error {
+		close(emitStarted)
+		<-allowEmitReturn
+		return nil
+	}
+
+	for i := 0; i < hubHealthUnresponsiveThreshold-1; i++ {
+		w.probeOnce(ctx)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.probeOnce(ctx)
+	}()
+
+	select {
+	case <-callbackStarted:
+		select {
+		case <-emitStarted:
+			t.Fatal("unresponsive warn emit started before restart callback returned")
+		default:
+		}
+	case <-emitStarted:
+		close(allowEmitReturn)
+		close(allowCallbackReturn)
+		<-done
+		t.Fatal("unresponsive warn emit started before restart callback")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for restart callback or warn emit")
+	}
+
+	close(allowCallbackReturn)
+	select {
+	case <-emitStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warn emit did not run after restart callback returned")
+	}
+	close(allowEmitReturn)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe did not finish after warn emit returned")
+	}
+}
+
 // TestHealthWatcherRecoveryEvent pins the recovery transition: after a
 // warn, a successful dial emits exactly one info recovery event, and the
 // failure counter resets so a subsequent outage warns again.
