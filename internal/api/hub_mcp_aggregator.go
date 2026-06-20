@@ -284,6 +284,8 @@ type listResult struct {
 // list call failing also lands here — surfacing the call as a failure
 // is intentional, since the caller can't discover any tools.
 func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMessage, instanceID string) ([]byte, error) {
+	current := LoadResolverSnapshot()
+
 	// Snapshot the inputs under the session mu. codex bot r17 P1
 	// closure on PR #157: capture each daemon's NEGOTIATED protocol
 	// version alongside its Mcp-Session-Id so the fan-out uses
@@ -301,41 +303,105 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	copy(initFailures, sess.InitFailures)
 	sess.mu.Unlock()
 
-	allowEmptySuccess := false
-	if current := LoadResolverSnapshot(); sess.SnapshotAtInit != nil && current != nil && current != sess.SnapshotAtInit {
-		originalCount := len(successes)
-		if originalCount > 0 {
-			filtered := make(map[canonicalDaemonRef]daemonInitState, originalCount)
-			for ref, state := range successes {
-				if liveRef, ok := liveDaemonBinding(current, sess.ScopeKey, ref); ok {
-					if liveRef.Port != ref.Port {
-						freshState, hasFreshState := sess.cachedDaemonInitState(liveRef)
-						if !hasFreshState {
-							var initErr error
-							freshState, initErr = sess.reinitializeDaemonBinding(ctx, liveRef)
-							if initErr != nil {
-								initFailures = append(initFailures, DaemonFailure{
-									Server: liveRef.Server,
-									Daemon: liveRef.Daemon,
-									Stage:  "initialize",
-									Err:    initErr.Error(),
-								})
-								continue
-							}
-						}
-						state = freshState
-					}
-					filtered[liveRef] = state
-				}
-			}
-			successes = filtered
-		}
+	allowEmptyKnown := false
+	if sess.SnapshotAtInit != nil && current != nil && current != sess.SnapshotAtInit {
+		successes, initFailures = sess.filterToolsListSuccessesByLiveSnapshot(ctx, current, successes, initFailures)
 		initFailures = filterInitFailuresByLiveBindings(initFailures, current, sess.ScopeKey, sess.IntendedParticipants)
-		allowEmptySuccess = originalCount > 0 && len(successes) == 0 && len(initFailures) == 0
+		liveParticipants := countLiveParticipants(current, sess.ScopeKey, sess.IntendedParticipants)
+		allowEmptyKnown = liveParticipants == 0 && len(successes) == 0 && len(initFailures) == 0 && snapshotKnowsScope(current, sess.ScopeKey)
 	}
 
 	results := fanOutToolsList(ctx, successes)
-	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID, allowEmptySuccess)
+	hiddenSet := buildHiddenToolSet(snapshotHiddenToolsForScope(current, sess.ScopeKey))
+	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID, allowEmptyKnown, hiddenSet)
+}
+
+func (s *hubSession) filterToolsListSuccessesByLiveSnapshot(ctx context.Context, current *ResolverSnapshot, successes map[canonicalDaemonRef]daemonInitState, initFailures []DaemonFailure) (map[canonicalDaemonRef]daemonInitState, []DaemonFailure) {
+	if len(successes) == 0 {
+		return successes, initFailures
+	}
+
+	filtered := make(map[canonicalDaemonRef]daemonInitState, len(successes))
+	moved := make([]canonicalDaemonRef, 0)
+	for ref, state := range successes {
+		liveRef, ok := liveDaemonBinding(current, s.ScopeKey, ref)
+		if !ok {
+			continue
+		}
+		if liveRef.Port == ref.Port {
+			filtered[liveRef] = state
+			continue
+		}
+		if freshState, ok := s.cachedDaemonInitState(liveRef); ok {
+			filtered[liveRef] = freshState
+			continue
+		}
+		moved = append(moved, liveRef)
+	}
+	if len(moved) == 0 {
+		return filtered, initFailures
+	}
+
+	freshStates, reinitFailures := s.reinitializeDaemonBindings(ctx, moved)
+	initFailures = append(initFailures, reinitFailures...)
+	for _, ref := range moved {
+		if state, ok := freshStates[ref]; ok {
+			filtered[ref] = state
+		}
+	}
+	return filtered, initFailures
+}
+
+type daemonReinitResult struct {
+	ref   canonicalDaemonRef
+	state daemonInitState
+	err   error
+}
+
+func (s *hubSession) reinitializeDaemonBindings(ctx context.Context, refs []canonicalDaemonRef) (map[canonicalDaemonRef]daemonInitState, []DaemonFailure) {
+	sortedRefs := append([]canonicalDaemonRef(nil), refs...)
+	sort.Slice(sortedRefs, func(i, j int) bool {
+		a, b := sortedRefs[i], sortedRefs[j]
+		if a.Server != b.Server {
+			return a.Server < b.Server
+		}
+		if a.Daemon != b.Daemon {
+			return a.Daemon < b.Daemon
+		}
+		return a.Port < b.Port
+	})
+
+	results := make([]daemonReinitResult, len(sortedRefs))
+	sem := make(chan struct{}, FanOutConcurrency)
+	var wg sync.WaitGroup
+	for i, ref := range sortedRefs {
+		i, ref := i, ref
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			state, err := s.reinitializeDaemonBinding(ctx, ref)
+			results[i] = daemonReinitResult{ref: ref, state: state, err: err}
+		}()
+	}
+	wg.Wait()
+
+	states := make(map[canonicalDaemonRef]daemonInitState, len(results))
+	failures := make([]DaemonFailure, 0)
+	for _, result := range results {
+		if result.err != nil {
+			failures = append(failures, DaemonFailure{
+				Server: result.ref.Server,
+				Daemon: result.ref.Daemon,
+				Stage:  "initialize",
+				Err:    result.err.Error(),
+			})
+			continue
+		}
+		states[result.ref] = result.state
+	}
+	return states, failures
 }
 
 func filterInitFailuresByLiveBindings(failures []DaemonFailure, current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef) []DaemonFailure {
@@ -361,6 +427,26 @@ func initFailureDaemonStillBound(current *ResolverSnapshot, scopeKey string, int
 		}
 	}
 	return false
+}
+
+func countLiveParticipants(current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef) int {
+	count := 0
+	for _, ref := range intended {
+		if _, ok := liveDaemonBinding(current, scopeKey, ref); ok {
+			count++
+		}
+	}
+	return count
+}
+
+func snapshotKnowsScope(current *ResolverSnapshot, scopeKey string) bool {
+	if current == nil {
+		return false
+	}
+	if _, ok := current.Bindings[scopeKey]; ok {
+		return true
+	}
+	return strings.HasPrefix(scopeKey, GroupScopeKeyPrefix) && current.Groups[scopeKey]
 }
 
 // daemonInitState bundles a daemon's per-daemon Mcp-Session-Id and
@@ -415,10 +501,11 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 // before returning so a concurrent tools/call sees the new routes.
 //
 // Decision: all-failed (-32000) vs success-with-partial-failures uses
-// listSuccessCount > 0 as the sole criterion. An init success with
-// zero list successes is treated as all-failed — the caller cannot
-// discover any tools, so we surface the failures via the error
-// envelope rather than returning result.tools=[].
+// listSuccessCount > 0, except for scopes the live resolver snapshot proves
+// are known-empty after filtering stale successes and failures. An init success
+// with zero list successes is otherwise treated as all-failed — the caller
+// cannot discover any tools, so we surface the failures via the error envelope
+// rather than returning result.tools=[].
 //
 // Namespace-collision handling: when two daemons under the same
 // server expose the same raw tool name, the resulting exposed name
@@ -430,7 +517,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 // stage="tools/list" partialFailure row per colliding daemon. The
 // failure message names every daemon that claimed the key so
 // operators can resolve the duplicate at the manifest layer.
-func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string, allowEmptySuccess bool) ([]byte, error) {
+func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string, allowEmptyKnown bool, hiddenSet hiddenToolSet) ([]byte, error) {
 	// codex bot r14 P2 closure on PR #157: fanOutToolsList appends
 	// results in goroutine-completion order, so identical inputs
 	// produced different mergedTools / partialFailures order across
@@ -467,8 +554,6 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	// too. Otherwise a hidden tool that ALSO collides between two same-server
 	// daemons is dropped from result.tools (Pass 2) yet still named in a
 	// `partialFailures` collision row — leaking the hidden tool's existence.
-	hiddenSet := buildHiddenToolSet(sess.hiddenToolsForScope())
-
 	// Pass 1 — for each successful daemon, record the SET of unique
 	// daemons that produced each exposed key. Keys claimed by more
 	// than one DISTINCT daemon become collisions. codex bot r13 P2
@@ -611,12 +696,12 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	allFailures = append(allFailures, listFailures...)
 
 	if listSuccessCount == 0 {
-		// Zero INTENDED participants (a declared-but-empty group — decision
-		// claim 5) is NOT the all-failed case: nothing was attempted, so the
-		// route exposes an empty tool surface, not a -32000 "all daemons
-		// failed" envelope. Distinguish on IntendedParticipants (empty ⇒
-		// nothing intended) vs the genuine all-failed case (≥1 intended, all
-		// failed).
+		// Known-empty scopes are NOT the all-failed case: nothing is live to
+		// attempt, so the route exposes an empty tool surface, not a -32000
+		// "all daemons failed" envelope. allowEmptyKnown covers sessions whose
+		// original participants were removed by the live resolver snapshot.
+		// The IntendedParticipants branch preserves declared groups that were
+		// empty from session creation.
 		//
 		// B2 (bot R3): the empty-success branch is restricted to GROUP scopes
 		// (ScopeKey carries the GroupScopeKeyPrefix "g:"). A /clients/ session
@@ -625,9 +710,9 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// client absent from the resolver snapshot). Returning empty-success
 		// there would MASK a broken hub config AND change the byte-identical
 		// client contract (pre-groups, a zero-binding client got the -32000
-		// all-failed envelope). So a non-group scope keeps the -32000 envelope;
-		// only a group reaches empty-success.
-		if allowEmptySuccess || (len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix)) {
+		// all-failed envelope). So a non-group scope with no known live
+		// snapshot entry keeps the -32000 envelope.
+		if allowEmptyKnown || (len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix)) {
 			sess.RouteMap.Store(&mergedRoutes)                                         // empty map — no tools to route
 			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID) // mergedTools is empty → result.tools=[]
 		}
@@ -963,15 +1048,23 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 	s.mu.Unlock()
 	type initResult struct{ sid, proto string }
 	groupKey := fmt.Sprintf("%s\x00%s\x00%d", daemonRef.Server, daemonRef.Daemon, daemonRef.Port)
-	v, initErr, _ := s.reinitGroup.Do(groupKey, func() (any, error) {
+	ch := s.reinitGroup.DoChan(groupKey, func() (any, error) {
 		sid, negotiated, err := initializeDaemonSession(ctx, daemonRef, protoVer)
 		if err != nil {
 			return nil, err
 		}
 		return initResult{sid: sid, proto: negotiated}, nil
 	})
-	if initErr != nil {
-		return daemonInitState{}, initErr
+
+	var v any
+	select {
+	case result := <-ch:
+		if result.Err != nil {
+			return daemonInitState{}, result.Err
+		}
+		v = result.Val
+	case <-ctx.Done():
+		return daemonInitState{}, ctx.Err()
 	}
 	res := v.(initResult)
 	proto := res.proto
@@ -1752,19 +1845,14 @@ func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) []namespace
 	return out
 }
 
-// hiddenToolsForScope returns the session's FINE-GRAINED per-tool
-// visibility filter (server name → hidden raw tool names) for its scope
-// key, read from the currently published resolver snapshot (groups/namespaces
-// Phase 5a). Returns nil for a CLIENT scope key (no entry → no filtering,
-// the byte-identical fence) and for any live snapshot with no ToolsHidden.
-// The binding set remains session-scoped; only per-tool visibility is live so
-// operator tools_hidden changes revoke tools/list without a reconnect.
-func (s *hubSession) hiddenToolsForScope() map[string][]string {
-	snap := LoadResolverSnapshot()
+// snapshotHiddenToolsForScope returns the FINE-GRAINED per-tool visibility
+// filter (server name -> hidden raw tool names) for scopeKey from the resolver
+// snapshot already selected for this tools/list assembly.
+func snapshotHiddenToolsForScope(snap *ResolverSnapshot, scopeKey string) map[string][]string {
 	if snap == nil || snap.ToolsHidden == nil {
 		return nil
 	}
-	return snap.ToolsHidden[s.ScopeKey]
+	return snap.ToolsHidden[scopeKey]
 }
 
 // hiddenToolSet is the precomputed O(1)-lookup form of a group's per-tool
