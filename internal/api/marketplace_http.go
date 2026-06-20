@@ -68,15 +68,17 @@ func newMarketplaceTransport() *http.Transport {
 }
 
 // newMarketplaceFetchTransport is the registry-fetch-only transport.
-// It preserves the cloned stdlib proxy/TLS/idle-connection defaults
-// from newMarketplaceTransport, then installs a dial ControlContext
-// guard that rejects unsafe resolved IPs immediately before connect.
+// It preserves the cloned stdlib TLS/idle-connection defaults from
+// newMarketplaceTransport, then installs a dial ControlContext guard
+// that rejects unsafe resolved IPs immediately before connect.
 func newMarketplaceFetchTransport() *http.Transport {
 	return newMarketplaceFetchTransportWithResolver(nil)
 }
 
 func newMarketplaceFetchTransportWithResolver(resolver *net.Resolver) *http.Transport {
 	t := newMarketplaceTransport()
+	// Registry SSRF checks must validate the origin IP, not an environment proxy.
+	t.Proxy = nil
 	d := &net.Dialer{
 		Timeout:        marketplaceFetchDialTimeout,
 		KeepAlive:      marketplaceFetchDialKeepAlive,

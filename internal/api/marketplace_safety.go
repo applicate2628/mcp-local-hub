@@ -157,9 +157,47 @@ func rejectMarketplaceLocalOrPrivateHost(host string) error {
 	return rejectMarketplaceLocalOrPrivateAddr(fmt.Sprintf("host %q", host), addr)
 }
 
+var marketplaceNonPublicSpecialAddrPrefixes = []struct {
+	name   string
+	prefix netip.Prefix
+}{
+	{"this-network", netip.MustParsePrefix("0.0.0.0/8")},
+	{"cgnat", netip.MustParsePrefix("100.64.0.0/10")},
+	{"ietf protocol assignments", netip.MustParsePrefix("192.0.0.0/24")},
+	{"documentation", netip.MustParsePrefix("192.0.2.0/24")},
+	{"as112", netip.MustParsePrefix("192.31.196.0/24")},
+	{"amt", netip.MustParsePrefix("192.52.193.0/24")},
+	{"6to4 relay anycast", netip.MustParsePrefix("192.88.99.0/24")},
+	{"as112", netip.MustParsePrefix("192.175.48.0/24")},
+	{"documentation", netip.MustParsePrefix("198.51.100.0/24")},
+	{"documentation", netip.MustParsePrefix("203.0.113.0/24")},
+	{"benchmarking", netip.MustParsePrefix("198.18.0.0/15")},
+	{"limited broadcast", netip.MustParsePrefix("255.255.255.255/32")},
+	{"reserved", netip.MustParsePrefix("240.0.0.0/4")},
+	{"ietf protocol assignments", netip.MustParsePrefix("::/8")},
+	{"ipv4-ipv6 translation", netip.MustParsePrefix("64:ff9b::/96")},
+	{"ipv4-ipv6 translation", netip.MustParsePrefix("64:ff9b:1::/48")},
+	{"discard-only", netip.MustParsePrefix("100::/64")},
+	{"dummy", netip.MustParsePrefix("100:0:0:1::/64")},
+	{"benchmarking", netip.MustParsePrefix("2001:2::/48")},
+	{"amt", netip.MustParsePrefix("2001:3::/32")},
+	{"as112", netip.MustParsePrefix("2001:4:112::/48")},
+	{"orchid", netip.MustParsePrefix("2001:10::/28")},
+	{"orchid", netip.MustParsePrefix("2001:20::/28")},
+	{"drone remote id", netip.MustParsePrefix("2001:30::/28")},
+	{"ietf protocol assignments", netip.MustParsePrefix("2001::/23")},
+	{"documentation", netip.MustParsePrefix("2001:db8::/32")},
+	{"6to4", netip.MustParsePrefix("2002::/16")},
+	{"as112", netip.MustParsePrefix("2620:4f:8000::/48")},
+	{"documentation", netip.MustParsePrefix("3fff::/20")},
+	{"segment routing", netip.MustParsePrefix("5f00::/16")},
+}
+
 func rejectMarketplaceLocalOrPrivateAddr(subject string, addr netip.Addr) error {
 	addr = addr.Unmap()
 	switch {
+	case !addr.IsValid():
+		return fmt.Errorf("%s is invalid address", subject)
 	case addr.IsLoopback():
 		return fmt.Errorf("%s is loopback address %s", subject, addr)
 	case addr.IsUnspecified():
@@ -168,7 +206,16 @@ func rejectMarketplaceLocalOrPrivateAddr(subject string, addr netip.Addr) error 
 		return fmt.Errorf("%s is private address %s", subject, addr)
 	case addr.IsLinkLocalUnicast():
 		return fmt.Errorf("%s is link-local address %s", subject, addr)
-	default:
-		return nil
+	case addr.IsMulticast():
+		return fmt.Errorf("%s is multicast address %s", subject, addr)
 	}
+	for _, special := range marketplaceNonPublicSpecialAddrPrefixes {
+		if special.prefix.Contains(addr) {
+			return fmt.Errorf("%s is %s address %s", subject, special.name, addr)
+		}
+	}
+	if !addr.IsGlobalUnicast() {
+		return fmt.Errorf("%s is non-global-unicast address %s", subject, addr)
+	}
+	return nil
 }

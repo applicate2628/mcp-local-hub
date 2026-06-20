@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -62,6 +63,15 @@ func TestMarketplaceHTTPClient_DisablesCompression(t *testing.T) {
 	_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", nil)
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
+	}
+}
+
+func TestMarketplaceFetchTransport_DisablesProxyFromEnvironment(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:65535")
+
+	tr := newMarketplaceFetchTransportWithResolver(nil)
+	if tr.Proxy != nil {
+		t.Fatal("marketplace registry fetch transport must disable proxy routing")
 	}
 }
 
@@ -257,11 +267,54 @@ func TestMarketplaceFetchDialControlRejectsUnsafeResolvedAddresses(t *testing.T)
 		{"ipv6 link local", "tcp6", "[fe80::1%eth0]:443", "link-local"},
 		{"ipv4 unspecified", "tcp4", "0.0.0.0:443", "unspecified"},
 		{"ipv6 unspecified", "tcp6", "[::]:443", "unspecified"},
+		{"ipv4 cgnat", "tcp4", "100.64.0.1:443", "cgnat"},
+		{"ipv4 multicast", "tcp4", "224.0.0.1:443", "multicast"},
+		{"ipv4 limited broadcast", "tcp4", "255.255.255.255:443", "limited broadcast"},
+		{"ipv4 mapped loopback", "tcp6", "[::ffff:127.0.0.1]:443", "loopback"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := marketplaceFetchDialControlContext(context.Background(), tc.network, tc.address, nil)
 			if err == nil {
 				t.Fatalf("expected rejection for %s", tc.address)
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), tc.want) {
+				t.Fatalf("error %v missing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRejectMarketplaceLocalOrPrivateAddrRejectsSpecialUseAddresses(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		addr string
+		want string
+	}{
+		{"ipv4 cgnat", "100.64.0.1", "cgnat"},
+		{"ipv4 multicast", "224.0.0.1", "multicast"},
+		{"ipv4 limited broadcast", "255.255.255.255", "limited broadcast"},
+		{"ipv4 this network", "0.1.2.3", "this-network"},
+		{"ipv4 ietf protocol assignments", "192.0.0.8", "ietf"},
+		{"ipv4 documentation", "192.0.2.1", "documentation"},
+		{"ipv4 as112", "192.31.196.1", "as112"},
+		{"ipv4 amt", "192.52.193.1", "amt"},
+		{"ipv4 6to4 relay anycast", "192.88.99.2", "6to4"},
+		{"ipv4 direct delegation as112", "192.175.48.1", "as112"},
+		{"ipv4 benchmarking", "198.18.0.1", "benchmarking"},
+		{"ipv4 reserved", "240.0.0.1", "reserved"},
+		{"ipv4 mapped loopback", "::ffff:127.0.0.1", "loopback"},
+		{"ipv6 dummy", "100:0:0:1::1", "dummy"},
+		{"ipv6 amt", "2001:3::1", "amt"},
+		{"ipv6 as112", "2001:4:112::1", "as112"},
+		{"ipv6 orchidv2", "2001:20::1", "orchid"},
+		{"ipv6 documentation 3fff", "3fff::1", "documentation"},
+		{"ipv6 srv6 sid", "5f00::1", "segment"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr := netip.MustParseAddr(tc.addr)
+			err := rejectMarketplaceLocalOrPrivateAddr("test address", addr)
+			if err == nil {
+				t.Fatalf("expected rejection for %s", tc.addr)
 			}
 			if !strings.Contains(strings.ToLower(err.Error()), tc.want) {
 				t.Fatalf("error %v missing %q", err, tc.want)
