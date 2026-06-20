@@ -770,12 +770,17 @@ attacker-crafted file. Combined with v0.5.0's new attack surface
 this gives a co-resident user the ability to:
 
 - flip `strict_mode` posture via swapped `supervisor-intent.json`,
-- inject attacker-controlled daemon descriptors,
-- inject a `state: quarantined` row in a swapped `supervisor-state.json`
-  to suppress a legitimate daemon on the next supervisor cold start
-  (the supervisor hydrates `state` from the file; the in-memory-only
-  crash sliding window is no longer attacker-primable via a persisted
-  `restart_history`, which was removed in the 2026-06-20 audit).
+- inject attacker-controlled daemon descriptors.
+
+A swapped `supervisor-state.json` cannot by itself inject a persisted
+`"state":"quarantined"` row to suppress a legitimate daemon on the next
+supervisor cold start. The state file is still parsed into the runtime
+tracker, but cold-start controller state is seeded only for verified
+running PIDs; a not-running daemon reaches the initial reconcile as
+idle/default state and running intent spawns it. The restart-policy
+internals (crash history, backoff deadline, quarantine timestamp, and
+queued action) are also in-memory-only and no longer attacker-primable
+through persisted fields after the 2026-06-20 audit.
 
 **Operators on such hosts MUST set
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` to extend the strict parent-dir

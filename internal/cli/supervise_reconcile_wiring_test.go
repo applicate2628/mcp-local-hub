@@ -1541,6 +1541,73 @@ func TestProductionSpawnFn_BlockingCrashSendNeverDropsExit(t *testing.T) {
 	}
 }
 
+// TestProductionSpawnFn_ClosesJobBeforeBlockingCrashSend pins the per-child
+// wait goroutine's resource-release ordering: the Job handle must be closed
+// before the blocking crashCh send can park on back-pressure.
+func TestProductionSpawnFn_ClosesJobBeforeBlockingCrashSend(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	closeStarted := make(chan struct{})
+	releaseClose := make(chan struct{})
+	var released atomic.Bool
+	release := func() {
+		if released.CompareAndSwap(false, true) {
+			close(releaseClose)
+		}
+	}
+	defer release()
+
+	prevClose := closeDaemonJobAfterWaitFn
+	closeDaemonJobAfterWaitFn = func(job *process.Job) error {
+		close(closeStarted)
+		<-releaseClose
+		return job.Close()
+	}
+	t.Cleanup(func() { closeDaemonJobAfterWaitFn = prevClose })
+
+	crashCh := make(chan crashEvent)
+	shutdown := make(chan struct{})
+	spawnFn := makeProductionSpawnFnWithStatePath(
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+	)
+
+	command, args := portableNoopCommand()
+	descriptor := api.SupervisorDaemon{
+		TaskName: reconcileWiringTestTaskName,
+		Server:   "memory",
+		Daemon:   "default",
+		Command:  command,
+		Args:     args,
+	}
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("spawn fn failed on noop command: %v", err)
+	}
+
+	select {
+	case <-closeStarted:
+	case ev := <-crashCh:
+		t.Fatalf("crash event delivered before Job close hook started: %+v", ev)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Job close hook did not start before timeout")
+	}
+
+	release()
+	select {
+	case ev := <-crashCh:
+		if ev.ExitCode != 0 || ev.WaitErr != nil {
+			t.Fatalf("crash event = %+v, want clean exit", ev)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("crash event not delivered after releasing Job close hook")
+	}
+}
+
 // TestProductionSpawnFn_CrashSendAbandonsOnShutdown proves the blocking
 // send does not leak the wait goroutine when the supervisor is shutting
 // down: once crashShutdown is closed (the bridge has stopped draining

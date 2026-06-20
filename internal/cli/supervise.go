@@ -188,6 +188,7 @@ var (
 	productionTerminatePIDWithIdentityFn = process.TerminatePIDWithIdentity
 	currentRunningVerifyPIDIdentityFn    = process.VerifyPIDIdentity
 	currentRunningIsPIDAliveFn           = process.IsPidAlive
+	closeDaemonJobAfterWaitFn            = func(job *process.Job) error { return job.Close() }
 )
 
 // setReconcileSpawnFnForTest installs a test spawn closure. Returns
@@ -3420,18 +3421,18 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// Transfer Job-handle ownership to the wait goroutine BEFORE
 		// launching it. After this assignment, the parent spawn
 		// closure's deferred close is a no-op (handedOff==true) and
-		// the goroutine alone owns daemonJob.Close() after cmd.Wait()
-		// returns. ADR step 1 constraint (b).
+		// the goroutine alone owns daemonJob.Close(), which it releases
+		// as soon as cmd.Wait() observes child exit and before posting
+		// any crashCh event that may block. ADR step 1 constraint (b).
 		handedOff = true
 		jobForWait := daemonJob // capture before goroutine launch
 		go func() {
-			defer func() {
-				if jobForWait != nil {
-					_ = jobForWait.Close()
-				}
-			}()
 			<-spawnLogged
 			waitErr := cmd.Wait()
+			if jobForWait != nil {
+				_ = closeDaemonJobAfterWaitFn(jobForWait)
+				jobForWait = nil
+			}
 			// Diagnostic emit: without this, a wrapper that exits
 			// immediately (e.g. uvx fails to fetch package, port
 			// already bound, env vars missing) leaves no trace —
