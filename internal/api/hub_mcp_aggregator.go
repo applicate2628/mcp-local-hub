@@ -87,6 +87,8 @@ type daemonHTTPError struct {
 
 func (e *daemonHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
 
+var errHubSessionDeletedDuringReinit = errors.New("hub session deleted during daemon reinit")
+
 // isRetriableTransportFailure reports whether err is a TRANSPORT-level failure
 // where the request demonstrably never reached the daemon — connection refused
 // or connection reset — and is therefore SAFE to retry against a freshly-
@@ -189,35 +191,7 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-			defer cancel()
-			sid, negotiated, err := postInitialize(subCtx, ref, protoVer)
-			// codex bot r4 P1 closure: per MCP lifecycle, the client
-			// (hub) MUST send notifications/initialized after
-			// initialize succeeds. codex bot r5 P2 closure on PR
-			// #157: propagate the notification error into the init-
-			// result. Earlier "best-effort" swallow recorded the
-			// daemon in InitSuccesses even when the required
-			// notification failed, leaving the session half-
-			// initialized and reporting subsequent tools/list /
-			// tools/call failures at the wrong stage. Use a fresh
-			// subCtx with the init timeout because the original
-			// subCtx is being torn down via defer cancel() at
-			// goroutine exit.
-			//
-			// codex bot r17 P1 closure on PR #157: send the
-			// notification with the DAEMON-NEGOTIATED protocol
-			// version, NOT the hub-requested one. A daemon may
-			// reply with a downgraded version per MCP negotiation;
-			// strict daemons reject follow-up headers carrying the
-			// original requested version with 400.
-			if err == nil {
-				notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-				if nerr := postInitialized(notifyCtx, ref, sid, negotiated); nerr != nil {
-					err = fmt.Errorf("notifications/initialized: %w", nerr)
-				}
-				notifyCancel()
-			}
+			sid, negotiated, err := initializeDaemonSession(ctx, ref, protoVer)
 			results[i] = initResult{ref: ref, sessionID: sid, negotiatedProto: negotiated, err: err}
 		}()
 	}
@@ -253,6 +227,37 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 	return body, nil
 }
 
+func initializeDaemonSession(ctx context.Context, ref canonicalDaemonRef, protoVer string) (sid, negotiated string, err error) {
+	initCtx, initCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+	sid, negotiated, err = postInitialize(initCtx, ref, protoVer)
+	initCancel()
+	if err != nil {
+		return "", "", err
+	}
+
+	// MCP lifecycle: notifications/initialized is mandatory after a
+	// successful initialize. If it fails, the daemon allocated a session
+	// that cannot be used; delete it with the negotiated protocol header and
+	// report initialize-stage failure instead of caching a half-initialized SID.
+	notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+	notifyErr := postInitialized(notifyCtx, ref, sid, negotiated)
+	notifyCancel()
+	if notifyErr == nil {
+		return sid, negotiated, nil
+	}
+
+	// Fire-and-forget the orphaned-session cleanup so it does NOT block this
+	// request's response on a background-ctx timeout. The DELETE runs on a
+	// detached goroutine with its own bounded ctx (independent of the caller's
+	// ctx, which is about to return) — best-effort by contract.
+	go func(ref canonicalDaemonRef, sid, negotiated string) {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
+		defer cleanupCancel()
+		_ = bestEffortDeleteDaemonSession(cleanupCtx, ref, sid, negotiated)
+	}(ref, sid, negotiated)
+	return "", "", fmt.Errorf("notifications/initialized: %w", notifyErr)
+}
+
 // namespacedTool is one daemon's contribution to the merged tools/list
 // response. Body is the original JSON blob with `name` rewritten to
 // the exposed `<server>__<rawname>` form; Exposed and Ref let the
@@ -286,7 +291,9 @@ type listResult struct {
 // data.mcphub.partialFailures. Note: initialize succeeding but EVERY
 // list call failing also lands here — surfacing the call as a failure
 // is intentional, since the caller can't discover any tools.
-func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMessage) ([]byte, error) {
+func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMessage, instanceID string) ([]byte, error) {
+	current := LoadResolverSnapshot()
+
 	// Snapshot the inputs under the session mu. codex bot r17 P1
 	// closure on PR #157: capture each daemon's NEGOTIATED protocol
 	// version alongside its Mcp-Session-Id so the fan-out uses
@@ -304,8 +311,130 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	copy(initFailures, sess.InitFailures)
 	sess.mu.Unlock()
 
+	allowEmptyKnown := false
+	if sess.SnapshotAtInit != nil && current != nil && current != sess.SnapshotAtInit {
+		successes, initFailures = sess.filterToolsListSuccessesByLiveSnapshot(current, successes, initFailures)
+		initFailures = filterInitFailuresByLiveBindings(initFailures, current, sess.ScopeKey, sess.IntendedParticipants)
+		liveParticipants := sess.countLiveParticipants(current, sess.ScopeKey, sess.IntendedParticipants)
+		allowEmptyKnown = strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) && liveParticipants == 0 && len(successes) == 0 && len(initFailures) == 0 && snapshotKnowsScope(current, sess.ScopeKey)
+	}
+
 	results := fanOutToolsList(ctx, successes)
-	return assembleToolsListResponse(reqID, results, initFailures, sess)
+	hiddenSet := buildHiddenToolSet(snapshotHiddenToolsForScope(current, sess.ScopeKey))
+	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID, allowEmptyKnown, hiddenSet)
+}
+
+// filterToolsListSuccessesByLiveSnapshot reconciles the captured init successes
+// against the CURRENT resolver snapshot before tools/list fans out. A binding
+// that is gone from the live snapshot is dropped; a binding whose port is
+// unchanged is kept; a binding that MOVED to a new port is kept ONLY if a fresh
+// session for the new port is already cached (the same-port restart consumers
+// — selfHealRetry / refreshStalePortBeforeDispatch — re-handshook it). When the
+// moved binding has no cached fresh session, it is DROPPED here: the daemon's
+// tools simply do not appear in this tools/list response, the same outcome as a
+// removed binding. The client re-lists and rediscovers the tool at its new port
+// via the hub's existing removed-binding/rediscover behavior — there is no
+// synchronous re-initialize inside the tools/list request path.
+func (s *hubSession) filterToolsListSuccessesByLiveSnapshot(current *ResolverSnapshot, successes map[canonicalDaemonRef]daemonInitState, initFailures []DaemonFailure) (map[canonicalDaemonRef]daemonInitState, []DaemonFailure) {
+	if len(successes) == 0 {
+		return successes, initFailures
+	}
+
+	filtered := make(map[canonicalDaemonRef]daemonInitState, len(successes))
+	for ref, state := range successes {
+		liveRef, ok := liveDaemonBinding(current, s.ScopeKey, ref)
+		if !ok {
+			continue
+		}
+		if liveRef.Port == ref.Port {
+			filtered[liveRef] = state
+			continue
+		}
+		// The daemon moved to a NEW port. If a same-port restart consumer
+		// already re-handshook it, use that cached fresh session — fast path.
+		if freshState, ok := s.cachedDaemonInitState(liveRef); ok {
+			filtered[liveRef] = freshState
+			continue
+		}
+		// Otherwise DROP the binding rather than synchronously re-initializing
+		// inside tools/list. The daemon's tools simply do not appear in this
+		// tools/list response (same outcome as the removed `!ok` branch above).
+		// The client re-lists / re-handshakes and rediscovers the tool at its
+		// new port via the existing removed-binding/rediscover behavior.
+		_ = LogHubMcpEvent("info", "moved-binding-dropped-rediscover", map[string]any{
+			"server": liveRef.Server, "daemon": liveRef.Daemon,
+			"old_port": ref.Port, "new_port": liveRef.Port,
+		})
+	}
+	return filtered, initFailures
+}
+
+func filterInitFailuresByLiveBindings(failures []DaemonFailure, current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef) []DaemonFailure {
+	if len(failures) == 0 {
+		return failures
+	}
+	filtered := make([]DaemonFailure, 0, len(failures))
+	for _, f := range failures {
+		if initFailureDaemonStillBound(current, scopeKey, intended, f) {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
+}
+
+func initFailureDaemonStillBound(current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef, failure DaemonFailure) bool {
+	for _, ref := range intended {
+		if ref.Server != failure.Server || ref.Daemon != failure.Daemon {
+			continue
+		}
+		liveRef, ok := liveDaemonBinding(current, scopeKey, ref)
+		if ok && liveRef.Port == ref.Port {
+			return true
+		}
+	}
+	return false
+}
+
+// countLiveParticipants counts the intended participants that are LIVE in the
+// current snapshot, using the SAME liveness predicate as
+// filterToolsListSuccessesByLiveSnapshot so the empty-known decision stays
+// symmetric with the set of bindings that actually contribute to tools/list. A
+// binding present at its original port is live; a binding that MOVED to a new
+// port is live ONLY when a fresh session for the new port is already cached
+// (the same fast-path the filter keeps). A moved binding with NO cached fresh
+// session is DROPPED by the filter (moved-no-cache → rediscover at the new
+// port), so it is NOT live here either — counting it would wrongly make a
+// last-participant-moved group report -32000 all-failed instead of the
+// empty-known success the dropped-and-rediscover contract intends. A binding
+// gone from the snapshot is never live.
+func (s *hubSession) countLiveParticipants(current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef) int {
+	count := 0
+	for _, ref := range intended {
+		liveRef, ok := liveDaemonBinding(current, scopeKey, ref)
+		if !ok {
+			continue
+		}
+		if liveRef.Port == ref.Port {
+			count++
+			continue
+		}
+		// Moved to a new port — live only if a fresh session is cached
+		// (matches filterToolsListSuccessesByLiveSnapshot's keep/drop split).
+		if _, cached := s.cachedDaemonInitState(liveRef); cached {
+			count++
+		}
+	}
+	return count
+}
+
+func snapshotKnowsScope(current *ResolverSnapshot, scopeKey string) bool {
+	if current == nil {
+		return false
+	}
+	if _, ok := current.Bindings[scopeKey]; ok {
+		return true
+	}
+	return strings.HasPrefix(scopeKey, GroupScopeKeyPrefix) && current.Groups[scopeKey]
 }
 
 // daemonInitState bundles a daemon's per-daemon Mcp-Session-Id and
@@ -360,10 +489,11 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 // before returning so a concurrent tools/call sees the new routes.
 //
 // Decision: all-failed (-32000) vs success-with-partial-failures uses
-// listSuccessCount > 0 as the sole criterion. An init success with
-// zero list successes is treated as all-failed — the caller cannot
-// discover any tools, so we surface the failures via the error
-// envelope rather than returning result.tools=[].
+// listSuccessCount > 0, except for scopes the live resolver snapshot proves
+// are known-empty after filtering stale successes and failures. An init success
+// with zero list successes is otherwise treated as all-failed — the caller
+// cannot discover any tools, so we surface the failures via the error envelope
+// rather than returning result.tools=[].
 //
 // Namespace-collision handling: when two daemons under the same
 // server expose the same raw tool name, the resulting exposed name
@@ -375,7 +505,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 // stage="tools/list" partialFailure row per colliding daemon. The
 // failure message names every daemon that claimed the key so
 // operators can resolve the duplicate at the manifest layer.
-func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession) ([]byte, error) {
+func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string, allowEmptyKnown bool, hiddenSet hiddenToolSet) ([]byte, error) {
 	// codex bot r14 P2 closure on PR #157: fanOutToolsList appends
 	// results in goroutine-completion order, so identical inputs
 	// produced different mergedTools / partialFailures order across
@@ -398,22 +528,20 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 
 	// Resolve the session's FINE-GRAINED per-tool visibility filter
 	// (groups/namespaces Phase 5a) BEFORE collision detection. For a GROUP
-	// scope key this is the group's tools_hidden map (server → hidden raw
-	// names) carried on the captured snapshot; for a CLIENT scope key it is
-	// nil → NO filtering (the byte-identical fence). Reading it off
-	// SnapshotAtInit keeps the (bindings, filter) pair consistent: a session
-	// always sees the filter from the SAME atomic snapshot it captured its
-	// bindings from. Precomputed into a (server → set-of-raw-names) lookup
-	// ONCE so each per-tool check is O(1); nil/empty filter → nil set →
-	// hides() short-circuits to false, preserving the client fence.
+	// scope key this is the live group's tools_hidden map (server → hidden raw
+	// names) carried on the current resolver snapshot; for a CLIENT scope key it
+	// is nil → NO filtering (the byte-identical fence). Reading it from the live
+	// snapshot mirrors tools/call revalidation: a tools_hidden republish revokes
+	// the listing surface on the next tools/list without a reconnect. Precomputed
+	// into a (server → set-of-raw-names) lookup ONCE so each per-tool check is
+	// O(1); nil/empty filter → nil set → hides() short-circuits to false,
+	// preserving the client fence.
 	//
 	// CRITICAL (codex bot r2 — leak via diagnostics): this MUST be computed
 	// before Pass 1 so a HIDDEN tool is excluded from collision detection
 	// too. Otherwise a hidden tool that ALSO collides between two same-server
 	// daemons is dropped from result.tools (Pass 2) yet still named in a
 	// `partialFailures` collision row — leaking the hidden tool's existence.
-	hiddenSet := buildHiddenToolSet(sess.hiddenToolsForScope())
-
 	// Pass 1 — for each successful daemon, record the SET of unique
 	// daemons that produced each exposed key. Keys claimed by more
 	// than one DISTINCT daemon become collisions. codex bot r13 P2
@@ -556,12 +684,12 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	allFailures = append(allFailures, listFailures...)
 
 	if listSuccessCount == 0 {
-		// Zero INTENDED participants (a declared-but-empty group — decision
-		// claim 5) is NOT the all-failed case: nothing was attempted, so the
-		// route exposes an empty tool surface, not a -32000 "all daemons
-		// failed" envelope. Distinguish on IntendedParticipants (empty ⇒
-		// nothing intended) vs the genuine all-failed case (≥1 intended, all
-		// failed).
+		// Known-empty scopes are NOT the all-failed case: nothing is live to
+		// attempt, so the route exposes an empty tool surface, not a -32000
+		// "all daemons failed" envelope. allowEmptyKnown covers sessions whose
+		// original participants were removed by the live resolver snapshot.
+		// The IntendedParticipants branch preserves declared groups that were
+		// empty from session creation.
 		//
 		// B2 (bot R3): the empty-success branch is restricted to GROUP scopes
 		// (ScopeKey carries the GroupScopeKeyPrefix "g:"). A /clients/ session
@@ -570,16 +698,16 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// client absent from the resolver snapshot). Returning empty-success
 		// there would MASK a broken hub config AND change the byte-identical
 		// client contract (pre-groups, a zero-binding client got the -32000
-		// all-failed envelope). So a non-group scope keeps the -32000 envelope;
-		// only a group reaches empty-success.
-		if len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) {
-			sess.RouteMap.Store(&mergedRoutes)                             // empty map — no tools to route
-			return buildToolsListResponse(reqID, mergedTools, allFailures) // mergedTools is empty → result.tools=[]
+		// all-failed envelope). So a non-group scope with no known live
+		// snapshot entry keeps the -32000 envelope.
+		if allowEmptyKnown || (len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix)) {
+			sess.RouteMap.Store(&mergedRoutes)                                         // empty map — no tools to route
+			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID) // mergedTools is empty → result.tools=[]
 		}
-		return buildAllFailedToolsListResponse(reqID, allFailures)
+		return buildAllFailedToolsListResponse(reqID, allFailures, instanceID)
 	}
 	sess.RouteMap.Store(&mergedRoutes)
-	return buildToolsListResponse(reqID, mergedTools, allFailures)
+	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID)
 }
 
 // resolvedCallTarget is the output of route lookup + resolver
@@ -603,7 +731,7 @@ type resolvedCallTarget struct {
 // On unknown name → -32601 "Method not found: <name>".
 // On daemon error → response body passed through verbatim.
 func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.RawMessage, paramsRaw json.RawMessage) ([]byte, error) {
-	target, err := resolveToolsCallRoute(sess, clientReqID, paramsRaw)
+	target, err := resolveToolsCallRoute(ctx, sess, clientReqID, paramsRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -620,7 +748,7 @@ func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.
 // envelope via target.errBody; the caller passes it through verbatim.
 // Returns (nil-target, err) only on internal JSON-marshal failure
 // inside buildJSONRPCError — never on routing rejection.
-func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMessage) (resolvedCallTarget, error) {
+func resolveToolsCallRoute(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage) (resolvedCallTarget, error) {
 	// Parse params to extract name. Other fields (arguments, _meta,
 	// extension attrs) survive verbatim through buildRewrittenParams's
 	// generic-map round-trip; we only need name here to drive route
@@ -649,21 +777,34 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 		return resolvedCallTarget{errBody: body}, mErr
 	}
 
-	// Resolver-snapshot revalidation: refuse if (Server, Daemon) is
-	// not in the calling client's current bindings, or if the current
-	// group visibility filter now hides the target tool. The session
-	// RouteMap is intentionally session-local, so a long-lived group
-	// session may still contain a route that was visible at tools/list
-	// time. Re-check the live immutable snapshot after a republish so a
-	// tools_hidden edit revokes existing sessions without requiring the
-	// daemon/server binding to change.
+	// Resolver-snapshot revalidation: refuse if (Server, Daemon) is not in the
+	// calling client's current bindings, rederive moved bindings to their live
+	// port, and enforce the current group visibility filter. The session RouteMap
+	// is intentionally session-local, so a long-lived group session may still
+	// contain a route that was visible at tools/list time.
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
-		if !daemonStillBound(current, sess.ScopeKey, ref) {
+		liveRef, stillBound := liveDaemonBinding(current, sess.ScopeKey, canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port})
+		if !stillBound {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
 		if snapshotHidesTool(current, sess.ScopeKey, ref) {
+			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
+			return resolvedCallTarget{errBody: body}, mErr
+		}
+		if liveRef.Port != ref.Port {
+			// The daemon moved to a NEW port. Fast path: if a same-port restart
+			// consumer already re-handshook it, dispatch to the cached fresh
+			// session at the new port.
+			if state, ok := sess.cachedDaemonInitState(liveRef); ok {
+				ref.Port = liveRef.Port
+				return resolvedCallTarget{ref: ref, daemonSID: state.SessionID, daemonProto: state.ProtocolVersion}, nil
+			}
+			// No cached fresh session: do NOT synchronously re-initialize inside
+			// tools/call. Return the same -32601 the removed-binding branch above
+			// returns. The client re-handshakes / re-lists and rediscovers the
+			// tool at its new port — never dispatching to the dead old port.
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
@@ -774,7 +915,7 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 // response; (nil, false) when the re-init or the retry itself failed (the caller
 // then returns the original -32000). Hard-capped at one attempt; never recurses.
 func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, inflightKey requestIDKey, params json.RawMessage) ([]byte, bool) {
-	sid, proto, port, ok := s.reinitDaemonSession(ctx, ref)
+	sid, proto, port, ok := s.reinitDaemonSession(ctx, ref, nil)
 	if !ok {
 		return nil, false // daemon still down → caller returns the original -32000
 	}
@@ -826,8 +967,11 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 	defer state.mu.Unlock()
 
 	if state.stale {
-		if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref); ok {
-			state.stale = false
+		clearToken := &staleClearToken{state: state, generation: state.generation, liveCallerClears: true}
+		if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref, clearToken); ok {
+			if state.generation == clearToken.generation {
+				state.stale = false
+			}
 			return sid, proto
 		}
 		_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
@@ -867,43 +1011,200 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 // (sid, proto, port, true), or ("","",0,false) if the daemon is still
 // unreachable. SHARED by the (a) failure-driven self-heal (selfHealRetry) and the
 // (b) event-driven proactive re-init (the supervisor-state restart watcher).
-func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef) (string, string, int, bool) {
+func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef, clearToken *staleClearToken) (string, string, int, bool) {
 	port := s.currentDaemonPort(ref)
 	daemonRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
-	// daemonKey MUST match resolveToolsCallRoute's key ({Server,Daemon,ref.Port})
-	// so the refreshed session id is found by the NEXT call's route lookup.
-	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
-
-	type initResult struct{ sid, proto string }
-	v, initErr, _ := s.reinitGroup.Do(ref.Server+"\x00"+ref.Daemon, func() (any, error) {
-		sid, negotiated, err := postInitialize(ctx, daemonRef, s.ProtocolVersion)
-		if err != nil {
-			return nil, err
-		}
-		// MCP lifecycle: notifications/initialized MUST precede further calls.
-		// Best-effort (matches AggregateInitialize).
-		_ = postInitialized(ctx, daemonRef, sid, negotiated)
-		return initResult{sid: sid, proto: negotiated}, nil
-	})
-	if initErr != nil {
+	state, err := s.reinitializeDaemonBindingWithStaleClear(ctx, daemonRef, clearToken)
+	if err != nil {
 		return "", "", 0, false
 	}
-	res := v.(initResult)
-	proto := res.proto
+	return state.SessionID, state.ProtocolVersion, port, true
+}
+
+func (s *hubSession) cachedDaemonInitState(ref canonicalDaemonRef) (daemonInitState, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sid, ok := s.InitSuccesses[ref]
+	if !ok {
+		return daemonInitState{}, false
+	}
+	proto := s.DaemonProtoVer[ref]
 	if proto == "" {
 		proto = s.ProtocolVersion
 	}
+	return daemonInitState{SessionID: sid, ProtocolVersion: proto}, true
+}
+
+func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef canonicalDaemonRef) (daemonInitState, error) {
+	return s.reinitializeDaemonBindingWithStaleClear(ctx, daemonRef, nil)
+}
+
+type staleClearToken struct {
+	state            *stalePortState
+	generation       uint64
+	liveCallerClears bool
+}
+
+func (s *hubSession) staleClearTokenForPort(port int) *staleClearToken {
+	state, ok := s.stalePortStateFor(port)
+	if !ok {
+		return nil
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.stale {
+		return nil
+	}
+	return &staleClearToken{state: state, generation: state.generation}
+}
+
+func (s *hubSession) clearCachedReinitStaleFlag(daemonRef canonicalDaemonRef, sid string, clearToken *staleClearToken) {
+	if clearToken == nil || clearToken.state == nil {
+		return
+	}
 
 	s.mu.Lock()
-	if s.InitSuccesses != nil {
-		s.InitSuccesses[daemonKey] = res.sid
+	cachedSID, ok := s.InitSuccesses[daemonRef]
+	s.mu.Unlock()
+	if !ok || cachedSID != sid {
+		return
 	}
+
+	clearToken.state.mu.Lock()
+	if clearToken.state.generation == clearToken.generation {
+		clearToken.state.stale = false
+	}
+	clearToken.state.mu.Unlock()
+}
+
+func (s *hubSession) reinitializeDaemonBindingWithStaleClear(ctx context.Context, daemonRef canonicalDaemonRef, clearToken *staleClearToken) (daemonInitState, error) {
+	if clearToken == nil {
+		clearToken = s.staleClearTokenForPort(daemonRef.Port)
+	}
+	s.mu.Lock()
+	protoVer := s.ProtocolVersion
+	s.mu.Unlock()
+	type initResult struct{ sid, proto string }
+	groupKey := fmt.Sprintf("%s\x00%s\x00%d", daemonRef.Server, daemonRef.Daemon, daemonRef.Port)
+	ch := s.reinitGroup.DoChan(groupKey, func() (any, error) {
+		// The shared initialize runs under a DETACHED context — NOT the first
+		// caller's ctx. singleflight runs the work function for the FIRST caller
+		// only and shares its result with all coalesced followers; binding it to
+		// the first caller's ctx would let that one caller's cancellation fail
+		// the re-handshake for everyone. initializeDaemonSession owns the
+		// PerDaemonInitTimeout caps for the daemon initialize lifecycle; adding
+		// another equal cap here would double-cap same-port self-heal and
+		// detached moved-reinit. Each caller's OWN ctx still bounds its wait via
+		// the select below.
+		sid, negotiated, err := initializeDaemonSession(context.Background(), daemonRef, protoVer)
+		if err != nil {
+			return nil, err
+		}
+		return initResult{sid: sid, proto: negotiated}, nil
+	})
+
+	var v any
+	select {
+	case result := <-ch:
+		if result.Err != nil {
+			return daemonInitState{}, result.Err
+		}
+		v = result.Val
+	case <-ctx.Done():
+		// This caller stopped waiting, but the DETACHED singleflight work is
+		// still running (it is NOT bound to this ctx) and will COMPLETE a full
+		// MCP handshake — producing a live daemon-side session. If this caller
+		// is the last/only waiter on this DoChan call, nobody would consume that
+		// channel and the freshly-initialized daemon session would ORPHAN until
+		// the daemon's idle GC. Drain the result on a detached goroutine and
+		// CACHE it (the natural consumer — the next request for this daemonKey
+		// reuses it) so a completed detached reinit never leaks a session. On a
+		// work-fn error there is nothing to cache: initializeDaemonSession has
+		// already best-effort-DELETEd any half-initialized session it allocated.
+		go func() {
+			res := <-ch
+			if res.Err != nil {
+				return
+			}
+			ir := res.Val.(initResult)
+			if proto, cached := s.cacheReinitResult(daemonRef, ir.sid, ir.proto, protoVer, clearToken, true); !cached {
+				s.deleteUncachedReinitResult(daemonRef, ir.sid, proto)
+			}
+		}()
+		return daemonInitState{}, ctx.Err()
+	}
+	res := v.(initResult)
+	clearCachedStale := clearToken == nil || !clearToken.liveCallerClears
+	proto, cached := s.cacheReinitResult(daemonRef, res.sid, res.proto, protoVer, clearToken, clearCachedStale)
+	if !cached {
+		s.deleteUncachedReinitResult(daemonRef, res.sid, proto)
+		return daemonInitState{}, errHubSessionDeletedDuringReinit
+	}
+	return daemonInitState{SessionID: res.sid, ProtocolVersion: proto}, nil
+}
+
+// cacheReinitResult records a completed reinit handshake's daemon session id +
+// negotiated protocol under the session mu so a later request for the same
+// daemonRef reuses it (cachedDaemonInitState). Shared by the live-waiter path
+// and the detached drain that fires when the triggering caller's ctx cancelled.
+// When requested, it also clears the matching stale-port generation so a cached
+// fresh session is not immediately treated as stale again.
+// If a session DELETE has already started, the completed daemon-side session is
+// not cacheable: the caller must best-effort DELETE it so the DELETE intent holds.
+// Falls back to the session-requested protoVer when the daemon emitted no
+// negotiated version. Returns the effective proto and whether it was cached.
+func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string, clearToken *staleClearToken, clearCachedStale bool) (string, bool) {
+	proto := negotiated
+	if proto == "" {
+		proto = protoVer
+	}
+
+	s.mu.Lock()
+	if s.deleteStarted {
+		s.mu.Unlock()
+		return proto, false
+	}
+	if s.InitSuccesses == nil {
+		s.InitSuccesses = map[canonicalDaemonRef]string{}
+	}
+	for cachedRef := range s.InitSuccesses {
+		if !sameDaemonIdentity(cachedRef, daemonRef) {
+			continue
+		}
+		if cachedRef != daemonRef {
+			delete(s.InitSuccesses, cachedRef)
+		}
+	}
+	s.InitSuccesses[daemonRef] = sid
 	if s.DaemonProtoVer == nil {
 		s.DaemonProtoVer = map[canonicalDaemonRef]string{}
 	}
-	s.DaemonProtoVer[daemonKey] = proto
+	for cachedRef := range s.DaemonProtoVer {
+		if !sameDaemonIdentity(cachedRef, daemonRef) {
+			continue
+		}
+		if cachedRef != daemonRef {
+			delete(s.DaemonProtoVer, cachedRef)
+		}
+	}
+	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
-	return res.sid, proto, port, true
+	if clearCachedStale {
+		s.clearCachedReinitStaleFlag(daemonRef, sid, clearToken)
+	}
+	return proto, true
+}
+
+func sameDaemonIdentity(a, b canonicalDaemonRef) bool {
+	return a.Server == b.Server && a.Daemon == b.Daemon
+}
+
+func (s *hubSession) deleteUncachedReinitResult(daemonRef canonicalDaemonRef, sid, proto string) {
+	go func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
+		defer cleanupCancel()
+		_ = bestEffortDeleteDaemonSession(cleanupCtx, daemonRef, sid, proto)
+	}()
 }
 
 // currentDaemonPort re-resolves the daemon's CURRENT port for (ref.Server,
@@ -971,23 +1272,29 @@ func ForwardCancellation(ctx context.Context, sess *hubSession, clientReqID json
 	_ = postCancellation(subCtx, entry.DaemonRef, entry.DaemonSessionID, proto, entry.DaemonRequestID)
 }
 
-// daemonStillBound reports whether the (Server, Daemon, Port) tuple
-// is still in the calling client's bindings within the current
-// snapshot.
-func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRef) bool {
+// liveDaemonBinding returns the current binding for the stable
+// (Server, Daemon) identity in the calling client's bindings.
+func liveDaemonBinding(snap *ResolverSnapshot, client string, ref canonicalDaemonRef) (canonicalDaemonRef, bool) {
 	if snap == nil {
-		return false
+		return canonicalDaemonRef{}, false
 	}
 	bindings, ok := snap.Bindings[client]
 	if !ok {
-		return false
+		return canonicalDaemonRef{}, false
 	}
 	for _, b := range bindings {
-		if b.Server == ref.Server && b.Daemon == ref.Daemon && b.Port == ref.Port {
-			return true
+		if b.Server == ref.Server && b.Daemon == ref.Daemon {
+			return b, true
 		}
 	}
-	return false
+	return canonicalDaemonRef{}, false
+}
+
+// daemonStillBound reports whether the stable (Server, Daemon) identity
+// is still in the calling client's bindings within the current snapshot.
+func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRef) bool {
+	_, ok := liveDaemonBinding(snap, client, canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port})
+	return ok
 }
 
 // ---------------- HTTP plumbing ----------------
@@ -1315,9 +1622,8 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, pr
 
 // postInitialized sends notifications/initialized to a daemon after
 // a successful initialize. Per MCP lifecycle the client MUST send
-// this notification before issuing any other method calls. Best-
-// effort: callers ignore the returned error (codex bot r4 P1 closure
-// on PR #157).
+// this notification before issuing any other method calls; callers
+// decide whether failure is best-effort or initialize-fatal.
 func postInitialized(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
 	body := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	// expectResponse=false: notifications/initialized has no response
@@ -1483,11 +1789,11 @@ func buildSyntheticInitResult(reqID json.RawMessage, protoVer string) ([]byte, e
 
 // buildToolsListResponse assembles a successful (≥1 daemon ok)
 // tools/list response with the merged tool list and partialFailures.
-func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure) ([]byte, error) {
+func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure, instanceID string) ([]byte, error) {
 	meta := map[string]any{
 		"mcphub": map[string]any{
 			"partialFailures": failuresOrEmpty(failures),
-			"instance_id":     currentInstanceIDOrEmpty(),
+			"instance_id":     instanceID,
 		},
 	}
 	result := map[string]any{
@@ -1504,11 +1810,11 @@ func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, fail
 
 // buildAllFailedToolsListResponse assembles a JSON-RPC -32000 error
 // envelope when every participating daemon failed.
-func buildAllFailedToolsListResponse(reqID json.RawMessage, failures []DaemonFailure) ([]byte, error) {
+func buildAllFailedToolsListResponse(reqID json.RawMessage, failures []DaemonFailure, instanceID string) ([]byte, error) {
 	data := map[string]any{
 		"mcphub": map[string]any{
 			"partialFailures": failuresOrEmpty(failures),
-			"instance_id":     currentInstanceIDOrEmpty(),
+			"instance_id":     instanceID,
 		},
 	}
 	envelope := map[string]any{
@@ -1661,20 +1967,14 @@ func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) []namespace
 	return out
 }
 
-// hiddenToolsForScope returns the session's FINE-GRAINED per-tool
-// visibility filter (server name → hidden raw tool names) for its scope
-// key, read from the snapshot captured at initialize (groups/namespaces
-// Phase 5a). Returns nil for a CLIENT scope key (no entry → no filtering,
-// the byte-identical fence) and for any session whose captured snapshot
-// has no ToolsHidden. Reading from SnapshotAtInit (not the live snapshot)
-// keeps the filter consistent with the bindings the session fanned out
-// over — both come from the SAME immutable pointer.
-func (s *hubSession) hiddenToolsForScope() map[string][]string {
-	snap := s.SnapshotAtInit
+// snapshotHiddenToolsForScope returns the FINE-GRAINED per-tool visibility
+// filter (server name -> hidden raw tool names) for scopeKey from the resolver
+// snapshot already selected for this tools/list assembly.
+func snapshotHiddenToolsForScope(snap *ResolverSnapshot, scopeKey string) map[string][]string {
 	if snap == nil || snap.ToolsHidden == nil {
 		return nil
 	}
-	return snap.ToolsHidden[s.ScopeKey]
+	return snap.ToolsHidden[scopeKey]
 }
 
 // hiddenToolSet is the precomputed O(1)-lookup form of a group's per-tool
@@ -1754,18 +2054,6 @@ func failuresOrEmpty(f []DaemonFailure) []DaemonFailure {
 		return []DaemonFailure{}
 	}
 	return f
-}
-
-// currentInstanceIDOrEmpty returns the persistent hub instance_id
-// from the loaded endpoint state, or "" if not loaded. Phase 4 fills
-// this from the established endpoint state at handler startup; in
-// tests it returns "" because the endpoint state isn't populated.
-func currentInstanceIDOrEmpty() string {
-	ep, err := LoadHubEndpoint()
-	if err != nil {
-		return ""
-	}
-	return ep.InstanceID
 }
 
 // generateDaemonRequestID returns a hex-encoded request id wrapped

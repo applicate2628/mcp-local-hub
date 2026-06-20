@@ -288,6 +288,29 @@ func TestStoreTouchUpdatesLastUsedAndPromotesLRU(t *testing.T) {
 	}
 }
 
+func TestMarkPortStaleIgnoresPortsOutsideSession(t *testing.T) {
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: 1111}
+	sess := &hubSession{
+		ScopeKey:      "claude-code",
+		InitSuccesses: map[canonicalDaemonRef]string{ref: "sid-1"},
+	}
+
+	sess.markStalePort(2222)
+	var count int
+	sess.staleDaemonPorts.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	if count != 0 {
+		t.Fatalf("unrelated stale port created %d staleDaemonPorts entries; want 0", count)
+	}
+
+	sess.markStalePort(1111)
+	if _, ok := sess.stalePortStateFor(1111); !ok {
+		t.Fatalf("tracked participant port was not marked stale")
+	}
+}
+
 // SessionStoreOpts zero values get filled with production defaults.
 func TestNewHubSessionStoreDefaults(t *testing.T) {
 	store := NewHubSessionStore(SessionStoreOpts{})

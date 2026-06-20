@@ -149,11 +149,12 @@ type hubSession struct {
 	inFlightCount    atomic.Int32
 	InitAt           time.Time
 	LastUsedAt       time.Time
-	mu               sync.Mutex // protects LastUsedAt + lifecycle + InitSuccesses + DaemonProtoVer
+	deleteStarted    bool
+	mu               sync.Mutex // protects LastUsedAt + lifecycle + InitSuccesses + DaemonProtoVer + deleteStarted
 	// reinitGroup coalesces concurrent hot-swap (a) self-heal re-initializations
-	// of the SAME daemon (keyed Server\x00Daemon) into ONE initialize, so a mass
-	// daemon restart that fails many in-flight tools/call at once cannot trigger
-	// an init-storm. Zero value is ready to use.
+	// of the SAME live daemon binding (keyed Server\x00Daemon\x00Port) into ONE
+	// initialize, so a mass daemon restart that fails many in-flight tools/call
+	// at once cannot trigger an init-storm. Zero value is ready to use.
 	reinitGroup singleflight.Group
 	// staleDaemonPorts marks daemon ports whose cached MCP session is stale
 	// because the supervisor restarted the daemon (the hot-swap (b) event-driven
@@ -161,26 +162,65 @@ type hubSession struct {
 	// current_pid change). The next tools/call to such a port re-initializes
 	// BEFORE dispatching, so the client never sees the stale-session failure that
 	// (a) would otherwise recover reactively. keys: int port. value:
-	// *stalePortState. The per-port state is intentionally retained after a
-	// successful refresh so callers that resolved the old daemon session just
-	// before the refresh can serialize behind it and re-read the fresh session id
-	// before dispatching.
+	// *stalePortState. Growth is bounded to ports this session can actually
+	// dispatch to: captured snapshot bindings, initialized daemon sessions, or
+	// the current RouteMap. Unrelated live supervisor ports are ignored and rely
+	// on the reactive self-heal path if a stale route ever appears later.
 	staleDaemonPorts sync.Map
 }
 
 type stalePortState struct {
 	mu    sync.Mutex
 	stale bool
+	// generation increments on every restart mark, so a reinit can clear only
+	// the stale mark it observed and not a newer mark for the same port.
+	generation uint64
 }
 
 // markStalePort flags a daemon port's cached session as needing re-init (called
 // by HubSessionStore.MarkPortStale from the supervisor-state restart watcher).
-func (s *hubSession) markStalePort(port int) {
+// It returns false when the port is outside this session's known participants,
+// bounding staleDaemonPorts to ports the session can dispatch to.
+func (s *hubSession) markStalePort(port int) bool {
+	if !s.tracksDaemonPort(port) {
+		return false
+	}
 	v, _ := s.staleDaemonPorts.LoadOrStore(port, &stalePortState{})
 	state := v.(*stalePortState)
 	state.mu.Lock()
+	state.generation++
 	state.stale = true
 	state.mu.Unlock()
+	return true
+}
+
+func (s *hubSession) tracksDaemonPort(port int) bool {
+	if port == 0 {
+		return false
+	}
+	if routes := s.RouteMap.Load(); routes != nil {
+		for _, ref := range *routes {
+			if ref.Port == port {
+				return true
+			}
+		}
+	}
+	s.mu.Lock()
+	for ref := range s.InitSuccesses {
+		if ref.Port == port {
+			s.mu.Unlock()
+			return true
+		}
+	}
+	s.mu.Unlock()
+	if snap := s.SnapshotAtInit; snap != nil {
+		for _, ref := range snap.Bindings[s.ScopeKey] {
+			if ref.Port == port {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // stalePortStateFor returns the per-port restart state, if the port was ever
@@ -199,14 +239,17 @@ func (s *hubSession) stalePortStateFor(port int) (*stalePortState, bool) {
 // given port as needing re-init. The hot-swap (b) DaemonRestartWatcher calls
 // this when a daemon's reported current_pid changes (a restart); the next
 // tools/call to that port re-initializes proactively (no client-visible
-// stale-session failure). Returns the number of sessions marked.
+// stale-session failure). Returns the number of sessions actually marked.
 func (st *HubSessionStore) MarkPortStale(port int) int {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
+	marked := 0
 	for _, sess := range st.sessions {
-		sess.markStalePort(port)
+		if sess.markStalePort(port) {
+			marked++
+		}
 	}
-	return len(st.sessions)
+	return marked
 }
 
 // InFlightCount returns the current in-flight count (atomic load).
@@ -281,6 +324,27 @@ func (s *hubSession) RemoveInFlight(key requestIDKey) {
 		delete(s.InFlightRequests, key)
 		s.inFlightCount.Add(-1)
 	}
+}
+
+func (s *hubSession) markDeleteStarted() {
+	s.mu.Lock()
+	s.deleteStarted = true
+	s.mu.Unlock()
+}
+
+func (s *hubSession) markDeleteStartedAndSnapshotDaemonSessions() map[canonicalDaemonRef]daemonInitState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteStarted = true
+	daemonSessions := make(map[canonicalDaemonRef]daemonInitState, len(s.InitSuccesses))
+	for ref, dsid := range s.InitSuccesses {
+		proto := s.DaemonProtoVer[ref]
+		if proto == "" {
+			proto = s.ProtocolVersion
+		}
+		daemonSessions[ref] = daemonInitState{SessionID: dsid, ProtocolVersion: proto}
+	}
+	return daemonSessions
 }
 
 // HubSessionStore owns every active hub session. Constructed via
@@ -488,6 +552,7 @@ func (s *HubSessionStore) deleteLocked(id string) bool {
 	if !ok {
 		return false
 	}
+	sess.markDeleteStarted()
 	delete(s.sessions, id)
 	s.perClient[sess.ScopeKey]--
 	if s.perClient[sess.ScopeKey] <= 0 {

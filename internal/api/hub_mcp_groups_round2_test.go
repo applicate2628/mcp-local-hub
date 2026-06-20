@@ -56,7 +56,7 @@ func TestGroupsRound2_EmptyGroupReturnsEmptyToolsNotMinus32000(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -88,6 +88,94 @@ func TestGroupsRound2_EmptyGroupReturnsEmptyToolsNotMinus32000(t *testing.T) {
 	}
 }
 
+func TestGroupsRound6_LiveEmptiedSuccessOnlyGroupReturnsEmptyKnownTools(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("emptied-success")
+	d1 := newStubDaemon(t, "d1-sid")
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: d1.port}
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
+		Groups:   map[string]bool{scope: true},
+	}
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{},
+		Groups:   map[string]bool{scope: true},
+	})
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-emptied-success",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       atInit,
+		IntendedParticipants: []canonicalDaemonRef{ref},
+		InitSuccesses:        map[canonicalDaemonRef]string{ref: "d1-sid"},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{ref: "2025-11-25"},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	assertEmptyKnownToolsList(t, body)
+	if got := d1.listCount.Load(); got != 0 {
+		t.Fatalf("removed success-only group daemon received tools/list; listCount=%d", got)
+	}
+}
+
+func TestGroupsRound6_LiveEmptiedFailureOnlyGroupReturnsEmptyKnownTools(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("emptied-failure")
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: 40123}
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
+		Groups:   map[string]bool{scope: true},
+	}
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{},
+		Groups:   map[string]bool{scope: true},
+	})
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-emptied-failure",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       atInit,
+		IntendedParticipants: []canonicalDaemonRef{ref},
+		InitSuccesses:        map[canonicalDaemonRef]string{},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{},
+		InitFailures: []DaemonFailure{{
+			Server: ref.Server,
+			Daemon: ref.Daemon,
+			Stage:  "initialize",
+			Err:    "initial initialize failed",
+		}},
+		InFlightRequests: map[requestIDKey]inflightEntry{},
+		InitAt:           time.Now(),
+		LastUsedAt:       time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	assertEmptyKnownToolsList(t, body)
+}
+
 // TestGroupsRound3_ZeroBindingClientReturnsMinus32000NotEmptySuccess pins B2
 // (bot R3): the empty-success branch is restricted to GROUP scopes. A /clients/
 // session with ZERO IntendedParticipants (a client with no bindings — a startup
@@ -117,7 +205,7 @@ func TestGroupsRound3_ZeroBindingClientReturnsMinus32000NotEmptySuccess(t *testi
 		t.Fatalf("init: %v", err)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -136,6 +224,36 @@ func TestGroupsRound3_ZeroBindingClientReturnsMinus32000NotEmptySuccess(t *testi
 	}
 	if env.Error.Code != -32000 {
 		t.Errorf("zero-binding CLIENT Error.Code=%d want -32000: %s", env.Error.Code, body)
+	}
+}
+
+func assertEmptyKnownToolsList(t *testing.T, body []byte) {
+	t.Helper()
+	var env struct {
+		Error  *json.RawMessage `json:"error"`
+		Result *struct {
+			Tools []json.RawMessage `json:"tools"`
+			Meta  struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse response: %v body=%s", err, body)
+	}
+	if env.Error != nil {
+		t.Fatalf("emptied group returned an error envelope (want success with empty tools): %s", body)
+	}
+	if env.Result == nil {
+		t.Fatalf("emptied group returned no result object: %s", body)
+	}
+	if len(env.Result.Tools) != 0 {
+		t.Fatalf("emptied group result.tools=%d want 0: %s", len(env.Result.Tools), body)
+	}
+	if len(env.Result.Meta.Mcphub.PartialFailures) != 0 {
+		t.Fatalf("emptied group partialFailures=%+v want none: %s", env.Result.Meta.Mcphub.PartialFailures, body)
 	}
 }
 
@@ -200,7 +318,7 @@ func TestGroupsRound2_HiddenCollidingToolNeverLeaksViaPartialFailures(t *testing
 		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}

@@ -66,6 +66,8 @@ var hubSupportedVersions = map[string]bool{
 	"2025-03-26": true,
 }
 
+const hubMcpResponseWriteTimeout = 30 * time.Second
+
 // hubSupportedVersionsList returns a deterministic slice of the
 // supported versions (sorted newest-first) for inclusion in
 // JSON-RPC error responses' data.supported field.
@@ -107,7 +109,8 @@ func (h *HubMcpHandler) SetEndpoint(ep HubEndpoint) {
 }
 
 // currentInstanceID returns the published endpoint's InstanceID, or
-// "" if SetEndpoint has not yet been called. Used by gate 5 only.
+// "" if SetEndpoint has not yet been called. Used by gate 5 and response
+// metadata that must reflect the already-authenticated cached endpoint.
 func (h *HubMcpHandler) currentInstanceID() string {
 	p := h.instanceEndpoint.Load()
 	if p == nil {
@@ -500,7 +503,7 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, scope
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		respBody, aerr := AggregateToolsList(r.Context(), sess, env.ID)
+		respBody, aerr := AggregateToolsList(r.Context(), sess, env.ID, h.currentInstanceID())
 		if aerr != nil {
 			writeJSONRPCErrorStatus(w, env.ID, http.StatusInternalServerError, -32603, "internal error: "+aerr.Error(), nil)
 			return
@@ -691,14 +694,10 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 		return
 	}
 
-	// Snapshot init successes under the session mu so we don't race
-	// with a concurrent tools/list that may be mutating the map.
-	sess.mu.Lock()
-	daemonSessions := make(map[canonicalDaemonRef]string, len(sess.InitSuccesses))
-	for ref, dsid := range sess.InitSuccesses {
-		daemonSessions[ref] = dsid
-	}
-	sess.mu.Unlock()
+	// Mark DELETE-started and snapshot init successes under the same session mu.
+	// Detached reinit cache attempts use this lifecycle flag to avoid caching a
+	// fresh daemon session after this DELETE's snapshot.
+	daemonSessions := sess.markDeleteStartedAndSnapshotDaemonSessions()
 
 	// codex bot phase4 r6 P1 closure on PR #158: invalidate the hub
 	// session BEFORE the daemon fan-out. The fan-out can block up to
@@ -756,16 +755,16 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 		// extra goroutine that depends on every worker
 		// finishing.
 		done := make(chan struct{}, len(daemonSessions))
-		for ref, dsid := range daemonSessions {
-			go func(ref canonicalDaemonRef, dsid string) {
+		for ref, state := range daemonSessions {
+			go func(ref canonicalDaemonRef, state daemonInitState) {
 				// defer signals completion to the buffered
 				// chan; never blocks because cap == worker
 				// count.
 				defer func() { done <- struct{}{} }()
 				fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer fanCancel()
-				_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
-			}(ref, dsid)
+				_ = bestEffortDeleteDaemonSession(fanCtx, ref, state.SessionID, state.ProtocolVersion)
+			}(ref, state)
 		}
 		// Bound the total wait at 5 s + small slack. Workers
 		// that finish in time tick the chan; the deadline path
@@ -789,7 +788,7 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 // with Mcp-Session-Id: <daemonSID>. Errors are returned to the caller
 // but swallowed at the call site (the spec contract is "best-effort
 // fan-out; 204 regardless").
-func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, daemonSID string) error {
+func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
 	u := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
@@ -797,6 +796,9 @@ func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, 
 	}
 	if daemonSID != "" {
 		req.Header.Set("Mcp-Session-Id", daemonSID)
+	}
+	if protoVer != "" {
+		req.Header.Set("MCP-Protocol-Version", protoVer)
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
@@ -980,8 +982,13 @@ func isLowerHex64(s string) bool {
 // aggregator already produced the final bytes.
 func writeRawJSON(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
+	setResponseWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+func setResponseWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(hubMcpResponseWriteTimeout))
 }
 
 // writeJSONRPCResult emits {"jsonrpc":"2.0","id":<reqID>,"result":<result>}
@@ -1009,6 +1016,7 @@ func writeJSONRPCResult(w http.ResponseWriter, reqID json.RawMessage, result any
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	setResponseWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)
 }
@@ -1077,6 +1085,7 @@ func writeJSONRPCErrorStatus(w http.ResponseWriter, reqID json.RawMessage, httpS
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	setResponseWriteDeadline(w)
 	w.WriteHeader(httpStatus)
 	_, _ = w.Write(payload)
 }
