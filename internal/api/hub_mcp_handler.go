@@ -694,18 +694,10 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 		return
 	}
 
-	// Snapshot init successes under the session mu so we don't race
-	// with a concurrent tools/list that may be mutating the map.
-	sess.mu.Lock()
-	daemonSessions := make(map[canonicalDaemonRef]daemonInitState, len(sess.InitSuccesses))
-	for ref, dsid := range sess.InitSuccesses {
-		proto := sess.DaemonProtoVer[ref]
-		if proto == "" {
-			proto = sess.ProtocolVersion
-		}
-		daemonSessions[ref] = daemonInitState{SessionID: dsid, ProtocolVersion: proto}
-	}
-	sess.mu.Unlock()
+	// Mark DELETE-started and snapshot init successes under the same session mu.
+	// Detached reinit cache attempts use this lifecycle flag to avoid caching a
+	// fresh daemon session after this DELETE's snapshot.
+	daemonSessions := sess.markDeleteStartedAndSnapshotDaemonSessions()
 
 	// codex bot phase4 r6 P1 closure on PR #158: invalidate the hub
 	// session BEFORE the daemon fan-out. The fan-out can block up to

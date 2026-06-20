@@ -87,6 +87,8 @@ type daemonHTTPError struct {
 
 func (e *daemonHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
 
+var errHubSessionDeletedDuringReinit = errors.New("hub session deleted during daemon reinit")
+
 // isRetriableTransportFailure reports whether err is a TRANSPORT-level failure
 // where the request demonstrably never reached the daemon — connection refused
 // or connection reset — and is therefore SAFE to retry against a freshly-
@@ -314,7 +316,7 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 		successes, initFailures = sess.filterToolsListSuccessesByLiveSnapshot(current, successes, initFailures)
 		initFailures = filterInitFailuresByLiveBindings(initFailures, current, sess.ScopeKey, sess.IntendedParticipants)
 		liveParticipants := sess.countLiveParticipants(current, sess.ScopeKey, sess.IntendedParticipants)
-		allowEmptyKnown = liveParticipants == 0 && len(successes) == 0 && len(initFailures) == 0 && snapshotKnowsScope(current, sess.ScopeKey)
+		allowEmptyKnown = strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) && liveParticipants == 0 && len(successes) == 0 && len(initFailures) == 0 && snapshotKnowsScope(current, sess.ScopeKey)
 	}
 
 	results := fanOutToolsList(ctx, successes)
@@ -385,7 +387,8 @@ func initFailureDaemonStillBound(current *ResolverSnapshot, scopeKey string, int
 		if ref.Server != failure.Server || ref.Daemon != failure.Daemon {
 			continue
 		}
-		if daemonStillBound(current, scopeKey, canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}) {
+		liveRef, ok := liveDaemonBinding(current, scopeKey, ref)
+		if ok && liveRef.Port == ref.Port {
 			return true
 		}
 	}
@@ -1075,28 +1078,39 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 				return
 			}
 			ir := res.Val.(initResult)
-			s.cacheReinitResult(daemonRef, ir.sid, ir.proto, protoVer)
+			if proto, cached := s.cacheReinitResult(daemonRef, ir.sid, ir.proto, protoVer); !cached {
+				s.deleteUncachedReinitResult(daemonRef, ir.sid, proto)
+			}
 		}()
 		return daemonInitState{}, ctx.Err()
 	}
 	res := v.(initResult)
-	proto := s.cacheReinitResult(daemonRef, res.sid, res.proto, protoVer)
+	proto, cached := s.cacheReinitResult(daemonRef, res.sid, res.proto, protoVer)
+	if !cached {
+		s.deleteUncachedReinitResult(daemonRef, res.sid, proto)
+		return daemonInitState{}, errHubSessionDeletedDuringReinit
+	}
 	return daemonInitState{SessionID: res.sid, ProtocolVersion: proto}, nil
 }
 
 // cacheReinitResult records a completed reinit handshake's daemon session id +
 // negotiated protocol under the session mu so a later request for the same
 // daemonRef reuses it (cachedDaemonInitState). Shared by the live-waiter path
-// and the detached drain that fires when the triggering caller's ctx cancelled
-// — either way a completed detached reinit caches its session and never orphans
-// it. Falls back to the session-requested protoVer when the daemon emitted no
-// negotiated version. Returns the effective proto so the live path can return it.
-func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string) string {
+// and the detached drain that fires when the triggering caller's ctx cancelled.
+// If a session DELETE has already started, the completed daemon-side session is
+// not cacheable: the caller must best-effort DELETE it so the DELETE intent holds.
+// Falls back to the session-requested protoVer when the daemon emitted no
+// negotiated version. Returns the effective proto and whether it was cached.
+func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string) (string, bool) {
 	proto := negotiated
 	if proto == "" {
 		proto = protoVer
 	}
 	s.mu.Lock()
+	if s.deleteStarted {
+		s.mu.Unlock()
+		return proto, false
+	}
 	if s.InitSuccesses == nil {
 		s.InitSuccesses = map[canonicalDaemonRef]string{}
 	}
@@ -1106,7 +1120,15 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	}
 	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
-	return proto
+	return proto, true
+}
+
+func (s *hubSession) deleteUncachedReinitResult(daemonRef canonicalDaemonRef, sid, proto string) {
+	go func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
+		defer cleanupCancel()
+		_ = bestEffortDeleteDaemonSession(cleanupCtx, daemonRef, sid, proto)
+	}()
 }
 
 // currentDaemonPort re-resolves the daemon's CURRENT port for (ref.Server,

@@ -149,7 +149,8 @@ type hubSession struct {
 	inFlightCount    atomic.Int32
 	InitAt           time.Time
 	LastUsedAt       time.Time
-	mu               sync.Mutex // protects LastUsedAt + lifecycle + InitSuccesses + DaemonProtoVer
+	deleteStarted    bool
+	mu               sync.Mutex // protects LastUsedAt + lifecycle + InitSuccesses + DaemonProtoVer + deleteStarted
 	// reinitGroup coalesces concurrent hot-swap (a) self-heal re-initializations
 	// of the SAME live daemon binding (keyed Server\x00Daemon\x00Port) into ONE
 	// initialize, so a mass daemon restart that fails many in-flight tools/call
@@ -319,6 +320,27 @@ func (s *hubSession) RemoveInFlight(key requestIDKey) {
 		delete(s.InFlightRequests, key)
 		s.inFlightCount.Add(-1)
 	}
+}
+
+func (s *hubSession) markDeleteStarted() {
+	s.mu.Lock()
+	s.deleteStarted = true
+	s.mu.Unlock()
+}
+
+func (s *hubSession) markDeleteStartedAndSnapshotDaemonSessions() map[canonicalDaemonRef]daemonInitState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteStarted = true
+	daemonSessions := make(map[canonicalDaemonRef]daemonInitState, len(s.InitSuccesses))
+	for ref, dsid := range s.InitSuccesses {
+		proto := s.DaemonProtoVer[ref]
+		if proto == "" {
+			proto = s.ProtocolVersion
+		}
+		daemonSessions[ref] = daemonInitState{SessionID: dsid, ProtocolVersion: proto}
+	}
+	return daemonSessions
 }
 
 // HubSessionStore owns every active hub session. Constructed via
@@ -526,6 +548,7 @@ func (s *HubSessionStore) deleteLocked(id string) bool {
 	if !ok {
 		return false
 	}
+	sess.markDeleteStarted()
 	delete(s.sessions, id)
 	s.perClient[sess.ScopeKey]--
 	if s.perClient[sess.ScopeKey] <= 0 {
