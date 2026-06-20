@@ -297,7 +297,12 @@ func (l *linuxBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
 	}
 	enabled, err := linuxUnitEnabledStatus()
 	if err != nil {
-		return StatusSnapshot{State: StateAbsent}, err
+		// The unit body was read above, so the unit IS installed; an is-enabled
+		// query failure (systemd unreachable / transient) must NOT collapse Status
+		// to Absent. Treat enabled as unknown and let the unit-body drift
+		// comparison below determine the state — failing closed (the fingerprint
+		// carries enabled=unknown) rather than mis-reporting the unit as absent.
+		enabled = "unknown"
 	}
 	spec := shimSpecFingerprint("linux", "installed=true", "enabled="+enabled, "unit="+string(body))
 	want, err := resolveMCPHubPath(opts)
