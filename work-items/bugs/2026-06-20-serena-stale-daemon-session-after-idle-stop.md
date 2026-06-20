@@ -1,9 +1,10 @@
 ---
-status: open
+status: closed
 severity: P2
 date: 2026-06-20
 slug: serena-stale-daemon-session-after-idle-stop
 discovered-by: codex different-model subsystem review (2026-06-20, parallel to PR #384)
+closed-by: PR #386 (serena per-workspace stop-gate refactored into the withSerenaWorkspaceGate seam; merged 2026-06-20)
 ---
 
 # Stale serena daemon-session binding reused after an idle-stop

@@ -38,9 +38,14 @@ corporate hosts where outbound HTTPS is only reachable via `HTTPS_PROXY`.
 The static URL + redirect host check (`validateMarketplacePublicHTTPSParsedURL` +
 `rejectUnsafeMarketplaceRedirect`) ALREADY runs on every fetch and every redirect Location — it
 blocks a literal loopback/private host in the registry URL on BOTH the proxy and direct paths. The
-dial-time guard stays installed in both gate states (validates the proxy IP on the proxy path, the
-origin on the direct path). So removing `Proxy=nil` does not remove the SSRF floor; it only changes
-which layer is authoritative on the proxy path.
+dial-time resolved-IP guard, however, is applied ONLY on the DIRECT transport
+(`configureMarketplaceFetchDialer(direct, resolver, true)`), where it validates the resolved ORIGIN
+IP; on the proxied transport it is intentionally NOT applied
+(`configureMarketplaceFetchDialer(proxied, resolver, false)`) because it would reject a normal
+corporate proxy's own loopback/RFC1918 address rather than the origin. So on the proxy path the
+static URL + redirect host check is the authoritative SSRF floor; honoring the proxy does not remove
+that floor — it only means the dial-time origin-IP check is unavailable on the proxy path (the
+accepted residual below).
 
 ## Accepted residual
 

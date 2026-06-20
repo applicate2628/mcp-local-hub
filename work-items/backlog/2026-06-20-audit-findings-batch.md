@@ -48,11 +48,11 @@ audit-* .out files. Triaged below.
 - P2 — readMarketplaceCache trusts the cached catalog without re-validation → re-run ParseMarketplaceCatalog.
 - P3 — http-entry URL is a HasPrefix("https://") byte check → url.Parse (scheme/host/no-creds).
 
-**cold-restart upgrade hardening** (fix/cold-restart-upgrade-hardening, lane bypyw191y):
+**cold-restart upgrade hardening** — ✅ MERGED as PR #387 (0a574b80):
 - P1 — `install --upgrade` reports success before the old supervisor releases the lock + the
-  successor may fail to start → verify handoff (lock release + new-supervisor IPC readiness).
-- P3 — SweepOldBinaries is dead code (defined, never wired) → wire into upgrade + supervisor startup.
-- P3 — SweepOldBinaries deletes by mtime without validating the `.old-<timestamp>` suffix → time.Parse gate.
+  successor may fail to start → verify handoff (lock release + new-supervisor IPC readiness). FIXED.
+- P3 — SweepOldBinaries is dead code (defined, never wired) → wire into upgrade + supervisor startup. FIXED.
+- P3 — SweepOldBinaries deletes by mtime without validating the `.old-<timestamp>` suffix → time.Parse gate. FIXED.
 
 **serena idle-stop races** (PR #386, fix/serena-idle-stop-gate): the 2 idle-stop subsystem races
 (per-workspace stop-gate). MERGED-pending bot + codex review.
