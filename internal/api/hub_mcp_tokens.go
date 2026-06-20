@@ -40,6 +40,7 @@ package api
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync/atomic"
 )
@@ -145,6 +146,8 @@ func pruneHubTokensLocked(scopeKeys []string) error {
 	return nil
 }
 
+var errGroupTokenActiveSetIndeterminate = errors.New("group token rotation active-set is indeterminate")
+
 // rotateReusedGroupTokensLocked mints a FRESH token for every declared
 // group scope key that has a pre-existing token row but was not in this
 // process's previously published live active set. Caller MUST already hold
@@ -160,18 +163,26 @@ func pruneHubTokensLocked(scopeKeys []string) error {
 // row instead of minting a fresh secret. This helper closes that hole by
 // rotating exactly the reintroduced-row case.
 //
-// The discriminator is deliberately single-source: current cfg.Groups supplies
-// declaredKeys, and this process's previous in-memory snapshot supplies
-// activeKeys. On cold start (hadPriorPublish=false), declared pre-existing rows
-// are trusted as the authoritative active set so clean restarts preserve their
-// tokens. A declared key with NO existing row is left to the subsequent
-// ensureHubTokensLocked, which mints a fresh one.
+// The discriminator is deliberately single-source when available: current
+// cfg.Groups supplies declaredKeys, and this process's previous KNOWN-GOOD
+// in-memory snapshot supplies activeKeys. On a genuine process cold start
+// (genuineColdStart=true, detected by PublishGroupsSnapshotLocked as no
+// resolver pointer AND no prior group publish attempt in this process),
+// declared pre-existing rows are trusted as the authoritative active set so
+// clean restarts preserve their tokens. A declared key with NO existing row is
+// left to the subsequent ensureHubTokensLocked, which mints a fresh one.
+//
+// If a previous transient/degraded publish made the active set indeterminate,
+// this helper preserves pre-existing rows and returns
+// errGroupTokenActiveSetIndeterminate instead of rotating on doubt. The caller
+// surfaces that as restart_required / retry rather than serving a group whose
+// rotate-or-preserve decision came from stale state.
 //
 // Returns true when at least one row was rotated (the table was written +
 // republished). A load/write failure surfaces; a missing token file is
 // "nothing to rotate" (the recreate path then mints fresh via ensure).
-func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]bool, hadPriorPublish bool) (bool, error) {
-	if len(declaredKeys) == 0 || !hadPriorPublish {
+func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]bool, priorActiveSetKnownGood bool, genuineColdStart bool) (bool, error) {
+	if len(declaredKeys) == 0 || genuineColdStart {
 		return false, nil
 	}
 	tbl, err := loadHubTokensLocked()
@@ -182,6 +193,18 @@ func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]
 		return false, err
 	}
 	if tbl.Tokens == nil {
+		return false, nil
+	}
+	if !priorActiveSetKnownGood {
+		var preexisting []string
+		for _, k := range declaredKeys {
+			if _, present := tbl.Tokens[k]; present {
+				preexisting = append(preexisting, k)
+			}
+		}
+		if len(preexisting) > 0 {
+			return false, fmt.Errorf("%w; preserving existing rows for declared groups %v", errGroupTokenActiveSetIndeterminate, preexisting)
+		}
 		return false, nil
 	}
 	rotated := false
@@ -215,8 +238,8 @@ func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]
 // stricter than "key exists in the live token table": the group must have been
 // active in the prior resolver snapshot (so it is not a re-created stale row),
 // and its live token must pass the same 64-hex shape gate used on disk loads.
-func groupTokensAlreadyPublished(declaredKeys []string, activeKeys map[string]bool) bool {
-	if len(declaredKeys) == 0 || len(activeKeys) == 0 {
+func groupTokensAlreadyPublished(declaredKeys []string, activeKeys map[string]bool, activeSetKnownGood bool) bool {
+	if len(declaredKeys) == 0 || len(activeKeys) == 0 || !activeSetKnownGood {
 		return false
 	}
 	tbl := CurrentTokenTable()

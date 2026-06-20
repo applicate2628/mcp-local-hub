@@ -198,6 +198,103 @@ func TestGroups_CleanRestartDeclaredGroupKeepsTokenWithoutTombstone(t *testing.T
 	}
 }
 
+// TestGroups_KnownGoodEmptySnapshotRotatesReintroducedRow distinguishes a
+// real, known-good empty active-set from process cold start. A prior publish
+// that authoritatively declared no groups is enough history to classify a
+// pre-existing row as reintroduced, so the next declared publish must rotate it.
+func TestGroups_KnownGoodEmptySnapshotRotatesReintroducedRow(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	resetResolverForTest(t)
+
+	const key = "g:frontend"
+	stale := strings.Repeat("d", 64)
+	writeGroupTokenRowForTest(t, key, stale)
+
+	publishWithGroups(t, []Group{})
+	if snap := LoadResolverSnapshot(); snap == nil || snap.Groups[key] {
+		t.Fatalf("known-good empty publish precondition failed, snap=%+v", snap)
+	}
+
+	publishWithGroups(t, []Group{{Name: "frontend", Servers: []string{"memory"}}})
+	after := CurrentTokenTable().Tokens[key]
+	if !isValidHexToken(after) {
+		t.Fatalf("after reintroduced publish: %q row missing/invalid (got %q)", key, after)
+	}
+	if after == stale {
+		t.Fatalf("known-good empty active-set skipped needed rotation; stale token %q survived", stale)
+	}
+}
+
+// TestGroups_IndeterminateActiveSetPreservesPreexistingRow pins the transient
+// failure edge: once the prior active-set is known indeterminate, a declared
+// pre-existing row must not be rotated on doubt. The publish surfaces the
+// uncertainty so callers can retry / require restart instead of serving an
+// unproven rotate-or-preserve decision.
+func TestGroups_IndeterminateActiveSetPreservesPreexistingRow(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	resetResolverForTest(t)
+
+	const key = "g:frontend"
+	seeded := strings.Repeat("e", 64)
+	writeGroupTokenRowForTest(t, key, seeded)
+	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{}})
+	storeResolverGroupActiveSetStatus(resolverGroupActiveSetIndeterminate)
+	if err := WriteGroups(GroupsConfig{Version: 1, Groups: []Group{{Name: "frontend", Servers: []string{"memory"}}}}); err != nil {
+		t.Fatalf("WriteGroups: %v", err)
+	}
+
+	err := PublishGroupsSnapshotLocked(context.Background(), scanOneServer)
+	if !errors.Is(err, errGroupTokenActiveSetIndeterminate) {
+		t.Fatalf("PublishGroupsSnapshotLocked err = %v, want errGroupTokenActiveSetIndeterminate", err)
+	}
+	raw, rerr := readHubMcpStateFile(hubMcpTokensFileLeaf)
+	if rerr != nil {
+		t.Fatalf("read token table after indeterminate publish: %v", rerr)
+	}
+	var tbl HubTokenTable
+	if jerr := json.Unmarshal(raw, &tbl); jerr != nil {
+		t.Fatalf("unmarshal token table after indeterminate publish: %v", jerr)
+	}
+	if got := tbl.Tokens[key]; got != seeded {
+		t.Fatalf("indeterminate active-set rotated token; got %q want preserved %q", got, seeded)
+	}
+	if snap := LoadResolverSnapshot(); snap == nil || snap.Groups[key] {
+		t.Fatalf("indeterminate token decision must not publish %q as routable, snap=%+v", key, snap)
+	}
+}
+
+// TestGroups_StaleActiveSnapshotDoesNotSkipTokenEnsure verifies that a stale
+// in-memory active snapshot is not authoritative for the token-publish skip.
+// The live token table alone is not durable state; if the disk row is missing,
+// the current cfg.Groups publish must still ensure it.
+func TestGroups_StaleActiveSnapshotDoesNotSkipTokenEnsure(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	resetResolverForTest(t)
+
+	const key = "g:frontend"
+	publishTokenTable(HubTokenTable{Tokens: map[string]string{key: strings.Repeat("f", 64)}})
+	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{key: true}})
+	storeResolverGroupActiveSetStatus(resolverGroupActiveSetIndeterminate)
+	if err := WriteGroups(GroupsConfig{Version: 1, Groups: []Group{{Name: "frontend", Servers: []string{"memory"}}}}); err != nil {
+		t.Fatalf("WriteGroups: %v", err)
+	}
+
+	if err := PublishGroupsSnapshotLocked(context.Background(), scanOneServer); err != nil {
+		t.Fatalf("PublishGroupsSnapshotLocked: %v", err)
+	}
+	raw, err := readHubMcpStateFile(hubMcpTokensFileLeaf)
+	if err != nil {
+		t.Fatalf("token row was not durably ensured: %v", err)
+	}
+	var tbl HubTokenTable
+	if err := json.Unmarshal(raw, &tbl); err != nil {
+		t.Fatalf("unmarshal ensured token table: %v", err)
+	}
+	if tok := tbl.Tokens[key]; !isValidHexToken(tok) {
+		t.Fatalf("ensured token invalid/missing for %q: %q", key, tok)
+	}
+}
+
 // TestGroups_RotationFailureDoesNotPublishStaleGroup pins fail-closed publish:
 // if the orphan-rotation step errors, PublishGroupsSnapshotLocked must return
 // the error without swapping in a resolver snapshot that makes the group
@@ -210,6 +307,7 @@ func TestGroups_RotationFailureDoesNotPublishStaleGroup(t *testing.T) {
 	stale := strings.Repeat("c", 64)
 	writeGroupTokenRowForTest(t, key, stale)
 	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{GroupScopeKey("old"): true}})
+	storeResolverGroupActiveSetStatus(resolverGroupActiveSetKnownGood)
 	if err := WriteGroups(GroupsConfig{Version: 1, Groups: []Group{{Name: "frontend", Servers: []string{"memory"}}}}); err != nil {
 		t.Fatalf("WriteGroups: %v", err)
 	}

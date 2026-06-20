@@ -118,7 +118,30 @@ type ResolverSnapshot struct {
 var (
 	resolverSnapshot atomic.Pointer[ResolverSnapshot]
 	resolverGen      atomic.Int64
+
+	// resolverGroupActiveSetStatus describes whether resolverSnapshot.Groups is
+	// safe to use as the prior in-memory active-set for group-token rotation.
+	// It is process-local on purpose: a clean process start has no prior live
+	// sessions to preserve, so cfg.Groups can be trusted as active only when
+	// LoadResolverSnapshot() is nil AND this status is still cold.
+	resolverGroupActiveSetStatus atomic.Int32
 )
+
+type resolverGroupActiveSetState int32
+
+const (
+	resolverGroupActiveSetCold resolverGroupActiveSetState = iota
+	resolverGroupActiveSetKnownGood
+	resolverGroupActiveSetIndeterminate
+)
+
+func loadResolverGroupActiveSetStatus() resolverGroupActiveSetState {
+	return resolverGroupActiveSetState(resolverGroupActiveSetStatus.Load())
+}
+
+func storeResolverGroupActiveSetStatus(state resolverGroupActiveSetState) {
+	resolverGroupActiveSetStatus.Store(int32(state))
+}
 
 // PublishResolverSnapshot atomically swaps in a new snapshot. Callers
 // MUST build the struct off-line, populate every map fully, and then
@@ -339,6 +362,7 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 // (nil groups) — see BumpResolverOnConfigChange for the groups-aware form.
 func BumpResolverOnManifestChange(manifests []config.ServerManifest) {
 	PublishResolverSnapshot(BuildResolverSnapshotFromManifests(manifests))
+	storeResolverGroupActiveSetStatus(resolverGroupActiveSetIndeterminate)
 }
 
 // BumpResolverOnConfigChange rebuilds + publishes a fresh snapshot from
@@ -348,7 +372,12 @@ func BumpResolverOnManifestChange(manifests []config.ServerManifest) {
 // Phase 4a). With nil/empty groups it is byte-equivalent to
 // BumpResolverOnManifestChange.
 func BumpResolverOnConfigChange(manifests []config.ServerManifest, groups []Group) {
+	publishResolverSnapshotWithGroupActiveSetStatus(manifests, groups, resolverGroupActiveSetKnownGood)
+}
+
+func publishResolverSnapshotWithGroupActiveSetStatus(manifests []config.ServerManifest, groups []Group, state resolverGroupActiveSetState) {
 	PublishResolverSnapshot(BuildResolverSnapshotFromManifestsAndGroups(manifests, groups))
+	storeResolverGroupActiveSetStatus(state)
 }
 
 // PublishGroupsSnapshotLocked is the LOCK-SERIALIZED groups-aware publish span
@@ -411,24 +440,32 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	// a partial scan) and surfaces to the caller.
 	manifests, serr := scan()
 	if serr != nil {
+		storeResolverGroupActiveSetStatus(resolverGroupActiveSetIndeterminate)
 		return fmt.Errorf("scan manifests under hub-mcp.lock: %w", serr)
 	}
 
+	cfgKnownGood := true
 	cfg, gerr := loadGroupsLocked()
 	if gerr != nil {
 		_ = LogHubMcpEvent("warn", "groups-config-load-failed", map[string]any{
 			"err": gerr.Error(),
 		})
 		cfg = GroupsConfig{}
+		cfgKnownGood = false
 	}
 
 	// Capture the prior published active set for live-session preservation and
-	// stale-row rotation. On cold start, nil prev means the current cfg.Groups
-	// is trusted as authoritative active state, so declared pre-existing token
-	// rows survive clean restarts.
+	// stale-row rotation. A genuine cold start is detected as nil prev AND a
+	// still-cold resolverGroupActiveSetStatus: no resolver pointer exists and no
+	// earlier publish attempt in this process made the group active-set stale or
+	// indeterminate. Only that case trusts current cfg.Groups as authoritative
+	// active state so declared pre-existing token rows survive clean restarts.
 	prev := LoadResolverSnapshot()
+	priorStatus := loadResolverGroupActiveSetStatus()
+	genuineColdStart := prev == nil && priorStatus == resolverGroupActiveSetCold
+	priorActiveSetKnownGood := prev != nil && priorStatus == resolverGroupActiveSetKnownGood
 	var activeGroupKeys map[string]bool
-	if prev != nil {
+	if priorActiveSetKnownGood {
 		activeGroupKeys = prev.Groups
 	}
 
@@ -437,14 +474,18 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	// publishes even when the token-ensure fails.
 	var tokenEnsureErr error
 	if groupKeys := GroupScopeKeys(cfg.Groups); len(groupKeys) > 0 {
-		if !groupTokensAlreadyPublished(groupKeys, activeGroupKeys) {
+		if !groupTokensAlreadyPublished(groupKeys, activeGroupKeys, priorActiveSetKnownGood) {
 			// First, ROTATE any declared group whose token row pre-exists but was
-			// not in this process's prior published active set. Still-active rows
-			// are preserved so live /g/ sessions survive; cold-start rows are
-			// trusted as current declared state. A rotation failure is fail-closed
-			// for this publish: serving the re-created group with the old row would
-			// expose the stale secret this path is specifically trying to retire.
-			if _, rerr := rotateReusedGroupTokensLocked(groupKeys, activeGroupKeys, prev != nil); rerr != nil {
+			// not in this process's prior known-good published active set.
+			// Still-active rows are preserved so live /g/ sessions survive;
+			// genuine cold-start rows are trusted as current declared state. An
+			// indeterminate prior active-set preserves existing rows but returns an
+			// error so callers surface restart_required/retry instead of rotating
+			// from stale state. A rotation failure is fail-closed for this publish:
+			// serving the re-created group with the old row would expose the stale
+			// secret this path is specifically trying to retire.
+			if _, rerr := rotateReusedGroupTokensLocked(groupKeys, activeGroupKeys, priorActiveSetKnownGood, genuineColdStart); rerr != nil {
+				storeResolverGroupActiveSetStatus(resolverGroupActiveSetIndeterminate)
 				_ = LogHubMcpEvent("warn", "group-tokens-rotate-reintroduced-failed", map[string]any{
 					"err": rerr.Error(),
 				})
@@ -462,7 +503,11 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	// In-memory build + atomic publish (no lock taken inside). Held under the
 	// hub-mcp.lock so the scan + cfg read above and this publish are one
 	// critical section — no interleaving mutation can publish a torn read.
-	BumpResolverOnConfigChange(manifests, cfg.Groups)
+	publishStatus := resolverGroupActiveSetKnownGood
+	if !cfgKnownGood {
+		publishStatus = resolverGroupActiveSetIndeterminate
+	}
+	publishResolverSnapshotWithGroupActiveSetStatus(manifests, cfg.Groups, publishStatus)
 
 	return tokenEnsureErr
 }
