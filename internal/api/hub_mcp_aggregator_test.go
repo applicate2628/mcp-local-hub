@@ -564,6 +564,63 @@ func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 	}
 }
 
+func TestAggregateToolsListFiltersRemovedLiveBinding(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+
+	resetResolverForTest(t)
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": nil},
+	}
+	PublishResolverSnapshot(current)
+
+	listBefore := d1.listCount.Load()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	names := decodeToolsListNames(t, body)
+	for _, name := range names {
+		if strings.HasPrefix(name, "srv1__") {
+			t.Fatalf("removed daemon tool %q leaked into tools/list; names=%v body=%s", name, names, string(body))
+		}
+	}
+	if got := d1.listCount.Load(); got != listBefore {
+		t.Fatalf("tools/list fanned out to removed daemon; listCount %d -> %d", listBefore, got)
+	}
+	rm := sess.RouteMap.Load()
+	if rm == nil {
+		t.Fatalf("RouteMap not published after live binding removal")
+	}
+	if len(*rm) != 0 {
+		t.Fatalf("RouteMap retained removed daemon routes: %+v", *rm)
+	}
+
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	callBody, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	code, _ := decodeRPCError(t, callBody)
+	if code != -32601 {
+		t.Fatalf("tools/call code=%d want -32601 after matching list removal; body=%s", code, string(callBody))
+	}
+}
+
 func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	sess := sessionWithParticipants(d1)
@@ -971,8 +1028,10 @@ func TestAggregateInitializeDeletesDaemonSessionWhenInitializedNotificationFails
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 	var deleteSID string
+	var deleteProto string
 	d1.onDelete = func(w http.ResponseWriter, r *http.Request) {
 		deleteSID = r.Header.Get("Mcp-Session-Id")
+		deleteProto = r.Header.Get("MCP-Protocol-Version")
 		w.WriteHeader(http.StatusAccepted)
 	}
 
@@ -991,6 +1050,9 @@ func TestAggregateInitializeDeletesDaemonSessionWhenInitializedNotificationFails
 	}
 	if deleteSID != daemonSID {
 		t.Fatalf("daemon DELETE Mcp-Session-Id=%q want %q", deleteSID, daemonSID)
+	}
+	if deleteProto != "2025-11-25" {
+		t.Fatalf("daemon DELETE MCP-Protocol-Version=%q want %q", deleteProto, "2025-11-25")
 	}
 }
 
@@ -2079,6 +2141,35 @@ func decodeRPCError(t *testing.T, body []byte) (int, string) {
 	return env.Error.Code, env.Error.Message
 }
 
+func decodeToolsListNames(t *testing.T, body []byte) []string {
+	t.Helper()
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result *struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse tools/list envelope: %v body=%s", err, string(body))
+	}
+	if env.Error != nil {
+		t.Fatalf("expected tools/list result envelope, got error code=%d message=%q body=%s", env.Error.Code, env.Error.Message, string(body))
+	}
+	if env.Result == nil {
+		t.Fatalf("expected tools/list result, got body=%s", string(body))
+	}
+	names := make([]string, 0, len(env.Result.Tools))
+	for _, tool := range env.Result.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
 // TestAggregateToolsCall_TransportFailureReturnsMinus32000 pins CURRENT behavior
 // when the upstream daemon is unreachable (connection refused): the hub returns a
 // -32000 "tools/call failed" envelope. Regression baseline for the hot-swap (a)
@@ -2226,6 +2317,76 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	}
 }
 
+func TestAggregateToolsCall_SelfHealDeletesReinitSessionWhenInitializedFails(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "d1-old-sid"
+	const freshSID = "d2-fresh-sid"
+
+	d1 := newStubDaemon(t, oldSID)
+	d2 := newStubDaemon(t, freshSID)
+	d2.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	var deleteSID string
+	var deleteProto string
+	d2.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteSID = r.Header.Get("Mcp-Session-Id")
+		deleteProto = r.Header.Get("MCP-Protocol-Version")
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: d2.port}}},
+	}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	d1.server.Close()
+
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall returned Go error (want JSON-RPC error envelope): %v", err)
+	}
+	code, _ := decodeRPCError(t, body)
+	if code != -32000 {
+		t.Fatalf("tools/call code=%d want -32000 when self-heal reinit notification fails; body=%s", code, string(body))
+	}
+	if got := d2.deleteCount.Load(); got != 1 {
+		t.Fatalf("replacement daemon DELETE count=%d want 1", got)
+	}
+	if deleteSID != freshSID {
+		t.Fatalf("replacement daemon DELETE Mcp-Session-Id=%q want %q", deleteSID, freshSID)
+	}
+	if deleteProto != "2025-11-25" {
+		t.Fatalf("replacement daemon DELETE MCP-Protocol-Version=%q want %q", deleteProto, "2025-11-25")
+	}
+	if got := d2.callCount.Load(); got != 0 {
+		t.Fatalf("replacement daemon callCount=%d want 0 after failed initialized notification", got)
+	}
+	daemonKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port}
+	if got := sess.InitSuccesses[daemonKey]; got != oldSID {
+		t.Fatalf("reinit failure changed cached daemon session for stale route to %q, want original %q", got, oldSID)
+	}
+	if got := sess.DaemonProtoVer[daemonKey]; got != "2025-11-25" {
+		t.Fatalf("reinit failure changed cached daemon proto for stale route to %q, want %q", got, "2025-11-25")
+	}
+}
+
 // TestSelfHealRetryInFlightCancellationUsesReplacementPort pins the
 // self-heal cancellation race: when a retry re-resolves a daemon onto a new
 // port, the in-flight row used by ForwardCancellation must point at that live
@@ -2365,6 +2526,90 @@ func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
 	}
 	if d1.initCount.Load() != initAfterFirst {
 		t.Errorf("stale mark not consumed: second call re-initialized again (initCount %d -> %d)", initAfterFirst, d1.initCount.Load())
+	}
+}
+
+func TestAggregateToolsCall_ProactiveReinitDeletesSessionWhenInitializedFails(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "d1-old-sid"
+	const freshSID = "d1-fresh-sid"
+
+	d1 := newStubDaemon(t, oldSID)
+	d1.onInit = func(w http.ResponseWriter, r *http.Request) {
+		if d1.initCount.Load() >= 2 {
+			w.Header().Set("Mcp-Session-Id", freshSID)
+		} else {
+			w.Header().Set("Mcp-Session-Id", oldSID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		if d1.notifyCount.Load() >= 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}
+	var deleteSID string
+	var deleteProto string
+	d1.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteSID = r.Header.Get("Mcp-Session-Id")
+		deleteProto = r.Header.Get("MCP-Protocol-Version")
+		w.WriteHeader(http.StatusAccepted)
+	}
+	var callSID string
+	d1.onCall = func(w http.ResponseWriter, r *http.Request) {
+		callSID = r.Header.Get("Mcp-Session-Id")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"called=read"}]}}`))
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+	resetResolverForTest(t)
+	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
+	sess.SnapshotAtInit = snap
+	PublishResolverSnapshot(snap)
+
+	sess.markStalePort(d1.port)
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	if !strings.Contains(string(body), "called=read") {
+		t.Fatalf("proactive reinit fallback call did not succeed with original session; body=%s", string(body))
+	}
+	if got := d1.deleteCount.Load(); got != 1 {
+		t.Fatalf("daemon DELETE count=%d want 1", got)
+	}
+	if deleteSID != freshSID {
+		t.Fatalf("daemon DELETE Mcp-Session-Id=%q want %q", deleteSID, freshSID)
+	}
+	if deleteProto != "2025-11-25" {
+		t.Fatalf("daemon DELETE MCP-Protocol-Version=%q want %q", deleteProto, "2025-11-25")
+	}
+	if callSID != oldSID {
+		t.Fatalf("tools/call Mcp-Session-Id=%q want original %q after failed proactive reinit", callSID, oldSID)
+	}
+	daemonKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port}
+	if got := sess.InitSuccesses[daemonKey]; got != oldSID {
+		t.Fatalf("failed proactive reinit cached sid=%q want original %q", got, oldSID)
+	}
+	if got := sess.DaemonProtoVer[daemonKey]; got != "2025-11-25" {
+		t.Fatalf("failed proactive reinit cached proto=%q want %q", got, "2025-11-25")
 	}
 }
 

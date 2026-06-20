@@ -189,40 +189,7 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-			defer cancel()
-			sid, negotiated, err := postInitialize(subCtx, ref, protoVer)
-			// codex bot r4 P1 closure: per MCP lifecycle, the client
-			// (hub) MUST send notifications/initialized after
-			// initialize succeeds. codex bot r5 P2 closure on PR
-			// #157: propagate the notification error into the init-
-			// result. Earlier "best-effort" swallow recorded the
-			// daemon in InitSuccesses even when the required
-			// notification failed, leaving the session half-
-			// initialized and reporting subsequent tools/list /
-			// tools/call failures at the wrong stage. Use a fresh
-			// subCtx with the init timeout because the original
-			// subCtx is being torn down via defer cancel() at
-			// goroutine exit.
-			//
-			// codex bot r17 P1 closure on PR #157: send the
-			// notification with the DAEMON-NEGOTIATED protocol
-			// version, NOT the hub-requested one. A daemon may
-			// reply with a downgraded version per MCP negotiation;
-			// strict daemons reject follow-up headers carrying the
-			// original requested version with 400.
-			if err == nil {
-				notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-				if nerr := postInitialized(notifyCtx, ref, sid, negotiated); nerr != nil {
-					notifyCancel()
-					cleanupCtx, cleanupCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-					_ = bestEffortDeleteDaemonSession(cleanupCtx, ref, sid)
-					cleanupCancel()
-					err = fmt.Errorf("notifications/initialized: %w", nerr)
-				} else {
-					notifyCancel()
-				}
-			}
+			sid, negotiated, err := initializeDaemonSession(ctx, ref, protoVer)
 			results[i] = initResult{ref: ref, sessionID: sid, negotiatedProto: negotiated, err: err}
 		}()
 	}
@@ -256,6 +223,31 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 		return nil, err
 	}
 	return body, nil
+}
+
+func initializeDaemonSession(ctx context.Context, ref canonicalDaemonRef, protoVer string) (sid, negotiated string, err error) {
+	initCtx, initCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+	sid, negotiated, err = postInitialize(initCtx, ref, protoVer)
+	initCancel()
+	if err != nil {
+		return "", "", err
+	}
+
+	// MCP lifecycle: notifications/initialized is mandatory after a
+	// successful initialize. If it fails, the daemon allocated a session
+	// that cannot be used; delete it with the negotiated protocol header and
+	// report initialize-stage failure instead of caching a half-initialized SID.
+	notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+	notifyErr := postInitialized(notifyCtx, ref, sid, negotiated)
+	notifyCancel()
+	if notifyErr == nil {
+		return sid, negotiated, nil
+	}
+
+	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+	_ = bestEffortDeleteDaemonSession(cleanupCtx, ref, sid, negotiated)
+	cleanupCancel()
+	return "", "", fmt.Errorf("notifications/initialized: %w", notifyErr)
 }
 
 // namespacedTool is one daemon's contribution to the merged tools/list
@@ -309,8 +301,23 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	copy(initFailures, sess.InitFailures)
 	sess.mu.Unlock()
 
+	allowEmptySuccess := false
+	if current := LoadResolverSnapshot(); sess.SnapshotAtInit != nil && current != nil && current != sess.SnapshotAtInit {
+		originalCount := len(successes)
+		if originalCount > 0 {
+			filtered := make(map[canonicalDaemonRef]daemonInitState, originalCount)
+			for ref, state := range successes {
+				if daemonStillBound(current, sess.ScopeKey, canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}) {
+					filtered[ref] = state
+				}
+			}
+			successes = filtered
+			allowEmptySuccess = len(successes) == 0
+		}
+	}
+
 	results := fanOutToolsList(ctx, successes)
-	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID)
+	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID, allowEmptySuccess)
 }
 
 // daemonInitState bundles a daemon's per-daemon Mcp-Session-Id and
@@ -380,7 +387,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 // stage="tools/list" partialFailure row per colliding daemon. The
 // failure message names every daemon that claimed the key so
 // operators can resolve the duplicate at the manifest layer.
-func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string) ([]byte, error) {
+func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string, allowEmptySuccess bool) ([]byte, error) {
 	// codex bot r14 P2 closure on PR #157: fanOutToolsList appends
 	// results in goroutine-completion order, so identical inputs
 	// produced different mergedTools / partialFailures order across
@@ -577,7 +584,7 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// client contract (pre-groups, a zero-binding client got the -32000
 		// all-failed envelope). So a non-group scope keeps the -32000 envelope;
 		// only a group reaches empty-success.
-		if len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) {
+		if allowEmptySuccess || (len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix)) {
 			sess.RouteMap.Store(&mergedRoutes)                                         // empty map — no tools to route
 			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID) // mergedTools is empty → result.tools=[]
 		}
@@ -881,13 +888,10 @@ func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolR
 
 	type initResult struct{ sid, proto string }
 	v, initErr, _ := s.reinitGroup.Do(ref.Server+"\x00"+ref.Daemon, func() (any, error) {
-		sid, negotiated, err := postInitialize(ctx, daemonRef, s.ProtocolVersion)
+		sid, negotiated, err := initializeDaemonSession(ctx, daemonRef, s.ProtocolVersion)
 		if err != nil {
 			return nil, err
 		}
-		// MCP lifecycle: notifications/initialized MUST precede further calls.
-		// Best-effort (matches AggregateInitialize).
-		_ = postInitialized(ctx, daemonRef, sid, negotiated)
 		return initResult{sid: sid, proto: negotiated}, nil
 	})
 	if initErr != nil {
@@ -1320,9 +1324,8 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, pr
 
 // postInitialized sends notifications/initialized to a daemon after
 // a successful initialize. Per MCP lifecycle the client MUST send
-// this notification before issuing any other method calls. Best-
-// effort: callers ignore the returned error (codex bot r4 P1 closure
-// on PR #157).
+// this notification before issuing any other method calls; callers
+// decide whether failure is best-effort or initialize-fatal.
 func postInitialized(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
 	body := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	// expectResponse=false: notifications/initialized has no response

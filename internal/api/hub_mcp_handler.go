@@ -695,9 +695,13 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 	// Snapshot init successes under the session mu so we don't race
 	// with a concurrent tools/list that may be mutating the map.
 	sess.mu.Lock()
-	daemonSessions := make(map[canonicalDaemonRef]string, len(sess.InitSuccesses))
+	daemonSessions := make(map[canonicalDaemonRef]daemonInitState, len(sess.InitSuccesses))
 	for ref, dsid := range sess.InitSuccesses {
-		daemonSessions[ref] = dsid
+		proto := sess.DaemonProtoVer[ref]
+		if proto == "" {
+			proto = sess.ProtocolVersion
+		}
+		daemonSessions[ref] = daemonInitState{SessionID: dsid, ProtocolVersion: proto}
 	}
 	sess.mu.Unlock()
 
@@ -757,16 +761,16 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 		// extra goroutine that depends on every worker
 		// finishing.
 		done := make(chan struct{}, len(daemonSessions))
-		for ref, dsid := range daemonSessions {
-			go func(ref canonicalDaemonRef, dsid string) {
+		for ref, state := range daemonSessions {
+			go func(ref canonicalDaemonRef, state daemonInitState) {
 				// defer signals completion to the buffered
 				// chan; never blocks because cap == worker
 				// count.
 				defer func() { done <- struct{}{} }()
 				fanCtx, fanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer fanCancel()
-				_ = bestEffortDeleteDaemonSession(fanCtx, ref, dsid)
-			}(ref, dsid)
+				_ = bestEffortDeleteDaemonSession(fanCtx, ref, state.SessionID, state.ProtocolVersion)
+			}(ref, state)
 		}
 		// Bound the total wait at 5 s + small slack. Workers
 		// that finish in time tick the chan; the deadline path
@@ -790,7 +794,7 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 // with Mcp-Session-Id: <daemonSID>. Errors are returned to the caller
 // but swallowed at the call site (the spec contract is "best-effort
 // fan-out; 204 regardless").
-func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, daemonSID string) error {
+func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
 	u := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
@@ -798,6 +802,9 @@ func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, 
 	}
 	if daemonSID != "" {
 		req.Header.Set("Mcp-Session-Id", daemonSID)
+	}
+	if protoVer != "" {
+		req.Header.Set("MCP-Protocol-Version", protoVer)
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
