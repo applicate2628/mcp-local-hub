@@ -35,6 +35,20 @@ export async function fetchOrThrow<T>(
   return data as T;
 }
 
+export interface APIError extends Error {
+  code?: string;
+  status: number;
+  body: unknown;
+}
+
+function makeAPIError(status: number, code: string | undefined, message: string, body: unknown): APIError {
+  const err = new Error(message) as APIError;
+  err.code = code;
+  err.status = status;
+  err.body = body;
+  return err;
+}
+
 // postDismiss sends the Migration screen's Unknown-group Dismiss action
 // to the hub. Backend persistence lives in Task 2; GET /api/dismissed
 // in Task 3. This
@@ -670,7 +684,9 @@ export async function postManifestEdit(
   if (resp.status === 409 && body?.code === "MANIFEST_HASH_MISMATCH") {
     throw new ManifestHashMismatchError(body.error ?? "hash mismatch");
   }
-  throw new Error(`/api/manifest/edit: ${body?.error ?? resp.statusText}`);
+  const msg = body?.error ?? resp.statusText ?? `HTTP ${resp.status}`;
+  const codeTag = body?.code ? ` [${body.code}]` : "";
+  throw makeAPIError(resp.status, body?.code, `/api/manifest/edit${codeTag}: ${msg}`, body ?? {});
 }
 
 // ───────────────────────────────────────────────────────────────────

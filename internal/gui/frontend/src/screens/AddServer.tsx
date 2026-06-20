@@ -579,8 +579,8 @@ export function AddServerScreen(props: {
 
   const [banner, setBanner] = useState<Banner | null>(null);
   const [busy, setBusy] = useState<"" | "validate" | "save" | "install">("");
-  // submissionVersion: bumped every time a Save/Save&Install click starts
-  // its own inline serialize-validate-submit pipeline. If a second click
+  // submissionVersion: bumped every time a Save/Save&Install/Reload/Force Save
+  // click starts its own async mutation pipeline. If a second click
   // happens while the first is still in flight, the older pipeline sees
   // submissionCounter.current != its own captured value and bails before
   // writing to state. (Q3 Codex-identified gotcha.)
@@ -783,12 +783,14 @@ export function AddServerScreen(props: {
   }
 
   async function runReload() {
+    const version = ++submissionCounter.current;
     const name = staleRecoveryName;
     if (!name) return;
     setBusy("save");
     setBanner(null);
     try {
       const { yaml, hash } = await getManifest(name);
+      if (version !== submissionCounter.current) return;
       // Codex R1 correction: re-run hasNestedUnknown on the reloaded YAML.
       // The external write that caused the stale-hash mismatch may have
       // introduced unsupported nested fields (e.g. a new daemons[].extra_*
@@ -820,9 +822,10 @@ export function AddServerScreen(props: {
       }
       setBanner({ kind: "success", text: "Reloaded fresh manifest from disk." });
     } catch (err) {
+      if (version !== submissionCounter.current) return;
       setBanner({ kind: "error", text: (err as Error).message });
     } finally {
-      setBusy("");
+      if (version === submissionCounter.current) setBusy("");
     }
   }
 
@@ -1128,10 +1131,10 @@ export function AddServerScreen(props: {
             </button>
           )}
           {banner.staleReload && (
-            <button type="button" onClick={() => runReload()} data-action="reload">Reload</button>
+            <button type="button" disabled={busy !== ""} onClick={() => runReload()} data-action="reload">Reload</button>
           )}
           {banner.staleForceSave && (
-            <button type="button" onClick={() => runForceSave()} data-action="force-save">Force Save</button>
+            <button type="button" disabled={busy !== ""} onClick={() => runForceSave()} data-action="force-save">Force Save</button>
           )}
         </div>
       )}

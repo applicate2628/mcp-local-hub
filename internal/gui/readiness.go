@@ -86,7 +86,10 @@ func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 	rep := api.CheckServerReadiness(m)
 	// Mirror the SAME gates Save & Install runs in ManifestCreate, so a draft the
 	// create path would reject never renders "Ready to install" and then fails
-	// before install starts (Codex #378 r4/r6/r11):
+	// before install starts (Codex #378 r4/r6/r11). This is a tracked temporary
+	// re-derivation of the write gate, guarded by TestReadinessHandler_DraftPOST_
+	// MirrorsManifestWriteGate; the end-state is one shared write-admission owner
+	// (work-items/decisions/2026-06-20-draft-readiness-mirrors-write-gate-follow-up.md).
 	//   1. CheckManifestName — a frontend-regex-valid but backend-reserved name
 	//      (Windows `con` / `nul.txt` / `aux`).
 	//   2. create-mode existence — ManifestCreateIn rejects an already-saved disk

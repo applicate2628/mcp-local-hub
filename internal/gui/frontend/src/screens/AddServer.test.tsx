@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/preact";
+import { fireEvent, render, screen, cleanup, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { AddServerScreen } from "./AddServer";
 
@@ -548,7 +548,103 @@ describe("AddServerScreen — create save follow-up edits", () => {
     expect(editBodies[1].yaml).toContain("command: 'node2'");
   });
 
-  it("falls back to manifest create when a committed create follow-up edit reports not found", async () => {
+  it("lets a same-tick Reload supersede Force Save through the submission baton", async () => {
+    const requests: Array<{ url: string; body?: string }> = [];
+    let getCalls = 0;
+    let editCalls = 0;
+    let resolveForceGet: ((resp: Response) => void) | null = null;
+    let resolveReloadGet: ((resp: Response) => void) | null = null;
+    let forceGetStarted!: () => void;
+    let reloadGetStarted!: () => void;
+    const forceGet = new Promise<void>((resolve) => { forceGetStarted = resolve; });
+    const reloadGet = new Promise<void>((resolve) => { reloadGetStarted = resolve; });
+
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      requests.push({ url, body: init?.body as string | undefined });
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        getCalls++;
+        if (getCalls === 1) {
+          return Promise.resolve(jsonResponse({
+            yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n",
+            hash: "hash-after-create",
+          }));
+        }
+        if (getCalls === 2) {
+          forceGetStarted();
+          return new Promise<Response>((resolve) => { resolveForceGet = resolve; });
+        }
+        reloadGetStarted();
+        return new Promise<Response>((resolve) => { resolveReloadGet = resolve; });
+      }
+      if (url === "/api/manifest/edit") {
+        editCalls++;
+        if (editCalls === 1) {
+          return Promise.resolve(jsonResponse({
+            code: "MANIFEST_HASH_MISMATCH",
+            error: "manifest hash mismatch",
+          }, 409));
+        }
+        return Promise.resolve(jsonResponse({ hash: "hash-after-force", restart_required: false, hub_live: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(1);
+    });
+
+    await user.clear(screen.getByLabelText("Command"));
+    await user.type(screen.getByLabelText("Command"), "node2");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+    await screen.findByText(/Manifest changed on disk since you opened it/i);
+
+    const forceButton = screen.getByRole("button", { name: "Force Save" });
+    const reloadButton = screen.getByRole("button", { name: "Reload" });
+    fireEvent.click(forceButton);
+    fireEvent.click(reloadButton);
+    await Promise.all([forceGet, reloadGet]);
+
+    resolveReloadGet!(jsonResponse({
+      yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'disk-node'\n",
+      hash: "hash-from-reload",
+    }));
+    await screen.findByText("Reloaded fresh manifest from disk.");
+
+    resolveForceGet!(jsonResponse({
+      yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'external-node'\n",
+      hash: "hash-for-force",
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(editCalls).toBe(1);
+    expect(screen.queryByText("Force-saved.")).toBeNull();
+    expect((screen.getByLabelText("Command") as HTMLInputElement).value).toBe("disk-node");
+  });
+
+  it("falls back to manifest create when a committed create follow-up edit reports not found by code only", async () => {
     const requests: Array<{ url: string; body?: string }> = [];
     let createCalls = 0;
     let editCalls = 0;
@@ -578,7 +674,7 @@ describe("AddServerScreen — create save follow-up edits", () => {
         editCalls++;
         return Promise.resolve(jsonResponse({
           code: "MANIFEST_NOT_FOUND",
-          error: 'manifest "demo" does not exist',
+          error: "gone",
         }, 404));
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));

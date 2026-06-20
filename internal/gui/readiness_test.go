@@ -2,7 +2,11 @@ package gui
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -227,6 +231,159 @@ func TestReadinessHandler_DraftPOST_EditTargetMissingManifestBlocks(t *testing.T
 	if !found {
 		t.Errorf("no missing-manifest blocker in report; requirements=%+v", rep.Requirements)
 	}
+}
+
+func TestReadinessHandler_DraftPOST_MirrorsManifestWriteGate(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpState)
+	t.Setenv("XDG_DATA_HOME", tmpState)
+
+	stubMcphub := filepath.Join(t.TempDir(), api.MCPHubBinaryName())
+	if err := os.WriteFile(stubMcphub, []byte("stub"), 0755); err != nil {
+		t.Fatalf("write mcphub stub: %v", err)
+	}
+	t.Cleanup(api.SetTestCanonicalMcphubPath(stubMcphub))
+
+	validYAML := func(name string) string {
+		return fmt.Sprintf(
+			"name: %s\nkind: global\ntransport: stdio-bridge\ncommand: go\ndaemons:\n  - name: default\n    port: %d\n",
+			name,
+			freeTCPPort(t),
+		)
+	}
+
+	cases := []struct {
+		name      string
+		mode      string
+		server    string
+		yaml      string
+		present   bool
+		editName  string
+		writeFunc func(a *api.API, dir, server, yaml string) error
+	}{
+		{
+			name:    "create valid manifest",
+			mode:    "create",
+			server:  "draftok",
+			yaml:    validYAML("draftok"),
+			present: false,
+			writeFunc: func(a *api.API, dir, server, yaml string) error {
+				return a.ManifestCreateIn(dir, server, yaml)
+			},
+		},
+		{
+			name:    "create rejects existing manifest",
+			mode:    "create",
+			server:  "saved",
+			yaml:    validYAML("saved"),
+			present: true,
+			writeFunc: func(a *api.API, dir, server, yaml string) error {
+				return a.ManifestCreateIn(dir, server, yaml)
+			},
+		},
+		{
+			name:    "create rejects reserved server name",
+			mode:    "create",
+			server:  "con",
+			yaml:    validYAML("con"),
+			present: false,
+			writeFunc: func(a *api.API, dir, server, yaml string) error {
+				return a.ManifestCreateIn(dir, server, yaml)
+			},
+		},
+		{
+			name:    "create rejects storage-blocking validation warning",
+			mode:    "create",
+			server:  "nodaemons",
+			yaml:    "name: nodaemons\nkind: global\ntransport: stdio-bridge\ncommand: go\n",
+			present: false,
+			writeFunc: func(a *api.API, dir, server, yaml string) error {
+				return a.ManifestCreateIn(dir, server, yaml)
+			},
+		},
+		{
+			name:     "edit valid manifest",
+			mode:     "edit",
+			server:   "editok",
+			yaml:     validYAML("editok"),
+			present:  true,
+			editName: "editok",
+			writeFunc: func(a *api.API, dir, server, yaml string) error {
+				_, err := a.ManifestEditInWithHash(dir, server, yaml, "")
+				return err
+			},
+		},
+		{
+			name:     "edit rejects missing target",
+			mode:     "edit",
+			server:   "gone",
+			yaml:     validYAML("gone"),
+			present:  false,
+			editName: "gone",
+			writeFunc: func(a *api.API, dir, server, yaml string) error {
+				_, err := a.ManifestEditInWithHash(dir, server, yaml, "")
+				return err
+			},
+		},
+		{
+			name:     "edit rejects strict-mode name",
+			mode:     "edit",
+			server:   "foo__bar",
+			yaml:     validYAML("foo__bar"),
+			present:  true,
+			editName: "foo__bar",
+			writeFunc: func(a *api.API, dir, server, yaml string) error {
+				_, err := a.ManifestEditInWithHash(dir, server, yaml, "")
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.present {
+				targetDir := filepath.Join(dir, tc.server)
+				if err := os.MkdirAll(targetDir, 0755); err != nil {
+					t.Fatalf("seed manifest dir: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(targetDir, "manifest.yaml"), []byte(validYAML(tc.server)), 0644); err != nil {
+					t.Fatalf("seed manifest: %v", err)
+				}
+			}
+			a := api.NewAPI()
+			writeOK := tc.writeFunc(a, dir, tc.server, tc.yaml) == nil
+
+			s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+			presence := fakeManifestPresence{}
+			if tc.present {
+				presence[tc.server] = true
+			}
+			s.manifestPresence = presence
+			body, _ := json.Marshal(map[string]string{"yaml": tc.yaml, "mode": tc.mode, "edit_name": tc.editName})
+			rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+			if rr.Code != 200 {
+				t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+			}
+			var rep api.ReadinessReport
+			if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+				t.Fatal(err)
+			}
+			if rep.Ready != writeOK {
+				t.Fatalf("readiness Ready=%v, write gate would-succeed=%v; requirements=%+v", rep.Ready, writeOK, rep.Requirements)
+			}
+		})
+	}
+}
+
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate TCP port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
