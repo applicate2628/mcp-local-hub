@@ -23,16 +23,16 @@ import (
 // Windows path; the rest hard-fail to expose accidental call-site
 // expansion.
 type fakeScheduler struct {
-	createCalls   []scheduler.TaskSpec
-	deleteCalls   []string
-	statusReturn  scheduler.TaskStatus
-	statusErr     error
-	xmlReturn     []byte
-	xmlErr        error
-	createErr     error
-	deleteErr     error
-	statusByName  map[string]scheduler.TaskStatus // optional override
-	xmlByName     map[string][]byte               // optional override
+	createCalls     []scheduler.TaskSpec
+	deleteCalls     []string
+	statusReturn    scheduler.TaskStatus
+	statusErr       error
+	xmlReturn       []byte
+	xmlErr          error
+	createErr       error
+	deleteErr       error
+	statusByName    map[string]scheduler.TaskStatus // optional override
+	xmlByName       map[string][]byte               // optional override
 	statusErrByName map[string]error
 	xmlErrByName    map[string]error
 }
@@ -68,8 +68,8 @@ func (f *fakeScheduler) ExportXML(name string) ([]byte, error) {
 }
 
 // Unused methods — hard-fail if autostart calls them.
-func (f *fakeScheduler) Run(string) error             { panic("fakeScheduler: Run unexpected") }
-func (f *fakeScheduler) Stop(string) error            { panic("fakeScheduler: Stop unexpected") }
+func (f *fakeScheduler) Run(string) error  { panic("fakeScheduler: Run unexpected") }
+func (f *fakeScheduler) Stop(string) error { panic("fakeScheduler: Stop unexpected") }
 func (f *fakeScheduler) List(string) ([]scheduler.TaskStatus, error) {
 	panic("fakeScheduler: List unexpected")
 }
@@ -456,6 +456,99 @@ func TestWindowsBackend_StatusSchedulerFactoryError(t *testing.T) {
 	}
 }
 
+func TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		xml    []byte
+		xmlErr error
+	}{
+		{name: "export-error", xmlErr: errors.New("schtasks export failed")},
+		{name: "empty-xml", xml: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{
+				statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
+				xmlReturn:    tc.xml,
+				xmlErr:       tc.xmlErr,
+			}
+			withFakeScheduler(t, f)
+
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			snapshot, err := b.StatusSnapshot(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+			if err == nil {
+				t.Fatalf("StatusSnapshot returned nil err and snapshot=%+v; XML uncertainty must fail closed", snapshot)
+			}
+			if snapshot.SpecFingerprint != "" {
+				t.Fatalf("StatusSnapshot returned fingerprint %q on unavailable XML, want no comparable spec", snapshot.SpecFingerprint)
+			}
+		})
+	}
+}
+
+func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testing.T) {
+	baseXML := buildWindowsStatusSnapshotXML(
+		`C:\mcp\mcphub.exe`,
+		"gui",
+		"true",
+		"<Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>"+
+			"<Principals><Principal id=\"Author\"><UserId>S-1-5-21-a</UserId></Principal></Principals>",
+	)
+	f := &fakeScheduler{
+		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
+		xmlReturn:    baseXML,
+	}
+	withFakeScheduler(t, f)
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	opts := Options{MCPHubPath: `C:\mcp\mcphub.exe`}
+	first, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot first: %v", err)
+	}
+	if first.SpecFingerprint == "" {
+		t.Fatal("StatusSnapshot SpecFingerprint is empty, want installed shim fingerprint")
+	}
+	second, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot second: %v", err)
+	}
+	if second.SpecFingerprint != first.SpecFingerprint {
+		t.Fatalf("SpecFingerprint unstable across identical re-probes: first=%q second=%q", first.SpecFingerprint, second.SpecFingerprint)
+	}
+
+	argsXML := buildWindowsStatusSnapshotXML(`C:\mcp\mcphub.exe`, "gui --strict-mode", "true", "")
+	argsFingerprint := mustWindowsStatusSnapshotFingerprint(t, argsXML, "Running", opts)
+	if argsFingerprint == first.SpecFingerprint {
+		t.Fatal("SpecFingerprint did not change when only <Arguments> changed")
+	}
+
+	disabledXML := buildWindowsStatusSnapshotXML(`C:\mcp\mcphub.exe`, "gui", "false", "")
+	disabledFingerprint := mustWindowsStatusSnapshotFingerprint(t, disabledXML, "Running", opts)
+	if disabledFingerprint == first.SpecFingerprint {
+		t.Fatal("SpecFingerprint did not change when only <Settings><Enabled> changed")
+	}
+
+	volatileXML := buildWindowsStatusSnapshotXML(
+		`C:\mcp\mcphub.exe`,
+		"gui",
+		"true",
+		"<Triggers><CalendarTrigger><Enabled>false</Enabled></CalendarTrigger></Triggers>"+
+			"<Principals><Principal id=\"Other\"><UserId>S-1-5-21-b</UserId></Principal></Principals>"+
+			"<RegistrationInfo><URI>\\changed-liveness-metadata</URI></RegistrationInfo>",
+	)
+	volatileFingerprint := mustWindowsStatusSnapshotFingerprint(t, volatileXML, "Ready", opts)
+	if volatileFingerprint != first.SpecFingerprint {
+		t.Fatalf("SpecFingerprint changed for trigger/principal/liveness-only differences: base=%q volatile=%q", first.SpecFingerprint, volatileFingerprint)
+	}
+}
+
 // buildMatchingXML produces the minimal Task Scheduler XML fragment
 // our drift detector parses — just <Command> and <Arguments>. The
 // real schtasks /Query /XML output is larger, but the detector only
@@ -479,4 +572,41 @@ func buildMatchingXML(command string, strictMode bool) []byte {
 			"</Exec></Actions></Task>\n",
 		command, args,
 	))
+}
+
+func buildWindowsStatusSnapshotXML(command, args, enabled, volatileBody string) []byte {
+	return []byte(fmt.Sprintf(
+		"<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"+
+			"<Task>"+
+			"%s"+
+			"<Settings><Enabled>%s</Enabled></Settings>"+
+			"<Actions><Exec>"+
+			"<Command>%s</Command>"+
+			"<Arguments>%s</Arguments>"+
+			"</Exec></Actions>"+
+			"</Task>\n",
+		volatileBody, enabled, command, args,
+	))
+}
+
+func mustWindowsStatusSnapshotFingerprint(t *testing.T, xmlBlob []byte, state string, opts Options) string {
+	t.Helper()
+	f := &fakeScheduler{
+		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: state},
+		xmlReturn:    xmlBlob,
+	}
+	withFakeScheduler(t, f)
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	snapshot, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot: %v", err)
+	}
+	if snapshot.SpecFingerprint == "" {
+		t.Fatal("StatusSnapshot SpecFingerprint is empty, want installed shim fingerprint")
+	}
+	return snapshot.SpecFingerprint
 }

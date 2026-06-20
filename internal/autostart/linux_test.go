@@ -454,6 +454,105 @@ func TestLinuxBackend_StatusDriftedPath(t *testing.T) {
 	}
 }
 
+func TestLinuxBackend_StatusSnapshotSpecFingerprintTracksUnitAndEnabledButNotLiveness(t *testing.T) {
+	fs := newFakeSystemctl()
+	unitPath := withFakeSystemctl(t, fs)
+	mustWriteUnit(t, unitPath, "/usr/local/bin/mcphub", false)
+	fs.responses["--user is-enabled mcphub-supervisor.service"] = systemctlCall{Stdout: "enabled\n"}
+	fs.responses["--user is-active mcphub-supervisor.service"] = systemctlCall{Stdout: "active\n"}
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	opts := Options{MCPHubPath: "/usr/local/bin/mcphub"}
+	first, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot first: %v", err)
+	}
+	if first.SpecFingerprint == "" {
+		t.Fatal("StatusSnapshot SpecFingerprint is empty, want installed unit fingerprint")
+	}
+	second, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot second: %v", err)
+	}
+	if second.SpecFingerprint != first.SpecFingerprint {
+		t.Fatalf("SpecFingerprint unstable across identical re-probes: first=%q second=%q", first.SpecFingerprint, second.SpecFingerprint)
+	}
+
+	mustWriteUnit(t, unitPath, "/usr/local/bin/mcphub", true)
+	unitChanged, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot after unit change: %v", err)
+	}
+	if unitChanged.SpecFingerprint == first.SpecFingerprint {
+		t.Fatal("SpecFingerprint did not change when only the unit ExecStart arguments changed")
+	}
+
+	mustWriteUnit(t, unitPath, "/usr/local/bin/mcphub", false)
+	fs.responses["--user is-enabled mcphub-supervisor.service"] = systemctlCall{Stdout: "disabled\n"}
+	enabledChanged, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot after enabled change: %v", err)
+	}
+	if enabledChanged.SpecFingerprint == first.SpecFingerprint {
+		t.Fatal("SpecFingerprint did not change when only systemctl is-enabled changed")
+	}
+
+	fs.responses["--user is-enabled mcphub-supervisor.service"] = systemctlCall{Stdout: "enabled\n"}
+	fs.responses["--user is-active mcphub-supervisor.service"] = systemctlCall{
+		Stdout: "inactive\n",
+		Err:    &exitErr{code: 3},
+	}
+	livenessChanged, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot after liveness change: %v", err)
+	}
+	if livenessChanged.SpecFingerprint != first.SpecFingerprint {
+		t.Fatalf("SpecFingerprint changed for liveness-only change: base=%q inactive=%q", first.SpecFingerprint, livenessChanged.SpecFingerprint)
+	}
+}
+
+func TestLinuxBackend_StatusSnapshotPreservesDisabledIsEnabledStdoutOnExitOne(t *testing.T) {
+	fs := newFakeSystemctl()
+	unitPath := withFakeSystemctl(t, fs)
+	mustWriteUnit(t, unitPath, "/usr/local/bin/mcphub", false)
+	fs.responses["--user is-active mcphub-supervisor.service"] = systemctlCall{
+		Stdout: "inactive\n",
+		Err:    &exitErr{code: 3},
+	}
+	fs.responses["--user is-enabled mcphub-supervisor.service"] = systemctlCall{
+		Stdout: "disabled\n",
+		Err:    &exitErr{code: 1},
+	}
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	opts := Options{MCPHubPath: "/usr/local/bin/mcphub"}
+	disabledExitOne, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot disabled exit 1: %v", err)
+	}
+	if disabledExitOne.State != StateEnabledStopped {
+		t.Fatalf("StatusSnapshot state = %s, want %s for disabled unit", disabledExitOne.State, StateEnabledStopped)
+	}
+	if disabledExitOne.SpecFingerprint == "" {
+		t.Fatal("StatusSnapshot SpecFingerprint is empty, want disabled unit fingerprint")
+	}
+
+	fs.responses["--user is-enabled mcphub-supervisor.service"] = systemctlCall{Stdout: "disabled\n"}
+	disabledExitZero, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot disabled exit 0: %v", err)
+	}
+	if disabledExitZero.SpecFingerprint != disabledExitOne.SpecFingerprint {
+		t.Fatalf("disabled stdout from exit 1 was not preserved: exit1=%q exit0=%q", disabledExitOne.SpecFingerprint, disabledExitZero.SpecFingerprint)
+	}
+}
+
 // mustWriteUnit produces the same unit body the production renderer
 // emits, so Status tests run against a representative on-disk shape.
 func mustWriteUnit(t *testing.T, path string, mcphubPath string, strictMode bool) {

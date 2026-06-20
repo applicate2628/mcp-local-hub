@@ -40,6 +40,8 @@
 package autostart
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,6 +139,17 @@ type Options struct {
 	MCPHubPath string
 }
 
+// StatusSnapshot is the backend-owned, liveness-free shim fingerprint used by
+// callers that must prove an installed shim did not change across a failed
+// multi-resource mutation. State still carries the operator-facing lifecycle;
+// SpecFingerprint carries the comparable installed-shim spec (command/args and
+// enabled/installed bits when the backend can observe them), excluding running
+// vs stopped noise.
+type StatusSnapshot struct {
+	State           State
+	SpecFingerprint string
+}
+
 // Backend is the cross-platform contract implemented by the per-OS
 // files (windows.go, linux.go, darwin.go). The same caller code in
 // `internal/cli/autostart.go` drives all three.
@@ -163,6 +176,11 @@ type Backend interface {
 	// a shim that has --strict-mode but the caller didn't pass it
 	// is still drift.
 	Status(opts Options) (State, error)
+
+	// StatusSnapshot reports State plus a comparable liveness-free shim spec.
+	// It is the safety surface for strict-mode rollback checks: two drifted
+	// states are equal only when their underlying shim spec fingerprint is equal.
+	StatusSnapshot(opts Options) (StatusSnapshot, error)
 }
 
 // New returns the autostart Backend for the current OS. The dispatcher
@@ -194,6 +212,15 @@ func resolveMCPHubPath(opts Options) (string, error) {
 // to every backend. Production points straight at os.Executable;
 // tests assign a closure returning a deterministic path.
 var osExecutableFn = os.Executable
+
+func shimSpecFingerprint(parts ...string) string {
+	h := sha256.New()
+	for _, part := range parts {
+		_, _ = h.Write([]byte(part))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 // atomicWriteFile writes payload to path through a temp-file + rename
 // pipeline. Mirrors the api.WriteStateFileAtomic pattern but for raw

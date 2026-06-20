@@ -272,3 +272,57 @@ func TestDarwinBackend_StatusDriftedStrictMode(t *testing.T) {
 		t.Errorf("Status = %s, want %s (strict-mode flag mismatch)", got, StateDrifted)
 	}
 }
+
+func TestDarwinBackend_StatusSnapshotSpecFingerprintTracksPlistButNotLiveness(t *testing.T) {
+	fl := newFakeLaunchctl()
+	plistPath := withFakeLaunchctl(t, fl)
+	body := renderDarwinPlist("/usr/local/bin/mcphub", false)
+	if err := os.WriteFile(plistPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write plist: %v", err)
+	}
+	fl.responses["print gui/501/"+DarwinLabel] = launchctlCall{Stdout: "state = running\n"}
+
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	opts := Options{MCPHubPath: "/usr/local/bin/mcphub"}
+	first, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot first: %v", err)
+	}
+	if first.SpecFingerprint == "" {
+		t.Fatal("StatusSnapshot SpecFingerprint is empty, want installed plist fingerprint")
+	}
+	second, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot second: %v", err)
+	}
+	if second.SpecFingerprint != first.SpecFingerprint {
+		t.Fatalf("SpecFingerprint unstable across identical re-probes: first=%q second=%q", first.SpecFingerprint, second.SpecFingerprint)
+	}
+
+	strictBody := renderDarwinPlist("/usr/local/bin/mcphub", true)
+	if err := os.WriteFile(plistPath, []byte(strictBody), 0o600); err != nil {
+		t.Fatalf("write strict plist: %v", err)
+	}
+	plistChanged, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot after plist change: %v", err)
+	}
+	if plistChanged.SpecFingerprint == first.SpecFingerprint {
+		t.Fatal("SpecFingerprint did not change when only the plist ProgramArguments changed")
+	}
+
+	if err := os.WriteFile(plistPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("restore plist: %v", err)
+	}
+	fl.responses["print gui/501/"+DarwinLabel] = launchctlCall{Stdout: "state = not running\n"}
+	livenessChanged, err := b.StatusSnapshot(opts)
+	if err != nil {
+		t.Fatalf("StatusSnapshot after liveness change: %v", err)
+	}
+	if livenessChanged.SpecFingerprint != first.SpecFingerprint {
+		t.Fatalf("SpecFingerprint changed for liveness-only change: base=%q stopped=%q", first.SpecFingerprint, livenessChanged.SpecFingerprint)
+	}
+}

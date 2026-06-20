@@ -95,6 +95,11 @@ func (f *fakeInstallAutostartBackend) Status(opts autostart.Options) (autostart.
 	return f.statusReturn, f.statusErr
 }
 
+func (f *fakeInstallAutostartBackend) StatusSnapshot(opts autostart.Options) (autostart.StatusSnapshot, error) {
+	state, err := f.Status(opts)
+	return autostart.StatusSnapshot{State: state}, err
+}
+
 func installFakeAutostartBackend(t *testing.T, fb *fakeInstallAutostartBackend) {
 	t.Helper()
 	orig := installAutostartBackendFactoryFn
