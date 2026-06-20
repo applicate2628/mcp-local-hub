@@ -1561,9 +1561,17 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 			if teardownVersion == "" {
 				teardownVersion = deleteProtocolVersion
 			}
-			fwdCtx, fwdCancel := context.WithTimeout(context.Background(), serenaDeleteTimeout)
-			s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, delWS, auditFn)
-			fwdCancel()
+			func() {
+				gateKey := delWS.WorkspaceKey
+				if gateKey == "" {
+					gateKey = wsKey
+				}
+				s.enterSerenaForward(gateKey)
+				defer s.exitSerenaForward(gateKey)
+				fwdCtx, fwdCancel := context.WithTimeout(context.Background(), serenaDeleteTimeout)
+				defer fwdCancel()
+				s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, delWS, auditFn)
+			}()
 		}
 	}
 
@@ -1811,10 +1819,16 @@ func (s *Server) handleSerenaCancelled(
 					fwdDaemonSID := daemonSessionID
 					fwdVersion := effectiveHandshakeProtocolVersion(forwardVersion)
 					fwdWSKey := wsKey
+					fwdGateKey := wsKey
+					if fwdGateKey == "" {
+						fwdGateKey = ws.WorkspaceKey
+					}
 					fwdClient := httpClient
 					fwdAudit := auditFn
 					fwdTimeout := deps.UpstreamTimeout
+					s.enterSerenaForward(fwdGateKey)
 					go func() {
+						defer s.exitSerenaForward(fwdGateKey)
 						fwdCtx, fwdCancel := cleanupContext(fwdTimeout)
 						defer fwdCancel()
 						s.forwardSerenaCancelledUpstream(fwdCtx, fwdClient, fwdURL, fwdDaemonSID, fwdVersion, fwdWSKey, fwdWS, cancelBody, fwdAudit)

@@ -21,8 +21,9 @@
 //     path. The supervisor's existing IntentWatcher + reconcile then terminates
 //     the daemon. No second stop path.
 //
-// CRITICAL mid-call invariant (the falsification test, spec §6) — TWO layers,
-// because last-activity alone is insufficient for a SINGLE long-lived call:
+// CRITICAL mid-call/teardown invariant (the falsification test, spec §6) — TWO
+// layers, because last-activity alone is insufficient for a SINGLE long-lived
+// call:
 //
 //  1. Last-activity is stamped ONCE at request START (serena_router.go), so a
 //     recently-FINISHED call has a fresh timestamp and is never idled. But a
@@ -33,8 +34,10 @@
 //     forward incl. the SSE stream), and the sweep SKIPS any daemon with a
 //     started request (hasSerenaForwardInFlight). The forward's completion ALSO
 //     re-stamps last-activity, so a just-finished long call resets the idle
-//     clock. Together these GUARANTEE a daemon being woken, handshaken, or
-//     mid-call is never idle-killed, even with the threshold at its 15m minimum.
+//     clock. The same gate also claims prune teardown before registry/intent
+//     mutation. Together these GUARANTEE a daemon being woken, handshaken,
+//     forwarded to, or pruned is never concurrently idle-killed/pruned/entered,
+//     even with the threshold at its 15m minimum.
 //
 // A daemon with NO recorded activity yet (just spawned, never called) uses its
 // supervisor uptime as the idle baseline, CAPPED at time-since-GUI-process-start
@@ -149,9 +152,17 @@ type serenaWorkspaceStopGate struct {
 	byWorkspace map[string]*serenaWorkspaceStopGateEntry
 }
 
+type serenaWorkspaceStopGatePhase uint8
+
+const (
+	serenaWorkspaceStopGatePhaseNone serenaWorkspaceStopGatePhase = iota
+	serenaWorkspaceStopGatePhaseIdleStop
+	serenaWorkspaceStopGatePhasePrune
+)
+
 type serenaWorkspaceStopGateEntry struct {
 	inFlight int
-	stopping bool
+	phase    serenaWorkspaceStopGatePhase
 	ready    *sync.Cond
 }
 
@@ -162,7 +173,7 @@ func (g *serenaWorkspaceStopGate) enter(wsKey string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	entry := g.entryLocked(wsKey)
-	for entry.stopping {
+	for entry.phase != serenaWorkspaceStopGatePhaseNone {
 		entry.ready.Wait()
 	}
 	entry.inFlight++
@@ -191,28 +202,44 @@ func (g *serenaWorkspaceStopGate) hasInFlight(wsKey string) bool {
 }
 
 func (g *serenaWorkspaceStopGate) beginIdleStop(wsKey string) bool {
-	if g == nil || wsKey == "" {
+	return g.beginPhase(wsKey, serenaWorkspaceStopGatePhaseIdleStop)
+}
+
+func (g *serenaWorkspaceStopGate) endIdleStop(wsKey string) {
+	g.endPhase(wsKey, serenaWorkspaceStopGatePhaseIdleStop)
+}
+
+func (g *serenaWorkspaceStopGate) beginPrune(wsKey string) bool {
+	return g.beginPhase(wsKey, serenaWorkspaceStopGatePhasePrune)
+}
+
+func (g *serenaWorkspaceStopGate) endPrune(wsKey string) {
+	g.endPhase(wsKey, serenaWorkspaceStopGatePhasePrune)
+}
+
+func (g *serenaWorkspaceStopGate) beginPhase(wsKey string, phase serenaWorkspaceStopGatePhase) bool {
+	if g == nil || wsKey == "" || phase == serenaWorkspaceStopGatePhaseNone {
 		return false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	entry := g.entryLocked(wsKey)
-	if entry.inFlight > 0 || entry.stopping {
+	if entry.inFlight > 0 || entry.phase != serenaWorkspaceStopGatePhaseNone {
 		return false
 	}
-	entry.stopping = true
+	entry.phase = phase
 	return true
 }
 
-func (g *serenaWorkspaceStopGate) endIdleStop(wsKey string) {
-	if g == nil || wsKey == "" {
+func (g *serenaWorkspaceStopGate) endPhase(wsKey string, phase serenaWorkspaceStopGatePhase) {
+	if g == nil || wsKey == "" || phase == serenaWorkspaceStopGatePhaseNone {
 		return
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	entry := g.entryLocked(wsKey)
-	if entry.stopping {
-		entry.stopping = false
+	if entry.phase == phase {
+		entry.phase = serenaWorkspaceStopGatePhaseNone
 		entry.ready.Broadcast()
 	}
 }
@@ -230,13 +257,14 @@ func (g *serenaWorkspaceStopGate) entryLocked(wsKey string) *serenaWorkspaceStop
 	return entry
 }
 
-// enterSerenaForward marks the start of a daemon-bound Serena request for
-// wsKey, including tool-call forwards and tools/list candidate probes
-// (increments the in-flight counter). The matching exitSerenaForward MUST be
-// deferred so the count is decremented on EVERY return path including a panic.
-// The sweeper uses the same per-workspace gate to make "no in-flight request"
-// atomic with starting an idle-stop phase; new requests wait for that phase to
-// finish before wake/handshake. An empty wsKey is ignored.
+// enterSerenaForward marks the start of a daemon-bound Serena request for wsKey,
+// including tool-call forwards, tools/list candidate probes, cancel forwards,
+// and client DELETE forwards (increments the in-flight counter). The matching
+// exitSerenaForward MUST be deferred so the count is decremented on EVERY return
+// path including a panic. The sweeper uses the same per-workspace gate to make
+// "no in-flight request" atomic with starting idle-stop/prune teardown; new
+// requests wait for that phase to finish before wake/handshake/forward. An empty
+// wsKey is ignored.
 func (s *Server) enterSerenaForward(wsKey string) {
 	if s == nil || wsKey == "" {
 		return
@@ -276,6 +304,20 @@ func (s *Server) endSerenaIdleStop(wsKey string) {
 		return
 	}
 	s.serenaStopGate.endIdleStop(wsKey)
+}
+
+func (s *Server) beginSerenaPrune(wsKey string) bool {
+	if s == nil || wsKey == "" {
+		return false
+	}
+	return s.serenaStopGate.beginPrune(wsKey)
+}
+
+func (s *Server) endSerenaPrune(wsKey string) {
+	if s == nil || wsKey == "" {
+		return
+	}
+	s.serenaStopGate.endPrune(wsKey)
 }
 
 func serenaTaskHasActiveIdleStop(taskName string, now time.Time) bool {

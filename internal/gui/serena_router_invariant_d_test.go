@@ -27,7 +27,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,6 +161,164 @@ func TestSerenaRouter_NotificationCancelled_DetachedFromInboundContext(t *testin
 	daemon.mu.Unlock()
 	if gotSID != wantDaemonSID {
 		t.Errorf("forwarded cancel Mcp-Session-Id = %q, want the daemon id %q", gotSID, wantDaemonSID)
+	}
+}
+
+func TestSerenaRouter_NotificationCancelledForwardBlocksIdleStop(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
+
+	const wsPath = "/proj/cancel-forward-gate"
+	ws := serenaWS("cancel-forward-gate", wsPath, 9321)
+	daemon := newFakeSerenaDaemon("cancel-forward-gate")
+
+	cancelStarted := make(chan struct{})
+	releaseCancel := make(chan struct{})
+	var cancelOnce, releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseCancel) }) })
+
+	base := daemon.handler()
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			if strings.Contains(string(body), `"notifications/cancelled"`) {
+				cancelOnce.Do(func() { close(cancelStarted) })
+				select {
+				case <-releaseCancel:
+				case <-r.Context().Done():
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+		}
+		base(w, r)
+	})
+	ts := httptest.NewServer(wrapped)
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Nanosecond, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+		},
+	)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-45*time.Minute))
+
+	cancelBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  map[string]any{"requestId": 7},
+	})
+	if rr := postSerena(t, s, cancelBody, map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusAccepted {
+		t.Fatalf("cancel status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+
+	select {
+	case <-cancelStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancel forward never reached the daemon")
+	}
+
+	n := s.SweepIdleSerenaDaemons(context.Background(), now)
+	stoppedDuringCancel := n != 0 || len(*captured) != 0
+
+	releaseOnce.Do(func() { close(releaseCancel) })
+	waitForDaemonCancelHits(t, daemon, 1)
+
+	if stoppedDuringCancel {
+		t.Fatalf("idle sweep stopped a workspace with a notifications/cancelled forward in flight: n=%d captured=%v", n, *captured)
+	}
+}
+
+func TestSerenaRouter_DeleteForwardBlocksIdleStop(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
+
+	const wsPath = "/proj/delete-forward-gate"
+	ws := serenaWS("delete-forward-gate", wsPath, 9322)
+	daemon := newFakeSerenaDaemon("delete-forward-gate")
+
+	deleteStarted := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var deleteOnce, releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseDelete) }) })
+
+	base := daemon.handler()
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteOnce.Do(func() { close(deleteStarted) })
+			select {
+			case <-releaseDelete:
+			case <-r.Context().Done():
+			}
+		}
+		base(w, r)
+	})
+	ts := httptest.NewServer(wrapped)
+	t.Cleanup(ts.Close)
+
+	deps := &serenaRouterDeps{
+		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	now := time.Now().UTC()
+	captured := withIdleSweeperSeams(t, time.Nanosecond, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+		},
+	)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	if rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"}), map[string]string{"Mcp-Session-Id": sid}); rr.Code != http.StatusOK {
+		t.Fatalf("setup tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-45*time.Minute))
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- deleteSerena(t, s, map[string]string{"Mcp-Session-Id": sid, "MCP-Protocol-Version": "2025-11-25"})
+	}()
+
+	select {
+	case <-deleteStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("DELETE forward never reached the daemon")
+	}
+
+	n := s.SweepIdleSerenaDaemons(context.Background(), now)
+	stoppedDuringDelete := n != 0 || len(*captured) != 0
+
+	releaseOnce.Do(func() { close(releaseDelete) })
+	select {
+	case rr := <-done:
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("DELETE status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DELETE did not complete after releasing upstream forward")
+	}
+
+	if stoppedDuringDelete {
+		t.Fatalf("idle sweep stopped a workspace with a client DELETE upstream forward in flight: n=%d captured=%v", n, *captured)
 	}
 }
 
