@@ -20,9 +20,14 @@ failed or mis-routed request that should not have happened.
 
 `enterSerenaForward` (the in-flight marker the idle sweeper checks) is set only AFTER
 wake/daemon-session resolution in the request path (`internal/gui/serena_router.go:1035`), so
-`SweepIdleSerenaDaemons`'s in-flight check (`internal/gui/serena_idle_sweeper.go:291`) can pass
-— seeing no in-flight request — and proceed to idle-stop the daemon during the window between
-"request started" and "enterSerenaForward set".
+`SweepIdleSerenaDaemons`'s in-flight check can pass — seeing no in-flight request — and proceed
+to idle-stop the daemon during the window between "request started" and "enterSerenaForward set".
+
+These file:line references are the PRE-#386 locations and have since moved. PR #386 closed this window
+by refactoring the five forward sites into the single `withSerenaWorkspaceGate` seam (which marks
+in-flight BEFORE resolve) and adding the `beginPhase` `waiters > 0` invariant so a sweeper phase cannot
+start in front of a request already waiting — see
+[`work-items/decisions/2026-06-20-serena-gate-uniform-seam.md`](../decisions/2026-06-20-serena-gate-uniform-seam.md).
 
 ## Scope
 

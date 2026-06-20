@@ -5,33 +5,11 @@ slug: audit-findings-batch
 source: opus subsystem-audit Workflow (wpaephnqp, 6 areas) + 2 codex audits (CLI/lock-order, cold-restart/IPC)
 ---
 
-## RESUME POINT (2026-06-20 ~18:50) — gated on Codex-limit refresh ~19:00
-
-MERGED tonight (8): #381 #383 #382 #378 #384 #385 #387 + #386 (architect-refactored serena gate-seam).
-3 architect decisions filed (gate-uniform-seam, marketplace-proxy-ssrf-residual, moved-binding-B′ [inline]).
-Commission Workflow (wse1jj1o2): all 4 security PRs = MERGE, zero confirmed blockers.
-
-IN-FLIGHT — 3 PRs CLEAN (inline=0, structural fixes landed) AWAITING bot PASS:
-- #388 marketplace-security @3ccbe75 — SSRF/Trojan-Source, 10 rounds; structural `urlredact.ScrubParseError`
-  single-owner ended the redaction whack-a-mole. commission=MERGE.
-- #389 state-file-read-hardening @e0b66b7 — inode-anchor + relax-posture + secret-file-read-refuse. commission=MERGE.
-- #391 hub-aggregator-hardening @7107943 — B′ (deleted moved-binding wrapper) + detached-reinit-never-orphans.
-  architect+commission signed.
-
-GATE: the Codex BOT hit its usage limit ("You have reached your Codex usage limits for code review") —
-the bot IS Codex; refreshes ~19:00 (user instruction: don't run codex till 19:00). HOLDING all codex/bot
-activity (no @codex retrigger, no codex lanes) to preserve the budget.
-
-NEXT (at 19:00, in order): (1) retrigger bot on the 3 clean PRs → PASS → squash-merge each;
-(2) redeploy full fleet (build.sh + full supervisor restart + `claude mcp list` verify + serena 404-contract
-probe); (3) NEXT-BATCH below (CLI strict-mode P1 first); (4) work-items doc traceability — commit the
-session's decision/bug docs (commission flagged dangling refs in #386 commit; they live untracked in main tree).
-
 # Audit-findings batch — mined bugs from the 3-source subsystem audit (2026-06-20)
 
-A concurrent Claude opus Workflow (6 subsystems) + 2 codex audit lanes mined the live/merged
-subsystems for real bugs. Full reports: tasks/wpaephnqp.output (Claude) + the codex
-audit-* .out files. Triaged below.
+A concurrent Claude opus subsystem-audit Workflow (6 areas) + 2 codex audit lanes (CLI/lock-order,
+cold-restart/IPC) mined the live/merged subsystems for real bugs; the raw audit outputs are session
+artifacts under the local `.reports/` tree (not committed). The triaged findings are below.
 
 ## BEING FIXED NOW (codex lanes / open PRs)
 
