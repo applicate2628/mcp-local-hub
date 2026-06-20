@@ -132,7 +132,9 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 			pidKillContext = pidKillErr.Error()
 		} else if err := stopForceKillPIDFn(pid); err != nil {
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
-			pidKillContext = pidKillErr.Error()
+			// (no pidKillContext set here: both exits below return pidKillErr
+			// directly and never reach the port-path appendPIDKillContext, so an
+			// assignment would be dead — SA4006.)
 			if pidKillAlreadyGoneError(err) {
 				// The trusted PID/tree kill reported the process already gone
 				// ("already gone"/"no such process"/etc): the daemon is CONFIRMED
