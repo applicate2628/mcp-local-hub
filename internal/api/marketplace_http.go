@@ -86,30 +86,93 @@ func newMarketplaceTransport() *http.Transport {
 
 // newMarketplaceFetchTransport is the registry-fetch-only transport.
 // It preserves the cloned stdlib TLS/idle-connection defaults from
-// newMarketplaceTransport, then installs a dial ControlContext guard
-// that rejects unsafe resolved IPs immediately before connect.
-func newMarketplaceFetchTransport() *http.Transport {
+// newMarketplaceTransport, then applies the resolved-IP dial guard only
+// when the effective request is direct. On a proxy-selected request, Go
+// dials the proxy address and sends CONNECT; validating that proxy IP would
+// reject normal loopback/RFC1918 corporate proxies instead of the origin.
+func newMarketplaceFetchTransport() http.RoundTripper {
 	return newMarketplaceFetchTransportWithResolver(nil, operatorRequestsMarketplaceDirectFetch())
 }
 
-func newMarketplaceFetchTransportWithResolver(resolver *net.Resolver, directFetch bool) *http.Transport {
-	t := newMarketplaceTransport()
-	if directFetch {
-		t.Proxy = nil
-	} else if t.Proxy != nil {
-		t.Proxy = marketplaceProxyWithResidualWarning(t.Proxy)
+type marketplaceFetchProxyContextKey struct{}
+
+type marketplaceFetchTransport struct {
+	direct  *http.Transport
+	proxied *http.Transport
+	proxy   func(*http.Request) (*url.URL, error)
+}
+
+func newMarketplaceFetchTransportWithResolver(resolver *net.Resolver, directFetch bool) *marketplaceFetchTransport {
+	return newMarketplaceFetchTransportWithResolverAndProxy(resolver, directFetch, nil)
+}
+
+func newMarketplaceFetchTransportWithResolverAndProxy(resolver *net.Resolver, directFetch bool, proxyOverride func(*http.Request) (*url.URL, error)) *marketplaceFetchTransport {
+	base := newMarketplaceTransport()
+	proxy := base.Proxy
+	if proxyOverride != nil {
+		proxy = proxyOverride
 	}
+	if directFetch {
+		proxy = nil
+	} else if proxy != nil {
+		proxy = marketplaceProxyWithResidualWarning(proxy)
+	}
+	direct := base.Clone()
+	direct.Proxy = nil
+	configureMarketplaceFetchDialer(direct, resolver, true)
+
+	proxied := base.Clone()
+	configureMarketplaceFetchDialer(proxied, resolver, false)
+	proxied.Proxy = func(req *http.Request) (*url.URL, error) {
+		if proxyURL, ok := req.Context().Value(marketplaceFetchProxyContextKey{}).(*url.URL); ok {
+			return proxyURL, nil
+		}
+		if proxy == nil {
+			return nil, nil
+		}
+		return proxy(req)
+	}
+
+	return &marketplaceFetchTransport{
+		direct:  direct,
+		proxied: proxied,
+		proxy:   proxy,
+	}
+}
+
+func configureMarketplaceFetchDialer(t *http.Transport, resolver *net.Resolver, guardResolvedAddr bool) {
 	d := &net.Dialer{
-		Timeout:        marketplaceFetchDialTimeout,
-		KeepAlive:      marketplaceFetchDialKeepAlive,
-		Resolver:       resolver,
-		ControlContext: marketplaceFetchDialControlContext,
+		Timeout:   marketplaceFetchDialTimeout,
+		KeepAlive: marketplaceFetchDialKeepAlive,
+		Resolver:  resolver,
+	}
+	if guardResolvedAddr {
+		d.ControlContext = marketplaceFetchDialControlContext
 	}
 	t.Dial = nil
 	t.DialContext = d.DialContext
 	t.DialTLS = nil
 	t.DialTLSContext = nil
-	return t
+}
+
+func (t *marketplaceFetchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.proxy == nil {
+		return t.direct.RoundTrip(req)
+	}
+	proxyURL, err := t.proxy(req)
+	if err != nil {
+		return nil, err
+	}
+	if proxyURL == nil {
+		return t.direct.RoundTrip(req)
+	}
+	req = req.WithContext(context.WithValue(req.Context(), marketplaceFetchProxyContextKey{}, proxyURL))
+	return t.proxied.RoundTrip(req)
+}
+
+func (t *marketplaceFetchTransport) CloseIdleConnections() {
+	t.direct.CloseIdleConnections()
+	t.proxied.CloseIdleConnections()
 }
 
 func marketplaceProxyWithResidualWarning(proxy func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {

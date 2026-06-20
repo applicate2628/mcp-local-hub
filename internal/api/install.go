@@ -1173,7 +1173,7 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 // (headers are the dominant credential surface).
 func expectedHubURL(m *config.ServerManifest, b config.ClientBinding) string {
 	if m.Transport == config.TransportRemoteHTTP {
-		expanded, err := ExpandSecrets(m.URL, nil)
+		expanded, err := expandRemoteHTTPURLSecrets(m.URL, nil)
 		if err != nil {
 			return "" // missing secrets at uninstall — caller treats as no-match
 		}
@@ -1638,7 +1638,7 @@ func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, e
 	// BEFORE any client config write so the operator sees a clear
 	// error rather than half-installed entries with placeholder
 	// strings.
-	expandedURL, err := ExpandSecrets(m.URL, nil)
+	expandedURL, err := expandRemoteHTTPURLSecrets(m.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("install remote-http manifest %s: expand url: %w", m.Name, err)
 	}

@@ -70,12 +70,12 @@ func TestMarketplaceFetchTransport_HonorsProxyByDefaultAndDirectFetchOptInDisabl
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:65535")
 
 	proxied := newMarketplaceFetchTransportWithResolver(nil, false)
-	if proxied.Proxy == nil {
+	if proxied.proxy == nil {
 		t.Fatal("marketplace registry fetch transport must honor proxy routing by default")
 	}
 
 	direct := newMarketplaceFetchTransportWithResolver(nil, true)
-	if direct.Proxy != nil {
+	if direct.proxy != nil {
 		t.Fatal("marketplace direct-fetch opt-in must disable proxy routing")
 	}
 }
@@ -101,20 +101,20 @@ func TestOperatorRequestsMarketplaceDirectFetchTruthiness(t *testing.T) {
 	}
 }
 
-func TestMarketplaceFetchTransport_DialGuardInstalledWithAndWithoutProxy(t *testing.T) {
+func TestMarketplaceFetchTransport_DirectPathInstallsDialGuard(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		directFetch bool
 	}{
-		{name: "proxy-honored-default", directFetch: false},
+		{name: "default-direct-path", directFetch: false},
 		{name: "direct-fetch-opt-in", directFetch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := newMarketplaceFetchTransportWithResolver(nil, tc.directFetch)
-			if tr.DialContext == nil {
-				t.Fatal("marketplace fetch transport must install a guarded DialContext")
+			if tr.direct.DialContext == nil {
+				t.Fatal("marketplace direct fetch transport must install a guarded DialContext")
 			}
-			_, err := tr.DialContext(context.Background(), "tcp", "127.0.0.1:443")
+			_, err := tr.direct.DialContext(context.Background(), "tcp", "127.0.0.1:443")
 			if err == nil {
 				t.Fatal("expected dial guard to reject loopback address")
 			}
@@ -122,6 +122,63 @@ func TestMarketplaceFetchTransport_DialGuardInstalledWithAndWithoutProxy(t *test
 				t.Fatalf("dial guard error = %v, want loopback rejection", err)
 			}
 		})
+	}
+}
+
+func TestMarketplaceFetchTransport_ProxyDialToLoopbackProxyIsNotRejectedByOriginGuard(t *testing.T) {
+	var proxyHits atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHits.Add(1)
+		if r.Method != http.MethodConnect {
+			t.Errorf("proxy method = %s, want CONNECT", r.Method)
+		}
+		http.Error(w, "proxy reached", http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatalf("parse proxy url: %v", err)
+	}
+	tr := newMarketplaceFetchTransportWithResolverAndProxy(nil, false, func(*http.Request) (*url.URL, error) {
+		return proxyURL, nil
+	})
+	client := &http.Client{
+		Transport:     tr,
+		CheckRedirect: rejectUnsafeMarketplaceRedirect,
+		Timeout:       time.Second,
+	}
+
+	_, err = MarketplaceFetchWithClient(context.Background(), client, "https://marketplace-proxy-target.example.test/catalog.json", "", nil)
+	if err == nil {
+		t.Fatal("expected proxy CONNECT failure after proxy was reached; got nil")
+	}
+	if proxyHits.Load() == 0 {
+		t.Fatalf("proxy was not reached; error = %v", err)
+	}
+	lower := strings.ToLower(err.Error())
+	if strings.Contains(lower, "loopback") || strings.Contains(lower, "private address") {
+		t.Fatalf("origin dial guard rejected the proxy address instead of letting CONNECT reach proxy: %v", err)
+	}
+}
+
+func TestMarketplaceFetchTransport_DirectDialToPrivateResolvedHostIsRejected(t *testing.T) {
+	const rebindHost = "marketplace-private.example.test"
+	tr := newMarketplaceFetchTransportWithResolver(marketplaceDNSResolverForTest(t, map[string]net.IP{
+		rebindHost: net.IPv4(10, 0, 0, 1),
+	}), true)
+	client := &http.Client{
+		Transport:     tr,
+		CheckRedirect: rejectUnsafeMarketplaceRedirect,
+		Timeout:       time.Second,
+	}
+
+	_, err := MarketplaceFetchWithClient(context.Background(), client, "https://"+rebindHost+"/catalog.json", "", nil)
+	if err == nil {
+		t.Fatal("expected direct resolved private address rejection; got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "private") {
+		t.Fatalf("error = %v, want private-address rejection", err)
 	}
 }
 
@@ -326,8 +383,7 @@ func TestMarketplaceHTTPClient_RejectsResolvedLoopbackRegistryHost(t *testing.T)
 	tr := newMarketplaceFetchTransportWithResolver(marketplaceDNSResolverForTest(t, map[string]net.IP{
 		rebindHost: net.IPv4(127, 0, 0, 1),
 	}), true)
-	tr.Proxy = nil
-	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
+	tr.direct.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
 	client := &http.Client{
 		Transport:     tr,
 		CheckRedirect: rejectUnsafeMarketplaceRedirect,

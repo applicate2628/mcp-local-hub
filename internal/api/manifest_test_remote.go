@@ -88,7 +88,7 @@ func (a *API) manifestTestRemoteFromYAML(ctx context.Context, name, yamlStr stri
 	if m.Transport != config.TransportRemoteHTTP {
 		return nil, fmt.Errorf("manifest %s: transport=%q (test-remote requires transport=remote-http)", name, m.Transport)
 	}
-	expandedURL, err := ExpandSecrets(m.URL, nil)
+	expandedURL, err := expandRemoteHTTPURLSecrets(m.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("expand url: %w", err)
 	}

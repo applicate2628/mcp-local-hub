@@ -479,10 +479,11 @@ func (m *ServerManifest) validateCompanion() error {
 // ValidateRemoteHTTPURL validates the remote-http endpoint URL shape shared by
 // manifests and marketplace catalog http entries.
 func ValidateRemoteHTTPURL(raw string) error {
+	parseRaw := raw
 	if remoteHTTPURLHasSecretPlaceholderHost(raw) {
-		return nil
+		parseRaw = remoteHTTPURLPlaceholderHostShapeURL(raw)
 	}
-	u, err := url.Parse(raw)
+	u, err := url.Parse(parseRaw)
 	if err != nil {
 		return fmt.Errorf("parse url: %w", err)
 	}
@@ -496,6 +497,27 @@ func ValidateRemoteHTTPURL(raw string) error {
 		return fmt.Errorf("must not embed credentials")
 	}
 	return nil
+}
+
+func remoteHTTPURLPlaceholderHostShapeURL(raw string) string {
+	const prefix = "https://"
+	rest := raw[len(prefix):]
+	end := strings.IndexAny(rest, "/?#")
+	authority := rest
+	suffix := ""
+	if end >= 0 {
+		authority = rest[:end]
+		suffix = rest[end:]
+	}
+	matches := secrets.SecretPlaceholderRE.FindStringIndex(authority)
+	tail := authority[matches[1]:]
+	return prefix + "placeholder.example" + tail + suffix
+}
+
+// RemoteHTTPURLHasSecretPlaceholderHost reports whether raw has a remote-http
+// URL authority made only from a ${secret:KEY} placeholder plus optional port.
+func RemoteHTTPURLHasSecretPlaceholderHost(raw string) bool {
+	return remoteHTTPURLHasSecretPlaceholderHost(raw)
 }
 
 func remoteHTTPURLHasSecretPlaceholderHost(raw string) bool {

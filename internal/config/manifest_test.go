@@ -468,6 +468,33 @@ func TestValidateRemoteHTTP_AllowsSecretPlaceholderHost(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteHTTP_SecretPlaceholderHostStillValidatesURLShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"non-https scheme", "http://${secret:REMOTE_MCP_HOST}/mcp", "https://"},
+		{"unsafe path byte", "https://${secret:REMOTE_MCP_HOST}/\x00mcp", "control"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "secret-host-bad",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       tc.url,
+			}
+			err := m.Validate()
+			if err == nil {
+				t.Fatalf("expected URL-shape rejection for %q; got nil", tc.url)
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.want)) {
+				t.Fatalf("error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest(t *testing.T) {
 	for _, rawURL := range []string{
 		"https://localhost/mcp",

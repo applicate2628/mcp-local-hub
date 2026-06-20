@@ -44,7 +44,7 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 			_, fix := LauncherGuidance("mcphub")
 			add("canonical-mcphub", "mcphub binary", err.Error(), fix, false)
 		}
-		if _, err := ExpandSecrets(m.URL, nil); err != nil {
+		if _, err := expandRemoteHTTPURLSecrets(m.URL, nil); err != nil {
 			add("remote-url-secret", "remote URL secrets", fmt.Sprintf("install remote-http manifest %s: expand url: %v", m.Name, err), "Set the missing remote URL secret or fix the malformed ${secret:KEY} placeholder.", false)
 		}
 		if _, err := ExpandSecretsMap(m.Headers, nil); err != nil {
