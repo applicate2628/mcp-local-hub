@@ -91,12 +91,14 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	}
 
 	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
-		BinaryPath:         target,
-		NewBinary:          exe,
-		PipePath:           deps.pipePath,
-		Deps:               deps,
-		ExpectedPorts:      expectedPorts,
-		VerifyPortsUnbound: verifyPortsUnboundForUpgrade,
+		BinaryPath:                 target,
+		NewBinary:                  exe,
+		PipePath:                   deps.pipePath,
+		Deps:                       deps,
+		ExpectedPorts:              expectedPorts,
+		VerifyPortsUnbound:         verifyPortsUnboundForUpgrade,
+		WaitSupervisorLockReleased: deps.WaitSupervisorLockReleased,
+		WaitSupervisorReady:        deps.WaitSupervisorReady,
 	}); err != nil {
 		return fmt.Errorf("v0.5 upgrade: %w", err)
 	}
@@ -538,6 +540,55 @@ func (d *v5UpgradeDeps) StartSupervisor(binaryPath string) error {
 	}
 	strictMode, _ := readPreMigrationStrictMode(stateDir)
 	return spawnSupervisorDetached(binaryPath, strictMode)()
+}
+
+func (d *v5UpgradeDeps) WaitSupervisorLockReleased(ctx context.Context, timeout time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var lastErr error
+	for {
+		lk, err := api.AcquireSupervisorLockQuiet(d.supervisorLockDir)
+		if err == nil {
+			lk.Release()
+			return nil
+		}
+		lastErr = err
+		select {
+		case <-waitCtx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("%w (last lock probe: %v)", waitCtx.Err(), lastErr)
+			}
+			return waitCtx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+func (d *v5UpgradeDeps) WaitSupervisorReady(ctx context.Context, timeout time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var lastErr error
+	for {
+		ready, err := probeReconcileReadyOnce(d.pipePath)
+		if err == nil && ready {
+			return nil
+		}
+		lastErr = err
+		select {
+		case <-waitCtx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("%w (last IPC status probe: %v)", waitCtx.Err(), lastErr)
+			}
+			return fmt.Errorf("%w (supervisor status never reported reconcile_ready=true)", waitCtx.Err())
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 // sendIPCWithResponse is the response-returning IPC sender used by

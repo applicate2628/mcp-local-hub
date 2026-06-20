@@ -38,7 +38,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -172,14 +174,21 @@ type UpgradeOpts struct {
 	// preserving backward compatibility for callers that have not
 	// yet adopted the closure.
 	//
-	// Used after the ForceKillSupervisor fallback: taskkill /F /T
-	// closes the supervisor PID + its child daemons, but the kernel
-	// may still report the listening sockets as bound for a brief
-	// window. The verification step proves the next supervisor
-	// (started in step 6) will be able to re-bind without fighting
-	// a zombie listener.
+	// Used after the prior supervisor exits on both clean graceful and force-kill
+	// paths: child daemons may still hold listening sockets briefly. The
+	// verification step proves the next supervisor (started in step 6) will be
+	// able to re-bind without fighting a zombie listener.
 	VerifyPortsUnbound func(ports []int, perPortTimeout time.Duration) error
-	Deps               UpgradeDeps
+	// WaitSupervisorLockReleased blocks until the prior supervisor releases
+	// supervisor.lock. The callback is wired by production adapters that know the
+	// concrete state directory. Nil preserves test/backcompat callers that do not
+	// own a real supervisor lock.
+	WaitSupervisorLockReleased func(ctx context.Context, timeout time.Duration) error
+	// WaitSupervisorReady blocks until the successor supervisor has acquired the
+	// lock and answers IPC status. Nil preserves non-production tests and legacy
+	// callers that cannot probe a successor.
+	WaitSupervisorReady func(ctx context.Context, timeout time.Duration) error
+	Deps                UpgradeDeps
 }
 
 // Default IPC timeouts per spec §"Upgrade sequence". Exported as
@@ -206,6 +215,17 @@ const (
 	// than that for taskkill /F /T to release the supervisor's
 	// child daemon listeners.
 	defaultPostForceKillPortVerifyTimeout = 10 * time.Second
+
+	// defaultSupervisorLockReleaseTimeout covers the old supervisor's
+	// post-ACK graceful shutdown window: quiesce drain (30s) plus exit
+	// teardown (5s). The old process owns supervisor.lock until its defer chain
+	// runs, so a successor start before this condition is proven can lose
+	// AcquireSupervisorLock and exit while upgrade reports success.
+	defaultSupervisorLockReleaseTimeout = time.Duration(defaultQuiesceTimeoutMs+defaultExitTimeoutMs) * time.Millisecond
+
+	// defaultSupervisorReadyTimeout bounds the successor IPC status poll after
+	// StartSupervisor returns. Detached process creation is not readiness.
+	defaultSupervisorReadyTimeout = 30 * time.Second
 )
 
 // RunInstallUpgrade orchestrates the v0.5.0 cold-restart upgrade
@@ -292,6 +312,11 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 			"then re-run `mcphub install --upgrade` once the cause is resolved",
 			err, opts.BinaryPath)
 	}
+	if err := sweepOldBinariesFn(filepath.Dir(opts.BinaryPath), func(path string, err error) {
+		fmt.Fprintf(os.Stderr, "warn: old binary sweep remove %s failed: %v\n", path, err)
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: old binary sweep in %s failed: %v\n", filepath.Dir(opts.BinaryPath), err)
+	}
 
 	// Step 2-3: IPC quiesce-timers (drain transient maintenance-timer
 	// PIDs from supervisor-state.transient_pids).
@@ -372,24 +397,27 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 			// supervisor died without its Job Object reaping children.
 		}
 
-		// Codex r2 Lane C P1 #8 closure: verify daemon ports are
-		// actually unbound after the force-kill. Without this check
-		// the rest of the upgrade flow would race a zombie listener:
-		// step 6 starts the new supervisor, the new supervisor tries
-		// to launch a daemon, the daemon's net.Listen fails with
-		// EADDRINUSE because the prior daemon's child socket is still
-		// in the kernel's TIME_WAIT/CLOSE_WAIT cleanup window. A 10s
-		// deadline matches the rollback step-3 budget. When the
-		// caller has not wired VerifyPortsUnbound (production adapter
-		// adoption is staged separately), the verification is silently
-		// skipped — same semantic as pre-fix behavior.
-		if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
-			if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
-				return fmt.Errorf("port-unbound verification failed after force-kill supervisor: %w; "+
-					"one or more daemon ports are still bound; "+
-					"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running `mcphub install --upgrade`",
-					err)
-			}
+	}
+
+	if opts.WaitSupervisorLockReleased != nil {
+		if err := opts.WaitSupervisorLockReleased(ctx, defaultSupervisorLockReleaseTimeout); err != nil {
+			return fmt.Errorf("prior supervisor did not release supervisor.lock within %s after upgrade exit request: %w; "+
+				"the old supervisor may still be shutting down and will block the successor from acquiring supervisor.lock; "+
+				"wait briefly, inspect supervisor-events.log, then run `mcphub supervise` from a shell if no supervisor is running",
+				defaultSupervisorLockReleaseTimeout, err)
+		}
+	}
+
+	// Verify daemon ports are actually unbound before starting the successor.
+	// This runs on BOTH clean graceful-exit and force-kill paths: exit{graceful}
+	// ACKs before the supervisor's shutdown path releases children, so the clean
+	// path has the same zombie-listener race as the force path.
+	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
+		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+			return fmt.Errorf("port-unbound verification failed after prior-supervisor exit: %w; "+
+				"one or more daemon ports are still bound; "+
+				"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running `mcphub install --upgrade`",
+				err)
 		}
 	}
 
@@ -418,14 +446,19 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 			"run `mcphub supervise` from a shell to diagnose (or `mcphub supervise &` to background-start)",
 			err, opts.BinaryPath)
 	}
+	if opts.WaitSupervisorReady != nil {
+		if err := opts.WaitSupervisorReady(ctx, defaultSupervisorReadyTimeout); err != nil {
+			return fmt.Errorf("supervisor successor did not become IPC-ready within %s after upgrade start: %w; "+
+				"the binary was replaced and a detached successor was spawned, but status never became reachable; "+
+				"check `mcphub status` and supervisor-events.log, then run `mcphub supervise` from a shell to see startup diagnostics",
+				defaultSupervisorReadyTimeout, err)
+		}
+	}
 
-	// Step 7 (implicit): new supervisor reads intent + daemon-intent
-	// files on its own startup path, runs the first reconcile pass,
-	// and respawns daemons. This happens INSIDE the supervisor
-	// process started in step 6; the orchestrator does NOT observe
-	// it directly. Operator-facing convergence verification is via
-	// `mcphub status` (which talks to the new supervisor through
-	// the same IPC pipe).
+	// Step 7: new supervisor reads intent + daemon-intent files on its own startup
+	// path, runs the first reconcile pass, and respawns daemons. When the caller
+	// wires WaitSupervisorReady, the orchestrator observes this via IPC status
+	// before reporting success; operator-facing follow-up remains `mcphub status`.
 	return nil
 }
 

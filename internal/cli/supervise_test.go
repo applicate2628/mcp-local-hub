@@ -767,6 +767,61 @@ func TestSuperviseCommand_ReaperFailureDoesNotBlockStartup(t *testing.T) {
 	}
 }
 
+// TestSuperviseCommand_SweepsOldBinariesOnStartup pins the P3 wiring: every
+// supervisor startup runs the rename-aside retention sweep, and the sweep is
+// non-fatal so normal startup still reaches the graceful test-exit path.
+func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	cleanupReaper := setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+		return ReaperResult{}, nil
+	})
+	defer cleanupReaper()
+
+	sweepCalled := make(chan string, 1)
+	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+		sweepCalled <- dir
+		return nil
+	})
+	defer cleanupSweep()
+
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	wantDir := filepath.Dir(exe)
+
+	select {
+	case gotDir := <-sweepCalled:
+		if gotDir != wantDir {
+			t.Fatalf("sweep dir = %s, want executable dir %s", gotDir, wantDir)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSupervise did not call SweepOldBinaries on startup")
+	}
+
+	exitCh <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervise exited with err after startup sweep: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	}
+}
+
 // errFakeReaperFailure is the synthetic error returned by the fake
 // reaper in TestSuperviseCommand_ReaperFailureDoesNotBlockStartup.
 // Defined as a package-level var so the test can match on the

@@ -504,6 +504,39 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			"state_dir":             stateDir,
 		},
 	})
+	if exe, err := os.Executable(); err != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "old-binary-sweep-failed",
+			Body: map[string]any{
+				"err": err.Error(),
+			},
+		})
+	} else {
+		sweepDir := filepath.Dir(exe)
+		if err := sweepOldBinariesFn(sweepDir, func(path string, err error) {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "old-binary-sweep-remove-failed",
+				Body: map[string]any{
+					"path": path,
+					"err":  err.Error(),
+				},
+			})
+		}); err != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "old-binary-sweep-failed",
+				Body: map[string]any{
+					"dir": sweepDir,
+					"err": err.Error(),
+				},
+			})
+		}
+	}
 
 	// Task 13.1 cold-start stale-child reap. POSIX-only in practice:
 	// the Windows variant is a no-op stub because the Job Object's

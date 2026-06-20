@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -50,8 +51,9 @@ const renameAsideMaxKeep = 5
 // expected to log warn and retry on the next pass.
 //
 // Returns a non-nil error only if filepath.Glob itself fails (a
-// programming error in the pattern, not a runtime condition).
-func SweepOldBinaries(dir string) error {
+// programming error in the pattern, not a runtime condition). Optional warn
+// callbacks receive per-file remove failures; those failures remain non-fatal.
+func SweepOldBinaries(dir string, warn ...func(string, error)) error {
 	patterns := []string{
 		filepath.Join(dir, "mcphub.exe.old-*"),
 		filepath.Join(dir, "mcphub.old-*"),
@@ -69,6 +71,9 @@ func SweepOldBinaries(dir string) error {
 			return err
 		}
 		for _, m := range matches {
+			if !isGeneratedRenameAside(m) {
+				continue
+			}
 			info, err := os.Stat(m)
 			if err != nil {
 				// Race: file vanished between Glob and Stat, or perms flip.
@@ -92,8 +97,27 @@ func SweepOldBinaries(dir string) error {
 	cutoff := time.Now().Add(-renameAsideRetention)
 	for i, a := range asides {
 		if a.mtime.Before(cutoff) || i >= renameAsideMaxKeep {
-			_ = os.Remove(a.path) // best-effort per spec
+			if err := os.Remove(a.path); err != nil {
+				for _, fn := range warn {
+					if fn != nil {
+						fn(a.path, err)
+					}
+				}
+			}
 		}
 	}
 	return nil
+}
+
+func isGeneratedRenameAside(path string) bool {
+	base := filepath.Base(path)
+	for _, prefix := range []string{"mcphub.exe.old-", "mcphub.old-"} {
+		if !strings.HasPrefix(base, prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(base, prefix)
+		_, err := time.Parse(renameAsideTimestampLayout, suffix)
+		return err == nil
+	}
+	return false
 }
