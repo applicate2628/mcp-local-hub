@@ -250,6 +250,9 @@ func writeVaultFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("rename temp: %w", err)
 	}
 	if err := vaultAtomicSyncParentDir(dir); err != nil {
+		if isUnsupportedParentDirSyncError(err) {
+			return nil
+		}
 		return fmt.Errorf("sync parent dir: %w", err)
 	}
 	return nil

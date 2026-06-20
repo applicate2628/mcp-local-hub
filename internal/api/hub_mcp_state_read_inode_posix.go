@@ -115,7 +115,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		}
 	}
 
-	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}

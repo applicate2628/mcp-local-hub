@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestReadStateFileInodeAnchored_FileModeReadBroadenedDefaultRelaxesStrictRejects(t *testing.T) {
@@ -73,5 +74,38 @@ func TestReadStateFileInodeAnchored_ENOTDIRPreserved(t *testing.T) {
 	}
 	if !errors.Is(err, syscall.ENOTDIR) {
 		t.Fatalf("err = %v, want errors.Is(syscall.ENOTDIR)", err)
+	}
+}
+
+func TestReadStateFileInodeAnchored_FIFOFailsClosedWithoutBlocking(t *testing.T) {
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "supervisor-intent.json")
+	if err := syscall.Mkfifo(target, 0o600); err != nil {
+		t.Skipf("mkfifo unsupported in this environment: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := readStateFileInodeAnchoredWithStrictPolicy(target, func() bool { return false })
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrIrregularFile) {
+			t.Fatalf("FIFO read err = %v, want ErrIrregularFile", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		// Pre-fix, openat(O_RDONLY) blocks on a FIFO until a writer appears.
+		// Open a writer to release the stuck reader before failing the test.
+		if wfd, err := syscall.Open(target, syscall.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = syscall.Close(wfd)
+		}
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("reader stayed blocked on FIFO even after a writer opened the pipe")
+		}
+		t.Fatal("FIFO read blocked before failing closed")
 	}
 }

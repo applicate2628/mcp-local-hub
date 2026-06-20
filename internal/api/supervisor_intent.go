@@ -178,7 +178,7 @@ type MaintenanceTimer struct {
 //
 // See also: filterSupervisorIntentOneshotDaemons() for the criteria.
 func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
-	raw, err := readStateFileInodeAnchored(path)
+	raw, err := readSupervisorIntentFileInodeAnchored(path)
 	if err != nil {
 		if isHubMcpStateMissingErr(err) {
 			return nil, fmt.Errorf("read %s: %w", path, os.ErrNotExist)
@@ -195,6 +195,10 @@ func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 	}
 	filterSupervisorIntentOneshotDaemons(&f)
 	return &f, nil
+}
+
+func readSupervisorIntentFileInodeAnchored(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredWithMaxBytes(path, maxIntentFileBytes)
 }
 
 // filterSupervisorIntentOneshotDaemons strips legacy one-shot command

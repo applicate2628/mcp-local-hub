@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -71,6 +72,47 @@ func TestSupervisorIntent_ReadRejectsSymlinkTarget(t *testing.T) {
 	}
 	if !errors.Is(err, ErrIrregularFile) {
 		t.Fatalf("ReadSupervisorIntent err = %v, want ErrIrregularFile", err)
+	}
+}
+
+func TestSupervisorIntent_ReadAllowsLargeIntentFile(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	intent := SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: "2026-06-20T12:00:00Z",
+	}
+	var raw []byte
+	for i := 0; int64(len(raw)) <= maxStateFileBytes; i++ {
+		intent.Daemons = append(intent.Daemons, SupervisorDaemon{
+			TaskName:     fmt.Sprintf(`\mcp-local-hub-large-%05d`, i),
+			Server:       "large",
+			Daemon:       fmt.Sprintf("d-%05d", i),
+			Command:      "node",
+			Args:         []string{strings.Repeat("x", 2048)},
+			Port:         9000 + i,
+			ManifestHash: "sha256:large",
+		})
+		var err error
+		raw, err = json.Marshal(intent)
+		if err != nil {
+			t.Fatalf("marshal intent: %v", err)
+		}
+		if int64(len(raw)) > maxIntentFileBytes {
+			t.Fatalf("test fixture grew past supervisor/daemon intent cap: %d > %d", len(raw), maxIntentFileBytes)
+		}
+	}
+	if err := WriteStateFileBytesAtomic(path, raw); err != nil {
+		t.Fatalf("seed large supervisor intent: %v", err)
+	}
+
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent rejected %d-byte intent: %v", len(raw), err)
+	}
+	if len(got.Daemons) != len(intent.Daemons) {
+		t.Fatalf("daemon count = %d, want %d", len(got.Daemons), len(intent.Daemons))
 	}
 }
 

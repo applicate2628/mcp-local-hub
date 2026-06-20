@@ -3,6 +3,7 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 
 	"golang.org/x/sys/windows"
@@ -30,4 +31,10 @@ func syncParentDir(dir string) error {
 		return fmt.Errorf("flush parent dir %s: %w", dir, err)
 	}
 	return nil
+}
+
+func isUnsupportedParentDirSyncError(err error) bool {
+	return errors.Is(err, windows.ERROR_INVALID_FUNCTION) ||
+		errors.Is(err, windows.ERROR_NOT_SUPPORTED) ||
+		errors.Is(err, windows.ERROR_CALL_NOT_IMPLEMENTED)
 }

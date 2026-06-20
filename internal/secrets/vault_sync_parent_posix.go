@@ -12,3 +12,7 @@ func syncParentDir(dir string) error {
 	defer f.Close()
 	return f.Sync()
 }
+
+func isUnsupportedParentDirSyncError(error) bool {
+	return false
+}

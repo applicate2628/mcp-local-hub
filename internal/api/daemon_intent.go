@@ -95,10 +95,10 @@ const (
 	// byte length. Per plan §35: real TS task names are <100 bytes; 1KB
 	// gives ample headroom while still rejecting accidental binary blobs.
 	IdentityFieldByteCap = 1024
-	// maxDaemonIntentFileBytes is the daemon-intent.json read ceiling. It is
-	// intentionally larger than maxStateFileBytes because daemon-intent.json is
-	// a per-task map and can legitimately exceed the small hub-state cap.
-	maxDaemonIntentFileBytes = 16 << 20
+	// maxIntentFileBytes is the daemon/supervisor intent read ceiling. It is
+	// intentionally larger than maxStateFileBytes because intent files are
+	// per-task maps/lists and can legitimately exceed the small hub-state cap.
+	maxIntentFileBytes = 16 << 20
 )
 
 // ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ func ParseDaemonIntentFile(raw []byte) (DaemonIntentFile, error) {
 }
 
 func readDaemonIntentFileInodeAnchored(path string) ([]byte, error) {
-	return readStateFileInodeAnchoredWithMaxBytes(path, maxDaemonIntentFileBytes)
+	return readStateFileInodeAnchoredWithMaxBytes(path, maxIntentFileBytes)
 }
 
 // ---------------------------------------------------------------------------
