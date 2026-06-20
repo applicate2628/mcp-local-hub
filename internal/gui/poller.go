@@ -35,12 +35,13 @@ import (
 // deltas on the next cycle. An empty Daemon falls back to "default" so
 // single-daemon servers stay correct.
 type StatusPoller struct {
-	status     statusProvider
-	events     *Broadcaster
-	interval   time.Duration
-	last       map[string]api.DaemonStatus // key: "<server>/<daemon>"
-	snapshotCh chan<- []api.DaemonStatus   // optional, see SetSnapshotChannel
-	errorCh    chan<- error                // optional, see SetErrorChannel
+	status            statusProvider
+	events            *Broadcaster
+	interval          time.Duration
+	last              map[string]api.DaemonStatus // key: "<server>/<daemon>"
+	lastSerenaLivePID map[string]int              // key: "<server>/<daemon>"; carries the last non-zero PID across stale rows
+	snapshotCh        chan<- []api.DaemonStatus   // optional, see SetSnapshotChannel
+	errorCh           chan<- error                // optional, see SetErrorChannel
 }
 
 // SetSnapshotChannel installs an optional sink that receives the full
@@ -82,10 +83,11 @@ func (p *StatusPoller) SetErrorChannel(ch chan<- error) {
 // goroutines; call Run(ctx) to begin polling.
 func NewStatusPoller(status statusProvider, events *Broadcaster, interval time.Duration) *StatusPoller {
 	return &StatusPoller{
-		status:   status,
-		events:   events,
-		interval: interval,
-		last:     map[string]api.DaemonStatus{},
+		status:            status,
+		events:            events,
+		interval:          interval,
+		last:              map[string]api.DaemonStatus{},
+		lastSerenaLivePID: map[string]int{},
 	}
 }
 
@@ -130,6 +132,14 @@ func keyFor(r api.DaemonStatus) string {
 		d = "default"
 	}
 	return r.Server + "/" + d
+}
+
+func isSerenaBackendLossRow(r api.DaemonStatus) bool {
+	return strings.EqualFold(r.Server, "serena")
+}
+
+func isConfirmedDeadDaemonRow(r api.DaemonStatus) bool {
+	return r.PID == 0 && r.StalePID == 0 && !strings.EqualFold(r.State, "Running")
 }
 
 // Run blocks until ctx is canceled. Polls every interval and publishes
@@ -201,17 +211,21 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		// failed on first observation still emits once.
 		nowFailed := isFailedDaemonState(r)
 		failedEdge := nowFailed && !isFailedDaemonState(prev)
-		backendLostPrevPID := prev.PID
-		backendLostEdge := ok && prev.PID > 0 && r.PID != prev.PID && r.StalePID == 0
-		if ok &&
-			strings.EqualFold(r.Server, "serena") &&
-			prev.PID == 0 &&
-			prev.StalePID > 0 &&
-			r.PID == 0 &&
-			r.StalePID == 0 &&
-			!strings.EqualFold(r.State, "Running") {
-			backendLostEdge = true
-			backendLostPrevPID = prev.StalePID
+		backendLostPrevPID := 0
+		backendLostEdge := false
+		if isSerenaBackendLossRow(r) {
+			lastLivePID := p.lastSerenaLivePID[k]
+			switch {
+			case r.PID > 0 && lastLivePID > 0 && r.PID != lastLivePID:
+				backendLostEdge = true
+				backendLostPrevPID = lastLivePID
+			case isConfirmedDeadDaemonRow(r) && lastLivePID > 0 && !(ok && isConfirmedDeadDaemonRow(prev)):
+				backendLostEdge = true
+				backendLostPrevPID = lastLivePID
+			}
+			if r.PID > 0 {
+				p.lastSerenaLivePID[k] = r.PID
+			}
 		}
 		// Falling edge: was failed, now healthy — the supervisor's auto-restart
 		// (or a manual restart) succeeded. The `ok` guard means a daemon
@@ -301,6 +315,10 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		if _, still := seen[k]; !still {
 			gone := p.last[k]
 			delete(p.last, k)
+			lastLivePID := p.lastSerenaLivePID[k]
+			if isSerenaBackendLossRow(gone) {
+				delete(p.lastSerenaLivePID, k)
+			}
 			p.events.Publish(Event{
 				Type: "daemon-state",
 				Body: map[string]any{
@@ -309,14 +327,14 @@ func (p *StatusPoller) poll(ctx context.Context) {
 					"state":  "Gone",
 				},
 			})
-			if gone.PID > 0 {
+			if isSerenaBackendLossRow(gone) && lastLivePID > 0 {
 				p.events.Publish(Event{
 					Type: "daemon-backend-lost",
 					Body: map[string]any{
 						"server":   gone.Server,
 						"daemon":   gone.Daemon,
 						"state":    "Gone",
-						"prev_pid": gone.PID,
+						"prev_pid": lastLivePID,
 						"port":     gone.Port,
 					},
 				})

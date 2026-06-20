@@ -24,6 +24,43 @@ func (s *scriptedStatus) Status() ([]api.DaemonStatus, error) {
 	return out, nil
 }
 
+func runPollerFrames(t *testing.T, frames [][]api.DaemonStatus, polls int) ([]Event, *StatusPoller) {
+	t.Helper()
+
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = true
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	var events []Event
+	for i := 0; i < polls; i++ {
+		p.poll(ctx)
+		for {
+			select {
+			case ev := <-ch:
+				events = append(events, ev)
+			default:
+				goto drained
+			}
+		}
+	drained:
+	}
+	return events, p
+}
+
+func backendLostBodies(events []Event) []map[string]any {
+	var bodies []map[string]any
+	for _, ev := range events {
+		if ev.Type == "daemon-backend-lost" {
+			bodies = append(bodies, ev.Body)
+		}
+	}
+	return bodies
+}
+
 // TestPoller_EmitsDeltaOnOrphanPIDChange is the regression guard
 // for the Windows post-create orphan SSE-delta path. When the
 // supervisor's best-effort kill of a Windows post-create orphan
@@ -498,6 +535,115 @@ func TestPoller_EmitsDaemonRecoveredOnFallingEdge(t *testing.T) {
 }
 
 func TestPoller_DaemonBackendLostEvent(t *testing.T) {
+	t.Run("emits-on-live-pid-change-after-stale-window", func(t *testing.T) {
+		const pidA = 4242
+		const pidB = 5151
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
+		}, 3)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("daemon-backend-lost fired %d times, want exactly 1 for live PID generation change across stale window; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		body := bodies[0]
+		if got, _ := body["state"].(string); got != "Running" {
+			t.Errorf("state = %q, want Running", got)
+		}
+		if got, _ := body["prev_pid"].(int); got != pidA {
+			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
+		}
+	})
+
+	t.Run("emits-on-confirmed-dead-after-stale-window", func(t *testing.T) {
+		const pidA = 4242
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0}},
+		}, 3)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("daemon-backend-lost fired %d times, want exactly 1 for confirmed-dead row after stale window; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		if got, _ := bodies[0]["prev_pid"].(int); got != pidA {
+			t.Errorf("prev_pid = %v, want %d", bodies[0]["prev_pid"], pidA)
+		}
+	})
+
+	t.Run("skips-stable-serena-pid", func(t *testing.T) {
+		const pidA = 4242
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+		}, 3)
+
+		if bodies := backendLostBodies(events); len(bodies) != 0 {
+			t.Fatalf("stable serena PID emitted daemon-backend-lost %d times, want 0; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+	})
+
+	t.Run("emits-once-during-long-down-spell", func(t *testing.T) {
+		const pidA = 4242
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0, LastResult: 1}},
+			{{Server: "serena", Daemon: "alpha", State: "Stopped", Port: 9301, PID: 0, StalePID: 0, LastResult: 2}},
+			{{Server: "serena", Daemon: "alpha", State: "Failed", Port: 9301, PID: 0, StalePID: 0, LastResult: 3}},
+		}, 4)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("long confirmed-dead spell emitted daemon-backend-lost %d times, want exactly 1; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		if got, _ := bodies[0]["prev_pid"].(int); got != pidA {
+			t.Errorf("prev_pid = %v, want %d", bodies[0]["prev_pid"], pidA)
+		}
+	})
+
+	t.Run("emits-on-direct-live-pid-change", func(t *testing.T) {
+		const pidA = 4242
+		const pidB = 5151
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
+		}, 2)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("direct live PID change emitted daemon-backend-lost %d times, want exactly 1; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		if got, _ := bodies[0]["prev_pid"].(int); got != pidA {
+			t.Errorf("prev_pid = %v, want %d", bodies[0]["prev_pid"], pidA)
+		}
+	})
+
+	t.Run("removed-row-clears-prior-live-pid", func(t *testing.T) {
+		const pidA = 4242
+		const pidB = 5151
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
+		}, 3)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("removed row plus reappearing live row emitted daemon-backend-lost %d times, want exactly 1 Gone wake; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		body := bodies[0]
+		if got, _ := body["state"].(string); got != "Gone" {
+			t.Errorf("state = %q, want Gone", got)
+		}
+		if got, _ := body["prev_pid"].(int); got != pidA {
+			t.Errorf("prev_pid = %v, want %d", body["prev_pid"], pidA)
+		}
+	})
+
 	t.Run("skips-port-stale-restart-window", func(t *testing.T) {
 		frames := [][]api.DaemonStatus{
 			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: 4242}},
