@@ -313,7 +313,7 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	if sess.SnapshotAtInit != nil && current != nil && current != sess.SnapshotAtInit {
 		successes, initFailures = sess.filterToolsListSuccessesByLiveSnapshot(current, successes, initFailures)
 		initFailures = filterInitFailuresByLiveBindings(initFailures, current, sess.ScopeKey, sess.IntendedParticipants)
-		liveParticipants := countLiveParticipants(current, sess.ScopeKey, sess.IntendedParticipants)
+		liveParticipants := sess.countLiveParticipants(current, sess.ScopeKey, sess.IntendedParticipants)
 		allowEmptyKnown = liveParticipants == 0 && len(successes) == 0 && len(initFailures) == 0 && snapshotKnowsScope(current, sess.ScopeKey)
 	}
 
@@ -392,10 +392,32 @@ func initFailureDaemonStillBound(current *ResolverSnapshot, scopeKey string, int
 	return false
 }
 
-func countLiveParticipants(current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef) int {
+// countLiveParticipants counts the intended participants that are LIVE in the
+// current snapshot, using the SAME liveness predicate as
+// filterToolsListSuccessesByLiveSnapshot so the empty-known decision stays
+// symmetric with the set of bindings that actually contribute to tools/list. A
+// binding present at its original port is live; a binding that MOVED to a new
+// port is live ONLY when a fresh session for the new port is already cached
+// (the same fast-path the filter keeps). A moved binding with NO cached fresh
+// session is DROPPED by the filter (moved-no-cache → rediscover at the new
+// port), so it is NOT live here either — counting it would wrongly make a
+// last-participant-moved group report -32000 all-failed instead of the
+// empty-known success the dropped-and-rediscover contract intends. A binding
+// gone from the snapshot is never live.
+func (s *hubSession) countLiveParticipants(current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef) int {
 	count := 0
 	for _, ref := range intended {
-		if _, ok := liveDaemonBinding(current, scopeKey, ref); ok {
+		liveRef, ok := liveDaemonBinding(current, scopeKey, ref)
+		if !ok {
+			continue
+		}
+		if liveRef.Port == ref.Port {
+			count++
+			continue
+		}
+		// Moved to a new port — live only if a fresh session is cached
+		// (matches filterToolsListSuccessesByLiveSnapshot's keep/drop split).
+		if _, cached := s.cachedDaemonInitState(liveRef); cached {
 			count++
 		}
 	}
@@ -1037,25 +1059,54 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 		}
 		v = result.Val
 	case <-ctx.Done():
+		// This caller stopped waiting, but the DETACHED singleflight work is
+		// still running (it is NOT bound to this ctx) and will COMPLETE a full
+		// MCP handshake — producing a live daemon-side session. If this caller
+		// is the last/only waiter on this DoChan call, nobody would consume that
+		// channel and the freshly-initialized daemon session would ORPHAN until
+		// the daemon's idle GC. Drain the result on a detached goroutine and
+		// CACHE it (the natural consumer — the next request for this daemonKey
+		// reuses it) so a completed detached reinit never leaks a session. On a
+		// work-fn error there is nothing to cache: initializeDaemonSession has
+		// already best-effort-DELETEd any half-initialized session it allocated.
+		go func() {
+			res := <-ch
+			if res.Err != nil {
+				return
+			}
+			ir := res.Val.(initResult)
+			s.cacheReinitResult(daemonRef, ir.sid, ir.proto, protoVer)
+		}()
 		return daemonInitState{}, ctx.Err()
 	}
 	res := v.(initResult)
-	proto := res.proto
+	proto := s.cacheReinitResult(daemonRef, res.sid, res.proto, protoVer)
+	return daemonInitState{SessionID: res.sid, ProtocolVersion: proto}, nil
+}
+
+// cacheReinitResult records a completed reinit handshake's daemon session id +
+// negotiated protocol under the session mu so a later request for the same
+// daemonRef reuses it (cachedDaemonInitState). Shared by the live-waiter path
+// and the detached drain that fires when the triggering caller's ctx cancelled
+// — either way a completed detached reinit caches its session and never orphans
+// it. Falls back to the session-requested protoVer when the daemon emitted no
+// negotiated version. Returns the effective proto so the live path can return it.
+func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string) string {
+	proto := negotiated
 	if proto == "" {
 		proto = protoVer
 	}
-
 	s.mu.Lock()
 	if s.InitSuccesses == nil {
 		s.InitSuccesses = map[canonicalDaemonRef]string{}
 	}
-	s.InitSuccesses[daemonRef] = res.sid
+	s.InitSuccesses[daemonRef] = sid
 	if s.DaemonProtoVer == nil {
 		s.DaemonProtoVer = map[canonicalDaemonRef]string{}
 	}
 	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
-	return daemonInitState{SessionID: res.sid, ProtocolVersion: proto}, nil
+	return proto
 }
 
 // currentDaemonPort re-resolves the daemon's CURRENT port for (ref.Server,

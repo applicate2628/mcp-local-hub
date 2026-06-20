@@ -736,6 +736,181 @@ func TestAggregateToolsListDropsMovedBindingWithNoCachedSession(t *testing.T) {
 	}
 }
 
+// TestReinitDetachedCachesSessionWhenCallerCancels pins the detached-reinit
+// session-lifecycle invariant (bot findings #1/#2/#3): the shared singleflight
+// reinit runs on a DETACHED ctx, so it COMPLETES a full MCP handshake (initialize
+// + notifications/initialized) and produces a live daemon session even when the
+// triggering caller's ctx was cancelled and that caller walked away. With no live
+// consumer the daemon session would ORPHAN. The fix drains the detached result and
+// CACHES it (the natural consumer — the next request reuses it) so it never leaks.
+//
+// Drive: cancel the caller's ctx WHILE the work fn is blocked inside the daemon's
+// initialize, then release the daemon. Assert (a) the caller saw ctx.Canceled,
+// (b) the detached reinit still ran the FULL lifecycle — the daemon received both
+// the initialize and the notifications/initialized (#2), and (c) the fresh session
+// is CACHED in InitSuccesses (#1/#3 — cached, not orphaned). The daemon's idle-GC
+// would otherwise be the only reaper; here a follow-up request reuses the session.
+func TestReinitDetachedCachesSessionWhenCallerCancels(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const freshSID = "detached-fresh-sid"
+	gate := make(chan struct{})
+	d := newStubDaemon(t, freshSID)
+	d.onInit = func(w http.ResponseWriter, r *http.Request) {
+		<-gate // block the detached work fn inside initialize until released
+		w.Header().Set("Mcp-Session-Id", freshSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+
+	sess := sessionWithParticipants(d)
+	ref := sess.IntendedParticipants[0]
+
+	// Caller ctx that we cancel while the detached work fn is gated.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct {
+		state daemonInitState
+		err   error
+	}, 1)
+	go func() {
+		st, err := sess.reinitializeDaemonBinding(ctx, ref)
+		done <- struct {
+			state daemonInitState
+			err   error
+		}{st, err}
+	}()
+
+	// Wait until the work fn has reached the daemon's initialize (it is now
+	// blocked on the gate), then cancel the caller's ctx so the select takes
+	// the ctx.Done() branch.
+	deadline := time.Now().Add(3 * time.Second)
+	for d.initCount.Load() == 0 {
+		if time.Now().After(deadline) {
+			close(gate)
+			t.Fatal("work fn never reached daemon initialize")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cancel()
+
+	// The caller returns promptly with ctx.Canceled (it did NOT wait for the
+	// detached work to finish).
+	select {
+	case res := <-done:
+		if res.err == nil {
+			t.Fatalf("reinit returned nil err on caller-cancel; want ctx.Canceled (state=%+v)", res.state)
+		}
+		if res.state.SessionID != "" {
+			t.Fatalf("reinit returned a session id on caller-cancel; want empty (state=%+v)", res.state)
+		}
+	case <-time.After(2 * time.Second):
+		close(gate)
+		t.Fatal("reinit did not return promptly after caller-cancel")
+	}
+
+	// Release the daemon so the DETACHED work fn completes the full handshake.
+	close(gate)
+
+	// The detached drain caches the fresh session. Poll until it lands.
+	cacheDeadline := time.Now().Add(3 * time.Second)
+	var cachedOK bool
+	var cached daemonInitState
+	for time.Now().Before(cacheDeadline) {
+		if cached, cachedOK = sess.cachedDaemonInitState(ref); cachedOK {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if !cachedOK {
+		t.Fatalf("detached reinit did not cache its session after caller-cancel (orphan leak); InitSuccesses=%v", sess.InitSuccesses)
+	}
+	if cached.SessionID != freshSID {
+		t.Fatalf("cached session id=%q want %q", cached.SessionID, freshSID)
+	}
+
+	// #2: the detached reinit completed the FULL lifecycle — notifications/initialized
+	// was sent under the detached ctx, not stopped at initialize.
+	notifyDeadline := time.Now().Add(3 * time.Second)
+	for d.notifyCount.Load() == 0 && time.Now().Before(notifyDeadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := d.notifyCount.Load(); got == 0 {
+		t.Fatalf("detached reinit did not send notifications/initialized (half-initialized cached session); notifyCount=%d", got)
+	}
+	// The handshake produced exactly one live session; it was cached, never DELETEd.
+	if got := d.deleteCount.Load(); got != 0 {
+		t.Fatalf("detached reinit DELETEd a fully-initialized session it should have cached; deleteCount=%d", got)
+	}
+}
+
+// TestEmptyKnownGroupWhenLastParticipantMovedAndDropped pins bot finding #4: a
+// binding that MOVED to a new port with NO cached fresh session is DROPPED from
+// tools/list (moved-no-cache → rediscover). When it is the ONLY participant, the
+// empty-known decision must NOT count it as live — otherwise the group wrongly
+// returns the -32000 all-failed envelope instead of the empty-known success the
+// dropped-and-rediscover contract intends. countLiveParticipants must use the SAME
+// keep/drop predicate as filterToolsListSuccessesByLiveSnapshot.
+func TestEmptyKnownGroupWhenLastParticipantMovedAndDropped(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("moved-emptied")
+	oldDaemon := newStubDaemon(t, "old-sid")
+	newPortDaemon := newStubDaemon(t, "fresh-sid") // moved-to port; never contacted (no cached session)
+
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: oldDaemon.port}
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
+		Groups:   map[string]bool{scope: true},
+	}
+	// The sole participant MOVED to newPortDaemon.port (still bound in the group,
+	// just at a new port) — distinct from the removed-binding case where the scope
+	// has zero bindings. No fresh session is cached for the new port → dropped.
+	movedRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: newPortDaemon.port}
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{scope: {movedRef}},
+		Groups:   map[string]bool{scope: true},
+	})
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-moved-emptied",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       atInit,
+		IntendedParticipants: []canonicalDaemonRef{ref},
+		InitSuccesses:        map[canonicalDaemonRef]string{ref: "old-sid"},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{ref: "2025-11-25"},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	// The moved-and-dropped sole participant must yield an empty-KNOWN success,
+	// not a -32000 all-failed envelope.
+	assertEmptyKnownToolsList(t, body)
+	// Neither port is contacted for tools/list: old binding is gone (moved),
+	// new port has no cached session (dropped, rediscover later).
+	if got := oldDaemon.listCount.Load(); got != 0 {
+		t.Fatalf("moved-from daemon received tools/list; listCount=%d", got)
+	}
+	if got := newPortDaemon.listCount.Load(); got != 0 {
+		t.Fatalf("moved-to port received tools/list (synchronous reinit?); listCount=%d", got)
+	}
+	if got := newPortDaemon.initCount.Load(); got != 0 {
+		t.Fatalf("moved-to port was initialized inside tools/list; initCount=%d", got)
+	}
+}
+
 func TestAggregateToolsListUsesOneResolverSnapshotForHiddenTools(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
