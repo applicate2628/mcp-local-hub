@@ -26,6 +26,10 @@ func readStateFileInodeAnchoredEnvStrictOnly(path string) ([]byte, error) {
 	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHomeEnvOnly)
 }
 
+func readStateFileInodeAnchoredEnvStrictOnlyNoAudit(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicyNoAudit(path, operatorRequiresSingleUserHomeEnvOnly)
+}
+
 func isSecretBearingStateFilePath(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	switch base {

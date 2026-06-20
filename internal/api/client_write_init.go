@@ -702,9 +702,10 @@ func strictModeFromIntentCached() bool {
 //     and does not prove the intent absent-or-false; failing closed keeps a read
 //     fault from silently disabling a persisted strict intent.
 //
-//   - JSON parse error → TRUE (strict), with a debug breadcrumb. A present-but-
-//     corrupt intent may be a strict-enabled intent whose body was clobbered;
-//     relaxing on corruption would silently downgrade an operator-enabled posture.
+//   - JSON parse error → TRUE (strict). A present-but-corrupt intent may be a
+//     strict-enabled intent whose body was clobbered; relaxing on corruption
+//     would silently downgrade an operator-enabled posture. The posture read is
+//     side-effect-free, so this branch does not emit diagnostics.
 //
 //   - parsed → return intent.StrictMode verbatim (true → strict, false → relax).
 //
@@ -777,7 +778,7 @@ func readStrictModeFromIntentBestEffort() bool {
 	// symlink/reparse swaps and preserves the pr301 r10 fleet-safety behavior:
 	// a broadened parent with strict_mode=false on disk relaxes unless the
 	// MCPHUB_REQUIRE_SINGLE_USER_HOME env var itself is set.
-	raw, err := readStateFileInodeAnchoredEnvStrictOnly(path)
+	raw, err := readStateFileInodeAnchoredEnvStrictOnlyNoAudit(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// ABSENT intent → RELAX (canon-aligned; pr301 r9/r10). An absent
@@ -803,15 +804,9 @@ func readStrictModeFromIntentBestEffort() bool {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		// Corrupt/unparseable intent → fail closed to STRICT (pr304 hybrid). A
 		// present-but-corrupt supervisor-intent.json may be a strict-enabled
-		// intent whose body was truncated/clobbered; relaxing on corruption
-		// would silently downgrade an operator-enabled strict posture. Emit a
-		// debug breadcrumb — never let a log failure change the verdict.
-		if logErr := LogHubMcpEvent("debug", "strict-mode-intent-parse-failed", map[string]any{
-			"path": path,
-			"err":  err.Error(),
-		}); logErr != nil {
-			_ = logErr
-		}
+		// intent whose body was truncated/clobbered; relaxing on corruption would
+		// silently downgrade an operator-enabled strict posture. This posture read
+		// is deliberately side-effect-free, so it does not emit diagnostics here.
 		return true
 	}
 	return f.StrictMode

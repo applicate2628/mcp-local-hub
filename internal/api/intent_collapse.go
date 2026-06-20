@@ -762,7 +762,7 @@ func readSupervisorStopsForTray() (*SupervisorIntentFile, error) {
 // host may have only one of the two intent files). All other errors fail the
 // backup so the merge does NOT proceed without a recovery point.
 func copyFileForBackup(src, dst string) error {
-	raw, err := readStateFileInodeAnchored(src)
+	raw, err := readIntentCollapseBackupSource(src)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -773,4 +773,11 @@ func copyFileForBackup(src, dst string) error {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
 	return nil
+}
+
+func readIntentCollapseBackupSource(src string) ([]byte, error) {
+	if filepath.Base(src) == intentFileLeaf {
+		return readDaemonIntentFileInodeAnchored(src)
+	}
+	return readStateFileInodeAnchored(src)
 }

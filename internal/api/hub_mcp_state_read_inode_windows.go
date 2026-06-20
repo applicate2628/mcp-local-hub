@@ -100,6 +100,14 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requiresStrict func() bool, maxBytes int64) ([]byte, error) {
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, maxBytes, true)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, maxStateFileBytes, false)
+}
+
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks bool) ([]byte, error) {
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -133,7 +141,7 @@ func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requires
 			return nil, fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				parentDir, err, RequireSingleUserHomeEnv)
 		}
-		if errors.Is(err, ErrWrongOwner) {
+		if !stateFileParentGateAllowsDefaultRelax(err) {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
 		}
 		// Default-relax. Distinguish write-broadening from
@@ -143,13 +151,15 @@ func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requires
 		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(parentHandle); wrErr != nil {
 			reason = "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read because subsequent ReadFile is bound to the file handle, not the path)"
 		}
-		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
-			"path":   path,
-			"parent": parentDir,
-			"reason": reason,
-			"err":    err.Error(),
-			"note":   "file's own DACL verified below; ReadFile is handle-bound so TOCTOU swap window is closed at the kernel level",
-		})
+		if auditFallbacks {
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+				"path":   path,
+				"parent": parentDir,
+				"reason": reason,
+				"err":    err.Error(),
+				"note":   "file's own DACL verified below; ReadFile is handle-bound so TOCTOU swap window is closed at the kernel level",
+			})
+		}
 	}
 
 	// Open the file RELATIVE to the parent handle, with
@@ -209,14 +219,16 @@ func readStateFileInodeAnchoredWithStrictPolicyAndMaxBytes(path string, requires
 		if isSecretBearingStateFilePath(path) {
 			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing", path, err)
 		}
-		reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
-		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
-			"path":   path,
-			"parent": parentDir,
-			"reason": reason,
-			"err":    err.Error(),
-			"note":   "ReadFile is handle-bound; symlink/reparse refusal and inode anchoring remain enforced",
-		})
+		if auditFallbacks {
+			reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
+				"path":   path,
+				"parent": parentDir,
+				"reason": reason,
+				"err":    err.Error(),
+				"note":   "ReadFile is handle-bound; symlink/reparse refusal and inode anchoring remain enforced",
+			})
+		}
 	}
 
 	// Read the content via the verified handle. windows.ReadFile

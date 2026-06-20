@@ -135,6 +135,9 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 			return fmt.Errorf("hub-mcp state write %s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				name, err, RequireSingleUserHomeEnv)
 		}
+		if !stateFileParentGateAllowsDefaultRelax(err) {
+			return fmt.Errorf("hub-mcp state write %s: %w", name, err)
+		}
 		// Best-effort audit log; never block the write on log failure. Default
 		// relax skips only the parent gate: the per-file DACL/mode remains
 		// handle-bound at temp-create, and publish remains dirHandle-relative.

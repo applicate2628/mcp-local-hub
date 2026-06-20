@@ -178,8 +178,17 @@ func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
 	return secureWriteClientConfigSkipParentGate(path, payload)
 }
 
+// stateFileParentGateAllowsDefaultRelax is the single parent-relax decision for
+// state-file read/write lanes. Call it only with parent-gate errors: wrong-owner
+// parents never relax, while owner-correct broadened parents may enter the
+// default solo-host relax lane when the caller's stricter mode permits it.
 func stateFileParentGateAllowsDefaultRelax(err error) bool {
-	return errors.Is(err, ErrSecureWriteParentInsecure) && !errors.Is(err, ErrWrongOwner)
+	if err == nil || errors.Is(err, ErrWrongOwner) {
+		return false
+	}
+	return errors.Is(err, ErrSecureWriteParentInsecure) ||
+		errors.Is(err, ErrTooLoose) ||
+		errors.Is(err, ErrDaclOutsideAllowlist)
 }
 
 // emitStateFileFallbackEvent records the audit warning for the

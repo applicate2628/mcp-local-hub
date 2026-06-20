@@ -58,19 +58,30 @@ func verifyHubMcpStateDACLImpl(path string) error {
 	// with write permission to the dir can replace files at any
 	// time.
 	if int(pst.Uid) != os.Getuid() {
-		return fmt.Errorf("%w: parent=%s uid=%d (need current uid %d)", ErrWrongOwner, parentPath, pst.Uid, os.Getuid())
+		parentErr := fmt.Errorf("%w: parent=%s uid=%d (need current uid %d)", ErrWrongOwner, parentPath, pst.Uid, os.Getuid())
+		if !stateFileParentGateAllowsDefaultRelax(parentErr) {
+			return parentErr
+		}
 	}
 	if pmode&0o022 != 0 {
+		parentErr := fmt.Errorf("%w: parent=%s mode=%04o grants group/world write (TOCTOU swap risk)", ErrTooLoose, parentPath, pmode&0o777)
+		if !stateFileParentGateAllowsDefaultRelax(parentErr) {
+			return parentErr
+		}
 		// Group/world WRITE — always reject (TOCTOU swap risk).
-		return fmt.Errorf("%w: parent=%s mode=%04o grants group/world write (TOCTOU swap risk)", ErrTooLoose, parentPath, pmode&0o777)
+		return parentErr
 	}
 	if pmode&0o055 != 0 {
+		parentErr := fmt.Errorf("%w: parent=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, parentPath, pmode&0o777)
 		// Group/world READ or EXEC bits set, but NOT write. Relax-
 		// tolerable on solo-dev hosts in default mode. Strict mode
 		// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) refuses any
 		// broadening.
 		if operatorRequiresSingleUserHome() {
-			return fmt.Errorf("%w: parent=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, parentPath, pmode&0o777)
+			return parentErr
+		}
+		if !stateFileParentGateAllowsDefaultRelax(parentErr) {
+			return parentErr
 		}
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
 			"path":        path,

@@ -125,6 +125,9 @@ func verifyHubMcpStateDACLImpl(path string) error {
 			return fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				parentDir, err, RequireSingleUserHomeEnv)
 		}
+		if !stateFileParentGateAllowsDefaultRelax(err) {
+			return fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
+		}
 		// Default-relax mode: the strict gate failed because some
 		// ACE grants access (read OR write/admin) to a non-
 		// allowlisted SID. The relax is ONLY safe for read-broadened
