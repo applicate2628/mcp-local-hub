@@ -350,14 +350,18 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 // AdmissionCheck owner, and the bind-probe rows remain richer GUI diagnostics.
 //
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
-// failing fast and returns a structured, GUI-renderable report. AdmissionCheck is
-// the authoritative "will this install be admitted" owner; Ready is true iff
-// AdmissionCheck returns no non-optional findings. The requirement rows below
-// are the rich rendering layer on top: launcher/runtime guidance, per-key secret
-// prompts, port detail rows, and install-plan explanations for the GUI.
+// failing fast and returns a structured, GUI-renderable report. AdmissionCheck
+// seeds the scope-independent admission result; later requirement rows can still
+// flip Ready=false when they add a non-optional blocker, including the
+// effective-scope install-plan dry-run. The requirement rows below are the rich
+// rendering layer on top: launcher/runtime guidance, per-key secret prompts,
+// port detail rows, and install-plan explanations for the GUI.
 func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	rep := &ReadinessReport{Server: m.Name, Ready: !containsNonOptional(AdmissionCheck(m, AdmissionScope{}))}
 	add := func(r ReadinessRequirement) {
+		if !r.OK && !r.Optional {
+			rep.Ready = false
+		}
 		rep.Requirements = append(rep.Requirements, r)
 	}
 

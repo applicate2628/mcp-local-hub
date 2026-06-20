@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/secrets"
@@ -21,10 +20,7 @@ type AdmissionFinding struct {
 }
 
 type AdmissionScope struct {
-	DaemonFilter           string
-	ClientsInclude         []string
-	DefaultClientsOverride []string
-	IncludeAllClients      bool
+	DaemonFilter string
 }
 
 func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionFinding {
@@ -48,30 +44,11 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 			_, fix := LauncherGuidance("mcphub")
 			add("canonical-mcphub", "mcphub binary", err.Error(), fix, false)
 		}
-		if scope.DaemonFilter != "" {
-			add("remote-daemon-filter", "daemon filter", fmt.Sprintf("manifest %s: transport=remote-http has no daemons; --daemon flag is not applicable (got --daemon=%q)", m.Name, scope.DaemonFilter), "Remove the --daemon filter for remote-http manifests.", false)
-		}
-		includeClient, ok := admissionClientPredicate(scope, &findings)
 		if _, err := ExpandSecrets(m.URL, nil); err != nil {
 			add("remote-url-secret", "remote URL secrets", fmt.Sprintf("install remote-http manifest %s: expand url: %v", m.Name, err), "Set the missing remote URL secret or fix the malformed ${secret:KEY} placeholder.", false)
 		}
 		if _, err := ExpandSecretsMap(m.Headers, nil); err != nil {
 			add("remote-headers-secret", "remote header secrets", fmt.Sprintf("install remote-http manifest %s: expand headers: %v", m.Name, err), "Set the missing remote header secret or fix the malformed ${secret:KEY} placeholder.", false)
-		}
-		for _, b := range m.ClientBindings {
-			if b.Daemon != "" && b.Daemon != "default" {
-				add("remote-binding-daemon", "remote binding daemon", fmt.Sprintf("manifest %s: remote-http binding for client %q names daemon=%q but no daemons are declared (remove the daemon: line or use daemon: default)", m.Name, b.Client, b.Daemon), "Remove the daemon field or use daemon: default for remote-http bindings.", false)
-			}
-			if ok && !includeClient(b.Client) {
-				continue
-			}
-			if !isRemoteHTTPCapableClient(b.Client) {
-				add("remote-client-matrix", "remote client capability", fmt.Sprintf("manifest %s: client=%q is not on the remote-http adapter capability matrix (supported: %v)", m.Name, b.Client, remoteHTTPCapableClients), "Use a remote-http capable client binding or add adapter support before installing.", false)
-				continue
-			}
-			if _, err := clientConfigPath(b.Client); err != nil {
-				add("client-config-path", "client config path", err.Error(), "Use a supported client name with a resolvable config path.", false)
-			}
 		}
 		return findings
 	}
@@ -182,7 +159,6 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 		}
 	}
 
-	findings = append(findings, admissionLocalClientScopeFindings(m, scope)...)
 	return findings
 }
 
@@ -197,87 +173,6 @@ func containsNonOptional(findings []AdmissionFinding) bool {
 
 func scopeForPreflight(daemonFilter string) AdmissionScope {
 	return AdmissionScope{DaemonFilter: daemonFilter}
-}
-
-func admissionClientPredicate(scope AdmissionScope, findings *[]AdmissionFinding) (func(string) bool, bool) {
-	add := func(id, name, reason, fix string) {
-		*findings = append(*findings, AdmissionFinding{ID: id, Name: name, Reason: reason, Fix: fix})
-	}
-	if scope.IncludeAllClients && len(scope.ClientsInclude) > 0 {
-		add("client-predicate", "client scope", "IncludeAllClients is mutually exclusive with ClientsInclude", "Choose either IncludeAllClients or an explicit ClientsInclude list, not both.")
-		return func(string) bool { return false }, false
-	}
-	if scope.IncludeAllClients {
-		return func(string) bool { return true }, true
-	}
-
-	var names []string
-	switch {
-	case len(scope.ClientsInclude) > 0:
-		names = scope.ClientsInclude
-	case len(scope.DefaultClientsOverride) > 0:
-		names = scope.DefaultClientsOverride
-	default:
-		names = clients.DefaultInstallClientNames()
-	}
-
-	supported := map[string]bool{}
-	for _, name := range clients.SupportedClientNames() {
-		supported[name] = true
-	}
-	selected := map[string]bool{}
-	ok := true
-	for _, name := range names {
-		trimmed := strings.TrimSpace(name)
-		if trimmed == "" {
-			continue
-		}
-		if !supported[trimmed] {
-			add("unknown-client-name", "client scope", fmt.Sprintf("unknown client %q (expected %s)", trimmed, strings.Join(clients.SupportedClientNames(), " | ")), "Use one of the supported client names.")
-			ok = false
-			continue
-		}
-		selected[trimmed] = true
-	}
-	return func(name string) bool { return selected[name] }, ok
-}
-
-func admissionLocalClientScopeFindings(m *config.ServerManifest, scope AdmissionScope) []AdmissionFinding {
-	var findings []AdmissionFinding
-	add := func(id, name, reason, fix string) {
-		findings = append(findings, AdmissionFinding{ID: id, Name: name, Reason: reason, Fix: fix})
-	}
-	if scope.DaemonFilter != "" {
-		if _, ok := findDaemon(m, scope.DaemonFilter); !ok {
-			add("daemon-filter", "daemon filter", fmt.Sprintf("no daemon %q in manifest %s", scope.DaemonFilter, m.Name), "Use a daemon name declared by this manifest.")
-		}
-	}
-	includeClient, ok := admissionClientPredicate(scope, &findings)
-	for _, b := range m.ClientBindings {
-		if scope.DaemonFilter != "" && b.Daemon != scope.DaemonFilter {
-			continue
-		}
-		if ok && !includeClient(b.Client) {
-			continue
-		}
-		daemon, exists := findDaemon(m, b.Daemon)
-		if !exists {
-			add("binding-unknown-daemon", "client binding daemon", fmt.Sprintf("binding references unknown daemon %q", b.Daemon), "Point the client binding at a declared daemon.")
-			continue
-		}
-		if _, err := clientConfigPath(b.Client); err != nil {
-			add("client-config-path", "client config path", err.Error(), "Use a supported client name with a resolvable config path.")
-		}
-		urlPath := b.URLPath
-		if urlPath == "" {
-			urlPath = "/mcp"
-		}
-		if err := validateClientURLPath(urlPath); err != nil {
-			add("url-path-invalid", "client binding url_path", fmt.Sprintf("invalid url_path for client %q: %v", b.Client, err), "Set url_path to a path-only URL starting with a single '/'.")
-		}
-		_ = daemon
-	}
-	return findings
 }
 
 func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {

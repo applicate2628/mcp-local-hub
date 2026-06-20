@@ -12,6 +12,12 @@ import (
 func TestAdmissionCheckCorpusPreflightReadinessParity(t *testing.T) {
 	setupAdmissionParityTest(t)
 
+	// Keep the strict parity corpus to scope-independent admission edges.
+	// Caller-dependent client-binding validation (daemon bindings, client config
+	// paths, url_path, and remote-http client matrix checks) intentionally lives
+	// in the scoped planner. Preflight skips those by design; readiness surfaces
+	// them through its effective-scope install-plan dry-run. The invalid-url-path
+	// edge is pinned separately below.
 	cases := admissionCorpusManifests(t)
 	for _, tc := range cases {
 		tc := tc
@@ -22,6 +28,36 @@ func TestAdmissionCheckCorpusPreflightReadinessParity(t *testing.T) {
 				t.Fatalf("Preflight == nil is %t, readiness Ready is %t", preflightOK, ready)
 			}
 		})
+	}
+}
+
+func TestAdmissionCheckCallerDependentClientBindingSplit(t *testing.T) {
+	setupAdmissionParityTest(t)
+
+	m := syntheticInvalidURLPathAdmissionManifest()
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("Preflight rejected caller-dependent client binding validation: %v", err)
+	}
+
+	rep := CheckServerReadiness(m)
+	if rep.Ready {
+		t.Fatalf("readiness Ready=true, want false for effective-scope install-plan blocker; requirements: %#v", rep.Requirements)
+	}
+	var installPlan *ReadinessRequirement
+	for i := range rep.Requirements {
+		if rep.Requirements[i].Name == "install plan" {
+			installPlan = &rep.Requirements[i]
+			break
+		}
+	}
+	if installPlan == nil {
+		t.Fatalf("readiness did not surface install-plan blocker: %#v", rep.Requirements)
+	}
+	if installPlan.OK {
+		t.Fatalf("install-plan requirement OK=true, want false")
+	}
+	if !strings.Contains(installPlan.Reason, "invalid url_path") {
+		t.Fatalf("install-plan reason = %q, want invalid url_path", installPlan.Reason)
 	}
 }
 
@@ -75,6 +111,41 @@ func TestAdmissionCheckMarksAdvisoryFindingsOptional(t *testing.T) {
 		if !f.Optional {
 			t.Fatalf("finding %q Optional=false, want true", id)
 		}
+	}
+}
+
+func TestPreflightSkipsCallerDependentClientBindingValidation(t *testing.T) {
+	setupAdmissionParityTest(t)
+
+	m := &config.ServerManifest{
+		Name:      "filtered-client-install",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "vscode", Port: 54324},
+		},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code", Daemon: "missing-default-daemon", URLPath: "/mcp"},
+			{Client: "vscode", Daemon: "vscode", URLPath: "/mcp"},
+		},
+	}
+
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("Preflight rejected a binding that the scoped install plan skips: %v", err)
+	}
+	if findings := AdmissionCheck(m, AdmissionScope{}); containsNonOptional(findings) {
+		t.Fatalf("AdmissionCheck returned caller-dependent client binding findings: %#v", findings)
+	}
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"vscode"}})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts scoped to vscode: %v", err)
+	}
+	if got := len(plan.ClientUpdates); got != 1 {
+		t.Fatalf("ClientUpdates len = %d, want 1", got)
+	}
+	if plan.ClientUpdates[0].Client != "vscode" {
+		t.Fatalf("ClientUpdates[0].Client = %q, want vscode", plan.ClientUpdates[0].Client)
 	}
 }
 
@@ -177,22 +248,22 @@ func admissionCorpusManifests(t *testing.T) []admissionCorpusCase {
 				Command:   "go",
 			},
 		},
-		admissionCorpusCase{
-			name: "synthetic-invalid-url-path",
-			manifest: &config.ServerManifest{
-				Name:      "invalid-url-path",
-				Kind:      config.KindGlobal,
-				Transport: config.TransportNativeHTTP,
-				Command:   "go",
-				Daemons:   []config.DaemonSpec{{Name: "main", Port: 54323}},
-				ClientBindings: []config.ClientBinding{
-					{Client: "claude-code", Daemon: "main", URLPath: "@evil.example/mcp"},
-				},
-			},
-		},
 	)
 
 	return out
+}
+
+func syntheticInvalidURLPathAdmissionManifest() *config.ServerManifest {
+	return &config.ServerManifest{
+		Name:      "invalid-url-path",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "main", Port: 54323}},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code", Daemon: "main", URLPath: "@evil.example/mcp"},
+		},
+	}
 }
 
 func setupAdmissionParityTest(t *testing.T) {
