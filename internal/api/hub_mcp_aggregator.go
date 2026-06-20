@@ -306,12 +306,24 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 		originalCount := len(successes)
 		if originalCount > 0 {
 			filtered := make(map[canonicalDaemonRef]daemonInitState, originalCount)
+			remapped := make(map[canonicalDaemonRef]daemonInitState)
 			for ref, state := range successes {
-				if daemonStillBound(current, sess.ScopeKey, canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}) {
-					filtered[ref] = state
+				if liveRef, ok := liveDaemonBinding(current, sess.ScopeKey, ref); ok {
+					filtered[liveRef] = state
+					if liveRef != ref {
+						remapped[liveRef] = state
+					}
 				}
 			}
 			successes = filtered
+			if len(remapped) > 0 {
+				sess.mu.Lock()
+				for ref, state := range remapped {
+					sess.InitSuccesses[ref] = state.SessionID
+					sess.DaemonProtoVer[ref] = state.ProtocolVersion
+				}
+				sess.mu.Unlock()
+			}
 		}
 		initFailures = filterInitFailuresByLiveBindings(initFailures, current, sess.ScopeKey, sess.IntendedParticipants)
 		allowEmptySuccess = originalCount > 0 && len(successes) == 0 && len(initFailures) == 0
@@ -1006,23 +1018,29 @@ func ForwardCancellation(ctx context.Context, sess *hubSession, clientReqID json
 	_ = postCancellation(subCtx, entry.DaemonRef, entry.DaemonSessionID, proto, entry.DaemonRequestID)
 }
 
-// daemonStillBound reports whether the (Server, Daemon, Port) tuple
-// is still in the calling client's bindings within the current
-// snapshot.
-func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRef) bool {
+// liveDaemonBinding returns the current binding for the stable
+// (Server, Daemon) identity in the calling client's bindings.
+func liveDaemonBinding(snap *ResolverSnapshot, client string, ref canonicalDaemonRef) (canonicalDaemonRef, bool) {
 	if snap == nil {
-		return false
+		return canonicalDaemonRef{}, false
 	}
 	bindings, ok := snap.Bindings[client]
 	if !ok {
-		return false
+		return canonicalDaemonRef{}, false
 	}
 	for _, b := range bindings {
-		if b.Server == ref.Server && b.Daemon == ref.Daemon && b.Port == ref.Port {
-			return true
+		if b.Server == ref.Server && b.Daemon == ref.Daemon {
+			return b, true
 		}
 	}
-	return false
+	return canonicalDaemonRef{}, false
+}
+
+// daemonStillBound reports whether the stable (Server, Daemon) identity
+// is still in the calling client's bindings within the current snapshot.
+func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRef) bool {
+	_, ok := liveDaemonBinding(snap, client, canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port})
+	return ok
 }
 
 // ---------------- HTTP plumbing ----------------

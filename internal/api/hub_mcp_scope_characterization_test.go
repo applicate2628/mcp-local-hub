@@ -33,10 +33,10 @@ import (
 )
 
 // ----------------------------------------------------------------------
-// daemonStillBound — snap.Bindings[client] membership predicate.
+// daemonStillBound — snap.Bindings[client] stable daemon membership predicate.
 //
 // The ScopeKey rename changes the `client` parameter name; this pins the
-// exact lookup-then-tuple-match contract so the rename can't alter it.
+// exact lookup-then-stable-identity-match contract so the rename can't alter it.
 // ----------------------------------------------------------------------
 
 func TestCharacterizeDaemonStillBound(t *testing.T) {
@@ -85,11 +85,11 @@ func TestCharacterizeDaemonStillBound(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "port-mismatch-false",
+			name:   "moved-port-same-stable-identity-true",
 			snap:   &ResolverSnapshot{Gen: 1, Bindings: bindingsWith(wrongPort)},
 			client: "claude-code",
 			ref:    refA,
-			want:   false,
+			want:   true,
 		},
 		{
 			name:   "server-mismatch-false",

@@ -621,6 +621,97 @@ func TestAggregateToolsListFiltersRemovedLiveBinding(t *testing.T) {
 	}
 }
 
+func TestAggregateToolsListKeepsMovedLiveBindingOnNewRoute(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	oldDaemon := newStubDaemon(t, "d1-sid")
+	removedDaemon := newStubDaemon(t, "d2-sid")
+	newDaemon := newStubDaemon(t, "d1-sid")
+	newDaemon.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"moved","description":"new route"}]}}`))
+	}
+
+	sess := sessionWithParticipants(oldDaemon, removedDaemon)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {{
+				Server: sess.IntendedParticipants[0].Server,
+				Daemon: sess.IntendedParticipants[0].Daemon,
+				Port:   newDaemon.port,
+			}},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	oldListBefore := oldDaemon.listCount.Load()
+	removedListBefore := removedDaemon.listCount.Load()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	names := decodeToolsListNames(t, body)
+	if len(names) != 1 || names[0] != "srv1__moved" {
+		t.Fatalf("tools/list names=%v want [srv1__moved]; body=%s", names, string(body))
+	}
+	if got := oldDaemon.listCount.Load(); got != oldListBefore {
+		t.Fatalf("old moved-from daemon received tools/list; listCount %d -> %d", oldListBefore, got)
+	}
+	if got := removedDaemon.listCount.Load(); got != removedListBefore {
+		t.Fatalf("removed daemon received tools/list; listCount %d -> %d", removedListBefore, got)
+	}
+	if got := newDaemon.listCount.Load(); got != 1 {
+		t.Fatalf("new moved-to daemon listCount=%d want 1", got)
+	}
+	rm := sess.RouteMap.Load()
+	if rm == nil {
+		t.Fatalf("RouteMap not published after moved live binding")
+	}
+	ref, ok := (*rm)["srv1__moved"]
+	if !ok {
+		t.Fatalf("RouteMap missing moved daemon route srv1__moved: %+v", *rm)
+	}
+	if ref.Port != newDaemon.port {
+		t.Fatalf("RouteMap port=%d want moved-to port %d", ref.Port, newDaemon.port)
+	}
+	for key := range *rm {
+		if strings.HasPrefix(key, "srv2__") {
+			t.Fatalf("RouteMap retained removed daemon route %q in %+v", key, *rm)
+		}
+	}
+
+	callBody, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__moved","arguments":{}}`))
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	if !strings.Contains(string(callBody), `called=moved`) {
+		t.Fatalf("tools/call did not dispatch through moved route with raw tool name; body=%s", string(callBody))
+	}
+	if got := oldDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("old moved-from daemon received tools/call; callCount=%d", got)
+	}
+	if got := removedDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("removed daemon received tools/call; callCount=%d", got)
+	}
+	if got := newDaemon.callCount.Load(); got != 1 {
+		t.Fatalf("new moved-to daemon callCount=%d want 1", got)
+	}
+}
+
 func TestAggregateToolsListRemovedSuccessWithRetainedFailureReturnsAllFailed(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
