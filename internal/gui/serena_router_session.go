@@ -1044,8 +1044,46 @@ func (s *Server) consumeSerenaBackendLossEvents(ctx context.Context, ch <-chan E
 		if srv, _ := ev.Body["server"].(string); srv != "serena" {
 			continue
 		}
+		eventInt := func(v any) (int, bool) {
+			switch n := v.(type) {
+			case float64:
+				return int(n), n > 0
+			case int:
+				return n, n > 0
+			default:
+				return 0, false
+			}
+		}
+		if port, ok := eventInt(ev.Body["port"]); ok {
+			if prev, ok := eventInt(ev.Body["prev_pid"]); ok {
+				s.recordSerenaBackendPrevPIDHint(port, prev)
+			}
+		}
 		s.triggerSerenaBackendLossReconcile()
 	}
+}
+
+func (s *Server) recordSerenaBackendPrevPIDHint(port, prev int) {
+	if s == nil || port <= 0 || prev <= 0 {
+		return
+	}
+	s.serenaBackendPIDMu.Lock()
+	defer s.serenaBackendPIDMu.Unlock()
+	if s.serenaBackendPrevPIDHint == nil {
+		s.serenaBackendPrevPIDHint = map[int]int{}
+	}
+	s.serenaBackendPrevPIDHint[port] = prev
+}
+
+func (s *Server) consumeSerenaBackendPrevPIDHintLocked(port int) (int, bool) {
+	if s == nil || port <= 0 || s.serenaBackendPrevPIDHint == nil {
+		return 0, false
+	}
+	prev, ok := s.serenaBackendPrevPIDHint[port]
+	if ok {
+		delete(s.serenaBackendPrevPIDHint, port)
+	}
+	return prev, ok
 }
 
 // serenaBackendStatusFn is the seam for the IPC reconcile fallback's status
@@ -1111,7 +1149,9 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	// Map the router's known workspace KEYS -> their PATHS (the IPC status key).
 	pathToKey := make(map[string]string, len(knownKeys))
 	pathToTaskName := make(map[string]string, len(knownKeys))
+	pathToPort := make(map[string]int, len(knownKeys))
 	wantPaths := make(map[string]struct{}, len(knownKeys))
+	wantPorts := make(map[int]struct{}, len(knownKeys))
 	knownSet := make(map[string]struct{}, len(knownKeys))
 	for _, k := range knownKeys {
 		knownSet[k] = struct{}{}
@@ -1126,9 +1166,18 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		s.rememberSerenaBackendWorkspacePath(ws)
 		pathToKey[ws.WorkspacePath] = ws.WorkspaceKey
 		pathToTaskName[ws.WorkspacePath] = ws.TaskName
+		pathToPort[ws.WorkspacePath] = ws.Port
 		wantPaths[ws.WorkspacePath] = struct{}{}
+		if ws.Port > 0 {
+			wantPorts[ws.Port] = struct{}{}
+		}
 	}
 	if len(wantPaths) == 0 {
+		s.serenaBackendPIDMu.Lock()
+		for port := range s.serenaBackendPrevPIDHint {
+			delete(s.serenaBackendPrevPIDHint, port)
+		}
+		s.serenaBackendPIDMu.Unlock()
 		return 0
 	}
 
@@ -1139,16 +1188,36 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	for path := range wantPaths {
 		if pid, ok := s.serenaBackendLastPID[path]; ok {
 			prior[path] = pid
+			if port := pathToPort[path]; port > 0 {
+				delete(s.serenaBackendPrevPIDHint, port)
+			}
 		}
 		if ticks, ok := s.serenaBackendIdlePaths[path]; ok {
 			priorIdle[path] = ticks
 		}
 		dropGenAtSnapshot[path] = s.serenaBackendDropGen[path]
 	}
+	for port := range s.serenaBackendPrevPIDHint {
+		if _, want := wantPorts[port]; !want {
+			delete(s.serenaBackendPrevPIDHint, port)
+		}
+	}
 	s.serenaBackendPIDMu.Unlock()
 
 	rows, err := statusFn(ctx)
 	if err != nil {
+		s.serenaBackendPIDMu.Lock()
+		for port := range s.serenaBackendPrevPIDHint {
+			if _, want := wantPorts[port]; !want {
+				delete(s.serenaBackendPrevPIDHint, port)
+			}
+		}
+		for path := range wantPaths {
+			if port := pathToPort[path]; port > 0 {
+				delete(s.serenaBackendPrevPIDHint, port)
+			}
+		}
+		s.serenaBackendPIDMu.Unlock()
 		// IPC unavailable / transient: do NOT tear down sessions on a status
 		// READ failure (that would be a false positive — the daemons may be
 		// fine and only the supervisor IPC momentarily unreachable). The
@@ -1277,6 +1346,13 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			if deadNow {
 				markLost(path)
 				delete(persisted, path)
+				continue
+			}
+			s.serenaBackendPIDMu.Lock()
+			hintPrev, ok := s.consumeSerenaBackendPrevPIDHintLocked(pathToPort[path])
+			s.serenaBackendPIDMu.Unlock()
+			if ok && newPID != 0 && hintPrev != newPID {
+				markLost(path)
 			}
 			continue
 		}
@@ -1340,6 +1416,16 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	skippedByDropGeneration := map[string]struct{}{}
 	dropGenerationAdvanced := func(path string) bool {
 		return s.serenaBackendDropGen[path] != dropGenAtSnapshot[path]
+	}
+	for port := range s.serenaBackendPrevPIDHint {
+		if _, want := wantPorts[port]; !want {
+			delete(s.serenaBackendPrevPIDHint, port)
+		}
+	}
+	for path := range wantPaths {
+		if port := pathToPort[path]; port > 0 {
+			delete(s.serenaBackendPrevPIDHint, port)
+		}
 	}
 	for path := range persisted {
 		if dropGenerationAdvanced(path) {

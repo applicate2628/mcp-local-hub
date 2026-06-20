@@ -57,3 +57,13 @@ the poller wake is harmless because the reconcile is the precise filter.
   closed.
 
 Referenced from PR #384. Promotion to `accepted` is the architecture-reviewer's call.
+
+## Follow-up: baseline-absent prev-PID hint
+
+Round 4 kept the same delegation rule while closing the baseline-absent restart gap:
+the `daemon-backend-lost` subscriber may record the event's raw `port` and `prev_pid`
+as a port-keyed hint, but only `ReconcileSerenaBackendLossViaIPC` consumes that hint.
+The hint is used solely inside the reconcile owner's baseline-absent first-observation
+path, after idle-stop, restarting, absent-row, and dead-row cases have already been
+classified by the owner. The subscriber still does not map ports to workspaces, inspect
+IPC status, or call teardown.

@@ -632,8 +632,9 @@ type Server struct {
 	// ticks is a backend-loss signal, so reconcileSerenaBackendLossViaIPC
 	// tears down that workspace's router sessions. Owned solely by the
 	// reconcile goroutine + its tests; guarded so a future caller is safe.
-	serenaBackendPIDMu   sync.Mutex
-	serenaBackendLastPID map[string]int
+	serenaBackendPIDMu       sync.Mutex
+	serenaBackendLastPID     map[string]int
+	serenaBackendPrevPIDHint map[int]int // port -> prior-generation PID, consumed by the reconcile's baseline-absent path
 	// serenaBackendIdlePaths tracks workspace paths that were intentionally
 	// idle-stopped and the remaining post-clear grace ticks. The first running
 	// PID after that phase is a wake respawn, not backend loss, so reconcile
