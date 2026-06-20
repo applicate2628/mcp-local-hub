@@ -31,6 +31,14 @@ async function expandEnvironmentSection() {
   await userEvent.click(envHeader);
 }
 
+function accordionHeader(name: RegExp): HTMLButtonElement {
+  const header = screen
+    .getAllByRole("button", { name })
+    .find((button) => button.classList.contains("accordion-header"));
+  if (!header) throw new Error(`accordion header not found for ${name}`);
+  return header as HTMLButtonElement;
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -112,6 +120,58 @@ describe("AddServerScreen — A3-b SecretPicker integration (Codex plan-R1 P2-1 
 });
 
 describe("AddServerScreen — readiness inline secrets", () => {
+  it("opens the readiness accordion when the first readiness response inserts it", async () => {
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      if (url === "/api/secrets" && method === "GET") {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+
+    const readinessHeader = await screen.findByRole("button", { name: /Install readiness/i });
+    expect(readinessHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByTestId("readiness-panel")).toBeTruthy();
+  });
+
+  it("keeps Environment accordion state when readiness is inserted before it", async () => {
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      if (url === "/api/secrets" && method === "GET") {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+    await expandEnvironmentSection();
+    expect(accordionHeader(/Environment/i).getAttribute("aria-expanded")).toBe("true");
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await screen.findByRole("button", { name: /Install readiness/i });
+
+    expect(accordionHeader(/Environment/i).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByText(/Add environment variable/i)).toBeTruthy();
+  });
+
   it("clears typed inline secret values once the vault snapshot reports the key present", async () => {
     const requests: Array<{ url: string; method: string; body?: string }> = [];
     let vaultHasApiKey = false;
@@ -195,6 +255,90 @@ describe("AddServerScreen — readiness inline secrets", () => {
       expect(requests.filter((r) => r.url.startsWith("/api/install"))).toHaveLength(1);
     });
     expect(requests.filter((r) => r.url === "/api/secrets" && r.method === "POST")).toHaveLength(0);
+  });
+
+  it("writes an inline secret when live readiness says missing even if the local snapshot is stale-present", async () => {
+    const requests: Array<{ url: string; method: string; body?: string }> = [];
+    let servedStalePresentSnapshot = false;
+    let stored = false;
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      requests.push({ url, method, body: init?.body as string | undefined });
+      if (url === "/api/secrets" && method === "GET") {
+        const present = !servedStalePresentSnapshot || stored;
+        servedStalePresentSnapshot = true;
+        return Promise.resolve(jsonResponse({
+          vault_state: "ok",
+          secrets: present ? [{ name: "API_KEY", state: "present", used_by: [] }] : [],
+          manifest_errors: [],
+        }));
+      }
+      if (url === "/api/secrets" && method === "POST") {
+        stored = true;
+        return Promise.resolve(jsonResponse({}, 201));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({
+          server: "demo",
+          ready: true,
+          requirements: [{
+            name: "secret: API_KEY",
+            ok: false,
+            optional: true,
+            reason: "not set",
+          }],
+        }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        return Promise.resolve(jsonResponse({
+          yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\nenv:\n  API_KEY: secret:API_KEY\n",
+          hash: "hash-after-create",
+        }));
+      }
+      if (url.startsWith("/api/install")) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    await expandEnvironmentSection();
+    await user.click(screen.getByText(/Add environment variable/i));
+    const envRow = document.querySelector<HTMLElement>('[data-env-row="0"]')!;
+    await user.type(envRow.querySelector<HTMLInputElement>('input[placeholder="KEY"]')!, "API_KEY");
+    const secretInput = envRow.querySelector<HTMLInputElement>("input.secret-picker-input")!;
+    await user.click(secretInput);
+    await user.keyboard("secret:API_KEY");
+    await user.keyboard("{Tab}");
+
+    const inlineInput = await screen.findByTestId("readiness-secret-input-API_KEY") as HTMLInputElement;
+    await user.type(inlineInput, "fresh-secret-value");
+
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save-and-install"]')!);
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url.startsWith("/api/install"))).toHaveLength(1);
+    });
+
+    const secretPosts = requests.filter((r) => r.url === "/api/secrets" && r.method === "POST");
+    expect(secretPosts).toHaveLength(1);
+    expect(JSON.parse(secretPosts[0].body ?? "{}")).toEqual({
+      name: "API_KEY",
+      value: "fresh-secret-value",
+    });
   });
 });
 

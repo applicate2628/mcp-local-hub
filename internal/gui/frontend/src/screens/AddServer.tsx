@@ -19,7 +19,7 @@ import { AddSecretModal } from "../components/AddSecretModal";
 import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
 import { ReadinessPanel } from "../components/ReadinessPanel";
-import { addSecret, secretsInit } from "../lib/secrets-api";
+import { addSecret, getSecrets, secretsInit } from "../lib/secrets-api";
 import { inlineSecretsToWrite, secretRefKeys } from "../lib/inline-secrets";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
@@ -140,13 +140,11 @@ export function AddServerScreen(props: {
   // diverges, a Reinstall would install stale config while persisting current
   // refs, so it must be disabled until re-saved (Codex #378 r6).
   const manifestDirty = !deepEqualForm(formState, initialSnapshot);
-  // hasPendingInlineSecret counts ONLY inline values that persistInlineSecrets
-  // would actually WRITE — current valid secret: refs whose key is NOT already in
-  // the vault. Using the same single-owner filter (pendingInlineSecretEntries)
-  // keeps the dirty flag and the write set in lockstep: a value for a ref the
-  // user abandoned, OR a key resolved meanwhile via the AddSecretModal/another
-  // tab, is neither written nor counted as dirty — so the screen never stays
-  // permanently dirty with a hidden, already-resolved value (Codex #378 r6).
+  // hasPendingInlineSecret counts inline values that persistInlineSecrets would
+  // carry into its save-time confirmation: current valid secret: refs with typed
+  // plaintext. A local present snapshot must not suppress a write when the live
+  // readiness report is already saying the ref is missing; persistInlineSecrets
+  // rechecks the vault at click time before deciding to skip or write.
   const hasPendingInlineSecret = pendingInlineSecretEntries(formState).length > 0;
   // isDirty (sidebar/close navigation guard) — a value typed into a readiness
   // inline secret field is unsaved data too, so warn before discarding it (r4),
@@ -183,15 +181,16 @@ export function AddServerScreen(props: {
     // (Codex #378).
   }, [yamlPreview, debouncedState.name, snapshot.fetchedAt, mode, readinessEditName]);
 
-  // pendingInlineSecretEntries is the SINGLE OWNER of "which inline values still
-  // need writing": current valid-named secret: refs (inlineSecretsToWrite drops a
-  // value typed for a ref the user later removed/renamed, or a non-conforming/
-  // reserved key) MINUS keys already present in the vault (created meanwhile via
-  // the AddSecretModal / another tab — never re-written). The dirty flag and the
-  // persist write set both derive from this, so they can never drift (Codex #378
-  // r1/r2/r6).
+  // pendingInlineSecretEntries is the SINGLE OWNER of "which inline values are
+  // candidates for persistence": current valid-named secret: refs
+  // (inlineSecretsToWrite drops a value typed for a ref the user later
+  // removed/renamed, or a non-conforming/reserved key). It deliberately does NOT
+  // subtract local snapshot-present keys: the snapshot can be stale-present while
+  // live readiness is already missing that key. persistInlineSecrets performs the
+  // save-time presence check and otherwise lets addSecret race-safely return
+  // SECRETS_KEY_EXISTS.
   function pendingInlineSecretEntries(state: ManifestFormState): [string, string][] {
-    return inlineSecretsToWrite(inlineSecrets, state).filter(([key]) => !presentSecretKeys.has(key));
+    return inlineSecretsToWrite(inlineSecrets, state);
   }
 
   useEffect(() => {
@@ -225,15 +224,42 @@ export function AddServerScreen(props: {
     });
   }, [presentSecretKeyToken, presentSecretKeys]);
 
+  function clearInlineSecret(key: string) {
+    setInlineSecrets((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
   async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
     const entries = pendingInlineSecretEntries(state);
     if (entries.length === 0) return;
+    let vaultState = snapshot.data?.vault_state;
+    let confirmedPresentKeys = new Set<string>();
+    try {
+      const latest = await getSecrets();
+      vaultState = latest.vault_state;
+      confirmedPresentKeys = new Set(
+        (latest.secrets ?? [])
+          .filter((s) => s.state === "present")
+          .map((s) => s.name),
+      );
+    } catch {
+      // If the save-time list check is unavailable, do not trust a stale local
+      // present snapshot to suppress the user's typed value. Continue to the
+      // write path; addSecret will surface the real vault error or a benign 409.
+    }
     // A fresh profile has no vault yet — initialize it before the first write, or
     // addSecret fails on the uninitialized vault (Codex #378 r2).
-    if (snapshot.data?.vault_state !== "ok") {
+    if (vaultState !== "ok") {
       await secretsInit();
     }
     for (const [key, value] of entries) {
+      if (confirmedPresentKeys.has(key)) {
+        clearInlineSecret(key);
+        continue;
+      }
       try {
         await addSecret(key, value);
       } catch (err) {
@@ -245,11 +271,7 @@ export function AddServerScreen(props: {
       }
       // Clear each on success/already-present so a LATER failure's retry does not
       // re-attempt an already-written key (Codex #378 r2/r3).
-      setInlineSecrets((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
+      clearInlineSecret(key);
     }
     // Bumps snapshot.fetchedAt → re-runs the readiness effect above so the panel
     // drops the now-resolved secret prompts (Codex #378).
@@ -1123,7 +1145,7 @@ export function AddServerScreen(props: {
       <div class="card">
         <div class="add-server-grid">
           <div class="add-server-form">
-          <AccordionSection title="Basics" open={true}>
+          <AccordionSection key="basics" title="Basics" open={true}>
             <div class="form-row">
               <label for="field-name">Name</label>
               <input
@@ -1153,7 +1175,7 @@ export function AddServerScreen(props: {
             </div>
           </AccordionSection>
 
-          <AccordionSection title="Command">
+          <AccordionSection key="command" title="Command">
             <div class="form-row">
               <label for="field-transport">Transport</label>
               <select
@@ -1208,7 +1230,7 @@ export function AddServerScreen(props: {
           </AccordionSection>
 
           {(readiness || readinessLoading) && (
-            <AccordionSection title="Install readiness" open>
+            <AccordionSection key="install-readiness" title="Install readiness" open>
               <ReadinessPanel
                 report={readiness}
                 loading={readinessLoading}
@@ -1223,7 +1245,7 @@ export function AddServerScreen(props: {
             </AccordionSection>
           )}
 
-          <AccordionSection title="Environment">
+          <AccordionSection key="environment" title="Environment">
             <BrokenRefsSummary vaultState={summaryVaultState} brokenRefs={brokenRefs} />
             <div class="repeatable-rows" data-testid="env-rows">
               {formState.env.map((row, i) => (
@@ -1249,7 +1271,7 @@ export function AddServerScreen(props: {
               <button type="button" onClick={addEnv} disabled={readOnly} data-action="add-env">+ Add environment variable</button>
             </div>
           </AccordionSection>
-          <AccordionSection title="Daemons">
+          <AccordionSection key="daemons" title="Daemons">
             <div class="repeatable-rows" data-testid="daemon-rows">
               {formState.daemons.map((d, i) => (
                 <div class="form-row daemon-row" key={d._id} data-daemon-row={i}>
@@ -1277,7 +1299,7 @@ export function AddServerScreen(props: {
               <button type="button" onClick={addDaemon} disabled={readOnly} data-action="add-daemon">+ Add daemon</button>
             </div>
           </AccordionSection>
-          <AccordionSection title="Client bindings">
+          <AccordionSection key="client-bindings" title="Client bindings">
             <ClientBindingsSection
               daemons={formState.daemons}
               bindings={formState.client_bindings}
@@ -1288,7 +1310,7 @@ export function AddServerScreen(props: {
               readOnly={readOnly}
             />
           </AccordionSection>
-          <AccordionSection title="Advanced">
+          <AccordionSection key="advanced" title="Advanced">
             <div class="form-row">
               <label for="field-idle-timeout">Idle timeout (min)</label>
               <input
