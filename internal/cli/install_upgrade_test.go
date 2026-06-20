@@ -931,16 +931,20 @@ func TestInstallCmd_UpgradeMutexErrors(t *testing.T) {
 // interface so the new orchestrator stays pure (no globals to reset
 // across test runs).
 type fakeUpgradeDeps struct {
+	calls []string
+
 	renameAsideErr    error
 	renameAsideCalled bool
 
-	quiesceResult api.IPCResponse
-	quiesceErr    error
-	quiesceCalled bool
+	quiesceResult    api.IPCResponse
+	quiesceErr       error
+	quiesceCalled    bool
+	quiesceTimeoutMs int
 
-	exitResult api.IPCResponse
-	exitErr    error
-	exitCalled bool
+	exitResult    api.IPCResponse
+	exitErr       error
+	exitCalled    bool
+	exitTimeoutMs int
 
 	forceKillCalled bool
 	forceKillErr    error
@@ -950,26 +954,33 @@ type fakeUpgradeDeps struct {
 }
 
 func (f *fakeUpgradeDeps) RenameAsideBinary(target, newSrc string) error {
+	f.calls = append(f.calls, "rename")
 	f.renameAsideCalled = true
 	return f.renameAsideErr
 }
 
 func (f *fakeUpgradeDeps) QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error) {
+	f.calls = append(f.calls, "quiesce")
 	f.quiesceCalled = true
+	f.quiesceTimeoutMs = timeoutMs
 	return f.quiesceResult, f.quiesceErr
 }
 
 func (f *fakeUpgradeDeps) ExitGraceful(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error) {
+	f.calls = append(f.calls, "exit")
 	f.exitCalled = true
+	f.exitTimeoutMs = timeoutMs
 	return f.exitResult, f.exitErr
 }
 
 func (f *fakeUpgradeDeps) ForceKillSupervisor(pipePath string) error {
+	f.calls = append(f.calls, "force-kill")
 	f.forceKillCalled = true
 	return f.forceKillErr
 }
 
 func (f *fakeUpgradeDeps) StartSupervisor(binaryPath string) error {
+	f.calls = append(f.calls, "start")
 	f.startCalled = true
 	return f.startErr
 }
@@ -1385,13 +1396,12 @@ func TestRunInstallUpgrade_QuiesceErrorTriggersForceKill(t *testing.T) {
 	}
 }
 
-// TestRunInstallUpgrade_QuiesceCleanDoesNotTriggerForceKill is the
-// negative-path companion: when QuiesceTimers returns success with
-// still_running empty AND ExitGraceful succeeds, the orchestrator
-// must NOT invoke force-kill (which is the happy-path covered by
-// TestInstallUpgrade_HappyPath, replicated here with explicit
-// ExpectedPorts + VerifyPortsUnbound to ensure neither fires).
-func TestRunInstallUpgrade_QuiesceCleanDoesNotTriggerForceKill(t *testing.T) {
+// TestRunInstallUpgrade_QuiesceCleanVerifiesPortsWithoutForceKill is the
+// negative force-kill companion: when QuiesceTimers returns success with
+// still_running empty AND ExitGraceful succeeds, the orchestrator must NOT invoke
+// force-kill, but it must still prove daemon ports are unbound before spawning
+// the successor.
+func TestRunInstallUpgrade_QuiesceCleanVerifiesPortsWithoutForceKill(t *testing.T) {
 	mock := &fakeUpgradeDeps{
 		quiesceResult: api.IPCResponse{
 			ID: 1,
@@ -1424,8 +1434,172 @@ func TestRunInstallUpgrade_QuiesceCleanDoesNotTriggerForceKill(t *testing.T) {
 	if mock.forceKillCalled {
 		t.Error("force-kill must NOT fire on clean quiesce + clean exit")
 	}
-	if verifyCalled {
-		t.Error("VerifyPortsUnbound must NOT fire on clean quiesce + clean exit (no force-kill ran)")
+	if !verifyCalled {
+		t.Error("VerifyPortsUnbound must fire on clean quiesce + clean exit before successor start")
+	}
+}
+
+// TestRunInstallUpgrade_CleanGracefulPathVerifiesHandoff pins the audit P1:
+// a clean exit{graceful} ACK is not enough to report success. The old
+// supervisor must release supervisor.lock, the prior daemon ports must be
+// observed unbound, the successor must be spawned, and IPC readiness must be
+// verified before RunInstallUpgrade returns nil.
+func TestRunInstallUpgrade_CleanGracefulPathVerifiesHandoff(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{
+			ID: 1,
+			OK: true,
+			Result: map[string]any{
+				"drained":       1.0,
+				"still_running": []any{},
+			},
+			Final: true,
+		},
+		exitResult: api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:    "/fake/mcphub",
+		NewBinary:     "/fake/mcphub.new",
+		PipePath:      "fake-pipe",
+		ExitTimeoutMs: 5000,
+		ExpectedPorts: []int{9128},
+		VerifyPortsUnbound: func(ports []int, timeout time.Duration) error {
+			mock.calls = append(mock.calls, "verify-ports")
+			return nil
+		},
+		WaitSupervisorLockReleased: func(ctx context.Context, timeout time.Duration) error {
+			mock.calls = append(mock.calls, "wait-lock")
+			return nil
+		},
+		WaitSupervisorReady: func(ctx context.Context, timeout time.Duration) error {
+			mock.calls = append(mock.calls, "wait-ready")
+			return nil
+		},
+		Deps: mock,
+	})
+	if err != nil {
+		t.Fatalf("clean graceful handoff should converge: %v", err)
+	}
+	if mock.forceKillCalled {
+		t.Fatal("force-kill must not run on clean quiesce + clean graceful exit")
+	}
+	want := []string{"rename", "quiesce", "exit", "wait-lock", "verify-ports", "start", "wait-ready"}
+	if strings.Join(mock.calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("call order = %v, want %v", mock.calls, want)
+	}
+}
+
+func TestRunInstallUpgrade_HandoffWaitHonorsCallerGracefulBudget(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{
+			ID: 1,
+			OK: true,
+			Result: map[string]any{
+				"drained":       1.0,
+				"still_running": []any{},
+			},
+			Final: true,
+		},
+		exitResult: api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+
+	var lockWaitTimeout time.Duration
+	var readyWaitTimeout time.Duration
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:    "/fake/mcphub",
+		NewBinary:     "/fake/mcphub.new",
+		PipePath:      "fake-pipe",
+		ExitTimeoutMs: 90000,
+		WaitSupervisorLockReleased: func(ctx context.Context, timeout time.Duration) error {
+			lockWaitTimeout = timeout
+			return nil
+		},
+		WaitSupervisorReady: func(ctx context.Context, timeout time.Duration) error {
+			readyWaitTimeout = timeout
+			return nil
+		},
+		Deps: mock,
+	})
+	if err != nil {
+		t.Fatalf("clean graceful handoff should converge: %v", err)
+	}
+	if mock.exitTimeoutMs != 90000 {
+		t.Fatalf("ExitGraceful timeout = %dms, want caller-supplied 90000ms", mock.exitTimeoutMs)
+	}
+	want := time.Duration(defaultQuiesceTimeoutMs+90000) * time.Millisecond
+	if lockWaitTimeout != want {
+		t.Fatalf("WaitSupervisorLockReleased timeout = %s, want %s", lockWaitTimeout, want)
+	}
+	if readyWaitTimeout != want {
+		t.Fatalf("WaitSupervisorReady timeout = %s, want %s", readyWaitTimeout, want)
+	}
+}
+
+// TestRunInstallUpgrade_CleanGracefulNeverReadySuccessorFails injects the
+// real-world P1 failure shape: the detached successor never becomes reachable
+// via IPC status. The upgrade must return a clear error instead of reporting
+// success after StartSupervisor returns.
+func TestRunInstallUpgrade_CleanGracefulNeverReadySuccessorFails(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{
+			ID:     1,
+			OK:     true,
+			Result: map[string]any{"drained": 1.0, "still_running": []any{}},
+			Final:  true,
+		},
+		exitResult: api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+	neverReady := errors.New("status poll timed out: supervisor.lock held by prior PID")
+
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub",
+		NewBinary:  "/fake/mcphub.new",
+		PipePath:   "fake-pipe",
+		WaitSupervisorLockReleased: func(ctx context.Context, timeout time.Duration) error {
+			return nil
+		},
+		WaitSupervisorReady: func(ctx context.Context, timeout time.Duration) error {
+			return neverReady
+		},
+		Deps: mock,
+	})
+	if err == nil {
+		t.Fatal("upgrade must fail when the successor never becomes IPC-ready")
+	}
+	if !strings.Contains(err.Error(), "IPC-ready") {
+		t.Fatalf("error should name successor IPC readiness, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "mcphub supervise") {
+		t.Fatalf("error should include foreground recovery guidance, got %v", err)
+	}
+}
+
+// TestRunInstallUpgrade_SweepsOldBinariesAfterSuccessfulSwap pins the P3
+// wiring: the cold-restart upgrade path must invoke the .old-<timestamp> sweep
+// after a successful rename-aside swap. Sweep failures are warning-only, so the
+// test uses a nil sweep result and asserts only the production call path.
+func TestRunInstallUpgrade_SweepsOldBinariesAfterSuccessfulSwap(t *testing.T) {
+	installDir := t.TempDir()
+	target := filepath.Join(installDir, "mcphub.exe")
+	mock := &fakeUpgradeDeps{}
+	var swept []string
+	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+		swept = append(swept, dir)
+		return nil
+	})
+	defer cleanupSweep()
+
+	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: target,
+		NewBinary:  target + ".new",
+		PipePath:   "fake-pipe",
+		Deps:       mock,
+	}); err != nil {
+		t.Fatalf("upgrade with sweep should still converge: %v", err)
+	}
+	if len(swept) != 1 || swept[0] != installDir {
+		t.Fatalf("sweep calls = %v, want [%s]", swept, installDir)
 	}
 }
 
