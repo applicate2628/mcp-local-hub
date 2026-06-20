@@ -218,7 +218,7 @@ func TestAdmissionCheckPoolExhaustionIsAdvisory(t *testing.T) {
 	}
 }
 
-func TestAdmissionCheckDaemonTemplatePoolForeignBoundExistingWorkspaceIsBlocking(t *testing.T) {
+func TestAdmissionCheckDaemonTemplatePoolForeignBoundExistingWorkspaceIsAdvisory(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		occupiedPort int
@@ -249,28 +249,34 @@ func TestAdmissionCheckDaemonTemplatePoolForeignBoundExistingWorkspaceIsBlocking
 				},
 			}
 
-			if err := Preflight(m, ""); err == nil {
-				t.Fatal("Preflight accepted a daemon-template pool whose existing workspace port is OS-bound by a foreign process; want blocking rejection")
+			if err := Preflight(m, ""); err != nil {
+				t.Fatalf("Preflight rejected a foreign-bound existing workspace pool: %v (pool bind snapshots must not block install/reinstall)", err)
 			}
-			if CheckServerReadiness(m).Ready {
-				t.Fatal("CheckServerReadiness.Ready=true with a foreign-bound existing workspace port; want false")
+			if !CheckServerReadiness(m).Ready {
+				t.Fatal("CheckServerReadiness.Ready=false with a foreign-bound existing workspace port; pool bind snapshots must not block readiness")
 			}
 			f, ok := admissionFindingByID(AdmissionCheck(m, AdmissionScope{}), "port-pool-free")
 			if !ok {
-				t.Fatal("port-pool-free finding missing for foreign-bound existing workspace port")
+				t.Fatal("port-pool-free advisory missing for a registry-full pool")
 			}
-			if f.Optional {
-				t.Fatal("foreign-bound existing workspace port finding is optional; want blocking")
+			if !f.Optional {
+				t.Fatal("port-pool-free finding is non-optional; registry-full pool capacity must be advisory")
 			}
 		})
 	}
 }
 
-func TestAdmissionCheckTopLevelPoolExhaustionIsBlocking(t *testing.T) {
+func TestAdmissionCheckTopLevelPoolExhaustionIsAdvisory(t *testing.T) {
 	setupAdmissionParityTest(t)
-	// The legacy workspace-scoped LSP shape allocates from m.PortPool during
-	// workspace registration, so a fully occupied top-level pool is not ready.
-	portAvailable = func(int) bool { return false }
+	portAvailable = func(int) bool { return true }
+	seedAdmissionWorkspaceRegistry(t, WorkspaceEntry{
+		WorkspaceKey:  "go-workspace",
+		WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
+		Language:      "go",
+		Backend:       "legacy-lsp",
+		Port:          55000,
+		TaskName:      "mcp-local-hub-legacy-lsp-go-workspace",
+	})
 
 	m := &config.ServerManifest{
 		Name:      "legacy-lsp-exhausted-pool",
@@ -283,18 +289,77 @@ func TestAdmissionCheckTopLevelPoolExhaustionIsBlocking(t *testing.T) {
 		},
 	}
 
-	if err := Preflight(m, ""); err == nil {
-		t.Fatal("Preflight accepted an exhausted top-level workspace pool; want blocking rejection")
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("Preflight rejected an exhausted top-level workspace pool: %v (pool exhaustion must be advisory)", err)
 	}
-	if CheckServerReadiness(m).Ready {
-		t.Fatal("CheckServerReadiness.Ready=true on exhausted top-level workspace pool; want false")
+	if !CheckServerReadiness(m).Ready {
+		t.Fatal("CheckServerReadiness.Ready=false on exhausted top-level workspace pool; pool exhaustion must be advisory")
 	}
 	f, ok := admissionFindingByID(AdmissionCheck(m, AdmissionScope{}), "port-pool-free")
 	if !ok {
 		t.Fatal("port-pool-free finding missing for exhausted top-level pool")
 	}
-	if f.Optional {
-		t.Fatal("top-level port-pool-free finding is optional; want blocking")
+	if !f.Optional {
+		t.Fatal("top-level port-pool-free finding is non-optional; want advisory")
+	}
+}
+
+func TestAdmissionCheckPoolRegistryReadFailureIsBlocking(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		seed func(t *testing.T)
+	}{
+		{
+			name: "resolve failure",
+			seed: func(t *testing.T) {
+				defaultRegistryPathFn = func() (string, error) {
+					return "", errors.New("registry path unavailable")
+				}
+			},
+		},
+		{
+			name: "load failure",
+			seed: func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "workspaces.yaml")
+				if err := os.WriteFile(path, []byte("workspaces:\n  - ["), 0o600); err != nil {
+					t.Fatalf("seed corrupt registry: %v", err)
+				}
+				defaultRegistryPathFn = func() (string, error) {
+					return path, nil
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupAdmissionParityTest(t)
+			tc.seed(t)
+
+			m := &config.ServerManifest{
+				Name:      "registry-read-fails",
+				Kind:      config.KindWorkspaceScoped,
+				Transport: config.TransportNativeHTTP,
+				Command:   "go",
+				DaemonTemplate: &config.DaemonTemplate{
+					Context:  "workspace",
+					PortPool: &config.PortPool{Start: 55000, End: 55000},
+				},
+			}
+
+			if err := Preflight(m, ""); err == nil {
+				t.Fatal("Preflight accepted a workspace pool when the registry cannot be read; want blocking rejection")
+			}
+			rep := CheckServerReadiness(m)
+			if rep.Ready {
+				t.Fatalf("CheckServerReadiness.Ready=true when the registry cannot be read; requirements: %#v", rep.Requirements)
+			}
+			f, ok := admissionFindingByID(AdmissionCheck(m, AdmissionScope{}), "port-pool-registry")
+			if !ok {
+				t.Fatal("port-pool-registry finding missing for registry read failure")
+			}
+			if f.Optional {
+				t.Fatal("port-pool-registry finding is optional; registry read failures must block pool installs")
+			}
+		})
 	}
 }
 

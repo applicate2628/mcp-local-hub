@@ -198,98 +198,6 @@ func manifestPortPools(m *config.ServerManifest) []manifestPortPool {
 	return pools
 }
 
-type registryPortOwners map[int][]WorkspaceEntry
-
-func registryPortOwnersFromEntries(entries []WorkspaceEntry) registryPortOwners {
-	out := registryPortOwners{}
-	for _, entry := range entries {
-		if entry.Port <= 0 {
-			continue
-		}
-		out[entry.Port] = append(out[entry.Port], entry)
-	}
-	return out
-}
-
-func (owners registryPortOwners) allocated(port int) bool {
-	return len(owners[port]) > 0
-}
-
-func (owners registryPortOwners) entriesNeedingPort(port int, nativeHTTP bool) []WorkspaceEntry {
-	var out []WorkspaceEntry
-	out = append(out, owners[port]...)
-	if nativeHTTP {
-		out = append(out, owners[port-config.NativeHTTPInternalPortOffset]...)
-	}
-	return out
-}
-
-func (owners registryPortOwners) heldByRegisteredDaemon(port int, server string, nativeHTTP bool) bool {
-	for _, entry := range owners[port] {
-		if daemon := workspaceRegistryDaemonName(entry); daemon != "" && portHeldByOurDaemonForPortArm(port, server, daemon, false) {
-			return true
-		}
-	}
-	if nativeHTTP {
-		for _, entry := range owners[port-config.NativeHTTPInternalPortOffset] {
-			if daemon := workspaceRegistryDaemonName(entry); daemon != "" && portHeldByOurDaemonForPortArm(port, server, daemon, true) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func workspaceRegistryDaemonName(entry WorkspaceEntry) string {
-	if entry.WorkspaceKey != "" {
-		return entry.WorkspaceKey
-	}
-	if entry.WorkspacePath != "" {
-		return WorkspaceKey(entry.WorkspacePath)
-	}
-	return ""
-}
-
-type portPoolAvailability struct {
-	free                    bool
-	foreignBoundNeeded      bool
-	foreignBoundUnallocated bool
-}
-
-func inspectPortPoolAvailability(p *config.PortPool, server string, nativeHTTP bool, owners registryPortOwners) portPoolAvailability {
-	var status portPoolAvailability
-	for port := p.Start; port <= p.End; port++ {
-		externalTaken, foreignNeeded, foreignUnallocated := inspectPoolPort(port, server, nativeHTTP, owners)
-		status.foreignBoundNeeded = status.foreignBoundNeeded || foreignNeeded
-		status.foreignBoundUnallocated = status.foreignBoundUnallocated || foreignUnallocated
-
-		internalTaken := false
-		if nativeHTTP {
-			internalTaken, foreignNeeded, foreignUnallocated = inspectPoolPort(port+config.NativeHTTPInternalPortOffset, server, nativeHTTP, owners)
-			status.foreignBoundNeeded = status.foreignBoundNeeded || foreignNeeded
-			status.foreignBoundUnallocated = status.foreignBoundUnallocated || foreignUnallocated
-		}
-
-		if externalTaken || internalTaken {
-			continue
-		}
-		status.free = true
-	}
-	return status
-}
-
-func inspectPoolPort(port int, server string, nativeHTTP bool, owners registryPortOwners) (taken, foreignBoundNeeded, foreignBoundUnallocated bool) {
-	available := portAvailable(port)
-	taken = !available || owners.allocated(port)
-	if available {
-		return taken, false, false
-	}
-	if len(owners.entriesNeedingPort(port, nativeHTTP)) == 0 {
-		return taken, false, true
-	}
-	return taken, !owners.heldByRegisteredDaemon(port, server, nativeHTTP), false
-}
-
 func portPoolName(p *config.PortPool) string {
 	return fmt.Sprintf("port pool %d-%d", p.Start, p.End)
 }
@@ -309,6 +217,30 @@ func nativeHTTPPoolOverflowReason(p *config.PortPool) string {
 
 func nativeHTTPPoolOverflowFix() string {
 	return fmt.Sprintf("Keep the pool's ports at or below %d so external+%d stays within 1..65535.", nativeHTTPPoolExternalCeiling(), config.NativeHTTPInternalPortOffset)
+}
+
+func loadRegistryAllocatedPorts() (map[int]bool, error) {
+	regPath, err := DefaultRegistryPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve registry path: %w", err)
+	}
+	reg := NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		return nil, fmt.Errorf("load registry: %w", err)
+	}
+	return reg.AllocatedPorts(), nil
+}
+
+func portPoolFullyAllocatedByRegistry(p *config.PortPool, allocatedPorts map[int]bool) bool {
+	if p == nil || p.End < p.Start {
+		return false
+	}
+	for port := p.Start; port <= p.End; port++ {
+		if !allocatedPorts[port] {
+			return false
+		}
+	}
+	return true
 }
 
 func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
@@ -333,8 +265,8 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 		}
 	}
 
-	var registryOwners registryPortOwners
-	if regPath, err := DefaultRegistryPath(); err != nil {
+	allocatedPorts, registryErr := loadRegistryAllocatedPorts()
+	if registryErr != nil {
 		for _, pp := range pools {
 			p := pp.pool
 			if p == nil || p.End < p.Start {
@@ -343,19 +275,6 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 			add("port-pool-registry", portPoolName(p), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
 		}
 		return findings
-	} else {
-		reg := NewRegistry(regPath)
-		if err := reg.Load(); err != nil {
-			for _, pp := range pools {
-				p := pp.pool
-				if p == nil || p.End < p.Start {
-					continue
-				}
-				add("port-pool-registry", portPoolName(p), "the workspace registry could not be read or resolved (register reads it before allocating a pool port)", "Fix or remove the corrupt workspaces.yaml registry (register reads it before allocating a pool port).", false)
-			}
-			return findings
-		}
-		registryOwners = registryPortOwnersFromEntries(reg.Workspaces)
 	}
 
 	for _, pp := range pools {
@@ -366,25 +285,8 @@ func admissionPortPoolFindings(m *config.ServerManifest) []AdmissionFinding {
 		if nativeHTTPPoolOverflows(p, nativeHTTP) {
 			continue
 		}
-		name := portPoolName(p)
-		availability := inspectPortPoolAvailability(p, m.Name, nativeHTTP, registryOwners)
-		if availability.foreignBoundNeeded || (!availability.free && availability.foreignBoundUnallocated) {
-			reason := "no port in the workspace pool is free because a pool port is OS-bound by a foreign process"
-			if availability.foreignBoundNeeded {
-				reason = "an existing workspace pool port is OS-bound by a foreign process"
-			}
-			add("port-pool-free", name, reason, "Free the foreign process holding the pool port (or its native-http +offset upstream), or widen the pool in the manifest.", false)
-			continue
-		}
-		if !availability.free {
-			optional := pp.daemonTemplate
-			reason := "no port in the workspace pool is free (OS-bound or registry-allocated)"
-			if optional {
-				// ADVISORY only for daemon-template dynamic-pool installs/reinstalls:
-				// those allocate no new pool port; workspace registration does.
-				reason = "no port in the workspace pool is free for a NEW workspace (registry-allocated by existing workspaces); existing workspaces and reinstall are unaffected"
-			}
-			add("port-pool-free", name, reason, "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest, before registering a new workspace.", optional)
+		if portPoolFullyAllocatedByRegistry(p, allocatedPorts) {
+			add("port-pool-free", portPoolName(p), "no port in the workspace pool is free for a NEW workspace (registry-allocated by existing workspaces); existing workspaces and reinstall are unaffected", "Free a pool port or widen the pool in the manifest before registering a new workspace.", true)
 		}
 	}
 	return findings

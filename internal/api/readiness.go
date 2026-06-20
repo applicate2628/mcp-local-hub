@@ -606,32 +606,20 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 	}
 
-	// Workspace-scoped (dynamic-pool) registration allocates from a PortPool;
-	// m.Daemons is EMPTY for these (e.g. mcp-language-server), so the
-	// daemon-port loop above checks nothing. A port counts as TAKEN when it is
-	// OS-bound OR already recorded in the registry (workspaces.yaml) — register's
-	// AllocatePort skips registry-allocated ports and returns
-	// ErrPortPoolExhausted even if nothing is currently listening (Codex #377
-	// r4). For a native-http pool the materialized proxy also binds
-	// external+offset upstream, so BOTH must be free.
-	var registryOwners registryPortOwners
+	// Workspace-scoped (dynamic-pool) registration allocates from a PortPool.
+	// Admission/readiness keep only scope-independent blocking checks here:
+	// native-http offset overflow and registry read/resolve failure. AllocatePort
+	// remains the registration-time owner for OS-bound/foreign-bound/free-port
+	// decisions.
+	var allocatedPorts map[int]bool
 	var registryLoadErr error
 	// register resolves the path (DefaultRegistryPath) AND loads it before
 	// allocating; BOTH can fail (no resolvable home/state dir in a headless
 	// session → path error; corrupt file → load error). Either leaves register
 	// unable to allocate, so capture it and let checkPool surface it as
-	// blocking rather than silently falling back to OS-bound ports — which
-	// would report the pool ready while register fails (Codex #377 r5/r7).
-	if regPath, perr := DefaultRegistryPath(); perr != nil {
-		registryLoadErr = fmt.Errorf("resolve registry path: %w", perr)
-	} else {
-		reg := NewRegistry(regPath)
-		if lerr := reg.Load(); lerr != nil {
-			registryLoadErr = fmt.Errorf("load registry: %w", lerr)
-		} else {
-			registryOwners = registryPortOwnersFromEntries(reg.Workspaces)
-		}
-	}
+	// blocking rather than silently reporting the pool ready while register
+	// fails (Codex #377 r5/r7).
+	allocatedPorts, registryLoadErr = loadRegistryAllocatedPorts()
 	checkPool := func(pp manifestPortPool, nativeHTTP bool) {
 		p := pp.pool
 		if p == nil || p.End < p.Start {
@@ -661,31 +649,11 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			return
 		}
 		name := portPoolName(p)
-		availability := inspectPortPoolAvailability(p, m.Name, nativeHTTP, registryOwners)
-		if availability.foreignBoundNeeded || (!availability.free && availability.foreignBoundUnallocated) {
-			reason := "no port in the workspace pool is free because a pool port is OS-bound by a foreign process"
-			if availability.foreignBoundNeeded {
-				reason = "an existing workspace pool port is OS-bound by a foreign process"
-			}
-			add(ReadinessRequirement{Name: name, OK: false,
-				Reason: reason,
-				Fix:    "Free the foreign process holding the pool port (or its native-http +offset upstream), or widen the pool in the manifest."})
-			return
+		if portPoolFullyAllocatedByRegistry(p, allocatedPorts) {
+			add(ReadinessRequirement{Name: name, OK: false, Optional: true,
+				Reason: "no port in the workspace pool is free for a NEW workspace (registry-allocated by existing workspaces); existing workspaces and reinstall are unaffected",
+				Fix:    "Free a pool port or widen the pool in the manifest before registering a new workspace."})
 		}
-		if availability.free {
-			add(ReadinessRequirement{Name: name, OK: true})
-			return
-		}
-		optional := pp.daemonTemplate
-		reason := "no port in the workspace pool is free (OS-bound or registry-allocated)"
-		if optional {
-			// ADVISORY only for daemon-template dynamic-pool installs/reinstalls:
-			// those allocate no new pool port; workspace registration does.
-			reason = "no port in the workspace pool is free for a NEW workspace (registry-allocated by existing workspaces); existing workspaces and reinstall are unaffected"
-		}
-		add(ReadinessRequirement{Name: name, OK: false, Optional: optional,
-			Reason: reason,
-			Fix:    "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest, before registering a new workspace."})
 	}
 	// Serena's dynamic-pool manifest is transport: native-http, so its
 	// materialized proxies bind external+offset upstream — mNative drives the
