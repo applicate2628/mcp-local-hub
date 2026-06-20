@@ -118,3 +118,14 @@ cancels the delayed goroutine before restoring the seam, or makes the exit
 seam swap+goroutine-join atomic within the test. Do NOT patch on this theory
 without capturing the actual ordering. Out of scope for groups Phase 5b-1;
 flagged for the orchestrator.
+
+Resolution update (2026-06-20): this adjacent finding was fixed while
+verifying PR #385 r4 because the required
+`go test -tags=test_state_path_env -race -run 'HubListener|HubRestart|Restart'
+./internal/gui/ ./internal/api/` command selects `TestGUISelfRestart_*` via the
+`Restart` regex. The captured stack showed the delayed goroutine calling
+`selfRestartExitFn` after test cleanup restored the production `os.Exit` seam
+(`internal/gui/gui_self_restart.go:142-153`,
+`internal/gui/gui_self_restart_test.go:18-25`). The test now waits for the
+delayed exit seam in the spawn-success case before cleanup restores production
+hooks; `GuiSelfRestart|SelfRestart` and the full requested race subset pass.

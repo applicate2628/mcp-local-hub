@@ -5,16 +5,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // swapSelfRestartSeams installs spawn + exit seams for the test scope and
 // restores them on cleanup. The exit seam records whether the handler
 // asked to exit (it must NOT call os.Exit in a test). The spawn seam
 // returns the supplied (pid, err) without launching any real process.
-func swapSelfRestartSeams(t *testing.T, pid int, spawnErr error) (exited *bool) {
+func swapSelfRestartSeams(t *testing.T, pid int, spawnErr error) (exited *bool, waitExit func()) {
 	t.Helper()
 	origSpawn := selfRestartSpawnFn
 	origExit := selfRestartExitFn
+	exitCalled := make(chan struct{})
 	t.Cleanup(func() {
 		selfRestartSpawnFn = origSpawn
 		selfRestartExitFn = origExit
@@ -22,8 +24,19 @@ func swapSelfRestartSeams(t *testing.T, pid int, spawnErr error) (exited *bool) 
 	ex := false
 	exited = &ex
 	selfRestartSpawnFn = func() (int, error) { return pid, spawnErr }
-	selfRestartExitFn = func() { ex = true } // never os.Exit in a test
-	return exited
+	selfRestartExitFn = func() {
+		ex = true
+		close(exitCalled)
+	} // never os.Exit in a test
+	waitExit = func() {
+		t.Helper()
+		select {
+		case <-exitCalled:
+		case <-time.After(selfRestartExitDelay + time.Second):
+			t.Fatal("timed out waiting for self-restart exit seam")
+		}
+	}
+	return exited, waitExit
 }
 
 // TestGUISelfRestart_SpawnSuccess: a successful spawn returns 200 with
@@ -31,7 +44,7 @@ func swapSelfRestartSeams(t *testing.T, pid int, spawnErr error) (exited *bool) 
 // (via the seam) so the lock is handed off.
 func TestGUISelfRestart_SpawnSuccess(t *testing.T) {
 	s := NewServer(Config{Port: 9})
-	_ = swapSelfRestartSeams(t, 4242, nil)
+	exited, waitExit := swapSelfRestartSeams(t, 4242, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/gui/restart", nil)
 	req.Header.Set("Origin", "http://127.0.0.1:9")
@@ -51,6 +64,10 @@ func TestGUISelfRestart_SpawnSuccess(t *testing.T) {
 	if resp.SpawnError != "" {
 		t.Fatalf("unexpected spawn_error %q", resp.SpawnError)
 	}
+	waitExit()
+	if !*exited {
+		t.Fatal("handler did not invoke self-restart exit seam")
+	}
 }
 
 // TestGUISelfRestart_SpawnFailureNoExit: when the spawn fails the handler
@@ -58,7 +75,7 @@ func TestGUISelfRestart_SpawnSuccess(t *testing.T) {
 // error in the body with spawned:false / restarting:false.
 func TestGUISelfRestart_SpawnFailureNoExit(t *testing.T) {
 	s := NewServer(Config{Port: 9})
-	exited := swapSelfRestartSeams(t, 0, errSelfRestartTest)
+	exited, _ := swapSelfRestartSeams(t, 0, errSelfRestartTest)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/gui/restart", nil)
 	req.Header.Set("Origin", "http://127.0.0.1:9")
@@ -86,7 +103,7 @@ func TestGUISelfRestart_SpawnFailureNoExit(t *testing.T) {
 // TestGUISelfRestart_MethodNotAllowed: GET is rejected 405.
 func TestGUISelfRestart_MethodNotAllowed(t *testing.T) {
 	s := NewServer(Config{Port: 9})
-	_ = swapSelfRestartSeams(t, 1, nil)
+	_, _ = swapSelfRestartSeams(t, 1, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/gui/restart", nil)
 	rr := httptest.NewRecorder()
