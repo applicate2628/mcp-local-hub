@@ -395,6 +395,15 @@ func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
 	}
 }
 
+func TestReadinessHandler_DraftPOST_RejectsOversizedBody(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	body, _ := json.Marshal(map[string]string{"yaml": strings.Repeat("a", maxReadinessDraftBodyBytes)})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 413 {
+		t.Fatalf("got %d, want 413 for an oversized draft readiness body: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestReadinessHandler_ByName_EmbeddedServer(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	rr := sameOriginGet(s, "/api/server/readiness?server=memory")

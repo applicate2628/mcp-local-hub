@@ -2,6 +2,7 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,6 +34,8 @@ type readinessDraftRequest struct {
 	Mode     string `json:"mode"`
 	EditName string `json:"edit_name"`
 }
+
+const maxReadinessDraftBodyBytes = 1 << 20 // 1 MiB; draft manifests are text and should stay small.
 
 func (s *Server) readinessHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -71,7 +74,13 @@ func (s *Server) readinessByName(w http.ResponseWriter, r *http.Request) {
 // manifest exists on disk.
 func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 	var req readinessDraftRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxReadinessDraftBodyBytes))
+	if err := dec.Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "draft manifest request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
