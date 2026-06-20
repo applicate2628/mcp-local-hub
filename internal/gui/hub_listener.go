@@ -90,6 +90,203 @@ func (c *HubListenerComponents) Alive() bool {
 	return c.alive.Load()
 }
 
+const (
+	hubListenerRestartBaseBackoff            = 5 * time.Second
+	hubListenerRestartMaxBackoff             = 5 * time.Minute
+	hubListenerRestartMaxConsecutiveRestarts = 5
+	hubListenerRestartStableWindow           = api.DefaultHubHealthProbeInterval
+)
+
+type hubListenerRestartSignalContextKey struct{}
+
+type hubListenerRestartDriverOptions struct {
+	startFn    func(context.Context) (*HubListenerComponents, error)
+	shutdownFn func(context.Context, *HubListenerComponents)
+	emitFn     func(level, event string, fields map[string]any) error
+	sleepFn    func(context.Context, time.Duration) bool
+	nowFn      func() time.Time
+}
+
+func contextWithHubListenerRestartSignal(ctx context.Context, s *Server) context.Context {
+	if s == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, hubListenerRestartSignalContextKey{}, s.signalHubListenerRestart)
+}
+
+func hubListenerRestartSignalFromContext(ctx context.Context) func() {
+	if ctx == nil {
+		return nil
+	}
+	fn, _ := ctx.Value(hubListenerRestartSignalContextKey{}).(func())
+	return fn
+}
+
+func (s *Server) signalHubListenerRestart() {
+	if s == nil || s.hubRestartCh == nil {
+		return
+	}
+	select {
+	case s.hubRestartCh <- struct{}{}:
+	default:
+	}
+}
+
+func runHubListenerRestartDriver(ctx context.Context, s *Server, opts hubListenerRestartDriverOptions) {
+	if s == nil || s.hubRestartCh == nil {
+		return
+	}
+	opts = normalizeHubListenerRestartDriverOptions(s, opts)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.hubRestartCh:
+			if !restartHubListener(ctx, s, opts) {
+				return
+			}
+		}
+	}
+}
+
+func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestartDriverOptions) hubListenerRestartDriverOptions {
+	if opts.startFn == nil {
+		opts.startFn = func(ctx context.Context) (*HubListenerComponents, error) {
+			return startHubMcpListener(ctx, true, s.api)
+		}
+	}
+	if opts.shutdownFn == nil {
+		opts.shutdownFn = ShutdownHubListener
+	}
+	if opts.emitFn == nil {
+		opts.emitFn = api.LogHubMcpEvent
+	}
+	if opts.sleepFn == nil {
+		opts.sleepFn = hubListenerRestartSleep
+	}
+	if opts.nowFn == nil {
+		opts.nowFn = time.Now
+	}
+	return opts
+}
+
+func restartHubListener(ctx context.Context, s *Server, opts hubListenerRestartDriverOptions) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+
+	oldTaken := false
+	restartPort := 0
+	for {
+		if ctx.Err() != nil {
+			return false
+		}
+		if !s.hubRestartLastSuccess.IsZero() && opts.nowFn().Sub(s.hubRestartLastSuccess) >= hubListenerRestartStableWindow {
+			s.hubRestartConsecutive = 0
+			s.hubRestartLastSuccess = time.Time{}
+		}
+		if s.hubRestartConsecutive >= hubListenerRestartMaxConsecutiveRestarts {
+			if restartPort == 0 {
+				if comp := s.hubMcpComp.Load(); comp != nil {
+					restartPort = comp.port
+				}
+			}
+			_ = opts.emitFn("error", "hub-listener-restart-exhausted", map[string]any{
+				"attempts":                 s.hubRestartConsecutive,
+				"max_consecutive_restarts": hubListenerRestartMaxConsecutiveRestarts,
+				"port":                     restartPort,
+			})
+			return false
+		}
+
+		s.hubRestartConsecutive++
+		attempt := s.hubRestartConsecutive
+		if !opts.sleepFn(ctx, hubListenerRestartBackoff(attempt)) {
+			return false
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+
+		if !oldTaken {
+			old := s.hubMcpComp.Swap(nil)
+			if old == nil {
+				return false
+			}
+			oldTaken = true
+			restartPort = old.port
+			opts.shutdownFn(ctx, old)
+			if ctx.Err() != nil {
+				return false
+			}
+		}
+
+		newComp, err := opts.startFn(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return false
+			}
+			_ = opts.emitFn("warn", "hub-listener-restart-failed", map[string]any{
+				"port":    restartPort,
+				"attempt": attempt,
+				"err":     err.Error(),
+			})
+			continue
+		}
+		if newComp == nil {
+			_ = opts.emitFn("warn", "hub-listener-restart-failed", map[string]any{
+				"port":    restartPort,
+				"attempt": attempt,
+				"err":     "startHubMcpListener returned nil bundle",
+			})
+			continue
+		}
+		if !s.hubMcpComp.CompareAndSwap(nil, newComp) {
+			opts.shutdownFn(context.Background(), newComp)
+			return false
+		}
+		restartPort = newComp.port
+		s.hubRestartLastSuccess = opts.nowFn()
+		_ = opts.emitFn("info", "hub-listener-restarted", map[string]any{
+			"port":                  restartPort,
+			"attempt":               attempt,
+			"instance_id_preserved": true,
+		})
+		return true
+	}
+}
+
+func hubListenerRestartBackoff(attempt int) time.Duration {
+	if attempt <= 1 {
+		return hubListenerRestartBaseBackoff
+	}
+	d := hubListenerRestartBaseBackoff
+	for i := 1; i < attempt; i++ {
+		if d >= hubListenerRestartMaxBackoff/2 {
+			return hubListenerRestartMaxBackoff
+		}
+		d *= 2
+	}
+	if d > hubListenerRestartMaxBackoff {
+		return hubListenerRestartMaxBackoff
+	}
+	return d
+}
+
+func hubListenerRestartSleep(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
 // readHubEndpointGateFromSettings reads gui_server.hub_endpoint_enabled
 // from the gui-preferences.yaml file directly. The settings registry
 // does not yet carry this key (Phase 5 adds it); we bypass the
@@ -334,19 +531,22 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	// observation (and for the astronomically-unlikely same-PID-recycle case).
 	go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(ctx)
 
-	// B1 footgun observability (work-items/backlog/2026-06-16-hub-listener-hang-no-recovery.md):
+	// B1 footgun observability + v1 auto-restart trigger:
 	// a HUNG (not crashed) hub listener with the GUI process still alive
 	// is otherwise SILENT — the serve goroutine's `hub-listener-down`
 	// only fires on a serve-loop DEATH, and `\mcp-local-hub-liveness`
 	// probes the supervisor lock, not this listener. This watcher TCP-
 	// dials the bound port on a cadence and emits a structured
-	// `hub-listener-unresponsive` warn (once, on transition) so the
-	// previously-invisible failure is observable in hub-mcp.log. It does
-	// NOT auto-restart the listener (deferred — needs Server-lifecycle
-	// integration; see CLAUDE.md "Hub listener hang — observability").
+	// `hub-listener-unresponsive` warn (once, on transition). The
+	// optional callback only signals the Server-owned restart driver; the
+	// watcher remains detect-only. v1 is intentionally TCP-dial only.
+	// A handler-deadlock-specific authed round-trip probe is the named v2
+	// follow-up because that probe can itself wedge or consume session cap.
 	// Fire-and-forget on the listener ctx: unwinds solely on ctx
 	// cancellation (hub stop / shutdown), same as the watcher above.
-	go api.NewHubListenerHealthWatcher(port, 0).Run(ctx)
+	healthWatcher := api.NewHubListenerHealthWatcher(port, 0)
+	healthWatcher.SetOnUnresponsive(hubListenerRestartSignalFromContext(ctx))
+	go healthWatcher.Run(ctx)
 
 	go func() {
 		// Mark the listener dead on any exit path (clean shutdown via

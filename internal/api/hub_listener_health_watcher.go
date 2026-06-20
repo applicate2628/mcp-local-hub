@@ -1,5 +1,5 @@
 // hub_listener_health_watcher.go — B1 footgun: hub-listener-hang
-// observability (partial; full auto-recovery deferred).
+// observability and restart signaling.
 //
 // Background (work-items/backlog/2026-06-16-hub-listener-hang-no-recovery.md):
 // under gate-ON, the hub aggregate listener is a fire-and-forget
@@ -7,27 +7,27 @@
 // client's aggregated MCP servers. A serve-loop DEATH (fatal accept
 // error) already logs `hub-listener-down` + flips the live badge. But a
 // HANG — wedged accept loop, stuck handler, deadlock — with the GUI
-// process still alive leaves all aggregated servers unreachable with NO
-// automatic recovery and NO observability: `\mcp-local-hub-liveness`
+// process still alive used to leave all aggregated servers unreachable
+// with NO automatic recovery and NO observability: `\mcp-local-hub-liveness`
 // probes the SUPERVISOR lock, not the hub listener, so a live GUI with a
 // hung listener passes the liveness probe.
 //
-// This watcher closes the OBSERVABILITY gap (not the recovery gap): it
+// This watcher closes the OBSERVABILITY gap: it
 // periodically TCP-dials the bound hub port and, on a bounded number of
 // consecutive failed dials, emits ONE structured `warn` event so the
 // previously-silent failure appears in the same hub-mcp.log stream as
-// bind/lifecycle events. On recovery it emits an `info` event. It does
-// NOT restart the listener.
+// bind/lifecycle events. On recovery it emits an `info` event. It remains
+// detect-only: a caller may attach a transition callback, but restart policy
+// stays outside this package.
 //
 // SCOPE / SOUNDNESS. A TCP dial detects a CLOSED or unreachable socket
 // (the OS-level listener is gone, or the accept loop is wedged such that
 // the kernel backlog fills and connects start failing). It does NOT
 // detect a handler-level deadlock where accept still completes but the
 // request hangs — that needs a full authed HTTP round-trip, which is
-// itself heavyweight and could wedge, and is DEFERRED with full
-// auto-recovery (see CLAUDE.md "Hub listener hang — observability"). The
-// dial is read-only (no auth, no JSON-RPC, no state mutation) so it
-// cannot itself destabilize the running hub.
+// itself heavyweight and could wedge, and is DEFERRED as the named v2
+// follow-up. The dial is read-only (no auth, no JSON-RPC, no state mutation)
+// so it cannot itself destabilize the running hub.
 
 package api
 
@@ -78,6 +78,11 @@ type HubListenerHealthWatcher struct {
 	// capture emitted events. Signature matches LogHubMcpEvent.
 	emit func(level, event string, fields map[string]any) error
 
+	// onUnresponsive is an optional detect-only callback fired on the same
+	// sustained-unresponsive transition as the warn event. The Server-owned
+	// restart driver attaches here; this watcher never performs restart work.
+	onUnresponsive func()
+
 	// consecutiveFailures counts failed dials in a row. Mutated only on
 	// the Run/probeOnce goroutine, so it needs no lock.
 	consecutiveFailures int
@@ -103,6 +108,13 @@ func NewHubListenerHealthWatcher(port int, interval time.Duration) *HubListenerH
 		dialFn:   defaultHubHealthDial,
 		emit:     LogHubMcpEvent,
 	}
+}
+
+// SetOnUnresponsive installs a detect-only transition callback. It must be
+// called before Run starts; HubListenerHealthWatcher does not synchronize
+// callback mutation with the probe goroutine.
+func (w *HubListenerHealthWatcher) SetOnUnresponsive(fn func()) {
+	w.onUnresponsive = fn
 }
 
 // defaultHubHealthDial is the production TCP-dial. Returns nil iff the
@@ -164,8 +176,11 @@ func (w *HubListenerHealthWatcher) probeOnce(ctx context.Context) {
 				"port":                 w.port,
 				"consecutive_failures": w.consecutiveFailures,
 				"err":                  err.Error(),
-				"note":                 "hub aggregate listener not accepting connections; restart the GUI to recover (auto-recovery is a deferred follow-up — see CLAUDE.md \"Hub listener hang\")",
+				"note":                 "hub aggregate listener not accepting connections; GUI auto-recovery restart requested",
 			})
+			if w.onUnresponsive != nil {
+				w.onUnresponsive()
+			}
 		}
 		return
 	}

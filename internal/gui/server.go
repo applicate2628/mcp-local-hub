@@ -585,6 +585,14 @@ type Server struct {
 	// pointer read would race the assignment).
 	hubMcpComp atomic.Pointer[HubListenerComponents]
 
+	// hubRestartCh is the buffered-1 signal channel from the detect-only
+	// HubListenerHealthWatcher to the Server-owned restart driver. The
+	// consecutive counter and last-success timestamp are owned by that driver
+	// goroutine; they discriminate flapping from a fresh outage.
+	hubRestartCh          chan struct{}
+	hubRestartConsecutive int
+	hubRestartLastSuccess time.Time
+
 	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
 	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
 	// future hot-reload of the workspace registry can swap the bundle
@@ -726,7 +734,13 @@ func NewServer(cfg Config) *Server {
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now(), pruneEnoentTicks: map[string]int{}}
+	s := &Server{
+		cfg:              cfg,
+		mux:              http.NewServeMux(),
+		hubRestartCh:     make(chan struct{}, 1),
+		guiProcessStart:  time.Now(),
+		pruneEnoentTicks: map[string]int{},
+	}
 	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the
 	// TTL+singleflight HealthSnapshot cache here so concurrent requests
@@ -951,6 +965,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// the explicit cancel + defer below covers both shutdown paths.
 	hubEnabled := readHubEndpointGateFromSettings()
 	hubInitCtx, hubInitCancel := context.WithCancel(ctx)
+	hubInitCtx = contextWithHubListenerRestartSignal(hubInitCtx, s)
 	defer hubInitCancel()
 	hubInitDone := make(chan struct{})
 	go func() {
@@ -1002,6 +1017,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// else: shutdown path already swapped — it owns teardown.
 		}
 	}()
+	go runHubListenerRestartDriver(hubInitCtx, s, hubListenerRestartDriverOptions{})
 
 	select {
 	case <-ctx.Done():

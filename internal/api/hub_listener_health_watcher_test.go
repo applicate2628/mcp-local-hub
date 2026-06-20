@@ -72,6 +72,43 @@ func TestHealthWatcherWarnsAfterConsecutiveFailures(t *testing.T) {
 	}
 }
 
+// TestHealthWatcherOnUnresponsiveCallbackFiresOnTransition pins the
+// restart seam: onUnresponsive fires exactly once on the SAME sustained
+// unresponsive transition as the existing warn event, and never on
+// below-threshold or already-unresponsive probes.
+func TestHealthWatcherOnUnresponsiveCallbackFiresOnTransition(t *testing.T) {
+	w, events, setDial := newTestHealthWatcher(3439)
+	ctx := context.Background()
+	fail := errors.New("connection refused")
+	callbacks := 0
+	w.onUnresponsive = func() { callbacks++ }
+
+	(*setDial)(fail)
+	for i := 0; i < hubHealthUnresponsiveThreshold-1; i++ {
+		w.probeOnce(ctx)
+	}
+	if callbacks != 0 {
+		t.Fatalf("below threshold callbacks = %d, want 0", callbacks)
+	}
+	if len(*events) != 0 {
+		t.Fatalf("below threshold events = %d, want 0", len(*events))
+	}
+
+	w.probeOnce(ctx)
+	if callbacks != 1 {
+		t.Fatalf("at threshold callbacks = %d, want 1", callbacks)
+	}
+	if len(*events) != 1 || (*events)[0].event != "hub-listener-unresponsive" {
+		t.Fatalf("at threshold events = %+v, want one hub-listener-unresponsive", *events)
+	}
+
+	w.probeOnce(ctx)
+	w.probeOnce(ctx)
+	if callbacks != 1 {
+		t.Fatalf("already-unresponsive callbacks = %d, want 1", callbacks)
+	}
+}
+
 // TestHealthWatcherRecoveryEvent pins the recovery transition: after a
 // warn, a successful dial emits exactly one info recovery event, and the
 // failure counter resets so a subsequent outage warns again.
