@@ -536,6 +536,70 @@ func TestWithSerenaWorkspaceGatePolicies(t *testing.T) {
 	}
 }
 
+func TestWithSerenaWorkspaceGateTimeoutSkipsCallbacksAndBody(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	const wsKey = "gate-timeout"
+
+	if !s.beginSerenaIdleStop(wsKey) {
+		t.Fatalf("precondition: could not hold idle-stop gate for %s", wsKey)
+	}
+	defer s.endSerenaIdleStop(wsKey)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	resolveCalls := 0
+	urlCalls := 0
+	onPhaseCalls := 0
+	fnCalls := 0
+	entered, aborted, err := s.withSerenaWorkspaceGate(
+		ctx,
+		wsKey,
+		serenaWorkspaceGatePolicyBlock,
+		func(string) *api.WorkspaceEntry {
+			resolveCalls++
+			return serenaWS(wsKey, "/proj/"+wsKey, 9126)
+		},
+		func(*api.WorkspaceEntry) string {
+			urlCalls++
+			return "http://127.0.0.1:9126"
+		},
+		func(*serenaWorkspaceGateOutcome) bool {
+			onPhaseCalls++
+			return true
+		},
+		func(*serenaWorkspaceGateOutcome) error {
+			fnCalls++
+			return nil
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("withSerenaWorkspaceGate err = %v", err)
+	}
+	if entered {
+		t.Fatalf("entered = true, want false after gate timeout")
+	}
+	if aborted {
+		t.Fatalf("aborted = true, want false when timeout skips callbacks")
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("resolve calls = %d, want 0", resolveCalls)
+	}
+	if urlCalls != 0 {
+		t.Fatalf("url calls = %d, want 0", urlCalls)
+	}
+	if onPhaseCalls != 0 {
+		t.Fatalf("onPhaseActive calls = %d, want 0", onPhaseCalls)
+	}
+	if fnCalls != 0 {
+		t.Fatalf("fn calls = %d, want 0", fnCalls)
+	}
+	if s.hasSerenaForwardInFlight(wsKey) {
+		t.Fatalf("gate timeout must not leave an in-flight forward")
+	}
+}
+
 func waitForSerenaStopGateWaiters(t *testing.T, s *Server, wsKey string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

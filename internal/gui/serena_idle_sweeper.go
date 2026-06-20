@@ -420,6 +420,9 @@ func (s *Server) withSerenaWorkspaceGate(
 			}
 		}
 		if !gate.entered {
+			if policy != serenaWorkspaceGatePolicyTryOnly {
+				return false, false, nil
+			}
 			out := &serenaWorkspaceGateOutcome{gate: gate}
 			if resolve != nil {
 				out.ws = resolve(currentKey)
