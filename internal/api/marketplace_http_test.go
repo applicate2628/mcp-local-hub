@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,7 +36,7 @@ func TestMarketplaceHTTPClient_RejectsDowngradeRedirect(t *testing.T) {
 	// Use the shared TLS-injecting helper so CheckRedirect +
 	// DisableCompression are inherited from production policy.
 	client := injectTLSTestClient(tlsSrv)
-	_, err := MarketplaceFetchWithClient(context.Background(), client, tlsSrv.URL, "", nil)
+	_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", nil)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "https") {
 		t.Errorf("expected https-downgrade rejection; got %v", err)
 	}
@@ -52,7 +53,7 @@ func TestMarketplaceHTTPClient_DisablesCompression(t *testing.T) {
 	}))
 	defer srv.Close()
 	client := injectTLSTestClient(srv)
-	_, err := MarketplaceFetchWithClient(context.Background(), client, srv.URL, "", nil)
+	_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", nil)
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestMarketplaceHTTPClient_RejectsCredentialHeaders(t *testing.T) {
 	defer srv.Close()
 	client := injectTLSTestClient(srv)
 	for _, hdr := range []string{"Authorization", "Cookie", "Proxy-Authorization", "authorization", "COOKIE"} {
-		_, err := MarketplaceFetchWithClient(context.Background(), client, srv.URL, "", map[string]string{
+		_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", map[string]string{
 			hdr: "leaked-credential-value",
 		})
 		if err == nil {
@@ -116,7 +117,7 @@ func TestMarketplaceHTTPClient_RejectsEmbeddedCredentials(t *testing.T) {
 	// Splice the userinfo into the httptest URL (https://<host>:<port>).
 	// httptest URLs are always scheme://host[:port]/path, so the
 	// "https://user:pass@<rest>" rewrite is safe.
-	rewritten := strings.Replace(srv.URL, "https://", "https://attacker:hunter2@", 1)
+	rewritten := strings.Replace(MarketplaceTestRegistryURL("/catalog.json"), "https://", "https://attacker:hunter2@", 1)
 	client := injectTLSTestClient(srv)
 	_, err := MarketplaceFetchWithClient(context.Background(), client, rewritten, "", nil)
 	if err == nil {
@@ -128,6 +129,65 @@ func TestMarketplaceHTTPClient_RejectsEmbeddedCredentials(t *testing.T) {
 	if seenAuth != "" {
 		t.Errorf("server received Authorization header despite rejection: %q (rejection bypassed)", seenAuth)
 	}
+}
+
+func TestMarketplaceHTTPClient_RejectsLocalAndPrivateRegistryURLsBeforeRequest(t *testing.T) {
+	var transportCalled bool
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			transportCalled = true
+			return nil, errors.New("transport called")
+		}),
+	}
+	for _, rawURL := range []string{
+		"https://localhost/catalog.json",
+		"https://127.0.0.1/catalog.json",
+		"https://[::1]/catalog.json",
+		"https://0.0.0.0/catalog.json",
+		"https://10.0.0.1/catalog.json",
+		"https://172.16.0.1/catalog.json",
+		"https://192.168.1.1/catalog.json",
+		"https://169.254.1.1/catalog.json",
+		"https://[fc00::1]/catalog.json",
+		"https://[fe80::1]/catalog.json",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			transportCalled = false
+			_, err := MarketplaceFetchWithClient(context.Background(), client, rawURL, "", nil)
+			if err == nil {
+				t.Fatalf("expected local/private registry URL rejection for %q", rawURL)
+			}
+			if transportCalled {
+				t.Fatalf("transport was called for rejected registry URL %q", rawURL)
+			}
+		})
+	}
+}
+
+func TestMarketplaceHTTPClient_RejectsRedirectToLoopback(t *testing.T) {
+	var hits int
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Redirect(w, r, "https://127.0.0.1/catalog.json", http.StatusFound)
+	}))
+	defer srv.Close()
+	client := injectTLSTestClient(srv)
+	_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", nil)
+	if hits != 1 {
+		t.Fatalf("expected initial registry request before redirect rejection; got %d hits", hits)
+	}
+	if err == nil {
+		t.Fatal("expected loopback redirect rejection; got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
+		t.Errorf("error should name loopback redirect rejection; got %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // injectTLSTestClient builds an http.Client that trusts the

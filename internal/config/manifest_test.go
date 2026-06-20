@@ -454,6 +454,26 @@ func TestValidateRemoteHTTP_RejectsMalformedHTTPSURL(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteHTTP_AllowsLocalhostForHandwrittenManifest(t *testing.T) {
+	for _, rawURL := range []string{
+		"https://localhost/mcp",
+		"https://127.0.0.1/mcp",
+		"https://[::1]/mcp",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "local-remote",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       rawURL,
+			}
+			if err := m.Validate(); err != nil {
+				t.Fatalf("handwritten remote-http manifest should allow %q; got %v", rawURL, err)
+			}
+		})
+	}
+}
+
 // TestValidateRemoteHTTP_RejectsWorkspaceScoped pins codex bot r8
 // P2 closure (PR #169): the workspace-scoped kind is per-(workspace,
 // language) lazy-proxy with required local LSP backends +

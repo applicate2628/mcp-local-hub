@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -25,14 +24,14 @@ const (
 	marketplaceCacheMaxBodyBytes = 10 * 1024 * 1024
 )
 
-// rejectNonHTTPSRedirect refuses any redirect target that is not
-// https://. Used by both production and test clients.
-func rejectNonHTTPSRedirect(req *http.Request, via []*http.Request) error {
-	if req.URL.Scheme != "https" {
-		return fmt.Errorf("refusing redirect from %s to non-https URL %s", via[len(via)-1].URL, req.URL)
-	}
+// rejectUnsafeMarketplaceRedirect refuses redirect targets outside the
+// marketplace registry URL policy. Used by both production and test clients.
+func rejectUnsafeMarketplaceRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("too many redirects")
+	}
+	if err := validateMarketplacePublicHTTPSParsedURL(req.URL); err != nil {
+		return fmt.Errorf("refusing redirect from %s to unsafe marketplace URL %s: %w", via[len(via)-1].URL, req.URL, err)
 	}
 	return nil
 }
@@ -66,7 +65,7 @@ func newMarketplaceTransport() *http.Transport {
 func newMarketplaceClient() *http.Client {
 	return &http.Client{
 		Transport:     newMarketplaceTransport(),
-		CheckRedirect: rejectNonHTTPSRedirect,
+		CheckRedirect: rejectUnsafeMarketplaceRedirect,
 		Timeout:       marketplaceHTTPTimeout,
 	}
 }
@@ -116,23 +115,9 @@ var forbiddenMarketplaceHeaders = map[string]struct{}{
 // Proxy-Authorization are dropped with an error before the request
 // is built.
 func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL, ifNoneMatch string, extraHeaders map[string]string) (*MarketplaceFetchResult, error) {
-	u, err := url.Parse(rawURL)
+	u, err := parseMarketplacePublicHTTPSURL(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse url %q: %w", rawURL, err)
-	}
-	if u.Scheme != "https" {
-		return nil, fmt.Errorf("marketplace url must be https:// (got scheme %q)", u.Scheme)
-	}
-	// codex r6 P1 closure (PR #163): reject URLs that embed
-	// credentials (https://user:pass@host/...). Go's net/http
-	// auto-emits a Basic Authorization header from url.URL.User on
-	// the outbound request, which would bypass the
-	// forbiddenMarketplaceHeaders denylist below. The marketplace
-	// threat model is an unauthenticated GET against a public
-	// registry; allowing URL-embedded credentials would silently
-	// leak them to whatever host the operator passed.
-	if u.User != nil {
-		return nil, fmt.Errorf("marketplace url must not embed credentials (got userinfo before host); registry fetches are unauthenticated")
+		return nil, fmt.Errorf("marketplace url must be public https:// without embedded credentials or unsafe characters (got %q): %w", rawURL, err)
 	}
 	// Reject credential-bearing headers BEFORE building the request
 	// (defense-in-depth: if a future caller passes Authorization,
@@ -143,7 +128,7 @@ func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL
 			return nil, fmt.Errorf("refusing to send credential-bearing header %q to marketplace registry — fetches are unauthenticated GETs", k)
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

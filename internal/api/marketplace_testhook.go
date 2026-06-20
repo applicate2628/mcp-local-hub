@@ -13,8 +13,12 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync"
 )
+
+const marketplaceTestRegistryHost = "registry.example.test"
 
 // marketplaceTestClient is the optional test-only client. nil in
 // production. Guarded by marketplaceTestClientMu so concurrent test
@@ -58,6 +62,20 @@ func InstallMarketplaceTestClientForCLI(srv *httptest.Server) func() {
 	}
 }
 
+// MarketplaceTestRegistryURL returns a non-localhost registry URL that the
+// marketplace test client rewrites to the supplied httptest server. Tests use
+// this to exercise the production loopback/private-host rejection instead of
+// weakening MarketplaceFetchWithClient for local test servers.
+func MarketplaceTestRegistryURL(path string) string {
+	if path == "" {
+		path = "/catalog.json"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return "https://" + marketplaceTestRegistryHost + path
+}
+
 // buildTLSTrustingClient is the body of injectTLSTestClient promoted
 // out of marketplace_http_test.go into production so the cli tests
 // can reach it. Inherits the production transport policy
@@ -69,9 +87,28 @@ func buildTLSTrustingClient(srv *httptest.Server) *http.Client {
 		RootCAs:    srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
 		MinVersion: tls.VersionTLS12,
 	}
+	target, _ := url.Parse(srv.URL)
 	return &http.Client{
-		Transport:     t,
-		CheckRedirect: rejectNonHTTPSRedirect,
+		Transport:     marketplaceTestRewriteTransport{base: t, target: target},
+		CheckRedirect: rejectUnsafeMarketplaceRedirect,
 		Timeout:       marketplaceHTTPTimeout,
 	}
+}
+
+type marketplaceTestRewriteTransport struct {
+	base   http.RoundTripper
+	target *url.URL
+}
+
+func (t marketplaceTestRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.target != nil && strings.EqualFold(req.URL.Hostname(), marketplaceTestRegistryHost) {
+		clone := req.Clone(req.Context())
+		u := *clone.URL
+		u.Scheme = t.target.Scheme
+		u.Host = t.target.Host
+		clone.URL = &u
+		clone.Host = t.target.Host
+		return t.base.RoundTrip(clone)
+	}
+	return t.base.RoundTrip(req)
 }

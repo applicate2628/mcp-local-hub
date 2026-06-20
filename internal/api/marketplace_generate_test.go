@@ -137,6 +137,94 @@ func TestGenerateDraftManifest_HttpEntryEmitsRemoteHTTPDraft(t *testing.T) {
 	}
 }
 
+func TestUnsafeMarketplaceTextRuneCoversTerminalAndDraftSet(t *testing.T) {
+	unsafe := []rune{
+		0x00, 0x1F, 0x1B, 0x7F, 0x85,
+		0x061C,
+		0x200E, 0x200F,
+		0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+		0x2028, 0x2029,
+		0x2066, 0x2067, 0x2068, 0x2069,
+	}
+	for _, r := range unsafe {
+		if !IsUnsafeMarketplaceTextRune(r) {
+			t.Errorf("IsUnsafeMarketplaceTextRune(U+%04X) = false, want true", r)
+		}
+	}
+	for _, r := range []rune{'a', 'Z', '0', '-', '_', '/', '.', '\u2713', '\u060C'} {
+		if IsUnsafeMarketplaceTextRune(r) {
+			t.Errorf("IsUnsafeMarketplaceTextRune(U+%04X) = true, want false", r)
+		}
+	}
+}
+
+func TestGenerateDraftManifest_RejectsUnsafeDraftBoundStrings(t *testing.T) {
+	cases := map[string]*MarketplaceEntry{
+		"command RLO": {
+			ID:        "bad-command",
+			Name:      "Bad",
+			Transport: "stdio",
+			Command:   "npx\u202E.exe",
+		},
+		"arg ALM": {
+			ID:        "bad-arg",
+			Name:      "Bad",
+			Transport: "stdio",
+			Command:   "npx",
+			Args:      []string{"--name=ok\u061Cbad"},
+		},
+		"env key isolate": {
+			ID:        "bad-env-key",
+			Name:      "Bad",
+			Transport: "stdio",
+			Command:   "npx",
+			Env:       map[string]string{"BAD\u2066KEY": "value"},
+		},
+		"env value RLO": {
+			ID:        "bad-env-value",
+			Name:      "Bad",
+			Transport: "stdio",
+			Command:   "npx",
+			Env:       map[string]string{"BAD": "value\u202E"},
+		},
+		"http url RLO": {
+			ID:        "bad-url",
+			Name:      "Bad",
+			Transport: "http",
+			URL:       "https://example.com/mcp\u202E",
+		},
+		"http id ALM comment": {
+			ID:        "bad\u061Cid",
+			Name:      "Bad",
+			Transport: "http",
+			URL:       "https://example.com/mcp",
+		},
+		"sensitive warning name RLO": {
+			ID:        "bad-warning",
+			Name:      "Bad",
+			Transport: "stdio",
+			Command:   "npx",
+			Args:      []string{"${env:AWS_TOKEN\u202E}"},
+		},
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			yaml, warnings, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: "/tmp/ws"})
+			if err == nil {
+				t.Fatalf("expected unsafe draft-bound string rejection; got yaml:\n%s\nwarnings=%v", yaml, warnings)
+			}
+			if !strings.Contains(err.Error(), "unsafe") {
+				t.Errorf("error should name unsafe-string rejection: %v", err)
+			}
+			for _, r := range []rune{0x061C, 0x202E, 0x2066} {
+				if strings.ContainsRune(yaml, r) {
+					t.Errorf("rejected draft still returned unsafe rune U+%04X in YAML:\n%s", r, yaml)
+				}
+			}
+		})
+	}
+}
+
 func TestGenerateDraftManifest_HttpEntryEmptyURLRejected(t *testing.T) {
 	e := &MarketplaceEntry{
 		ID:        "bad",

@@ -130,6 +130,34 @@ func TestParseCatalog_RejectsMalformedHTTPSURL(t *testing.T) {
 	}
 }
 
+func TestParseCatalog_RejectsMarketplaceLocalAndPrivateHTTPEntryURLs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"localhost", "https://localhost/mcp"},
+		{"ipv4 loopback", "https://127.0.0.1/mcp"},
+		{"ipv6 loopback", "https://[::1]/mcp"},
+		{"ipv4 unspecified", "https://0.0.0.0/mcp"},
+		{"ipv6 unspecified", "https://[::]/mcp"},
+		{"private 10/8", "https://10.0.0.1/mcp"},
+		{"private 172.16/12", "https://172.16.0.1/mcp"},
+		{"private 192.168/16", "https://192.168.1.1/mcp"},
+		{"ipv6 unique local", "https://[fc00::1]/mcp"},
+		{"ipv4 link local", "https://169.254.1.1/mcp"},
+		{"ipv6 link local", "https://[fe80::1]/mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"schema_version": "1", "entries": [
+				{"id": "ctx7", "name": "Context7", "transport": "http", "url": "` + tc.url + `"}
+			]}`
+			if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil {
+				t.Fatalf("expected marketplace SSRF URL rejection for %q", tc.url)
+			}
+		})
+	}
+}
+
 func TestParseCatalog_NativeHTTPEntryAllowedWithCommand(t *testing.T) {
 	raw := `{"schema_version": "1", "entries": [
 		{"id": "serena", "name": "Serena", "transport": "native-http", "command": "uvx",

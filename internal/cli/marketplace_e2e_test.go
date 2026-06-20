@@ -69,9 +69,9 @@ func TestMarketplaceE2E_SearchShowGenerate(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"search", "filesys", "--registry", srv.URL}, "filesys"},
-		{[]string{"show", "filesys", "--registry", srv.URL}, "Transport:  stdio"},
-		{[]string{"generate", "filesys", "--registry", srv.URL}, "name: filesys"},
+		{[]string{"search", "filesys", "--registry", api.MarketplaceTestRegistryURL("/catalog.json")}, "filesys"},
+		{[]string{"show", "filesys", "--registry", api.MarketplaceTestRegistryURL("/catalog.json")}, "Transport:  stdio"},
+		{[]string{"generate", "filesys", "--registry", api.MarketplaceTestRegistryURL("/catalog.json")}, "name: filesys"},
 	} {
 		c := newMarketplaceCmd()
 		var stdout, stderr bytes.Buffer
