@@ -28,6 +28,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -846,6 +849,100 @@ func TestReinitDetachedCachesSessionWhenCallerCancels(t *testing.T) {
 	// The handshake produced exactly one live session; it was cached, never DELETEd.
 	if got := d.deleteCount.Load(); got != 0 {
 		t.Fatalf("detached reinit DELETEd a fully-initialized session it should have cached; deleteCount=%d", got)
+	}
+}
+
+func TestReinitDetachedCacheClearsStaleStateForDaemonIdentity(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "detached-old-sid"
+	const freshSID = "detached-fresh-sid"
+	const oldPort = 49152
+
+	gate := make(chan struct{})
+	d := newStubDaemon(t, freshSID)
+	d.onInit = func(w http.ResponseWriter, r *http.Request) {
+		<-gate
+		w.Header().Set("Mcp-Session-Id", freshSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+
+	sess := sessionWithParticipants(d)
+	freshRef := sess.IntendedParticipants[0]
+	oldRef := canonicalDaemonRef{Server: freshRef.Server, Daemon: freshRef.Daemon, Port: oldPort}
+	sess.SnapshotAtInit = &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {oldRef, freshRef}},
+	}
+	sess.InitSuccesses[oldRef] = oldSID
+	sess.DaemonProtoVer[oldRef] = "2025-11-25"
+	if !sess.markStalePort(oldPort) {
+		t.Fatalf("setup: old daemon port %d was not tracked as stale", oldPort)
+	}
+	if !sess.markStalePort(freshRef.Port) {
+		t.Fatalf("setup: fresh daemon port %d was not tracked as stale", freshRef.Port)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := sess.reinitializeDaemonBinding(ctx, freshRef)
+		done <- err
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for d.initCount.Load() == 0 {
+		if time.Now().After(deadline) {
+			close(gate)
+			t.Fatal("detached reinit never reached daemon initialize")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			close(gate)
+			t.Fatal("reinit returned nil err on caller-cancel; want ctx.Canceled")
+		}
+	case <-time.After(2 * time.Second):
+		close(gate)
+		t.Fatal("reinit did not return promptly after caller-cancel")
+	}
+
+	close(gate)
+	cacheDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(cacheDeadline) {
+		if cached, ok := sess.cachedDaemonInitState(freshRef); ok && cached.SessionID == freshSID {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	cached, ok := sess.cachedDaemonInitState(freshRef)
+	if !ok || cached.SessionID != freshSID {
+		t.Fatalf("detached reinit did not cache fresh session %q; cached=%+v ok=%v", freshSID, cached, ok)
+	}
+	if _, ok := sess.cachedDaemonInitState(oldRef); ok {
+		t.Fatalf("detached reinit left stale cached init entry for old port %d", oldPort)
+	}
+	if state, ok := sess.stalePortStateFor(oldPort); ok {
+		state.mu.Lock()
+		stale := state.stale
+		state.mu.Unlock()
+		if stale {
+			t.Fatalf("detached reinit left stale port marker set for old port %d", oldPort)
+		}
+	}
+	if state, ok := sess.stalePortStateFor(freshRef.Port); ok {
+		state.mu.Lock()
+		stale := state.stale
+		state.mu.Unlock()
+		if stale {
+			t.Fatalf("detached reinit left stale port marker set for fresh port %d", freshRef.Port)
+		}
 	}
 }
 
@@ -3167,6 +3264,44 @@ func waitForCount(c *atomic.Int32, want int32) int32 {
 	}
 }
 
+func findFuncDeclForTest(file *ast.File, name string) *ast.FuncDecl {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name {
+			return fn
+		}
+	}
+	return nil
+}
+
+func hasPerDaemonInitTimeoutWithTimeoutForTest(fn *ast.FuncDecl) bool {
+	return countPerDaemonInitTimeoutWithTimeoutForTest(fn) > 0
+}
+
+func countPerDaemonInitTimeoutWithTimeoutForTest(fn *ast.FuncDecl) int {
+	count := 0
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) < 2 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "WithTimeout" {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || pkg.Name != "context" {
+			return true
+		}
+		arg, ok := call.Args[1].(*ast.Ident)
+		if ok && arg.Name == "PerDaemonInitTimeout" {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
 // TestAggregateToolsCall_TransportFailureReturnsMinus32000 pins CURRENT behavior
 // when the upstream daemon is unreachable (connection refused): the hub returns a
 // -32000 "tools/call failed" envelope. Regression baseline for the hot-swap (a)
@@ -3311,6 +3446,30 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	}
 	if got := sess.InFlightCount(); got != 0 {
 		t.Errorf("inFlight=%d after self-heal want 0", got)
+	}
+}
+
+func TestReinitDeadlineCapOwnedByInitializeDaemonSession(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "hub_mcp_aggregator.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse hub_mcp_aggregator.go: %v", err)
+	}
+
+	reinit := findFuncDeclForTest(file, "reinitializeDaemonBinding")
+	if reinit == nil {
+		t.Fatal("reinitializeDaemonBinding not found")
+	}
+	if hasPerDaemonInitTimeoutWithTimeoutForTest(reinit) {
+		t.Fatal("reinitializeDaemonBinding must not add a second PerDaemonInitTimeout; initializeDaemonSession owns the daemon init cap used by same-port self-heal and detached moved-reinit")
+	}
+
+	initFn := findFuncDeclForTest(file, "initializeDaemonSession")
+	if initFn == nil {
+		t.Fatal("initializeDaemonSession not found")
+	}
+	if got := countPerDaemonInitTimeoutWithTimeoutForTest(initFn); got == 0 {
+		t.Fatal("initializeDaemonSession must own the PerDaemonInitTimeout cap for reinit callers")
 	}
 }
 

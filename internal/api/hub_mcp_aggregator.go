@@ -1039,15 +1039,16 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 	type initResult struct{ sid, proto string }
 	groupKey := fmt.Sprintf("%s\x00%s\x00%d", daemonRef.Server, daemonRef.Daemon, daemonRef.Port)
 	ch := s.reinitGroup.DoChan(groupKey, func() (any, error) {
-		// The shared initialize runs under a DETACHED context bounded by
-		// PerDaemonInitTimeout — NOT the first caller's ctx. singleflight runs
-		// the work function for the FIRST caller only and shares its result with
-		// all coalesced followers; binding it to the first caller's ctx would
-		// let that one caller's cancellation fail the re-handshake for everyone.
-		// Each caller's OWN ctx still bounds its wait via the select below.
-		fnCtx, fnCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
-		defer fnCancel()
-		sid, negotiated, err := initializeDaemonSession(fnCtx, daemonRef, protoVer)
+		// The shared initialize runs under a DETACHED context — NOT the first
+		// caller's ctx. singleflight runs the work function for the FIRST caller
+		// only and shares its result with all coalesced followers; binding it to
+		// the first caller's ctx would let that one caller's cancellation fail
+		// the re-handshake for everyone. initializeDaemonSession owns the
+		// PerDaemonInitTimeout caps for the daemon initialize lifecycle; adding
+		// another equal cap here would double-cap same-port self-heal and
+		// detached moved-reinit. Each caller's OWN ctx still bounds its wait via
+		// the select below.
+		sid, negotiated, err := initializeDaemonSession(context.Background(), daemonRef, protoVer)
 		if err != nil {
 			return nil, err
 		}
@@ -1106,6 +1107,19 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	if proto == "" {
 		proto = protoVer
 	}
+	stalePorts := []int{daemonRef.Port}
+	seenPort := map[int]struct{}{daemonRef.Port: {}}
+	addStalePort := func(port int) {
+		if port == 0 {
+			return
+		}
+		if _, ok := seenPort[port]; ok {
+			return
+		}
+		seenPort[port] = struct{}{}
+		stalePorts = append(stalePorts, port)
+	}
+
 	s.mu.Lock()
 	if s.deleteStarted {
 		s.mu.Unlock()
@@ -1114,13 +1128,53 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	if s.InitSuccesses == nil {
 		s.InitSuccesses = map[canonicalDaemonRef]string{}
 	}
+	for cachedRef := range s.InitSuccesses {
+		if !sameDaemonIdentity(cachedRef, daemonRef) {
+			continue
+		}
+		addStalePort(cachedRef.Port)
+		if cachedRef != daemonRef {
+			delete(s.InitSuccesses, cachedRef)
+		}
+	}
 	s.InitSuccesses[daemonRef] = sid
 	if s.DaemonProtoVer == nil {
 		s.DaemonProtoVer = map[canonicalDaemonRef]string{}
 	}
+	for cachedRef := range s.DaemonProtoVer {
+		if !sameDaemonIdentity(cachedRef, daemonRef) {
+			continue
+		}
+		addStalePort(cachedRef.Port)
+		if cachedRef != daemonRef {
+			delete(s.DaemonProtoVer, cachedRef)
+		}
+	}
 	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
+	s.clearStalePortMarkers(stalePorts)
 	return proto, true
+}
+
+func sameDaemonIdentity(a, b canonicalDaemonRef) bool {
+	return a.Server == b.Server && a.Daemon == b.Daemon
+}
+
+func (s *hubSession) clearStalePortMarkers(ports []int) {
+	for _, port := range ports {
+		v, ok := s.staleDaemonPorts.Load(port)
+		if !ok {
+			continue
+		}
+		state := v.(*stalePortState)
+		if !state.mu.TryLock() {
+			// The proactive stale-port refresh path already owns this lock and
+			// will clear its consumed marker before dispatch resumes.
+			continue
+		}
+		state.stale = false
+		state.mu.Unlock()
+	}
 }
 
 func (s *hubSession) deleteUncachedReinitResult(daemonRef canonicalDaemonRef, sid, proto string) {
