@@ -68,6 +68,34 @@ func TestBuildPlanWithOpts_RemoteHTTPSecretPlaceholderHostRejectsLoopbackExpansi
 	}
 }
 
+func TestExpandRemoteHTTPURLSecretsRejectsPlaceholderHostDelimiterInjection(t *testing.T) {
+	for _, expandedHost := range []string{
+		"host/evil",
+		"host@evil",
+		"host:443/evil",
+		"host#frag",
+		"host?q",
+		"bad_host",
+		"host:+443",
+	} {
+		t.Run(expandedHost, func(t *testing.T) {
+			_, err := expandRemoteHTTPURLSecrets(
+				"https://${secret:REMOTE_MCP_HOST}/mcp",
+				fakeSecretLookup(map[string]string{"REMOTE_MCP_HOST": expandedHost}),
+			)
+			if err == nil {
+				t.Fatal("expected expanded placeholder host delimiter rejection; got nil")
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "expanded remote-http host") {
+				t.Fatalf("error = %v, want expanded remote-http host rejection", err)
+			}
+			if strings.Contains(err.Error(), expandedHost) {
+				t.Fatalf("expanded secret host leaked in error: %v", err)
+			}
+		})
+	}
+}
+
 func TestManifestTestRemote_SecretPlaceholderHostRejectsLoopbackExpansionBeforeDial(t *testing.T) {
 	seedDefaultSecretForTest(t, "REMOTE_MCP_HOST", "127.0.0.1")
 

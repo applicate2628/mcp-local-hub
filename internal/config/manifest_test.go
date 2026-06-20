@@ -431,6 +431,18 @@ func TestValidateRemoteHTTP_RejectsPlaintextURL(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteHTTP_AllowsUppercaseHTTPSScheme(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "ctx7-uppercase",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "HTTPS://mcp.context7.com/mcp",
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("uppercase HTTPS scheme should parse as https; got %v", err)
+	}
+}
+
 func TestValidateRemoteHTTP_RejectsMalformedHTTPSURL(t *testing.T) {
 	for _, tc := range []struct {
 		name string

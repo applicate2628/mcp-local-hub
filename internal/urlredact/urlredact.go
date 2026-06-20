@@ -1,6 +1,9 @@
 package urlredact
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 // MarketplaceURLForError returns a URL-shaped string safe for operator-facing
 // validation errors. It strips userinfo from ordinary URLs. When callers pass a
@@ -10,14 +13,33 @@ func MarketplaceURLForError(raw string, displayURL ...string) string {
 	if len(displayURL) > 0 && displayURL[0] != "" && displayURL[0] != raw {
 		return MarketplaceURLForError(displayURL[0])
 	}
-	schemeEnd := strings.Index(raw, "://")
-	if schemeEnd < 0 {
-		return raw
+	if redacted, ok := redactAuthorityUserinfo(raw); ok {
+		return redacted
 	}
-	prefix := raw[:schemeEnd+len("://")]
-	rest := raw[schemeEnd+len("://"):]
+	if u, err := url.Parse(raw); err == nil && u.User != nil {
+		safe := *u
+		safe.User = nil
+		return safe.String()
+	}
+	return raw
+}
+
+func redactAuthorityUserinfo(raw string) (string, bool) {
+	schemeEnd := strings.Index(raw, "://")
+	prefix := ""
+	rest := ""
+	switch {
+	case schemeEnd >= 0:
+		prefix = raw[:schemeEnd+len("://")]
+		rest = raw[schemeEnd+len("://"):]
+	case strings.HasPrefix(raw, "//"):
+		prefix = "//"
+		rest = raw[len("//"):]
+	default:
+		return "", false
+	}
 	if rest == "" {
-		return raw
+		return "", false
 	}
 	authority := rest
 	suffix := ""
@@ -27,6 +49,7 @@ func MarketplaceURLForError(raw string, displayURL ...string) string {
 	}
 	if at := strings.LastIndex(authority, "@"); at >= 0 {
 		authority = authority[at+1:]
+		return prefix + authority + suffix, true
 	}
-	return prefix + authority + suffix
+	return "", false
 }

@@ -121,6 +121,30 @@ func TestUninstallSecretPlaceholderHostURLMatchesHubOwnedEntry(t *testing.T) {
 	}
 }
 
+func TestUninstallSecretPlaceholderHostURLMatchesExpandedHubOwnedEntry(t *testing.T) {
+	seedDefaultSecretForTest(t, "REMOTE_MCP_HOST", "mcp.context7.com")
+
+	rawURL := "https://${secret:REMOTE_MCP_HOST}/mcp"
+	expandedURL := "https://mcp.context7.com/mcp"
+	m := &config.ServerManifest{
+		Name:      "secret-host",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportRemoteHTTP,
+		URL:       rawURL,
+	}
+	expectedURLs := expectedHubURLs(m, config.ClientBinding{Client: "claude-code"})
+	if !stringSliceContains(expectedURLs, rawURL) {
+		t.Fatalf("expectedHubURLs = %v, want placeholder URL %q", expectedURLs, rawURL)
+	}
+	if !stringSliceContains(expectedURLs, expandedURL) {
+		t.Fatalf("expectedHubURLs = %v, want expanded URL %q", expectedURLs, expandedURL)
+	}
+	entry := &clients.MCPEntry{Name: "secret-host", URL: expandedURL}
+	if !isHubOwnedEntryForAnyExpectedURL(entry, "secret-host", "", expectedURLs) {
+		t.Fatal("uninstall ownership should match expanded secret-placeholder-host URL")
+	}
+}
+
 // stubMigrateClient is a non-nil clients.Client whose methods are never called:
 // the migrateOneBinding dry-run path returns after computing the URL, before any
 // adapter method runs. Embedding the interface satisfies it without implementing

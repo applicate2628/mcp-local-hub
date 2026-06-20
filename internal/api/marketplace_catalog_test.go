@@ -179,6 +179,15 @@ func TestParseCatalog_RejectsMarketplaceLocalAndPrivateHTTPEntryURLs(t *testing.
 	}
 }
 
+func TestParseCatalog_RejectsLiteralLoopbackHTTPEntryHost(t *testing.T) {
+	raw := `{"schema_version": "1", "entries": [
+		{"id": "ctx7", "name": "Context7", "transport": "http", "url": "https://127.0.0.1/mcp"}
+	]}`
+	if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil {
+		t.Fatal("expected catalog entry literal loopback host rejection")
+	}
+}
+
 func TestParseCatalog_NativeHTTPEntryAllowedWithCommand(t *testing.T) {
 	raw := `{"schema_version": "1", "entries": [
 		{"id": "serena", "name": "Serena", "transport": "native-http", "command": "uvx",
