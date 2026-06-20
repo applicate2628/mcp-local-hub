@@ -96,6 +96,19 @@ func TestExpandRemoteHTTPURLSecretsRejectsPlaceholderHostDelimiterInjection(t *t
 	}
 }
 
+func TestExpandRemoteHTTPURLSecretsPreservesPlaceholderHostPathAndQuery(t *testing.T) {
+	got, err := expandRemoteHTTPURLSecrets(
+		"https://${secret:REMOTE_MCP_HOST}/a/b?c=d",
+		fakeSecretLookup(map[string]string{"REMOTE_MCP_HOST": "remote.example"}),
+	)
+	if err != nil {
+		t.Fatalf("expandRemoteHTTPURLSecrets: %v", err)
+	}
+	if got != "https://remote.example/a/b?c=d" {
+		t.Fatalf("expanded URL = %q, want path and query preserved", got)
+	}
+}
+
 func TestManifestTestRemote_SecretPlaceholderHostRejectsLoopbackExpansionBeforeDial(t *testing.T) {
 	seedDefaultSecretForTest(t, "REMOTE_MCP_HOST", "127.0.0.1")
 

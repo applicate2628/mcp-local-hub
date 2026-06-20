@@ -363,6 +363,27 @@ func TestMarketplaceHTTPClient_RejectsLocalAndPrivateRegistryURLsBeforeRequest(t
 	}
 }
 
+func TestMarketplaceHTTPClient_RejectsIDNALocalhostBeforeRequest(t *testing.T) {
+	var transportCalled bool
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			transportCalled = true
+			return nil, errors.New("transport called")
+		}),
+	}
+
+	_, err := MarketplaceFetchWithClient(context.Background(), client, "https://ｌｏｃａｌｈｏｓｔ/catalog.json", "", nil)
+	if err == nil {
+		t.Fatal("expected IDNA-normalized localhost registry URL rejection")
+	}
+	if transportCalled {
+		t.Fatal("transport was called for IDNA-normalized localhost registry URL")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "localhost") {
+		t.Fatalf("error = %v, want localhost rejection", err)
+	}
+}
+
 func TestMarketplaceHTTPClient_RejectsRedirectToLoopback(t *testing.T) {
 	for _, target := range []string{
 		"https://127.0.0.1/catalog.json",

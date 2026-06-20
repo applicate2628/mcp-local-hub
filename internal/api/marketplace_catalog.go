@@ -108,10 +108,26 @@ func validateMarketplaceEntry(e *MarketplaceEntry) error {
 			return fmt.Errorf("http entry must declare url")
 		}
 		if _, err := parseMarketplacePublicHTTPSURL(e.URL); err != nil {
-			return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", urlredact.MarketplaceURLForError(e.URL), err)
+			return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", marketplaceCatalogURLForError(e.URL), err)
 		}
 	default:
 		return fmt.Errorf("unknown transport %q (want stdio, native-http, or http)", e.Transport)
 	}
 	return nil
+}
+
+func marketplaceCatalogURLForError(raw string) string {
+	return sanitizeMarketplaceErrorText(urlredact.MarketplaceURLForError(raw))
+}
+
+func sanitizeMarketplaceErrorText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if IsUnsafeMarketplaceTextRune(r) {
+			b.WriteRune('\uFFFD')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

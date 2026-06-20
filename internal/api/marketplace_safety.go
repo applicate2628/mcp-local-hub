@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"golang.org/x/net/idna"
 )
 
 // IsUnsafeMarketplaceTextRune is the single terminal/draft safety predicate for
@@ -143,10 +145,14 @@ func rejectUnsafeMarketplaceURLParts(u *url.URL) error {
 }
 
 func rejectMarketplaceLocalOrPrivateHost(host string) error {
-	if strings.EqualFold(strings.TrimSuffix(host, "."), "localhost") {
+	normalizedHost, err := marketplaceHostLookupASCII(host)
+	if err != nil {
+		return fmt.Errorf("host %q is not a valid IDNA hostname: %w", host, err)
+	}
+	if strings.EqualFold(strings.TrimSuffix(normalizedHost, "."), "localhost") {
 		return fmt.Errorf("host %q is the localhost loopback name", host)
 	}
-	hostForIP := host
+	hostForIP := normalizedHost
 	if i := strings.LastIndexByte(hostForIP, '%'); i >= 0 {
 		hostForIP = hostForIP[:i]
 	}
@@ -158,6 +164,17 @@ func rejectMarketplaceLocalOrPrivateHost(host string) error {
 		return nil
 	}
 	return rejectMarketplaceLocalOrPrivateAddr(fmt.Sprintf("host %q", host), addr)
+}
+
+func marketplaceHostLookupASCII(host string) (string, error) {
+	hostForIP := host
+	if i := strings.LastIndexByte(hostForIP, '%'); i >= 0 {
+		hostForIP = hostForIP[:i]
+	}
+	if _, err := netip.ParseAddr(hostForIP); err == nil {
+		return host, nil
+	}
+	return idna.Lookup.ToASCII(host)
 }
 
 func isNonCanonicalNumericIPHost(host string) bool {
