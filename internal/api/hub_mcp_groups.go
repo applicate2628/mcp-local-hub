@@ -373,6 +373,9 @@ func ReadModifyWriteGroups(mutate func(cfg *GroupsConfig) (deletedGroups []strin
 		}
 		if len(keys) > 0 {
 			if perr := pruneHubTokensLocked(keys); perr != nil {
+				if terr := markGroupTokenOrphansLocked(keys); terr != nil {
+					return fmt.Errorf("%w: %v; additionally failed to persist group-token orphan tombstone: %v", ErrTokenPruneFailed, perr, terr)
+				}
 				// B3 (bot R3): the groups.yaml write already committed (the
 				// config is the source of truth). A post-write token-prune
 				// failure must NOT be conflated with a genuine write failure:

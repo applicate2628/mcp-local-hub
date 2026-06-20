@@ -422,26 +422,14 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 		cfg = GroupsConfig{}
 	}
 
-	// Capture the CURRENTLY-active group scope keys from the prior published
-	// snapshot BEFORE this publish swaps in the new one. snap.Groups is the
-	// authoritative "this group is live-routable right now" set, so it is the
-	// discriminator the orphan-token rotation below uses to tell a
-	// still-active group (keep its token — live /g/ sessions depend on it)
-	// apart from a stale row being re-created over (rotate it).
-	//
-	// prevSnapshotPublished is false ONLY on the FIRST publish of this process
-	// (cold start — the in-memory resolver pointer is nil until the first
-	// Store). On a cold start the on-disk token rows are legitimate ACTIVE-
-	// group tokens that MUST survive a clean restart (the documented "restart
-	// the hub to re-ensure" recovery), and there is no in-memory prior active
-	// set to classify orphan-vs-active against. So orphan rotation is SKIPPED
-	// on the first publish — fail safe = preserve every token, byte-identical
-	// to the pre-fix cold-start behavior. The orphan-rotation is strictly a
-	// delta against a KNOWN prior active set; the recreate-over-orphan defect
-	// it closes only arises mid-process after a delete's failed prune, where a
-	// prior snapshot always exists.
+	// Capture the prior published active set only for live-session
+	// preservation. It is NOT the durable orphan discriminator: a previous
+	// resolver snapshot can be stale after a groups.yaml delete committed but
+	// its non-fatal republish failed. The durable discriminator is the
+	// group-token orphan tombstone written by ReadModifyWriteGroups when token
+	// pruning fails; that marker is consumed below even on the first publish of
+	// a process.
 	prev := LoadResolverSnapshot()
-	prevSnapshotPublished := prev != nil
 	var activeGroupKeys map[string]bool
 	if prev != nil {
 		activeGroupKeys = prev.Groups
@@ -453,27 +441,30 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	var tokenEnsureErr error
 	if groupKeys := GroupScopeKeys(cfg.Groups); len(groupKeys) > 0 {
 		// First, ROTATE any declared group whose token row is an ORPHAN — a
-		// row left behind by a prior delete's failed prune (ErrTokenPruneFailed)
-		// for a group NOT currently active in the published snapshot. Without
-		// this, a re-created group of the same name would REUSE the stale
-		// (possibly leaked) token because ensureHubTokensLocked never rotates an
-		// existing row. A still-active group (in activeGroupKeys) is never
-		// rotated, so live sessions are preserved. Skipped on the first publish
-		// of the process (see prevSnapshotPublished above). Failure is deferred
-		// like the ensure below (the snapshot must still publish).
-		if prevSnapshotPublished {
-			if _, rerr := rotateReusedGroupTokensLocked(groupKeys, activeGroupKeys); rerr != nil {
-				_ = LogHubMcpEvent("warn", "group-tokens-rotate-orphan-failed", map[string]any{
-					"err": rerr.Error(),
-				})
-				tokenEnsureErr = fmt.Errorf("rotate orphaned group token rows: %w", rerr)
-			}
+		// row left behind by a prior delete's failed prune (ErrTokenPruneFailed).
+		// The durable tombstone wins over stale previous snapshots and nil
+		// first-publish snapshots. For the original in-process delete/recreate
+		// case, a declared row absent from the known prior active set also
+		// rotates, while still-active rows are preserved so live /g/ sessions
+		// survive. A rotation failure is fail-closed for this publish: serving
+		// the re-created group with the old row would expose the stale secret
+		// this path is specifically trying to retire.
+		if _, rerr := rotateReusedGroupTokensLocked(groupKeys, activeGroupKeys, prev != nil); rerr != nil {
+			_ = LogHubMcpEvent("warn", "group-tokens-rotate-orphan-failed", map[string]any{
+				"err": rerr.Error(),
+			})
+			return fmt.Errorf("rotate orphaned group token rows: %w", rerr)
 		}
 		if _, terr := ensureHubTokensLocked(groupKeys); terr != nil {
 			_ = LogHubMcpEvent("warn", "group-tokens-ensure-failed", map[string]any{
 				"err": terr.Error(),
 			})
 			tokenEnsureErr = fmt.Errorf("ensure group token rows: %w", terr)
+		} else if cerr := clearGroupTokenOrphansLocked(groupKeys); cerr != nil {
+			_ = LogHubMcpEvent("warn", "group-token-orphan-clear-failed", map[string]any{
+				"err": cerr.Error(),
+			})
+			tokenEnsureErr = fmt.Errorf("clear group-token orphan tombstones: %w", cerr)
 		}
 	}
 
