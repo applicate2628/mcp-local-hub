@@ -29,7 +29,9 @@ func registerReadinessRoutes(s *Server) {
 }
 
 type readinessDraftRequest struct {
-	YAML string `json:"yaml"`
+	YAML     string `json:"yaml"`
+	Mode     string `json:"mode"`
+	EditName string `json:"edit_name"`
 }
 
 func (s *Server) readinessHandler(w http.ResponseWriter, r *http.Request) {
@@ -82,29 +84,57 @@ func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rep := api.CheckServerReadiness(m)
-	// Mirror the SAME two name gates Save & Install runs in ManifestCreate, so a
-	// draft the create path would reject never renders "Ready to install" and then
-	// fails before install starts (Codex #378 r4/r6):
+	// Mirror the SAME gates Save & Install runs in ManifestCreate, so a draft the
+	// create path would reject never renders "Ready to install" and then fails
+	// before install starts (Codex #378 r4/r6/r11):
 	//   1. CheckManifestName — a frontend-regex-valid but backend-reserved name
 	//      (Windows `con` / `nul.txt` / `aux`).
-	//   2. ManifestValidateMode(Strict) — strict-mode-only rejections the regular
-	//      validate accepts, notably a `__` substring in the server name.
-	// Both errors are about the manifest/name (validation text, not a host path),
-	// so they are safe to echo.
+	//   2. create-mode existence — ManifestCreateIn rejects an already-saved disk
+	//      manifest, while edit mode must allow the edit target to exist.
+	//   3. ManifestValidateMode(Strict) warnings/errors — the storage path treats
+	//      manifestBlockingWarnings as hard errors even when strictErr is nil.
 	nameErr := api.CheckManifestName(m.Name)
-	if nameErr == nil {
-		if _, strictErr := api.NewAPI().ManifestValidateMode(req.YAML, api.ValidateModeStrict); strictErr != nil {
-			nameErr = strictErr
-		}
-	}
+	var blockers []api.ReadinessRequirement
 	if nameErr != nil {
-		rep.Ready = false
-		rep.Requirements = append([]api.ReadinessRequirement{{
+		blockers = append(blockers, api.ReadinessRequirement{
 			Name:   "server name",
 			OK:     false,
 			Reason: nameErr.Error(),
 			Fix:    "choose a name the backend accepts (avoid reserved names like con/nul/aux and a `__` substring)",
-		}}, rep.Requirements...)
+		})
+	} else if strings.TrimSpace(req.Mode) == "create" && m.Name != strings.TrimSpace(req.EditName) && s.manifestPresence != nil {
+		exists, err := s.manifestPresence.ManifestExists(m.Name)
+		if err != nil {
+			log.Printf("readiness: check manifest existence %q: %v", m.Name, err)
+		} else if exists {
+			blockers = append(blockers, api.ReadinessRequirement{
+				Name:   "manifest exists",
+				OK:     false,
+				Reason: fmt.Sprintf("manifest %q already exists; use edit instead", m.Name),
+				Fix:    "choose a new server name, or open the saved manifest in edit mode",
+			})
+		}
+	}
+	warnings, strictErr := api.NewAPI().ManifestValidateMode(req.YAML, api.ValidateModeStrict)
+	for _, warning := range warnings {
+		blockers = append(blockers, api.ReadinessRequirement{
+			Name:   "manifest validation",
+			OK:     false,
+			Reason: warning,
+			Fix:    "fix the manifest validation warning before saving",
+		})
+	}
+	if strictErr != nil {
+		blockers = append(blockers, api.ReadinessRequirement{
+			Name:   "server name",
+			OK:     false,
+			Reason: strictErr.Error(),
+			Fix:    "choose a name the backend accepts (avoid reserved names like con/nul/aux and a `__` substring)",
+		})
+	}
+	if len(blockers) > 0 {
+		rep.Ready = false
+		rep.Requirements = append(blockers, rep.Requirements...)
 	}
 	writeReadinessJSON(w, rep)
 }

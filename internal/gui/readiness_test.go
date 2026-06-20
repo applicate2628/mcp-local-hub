@@ -9,6 +9,12 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+type fakeManifestPresence map[string]bool
+
+func (f fakeManifestPresence) ManifestExists(name string) (bool, error) {
+	return f[name], nil
+}
+
 func sameOriginGet(s *Server, path string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest("GET", path, nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -111,6 +117,86 @@ func TestReadinessHandler_DraftPOST_DoubleUnderscoreNameBlocks(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no 'server name' blocker for a '__' name; requirements=%+v", rep.Requirements)
+	}
+}
+
+func TestReadinessHandler_DraftPOST_BlockingValidationWarningsBlock(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	// Save/create rejects this storage-blocking warning through
+	// validateManifestForStorageName/manifestBlockingWarnings even though
+	// ManifestValidateMode(Strict) returns a nil error.
+	yaml := "name: nodaemons\nkind: global\ntransport: stdio-bridge\ncommand: go\n"
+	body, _ := json.Marshal(map[string]string{"yaml": yaml, "mode": "create"})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	var rep api.ReadinessReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Error("draft with storage-blocking warning reported Ready=true; Save/create would reject it")
+	}
+	found := false
+	for _, r := range rep.Requirements {
+		if !r.OK && strings.Contains(r.Reason, "no daemons declared") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no storage-blocking validation warning in report; requirements=%+v", rep.Requirements)
+	}
+}
+
+func TestReadinessHandler_DraftPOST_CreateModeExistingManifestBlocks(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.manifestPresence = fakeManifestPresence{"saved": true}
+	yaml := "name: saved\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
+		"daemons:\n  - name: default\n    port: 9324\n" +
+		"client_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n"
+	body, _ := json.Marshal(map[string]string{"yaml": yaml, "mode": "create"})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	var rep api.ReadinessReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Error("fresh create draft for an existing manifest reported Ready=true; create would reject it")
+	}
+	found := false
+	for _, r := range rep.Requirements {
+		if r.Name == "manifest exists" && !r.OK && strings.Contains(r.Reason, `manifest "saved" already exists`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no existing-manifest blocker in report; requirements=%+v", rep.Requirements)
+	}
+}
+
+func TestReadinessHandler_DraftPOST_EditTargetExistingManifestDoesNotBlock(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.manifestPresence = fakeManifestPresence{"saved": true}
+	yaml := "name: saved\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
+		"daemons:\n  - name: default\n    port: 9325\n" +
+		"client_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n"
+	body, _ := json.Marshal(map[string]string{"yaml": yaml, "mode": "edit", "edit_name": "saved"})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	var rep api.ReadinessReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rep.Requirements {
+		if r.Name == "manifest exists" && !r.OK {
+			t.Fatalf("edit target existence should not block readiness; requirements=%+v", rep.Requirements)
+		}
 	}
 }
 

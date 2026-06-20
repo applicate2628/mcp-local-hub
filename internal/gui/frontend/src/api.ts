@@ -159,13 +159,18 @@ export async function getServerReadiness(server: string): Promise<ReadinessRepor
 
 // checkDraftReadiness checks the readiness of a DRAFT manifest the Add/Edit-
 // server screen is composing, BEFORE it is saved — so the panel updates live as
-// the operator fills the form (incl. which `secret:` refs are still unset). The
-// body shape matches /api/manifest/validate.
-export async function checkDraftReadiness(yaml: string): Promise<ReadinessReport> {
+// the operator fills the form (incl. which `secret:` refs are still unset).
+export async function checkDraftReadiness(
+  yaml: string,
+  opts: { mode?: "create" | "edit"; editName?: string } = {},
+): Promise<ReadinessReport> {
+  const body: { yaml: string; mode?: "create" | "edit"; edit_name?: string } = { yaml };
+  if (opts.mode) body.mode = opts.mode;
+  if (opts.editName) body.edit_name = opts.editName;
   return fetchOrThrow<ReadinessReport>("/api/server/readiness", "object", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ yaml }),
+    body: JSON.stringify(body),
   });
 }
 

@@ -29,6 +29,10 @@ type manifestGetter interface {
 	ManifestGetWithHash(name string) (yaml string, hash string, err error)
 }
 
+type manifestPresence interface {
+	ManifestExists(name string) (bool, error)
+}
+
 type manifestEditor interface {
 	ManifestEditWithHash(name, yaml, expectedHash string) (newHash string, err error)
 }

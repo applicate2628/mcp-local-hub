@@ -173,6 +173,78 @@ describe("AddServerScreen — create save follow-up edits", () => {
     expect(editBody.yaml).toContain("command: 'node2'");
   });
 
+  it("uses manifest edit after create commits even when hash refresh fails once", async () => {
+    const requests: Array<{ url: string; body?: string }> = [];
+    let getCalls = 0;
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      requests.push({ url, body: init?.body as string | undefined });
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        getCalls++;
+        if (getCalls === 1) {
+          return Promise.resolve(jsonResponse({ error: "transient read failed" }, 503));
+        }
+        return Promise.resolve(jsonResponse({
+          yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'disk-node'\n",
+          hash: "hash-after-retry",
+        }));
+      }
+      if (url === "/api/manifest/edit") {
+        return Promise.resolve(jsonResponse({ hash: "hash-after-edit", restart_required: false, hub_live: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    const saveButton = document.querySelector<HTMLButtonElement>('[data-action="save"]')!;
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(1);
+      expect(requests.filter((r) => r.url.startsWith("/api/manifest/get"))).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(saveButton.disabled).toBe(false);
+    });
+
+    await user.clear(screen.getByLabelText("Command"));
+    await user.type(screen.getByLabelText("Command"), "node2");
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/edit")).toHaveLength(1);
+    });
+    expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(1);
+    expect(requests.filter((r) => r.url.startsWith("/api/manifest/get"))).toHaveLength(2);
+    const editBody = JSON.parse(requests.find((r) => r.url === "/api/manifest/edit")?.body ?? "{}") as {
+      expected_hash?: string;
+      name?: string;
+      yaml?: string;
+    };
+    expect(editBody.name).toBe("demo");
+    expect(editBody.expected_hash).toBe("hash-after-retry");
+    expect(editBody.yaml).toContain("command: 'node2'");
+  });
+
   it("offers Force Save after a create-mode follow-up edit hits a stale hash", async () => {
     const requests: Array<{ url: string; body?: string }> = [];
     let getCalls = 0;

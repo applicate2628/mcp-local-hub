@@ -347,6 +347,23 @@ func (a *API) ManifestCreate(name, yaml string) error {
 	return a.ManifestCreateIn(defaultManifestDir(), name, yaml)
 }
 
+// ManifestExists reports whether the default manifest dir already has the
+// target manifest file. It mirrors ManifestCreateIn's pre-create existence
+// gate without reading the file contents.
+func (a *API) ManifestExists(name string) (bool, error) {
+	if err := checkManifestName(name); err != nil {
+		return false, err
+	}
+	target := filepath.Join(defaultManifestDir(), name, "manifest.yaml")
+	if _, err := os.Stat(target); err == nil {
+		return true, nil
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else {
+		return false, err
+	}
+}
+
 // ManifestCreateIn is the tempdir-capable form of ManifestCreate.
 func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if err := checkManifestName(name); err != nil {

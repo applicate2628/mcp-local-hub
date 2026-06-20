@@ -88,6 +88,14 @@ export function AddServerScreen(props: {
   // anti-silent-data-loss: paste must not move the baseline).
   const [initialSnapshot, setInitialSnapshot] = useState<ManifestFormState>(BLANK_FORM);
   const [committedCreate, setCommittedCreate] = useState<{ name: string; hash: string } | null>(null);
+  // editName is derived from route.query so that a dirty-declined name=a →
+  // name=b navigation does not fire a stale load (the memo dep stays stable).
+  const editName = useMemo(() => {
+    if (props.mode !== "edit") return "";
+    const params = new URLSearchParams(props.route?.query ?? "");
+    return params.get("name") ?? "";
+  }, [props.mode, props.route?.query]);
+  const readinessEditName = mode === "edit" ? editName : committedCreate?.name ?? "";
   const debouncedState = useDebouncedValue(formState, 150);
   const yamlPreview = toYAML(debouncedState);
 
@@ -131,7 +139,7 @@ export function AddServerScreen(props: {
     }
     const reqId = ++readinessReqRef.current;
     setReadinessLoading(true);
-    checkDraftReadiness(yamlPreview)
+    checkDraftReadiness(yamlPreview, { mode, editName: readinessEditName })
       .then((rep) => {
         if (reqId === readinessReqRef.current) setReadiness(rep);
       })
@@ -148,7 +156,7 @@ export function AddServerScreen(props: {
     // secret (inline OR via the AddSecretModal) re-runs this effect and the
     // panel reflects the now-resolved secret instead of a stale advisory
     // (Codex #378).
-  }, [yamlPreview, debouncedState.name, snapshot.fetchedAt]);
+  }, [yamlPreview, debouncedState.name, snapshot.fetchedAt, mode, readinessEditName]);
 
   // pendingInlineSecretEntries is the SINGLE OWNER of "which inline values still
   // need writing": current valid-named secret: refs (inlineSecretsToWrite drops a
@@ -278,13 +286,6 @@ export function AddServerScreen(props: {
     };
   }, []);
 
-  // editName is derived from route.query so that a dirty-declined name=a →
-  // name=b navigation does not fire a stale load (the memo dep stays stable).
-  const editName = useMemo(() => {
-    if (props.mode !== "edit") return "";
-    const params = new URLSearchParams(props.route?.query ?? "");
-    return params.get("name") ?? "";
-  }, [props.mode, props.route?.query]);
   const staleRecoveryName = editName || committedCreate?.name || "";
 
   // Mount effect for edit mode: reset per-manifest state BEFORE the new load
@@ -621,7 +622,16 @@ export function AddServerScreen(props: {
       } else {
         if (committedCreate?.name === name) {
           try {
-            const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, committedCreate.hash);
+            let expectedHash = committedCreate.hash;
+            if (!expectedHash) {
+              const fresh = await getManifest(name);
+              if (version !== submissionCounter.current) return;
+              if (!fresh.hash) {
+                throw new Error("/api/manifest/get: success response missing hash field");
+              }
+              expectedHash = fresh.hash;
+            }
+            const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, expectedHash);
             if (version !== submissionCounter.current) return;
             restartHub = restartRequired;
             setCommittedCreate({ name, hash: newHash });
@@ -639,9 +649,16 @@ export function AddServerScreen(props: {
         } else {
           const { restartRequired } = await postManifestCreate(name, payload);
           if (version !== submissionCounter.current) return;
-          const { hash } = await getManifest(name);
-          if (version !== submissionCounter.current) return;
           restartHub = restartRequired;
+          let hash = "";
+          try {
+            ({ hash } = await getManifest(name));
+          } catch {
+            // The create already committed; an empty hash tells the follow-up
+            // edit path to re-read before saving instead of attempting create.
+            hash = "";
+          }
+          if (version !== submissionCounter.current) return;
           setCommittedCreate({ name, hash });
           const postSave: ManifestFormState = { ...payloadState, loadedHash: hash };
           setFormState(postSave);
