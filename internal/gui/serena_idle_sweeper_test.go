@@ -558,6 +558,88 @@ func TestSerenaRouter_PreForwardWakeWindowBlocksIdleStop(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_ToolsListWakeWindowBlocksIdleStop(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
+
+	const wsPath = "/proj/tools-list-pre-forward-wake"
+	daemon := newFakeSerenaDaemon("tools-list-pre-forward-wake")
+	daemon.tool = func(w http.ResponseWriter, _ *http.Request, b []byte) {
+		if !strings.Contains(string(b), `"tools/list"`) {
+			t.Errorf("upstream body did not carry tools/list; got %s", string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"find_symbol"}]}}`))
+	}
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	ws := serenaWS("tools-list-pre-forward-wake", wsPath, testServerPort(t, ts))
+	wakeStarted := make(chan struct{})
+	releaseWake := make(chan struct{})
+	var wakeOnce sync.Once
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(context.Context, string, int, string) error {
+			wakeOnce.Do(func() { close(wakeStarted) })
+			<-releaseWake
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	captured := withIdleSweeperSeams(t, time.Nanosecond, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+		},
+	)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildLifecycleBody(t, "tools/list", map[string]any{})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+		if rr.Code != http.StatusOK {
+			t.Errorf("tools/list status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+	}()
+
+	select {
+	case <-wakeStarted:
+	case <-time.After(5 * time.Second):
+		close(releaseWake)
+		t.Fatal("tools/list request never reached the injected slow wake")
+	}
+
+	markedDuringWake := s.hasSerenaForwardInFlight(ws.WorkspaceKey)
+	n := s.SweepIdleSerenaDaemons(context.Background(), time.Now().UTC().Add(time.Minute))
+	stoppedDuringWake := n != 0 || len(*captured) != 0
+
+	close(releaseWake)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tools/list did not complete after releasing wake")
+	}
+
+	if !markedDuringWake {
+		t.Fatalf("tools/list must mark workspace %q in-flight before WakeIdleFn blocks", ws.WorkspaceKey)
+	}
+	if stoppedDuringWake {
+		t.Fatalf("idle sweep stopped a workspace with tools/list already in its wake window: n=%d captured=%v", n, *captured)
+	}
+}
+
 // FALSIFICATION: when the daemon has an operator stop, WakeIdleFn returns
 // ErrWakeRefusedOperatorStop. The handler must treat that as terminal instead
 // of forwarding to whatever process happens to own the descriptor port.

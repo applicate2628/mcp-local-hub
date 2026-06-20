@@ -230,12 +230,13 @@ func (g *serenaWorkspaceStopGate) entryLocked(wsKey string) *serenaWorkspaceStop
 	return entry
 }
 
-// enterSerenaForward marks the start of a /serena/mcp request bound for wsKey's
-// daemon (increments the in-flight counter). The matching exitSerenaForward
-// MUST be deferred so the count is decremented on EVERY return path including a
-// panic. The sweeper uses the same per-workspace gate to make "no in-flight
-// request" atomic with starting an idle-stop phase; new requests wait for that
-// phase to finish before wake/handshake. An empty wsKey is ignored.
+// enterSerenaForward marks the start of a daemon-bound Serena request for
+// wsKey, including tool-call forwards and tools/list candidate probes
+// (increments the in-flight counter). The matching exitSerenaForward MUST be
+// deferred so the count is decremented on EVERY return path including a panic.
+// The sweeper uses the same per-workspace gate to make "no in-flight request"
+// atomic with starting an idle-stop phase; new requests wait for that phase to
+// finish before wake/handshake. An empty wsKey is ignored.
 func (s *Server) enterSerenaForward(wsKey string) {
 	if s == nil || wsKey == "" {
 		return

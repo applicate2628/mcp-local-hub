@@ -867,6 +867,8 @@ func (s *Server) handleToolsList(
 	// terminal — those candidates stay eligible so the existing wake-as-an-
 	// optimization posture is preserved (a not-ready daemon may have come up by
 	// the time the fetch loop reaches it, or another live daemon answers).
+	exitToolsListForwards := s.enterSerenaToolsListCandidateForwards(entries)
+	defer exitToolsListForwards()
 	operatorStopped := s.wakeOneSerenaCandidateForToolsList(r, deps, entries, auditFn)
 	fetchEntries := excludeOperatorStoppedSerenaCandidates(entries, operatorStopped)
 	if len(fetchEntries) == 0 {
@@ -1018,6 +1020,35 @@ func (s *Server) wakeOneSerenaCandidateForToolsList(
 		})
 	}
 	return operatorStopped
+}
+
+// enterSerenaToolsListCandidateForwards marks every Serena workspace that a
+// cache-miss tools/list may wake or proxy as in-flight. The returned cleanup
+// must stay deferred until after wakeOneSerenaCandidateForToolsList and
+// fetchToolsListFromAnyDaemon complete, including proxyToolsListOnce and the
+// one-shot upstream DELETE cleanup inside the fetch loop.
+func (s *Server) enterSerenaToolsListCandidateForwards(entries []*api.WorkspaceEntry) func() {
+	if s == nil || len(entries) == 0 {
+		return func() {}
+	}
+	seen := make(map[string]struct{}, len(entries))
+	keys := make([]string, 0, len(entries))
+	for _, ws := range entries {
+		if ws == nil || ws.WorkspaceKey == "" || !isSerenaWorkspaceEntry(ws) {
+			continue
+		}
+		if _, ok := seen[ws.WorkspaceKey]; ok {
+			continue
+		}
+		seen[ws.WorkspaceKey] = struct{}{}
+		s.enterSerenaForward(ws.WorkspaceKey)
+		keys = append(keys, ws.WorkspaceKey)
+	}
+	return func() {
+		for i := len(keys) - 1; i >= 0; i-- {
+			s.exitSerenaForward(keys[i])
+		}
+	}
 }
 
 // excludeOperatorStoppedSerenaCandidates returns the subset of entries whose
