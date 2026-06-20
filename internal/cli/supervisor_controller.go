@@ -3313,11 +3313,14 @@ const respawnBackoffMax = 60 * time.Second
 // emitted.
 //
 // Exits when ctx is canceled (supervisor graceful shutdown) or when
-// crashCh is closed. Errors from loop.Post are not possible -
-// EventLoop.Post is non-blocking against a full channel only at the
-// channel-cap level (cap=1024 from the production wiring at
-// supervise.go:416), and a full channel here would block the
-// bridge but not lose events.
+// crashCh is closed. loop.Post is a BLOCKING send onto the event loop's
+// main channel (NewEventLoop(1024) in runSupervise): if that channel is
+// momentarily full the bridge blocks here rather than losing the event,
+// which is the load-bearing half of the never-drop-a-real-child-exit
+// invariant (the other half is the per-child wait goroutine's BLOCKING
+// send onto crashCh — audit P3, 2026-06-20). Back-pressure always
+// drains because the loop goroutine never waits on a wait goroutine, so
+// it keeps consuming loop.ch regardless of how many sends are queued.
 func runCrashEventBridge(
 	ctx context.Context,
 	crashCh <-chan crashEvent,

@@ -519,8 +519,17 @@ shared with the v0.4.x watchdog state dir for byte-symmetric rollback):
                                       # canonical truth for `strict_mode`; mutated only via `mcphub strict-mode {enable, disable}`
                                       # task_name keys are canonical leading-backslash form
   supervisor-state.json               # NEW: {version, daemons{state, current_pid, pid_generation, started_at,
-                                      #        restart_history[30-min sliding window], backoff_until, quarantine_since, queued_action},
+                                      #        orphan_pid, job_protection},
                                       #        transient_pids[], maintenance_fired_at{}}
+                                      # NOTE: restart-policy runtime state (the 30-min crash sliding window,
+                                      # backoff deadline, quarantine timestamp, queued post-exit action) is
+                                      # IN-MEMORY ONLY in the supervisor (DaemonRuntimeTracker + SMContext) and
+                                      # RESETS on every cold restart by design — pre-restart crashes are not
+                                      # relevant to runtime respawn decisions. Earlier revisions carried
+                                      # vestigial restart_history / backoff_until / quarantine_since /
+                                      # queued_action fields here, but no production path ever wrote a non-empty
+                                      # value; they were removed (2026-06-20 supervisor audit P3) so the
+                                      # persisted schema matches what the code actually writes.
   supervisor-events.log               # NEW: JSONL audit trail; 16 KB per-entry cap; 10 MB rotation → .log.1 (schema below)
   supervisor.lock                     # NEW: supervisor singleton flock; sidecar JSON carries {pid, start_time}
                                       # IPC clients read this BEFORE opening the named pipe / unix socket for handshake
@@ -762,7 +771,11 @@ this gives a co-resident user the ability to:
 
 - flip `strict_mode` posture via swapped `supervisor-intent.json`,
 - inject attacker-controlled daemon descriptors,
-- prime `restart_history` to force quarantine on legitimate daemons.
+- inject a `state: quarantined` row in a swapped `supervisor-state.json`
+  to suppress a legitimate daemon on the next supervisor cold start
+  (the supervisor hydrates `state` from the file; the in-memory-only
+  crash sliding window is no longer attacker-primable via a persisted
+  `restart_history`, which was removed in the 2026-06-20 audit).
 
 **Operators on such hosts MUST set
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` to extend the strict parent-dir

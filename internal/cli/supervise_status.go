@@ -194,21 +194,25 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 				runtimeState.CurrentPID = 0
 			}
 		}
+		// NOTE: restart-policy runtime state (restart_history / backoff_until
+		// / quarantine_since / queued_action) is deliberately NOT in this IPC
+		// status row. It is in-memory-only in the supervisor and resets on
+		// cold restart (see api.SupervisorDaemonState's doc comment); the
+		// pre-2026-06-20 row emitted those keys as always-empty placeholders
+		// that no consumer (GUI, mcphub status CLI, health.go) ever read, so
+		// they were dropped with the persisted fields (audit P3).
 		row := map[string]any{
-			"task_name":        taskName,
-			"server":           server,
-			"daemon":           daemon,
-			"command":          d.Command,
-			"args":             args,
-			"workspace":        d.Workspace,
-			"port":             port,
-			"state":            stateText,
-			"current_pid":      runtimeState.CurrentPID,
-			"started_at":       daemonRuntimeStartedAt(runtimeState.StartedAt),
-			"restart_history":  []api.RestartEvent{},
-			"backoff_until":    "",
-			"quarantine_since": "",
-			"is_maintenance":   isSupervisorMaintenanceTask(taskName),
+			"task_name":      taskName,
+			"server":         server,
+			"daemon":         daemon,
+			"command":        d.Command,
+			"args":           args,
+			"workspace":      d.Workspace,
+			"port":           port,
+			"state":          stateText,
+			"current_pid":    runtimeState.CurrentPID,
+			"started_at":     daemonRuntimeStartedAt(runtimeState.StartedAt),
+			"is_maintenance": isSupervisorMaintenanceTask(taskName),
 		}
 		if stalePID != 0 {
 			row["stale_pid"] = stalePID

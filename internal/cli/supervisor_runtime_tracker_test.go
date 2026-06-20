@@ -2,7 +2,9 @@ package cli
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,91 +168,113 @@ func TestDaemonRuntimeTracker_PersistAndHydrate(t *testing.T) {
 	}
 }
 
-// TestDaemonRuntimeTracker_PersistPreservesFileOwnedFields is the Codex
-// deep-sec PR #268 Conc-F1 guard: PersistTo rebuilds file.Daemons
-// wholesale from the in-memory tracker, which models only State /
-// CurrentPID / PIDGeneration / OrphanPID / JobProtection / StartedAt. The
-// four file-owned fields the tracker does NOT model —
-// RestartHistory / BackoffUntil / QuarantineSince / QueuedAction — must be
-// preserved from the existing on-disk row across a persist that updates
-// State/PID, not zero-filled. Pre-fix every persist erased them, and the
-// persist-on-every-transition cadence made the loss guaranteed (the
-// cross-restart 30-min sliding window read by HydrateFromState would be
-// silently dropped on the first transition after cold start).
-func TestDaemonRuntimeTracker_PersistPreservesFileOwnedFields(t *testing.T) {
+// TestDaemonRuntimeTracker_PersistDoesNotEmitVestigialRestartFields pins
+// the 2026-06-20 supervisor audit P3 decision (Option 2: DELETE the
+// vestigial restart-policy fields, document in-memory-only). The
+// restart-policy runtime state (30-min crash sliding window, backoff
+// deadline, quarantine timestamp, queued post-exit action) is
+// in-memory-only in DaemonRuntimeTracker and the SM's SMContext; it is
+// NOT persisted and resets on cold restart by design. The persisted
+// supervisor-state.json must therefore NEVER carry restart_history /
+// backoff_until / quarantine_since / queued_action keys — the previous
+// schema claimed they were persisted but no production path ever wrote a
+// non-empty value (this superseded the Codex deep-sec PR #268 Conc-F1
+// forward-copy, which only ever preserved empties).
+//
+// The test asserts on the RAW JSON bytes because the Go struct no longer
+// has those fields at all — a struct-field assertion can't catch a
+// regression that re-adds them, but a raw-key scan can.
+func TestDaemonRuntimeTracker_PersistDoesNotEmitVestigialRestartFields(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	taskName := `\mcp-local-hub-memory-default`
 
-	// Seed a row carrying all four file-owned fields with non-zero values,
-	// as a quarantine/backoff path or a previous supervisor would have
-	// written them.
-	backoffUntil := "2026-06-09T10:05:00.000000000Z"
-	quarantineSince := "2026-06-09T09:30:00.000000000Z"
-	if err := api.WriteSupervisorState(statePath, &api.SupervisorStateFile{
-		Version: 1,
-		Daemons: map[string]api.SupervisorDaemonState{
-			taskName: {
-				State:         "backoff-waiting",
-				CurrentPID:    0,
-				PIDGeneration: 4,
-				RestartHistory: []api.RestartEvent{
-					{At: "2026-06-09T09:50:00.000000000Z", ExitCode: 1},
-					{At: "2026-06-09T09:55:00.000000000Z", ExitCode: 2},
-				},
-				BackoffUntil:    backoffUntil,
-				QuarantineSince: quarantineSince,
-				QueuedAction:    &api.QueuedAction{Kind: "respawn", Reason: "manual-restart"},
-			},
-		},
-	}); err != nil {
-		t.Fatalf("seed supervisor-state.json: %v", err)
-	}
-
-	// A persist driven by a state/PID transition (e.g. the daemon respawned).
+	// Drive a crash + backoff + quarantine + spawn sequence so any path
+	// that WOULD persist restart-policy state has fired before the persist.
 	tracker := NewDaemonRuntimeTracker()
 	startedAt := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	tracker.MarkSpawned(taskName, 5555, startedAt)
+	tracker.RecordCrashAndCountInWindow(taskName, startedAt.Add(time.Minute), 30*time.Minute)
+	tracker.MarkBackoff(taskName)
+	tracker.MarkQuarantined(taskName)
+	tracker.MarkSpawned(taskName, 6666, startedAt.Add(2*time.Minute))
 	if err := tracker.PersistTo(statePath); err != nil {
 		t.Fatalf("persist tracker: %v", err)
 	}
 
+	// The tracker fields ARE persisted (state/pid/generation/started_at).
 	persisted, err := api.ReadSupervisorState(statePath)
 	if err != nil {
 		t.Fatalf("read persisted supervisor-state.json: %v", err)
 	}
 	row := persisted.Daemons[taskName]
-	// State/PID/generation reflect the tracker's fresh values.
-	if row.State != "running" || row.CurrentPID != 5555 || row.PIDGeneration != 1 || row.StartedAt != startedAt.Format(time.RFC3339Nano) {
-		t.Fatalf("persisted row tracker fields = %+v, want running pid=5555 generation=1 started_at", row)
+	if row.State != "running" || row.CurrentPID != 6666 || row.PIDGeneration != 2 {
+		t.Fatalf("persisted row tracker fields = %+v, want running pid=6666 generation=2", row)
 	}
-	// The four file-owned fields are RETAINED, not zeroed.
-	if len(row.RestartHistory) != 2 {
-		t.Fatalf("RestartHistory zeroed by persist: %+v (Conc-F1 regression)", row.RestartHistory)
+
+	// The vestigial restart-policy keys MUST be absent from the on-disk JSON.
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read raw supervisor-state.json: %v", err)
 	}
-	if row.RestartHistory[0].ExitCode != 1 || row.RestartHistory[1].ExitCode != 2 {
-		t.Fatalf("RestartHistory corrupted by persist: %+v", row.RestartHistory)
-	}
-	if row.BackoffUntil != backoffUntil {
-		t.Fatalf("BackoffUntil = %q, want preserved %q (Conc-F1 regression)", row.BackoffUntil, backoffUntil)
-	}
-	if row.QuarantineSince != quarantineSince {
-		t.Fatalf("QuarantineSince = %q, want preserved %q (Conc-F1 regression)", row.QuarantineSince, quarantineSince)
-	}
-	if row.QueuedAction == nil || row.QueuedAction.Kind != "respawn" || row.QueuedAction.Reason != "manual-restart" {
-		t.Fatalf("QueuedAction = %+v, want preserved {respawn manual-restart} (Conc-F1 regression)", row.QueuedAction)
+	for _, key := range []string{"restart_history", "backoff_until", "quarantine_since", "queued_action"} {
+		if strings.Contains(string(raw), key) {
+			t.Fatalf("persisted supervisor-state.json carries vestigial key %q (audit P3 regression):\n%s", key, raw)
+		}
 	}
 }
 
-// TestDaemonRuntimeTracker_PersistDropsFieldsForRemovedDaemon is the
-// adversarial complement to the Conc-F1 preserve fix: the preserve logic
-// must NOT resurrect the four file-owned fields for a daemon the tracker
-// no longer owns (e.g. removed via clearRemovedTaskRuntime). PersistTo
-// rebuilds file.Daemons from the tracker snapshot, so a task absent from
-// the tracker is dropped from the file entirely — including its four
-// fields. This proves the preserve copy is scoped to tasks the tracker
-// still tracks, not a blanket merge that would strand stale rows.
-func TestDaemonRuntimeTracker_PersistDropsFieldsForRemovedDaemon(t *testing.T) {
+// TestDaemonRuntimeTracker_RestartPolicyStateResetsOnColdRestart pins the
+// in-memory-only contract: a crash window + quarantine that exists in one
+// supervisor's tracker does NOT survive a cold restart (a fresh tracker
+// hydrated from the persisted file). This is the behavior the audit P3
+// decision documents as intentional (pre-restart crashes are irrelevant
+// to runtime respawn decisions; a cold restart is an operator reset).
+func TestDaemonRuntimeTracker_RestartPolicyStateResetsOnColdRestart(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	taskName := `\mcp-local-hub-memory-default`
+
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	hot := NewDaemonRuntimeTracker()
+	hot.MarkSpawned(taskName, 5555, now)
+	// Record several crashes so the sliding window is non-empty in-memory.
+	for i := 0; i < 3; i++ {
+		hot.RecordCrashAndCountInWindow(taskName, now.Add(time.Duration(i)*time.Minute), 30*time.Minute)
+	}
+	if got := hot.CrashCountInWindow(taskName, now.Add(5*time.Minute), 30*time.Minute); got != 3 {
+		t.Fatalf("hot tracker crash window = %d, want 3", got)
+	}
+	if err := hot.PersistTo(statePath); err != nil {
+		t.Fatalf("persist hot tracker: %v", err)
+	}
+
+	// Cold restart: a fresh tracker hydrated from the persisted state has
+	// NO crash history (the window is in-memory-only and was not persisted).
+	cold, err := loadDaemonRuntimeTrackerFromStatePath(statePath)
+	if err != nil {
+		t.Fatalf("load cold tracker: %v", err)
+	}
+	if got := cold.CrashCountInWindow(taskName, now.Add(5*time.Minute), 30*time.Minute); got != 0 {
+		t.Fatalf("cold tracker crash window = %d, want 0 (reset on restart)", got)
+	}
+	entry, ok := cold.Get(taskName)
+	if !ok {
+		t.Fatal("cold tracker missing hydrated entry")
+	}
+	// RestartCount is in-memory-only and also resets to 0 on cold restart.
+	if entry.RestartCount != 0 {
+		t.Fatalf("cold tracker RestartCount = %d, want 0 (reset on restart)", entry.RestartCount)
+	}
+}
+
+// TestDaemonRuntimeTracker_PersistDropsRowForRemovedDaemon proves
+// PersistTo rebuilds file.Daemons wholesale from the tracker snapshot:
+// a task absent from the tracker (e.g. removed via clearRemovedTaskRuntime
+// → tracker.Remove) is dropped from the file entirely rather than stranded
+// as a stale row. (The wholesale rebuild is also why no stale vestigial
+// restart-policy fields can survive — there is no per-row merge anymore.)
+func TestDaemonRuntimeTracker_PersistDropsRowForRemovedDaemon(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	removed := `\mcp-local-hub-removed-default`
@@ -260,11 +284,8 @@ func TestDaemonRuntimeTracker_PersistDropsFieldsForRemovedDaemon(t *testing.T) {
 		Version: 1,
 		Daemons: map[string]api.SupervisorDaemonState{
 			removed: {
-				State:           "quarantined",
-				PIDGeneration:   9,
-				RestartHistory:  []api.RestartEvent{{At: "2026-06-09T09:00:00.000000000Z", ExitCode: 1}},
-				QuarantineSince: "2026-06-09T09:00:00.000000000Z",
-				QueuedAction:    &api.QueuedAction{Kind: "respawn", Reason: "x"},
+				State:         "quarantined",
+				PIDGeneration: 9,
 			},
 		},
 	}); err != nil {
