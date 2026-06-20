@@ -614,7 +614,7 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// ErrPortPoolExhausted even if nothing is currently listening (Codex #377
 	// r4). For a native-http pool the materialized proxy also binds
 	// external+offset upstream, so BOTH must be free.
-	var registryTaken map[int]bool
+	var registryOwners registryPortOwners
 	var registryLoadErr error
 	// register resolves the path (DefaultRegistryPath) AND loads it before
 	// allocating; BOTH can fail (no resolvable home/state dir in a headless
@@ -629,15 +629,9 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		if lerr := reg.Load(); lerr != nil {
 			registryLoadErr = fmt.Errorf("load registry: %w", lerr)
 		} else {
-			registryTaken = reg.AllocatedPorts()
+			registryOwners = registryPortOwnersFromEntries(reg.Workspaces)
 		}
 	}
-	// portTaken mirrors the allocator EXACTLY: AllocatePort skips a port when
-	// registry-allocated OR when portAvailable (the OS bind probe) is false. A
-	// TCP dial (preflightPortInUse) differs — a port bound but not yet
-	// accepting reads as free to a dial yet fails the allocator's bind, so use
-	// the SAME portAvailable probe (Codex #377 r7).
-	portTaken := func(port int) bool { return !portAvailable(port) || registryTaken[port] }
 	checkPool := func(pp manifestPortPool, nativeHTTP bool) {
 		p := pp.pool
 		if p == nil || p.End < p.Start {
@@ -667,13 +661,18 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			return
 		}
 		name := portPoolName(p)
-		for port := p.Start; port <= p.End; port++ {
-			if portTaken(port) {
-				continue
+		availability := inspectPortPoolAvailability(p, m.Name, nativeHTTP, registryOwners)
+		if availability.foreignBoundNeeded || (!availability.free && availability.foreignBoundUnallocated) {
+			reason := "no port in the workspace pool is free because a pool port is OS-bound by a foreign process"
+			if availability.foreignBoundNeeded {
+				reason = "an existing workspace pool port is OS-bound by a foreign process"
 			}
-			if nativeHTTP && portTaken(port+config.NativeHTTPInternalPortOffset) {
-				continue
-			}
+			add(ReadinessRequirement{Name: name, OK: false,
+				Reason: reason,
+				Fix:    "Free the foreign process holding the pool port (or its native-http +offset upstream), or widen the pool in the manifest."})
+			return
+		}
+		if availability.free {
 			add(ReadinessRequirement{Name: name, OK: true})
 			return
 		}
@@ -682,7 +681,7 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		if optional {
 			// ADVISORY only for daemon-template dynamic-pool installs/reinstalls:
 			// those allocate no new pool port; workspace registration does.
-			reason = "no port in the workspace pool is free for a NEW workspace (OS-bound or registry-allocated); existing workspaces and reinstall are unaffected"
+			reason = "no port in the workspace pool is free for a NEW workspace (registry-allocated by existing workspaces); existing workspaces and reinstall are unaffected"
 		}
 		add(ReadinessRequirement{Name: name, OK: false, Optional: optional,
 			Reason: reason,

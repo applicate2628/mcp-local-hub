@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,8 +179,18 @@ func TestPreflightSkipsCallerDependentClientBindingValidation(t *testing.T) {
 // still surfaced (operator sees the pool is full) but Optional, in BOTH gates.
 func TestAdmissionCheckPoolExhaustionIsAdvisory(t *testing.T) {
 	setupAdmissionParityTest(t)
-	// Every pool port appears OS-bound — the exhausted-pool reinstall case.
-	portAvailable = func(int) bool { return false }
+	// Every pool port is already assigned to an existing workspace, but the OS
+	// bind probe is free. A server reinstall allocates no NEW pool port, so this
+	// remains advisory.
+	portAvailable = func(int) bool { return true }
+	seedAdmissionWorkspaceRegistry(t, WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          55000,
+		TaskName:      "mcp-local-hub-serena-abcd1234",
+	})
 
 	m := &config.ServerManifest{
 		Name:      "exhausted-pool",
@@ -204,6 +215,54 @@ func TestAdmissionCheckPoolExhaustionIsAdvisory(t *testing.T) {
 	}
 	if !f.Optional {
 		t.Fatal("port-pool-free finding is non-optional; it must be advisory so install/reinstall is not blocked")
+	}
+}
+
+func TestAdmissionCheckDaemonTemplatePoolForeignBoundExistingWorkspaceIsBlocking(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		occupiedPort int
+	}{
+		{name: "external", occupiedPort: 55000},
+		{name: "native-http upstream", occupiedPort: 55000 + config.NativeHTTPInternalPortOffset},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupAdmissionParityTest(t)
+			portAvailable = func(port int) bool { return port != tc.occupiedPort }
+			seedAdmissionWorkspaceRegistry(t, WorkspaceEntry{
+				WorkspaceKey:  "abcd1234",
+				WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
+				Language:      SerenaLanguageSentinel,
+				Backend:       "serena",
+				Port:          55000,
+				TaskName:      "mcp-local-hub-serena-abcd1234",
+			})
+
+			m := &config.ServerManifest{
+				Name:      "foreign-bound-pool",
+				Kind:      config.KindWorkspaceScoped,
+				Transport: config.TransportNativeHTTP,
+				Command:   "go",
+				DaemonTemplate: &config.DaemonTemplate{
+					Context:  "workspace",
+					PortPool: &config.PortPool{Start: 55000, End: 55000},
+				},
+			}
+
+			if err := Preflight(m, ""); err == nil {
+				t.Fatal("Preflight accepted a daemon-template pool whose existing workspace port is OS-bound by a foreign process; want blocking rejection")
+			}
+			if CheckServerReadiness(m).Ready {
+				t.Fatal("CheckServerReadiness.Ready=true with a foreign-bound existing workspace port; want false")
+			}
+			f, ok := admissionFindingByID(AdmissionCheck(m, AdmissionScope{}), "port-pool-free")
+			if !ok {
+				t.Fatal("port-pool-free finding missing for foreign-bound existing workspace port")
+			}
+			if f.Optional {
+				t.Fatal("foreign-bound existing workspace port finding is optional; want blocking")
+			}
+		})
 	}
 }
 
@@ -236,6 +295,41 @@ func TestAdmissionCheckTopLevelPoolExhaustionIsBlocking(t *testing.T) {
 	}
 	if f.Optional {
 		t.Fatal("top-level port-pool-free finding is optional; want blocking")
+	}
+}
+
+func TestAdmissionCheckIgnoresGlobalTopLevelPortPool(t *testing.T) {
+	setupAdmissionParityTest(t)
+	defaultRegistryPathFn = func() (string, error) {
+		return "", errors.New("registry unavailable")
+	}
+	portAvailable = func(port int) bool {
+		return port != 55000
+	}
+
+	m := &config.ServerManifest{
+		Name:      "global-stray-pool",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportStdioBridge,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "main", Port: 54324}},
+		PortPool:  &config.PortPool{Start: 55000, End: 55000},
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate rejected a global local-transport manifest with stray top-level port_pool: %v", err)
+	}
+
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("Preflight rejected a global manifest due to an unused top-level pool: %v", err)
+	}
+	if !CheckServerReadiness(m).Ready {
+		t.Fatal("CheckServerReadiness.Ready=false due to an unused global top-level pool; want true")
+	}
+	if hasAdmissionFinding(AdmissionCheck(m, AdmissionScope{}), "port-pool-free") {
+		t.Fatal("AdmissionCheck surfaced port-pool-free for an unused global top-level pool")
+	}
+	if hasAdmissionFinding(AdmissionCheck(m, AdmissionScope{}), "port-pool-registry") {
+		t.Fatal("AdmissionCheck read the workspace registry for an unused global top-level pool")
 	}
 }
 
@@ -421,6 +515,24 @@ func setupAdmissionParityTest(t *testing.T) {
 	preflightPortInUse = func(int) bool { return false }
 	defaultRegistryPathFn = func() (string, error) {
 		return filepath.Join(root, "State", "mcp-local-hub", "workspaces.yaml"), nil
+	}
+}
+
+func seedAdmissionWorkspaceRegistry(t *testing.T, entries ...WorkspaceEntry) {
+	t.Helper()
+	path, err := DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("default registry path: %v", err)
+	}
+	reg := NewRegistry(path)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	for _, entry := range entries {
+		reg.Put(entry)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry: %v", err)
 	}
 }
 
