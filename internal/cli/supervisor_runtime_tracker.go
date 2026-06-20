@@ -438,14 +438,15 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 	snapshot := t.Snapshot()
 	return mutateSupervisorStateFile(path, func(file *api.SupervisorStateFile) error {
 		// REPLACE file.Daemons wholesale from the in-memory tracker
-		// snapshot. SupervisorDaemonState now carries ONLY the fields the
-		// tracker models (State/CurrentPID/PIDGeneration/StartedAt/
+		// snapshot. SupervisorDaemonState now carries ONLY durable state
+		// plus PID metadata (State/CurrentPID/PIDGeneration/StartedAt/
 		// OrphanPID/JobProtection). The earlier forward-copy of
 		// restart_history/backoff_until/quarantine_since/queued_action is
 		// gone with those fields: no production path ever wrote them, so
 		// there was never a real value to preserve. Restart-policy runtime
 		// state (sliding window, backoff deadline, quarantine, queued
-		// action) is in-memory-only and resets on cold restart by design —
+		// action, and the backoff/quarantine sub-states themselves) is
+		// in-memory-only and resets on cold restart by design —
 		// see SupervisorDaemonState's doc comment + the
 		// DaemonRuntimeTracker.failures map (2026-06-20 supervisor audit
 		// P3, superseding the Codex deep-sec PR #268 Conc-F1 forward-copy).
@@ -530,10 +531,6 @@ func runtimeStateFromSupervisorState(state string) string {
 
 func supervisorStateFromRuntimeState(state string) string {
 	switch runtimeStateFromSupervisorState(state) {
-	case daemonRuntimeStateBackoff:
-		return "backoff-waiting"
-	case daemonRuntimeStateQuarantine:
-		return "quarantined"
 	case daemonRuntimeStateRunning:
 		return daemonRuntimeStateRunning
 	default:

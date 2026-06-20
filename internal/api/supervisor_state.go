@@ -34,7 +34,7 @@ type SupervisorStateFile struct {
 // supervisor audit P3) so the persisted schema matches what the code
 // actually writes.
 type SupervisorDaemonState struct {
-	State         string `json:"state"` // idle|spawning|running|exiting|backoff-waiting|quarantined
+	State         string `json:"state"` // durable persisted state: idle|running
 	CurrentPID    int    `json:"current_pid"`
 	PIDGeneration int    `json:"pid_generation"`
 	StartedAt     string `json:"started_at,omitempty"`

@@ -10,6 +10,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 func TestDaemonRuntimeTracker_LifecycleTransitions(t *testing.T) {
@@ -143,8 +144,8 @@ func TestDaemonRuntimeTracker_PersistAndHydrate(t *testing.T) {
 		t.Fatalf("persisted memory state = %+v, want running pid=4321 generation=1 started_at", mem)
 	}
 	serena := persisted.Daemons[`\mcp-local-hub-serena-codex`]
-	if serena.State != "backoff-waiting" || serena.CurrentPID != 0 {
-		t.Fatalf("persisted serena state = %+v, want backoff-waiting pid=0", serena)
+	if serena.State != "idle" || serena.CurrentPID != 0 {
+		t.Fatalf("persisted serena state = %+v, want neutral idle pid=0", serena)
 	}
 	if len(persisted.TransientPIDs) != 1 || persisted.MaintenanceFiredAt["workspace-weekly-refresh"] == "" {
 		t.Fatalf("persist lost non-daemon state: %+v", persisted)
@@ -163,8 +164,8 @@ func TestDaemonRuntimeTracker_PersistAndHydrate(t *testing.T) {
 	if !ok {
 		t.Fatal("hydrated serena entry missing")
 	}
-	if entry.State != daemonRuntimeStateBackoff || entry.CurrentPID != 0 {
-		t.Fatalf("hydrated serena entry = %+v, want backoff pid=0", entry)
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+		t.Fatalf("hydrated serena entry = %+v, want idle pid=0", entry)
 	}
 }
 
@@ -220,6 +221,85 @@ func TestDaemonRuntimeTracker_PersistDoesNotEmitVestigialRestartFields(t *testin
 	for _, key := range []string{"restart_history", "backoff_until", "quarantine_since", "queued_action"} {
 		if strings.Contains(string(raw), key) {
 			t.Fatalf("persisted supervisor-state.json carries vestigial key %q (audit P3 regression):\n%s", key, raw)
+		}
+	}
+}
+
+func TestDaemonRuntimeTracker_PersistCollapsesRestartPolicyRuntimeStates(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	runningTask := `\mcp-local-hub-memory-default`
+	backoffTask := `\mcp-local-hub-serena-default`
+	quarantinedTask := `\mcp-local-hub-lsp-default`
+	startedAt := time.Date(2026, 6, 21, 10, 0, 0, 0, time.UTC)
+
+	hot := NewDaemonRuntimeTracker()
+	hot.MarkSpawned(runningTask, 7777, startedAt)
+	hot.MarkSpawned(backoffTask, 8888, startedAt.Add(time.Minute))
+	hot.MarkBackoff(backoffTask)
+	hot.MarkSpawned(quarantinedTask, 9999, startedAt.Add(2*time.Minute))
+	hot.MarkQuarantined(quarantinedTask)
+	if err := hot.PersistTo(statePath); err != nil {
+		t.Fatalf("persist hot tracker: %v", err)
+	}
+
+	persisted, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read persisted supervisor-state.json: %v", err)
+	}
+	if row := persisted.Daemons[runningTask]; row.State != "running" || row.CurrentPID != 7777 || row.PIDGeneration != 1 {
+		t.Fatalf("running row = %+v, want running pid=7777 generation=1", row)
+	}
+	for _, taskName := range []string{backoffTask, quarantinedTask} {
+		row := persisted.Daemons[taskName]
+		if row.State != "idle" || row.CurrentPID != 0 || row.StartedAt != "" {
+			t.Fatalf("restart-policy runtime row %s = %+v, want neutral idle pid=0 no started_at", taskName, row)
+		}
+	}
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read raw supervisor-state.json: %v", err)
+	}
+	for _, transient := range []string{"backoff-waiting", "quarantined"} {
+		if strings.Contains(string(raw), transient) {
+			t.Fatalf("persisted supervisor-state.json carries transient state %q:\n%s", transient, raw)
+		}
+	}
+
+	prevVerify := currentRunningVerifyPIDIdentityFn
+	prevAlive := currentRunningIsPIDAliveFn
+	currentRunningVerifyPIDIdentityFn = func(proof process.PIDIdentityProof) error {
+		if proof.PID != 7777 {
+			t.Fatalf("verified PID = %d, want only running PID 7777", proof.PID)
+		}
+		return nil
+	}
+	currentRunningIsPIDAliveFn = func(pid int) bool {
+		t.Fatalf("verified PID path should not need alive fallback, got pid %d", pid)
+		return false
+	}
+	t.Cleanup(func() {
+		currentRunningVerifyPIDIdentityFn = prevVerify
+		currentRunningIsPIDAliveFn = prevAlive
+	})
+
+	cold, currentRunning, runningPIDs, err := loadSupervisorStartupRuntime(stateDir)
+	if err != nil {
+		t.Fatalf("loadSupervisorStartupRuntime: %v", err)
+	}
+	if !currentRunning[runningTask] || runningPIDs[runningTask].PID != 7777 {
+		t.Fatalf("verified running daemon not seeded: currentRunning=%v runningPIDs=%v", currentRunning, runningPIDs)
+	}
+	for _, taskName := range []string{backoffTask, quarantinedTask} {
+		if currentRunning[taskName] {
+			t.Fatalf("non-running restart-policy row %s reached currentRunning: %v", taskName, currentRunning)
+		}
+		entry, ok := cold.Get(taskName)
+		if !ok {
+			t.Fatalf("cold tracker missing %s", taskName)
+		}
+		if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+			t.Fatalf("cold tracker %s = %+v, want idle pid=0", taskName, entry)
 		}
 	}
 }

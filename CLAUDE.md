@@ -521,9 +521,11 @@ shared with the v0.4.x watchdog state dir for byte-symmetric rollback):
   supervisor-state.json               # NEW: {version, daemons{state, current_pid, pid_generation, started_at,
                                       #        orphan_pid, job_protection},
                                       #        transient_pids[], maintenance_fired_at{}}
-                                      # NOTE: restart-policy runtime state (the 30-min crash sliding window,
-                                      # backoff deadline, quarantine timestamp, queued post-exit action) is
-                                      # IN-MEMORY ONLY in the supervisor (DaemonRuntimeTracker + SMContext) and
+                                      # NOTE: state is durable-only (`running`, or neutral `idle` when no
+                                      # verified child is running). Restart-policy runtime state (the 30-min
+                                      # crash sliding window, backoff deadline, quarantine timestamp, queued
+                                      # post-exit action, and backoff/quarantine sub-states) is IN-MEMORY ONLY
+                                      # in the supervisor (DaemonRuntimeTracker + SMContext) and
                                       # RESETS on every cold restart by design — pre-restart crashes are not
                                       # relevant to runtime respawn decisions. Earlier revisions carried
                                       # vestigial restart_history / backoff_until / quarantine_since /
@@ -773,14 +775,16 @@ this gives a co-resident user the ability to:
 - inject attacker-controlled daemon descriptors.
 
 A swapped `supervisor-state.json` cannot by itself inject a persisted
-`"state":"quarantined"` row to suppress a legitimate daemon on the next
-supervisor cold start. The state file is still parsed into the runtime
-tracker, but cold-start controller state is seeded only for verified
-running PIDs; a not-running daemon reaches the initial reconcile as
-idle/default state and running intent spawns it. The restart-policy
-internals (crash history, backoff deadline, quarantine timestamp, and
-queued action) are also in-memory-only and no longer attacker-primable
-through persisted fields after the 2026-06-20 audit.
+`"state":"quarantined"` row from a current supervisor writer to suppress
+a legitimate daemon on the next supervisor cold start. Current writes
+collapse restart-policy sub-states to neutral `idle`; the state file is
+still parsed into the runtime tracker, but cold-start controller state is
+seeded only for verified running PIDs; a not-running daemon reaches the
+initial reconcile as idle/default state and running intent spawns it.
+The restart-policy internals (crash history, backoff deadline,
+quarantine timestamp, queued action, and backoff/quarantine sub-states)
+are also in-memory-only and no longer attacker-primable through
+persisted fields after the 2026-06-20 audit.
 
 **Operators on such hosts MUST set
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` to extend the strict parent-dir
