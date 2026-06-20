@@ -29,7 +29,7 @@ func waitRestartTestEvent(t *testing.T, ch <-chan hubRestartTestEvent, want stri
 	for {
 		select {
 		case ev := <-ch:
-			if ev.event == want {
+			if want == "" || ev.event == want {
 				return ev
 			}
 		case <-deadline:
@@ -171,7 +171,11 @@ func TestHubListenerRestartDriverBackoffAndExhaustion(t *testing.T) {
 				events <- hubRestartTestEvent{level: level, event: event, fields: fields}
 				return nil
 			},
-			sleepFn: func(_ context.Context, d time.Duration) bool {
+			sleepFn: func(ctx context.Context, d time.Duration) bool {
+				if d == hubListenerRestartStableWindow {
+					<-ctx.Done()
+					return false
+				}
 				sleeps = append(sleeps, d)
 				return true
 			},
@@ -210,6 +214,129 @@ func TestHubListenerRestartDriverBackoffAndExhaustion(t *testing.T) {
 	}
 	if got := s.hubMcpComp.Load(); got != nil {
 		t.Fatalf("component after exhausted failed restarts = %#v, want nil", got)
+	}
+}
+
+func TestHubListenerRestartDriverRetriesStartFailureExhaustionWithoutSignal(t *testing.T) {
+	stateDir := t.TempDir()
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	if _, err := api.EnsureHubEndpoint(3439, 111); err != nil {
+		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
+	}
+
+	s := NewServer(Config{Port: 0})
+	oldComp := liveRestartTestComp(3439)
+	newComp := liveRestartTestComp(3439)
+	s.hubMcpComp.Store(oldComp)
+
+	var starts int
+	var shutdowns int
+	var sleeps []time.Duration
+	events := make(chan hubRestartTestEvent, 32)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	defer func() {
+		cancel()
+		waitRestartDriverDone(t, done)
+	}()
+
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
+			startFn: func(context.Context) (*HubListenerComponents, error) {
+				starts++
+				if starts <= hubListenerRestartMaxConsecutiveRestarts {
+					return nil, errors.New("bind failed")
+				}
+				return newComp, nil
+			},
+			shutdownFn: func(context.Context, *HubListenerComponents) {
+				shutdowns++
+			},
+			emitFn: func(level, event string, fields map[string]any) error {
+				events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+				return nil
+			},
+			sleepFn: func(_ context.Context, d time.Duration) bool {
+				sleeps = append(sleeps, d)
+				return true
+			},
+			nowFn: func() time.Time { return time.Unix(100, 0) },
+		})
+	}()
+
+	s.signalHubListenerRestart()
+	waitRestartTestEvent(t, events, "hub-listener-restart-exhausted")
+	restarted := waitRestartTestEvent(t, events, "hub-listener-restarted")
+
+	if starts != hubListenerRestartMaxConsecutiveRestarts+1 {
+		t.Fatalf("start calls after timer retry = %d, want %d", starts, hubListenerRestartMaxConsecutiveRestarts+1)
+	}
+	if shutdowns != 1 {
+		t.Fatalf("shutdown calls = %d, want old listener shutdown once", shutdowns)
+	}
+	if got := s.hubMcpComp.Load(); got != newComp {
+		t.Fatalf("published component after timer retry = %#v, want new component", got)
+	}
+	if restarted.fields["attempt"] != 1 {
+		t.Fatalf("restart attempt after exhausted timer retry = %v, want 1", restarted.fields["attempt"])
+	}
+	if len(sleeps) == 0 || sleeps[len(sleeps)-1] != hubListenerRestartStableWindow {
+		t.Fatalf("last retry sleep = %v, want no-signal retry delay %s", sleeps, hubListenerRestartStableWindow)
+	}
+}
+
+func TestHubListenerRestartDriverStartFailureRetryEventuallyAbandons(t *testing.T) {
+	s := NewServer(Config{Port: 0})
+	s.hubMcpComp.Store(liveRestartTestComp(3439))
+
+	var starts int
+	var sleeps int
+	events := make(chan hubRestartTestEvent, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	defer cancel()
+
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
+			startFn: func(context.Context) (*HubListenerComponents, error) {
+				starts++
+				return nil, errors.New("bind failed")
+			},
+			shutdownFn: func(context.Context, *HubListenerComponents) {},
+			emitFn: func(level, event string, fields map[string]any) error {
+				events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+				return nil
+			},
+			sleepFn: func(context.Context, time.Duration) bool {
+				sleeps++
+				return true
+			},
+			nowFn: func() time.Time { return time.Unix(100, 0) },
+		})
+	}()
+
+	s.signalHubListenerRestart()
+	ev := waitRestartTestEvent(t, events, "hub-listener-restart-abandoned")
+	waitRestartDriverDone(t, done)
+
+	if ev.level != "error" {
+		t.Fatalf("abandoned level = %q, want error", ev.level)
+	}
+	if starts <= hubListenerRestartMaxConsecutiveRestarts {
+		t.Fatalf("start calls before abandonment = %d, want retries after first exhaustion", starts)
+	}
+	if starts >= 32 {
+		t.Fatalf("start calls before abandonment = %d, want bounded retry cap below 32", starts)
+	}
+	if sleeps == 0 {
+		t.Fatal("restart driver abandoned without using retry sleeps")
+	}
+	if got := s.hubMcpComp.Load(); got != nil {
+		t.Fatalf("component after abandoned failed restart = %#v, want nil", got)
 	}
 }
 
@@ -423,6 +550,115 @@ func TestHubListenerRestartDriverContinuesAfterExhaustionForFreshOutage(t *testi
 	}
 }
 
+func TestHubListenerRestartDriverRollingCapAbandonsRepeatedStableWindowFlaps(t *testing.T) {
+	s := NewServer(Config{Port: 0})
+	s.hubMcpComp.Store(liveRestartTestComp(3439))
+
+	var nowMu sync.Mutex
+	now := time.Unix(3000, 0)
+	advanceNow := func(d time.Duration) {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		now = now.Add(d)
+	}
+	readNow := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return now
+	}
+
+	var starts int
+	events := make(chan hubRestartTestEvent, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	defer cancel()
+
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
+			startFn: func(context.Context) (*HubListenerComponents, error) {
+				starts++
+				return liveRestartTestComp(3439), nil
+			},
+			shutdownFn: func(context.Context, *HubListenerComponents) {},
+			emitFn: func(level, event string, fields map[string]any) error {
+				events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+				return nil
+			},
+			sleepFn: func(context.Context, time.Duration) bool { return true },
+			nowFn:   readNow,
+		})
+	}()
+
+	var abandoned hubRestartTestEvent
+	for i := 0; i < 32; i++ {
+		s.signalHubListenerRestart()
+		ev := waitRestartTestEvent(t, events, "")
+		if ev.event == "hub-listener-restart-abandoned" {
+			abandoned = ev
+			break
+		}
+		if ev.event != "hub-listener-restarted" {
+			t.Fatalf("restart event[%d] = %q, want restarted or abandoned", i, ev.event)
+		}
+		advanceNow(hubListenerRestartStableWindow + time.Second)
+	}
+	if abandoned.event == "" {
+		t.Fatal("repeated stable-window flaps did not hit rolling restart abandonment")
+	}
+	if abandoned.level != "error" {
+		t.Fatalf("abandoned level = %q, want error", abandoned.level)
+	}
+	if starts <= hubListenerRestartMaxConsecutiveRestarts {
+		t.Fatalf("start calls before rolling abandonment = %d, want more than consecutive budget", starts)
+	}
+	if starts >= 32 {
+		t.Fatalf("start calls before rolling abandonment = %d, want bounded rolling cap below 32", starts)
+	}
+	waitRestartDriverDone(t, done)
+}
+
+func TestHubListenerRestartDriverRollingCapResetsAfterWindow(t *testing.T) {
+	s := NewServer(Config{Port: 0})
+	oldComp := liveRestartTestComp(3439)
+	newComp := liveRestartTestComp(3439)
+	s.hubMcpComp.Store(oldComp)
+
+	now := time.Unix(4000, 0)
+	s.hubRestartWindowStart = now.Add(-hubListenerRestartRollingWindow - time.Second)
+	s.hubRestartWindowAttempts = hubListenerRestartMaxAttemptsPerWindow
+	events := make(chan hubRestartTestEvent, 4)
+	var starts int
+
+	restarted := restartHubListener(context.Background(), s, hubListenerRestartDriverOptions{
+		startFn: func(context.Context) (*HubListenerComponents, error) {
+			starts++
+			return newComp, nil
+		},
+		shutdownFn: func(context.Context, *HubListenerComponents) {},
+		emitFn: func(level, event string, fields map[string]any) error {
+			events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+			return nil
+		},
+		sleepFn: func(context.Context, time.Duration) bool { return true },
+		nowFn:   func() time.Time { return now },
+	})
+
+	if !restarted {
+		t.Fatal("restartHubListener abandoned a fresh outage after the rolling window elapsed")
+	}
+	if starts != 1 {
+		t.Fatalf("start calls after rolling window reset = %d, want 1", starts)
+	}
+	if s.hubRestartWindowAttempts != 1 {
+		t.Fatalf("rolling window attempts after reset = %d, want 1", s.hubRestartWindowAttempts)
+	}
+	if got := s.hubMcpComp.Load(); got != newComp {
+		t.Fatalf("published component after rolling window reset = %#v, want new component", got)
+	}
+	waitRestartTestEvent(t, events, "hub-listener-restarted")
+}
+
 func TestHubListenerRestartDriverStableResetDoesNotDisableFailureExhaustion(t *testing.T) {
 	s := NewServer(Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
@@ -447,6 +683,7 @@ func TestHubListenerRestartDriverStableResetDoesNotDisableFailureExhaustion(t *t
 		emitFn: func(_ string, event string, _ map[string]any) error {
 			if event == "hub-listener-restart-exhausted" {
 				exhausted = true
+				cancel()
 			}
 			return nil
 		},
@@ -868,7 +1105,7 @@ func TestHubListenerRestartDriverPreservesEndpointInstanceIDAcrossRealRestart(t 
 	}
 }
 
-func TestHubListenerRestartEventReportsInstanceIDMismatch(t *testing.T) {
+func TestHubListenerRestartEventReportsInstanceIDMismatchAsDegraded(t *testing.T) {
 	stateDir := t.TempDir()
 	restoreState := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restoreState)
@@ -902,12 +1139,21 @@ func TestHubListenerRestartEventReportsInstanceIDMismatch(t *testing.T) {
 	if !restarted {
 		t.Fatal("restartHubListener returned false")
 	}
-	ev := waitRestartTestEvent(t, events, "hub-listener-restarted")
-	if ev.level != "warn" {
-		t.Fatalf("restart event level = %q, want warn on InstanceID mismatch", ev.level)
+	ev := waitRestartTestEvent(t, events, "hub-listener-restart-instance-id-changed")
+	if ev.level != "error" {
+		t.Fatalf("instance-id mismatch event level = %q, want error", ev.level)
 	}
 	if ev.fields["instance_id_preserved"] != false {
-		t.Fatalf("restart event instance_id_preserved = %v, want false", ev.fields["instance_id_preserved"])
+		t.Fatalf("instance-id mismatch event instance_id_preserved = %v, want false", ev.fields["instance_id_preserved"])
+	}
+	if ev.fields["operator_action"] != "mcphub install --reconcile-hub-mode" {
+		t.Fatalf("instance-id mismatch operator_action = %v, want reconcile command", ev.fields["operator_action"])
+	}
+	if ev.fields["client_impact"] == "" {
+		t.Fatal("instance-id mismatch event did not describe client impact")
+	}
+	if !s.hubRestartLastSuccess.IsZero() {
+		t.Fatalf("hubRestartLastSuccess = %s, want zero after degraded restart", s.hubRestartLastSuccess)
 	}
 }
 

@@ -594,11 +594,14 @@ type Server struct {
 
 	// hubRestartCh is the buffered-1 signal channel from the detect-only
 	// HubListenerHealthWatcher to the Server-owned restart driver. The
-	// consecutive counter and last-success timestamp are owned by that driver
-	// goroutine; they discriminate flapping from a fresh outage.
-	hubRestartCh          chan struct{}
-	hubRestartConsecutive int
-	hubRestartLastSuccess time.Time
+	// restart counters and last-success timestamp are owned by that driver
+	// goroutine; they discriminate flapping from a fresh outage and cap
+	// rolling restart attempts.
+	hubRestartCh             chan struct{}
+	hubRestartConsecutive    int
+	hubRestartLastSuccess    time.Time
+	hubRestartWindowStart    time.Time
+	hubRestartWindowAttempts int
 
 	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
 	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
