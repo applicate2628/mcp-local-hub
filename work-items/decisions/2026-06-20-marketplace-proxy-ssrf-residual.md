@@ -49,8 +49,10 @@ accepted residual below).
 
 ## Accepted residual
 
-With the proxy honored (default), the dial-time IP guard validates the proxy's address, not the
-origin — so a registry the operator points at could DNS-rebind so the proxy connects to an internal
+With the proxy honored (default), the dial-time IP guard is NOT applied on the proxied transport (it
+would reject the corporate proxy's own loopback/RFC1918 address), so neither the proxy's nor the
+origin's resolved IP is dial-guarded on that path — so a registry the operator points at could
+DNS-rebind so the proxy connects to an internal
 host the static check could not pre-classify. Accepted because: (a) only reachable by an operator
 who chose a non-default registry; (b) credential headers are stripped (blind SSRF, no exfil);
 (c) the static URL+redirect check still blocks literal-private targets on the proxy path; (d) the
