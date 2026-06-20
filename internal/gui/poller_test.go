@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,43 @@ func (s *scriptedStatus) Status() ([]api.DaemonStatus, error) {
 	out := s.frames[s.idx]
 	s.idx++
 	return out, nil
+}
+
+func runPollerFrames(t *testing.T, frames [][]api.DaemonStatus, polls int) ([]Event, *StatusPoller) {
+	t.Helper()
+
+	status := &scriptedStatus{frames: frames}
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = true
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(status, b, 50*time.Millisecond)
+	var events []Event
+	for i := 0; i < polls; i++ {
+		p.poll(ctx)
+		for {
+			select {
+			case ev := <-ch:
+				events = append(events, ev)
+			default:
+				goto drained
+			}
+		}
+	drained:
+	}
+	return events, p
+}
+
+func backendLostBodies(events []Event) []map[string]any {
+	var bodies []map[string]any
+	for _, ev := range events {
+		if ev.Type == "daemon-backend-lost" {
+			bodies = append(bodies, ev.Body)
+		}
+	}
+	return bodies
 }
 
 // TestPoller_EmitsDeltaOnOrphanPIDChange is the regression guard
@@ -496,6 +534,296 @@ func TestPoller_EmitsDaemonRecoveredOnFallingEdge(t *testing.T) {
 	}
 }
 
+func TestPoller_DaemonBackendLostEvent(t *testing.T) {
+	t.Run("emits-on-confirmed-dead-after-stale-window", func(t *testing.T) {
+		const pidA = 4242
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0}},
+		}, 3)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("daemon-backend-lost fired %d times, want exactly 1 for confirmed-dead row after stale window; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		if got, _ := bodies[0]["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
+		}
+	})
+
+	t.Run("confirmed-dead-recovery-does-not-reemit-stale-prev-pid", func(t *testing.T) {
+		const pidA = 4242
+		const pidB = 5151
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
+		}, 3)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("confirmed-dead recovery emitted daemon-backend-lost %d times, want exactly 1 for A->dead only; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		body := bodies[0]
+		if got, _ := body["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
+		}
+	})
+
+	t.Run("skips-stable-serena-pid", func(t *testing.T) {
+		const pidA = 4242
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+		}, 3)
+
+		if bodies := backendLostBodies(events); len(bodies) != 0 {
+			t.Fatalf("stable serena PID emitted daemon-backend-lost %d times, want 0; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+	})
+
+	t.Run("emits-once-during-long-down-spell", func(t *testing.T) {
+		const pidA = 4242
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0, LastResult: 1}},
+			{{Server: "serena", Daemon: "alpha", State: "Stopped", Port: 9301, PID: 0, StalePID: 0, LastResult: 2}},
+			{{Server: "serena", Daemon: "alpha", State: "Failed", Port: 9301, PID: 0, StalePID: 0, LastResult: 3}},
+		}, 4)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("long confirmed-dead spell emitted daemon-backend-lost %d times, want exactly 1; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		if got, _ := bodies[0]["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
+		}
+	})
+
+	t.Run("emits-on-direct-live-pid-change", func(t *testing.T) {
+		const pidA = 4242
+		const pidB = 5151
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
+		}, 2)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("direct live PID change emitted daemon-backend-lost %d times, want exactly 1; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		if got, _ := bodies[0]["state"].(string); got != "Running" {
+			t.Errorf("state = %q, want Running", got)
+		}
+	})
+
+	t.Run("removed-row-clears-prior-live-pid", func(t *testing.T) {
+		const pidA = 4242
+		const pidB = 5151
+		events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{},
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidB}},
+		}, 3)
+
+		bodies := backendLostBodies(events)
+		if len(bodies) != 1 {
+			t.Fatalf("removed row plus reappearing live row emitted daemon-backend-lost %d times, want exactly 1 Gone wake; bodies=%v events=%v", len(bodies), bodies, events)
+		}
+		body := bodies[0]
+		if got, _ := body["state"].(string); got != "Gone" {
+			t.Errorf("state = %q, want Gone", got)
+		}
+	})
+
+	t.Run("skips-port-stale-restart-window", func(t *testing.T) {
+		frames := [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: 4242}},
+			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: 4242}},
+		}
+		status := &scriptedStatus{frames: frames}
+		b := NewBroadcaster()
+		b.DisableGUIEventLog = true
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := b.Subscribe(ctx)
+
+		p := NewStatusPoller(status, b, 50*time.Millisecond)
+		go p.Run(ctx)
+
+		daemonStates := 0
+		deadline := time.After(2 * time.Second)
+		for daemonStates < 2 {
+			select {
+			case ev := <-ch:
+				switch ev.Type {
+				case "daemon-state":
+					daemonStates++
+				case "daemon-backend-lost":
+					t.Fatalf("port-stale Restarting row emitted daemon-backend-lost: body=%v", ev.Body)
+				}
+			case <-deadline:
+				t.Fatalf("did not observe 2 daemon-state deltas; got %d", daemonStates)
+			}
+		}
+
+		select {
+		case ev := <-ch:
+			if ev.Type == "daemon-backend-lost" {
+				t.Fatalf("late port-stale Restarting event emitted daemon-backend-lost: body=%v", ev.Body)
+			}
+		case <-time.After(150 * time.Millisecond):
+			// good — no backend-loss event for the benign port-stale window.
+		}
+	})
+
+	t.Run("emits-on-quarantined-zero-pid", func(t *testing.T) {
+		frames := [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: 4242}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0}},
+		}
+		status := &scriptedStatus{frames: frames}
+		b := NewBroadcaster()
+		b.DisableGUIEventLog = true
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := b.Subscribe(ctx)
+
+		p := NewStatusPoller(status, b, 50*time.Millisecond)
+		go p.Run(ctx)
+
+		var bodies []map[string]any
+		daemonStates := 0
+		deadline := time.After(2 * time.Second)
+		for daemonStates < 2 || len(bodies) < 1 {
+			select {
+			case ev := <-ch:
+				switch ev.Type {
+				case "daemon-state":
+					daemonStates++
+				case "daemon-backend-lost":
+					bodies = append(bodies, ev.Body)
+				}
+			case <-deadline:
+				t.Fatalf("did not observe 2 daemon-state deltas; got %d, daemon-backend-lost=%d", daemonStates, len(bodies))
+			}
+		}
+		if len(bodies) != 1 {
+			t.Fatalf("daemon-backend-lost fired %d times, want exactly 1; bodies=%v", len(bodies), bodies)
+		}
+		body := bodies[0]
+		if got, _ := body["server"].(string); got != "serena" {
+			t.Errorf("server = %q, want serena", got)
+		}
+		if got, _ := body["daemon"].(string); got != "alpha" {
+			t.Errorf("daemon = %q, want alpha", got)
+		}
+		if got, _ := body["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
+		}
+		if _, ok := body["pid"]; ok {
+			t.Errorf("daemon-backend-lost body carried pid=%v; want coarse wake body only", body["pid"])
+		}
+	})
+
+	t.Run("emits-after-port-stale-crash-clears-stale-pid", func(t *testing.T) {
+		withSerenaIdleReconcileGlobals(t)
+
+		const wsPath = "/proj/poller-stale-crash"
+		const sid = "sid-poller-stale-crash"
+		const pidA = 4242
+		ws := serenaWS("poller-stale-crash", wsPath, 9301)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-poller-stale-crash")
+		seedSerenaBackendBaseline(s, wsPath, pidA)
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{
+				{Server: "serena", Daemon: "alpha", Workspace: wsPath, TaskName: ws.TaskName, State: "Quarantined", Port: 9301, PID: 0, StalePID: 0},
+			}, nil
+		}
+
+		frames := [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: pidA}},
+			{{Server: "serena", Daemon: "alpha", State: "Quarantined", Port: 9301, PID: 0, StalePID: 0}},
+		}
+		status := &scriptedStatus{frames: frames}
+		b := NewBroadcaster()
+		b.DisableGUIEventLog = true
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := b.Subscribe(ctx)
+
+		p := NewStatusPoller(status, b, 50*time.Millisecond)
+		go p.Run(ctx)
+
+		var body map[string]any
+		daemonStates := 0
+		deadline := time.After(2 * time.Second)
+		for daemonStates < 3 || body == nil {
+			select {
+			case ev := <-ch:
+				switch ev.Type {
+				case "daemon-state":
+					daemonStates++
+				case "daemon-backend-lost":
+					body = ev.Body
+				}
+			case <-deadline:
+				t.Fatalf("did not observe stale-crash backend-loss wake; daemonStates=%d body=%v", daemonStates, body)
+			}
+		}
+		if got, _ := body["state"].(string); got != "Quarantined" {
+			t.Errorf("state = %q, want Quarantined", got)
+		}
+
+		if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+			t.Fatalf("reconcile after stale-crash wake tore down %d sessions; want 1", n)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+	})
+
+	t.Run("emits-on-removed-row", func(t *testing.T) {
+		frames := [][]api.DaemonStatus{
+			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: 4242}},
+			{},
+		}
+		status := &scriptedStatus{frames: frames}
+		b := NewBroadcaster()
+		b.DisableGUIEventLog = true
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := b.Subscribe(ctx)
+
+		p := NewStatusPoller(status, b, 50*time.Millisecond)
+		go p.Run(ctx)
+
+		var body map[string]any
+		goneStates := 0
+		deadline := time.After(2 * time.Second)
+		for goneStates < 1 || body == nil {
+			select {
+			case ev := <-ch:
+				switch ev.Type {
+				case "daemon-state":
+					if state, _ := ev.Body["state"].(string); state == "Gone" {
+						goneStates++
+					}
+				case "daemon-backend-lost":
+					body = ev.Body
+				}
+			case <-deadline:
+				t.Fatalf("did not observe removed-row backend loss; goneStates=%d body=%v", goneStates, body)
+			}
+		}
+		if got, _ := body["state"].(string); got != "Gone" {
+			t.Errorf("state = %q, want Gone", got)
+		}
+	})
+}
+
 // errStatus is a statusProvider that always returns the configured
 // error, modeling a down-supervisor fail-loud snapshot.
 type errStatus struct{ err error }
@@ -538,5 +866,38 @@ func TestPoller_FeedsErrorChannelOnFetchError(t *testing.T) {
 		t.Fatalf("poller fanned a snapshot on the error path: %v (regression: empty/stale snapshot aggregates to StateHealthy and masks the down supervisor)", snap)
 	case <-time.After(200 * time.Millisecond):
 		// good — no snapshot on the error path.
+	}
+}
+
+func TestPoller_FetchErrorDoesNotEnterBackendLostDeltaLoop(t *testing.T) {
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	p := NewStatusPoller(errStatus{err: api.ErrSupervisorDown}, b, 50*time.Millisecond)
+	p.last = map[string]api.DaemonStatus{
+		"serena/alpha": {Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: 4242},
+	}
+	wantLast := map[string]api.DaemonStatus{
+		"serena/alpha": {Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: 4242},
+	}
+
+	p.poll(ctx)
+
+	if !reflect.DeepEqual(p.last, wantLast) {
+		t.Fatalf("p.last changed on status fetch error: got=%v want=%v", p.last, wantLast)
+	}
+	for {
+		select {
+		case ev := <-ch:
+			switch ev.Type {
+			case "daemon-state", "daemon-backend-lost":
+				t.Fatalf("fetch-error path emitted %s despite early return; body=%v", ev.Type, ev.Body)
+			}
+		default:
+			return
+		}
 	}
 }

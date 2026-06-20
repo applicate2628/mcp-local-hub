@@ -64,18 +64,20 @@ func TestBroadcaster_Publish_PersistsToGUIEventLog(t *testing.T) {
 	b := NewBroadcaster()
 	b.SetAPI(a)
 	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})
+	b.Publish(Event{Type: "daemon-backend-lost", Body: map[string]any{"server": "serena"}})
 	b.Publish(Event{Type: "poller-error", Body: map[string]any{"err": "boom"}})
 	b.Publish(Event{Type: "bulk-action", Body: map[string]any{"action": "restart"}})
 	b.Close() // flush drain goroutine before reading
 
 	tail := a.ReadGUIEventLogTail(10)
-	if len(tail) != 3 {
-		t.Fatalf("tail len = %d, want 3", len(tail))
+	if len(tail) != 4 {
+		t.Fatalf("tail len = %d, want 4", len(tail))
 	}
 	cases := []struct {
 		etype, wantSource, wantSeverity string
 	}{
 		{"daemon-state", "poller", api.GUIEventSeverityInfo},
+		{"daemon-backend-lost", "poller", api.GUIEventSeverityInfo},
 		{"poller-error", "poller", api.GUIEventSeverityError},
 		{"bulk-action", "servers", api.GUIEventSeverityInfo},
 	}

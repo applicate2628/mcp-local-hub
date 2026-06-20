@@ -662,6 +662,11 @@ type Server struct {
 	// last-unbind deletion avoid blockable resolver scans on hot teardown paths.
 	// Guarded by serenaBackendPIDMu.
 	serenaBackendPathByKey map[string]string
+	// serenaBackendLossTrigger is a coalesced wake signal for the IPC
+	// backend-loss reconcile ticker. The event subscriber owns writes; the GUI
+	// lifecycle ticker owns reads. Nil preserves the pure interval floor for
+	// bare test Servers that bypass NewServer.
+	serenaBackendLossTrigger chan struct{}
 
 	// v0.6 idle-shutdown (#6, spec §6) per-daemon LAST-ACTIVITY tracking.
 	// serenaActivityMu guards serenaLastActivity: WorkspaceKey -> the wall
@@ -733,7 +738,7 @@ func NewServer(cfg Config) *Server {
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
 	}
-	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now(), pruneEnoentTicks: map[string]int{}}
+	s := &Server{cfg: cfg, mux: http.NewServeMux(), guiProcessStart: time.Now(), pruneEnoentTicks: map[string]int{}, serenaBackendLossTrigger: make(chan struct{}, 1)}
 	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the
 	// TTL+singleflight HealthSnapshot cache here so concurrent requests

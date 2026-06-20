@@ -9,6 +9,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/serena_routing"
+	"mcp-local-hub/internal/gui"
 )
 
 func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
@@ -32,6 +33,28 @@ func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
 	// --force is intentionally hidden (Phase 3B-II placeholder); --help must NOT advertise it.
 	if strings.Contains(buf.String(), "--force") {
 		t.Errorf("--help unexpectedly advertises --force; should be hidden until take-over is implemented")
+	}
+}
+
+func TestSerenaBackendLossReconcileTicker_NilTriggerWaitsForInterval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runSerenaBackendLossReconcileTicker(ctx, &gui.Server{}, time.Hour)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("reconcile ticker exited before its interval fired or ctx was canceled")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcile ticker did not exit after ctx cancel")
 	}
 }
 
