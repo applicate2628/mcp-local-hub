@@ -268,6 +268,12 @@ func (realManifestGetter) ManifestGetWithHash(name string) (string, string, erro
 	return api.NewAPI().ManifestGetWithHash(name)
 }
 
+type realManifestPresence struct{}
+
+func (realManifestPresence) ManifestExists(name string) (bool, error) {
+	return api.NewAPI().ManifestExists(name)
+}
+
 // realManifestEditor is the production adapter for /api/manifest/edit.
 type realManifestEditor struct{}
 
@@ -512,6 +518,7 @@ type Server struct {
 	manifestCreator      manifestCreator
 	manifestValidator    manifestValidator
 	manifestGetter       manifestGetter
+	manifestPresence     manifestPresence
 	manifestEditor       manifestEditor
 	manifestLister       manifestLister
 	manifestDeleter      manifestDeleter
@@ -743,6 +750,7 @@ func NewServer(cfg Config) *Server {
 	s.manifestCreator = realManifestCreator{}
 	s.manifestValidator = realManifestValidator{}
 	s.manifestGetter = realManifestGetter{}
+	s.manifestPresence = realManifestPresence{}
 	s.manifestEditor = realManifestEditor{}
 	s.manifestLister = realManifestLister{}
 	s.manifestDeleter = realManifestDeleter{}

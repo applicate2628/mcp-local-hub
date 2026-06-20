@@ -8,7 +8,9 @@ import {
   postManifestCreate,
   postManifestEdit,
   postManifestValidate,
+  checkDraftReadiness,
   ManifestHashMismatchError,
+  type ReadinessReport,
 } from "../api";
 import { generateUUID } from "../lib/uuid";
 import type { BindingFormEntry, DaemonFormEntry, LanguageFormEntry, ManifestFormState } from "../types";
@@ -16,6 +18,9 @@ import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
 import { AddSecretModal } from "../components/AddSecretModal";
 import { SecretPicker } from "../components/SecretPicker";
 import { BrokenRefsSummary } from "../components/BrokenRefsSummary";
+import { ReadinessPanel } from "../components/ReadinessPanel";
+import { addSecret, getSecrets, secretsInit } from "../lib/secrets-api";
+import { inlineSecretsToWrite, secretRefKeys } from "../lib/inline-secrets";
 import { hasSecretKey, isSecretRef } from "../lib/secret-ref";
 import { ALL_CLIENTS, CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
 import { pushToast } from "../lib/toast-store";
@@ -70,6 +75,20 @@ function parseAddServerQuery(): { server: string; fromClient: string } {
   };
 }
 
+function isManifestNotFoundError(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  const code = (err as { code?: unknown } | null)?.code;
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  // A typed APIError (status/code present) is AUTHORITATIVE — do not fall through
+  // to the brittle message regex, which could wrongly match a coded
+  // non-not-found error whose message happens to contain "not found".
+  if (typeof status === "number" || typeof code === "string") {
+    return status === 404 || code === "MANIFEST_NOT_FOUND";
+  }
+  // Legacy untyped error (no status/code): the message heuristic is the only signal.
+  return /\b404\b/i.test(message) || /manifest_not_found|not found|does not exist/i.test(message);
+}
+
 export function AddServerScreen(props: {
   mode?: "create" | "edit";
   route?: RouterState;
@@ -82,12 +101,184 @@ export function AddServerScreen(props: {
   // successful Save. Critically NOT updated on Paste YAML import (Q8
   // anti-silent-data-loss: paste must not move the baseline).
   const [initialSnapshot, setInitialSnapshot] = useState<ManifestFormState>(BLANK_FORM);
+  const [committedCreate, setCommittedCreate] = useState<{ name: string; hash: string } | null>(null);
+  // editName is derived from route.query so that a dirty-declined name=a →
+  // name=b navigation does not fire a stale load (the memo dep stays stable).
+  const editName = useMemo(() => {
+    if (props.mode !== "edit") return "";
+    const params = new URLSearchParams(props.route?.query ?? "");
+    return params.get("name") ?? "";
+  }, [props.mode, props.route?.query]);
+  const readinessEditName = mode === "edit" ? editName : committedCreate?.name ?? "";
   const debouncedState = useDebouncedValue(formState, 150);
   const yamlPreview = toYAML(debouncedState);
 
-  const isDirty = !deepEqualForm(formState, initialSnapshot);
-
   const snapshot = useSecretsSnapshot();
+
+  // Live install-readiness on the debounced draft YAML (epic install-and-it-
+  // works, area 1): the ReadinessPanel shows what blocks/advises the install
+  // BEFORE it fails later, and renders inline fields for unset optional secrets.
+  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const readinessReqRef = useRef(0);
+  // inlineSecrets maps a vault key → the plaintext the operator typed in the
+  // readiness panel; persisted to the vault just before install.
+  const [inlineSecrets, setInlineSecrets] = useState<Record<string, string>>({});
+  const presentSecretKeyToken = useMemo(
+    () => JSON.stringify(
+      (snapshot.data?.secrets ?? [])
+        .filter((s) => s.state === "present")
+        .map((s) => s.name)
+        .sort(),
+    ),
+    [snapshot.data?.secrets],
+  );
+  const presentSecretKeys = useMemo(
+    () => new Set(JSON.parse(presentSecretKeyToken) as string[]),
+    [presentSecretKeyToken],
+  );
+  // manifestDirty = the editable form differs from the last saved snapshot. It
+  // gates Reinstall (which installs the LAST SAVED manifest) — once the form
+  // diverges, a Reinstall would install stale config while persisting current
+  // refs, so it must be disabled until re-saved (Codex #378 r6).
+  const manifestDirty = !deepEqualForm(formState, initialSnapshot);
+  // hasPendingInlineSecret counts inline values that persistInlineSecrets would
+  // carry into its save-time confirmation: current valid secret: refs with typed
+  // plaintext. A local present snapshot must not suppress a write when the live
+  // readiness report is already saying the ref is missing; persistInlineSecrets
+  // rechecks the vault at click time before deciding to skip or write.
+  const hasPendingInlineSecret = pendingInlineSecretEntries(formState).length > 0;
+  // isDirty (sidebar/close navigation guard) — a value typed into a readiness
+  // inline secret field is unsaved data too, so warn before discarding it (r4),
+  // but only while it is still a live ref (r6).
+  const isDirty = manifestDirty || hasPendingInlineSecret;
+  const currentSecretRefToken = useMemo(() => JSON.stringify(secretRefKeys(formState)), [formState]);
+  useEffect(() => {
+    if (!yamlPreview || !debouncedState.name.trim()) {
+      // Invalidate any in-flight check AND clear loading, so a late response for
+      // a since-cleared draft cannot land a stale report (Codex #378 r2).
+      readinessReqRef.current++;
+      setReadiness(null);
+      setReadinessLoading(false);
+      return;
+    }
+    const reqId = ++readinessReqRef.current;
+    setReadinessLoading(true);
+    checkDraftReadiness(yamlPreview, { mode, editName: readinessEditName })
+      .then((rep) => {
+        if (reqId === readinessReqRef.current) setReadiness(rep);
+      })
+      .catch(() => {
+        // The draft is currently unparseable (400) or unreachable → drop the
+        // now-stale report rather than leaving an out-of-date panel up (Codex
+        // #378 r2).
+        if (reqId === readinessReqRef.current) setReadiness(null);
+      })
+      .finally(() => {
+        if (reqId === readinessReqRef.current) setReadinessLoading(false);
+      });
+    // snapshot.fetchedAt changes on every successful vault refresh, so writing a
+    // secret (inline OR via the AddSecretModal) re-runs this effect and the
+    // panel reflects the now-resolved secret instead of a stale advisory
+    // (Codex #378).
+  }, [yamlPreview, debouncedState.name, snapshot.fetchedAt, mode, readinessEditName]);
+
+  // pendingInlineSecretEntries is the SINGLE OWNER of "which inline values are
+  // candidates for persistence": current valid-named secret: refs
+  // (inlineSecretsToWrite drops a value typed for a ref the user later
+  // removed/renamed, or a non-conforming/reserved key). It deliberately does NOT
+  // subtract local snapshot-present keys: the snapshot can be stale-present while
+  // live readiness is already missing that key. persistInlineSecrets performs the
+  // save-time presence check and otherwise lets addSecret race-safely return
+  // SECRETS_KEY_EXISTS.
+  function pendingInlineSecretEntries(state: ManifestFormState): [string, string][] {
+    return inlineSecretsToWrite(inlineSecrets, state);
+  }
+
+  useEffect(() => {
+    const refs = new Set(JSON.parse(currentSecretRefToken) as string[]);
+    setInlineSecrets((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (refs.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [currentSecretRefToken]);
+
+  useEffect(() => {
+    if (presentSecretKeys.size === 0) return;
+    setInlineSecrets((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (presentSecretKeys.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [presentSecretKeyToken, presentSecretKeys]);
+
+  function clearInlineSecret(key: string) {
+    setInlineSecrets((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
+    const entries = pendingInlineSecretEntries(state);
+    if (entries.length === 0) return;
+    let vaultState = snapshot.data?.vault_state;
+    let confirmedPresentKeys = new Set<string>();
+    try {
+      const latest = await getSecrets();
+      vaultState = latest.vault_state;
+      confirmedPresentKeys = new Set(
+        (latest.secrets ?? [])
+          .filter((s) => s.state === "present")
+          .map((s) => s.name),
+      );
+    } catch {
+      // If the save-time list check is unavailable, do not trust a stale local
+      // present snapshot to suppress the user's typed value. Continue to the
+      // write path; addSecret will surface the real vault error or a benign 409.
+    }
+    // A fresh profile has no vault yet — initialize it before the first write, or
+    // addSecret fails on the uninitialized vault (Codex #378 r2).
+    if (vaultState !== "ok") {
+      await secretsInit();
+    }
+    for (const [key, value] of entries) {
+      if (confirmedPresentKeys.has(key)) {
+        clearInlineSecret(key);
+        continue;
+      }
+      try {
+        await addSecret(key, value);
+      } catch (err) {
+        // A concurrent creator (another tab / the CLI) may have created the key
+        // between the snapshot and now → SECRETS_KEY_EXISTS means it is ALREADY
+        // satisfied, so treat it as success instead of aborting the install
+        // (Codex #378 r3). Any other error is real and propagates.
+        if ((err as { code?: string } | null)?.code !== "SECRETS_KEY_EXISTS") throw err;
+      }
+      // Clear each on success/already-present so a LATER failure's retry does not
+      // re-attempt an already-written key (Codex #378 r2/r3).
+      clearInlineSecret(key);
+    }
+    // Bumps snapshot.fetchedAt → re-runs the readiness effect above so the panel
+    // drops the now-resolved secret prompts (Codex #378).
+    await snapshot.refresh();
+  }
   const [createModalState, setCreateModalState] = useState<{ open: boolean; prefill: string | null }>({ open: false, prefill: null });
   // savedFiredRef tracks whether onSaved (which already does a refresh)
   // has fired during this modal lifecycle. If it has, the on-close
@@ -156,13 +347,7 @@ export function AddServerScreen(props: {
     };
   }, []);
 
-  // editName is derived from route.query so that a dirty-declined name=a →
-  // name=b navigation does not fire a stale load (the memo dep stays stable).
-  const editName = useMemo(() => {
-    if (props.mode !== "edit") return "";
-    const params = new URLSearchParams(props.route?.query ?? "");
-    return params.get("name") ?? "";
-  }, [props.mode, props.route?.query]);
+  const staleRecoveryName = editName || committedCreate?.name || "";
 
   // Mount effect for edit mode: reset per-manifest state BEFORE the new load
   // (R3 invariant) then fetch, apply hash, and detect nested-unknown fields.
@@ -177,6 +362,12 @@ export function AddServerScreen(props: {
     setReadOnlyReason(null);
     setFormState(BLANK_FORM);
     setInitialSnapshot(BLANK_FORM);
+    setCommittedCreate(null);
+    // Clear inline secrets typed for the PRIOR draft so a value entered for
+    // manifest a cannot reappear prefilled in manifest b that references the
+    // same missing key (Codex #378 r4 — a→b edit navigation would otherwise
+    // write a's secret value for b).
+    setInlineSecrets({});
     if (!editName) {
       setLoadError("No manifest name specified");
       return;
@@ -372,7 +563,12 @@ export function AddServerScreen(props: {
   type Banner = {
     kind: "error" | "success";
     text: string;
-    retry?: () => Promise<void>;
+    // retryName is the install TARGET name, NOT a callback: the Retry button
+    // invokes the CURRENT render's retryInstall(retryName) so it reads the latest
+    // formState / inlineSecrets. Storing a `() => retryInstall(name)` closure
+    // instead froze the inline-secret map at banner-creation time, so a value the
+    // operator typed AFTER the failure was lost on Retry (Codex #378 r6).
+    retryName?: string;
     reinstall?: boolean;
     staleReload?: boolean;
     staleForceSave?: boolean;
@@ -385,8 +581,8 @@ export function AddServerScreen(props: {
 
   const [banner, setBanner] = useState<Banner | null>(null);
   const [busy, setBusy] = useState<"" | "validate" | "save" | "install">("");
-  // submissionVersion: bumped every time a Save/Save&Install click starts
-  // its own inline serialize-validate-submit pipeline. If a second click
+  // submissionVersion: bumped every time a Save/Save&Install/Reload/Force Save
+  // click starts its own async mutation pipeline. If a second click
   // happens while the first is still in flight, the older pipeline sees
   // submissionCounter.current != its own captured value and bails before
   // writing to state. (Q3 Codex-identified gotcha.)
@@ -395,6 +591,15 @@ export function AddServerScreen(props: {
   // newer Validate click invalidates an older in-flight validate's result
   // so stale warnings don't paint over fresh state. (Q5.)
   const validateCounter = useRef(0);
+
+  function showStaleHashRecovery() {
+    setBanner({
+      kind: "error",
+      text: "Manifest changed on disk since you opened it. Reload will discard your edits and show the new version. Force Save will overwrite with your version.",
+      staleReload: true,
+      staleForceSave: true,
+    });
+  }
 
   async function runValidate() {
     const version = ++validateCounter.current;
@@ -414,7 +619,10 @@ export function AddServerScreen(props: {
       if (version !== validateCounter.current) return;
       setBanner({ kind: "error", text: `/api/manifest/validate: ${(err as Error).message}` });
     } finally {
-      setBusy("");
+      // A preempted validation (a newer runValidate bumped validateCounter)
+      // must NOT clear busy — that would re-enable Save/Install while the newer
+      // validation is still in flight. Only the current validation owns the clear.
+      if (version === validateCounter.current) setBusy("");
     }
   }
 
@@ -454,6 +662,25 @@ export function AddServerScreen(props: {
       // R4-2: captures the gate-ON in-place republish-failure signal from the
       // create/edit response so the success banner can prompt a hub restart.
       let restartHub = false;
+      const createManifestFromDraft = async (): Promise<boolean> => {
+        const { restartRequired } = await postManifestCreate(name, payload);
+        if (version !== submissionCounter.current) return false;
+        restartHub = restartRequired;
+        let hash = "";
+        try {
+          ({ hash } = await getManifest(name));
+        } catch {
+          // The create already committed; an empty hash tells the follow-up
+          // edit path to re-read before saving instead of attempting create.
+          hash = "";
+        }
+        if (version !== submissionCounter.current) return false;
+        setCommittedCreate({ name, hash });
+        const postSave: ManifestFormState = { ...payloadState, loadedHash: hash };
+        setFormState(postSave);
+        setInitialSnapshot(postSave);
+        return true;
+      };
       if (mode === "edit") {
         try {
           const expectedHash = initialSnapshot.loadedHash;
@@ -470,21 +697,46 @@ export function AddServerScreen(props: {
         } catch (err) {
           if (version !== submissionCounter.current) return;
           if (err instanceof ManifestHashMismatchError) {
-            setBanner({
-              kind: "error",
-              text: "Manifest changed on disk since you opened it. Reload will discard your edits and show the new version. Force Save will overwrite with your version.",
-              staleReload: true,
-              staleForceSave: true,
-            });
+            showStaleHashRecovery();
             return;
           }
           throw err;
         }
       } else {
-        const { restartRequired } = await postManifestCreate(name, payload);
-        if (version !== submissionCounter.current) return;
-        restartHub = restartRequired;
-        setInitialSnapshot(formState);
+        if (committedCreate?.name === name) {
+          try {
+            let expectedHash = committedCreate.hash;
+            if (!expectedHash) {
+              const fresh = await getManifest(name);
+              if (version !== submissionCounter.current) return;
+              if (!fresh.hash) {
+                throw new Error("/api/manifest/get: success response missing hash field");
+              }
+              expectedHash = fresh.hash;
+            }
+            const { hash: newHash, restartRequired } = await postManifestEdit(name, payload, expectedHash);
+            if (version !== submissionCounter.current) return;
+            restartHub = restartRequired;
+            setCommittedCreate({ name, hash: newHash });
+            const postSave: ManifestFormState = { ...payloadState, loadedHash: newHash };
+            setFormState(postSave);
+            setInitialSnapshot(postSave);
+          } catch (err) {
+            if (version !== submissionCounter.current) return;
+            if (err instanceof ManifestHashMismatchError) {
+              showStaleHashRecovery();
+              return;
+            }
+            if (isManifestNotFoundError(err)) {
+              setCommittedCreate(null);
+              if (!(await createManifestFromDraft())) return;
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          if (!(await createManifestFromDraft())) return;
+        }
       }
       setWarnings(null);
       if (!opts.install) {
@@ -492,15 +744,41 @@ export function AddServerScreen(props: {
           kind: "success",
           text: mode === "edit"
             ? `Saved. Daemon still running old config.`
-            : `Saved servers/${name}/manifest.yaml.`,
-          reinstall: mode === "edit",
+            : `Saved servers/${name}/manifest.yaml. Click Reinstall to install it now.`,
+          // Show the Reinstall (persist-pending-secrets + install) path after a
+          // plain Save in BOTH modes. In create mode a plain Save otherwise left
+          // any inline secret stuck: there was no install path, and the next
+          // Save & Install hit "already exists" for the just-created name before
+          // reaching the persist step (Codex #378 r6). Reinstall → retryInstall
+          // installs the saved manifest with the pending secret.
+          reinstall: true,
           restartHub,
         });
         // Flowbite success toast mirroring the inline save banner.
         pushToast("success", `Saved ${name} manifest.`);
         return;
       }
-      await runInstallNow(name, version);
+      // Install phase — the manifest is now COMMITTED. Persist inline secrets
+      // (AFTER the commit so a failed commit never orphans a vault key — Codex
+      // #378 r4) then install. A failure HERE is retryable: the manifest is
+      // saved, so a transient vault init/write failure must surface a Retry path
+      // (retryInstall persists + re-installs), not a dead-end error that strands
+      // the saved manifest behind a future "already exists" (Codex #378 r6). The
+      // outer catch is left to handle only manifest-COMMIT failures (manifest not
+      // saved → plain error, correctly no Retry).
+      try {
+        await persistInlineSecrets(payloadState);
+        if (version !== submissionCounter.current) return;
+        await runInstallNow(name, version);
+      } catch (installErr) {
+        if (version === submissionCounter.current) {
+          setBanner({
+            kind: "error",
+            text: `Saved servers/${name}/manifest.yaml, but install could not complete: ${(installErr as Error).message}`,
+            retryName: name,
+          });
+        }
+      }
     } catch (err) {
       if (version !== submissionCounter.current) return;
       setBanner({ kind: "error", text: (err as Error).message });
@@ -510,11 +788,14 @@ export function AddServerScreen(props: {
   }
 
   async function runReload() {
-    if (!editName) return;
+    const version = ++submissionCounter.current;
+    const name = staleRecoveryName;
+    if (!name) return;
     setBusy("save");
     setBanner(null);
     try {
-      const { yaml, hash } = await getManifest(editName);
+      const { yaml, hash } = await getManifest(name);
+      if (version !== submissionCounter.current) return;
       // Codex R1 correction: re-run hasNestedUnknown on the reloaded YAML.
       // The external write that caused the stale-hash mismatch may have
       // introduced unsupported nested fields (e.g. a new daemons[].extra_*
@@ -526,6 +807,14 @@ export function AddServerScreen(props: {
       parsed.loadedHash = hash;
       setFormState(parsed);
       setInitialSnapshot(parsed);
+      if (committedCreate?.name === name) {
+        setCommittedCreate({ name, hash });
+      }
+      // Reload replaces the draft from disk → drop inline secrets typed for the
+      // REJECTED local draft so a value entered for the old version cannot linger
+      // and later reappear/be written if the reloaded manifest references the same
+      // missing key (Codex #378 r6 — same clear as the edit-mount + paste paths).
+      setInlineSecrets({});
       if (nested) {
         setReadOnlyReason(
           "This manifest contains fields the GUI cannot handle. Editing via GUI would drop them.",
@@ -538,9 +827,10 @@ export function AddServerScreen(props: {
       }
       setBanner({ kind: "success", text: "Reloaded fresh manifest from disk." });
     } catch (err) {
+      if (version !== submissionCounter.current) return;
       setBanner({ kind: "error", text: (err as Error).message });
     } finally {
-      setBusy("");
+      if (version === submissionCounter.current) setBusy("");
     }
   }
 
@@ -549,10 +839,9 @@ export function AddServerScreen(props: {
     setBusy("save");
     setBanner(null);
     try {
-      // Codex R1 correction: Force Save is only reachable in edit mode;
-      // anchor to editName (URL-derived, immutable) rather than
-      // formState.name which a Paste YAML could have retargeted.
-      const name = editName;
+      // Anchor to the persisted manifest identity (edit URL name or the
+      // create-mode name already committed), not mutable formState.name.
+      const name = staleRecoveryName;
       if (!name) return;
       // 1. Re-read disk to get fresh hash + fresh _preservedRaw.
       const fresh = await getManifest(name);
@@ -587,6 +876,9 @@ export function AddServerScreen(props: {
       const postSave: ManifestFormState = { ...merged, loadedHash: newHash };
       setFormState(postSave);
       setInitialSnapshot(postSave);
+      if (committedCreate?.name === name) {
+        setCommittedCreate({ name, hash: newHash });
+      }
       const preservedKeys = Object.keys(freshParsed._preservedRaw);
       setBanner({
         kind: "success",
@@ -607,6 +899,41 @@ export function AddServerScreen(props: {
     }
   }
 
+  // retryInstall is the SINGLE owner of "persist any pending inline secrets, then
+  // install". Used by both the install-failure Retry banner AND the edit-success
+  // Reinstall banner: each re-enters install OUTSIDE the runSave pipeline, so
+  // without this an inline secret the operator entered/changed while fixing the
+  // failure (or before a plain Save) would stay only in component state and the
+  // install would run without it (Codex #378 r4/r6).
+  async function retryInstall(name: string) {
+    const version = ++submissionCounter.current;
+    // Set busy so the readiness inline inputs + Save/Install buttons (all gated on
+    // busy !== "") are disabled WHILE the retry persists + installs. Without it the
+    // operator could edit a password mid-retry; the running persist already
+    // snapshotted the old inlineSecrets, so the new value would be dropped/clobbered
+    // (Codex #378 r6).
+    setBusy("install");
+    try {
+      await persistInlineSecrets(formState);
+      if (version !== submissionCounter.current) return;
+      await runInstallNow(name, version);
+    } catch (err) {
+      if (version === submissionCounter.current) {
+        // The manifest is already saved at this point, so a persist/install
+        // failure (transient vault init/write, connection reset) must stay
+        // RETRYABLE — a dead-end error would strand the saved manifest, and a
+        // fresh Save & Install would hit "already exists" (Codex #378 r6).
+        setBanner({
+          kind: "error",
+          text: `Saved servers/${name}/manifest.yaml, but install could not complete: ${(err as Error).message}`,
+          retryName: name,
+        });
+      }
+    } finally {
+      if (version === submissionCounter.current) setBusy("");
+    }
+  }
+
   async function runInstallNow(name: string, version: number) {
     try {
       const resp = await fetch(`/api/install?name=${encodeURIComponent(name)}`, {
@@ -620,7 +947,7 @@ export function AddServerScreen(props: {
         setBanner({
           kind: "error",
           text: `Saved servers/${name}/manifest.yaml, but install failed: ${err}`,
-          retry: () => runInstallNow(name, ++submissionCounter.current),
+          retryName: name,
         });
         pushToast("danger", `Install failed for ${name}: ${err}`);
         return;
@@ -633,7 +960,10 @@ export function AddServerScreen(props: {
       setBanner({
         kind: "error",
         text: `Saved servers/${name}/manifest.yaml, but install threw: ${(err as Error).message}`,
-        retry: () => runInstallNow(name, ++submissionCounter.current),
+        // Route through retryInstall (not runInstallNow) so a Retry persists any
+        // inline secret the operator enters/edits while fixing the failure before
+        // re-installing the saved manifest (Codex #378 r6).
+        retryName: name,
       });
       pushToast("danger", `Install failed for ${name}: ${(err as Error).message}`);
     }
@@ -650,6 +980,10 @@ export function AddServerScreen(props: {
       return;
     }
     setFormState(parsed);
+    // A wholesale paste replaces the draft → drop inline secrets typed for the
+    // previous draft so they cannot be written under the pasted manifest's name
+    // (Codex #378 r4).
+    setInlineSecrets({});
     // Per Q8 decision: paste does NOT reset the dirty baseline. Only
     // successful Save does. We DO auto-run structural validate since
     // paste is a mode switch and users expect "this parsed / this
@@ -675,7 +1009,10 @@ export function AddServerScreen(props: {
       if (version !== validateCounter.current) return;
       setBanner({ kind: "error", text: `/api/manifest/validate: ${(err as Error).message}` });
     } finally {
-      setBusy("");
+      // A preempted validation (a newer runValidate bumped validateCounter)
+      // must NOT clear busy — that would re-enable Save/Install while the newer
+      // validation is still in flight. Only the current validation owns the clear.
+      if (version === validateCounter.current) setBusy("");
     }
   }
 
@@ -766,23 +1103,46 @@ export function AddServerScreen(props: {
               The aggregated hub is running but could not refresh its routing in place — restart the hub (Settings → Expose a single aggregated hub URL, toggle off and on) to apply this change to /clients and /g endpoints.
             </p>
           )}
-          {banner.retry && (
-            <button type="button" onClick={() => banner.retry?.()} data-action="retry-install">Retry Install</button>
+          {banner.retryName && (
+            <button
+              type="button"
+              // Retry re-installs the LAST SAVED manifest, and retryInstall persists
+              // inline secrets from the CURRENT form. Once the operator edits the
+              // draft (manifestDirty), retrying would write secrets for unsaved refs
+              // that the saved-manifest install never uses (orphans). Disable it —
+              // the edited manifest must go through Save & Install, not Retry (#378 r6).
+              disabled={busy !== "" || manifestDirty}
+              title={manifestDirty ? "Save your changes first — Retry re-installs the last saved manifest." : undefined}
+              // Call the CURRENT render's retryInstall with the stored target so it
+              // reads the latest inlineSecrets, not a closure frozen at failure time.
+              onClick={() => retryInstall(banner.retryName!)}
+              data-action="retry-install"
+            >
+              Retry Install
+            </button>
           )}
           {banner.reinstall && (
             <button
               type="button"
-              onClick={() => runInstallNow(formState.name.trim(), ++submissionCounter.current)}
+              // Reinstall installs the LAST SAVED manifest via retryInstall (which
+              // persists pending inline secrets first — Codex #378 r3). Disabled
+              // once the form diverges from the saved snapshot (manifestDirty): a
+              // Reinstall then would install stale config while persisting the
+              // current, unsaved refs — an orphaned secret + a mismatched install.
+              // The operator must Save again (which re-arms a clean banner) (r6).
+              disabled={busy !== "" || manifestDirty}
+              title={manifestDirty ? "Save your changes first — Reinstall applies the last saved manifest." : undefined}
+              onClick={() => retryInstall(formState.name.trim())}
               data-action="reinstall"
             >
               Reinstall
             </button>
           )}
           {banner.staleReload && (
-            <button type="button" onClick={() => runReload()} data-action="reload">Reload</button>
+            <button type="button" disabled={busy !== ""} onClick={() => runReload()} data-action="reload">Reload</button>
           )}
           {banner.staleForceSave && (
-            <button type="button" onClick={() => runForceSave()} data-action="force-save">Force Save</button>
+            <button type="button" disabled={busy !== ""} onClick={() => runForceSave()} data-action="force-save">Force Save</button>
           )}
         </div>
       )}
@@ -796,7 +1156,7 @@ export function AddServerScreen(props: {
       <div class="card">
         <div class="add-server-grid">
           <div class="add-server-form">
-          <AccordionSection title="Basics" open={true}>
+          <AccordionSection key="basics" title="Basics" open={true}>
             <div class="form-row">
               <label for="field-name">Name</label>
               <input
@@ -826,7 +1186,7 @@ export function AddServerScreen(props: {
             </div>
           </AccordionSection>
 
-          <AccordionSection title="Command">
+          <AccordionSection key="command" title="Command">
             <div class="form-row">
               <label for="field-transport">Transport</label>
               <select
@@ -880,7 +1240,23 @@ export function AddServerScreen(props: {
             </div>
           </AccordionSection>
 
-          <AccordionSection title="Environment">
+          {(readiness || readinessLoading) && (
+            <AccordionSection key="install-readiness" title="Install readiness" open>
+              <ReadinessPanel
+                report={readiness}
+                loading={readinessLoading}
+                error={null}
+                inlineSecrets={inlineSecrets}
+                onInlineSecretChange={(key, value) =>
+                  setInlineSecrets((prev) => ({ ...prev, [key]: value }))
+                }
+                readOnly={readOnly}
+                inputsDisabled={busy !== ""}
+              />
+            </AccordionSection>
+          )}
+
+          <AccordionSection key="environment" title="Environment">
             <BrokenRefsSummary vaultState={summaryVaultState} brokenRefs={brokenRefs} />
             <div class="repeatable-rows" data-testid="env-rows">
               {formState.env.map((row, i) => (
@@ -906,7 +1282,7 @@ export function AddServerScreen(props: {
               <button type="button" onClick={addEnv} disabled={readOnly} data-action="add-env">+ Add environment variable</button>
             </div>
           </AccordionSection>
-          <AccordionSection title="Daemons">
+          <AccordionSection key="daemons" title="Daemons">
             <div class="repeatable-rows" data-testid="daemon-rows">
               {formState.daemons.map((d, i) => (
                 <div class="form-row daemon-row" key={d._id} data-daemon-row={i}>
@@ -934,7 +1310,7 @@ export function AddServerScreen(props: {
               <button type="button" onClick={addDaemon} disabled={readOnly} data-action="add-daemon">+ Add daemon</button>
             </div>
           </AccordionSection>
-          <AccordionSection title="Client bindings">
+          <AccordionSection key="client-bindings" title="Client bindings">
             <ClientBindingsSection
               daemons={formState.daemons}
               bindings={formState.client_bindings}
@@ -945,7 +1321,7 @@ export function AddServerScreen(props: {
               readOnly={readOnly}
             />
           </AccordionSection>
-          <AccordionSection title="Advanced">
+          <AccordionSection key="advanced" title="Advanced">
             <div class="form-row">
               <label for="field-idle-timeout">Idle timeout (min)</label>
               <input

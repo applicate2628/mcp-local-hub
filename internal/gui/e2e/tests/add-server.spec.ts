@@ -89,6 +89,45 @@ test.describe("Add server screen", () => {
     await expect(page.locator('[data-testid="banner"].success')).toContainText("Saved");
   });
 
+  test("readiness panel surfaces a launcher blocker for an unknown command", async ({ page, hub }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    await page.locator("#field-name").fill("e2e-readiness");
+    await page.locator(".accordion-header", { hasText: "Command" }).click();
+    await page.locator("#field-command").fill("definitely-not-on-path-zzz");
+    await page.locator(".accordion-header", { hasText: "Daemons" }).click();
+    await page.locator('[data-action="add-daemon"]').click();
+    await page.locator('[data-field="daemon-name"]').fill("default");
+    await page.locator('[data-field="daemon-port"]').fill("9993");
+    // The readiness panel appears after the debounced draft-readiness check and
+    // reports the missing launcher as a blocker (epic install-and-it-works A1).
+    await expect(page.locator('[data-testid="readiness-panel"]')).toBeVisible();
+    await expect(page.locator('[data-testid="readiness-badge"]')).toContainText("blocker");
+    await expect(page.locator('[data-testid="readiness-panel"]')).toContainText("launcher");
+  });
+
+  test("readiness panel offers an inline field for an unset secret env ref", async ({ page, hub }) => {
+    await page.goto(`${hub.url}/#/add-server`);
+    await page.locator("#field-name").fill("e2e-readiness-secret");
+    await page.locator(".accordion-header", { hasText: "Command" }).click();
+    await page.locator("#field-command").fill("echo");
+    await page.locator(".accordion-header", { hasText: "Daemons" }).click();
+    await page.locator('[data-action="add-daemon"]').click();
+    await page.locator('[data-field="daemon-name"]').fill("default");
+    await page.locator('[data-field="daemon-port"]').fill("9995");
+    await page.locator(".accordion-header", { hasText: "Environment" }).click();
+    await page.click('[data-action="add-env"]');
+    await page.fill('[data-env-row="0"] input[placeholder="KEY"]', "API_KEY");
+    const valueInput = page.locator('[data-env-row="0"] [role="combobox"]');
+    await valueInput.click();
+    await valueInput.type("secret:e2e_unset_key");
+    await page.keyboard.press("Escape");
+    // The unset secret surfaces an inline password field right in the readiness
+    // panel — "секреты в конкретные поля при установке".
+    await expect(
+      page.locator('[data-testid="readiness-secret-input-e2e_unset_key"]'),
+    ).toBeVisible();
+  });
+
   test("Save & Install on a name with port conflict keeps manifest + shows Retry Install", async ({
     page,
     hub,

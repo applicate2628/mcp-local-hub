@@ -54,7 +54,7 @@ describe("fetchOrThrow", () => {
   });
 });
 
-import { postManifestCreate, postManifestValidate, getManifest, postManifestEdit, ManifestHashMismatchError } from "./api";
+import { postManifestCreate, postManifestValidate, getManifest, postManifestEdit, ManifestHashMismatchError, type APIError } from "./api";
 
 describe("postManifestCreate", () => {
   beforeEach(() => {
@@ -222,14 +222,23 @@ describe("postManifestEdit", () => {
     }) as unknown as Response);
     await expect(postManifestEdit("demo", "name: demo\n", "stale")).rejects.toBeInstanceOf(ManifestHashMismatchError);
   });
-  it("throws generic Error on other non-2xx", async () => {
+  it("throws typed APIError on other non-2xx", async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: false,
       status: 500,
       statusText: "Internal Server Error",
-      json: async () => ({ error: "disk full" }),
+      json: async () => ({ error: "disk full", code: "MANIFEST_EDIT_FAILED" }),
     }) as unknown as Response);
-    await expect(postManifestEdit("demo", "name: demo\n", "hash")).rejects.toThrow(/disk full/);
+    let err: unknown;
+    try {
+      await postManifestEdit("demo", "name: demo\n", "hash");
+    } catch (caught) {
+      err = caught;
+    }
+    expect(err).toBeInstanceOf(Error);
+    expect((err as APIError).message).toMatch(/disk full/);
+    expect((err as APIError).status).toBe(500);
+    expect((err as APIError).code).toBe("MANIFEST_EDIT_FAILED");
   });
   it("sends name + yaml + expected_hash in JSON body", async () => {
     const seen: { body?: string } = {};
