@@ -915,7 +915,7 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 // response; (nil, false) when the re-init or the retry itself failed (the caller
 // then returns the original -32000). Hard-capped at one attempt; never recurses.
 func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, inflightKey requestIDKey, params json.RawMessage) ([]byte, bool) {
-	sid, proto, port, ok := s.reinitDaemonSession(ctx, ref)
+	sid, proto, port, ok := s.reinitDaemonSession(ctx, ref, nil)
 	if !ok {
 		return nil, false // daemon still down → caller returns the original -32000
 	}
@@ -967,8 +967,11 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 	defer state.mu.Unlock()
 
 	if state.stale {
-		if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref); ok {
-			state.stale = false
+		clearToken := &staleClearToken{state: state, generation: state.generation, liveCallerClears: true}
+		if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref, clearToken); ok {
+			if state.generation == clearToken.generation {
+				state.stale = false
+			}
 			return sid, proto
 		}
 		_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
@@ -1008,10 +1011,10 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 // (sid, proto, port, true), or ("","",0,false) if the daemon is still
 // unreachable. SHARED by the (a) failure-driven self-heal (selfHealRetry) and the
 // (b) event-driven proactive re-init (the supervisor-state restart watcher).
-func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef) (string, string, int, bool) {
+func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef, clearToken *staleClearToken) (string, string, int, bool) {
 	port := s.currentDaemonPort(ref)
 	daemonRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
-	state, err := s.reinitializeDaemonBinding(ctx, daemonRef)
+	state, err := s.reinitializeDaemonBindingWithStaleClear(ctx, daemonRef, clearToken)
 	if err != nil {
 		return "", "", 0, false
 	}
@@ -1033,6 +1036,51 @@ func (s *hubSession) cachedDaemonInitState(ref canonicalDaemonRef) (daemonInitSt
 }
 
 func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef canonicalDaemonRef) (daemonInitState, error) {
+	return s.reinitializeDaemonBindingWithStaleClear(ctx, daemonRef, nil)
+}
+
+type staleClearToken struct {
+	state            *stalePortState
+	generation       uint64
+	liveCallerClears bool
+}
+
+func (s *hubSession) staleClearTokenForPort(port int) *staleClearToken {
+	state, ok := s.stalePortStateFor(port)
+	if !ok {
+		return nil
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.stale {
+		return nil
+	}
+	return &staleClearToken{state: state, generation: state.generation}
+}
+
+func (s *hubSession) clearCachedReinitStaleFlag(daemonRef canonicalDaemonRef, sid string, clearToken *staleClearToken) {
+	if clearToken == nil || clearToken.state == nil {
+		return
+	}
+
+	s.mu.Lock()
+	cachedSID, ok := s.InitSuccesses[daemonRef]
+	s.mu.Unlock()
+	if !ok || cachedSID != sid {
+		return
+	}
+
+	clearToken.state.mu.Lock()
+	if clearToken.state.generation == clearToken.generation {
+		clearToken.state.stale = false
+	}
+	clearToken.state.mu.Unlock()
+}
+
+func (s *hubSession) reinitializeDaemonBindingWithStaleClear(ctx context.Context, daemonRef canonicalDaemonRef, clearToken *staleClearToken) (daemonInitState, error) {
+	if clearToken == nil {
+		clearToken = s.staleClearTokenForPort(daemonRef.Port)
+	}
 	s.mu.Lock()
 	protoVer := s.ProtocolVersion
 	s.mu.Unlock()
@@ -1079,14 +1127,15 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 				return
 			}
 			ir := res.Val.(initResult)
-			if proto, cached := s.cacheReinitResult(daemonRef, ir.sid, ir.proto, protoVer); !cached {
+			if proto, cached := s.cacheReinitResult(daemonRef, ir.sid, ir.proto, protoVer, clearToken, true); !cached {
 				s.deleteUncachedReinitResult(daemonRef, ir.sid, proto)
 			}
 		}()
 		return daemonInitState{}, ctx.Err()
 	}
 	res := v.(initResult)
-	proto, cached := s.cacheReinitResult(daemonRef, res.sid, res.proto, protoVer)
+	clearCachedStale := clearToken == nil || !clearToken.liveCallerClears
+	proto, cached := s.cacheReinitResult(daemonRef, res.sid, res.proto, protoVer, clearToken, clearCachedStale)
 	if !cached {
 		s.deleteUncachedReinitResult(daemonRef, res.sid, proto)
 		return daemonInitState{}, errHubSessionDeletedDuringReinit
@@ -1098,11 +1147,13 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 // negotiated protocol under the session mu so a later request for the same
 // daemonRef reuses it (cachedDaemonInitState). Shared by the live-waiter path
 // and the detached drain that fires when the triggering caller's ctx cancelled.
+// When requested, it also clears the matching stale-port generation so a cached
+// fresh session is not immediately treated as stale again.
 // If a session DELETE has already started, the completed daemon-side session is
 // not cacheable: the caller must best-effort DELETE it so the DELETE intent holds.
 // Falls back to the session-requested protoVer when the daemon emitted no
 // negotiated version. Returns the effective proto and whether it was cached.
-func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string) (string, bool) {
+func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string, clearToken *staleClearToken, clearCachedStale bool) (string, bool) {
 	proto := negotiated
 	if proto == "" {
 		proto = protoVer
@@ -1138,6 +1189,9 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	}
 	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
+	if clearCachedStale {
+		s.clearCachedReinitStaleFlag(daemonRef, sid, clearToken)
+	}
 	return proto, true
 }
 

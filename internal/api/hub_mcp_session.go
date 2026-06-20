@@ -172,6 +172,9 @@ type hubSession struct {
 type stalePortState struct {
 	mu    sync.Mutex
 	stale bool
+	// generation increments on every restart mark, so a reinit can clear only
+	// the stale mark it observed and not a newer mark for the same port.
+	generation uint64
 }
 
 // markStalePort flags a daemon port's cached session as needing re-init (called
@@ -185,6 +188,7 @@ func (s *hubSession) markStalePort(port int) bool {
 	v, _ := s.staleDaemonPorts.LoadOrStore(port, &stalePortState{})
 	state := v.(*stalePortState)
 	state.mu.Lock()
+	state.generation++
 	state.stale = true
 	state.mu.Unlock()
 	return true

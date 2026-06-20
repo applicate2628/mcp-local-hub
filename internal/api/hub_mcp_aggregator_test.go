@@ -852,7 +852,7 @@ func TestReinitDetachedCachesSessionWhenCallerCancels(t *testing.T) {
 	}
 }
 
-func TestReinitDetachedCachePreservesStaleMarkersForProactiveConsumer(t *testing.T) {
+func TestReinitDetachedCacheClearsCachedSessionStaleMarkerForProactiveConsumer(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
 
@@ -940,9 +940,25 @@ func TestReinitDetachedCachePreservesStaleMarkersForProactiveConsumer(t *testing
 		state.mu.Lock()
 		stale := state.stale
 		state.mu.Unlock()
-		if !stale {
-			t.Fatalf("detached reinit cleared stale port marker for fresh port %d; only proactive dispatch may consume markers", freshRef.Port)
+		if stale {
+			t.Fatalf("detached reinit left stale port marker set for cached fresh port %d", freshRef.Port)
 		}
+	}
+	initAfterCache := d.initCount.Load()
+	sid, proto := sess.refreshStalePortBeforeDispatch(
+		context.Background(),
+		canonicalToolRef{Server: freshRef.Server, Daemon: freshRef.Daemon, Port: freshRef.Port, RawName: "read"},
+		oldSID,
+		"2025-11-25",
+	)
+	if sid != freshSID {
+		t.Fatalf("post-cache dispatch resolved session id=%q want cached fresh id %q", sid, freshSID)
+	}
+	if proto != "2025-11-25" {
+		t.Fatalf("post-cache dispatch proto=%q want %q", proto, "2025-11-25")
+	}
+	if got := d.initCount.Load(); got != initAfterCache {
+		t.Fatalf("post-cache dispatch reinitialized stale-cleared cached session: initCount %d -> %d", initAfterCache, got)
 	}
 }
 
