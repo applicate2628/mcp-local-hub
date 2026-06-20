@@ -111,6 +111,93 @@ describe("AddServerScreen — A3-b SecretPicker integration (Codex plan-R1 P2-1 
   });
 });
 
+describe("AddServerScreen — readiness inline secrets", () => {
+  it("clears typed inline secret values once the vault snapshot reports the key present", async () => {
+    const requests: Array<{ url: string; method: string; body?: string }> = [];
+    let vaultHasApiKey = false;
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      requests.push({ url, method, body: init?.body as string | undefined });
+      if (url === "/api/secrets" && method === "GET") {
+        return Promise.resolve(jsonResponse({
+          vault_state: "ok",
+          secrets: vaultHasApiKey ? [{ name: "API_KEY", state: "present", used_by: [] }] : [],
+          manifest_errors: [],
+        }));
+      }
+      if (url === "/api/secrets" && method === "POST") {
+        return Promise.resolve(jsonResponse({}, 201));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({
+          server: "demo",
+          ready: true,
+          requirements: [{
+            name: "secret: API_KEY",
+            ok: vaultHasApiKey,
+            optional: true,
+            reason: vaultHasApiKey ? undefined : "not set",
+          }],
+        }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        return Promise.resolve(jsonResponse({
+          yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\nenv:\n  API_KEY: secret:API_KEY\n",
+          hash: "hash-after-create",
+        }));
+      }
+      if (url.startsWith("/api/install")) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    await expandEnvironmentSection();
+    await user.click(screen.getByText(/Add environment variable/i));
+    const envRow = document.querySelector<HTMLElement>('[data-env-row="0"]')!;
+    await user.type(envRow.querySelector<HTMLInputElement>('input[placeholder="KEY"]')!, "API_KEY");
+    const secretInput = envRow.querySelector<HTMLInputElement>("input.secret-picker-input")!;
+    await user.click(secretInput);
+    await user.keyboard("secret:API_KEY");
+    await user.keyboard("{Tab}");
+
+    const inlineInput = await screen.findByTestId("readiness-secret-input-API_KEY") as HTMLInputElement;
+    await user.type(inlineInput, "old-hidden-value");
+
+    vaultHasApiKey = true;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("readiness-secret-input-API_KEY")).toBeNull();
+    });
+
+    vaultHasApiKey = false;
+    window.dispatchEvent(new Event("focus"));
+    const reappearedInput = await screen.findByTestId("readiness-secret-input-API_KEY") as HTMLInputElement;
+    expect(reappearedInput.value).toBe("");
+
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save-and-install"]')!);
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url.startsWith("/api/install"))).toHaveLength(1);
+    });
+    expect(requests.filter((r) => r.url === "/api/secrets" && r.method === "POST")).toHaveLength(0);
+  });
+});
+
 describe("AddServerScreen — create save follow-up edits", () => {
   it("uses manifest edit after a create-mode save has committed", async () => {
     const requests: Array<{ url: string; body?: string }> = [];
@@ -315,5 +402,70 @@ describe("AddServerScreen — create save follow-up edits", () => {
     expect(editBodies[1].name).toBe("demo");
     expect(editBodies[1].expected_hash).toBe("hash-external");
     expect(editBodies[1].yaml).toContain("command: 'node2'");
+  });
+
+  it("falls back to manifest create when a committed create follow-up edit reports not found", async () => {
+    const requests: Array<{ url: string; body?: string }> = [];
+    let createCalls = 0;
+    let editCalls = 0;
+    mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      requests.push({ url, body: init?.body as string | undefined });
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        createCalls++;
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        return Promise.resolve(jsonResponse({
+          yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n",
+          hash: createCalls <= 1 ? "hash-after-create" : "hash-after-recreate",
+        }));
+      }
+      if (url === "/api/manifest/edit") {
+        editCalls++;
+        return Promise.resolve(jsonResponse({
+          code: "MANIFEST_NOT_FOUND",
+          error: 'manifest "demo" does not exist',
+        }, 404));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).toBeTruthy();
+    await user.type(nameInput!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(1);
+    });
+
+    await user.clear(screen.getByLabelText("Command"));
+    await user.type(screen.getByLabelText("Command"), "node2");
+    await user.click(document.querySelector<HTMLButtonElement>('[data-action="save"]')!);
+
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === "/api/manifest/create")).toHaveLength(2);
+    });
+    expect(editCalls).toBe(1);
+    const createBodies = requests
+      .filter((r) => r.url === "/api/manifest/create")
+      .map((r) => JSON.parse(r.body ?? "{}") as { name?: string; yaml?: string });
+    expect(createBodies[1].name).toBe("demo");
+    expect(createBodies[1].yaml).toContain("command: 'node2'");
   });
 });

@@ -75,6 +75,18 @@ function parseAddServerQuery(): { server: string; fromClient: string } {
   };
 }
 
+function isManifestNotFoundError(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  const code = (err as { code?: unknown } | null)?.code;
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return (
+    status === 404 ||
+    code === "MANIFEST_NOT_FOUND" ||
+    /\b404\b/i.test(message) ||
+    /manifest_not_found|not found|does not exist/i.test(message)
+  );
+}
+
 export function AddServerScreen(props: {
   mode?: "create" | "edit";
   route?: RouterState;
@@ -110,6 +122,19 @@ export function AddServerScreen(props: {
   // inlineSecrets maps a vault key → the plaintext the operator typed in the
   // readiness panel; persisted to the vault just before install.
   const [inlineSecrets, setInlineSecrets] = useState<Record<string, string>>({});
+  const presentSecretKeyToken = useMemo(
+    () => JSON.stringify(
+      (snapshot.data?.secrets ?? [])
+        .filter((s) => s.state === "present")
+        .map((s) => s.name)
+        .sort(),
+    ),
+    [snapshot.data?.secrets],
+  );
+  const presentSecretKeys = useMemo(
+    () => new Set(JSON.parse(presentSecretKeyToken) as string[]),
+    [presentSecretKeyToken],
+  );
   // manifestDirty = the editable form differs from the last saved snapshot. It
   // gates Reinstall (which installs the LAST SAVED manifest) — once the form
   // diverges, a Reinstall would install stale config while persisting current
@@ -166,10 +191,7 @@ export function AddServerScreen(props: {
   // persist write set both derive from this, so they can never drift (Codex #378
   // r1/r2/r6).
   function pendingInlineSecretEntries(state: ManifestFormState): [string, string][] {
-    const present = new Set(
-      (snapshot.data?.secrets ?? []).filter((s) => s.state === "present").map((s) => s.name),
-    );
-    return inlineSecretsToWrite(inlineSecrets, state).filter(([key]) => !present.has(key));
+    return inlineSecretsToWrite(inlineSecrets, state).filter(([key]) => !presentSecretKeys.has(key));
   }
 
   useEffect(() => {
@@ -187,6 +209,21 @@ export function AddServerScreen(props: {
       return changed ? next : prev;
     });
   }, [currentSecretRefToken]);
+
+  useEffect(() => {
+    if (presentSecretKeys.size === 0) return;
+    setInlineSecrets((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (presentSecretKeys.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [presentSecretKeyToken, presentSecretKeys]);
 
   async function persistInlineSecrets(state: ManifestFormState): Promise<void> {
     const entries = pendingInlineSecretEntries(state);
@@ -598,6 +635,25 @@ export function AddServerScreen(props: {
       // R4-2: captures the gate-ON in-place republish-failure signal from the
       // create/edit response so the success banner can prompt a hub restart.
       let restartHub = false;
+      const createManifestFromDraft = async (): Promise<boolean> => {
+        const { restartRequired } = await postManifestCreate(name, payload);
+        if (version !== submissionCounter.current) return false;
+        restartHub = restartRequired;
+        let hash = "";
+        try {
+          ({ hash } = await getManifest(name));
+        } catch {
+          // The create already committed; an empty hash tells the follow-up
+          // edit path to re-read before saving instead of attempting create.
+          hash = "";
+        }
+        if (version !== submissionCounter.current) return false;
+        setCommittedCreate({ name, hash });
+        const postSave: ManifestFormState = { ...payloadState, loadedHash: hash };
+        setFormState(postSave);
+        setInitialSnapshot(postSave);
+        return true;
+      };
       if (mode === "edit") {
         try {
           const expectedHash = initialSnapshot.loadedHash;
@@ -644,25 +700,15 @@ export function AddServerScreen(props: {
               showStaleHashRecovery();
               return;
             }
-            throw err;
+            if (isManifestNotFoundError(err)) {
+              setCommittedCreate(null);
+              if (!(await createManifestFromDraft())) return;
+            } else {
+              throw err;
+            }
           }
         } else {
-          const { restartRequired } = await postManifestCreate(name, payload);
-          if (version !== submissionCounter.current) return;
-          restartHub = restartRequired;
-          let hash = "";
-          try {
-            ({ hash } = await getManifest(name));
-          } catch {
-            // The create already committed; an empty hash tells the follow-up
-            // edit path to re-read before saving instead of attempting create.
-            hash = "";
-          }
-          if (version !== submissionCounter.current) return;
-          setCommittedCreate({ name, hash });
-          const postSave: ManifestFormState = { ...payloadState, loadedHash: hash };
-          setFormState(postSave);
-          setInitialSnapshot(postSave);
+          if (!(await createManifestFromDraft())) return;
         }
       }
       setWarnings(null);
