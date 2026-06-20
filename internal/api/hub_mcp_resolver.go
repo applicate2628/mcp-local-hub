@@ -189,10 +189,10 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 	// so a manifest that accidentally repeats a ClientBinding row (no
 	// uniqueness check in validation yet) cannot make AggregateInitialize
 	// fan-out the same daemon twice. Duplicate fan-outs both write to
-	// the same InitSuccesses key, leaving one daemon session orphaned
-	// (and the other un-tracked for cancellation / cleanup). The same
-	// dedupe now also covers the group path (a server named by two
-	// groups, or twice by one group).
+	// the same InitSuccesses key, leaving one daemon session without a
+	// live owner (and the other untracked for cancellation / cleanup).
+	// The same dedupe now also covers the group path (a server named by
+	// two groups, or twice by one group).
 	type seenKey struct {
 		ScopeKey string
 		Ref      canonicalDaemonRef
@@ -422,13 +422,10 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 		cfg = GroupsConfig{}
 	}
 
-	// Capture the prior published active set only for live-session
-	// preservation. It is NOT the durable orphan discriminator: a previous
-	// resolver snapshot can be stale after a groups.yaml delete committed but
-	// its non-fatal republish failed. The durable discriminator is the
-	// group-token orphan tombstone written by ReadModifyWriteGroups when token
-	// pruning fails; that marker is consumed below even on the first publish of
-	// a process.
+	// Capture the prior published active set for live-session preservation and
+	// stale-row rotation. On cold start, nil prev means the current cfg.Groups
+	// is trusted as authoritative active state, so declared pre-existing token
+	// rows survive clean restarts.
 	prev := LoadResolverSnapshot()
 	var activeGroupKeys map[string]bool
 	if prev != nil {
@@ -440,31 +437,23 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	// publishes even when the token-ensure fails.
 	var tokenEnsureErr error
 	if groupKeys := GroupScopeKeys(cfg.Groups); len(groupKeys) > 0 {
-		// First, ROTATE any declared group whose token row is an ORPHAN — a
-		// row left behind by a prior delete's failed prune (ErrTokenPruneFailed).
-		// The durable tombstone wins over stale previous snapshots and nil
-		// first-publish snapshots. For the original in-process delete/recreate
-		// case, a declared row absent from the known prior active set also
-		// rotates, while still-active rows are preserved so live /g/ sessions
-		// survive. A rotation failure is fail-closed for this publish: serving
-		// the re-created group with the old row would expose the stale secret
-		// this path is specifically trying to retire.
+		// First, ROTATE any declared group whose token row pre-exists but was
+		// not in this process's prior published active set. Still-active rows
+		// are preserved so live /g/ sessions survive; cold-start rows are
+		// trusted as current declared state. A rotation failure is fail-closed
+		// for this publish: serving the re-created group with the old row would
+		// expose the stale secret this path is specifically trying to retire.
 		if _, rerr := rotateReusedGroupTokensLocked(groupKeys, activeGroupKeys, prev != nil); rerr != nil {
-			_ = LogHubMcpEvent("warn", "group-tokens-rotate-orphan-failed", map[string]any{
+			_ = LogHubMcpEvent("warn", "group-tokens-rotate-reintroduced-failed", map[string]any{
 				"err": rerr.Error(),
 			})
-			return fmt.Errorf("rotate orphaned group token rows: %w", rerr)
+			return fmt.Errorf("rotate reintroduced group token rows: %w", rerr)
 		}
 		if _, terr := ensureHubTokensLocked(groupKeys); terr != nil {
 			_ = LogHubMcpEvent("warn", "group-tokens-ensure-failed", map[string]any{
 				"err": terr.Error(),
 			})
 			tokenEnsureErr = fmt.Errorf("ensure group token rows: %w", terr)
-		} else if cerr := clearGroupTokenOrphansLocked(groupKeys); cerr != nil {
-			_ = LogHubMcpEvent("warn", "group-token-orphan-clear-failed", map[string]any{
-				"err": cerr.Error(),
-			})
-			tokenEnsureErr = fmt.Errorf("clear group-token orphan tombstones: %w", cerr)
 		}
 	}
 

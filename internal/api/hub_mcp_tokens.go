@@ -56,15 +56,6 @@ type HubTokenTable struct {
 	Tokens map[string]string `json:"tokens"`
 }
 
-// hubMcpGroupTokenOrphansFileLeaf records group scope keys whose groups.yaml
-// delete committed but whose token row could not be pruned. It is the durable
-// discriminator that survives stale resolver snapshots and cold starts.
-const hubMcpGroupTokenOrphansFileLeaf = "hub-mcp-group-token-orphans.json"
-
-type groupTokenOrphanTable struct {
-	Orphans map[string]bool `json:"orphans"`
-}
-
 // liveTokenTable holds the published snapshot for the auth gate. The
 // atomic.Pointer swap makes per-request reads lock-free while
 // guaranteeing visibility of new tokens after every Ensure / Rotate /
@@ -154,82 +145,10 @@ func pruneHubTokensLocked(scopeKeys []string) error {
 	return nil
 }
 
-func loadGroupTokenOrphansLocked() (groupTokenOrphanTable, error) {
-	raw, err := readHubMcpStateFile(hubMcpGroupTokenOrphansFileLeaf)
-	if err != nil {
-		if isHubMcpStateMissingErr(err) {
-			return groupTokenOrphanTable{Orphans: map[string]bool{}}, nil
-		}
-		return groupTokenOrphanTable{}, err
-	}
-	var tbl groupTokenOrphanTable
-	if uerr := json.Unmarshal(raw, &tbl); uerr != nil {
-		return groupTokenOrphanTable{}, fmt.Errorf("hub-mcp group-token orphan tombstones corrupt: %w", uerr)
-	}
-	if tbl.Orphans == nil {
-		tbl.Orphans = map[string]bool{}
-	}
-	return tbl, nil
-}
-
-func writeGroupTokenOrphansLocked(tbl groupTokenOrphanTable) error {
-	if tbl.Orphans == nil {
-		tbl.Orphans = map[string]bool{}
-	}
-	payload, err := json.Marshal(tbl)
-	if err != nil {
-		return fmt.Errorf("marshal group-token orphan tombstones: %w", err)
-	}
-	return writeHubMcpStateFile(hubMcpGroupTokenOrphansFileLeaf, payload)
-}
-
-func markGroupTokenOrphansLocked(scopeKeys []string) error {
-	if len(scopeKeys) == 0 {
-		return nil
-	}
-	tbl, err := loadGroupTokenOrphansLocked()
-	if err != nil {
-		return err
-	}
-	changed := false
-	for _, key := range scopeKeys {
-		if key == "" || tbl.Orphans[key] {
-			continue
-		}
-		tbl.Orphans[key] = true
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return writeGroupTokenOrphansLocked(tbl)
-}
-
-func clearGroupTokenOrphansLocked(scopeKeys []string) error {
-	if len(scopeKeys) == 0 {
-		return nil
-	}
-	tbl, err := loadGroupTokenOrphansLocked()
-	if err != nil {
-		return err
-	}
-	changed := false
-	for _, key := range scopeKeys {
-		if tbl.Orphans[key] {
-			delete(tbl.Orphans, key)
-			changed = true
-		}
-	}
-	if !changed {
-		return nil
-	}
-	return writeGroupTokenOrphansLocked(tbl)
-}
-
 // rotateReusedGroupTokensLocked mints a FRESH token for every declared
-// group scope key that has a pre-existing ORPHANED token row. Caller MUST
-// already hold hub-mcp.lock (called from
-// PublishGroupsSnapshotLocked under its held lock).
+// group scope key that has a pre-existing token row but was not in this
+// process's previously published live active set. Caller MUST already hold
+// hub-mcp.lock (called from PublishGroupsSnapshotLocked under its held lock).
 //
 // Why this exists (the "stale token reused on group re-create" defect):
 // ensureHubTokensLocked NEVER rotates an existing row (its contract is
@@ -239,28 +158,21 @@ func clearGroupTokenOrphansLocked(scopeKeys []string) error {
 // forced). If the operator later RE-CREATES a group of the same name,
 // the plain ensure path REUSES that stale (possibly leaked/compromised)
 // row instead of minting a fresh secret. This helper closes that hole by
-// rotating exactly the orphaned-row case.
+// rotating exactly the reintroduced-row case.
 //
-// The durable discriminator is hub-mcp-group-token-orphans.json: a delete
-// writes that tombstone if groups.yaml committed but pruning the token row
-// failed. That marker wins over both a stale previous resolver snapshot and
-// a nil first-publish snapshot. `activeKeys` is only the live-session safety
-// set for the already-published process state; when rotateUntracked is true,
-// a declared row that is absent from that known-live set is also rotated for
-// the original in-process recreate-over-orphan case. A declared key with NO
-// existing row is left to the subsequent ensureHubTokensLocked (which mints a
-// fresh one anyway) and any stale tombstone for it is cleared.
+// The discriminator is deliberately single-source: current cfg.Groups supplies
+// declaredKeys, and this process's previous in-memory snapshot supplies
+// activeKeys. On cold start (hadPriorPublish=false), declared pre-existing rows
+// are trusted as the authoritative active set so clean restarts preserve their
+// tokens. A declared key with NO existing row is left to the subsequent
+// ensureHubTokensLocked, which mints a fresh one.
 //
 // Returns true when at least one row was rotated (the table was written +
 // republished). A load/write failure surfaces; a missing token file is
 // "nothing to rotate" (the recreate path then mints fresh via ensure).
-func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]bool, rotateUntracked bool) (bool, error) {
-	if len(declaredKeys) == 0 {
+func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]bool, hadPriorPublish bool) (bool, error) {
+	if len(declaredKeys) == 0 || !hadPriorPublish {
 		return false, nil
-	}
-	orphans, err := loadGroupTokenOrphansLocked()
-	if err != nil {
-		return false, err
 	}
 	tbl, err := loadHubTokensLocked()
 	if err != nil {
@@ -273,40 +185,26 @@ func rotateReusedGroupTokensLocked(declaredKeys []string, activeKeys map[string]
 		return false, nil
 	}
 	rotated := false
-	clearOrphans := make([]string, 0)
 	for _, k := range declaredKeys {
-		tombstoned := orphans.Orphans[k]
 		if _, present := tbl.Tokens[k]; !present {
-			if tombstoned {
-				clearOrphans = append(clearOrphans, k)
-			}
 			continue // no row yet — ensure mints a fresh one, nothing stale to rotate.
 		}
-		if !tombstoned && (!rotateUntracked || activeKeys[k]) {
+		if activeKeys[k] {
 			continue // still-active group — keep its token so live sessions survive.
 		}
-		// Orphaned row being (re)created over: mint a fresh secret.
+		// Reintroduced row: mint a fresh secret before the group becomes routable.
 		fresh, gerr := generateHexToken()
 		if gerr != nil {
 			return rotated, gerr
 		}
 		tbl.Tokens[k] = fresh
 		rotated = true
-		if tombstoned {
-			clearOrphans = append(clearOrphans, k)
-		}
 	}
 	if !rotated {
-		if err := clearGroupTokenOrphansLocked(clearOrphans); err != nil {
-			return false, fmt.Errorf("clear group-token orphan tombstones: %w", err)
-		}
 		return false, nil
 	}
 	if werr := writeHubTokensLocked(tbl); werr != nil {
 		return false, werr
-	}
-	if err := clearGroupTokenOrphansLocked(clearOrphans); err != nil {
-		return false, fmt.Errorf("clear group-token orphan tombstones: %w", err)
 	}
 	publishTokenTable(tbl)
 	return true, nil

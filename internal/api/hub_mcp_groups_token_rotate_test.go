@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -45,23 +46,6 @@ func writeGroupTokenRowForTest(t *testing.T, key, token string) {
 	}
 	if err := writeHubMcpStateFile(hubMcpTokensFileLeaf, payload); err != nil {
 		t.Fatalf("write token table: %v", err)
-	}
-}
-
-func writeGroupTokenOrphanTombstoneForTest(t *testing.T, keys ...string) {
-	t.Helper()
-	orphans := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		orphans[key] = true
-	}
-	payload, err := json.Marshal(struct {
-		Orphans map[string]bool `json:"orphans"`
-	}{Orphans: orphans})
-	if err != nil {
-		t.Fatalf("marshal group-token orphan tombstone: %v", err)
-	}
-	if err := writeHubMcpStateFile(hubMcpGroupTokenOrphansFileLeaf, payload); err != nil {
-		t.Fatalf("write group-token orphan tombstone: %v", err)
 	}
 }
 
@@ -147,44 +131,10 @@ func TestGroups_StillActiveTokenNotRotated(t *testing.T) {
 	}
 }
 
-// TestGroups_FirstPublishRecreatedOrphanTombstoneRotatesToken pins the
-// offline / gate-off recreate case: a prior delete's token-prune failure
-// persisted the deletion but left a token row behind, then the group was
-// re-added before this process published any resolver snapshot. The persisted
-// orphan tombstone is the durable discriminator; prev==nil must not make that
-// stale row look like a clean-restart active token.
-func TestGroups_FirstPublishRecreatedOrphanTombstoneRotatesToken(t *testing.T) {
-	hubMcpStateTestHelper(t)
-	resetResolverForTest(t)
-
-	const key = "g:shared"
-	stale := strings.Repeat("a", 64)
-	writeGroupTokenRowForTest(t, key, stale)
-	writeGroupTokenOrphanTombstoneForTest(t, key)
-
-	if err := WriteGroups(GroupsConfig{Version: 1, Groups: []Group{{Name: "shared", Servers: []string{"memory"}}}}); err != nil {
-		t.Fatalf("WriteGroups: %v", err)
-	}
-
-	// First publish of the process (nil resolver snapshot) must still rotate
-	// the tombstoned row before making the group routable.
-	publishCurrentGroups(t)
-	after := CurrentTokenTable().Tokens[key]
-	if !isValidHexToken(after) {
-		t.Fatalf("after first publish: %q token invalid: %q", key, after)
-	}
-	if after == stale {
-		t.Fatalf("first publish reused tombstoned orphan token %q; it must rotate before publish", stale)
-	}
-	if snap := LoadResolverSnapshot(); snap == nil || !snap.Groups[key] {
-		t.Fatalf("group should publish after successful orphan rotation, snap=%+v", snap)
-	}
-}
-
 // TestGroups_CleanRestartDeclaredGroupKeepsTokenWithoutTombstone pins the
-// safety half of the persisted discriminator: a normal restart has the group
-// declared in groups.yaml and its token row present, but no orphan tombstone.
-// That token must survive the first publish of the new process.
+// cold-start rule: a normal restart has the group declared in groups.yaml and
+// its token row present. With no prior in-memory publish in this process, that
+// declared row is authoritative active state and must survive.
 func TestGroups_CleanRestartDeclaredGroupKeepsTokenWithoutTombstone(t *testing.T) {
 	hubMcpStateTestHelper(t)
 	resetResolverForTest(t)
@@ -210,31 +160,6 @@ func TestGroups_CleanRestartDeclaredGroupKeepsTokenWithoutTombstone(t *testing.T
 	}
 }
 
-// TestGroups_StalePreviousSnapshotDoesNotSuppressTombstonedRecreate pins the
-// failed-delete-publish edge case: groups.yaml durably deleted the group and
-// token prune failed, but the previous resolver snapshot was never republished
-// and still says the group is active. The persisted orphan tombstone must win
-// over that stale in-memory snapshot.
-func TestGroups_StalePreviousSnapshotDoesNotSuppressTombstonedRecreate(t *testing.T) {
-	hubMcpStateTestHelper(t)
-	resetResolverForTest(t)
-
-	const key = "g:frontend"
-	stale := strings.Repeat("b", 64)
-	writeGroupTokenRowForTest(t, key, stale)
-	writeGroupTokenOrphanTombstoneForTest(t, key)
-	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{key: true}})
-
-	publishWithGroups(t, []Group{{Name: "frontend", Servers: []string{"memory"}}})
-	after := CurrentTokenTable().Tokens[key]
-	if !isValidHexToken(after) {
-		t.Fatalf("after recreate: %q token invalid: %q", key, after)
-	}
-	if after == stale {
-		t.Fatalf("stale previous snapshot suppressed orphan rotation; token is still %q", stale)
-	}
-}
-
 // TestGroups_RotationFailureDoesNotPublishStaleGroup pins fail-closed publish:
 // if the orphan-rotation step errors, PublishGroupsSnapshotLocked must return
 // the error without swapping in a resolver snapshot that makes the group
@@ -244,20 +169,24 @@ func TestGroups_RotationFailureDoesNotPublishStaleGroup(t *testing.T) {
 	resetResolverForTest(t)
 
 	const key = "g:frontend"
-	writeGroupTokenOrphanTombstoneForTest(t, key)
-	if err := writeHubMcpStateFile(hubMcpTokensFileLeaf, []byte(`{"tokens":{"g:frontend":"malformed"}}`)); err != nil {
-		t.Fatalf("write malformed token table: %v", err)
-	}
+	stale := strings.Repeat("c", 64)
+	writeGroupTokenRowForTest(t, key, stale)
 	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{GroupScopeKey("old"): true}})
 	if err := WriteGroups(GroupsConfig{Version: 1, Groups: []Group{{Name: "frontend", Servers: []string{"memory"}}}}); err != nil {
 		t.Fatalf("WriteGroups: %v", err)
 	}
 
+	prev := postRenameVerifyFailHook
+	t.Cleanup(func() { postRenameVerifyFailHook = prev })
+	postRenameVerifyFailHook = func() error {
+		return errors.New("synthetic token rotation write failure")
+	}
+
 	err := PublishGroupsSnapshotLocked(context.Background(), scanOneServer)
 	if err == nil {
-		t.Fatal("PublishGroupsSnapshotLocked must fail when orphan token rotation fails")
+		t.Fatal("PublishGroupsSnapshotLocked must fail when group token rotation cannot be written")
 	}
-	if !strings.Contains(err.Error(), "rotate orphaned group token rows") {
+	if !strings.Contains(err.Error(), "rotate reintroduced group token rows") {
 		t.Fatalf("error should surface rotation failure, got: %v", err)
 	}
 	if snap := LoadResolverSnapshot(); snap == nil || snap.Groups[key] {
@@ -265,12 +194,12 @@ func TestGroups_RotationFailureDoesNotPublishStaleGroup(t *testing.T) {
 	}
 }
 
-// TestGroups_DeletePruneFailurePersistsOrphanTombstone verifies the producer
-// side of the durable discriminator: when the groups.yaml delete commits but
-// token pruning fails, the deleted group key is recorded for a future recreate
-// publish to rotate before serving.
-func TestGroups_DeletePruneFailurePersistsOrphanTombstone(t *testing.T) {
-	hubMcpStateTestHelper(t)
+// TestGroups_DeletePruneFailureDoesNotPersistTombstone verifies that groups.yaml
+// remains the single durable source of truth when a delete commits but token
+// pruning fails. The caller still sees ErrTokenPruneFailed so it can force
+// restart_required, but no second marker file is written.
+func TestGroups_DeletePruneFailureDoesNotPersistTombstone(t *testing.T) {
+	dir := hubMcpStateTestHelper(t)
 	resetResolverForTest(t)
 
 	const key = "g:frontend"
@@ -289,17 +218,13 @@ func TestGroups_DeletePruneFailurePersistsOrphanTombstone(t *testing.T) {
 		t.Fatalf("delete should return ErrTokenPruneFailed, got %v", err)
 	}
 
-	raw, err := readHubMcpStateFile(hubMcpGroupTokenOrphansFileLeaf)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read group-token orphan tombstone: %v", err)
+		t.Fatalf("read state dir: %v", err)
 	}
-	var tombstone struct {
-		Orphans map[string]bool `json:"orphans"`
-	}
-	if err := json.Unmarshal(raw, &tombstone); err != nil {
-		t.Fatalf("unmarshal group-token orphan tombstone: %v", err)
-	}
-	if !tombstone.Orphans[key] {
-		t.Fatalf("expected tombstone for %q, got %+v", key, tombstone.Orphans)
+	for _, entry := range entries {
+		if strings.Contains(strings.ToLower(entry.Name()), "orphan") {
+			t.Fatalf("delete prune failure wrote legacy tombstone file %q", entry.Name())
+		}
 	}
 }
