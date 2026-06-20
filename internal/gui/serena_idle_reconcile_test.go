@@ -271,6 +271,164 @@ func TestSerenaRouter_BackendLoss_SeedNeverOverwritesExistingBaseline(t *testing
 	}
 }
 
+func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+
+	t.Run("mapping", func(t *testing.T) {
+		const wsPath = "/proj/event-map"
+		ws := serenaWS("event-map", wsPath, 9305)
+		s, _ := newSerenaStoreSeedServer(t, ws)
+
+		if got := s.serenaWorkspaceForBackendLostEvent(map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9999,
+		}); got == nil || got.WorkspaceKey != ws.WorkspaceKey {
+			t.Fatalf("mapping by daemon key = %v, want ws %q", got, ws.WorkspaceKey)
+		}
+		if got := s.serenaWorkspaceForBackendLostEvent(map[string]any{
+			"server": "serena", "port": float64(9305),
+		}); got == nil || got.WorkspaceKey != ws.WorkspaceKey {
+			t.Fatalf("mapping port fallback = %v, want ws %q", got, ws.WorkspaceKey)
+		}
+		if got := s.serenaWorkspaceForBackendLostEvent(map[string]any{
+			"server": "mcp-language-server", "daemon": ws.WorkspaceKey, "port": 9305,
+		}); got != nil {
+			t.Fatalf("mapping non-serena event = %v, want nil", got)
+		}
+		if got := s.serenaWorkspaceForBackendLostEvent(map[string]any{
+			"server": "serena", "daemon": "nope", "port": 9305,
+		}); got != nil {
+			t.Fatalf("mapping unknown daemon key = %v, want nil", got)
+		}
+
+		lsp := &api.WorkspaceEntry{
+			WorkspaceKey:  "lsp-alpha",
+			WorkspacePath: "/proj/lsp-alpha",
+			Language:      "go",
+			Backend:       "mcp-language-server",
+			Port:          9305,
+			TaskName:      `\mcp-local-hub-lsp-lsp-alpha-go`,
+		}
+		s.SetSerenaRouterDeps(&serenaRouterDeps{
+			Resolver: &listerStubResolver{
+				stubResolver: stubResolver{entries: []*api.WorkspaceEntry{lsp}},
+				list:         []*api.WorkspaceEntry{lsp},
+			},
+		})
+		if got := s.serenaWorkspaceForBackendLostEvent(map[string]any{
+			"server": "serena", "port": 9305,
+		}); got != nil {
+			t.Fatalf("mapping serena event to non-serena workspace row = %v, want nil", got)
+		}
+	})
+
+	t.Run("subscriber-ignores-lsp-event", func(t *testing.T) {
+		const wsPath = "/proj/event-lsp-ignore"
+		const sid = "sid-event-lsp-ignore"
+		ws := serenaWS("event-lsp-ignore", wsPath, 9308)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-lsp-ignore")
+
+		ch := make(chan Event, 1)
+		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "mcp-language-server", "daemon": ws.WorkspaceKey, "prev_pid": 1234, "port": 9308,
+		}}
+		close(ch)
+		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+
+		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+	})
+
+	t.Run("subscriber-tears-down", func(t *testing.T) {
+		const wsPath = "/proj/event-teardown"
+		const sid = "sid-event-teardown"
+		const prevPID = 1234
+		ws := serenaWS("event-teardown", wsPath, 9306)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-teardown")
+		s.Broadcaster().DisableGUIEventLog = true
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Workspace: wsPath, PID: prevPID}}, nil
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := s.Broadcaster().Subscribe(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.consumeSerenaBackendLossEvents(ctx, ch)
+		}()
+
+		s.Broadcaster().Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "serena", "daemon": ws.WorkspaceKey}})
+		s.Broadcaster().Publish(Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "mcp-language-server", "daemon": ws.WorkspaceKey, "prev_pid": prevPID, "port": 9306,
+		}})
+		s.Broadcaster().Publish(Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": prevPID, "port": 9306,
+		}})
+
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if !s.serenaRouterSessions.known(sid) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("router session %q not torn down after daemon-backend-lost event", sid)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("subscriber goroutine did not exit on ctx cancel")
+		}
+	})
+
+	t.Run("idempotent-second-teardown-zero", func(t *testing.T) {
+		const wsPath = "/proj/event-idempotent"
+		const sid = "sid-event-idempotent"
+		ws := serenaWS("event-idempotent", wsPath, 9309)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-idempotent")
+
+		if n := s.terminateSerenaSessionsForWorkspace(ws.WorkspaceKey); n != 1 {
+			t.Fatalf("first workspace teardown removed %d sessions; want 1", n)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+
+		if n := s.terminateSerenaSessionsForWorkspace(ws.WorkspaceKey); n != 0 {
+			t.Fatalf("second workspace teardown removed %d sessions; want 0 for idempotent no-op", n)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+	})
+
+	t.Run("ignores-stale-event-after-restart", func(t *testing.T) {
+		const wsPath = "/proj/event-stale"
+		const sid = "sid-event-stale"
+		ws := serenaWS("event-stale", wsPath, 9307)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-stale")
+		s.Broadcaster().DisableGUIEventLog = true
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Workspace: wsPath, PID: 7777}}, nil
+		}
+
+		ch := make(chan Event, 1)
+		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "prev_pid": 1234, "port": 9307,
+		}}
+		close(ch)
+		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+
+		if !s.serenaRouterSessions.known(sid) {
+			t.Fatalf("stale daemon-backend-lost event for old pid tore down a healthy post-restart session")
+		}
+	})
+}
+
 func TestSerenaRouter_BackendLoss_LastUnbindDropsBaselineAndIdleMarker(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 	withTempSerenaStateRoot(t)

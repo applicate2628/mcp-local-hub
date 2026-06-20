@@ -489,6 +489,7 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		// bounds the post-death zombie window for the case where NO client
 		// request fires to trip the always-on forward-failure floor.
 		go runSerenaBackendLossReconcileTicker(ctx, s, 30*time.Second)
+		go s.RunSerenaBackendLossEventSubscriber(ctx)
 		// v0.6 idle-shutdown (#6, spec §6): the 60s in-GUI idle sweeper. Each
 		// tick it stops every RUNNING serena pool daemon idle longer than the
 		// operator-configured threshold (daemons.serena_idle_shutdown) by
