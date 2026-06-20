@@ -107,7 +107,8 @@ func (h *HubMcpHandler) SetEndpoint(ep HubEndpoint) {
 }
 
 // currentInstanceID returns the published endpoint's InstanceID, or
-// "" if SetEndpoint has not yet been called. Used by gate 5 only.
+// "" if SetEndpoint has not yet been called. Used by gate 5 and response
+// metadata that must reflect the already-authenticated cached endpoint.
 func (h *HubMcpHandler) currentInstanceID() string {
 	p := h.instanceEndpoint.Load()
 	if p == nil {
@@ -500,7 +501,7 @@ func (h *HubMcpHandler) handlePost(w http.ResponseWriter, r *http.Request, scope
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		respBody, aerr := AggregateToolsList(r.Context(), sess, env.ID)
+		respBody, aerr := AggregateToolsList(r.Context(), sess, env.ID, h.currentInstanceID())
 		if aerr != nil {
 			writeJSONRPCErrorStatus(w, env.ID, http.StatusInternalServerError, -32603, "internal error: "+aerr.Error(), nil)
 			return

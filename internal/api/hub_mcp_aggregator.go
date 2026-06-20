@@ -214,9 +214,14 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 			if err == nil {
 				notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 				if nerr := postInitialized(notifyCtx, ref, sid, negotiated); nerr != nil {
+					notifyCancel()
+					cleanupCtx, cleanupCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+					_ = bestEffortDeleteDaemonSession(cleanupCtx, ref, sid)
+					cleanupCancel()
 					err = fmt.Errorf("notifications/initialized: %w", nerr)
+				} else {
+					notifyCancel()
 				}
-				notifyCancel()
 			}
 			results[i] = initResult{ref: ref, sessionID: sid, negotiatedProto: negotiated, err: err}
 		}()
@@ -286,7 +291,7 @@ type listResult struct {
 // data.mcphub.partialFailures. Note: initialize succeeding but EVERY
 // list call failing also lands here — surfacing the call as a failure
 // is intentional, since the caller can't discover any tools.
-func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMessage) ([]byte, error) {
+func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMessage, instanceID string) ([]byte, error) {
 	// Snapshot the inputs under the session mu. codex bot r17 P1
 	// closure on PR #157: capture each daemon's NEGOTIATED protocol
 	// version alongside its Mcp-Session-Id so the fan-out uses
@@ -305,7 +310,7 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	sess.mu.Unlock()
 
 	results := fanOutToolsList(ctx, successes)
-	return assembleToolsListResponse(reqID, results, initFailures, sess)
+	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID)
 }
 
 // daemonInitState bundles a daemon's per-daemon Mcp-Session-Id and
@@ -375,7 +380,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 // stage="tools/list" partialFailure row per colliding daemon. The
 // failure message names every daemon that claimed the key so
 // operators can resolve the duplicate at the manifest layer.
-func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession) ([]byte, error) {
+func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string) ([]byte, error) {
 	// codex bot r14 P2 closure on PR #157: fanOutToolsList appends
 	// results in goroutine-completion order, so identical inputs
 	// produced different mergedTools / partialFailures order across
@@ -398,14 +403,14 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 
 	// Resolve the session's FINE-GRAINED per-tool visibility filter
 	// (groups/namespaces Phase 5a) BEFORE collision detection. For a GROUP
-	// scope key this is the group's tools_hidden map (server → hidden raw
-	// names) carried on the captured snapshot; for a CLIENT scope key it is
-	// nil → NO filtering (the byte-identical fence). Reading it off
-	// SnapshotAtInit keeps the (bindings, filter) pair consistent: a session
-	// always sees the filter from the SAME atomic snapshot it captured its
-	// bindings from. Precomputed into a (server → set-of-raw-names) lookup
-	// ONCE so each per-tool check is O(1); nil/empty filter → nil set →
-	// hides() short-circuits to false, preserving the client fence.
+	// scope key this is the live group's tools_hidden map (server → hidden raw
+	// names) carried on the current resolver snapshot; for a CLIENT scope key it
+	// is nil → NO filtering (the byte-identical fence). Reading it from the live
+	// snapshot mirrors tools/call revalidation: a tools_hidden republish revokes
+	// the listing surface on the next tools/list without a reconnect. Precomputed
+	// into a (server → set-of-raw-names) lookup ONCE so each per-tool check is
+	// O(1); nil/empty filter → nil set → hides() short-circuits to false,
+	// preserving the client fence.
 	//
 	// CRITICAL (codex bot r2 — leak via diagnostics): this MUST be computed
 	// before Pass 1 so a HIDDEN tool is excluded from collision detection
@@ -573,13 +578,13 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// all-failed envelope). So a non-group scope keeps the -32000 envelope;
 		// only a group reaches empty-success.
 		if len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) {
-			sess.RouteMap.Store(&mergedRoutes)                             // empty map — no tools to route
-			return buildToolsListResponse(reqID, mergedTools, allFailures) // mergedTools is empty → result.tools=[]
+			sess.RouteMap.Store(&mergedRoutes)                                         // empty map — no tools to route
+			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID) // mergedTools is empty → result.tools=[]
 		}
-		return buildAllFailedToolsListResponse(reqID, allFailures)
+		return buildAllFailedToolsListResponse(reqID, allFailures, instanceID)
 	}
 	sess.RouteMap.Store(&mergedRoutes)
-	return buildToolsListResponse(reqID, mergedTools, allFailures)
+	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID)
 }
 
 // resolvedCallTarget is the output of route lookup + resolver
@@ -1483,11 +1488,11 @@ func buildSyntheticInitResult(reqID json.RawMessage, protoVer string) ([]byte, e
 
 // buildToolsListResponse assembles a successful (≥1 daemon ok)
 // tools/list response with the merged tool list and partialFailures.
-func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure) ([]byte, error) {
+func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure, instanceID string) ([]byte, error) {
 	meta := map[string]any{
 		"mcphub": map[string]any{
 			"partialFailures": failuresOrEmpty(failures),
-			"instance_id":     currentInstanceIDOrEmpty(),
+			"instance_id":     instanceID,
 		},
 	}
 	result := map[string]any{
@@ -1504,11 +1509,11 @@ func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, fail
 
 // buildAllFailedToolsListResponse assembles a JSON-RPC -32000 error
 // envelope when every participating daemon failed.
-func buildAllFailedToolsListResponse(reqID json.RawMessage, failures []DaemonFailure) ([]byte, error) {
+func buildAllFailedToolsListResponse(reqID json.RawMessage, failures []DaemonFailure, instanceID string) ([]byte, error) {
 	data := map[string]any{
 		"mcphub": map[string]any{
 			"partialFailures": failuresOrEmpty(failures),
-			"instance_id":     currentInstanceIDOrEmpty(),
+			"instance_id":     instanceID,
 		},
 	}
 	envelope := map[string]any{
@@ -1663,14 +1668,13 @@ func nameSpaceTools(ref canonicalDaemonRef, tools []json.RawMessage) []namespace
 
 // hiddenToolsForScope returns the session's FINE-GRAINED per-tool
 // visibility filter (server name → hidden raw tool names) for its scope
-// key, read from the snapshot captured at initialize (groups/namespaces
+// key, read from the currently published resolver snapshot (groups/namespaces
 // Phase 5a). Returns nil for a CLIENT scope key (no entry → no filtering,
-// the byte-identical fence) and for any session whose captured snapshot
-// has no ToolsHidden. Reading from SnapshotAtInit (not the live snapshot)
-// keeps the filter consistent with the bindings the session fanned out
-// over — both come from the SAME immutable pointer.
+// the byte-identical fence) and for any live snapshot with no ToolsHidden.
+// The binding set remains session-scoped; only per-tool visibility is live so
+// operator tools_hidden changes revoke tools/list without a reconnect.
 func (s *hubSession) hiddenToolsForScope() map[string][]string {
-	snap := s.SnapshotAtInit
+	snap := LoadResolverSnapshot()
 	if snap == nil || snap.ToolsHidden == nil {
 		return nil
 	}
@@ -1754,18 +1758,6 @@ func failuresOrEmpty(f []DaemonFailure) []DaemonFailure {
 		return []DaemonFailure{}
 	}
 	return f
-}
-
-// currentInstanceIDOrEmpty returns the persistent hub instance_id
-// from the loaded endpoint state, or "" if not loaded. Phase 4 fills
-// this from the established endpoint state at handler startup; in
-// tests it returns "" because the endpoint state isn't populated.
-func currentInstanceIDOrEmpty() string {
-	ep, err := LoadHubEndpoint()
-	if err != nil {
-		return ""
-	}
-	return ep.InstanceID
 }
 
 // generateDaemonRequestID returns a hex-encoded request id wrapped

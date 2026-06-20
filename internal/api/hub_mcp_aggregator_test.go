@@ -56,12 +56,14 @@ type stubDaemon struct {
 	onList   func(w http.ResponseWriter, r *http.Request)
 	onCall   func(w http.ResponseWriter, r *http.Request)
 	onNotify func(w http.ResponseWriter, r *http.Request, body []byte)
+	onDelete func(w http.ResponseWriter, r *http.Request)
 
 	// counters
 	initCount   atomic.Int32
 	listCount   atomic.Int32
 	callCount   atomic.Int32
 	notifyCount atomic.Int32
+	deleteCount atomic.Int32
 
 	// bodyMu guards capture fields below. Updated by the dispatch
 	// loop AFTER reading r.Body, BEFORE delegating to the per-method
@@ -81,6 +83,15 @@ func newStubDaemon(t *testing.T, sessionID string) *stubDaemon {
 	sd.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/mcp" {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			sd.deleteCount.Add(1)
+			if sd.onDelete != nil {
+				sd.onDelete(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
 			return
 		}
 		body, _ := readAllBody(r)
@@ -274,7 +285,7 @@ func TestAggregateToolsListMergesAndNamespaces(t *testing.T) {
 		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -336,7 +347,7 @@ func TestAggregateToolsListReportsAllFailedAsErrorMinus32000(t *testing.T) {
 	if len(sess.InitSuccesses) != 0 {
 		t.Fatalf("expected 0 init successes, got %d", len(sess.InitSuccesses))
 	}
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -421,7 +432,7 @@ func TestAggregateToolsListAllListFailedReturnsMinus32000(t *testing.T) {
 		t.Fatalf("want 0 init failures, got %d: %+v", len(sess.InitFailures), sess.InitFailures)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -468,7 +479,7 @@ func TestAggregateToolsCallCanonicalRewrite(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -509,7 +520,7 @@ func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -561,7 +572,7 @@ func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	// publish a non-stale resolver.
@@ -894,7 +905,7 @@ func TestPostToolsListIncludesProtocolVersionHeader(t *testing.T) {
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if protoHeader != "2025-11-25" {
@@ -953,6 +964,36 @@ func TestAggregateInitializeFailsOnInitializedNotificationError(t *testing.T) {
 	}
 }
 
+func TestAggregateInitializeDeletesDaemonSessionWhenInitializedNotificationFails(t *testing.T) {
+	const daemonSID = "d1-sid"
+	d1 := newStubDaemon(t, daemonSID)
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	var deleteSID string
+	d1.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteSID = r.Header.Get("Mcp-Session-Id")
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Fatalf("notification-failed daemon must not be retained in InitSuccesses: %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	if got := d1.deleteCount.Load(); got != 1 {
+		t.Fatalf("daemon DELETE count=%d want 1", got)
+	}
+	if deleteSID != daemonSID {
+		t.Fatalf("daemon DELETE Mcp-Session-Id=%q want %q", deleteSID, daemonSID)
+	}
+}
+
 // TestRewriteResponseIDRejectsNullBody pins the codex bot r5 P1
 // closure: a daemon returning body=`null` (HTTP 200) must NOT panic
 // the request path. Earlier code would crash with "assignment to
@@ -1001,7 +1042,7 @@ func TestAggregateInitializePersistsFallbackProtocolVersion(t *testing.T) {
 	// And the subsequent tools/list call MUST carry the same fallback in
 	// the MCP-Protocol-Version header — proves the persistence is wired
 	// into the read paths that fanOutToolsList + postToolsList exercise.
-	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(context.Background(), sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
 	if listProtoHeader != hubProtocolVersionFallback {
@@ -1027,7 +1068,7 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("list#1: %v", err)
 	}
 	before := sess.RouteMap.Load()
@@ -1044,7 +1085,7 @@ func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`3`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`3`), "")
 	if err != nil {
 		t.Fatalf("list#2: %v", err)
 	}
@@ -1280,7 +1321,7 @@ func TestAggregateToolsListDeterministicOrdering(t *testing.T) {
 			cancel()
 			t.Fatalf("iter %d: init: %v", i, err)
 		}
-		body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+		body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 		cancel()
 		if err != nil {
 			t.Fatalf("iter %d: list: %v", i, err)
@@ -1349,7 +1390,7 @@ func TestAggregateToolsListRejectsMalformedDaemonResponse(t *testing.T) {
 				t.Fatalf("init: %v", err)
 			}
 
-			body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+			body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 			if err != nil {
 				t.Fatalf("AggregateToolsList: %v", err)
 			}
@@ -1478,7 +1519,7 @@ func TestNegotiatedProtocolVersionPropagates(t *testing.T) {
 	}
 
 	// tools/list uses the per-daemon negotiated version.
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`2`), ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	hdrMu.Lock()
@@ -1558,7 +1599,7 @@ func TestAggregateToolsListIntraDaemonDuplicateNotCollision(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -1673,7 +1714,7 @@ func TestAggregateToolsListNamespaceCollision(t *testing.T) {
 		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -2053,7 +2094,7 @@ func TestAggregateToolsCall_TransportFailureReturnsMinus32000(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)
@@ -2100,7 +2141,7 @@ func TestAggregateToolsCall_DaemonHTTPErrorReturnsMinus32000(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)
@@ -2146,7 +2187,7 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2291,7 +2332,7 @@ func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)
@@ -2374,7 +2415,7 @@ func TestAggregateToolsCall_ConcurrentProactiveReinitRereadsFreshSID(t *testing.
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`)); err != nil {
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
 		t.Fatal(err)
 	}
 	resetResolverForTest(t)

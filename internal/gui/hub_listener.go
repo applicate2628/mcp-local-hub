@@ -56,6 +56,13 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+const (
+	hubMcpReadHeaderTimeout = 10 * time.Second
+	hubMcpReadTimeout       = 15 * time.Second
+	hubMcpWriteTimeout      = api.PerCallWallClockCap + 30*time.Second
+	hubMcpIdleTimeout       = 120 * time.Second
+)
+
 // HubListenerComponents bundles the resources the hub listener owns
 // across its lifetime. Bound to Server in Server.Start so Shutdown
 // can tear them down on context cancellation.
@@ -304,10 +311,7 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 		mux.ServeHTTP(w, r)
 	})
 
-	srv := &http.Server{
-		Handler:           muxedHandler,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	srv := newHubMcpHTTPServer(muxedHandler)
 
 	// Allocate the components bundle BEFORE starting the serve
 	// goroutine so the goroutine can mark `alive=false` on exit
@@ -377,6 +381,16 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 	})
 
 	return comp, nil
+}
+
+func newHubMcpHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: hubMcpReadHeaderTimeout,
+		ReadTimeout:       hubMcpReadTimeout,
+		WriteTimeout:      hubMcpWriteTimeout,
+		IdleTimeout:       hubMcpIdleTimeout,
+	}
 }
 
 // ShutdownHubListener drains the hub listener under a 5s timeout +

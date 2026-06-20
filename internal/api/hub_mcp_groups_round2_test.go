@@ -56,7 +56,7 @@ func TestGroupsRound2_EmptyGroupReturnsEmptyToolsNotMinus32000(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestGroupsRound3_ZeroBindingClientReturnsMinus32000NotEmptySuccess(t *testi
 		t.Fatalf("init: %v", err)
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestGroupsRound2_HiddenCollidingToolNeverLeaksViaPartialFailures(t *testing
 		t.Fatalf("want 2 init successes, got %d", len(sess.InitSuccesses))
 	}
 
-	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`))
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}

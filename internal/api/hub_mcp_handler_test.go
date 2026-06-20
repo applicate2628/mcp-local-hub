@@ -305,6 +305,48 @@ func TestHandlerProtocolVersionMismatchReturns400Minus32600(t *testing.T) {
 	}
 }
 
+func TestHandlerToolsListMetaUsesCachedInstanceIDWhenEndpointFileUnreadable(t *testing.T) {
+	restore := SetDaemonStateRootForTest(t.TempDir())
+	t.Cleanup(restore)
+
+	d1 := newStubDaemon(t, "d1-sid")
+	h := newTestHandler(t)
+	sess, err := h.sessions.Create("claude-code", "2025-11-25", nil)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port}
+	sess.IntendedParticipants = []canonicalDaemonRef{ref}
+	sess.InitSuccesses[ref] = "d1-sid"
+	sess.DaemonProtoVer[ref] = "2025-11-25"
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	req := authedRequest(t, http.MethodPost, "/clients/claude-code/mcp", body)
+	req.Header.Set("Mcp-Session-Id", sess.ClientSessionID)
+	req.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tools/list status=%d want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	var env struct {
+		Result struct {
+			Meta struct {
+				Mcphub struct {
+					InstanceID string `json:"instance_id"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("parse tools/list response: %v body=%s", err, w.Body.String())
+	}
+	if env.Result.Meta.Mcphub.InstanceID != realInstanceID {
+		t.Fatalf("tools/list _meta.mcphub.instance_id=%q want cached %q", env.Result.Meta.Mcphub.InstanceID, realInstanceID)
+	}
+}
+
 // TestHandlerInitializeUnsupportedVersionReturnsSyncJSONRPCError —
 // codex r7-bot-r2 P2 closure: an `initialize` with an unsupported
 // protocolVersion returns a JSON-RPC error envelope synchronously
