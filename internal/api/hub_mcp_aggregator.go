@@ -1107,18 +1107,6 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	if proto == "" {
 		proto = protoVer
 	}
-	stalePorts := []int{daemonRef.Port}
-	seenPort := map[int]struct{}{daemonRef.Port: {}}
-	addStalePort := func(port int) {
-		if port == 0 {
-			return
-		}
-		if _, ok := seenPort[port]; ok {
-			return
-		}
-		seenPort[port] = struct{}{}
-		stalePorts = append(stalePorts, port)
-	}
 
 	s.mu.Lock()
 	if s.deleteStarted {
@@ -1132,7 +1120,6 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 		if !sameDaemonIdentity(cachedRef, daemonRef) {
 			continue
 		}
-		addStalePort(cachedRef.Port)
 		if cachedRef != daemonRef {
 			delete(s.InitSuccesses, cachedRef)
 		}
@@ -1145,36 +1132,17 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 		if !sameDaemonIdentity(cachedRef, daemonRef) {
 			continue
 		}
-		addStalePort(cachedRef.Port)
 		if cachedRef != daemonRef {
 			delete(s.DaemonProtoVer, cachedRef)
 		}
 	}
 	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
-	s.clearStalePortMarkers(stalePorts)
 	return proto, true
 }
 
 func sameDaemonIdentity(a, b canonicalDaemonRef) bool {
 	return a.Server == b.Server && a.Daemon == b.Daemon
-}
-
-func (s *hubSession) clearStalePortMarkers(ports []int) {
-	for _, port := range ports {
-		v, ok := s.staleDaemonPorts.Load(port)
-		if !ok {
-			continue
-		}
-		state := v.(*stalePortState)
-		if !state.mu.TryLock() {
-			// The proactive stale-port refresh path already owns this lock and
-			// will clear its consumed marker before dispatch resumes.
-			continue
-		}
-		state.stale = false
-		state.mu.Unlock()
-	}
 }
 
 func (s *hubSession) deleteUncachedReinitResult(daemonRef canonicalDaemonRef, sid, proto string) {

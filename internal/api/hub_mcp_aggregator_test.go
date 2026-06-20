@@ -852,7 +852,7 @@ func TestReinitDetachedCachesSessionWhenCallerCancels(t *testing.T) {
 	}
 }
 
-func TestReinitDetachedCacheClearsStaleStateForDaemonIdentity(t *testing.T) {
+func TestReinitDetachedCachePreservesStaleMarkersForProactiveConsumer(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
 
@@ -932,17 +932,109 @@ func TestReinitDetachedCacheClearsStaleStateForDaemonIdentity(t *testing.T) {
 		state.mu.Lock()
 		stale := state.stale
 		state.mu.Unlock()
-		if stale {
-			t.Fatalf("detached reinit left stale port marker set for old port %d", oldPort)
+		if !stale {
+			t.Fatalf("detached reinit cleared stale port marker for old port %d; only proactive dispatch may consume markers", oldPort)
 		}
 	}
 	if state, ok := sess.stalePortStateFor(freshRef.Port); ok {
 		state.mu.Lock()
 		stale := state.stale
 		state.mu.Unlock()
-		if stale {
-			t.Fatalf("detached reinit left stale port marker set for fresh port %d", freshRef.Port)
+		if !stale {
+			t.Fatalf("detached reinit cleared stale port marker for fresh port %d; only proactive dispatch may consume markers", freshRef.Port)
 		}
+	}
+}
+
+func TestReinitPreservesNewerSamePortStaleMarker(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "reactive-old-sid"
+	const freshSID = "reactive-fresh-sid"
+
+	d := newStubDaemon(t, freshSID)
+	reinitStarted := make(chan struct{})
+	releaseReinit := make(chan struct{})
+	var reinitStartedOnce sync.Once
+	d.onInit = func(w http.ResponseWriter, r *http.Request) {
+		if d.initCount.Load() >= 1 {
+			reinitStartedOnce.Do(func() { close(reinitStarted) })
+			select {
+			case <-releaseReinit:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		w.Header().Set("Mcp-Session-Id", freshSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	sess := sessionWithParticipants(d)
+	ref := sess.IntendedParticipants[0]
+	sess.SnapshotAtInit = &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {ref}},
+	}
+	sess.InitSuccesses[ref] = oldSID
+	sess.DaemonProtoVer[ref] = "2025-11-25"
+	if !sess.markStalePort(ref.Port) {
+		t.Fatalf("setup: daemon port %d was not tracked as stale", ref.Port)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan struct {
+		state daemonInitState
+		err   error
+	}, 1)
+	go func() {
+		state, err := sess.reinitializeDaemonBinding(ctx, ref)
+		done <- struct {
+			state daemonInitState
+			err   error
+		}{state: state, err: err}
+	}()
+
+	select {
+	case <-reinitStarted:
+	case <-ctx.Done():
+		close(releaseReinit)
+		t.Fatalf("timed out waiting for reinitializeDaemonBinding to start: %v", ctx.Err())
+	}
+	if !sess.markStalePort(ref.Port) {
+		close(releaseReinit)
+		t.Fatalf("concurrent stale mark for daemon port %d was not tracked", ref.Port)
+	}
+	close(releaseReinit)
+
+	var result struct {
+		state daemonInitState
+		err   error
+	}
+	select {
+	case result = <-done:
+	case <-ctx.Done():
+		t.Fatalf("reinitializeDaemonBinding did not finish: %v", ctx.Err())
+	}
+	if result.err != nil {
+		t.Fatalf("reinitializeDaemonBinding: %v", result.err)
+	}
+	if result.state.SessionID != freshSID {
+		t.Fatalf("reinitialized session id=%q want %q", result.state.SessionID, freshSID)
+	}
+
+	staleState, ok := sess.stalePortStateFor(ref.Port)
+	if !ok {
+		t.Fatalf("stale port state for port %d missing", ref.Port)
+	}
+	staleState.mu.Lock()
+	stale := staleState.stale
+	staleState.mu.Unlock()
+	if !stale {
+		t.Fatalf("newer same-port stale marker was cleared by restart-A reinit")
 	}
 }
 
