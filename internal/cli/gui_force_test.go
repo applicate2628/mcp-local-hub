@@ -34,7 +34,7 @@ func TestForce_HealthyIncumbent_BareFlagActivates(t *testing.T) {
 	srv := healthyIncumbentServer(t, os.Getpid())
 	defer srv.Close()
 	port := portFromHTTPTestURL(t, srv.URL)
-	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), port)), 0o600); err != nil {
+	if err := gui.WritePidport(pidport, os.Getpid(), port); err != nil {
 		t.Fatal(err)
 	}
 	// Pre-acquire the flock so AcquireSingleInstance returns busy and
@@ -772,7 +772,7 @@ func TestForce_KillRecoveryHealthyBetweenProbes(t *testing.T) {
 	defer srv.Close()
 	port := portFromHTTPTestURL(t, srv.URL)
 
-	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), port)), 0o600); err != nil {
+	if err := gui.WritePidport(pidport, os.Getpid(), port); err != nil {
 		t.Fatal(err)
 	}
 	// Backdate pidport mtime past probeStartupWindow (5s) so the

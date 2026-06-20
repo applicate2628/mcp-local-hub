@@ -559,7 +559,7 @@ func readStrictModeRecoverChoiceStdin() (string, error) {
 // the breadcrumb on success.
 func RunStrictModeRecover(deps StrictModeDeps) error {
 	// Read breadcrumb.
-	raw, err := api.ReadStateFileInodeAnchored(deps.BreadcrumbPath)
+	raw, err := api.ReadStateFileInodeAnchoredEnvStrictOnly(deps.BreadcrumbPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("strict-mode --recover: no breadcrumb at %s (nothing to reconcile)", deps.BreadcrumbPath)

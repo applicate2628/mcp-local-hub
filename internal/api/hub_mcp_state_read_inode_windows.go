@@ -198,6 +198,9 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
 			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable", path, wrErr)
 		}
+		if isSecretBearingStateFilePath(path) {
+			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing", path, err)
+		}
 		reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
 			"path":   path,

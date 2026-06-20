@@ -123,6 +123,9 @@ func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func
 		if requiresStrict() {
 			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, path, mode)
 		}
+		if isSecretBearingStateFilePath(path) {
+			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world on secret-bearing state file", ErrTooLoose, path, mode)
+		}
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
 			"path":      path,
 			"parent":    parentPath,

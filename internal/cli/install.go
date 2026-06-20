@@ -540,6 +540,15 @@ func readHubEndpointGateForReconcile() (bool, error) {
 	data, err := api.ReadStateFileInodeAnchored(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			parent := filepath.Dir(path)
+			if info, statErr := os.Lstat(parent); statErr != nil {
+				if errors.Is(statErr, os.ErrNotExist) {
+					return false, nil
+				}
+				return false, fmt.Errorf("settings parent %s unreadable: %w", parent, statErr)
+			} else if !info.IsDir() {
+				return false, fmt.Errorf("settings parent %s is not a directory", parent)
+			}
 			return false, nil
 		}
 		return false, fmt.Errorf("read settings %s: %w", path, err)

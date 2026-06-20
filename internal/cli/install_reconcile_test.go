@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -146,5 +148,25 @@ func TestReconcileHubMode_SupervisorIntentOnlyServerCountsInstalled(t *testing.T
 	}
 	if !strings.Contains(stdout.String(), "entry=time") {
 		t.Fatalf("supervisor-intent-only time install did not produce time restore ops; output=%q", stdout.String())
+	}
+}
+
+func TestReadHubEndpointGateForReconcileFailsClosedOnCorruptSettingsParent(t *testing.T) {
+	localAppData := t.TempDir()
+	t.Setenv("LOCALAPPDATA", localAppData)
+	settingsParent := filepath.Join(localAppData, "mcp-local-hub")
+	if err := os.WriteFile(settingsParent, []byte("not-a-directory"), 0o600); err != nil {
+		t.Fatalf("seed settings parent as file: %v", err)
+	}
+
+	_, err := readHubEndpointGateForReconcile()
+	if err == nil {
+		t.Fatal("readHubEndpointGateForReconcile must fail closed when settings parent is a file")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("corrupt settings parent must not be reported as genuine absence: %v", err)
+	}
+	if !strings.Contains(err.Error(), "settings") {
+		t.Fatalf("error should identify settings read, got %v", err)
 	}
 }

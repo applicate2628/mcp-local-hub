@@ -2,6 +2,7 @@ package api
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -13,8 +14,32 @@ func ReadStateFileInodeAnchored(path string) ([]byte, error) {
 	return readStateFileInodeAnchored(path)
 }
 
+// ReadStateFileInodeAnchoredEnvStrictOnly is the bootstrap variant for recovery
+// paths that must not consult persisted supervisor-intent strict_mode while
+// reading the state needed to repair that same persisted posture. It still
+// honors MCPHUB_REQUIRE_SINGLE_USER_HOME and keeps the inode/symlink checks.
+func ReadStateFileInodeAnchoredEnvStrictOnly(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredEnvStrictOnly(path)
+}
+
 func readStateFileInodeAnchoredEnvStrictOnly(path string) ([]byte, error) {
 	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHomeEnvOnly)
+}
+
+func isSecretBearingStateFilePath(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	switch base {
+	case hubMcpTokensFileLeaf,
+		hubMcpControlTokenFileLeaf,
+		"hub-mcp-control.tok",
+		"secrets.age",
+		".age-key":
+		return true
+	}
+	return strings.Contains(base, "token") ||
+		strings.Contains(base, "secret") ||
+		strings.Contains(base, "credential") ||
+		strings.Contains(base, "vault")
 }
 
 func operatorRequiresSingleUserHomeEnvOnly() bool {

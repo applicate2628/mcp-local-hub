@@ -277,6 +277,35 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *test
 	}
 }
 
+func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretState(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := hardenedTempDir(t)
+	daemonStateRootOverride = stateDir
+	resetStrictModeIntentCacheForTest()
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	dir := hardenedTempDir(t)
+	nonSecret := filepath.Join(dir, "supervisor-intent.json")
+	if err := os.WriteFile(nonSecret, []byte(`{"strict_mode":false}`), 0600); err != nil {
+		t.Fatalf("write non-secret target: %v", err)
+	}
+	applyFileDACLWithAuthUsersReadACE(t, nonSecret)
+	if _, err := readStateFileInodeAnchored(nonSecret); err != nil {
+		t.Fatalf("default mode must still relax read-broadened non-secret state file: %v", err)
+	}
+
+	secret := filepath.Join(dir, hubMcpTokensFileLeaf)
+	if err := os.WriteFile(secret, []byte(`{"tokens":{"claude-code":"`+strings.Repeat("a", 64)+`"}}`), 0600); err != nil {
+		t.Fatalf("write secret target: %v", err)
+	}
+	applyFileDACLWithAuthUsersReadACE(t, secret)
+	if _, err := readStateFileInodeAnchored(secret); err == nil {
+		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
+	} else if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Fatalf("secret read-broadened error = %v, want ErrDaclOutsideAllowlist", err)
+	}
+}
+
 func TestReadStateFileInodeAnchored_RejectsSymlinkTarget_DefaultAndStrict(t *testing.T) {
 	dir := hardenedTempDir(t)
 	real := filepath.Join(dir, "real.json")

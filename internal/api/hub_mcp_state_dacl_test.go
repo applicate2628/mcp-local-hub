@@ -1,9 +1,11 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -150,6 +152,37 @@ func TestReadStateFileInodeAnchored_TightParent_DefaultMode(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Errorf("content roundtrip: got %q, want %q", got, want)
+	}
+}
+
+func TestReadStateFileInodeAnchored_FileReadBroadenedDefaultModeRefusesSecretState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only mode probe; Windows DACL case lives in hub_mcp_state_dacl_windows_test.go")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod parent: %v", err)
+	}
+
+	nonSecret := filepath.Join(dir, supervisorIntentFileLeaf)
+	if err := os.WriteFile(nonSecret, []byte(`{"strict_mode":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readStateFileInodeAnchored(nonSecret); err != nil {
+		t.Fatalf("default mode must still relax read-broadened non-secret state file: %v", err)
+	} else if string(got) != `{"strict_mode":false}` {
+		t.Fatalf("non-secret payload = %q", got)
+	}
+
+	secret := filepath.Join(dir, hubMcpTokensFileLeaf)
+	if err := os.WriteFile(secret, []byte(`{"tokens":{"claude-code":"`+strings.Repeat("a", 64)+`"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readStateFileInodeAnchored(secret); err == nil {
+		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
+	} else if !errors.Is(err, ErrTooLoose) {
+		t.Fatalf("secret read-broadened error = %v, want ErrTooLoose", err)
 	}
 }
 

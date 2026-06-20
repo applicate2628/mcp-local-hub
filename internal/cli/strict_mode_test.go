@@ -16,6 +16,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -563,6 +564,68 @@ func TestStrictModeRecover_InProgressMarkerReconciles(t *testing.T) {
 	}
 	if _, err := os.Stat(tmp.BreadcrumbPath()); err == nil {
 		t.Error("in-progress breadcrumb not deleted after successful recover")
+	}
+}
+
+func TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode(t *testing.T) {
+	t.Setenv(api.RequireSingleUserHomeEnv, "")
+	stateDir := t.TempDir()
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(stateDir, 0o755); err != nil {
+			t.Fatalf("chmod state dir read-broadened: %v", err)
+		}
+	}
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	api.ResetStrictModeIntentCacheForTest()
+	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
+
+	tmp := &strictModeFixture{
+		t:              t,
+		stateDir:       stateDir,
+		intentPath:     filepath.Join(stateDir, "supervisor-intent.json"),
+		breadcrumbPath: filepath.Join(stateDir, "strict-mode-mutation-incomplete.json"),
+		backend:        &fakeAutostartBackend{},
+	}
+	initial := &api.SupervisorIntentFile{
+		Version:    1,
+		UpdatedAt:  "1970-01-01T00:00:00Z",
+		StrictMode: false,
+	}
+	if err := api.WriteSupervisorIntent(tmp.intentPath, initial); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+
+	bc := strictModeBreadcrumb{
+		Intended:          true,
+		ActualIntentState: false,
+		ActualShimState:   false,
+		TS:                "2026-06-20T10:00:00Z",
+		Phase:             strictModeBreadcrumbPhaseInProgress,
+	}
+	raw, _ := json.MarshalIndent(bc, "", "  ")
+	if err := api.WriteStateFileBytesAtomic(tmp.BreadcrumbPath(), raw); err != nil {
+		t.Fatalf("seed breadcrumb: %v", err)
+	}
+	tmp.SeedInitialStrict(true)
+	tmp.backend.installed = true
+	tmp.backend.currentStrict = false
+	api.ResetStrictModeIntentCacheForTest()
+
+	deps := tmp.Deps()
+	deps.PromptOperator = func() (string, error) { return "B", nil }
+	if err := RunStrictModeRecover(deps); err != nil {
+		t.Fatalf("recover must read breadcrumb even when persisted strict_mode=true and parent is read-broadened: %v", err)
+	}
+	api.ResetStrictModeIntentCacheForTest()
+	intent, err := api.ReadSupervisorIntent(tmp.IntentPath())
+	if err != nil {
+		t.Fatalf("read recovered intent: %v", err)
+	}
+	if intent.StrictMode {
+		t.Fatal("recover branch B did not roll intent back to strict_mode=false")
+	}
+	if tmp.backend.currentStrict {
+		t.Fatal("recover branch B unexpectedly left shim strict_mode=true")
 	}
 }
 
