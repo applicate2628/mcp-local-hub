@@ -136,7 +136,10 @@ func (v *Vault) save() error {
 	return writeVaultFileAtomic(v.vaultPath, buf.Bytes(), 0600)
 }
 
-var vaultAtomicRenameFile = os.Rename
+var (
+	vaultAtomicRenameFile    = os.Rename
+	vaultAtomicSyncParentDir = syncParentDir
+)
 
 func writeVaultFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
@@ -175,6 +178,9 @@ func writeVaultFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := vaultAtomicRenameFile(tempName, path); err != nil {
 		_ = os.Remove(tempName)
 		return fmt.Errorf("rename temp: %w", err)
+	}
+	if err := vaultAtomicSyncParentDir(dir); err != nil {
+		return fmt.Errorf("sync parent dir: %w", err)
 	}
 	return nil
 }

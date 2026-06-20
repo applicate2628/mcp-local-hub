@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/process"
 )
 
@@ -56,7 +57,7 @@ func acquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock,
 	if !ok {
 		return nil, ErrSingleInstanceBusy
 	}
-	if err := os.WriteFile(pidportPath, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
+	if err := api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port))); err != nil {
 		_ = fl.Unlock()
 		return nil, fmt.Errorf("write pidport: %w", err)
 	}
@@ -92,7 +93,7 @@ func (l *SingleInstanceLock) Release() {
 // failure or missing file. Second-instance callers use it to probe the
 // incumbent.
 func ReadPidport(path string) (pid, port int, err error) {
-	b, err := os.ReadFile(path)
+	b, err := api.ReadStateFileInodeAnchored(path)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -129,7 +130,7 @@ func AcquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock,
 // lock — the flock on *.lock gates ownership, the pidport file is
 // ownership metadata the lock holder freely updates.
 func RewritePidportPort(pidportPath string, port int) error {
-	return os.WriteFile(pidportPath, []byte(formatPidport(os.Getpid(), port)), 0o600)
+	return api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port)))
 }
 
 // WritePidport overwrites the pidport file with the supplied PID and
@@ -145,7 +146,7 @@ func RewritePidportPort(pidportPath string, port int) error {
 // != requestedPort and only updated the port field — leaving the
 // killed incumbent's PID stale in the pidport after a successful kill.
 func WritePidport(pidportPath string, pid, port int) error {
-	return os.WriteFile(pidportPath, []byte(formatPidport(pid, port)), 0o600)
+	return api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(pid, port)))
 }
 
 // VerdictClass enumerates the result of Probe / KillRecordedHolder.

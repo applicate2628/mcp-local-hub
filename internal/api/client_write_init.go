@@ -758,11 +758,16 @@ func readStrictModeFromIntentBestEffort() bool {
 		return true
 	}
 	path := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
-	// GATE-FREE read: deliberately os.ReadFile, NOT ReadSupervisorIntent. The
-	// latter runs the parent-dir WRITE-protection gate before reading, which
-	// on a broadened parent rejects and would force strict=TRUE on a host whose
-	// strict_mode is actually false — the pr301 r10 fleet-safety regression.
-	raw, err := os.ReadFile(path)
+	// Inode-anchored read with ENV-only strict policy: deliberately NOT
+	// ReadSupervisorIntent, and deliberately NOT the normal anchored reader's
+	// persisted-strict policy. ReadSupervisorIntent runs the parent-dir
+	// WRITE-protection gate before reading; the normal anchored reader asks
+	// OperatorRequiresSingleUserHome, which would recurse into this very
+	// persisted strict-mode resolution. This variant still rejects
+	// symlink/reparse swaps and preserves the pr301 r10 fleet-safety behavior:
+	// a broadened parent with strict_mode=false on disk relaxes unless the
+	// MCPHUB_REQUIRE_SINGLE_USER_HOME env var itself is set.
+	raw, err := readStateFileInodeAnchoredEnvStrictOnly(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// ABSENT intent → RELAX (canon-aligned; pr301 r9/r10). An absent

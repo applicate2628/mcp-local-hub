@@ -32,6 +32,10 @@ import (
 // Returns up to maxStateFileBytes (defined in hub_mcp_state.go)
 // of content.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
 	parentPath := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -59,7 +63,7 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		// refuses any parent broadening because the underlying mode
 		// diverges from the single-user invariant strict mode
 		// promises.
-		if operatorRequiresSingleUserHome() {
+		if requiresStrict() {
 			return nil, fmt.Errorf("%w: parent=%s mode=%04o grants group/world write; %s=1 enforces refusal", ErrTooLoose, parentPath, pmode&0o777, RequireSingleUserHomeEnv)
 		}
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
@@ -70,7 +74,7 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		})
 	}
 	if pmode&0o055 != 0 {
-		if operatorRequiresSingleUserHome() {
+		if requiresStrict() {
 			return nil, fmt.Errorf("%w: parent=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, parentPath, pmode&0o777)
 		}
 		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{

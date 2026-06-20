@@ -1,7 +1,6 @@
 package api
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,6 +13,13 @@ func tmpSettings(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "gui-preferences.yaml")
+}
+
+func seedSettingsFile(t *testing.T, path string, raw []byte) {
+	t.Helper()
+	if err := WriteStateFileBytesAtomic(path, raw); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSettings_DefaultsResolve(t *testing.T) {
@@ -74,13 +80,8 @@ func TestSettings_Set_PreservesUnknownKeys(t *testing.T) {
 	a := &API{}
 	path := tmpSettings(t)
 	// Seed a file with a known + an unknown key.
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
 	seeded := []byte("appearance.theme: dark\nfuture_unknown.key: hello\n")
-	if err := os.WriteFile(path, seeded, 0600); err != nil {
-		t.Fatal(err)
-	}
+	seedSettingsFile(t, path, seeded)
 	// Mutate a known key.
 	if err := a.SettingsSetIn(path, "appearance.theme", "light"); err != nil {
 		t.Fatal(err)
@@ -239,13 +240,8 @@ func TestSettings_MigratesLegacyKeys(t *testing.T) {
 	// happens transparently on first read and is persisted on next write.
 	a := &API{}
 	path := tmpSettings(t)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
 	seeded := []byte("theme: dark\nshell: bash\ndefault-home: /home/old\n")
-	if err := os.WriteFile(path, seeded, 0600); err != nil {
-		t.Fatal(err)
-	}
+	seedSettingsFile(t, path, seeded)
 	// SettingsListIn should expose the legacy values under canonical keys.
 	all, err := a.SettingsListIn(path)
 	if err != nil {
@@ -286,13 +282,8 @@ func TestSettings_MigratesLegacyKeys_CanonicalWins(t *testing.T) {
 	// practice but the migration must be deterministic.
 	a := &API{}
 	path := tmpSettings(t)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
 	seeded := []byte("theme: light\nappearance.theme: dark\n")
-	if err := os.WriteFile(path, seeded, 0600); err != nil {
-		t.Fatal(err)
-	}
+	seedSettingsFile(t, path, seeded)
 	all, err := a.SettingsListIn(path)
 	if err != nil {
 		t.Fatal(err)
@@ -309,13 +300,8 @@ func TestSettings_ListIn_FallsBackToDefaultOnInvalidPersistedValue(t *testing.T)
 	// fall back to the registry default silently.
 	a := &API{}
 	path := tmpSettings(t)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
 	seeded := []byte("appearance.theme: blue\nappearance.shell: sidebar\ngui_server.port: not-a-number\n")
-	if err := os.WriteFile(path, seeded, 0600); err != nil {
-		t.Fatal(err)
-	}
+	seedSettingsFile(t, path, seeded)
 	all, err := a.SettingsListIn(path)
 	if err != nil {
 		t.Fatal(err)
@@ -335,13 +321,8 @@ func TestSettings_ListIn_AcceptsValidPersistedValue(t *testing.T) {
 	// Sanity: the validator-on-read path must NOT regress valid values.
 	a := &API{}
 	path := tmpSettings(t)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
 	seeded := []byte("appearance.theme: dark\nappearance.shell: bash\ngui_server.port: 9300\n")
-	if err := os.WriteFile(path, seeded, 0600); err != nil {
-		t.Fatal(err)
-	}
+	seedSettingsFile(t, path, seeded)
 	all, err := a.SettingsListIn(path)
 	if err != nil {
 		t.Fatal(err)

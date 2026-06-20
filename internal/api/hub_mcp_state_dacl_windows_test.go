@@ -36,9 +36,19 @@ func TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Build a DACL: ALLOW current-user GENERIC_ALL, ALLOW Authenticated
-	// Users GENERIC_READ. The Authenticated Users ACE is the
-	// disallowed read-capable ACE — verifier MUST reject.
+	applyFileDACLWithAuthUsersReadACE(t, target)
+
+	err := VerifyHubMcpStateDACL(target)
+	if err == nil {
+		t.Fatalf("VerifyHubMcpStateDACL must reject Authenticated Users read ALLOW; got nil")
+	}
+	if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Errorf("expected ErrDaclOutsideAllowlist, got %v", err)
+	}
+}
+
+func applyFileDACLWithAuthUsersReadACE(t *testing.T, target string) {
+	t.Helper()
 	currentSID, err := currentUserSID()
 	if err != nil {
 		t.Fatalf("currentUserSID: %v", err)
@@ -58,14 +68,6 @@ func TestVerifyHubMcpStateDACLRejectsAuthenticatedUsersAllow(t *testing.T) {
 		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_READ),
 	}
 	applyProtectedDACLFromEntries(t, target, entries)
-
-	err = VerifyHubMcpStateDACL(target)
-	if err == nil {
-		t.Fatalf("VerifyHubMcpStateDACL must reject Authenticated Users read ALLOW; got nil")
-	}
-	if !errors.Is(err, ErrDaclOutsideAllowlist) {
-		t.Errorf("expected ErrDaclOutsideAllowlist, got %v", err)
-	}
 }
 
 // TestVerifyHubMcpStateDACLAcceptsAllowlistOnly synthesizes the
@@ -176,6 +178,92 @@ func TestVerifyHubMcpStateDACLAcceptsPermissiveParentDACL_DefaultRelax(t *testin
 
 	if err := VerifyHubMcpStateDACL(target); err != nil {
 		t.Errorf("default-relax: expected nil (file DACL is allowlist-clean); got %v", err)
+	}
+}
+
+func TestReadStateFileInodeAnchored_FileDACLDefaultRelaxesStrictRejects(t *testing.T) {
+	statePathsHelper(t)
+	stateDir := hardenedTempDir(t)
+	daemonStateRootOverride = stateDir
+	resetStrictModeIntentCacheForTest()
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "supervisor-intent.json")
+	want := []byte(`{"strict_mode":false}`)
+	if err := os.WriteFile(target, want, 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	applyFileDACLWithAuthUsersReadACE(t, target)
+
+	got, err := readStateFileInodeAnchored(target)
+	if err != nil {
+		t.Fatalf("default mode must read file with broadened DACL via inode-anchored handle: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("read payload = %q, want %q", got, want)
+	}
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	var found map[string]any
+	for _, ev := range events {
+		if ev["event"] == "hub-mcp-state-read-unhardened-file-fallback" {
+			found = ev
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no hub-mcp-state-read-unhardened-file-fallback event in last %d entries (got %d events)", 20, len(events))
+	}
+	if found["level"] != "warn" {
+		t.Errorf("event level = %v, want \"warn\"", found["level"])
+	}
+	if path, _ := found["path"].(string); path != target {
+		t.Errorf("event path = %v, want %q", found["path"], target)
+	}
+	if reason, _ := found["reason"].(string); !strings.Contains(reason, "default-relax-on-solo-host") {
+		t.Errorf("event reason = %v, want default-relax-on-solo-host", found["reason"])
+	}
+
+	t.Setenv(RequireSingleUserHomeEnv, "1")
+	if _, err := readStateFileInodeAnchored(target); err == nil {
+		t.Fatalf("strict mode must reject file with broadened DACL")
+	} else if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Fatalf("strict mode err = %v, want ErrDaclOutsideAllowlist", err)
+	}
+}
+
+func TestReadStateFileInodeAnchored_RejectsSymlinkTarget_DefaultAndStrict(t *testing.T) {
+	dir := hardenedTempDir(t)
+	real := filepath.Join(dir, "real.json")
+	if err := os.WriteFile(real, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		strict bool
+	}{
+		{name: "default", strict: false},
+		{name: "strict", strict: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := readStateFileInodeAnchoredWithStrictPolicy(link, func() bool { return tc.strict })
+			if err == nil {
+				t.Fatalf("readStateFileInodeAnchored must refuse symlink target in %s mode", tc.name)
+			}
+			if !errors.Is(err, ErrIrregularFile) {
+				t.Fatalf("err = %v, want ErrIrregularFile", err)
+			}
+		})
 	}
 }
 

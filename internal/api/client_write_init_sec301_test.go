@@ -79,6 +79,7 @@ func TestReadStrictModeFromIntent_PathUnresolvable_FailsClosed(t *testing.T) {
 	// Clear the override (statePathsHelper restores it) so the REAL resolver runs.
 	statePathsHelper(t)
 	daemonStateRootOverride = ""
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", "")
 
 	if runtime.GOOS == "windows" {
 		// Force the KnownFolder resolver and BOTH env fallbacks to fail.

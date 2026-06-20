@@ -537,7 +537,7 @@ func manifestHasInstallSignal(m *config.ServerManifest, scheduledTasks map[strin
 //   - File present and parseable with content: use the persisted value.
 func readHubEndpointGateForReconcile() (bool, error) {
 	path := api.SettingsPath()
-	data, err := os.ReadFile(path)
+	data, err := api.ReadStateFileInodeAnchored(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil

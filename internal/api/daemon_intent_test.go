@@ -931,6 +931,38 @@ func TestTryReadDaemonIntent_LockFreeMissingFile(t *testing.T) {
 	}
 }
 
+func TestReadDaemonIntentFile_RejectsSymlinkTarget(t *testing.T) {
+	dir := hardenedTempDir(t)
+	realPath := filepath.Join(dir, "real-daemon-intent.json")
+	linkPath := filepath.Join(dir, intentFileLeaf)
+	raw, err := json.Marshal(DaemonIntentFile{
+		Tasks: map[string]DaemonIntent{
+			`\mcp-local-hub-time-default`: {
+				Desired:   IntentDesiredStopped,
+				Reason:    IntentReasonUserStop,
+				UpdatedAt: time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal daemon intent: %v", err)
+	}
+	if err := os.WriteFile(realPath, raw, 0o600); err != nil {
+		t.Fatalf("seed real daemon intent: %v", err)
+	}
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+
+	res := ReadDaemonIntentFile(linkPath, time.Second)
+	if res.Err == nil {
+		t.Fatalf("ReadDaemonIntentFile followed symlink target; state=%s file=%+v", res.State, res.File)
+	}
+	if !errors.Is(res.Err, ErrIrregularFile) {
+		t.Fatalf("ReadDaemonIntentFile err = %v, want ErrIrregularFile", res.Err)
+	}
+}
+
 // TestTryReadDaemonIntent_LockFreeCorruptFile is the round 3 codex
 // finding Q2 boundary case: garbage bytes on disk, lock free, expect
 // State=corrupt with QuarantinePath set, a non-nil parse error, an

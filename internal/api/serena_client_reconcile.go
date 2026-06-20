@@ -35,7 +35,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -178,7 +177,7 @@ var readPidportFn = parseGUIPidportFile
 // a missing file or any parse failure — byte-identical semantics to
 // internal/gui.ReadPidport (single_instance.go:92-110).
 func parseGUIPidportFile(path string) (pid, port int, err error) {
-	b, err := os.ReadFile(path)
+	b, err := readStateFileInodeAnchored(path)
 	if err != nil {
 		return 0, 0, err
 	}

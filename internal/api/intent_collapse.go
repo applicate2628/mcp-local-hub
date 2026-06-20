@@ -600,7 +600,7 @@ func daemonIntentRecordMergedOrSuperseded(subBlock, legacy DaemonIntent) bool {
 // corrupt stop file must NOT silently merge to "no stops" and un-suppress a
 // stopped daemon.
 func readDaemonIntentForMerge(path string) (*DaemonIntentFile, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readStateFileInodeAnchored(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -700,9 +700,9 @@ func pruneOldPreCollapseBackups(stateDir string, keep int) {
 //     readSupervisorStopsForTray fail-OPEN swallow is replaced).
 //
 // The `timeout` parameter is retained for signature stability but is now
-// advisory: the supervisor-intent.json read is a small lock-free os.ReadFile
-// (no ~5 MB daemon-intent.json flock to bound), so there is no lock-acquisition
-// budget to honor.
+// advisory: the supervisor-intent.json read is a small lock-free
+// inode-anchored state read (no ~5 MB daemon-intent.json flock to bound), so
+// there is no lock-acquisition budget to honor.
 func (a *API) TryReadUnifiedStops(_ time.Duration) IntentReadResult {
 	supervisorIntent, readErr := readSupervisorStopsForTray()
 	if readErr != nil {
@@ -762,7 +762,7 @@ func readSupervisorStopsForTray() (*SupervisorIntentFile, error) {
 // host may have only one of the two intent files). All other errors fail the
 // backup so the merge does NOT proceed without a recovery point.
 func copyFileForBackup(src, dst string) error {
-	raw, err := os.ReadFile(src)
+	raw, err := readStateFileInodeAnchored(src)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil

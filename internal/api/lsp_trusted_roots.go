@@ -146,23 +146,13 @@ func canonicalizeTrustedRoot(p string) (string, error) {
 // JSON, but unknown top-level fields are tolerated (forward-compat with
 // a future writer that adds fields) by using the default decoder.
 //
-// The read applies the SAME parent-directory DACL gate the
-// supervisor-intent / supervisor-state readers apply
-// (checkStateDirParentWriteSafe), unless the operator has opted into the
-// relax lane via MCPHUB_ALLOW_UNHARDENED_STATE_READ=1. A parent that
-// grants write/delete to a non-allowlisted principal is a swap risk: an
-// attacker who can replace lsp-trusted-roots.json could inject an
-// attacker-chosen trusted root and re-open the very hole this file
-// closes. The gate refuses such a parent on read, symmetric with the
-// write side.
+// The read uses the same inode-anchored state reader as supervisor-intent /
+// supervisor-state. The parent gate still hard-fails under strict mode, but in
+// default-relax mode the content is read from the verified file handle rather
+// than a second path lookup, so a symlink/reparse or directory-entry swap cannot
+// inject attacker-chosen trusted roots.
 func LoadLSPTrustedRoots(path string) (*LSPTrustedRootsFile, error) {
-	if !operatorAllowsUnhardenedStateRead() {
-		if err := checkStateDirParentWriteSafe(filepath.Dir(path)); err != nil {
-			return nil, fmt.Errorf("read %s: insecure parent directory (set %s=1 to opt into the relax lane on operator-managed Windows hosts whose %%LOCALAPPDATA%% inherits AD-pushed groups, or tighten the parent's DACL): %w",
-				path, AllowUnhardenedStateReadEnv, err)
-		}
-	}
-	raw, err := os.ReadFile(path)
+	raw, err := readStateFileInodeAnchored(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return &LSPTrustedRootsFile{Version: lspTrustedRootsVersion}, nil

@@ -155,7 +155,7 @@ func (s *Server) supervisorRestartHandler(w http.ResponseWriter, r *http.Request
 // writes) anchors the kill-target identity gate's PID-recycle defense.
 func readSupervisorLockOwner(stateDir string) (int, string, error) {
 	path := filepath.Join(stateDir, "supervisor.lock.owner.json")
-	raw, err := os.ReadFile(path)
+	raw, err := api.ReadStateFileInodeAnchored(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, "", nil

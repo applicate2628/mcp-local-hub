@@ -321,7 +321,15 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// Read current intent so we know the original value to revert to
 	// on failure. Missing file is treated as default StrictMode=false.
 	var originalStrict bool
-	original, err := api.ReadSupervisorIntent(deps.IntentPath)
+	var original *api.SupervisorIntentFile
+	var err error
+	readErr := api.WithStrictModeMutationGateBypass(func() error {
+		original, err = api.ReadSupervisorIntent(deps.IntentPath)
+		return nil
+	})
+	if readErr != nil {
+		return fmt.Errorf("strict-mode: read intent bypass: %w", readErr)
+	}
 	if err == nil {
 		originalStrict = original.StrictMode
 	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") && !strings.Contains(err.Error(), "cannot find the file") {
@@ -551,7 +559,7 @@ func readStrictModeRecoverChoiceStdin() (string, error) {
 // the breadcrumb on success.
 func RunStrictModeRecover(deps StrictModeDeps) error {
 	// Read breadcrumb.
-	raw, err := os.ReadFile(deps.BreadcrumbPath)
+	raw, err := api.ReadStateFileInodeAnchored(deps.BreadcrumbPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("strict-mode --recover: no breadcrumb at %s (nothing to reconcile)", deps.BreadcrumbPath)

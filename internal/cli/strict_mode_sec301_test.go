@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,30 +10,13 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// seedStrictIntentRaw writes a strict_mode=true supervisor-intent.json directly
-// via os.WriteFile, bypassing the secure-write operator gate.
-//
-// Seeding is fixture setup, not the unit under test, so a raw write is the
-// correct gate-free path: it deterministically lands the strict=true intent on
-// the broadened parent without depending on the secure-write relax lane (or on
-// any intent-cache resolution order). The test then resets the cache so the
-// next resolution reads the now-PRESENT strict=true intent — exactly the
-// #301-3 deadlock condition these tests exercise (a stale present strict_mode
-// must not self-gate the disabling write).
-//
-// (Historical note: pr301 r5/r6/r7 made an ABSENT intent on a delete-capable
-// broadened dir resolve strict, so a gated seed write self-refused — the
-// chicken-and-egg the raw seed sidestepped. pr301 r9 reverted absent → relax,
-// so that self-refusal no longer occurs; the raw seed is retained as the
-// simplest deterministic fixture path.)
-func seedStrictIntentRaw(t *testing.T, intentPath string) {
+// seedStrictIntent writes a strict_mode=true supervisor-intent.json through the
+// hardened state-file writer so the fixture remains readable by the
+// inode-anchored reader.
+func seedStrictIntent(t *testing.T, intentPath string) {
 	t.Helper()
-	raw, err := json.Marshal(&api.SupervisorIntentFile{Version: 1, StrictMode: true})
-	if err != nil {
-		t.Fatalf("marshal seed intent: %v", err)
-	}
-	if err := os.WriteFile(intentPath, raw, 0o600); err != nil {
-		t.Fatalf("seed strict intent (raw): %v", err)
+	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{Version: 1, StrictMode: true}); err != nil {
+		t.Fatalf("seed strict intent: %v", err)
 	}
 }
 
@@ -97,10 +79,8 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 	t.Cleanup(api.ResetStrictModeMutationGateBypassForTest)
 
 	intentPath := filepath.Join(dir, "supervisor-intent.json")
-	// Seed intent strict_mode=true (the to-be-disabled state) via a gate-free raw
-	// write — a gated WriteSupervisorIntent would now self-refuse on this
-	// broadened parent (pr301 r5 Finding 1; see seedStrictIntentRaw).
-	seedStrictIntentRaw(t, intentPath)
+	// Seed intent strict_mode=true (the to-be-disabled state).
+	seedStrictIntent(t, intentPath)
 	// Force the gate cache to resolve strict=true from the seeded file, so the
 	// (un-bypassed) gate WOULD refuse a write — this is the deadlock condition.
 	api.ResetStrictModeIntentCacheForTest()
@@ -123,6 +103,7 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 	}
 
 	// The intent on disk must now be strict_mode=false.
+	api.ResetStrictModeIntentCacheForTest()
 	got, err := api.ReadSupervisorIntent(intentPath)
 	if err != nil {
 		t.Fatalf("read intent after disable: %v", err)
@@ -138,11 +119,11 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 	}
 }
 
-// TestStrictModeDisable_BroadenedParent_NonMutationWriteStillRefused is the
-// NEGATIVE CONTROL: with the SAME broadened parent and the SAME strict intent
-// cache, a NON-mutation secure state-file write is STILL refused. This proves
-// the #301-3 bypass is scoped to the strict-mode mutation's own writes, not a
-// process-wide relaxation that would re-open the SEC-F2 hole.
+// TestStrictModeDisable_BroadenedParent_NonMutationWriteDefaultRelaxes is the
+// default-relax control: with the same broadened parent and persisted strict
+// intent cache, a non-mutation secure state-file write still proceeds unless
+// MCPHUB_REQUIRE_SINGLE_USER_HOME=1 is set. Persisted strict intent alone no
+// longer hard-fails the parent gate for writes.
 //
 // SELF-HEAL HAZARD (pr301 r3 Finding 1): the negative-control write target's
 // PARENT must be a directory that DaemonStateDir()'s ensureStateRoot chmod
@@ -159,7 +140,7 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 // (On Windows ensureStateRoot is MkdirAll-only — it never touches DACLs — so
 // the root would survive too, but the child structure keeps both platforms on
 // one code path.)
-func TestStrictModeDisable_BroadenedParent_NonMutationWriteStillRefused(t *testing.T) {
+func TestStrictModeDisable_BroadenedParent_NonMutationWriteDefaultRelaxes(t *testing.T) {
 	dir := broadenedParentForGate(t)
 	t.Setenv(api.AllowUnhardenedStateReadEnv, "1")
 	t.Setenv(api.RequireSingleUserHomeEnv, "")
@@ -168,9 +149,7 @@ func TestStrictModeDisable_BroadenedParent_NonMutationWriteStillRefused(t *testi
 	t.Cleanup(api.ResetStrictModeMutationGateBypassForTest)
 
 	intentPath := filepath.Join(dir, "supervisor-intent.json")
-	// Gate-free raw seed (pr301 r5 Finding 1; see seedStrictIntentRaw): a gated
-	// write would self-refuse on this broadened parent.
-	seedStrictIntentRaw(t, intentPath)
+	seedStrictIntent(t, intentPath)
 	api.ResetStrictModeIntentCacheForTest()
 	if !api.OperatorRequiresSingleUserHome() {
 		t.Fatal("precondition: seeded intent strict_mode=true must make the gate strict; got relaxed")
@@ -209,17 +188,14 @@ func TestStrictModeDisable_BroadenedParent_NonMutationWriteStillRefused(t *testi
 		}
 	}
 
-	// A NON-mutation state-file write INSIDE the broadened CHILD parent, with
-	// NO bypass window open, must be refused by the strict (intent-derived)
-	// gate. The child parent's broadened bits/ACE are what the gate rejects.
+	// A non-mutation state-file write inside the broadened child parent, with no
+	// bypass window open, now proceeds because the write fallback hard-fails only
+	// on MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
 	unrelated := filepath.Join(childParent, "unrelated-state.json")
-	err := api.WriteStateFileAtomic(unrelated, map[string]any{"not": "a strict-mode mutation"})
-	if !errors.Is(err, api.ErrSecureWriteParentInsecure) {
-		t.Fatalf("negative control: a non-mutation secure write on a broadened parent with intent "+
-			"strict_mode=true MUST be refused with ErrSecureWriteParentInsecure (the bypass must NOT "+
-			"leak beyond the strict-mode mutation writes); got err=%v", err)
+	if err := api.WriteStateFileAtomic(unrelated, map[string]any{"not": "a strict-mode mutation"}); err != nil {
+		t.Fatalf("default-relax non-mutation write on broadened parent must proceed; got %v", err)
 	}
-	if _, statErr := os.Stat(unrelated); !os.IsNotExist(statErr) {
-		t.Errorf("refused non-mutation write must not leave a file; stat err=%v", statErr)
+	if _, statErr := os.Stat(unrelated); statErr != nil {
+		t.Errorf("default-relax write did not leave the target file: %v", statErr)
 	}
 }

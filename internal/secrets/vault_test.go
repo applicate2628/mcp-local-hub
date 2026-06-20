@@ -108,6 +108,36 @@ func TestVaultSaveAtomicRenameFailurePreservesExistingVault(t *testing.T) {
 	}
 }
 
+func TestVaultSaveAtomicParentSyncFailureIsReturned(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+	if err := InitVault(keyPath, vaultPath); err != nil {
+		t.Fatalf("InitVault: %v", err)
+	}
+	v, err := OpenVault(keyPath, vaultPath)
+	if err != nil {
+		t.Fatalf("OpenVault: %v", err)
+	}
+
+	sentinel := errors.New("synthetic parent sync failure")
+	previousSync := vaultAtomicSyncParentDir
+	var syncedDir string
+	vaultAtomicSyncParentDir = func(dir string) error {
+		syncedDir = dir
+		return sentinel
+	}
+	t.Cleanup(func() { vaultAtomicSyncParentDir = previousSync })
+
+	err = v.Set("API_KEY", "new-value")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Set err = %v, want synthetic parent sync failure", err)
+	}
+	if syncedDir != dir {
+		t.Fatalf("synced parent dir = %q, want %q", syncedDir, dir)
+	}
+}
+
 func TestInitVaultIdentityWriteUsesAtomicSiblingTemp(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := filepath.Join(dir, ".age-key")
@@ -149,6 +179,29 @@ func TestInitVaultIdentityWriteUsesAtomicSiblingTemp(t *testing.T) {
 	}
 	if _, statErr := os.Stat(identityTemp); !os.IsNotExist(statErr) {
 		t.Fatalf("identity temp %q was not cleaned up after failed rename: %v", identityTemp, statErr)
+	}
+}
+
+func TestInitVaultIdentityWriteParentSyncFailureIsReturned(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, ".age-key")
+	vaultPath := filepath.Join(dir, "secrets.age")
+
+	sentinel := errors.New("synthetic identity parent sync failure")
+	previousSync := vaultAtomicSyncParentDir
+	var syncedDir string
+	vaultAtomicSyncParentDir = func(dir string) error {
+		syncedDir = dir
+		return sentinel
+	}
+	t.Cleanup(func() { vaultAtomicSyncParentDir = previousSync })
+
+	err := InitVault(keyPath, vaultPath)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("InitVault err = %v, want synthetic parent sync failure", err)
+	}
+	if syncedDir != dir {
+		t.Fatalf("synced parent dir = %q, want %q", syncedDir, dir)
 	}
 }
 

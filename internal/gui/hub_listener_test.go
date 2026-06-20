@@ -61,7 +61,7 @@ func writeGate(t *testing.T, path string, on bool) {
 		v = "true"
 	}
 	content := fmt.Sprintf("gui_server.hub_endpoint_enabled: %q\n", v)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := api.WriteStateFileBytesAtomic(path, []byte(content)); err != nil {
 		t.Fatalf("write gui-preferences.yaml: %v", err)
 	}
 }
@@ -174,11 +174,26 @@ func TestReadHubEndpointGateFromSettings_AbsentFileReturnsFalse(t *testing.T) {
 // malformed YAML MUST evaluate the gate as false (fail-closed).
 func TestReadHubEndpointGateFromSettings_CorruptYAMLReturnsFalse(t *testing.T) {
 	settingsPath := setupGateOverrides(t)
-	if err := os.WriteFile(settingsPath, []byte("{ not valid: yaml: ["), 0o600); err != nil {
+	if err := api.WriteStateFileBytesAtomic(settingsPath, []byte("{ not valid: yaml: [")); err != nil {
 		t.Fatalf("write corrupt yaml: %v", err)
 	}
 	if readHubEndpointGateFromSettings() {
 		t.Errorf("gate evaluated as true on corrupt YAML")
+	}
+}
+
+func TestReadHubEndpointGateFromSettings_InodeAnchorRejectsSymlink(t *testing.T) {
+	settingsPath := setupGateOverrides(t)
+	target := filepath.Join(filepath.Dir(settingsPath), "target-gui-preferences.yaml")
+	if err := os.WriteFile(target, []byte(`gui_server.hub_endpoint_enabled: "true"`+"\n"), 0o600); err != nil {
+		t.Fatalf("write target settings: %v", err)
+	}
+	if err := os.Symlink(target, settingsPath); err != nil {
+		t.Skipf("symlink unsupported in this environment: %v", err)
+	}
+
+	if readHubEndpointGateFromSettings() {
+		t.Fatalf("gate followed a symlinked true settings file; want fail-closed false")
 	}
 }
 
@@ -202,7 +217,7 @@ func TestReadHubEndpointGateFromSettings_OnlyTrueIsTrue(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if err := os.WriteFile(settingsPath, []byte(c.raw+"\n"), 0o600); err != nil {
+			if err := api.WriteStateFileBytesAtomic(settingsPath, []byte(c.raw+"\n")); err != nil {
 				t.Fatalf("write: %v", err)
 			}
 			got := readHubEndpointGateFromSettings()

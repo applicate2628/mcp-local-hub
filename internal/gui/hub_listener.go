@@ -101,7 +101,7 @@ func (c *HubListenerComponents) Alive() bool {
 // corrupt settings file MUST NOT silently flip the gate on.
 func readHubEndpointGateFromSettings() bool {
 	path := api.SettingsPath()
-	data, err := os.ReadFile(path)
+	data, err := api.ReadStateFileInodeAnchored(path)
 	if err != nil {
 		return false
 	}

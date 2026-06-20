@@ -46,9 +46,16 @@ package api
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"golang.org/x/sys/windows"
+)
+
+const (
+	statusNoSuchFile        windows.NTStatus = 0xC000000F
+	statusObjectNameMissing windows.NTStatus = 0xC0000034
+	statusObjectPathMissing windows.NTStatus = 0xC000003A
 )
 
 // readStateFileInodeAnchoredWindows opens parent + file under the
@@ -73,10 +80,17 @@ import (
 //     swap window the old verifyHubMcpStateDACLImpl rejected on is
 //     closed by the inode-anchored read in this function — the
 //     attacker can replace the directory entry but not the inode
-//     our handle points to). A separate warn event distinguishes
-//     write-broadening proceed from read-only-broadening proceed so
-//     operators can audit the more-permissive case.
+//     our handle points to). File-DACL broadening also warns and
+//     proceeds in default-relax mode so inherited solo-host principals
+//     do not make read-side probes fail closed. Strict mode keeps both
+//     DACL gates hard. Separate warn events distinguish parent vs file
+//     broadening and write-broadening vs read-only-broadening so
+//     operators can audit the more-permissive cases.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
+	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
+}
+
+func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -94,6 +108,9 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		0,
 	)
 	if err != nil {
+		if windowsAnchoredReadErrIsNotExist(err) {
+			return nil, &os.PathError{Op: "open", Path: parentDir, Err: os.ErrNotExist}
+		}
 		return nil, fmt.Errorf("open parent %s: %w", parentDir, err)
 	}
 	defer windows.CloseHandle(parentHandle)
@@ -103,7 +120,7 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 	// read-only and write/DAC-edit broadening because the read
 	// below is inode-anchored.
 	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
-		if operatorRequiresSingleUserHome() {
+		if requiresStrict() {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				parentDir, err, RequireSingleUserHomeEnv)
 		}
@@ -136,6 +153,9 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		windows.FILE_READ_DATA|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
 	)
 	if err != nil {
+		if windowsAnchoredReadErrIsNotExist(err) {
+			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+		}
 		// FILE_NON_DIRECTORY_FILE inside ntOpenRelative makes NT
 		// fail the open with STATUS_FILE_IS_A_DIRECTORY (0xC00000BA)
 		// when the target is a directory. Map that to our portable
@@ -162,9 +182,29 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		return nil, ErrIrregularFile
 	}
 
-	// File-DACL gate (same allowlist as the old verify).
+	// File-DACL gate. Strict mode preserves the single-user DACL
+	// invariant. Default-relax mirrors the write side: inherited
+	// non-allowlisted principals on normal temp/state files warn but
+	// do not block the handle-bound read. Wrong-owner remains hard.
 	if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
-		return nil, err
+		if requiresStrict() {
+			return nil, fmt.Errorf("file %s not single-user safe: %w; %s=1 is set, so the strict file-DACL gate is enforced (unset that env var, or tighten the file's DACL to remove the offending principal, to proceed)",
+				path, err, RequireSingleUserHomeEnv)
+		}
+		if errors.Is(err, ErrWrongOwner) {
+			return nil, err
+		}
+		reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
+		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
+			reason = "default-relax-on-solo-host (file grants WRITE/DAC-edit access to non-allowlisted SID; continuing because default read-side posture is advisory unless strict mode is enabled)"
+		}
+		_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
+			"path":   path,
+			"parent": parentDir,
+			"reason": reason,
+			"err":    err.Error(),
+			"note":   "ReadFile is handle-bound; symlink/reparse refusal and inode anchoring remain enforced",
+		})
 	}
 
 	// Read the content via the verified handle. windows.ReadFile
@@ -205,4 +245,19 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 		buf = []byte{}
 	}
 	return buf, nil
+}
+
+func windowsAnchoredReadErrIsNotExist(err error) bool {
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) ||
+		errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		return true
+	}
+	var status windows.NTStatus
+	if errors.As(err, &status) {
+		switch status {
+		case statusNoSuchFile, statusObjectNameMissing, statusObjectPathMissing:
+			return true
+		}
+	}
+	return false
 }
