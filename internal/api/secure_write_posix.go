@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -146,17 +147,90 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 
 	// 10. Re-open destination via SAME dirFd to re-verify. Path-based
 	// re-open here would be TOCTOU; the dirFd anchor closes the window.
-	verifyFd, err := unix.Openat(dirFd, base, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	//
+	// After step 8's atomic renameat a COMPLETE owner-only file is published
+	// at `base`. Re-open can fail transiently (signal, ETXTBSY, temporary
+	// access hiccup), so do not erase the published file unless we actually
+	// re-open it and prove the owner/mode is wrong. A definitive verify
+	// failure below still uses the dirFd-relative cleanup path.
+	verifyFd, err := openPostRenameVerifyFdPosix(dirFd, base)
 	if err != nil {
 		return fmt.Errorf("secure write: re-open %s: %w", base, err)
 	}
 	defer unix.Close(verifyFd)
 
+	// Test-only seam (secure_write_client_config.go): force a post-rename
+	// verify failure so the "no file on error" cleanup path is
+	// exercisable without engineering a real mode/owner mismatch on the
+	// persisted inode. nil in production → the real verify below runs.
+	if postRenameVerifyFailHook != nil {
+		if herr := postRenameVerifyFailHook(); herr != nil {
+			return postRenameFailurePosix(dirFd, base,
+				fmt.Errorf("secure write: post-rename verify %s: %w", base, herr))
+		}
+	}
+
 	// 11. Re-verify mode + ownership on the persisted file.
 	if err := verifyPosixFileFromFd(verifyFd); err != nil {
-		return fmt.Errorf("secure write: post-rename verify %s: %w", base, err)
+		return postRenameFailurePosix(dirFd, base,
+			fmt.Errorf("secure write: post-rename verify %s: %w", base, err))
 	}
 	return nil
+}
+
+func openPostRenameVerifyFdPosix(dirFd int, base string) (int, error) {
+	var lastErr error
+	for attempt := 1; attempt <= postRenameOpenMaxAttempts; attempt++ {
+		if postRenameOpenFailHook != nil {
+			if herr := postRenameOpenFailHook(); herr != nil {
+				lastErr = herr
+				if !isRetryablePostRenameOpenErrPosix(herr) || attempt == postRenameOpenMaxAttempts {
+					return -1, postRenameOpenErrAfterAttempts(attempt, herr)
+				}
+				time.Sleep(postRenameOpenRetryDelay)
+				continue
+			}
+		}
+		fd, err := unix.Openat(dirFd, base, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err == nil {
+			return fd, nil
+		}
+		lastErr = err
+		if !isRetryablePostRenameOpenErrPosix(err) || attempt == postRenameOpenMaxAttempts {
+			return -1, postRenameOpenErrAfterAttempts(attempt, err)
+		}
+		time.Sleep(postRenameOpenRetryDelay)
+	}
+	return -1, lastErr
+}
+
+func postRenameOpenErrAfterAttempts(attempts int, err error) error {
+	if attempts <= 1 {
+		return err
+	}
+	return fmt.Errorf("still failing after %d attempts: %w", attempts, err)
+}
+
+func isRetryablePostRenameOpenErrPosix(err error) bool {
+	return errors.Is(err, unix.EINTR) ||
+		errors.Is(err, unix.ETXTBSY) ||
+		errors.Is(err, unix.EBUSY) ||
+		errors.Is(err, unix.EAGAIN) ||
+		errors.Is(err, unix.EACCES)
+}
+
+// postRenameFailurePosix is the "no file on error" cleanup for a
+// definitive post-rename verify failure (step 11). It best-effort UNLINKs
+// the just-published `base` via a dirFd-relative unlinkat (anchored to the
+// same dirFd the rename used — not a path re-walk that could race a swapped
+// symlink). ENOENT (already gone) is success. If the unlink fails the
+// published file genuinely REMAINS, so that fact is folded into the returned
+// error rather than hidden. origErr is always preserved as the primary cause.
+func postRenameFailurePosix(dirFd int, base string, origErr error) error {
+	if derr := unix.Unlinkat(dirFd, base, 0); derr != nil && !errors.Is(derr, unix.ENOENT) {
+		return fmt.Errorf("%w; AND the published file could not be removed (it may remain at the destination): %v", origErr, derr)
+	}
+	return origErr
 }
 
 // writeAllUnix retries unix.Write until every byte in p is committed

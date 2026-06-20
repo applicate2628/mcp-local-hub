@@ -294,4 +294,5 @@ func resetResolverForTest(t *testing.T) {
 	t.Helper()
 	resolverSnapshot.Store(nil)
 	resolverGen.Store(0)
+	storeResolverGroupActiveSetStatus(resolverGroupActiveSetCold)
 }
