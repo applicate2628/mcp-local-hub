@@ -244,7 +244,7 @@ func initializeDaemonSession(ctx context.Context, ref canonicalDaemonRef, protoV
 		return sid, negotiated, nil
 	}
 
-	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
 	_ = bestEffortDeleteDaemonSession(cleanupCtx, ref, sid, negotiated)
 	cleanupCancel()
 	return "", "", fmt.Errorf("notifications/initialized: %w", notifyErr)
@@ -312,12 +312,38 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 				}
 			}
 			successes = filtered
-			allowEmptySuccess = len(successes) == 0
 		}
+		initFailures = filterInitFailuresByLiveBindings(initFailures, current, sess.ScopeKey, sess.IntendedParticipants)
+		allowEmptySuccess = originalCount > 0 && len(successes) == 0 && len(initFailures) == 0
 	}
 
 	results := fanOutToolsList(ctx, successes)
 	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID, allowEmptySuccess)
+}
+
+func filterInitFailuresByLiveBindings(failures []DaemonFailure, current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef) []DaemonFailure {
+	if len(failures) == 0 {
+		return failures
+	}
+	filtered := make([]DaemonFailure, 0, len(failures))
+	for _, f := range failures {
+		if initFailureDaemonStillBound(current, scopeKey, intended, f) {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
+}
+
+func initFailureDaemonStillBound(current *ResolverSnapshot, scopeKey string, intended []canonicalDaemonRef, failure DaemonFailure) bool {
+	for _, ref := range intended {
+		if ref.Server != failure.Server || ref.Daemon != failure.Daemon {
+			continue
+		}
+		if daemonStillBound(current, scopeKey, canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}) {
+			return true
+		}
+	}
+	return false
 }
 
 // daemonInitState bundles a daemon's per-daemon Mcp-Session-Id and

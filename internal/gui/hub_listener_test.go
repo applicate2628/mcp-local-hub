@@ -116,8 +116,8 @@ func TestHubMcpHTTPServerHasSlowClientTimeouts(t *testing.T) {
 	if srv.ReadTimeout <= 0 {
 		t.Fatalf("ReadTimeout must bound slow request bodies")
 	}
-	if srv.WriteTimeout < api.PerCallWallClockCap+10*time.Second {
-		t.Fatalf("WriteTimeout=%v want at least PerCallWallClockCap+10s", srv.WriteTimeout)
+	if srv.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout=%v want 0 so large fan-out compute is not capped by server write timeout", srv.WriteTimeout)
 	}
 	if srv.IdleTimeout != 120*time.Second {
 		t.Fatalf("IdleTimeout=%v want 120s", srv.IdleTimeout)

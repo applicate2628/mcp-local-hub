@@ -621,6 +621,130 @@ func TestAggregateToolsListFiltersRemovedLiveBinding(t *testing.T) {
 	}
 }
 
+func TestAggregateToolsListRemovedSuccessWithRetainedFailureReturnsAllFailed(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	d1 := newStubDaemon(t, "d1-sid")
+	d2 := newStubDaemon(t, "d2-sid")
+	d2.onInit = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	sess := sessionWithParticipants(d1, d2)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 1 {
+		t.Fatalf("InitSuccesses=%d want 1: %+v", len(sess.InitSuccesses), sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {sess.IntendedParticipants[1]},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	code, msg := decodeRPCError(t, body)
+	if code != -32000 {
+		t.Fatalf("code=%d want -32000 all-failed after live filter removed only success; msg=%q body=%s", code, msg, string(body))
+	}
+	failures := decodeRPCPartialFailures(t, body)
+	if len(failures) != 1 || failures[0].Server != "srv2" {
+		t.Fatalf("partialFailures=%+v want only retained failed daemon srv2", failures)
+	}
+	if got := d1.listCount.Load(); got != 0 {
+		t.Fatalf("removed successful daemon received tools/list; listCount=%d", got)
+	}
+}
+
+func TestAggregateToolsListLiveFilterDropsRemovedRoutesAndInitFailures(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	d1 := newStubDaemon(t, "d1-sid")
+	d2 := newStubDaemon(t, "d2-sid")
+	d3 := newStubDaemon(t, "d3-sid")
+	d2.onInit = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	sess := sessionWithParticipants(d1, d2, d3)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 2 {
+		t.Fatalf("InitSuccesses=%d want 2: %+v", len(sess.InitSuccesses), sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {sess.IntendedParticipants[2]},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	names := decodeToolsListNames(t, body)
+	for _, name := range names {
+		if strings.HasPrefix(name, "srv1__") || strings.HasPrefix(name, "srv2__") {
+			t.Fatalf("removed daemon tool %q leaked into tools/list; names=%v body=%s", name, names, string(body))
+		}
+	}
+	if got := d1.listCount.Load(); got != 0 {
+		t.Fatalf("removed successful daemon received tools/list; listCount=%d", got)
+	}
+	if got := d3.listCount.Load(); got != 1 {
+		t.Fatalf("retained successful daemon listCount=%d want 1", got)
+	}
+	failures := decodeToolsListPartialFailures(t, body)
+	if len(failures) != 0 {
+		t.Fatalf("removed init failure leaked into partialFailures: %+v", failures)
+	}
+	rm := sess.RouteMap.Load()
+	if rm == nil {
+		t.Fatalf("RouteMap not published after retained daemon tools/list")
+	}
+	for key := range *rm {
+		if strings.HasPrefix(key, "srv1__") || strings.HasPrefix(key, "srv2__") {
+			t.Fatalf("RouteMap retained removed daemon route %q in %+v", key, *rm)
+		}
+	}
+	if _, ok := (*rm)["srv3__read"]; !ok {
+		t.Fatalf("RouteMap missing retained daemon route srv3__read: %+v", *rm)
+	}
+}
+
 func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	sess := sessionWithParticipants(d1)
@@ -1053,6 +1177,39 @@ func TestAggregateInitializeDeletesDaemonSessionWhenInitializedNotificationFails
 	}
 	if deleteProto != "2025-11-25" {
 		t.Fatalf("daemon DELETE MCP-Protocol-Version=%q want %q", deleteProto, "2025-11-25")
+	}
+}
+
+func TestAggregateInitializeCleanupSurvivesCanceledClientContext(t *testing.T) {
+	const daemonSID = "d1-sid"
+	d1 := newStubDaemon(t, daemonSID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		cancel()
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	deleteSeen := make(chan struct{}, 1)
+	d1.onDelete = func(w http.ResponseWriter, r *http.Request) {
+		deleteSeen <- struct{}{}
+		w.WriteHeader(http.StatusAccepted)
+	}
+
+	sess := sessionWithParticipants(d1)
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Fatalf("notification-failed daemon must not be retained in InitSuccesses: %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	select {
+	case <-deleteSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("daemon DELETE was not attempted after client context cancellation")
 	}
 }
 
@@ -2141,6 +2298,26 @@ func decodeRPCError(t *testing.T, body []byte) (int, string) {
 	return env.Error.Code, env.Error.Message
 }
 
+func decodeRPCPartialFailures(t *testing.T, body []byte) []DaemonFailure {
+	t.Helper()
+	var env struct {
+		Error *struct {
+			Data struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse error envelope: %v body=%s", err, string(body))
+	}
+	if env.Error == nil {
+		t.Fatalf("expected JSON-RPC error envelope, got: %s", string(body))
+	}
+	return env.Error.Data.Mcphub.PartialFailures
+}
+
 func decodeToolsListNames(t *testing.T, body []byte) []string {
 	t.Helper()
 	var env struct {
@@ -2168,6 +2345,33 @@ func decodeToolsListNames(t *testing.T, body []byte) []string {
 		names = append(names, tool.Name)
 	}
 	return names
+}
+
+func decodeToolsListPartialFailures(t *testing.T, body []byte) []DaemonFailure {
+	t.Helper()
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result *struct {
+			Meta struct {
+				Mcphub struct {
+					PartialFailures []DaemonFailure `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse tools/list envelope: %v body=%s", err, string(body))
+	}
+	if env.Error != nil {
+		t.Fatalf("expected tools/list result envelope, got error code=%d message=%q body=%s", env.Error.Code, env.Error.Message, string(body))
+	}
+	if env.Result == nil {
+		t.Fatalf("expected tools/list result, got body=%s", string(body))
+	}
+	return env.Result.Meta.Mcphub.PartialFailures
 }
 
 // TestAggregateToolsCall_TransportFailureReturnsMinus32000 pins CURRENT behavior

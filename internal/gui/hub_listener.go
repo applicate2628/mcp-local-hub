@@ -59,7 +59,6 @@ import (
 const (
 	hubMcpReadHeaderTimeout = 10 * time.Second
 	hubMcpReadTimeout       = 15 * time.Second
-	hubMcpWriteTimeout      = api.PerCallWallClockCap + 30*time.Second
 	hubMcpIdleTimeout       = 120 * time.Second
 )
 
@@ -388,7 +387,6 @@ func newHubMcpHTTPServer(handler http.Handler) *http.Server {
 		Handler:           handler,
 		ReadHeaderTimeout: hubMcpReadHeaderTimeout,
 		ReadTimeout:       hubMcpReadTimeout,
-		WriteTimeout:      hubMcpWriteTimeout,
 		IdleTimeout:       hubMcpIdleTimeout,
 	}
 }

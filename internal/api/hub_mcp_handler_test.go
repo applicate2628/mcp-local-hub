@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeToken is a 64-lower-hex token used by tests that need a
@@ -34,6 +35,37 @@ const realToken = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef0
 // tests that exercise a mismatch send fakeInstanceID.
 const realInstanceID = "1111111122222222333333334444444455555555666666667777777788888888"
 const fakeInstanceID = "9999999999999999999999999999999999999999999999999999999999999999"
+
+type deadlineRecorder struct {
+	header              http.Header
+	status              int
+	body                bytes.Buffer
+	deadline            time.Time
+	writeBeforeDeadline bool
+}
+
+func (r *deadlineRecorder) Header() http.Header {
+	if r.header == nil {
+		r.header = http.Header{}
+	}
+	return r.header
+}
+
+func (r *deadlineRecorder) WriteHeader(statusCode int) {
+	r.status = statusCode
+}
+
+func (r *deadlineRecorder) Write(p []byte) (int, error) {
+	if r.deadline.IsZero() {
+		r.writeBeforeDeadline = true
+	}
+	return r.body.Write(p)
+}
+
+func (r *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	r.deadline = deadline
+	return nil
+}
 
 // publishTestTokenTable swaps the live token table to a fresh map
 // with one entry for "claude-code" and "codex-cli". Callers MUST
@@ -80,6 +112,33 @@ func authedRequest(t *testing.T, method, path string, body []byte) *http.Request
 	req.Header.Set("X-Mcphub-Hub-Token", realToken)
 	req.Header.Set("X-Mcphub-Instance-Id", realInstanceID)
 	return req
+}
+
+func TestWriteRawJSONSetsWriteDeadlineBeforeBodyWrite(t *testing.T) {
+	rec := &deadlineRecorder{}
+	payload := []byte(`{"jsonrpc":"2.0","id":1,"result":{}}`)
+	start := time.Now()
+
+	writeRawJSON(rec, payload)
+
+	if rec.status != http.StatusOK {
+		t.Fatalf("status=%d want 200", rec.status)
+	}
+	if rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("Content-Type=%q want application/json", rec.Header().Get("Content-Type"))
+	}
+	if rec.writeBeforeDeadline {
+		t.Fatalf("response body was written before SetWriteDeadline")
+	}
+	if rec.deadline.IsZero() {
+		t.Fatalf("SetWriteDeadline was not called")
+	}
+	if !rec.deadline.After(start) || rec.deadline.After(start.Add(hubMcpResponseWriteTimeout+2*time.Second)) {
+		t.Fatalf("deadline=%v want within response write budget from %v", rec.deadline, start)
+	}
+	if rec.body.String() != string(payload) {
+		t.Fatalf("body=%s want %s", rec.body.String(), payload)
+	}
 }
 
 // TestHandlerLoopbackGuardRejectsNonLoopbackHost — gate 1: Host

@@ -66,6 +66,8 @@ var hubSupportedVersions = map[string]bool{
 	"2025-03-26": true,
 }
 
+const hubMcpResponseWriteTimeout = 30 * time.Second
+
 // hubSupportedVersionsList returns a deterministic slice of the
 // supported versions (sorted newest-first) for inclusion in
 // JSON-RPC error responses' data.supported field.
@@ -988,8 +990,13 @@ func isLowerHex64(s string) bool {
 // aggregator already produced the final bytes.
 func writeRawJSON(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
+	setResponseWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+func setResponseWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(hubMcpResponseWriteTimeout))
 }
 
 // writeJSONRPCResult emits {"jsonrpc":"2.0","id":<reqID>,"result":<result>}
@@ -1017,6 +1024,7 @@ func writeJSONRPCResult(w http.ResponseWriter, reqID json.RawMessage, result any
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	setResponseWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)
 }
@@ -1085,6 +1093,7 @@ func writeJSONRPCErrorStatus(w http.ResponseWriter, reqID json.RawMessage, httpS
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	setResponseWriteDeadline(w)
 	w.WriteHeader(httpStatus)
 	_, _ = w.Write(payload)
 }
