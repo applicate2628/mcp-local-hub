@@ -421,11 +421,10 @@ func publishResolverSnapshotWithGroupActiveSetStatus(manifests []config.ServerMa
 // its lock), so acquiring it here is always a fresh, non-nested acquisition.
 //
 // A scan error is fatal (returned without publishing) — the caller treats it as
-// non-fatal to the bind/mutation and logs a warn, degrading to the prior
-// snapshot. A groups.yaml load error degrades to "no groups" with a structured
-// warn (additive-by-omission, decision claim 5) so the client bindings still
-// publish — byte-identical client routing for a host with a missing/corrupt
-// groups.yaml. A token-ensure failure is DEFERRED: the snapshot still publishes
+// non-fatal to the bind/mutation and logs a warn, preserving the prior
+// snapshot. A groups.yaml load error is also returned without publishing: a
+// transient read/parse failure must not erase the last known-good groups
+// active set. A token-ensure failure is DEFERRED: the snapshot still publishes
 // first (bindings live), then the token error is returned so the caller can
 // surface restart_required (without the row the /g/ route cannot auth).
 func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.ServerManifest, error)) error {
@@ -436,22 +435,19 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	defer func() { _ = lk.Unlock() }()
 
 	// R4-3: scan UNDER the held lock so scan+publish is one atomic critical
-	// section. A scan failure aborts WITHOUT publishing (no torn snapshot from
-	// a partial scan) and surfaces to the caller.
+	// section. A scan failure aborts WITHOUT publishing or changing the
+	// active-set status: the last known-good/cold state remains authoritative.
 	manifests, serr := scan()
 	if serr != nil {
-		storeResolverGroupActiveSetStatus(resolverGroupActiveSetIndeterminate)
 		return fmt.Errorf("scan manifests under hub-mcp.lock: %w", serr)
 	}
 
-	cfgKnownGood := true
 	cfg, gerr := loadGroupsLocked()
 	if gerr != nil {
 		_ = LogHubMcpEvent("warn", "groups-config-load-failed", map[string]any{
 			"err": gerr.Error(),
 		})
-		cfg = GroupsConfig{}
-		cfgKnownGood = false
+		return fmt.Errorf("load groups.yaml under hub-mcp.lock: %w", gerr)
 	}
 
 	// Capture the prior published active set for live-session preservation and
@@ -503,11 +499,7 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 	// In-memory build + atomic publish (no lock taken inside). Held under the
 	// hub-mcp.lock so the scan + cfg read above and this publish are one
 	// critical section — no interleaving mutation can publish a torn read.
-	publishStatus := resolverGroupActiveSetKnownGood
-	if !cfgKnownGood {
-		publishStatus = resolverGroupActiveSetIndeterminate
-	}
-	publishResolverSnapshotWithGroupActiveSetStatus(manifests, cfg.Groups, publishStatus)
+	publishResolverSnapshotWithGroupActiveSetStatus(manifests, cfg.Groups, resolverGroupActiveSetKnownGood)
 
 	return tokenEnsureErr
 }

@@ -198,6 +198,43 @@ func TestGroups_CleanRestartDeclaredGroupKeepsTokenWithoutTombstone(t *testing.T
 	}
 }
 
+// TestGroups_ColdScanFailureDoesNotPoisonNextPublish pins the cold-start
+// fail-safe: a transient manifest scan error before any snapshot is published
+// must leave the resolver cold. Otherwise the retry treats durable group rows
+// as indeterminate and strands the group instead of preserving its token.
+func TestGroups_ColdScanFailureDoesNotPoisonNextPublish(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	resetResolverForTest(t)
+
+	const key = "g:shared"
+
+	// Prior process left durable state for a declared active group.
+	publishWithGroups(t, []Group{{Name: "shared", Servers: []string{"memory"}}})
+	seeded := CurrentTokenTable().Tokens[key]
+	if !isValidHexToken(seeded) {
+		t.Fatalf("seeded token invalid: %q", seeded)
+	}
+	resetResolverForTest(t)
+
+	err := PublishGroupsSnapshotLocked(context.Background(), func() ([]config.ServerManifest, error) {
+		return nil, errors.New("synthetic transient scan failure")
+	})
+	if err == nil {
+		t.Fatal("transient scan failure must surface to caller")
+	}
+	if snap := LoadResolverSnapshot(); snap != nil {
+		t.Fatalf("failed cold scan published snapshot: %+v", snap)
+	}
+	if got := loadResolverGroupActiveSetStatus(); got != resolverGroupActiveSetCold {
+		t.Fatalf("failed cold scan status = %v, want cold", got)
+	}
+
+	publishCurrentGroups(t)
+	if after := CurrentTokenTable().Tokens[key]; after != seeded {
+		t.Fatalf("retry after transient cold scan rotated token (%q -> %q)", seeded, after)
+	}
+}
+
 // TestGroups_KnownGoodEmptySnapshotRotatesReintroducedRow distinguishes a
 // real, known-good empty active-set from process cold start. A prior publish
 // that authoritatively declared no groups is enough history to classify a
@@ -260,6 +297,52 @@ func TestGroups_IndeterminateActiveSetPreservesPreexistingRow(t *testing.T) {
 	}
 	if snap := LoadResolverSnapshot(); snap == nil || snap.Groups[key] {
 		t.Fatalf("indeterminate token decision must not publish %q as routable, snap=%+v", key, snap)
+	}
+}
+
+// TestGroups_TransientGroupsParseFailurePreservesAndRecovers pins the publish
+// fail-safe for groups.yaml load/parse failures: a transient bad read must not
+// publish an empty degraded active set over the last known-good snapshot. Once
+// groups.yaml is readable again, the next publish should recover without
+// rotating the still-active group's token.
+func TestGroups_TransientGroupsParseFailurePreservesAndRecovers(t *testing.T) {
+	hubMcpStateTestHelper(t)
+	resetResolverForTest(t)
+
+	const key = "g:frontend"
+	publishWithGroups(t, []Group{{Name: "frontend", Servers: []string{"memory"}}})
+	seeded := CurrentTokenTable().Tokens[key]
+	if !isValidHexToken(seeded) {
+		t.Fatalf("seeded token invalid: %q", seeded)
+	}
+	before := LoadResolverSnapshot()
+	if before == nil || !before.Groups[key] {
+		t.Fatalf("known-good publish precondition failed, snap=%+v", before)
+	}
+
+	if err := writeHubMcpStateFile(hubMcpGroupsFileLeaf, []byte("version: [")); err != nil {
+		t.Fatalf("install transient malformed groups.yaml: %v", err)
+	}
+	err := PublishGroupsSnapshotLocked(context.Background(), scanOneServer)
+	if err == nil {
+		t.Fatal("transient groups.yaml parse failure must surface to caller")
+	}
+	if LoadResolverSnapshot() != before {
+		t.Fatal("transient groups.yaml parse failure replaced the known-good resolver snapshot")
+	}
+	if got := loadResolverGroupActiveSetStatus(); got != resolverGroupActiveSetKnownGood {
+		t.Fatalf("transient groups.yaml parse failure status = %v, want known-good preserved", got)
+	}
+
+	if err := WriteGroups(GroupsConfig{Version: 1, Groups: []Group{{Name: "frontend", Servers: []string{"memory"}}}}); err != nil {
+		t.Fatalf("restore groups.yaml: %v", err)
+	}
+	publishCurrentGroups(t)
+	if after := CurrentTokenTable().Tokens[key]; after != seeded {
+		t.Fatalf("recovering after transient groups.yaml parse failure rotated token (%q -> %q)", seeded, after)
+	}
+	if snap := LoadResolverSnapshot(); snap == nil || !snap.Groups[key] {
+		t.Fatalf("recovering publish did not restore %q as known group, snap=%+v", key, snap)
 	}
 }
 

@@ -348,7 +348,17 @@ func isRetryablePostRenameOpenErrWindows(err error) bool {
 	return errors.Is(err, windows.ERROR_ACCESS_DENIED) ||
 		errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
 		errors.Is(err, windows.ERROR_LOCK_VIOLATION) ||
-		errors.Is(err, windows.ERROR_BUSY)
+		errors.Is(err, windows.ERROR_BUSY) ||
+		ntStatusIs(err, windows.STATUS_ACCESS_DENIED) ||
+		ntStatusIs(err, windows.STATUS_SHARING_VIOLATION) ||
+		ntStatusIs(err, windows.STATUS_FILE_LOCK_CONFLICT) ||
+		ntStatusIs(err, windows.STATUS_LOCK_NOT_GRANTED) ||
+		ntStatusIs(err, windows.STATUS_PENDING) ||
+		ntStatusIs(err, windows.STATUS_OPLOCK_BREAK_IN_PROGRESS) ||
+		ntStatusIs(err, windows.STATUS_DELETE_PENDING) ||
+		ntStatusIs(err, windows.STATUS_DEVICE_BUSY) ||
+		ntStatusIs(err, windows.STATUS_TIMEOUT) ||
+		ntStatusIs(err, windows.STATUS_RETRY)
 }
 
 // postRenameFailureWindows is the "no file on error" cleanup for a
