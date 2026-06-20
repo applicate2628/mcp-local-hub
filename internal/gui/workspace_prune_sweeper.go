@@ -17,9 +17,10 @@ import (
 // in the gui-command wiring.
 //
 // SAFETY (operator-flagged "don't remove a live one"): a workspace is pruned
-// only when it is NOT mid-call — we skip any workspace whose serena daemon has
-// an in-flight /serena/mcp forward (s.hasSerenaForwardInFlight, the same guard
-// the idle sweeper uses). Prune is non-destructive: a pruned workspace
+// only after claiming the same per-workspace serena stop gate the idle sweeper
+// uses. The claim atomically observes no in-flight /serena/mcp forward and blocks
+// a new forward from entering until prune teardown has finished mutating the
+// registry/intent state. Prune is non-destructive: a pruned workspace
 // re-registers on its next open (EnsureLSPRegistered / AutoRegisterSerenaWorkspace),
 // so the only residual (an in-flight LSP-only call against a workspace with no
 // serena row) at worst drops one short LSP request the client retries.
@@ -66,10 +67,16 @@ func defaultPruneWorkspaceRows(s *Server) []*api.WorkspaceEntry {
 	return rows
 }
 
-// pruneInFlightFn reports whether the workspace's serena daemon has an open
-// /serena/mcp forward (the mid-call guard). Test seam over hasSerenaForwardInFlight.
-var pruneInFlightFn = func(s *Server, serenaKey string) bool {
-	return s.hasSerenaForwardInFlight(serenaKey)
+// pruneBeginFn claims the serena stop gate for prune teardown. It must use the
+// same gate as idle-stop/forward so "no in-flight request" is atomic with prune
+// mutation. Test seam over beginSerenaPrune.
+var pruneBeginFn = func(s *Server, serenaKey string) bool {
+	return s.beginSerenaPrune(serenaKey)
+}
+
+// pruneEndFn releases the prune teardown claim. Test seam over endSerenaPrune.
+var pruneEndFn = func(s *Server, serenaKey string) {
+	s.endSerenaPrune(serenaKey)
 }
 
 // pruneIdleThresholdFn returns the Phase-3 idle-prune threshold; 0 disables
@@ -144,11 +151,6 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 
 	pruned := 0
 	for path, c := range byPath {
-		// In-flight guard: never prune a workspace mid serena call.
-		if c.serenaKey != "" && pruneInFlightFn(s, c.serenaKey) {
-			continue
-		}
-
 		var reason string
 		switch {
 		case api.IsAgentWorktreePath(path):
@@ -175,7 +177,15 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 			continue
 		}
 
-		report, err := pruneActionFn(s, path)
+		if c.serenaKey != "" && !pruneBeginFn(s, c.serenaKey) {
+			continue
+		}
+		report, err := func() (*api.PruneReport, error) {
+			if c.serenaKey != "" {
+				defer pruneEndFn(s, c.serenaKey)
+			}
+			return pruneActionFn(s, path)
+		}()
 		s.pruneEnoentMu.Lock()
 		delete(s.pruneEnoentTicks, path) // clear; re-accrues next tick if still dead.
 		s.pruneEnoentMu.Unlock()
