@@ -246,6 +246,7 @@ func forceMarketplaceCacheStaleForTest(t interface {
 	}
 	if cf == nil {
 		t.Fatalf("no cache to rewind")
+		return // t is an interface — a Fatalf impl that does not abort would nil-deref below (SA5011)
 	}
 	cf.FetchedAt = when
 	if err := writeMarketplaceCache(cf); err != nil {

@@ -300,6 +300,14 @@ func TestStopForcePIDIdentityRefusalFallsThroughToPortClassifier(t *testing.T) {
 			taskkillProcessTreeByPIDFn = origTaskkill
 			stopForceKillPIDFn = origPIDKill
 		})
+		// This subtest drives a SUCCESSFUL port-path kill of a same-user mcphub
+		// rebind via fake PIDs; pin the SEC-F3 owner-SID arm to a same-user pass
+		// (the sibling stop-force tests already do) so the Windows production seam
+		// does not open a token for the fake PID and fail-closed refuse the kill —
+		// which left taskkill uncalled and failed this subtest on Windows (it
+		// passed on POSIX where the arm is a no-op). The owner-SID refusal path has
+		// its own dedicated tests.
+		pinOwnerSIDMatch(t)
 
 		forceKillByPortFn = killDaemonByPortOutcome
 		killed := false
