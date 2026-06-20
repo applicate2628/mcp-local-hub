@@ -728,6 +728,31 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.enterSerenaForward(ws.WorkspaceKey)
+	inFlightWorkspaceKey := ws.WorkspaceKey
+	restampSerenaForwardOnExit := false
+	upstreamReached := false
+	defer func() {
+		if restampSerenaForwardOnExit {
+			// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
+			// protection. The sweeper reads counter-then-activity unsynchronized;
+			// exit-first would open a window where counter==0 while last-activity
+			// is still the stale request-START stamp — a sweep tick landing there
+			// idle-stops a daemon that finished a >threshold call nanoseconds ago
+			// (focused re-review P3, both lenses).
+			now := time.Now()
+			s.recordSerenaActivity(inFlightWorkspaceKey, now)
+			// Only make the activity restart-durable after the HTTP request reached
+			// the daemon. Wake refusals, request-build failures, and transport errors
+			// must not refresh durable idle-prune state or imply healthy daemon
+			// activity in status views.
+			if upstreamReached {
+				s.maybePersistSerenaActivity(inFlightWorkspaceKey, now)
+			}
+		}
+		s.exitSerenaForward(inFlightWorkspaceKey)
+	}()
+
 	upstreamURL := upstreamURLFn(ws)
 	if upstreamURL == "" {
 		http.Error(w, "upstream URL resolution failed", http.StatusInternalServerError)
@@ -1021,37 +1046,14 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	// FIX-3 mid-call protection: mark this forward in-flight for ws around the
-	// WHOLE forward — the upstream POST AND the SSE stream / body copy below.
-	// The idle sweeper skips any daemon with an open forward, so a single call
-	// that streams past the idle threshold (min 15m) is never idle-killed
-	// mid-call. The deferred exit fires on EVERY return path (build error,
-	// transport error, SSE completion, plain-body completion) including a panic.
-	// On completion it ALSO re-stamps last-activity so the just-finished call
+	// The request entered the per-workspace stop/forward gate before wake and
+	// daemon-session resolution. From here through the upstream POST/SSE copy,
+	// the completion path also re-stamps last-activity so the just-finished call
 	// resets the daemon's idle clock (recordSerenaActivity was stamped ONCE at
 	// request start; a long call would otherwise leave a stale timestamp, and the
 	// next sweep right after a long call could idle a daemon that was busy until
 	// seconds ago).
-	s.enterSerenaForward(ws.WorkspaceKey)
-	upstreamReached := false
-	defer func() {
-		// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
-		// protection. The sweeper reads counter-then-activity unsynchronized;
-		// exit-first would open a window where counter==0 while last-activity
-		// is still the stale request-START stamp — a sweep tick landing there
-		// idle-stops a daemon that finished a >threshold call nanoseconds ago
-		// (focused re-review P3, both lenses).
-		now := time.Now()
-		s.recordSerenaActivity(ws.WorkspaceKey, now)
-		// Only make the activity restart-durable after the HTTP request reached
-		// the daemon. Wake refusals, request-build failures, and transport errors
-		// must not refresh durable idle-prune state or imply healthy daemon
-		// activity in status views.
-		if upstreamReached {
-			s.maybePersistSerenaActivity(ws.WorkspaceKey, now)
-		}
-		s.exitSerenaForward(ws.WorkspaceKey)
-	}()
+	restampSerenaForwardOnExit = true
 
 	upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if ureqErr != nil {

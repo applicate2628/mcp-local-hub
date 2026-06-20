@@ -703,15 +703,14 @@ type Server struct {
 	// fable's coupled-hazard insight). Read-only after construction.
 	guiProcessStart time.Time
 
-	// serenaInFlightMu guards serenaInFlight: WorkspaceKey -> count of
-	// /serena/mcp forwards currently in flight to that workspace's daemon
-	// (incremented around the WHOLE forward, including the SSE stream copy;
-	// decremented on completion). The idle sweeper SKIPS any daemon with an
-	// open forward so a single long-lived streaming call past the threshold is
-	// never idle-killed MID-CALL (FIX-3). A zero/absent count means no forward
-	// is open. The map prunes entries back to absent when the count hits 0.
-	serenaInFlightMu sync.Mutex
-	serenaInFlight   map[string]int
+	// serenaStopGate owns the per-workspace stop/forward gate. A path-bound
+	// /serena/mcp request enters it immediately after workspace resolution and
+	// before wake/daemon-session resolution; the idle sweeper starts the same
+	// workspace gate while deciding to stop and releases later entrants only
+	// after the stop write plus stale daemon-session invalidation finish. A
+	// non-zero count means a request has started for that workspace, even if it
+	// has not reached the upstream POST yet.
+	serenaStopGate serenaWorkspaceStopGate
 
 	// pruneEnoentMu guards pruneEnoentTicks: WorkspaceKey -> number of
 	// CONSECUTIVE prune-sweep ticks that observed the workspace directory as

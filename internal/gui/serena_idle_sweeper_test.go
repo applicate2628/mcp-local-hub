@@ -487,6 +487,77 @@ func TestRouterForward_InFlightCounterAndRestamp(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_PreForwardWakeWindowBlocksIdleStop(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmpState, "AppData", "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpState, "state"))
+
+	const wsPath = "/proj/pre-forward-wake"
+	ws := serenaWS("pre-forward-wake", wsPath, 9312)
+
+	daemon := newFakeSerenaDaemon("pre-forward-wake")
+	ts := httptest.NewServer(daemon.handler())
+	t.Cleanup(ts.Close)
+
+	wakeStarted := make(chan struct{})
+	releaseWake := make(chan struct{})
+	var wakeOnce sync.Once
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
+			list:         []*api.WorkspaceEntry{ws},
+		},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(string, string, map[string]any) error { return nil },
+		WakeIdleFn: func(context.Context, string, int, string) error {
+			wakeOnce.Do(func() { close(wakeStarted) })
+			<-releaseWake
+			return nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	captured := withIdleSweeperSeams(t, time.Nanosecond, true,
+		func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+		},
+	)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsPath + "/src/main.go"})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+		if rr.Code != http.StatusOK {
+			t.Errorf("tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		}
+	}()
+
+	select {
+	case <-wakeStarted:
+	case <-time.After(5 * time.Second):
+		close(releaseWake)
+		t.Fatal("request never reached the injected slow wake")
+	}
+
+	n := s.SweepIdleSerenaDaemons(context.Background(), time.Now().UTC().Add(time.Minute))
+	stoppedDuringWake := n != 0 || len(*captured) != 0
+
+	close(releaseWake)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool call did not complete after releasing wake")
+	}
+
+	if stoppedDuringWake {
+		t.Fatalf("idle sweep stopped a workspace with a request already in its pre-forward wake window: n=%d captured=%v", n, *captured)
+	}
+}
+
 // FALSIFICATION: when the daemon has an operator stop, WakeIdleFn returns
 // ErrWakeRefusedOperatorStop. The handler must treat that as terminal instead
 // of forwarding to whatever process happens to own the descriptor port.
