@@ -343,36 +343,22 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 // KNOWN-TOLERATED non-convergences (correct to keep as advisory, not bugs): a
 // RELATIVE base_args[0] under a daemon with no absolute cwd cannot be verified
 // from this process (the daemon inherits an unpredictable launch cwd) — surfaced
-// Optional, never resolved against os.Getwd() (Codex #377 r18). Port probing
-// differs intentionally between the two gates: readiness uses a bind probe
-// (portAvailable, the allocator's own truth) while Preflight uses a dial probe
-// plus supervisor-intent awareness (portHeldByOurDaemonForPortArm) — Preflight's
-// is the richer authoritative collision check, readiness's the simpler advisory.
+// Optional, never resolved against os.Getwd() (Codex #377 r18). The fixed-port
+// detail rows still use the readiness bind probe (portAvailable, the allocator's
+// own truth) while AdmissionCheck preserves Preflight's dial probe plus
+// supervisor-intent awareness (portHeldByOurDaemonForPortArm); Ready follows the
+// AdmissionCheck owner, and the bind-probe rows remain richer GUI diagnostics.
 //
 // CheckServerReadiness runs every prerequisite check for a server WITHOUT
-// failing fast and returns a structured, GUI-renderable report. It is the
-// non-fatal, all-requirements companion to Preflight (which fails fast at the
-// first blocker for the install gate). It MIRRORS what install + run actually
-// require, so /api/server/readiness never reports Ready while the install gate
-// (or the running server) would fail (Codex #377): the launcher on PATH + the
-// runtime behind it, the canonical mcphub binary, declared required_binaries
-// (incl. per-language), foreign daemon-port collisions, optional stdio env
-// `secret:` refs (advisory), and required remote-http url/header
-// ${secret:KEY} placeholders (blocking).
-//
-// NOTE (architecture, #377): the authoritative "will this install be admitted"
-// decision is currently an implicit SEQUENCE (Preflight + BuildPlan +
-// validateDynamicPoolManifest) re-spelled at each install site and approximated
-// here. A follow-up extracts that into one pure AdmissionCheck both gates adapt
-// (see work-items/decisions/2026-06-19-admission-check-single-gate.md) so the
-// two can never diverge by construction; until then the shared predicates below
-// keep them in sync.
+// failing fast and returns a structured, GUI-renderable report. AdmissionCheck
+// seeds the scope-independent admission result; later requirement rows can still
+// flip Ready=false when they add a non-optional blocker, including the
+// effective-scope install-plan dry-run. The requirement rows below are the rich
+// rendering layer on top: launcher/runtime guidance, per-key secret prompts,
+// port detail rows, and install-plan explanations for the GUI.
 func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
-	rep := &ReadinessReport{Server: m.Name, Ready: true}
+	rep := &ReadinessReport{Server: m.Name, Ready: !containsNonOptional(AdmissionCheck(m, AdmissionScope{}))}
 	add := func(r ReadinessRequirement) {
-		// An unmet OPTIONAL requirement (an unset secret) is advisory — it
-		// prompts the operator but does not block install/spawn, so it does
-		// NOT flip Ready.
 		if !r.OK && !r.Optional {
 			rep.Ready = false
 		}
@@ -620,45 +606,37 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 		}
 	}
 
-	// Workspace-scoped (dynamic-pool) registration allocates from a PortPool;
-	// m.Daemons is EMPTY for these (e.g. mcp-language-server), so the
-	// daemon-port loop above checks nothing. A port counts as TAKEN when it is
-	// OS-bound OR already recorded in the registry (workspaces.yaml) — register's
-	// AllocatePort skips registry-allocated ports and returns
-	// ErrPortPoolExhausted even if nothing is currently listening (Codex #377
-	// r4). For a native-http pool the materialized proxy also binds
-	// external+offset upstream, so BOTH must be free.
-	var registryTaken map[int]bool
+	// Workspace-scoped (dynamic-pool) registration allocates from a PortPool.
+	// Admission/readiness keep only scope-independent blocking checks here:
+	// native-http offset overflow and registry read/resolve failure. AllocatePort
+	// remains the registration-time owner for OS-bound/foreign-bound/free-port
+	// decisions.
+	var allocatedPorts map[int]bool
 	var registryLoadErr error
 	// register resolves the path (DefaultRegistryPath) AND loads it before
 	// allocating; BOTH can fail (no resolvable home/state dir in a headless
 	// session → path error; corrupt file → load error). Either leaves register
 	// unable to allocate, so capture it and let checkPool surface it as
-	// blocking rather than silently falling back to OS-bound ports — which
-	// would report the pool ready while register fails (Codex #377 r5/r7).
-	if regPath, perr := DefaultRegistryPath(); perr != nil {
-		registryLoadErr = fmt.Errorf("resolve registry path: %w", perr)
-	} else {
-		reg := NewRegistry(regPath)
-		if lerr := reg.Load(); lerr != nil {
-			registryLoadErr = fmt.Errorf("load registry: %w", lerr)
-		} else {
-			registryTaken = reg.AllocatedPorts()
-		}
-	}
-	// portTaken mirrors the allocator EXACTLY: AllocatePort skips a port when
-	// registry-allocated OR when portAvailable (the OS bind probe) is false. A
-	// TCP dial (preflightPortInUse) differs — a port bound but not yet
-	// accepting reads as free to a dial yet fails the allocator's bind, so use
-	// the SAME portAvailable probe (Codex #377 r7).
-	portTaken := func(port int) bool { return !portAvailable(port) || registryTaken[port] }
-	checkPool := func(p *config.PortPool, nativeHTTP bool) {
+	// blocking rather than silently reporting the pool ready while register
+	// fails (Codex #377 r5/r7).
+	allocatedPorts, registryLoadErr = loadRegistryAllocatedPorts()
+	checkPool := func(pp manifestPortPool, nativeHTTP bool) {
+		p := pp.pool
 		if p == nil || p.End < p.Start {
 			return
 		}
+		overflow := nativeHTTPPoolOverflows(p, nativeHTTP)
+		if overflow {
+			add(ReadinessRequirement{
+				Name:   portPoolName(p),
+				OK:     false,
+				Reason: nativeHTTPPoolOverflowReason(p),
+				Fix:    nativeHTTPPoolOverflowFix(),
+			})
+		}
 		if registryLoadErr != nil {
 			add(ReadinessRequirement{
-				Name: fmt.Sprintf("port pool %d-%d", p.Start, p.End),
+				Name: portPoolName(p),
 				OK:   false,
 				// Reason is GUI-rendered — do not echo registryLoadErr, which
 				// wraps the absolute workspaces.yaml path (Codex pre-catch r9).
@@ -667,28 +645,22 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 			})
 			return
 		}
-		name := fmt.Sprintf("port pool %d-%d", p.Start, p.End)
-		for port := p.Start; port <= p.End; port++ {
-			if portTaken(port) {
-				continue
-			}
-			if nativeHTTP && portTaken(port+config.NativeHTTPInternalPortOffset) {
-				continue
-			}
-			add(ReadinessRequirement{Name: name, OK: true})
+		if overflow {
 			return
 		}
-		add(ReadinessRequirement{Name: name, OK: false,
-			Reason: "no port in the workspace pool is free (OS-bound or registry-allocated)",
-			Fix:    "Free a pool port (or its native-http +offset upstream), or widen the pool in the manifest."})
+		name := portPoolName(p)
+		if portPoolFullyAllocatedByRegistry(p, allocatedPorts) {
+			add(ReadinessRequirement{Name: name, OK: false, Optional: true,
+				Reason: "no port in the workspace pool is free for a NEW workspace (registry-allocated by existing workspaces); existing workspaces and reinstall are unaffected",
+				Fix:    "Free a pool port or widen the pool in the manifest before registering a new workspace."})
+		}
 	}
 	// Serena's dynamic-pool manifest is transport: native-http, so its
 	// materialized proxies bind external+offset upstream — mNative drives the
 	// offset check for both the server pool and the daemon-template pool.
 	mNative := m.Transport == config.TransportNativeHTTP
-	checkPool(m.PortPool, mNative)
-	if m.DaemonTemplate != nil {
-		checkPool(m.DaemonTemplate.PortPool, mNative)
+	for _, pp := range manifestPortPools(m) {
+		checkPool(pp, mNative)
 	}
 
 	// A vault that EXISTS but is unreadable/undecryptable is BLOCKING for a
