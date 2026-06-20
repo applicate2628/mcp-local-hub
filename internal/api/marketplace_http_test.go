@@ -66,12 +66,106 @@ func TestMarketplaceHTTPClient_DisablesCompression(t *testing.T) {
 	}
 }
 
-func TestMarketplaceFetchTransport_DisablesProxyFromEnvironment(t *testing.T) {
+func TestMarketplaceFetchTransport_HonorsProxyByDefaultAndDirectFetchOptInDisablesIt(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:65535")
 
-	tr := newMarketplaceFetchTransportWithResolver(nil)
-	if tr.Proxy != nil {
-		t.Fatal("marketplace registry fetch transport must disable proxy routing")
+	proxied := newMarketplaceFetchTransportWithResolver(nil, false)
+	if proxied.Proxy == nil {
+		t.Fatal("marketplace registry fetch transport must honor proxy routing by default")
+	}
+
+	direct := newMarketplaceFetchTransportWithResolver(nil, true)
+	if direct.Proxy != nil {
+		t.Fatal("marketplace direct-fetch opt-in must disable proxy routing")
+	}
+}
+
+func TestOperatorRequestsMarketplaceDirectFetchTruthiness(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  string
+		want bool
+	}{
+		{name: "unset", val: "", want: false},
+		{name: "one", val: "1", want: true},
+		{name: "true case-insensitive", val: " TrUe ", want: true},
+		{name: "false", val: "false", want: false},
+		{name: "garbage", val: "yes", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(MarketplaceDirectFetchEnv, tc.val)
+			if got := operatorRequestsMarketplaceDirectFetch(); got != tc.want {
+				t.Fatalf("operatorRequestsMarketplaceDirectFetch(%q) = %v, want %v", tc.val, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMarketplaceFetchTransport_DialGuardInstalledWithAndWithoutProxy(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		directFetch bool
+	}{
+		{name: "proxy-honored-default", directFetch: false},
+		{name: "direct-fetch-opt-in", directFetch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := newMarketplaceFetchTransportWithResolver(nil, tc.directFetch)
+			if tr.DialContext == nil {
+				t.Fatal("marketplace fetch transport must install a guarded DialContext")
+			}
+			_, err := tr.DialContext(context.Background(), "tcp", "127.0.0.1:443")
+			if err == nil {
+				t.Fatal("expected dial guard to reject loopback address")
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
+				t.Fatalf("dial guard error = %v, want loopback rejection", err)
+			}
+		})
+	}
+}
+
+func TestMarketplaceProxyResidualWarningEmittedWhenProxySelected(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+
+	proxyURL := &url.URL{Scheme: "http", Host: "proxy.example:8080"}
+	proxy := marketplaceProxyWithResidualWarning(func(*http.Request) (*url.URL, error) {
+		return proxyURL, nil
+	})
+	req, err := http.NewRequest(http.MethodGet, "https://registry.example/catalog.json", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	gotProxy, err := proxy(req)
+	if err != nil {
+		t.Fatalf("proxy resolver: %v", err)
+	}
+	if gotProxy.String() != proxyURL.String() {
+		t.Fatalf("proxy resolver returned %v, want %v", gotProxy, proxyURL)
+	}
+
+	events, err := RecentHubMcpEvents(10)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	var found map[string]any
+	for _, ev := range events {
+		if ev["event"] == "marketplace-proxy-ssrf-residual-accepted" {
+			found = ev
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no marketplace proxy residual warning in events: %+v", events)
+	}
+	if found["level"] != "warn" {
+		t.Fatalf("event level = %v, want warn", found["level"])
+	}
+	if found["direct_fetch_env"] != MarketplaceDirectFetchEnv {
+		t.Fatalf("direct_fetch_env = %v, want %s", found["direct_fetch_env"], MarketplaceDirectFetchEnv)
+	}
+	if found["residual"] != "dns-rebind-ssrf-via-proxy" {
+		t.Fatalf("residual = %v, want dns-rebind-ssrf-via-proxy", found["residual"])
 	}
 }
 
@@ -231,7 +325,7 @@ func TestMarketplaceHTTPClient_RejectsResolvedLoopbackRegistryHost(t *testing.T)
 	const rebindHost = "marketplace-rebind.example.test"
 	tr := newMarketplaceFetchTransportWithResolver(marketplaceDNSResolverForTest(t, map[string]net.IP{
 		rebindHost: net.IPv4(127, 0, 0, 1),
-	}))
+	}), true)
 	tr.Proxy = nil
 	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
 	client := &http.Client{

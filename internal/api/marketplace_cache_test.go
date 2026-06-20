@@ -114,6 +114,35 @@ func TestReadMarketplaceCache_RejectsTamperedInvalidCatalog(t *testing.T) {
 	}
 }
 
+func TestLoadMarketplaceCatalog_RejectsCachedDisallowedSourceURL(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	rawURL := "https://127.0.0.1/catalog.json"
+	payload := `{"schema_version":"1","fetched_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","source_url":"` + rawURL + `","catalog":{"schema_version":"1","entries":[{"id":"cached","name":"Cached","transport":"stdio","command":"npx"}]}}`
+	if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(payload)); err != nil {
+		t.Fatalf("write tampered cache: %v", err)
+	}
+	client := &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("fresh fetch transport must not be reached for a statically disallowed source URL")
+			return nil, nil
+		}),
+	}
+
+	cat, src, err := LoadMarketplaceCatalogWithClient(context.Background(), client, rawURL)
+	if err == nil {
+		t.Fatalf("expected cached disallowed source_url to be rejected; got catalog=%+v src=%v", cat, src)
+	}
+	if cat != nil {
+		t.Fatalf("poisoned cache was returned: %+v", cat)
+	}
+	if src != 0 {
+		t.Fatalf("source = %v, want zero value on rejected poisoned cache", src)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
+		t.Fatalf("error = %v, want loopback source_url rejection", err)
+	}
+}
+
 // TestLoadMarketplaceCatalog_FutureFetchedAtForcesRevalidate pins
 // codex r1 P2 closure: a clock rollback or corrupted fetched_at
 // timestamp must not pin stale catalog data as "fresh forever".

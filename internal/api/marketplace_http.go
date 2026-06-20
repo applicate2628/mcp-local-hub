@@ -17,6 +17,8 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +30,21 @@ const (
 	marketplaceFetchDialTimeout   = 30 * time.Second
 	marketplaceFetchDialKeepAlive = 30 * time.Second
 )
+
+// MarketplaceDirectFetchEnv is the operator opt-in for the airtight
+// marketplace registry fetch path. When set to "1" or "true", marketplace
+// fetches bypass environment proxies so the dial-time guard validates the
+// origin address directly. The default honors the cloned stdlib proxy settings
+// for corporate proxy-only hosts.
+const MarketplaceDirectFetchEnv = "MCPHUB_MARKETPLACE_DIRECT_FETCH"
+
+func operatorRequestsMarketplaceDirectFetch() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(MarketplaceDirectFetchEnv))) {
+	case "1", "true":
+		return true
+	}
+	return false
+}
 
 // rejectUnsafeMarketplaceRedirect refuses redirect targets outside the
 // marketplace registry URL policy. Used by both production and test clients.
@@ -72,13 +89,16 @@ func newMarketplaceTransport() *http.Transport {
 // newMarketplaceTransport, then installs a dial ControlContext guard
 // that rejects unsafe resolved IPs immediately before connect.
 func newMarketplaceFetchTransport() *http.Transport {
-	return newMarketplaceFetchTransportWithResolver(nil)
+	return newMarketplaceFetchTransportWithResolver(nil, operatorRequestsMarketplaceDirectFetch())
 }
 
-func newMarketplaceFetchTransportWithResolver(resolver *net.Resolver) *http.Transport {
+func newMarketplaceFetchTransportWithResolver(resolver *net.Resolver, directFetch bool) *http.Transport {
 	t := newMarketplaceTransport()
-	// Registry SSRF checks must validate the origin IP, not an environment proxy.
-	t.Proxy = nil
+	if directFetch {
+		t.Proxy = nil
+	} else if t.Proxy != nil {
+		t.Proxy = marketplaceProxyWithResidualWarning(t.Proxy)
+	}
 	d := &net.Dialer{
 		Timeout:        marketplaceFetchDialTimeout,
 		KeepAlive:      marketplaceFetchDialKeepAlive,
@@ -90,6 +110,22 @@ func newMarketplaceFetchTransportWithResolver(resolver *net.Resolver) *http.Tran
 	t.DialTLS = nil
 	t.DialTLSContext = nil
 	return t
+}
+
+func marketplaceProxyWithResidualWarning(proxy func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
+	return func(req *http.Request) (*url.URL, error) {
+		proxyURL, err := proxy(req)
+		if err == nil && proxyURL != nil {
+			_ = LogHubMcpEvent("warn", "marketplace-proxy-ssrf-residual-accepted", map[string]any{
+				"registry_host":    req.URL.Host,
+				"proxy_host":       proxyURL.Host,
+				"residual":         "dns-rebind-ssrf-via-proxy",
+				"direct_fetch_env": MarketplaceDirectFetchEnv,
+				"mitigation":       MarketplaceDirectFetchEnv + "=1 bypasses environment proxies so the dial guard validates the registry origin address directly",
+			})
+		}
+		return proxyURL, err
+	}
 }
 
 func marketplaceFetchDialControlContext(_ context.Context, _ string, address string, _ syscall.RawConn) error {

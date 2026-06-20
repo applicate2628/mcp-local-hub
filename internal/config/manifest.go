@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mcp-local-hub/internal/secrets"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -477,6 +479,9 @@ func (m *ServerManifest) validateCompanion() error {
 // ValidateRemoteHTTPURL validates the remote-http endpoint URL shape shared by
 // manifests and marketplace catalog http entries.
 func ValidateRemoteHTTPURL(raw string) error {
+	if remoteHTTPURLHasSecretPlaceholderHost(raw) {
+		return nil
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("parse url: %w", err)
@@ -484,13 +489,46 @@ func ValidateRemoteHTTPURL(raw string) error {
 	if u.Scheme != "https" {
 		return fmt.Errorf("must use https:// (got scheme %q)", u.Scheme)
 	}
-	if u.Host == "" {
+	if u.Hostname() == "" {
 		return fmt.Errorf("must include a host")
 	}
 	if u.User != nil {
 		return fmt.Errorf("must not embed credentials")
 	}
 	return nil
+}
+
+func remoteHTTPURLHasSecretPlaceholderHost(raw string) bool {
+	const prefix = "https://"
+	if !strings.HasPrefix(raw, prefix) {
+		return false
+	}
+	rest := raw[len(prefix):]
+	end := strings.IndexAny(rest, "/?#")
+	authority := rest
+	if end >= 0 {
+		authority = rest[:end]
+	}
+	if authority == "" || strings.Contains(authority, "@") {
+		return false
+	}
+	matches := secrets.SecretPlaceholderRE.FindAllStringIndex(authority, -1)
+	if len(matches) != 1 || matches[0][0] != 0 {
+		return false
+	}
+	tail := authority[matches[0][1]:]
+	if tail == "" {
+		return true
+	}
+	if !strings.HasPrefix(tail, ":") || len(tail) == 1 {
+		return false
+	}
+	for _, r := range tail[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *ServerManifest) Validate() error {

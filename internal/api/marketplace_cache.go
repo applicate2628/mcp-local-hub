@@ -229,6 +229,11 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	if err := validateMarketplaceCatalog(&cf.Catalog); err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
+	if cf.SourceURL != "" {
+		if _, err := parseMarketplacePublicHTTPSURL(cf.SourceURL); err != nil {
+			return nil, fmt.Errorf("validate cache source_url %q: %w", cf.SourceURL, err)
+		}
+	}
 	return &cf, nil
 }
 

@@ -437,6 +437,8 @@ func TestValidateRemoteHTTP_RejectsMalformedHTTPSURL(t *testing.T) {
 		url  string
 	}{
 		{"empty host", "https:///mcp"},
+		{"hostless with port", "https://:443/mcp"},
+		{"mixed literal and secret-placeholder host", "https://127.0.0.1${secret:REMOTE_MCP_HOST}/mcp"},
 		{"embedded credentials", "https://user:pass@mcp.context7.com/mcp"},
 		{"control byte", "https://mcp.context7.com/\x00mcp"},
 	} {
@@ -451,6 +453,18 @@ func TestValidateRemoteHTTP_RejectsMalformedHTTPSURL(t *testing.T) {
 				t.Fatalf("expected malformed URL rejection for %q", tc.url)
 			}
 		})
+	}
+}
+
+func TestValidateRemoteHTTP_AllowsSecretPlaceholderHost(t *testing.T) {
+	m := &ServerManifest{
+		Name:      "secret-host",
+		Kind:      KindGlobal,
+		Transport: TransportRemoteHTTP,
+		URL:       "https://${secret:REMOTE_MCP_HOST}/mcp",
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("secret-placeholder host should defer host validation to use time; got %v", err)
 	}
 }
 
