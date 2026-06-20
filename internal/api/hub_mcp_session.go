@@ -151,9 +151,9 @@ type hubSession struct {
 	LastUsedAt       time.Time
 	mu               sync.Mutex // protects LastUsedAt + lifecycle + InitSuccesses + DaemonProtoVer
 	// reinitGroup coalesces concurrent hot-swap (a) self-heal re-initializations
-	// of the SAME daemon (keyed Server\x00Daemon) into ONE initialize, so a mass
-	// daemon restart that fails many in-flight tools/call at once cannot trigger
-	// an init-storm. Zero value is ready to use.
+	// of the SAME live daemon binding (keyed Server\x00Daemon\x00Port) into ONE
+	// initialize, so a mass daemon restart that fails many in-flight tools/call
+	// at once cannot trigger an init-storm. Zero value is ready to use.
 	reinitGroup singleflight.Group
 	// staleDaemonPorts marks daemon ports whose cached MCP session is stale
 	// because the supervisor restarted the daemon (the hot-swap (b) event-driven

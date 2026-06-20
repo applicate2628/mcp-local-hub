@@ -306,24 +306,29 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 		originalCount := len(successes)
 		if originalCount > 0 {
 			filtered := make(map[canonicalDaemonRef]daemonInitState, originalCount)
-			remapped := make(map[canonicalDaemonRef]daemonInitState)
 			for ref, state := range successes {
 				if liveRef, ok := liveDaemonBinding(current, sess.ScopeKey, ref); ok {
-					filtered[liveRef] = state
-					if liveRef != ref {
-						remapped[liveRef] = state
+					if liveRef.Port != ref.Port {
+						freshState, hasFreshState := sess.cachedDaemonInitState(liveRef)
+						if !hasFreshState {
+							var initErr error
+							freshState, initErr = sess.reinitializeDaemonBinding(ctx, liveRef)
+							if initErr != nil {
+								initFailures = append(initFailures, DaemonFailure{
+									Server: liveRef.Server,
+									Daemon: liveRef.Daemon,
+									Stage:  "initialize",
+									Err:    initErr.Error(),
+								})
+								continue
+							}
+						}
+						state = freshState
 					}
+					filtered[liveRef] = state
 				}
 			}
 			successes = filtered
-			if len(remapped) > 0 {
-				sess.mu.Lock()
-				for ref, state := range remapped {
-					sess.InitSuccesses[ref] = state.SessionID
-					sess.DaemonProtoVer[ref] = state.ProtocolVersion
-				}
-				sess.mu.Unlock()
-			}
 		}
 		initFailures = filterInitFailuresByLiveBindings(initFailures, current, sess.ScopeKey, sess.IntendedParticipants)
 		allowEmptySuccess = originalCount > 0 && len(successes) == 0 && len(initFailures) == 0
@@ -653,7 +658,7 @@ type resolvedCallTarget struct {
 // On unknown name → -32601 "Method not found: <name>".
 // On daemon error → response body passed through verbatim.
 func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.RawMessage, paramsRaw json.RawMessage) ([]byte, error) {
-	target, err := resolveToolsCallRoute(sess, clientReqID, paramsRaw)
+	target, err := resolveToolsCallRoute(ctx, sess, clientReqID, paramsRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -670,7 +675,7 @@ func AggregateToolsCall(ctx context.Context, sess *hubSession, clientReqID json.
 // envelope via target.errBody; the caller passes it through verbatim.
 // Returns (nil-target, err) only on internal JSON-marshal failure
 // inside buildJSONRPCError — never on routing rejection.
-func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMessage) (resolvedCallTarget, error) {
+func resolveToolsCallRoute(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage) (resolvedCallTarget, error) {
 	// Parse params to extract name. Other fields (arguments, _meta,
 	// extension attrs) survive verbatim through buildRewrittenParams's
 	// generic-map round-trip; we only need name here to drive route
@@ -699,23 +704,34 @@ func resolveToolsCallRoute(sess *hubSession, clientReqID, paramsRaw json.RawMess
 		return resolvedCallTarget{errBody: body}, mErr
 	}
 
-	// Resolver-snapshot revalidation: refuse if (Server, Daemon) is
-	// not in the calling client's current bindings, or if the current
-	// group visibility filter now hides the target tool. The session
-	// RouteMap is intentionally session-local, so a long-lived group
-	// session may still contain a route that was visible at tools/list
-	// time. Re-check the live immutable snapshot after a republish so a
-	// tools_hidden edit revokes existing sessions without requiring the
-	// daemon/server binding to change.
+	// Resolver-snapshot revalidation: refuse if (Server, Daemon) is not in the
+	// calling client's current bindings, rederive moved bindings to their live
+	// port, and enforce the current group visibility filter. The session RouteMap
+	// is intentionally session-local, so a long-lived group session may still
+	// contain a route that was visible at tools/list time.
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
-		if !daemonStillBound(current, sess.ScopeKey, ref) {
+		liveRef, stillBound := liveDaemonBinding(current, sess.ScopeKey, canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port})
+		if !stillBound {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
 		if snapshotHidesTool(current, sess.ScopeKey, ref) {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
+		}
+		if liveRef.Port != ref.Port {
+			state, ok := sess.cachedDaemonInitState(liveRef)
+			if !ok {
+				var initErr error
+				state, initErr = sess.reinitializeDaemonBinding(ctx, liveRef)
+				if initErr != nil {
+					body, mErr := buildJSONRPCError(clientReqID, -32000, "tools/call failed: initialize moved daemon session: "+initErr.Error(), nil)
+					return resolvedCallTarget{errBody: body}, mErr
+				}
+			}
+			ref.Port = liveRef.Port
+			return resolvedCallTarget{ref: ref, daemonSID: state.SessionID, daemonProto: state.ProtocolVersion}, nil
 		}
 	}
 
@@ -920,37 +936,60 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef) (string, string, int, bool) {
 	port := s.currentDaemonPort(ref)
 	daemonRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
-	// daemonKey MUST match resolveToolsCallRoute's key ({Server,Daemon,ref.Port})
-	// so the refreshed session id is found by the NEXT call's route lookup.
-	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
+	state, err := s.reinitializeDaemonBinding(ctx, daemonRef)
+	if err != nil {
+		return "", "", 0, false
+	}
+	return state.SessionID, state.ProtocolVersion, port, true
+}
 
+func (s *hubSession) cachedDaemonInitState(ref canonicalDaemonRef) (daemonInitState, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sid, ok := s.InitSuccesses[ref]
+	if !ok {
+		return daemonInitState{}, false
+	}
+	proto := s.DaemonProtoVer[ref]
+	if proto == "" {
+		proto = s.ProtocolVersion
+	}
+	return daemonInitState{SessionID: sid, ProtocolVersion: proto}, true
+}
+
+func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef canonicalDaemonRef) (daemonInitState, error) {
+	s.mu.Lock()
+	protoVer := s.ProtocolVersion
+	s.mu.Unlock()
 	type initResult struct{ sid, proto string }
-	v, initErr, _ := s.reinitGroup.Do(ref.Server+"\x00"+ref.Daemon, func() (any, error) {
-		sid, negotiated, err := initializeDaemonSession(ctx, daemonRef, s.ProtocolVersion)
+	groupKey := fmt.Sprintf("%s\x00%s\x00%d", daemonRef.Server, daemonRef.Daemon, daemonRef.Port)
+	v, initErr, _ := s.reinitGroup.Do(groupKey, func() (any, error) {
+		sid, negotiated, err := initializeDaemonSession(ctx, daemonRef, protoVer)
 		if err != nil {
 			return nil, err
 		}
 		return initResult{sid: sid, proto: negotiated}, nil
 	})
 	if initErr != nil {
-		return "", "", 0, false
+		return daemonInitState{}, initErr
 	}
 	res := v.(initResult)
 	proto := res.proto
 	if proto == "" {
-		proto = s.ProtocolVersion
+		proto = protoVer
 	}
 
 	s.mu.Lock()
-	if s.InitSuccesses != nil {
-		s.InitSuccesses[daemonKey] = res.sid
+	if s.InitSuccesses == nil {
+		s.InitSuccesses = map[canonicalDaemonRef]string{}
 	}
+	s.InitSuccesses[daemonRef] = res.sid
 	if s.DaemonProtoVer == nil {
 		s.DaemonProtoVer = map[canonicalDaemonRef]string{}
 	}
-	s.DaemonProtoVer[daemonKey] = proto
+	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
-	return res.sid, proto, port, true
+	return daemonInitState{SessionID: res.sid, ProtocolVersion: proto}, nil
 }
 
 // currentDaemonPort re-resolves the daemon's CURRENT port for (ref.Server,

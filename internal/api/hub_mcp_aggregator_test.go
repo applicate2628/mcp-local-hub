@@ -625,13 +625,29 @@ func TestAggregateToolsListKeepsMovedLiveBindingOnNewRoute(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
 
-	oldDaemon := newStubDaemon(t, "d1-sid")
+	const oldSID = "d1-old-sid"
+	const freshSID = "d1-fresh-sid"
+
+	oldDaemon := newStubDaemon(t, oldSID)
 	removedDaemon := newStubDaemon(t, "d2-sid")
-	newDaemon := newStubDaemon(t, "d1-sid")
+	newDaemon := newStubDaemon(t, freshSID)
 	newDaemon.onList = func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Mcp-Session-Id"); got != freshSID {
+			http.Error(w, "stale moved-binding session", http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"moved","description":"new route"}]}}`))
+	}
+	newDaemon.onCall = func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Mcp-Session-Id"); got != freshSID {
+			http.Error(w, "stale moved-binding session", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"called=moved"}]}}`))
 	}
 
 	sess := sessionWithParticipants(oldDaemon, removedDaemon)
@@ -677,6 +693,9 @@ func TestAggregateToolsListKeepsMovedLiveBindingOnNewRoute(t *testing.T) {
 	if got := newDaemon.listCount.Load(); got != 1 {
 		t.Fatalf("new moved-to daemon listCount=%d want 1", got)
 	}
+	if got := newDaemon.initCount.Load(); got != 1 {
+		t.Fatalf("new moved-to daemon initCount=%d want 1 fresh handshake", got)
+	}
 	rm := sess.RouteMap.Load()
 	if rm == nil {
 		t.Fatalf("RouteMap not published after moved live binding")
@@ -709,6 +728,70 @@ func TestAggregateToolsListKeepsMovedLiveBindingOnNewRoute(t *testing.T) {
 	}
 	if got := newDaemon.callCount.Load(); got != 1 {
 		t.Fatalf("new moved-to daemon callCount=%d want 1", got)
+	}
+}
+
+func TestAggregateToolsCallRevalidatesMovedLivePortAndReinitializesSession(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "d1-old-sid"
+	const freshSID = "d1-fresh-sid"
+
+	oldDaemon := newStubDaemon(t, oldSID)
+	newDaemon := newStubDaemon(t, freshSID)
+	newDaemon.onCall = func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Mcp-Session-Id"); got != freshSID {
+			http.Error(w, "stale moved-binding session", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"called=read"}]}}`))
+	}
+
+	sess := sessionWithParticipants(oldDaemon)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
+	}
+	sess.SnapshotAtInit = atInit
+	current := &ResolverSnapshot{
+		Gen: 2,
+		Bindings: map[string][]canonicalDaemonRef{
+			"claude-code": {{
+				Server: sess.IntendedParticipants[0].Server,
+				Daemon: sess.IntendedParticipants[0].Daemon,
+				Port:   newDaemon.port,
+			}},
+		},
+	}
+	PublishResolverSnapshot(current)
+
+	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read","arguments":{}}`))
+	if err != nil {
+		t.Fatalf("AggregateToolsCall: %v", err)
+	}
+	if !strings.Contains(string(body), `called=read`) {
+		t.Fatalf("tools/call did not dispatch through moved live route with fresh session; body=%s", string(body))
+	}
+	if got := oldDaemon.callCount.Load(); got != 0 {
+		t.Fatalf("old moved-from daemon received tools/call; callCount=%d", got)
+	}
+	if got := newDaemon.callCount.Load(); got != 1 {
+		t.Fatalf("new moved-to daemon callCount=%d want 1", got)
+	}
+	if got := newDaemon.initCount.Load(); got != 1 {
+		t.Fatalf("new moved-to daemon initCount=%d want 1 fresh handshake", got)
 	}
 }
 
