@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"mcp-local-hub/internal/api"
@@ -27,6 +28,10 @@ type manifestValidator interface {
 
 type manifestGetter interface {
 	ManifestGetWithHash(name string) (yaml string, hash string, err error)
+}
+
+type manifestPresence interface {
+	ManifestExists(name string) (bool, error)
 }
 
 type manifestEditor interface {
@@ -114,6 +119,17 @@ type manifestEditResponse struct {
 	// word the restart banner precisely. Both false on a gate-OFF host.
 	RestartRequired bool `json:"restart_required"`
 	HubLive         bool `json:"hub_live"`
+}
+
+func isManifestNotFoundWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "manifest ") && strings.Contains(msg, " does not exist")
 }
 
 // manifestMutationResponse is the create / delete wire shape (R4-2 — bot R4).
@@ -291,6 +307,11 @@ func registerManifestRoutes(s *Server) {
 			// hash-gate read) and must be sanitized before responding.
 			if errors.Is(err, api.ErrManifestHashMismatch) {
 				writeAPIError(w, err, http.StatusConflict, "MANIFEST_HASH_MISMATCH")
+				return
+			}
+			if isManifestNotFoundWriteError(err) {
+				log.Printf("/api/manifest/edit name=%q: %v", name, err)
+				writeAPIError(w, fmt.Errorf("manifest %q not found", name), http.StatusNotFound, "MANIFEST_NOT_FOUND")
 				return
 			}
 			log.Printf("/api/manifest/edit name=%q: %v", name, err)

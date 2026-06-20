@@ -967,14 +967,11 @@ func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
 // per-id unbind is a cheap no-op when there is nothing to drop. The audit is
 // best-effort (a nil/erroring auditFn is tolerated) and never blocks teardown.
 //
-// TODO(§3.x signal #1 — PREFERRED upgrade, not required here): subscribe the
-// router to a cross-process supervisor child-exit → GUI `daemon-failed` event
-// (supervisor_state_machine.go EvChildExit → controller crashCh →
-// internal/gui/events.go SSE bus) so a daemon death is observed even when NO
-// client request is in flight to surface it. The GUI event bus lacks a
-// `daemon-failed` event today (§11.9), so this floor + the IPC pid_generation
-// reconcile fallback (reconcileSerenaBackendLossViaIPC) ship first; signal #1
-// is a later upgrade once the event is added.
+// §3.x signal #1 (the event-driven faster path that observes a daemon death
+// even when NO client request is in flight) now ships as
+// RunSerenaBackendLossEventSubscriber below — it subscribes to the GUI event
+// bus's `daemon-backend-lost` event and wakes the IPC reconcile immediately,
+// ahead of the 30s fallback interval. This floor stays the always-on backstop.
 func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID string, cause error, auditFn func(level, event string, fields map[string]any) error) {
 	var sticky sessionRouter
 	if deps := s.serenaRouterDepsProd(); deps != nil {
@@ -999,6 +996,55 @@ func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID 
 			"trigger":           "forward-failure",
 			"err":               errStr,
 		})
+	}
+}
+
+// SerenaBackendLossReconcileTrigger returns the coalesced wake channel consumed
+// by the GUI lifecycle ticker. Nil means no event wake source is configured.
+func (s *Server) SerenaBackendLossReconcileTrigger() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.serenaBackendLossTrigger
+}
+
+func (s *Server) triggerSerenaBackendLossReconcile() {
+	if s == nil || s.serenaBackendLossTrigger == nil {
+		return
+	}
+	select {
+	case s.serenaBackendLossTrigger <- struct{}{}:
+	default:
+	}
+}
+
+// RunSerenaBackendLossEventSubscriber is §3.x signal #1: the event-driven
+// backend-loss trigger. It subscribes to the GUI event bus and, on each serena
+// `daemon-backend-lost` event, wakes ReconcileSerenaBackendLossViaIPC instead
+// of duplicating the reconcile owner's teardown decisions.
+func (s *Server) RunSerenaBackendLossEventSubscriber(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	bus := s.Broadcaster()
+	if bus == nil {
+		return
+	}
+	// Subscribe is best-effort: if the bounded subscriber channel drops an
+	// event, the 30s IPC reconcile fallback remains the correctness floor.
+	s.consumeSerenaBackendLossEvents(ctx, bus.Subscribe(ctx))
+}
+
+func (s *Server) consumeSerenaBackendLossEvents(ctx context.Context, ch <-chan Event) {
+	_ = ctx
+	for ev := range ch {
+		if ev.Type != "daemon-backend-lost" {
+			continue
+		}
+		if srv, _ := ev.Body["server"].(string); srv != "serena" {
+			continue
+		}
+		s.triggerSerenaBackendLossReconcile()
 	}
 }
 
@@ -1107,8 +1153,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 		// READ failure (that would be a false positive — the daemons may be
 		// fine and only the supervisor IPC momentarily unreachable). The
 		// always-on forward-failure floor still covers real backend loss; this
-		// fallback simply skips this tick. The snapshot is left UNCHANGED so the
-		// next successful tick compares against the last known-good PIDs.
+		// fallback simply skips this tick.
 		return 0
 	}
 
@@ -1231,6 +1276,7 @@ func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 			if deadNow {
 				markLost(path)
 				delete(persisted, path)
+				continue
 			}
 			continue
 		}

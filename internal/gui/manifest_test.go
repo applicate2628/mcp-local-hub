@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -317,6 +318,41 @@ func TestManifestEditHandler_OtherError_Returns500(t *testing.T) {
 		`{"name":"demo","yaml":"name: demo","expected_hash":""}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestManifestEditHandler_NotFound_Returns404(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "os-not-exist",
+			err:  &os.PathError{Op: "open", Path: `/home/alice/.mcphub/servers/ghost/manifest.yaml`, Err: os.ErrNotExist},
+		},
+		{
+			name: "api-not-found",
+			err:  errors.New(`manifest "ghost" does not exist; use create instead`),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			editor := &fakeManifestEditor{err: tc.err}
+			s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
+				&fakeManifestGetter{}, editor)
+			rec := postJSON(t, s, "/api/manifest/edit",
+				`{"name":"ghost","yaml":"name: ghost","expected_hash":"old-hash"}`)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404, body=%q", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, "MANIFEST_NOT_FOUND") {
+				t.Errorf("body=%q missing MANIFEST_NOT_FOUND code", body)
+			}
+			if strings.Contains(body, "/home/alice") || strings.Contains(body, "use create instead") {
+				t.Errorf("body leaks backend not-found detail: %q", body)
+			}
+		})
 	}
 }
 

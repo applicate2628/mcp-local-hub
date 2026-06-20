@@ -3,7 +3,7 @@
 // StatusPoller samples statusProvider.Status() on a fixed interval and
 // publishes a "daemon-state" event onto the Broadcaster on every
 // observed change in (Server, Daemon, State, PID, Port, OrphanPID,
-// LastResult, JobProtection). On a rising FAILURE edge (a row that newly
+// StalePID, LastResult, JobProtection). On a rising FAILURE edge (a row that newly
 // trips api.IsRealFailure(LastResult) or whose State contains "fail") it
 // ALSO publishes a "daemon-failed" event for the Dashboard/toast alert
 // surface, and on the symmetric FALLING edge (failed -> healthy) a
@@ -25,7 +25,7 @@ import (
 
 // StatusPoller samples api.Status() on a fixed interval and publishes
 // a daemon-state event on every observed change in (Server, Daemon,
-// State, PID, Port, OrphanPID, JobProtection). The event body matches
+// State, PID, Port, OrphanPID, StalePID, JobProtection). The event body matches
 // spec §3.6.
 //
 // The cache is keyed by the composite "<server>/<daemon>" tuple because
@@ -132,6 +132,14 @@ func keyFor(r api.DaemonStatus) string {
 	return r.Server + "/" + d
 }
 
+func isSerenaBackendLossRow(r api.DaemonStatus) bool {
+	return strings.EqualFold(r.Server, "serena")
+}
+
+func isConfirmedDeadDaemonRow(r api.DaemonStatus) bool {
+	return r.PID == 0 && r.StalePID == 0 && !strings.EqualFold(r.State, "Running")
+}
+
 // Run blocks until ctx is canceled. Polls every interval and publishes
 // deltas. Fetch errors are surfaced as "poller-error" events and the
 // loop continues on the next tick.
@@ -187,6 +195,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			prev.PID == r.PID &&
 			prev.Port == r.Port &&
 			prev.OrphanPID == r.OrphanPID &&
+			prev.StalePID == r.StalePID &&
 			prev.LastResult == r.LastResult &&
 			boolPtrEqual(prev.JobProtection, r.JobProtection) {
 			continue
@@ -200,6 +209,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		// failed on first observation still emits once.
 		nowFailed := isFailedDaemonState(r)
 		failedEdge := nowFailed && !isFailedDaemonState(prev)
+		backendLostEdge := isSerenaBackendLossRow(r) && ((ok && prev.PID > 0 && r.PID > 0 && prev.PID != r.PID) || (isConfirmedDeadDaemonRow(r) && !(ok && isConfirmedDeadDaemonRow(prev))))
 		// Falling edge: was failed, now healthy — the supervisor's auto-restart
 		// (or a manual restart) succeeded. The `ok` guard means a daemon
 		// first-seen healthy does NOT spuriously announce a recovery; only a
@@ -255,6 +265,17 @@ func (p *StatusPoller) poll(ctx context.Context) {
 				},
 			})
 		}
+		if backendLostEdge {
+			p.events.Publish(Event{
+				Type: "daemon-backend-lost",
+				Body: map[string]any{
+					"server": r.Server,
+					"daemon": r.Daemon,
+					"port":   r.Port,
+					"state":  r.State,
+				},
+			})
+		}
 		// Symmetric falling edge: announce the recovery so the operator who
 		// got the danger toast also sees the all-clear (C4 "auto-restart done"
 		// notification). Edge-triggered, so it fires exactly once per recovery.
@@ -284,6 +305,17 @@ func (p *StatusPoller) poll(ctx context.Context) {
 					"state":  "Gone",
 				},
 			})
+			if isSerenaBackendLossRow(gone) {
+				p.events.Publish(Event{
+					Type: "daemon-backend-lost",
+					Body: map[string]any{
+						"server": gone.Server,
+						"daemon": gone.Daemon,
+						"port":   gone.Port,
+						"state":  "Gone",
+					},
+				})
+			}
 		}
 	}
 }

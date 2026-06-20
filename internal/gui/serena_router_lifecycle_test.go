@@ -2861,6 +2861,95 @@ func TestSerenaRouter_BackendLoss_IPCReconcileNoTeardownOnStatusError(t *testing
 	}
 }
 
+func TestSerenaRouter_BackendLoss_CachedDaemonSession404CopiedToClient(t *testing.T) {
+	var mu sync.Mutex
+	validDaemonSID := "daemon-a-session"
+	initCount := 0
+	var forwardedSIDs []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var probe struct {
+			Method string          `json:"method"`
+			ID     json.RawMessage `json:"id"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &probe)
+
+		switch probe.Method {
+		case "initialize":
+			mu.Lock()
+			initCount++
+			sid := validDaemonSID
+			mu.Unlock()
+			w.Header().Set("Mcp-Session-Id", sid)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%q,"serverInfo":{"name":"serena","version":"fake"},"capabilities":{"tools":{}}}}`, idOrNull(probe.ID), probe.Params.ProtocolVersion)
+			return
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
+		daemonSID := r.Header.Get("Mcp-Session-Id")
+		mu.Lock()
+		forwardedSIDs = append(forwardedSIDs, daemonSID)
+		known := daemonSID != "" && daemonSID == validDaemonSID
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if !known {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"error":{"code":-32600,"message":"unknown session"}}`, idOrNull(probe.ID))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: testServerPort(t, ts)}
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+	}
+	s := newSerenaTestServer(t, deps)
+
+	sid := mintRouterSession(t, s, "2025-11-25")
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"})
+	rr := postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("initial tool call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	mu.Lock()
+	validDaemonSID = "daemon-b-session"
+	mu.Unlock()
+	rr = postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("stale cached daemon session status = %d, want 404 copied from live replacement daemon; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Mcp-Session-Id"); got != sid {
+		t.Fatalf("client session header = %q, want router session %q preserved while copying upstream 404", got, sid)
+	}
+	if !strings.Contains(rr.Body.String(), `"unknown session"`) {
+		t.Fatalf("404 body was not copied from upstream; body=%s", rr.Body.String())
+	}
+	mu.Lock()
+	gotInitCount := initCount
+	gotForwardedSIDs := append([]string(nil), forwardedSIDs...)
+	mu.Unlock()
+	if gotInitCount != 1 {
+		t.Fatalf("router performed %d upstream initializes, want 1; stale request must reuse cached daemon session and receive B's 404", gotInitCount)
+	}
+	if len(gotForwardedSIDs) != 2 || gotForwardedSIDs[0] != "daemon-a-session" || gotForwardedSIDs[1] != "daemon-a-session" {
+		t.Fatalf("forwarded daemon session ids = %v, want cached daemon-a-session on both forwards", gotForwardedSIDs)
+	}
+}
+
 // ---------------------------------------------------------------------
 // §3 fail-loud — REGRESSION (PR #280, P1): a client-side request cancel
 // (MCP client interrupts an in-flight serena tool call / disconnects

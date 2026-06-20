@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 
 	toml "github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
@@ -1319,13 +1320,28 @@ func shapeWindsurfEntry(raw map[string]any) ClientEntry {
 // directory only — used by tests to inject a hermetic manifest set.
 func readManifestNames(dir string) (map[string]bool, error) {
 	names := map[string]bool{}
+	// add registers a manifest name UNLESS it is a kind=companion manifest. A
+	// companion is a hub-managed NON-MCP process (e.g. the excalidraw canvas) and
+	// must never appear as an MCP server in classify / the Servers matrix /
+	// via-hub detection. This is the single SOURCE-FILTER the companion design
+	// relies on (routing/install/migrate sink-guards are defense-in-depth) —
+	// excluding it here removes it from every scan-derived MCP surface at once. A
+	// manifest that fails to load is kept (existing behavior — a malformed
+	// manifest still surfaces as a name); only a successfully-parsed companion is
+	// filtered out.
+	add := func(n string) {
+		if m, err := loadManifestForServer(dir, n); err == nil && m != nil && m.Kind == config.KindCompanion {
+			return
+		}
+		names[n] = true
+	}
 	if dir == "" {
 		list, err := listManifestNamesEmbedFirst()
 		if err != nil {
 			return nil, err
 		}
 		for _, n := range list {
-			names[n] = true
+			add(n)
 		}
 		return names, nil
 	}
@@ -1341,7 +1357,7 @@ func readManifestNames(dir string) (map[string]bool, error) {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(dir, e.Name(), "manifest.yaml")); err == nil {
-			names[e.Name()] = true
+			add(e.Name())
 		}
 	}
 	return names, nil

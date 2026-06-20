@@ -112,6 +112,15 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 			report.Failed = append(report.Failed, FailedMigration{Server: server, Err: err.Error()})
 			continue
 		}
+		// Companion sink-guard: a kind=companion server is a hub-managed NON-MCP
+		// process with no client routing. It has no client_bindings, so the
+		// binding loop below is a no-op — but the synthesized-binding pass would
+		// otherwise fabricate a binding from its primary daemon and write a bogus
+		// client URL. Skip it outright (defense-in-depth atop the scan
+		// source-filter that already keeps it out of the matrix).
+		if m.Kind == config.KindCompanion {
+			continue
+		}
 		// Track which clients a manifest binding already covers for this
 		// server so the synthesized-binding pass below does not migrate a
 		// client twice.

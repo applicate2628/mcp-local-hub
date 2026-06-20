@@ -319,6 +319,8 @@ func classifyEvent(eventType string) (source string, severity string) {
 		// reader can filter the failure onset out of the steady-state
 		// daemon-state churn.
 		return "poller", api.GUIEventSeverityError
+	case "daemon-backend-lost":
+		return "poller", api.GUIEventSeverityInfo
 	case "daemon-recovered":
 		// Falling edge — a previously-failed daemon is healthy again (the
 		// supervisor auto-restart, or a manual restart, succeeded). Info

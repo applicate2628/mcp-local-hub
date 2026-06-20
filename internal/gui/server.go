@@ -268,6 +268,12 @@ func (realManifestGetter) ManifestGetWithHash(name string) (string, string, erro
 	return api.NewAPI().ManifestGetWithHash(name)
 }
 
+type realManifestPresence struct{}
+
+func (realManifestPresence) ManifestExists(name string) (bool, error) {
+	return api.NewAPI().ManifestExists(name)
+}
+
 // realManifestEditor is the production adapter for /api/manifest/edit.
 type realManifestEditor struct{}
 
@@ -512,6 +518,7 @@ type Server struct {
 	manifestCreator      manifestCreator
 	manifestValidator    manifestValidator
 	manifestGetter       manifestGetter
+	manifestPresence     manifestPresence
 	manifestEditor       manifestEditor
 	manifestLister       manifestLister
 	manifestDeleter      manifestDeleter
@@ -663,6 +670,11 @@ type Server struct {
 	// last-unbind deletion avoid blockable resolver scans on hot teardown paths.
 	// Guarded by serenaBackendPIDMu.
 	serenaBackendPathByKey map[string]string
+	// serenaBackendLossTrigger is a coalesced wake signal for the IPC
+	// backend-loss reconcile ticker. The event subscriber owns writes; the GUI
+	// lifecycle ticker owns reads. Nil preserves the pure interval floor for
+	// bare test Servers that bypass NewServer.
+	serenaBackendLossTrigger chan struct{}
 
 	// v0.6 idle-shutdown (#6, spec §6) per-daemon LAST-ACTIVITY tracking.
 	// serenaActivityMu guards serenaLastActivity: WorkspaceKey -> the wall
@@ -735,11 +747,12 @@ func NewServer(cfg Config) *Server {
 		cfg.PID = os.Getpid()
 	}
 	s := &Server{
-		cfg:              cfg,
-		mux:              http.NewServeMux(),
-		hubRestartCh:     make(chan struct{}, 1),
-		guiProcessStart:  time.Now(),
-		pruneEnoentTicks: map[string]int{},
+		cfg:                      cfg,
+		mux:                      http.NewServeMux(),
+		hubRestartCh:             make(chan struct{}, 1),
+		serenaBackendLossTrigger: make(chan struct{}, 1),
+		guiProcessStart:          time.Now(),
+		pruneEnoentTicks:         map[string]int{},
 	}
 	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the
@@ -757,6 +770,7 @@ func NewServer(cfg Config) *Server {
 	s.manifestCreator = realManifestCreator{}
 	s.manifestValidator = realManifestValidator{}
 	s.manifestGetter = realManifestGetter{}
+	s.manifestPresence = realManifestPresence{}
 	s.manifestEditor = realManifestEditor{}
 	s.manifestLister = realManifestLister{}
 	s.manifestDeleter = realManifestDeleter{}

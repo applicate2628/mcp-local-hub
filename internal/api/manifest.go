@@ -212,6 +212,14 @@ func (a *API) RoutableServerNames() ([]string, error) {
 		if len(m.Daemons) == 0 {
 			continue
 		}
+		// kind=companion has daemons[] (so it is supervised) but is a NON-MCP
+		// process with NO client routing — exclude it from the routable /
+		// group-authoring set so the Groups GUI never offers it as a member (the
+		// hub publish scan-filter already drops it from snapshots; excluding it
+		// here stops it being selectable in the first place) (Codex #381).
+		if m.Kind == config.KindCompanion {
+			continue
+		}
 		out = append(out, name)
 	}
 	sort.Strings(out)
@@ -345,6 +353,23 @@ func (a *API) ManifestGetWithHash(name string) (string, string, error) {
 // to change existing ones.
 func (a *API) ManifestCreate(name, yaml string) error {
 	return a.ManifestCreateIn(defaultManifestDir(), name, yaml)
+}
+
+// ManifestExists reports whether the default manifest dir already has the
+// target manifest file. It mirrors ManifestCreateIn's pre-create existence
+// gate without reading the file contents.
+func (a *API) ManifestExists(name string) (bool, error) {
+	if err := checkManifestName(name); err != nil {
+		return false, err
+	}
+	target := filepath.Join(defaultManifestDir(), name, "manifest.yaml")
+	if _, err := os.Stat(target); err == nil {
+		return true, nil
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
 // ManifestCreateIn is the tempdir-capable form of ManifestCreate.
@@ -488,6 +513,10 @@ func (a *API) validateManifestForStorageName(name, yaml string) []string {
 }
 
 // manifestValidationWarnings returns the BLOCKING warnings only.
+// Draft readiness currently mirrors the write gate by calling
+// ManifestValidateMode(Strict), so this alias to manifestBlockingWarnings is a
+// temporary drift-sensitive dependency, not an incidental implementation detail
+// (see work-items/decisions/2026-06-20-draft-readiness-mirrors-write-gate-follow-up.md).
 // Pre-r10 it returned blocking + advisory combined; codex bot r10
 // P2 closure (PR #169) flagged that the GUI save flow
 // (AddServer.tsx) treats ANY warnings.length > 0 as fatal, so
@@ -525,9 +554,15 @@ func manifestBlockingWarnings(m *config.ServerManifest) []string {
 		len(m.Daemons) == 0 {
 		warnings = append(warnings, "no daemons declared")
 	}
-	for _, d := range m.Daemons {
-		if d.Port == 0 {
-			warnings = append(warnings, fmt.Sprintf("daemon %q has port=0", d.Name))
+	// A kind=companion daemon is a NON-MCP process — it binds no mcphub MCP port
+	// (the companion, e.g. the excalidraw canvas, listens on its own port
+	// directly), so port=0 is VALID for it and must not be flagged as a structural
+	// error that blocks the manifest write / install (Codex #381).
+	if m.Kind != config.KindCompanion {
+		for _, d := range m.Daemons {
+			if d.Port == 0 {
+				warnings = append(warnings, fmt.Sprintf("daemon %q has port=0", d.Name))
+			}
 		}
 	}
 	return warnings

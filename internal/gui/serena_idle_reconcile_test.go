@@ -271,6 +271,159 @@ func TestSerenaRouter_BackendLoss_SeedNeverOverwritesExistingBaseline(t *testing
 	}
 }
 
+func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+	withTempSerenaStateRoot(t)
+
+	t.Run("subscriber-filters-and-coalesces-serena-events", func(t *testing.T) {
+		const wsPath = "/proj/event-lsp-ignore"
+		ws := serenaWS("event-lsp-ignore", wsPath, 9308)
+		s, _ := newSerenaStoreSeedServer(t, ws)
+
+		ch := make(chan Event, 8)
+		ch <- Event{Type: "daemon-state", Body: map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey,
+		}}
+		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "mcp-language-server", "daemon": ws.WorkspaceKey, "port": 9308, "state": "Stopped",
+		}}
+		for i := 0; i < 5; i++ {
+			ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+				"server": "serena", "daemon": ws.WorkspaceKey, "port": 9308, "state": "Stopped",
+			}}
+		}
+		close(ch)
+		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+
+		if got := len(s.serenaBackendLossTrigger); got != 1 {
+			t.Fatalf("backend-loss trigger depth after 5 serena events = %d, want 1 coalesced wake", got)
+		}
+	})
+
+	t.Run("triggered-reconcile-preserves-idle-stopped-session", func(t *testing.T) {
+		const wsPath = "/proj/event-idle-stop"
+		const sid = "sid-event-idle-stop"
+		const pidA = 1234
+		ws := serenaWS("event-idle-stop", wsPath, 9306)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-idle-stop")
+		seedSerenaBackendBaseline(s, wsPath, pidA)
+		if err := api.NewAPI().WriteSerenaIdleStop(ws.TaskName, time.Now().UTC()); err != nil {
+			t.Fatalf("seed idle stop: %v", err)
+		}
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{
+				{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Stopped", PID: 0, StalePID: 0, Port: ws.Port},
+			}, nil
+		}
+
+		ch := make(chan Event, 1)
+		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9306, "state": "Stopped",
+		}}
+		close(ch)
+		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+
+		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+		if got := len(s.serenaBackendLossTrigger); got != 1 {
+			t.Fatalf("backend-loss trigger depth = %d, want 1", got)
+		}
+		<-s.serenaBackendLossTrigger
+
+		if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 0 {
+			t.Fatalf("triggered reconcile with active idle stop tore down %d sessions; want 0", n)
+		}
+		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+	})
+
+	t.Run("triggered-reconcile-tears-down-direct-restart", func(t *testing.T) {
+		const wsPath = "/proj/event-direct-restart"
+		const sid = "sid-event-direct-restart"
+		const pidA = 1234
+		const pidB = 7777
+		ws := serenaWS("event-direct-restart", wsPath, 9307)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-direct-restart")
+		seedSerenaBackendBaseline(s, wsPath, pidA)
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{
+				{Server: "serena", Workspace: wsPath, TaskName: ws.TaskName, State: "Running", PID: pidB, Port: ws.Port},
+			}, nil
+		}
+
+		ch := make(chan Event, 1)
+		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9307, "state": "Running",
+		}}
+		close(ch)
+		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+
+		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+		if got := len(s.serenaBackendLossTrigger); got != 1 {
+			t.Fatalf("backend-loss trigger depth = %d, want 1", got)
+		}
+		<-s.serenaBackendLossTrigger
+
+		if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+			t.Fatalf("triggered reconcile after PID %d -> %d restart tore down %d sessions; want 1", pidA, pidB, n)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+	})
+
+	t.Run("triggered-reconcile-ignores-event-daemon-name-and-uses-reconcile-mapping", func(t *testing.T) {
+		const wsPath = "/proj/event-default-daemon"
+		const sid = "sid-event-default-daemon"
+		const pidA = 1234
+		ws := serenaWS("event-default-daemon", wsPath, 9305)
+		s, sessions := newSerenaStoreSeedServer(t, ws)
+		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-event-default-daemon")
+		seedSerenaBackendBaseline(s, wsPath, pidA)
+		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+			return []api.DaemonStatus{
+				{Server: "serena", Daemon: "default", Workspace: wsPath, TaskName: ws.TaskName, State: "Stopped", PID: 0, StalePID: 0, Port: ws.Port},
+			}, nil
+		}
+
+		ch := make(chan Event, 1)
+		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
+			"server": "serena", "daemon": "default", "port": 9305, "state": "Stopped",
+		}}
+		close(ch)
+		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+
+		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
+		if got := len(s.serenaBackendLossTrigger); got != 1 {
+			t.Fatalf("backend-loss trigger depth = %d, want 1", got)
+		}
+		<-s.serenaBackendLossTrigger
+
+		if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
+			t.Fatalf("triggered reconcile for default-named serena event tore down %d sessions; want 1", n)
+		}
+		assertSerenaSessionGone(t, s, sessions, sid)
+	})
+}
+
+func TestSerenaRouter_BackendLossTriggerCoalesces(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+
+	for i := 0; i < 10; i++ {
+		s.triggerSerenaBackendLossReconcile()
+	}
+	if got := len(s.serenaBackendLossTrigger); got != 1 {
+		t.Fatalf("trigger depth after rapid sends = %d, want 1", got)
+	}
+	<-s.serenaBackendLossTrigger
+
+	s.triggerSerenaBackendLossReconcile()
+	if got := len(s.serenaBackendLossTrigger); got != 1 {
+		t.Fatalf("trigger depth after drain and resend = %d, want 1", got)
+	}
+
+	(&Server{}).triggerSerenaBackendLossReconcile()
+	(*Server)(nil).triggerSerenaBackendLossReconcile()
+}
+
 func TestSerenaRouter_BackendLoss_LastUnbindDropsBaselineAndIdleMarker(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 	withTempSerenaStateRoot(t)

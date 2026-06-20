@@ -35,6 +35,20 @@ export async function fetchOrThrow<T>(
   return data as T;
 }
 
+export interface APIError extends Error {
+  code?: string;
+  status: number;
+  body: unknown;
+}
+
+function makeAPIError(status: number, code: string | undefined, message: string, body: unknown): APIError {
+  const err = new Error(message) as APIError;
+  err.code = code;
+  err.status = status;
+  err.body = body;
+  return err;
+}
+
 // postDismiss sends the Migration screen's Unknown-group Dismiss action
 // to the hub. Backend persistence lives in Task 2; GET /api/dismissed
 // in Task 3. This
@@ -126,6 +140,52 @@ export async function postManifestValidate(yaml: string): Promise<string[]> {
   }
   const payload = (await resp.json()) as { warnings?: string[] };
   return payload.warnings ?? [];
+}
+
+// ReadinessRequirement mirrors api.ReadinessRequirement (lowercase JSON tags).
+// `optional` marks an ADVISORY requirement (a not-yet-set `secret:` ref) that
+// does NOT block readiness; the GUI renders these as inline "set to enable"
+// prompt fields at install rather than blockers.
+export interface ReadinessRequirement {
+  name: string;
+  ok: boolean;
+  optional?: boolean;
+  reason?: string;
+  fix?: string;
+}
+
+export interface ReadinessReport {
+  server: string;
+  ready: boolean;
+  requirements: ReadinessRequirement[];
+}
+
+// getServerReadiness fetches the install-readiness report for a SAVED server by
+// name (epic install-and-it-works, area 1). Each requirement carries a guided
+// Fix so the GUI renders an actionable panel instead of a cryptic later
+// HTTP-502 at the client.
+export async function getServerReadiness(server: string): Promise<ReadinessReport> {
+  return fetchOrThrow<ReadinessReport>(
+    `/api/server/readiness?server=${encodeURIComponent(server)}`,
+    "object",
+  );
+}
+
+// checkDraftReadiness checks the readiness of a DRAFT manifest the Add/Edit-
+// server screen is composing, BEFORE it is saved — so the panel updates live as
+// the operator fills the form (incl. which `secret:` refs are still unset).
+export async function checkDraftReadiness(
+  yaml: string,
+  opts: { mode?: "create" | "edit"; editName?: string } = {},
+): Promise<ReadinessReport> {
+  const body: { yaml: string; mode?: "create" | "edit"; edit_name?: string } = { yaml };
+  if (opts.mode) body.mode = opts.mode;
+  if (opts.editName) body.edit_name = opts.editName;
+  return fetchOrThrow<ReadinessReport>("/api/server/readiness", "object", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 // getExtractManifest fetches the prefill YAML that populates AddServer's
@@ -624,7 +684,9 @@ export async function postManifestEdit(
   if (resp.status === 409 && body?.code === "MANIFEST_HASH_MISMATCH") {
     throw new ManifestHashMismatchError(body.error ?? "hash mismatch");
   }
-  throw new Error(`/api/manifest/edit: ${body?.error ?? resp.statusText}`);
+  const msg = body?.error ?? resp.statusText ?? `HTTP ${resp.status}`;
+  const codeTag = body?.code ? ` [${body.code}]` : "";
+  throw makeAPIError(resp.status, body?.code, `/api/manifest/edit${codeTag}: ${msg}`, body ?? {});
 }
 
 // ───────────────────────────────────────────────────────────────────
