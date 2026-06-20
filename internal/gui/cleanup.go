@@ -2,7 +2,6 @@
 package gui
 
 import (
-	"encoding/json"
 	"net/http"
 	"slices"
 
@@ -98,8 +97,8 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req cleanupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		http.Error(w, decodeBodyErrorText(err), decodeBodyStatusCode(err))
 		return
 	}
 	if req.MinAgeSec < 0 {
@@ -206,8 +205,8 @@ func (s *Server) cleanupLogWatchersHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req logWatcherRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		http.Error(w, decodeBodyErrorText(err), decodeBodyStatusCode(err))
 		return
 	}
 

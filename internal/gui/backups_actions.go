@@ -19,7 +19,6 @@
 package gui
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -200,8 +199,8 @@ func (s *Server) backupsRestoreHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req backupRestoreRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
 	cleaned, status, code, verr := validateBackupTarget(req.Client, req.Path)
@@ -228,8 +227,8 @@ func (s *Server) backupsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req backupDeleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
 	cleaned, status, code, verr := validateBackupTarget(req.Client, req.Path)

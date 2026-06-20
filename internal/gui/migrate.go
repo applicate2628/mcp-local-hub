@@ -3,7 +3,6 @@ package gui
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"mcp-local-hub/internal/api"
@@ -32,8 +31,8 @@ func registerMigrateRoutes(s *Server) {
 			return
 		}
 		var req migrateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "BAD_REQUEST")
+		if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "BAD_REQUEST")
 			return
 		}
 		report, err := s.migrator.Migrate(req.Servers, req.Clients)

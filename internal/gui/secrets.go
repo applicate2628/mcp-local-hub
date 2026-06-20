@@ -4,7 +4,6 @@ package gui
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -91,8 +90,8 @@ func (s *Server) secretsListOrAddHandler(w http.ResponseWriter, r *http.Request)
 			Name  string `json:"name"`
 			Value string `json:"value"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "SECRETS_INVALID_JSON")
+		if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "SECRETS_INVALID_JSON")
 			return
 		}
 		if err := s.secrets.Set(body.Name, body.Value); err != nil {
@@ -175,8 +174,8 @@ func (s *Server) secretsKeyRoot(w http.ResponseWriter, r *http.Request, key stri
 			Value   string `json:"value"`
 			Restart bool   `json:"restart"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeAPIError(w, fmt.Errorf("invalid JSON: %w", err), http.StatusBadRequest, "SECRETS_INVALID_JSON")
+		if err := decodeJSONBodyLimited(w, r, &body, maxControlBodyBytes); err != nil {
+			writeDecodeBodyError(w, err, "SECRETS_INVALID_JSON")
 			return
 		}
 		res, err := s.secrets.Rotate(key, body.Value, body.Restart)
