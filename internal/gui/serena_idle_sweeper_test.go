@@ -314,6 +314,22 @@ func TestIdleSweeper_InFlightCounter_Balanced(t *testing.T) {
 	}
 }
 
+func TestSerenaStopGate_PrunesIdleEntryAfterLastExit(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+
+	s.enterSerenaForward("zero-count")
+	s.exitSerenaForward("zero-count")
+
+	s.serenaStopGate.mu.Lock()
+	_, exists := s.serenaStopGate.byWorkspace["zero-count"]
+	size := len(s.serenaStopGate.byWorkspace)
+	s.serenaStopGate.mu.Unlock()
+
+	if exists {
+		t.Fatalf("stop gate retained zero-count idle entry after last exit; map size=%d", size)
+	}
+}
+
 // A non-running (Stopped/Restarting) daemon is never idle-stopped.
 func TestIdleSweeper_NotRunning_Skipped(t *testing.T) {
 	const wsPath = "/proj/zeta"

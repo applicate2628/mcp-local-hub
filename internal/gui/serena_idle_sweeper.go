@@ -163,33 +163,44 @@ const (
 type serenaWorkspaceStopGateEntry struct {
 	inFlight int
 	phase    serenaWorkspaceStopGatePhase
+	waiters  int
 	ready    *sync.Cond
 }
 
-func (g *serenaWorkspaceStopGate) enter(wsKey string) {
-	_ = g.enterCtx(context.Background(), wsKey)
+type serenaWorkspaceStopGateEnterResult struct {
+	entered            bool
+	waitedThroughPrune bool
 }
 
-func (g *serenaWorkspaceStopGate) enterCtx(ctx context.Context, wsKey string) bool {
+func (g *serenaWorkspaceStopGate) enter(wsKey string) serenaWorkspaceStopGateEnterResult {
+	return g.enterCtx(context.Background(), wsKey)
+}
+
+func (g *serenaWorkspaceStopGate) enterCtx(ctx context.Context, wsKey string) serenaWorkspaceStopGateEnterResult {
 	if g == nil || wsKey == "" {
-		return true
+		return serenaWorkspaceStopGateEnterResult{entered: true}
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return false
+		return serenaWorkspaceStopGateEnterResult{}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	entry := g.entryLocked(wsKey)
 	var stopWake func() bool
+	waitedThroughPrune := false
 	for entry.phase != serenaWorkspaceStopGatePhaseNone {
+		if entry.phase == serenaWorkspaceStopGatePhasePrune {
+			waitedThroughPrune = true
+		}
 		if err := ctx.Err(); err != nil {
 			if stopWake != nil {
 				stopWake()
 			}
-			return false
+			g.pruneIdleEntryLocked(wsKey, entry)
+			return serenaWorkspaceStopGateEnterResult{waitedThroughPrune: waitedThroughPrune}
 		}
 		if stopWake == nil {
 			stopWake = context.AfterFunc(ctx, func() {
@@ -199,13 +210,16 @@ func (g *serenaWorkspaceStopGate) enterCtx(ctx context.Context, wsKey string) bo
 			})
 			defer stopWake()
 		}
+		entry.waiters++
 		entry.ready.Wait()
+		entry.waiters--
 	}
 	if err := ctx.Err(); err != nil {
-		return false
+		g.pruneIdleEntryLocked(wsKey, entry)
+		return serenaWorkspaceStopGateEnterResult{waitedThroughPrune: waitedThroughPrune}
 	}
 	entry.inFlight++
-	return true
+	return serenaWorkspaceStopGateEnterResult{entered: true, waitedThroughPrune: waitedThroughPrune}
 }
 
 func (g *serenaWorkspaceStopGate) exit(wsKey string) {
@@ -214,10 +228,14 @@ func (g *serenaWorkspaceStopGate) exit(wsKey string) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	entry := g.entryLocked(wsKey)
+	entry := g.byWorkspace[wsKey]
+	if entry == nil {
+		return
+	}
 	if entry.inFlight > 0 {
 		entry.inFlight--
 	}
+	g.pruneIdleEntryLocked(wsKey, entry)
 }
 
 func (g *serenaWorkspaceStopGate) hasInFlight(wsKey string) bool {
@@ -226,8 +244,8 @@ func (g *serenaWorkspaceStopGate) hasInFlight(wsKey string) bool {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	entry := g.entryLocked(wsKey)
-	return entry.inFlight > 0
+	entry := g.byWorkspace[wsKey]
+	return entry != nil && entry.inFlight > 0
 }
 
 func (g *serenaWorkspaceStopGate) beginIdleStop(wsKey string) bool {
@@ -270,6 +288,7 @@ func (g *serenaWorkspaceStopGate) endPhase(wsKey string, phase serenaWorkspaceSt
 	if entry.phase == phase {
 		entry.phase = serenaWorkspaceStopGatePhaseNone
 		entry.ready.Broadcast()
+		g.pruneIdleEntryLocked(wsKey, entry)
 	}
 }
 
@@ -286,6 +305,15 @@ func (g *serenaWorkspaceStopGate) entryLocked(wsKey string) *serenaWorkspaceStop
 	return entry
 }
 
+func (g *serenaWorkspaceStopGate) pruneIdleEntryLocked(wsKey string, entry *serenaWorkspaceStopGateEntry) {
+	if g == nil || wsKey == "" || entry == nil {
+		return
+	}
+	if entry.inFlight == 0 && entry.phase == serenaWorkspaceStopGatePhaseNone && entry.waiters == 0 {
+		delete(g.byWorkspace, wsKey)
+	}
+}
+
 // enterSerenaForward marks the start of a daemon-bound Serena request for wsKey,
 // including tool-call forwards, tools/list candidate probes, cancel forwards,
 // and client DELETE forwards (increments the in-flight counter). The matching
@@ -294,18 +322,19 @@ func (g *serenaWorkspaceStopGate) entryLocked(wsKey string) *serenaWorkspaceStop
 // "no in-flight request" atomic with starting idle-stop/prune teardown; new
 // requests wait for that phase to finish before wake/handshake/forward. An empty
 // wsKey is ignored.
-func (s *Server) enterSerenaForward(wsKey string) {
+func (s *Server) enterSerenaForward(wsKey string) serenaWorkspaceStopGateEnterResult {
 	if s == nil || wsKey == "" {
-		return
+		return serenaWorkspaceStopGateEnterResult{entered: true}
 	}
-	s.serenaStopGate.enter(wsKey)
+	return s.serenaStopGate.enter(wsKey)
 }
 
-// enterSerenaForwardCtx is the bounded form of enterSerenaForward. It returns
-// false when ctx expires before the current idle-stop/prune phase releases.
-func (s *Server) enterSerenaForwardCtx(ctx context.Context, wsKey string) bool {
+// enterSerenaForwardCtx is the bounded form of enterSerenaForward. The result
+// reports whether the request entered before ctx expired and whether it waited
+// across a prune phase, which means callers must re-read workspace state.
+func (s *Server) enterSerenaForwardCtx(ctx context.Context, wsKey string) serenaWorkspaceStopGateEnterResult {
 	if s == nil || wsKey == "" {
-		return true
+		return serenaWorkspaceStopGateEnterResult{entered: true}
 	}
 	return s.serenaStopGate.enterCtx(ctx, wsKey)
 }

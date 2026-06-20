@@ -728,11 +728,13 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.enterSerenaForward(ws.WorkspaceKey)
-	inFlightWorkspaceKey := ws.WorkspaceKey
+	inFlightWorkspaceKey := ""
 	restampSerenaForwardOnExit := false
 	upstreamReached := false
 	defer func() {
+		if inFlightWorkspaceKey == "" {
+			return
+		}
 		if restampSerenaForwardOnExit {
 			// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
 			// protection. The sweeper reads counter-then-activity unsynchronized;
@@ -752,6 +754,54 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		s.exitSerenaForward(inFlightWorkspaceKey)
 	}()
+
+	for {
+		gate := s.enterSerenaForward(ws.WorkspaceKey)
+		inFlightWorkspaceKey = ws.WorkspaceKey
+		if !gate.waitedThroughPrune {
+			break
+		}
+
+		var refreshed *api.WorkspaceEntry
+		if hasPath {
+			resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
+			if resolveErr != nil {
+				if errors.Is(resolveErr, ErrWorkspaceNotFound) {
+					refreshed = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
+					if refreshed == nil {
+						return
+					}
+				} else {
+					http.Error(w, "resolve workspace: "+resolveErr.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else if resolved == nil {
+				refreshed = s.attemptSerenaAutoRegister(w, r, deps, tb.ID, sessionID, pathArg)
+				if refreshed == nil {
+					return
+				}
+			} else {
+				refreshed = resolved
+			}
+			if sessionID != "" && deps.Sessions != nil {
+				bindSessionAfterUpstream = true
+			}
+		} else {
+			refreshed = s.resolveWorkspaceByKey(deps, ws.WorkspaceKey)
+			if refreshed == nil {
+				writeWorkspaceNotFound(w, "", true)
+				return
+			}
+		}
+
+		if refreshed.WorkspaceKey == ws.WorkspaceKey {
+			ws = refreshed
+			break
+		}
+		s.exitSerenaForward(inFlightWorkspaceKey)
+		inFlightWorkspaceKey = ""
+		ws = refreshed
+	}
 
 	upstreamURL := upstreamURLFn(ws)
 	if upstreamURL == "" {
@@ -1524,56 +1574,71 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		httpClient := serenaHTTPClient(deps.HTTPClient, upstreamTimeout)
 
-		if upstreamURL := upstreamURLFn(delWS); upstreamURL != "" {
-			// Detach from r.Context() (mirror the hub's handleDelete,
-			// internal/api/hub_mcp_handler.go): a client that disconnects
-			// right after sending DELETE would otherwise cancel r.Context()
-			// immediately and short-circuit the daemon-side teardown —
-			// leaking the upstream session this finding exists to release.
-			//
-			// Bound: this is handleSerenaDelete's MAIN teardown — the thing the
-			// client's DELETE is awaiting (the 204 fires after it), NOT a
-			// fire-and-forget call. sonnet post-PASS finding 1: it used to use the
-			// 60s upstreamTimeout default, which blocked the client's 204 for up to
-			// a minute AND held this handler goroutine 60s after a client
-			// disconnect (the context is detached from r.Context()) on a hung/slow
-			// daemon. The local revocation already ran above (Finding A), so a slow
-			// daemon cannot delay revocation — only the 204 ack. Cap it at the SHORT
-			// serenaDeleteTimeout (5s, matching the hub's per-daemon teardown budget
-			// and internal/daemon/http_host.go's httpHostCleanupTimeout) so the
-			// client's teardown 204 lands within ~5s regardless of daemon health.
-			// Still detached from r.Context() (correct — survives client
-			// disconnect), just bounded to 5s instead of 60s. (This is distinct from
-			// the Invariant-D fire-and-forget cleanupContext sites #4/#6/#7 + the
-			// displaced-rebind teardown, which use serenaCleanupTimeout/min budget;
-			// the DELETE forward is awaited so it gets its own equal-5s constant.)
-			//
-			// Finding #8 + Finding 2 (V-forward): forward the version the daemon
-			// session was established under. Prefer the persisted
-			// daemonProtocolVersion (the daemon-negotiated version on the
-			// binding); fall back to the router-client session version
-			// (deleteProtocolVersion) for a legacy binding stored before #8 or
-			// an unknown router session. effectiveHandshakeProtocolVersion fills
-			// the router default if both are empty, so the teardown always
-			// carries a non-empty MCP-Protocol-Version and a strict daemon does
-			// not 400 the DELETE.
-			teardownVersion := daemonProtocolVersion
-			if teardownVersion == "" {
-				teardownVersion = deleteProtocolVersion
-			}
-			func() {
-				gateKey := delWS.WorkspaceKey
-				if gateKey == "" {
-					gateKey = wsKey
-				}
-				fwdCtx, fwdCancel := context.WithTimeout(context.Background(), serenaDeleteTimeout)
-				defer fwdCancel()
-				if entered := s.enterSerenaForwardCtx(fwdCtx, gateKey); entered {
-					defer s.exitSerenaForward(gateKey)
-				}
-				s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, delWS, auditFn)
-			}()
+		// Detach from r.Context() (mirror the hub's handleDelete,
+		// internal/api/hub_mcp_handler.go): a client that disconnects
+		// right after sending DELETE would otherwise cancel r.Context()
+		// immediately and short-circuit the daemon-side teardown —
+		// leaking the upstream session this finding exists to release.
+		//
+		// Bound: this is handleSerenaDelete's MAIN teardown — the thing the
+		// client's DELETE is awaiting (the 204 fires after it), NOT a
+		// fire-and-forget call. sonnet post-PASS finding 1: it used to use the
+		// 60s upstreamTimeout default, which blocked the client's 204 for up to
+		// a minute AND held this handler goroutine 60s after a client
+		// disconnect (the context is detached from r.Context()) on a hung/slow
+		// daemon. The local revocation already ran above (Finding A), so a slow
+		// daemon cannot delay revocation — only the 204 ack. Cap it at the SHORT
+		// serenaDeleteTimeout (5s, matching the hub's per-daemon teardown budget
+		// and internal/daemon/http_host.go's httpHostCleanupTimeout) so the
+		// client's teardown 204 lands within ~5s regardless of daemon health.
+		// Still detached from r.Context() (correct — survives client
+		// disconnect), just bounded to 5s instead of 60s. (This is distinct from
+		// the Invariant-D fire-and-forget cleanupContext sites #4/#6/#7 + the
+		// displaced-rebind teardown, which use serenaCleanupTimeout/min budget;
+		// the DELETE forward is awaited so it gets its own equal-5s constant.)
+		//
+		// Finding #8 + Finding 2 (V-forward): forward the version the daemon
+		// session was established under. Prefer the persisted
+		// daemonProtocolVersion (the daemon-negotiated version on the
+		// binding); fall back to the router-client session version
+		// (deleteProtocolVersion) for a legacy binding stored before #8 or
+		// an unknown router session. effectiveHandshakeProtocolVersion fills
+		// the router default if both are empty, so the teardown always
+		// carries a non-empty MCP-Protocol-Version and a strict daemon does
+		// not 400 the DELETE.
+		teardownVersion := daemonProtocolVersion
+		if teardownVersion == "" {
+			teardownVersion = deleteProtocolVersion
 		}
+		func() {
+			gateKey := delWS.WorkspaceKey
+			if gateKey == "" {
+				gateKey = wsKey
+			}
+			fwdCtx, fwdCancel := context.WithTimeout(context.Background(), serenaDeleteTimeout)
+			defer fwdCancel()
+			gate := s.enterSerenaForwardCtx(fwdCtx, gateKey)
+			if !gate.entered {
+				return
+			}
+			defer s.exitSerenaForward(gateKey)
+
+			fwdWS := delWS
+			if gate.waitedThroughPrune {
+				if wsKey == "" {
+					return
+				}
+				fwdWS = s.resolveWorkspaceByKey(deps, wsKey)
+				if fwdWS == nil {
+					return
+				}
+			}
+			upstreamURL := upstreamURLFn(fwdWS)
+			if upstreamURL == "" {
+				return
+			}
+			s.forwardSerenaDeleteUpstream(fwdCtx, httpClient, upstreamURL, daemonSessionID, effectiveHandshakeProtocolVersion(teardownVersion), wsKey, fwdWS, auditFn)
+		}()
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -1827,12 +1892,32 @@ func (s *Server) handleSerenaCancelled(
 					fwdClient := httpClient
 					fwdAudit := auditFn
 					fwdTimeout := deps.UpstreamTimeout
+					fwdDeps := deps
 					go func() {
-						s.enterSerenaForward(fwdGateKey)
-						defer s.exitSerenaForward(fwdGateKey)
 						fwdCtx, fwdCancel := cleanupContext(fwdTimeout)
 						defer fwdCancel()
-						s.forwardSerenaCancelledUpstream(fwdCtx, fwdClient, fwdURL, fwdDaemonSID, fwdVersion, fwdWSKey, fwdWS, cancelBody, fwdAudit)
+						gate := s.enterSerenaForwardCtx(fwdCtx, fwdGateKey)
+						if !gate.entered {
+							return
+						}
+						defer s.exitSerenaForward(fwdGateKey)
+
+						forwardWS := fwdWS
+						forwardURL := fwdURL
+						if gate.waitedThroughPrune {
+							if fwdWSKey == "" {
+								return
+							}
+							forwardWS = s.resolveWorkspaceByKey(fwdDeps, fwdWSKey)
+							if forwardWS == nil {
+								return
+							}
+							forwardURL = upstreamURLFn(forwardWS)
+							if forwardURL == "" {
+								return
+							}
+						}
+						s.forwardSerenaCancelledUpstream(fwdCtx, fwdClient, forwardURL, fwdDaemonSID, fwdVersion, fwdWSKey, forwardWS, cancelBody, fwdAudit)
 					}()
 				}
 			}
