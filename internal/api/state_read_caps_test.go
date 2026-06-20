@@ -48,6 +48,11 @@ func TestStateFileReadCapResolverByKind(t *testing.T) {
 			want: 16 << 20,
 		},
 		{
+			name: "workspace registry",
+			path: filepath.Join(stateDir, "workspaces.yaml"),
+			want: maxWorkspaceRegistryFileBytes,
+		},
+		{
 			name: "ordinary state",
 			path: filepath.Join(stateDir, "supervisor-state.json"),
 			want: 1 << 20,

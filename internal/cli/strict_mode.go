@@ -658,7 +658,15 @@ reconcile:
 func reconcileBothResources(target bool, deps StrictModeDeps) error {
 	// Preserve fields we don't own from existing intent.
 	var preserved *api.SupervisorIntentFile
-	if existing, err := api.ReadSupervisorIntent(deps.IntentPath); err == nil {
+	var existing *api.SupervisorIntentFile
+	var existingErr error
+	if bypassErr := api.WithStrictModeMutationGateBypass(func() error {
+		existing, existingErr = api.ReadSupervisorIntent(deps.IntentPath)
+		return nil
+	}); bypassErr != nil {
+		return fmt.Errorf("intent read bypass: %w", bypassErr)
+	}
+	if existingErr == nil {
 		preserved = existing
 	}
 	newIntent := supervisorIntentWithStrictMode(preserved, target)

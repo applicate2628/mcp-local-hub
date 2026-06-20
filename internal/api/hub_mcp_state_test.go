@@ -175,9 +175,10 @@ func TestWriteHubMcpStateFile_HonorsPersistedStrictModeWhenParentInsecure(t *tes
 	broadenParentForStateFileTest(t, stateDir)
 	daemonStateRootOverride = stateDir
 	resetStrictModeIntentCacheForTest()
-	if !OperatorRequiresSingleUserHome() {
+	if !readStrictModeFromIntentBestEffort() {
 		t.Fatal("precondition: persisted strict_mode=true with env unset must enable the strict gate")
 	}
+	resetStrictModeIntentCacheForTest()
 
 	err := writeHubMcpStateFile(hubMcpEndpointFileLeaf, []byte(`{"port":9125}`))
 	if err == nil {

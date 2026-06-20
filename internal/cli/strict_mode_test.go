@@ -588,10 +588,35 @@ func TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode(t *testing.
 		breadcrumbPath: filepath.Join(stateDir, "strict-mode-mutation-incomplete.json"),
 		backend:        &fakeAutostartBackend{},
 	}
+	timerEnabled := true
 	initial := &api.SupervisorIntentFile{
-		Version:    1,
-		UpdatedAt:  "1970-01-01T00:00:00Z",
+		Version:   11,
+		UpdatedAt: "1970-01-01T00:00:00Z",
+		Daemons: []api.SupervisorDaemon{{
+			TaskName:     `\mcp-local-hub-memory-default`,
+			Server:       "memory",
+			Daemon:       "default",
+			Command:      "node",
+			Args:         []string{"memory-server.js"},
+			Port:         9128,
+			ManifestHash: "sha256:memory",
+		}},
+		MaintenanceTimers: []api.MaintenanceTimer{{
+			Name:    `\mcp-local-hub-maintenance-memory`,
+			Kind:    "server-weekly-refresh",
+			Server:  "memory",
+			Command: "mcphub",
+			Args:    []string{"maintenance", "refresh", "memory"},
+			Enabled: &timerEnabled,
+		}},
 		StrictMode: false,
+		Stops: map[string]api.DaemonIntent{
+			`\mcp-local-hub-memory-default`: {
+				Desired:   api.IntentDesiredStopped,
+				Reason:    api.IntentReasonUserStop,
+				UpdatedAt: time.Date(2026, 6, 20, 14, 0, 0, 0, time.UTC),
+			},
+		},
 	}
 	if err := api.WriteSupervisorIntent(tmp.intentPath, initial); err != nil {
 		t.Fatalf("seed intent: %v", err)
@@ -608,7 +633,11 @@ func TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode(t *testing.
 	if err := api.WriteStateFileBytesAtomic(tmp.BreadcrumbPath(), raw); err != nil {
 		t.Fatalf("seed breadcrumb: %v", err)
 	}
-	tmp.SeedInitialStrict(true)
+	liveIntent := *initial
+	liveIntent.StrictMode = true
+	if err := api.WriteSupervisorIntent(tmp.IntentPath(), &liveIntent); err != nil {
+		t.Fatalf("seed live strict intent: %v", err)
+	}
 	tmp.backend.installed = true
 	tmp.backend.currentStrict = false
 	api.ResetStrictModeIntentCacheForTest()
@@ -628,6 +657,21 @@ func TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode(t *testing.
 	}
 	if tmp.backend.currentStrict {
 		t.Fatal("recover branch B unexpectedly left shim strict_mode=true")
+	}
+	if intent.Version != initial.Version {
+		t.Fatalf("version = %d, want %d", intent.Version, initial.Version)
+	}
+	if intent.UpdatedAt != initial.UpdatedAt {
+		t.Fatalf("updated_at = %q, want %q", intent.UpdatedAt, initial.UpdatedAt)
+	}
+	if !reflect.DeepEqual(intent.Daemons, initial.Daemons) {
+		t.Fatalf("daemons changed: got %+v want %+v", intent.Daemons, initial.Daemons)
+	}
+	if !reflect.DeepEqual(intent.MaintenanceTimers, initial.MaintenanceTimers) {
+		t.Fatalf("maintenance_timers changed: got %+v want %+v", intent.MaintenanceTimers, initial.MaintenanceTimers)
+	}
+	if !reflect.DeepEqual(intent.Stops, initial.Stops) {
+		t.Fatalf("stops changed: got %+v want %+v", intent.Stops, initial.Stops)
 	}
 }
 

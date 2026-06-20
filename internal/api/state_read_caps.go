@@ -20,6 +20,9 @@ const (
 	// maxVaultBlobFileBytes bounds the encrypted secrets vault. The vault can
 	// legitimately exceed the small hub-state cap as operators add secrets.
 	maxVaultBlobFileBytes = 16 << 20
+	// maxWorkspaceRegistryFileBytes bounds workspaces.yaml. The registry can
+	// legitimately exceed the small hub-state cap on hosts with many workspaces.
+	maxWorkspaceRegistryFileBytes = 16 << 20
 )
 
 func stateFileReadCapBytes(path string) int64 {
@@ -31,6 +34,8 @@ func stateFileReadCapBytes(path string) int64 {
 		return maxAgeKeyFileBytes
 	case "secrets.age":
 		return maxVaultBlobFileBytes
+	case "workspaces.yaml":
+		return maxWorkspaceRegistryFileBytes
 	default:
 		return maxStateFileBytes
 	}
