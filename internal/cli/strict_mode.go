@@ -326,32 +326,48 @@ func acquireStrictModeStateLocks(stateDir string) (*api.StateDirLockSet, error) 
 	return locks, err
 }
 
-type strictModeShimFingerprint string
+type strictModeShimFingerprintKind string
 
 const (
-	strictModeShimFingerprintAbsent          strictModeShimFingerprint = "absent"
-	strictModeShimFingerprintEnabledMatching strictModeShimFingerprint = "enabled-matching"
-	strictModeShimFingerprintDrifted         strictModeShimFingerprint = "drifted"
-	strictModeShimFingerprintStaleResidue    strictModeShimFingerprint = "stale-residue"
+	strictModeShimFingerprintAbsent          strictModeShimFingerprintKind = "absent"
+	strictModeShimFingerprintEnabledMatching strictModeShimFingerprintKind = "enabled-matching"
+	strictModeShimFingerprintDrifted         strictModeShimFingerprintKind = "drifted"
+	strictModeShimFingerprintStaleResidue    strictModeShimFingerprintKind = "stale-residue"
 )
+
+type strictModeShimFingerprint struct {
+	kind strictModeShimFingerprintKind
+	spec string
+}
+
+func (f strictModeShimFingerprint) String() string {
+	if f.spec == "" {
+		return string(f.kind)
+	}
+	return string(f.kind) + ":" + f.spec
+}
 
 // strictModeShimDriftFingerprint keeps only the shim-shape facts strict-mode
 // needs for rollback safety. Status distinguishes enabled-running from
 // enabled-stopped for operator liveness reporting, but both mean the same
-// installed shim matched the StrictMode probe options. Drifted stays distinct
-// because it is the backend's signal that the shim args/path no longer match.
-func strictModeShimDriftFingerprint(state autostart.State) strictModeShimFingerprint {
-	switch state {
+// installed shim matched the StrictMode probe options. Drifted/stale-residue
+// include the backend-owned spec fingerprint so distinct drifted shims do not
+// collapse into one coarse bucket.
+func strictModeShimDriftFingerprint(snapshot autostart.StatusSnapshot) strictModeShimFingerprint {
+	switch snapshot.State {
 	case autostart.StateAbsent:
-		return strictModeShimFingerprintAbsent
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintAbsent}
 	case autostart.StateEnabledRunning, autostart.StateEnabledStopped:
-		return strictModeShimFingerprintEnabledMatching
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintEnabledMatching}
 	case autostart.StateDrifted:
-		return strictModeShimFingerprintDrifted
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintDrifted, spec: snapshot.SpecFingerprint}
 	case autostart.StateStaleResidue:
-		return strictModeShimFingerprintStaleResidue
+		return strictModeShimFingerprint{kind: strictModeShimFingerprintStaleResidue, spec: snapshot.SpecFingerprint}
 	default:
-		return strictModeShimFingerprint(fmt.Sprintf("unknown:%d", state))
+		return strictModeShimFingerprint{
+			kind: strictModeShimFingerprintKind(fmt.Sprintf("unknown:%d", snapshot.State)),
+			spec: snapshot.SpecFingerprint,
+		}
 	}
 }
 
@@ -382,7 +398,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// value still carries liveness-only noise (enabled-running vs
 	// enabled-stopped), so the revert branch compares the drift fingerprint
 	// derived from this baseline instead of raw State equality.
-	shimSnapshot, snapshotErr := deps.AutostartBackend.Status(autostart.Options{StrictMode: originalStrict})
+	shimSnapshot, snapshotErr := deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict})
 	shimSnapshotFingerprint := strictModeShimDriftFingerprint(shimSnapshot)
 
 	// Forward-progress breadcrumb for the SIGKILL/power-loss window
@@ -506,10 +522,10 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		// back into sync. The invariant: strict-mode never reports clean while
 		// the shim might be out of sync with the (reverted) intent.
 		shimProvenUnchanged := false
-		var reprobe autostart.State
+		var reprobe autostart.StatusSnapshot
 		var reprobeErr error
 		if snapshotErr == nil {
-			reprobe, reprobeErr = deps.AutostartBackend.Status(autostart.Options{StrictMode: originalStrict})
+			reprobe, reprobeErr = deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict})
 			if reprobeErr == nil && strictModeShimDriftFingerprint(reprobe) == shimSnapshotFingerprint {
 				shimProvenUnchanged = true
 			}

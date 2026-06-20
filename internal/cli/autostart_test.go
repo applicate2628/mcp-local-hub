@@ -37,6 +37,10 @@ func (f *fakeBackend) Status(opts autostart.Options) (autostart.State, error) {
 	f.statusCalls = append(f.statusCalls, opts)
 	return f.statusReturn, f.statusErr
 }
+func (f *fakeBackend) StatusSnapshot(opts autostart.Options) (autostart.StatusSnapshot, error) {
+	state, err := f.Status(opts)
+	return autostart.StatusSnapshot{State: state}, err
+}
 
 // withFakeBackend swaps the autostart factory and returns the fake so
 // the test can inspect it. Restores the prior factory on cleanup.

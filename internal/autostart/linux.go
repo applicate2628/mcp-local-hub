@@ -276,33 +276,55 @@ func (l *linuxBackend) Disable() error {
 //   - Unit present + is-active!="active" + body matches → StateEnabledStopped.
 //   - Unit present + body mismatch → StateDrifted regardless of liveness.
 func (l *linuxBackend) Status(opts Options) (State, error) {
+	snapshot, err := l.StatusSnapshot(opts)
+	return snapshot.State, err
+}
+
+// StatusSnapshot reports State plus a spec fingerprint derived from the unit
+// body and systemd enabled status. It deliberately excludes is-active liveness
+// so running↔stopped ticks do not look like shim spec drift.
+func (l *linuxBackend) StatusSnapshot(opts Options) (StatusSnapshot, error) {
 	unitPath, err := unitPathFn()
 	if err != nil {
-		return StateAbsent, fmt.Errorf("resolve unit path: %w", err)
+		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("resolve unit path: %w", err)
 	}
 	body, err := os.ReadFile(unitPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return StateAbsent, nil
+			return StatusSnapshot{State: StateAbsent}, nil
 		}
-		return StateAbsent, fmt.Errorf("read unit: %w", err)
+		return StatusSnapshot{State: StateAbsent}, fmt.Errorf("read unit: %w", err)
 	}
+	enabled := linuxUnitEnabledStatus()
+	spec := shimSpecFingerprint("linux", "installed=true", "enabled="+enabled, "unit="+string(body))
 	want, err := resolveMCPHubPath(opts)
 	if err != nil {
-		return StateAbsent, err
+		return StatusSnapshot{State: StateAbsent, SpecFingerprint: spec}, err
 	}
 	expected := renderLinuxUnit(want, opts.StrictMode)
 	if string(body) != expected {
-		return StateDrifted, nil
+		return StatusSnapshot{State: StateDrifted, SpecFingerprint: spec}, nil
 	}
 	// is-active returns exit 0 + "active" when running, exit 3 +
 	// "inactive"/"failed"/"activating" otherwise. We only need the
 	// stdout token to decide.
 	stdout, _, _ := systemctlFn([]string{"--user", "is-active", linuxUnitName})
 	if strings.TrimSpace(stdout) == "active" {
-		return StateEnabledRunning, nil
+		return StatusSnapshot{State: StateEnabledRunning, SpecFingerprint: spec}, nil
 	}
-	return StateEnabledStopped, nil
+	return StatusSnapshot{State: StateEnabledStopped, SpecFingerprint: spec}, nil
+}
+
+func linuxUnitEnabledStatus() string {
+	stdout, _, err := systemctlFn([]string{"--user", "is-enabled", linuxUnitName})
+	if err != nil {
+		return "unknown"
+	}
+	status := strings.TrimSpace(stdout)
+	if status == "" {
+		return "unknown"
+	}
+	return status
 }
 
 // isSystemctlMissing returns true when realSystemctl's exec.LookPath

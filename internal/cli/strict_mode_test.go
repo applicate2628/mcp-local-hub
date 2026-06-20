@@ -42,7 +42,8 @@ type fakeAutostartBackend struct {
 	// failed Enable can disagree (the torn-shim signal). When nil, Status
 	// falls back to the legacy installed/StateEnabledRunning behavior so every
 	// pre-existing test keeps its semantics.
-	statusFn func(opts autostart.Options) (autostart.State, error)
+	statusFn     func(opts autostart.Options) (autostart.State, error)
+	statusSpecFn func(opts autostart.Options) string
 }
 
 func (f *fakeAutostartBackend) Enable(opts autostart.Options) error {
@@ -78,6 +79,15 @@ func (f *fakeAutostartBackend) Status(opts autostart.Options) (autostart.State, 
 		return autostart.StateAbsent, nil
 	}
 	return autostart.StateEnabledRunning, nil
+}
+
+func (f *fakeAutostartBackend) StatusSnapshot(opts autostart.Options) (autostart.StatusSnapshot, error) {
+	state, err := f.Status(opts)
+	spec := ""
+	if f.statusSpecFn != nil {
+		spec = f.statusSpecFn(opts)
+	}
+	return autostart.StatusSnapshot{State: state, SpecFingerprint: spec}, err
 }
 
 // strictModeFixture is the test harness referenced in plan §2553-2600.
@@ -457,6 +467,21 @@ func tornShimStatusFn(states ...autostart.State) func(autostart.Options) (autost
 	}
 }
 
+// tornShimSpecFn returns a liveness-free synthetic shim spec for each Status
+// probe. Tests use it to distinguish drifted-A from drifted-B while keeping
+// both states at StateDrifted.
+func tornShimSpecFn(specs ...string) func(autostart.Options) string {
+	call := 0
+	return func(autostart.Options) string {
+		idx := call
+		if idx >= len(specs) {
+			idx = len(specs) - 1
+		}
+		call++
+		return specs[idx]
+	}
+}
+
 // TestStrictModeEnable_TornShimKeepsBreadcrumb is the P1 falsifying regression.
 // Pre-fix: Enable fails, intent revert succeeds, and the code BLINDLY deletes
 // the breadcrumb and reports clean — even though the shim is torn. Post-fix the
@@ -497,6 +522,73 @@ func TestStrictModeEnable_TornShimKeepsBreadcrumb(t *testing.T) {
 	}
 	if intent.StrictMode {
 		t.Error("intent.strict_mode not reverted to false after torn-shim failure")
+	}
+}
+
+func TestStrictModeEnable_DriftedSpecChangeKeepsBreadcrumb(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.SeedInitialStrict(false)
+	tmp.MakeShimWriteFail()
+	tmp.backend.statusFn = tornShimStatusFn(autostart.StateDrifted, autostart.StateDrifted)
+	tmp.backend.statusSpecFn = tornShimSpecFn(
+		`installed=true enabled=true command=C:\mcp\mcphub.exe args=gui`,
+		`installed=true enabled=true command=C:\mcp\mcphub.exe args=gui --strict-mode`,
+	)
+
+	err := RunStrictMode([]string{"enable"}, tmp.Deps())
+	if exitCode := exitCodeFromError(err); exitCode != ExitStrictModeRevertFailed {
+		t.Fatalf("drifted-A to drifted-B must force exit %d, got %d (err=%v)", ExitStrictModeRevertFailed, exitCode, err)
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr != nil {
+		t.Fatalf("breadcrumb must survive drifted-A to drifted-B; missing: %v", statErr)
+	}
+}
+
+func TestStrictModeEnable_IdenticalDriftedSpecDeletesBreadcrumb(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.SeedInitialStrict(false)
+	tmp.MakeShimWriteFail()
+	tmp.backend.statusFn = tornShimStatusFn(autostart.StateDrifted, autostart.StateDrifted)
+	tmp.backend.statusSpecFn = tornShimSpecFn(
+		`installed=true enabled=true command=C:\mcp\mcphub.exe args=legacy-supervise`,
+		`installed=true enabled=true command=C:\mcp\mcphub.exe args=legacy-supervise`,
+	)
+
+	err := RunStrictMode([]string{"enable"}, tmp.Deps())
+	if err == nil {
+		t.Fatal("expected non-nil error surfacing the shim Enable failure")
+	}
+	if exitCode := exitCodeFromError(err); exitCode == ExitStrictModeRevertFailed {
+		t.Fatalf("identical drifted spec must not force recovery: exit %d (err=%v)", exitCode, err)
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr == nil {
+		t.Fatal("breadcrumb must be deleted when the drifted shim spec is unchanged")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unexpected breadcrumb stat error: %v", statErr)
+	}
+}
+
+func TestStrictModeEnable_DriftedLivenessOnlyChangeDeletesBreadcrumb(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.SeedInitialStrict(false)
+	tmp.MakeShimWriteFail()
+	tmp.backend.statusFn = tornShimStatusFn(autostart.StateDrifted, autostart.StateDrifted)
+	tmp.backend.statusSpecFn = tornShimSpecFn(
+		`installed=true enabled=true command=C:\mcp\mcphub.exe args=legacy-supervise`,
+		`installed=true enabled=true command=C:\mcp\mcphub.exe args=legacy-supervise`,
+	)
+
+	err := RunStrictMode([]string{"enable"}, tmp.Deps())
+	if err == nil {
+		t.Fatal("expected non-nil error surfacing the shim Enable failure")
+	}
+	if exitCode := exitCodeFromError(err); exitCode == ExitStrictModeRevertFailed {
+		t.Fatalf("liveness-only drifted reprobe change must not force recovery: exit %d (err=%v)", exitCode, err)
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr == nil {
+		t.Fatal("breadcrumb must be deleted when only drifted-shim liveness changed")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unexpected breadcrumb stat error: %v", statErr)
 	}
 }
 
