@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,9 +87,10 @@ type ServerManifest struct {
 
 	// URL is the remote HTTPS endpoint for TransportRemoteHTTP servers.
 	// REQUIRED for transport="remote-http"; REJECTED if set with any
-	// other transport. Must start with "https://" (G6 §"Validation
-	// rules": plain http:// rejected — plaintext credentials over the
-	// wire are out of scope).
+	// other transport. Must parse as https:// with a non-empty host and
+	// no URL-embedded credentials (G6 §"Validation rules": plain
+	// http:// rejected — plaintext credentials over the wire are out of
+	// scope).
 	URL string `yaml:"url"`
 
 	// Headers carries HTTP headers sent on every request to the remote
@@ -472,6 +474,25 @@ func (m *ServerManifest) validateCompanion() error {
 	return nil
 }
 
+// ValidateRemoteHTTPURL validates the remote-http endpoint URL shape shared by
+// manifests and marketplace catalog http entries.
+func ValidateRemoteHTTPURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse url: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("must use https:// (got scheme %q)", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("must include a host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("must not embed credentials")
+	}
+	return nil
+}
+
 func (m *ServerManifest) Validate() error {
 	if m.Name == "" {
 		return fmt.Errorf("manifest: name is required")
@@ -509,7 +530,8 @@ func (m *ServerManifest) Validate() error {
 	}
 
 	// G6 remote-http branch (spec §"Validation rules"):
-	//   - URL required and must be https://
+	//   - URL required and must parse as https:// with host and no
+	//     embedded credentials
 	//   - Command / BaseArgs / BaseArgsTemplate / Env / Daemons /
 	//     PortPool / Languages / IdleTimeoutMin REJECTED if non-zero
 	//     (silent ignore would let malformed manifests slip through
@@ -533,8 +555,8 @@ func (m *ServerManifest) Validate() error {
 		if m.URL == "" {
 			return fmt.Errorf("manifest %s: transport=remote-http requires url:", m.Name)
 		}
-		if !strings.HasPrefix(m.URL, "https://") {
-			return fmt.Errorf("manifest %s: transport=remote-http url must start with https:// (got %q; plaintext rejected — operator must TLS-terminate)", m.Name, m.URL)
+		if err := ValidateRemoteHTTPURL(m.URL); err != nil {
+			return fmt.Errorf("manifest %s: transport=remote-http url must be valid https:// without embedded credentials (got %q; plaintext rejected — operator must TLS-terminate): %w", m.Name, m.URL, err)
 		}
 		if m.Command != "" {
 			return fmt.Errorf("manifest %s: transport=remote-http rejects command (no local subprocess; remove the field)", m.Name)

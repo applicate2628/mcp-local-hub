@@ -100,6 +100,11 @@ func TestSanitizeCatalogField_StripsControlAndEscape(t *testing.T) {
 		// utf8.DecodeRuneInString path catches it as RuneError/size=1
 		// and replaces with '?'.
 		{"high\x9Boops", "high?oops", "raw c1 byte"},
+		{"spoof\u202Etxt", "spoof?txt", "bidi rlo"},
+		{"mark\u200Etext", "mark?text", "left-to-right mark"},
+		{"line\u2028next", "line?next", "unicode line separator"},
+		{"paragraph\u2029next", "paragraph?next", "unicode paragraph separator"},
+		{"nel\u0085next", "nel?next", "unicode next-line"},
 		{"emoji✓ check", "emoji✓ check", "utf8 preserved"},
 		{"кириллица", "кириллица", "cyrillic preserved"},
 		{"em—dash", "em—dash", "em-dash preserved"},

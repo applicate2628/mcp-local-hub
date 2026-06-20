@@ -314,10 +314,13 @@ func entryMatches(e *api.MarketplaceEntry, q string) bool {
 //     with a single space so the tabwriter doesn't see embedded
 //     \r/\n that would break row alignment.
 //   - DEL (0x7F) and C1 controls (0x80-0x9F): replaced with '?'.
+//   - Unicode bidi / Trojan-Source controls (LRM/RLM, embedding,
+//     override, isolate controls) and Unicode line/paragraph
+//     separators are replaced with '?'.
 //   - Invalid UTF-8 bytes (raw 0x80-0xFF that don't form a valid
 //     rune): replaced with '?' to avoid letting a hostile catalog
 //     hide raw C1 bytes behind a UTF-8 decode failure.
-//   - Everything else (printable ASCII + UTF-8 above U+009F) passes
+//   - Everything else (printable ASCII + safe UTF-8) passes
 //     through unchanged.
 //
 // We iterate byte-by-byte with utf8.DecodeRuneInString so invalid
@@ -335,19 +338,15 @@ func sanitizeCatalogField(s string) string {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		if r == utf8.RuneError && size == 1 {
 			// Raw byte that doesn't form valid UTF-8 — almost
-			// certainly a smuggled control byte. Drop it.
+			// certainly a smuggled control byte. Neutralize it.
 			b.WriteByte('?')
 			i++
 			continue
 		}
 		switch {
-		case r == 0x1B:
-			b.WriteByte('?')
-		case r < 0x20:
+		case isUnsafeCatalogFieldRune(r) && r < 0x20 && r != 0x1B:
 			b.WriteByte(' ')
-		case r == 0x7F:
-			b.WriteByte('?')
-		case r >= 0x80 && r <= 0x9F:
+		case isUnsafeCatalogFieldRune(r):
 			b.WriteByte('?')
 		default:
 			b.WriteRune(r)
@@ -355,6 +354,29 @@ func sanitizeCatalogField(s string) string {
 		i += size
 	}
 	return b.String()
+}
+
+func isUnsafeCatalogFieldRune(r rune) bool {
+	switch {
+	case r == 0x1B:
+		return true
+	case r < 0x20:
+		return true
+	case r == 0x7F:
+		return true
+	case r >= 0x80 && r <= 0x9F:
+		return true
+	case r >= 0x200E && r <= 0x200F:
+		return true
+	case r >= 0x202A && r <= 0x202E:
+		return true
+	case r >= 0x2066 && r <= 0x2069:
+		return true
+	case r == 0x2028 || r == 0x2029:
+		return true
+	default:
+		return false
+	}
 }
 
 // warnIfStale emits one stderr line when the cache fell back to

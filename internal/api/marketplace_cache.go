@@ -222,6 +222,13 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	if err := json.Unmarshal(raw, &cf); err != nil {
 		return nil, fmt.Errorf("parse cache: %w", err)
 	}
+	if cf.SchemaVersion != MarketplaceCatalogSchemaVersion {
+		return nil, fmt.Errorf("validate cache schema_version %q: this build only accepts %q",
+			cf.SchemaVersion, MarketplaceCatalogSchemaVersion)
+	}
+	if err := validateMarketplaceCatalog(&cf.Catalog); err != nil {
+		return nil, fmt.Errorf("validate cache catalog: %w", err)
+	}
 	return &cf, nil
 }
 

@@ -431,6 +431,29 @@ func TestValidateRemoteHTTP_RejectsPlaintextURL(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteHTTP_RejectsMalformedHTTPSURL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{"empty host", "https:///mcp"},
+		{"embedded credentials", "https://user:pass@mcp.context7.com/mcp"},
+		{"control byte", "https://mcp.context7.com/\x00mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &ServerManifest{
+				Name:      "ctx7-bad",
+				Kind:      KindGlobal,
+				Transport: TransportRemoteHTTP,
+				URL:       tc.url,
+			}
+			if err := m.Validate(); err == nil {
+				t.Fatalf("expected malformed URL rejection for %q", tc.url)
+			}
+		})
+	}
+}
+
 // TestValidateRemoteHTTP_RejectsWorkspaceScoped pins codex bot r8
 // P2 closure (PR #169): the workspace-scoped kind is per-(workspace,
 // language) lazy-proxy with required local LSP backends +

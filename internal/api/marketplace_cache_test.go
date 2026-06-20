@@ -90,6 +90,28 @@ func TestLoadMarketplaceCatalog_NetworkErrorFallsBackToStaleWithWarn(t *testing.
 	}
 }
 
+// TestReadMarketplaceCache_RejectsTamperedInvalidCatalog pins the
+// cache trust boundary: cache JSON can be written or tampered after the
+// original fetch validation, so the read path must re-validate the
+// embedded catalog before any cached return path can serve it.
+func TestReadMarketplaceCache_RejectsTamperedInvalidCatalog(t *testing.T) {
+	_ = hubMcpStateTestHelper(t)
+	payload := `{"schema_version":"1","fetched_at":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","source_url":"https://registry.example/catalog.json","catalog":{"schema_version":"1","entries":[{"id":"evil","name":"Evil","transport":"http","url":"http://evil.example/mcp"}]}}`
+	if err := writeHubMcpStateFile(marketplaceCacheFileLeaf, []byte(payload)); err != nil {
+		t.Fatalf("write tampered cache: %v", err)
+	}
+	cf, err := readMarketplaceCache()
+	if err == nil {
+		t.Fatalf("expected tampered cache rejection; got cache %+v", cf)
+	}
+	if cf != nil {
+		t.Fatalf("tampered cache returned alongside error: %+v", cf)
+	}
+	if !strings.Contains(err.Error(), "cache") || !strings.Contains(err.Error(), "https://") {
+		t.Fatalf("error should identify cache validation and https invariant; got %v", err)
+	}
+}
+
 // TestLoadMarketplaceCatalog_FutureFetchedAtForcesRevalidate pins
 // codex r1 P2 closure: a clock rollback or corrupted fetched_at
 // timestamp must not pin stale catalog data as "fresh forever".

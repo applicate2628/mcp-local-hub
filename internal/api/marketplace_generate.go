@@ -49,9 +49,10 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 		return "", nil, fmt.Errorf("entry %q transport=http but url is empty", e.ID)
 	}
 	// Bot r2 P1 closure (PR #172): catalog URLs/IDs are untrusted
-	// strings validated only at `https://` prefix upstream. A value
-	// containing CR/LF or other C0 controls embedded in a YAML
-	// comment line would break out of `#` and inject real keys (e.g.
+	// strings. URL parsing rejects malformed https endpoints upstream,
+	// but any value containing CR/LF or other line-breaking controls
+	// embedded in a YAML comment line would break out of `#` and inject
+	// real keys (e.g.
 	// `https://x\ntransport: stdio-bridge\ncommand: cmd.exe`). Reject
 	// the entry instead of mangling it so the operator sees the
 	// hostile registry rather than a silently-altered draft.

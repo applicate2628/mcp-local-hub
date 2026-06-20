@@ -110,6 +110,26 @@ func TestParseCatalog_HttpEntryAllowedNoCommand(t *testing.T) {
 	}
 }
 
+func TestParseCatalog_RejectsMalformedHTTPSURL(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		urlJSON string
+	}{
+		{"empty host", `"https:///mcp"`},
+		{"embedded credentials", `"https://user:pass@mcp.context7.com/mcp"`},
+		{"control byte", `"https://mcp.context7.com/\u0000mcp"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"schema_version": "1", "entries": [
+				{"id": "ctx7", "name": "Context7", "transport": "http", "url": ` + tc.urlJSON + `}
+			]}`
+			if _, err := ParseMarketplaceCatalog([]byte(raw)); err == nil {
+				t.Fatalf("expected rejection for url %s", tc.urlJSON)
+			}
+		})
+	}
+}
+
 func TestParseCatalog_NativeHTTPEntryAllowedWithCommand(t *testing.T) {
 	raw := `{"schema_version": "1", "entries": [
 		{"id": "serena", "name": "Serena", "transport": "native-http", "command": "uvx",
