@@ -500,6 +500,49 @@ func TestStrictModeEnable_TornShimKeepsBreadcrumb(t *testing.T) {
 	}
 }
 
+// TestStrictModeEnable_LivenessOnlyReprobeChangeDeletesBreadcrumb pins the
+// drift fingerprint distinction: enabled-running and enabled-stopped differ
+// only by supervisor liveness, not by the installed shim shape. A liveness tick
+// between the snapshot and re-probe must not force recovery.
+func TestStrictModeEnable_LivenessOnlyReprobeChangeDeletesBreadcrumb(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.SeedInitialStrict(false)
+	tmp.MakeShimWriteFail()
+	tmp.backend.statusFn = tornShimStatusFn(autostart.StateEnabledRunning, autostart.StateEnabledStopped)
+
+	err := RunStrictMode([]string{"enable"}, tmp.Deps())
+	if err == nil {
+		t.Fatal("expected non-nil error surfacing the shim Enable failure")
+	}
+	if exitCode := exitCodeFromError(err); exitCode == ExitStrictModeRevertFailed {
+		t.Fatalf("liveness-only status change forced recovery: exit %d (err=%v)", exitCode, err)
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr == nil {
+		t.Fatal("breadcrumb must be deleted when only shim liveness changed")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unexpected breadcrumb stat error: %v", statErr)
+	}
+}
+
+// TestStrictModeEnable_RealShimDriftKeepsBreadcrumb is the negative control for
+// the liveness-only case: a re-probe that reports drifted means the shim args or
+// binary no longer match the original strict-mode fingerprint, so recovery must
+// stay forced.
+func TestStrictModeEnable_RealShimDriftKeepsBreadcrumb(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.SeedInitialStrict(false)
+	tmp.MakeShimWriteFail()
+	tmp.backend.statusFn = tornShimStatusFn(autostart.StateEnabledRunning, autostart.StateDrifted)
+
+	err := RunStrictMode([]string{"enable"}, tmp.Deps())
+	if exitCode := exitCodeFromError(err); exitCode != ExitStrictModeRevertFailed {
+		t.Fatalf("real shim drift must force exit %d, got %d (err=%v)", ExitStrictModeRevertFailed, exitCode, err)
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr != nil {
+		t.Fatalf("breadcrumb must survive real shim drift; missing: %v", statErr)
+	}
+}
+
 // TestStrictModeEnable_ReprobeErrorKeepsBreadcrumb proves an UNPROVABLE shim
 // (the re-probe itself errors) is treated as torn — breadcrumb KEPT, exit 10.
 // "Cannot prove unchanged" is fail-closed, not fail-open.
@@ -573,6 +616,34 @@ func TestStrictModeEnable_ProvenUnchangedShimDeletesBreadcrumb(t *testing.T) {
 	}
 }
 
+func TestStrictModeEnable_SnapshotTakenBeforeIntentMutation(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+
+	statusCalls := 0
+	var strictModeSeenBySnapshot bool
+	tmp.backend.statusFn = func(autostart.Options) (autostart.State, error) {
+		statusCalls++
+		if statusCalls == 1 {
+			intent, err := api.ReadSupervisorIntent(tmp.IntentPath())
+			if err != nil {
+				t.Fatalf("read intent from Status snapshot: %v", err)
+			}
+			strictModeSeenBySnapshot = intent.StrictMode
+		}
+		return autostart.StateEnabledStopped, nil
+	}
+
+	if err := RunStrictMode([]string{"enable"}, tmp.Deps()); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if statusCalls == 0 {
+		t.Fatal("Status snapshot was not taken")
+	}
+	if strictModeSeenBySnapshot {
+		t.Fatal("Status snapshot observed strict_mode=true; snapshot must be taken before the intent mutation")
+	}
+}
+
 // TestStrictModeEnable_TornShimPerPlatformSignatures models each per-OS
 // backend's torn signature through the snapshot/re-probe pair and asserts the
 // breadcrumb is kept + exit 10 for every one. This is the cross-platform
@@ -580,7 +651,7 @@ func TestStrictModeEnable_ProvenUnchangedShimDeletesBreadcrumb(t *testing.T) {
 // build tags; the fake reproduces their observable torn state transition).
 func TestStrictModeEnable_TornShimPerPlatformSignatures(t *testing.T) {
 	cases := []struct {
-		name             string
+		name              string
 		snapshot, reprobe autostart.State
 	}{
 		// Windows: Delete succeeded, Create failed → task now Absent.

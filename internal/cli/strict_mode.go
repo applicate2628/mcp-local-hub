@@ -326,6 +326,35 @@ func acquireStrictModeStateLocks(stateDir string) (*api.StateDirLockSet, error) 
 	return locks, err
 }
 
+type strictModeShimFingerprint string
+
+const (
+	strictModeShimFingerprintAbsent          strictModeShimFingerprint = "absent"
+	strictModeShimFingerprintEnabledMatching strictModeShimFingerprint = "enabled-matching"
+	strictModeShimFingerprintDrifted         strictModeShimFingerprint = "drifted"
+	strictModeShimFingerprintStaleResidue    strictModeShimFingerprint = "stale-residue"
+)
+
+// strictModeShimDriftFingerprint keeps only the shim-shape facts strict-mode
+// needs for rollback safety. Status distinguishes enabled-running from
+// enabled-stopped for operator liveness reporting, but both mean the same
+// installed shim matched the StrictMode probe options. Drifted stays distinct
+// because it is the backend's signal that the shim args/path no longer match.
+func strictModeShimDriftFingerprint(state autostart.State) strictModeShimFingerprint {
+	switch state {
+	case autostart.StateAbsent:
+		return strictModeShimFingerprintAbsent
+	case autostart.StateEnabledRunning, autostart.StateEnabledStopped:
+		return strictModeShimFingerprintEnabledMatching
+	case autostart.StateDrifted:
+		return strictModeShimFingerprintDrifted
+	case autostart.StateStaleResidue:
+		return strictModeShimFingerprintStaleResidue
+	default:
+		return strictModeShimFingerprint(fmt.Sprintf("unknown:%d", state))
+	}
+}
+
 // runStrictModeUnderLocks performs the two-resource mutation with the
 // locks already held. Extracted so RunStrictMode and the test seam can
 // share the body without duplicating the lock + breadcrumb scaffolding.
@@ -348,6 +377,13 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// the recorded args gets reconciled. Intent re-write is also
 	// idempotent (atomic rename of identical bytes is a no-op
 	// observed by readers).
+
+	// Snapshot the shim BEFORE mutating either owned resource. The Status
+	// value still carries liveness-only noise (enabled-running vs
+	// enabled-stopped), so the revert branch compares the drift fingerprint
+	// derived from this baseline instead of raw State equality.
+	shimSnapshot, snapshotErr := deps.AutostartBackend.Status(autostart.Options{StrictMode: originalStrict})
+	shimSnapshotFingerprint := strictModeShimDriftFingerprint(shimSnapshot)
 
 	// Forward-progress breadcrumb for the SIGKILL/power-loss window
 	// (opus-3 F11). Write an IN-PROGRESS marker BEFORE step 1 and delete
@@ -409,21 +445,6 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		return fmt.Errorf("strict-mode: step 1 (intent write): %w", err)
 	}
 
-	// Snapshot the shim's observable state BEFORE step 2 mutates it. The
-	// per-OS backends are NOT all-or-nothing: each one mutates the shim
-	// (Windows deletes the prior task before Create; Linux overwrites the
-	// unit file before `systemctl enable --now`; macOS boots out the prior
-	// agent and overwrites the plist before `launchctl bootstrap`) and only
-	// THEN can the OS step error. So an `Enable` error does NOT prove the
-	// shim is untouched. This snapshot is the only evidence that lets the
-	// revert-succeeded branch below decide whether the shim is provably
-	// unchanged (delete the breadcrumb) or possibly torn (KEEP it so
-	// `--recover` can drive both resources back into sync). We probe with
-	// the ORIGINAL strict value because that is what the shim should reflect
-	// before any mutation — a post-error re-probe that disagrees with this
-	// snapshot is exactly the torn-shim signal.
-	shimSnapshot, snapshotErr := deps.AutostartBackend.Status(autostart.Options{StrictMode: originalStrict})
-
 	// Step 2: install/update shim with new strict_mode flag.
 	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: desired}); err != nil {
 		// Revert step 1.
@@ -478,18 +499,18 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		// (Windows: prior task deleted, new one never created; Linux/macOS:
 		// unit/plist already overwritten with the NEW flag, enable/bootstrap
 		// failed). Re-probe the shim and only delete the breadcrumb when the
-		// shim is PROVABLY unchanged from the pre-mutation snapshot. Any
-		// uncertainty (snapshot unavailable, re-probe error, or a state that
-		// differs from the snapshot) must KEEP a torn-shape breadcrumb so
-		// `mcphub strict-mode --recover` can drive intent + shim back into
-		// sync. The invariant: strict-mode never reports clean while the shim
-		// might be out of sync with the (reverted) intent.
+		// shim drift fingerprint is PROVABLY unchanged from the pre-mutation
+		// snapshot. Any uncertainty (snapshot unavailable, re-probe error, or
+		// a fingerprint that differs from the snapshot) must KEEP a torn-shape
+		// breadcrumb so `mcphub strict-mode --recover` can drive intent + shim
+		// back into sync. The invariant: strict-mode never reports clean while
+		// the shim might be out of sync with the (reverted) intent.
 		shimProvenUnchanged := false
 		var reprobe autostart.State
 		var reprobeErr error
 		if snapshotErr == nil {
 			reprobe, reprobeErr = deps.AutostartBackend.Status(autostart.Options{StrictMode: originalStrict})
-			if reprobeErr == nil && reprobe == shimSnapshot {
+			if reprobeErr == nil && strictModeShimDriftFingerprint(reprobe) == shimSnapshotFingerprint {
 				shimProvenUnchanged = true
 			}
 		}
@@ -514,8 +535,8 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		// revert succeeded); --recover branch A drives both to Intended,
 		// branch B drives both to ActualIntentState — either re-runs Enable
 		// and repairs the shim.
-		shimDetail := fmt.Sprintf("shim state could not be proven unchanged after failed Enable (snapshot=%v snapshotErr=%v reprobe=%v reprobeErr=%v)",
-			shimSnapshot, snapshotErr, reprobe, reprobeErr)
+		shimDetail := fmt.Sprintf("shim state could not be proven unchanged after failed Enable (snapshot=%v snapshotFingerprint=%v snapshotErr=%v reprobe=%v reprobeFingerprint=%v reprobeErr=%v)",
+			shimSnapshot, shimSnapshotFingerprint, snapshotErr, reprobe, strictModeShimDriftFingerprint(reprobe), reprobeErr)
 		bc := strictModeBreadcrumb{
 			Intended:          desired,
 			ActualIntentState: originalStrict, // revert succeeded, so intent IS back at original
