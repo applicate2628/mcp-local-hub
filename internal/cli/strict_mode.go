@@ -13,11 +13,23 @@
 //  1. Acquire `migration.lock` (refuse-if-held → exit 9 STRICT_MODE_BUSY).
 //  2. Acquire `--once.lock` (LIFO release).
 //  3. Refuse-if-held on the breadcrumb file (operator must run --recover).
-//  4. Write supervisor-intent.json with the new strict_mode value.
-//  5. Call autostart.Backend.Enable(Options{StrictMode: newValue}).
-//  6. On step 5 failure: revert step 4 (re-write intent with original).
-//  7. On step 6 failure: write breadcrumb + emit to stderr + exit 10.
-//  8. LIFO release.
+//  4. Snapshot the autostart shim's observable Status before mutating it.
+//  5. Write supervisor-intent.json with the new strict_mode value.
+//  6. Call autostart.Backend.Enable(Options{StrictMode: newValue}).
+//  7. On step 6 failure: revert step 5 (re-write intent with original).
+//  8. On step 7 failure (both writes failed): write breadcrumb + exit 10.
+//  9. On step 7 success: re-probe the shim. The per-OS backends are NOT
+//     all-or-nothing — they mutate the shim (delete-before-create on
+//     Windows, write-before-enable on Linux, bootout+write-before-bootstrap
+//     on macOS) before the OS step can error, so a failed Enable can leave
+//     the shim torn or out of sync with the reverted intent. Only when the
+//     re-probe PROVES the shim is unchanged from the step-4 snapshot is the
+//     breadcrumb deleted; otherwise a torn-shape breadcrumb is KEPT and the
+//     command exits 10 so `--recover` can drive both resources back in sync.
+//  10. LIFO release.
+//
+// Invariant: strict-mode never deletes the breadcrumb / returns clean while
+// the autostart shim might be torn or out of sync with the intent.
 //
 // `--recover` reads the breadcrumb, prompts the operator with two
 // exhaustive branches (drive both to `intended` or drive both to
@@ -397,6 +409,21 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		return fmt.Errorf("strict-mode: step 1 (intent write): %w", err)
 	}
 
+	// Snapshot the shim's observable state BEFORE step 2 mutates it. The
+	// per-OS backends are NOT all-or-nothing: each one mutates the shim
+	// (Windows deletes the prior task before Create; Linux overwrites the
+	// unit file before `systemctl enable --now`; macOS boots out the prior
+	// agent and overwrites the plist before `launchctl bootstrap`) and only
+	// THEN can the OS step error. So an `Enable` error does NOT prove the
+	// shim is untouched. This snapshot is the only evidence that lets the
+	// revert-succeeded branch below decide whether the shim is provably
+	// unchanged (delete the breadcrumb) or possibly torn (KEEP it so
+	// `--recover` can drive both resources back into sync). We probe with
+	// the ORIGINAL strict value because that is what the shim should reflect
+	// before any mutation — a post-error re-probe that disagrees with this
+	// snapshot is exactly the torn-shim signal.
+	shimSnapshot, snapshotErr := deps.AutostartBackend.Status(autostart.Options{StrictMode: originalStrict})
+
 	// Step 2: install/update shim with new strict_mode flag.
 	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: desired}); err != nil {
 		// Revert step 1.
@@ -444,16 +471,75 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 			fmt.Fprintln(stderrOrDefault(deps), string(body))
 			return &forceExitError{code: ExitStrictModeRevertFailed}
 		}
-		// Revert succeeded — both resources are back at their original
-		// strict-mode value, so there is no torn state and no drift: delete
-		// the in-progress breadcrumb (best-effort; a stale crumb would
-		// otherwise force the operator to --recover a non-existent drift).
-		// Surface the step 2 error so the operator can investigate the
-		// underlying shim failure.
-		if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-			fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after revert: %v\n", rmErr)
+		// Revert of step 1 (intent) succeeded — intent is back at
+		// originalStrict. But the autostart shim is NOT proven to be back
+		// at originalStrict: the per-OS backends mutate the shim before the
+		// OS step can error, so `Enable` failing means the shim may be torn
+		// (Windows: prior task deleted, new one never created; Linux/macOS:
+		// unit/plist already overwritten with the NEW flag, enable/bootstrap
+		// failed). Re-probe the shim and only delete the breadcrumb when the
+		// shim is PROVABLY unchanged from the pre-mutation snapshot. Any
+		// uncertainty (snapshot unavailable, re-probe error, or a state that
+		// differs from the snapshot) must KEEP a torn-shape breadcrumb so
+		// `mcphub strict-mode --recover` can drive intent + shim back into
+		// sync. The invariant: strict-mode never reports clean while the shim
+		// might be out of sync with the (reverted) intent.
+		shimProvenUnchanged := false
+		var reprobe autostart.State
+		var reprobeErr error
+		if snapshotErr == nil {
+			reprobe, reprobeErr = deps.AutostartBackend.Status(autostart.Options{StrictMode: originalStrict})
+			if reprobeErr == nil && reprobe == shimSnapshot {
+				shimProvenUnchanged = true
+			}
 		}
-		return fmt.Errorf("strict-mode: step 2 (autostart shim): %w (intent reverted to %v)", err, originalStrict)
+		if shimProvenUnchanged {
+			// Shim is provably back at (== never left) originalStrict and
+			// intent was reverted to originalStrict: no torn state, no drift.
+			// Delete the in-progress breadcrumb (best-effort; a stale crumb
+			// would otherwise force the operator to --recover a non-existent
+			// drift). Surface the step 2 error so the operator can investigate
+			// the underlying shim failure.
+			if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after revert: %v\n", rmErr)
+			}
+			return fmt.Errorf("strict-mode: step 2 (autostart shim): %w (intent reverted to %v, shim unchanged)", err, originalStrict)
+		}
+
+		// Shim state could NOT be proven unchanged after the failed Enable.
+		// Intent was reverted to originalStrict, but the shim may be torn or
+		// out of sync. Overwrite the in-progress breadcrumb with the torn
+		// shape so `--recover` reconciles both resources. ActualIntentState
+		// records where intent actually is now (originalStrict, since the
+		// revert succeeded); --recover branch A drives both to Intended,
+		// branch B drives both to ActualIntentState — either re-runs Enable
+		// and repairs the shim.
+		shimDetail := fmt.Sprintf("shim state could not be proven unchanged after failed Enable (snapshot=%v snapshotErr=%v reprobe=%v reprobeErr=%v)",
+			shimSnapshot, snapshotErr, reprobe, reprobeErr)
+		bc := strictModeBreadcrumb{
+			Intended:          desired,
+			ActualIntentState: originalStrict, // revert succeeded, so intent IS back at original
+			ActualShimState:   originalStrict, // best-effort: target the shim should hold; recover re-Enables regardless
+			Step1Error:        "",
+			Step2Error:        err.Error() + "; " + shimDetail,
+			RevertError:       "",
+			TS:                time.Now().UTC().Format(time.RFC3339Nano),
+			Phase:             strictModeBreadcrumbPhaseTorn,
+		}
+		if writeBCErr := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &bc); writeBCErr != nil {
+			// Cannot even overwrite the breadcrumb — the in-progress marker
+			// written before step 1 still survives on disk (it was never
+			// deleted on this path), so `--recover` still has a marker to act
+			// on. Emit the intended torn body + the write error to stderr so
+			// the operator sees the full state immediately.
+			body, _ := json.MarshalIndent(bc, "", "  ")
+			fmt.Fprintln(stderrOrDefault(deps), string(body))
+			fmt.Fprintf(stderrOrDefault(deps), "strict-mode: shim possibly torn AND torn-breadcrumb write failed: %v\n", writeBCErr)
+			return &forceExitError{code: ExitStrictModeRevertFailed}
+		}
+		body, _ := json.MarshalIndent(bc, "", "  ")
+		fmt.Fprintln(stderrOrDefault(deps), string(body))
+		return &forceExitError{code: ExitStrictModeRevertFailed}
 	}
 	// Clean success: both resources reached `desired`. Delete the
 	// in-progress breadcrumb so the next strict-mode invocation does not
