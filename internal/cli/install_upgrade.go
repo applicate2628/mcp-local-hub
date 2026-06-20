@@ -222,10 +222,6 @@ const (
 	// runs, so a successor start before this condition is proven can lose
 	// AcquireSupervisorLock and exit while upgrade reports success.
 	defaultSupervisorLockReleaseTimeout = time.Duration(defaultQuiesceTimeoutMs+defaultExitTimeoutMs) * time.Millisecond
-
-	// defaultSupervisorReadyTimeout bounds the successor IPC status poll after
-	// StartSupervisor returns. Detached process creation is not readiness.
-	defaultSupervisorReadyTimeout = 30 * time.Second
 )
 
 // RunInstallUpgrade orchestrates the v0.5.0 cold-restart upgrade
@@ -286,6 +282,9 @@ const (
 // matches the spec's stated budgets without forcing every caller to
 // repeat them.
 func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
+	callerQuiesceTimeoutMs := opts.QuiesceTimeoutMs
+	callerExitTimeoutMs := opts.ExitTimeoutMs
+
 	// Default timeouts (spec §"Upgrade sequence" steps 3 + 4).
 	if opts.QuiesceTimeoutMs == 0 {
 		opts.QuiesceTimeoutMs = defaultQuiesceTimeoutMs
@@ -399,12 +398,13 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 
 	}
 
+	handoffTimeout := effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, opts.QuiesceTimeoutMs, opts.ExitTimeoutMs)
 	if opts.WaitSupervisorLockReleased != nil {
-		if err := opts.WaitSupervisorLockReleased(ctx, defaultSupervisorLockReleaseTimeout); err != nil {
+		if err := opts.WaitSupervisorLockReleased(ctx, handoffTimeout); err != nil {
 			return fmt.Errorf("prior supervisor did not release supervisor.lock within %s after upgrade exit request: %w; "+
 				"the old supervisor may still be shutting down and will block the successor from acquiring supervisor.lock; "+
 				"wait briefly, inspect supervisor-events.log, then run `mcphub supervise` from a shell if no supervisor is running",
-				defaultSupervisorLockReleaseTimeout, err)
+				handoffTimeout, err)
 		}
 	}
 
@@ -447,11 +447,11 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 			err, opts.BinaryPath)
 	}
 	if opts.WaitSupervisorReady != nil {
-		if err := opts.WaitSupervisorReady(ctx, defaultSupervisorReadyTimeout); err != nil {
+		if err := opts.WaitSupervisorReady(ctx, handoffTimeout); err != nil {
 			return fmt.Errorf("supervisor successor did not become IPC-ready within %s after upgrade start: %w; "+
 				"the binary was replaced and a detached successor was spawned, but status never became reachable; "+
 				"check `mcphub status` and supervisor-events.log, then run `mcphub supervise` from a shell to see startup diagnostics",
-				defaultSupervisorReadyTimeout, err)
+				handoffTimeout, err)
 		}
 	}
 
@@ -460,6 +460,17 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// wires WaitSupervisorReady, the orchestrator observes this via IPC status
 	// before reporting success; operator-facing follow-up remains `mcphub status`.
 	return nil
+}
+
+func effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, effectiveQuiesceTimeoutMs, effectiveExitTimeoutMs int) time.Duration {
+	if callerQuiesceTimeoutMs == 0 && callerExitTimeoutMs == 0 {
+		return defaultSupervisorLockReleaseTimeout
+	}
+	callerShutdownBudget := time.Duration(effectiveQuiesceTimeoutMs+effectiveExitTimeoutMs) * time.Millisecond
+	if callerShutdownBudget > defaultSupervisorLockReleaseTimeout {
+		return callerShutdownBudget
+	}
+	return defaultSupervisorLockReleaseTimeout
 }
 
 // ReapOpts is the input bundle to ReapSupervisorForRestart. It is a

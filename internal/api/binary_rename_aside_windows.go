@@ -35,7 +35,7 @@ import (
 // renameAsideTimestampLayout is a Windows-filename-safe timestamp
 // suffix layout (no colons, no fractional seconds): "20060102T150405Z".
 // Sortable lexicographically; sufficient resolution for sweep selection
-// (mtime is the actual age authority).
+// (the encoded suffix timestamp is the sweep age authority).
 const renameAsideTimestampLayout = "20060102T150405Z"
 
 // RenameAsideReplace performs the Windows rename-aside two-step binary

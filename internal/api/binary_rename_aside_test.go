@@ -61,7 +61,7 @@ func TestRenameAside_TwoStepReplace(t *testing.T) {
 }
 
 // TestSweepOldBinaries_RemovesAgedFiles plants a stale aside whose
-// mtime is 10 days in the past and verifies SweepOldBinaries removes
+// suffix timestamp is 10 days in the past and verifies SweepOldBinaries removes
 // it while leaving the current binary intact.
 func TestSweepOldBinaries_RemovesAgedFiles(t *testing.T) {
 	dir := t.TempDir()
@@ -73,14 +73,15 @@ func TestSweepOldBinaries_RemovesAgedFiles(t *testing.T) {
 	if err := os.WriteFile(target, []byte("current"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// Plant an old .old- file with mtime > 7 days. Use a
+	// Plant an old .old- file with suffix timestamp > 7 days. Use a
 	// Windows-filename-safe suffix (no colons).
-	old := target + ".old-20260501T000000Z"
+	oldSuffix := time.Now().UTC().Add(-10 * 24 * time.Hour).Format(renameAsideTimestampLayout)
+	old := target + ".old-" + oldSuffix
 	if err := os.WriteFile(old, []byte("ancient"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	oldTime := time.Now().Add(-10 * 24 * time.Hour)
-	if err := os.Chtimes(old, oldTime, oldTime); err != nil {
+	freshMtime := time.Now()
+	if err := os.Chtimes(old, freshMtime, freshMtime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -96,8 +97,8 @@ func TestSweepOldBinaries_RemovesAgedFiles(t *testing.T) {
 	}
 }
 
-// TestSweepOldBinaries_KeepsRecentFiles verifies that aside files
-// whose mtime is within the 7-day retention window are NOT removed.
+// TestSweepOldBinaries_KeepsRecentFiles verifies that aside files whose suffix
+// timestamp is within the 7-day retention window are NOT removed.
 func TestSweepOldBinaries_KeepsRecentFiles(t *testing.T) {
 	dir := t.TempDir()
 	targetName := "mcphub.exe"
@@ -108,13 +109,14 @@ func TestSweepOldBinaries_KeepsRecentFiles(t *testing.T) {
 	if err := os.WriteFile(target, []byte("current"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// Plant a recent generated .old- file (mtime 1 day ago — within retention).
-	recent := target + ".old-20260601T000000Z"
+	// Plant a recent generated .old- file (suffix 1 day ago — within retention).
+	recentSuffix := time.Now().UTC().Add(-24 * time.Hour).Format(renameAsideTimestampLayout)
+	recent := target + ".old-" + recentSuffix
 	if err := os.WriteFile(recent, []byte("recent"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	recentTime := time.Now().Add(-1 * 24 * time.Hour)
-	if err := os.Chtimes(recent, recentTime, recentTime); err != nil {
+	recentMtime := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(recent, recentMtime, recentMtime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,6 +125,37 @@ func TestSweepOldBinaries_KeepsRecentFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(recent); err != nil {
 		t.Fatalf("recent binary was swept (should retain <7d): %v", err)
+	}
+}
+
+// TestSweepOldBinaries_KeepsFreshSuffixDespiteStaleMtime verifies that the
+// retention age is based on the generated .old-<timestamp> suffix, not on the
+// preserved file mtime from the prior installed binary.
+func TestSweepOldBinaries_KeepsFreshSuffixDespiteStaleMtime(t *testing.T) {
+	dir := t.TempDir()
+	targetName := "mcphub.exe"
+	if runtime.GOOS != "windows" {
+		targetName = "mcphub"
+	}
+	target := filepath.Join(dir, targetName)
+	if err := os.WriteFile(target, []byte("current"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	freshSuffix := time.Now().UTC().Format(renameAsideTimestampLayout)
+	freshAside := target + ".old-" + freshSuffix
+	if err := os.WriteFile(freshAside, []byte("fresh-aside"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	staleMtime := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(freshAside, staleMtime, staleMtime); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SweepOldBinaries(dir); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if _, err := os.Stat(freshAside); err != nil {
+		t.Fatalf("fresh-suffix aside was swept because its file mtime was stale: %v", err)
 	}
 }
 
@@ -141,18 +174,19 @@ func TestSweepOldBinaries_CountCapTrimsRecentSurplus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Plant renameAsideMaxKeep+2 recent asides with strictly-decreasing mtimes
-	// (index 0 newest). All are < 7 days old, so only the count cap can prune.
+	// Plant renameAsideMaxKeep+2 recent asides with strictly-decreasing suffix
+	// timestamps (index 0 newest). All are < 7 days old, so only the count cap can prune.
 	const planted = renameAsideMaxKeep + 2
 	paths := make([]string, planted)
+	baseSuffixTime := time.Now().UTC().Add(-time.Minute)
 	for i := 0; i < planted; i++ {
-		suffix := time.Date(2026, 6, 1, 0, i, 0, 0, time.UTC).Format(renameAsideTimestampLayout)
+		suffix := baseSuffixTime.Add(-time.Duration(i) * time.Minute).Format(renameAsideTimestampLayout)
 		p := target + ".old-" + suffix
 		if err := os.WriteFile(p, []byte("aside"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		// i hours ago → index 0 is newest, last index is oldest (still <7d).
-		mt := time.Now().Add(-time.Duration(i) * time.Hour)
+		// Keep file mtimes equal; suffix time is the ranking authority.
+		mt := time.Now()
 		if err := os.Chtimes(p, mt, mt); err != nil {
 			t.Fatal(err)
 		}

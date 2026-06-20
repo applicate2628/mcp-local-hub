@@ -936,13 +936,15 @@ type fakeUpgradeDeps struct {
 	renameAsideErr    error
 	renameAsideCalled bool
 
-	quiesceResult api.IPCResponse
-	quiesceErr    error
-	quiesceCalled bool
+	quiesceResult    api.IPCResponse
+	quiesceErr       error
+	quiesceCalled    bool
+	quiesceTimeoutMs int
 
-	exitResult api.IPCResponse
-	exitErr    error
-	exitCalled bool
+	exitResult    api.IPCResponse
+	exitErr       error
+	exitCalled    bool
+	exitTimeoutMs int
 
 	forceKillCalled bool
 	forceKillErr    error
@@ -960,12 +962,14 @@ func (f *fakeUpgradeDeps) RenameAsideBinary(target, newSrc string) error {
 func (f *fakeUpgradeDeps) QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error) {
 	f.calls = append(f.calls, "quiesce")
 	f.quiesceCalled = true
+	f.quiesceTimeoutMs = timeoutMs
 	return f.quiesceResult, f.quiesceErr
 }
 
 func (f *fakeUpgradeDeps) ExitGraceful(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error) {
 	f.calls = append(f.calls, "exit")
 	f.exitCalled = true
+	f.exitTimeoutMs = timeoutMs
 	return f.exitResult, f.exitErr
 }
 
@@ -1483,6 +1487,52 @@ func TestRunInstallUpgrade_CleanGracefulPathVerifiesHandoff(t *testing.T) {
 	want := []string{"rename", "quiesce", "exit", "wait-lock", "verify-ports", "start", "wait-ready"}
 	if strings.Join(mock.calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("call order = %v, want %v", mock.calls, want)
+	}
+}
+
+func TestRunInstallUpgrade_HandoffWaitHonorsCallerGracefulBudget(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{
+			ID: 1,
+			OK: true,
+			Result: map[string]any{
+				"drained":       1.0,
+				"still_running": []any{},
+			},
+			Final: true,
+		},
+		exitResult: api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+
+	var lockWaitTimeout time.Duration
+	var readyWaitTimeout time.Duration
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:    "/fake/mcphub",
+		NewBinary:     "/fake/mcphub.new",
+		PipePath:      "fake-pipe",
+		ExitTimeoutMs: 90000,
+		WaitSupervisorLockReleased: func(ctx context.Context, timeout time.Duration) error {
+			lockWaitTimeout = timeout
+			return nil
+		},
+		WaitSupervisorReady: func(ctx context.Context, timeout time.Duration) error {
+			readyWaitTimeout = timeout
+			return nil
+		},
+		Deps: mock,
+	})
+	if err != nil {
+		t.Fatalf("clean graceful handoff should converge: %v", err)
+	}
+	if mock.exitTimeoutMs != 90000 {
+		t.Fatalf("ExitGraceful timeout = %dms, want caller-supplied 90000ms", mock.exitTimeoutMs)
+	}
+	want := time.Duration(defaultQuiesceTimeoutMs+90000) * time.Millisecond
+	if lockWaitTimeout != want {
+		t.Fatalf("WaitSupervisorLockReleased timeout = %s, want %s", lockWaitTimeout, want)
+	}
+	if readyWaitTimeout != want {
+		t.Fatalf("WaitSupervisorReady timeout = %s, want %s", readyWaitTimeout, want)
 	}
 }
 
