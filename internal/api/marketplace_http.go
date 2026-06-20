@@ -14,14 +14,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
+	"syscall"
 	"time"
 )
 
 const (
-	marketplaceHTTPTimeout       = 15 * time.Second
-	marketplaceCacheMaxBodyBytes = 10 * 1024 * 1024
+	marketplaceHTTPTimeout        = 15 * time.Second
+	marketplaceCacheMaxBodyBytes  = 10 * 1024 * 1024
+	marketplaceFetchDialTimeout   = 30 * time.Second
+	marketplaceFetchDialKeepAlive = 30 * time.Second
 )
 
 // rejectUnsafeMarketplaceRedirect refuses redirect targets outside the
@@ -62,9 +67,47 @@ func newMarketplaceTransport() *http.Transport {
 	}
 }
 
+// newMarketplaceFetchTransport is the registry-fetch-only transport.
+// It preserves the cloned stdlib proxy/TLS/idle-connection defaults
+// from newMarketplaceTransport, then installs a dial ControlContext
+// guard that rejects unsafe resolved IPs immediately before connect.
+func newMarketplaceFetchTransport() *http.Transport {
+	return newMarketplaceFetchTransportWithResolver(nil)
+}
+
+func newMarketplaceFetchTransportWithResolver(resolver *net.Resolver) *http.Transport {
+	t := newMarketplaceTransport()
+	d := &net.Dialer{
+		Timeout:        marketplaceFetchDialTimeout,
+		KeepAlive:      marketplaceFetchDialKeepAlive,
+		Resolver:       resolver,
+		ControlContext: marketplaceFetchDialControlContext,
+	}
+	t.Dial = nil
+	t.DialContext = d.DialContext
+	t.DialTLS = nil
+	t.DialTLSContext = nil
+	return t
+}
+
+func marketplaceFetchDialControlContext(_ context.Context, _ string, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("marketplace fetch resolved dial address %q is not host:port: %w", address, err)
+	}
+	if i := strings.LastIndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("marketplace fetch resolved dial address %q is not an IP address: %w", address, err)
+	}
+	return rejectMarketplaceLocalOrPrivateAddr(fmt.Sprintf("marketplace fetch resolved address %q", address), addr)
+}
+
 func newMarketplaceClient() *http.Client {
 	return &http.Client{
-		Transport:     newMarketplaceTransport(),
+		Transport:     newMarketplaceFetchTransport(),
 		CheckRedirect: rejectUnsafeMarketplaceRedirect,
 		Timeout:       marketplaceHTTPTimeout,
 	}

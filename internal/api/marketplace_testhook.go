@@ -78,9 +78,9 @@ func MarketplaceTestRegistryURL(path string) string {
 
 // buildTLSTrustingClient is the body of injectTLSTestClient promoted
 // out of marketplace_http_test.go into production so the cli tests
-// can reach it. Inherits the production transport policy
-// (DisableCompression + CheckRedirect). MinTLS = 1.2 to keep parity
-// with mainstream Go HTTPS defaults.
+// can reach it. It keeps the marketplace test policy needed for local
+// server rewrites (DisableCompression + CheckRedirect). MinTLS = 1.2
+// to keep parity with mainstream Go HTTPS defaults.
 func buildTLSTrustingClient(srv *httptest.Server) *http.Client {
 	t := newMarketplaceTransport()
 	t.TLSClientConfig = &tls.Config{

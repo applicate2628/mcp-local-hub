@@ -136,6 +136,8 @@ func TestParseCatalog_RejectsMarketplaceLocalAndPrivateHTTPEntryURLs(t *testing.
 		url  string
 	}{
 		{"localhost", "https://localhost/mcp"},
+		{"localhost fqdn", "https://localhost./mcp"},
+		{"localhost fqdn uppercase", "https://LOCALHOST./mcp"},
 		{"ipv4 loopback", "https://127.0.0.1/mcp"},
 		{"ipv6 loopback", "https://[::1]/mcp"},
 		{"ipv4 unspecified", "https://0.0.0.0/mcp"},

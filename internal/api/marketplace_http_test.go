@@ -3,11 +3,17 @@ package api
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestMarketplaceHTTPClient_RejectsNonHTTPSURL(t *testing.T) {
@@ -141,6 +147,8 @@ func TestMarketplaceHTTPClient_RejectsLocalAndPrivateRegistryURLsBeforeRequest(t
 	}
 	for _, rawURL := range []string{
 		"https://localhost/catalog.json",
+		"https://localhost./catalog.json",
+		"https://LOCALHOST./catalog.json",
 		"https://127.0.0.1/catalog.json",
 		"https://[::1]/catalog.json",
 		"https://0.0.0.0/catalog.json",
@@ -165,23 +173,252 @@ func TestMarketplaceHTTPClient_RejectsLocalAndPrivateRegistryURLsBeforeRequest(t
 }
 
 func TestMarketplaceHTTPClient_RejectsRedirectToLoopback(t *testing.T) {
-	var hits int
+	for _, target := range []string{
+		"https://127.0.0.1/catalog.json",
+		"https://localhost./catalog.json",
+		"https://LOCALHOST./catalog.json",
+	} {
+		t.Run(target, func(t *testing.T) {
+			var hits int
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits++
+				http.Redirect(w, r, target, http.StatusFound)
+			}))
+			defer srv.Close()
+			client := injectTLSTestClient(srv)
+			_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", nil)
+			if hits != 1 {
+				t.Fatalf("expected initial registry request before redirect rejection; got %d hits", hits)
+			}
+			if err == nil {
+				t.Fatal("expected loopback redirect rejection; got nil")
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "loopback") &&
+				!strings.Contains(strings.ToLower(err.Error()), "localhost") {
+				t.Errorf("error should name loopback/localhost redirect rejection; got %v", err)
+			}
+		})
+	}
+}
+
+func TestMarketplaceHTTPClient_RejectsResolvedLoopbackRegistryHost(t *testing.T) {
+	var hits atomic.Int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
-		http.Redirect(w, r, "https://127.0.0.1/catalog.json", http.StatusFound)
+		hits.Add(1)
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[]}`))
 	}))
 	defer srv.Close()
-	client := injectTLSTestClient(srv)
-	_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", nil)
-	if hits != 1 {
-		t.Fatalf("expected initial registry request before redirect rejection; got %d hits", hits)
+
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
 	}
+	_, port, err := net.SplitHostPort(target.Host)
+	if err != nil {
+		t.Fatalf("split test server hostport %q: %v", target.Host, err)
+	}
+
+	const rebindHost = "marketplace-rebind.example.test"
+	tr := newMarketplaceFetchTransportWithResolver(marketplaceDNSResolverForTest(t, map[string]net.IP{
+		rebindHost: net.IPv4(127, 0, 0, 1),
+	}))
+	tr.Proxy = nil
+	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
+	client := &http.Client{
+		Transport:     tr,
+		CheckRedirect: rejectUnsafeMarketplaceRedirect,
+		Timeout:       time.Second,
+	}
+
+	_, err = MarketplaceFetchWithClient(context.Background(), client, "https://"+rebindHost+":"+port+"/catalog.json", "", nil)
 	if err == nil {
-		t.Fatal("expected loopback redirect rejection; got nil")
+		t.Fatal("expected resolved loopback address rejection; got nil")
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("server received %d request(s); resolved loopback rejection must happen before connect", hits.Load())
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "loopback") {
-		t.Errorf("error should name loopback redirect rejection; got %v", err)
+		t.Errorf("error should name resolved loopback rejection; got %v", err)
 	}
+}
+
+func TestMarketplaceFetchDialControlRejectsUnsafeResolvedAddresses(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		network string
+		address string
+		want    string
+	}{
+		{"ipv4 loopback", "tcp4", "127.0.0.1:443", "loopback"},
+		{"ipv6 loopback", "tcp6", "[::1]:443", "loopback"},
+		{"ipv4 private", "tcp4", "10.0.0.1:443", "private"},
+		{"ipv6 private", "tcp6", "[fc00::1]:443", "private"},
+		{"ipv4 link local", "tcp4", "169.254.1.1:443", "link-local"},
+		{"ipv6 link local", "tcp6", "[fe80::1%eth0]:443", "link-local"},
+		{"ipv4 unspecified", "tcp4", "0.0.0.0:443", "unspecified"},
+		{"ipv6 unspecified", "tcp6", "[::]:443", "unspecified"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := marketplaceFetchDialControlContext(context.Background(), tc.network, tc.address, nil)
+			if err == nil {
+				t.Fatalf("expected rejection for %s", tc.address)
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), tc.want) {
+				t.Fatalf("error %v missing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func marketplaceDNSResolverForTest(t *testing.T, records map[string]net.IP) *net.Resolver {
+	t.Helper()
+	udpConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen test dns udp: %v", err)
+	}
+	t.Cleanup(func() { _ = udpConn.Close() })
+	go func() {
+		buf := make([]byte, 1500)
+		for {
+			n, addr, err := udpConn.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			query := append([]byte(nil), buf[:n]...)
+			resp := marketplaceDNSResponseForTest(query, records)
+			if len(resp) != 0 {
+				_, _ = udpConn.WriteTo(resp, addr)
+			}
+		}
+	}()
+
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen test dns tcp: %v", err)
+	}
+	t.Cleanup(func() { _ = tcpLn.Close() })
+	go func() {
+		for {
+			conn, err := tcpLn.Accept()
+			if err != nil {
+				return
+			}
+			go marketplaceServeDNSTCPConnForTest(conn, records)
+		}
+	}()
+
+	udpAddr := udpConn.LocalAddr().String()
+	tcpAddr := tcpLn.Addr().String()
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			var d net.Dialer
+			if strings.HasPrefix(network, "tcp") {
+				return d.DialContext(ctx, network, tcpAddr)
+			}
+			return d.DialContext(ctx, network, udpAddr)
+		},
+	}
+}
+
+func marketplaceServeDNSTCPConnForTest(conn net.Conn, records map[string]net.IP) {
+	defer conn.Close()
+	for {
+		var frameLen [2]byte
+		if _, err := io.ReadFull(conn, frameLen[:]); err != nil {
+			return
+		}
+		msgLen := int(binary.BigEndian.Uint16(frameLen[:]))
+		query := make([]byte, msgLen)
+		if _, err := io.ReadFull(conn, query); err != nil {
+			return
+		}
+		resp := marketplaceDNSResponseForTest(query, records)
+		if len(resp) == 0 {
+			return
+		}
+		framed := make([]byte, 2, len(resp)+2)
+		binary.BigEndian.PutUint16(framed, uint16(len(resp)))
+		framed = append(framed, resp...)
+		if _, err := conn.Write(framed); err != nil {
+			return
+		}
+	}
+}
+
+func marketplaceDNSResponseForTest(query []byte, records map[string]net.IP) []byte {
+	if len(query) < 12 {
+		return marketplaceDNSHeaderResponseForTest(query, 1)
+	}
+	off := 12
+	var labels []string
+	for {
+		if off >= len(query) {
+			return marketplaceDNSHeaderResponseForTest(query, 1)
+		}
+		l := int(query[off])
+		off++
+		if l == 0 {
+			break
+		}
+		if off+l > len(query) {
+			return marketplaceDNSHeaderResponseForTest(query, 1)
+		}
+		labels = append(labels, string(query[off:off+l]))
+		off += l
+	}
+	if off+4 > len(query) {
+		return marketplaceDNSHeaderResponseForTest(query, 1)
+	}
+	qtype := binary.BigEndian.Uint16(query[off : off+2])
+	questionEnd := off + 4
+	host := strings.ToLower(strings.Join(labels, "."))
+	ip := records[host]
+	if ip == nil {
+		return marketplaceDNSHeaderResponseForTest(query, 3)
+	}
+
+	var answer []byte
+	switch qtype {
+	case 1:
+		if ip4 := ip.To4(); ip4 != nil {
+			answer = appendDNSAnswerForTest(answer, qtype, ip4)
+		}
+	case 28:
+		if ip16 := ip.To16(); ip16 != nil && ip.To4() == nil {
+			answer = appendDNSAnswerForTest(answer, qtype, ip16)
+		}
+	}
+
+	resp := make([]byte, 12, 12+questionEnd-12+len(answer))
+	copy(resp[:2], query[:2])
+	binary.BigEndian.PutUint16(resp[2:4], 0x8180)
+	binary.BigEndian.PutUint16(resp[4:6], 1)
+	if len(answer) != 0 {
+		binary.BigEndian.PutUint16(resp[6:8], 1)
+	}
+	resp = append(resp, query[12:questionEnd]...)
+	resp = append(resp, answer...)
+	return resp
+}
+
+func marketplaceDNSHeaderResponseForTest(query []byte, rcode uint16) []byte {
+	resp := make([]byte, 12)
+	if len(query) >= 2 {
+		copy(resp[:2], query[:2])
+	}
+	binary.BigEndian.PutUint16(resp[2:4], 0x8180|rcode)
+	return resp
+}
+
+func appendDNSAnswerForTest(dst []byte, qtype uint16, data []byte) []byte {
+	dst = append(dst, 0xc0, 0x0c)
+	dst = binary.BigEndian.AppendUint16(dst, qtype)
+	dst = binary.BigEndian.AppendUint16(dst, 1)
+	dst = binary.BigEndian.AppendUint32(dst, 0)
+	dst = binary.BigEndian.AppendUint16(dst, uint16(len(data)))
+	dst = append(dst, data...)
+	return dst
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -191,8 +428,9 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // injectTLSTestClient builds an http.Client that trusts the
-// httptest TLS server's certificate AND inherits the marketplace
-// transport policy (DisableCompression + downgrade-redirect guard).
+// httptest TLS server's certificate and keeps the marketplace test
+// policy needed for local server rewrites (DisableCompression +
+// downgrade-redirect guard).
 // Tests share this helper instead of building it inline. The body is
 // promoted to production code in marketplace_testhook.go as
 // buildTLSTrustingClient so cross-package CLI tests can reuse the

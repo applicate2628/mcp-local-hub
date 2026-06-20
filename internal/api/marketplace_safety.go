@@ -143,7 +143,7 @@ func rejectUnsafeMarketplaceURLParts(u *url.URL) error {
 }
 
 func rejectMarketplaceLocalOrPrivateHost(host string) error {
-	if strings.EqualFold(host, "localhost") {
+	if strings.EqualFold(strings.TrimSuffix(host, "."), "localhost") {
 		return fmt.Errorf("host %q is the localhost loopback name", host)
 	}
 	hostForIP := host
@@ -154,16 +154,20 @@ func rejectMarketplaceLocalOrPrivateHost(host string) error {
 	if err != nil {
 		return nil
 	}
+	return rejectMarketplaceLocalOrPrivateAddr(fmt.Sprintf("host %q", host), addr)
+}
+
+func rejectMarketplaceLocalOrPrivateAddr(subject string, addr netip.Addr) error {
 	addr = addr.Unmap()
 	switch {
 	case addr.IsLoopback():
-		return fmt.Errorf("host %q is loopback address %s", host, addr)
+		return fmt.Errorf("%s is loopback address %s", subject, addr)
 	case addr.IsUnspecified():
-		return fmt.Errorf("host %q is unspecified address %s", host, addr)
+		return fmt.Errorf("%s is unspecified address %s", subject, addr)
 	case addr.IsPrivate():
-		return fmt.Errorf("host %q is private address %s", host, addr)
+		return fmt.Errorf("%s is private address %s", subject, addr)
 	case addr.IsLinkLocalUnicast():
-		return fmt.Errorf("host %q is link-local address %s", host, addr)
+		return fmt.Errorf("%s is link-local address %s", subject, addr)
 	default:
 		return nil
 	}
