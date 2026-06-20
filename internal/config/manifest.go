@@ -11,10 +11,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Kind enumerates daemon types. Only these two values are valid in manifest.kind.
+// Kind enumerates daemon types. Only these values are valid in manifest.kind.
 const (
 	KindGlobal          = "global"
 	KindWorkspaceScoped = "workspace-scoped"
+	// KindCompanion is a hub-MANAGED but NON-MCP process (e.g. the excalidraw
+	// canvas Express server). It is supervised like a daemon — Job-Object
+	// orphan-protection, restart policy, autostart-on-boot, GUI status — but is
+	// EXCLUDED from MCP routing, scan/classify, the Servers matrix, and
+	// client-config writes (it has no client_bindings, so routing — which is
+	// keyed off client_bindings — never sees it; the scan source-filter and the
+	// routing/install/migrate sink-guards make the exclusion explicit). Paired
+	// with transport=process. Decision:
+	// work-items/decisions/2026-06-19-companion-process-manifest-kind.md
+	KindCompanion = "companion"
 )
 
 // Transport enumerates how the server speaks MCP. Only these are valid.
@@ -27,6 +37,10 @@ const (
 	// configs after expanding ${secret:KEY} placeholders.
 	// Spec: docs/superpowers/specs/2026-05-12-g6-remote-mcp-manifests-design.md
 	TransportRemoteHTTP = "remote-http"
+	// TransportProcess runs the manifest's command as a raw supervised process
+	// with NO MCP host, NO HTTP listener, and NO port bind — the daemon layer
+	// just execs it with cmd.Dir = daemons[0].cwd. Companion-only (kind=companion).
+	TransportProcess = "process"
 )
 
 // NativeHTTPInternalPortOffset is the fixed delta between a native-http
@@ -390,15 +404,93 @@ func ArgsContainContextFlag(args []string) bool {
 // internal/api/settings_registry.go.
 const ReservedGUIPort = 9125
 
+// validateCompanion validates a kind=companion / transport=process manifest: a
+// hub-managed NON-MCP process. It REQUIRES command + exactly one daemons[] entry
+// carrying the working directory (cwd — the bug the companion feature fixes: the
+// process must run from its package dir), and REJECTS every MCP-shaped field
+// (client_bindings, daemon_template, languages, port_pool, url, headers) so a
+// companion can never be mistaken for — or routed as — an MCP server.
+func (m *ServerManifest) validateCompanion() error {
+	if m.Command == "" {
+		return fmt.Errorf("manifest %s: kind=companion requires command (the process to run)", m.Name)
+	}
+	if len(m.ClientBindings) != 0 {
+		return fmt.Errorf("manifest %s: kind=companion rejects client_bindings (a companion is a non-MCP process, never routed to clients)", m.Name)
+	}
+	if m.DaemonTemplate != nil {
+		return fmt.Errorf("manifest %s: kind=companion rejects daemon_template (no dynamic pool; declare one fixed daemons[] entry)", m.Name)
+	}
+	if len(m.Languages) != 0 {
+		return fmt.Errorf("manifest %s: kind=companion rejects languages[] (not a workspace LSP proxy)", m.Name)
+	}
+	if m.PortPool != nil {
+		return fmt.Errorf("manifest %s: kind=companion rejects port_pool (no MCP ports allocated)", m.Name)
+	}
+	if m.URL != "" {
+		return fmt.Errorf("manifest %s: kind=companion rejects url (only valid with transport=remote-http)", m.Name)
+	}
+	if m.Headers != nil {
+		return fmt.Errorf("manifest %s: kind=companion rejects headers (only valid with transport=remote-http)", m.Name)
+	}
+	// A companion has NO per-workspace materialization — the launch path
+	// (cli/daemon.go) builds childArgs from base_args + the daemon's extra_args
+	// VERBATIM and never expands a *_template. Accepting a template would let the
+	// manifest install successfully while silently dropping those args at spawn
+	// (Codex #381). Reject both template surfaces.
+	if len(m.BaseArgsTemplate) != 0 {
+		return fmt.Errorf("manifest %s: kind=companion rejects base_args_template (no per-workspace materialization; use base_args — a template is silently dropped at spawn)", m.Name)
+	}
+	if len(m.Daemons) != 1 {
+		return fmt.Errorf("manifest %s: kind=companion requires exactly one daemons[] entry carrying the working directory (got %d)", m.Name, len(m.Daemons))
+	}
+	d := m.Daemons[0]
+	if d.Name == "" {
+		return fmt.Errorf("manifest %s: kind=companion daemons[0].name is required", m.Name)
+	}
+	// cwd is REQUIRED for a companion — the canvas process must run from its
+	// package directory (it writes cwd-relative files + serves cwd-relative
+	// assets). Parse already ${ENV}-expanded it; the companion returns before the
+	// global-branch absolute-cwd check, so enforce both presence AND absoluteness
+	// here (a relative cwd has no stable base across supervisor / autostart).
+	if d.Cwd == "" {
+		return fmt.Errorf("manifest %s: kind=companion daemons[0].cwd is required (the package working directory the process must run from)", m.Name)
+	}
+	if !filepath.IsAbs(d.Cwd) {
+		return fmt.Errorf("manifest %s: kind=companion daemons[0].cwd %q must be an absolute path", m.Name, d.Cwd)
+	}
+	// A companion daemon must carry NO port (Port==0). The companion process binds
+	// its own listener directly (e.g. the excalidraw canvas on its own port); it is
+	// NOT an mcphub MCP port. If an operator records the companion's own port here,
+	// supervisorDaemonsFromPlan copies it into SupervisorDaemon.Port and the liveness
+	// sweep treats it as a port the `mcphub daemon` wrapper owns — but the real
+	// listener belongs to the raw child, so supervisorDaemonEntryLiveWithProbe
+	// returns port_owner_mismatch and restarts an otherwise-healthy companion
+	// (Codex #381). Reject a non-zero port so that can never be recorded.
+	if d.Port != 0 {
+		return fmt.Errorf("manifest %s: kind=companion daemons[0].port must be 0 (the companion binds its own port directly; a non-zero value is mis-owned by the liveness probe and would restart a healthy companion)", m.Name)
+	}
+	return nil
+}
+
 func (m *ServerManifest) Validate() error {
 	if m.Name == "" {
 		return fmt.Errorf("manifest: name is required")
 	}
-	if m.Kind != KindGlobal && m.Kind != KindWorkspaceScoped {
-		return fmt.Errorf("manifest %s: kind must be %q or %q (got %q)", m.Name, KindGlobal, KindWorkspaceScoped, m.Kind)
+	if m.Kind != KindGlobal && m.Kind != KindWorkspaceScoped && m.Kind != KindCompanion {
+		return fmt.Errorf("manifest %s: kind must be %q, %q, or %q (got %q)", m.Name, KindGlobal, KindWorkspaceScoped, KindCompanion, m.Kind)
 	}
-	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP {
-		return fmt.Errorf("manifest %s: transport must be %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, m.Transport)
+	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP && m.Transport != TransportProcess {
+		return fmt.Errorf("manifest %s: transport must be %q, %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, TransportProcess, m.Transport)
+	}
+
+	// kind=companion and transport=process are a matched pair: each is invalid
+	// without the other. A companion is a supervised NON-MCP process; transport
+	// =process has no MCP host to belong to under any other kind.
+	if (m.Kind == KindCompanion) != (m.Transport == TransportProcess) {
+		return fmt.Errorf("manifest %s: kind=%q and transport=%q must be used together (got kind=%q transport=%q)", m.Name, KindCompanion, TransportProcess, m.Kind, m.Transport)
+	}
+	if m.Kind == KindCompanion {
+		return m.validateCompanion()
 	}
 
 	// Cross-branch gate (closes v6 codex BLOCKER "daemon_template silently

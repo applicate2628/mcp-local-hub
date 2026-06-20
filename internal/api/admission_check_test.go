@@ -114,6 +114,27 @@ func TestAdmissionCheckMarksAdvisoryFindingsOptional(t *testing.T) {
 	}
 }
 
+// TestAdmissionCheckAdmitsCompanion guards the #381<->#382 merge integration: a
+// kind=companion daemon (Port==0, no MCP port — it binds its own port) must NOT be
+// flagged by AdmissionCheck's daemon port loop, so the merged AdmissionCheck refactor
+// keeps the companion installable (the companion-skip was preserved through the refactor).
+func TestAdmissionCheckAdmitsCompanion(t *testing.T) {
+	setupAdmissionParityTest(t)
+	m := &config.ServerManifest{
+		Name:      "excalidraw-canvas",
+		Kind:      config.KindCompanion,
+		Transport: config.TransportProcess,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "default", Cwd: t.TempDir()}},
+	}
+	if hasAdmissionFinding(AdmissionCheck(m, AdmissionScope{}), "external-port-range") {
+		t.Fatal("AdmissionCheck flagged external-port-range for a companion (Port==0 is valid)")
+	}
+	if err := Preflight(m, ""); err != nil {
+		t.Fatalf("Preflight rejected a companion: %v", err)
+	}
+}
+
 func TestPreflightSkipsCallerDependentClientBindingValidation(t *testing.T) {
 	setupAdmissionParityTest(t)
 

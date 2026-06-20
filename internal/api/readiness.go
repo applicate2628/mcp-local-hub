@@ -578,6 +578,13 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// the pool allocator's portAvailable, so a bound-but-not-listening port is
 	// not reported free (Codex #377 r15/r16).
 	for _, d := range m.Daemons {
+		// A kind=companion daemon binds NO mcphub MCP port (Port==0 is valid — it
+		// listens on its own port directly). Skip the fixed-port requirement so the
+		// companion is not reported Ready=false for an out-of-range port that
+		// Preflight now admits — keeping readiness in sync with install (Codex #381).
+		if m.Kind == config.KindCompanion {
+			continue
+		}
 		portName := fmt.Sprintf("port %d (%s)", d.Port, d.Name)
 		if ok, reason := fixedPortStatus(d.Port, m.Name, d.Name, false); !ok {
 			add(ReadinessRequirement{Name: portName, OK: false, Reason: reason,

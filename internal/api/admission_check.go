@@ -85,7 +85,7 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 	}
 	if manifestNeedsGit(m) && !binaryAvailable("git") {
 		_, fix := LauncherGuidance("git")
-		add("git-for-uvx-git-source", "binary: git", fmt.Sprintf("git is required to fetch the uvx git+ source but is not on PATH — %s", fix), fix, false)
+		add("git-for-uvx-git-source", "binary: git", fmt.Sprintf("git is required to fetch the uvx git+ source but is not on PATH — %s", fix), fix, launcherOptional)
 	}
 
 	if m.Transport == config.TransportStdioBridge && len(m.BaseArgs) >= 2 && m.BaseArgs[0] == "lldb-bridge" {
@@ -124,6 +124,13 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 
 	for _, d := range m.Daemons {
 		if scope.DaemonFilter != "" && d.Name != scope.DaemonFilter {
+			continue
+		}
+		// A kind=companion daemon binds NO mcphub MCP port (Port==0 is valid — it
+		// listens on its own port directly). Skip the MCP port range + collision
+		// checks (Codex #381; preserved through the AdmissionCheck refactor so the
+		// merged companion + AdmissionCheck features stay consistent).
+		if m.Kind == config.KindCompanion {
 			continue
 		}
 		if d.Port < 1 || d.Port > 65535 {

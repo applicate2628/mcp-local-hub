@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -1026,6 +1027,71 @@ func TestServerManifestValidate_LegacyLSPManifest_StillValidates(t *testing.T) {
 	if err := m.Validate(); err != nil {
 		t.Fatalf("legacy LSP manifest must still validate; got %v", err)
 	}
+}
+
+// TestServerManifestValidate_Companion pins the kind=companion / transport=process
+// contract: a valid companion (command + exactly one daemon with an absolute cwd,
+// no MCP-shaped fields) validates; every MCP-shaped field and the missing-cwd /
+// relative-cwd / kind-transport-mismatch cases are rejected.
+func TestServerManifestValidate_Companion(t *testing.T) {
+	absCwd := "/opt/excalidraw-canvas"
+	if runtime.GOOS == "windows" {
+		absCwd = `C:\opt\excalidraw-canvas`
+	}
+	valid := func() *ServerManifest {
+		return &ServerManifest{
+			Name:      "excalidraw-canvas",
+			Kind:      KindCompanion,
+			Transport: TransportProcess,
+			Command:   "node",
+			BaseArgs:  []string{"dist/server.js"},
+			Daemons:   []DaemonSpec{{Name: "default", Cwd: absCwd}},
+		}
+	}
+	if err := valid().Validate(); err != nil {
+		t.Fatalf("valid companion must validate; got %v", err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*ServerManifest)
+		want   string
+	}{
+		{"missing command", func(m *ServerManifest) { m.Command = "" }, "requires command"},
+		{"client_bindings rejected", func(m *ServerManifest) {
+			m.ClientBindings = []ClientBinding{{Client: "claude-code", Daemon: "default"}}
+		}, "rejects client_bindings"},
+		{"no daemons", func(m *ServerManifest) { m.Daemons = nil }, "exactly one daemons"},
+		{"two daemons", func(m *ServerManifest) {
+			m.Daemons = append(m.Daemons, DaemonSpec{Name: "second", Cwd: absCwd})
+		}, "exactly one daemons"},
+		{"daemon missing cwd", func(m *ServerManifest) { m.Daemons[0].Cwd = "" }, "cwd is required"},
+		{"relative cwd", func(m *ServerManifest) { m.Daemons[0].Cwd = "relative/path" }, "absolute path"},
+		{"transport not process", func(m *ServerManifest) { m.Transport = TransportStdioBridge }, "must be used together"},
+		{"port_pool rejected", func(m *ServerManifest) { m.PortPool = &PortPool{Start: 1, End: 2} }, "rejects port_pool"},
+		{"languages rejected", func(m *ServerManifest) {
+			m.Languages = []LanguageSpec{{Name: "go"}}
+		}, "rejects languages"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := valid()
+			tc.mutate(m)
+			err := m.Validate()
+			if err == nil {
+				t.Fatalf("expected error containing %q; got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %v; want substring %q", err, tc.want)
+			}
+		})
+	}
+	t.Run("process transport requires companion kind", func(t *testing.T) {
+		m := valid()
+		m.Kind = KindGlobal
+		if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "must be used together") {
+			t.Errorf("transport=process under kind=global must be rejected; got %v", err)
+		}
+	})
 }
 
 // TestContainsWorkspacePathTokenInArgs_SubstringMatch pins the helper

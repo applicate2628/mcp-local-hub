@@ -212,6 +212,14 @@ func (a *API) RoutableServerNames() ([]string, error) {
 		if len(m.Daemons) == 0 {
 			continue
 		}
+		// kind=companion has daemons[] (so it is supervised) but is a NON-MCP
+		// process with NO client routing — exclude it from the routable /
+		// group-authoring set so the Groups GUI never offers it as a member (the
+		// hub publish scan-filter already drops it from snapshots; excluding it
+		// here stops it being selectable in the first place) (Codex #381).
+		if m.Kind == config.KindCompanion {
+			continue
+		}
 		out = append(out, name)
 	}
 	sort.Strings(out)
@@ -525,9 +533,15 @@ func manifestBlockingWarnings(m *config.ServerManifest) []string {
 		len(m.Daemons) == 0 {
 		warnings = append(warnings, "no daemons declared")
 	}
-	for _, d := range m.Daemons {
-		if d.Port == 0 {
-			warnings = append(warnings, fmt.Sprintf("daemon %q has port=0", d.Name))
+	// A kind=companion daemon is a NON-MCP process — it binds no mcphub MCP port
+	// (the companion, e.g. the excalidraw canvas, listens on its own port
+	// directly), so port=0 is VALID for it and must not be flagged as a structural
+	// error that blocks the manifest write / install (Codex #381).
+	if m.Kind != config.KindCompanion {
+		for _, d := range m.Daemons {
+			if d.Port == 0 {
+				warnings = append(warnings, fmt.Sprintf("daemon %q has port=0", d.Name))
+			}
 		}
 	}
 	return warnings

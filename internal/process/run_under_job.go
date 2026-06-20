@@ -27,6 +27,10 @@ import "os/exec"
 // calling; RunUnderKillJob only owns Start, Assign, Wait, and Close.
 func RunUnderKillJob(cmd *exec.Cmd) error {
 	job, _ := NewKillOnCloseJob() // (nil,err) on Windows alloc failure; (&Job{},nil) POSIX stub
+	// POSIX: put the child in its own process group so the whole forked tree can be
+	// reaped by killProcessGroup below (the Job stub does not reap on POSIX).
+	// Windows: no-op — the Job Object owns tree-kill.
+	prepareProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		if job != nil {
 			_ = job.Close()
@@ -40,5 +44,10 @@ func RunUnderKillJob(cmd *exec.Cmd) error {
 		_ = job.Assign(cmd)
 		defer func() { _ = job.Close() }()
 	}
+	// POSIX: after Wait returns, SIGKILL the process group to reap any forks the
+	// context-deadline kill of the leader missed (a wrapper companion's real
+	// server keeping its port open). Windows: no-op — job.Close() already reaped.
+	// Runs before job.Close() (LIFO defer), harmless on either platform.
+	defer killProcessGroup(cmd)
 	return cmd.Wait()
 }
