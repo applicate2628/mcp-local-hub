@@ -128,6 +128,21 @@ var postRenameVerifyFailHook func() error
 // deterministically across platforms. Never set in production.
 var postRenameOpenFailHook func() error
 
+// resolvedParentDescendStepHook is a TEST-ONLY seam consulted by
+// secureWriteThroughResolvedParentHandle (both platform legs) AFTER opening
+// each intermediate component N of the resolved target's volume-root descent
+// and BEFORE opening component N+1. nil in production (a no-op). A test sets
+// it to swap an as-yet-unopened intermediate component into a symlink so the
+// descent's O_NOFOLLOW open of that component REFUSES (ELOOP) — engineering
+// the intermediate-component-swap TOCTOU window deterministically per the
+// repo's race-window-assertion discipline, with no reliance on a natural race.
+// The hook receives the just-opened component's name (diagnostic only).
+//
+// It is platform-neutral (declared here, called from both _posix and _windows
+// legs) so the POSIX swap test — symlink creation needs no elevation there —
+// can set it; the Windows decomposition is unit-tested separately.
+var resolvedParentDescendStepHook func(openedComponent string)
+
 // The AF-1 secure-write observation counters
 // (secureWritePathBasedStringEntryCount / secureWriteResolvedParentEntryCount)
 // and their observeStringEntry() / observeResolvedParentEntry() recorders live

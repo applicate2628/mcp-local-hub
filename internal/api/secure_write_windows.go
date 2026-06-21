@@ -470,6 +470,47 @@ func openDirHandleNoReparse(path string) (windows.Handle, error) {
 	return h, nil
 }
 
+// openTraverseOnlyDirHandleNoReparse opens a directory TRAVERSE-ONLY
+// (FILE_TRAVERSE | FILE_READ_ATTRIBUTES) with FILE_FLAG_BACKUP_SEMANTICS +
+// FILE_FLAG_OPEN_REPARSE_POINT. It is the Finding 1 volume-root-anchor analog
+// of openDirHandleNoReparse for the resolved-symlink component descent: the
+// root anchor (a drive root "C:\" or a UNC share root \\server\share) only
+// needs to be TRAVERSED to descend O_NOFOLLOW-relative into its first
+// intermediate — ordinary path traversal and the old full-parent open never
+// needed FILE_LIST_DIRECTORY on the root.
+//
+// It is SEPARATE from openDirHandleNoReparse on purpose: that shared helper
+// returns a LIST/READ_CONTROL handle because its OTHER callers
+// (secureWriteImpl's production parent open, G17's home-anchor open,
+// secure_create_client_config_windows.go) run a parent-DACL verify via
+// GetSecurityInfo, which needs READ_CONTROL. Leaving openDirHandleNoReparse
+// UNCHANGED keeps G17's read-fd DACL-verify path intact; only the
+// resolved-symlink anchor drops to traverse-only.
+//
+// FILE_FLAG_OPEN_REPARSE_POINT is kept (so even a reparse-point root would be
+// opened as the link itself rather than followed — though a drive/share root
+// is never itself a reparse point); the per-component reparse refusal still
+// fires on every intermediate.
+func openTraverseOnlyDirHandleNoReparse(path string) (windows.Handle, error) {
+	pathW, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return windows.InvalidHandle, fmt.Errorf("utf16 %q: %w", path, err)
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		windows.FILE_TRAVERSE|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	return h, nil
+}
+
 // ntCreateRelative wraps NtCreateFile with RootDirectory=dirHandle.
 // ObjectName is the relative path; ShareAccess is full r/w/d so the
 // post-rename re-open at step 8 succeeds even if AV scanners hold

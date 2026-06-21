@@ -87,17 +87,38 @@ open after resolve:
   `secureWriteClientConfigImpl` opens the parent and delegates to it — ONE
   owner of those steps.
 - **Resolve-to-handle write-through:** `secureWriteThroughResolvedParentHandle`
-  (`client_write_resolve_{windows,posix}.go`) opens the resolved target's
-  PARENT exactly once (`openDirHandleNoReparse` on Windows;
-  `unix.Open(O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC)` on POSIX — frozen at open) and
-  runs the shared owner against that held handle/fd. No `filepath.Split` of a
-  resolved string, no second path open.
+  (`client_write_resolve_{windows,posix}.go`) descends to the resolved
+  target's PARENT **component-by-component** from the resolved target's VOLUME
+  ROOT (POSIX `/`; Windows drive root `C:\` or UNC share root
+  `\\server\share`), opening one real component at a time
+  O_NOFOLLOW-relative-to-the-previously-held-fd/handle via the shared
+  `openExistingRealDirAt` step, then runs the shared owner against the final
+  held parent handle/fd. No `filepath.Split` of a resolved string, no
+  path-based open of the whole parent string.
+
+  > **F1 correction (this PR-B, 2026-06-21).** The PR-A shape opened the
+  > resolved target's parent BY PATH **exactly once** (`openDirHandleNoReparse`
+  > / `unix.Open(parentDir, O_NOFOLLOW)`). O_NOFOLLOW on a single open of the
+  > full parent string protects ONLY the FINAL component; the kernel / object
+  > manager re-walks every INTERMEDIATE component at open time, so an
+  > intermediate dir swapped to a symlink between resolve and that single open
+  > still redirected the privileged write. The earlier wording in this doc and
+  > in the resolver comments ("a co-resident who swaps … an intermediate
+  > component … cannot redirect the privileged write") was OVER-CLAIMING:
+  > PR-A's single path-based open did NOT close the intermediate-component
+  > swap. PR-B (F1) closes it via the component-by-component descent above —
+  > the trust anchor is the resolved target's VOLUME ROOT (NOT $HOME; the
+  > resolved target is out-of-home by design), and the only property delivered
+  > is "no intermediate component is followed through a swap" (no
+  > path-containment refusal). Regression guard:
+  > `TestF1_IntermediateComponentSwap_Refused` (POSIX) +
+  > `TestF1_DecomposeResolvedParentWindows` (Windows decomposition).
 - **F2 migration:** the `MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK` env-var lane now
   ALSO goes resolve-to-handle → SEAM-A. This is the high-value part — it
   closes the shipping AF-1 TOCTOU.
 - **SEAM-B (scoped consent):** a `ResolvedSymlinkConsent` pins the resolved
-  PARENT the operator approved; at write time the re-resolved parent must
-  match the pin or the write is refused (the swap-between-confirm-and-write
+  FULL TARGET the operator approved; at write time the re-resolved full target
+  must match the pin or the write is refused (the swap-between-confirm-and-write
   guard).
 
 ## What is PRESERVED (not weakened by this fix)
@@ -115,13 +136,30 @@ open after resolve:
 
 ## Status
 
-**RESOLVED by this PR (A3 PR-1).** Verified on the POSIX leg (WSL Ubuntu,
-go1.26.4): `TestA3_T1..T6` + the scoped-consent pin-match positive control all
-PASS (7/7), with the pre-existing `TestSecureWriteWithOperatorOpt_Symlink*` F2
-tests still passing (105/0/0 PASS/FAIL/SKIP across the
-Symlink|SecureWrite|Resolve|... set). Windows host skips the elevation-gated
-symlink tests and passes the path-based + resolve-shape tests. The residual
-namespace-rights limitation (a co-resident with `FILE_DELETE_CHILD` on the
-resolved parent) is the documented best-effort limitation covered by
-`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` — see
-`work-items/decisions/2026-06-21-symlink-client-config-scoped-consent.md`.
+**FULLY RESOLVED across two PRs.**
+
+- **PR-A (A3 PR-1)** closed the symlink-itself swap and the resolve→re-walk for
+  the FINAL component: resolve-to-handle write-through + the SEAM-B full-target
+  pin. Verified on the POSIX leg: `TestA3_T1..T7` + the scoped-consent pin-match
+  positive control all PASS, with the pre-existing
+  `TestSecureWriteWithOperatorOpt_Symlink*` F2 tests still passing.
+- **PR-B (F1)** closed the remaining INTERMEDIATE-component swap: PR-A's single
+  path-based open of the resolved parent string re-walked every intermediate
+  component (O_NOFOLLOW guards only the final component), so an intermediate dir
+  swapped to a symlink between resolve and that open still redirected the write.
+  PR-B replaces the single open with a component-by-component O_NOFOLLOW descent
+  from the resolved target's VOLUME ROOT. Verified on the POSIX leg (WSL,
+  go1.26.4): `TestF1_IntermediateComponentSwap_Refused` +
+  `TestF1_OutOfHomeSymlink_Succeeds` PASS; the per-component swap is
+  falsification-proven load-bearing (the same swap against the pre-F1
+  single-open shape writes the attacker file). Windows host passes
+  `TestF1_DecomposeResolvedParentWindows` (drive-root + UNC decomposition) and
+  the G17 `TestSecureCreateClientConfigParentDir_Windows*` suite stays green
+  (the shared `openExistingRealDirAt` extraction did not regress parent-create).
+
+Windows host skips the elevation-gated symlink tests and passes the
+path-based, resolve-shape, and decomposition tests. The residual
+namespace-rights limitation
+(a co-resident with `FILE_DELETE_CHILD` on the resolved parent) is the
+documented best-effort limitation covered by `MCPHUB_REQUIRE_SINGLE_USER_HOME=1`
+— see `work-items/decisions/2026-06-21-symlink-client-config-scoped-consent.md`.

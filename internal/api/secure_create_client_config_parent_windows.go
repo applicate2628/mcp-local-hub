@@ -139,12 +139,33 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 		if !isAlreadyExistsErr(err) {
 			return windows.InvalidHandle, fmt.Errorf("secure mkparent: ntcreate dir %s: %w", full, err)
 		}
-		h, err = ntOpenDirRelative(parentHandle, name, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL)
+		// Existing component: open it relative to the held parent handle
+		// (FILE_OPEN_REPARSE_POINT) and refuse a reparse point / non-dir
+		// via the SHARED descent step (also used by the AF-1 F1
+		// resolved-symlink-target walk in client_write_resolve_windows.go).
+		h, err = openExistingRealDirAt(parentHandle, name)
 		if err != nil {
-			return windows.InvalidHandle, fmt.Errorf("secure mkparent: relative open %s: %w", full, err)
+			return windows.InvalidHandle, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, err)
 		}
+		closeOnErr := true
+		defer func() {
+			if closeOnErr {
+				_ = windows.CloseHandle(h)
+			}
+		}()
+		if verifyDACL {
+			if verr := verifyWindowsDACLFromHandle(h); verr != nil {
+				return windows.InvalidHandle, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
+			}
+		}
+		closeOnErr = false
+		return h, nil
 	}
 
+	// Freshly created via FILE_CREATE: it is a real directory by
+	// construction (FILE_DIRECTORY_FILE), so re-assert the reparse/non-dir
+	// refusal (defends against a hostile swap in the create window) and
+	// verify the DACL if requested.
 	closeOnErr := true
 	defer func() {
 		if closeOnErr {
@@ -163,6 +184,92 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 	closeOnErr = false
 	return h, nil
 }
+
+// openExistingRealDirAt opens an EXISTING real directory `name` relative to
+// the already-held `parentHandle` (FILE_OPEN_REPARSE_POINT so a reparse
+// point at the slot is opened as the link itself, then REFUSED, never
+// followed), verifies it is a real directory (not a reparse point / file),
+// and returns the open handle. It is the single per-component descent step
+// shared by
+//
+//   - mkdirOrVerifyRealDirWindows (G17 parent-create — its EEXIST branch), and
+//   - secureWriteThroughResolvedParentHandle's volume-root descent (the
+//     AF-1 F1 fix in client_write_resolve_windows.go), which walks an
+//     already-existing resolved chain and creates nothing.
+//
+// It does NOT create, set a DACL, or DACL-verify — it ONLY opens an existing
+// component refusing reparse-follow, so the descent never walks through a
+// swapped intermediate. Holding the returned handle as the anchor for the
+// next component is what closes the intermediate-component re-walk TOCTOU
+// (FILE_FLAG_OPEN_REPARSE_POINT on a single path-based open of the whole
+// parent string protects only the FINAL component; the object manager
+// re-walks every intermediate at open time). On error the (possibly opened)
+// handle is closed before returning.
+func openExistingRealDirAt(parentHandle windows.Handle, name string) (windows.Handle, error) {
+	if !singleWindowsPathComponent(name) {
+		return windows.InvalidHandle, fmt.Errorf("invalid path component %q", name)
+	}
+	h, err := ntOpenDirRelative(parentHandle, name, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	if rerr := refuseReparsePointHandle(h); rerr != nil {
+		_ = windows.CloseHandle(h)
+		return windows.InvalidHandle, rerr
+	}
+	return h, nil
+}
+
+// openTraverseOnlyDirAt opens an EXISTING real directory `name` relative to
+// the already-held `parentHandle` TRAVERSE-ONLY for the resolved-symlink
+// intermediate-ancestor descent (Finding 1 — the Windows analog of the POSIX
+// openSearchOnlyDirAt / O_PATH split). It is the Windows mirror of
+// openExistingRealDirAt with one difference: it requests
+// FILE_TRAVERSE|FILE_READ_ATTRIBUTES (the minimal access to descend one
+// O_NOFOLLOW-relative component and read the reparse/dir attributes) WITHOUT
+// FILE_LIST_DIRECTORY, so a consented symlink on a UNC share — or under an
+// ancestor that grants TRAVERSE but denies directory LISTING — is still
+// reachable. Ordinary Windows path traversal and the old full-parent open
+// only ever needed TRAVERSE on ancestors.
+//
+// The reparse-point refusal is PRESERVED: ntOpenDirRelative opens with
+// FILE_OPEN_REPARSE_POINT (so a swapped intermediate junction/symlink is
+// opened as the link itself, never followed) and refuseReparsePointHandle
+// then REFUSES it via GetFileInformationByHandle (which needs the retained
+// FILE_READ_ATTRIBUTES). The F1 intermediate-swap TOCTOU closure is therefore
+// unchanged; only the LIST requirement on ancestors is dropped.
+//
+// It is SEPARATE from openExistingRealDirAt by design: G17's
+// mkdirOrVerifyRealDirWindows DACL-verify (verifyWindowsDACLFromHandle ->
+// GetSecurityInfo) needs the full LIST/READ_CONTROL handle, so that shared
+// step keeps openExistingRealDirAt UNCHANGED; only this resolved-symlink walk
+// drops the LIST requirement on ancestors. The FINAL parent of the descent
+// still uses openExistingRealDirAt (the normal full open).
+func openTraverseOnlyDirAt(parentHandle windows.Handle, name string) (windows.Handle, error) {
+	if !singleWindowsPathComponent(name) {
+		return windows.InvalidHandle, fmt.Errorf("invalid path component %q", name)
+	}
+	h, err := ntOpenDirRelative(parentHandle, name, traverseOnlyDirAccess)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	if rerr := refuseReparsePointHandle(h); rerr != nil {
+		_ = windows.CloseHandle(h)
+		return windows.InvalidHandle, rerr
+	}
+	return h, nil
+}
+
+// traverseOnlyDirAccess is the minimal NtCreateFile desired-access mask for a
+// traverse-only intermediate-ancestor open in the resolved-symlink descent:
+// FILE_TRAVERSE (right to resolve a path component THROUGH the directory) plus
+// FILE_READ_ATTRIBUTES (required by GetFileInformationByHandle in
+// refuseReparsePointHandle to read the reparse/directory attribute bits).
+// FILE_LIST_DIRECTORY (the right to ENUMERATE the directory) is deliberately
+// EXCLUDED — the descent never lists, so requiring it would reject a
+// traverse-but-no-list ancestor (e.g. on a UNC share). ntOpenDirRelative adds
+// SYNCHRONIZE itself.
+const traverseOnlyDirAccess = windows.FILE_TRAVERSE | windows.FILE_READ_ATTRIBUTES
 
 func ntOpenDirRelative(parentHandle windows.Handle, name string, desiredAccess uint32) (windows.Handle, error) {
 	return ntCreateRelative(
