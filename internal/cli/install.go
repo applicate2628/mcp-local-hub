@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,12 +12,14 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
@@ -162,6 +165,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 					IncludeAllClients: allClients,
 					DryRun:            dryRun,
 					Writer:            cmd.OutOrStdout(),
+					GUIPort:           resolveInstallGUIPort(),
 				})
 				failed := 0
 				for _, r := range results {
@@ -192,6 +196,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				IncludeAllClients: allClients,
 				DryRun:            dryRun,
 				Writer:            cmd.OutOrStdout(),
+				GUIPort:           resolveInstallGUIPort(),
 			})
 		},
 	}
@@ -1192,6 +1197,22 @@ var upgradeNoClientWriteSentinel = []string{""}
 // driving a real install. nil → the real api.NewAPI().Install.
 var upgradeServerInstallFn func(api.InstallOpts) error
 
+func resolveInstallGUIPort() int {
+	// NoCreate: this runs at InstallOpts construction (before the dry-run gate),
+	// so it must not create the per-user GUI dir as a side effect of a dry-run.
+	pidportPath, err := gui.PidportPathNoCreate()
+	if err != nil {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+	v := gui.Probe(ctx, pidportPath)
+	if v.Class != gui.VerdictHealthy || v.Port <= 0 {
+		return 0
+	}
+	return v.Port
+}
+
 func upgradeInstallServer(server string, w io.Writer) error {
 	if upgradeInstallServerFn != nil {
 		return upgradeInstallServerFn(server, w)
@@ -1200,6 +1221,7 @@ func upgradeInstallServer(server string, w io.Writer) error {
 		Server:         server,
 		ClientsInclude: upgradeNoClientWriteSentinel,
 		Writer:         w,
+		GUIPort:        resolveInstallGUIPort(),
 	}
 	if upgradeServerInstallFn != nil {
 		return upgradeServerInstallFn(opts)

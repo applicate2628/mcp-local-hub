@@ -486,8 +486,8 @@ func TestApplyHubReconcileReportsSkipListedClient(t *testing.T) {
 // pipeline; per-server installs only touch their own per-(server,
 // client) bindings.
 func TestPerServerInstallSkipsHubEntryRemoval(t *testing.T) {
-	m := serenaLikeManifest()
-	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	m := genericMultiDaemonManifest()
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true, GUIPort: 9125})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

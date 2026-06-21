@@ -507,8 +507,9 @@ func runSetupInstallServer(out io.Writer, server string) error {
 		return setupInstallServerFn(name, out)
 	}
 	return api.NewAPI().Install(api.InstallOpts{
-		Server: name,
-		Writer: out,
+		Server:  name,
+		Writer:  out,
+		GUIPort: resolveInstallGUIPort(),
 	})
 }
 
