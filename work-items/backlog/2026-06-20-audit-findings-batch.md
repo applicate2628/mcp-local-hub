@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: closed
 date: 2026-06-20
 slug: audit-findings-batch
 source: opus subsystem-audit Workflow (wpaephnqp, 6 areas) + 2 codex audits (CLI/lock-order, cold-restart/IPC)
@@ -73,3 +73,5 @@ artifacts under the local `.reports/` tree (not committed). The triaged findings
   → durable recovery (detect missing-target + valid .old-* → restore).
 - P3 — the post-ListenPipe DACL "smoke assert" returns the requested SDDL, not the live handle's
   effective DACL → query the actual pipe handle SD (or add negative connection tests).
+
+_Closed 2026-06-21: NEXT-BATCH fully shipped across tonight's 20 PRs._

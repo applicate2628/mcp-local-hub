@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed
 severity: P3
 date: 2026-06-20
 slug: gui-post-handlers-unbounded-body
@@ -36,3 +36,5 @@ per-endpoint oversized-body test or a shared table test.
 Flagged on PR #378 (which adds the readiness + exercises the secrets endpoints) but the pattern
 predates and exceeds #378; fixing only the 3 #378-touched endpoints would be inconsistent, so it
 is tracked here as a standalone hygiene sweep rather than bolted onto the feature PR.
+
+_Closed 2026-06-21: done-by-tonight — #393, all 22 gui POST handlers route through decodeJSONBodyLimited._

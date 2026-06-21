@@ -47,3 +47,5 @@ assert the sweeper does not stop a daemon with a request in its pre-forward wind
 
 Sibling race: [[2026-06-20-serena-stale-daemon-session-after-idle-stop]] (the idle-stop
 invalidation half). The two are best fixed together (same stop-gate seam).
+
+_Closed 2026-06-21: done-by-tonight — #386 shared withSerenaWorkspaceGate stop-gate._
