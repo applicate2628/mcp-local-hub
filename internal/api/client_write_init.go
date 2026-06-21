@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -308,42 +309,196 @@ const AllowClientConfigSymlinkEnv = "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK"
 // (the relax fires either way — old-style explicit opt-in OR new-
 // style default). Operators on corp-managed hosts who want the
 // strict gate must opt IN via MCPHUB_REQUIRE_SINGLE_USER_HOME=1.
+// ResolvedSymlinkConsent carries a SCOPED, per-write operator consent to
+// follow a client-config symlink to its resolved target — the SEAM-B
+// supplement to the AllowClientConfigSymlinkEnv env-var opt-in (NOT a
+// replacement: the env var stays valid; a scoped consent is the second,
+// per-path input to the SAME follow-symlink predicate).
+//
+// PinnedResolvedPath is the resolved-PARENT directory the operator was
+// shown and consented to at confirm time (PR-2 GUI/CLI surfaces it; PR-1
+// only plumbs it). At write time the resolve re-runs and the
+// freshly-resolved parent MUST equal PinnedResolvedPath, else the write is
+// REFUSED — this is the swap-between-confirm-and-write guard: a co-resident
+// who repoints the symlink after the operator consented but before the
+// write lands cannot redirect the privileged write to a different target,
+// because the pin no longer matches.
+//
+// Client + OriginalPath are diagnostic/audit context only (which client's
+// config, the symlink path the operator pointed at); they are NOT part of
+// the pin-match decision.
+//
+// CLIENT-CONFIG-ONLY: a ResolvedSymlinkConsent is never constructed for a
+// state_dir / supervisor-intent write. The state-file pipeline has its own
+// strict-mode resolution and does not follow symlinks.
+type ResolvedSymlinkConsent struct {
+	Client             string
+	OriginalPath       string
+	PinnedResolvedPath string
+}
+
+// secureWriteWithOperatorOpt is the production clients.WriteConfigFile hook.
+// It carries NO scoped consent (consent=nil) — the symlink-follow decision
+// then reduces to the AllowClientConfigSymlinkEnv env-var opt-in alone
+// (the F2 lane). PR-2 will add the scoped-consent caller surface; PR-1
+// keeps the production hook's behavior identical via the nil-consent path.
 func secureWriteWithOperatorOpt(path string, contents []byte) error {
-	// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in (post-PR #209
-	// reintroduction under explicit operator consent): when set,
-	// resolve symlinks at the destination before calling secure-
-	// write. The hardened pipeline refuses pre-existing reparse
-	// points outright (symlink-attack defense), but a real-world
-	// solo-dev pattern is to symlink dotfiles to a separate repo
-	// (~/.codex/config.toml -> /e/env/Agents/.codex/config.toml).
-	// Without the opt-in, every matrix Apply on such hosts fails
-	// with "pre-existing reparse point refused".
-	//
-	// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides
-	// the opt-in inside OperatorAllowsClientConfigSymlink, so
-	// multi-tenant / corp-managed hosts get the symlink-attack
-	// protection without compromise.
-	//
-	// Resolution writes through to the symlink's TARGET path.
-	// The original symlink is left intact (mcphub does not
-	// rewrite it as a regular file). The target's DACL after the
-	// write is owner-only via the secure-write pipeline.
-	//
-	// Audit log: emit a warn event on each opt-in resolve so the
-	// security-boundary downgrade is visible to log monitoring
-	// (mirrors the unhardened-fallback warn at line 271+).
-	if OperatorAllowsClientConfigSymlink() {
-		if resolved, was := resolveSymlinkForSecureWrite(path); was {
-			if logErr := LogHubMcpEvent("warn", "client-write-symlink-resolved-via-optin", map[string]any{
-				"path":     path,
-				"resolved": resolved,
-				"reason":   "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 (operator opt-in; write follows symlink target)",
-			}); logErr != nil {
-				_ = logErr
+	return secureWriteWithOperatorOptConsent(path, contents, nil)
+}
+
+// secureWriteWithOperatorOptConsent is the consent-aware writer. The two
+// inputs to the ONE follow-symlink predicate are:
+//
+//   - the AllowClientConfigSymlinkEnv env-var opt-in (F2), and
+//   - a present, matching ResolvedSymlinkConsent (SEAM-B).
+//
+// Either alone is sufficient to follow a symlink; strict mode
+// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1, checked inside
+// OperatorAllowsClientConfigSymlink AND re-checked here for the consent
+// path) overrides BOTH and refuses symlink-follow unconditionally.
+//
+// AF-1 closure: when a symlink is followed, the write goes through the
+// HANDLE-PINNED secureWriteThroughResolvedParentHandle (resolve → open the
+// resolved target's parent ONCE → write through the held handle), NOT the
+// old resolve-to-STRING → SecureWriteClientConfig(resolvedString) path that
+// re-walked the resolved string (filepath.Split + a second path-based
+// parent open). The pinned parent handle/fd is frozen at open, so a
+// symlink/component swap between resolve and write cannot redirect the
+// privileged write.
+func secureWriteWithOperatorOptConsent(path string, contents []byte, consent *ResolvedSymlinkConsent) error {
+	// Follow-symlink decision: the env-var opt-in OR a present scoped
+	// consent. Strict mode overrides both — OperatorAllowsClientConfigSymlink
+	// already returns false under strict, and the consent branch re-checks
+	// operatorRequiresSingleUserHome() so a scoped consent can NEVER bypass
+	// strict mode (PROTECTED invariant: corp-managed hosts get symlink-attack
+	// hardening regardless of any per-write consent).
+	followViaEnv := OperatorAllowsClientConfigSymlink()
+	followViaConsent := consent != nil && !operatorRequiresSingleUserHome()
+	if followViaEnv || followViaConsent {
+		if _, was := resolveSymlinkForSecureWrite(path); was {
+			// Test-only injection seam (race-window-assertion discipline):
+			// fires AFTER the confirm-time resolve confirmed a symlink but
+			// BEFORE secureWriteFollowingSymlink re-resolves for the
+			// pin-match. A test repoints the symlink here to engineer a
+			// deterministic swap-between-confirm-and-write window (T3) so the
+			// TOCTOU pin-mismatch refusal is exercised without relying on the
+			// natural race staying open. nil in production.
+			if afterResolveBeforePinHook != nil {
+				afterResolveBeforePinHook()
 			}
-			path = resolved
+			return secureWriteFollowingSymlink(path, contents, consent, followViaEnv)
 		}
 	}
+	// Non-symlink path (or symlink-follow not consented): the standard
+	// path-based hardened pipeline with the env/legacy relax fallback.
+	return secureWritePathBased(path, contents)
+}
+
+// afterResolveBeforePinHook is a TEST-ONLY seam (see
+// secureWriteWithOperatorOptConsent). nil in production. Tests set it to
+// repoint a symlink between the confirm-time resolve and the write-time
+// re-resolve, engineering a deterministic TOCTOU window for the
+// scoped-consent pin-mismatch guard (T3).
+var afterResolveBeforePinHook func()
+
+// secureWriteFollowingSymlink performs the handle-pinned write to a
+// resolved symlink target at `originalPath`. It RE-RESOLVES the symlink
+// here (not trusting any earlier confirm-time resolve) so the pin-match
+// reflects the symlink's state at write time — that is the load-bearing
+// half of the swap-between-confirm-and-write guard. `consent` (when
+// non-nil) pins the resolved PARENT the operator approved. It tries the
+// hardened pipeline (parent gate ON) first; on ErrSecureWriteParentInsecure
+// with strict mode OFF it retries with the parent gate skipped, mirroring
+// secureWritePathBased's relax fallback.
+func secureWriteFollowingSymlink(originalPath string, contents []byte, consent *ResolvedSymlinkConsent, followViaEnv bool) error {
+	// Re-resolve at write time. If the symlink vanished or is no longer a
+	// symlink, refuse — the operator consented to following a symlink, and
+	// a target that changed shape is exactly the swap we must catch.
+	resolved, was := resolveSymlinkForSecureWrite(originalPath)
+	if !was {
+		return fmt.Errorf("secure write: symlink %s no longer resolves to a follow-able target at write time; refusing the write — the symlink may have been removed or repointed after consent",
+			originalPath)
+	}
+
+	// SEAM-B swap-between-confirm-and-write guard: when a scoped consent is
+	// present, the write-time-resolved PARENT now MUST equal the parent the
+	// operator consented to. Refuse on mismatch BEFORE opening any handle or
+	// writing any byte.
+	if consent != nil {
+		resolvedParent := filepath.Clean(filepath.Dir(resolved))
+		pinnedParent := filepath.Clean(consent.PinnedResolvedPath)
+		if resolvedParent != pinnedParent {
+			return fmt.Errorf("secure write: symlink %s now resolves to a parent (%s) that does not match the operator-consented target (%s); refusing the write — the symlink may have been repointed after consent",
+				originalPath, resolvedParent, pinnedParent)
+		}
+	}
+
+	// Audit: emit a distinct warn event per relax lane so the
+	// security-boundary downgrade is visible to log monitoring. The env
+	// lane keeps the established client-write-symlink-resolved-via-optin
+	// event; the scoped-consent lane emits its own distinct event.
+	if followViaEnv {
+		if logErr := LogHubMcpEvent("warn", "client-write-symlink-resolved-via-optin", map[string]any{
+			"path":     originalPath,
+			"resolved": resolved,
+			"reason":   "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1 (operator opt-in; write follows symlink target via pinned parent handle)",
+		}); logErr != nil {
+			_ = logErr
+		}
+	} else if consent != nil {
+		if logErr := LogHubMcpEvent("warn", "client-write-symlink-resolved-via-scoped-consent", map[string]any{
+			"path":     originalPath,
+			"resolved": resolved,
+			"client":   consent.Client,
+			"reason":   "scoped operator consent (per-write; pinned-parent verified; write follows symlink target via pinned parent handle)",
+		}); logErr != nil {
+			_ = logErr
+		}
+	}
+
+	// Handle-pinned write: resolve target's parent is opened ONCE and the
+	// hardened owner runs against the held handle/fd. No string re-walk,
+	// no second path-based parent open. (AF-1 closure.)
+	_, err := secureWriteThroughResolvedParentHandle(resolved, contents, false)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+		return err
+	}
+	if operatorRequiresSingleUserHome() {
+		return fmt.Errorf("%w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
+			err, RequireSingleUserHomeEnv)
+	}
+	if logErr := LogHubMcpEvent("warn", "client-write-unhardened-fallback", map[string]any{
+		"path":     resolved,
+		"reason":   "default-relax-on-solo-host (symlink-resolved target)",
+		"original": originalPath,
+		"err":      err.Error(),
+	}); logErr != nil {
+		_ = logErr
+	}
+	// Relax retry: same handle-pinned write with the parent-dir gate
+	// skipped. The per-file restrictive DACL/mode is still installed on
+	// the file handle at create time, so the resolved target stays
+	// owner-only regardless of how broad its parent's ACL is.
+	if _, rerr := secureWriteThroughResolvedParentHandle(resolved, contents, true); rerr != nil {
+		return rerr
+	}
+	return nil
+}
+
+// secureWritePathBased is the non-symlink standard pipeline: the hardened
+// path-based secure-write WITH the parent-dir gate, falling back to the
+// gate-skipped relax lane on ErrSecureWriteParentInsecure when strict mode
+// is OFF. This is the pre-existing behavior preserved verbatim for the
+// common (regular-file) path.
+//
+// PR #185 r3 (codex deep-sec P1 closure): the relax lane re-runs the SAME
+// hardened pipeline with the parent-dir gate bypassed; per-file DACL/mode
+// hardening still applies at temp-create time, closing the race window the
+// previous os.CreateTemp + path-based SetNamedSecurityInfo path left open.
+func secureWritePathBased(path string, contents []byte) error {
 	err := SecureWriteClientConfig(path, contents)
 	if err == nil {
 		return nil
@@ -377,11 +532,6 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 		// fallback write still proceeds.
 		_ = logErr
 	}
-	// PR #185 r3: re-run the SAME hardened pipeline with parent-dir
-	// gate bypassed. Per-file DACL/mode hardening still applies at
-	// temp-create time, closing the race window that the previous
-	// os.CreateTemp + path-based SetNamedSecurityInfo path left
-	// open.
 	return secureWriteClientConfigSkipParentGate(path, contents)
 }
 

@@ -124,6 +124,7 @@ const fileInformationClassRenameEx uint32 = 65
 // across the DACL tighten (ACL changes do not revoke existing
 // handles). Reusing the hardened pipeline closes that window.
 func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bool) error {
+	secureWritePathBasedStringEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
 		parentDir = "."
@@ -143,6 +144,39 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 		return fmt.Errorf("secure write: open parent %s: %w", parentDir, err)
 	}
 	defer windows.CloseHandle(dirHandle)
+
+	// Steps 2-10 run against the held parent handle. The shared owner
+	// (secureWriteClientConfigToResolvedParent) does NOT close dirHandle —
+	// this caller owns it via the defer above. parentDirForDiag carries the
+	// human-readable parent path for the ErrSecureWriteParentInsecure wrap.
+	return secureWriteClientConfigToResolvedParent(dirHandle, parentDir, base, contents, skipParentGate)
+}
+
+// secureWriteClientConfigToResolvedParent runs the hardened post-parent-open
+// sequence (steps 2-10) against a CALLER-OPENED parent directory handle.
+// It is the SINGLE OWNER of those steps: the path-based
+// secureWriteClientConfigImpl opens the parent by path and delegates here,
+// and the symlink-resolve-to-handle lane
+// (secureWriteThroughResolvedParentHandle) opens the resolved target's
+// parent and delegates here too — so neither path re-walks a string after
+// the parent handle is frozen (AF-1 closure: no filepath.Split of a
+// resolved string, no second path-based open).
+//
+// CONTRACT: dirHandle MUST stay open for the duration of this call and is
+// NOT closed here — the caller owns the handle's lifetime. parentDirForDiag
+// is the human-readable parent path used only in the
+// ErrSecureWriteParentInsecure diagnostic; it is NEVER re-opened.
+//
+// When skipParentGate=true the parent-dir DACL verify (step 2) is SKIPPED
+// (relax lane). Everything else — symlink refusal, born-with-restrictive-DACL
+// temp create relative to dirHandle, atomic rename across the held handle,
+// post-rename DACL re-verify — still applies, so there is NO race window
+// between temp create and DACL apply and NO TOCTOU window on the parent.
+func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDirForDiag, base string, contents []byte, skipParentGate bool) error {
+	secureWriteResolvedParentEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
+	if base == "" {
+		return fmt.Errorf("secure write: empty base name (parent %q)", parentDirForDiag)
+	}
 
 	// 2. Handle-bound parent-dir DACL verify (spec lines 323-326 +
 	//    422-432). Wrap with parent-dir context so operators see
@@ -164,7 +198,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 			// Wrap with ErrSecureWriteParentInsecure so the cross-package
 			// wrapper in client_write_init.go can match via errors.Is
 			// (issue #161 P1).
-			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDir, err)
+			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDirForDiag, err)
 		}
 	}
 
@@ -173,7 +207,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	// the caller probably meant to update the symlink target rather
 	// than create a new restricted regular file at the symlink slot.
 	if err := refusePreexistingReparsePoint(dirHandle, base); err != nil {
-		return fmt.Errorf("secure write: target %s: %w", path, err)
+		return fmt.Errorf("secure write: target %s: %w", filepath.Join(parentDirForDiag, base), err)
 	}
 
 	// 3. Compose unpredictable temp name to defeat slot-squat races.
