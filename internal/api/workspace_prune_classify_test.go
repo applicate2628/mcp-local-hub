@@ -17,8 +17,15 @@ func TestClassifyWorkspaceOrphan(t *testing.T) {
 
 	// deadWT: an existing dir that is a leftover git linked worktree whose admin
 	// dir is gone → IsDeadGitWorktreePath true (gated by opts.PruneDeadWorktrees).
+	// REALISTIC `git worktree remove` shape: the parent `.git/worktrees/` dir
+	// survives; only the `<name>` leaf is gone (the Finding-2 parent-exists guard
+	// requires the parent present before treating ENOENT as a genuine removal).
 	deadWT := t.TempDir()
-	deadAdmin := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "gone") // never created
+	deadWorktreesParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(deadWorktreesParent, 0o755); err != nil {
+		t.Fatalf("mkdir dead worktrees parent: %v", err)
+	}
+	deadAdmin := filepath.Join(deadWorktreesParent, "gone") // parent exists; leaf never created
 	if err := os.WriteFile(filepath.Join(deadWT, ".git"), []byte("gitdir: "+deadAdmin+"\n"), 0o600); err != nil {
 		t.Fatalf("write .git file: %v", err)
 	}

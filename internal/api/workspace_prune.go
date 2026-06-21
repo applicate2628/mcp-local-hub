@@ -16,6 +16,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -91,37 +92,45 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 	return false
 }
 
-// IsDeadGitWorktreePath reports whether canonicalPath is a leftover git LINKED
-// WORKTREE whose admin directory has been deleted — the directory still exists
-// on disk (so WorkspaceDirDeleted is false) but the worktree it represents is
-// structurally dead because git's per-worktree admin dir
-// (`<main-repo>/.git/worktrees/<name>`) is gone. This is the REAL incident
-// signal: such a directory slips through BOTH the agent-worktree path check
-// (its path is not under `.claude/worktrees/agent-`) AND the deleted-dir check
-// (the directory still exists).
+// IsDeadGitWorktreePath reports whether canonicalPath is (or is a SUBDIR inside)
+// a leftover git LINKED WORKTREE whose admin directory has been deleted — the
+// workspace directory still exists on disk (so WorkspaceDirDeleted is false) but
+// the worktree it represents is structurally dead because git's per-worktree
+// admin dir (`<main-repo>/.git/worktrees/<name>`) is gone. This is the REAL
+// incident signal: such a directory slips through BOTH the agent-worktree path
+// check (its path is not under `.claude/worktrees/agent-`) AND the deleted-dir
+// check (the directory still exists).
 //
 // It returns true ONLY when ALL of the following hold — conservative by
-// construction so a live repo, a live worktree, a live submodule, or any
-// ambiguous-error stat can NEVER be misclassified:
+// construction so a live repo, a live worktree, a live submodule, an unmounted
+// admin root, a cross-OS pointer, or any ambiguous-error stat can NEVER be
+// misclassified:
 //
 //  1. the workspace directory STILL EXISTS (a definitive ENOENT on the dir is
 //     the deleted-dir case, owned by WorkspaceDirDeleted — NOT here);
-//  2. `<dir>/.git` exists AND is a REGULAR FILE. A normal repo has a `.git`
-//     DIRECTORY (→ false); a non-git dir has no `.git` (→ false). Only a linked
-//     worktree (and a submodule — handled by condition 3) uses a `.git` file;
-//  3. the `.git` file's `gitdir: <path>` pointer (relative paths resolved
-//     against the workspace dir) names an admin directory that is ABSENT via
-//     os.IsNotExist-ONLY. Any OTHER stat error on the admin dir (permission,
-//     transient I/O, an offline/removable mount) returns FALSE — it inherits
-//     the EXACT false-positive-safe discipline of WorkspaceDirDeleted: a
-//     transient or ambiguous error must NEVER read as "dead".
+//  2. walking UP from the workspace dir through its ancestors, the NEAREST
+//     `.git` found is a REGULAR FILE (the worktree pointer). The walk handles a
+//     SUBDIR workspace inside a linked worktree (a monorepo package, or an
+//     LSP/.serena marker root) whose `.git` pointer lives at the worktree ROOT
+//     (an ancestor), not the subdir itself. If the nearest `.git` is a DIRECTORY
+//     it is a normal repo root → LIVE → false (stop the walk). A non-git tree
+//     with no `.git` anywhere up to the volume root → false;
+//  3. the pointer's `gitdir: <path>` (relative paths resolved against the
+//     worktree-root dir that holds the pointer) names an admin directory that is
+//     ABSENT via os.IsNotExist-ONLY, AND the admin dir's PARENT chain is still
+//     present (distinguishing "worktree removed" from "whole admin root
+//     unmounted" — see isAdminDirGenuinelyDeleted). Any OTHER stat error on the
+//     admin dir (permission, transient I/O, an offline/removable mount) returns
+//     FALSE — it inherits the EXACT false-positive-safe discipline of
+//     WorkspaceDirDeleted: a transient or ambiguous error must NEVER read as
+//     "dead".
 //
 // SUBMODULE SAFETY: a git submodule ALSO stores a `.git` FILE, pointing at
 // `<superproject>/.git/modules/<name>`. A LIVE submodule's admin dir is present,
 // so condition 3 fails and it is correctly never matched. A submodule whose
 // superproject sits on an OFFLINE mount yields a NON-ENOENT stat error on the
-// admin dir, so condition 3's os.IsNotExist-only guard returns false (not
-// pruned). No submodule special-casing is needed beyond that guard.
+// admin dir (or an ENOENT whose PARENT is also gone), so condition 3 returns
+// false (not pruned). No submodule special-casing is needed beyond that guard.
 //
 // Exported so the GUI prune sweeper (internal/gui) can classify rows.
 func IsDeadGitWorktreePath(canonicalPath string) bool {
@@ -130,43 +139,125 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 	}
 	dir := resolveSymlinksBestEffort(canonicalPath)
 
-	// Condition 1: the directory must STILL EXIST. A definitive ENOENT on the
-	// directory is the deleted-dir case (WorkspaceDirDeleted owns it); any other
-	// stat error is ambiguous → not a dead worktree. Either way, bail.
+	// Condition 1: the workspace directory must STILL EXIST. A definitive ENOENT
+	// on the directory is the deleted-dir case (WorkspaceDirDeleted owns it); any
+	// other stat error is ambiguous → not a dead worktree. Either way, bail.
 	if _, err := os.Stat(dir); err != nil {
 		return false
 	}
 
-	// Condition 2: `<dir>/.git` must exist AND be a REGULAR FILE.
-	gitPath := filepath.Join(dir, ".git")
-	gitInfo, err := os.Lstat(gitPath)
-	if err != nil {
-		// No `.git` (ENOENT) → not a git dir at all; any other error → ambiguous.
-		// Both are NOT a dead worktree.
-		return false
-	}
-	// A normal repo's `.git` is a DIRECTORY; a worktree/submodule's is a regular
-	// file. Reject anything that is not a regular file (directory, symlink, etc.)
-	// — Mode().IsRegular() is false for all of those.
-	if !gitInfo.Mode().IsRegular() {
+	// Condition 2: walk UP from the workspace dir to the NEAREST `.git`. A subdir
+	// workspace inside a linked worktree keeps its `.git` pointer at the worktree
+	// ROOT (an ancestor), so probing only `<dir>/.git` would miss it (Finding 1).
+	gitPath, pointerDir, ok := findNearestGitPointer(dir)
+	if !ok {
+		// No regular-file `.git` pointer found before hitting a normal-repo `.git`
+		// directory or the volume root → not a (dead) linked worktree.
 		return false
 	}
 
-	// Condition 3: parse the `gitdir:` pointer and confirm the admin dir is
-	// ABSENT via os.IsNotExist ONLY.
-	adminDir, ok := parseGitWorktreePointer(gitPath, dir)
+	// Condition 3: parse the `gitdir:` pointer (relative paths resolved against
+	// the dir that HOLDS the pointer — the worktree root — not the subdir
+	// workspace) and confirm the admin dir is GENUINELY deleted.
+	adminDir, ok := parseGitWorktreePointer(gitPath, pointerDir)
 	if !ok {
-		// Unreadable/unparsable `.git` file → ambiguous, never prune.
+		// Unreadable/unparsable/cross-OS `.git` pointer → ambiguous, never prune.
 		return false
 	}
-	if _, err := os.Stat(adminDir); err != nil {
-		// ENOENT → admin dir gone → DEAD worktree. Any other error (permission,
-		// transient I/O, offline mount, submodule-on-offline-superproject) →
-		// FALSE (inherit WorkspaceDirDeleted's false-positive-safe discipline).
-		return os.IsNotExist(err)
+	return isAdminDirGenuinelyDeleted(adminDir)
+}
+
+// findNearestGitPointer walks UP from dir through its ancestors and returns the
+// path of the NEAREST `.git` that is a REGULAR FILE (a linked-worktree /
+// submodule pointer), along with the directory that holds it (pointerDir — used
+// to resolve a relative `gitdir:` target). The walk stops — with ok=false — the
+// moment it finds a `.git` that is a DIRECTORY (a normal repo root: that tree is
+// a LIVE repo, NOT a dead worktree), or when it climbs past the volume/filesystem
+// root (filepath.Dir stops changing) without finding any `.git`.
+//
+// Bounding the walk on filepath.Dir's fixpoint (root) is the depth guard the
+// design requires: on every OS filepath.Dir("/") == "/" and filepath.Dir(`c:\`)
+// == `c:\`, so the loop terminates at the volume root. Each ancestor's `.git` is
+// probed with Lstat (so a symlinked `.git` is rejected as not-a-regular-file,
+// matching the prior single-dir behavior). A non-ENOENT Lstat error on an
+// ancestor's `.git` (permission, transient I/O) is treated as ambiguous and
+// stops the walk with ok=false — never climb past an unreadable ancestor and
+// risk matching a deeper unrelated pointer.
+func findNearestGitPointer(dir string) (gitPath, pointerDir string, ok bool) {
+	cur := dir
+	for {
+		candidate := filepath.Join(cur, ".git")
+		info, err := os.Lstat(candidate)
+		switch {
+		case err == nil && info.Mode().IsRegular():
+			// Regular-file `.git` → worktree/submodule pointer. Nearest wins.
+			return candidate, cur, true
+		case err == nil && info.IsDir():
+			// Directory `.git` → normal repo root → LIVE repo, not a dead
+			// worktree. Stop the walk (and any deeper ancestor pointer is
+			// irrelevant: this repo root is the owning boundary).
+			return "", "", false
+		case err == nil:
+			// `.git` exists but is neither a regular file nor a directory
+			// (symlink, device, etc.) → ambiguous → stop, never prune.
+			return "", "", false
+		case !os.IsNotExist(err):
+			// Non-ENOENT Lstat error (permission, transient I/O) → ambiguous →
+			// stop the walk; do not climb past an unreadable ancestor.
+			return "", "", false
+		}
+		// ENOENT here → no `.git` at this ancestor → climb one level up.
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			// Reached the volume/filesystem root without a `.git` → not a worktree.
+			return "", "", false
+		}
+		cur = parent
 	}
-	// Admin dir present → live worktree (or live submodule) → not dead.
-	return false
+}
+
+// isAdminDirGenuinelyDeleted reports whether the worktree admin dir at adminDir
+// is GENUINELY deleted (a `git worktree remove` outcome) rather than merely
+// UNAVAILABLE because its whole admin ROOT is offline/unmounted (Finding 2).
+//
+// A `git worktree remove` deletes ONLY the `worktrees/<name>` subdir, leaving
+// the parent `.git/worktrees/` (or, for the main-repo layout, the main repo's
+// `.git`) present. So:
+//
+//   - adminDir Stat succeeds → admin dir present → LIVE worktree → false.
+//   - adminDir Stat is a NON-ENOENT error (permission, transient I/O, offline
+//     mount) → ambiguous → false (inherit WorkspaceDirDeleted's discipline).
+//   - adminDir Stat is ENOENT → the worktree subdir is gone, BUT only treat it
+//     as DEAD when adminDir's immediate PARENT still EXISTS. If the parent is
+//     ALSO absent/inaccessible, the whole admin root (mount/repo) is gone — that
+//     is an unmounted-root ambiguity, NOT a removed worktree → false.
+//
+// The parent-exists check cleanly separates "worktree removed" (parent
+// `.git/worktrees/` survives) from "mount offline" (parent also vanished).
+func isAdminDirGenuinelyDeleted(adminDir string) bool {
+	if _, err := os.Stat(adminDir); err == nil {
+		// Admin dir present → live worktree (or live submodule) → not dead.
+		return false
+	} else if !os.IsNotExist(err) {
+		// Non-ENOENT (permission, transient I/O, offline mount) → ambiguous.
+		return false
+	}
+	// adminDir is ENOENT. Confirm its PARENT is present before declaring DEAD —
+	// otherwise the whole admin root may merely be unmounted (Finding 2).
+	parent := filepath.Dir(adminDir)
+	if parent == adminDir {
+		// Degenerate: adminDir is itself a root. No parent to corroborate against
+		// → treat as ambiguous (never prune).
+		return false
+	}
+	if _, err := os.Stat(parent); err != nil {
+		// Parent absent OR inaccessible (ENOENT, permission, offline mount) → the
+		// admin ROOT is gone/unavailable, not just the worktree subdir → ambiguous.
+		return false
+	}
+	// Parent present (e.g. `.git/worktrees/` survives) but the `<name>` subdir
+	// is ENOENT → genuinely a removed worktree → DEAD.
+	return true
 }
 
 // parseGitWorktreePointer reads the `.git` FILE at gitPath and returns the
@@ -174,8 +265,21 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 // line. A relative pointer is resolved against workspaceDir (git writes a
 // relative pointer for a worktree created with `--relative-paths`, and an
 // absolute one otherwise). It returns ok=false on any read error, a missing
-// `gitdir:` line, or an empty target — every such case makes the caller treat
-// the path as NOT a dead worktree (ambiguous → safe).
+// `gitdir:` line, an empty target, OR a FOREIGN-ABSOLUTE target (Finding 3) —
+// every such case makes the caller treat the path as NOT a dead worktree
+// (ambiguous → safe).
+//
+// FOREIGN-ABSOLUTE (cross-OS) gitdir handling: a worktree created by
+// Git-for-Windows writes `gitdir: C:/...` (or a `\\srv\share` UNC); a worktree
+// created on POSIX writes `gitdir: /...`. filepath.IsAbs is OS-SPECIFIC — on
+// POSIX it returns FALSE for `C:/...` and `\\...`, on Windows it returns FALSE
+// for `/...` — so a naive `if !IsAbs { join under workspace }` would JOIN a
+// foreign-absolute pointer UNDER the workspace as if relative, fabricate a path
+// that does not exist, stat ENOENT, and prune a LIVE workspace. Translating a
+// path across OSes is fragile, so a foreign-absolute target is rejected as
+// AMBIGUOUS (ok=false): the worktree was created on the other OS and we cannot
+// reliably resolve its admin dir → never prune. A NATIVE absolute path (IsAbs
+// true) and a NATIVE relative path (joined against workspaceDir) keep working.
 func parseGitWorktreePointer(gitPath, workspaceDir string) (adminDir string, ok bool) {
 	data, err := os.ReadFile(gitPath)
 	if err != nil {
@@ -190,12 +294,56 @@ func parseGitWorktreePointer(gitPath, workspaceDir string) (adminDir string, ok 
 		if target == "" {
 			return "", false
 		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(workspaceDir, target)
+		if filepath.IsAbs(target) {
+			// Native absolute (drive-letter/UNC on Windows, `/...` on POSIX).
+			return filepath.Clean(target), true
 		}
-		return filepath.Clean(target), true
+		if isForeignAbsolutePath(target) {
+			// A path the CURRENT OS does not consider absolute but the OTHER OS
+			// would (Windows drive-letter/UNC seen on POSIX, or a POSIX `/...`
+			// seen on Windows). Cross-OS worktree → cannot resolve safely →
+			// ambiguous, never prune.
+			return "", false
+		}
+		// Genuinely native-relative → resolve against the pointer's dir.
+		return filepath.Clean(filepath.Join(workspaceDir, target)), true
 	}
 	return "", false
+}
+
+// isForeignAbsolutePath reports whether target is absolute on the OTHER OS but
+// not the current one — i.e. filepath.IsAbs(target) already returned false on
+// THIS GOOS, yet the path is clearly an absolute path authored on the opposite
+// platform. Callers use this to REJECT (treat as ambiguous), never to resolve.
+//
+//   - On non-Windows (POSIX/WSL): a Windows drive-letter root (`C:\` or `C:/`)
+//     or a UNC root (`\\server\share`).
+//   - On Windows: a POSIX-absolute root (`/foo`). Note `\foo` is intentionally
+//     NOT treated as foreign on Windows — it is a native (drive-relative) path
+//     that Windows IsAbs already classifies as relative, and git never emits it
+//     as a gitdir.
+func isForeignAbsolutePath(target string) bool {
+	if target == "" {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		// POSIX-absolute `/...` seen on Windows (but not `\...`, which is a
+		// native Windows drive-relative path, nor `\\...` UNC which Windows
+		// IsAbs already accepts as absolute).
+		return target[0] == '/'
+	}
+	// Non-Windows: Windows drive-letter root `^[A-Za-z]:[\\/]`.
+	if len(target) >= 3 &&
+		((target[0] >= 'A' && target[0] <= 'Z') || (target[0] >= 'a' && target[0] <= 'z')) &&
+		target[1] == ':' &&
+		(target[2] == '\\' || target[2] == '/') {
+		return true
+	}
+	// Non-Windows: UNC root `^\\` (two leading backslashes).
+	if len(target) >= 2 && target[0] == '\\' && target[1] == '\\' {
+		return true
+	}
+	return false
 }
 
 // WorkspaceOrphanReason names WHY a registered workspace classifies as an
