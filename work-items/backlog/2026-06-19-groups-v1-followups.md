@@ -19,6 +19,18 @@ The in-PR batch surfaced the group connection triple (url + token + instance_id)
 
 **2026-06-21:** architect design complete (PASS) + operator decisions made — **Model B** (separate `group-client-bindings` store + GUI matrix, NOT a `clients:` list in `groups.yaml`); **full feature, phased, await operator go-ahead** to plan/implement. Phase 1 = single-client wire + the C7 port-reset safety gate + reserved-name guard (~90% value); Phase 2 = full matrix + scan-classify + CLI verb. ~1,200-2,000 LOC. Full design: `work-items/decisions/2026-06-21-groups-client-reconcile-b4.md`.
 
+### C6 — stale group token row on group rename (sonnet, #405 review)
+A group rename via the GUI upsert (`internal/gui/groups.go:~390`) changes the scope key (`g:OldName` →
+`g:NewName`), but the upsert callback returns an empty `deletedGroups`, so `pruneHubTokensLocked`
+(`internal/api/hub_mcp_resolver.go:~509`) never runs for the old key and a dead token row for `g:OldName`
+persists in `hub-mcp-tokens.json`. **Pre-existing** (any rename `Frontend`→`Backend` orphans identically); the
+C5-case change only makes *case-only* renames newly reachable through this path. **Bounded + non-exploitable:**
+Gate-2 (`isKnownGroup`) keys on the case-sensitive snapshot `Groups` map, so a request bearing the orphaned
+token 404s before auth — a file-hygiene leak, not an auth/routing bug. Fix: prune the old scope key's token row
+when a group's name (and thus scope key) changes — detect the rename in the upsert and feed the old key to
+`pruneHubTokensLocked` (or prune any token key no longer in the live declared set on republish). Additive,
+low-priority.
+
 ## Notes
 - All four are additive / non-breaking; none blocks v1.
 - `tools_hidden` is documented (in-PR) as a UX filter, NOT an access-control boundary — the §D multi-tenant/auth paid tier is the eventual security layer built ON this seam, tracked in the roadmap, not here.
