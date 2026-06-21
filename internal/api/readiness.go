@@ -431,6 +431,15 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 	// (when known + absolute) rather than skipping or statting it against this
 	// process's cwd (Codex #377 r9). Skip flag-shaped args (python -m, --flag).
 	for _, c := range entryScriptCheckTargets(m) {
+		// A daemon-scoped install (scope.DaemonFilter set) skips sibling
+		// daemons — Preflight / BuildPlanWithOpts(DaemonFilter) never stat a
+		// sibling's entry script, so readiness must not block on one either
+		// (bot review readiness.go:366). c.daemon=="" is the cwd-independent
+		// ABSOLUTE target that applies to EVERY daemon (entryScriptCheckTargets
+		// leaves it unfiltered, see the daemon "" comment) — never skip it.
+		if scope.DaemonFilter != "" && c.daemon != "" && c.daemon != scope.DaemonFilter {
+			continue
+		}
 		if !c.resolvable {
 			// Relative entry script + non-absolute daemon cwd: known-tolerated
 			// non-convergence — the launch cwd is unknowable here. Surface as an
@@ -786,7 +795,13 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 	if eff, cerr := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); cerr == nil && len(eff) > 0 {
 		clientScope = eff
 	}
-	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope}); err != nil {
+	// Scope the dry-run to the SAME daemon the real install targets. A
+	// daemon-filtered install (scope.DaemonFilter set) only validates the
+	// chosen daemon's bindings; a sibling's invalid url_path / unknown-daemon
+	// binding must not block readiness when BuildPlanWithOpts(DaemonFilter)
+	// would skip it (bot review readiness.go:366). Empty filter = full install
+	// = validate every daemon, unchanged from the global path.
+	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope, DaemonFilter: scope.DaemonFilter}); err != nil {
 		add(ReadinessRequirement{
 			Name: "install plan",
 			OK:   false,

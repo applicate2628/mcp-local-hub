@@ -593,3 +593,109 @@ func TestCheckServerReadinessWithScope_SkipsUnselectedDaemonPortBlockers(t *test
 		}
 	}
 }
+
+func TestCheckServerReadinessWithScope_SkipsUnselectedDaemonEntryScript(t *testing.T) {
+	// A daemon-filtered readiness must skip a SIBLING daemon's missing per-daemon
+	// entry script — the real install (Preflight / BuildPlanWithOpts with
+	// DaemonFilter) never stats a sibling's script, so readiness must not block
+	// on it either (bot review readiness.go:366). The SAME manifest with no
+	// filter (global install) DOES surface the sibling's missing script.
+	//
+	// Two daemons with ABSOLUTE cwds so each entry-script target is resolvable
+	// and statable: alpha's cwd has build/index.js, beta's does not.
+	dirAlpha := t.TempDir()
+	dirBeta := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dirAlpha, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirAlpha, "build", "index.js"), []byte("//"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &config.ServerManifest{
+		Name:     "demo",
+		Kind:     config.KindGlobal,
+		Command:  "node",
+		BaseArgs: []string{"build/index.js"},
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 51234, Cwd: dirAlpha},
+			{Name: "beta", Port: 51235, Cwd: dirBeta}, // build/index.js absent here
+		},
+	}
+
+	// Scoped to alpha: beta's missing script must NOT appear and must NOT block.
+	scoped := CheckServerReadinessWithScope(m, AdmissionScope{DaemonFilter: "alpha"})
+	for _, r := range scoped.Requirements {
+		if strings.HasPrefix(r.Name, "script:") && strings.Contains(r.Name, "(beta)") {
+			t.Fatalf("scoped readiness reported unselected daemon beta's entry script: %+v", r)
+		}
+	}
+	var sawAlphaScript bool
+	for _, r := range scoped.Requirements {
+		if strings.HasPrefix(r.Name, "script:") && strings.Contains(r.Name, "(alpha)") {
+			sawAlphaScript = true
+			if !r.OK {
+				t.Errorf("alpha's present entry script must be OK under scope: %+v", r)
+			}
+		}
+	}
+	if !sawAlphaScript {
+		t.Fatalf("scoped readiness did not report the selected daemon alpha's entry script: %+v", scoped.Requirements)
+	}
+
+	// Global (no filter): beta's missing script MUST surface as a non-optional
+	// blocker (the global path still checks ALL daemons — PROTECTED behavior).
+	global := CheckServerReadiness(m)
+	var betaScriptBlocked bool
+	for _, r := range global.Requirements {
+		if strings.HasPrefix(r.Name, "script:") && strings.Contains(r.Name, "(beta)") && !r.OK && !r.Optional {
+			betaScriptBlocked = true
+		}
+	}
+	if !betaScriptBlocked {
+		t.Fatalf("global readiness must surface unselected-by-scope daemon beta's missing entry script as a blocker: %+v", global.Requirements)
+	}
+}
+
+func TestCheckServerReadinessWithScope_DryRunSkipsUnselectedDaemonBinding(t *testing.T) {
+	// The install-plan dry-run (BuildPlanWithOpts) must be daemon-scoped: a
+	// SIBLING daemon's invalid client binding (bad url_path) is skipped by
+	// BuildPlanWithOpts(DaemonFilter), so a daemon-filtered readiness must not
+	// block on it (bot review readiness.go:366). The SAME manifest with no
+	// filter DOES block — the dry-run validates every daemon's bindings.
+	m := &config.ServerManifest{
+		Name:    "demo",
+		Kind:    config.KindGlobal,
+		Command: "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 51236},
+			{Name: "beta", Port: 51237},
+		},
+		ClientBindings: []config.ClientBinding{
+			// beta's binding has an invalid url_path (must start with '/').
+			// claude-code is a default-install client, so the dry-run validates it.
+			{Client: "claude-code", Daemon: "beta", URLPath: "bad-no-leading-slash"},
+		},
+	}
+
+	// Scoped to alpha: beta's binding is skipped by the dry-run, so the install
+	// plan must NOT be reported as a blocker.
+	scoped := CheckServerReadinessWithScope(m, AdmissionScope{DaemonFilter: "alpha"})
+	for _, r := range scoped.Requirements {
+		if r.Name == "install plan" && !r.OK {
+			t.Fatalf("scoped dry-run blocked on unselected daemon beta's invalid binding: %+v", r)
+		}
+	}
+
+	// Global (no filter): beta's invalid binding MUST make the dry-run reject the
+	// plan, surfacing the "install plan" blocker (PROTECTED global behavior).
+	global := CheckServerReadiness(m)
+	var planBlocked bool
+	for _, r := range global.Requirements {
+		if r.Name == "install plan" && !r.OK && !r.Optional {
+			planBlocked = true
+		}
+	}
+	if !planBlocked {
+		t.Fatalf("global readiness must surface the invalid sibling binding via the install-plan dry-run: %+v", global.Requirements)
+	}
+}
