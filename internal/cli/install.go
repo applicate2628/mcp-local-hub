@@ -1198,7 +1198,9 @@ var upgradeNoClientWriteSentinel = []string{""}
 var upgradeServerInstallFn func(api.InstallOpts) error
 
 func resolveInstallGUIPort() int {
-	pidportPath, err := gui.PidportPath()
+	// NoCreate: this runs at InstallOpts construction (before the dry-run gate),
+	// so it must not create the per-user GUI dir as a side effect of a dry-run.
+	pidportPath, err := gui.PidportPathNoCreate()
 	if err != nil {
 		return 0
 	}

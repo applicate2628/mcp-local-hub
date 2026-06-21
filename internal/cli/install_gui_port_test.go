@@ -38,6 +38,24 @@ func TestResolveInstallGUIPortReturnsZeroForMissingOrStalePidport(t *testing.T) 
 	}
 }
 
+// resolveInstallGUIPort runs at InstallOpts construction — BEFORE the dry-run
+// gate — so it must not create the per-user GUI state dir as a side effect of a
+// `mcphub install --dry-run`. It uses gui.PidportPathNoCreate for exactly this.
+func TestResolveInstallGUIPortDoesNotCreateGUIDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALAPPDATA", root)
+	t.Setenv("XDG_STATE_HOME", root)
+	t.Setenv("HOME", root)
+
+	if got := resolveInstallGUIPort(); got != 0 {
+		t.Fatalf("resolveInstallGUIPort() with no GUI = %d, want 0", got)
+	}
+	appDir := filepath.Join(root, "mcp-local-hub")
+	if _, err := os.Stat(appDir); !os.IsNotExist(err) {
+		t.Fatalf("resolveInstallGUIPort created the GUI state dir %q (err=%v); a dry-run probe must have no filesystem side effect", appDir, err)
+	}
+}
+
 func TestResolveInstallGUIPortReturnsLivePidportPort(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LOCALAPPDATA", root)
