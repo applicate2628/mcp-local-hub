@@ -17,6 +17,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
@@ -162,6 +163,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 					IncludeAllClients: allClients,
 					DryRun:            dryRun,
 					Writer:            cmd.OutOrStdout(),
+					GUIPort:           resolveInstallGUIPort(),
 				})
 				failed := 0
 				for _, r := range results {
@@ -192,6 +194,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				IncludeAllClients: allClients,
 				DryRun:            dryRun,
 				Writer:            cmd.OutOrStdout(),
+				GUIPort:           resolveInstallGUIPort(),
 			})
 		},
 	}
@@ -1192,6 +1195,18 @@ var upgradeNoClientWriteSentinel = []string{""}
 // driving a real install. nil → the real api.NewAPI().Install.
 var upgradeServerInstallFn func(api.InstallOpts) error
 
+func resolveInstallGUIPort() int {
+	pidportPath, err := gui.PidportPath()
+	if err != nil {
+		return 0
+	}
+	_, port, err := gui.ReadPidport(pidportPath)
+	if err != nil || port <= 0 {
+		return 0
+	}
+	return port
+}
+
 func upgradeInstallServer(server string, w io.Writer) error {
 	if upgradeInstallServerFn != nil {
 		return upgradeInstallServerFn(server, w)
@@ -1200,6 +1215,7 @@ func upgradeInstallServer(server string, w io.Writer) error {
 		Server:         server,
 		ClientsInclude: upgradeNoClientWriteSentinel,
 		Writer:         w,
+		GUIPort:        resolveInstallGUIPort(),
 	}
 	if upgradeServerInstallFn != nil {
 		return upgradeServerInstallFn(opts)

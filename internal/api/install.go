@@ -93,6 +93,7 @@ type Plan struct {
 	SchedulerTasks   []ScheduledTaskPlan     // DEPRECATED: kept for v0.5.x backward compat; replaced by SupervisorIntent in v0.6+.
 	SupervisorIntent []SupervisorIntentEntry // v0.5.0 Phase 12 — authoritative for new supervisor-intent.json consumers.
 	ClientUpdates    []ClientUpdatePlan
+	Notices          []string
 	// FullInstall is true when BuildPlan was called with an empty daemonFilter
 	// — i.e. the plan covers the whole manifest. Only a full install can
 	// safely reconcile (prune) obsolete sibling scheduler tasks from prior
@@ -158,6 +159,7 @@ type ClientUpdatePlan struct {
 	URL        string            // empty for Remove
 	DisplayURL string            // safe-to-print form of URL; falls back to URL when not set
 	Headers    map[string]string // F-G5: token + instance id; empty for per-daemon
+	RelayURL   string            // optional direct relay target for relay-stdio clients
 	DaemonName string            // legacy; only meaningful for per-daemon entries
 }
 
@@ -169,6 +171,7 @@ type InstallOpts struct {
 	IncludeAllClients bool
 	DryRun            bool
 	Writer            io.Writer // progress output destination; nil = os.Stderr
+	GUIPort           int       // live GUI/router port injected by CLI/GUI; zero means unknown
 }
 
 // InstallAllOpts controls a bulk install.
@@ -178,6 +181,7 @@ type InstallAllOpts struct {
 	IncludeAllClients bool
 	DryRun            bool
 	Writer            io.Writer
+	GUIPort           int
 }
 
 // InstallResult is one row in an InstallAll report.
@@ -259,6 +263,7 @@ func (a *API) Install(opts InstallOpts) error {
 		ClientsInclude:         opts.ClientsInclude,
 		IncludeAllClients:      opts.IncludeAllClients,
 		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
+		GUIPort:                opts.GUIPort,
 	})
 	if err != nil {
 		return err
@@ -306,6 +311,7 @@ func (a *API) InstallAllWithOpts(opts InstallAllOpts) []InstallResult {
 			IncludeAllClients: opts.IncludeAllClients,
 			DryRun:            opts.DryRun,
 			Writer:            opts.Writer,
+			GUIPort:           opts.GUIPort,
 		})
 		results = append(results, InstallResult{Server: name, Err: err})
 	}
@@ -350,6 +356,7 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 			IncludeAllClients: opts.IncludeAllClients,
 			DryRun:            opts.DryRun,
 			Writer:            opts.Writer,
+			GUIPort:           opts.GUIPort,
 		}, opts.ManifestDir)
 		results = append(results, InstallResult{Server: e.Name(), Err: err})
 	}
@@ -383,6 +390,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 		DaemonFilter:      opts.DaemonFilter,
 		ClientsInclude:    opts.ClientsInclude,
 		IncludeAllClients: opts.IncludeAllClients,
+		GUIPort:           opts.GUIPort,
 	})
 	if err != nil {
 		return err
@@ -416,6 +424,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 		ClientsInclude:         opts.ClientsInclude,
 		IncludeAllClients:      opts.IncludeAllClients,
 		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
+		GUIPort:                opts.GUIPort,
 	})
 	if err != nil {
 		return err
@@ -1466,6 +1475,11 @@ type BuildPlanOpts struct {
 	// top-level install entry points (Install / installFromManifestDir)
 	// resolve the override from disk and populate this.
 	DefaultClientsOverride []string
+
+	// GUIPort is the live GUI/hub port for router-fronted servers (serena).
+	// HERMETIC field: BuildPlanWithOpts does NO disk read; callers/tests supply
+	// it. 0 means unknown.
+	GUIPort int
 }
 
 // BuildPlan translates a manifest into concrete intended actions using the
@@ -1548,6 +1562,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		})
 	}
 	// Client updates — one per binding; with a filter, only bindings pointing at the chosen daemon.
+	serenaClientDeferredNotice := false
 	for _, b := range m.ClientBindings {
 		if opts.DaemonFilter != "" && b.Daemon != opts.DaemonFilter {
 			continue
@@ -1572,6 +1587,20 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		}
 		// Single owner of the loopback-host literal — see clients.HubLoopbackURL.
 		url := clients.HubLoopbackURL(daemon.Port, urlPath)
+		relayURL := ""
+		if IsSerenaServer(m.Name) {
+			if opts.GUIPort <= 0 {
+				if !serenaClientDeferredNotice {
+					p.Notices = append(p.Notices, "serena client entry deferred: live hub router not resolvable")
+					serenaClientDeferredNotice = true
+				}
+				continue
+			}
+			url = SerenaRouterClientURL(opts.GUIPort)
+			if clients.IsRelayStdio(b.Client) {
+				relayURL = url
+			}
+		}
 		// Per-server install path NEVER emits Remove (including a Remove
 		// of the mcphub-hub aggregate). The full-reconcile pipeline
 		// (BuildHubReconcilePlan / ApplyHubReconcileInOrder) owns gate
@@ -1583,6 +1612,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 			Action:     ClientUpdateAddReplace,
 			EntryName:  m.Name,
 			URL:        url,
+			RelayURL:   relayURL,
 			DaemonName: b.Daemon,
 		})
 	}
@@ -2216,6 +2246,9 @@ func portInUse(port int) bool {
 
 func printPlanTo(w io.Writer, p *Plan) error {
 	fmt.Fprintf(w, "Install plan for server %q (dry-run):\n\n", p.Server)
+	for _, notice := range p.Notices {
+		fmt.Fprintf(w, "  notice: %s\n", notice)
+	}
 	fmt.Fprintf(w, "  Scheduler tasks to create (%d):\n", len(p.SchedulerTasks))
 	for _, t := range p.SchedulerTasks {
 		fmt.Fprintf(w, "    \u2022 %s  [%s]\n        %s %v\n", t.Name, t.Trigger, t.Command, t.Args)
@@ -2549,6 +2582,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 			RelayServer:  m.Name,
 			RelayDaemon:  u.DaemonName,
 			RelayExePath: canonical,
+			RelayURL:     u.RelayURL,
 		}
 		if err := client.AddEntry(entry); err != nil {
 			runRollback()

@@ -15,13 +15,14 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-// serenaLikeManifest returns a manifest resembling the Serena manifest:
+// genericMultiDaemonManifest returns a generic manifest with the same daemon
+// shape many install planner tests need:
 // 3 daemons, weekly refresh, and client bindings where Claude, Gemini,
 // Antigravity, Cursor, VS Code, and Qwen share the claude-compatible daemon
 // while Codex keeps its own daemon.
-func serenaLikeManifest() *config.ServerManifest {
+func genericMultiDaemonManifest() *config.ServerManifest {
 	return &config.ServerManifest{
-		Name:      "serena",
+		Name:      "multidaemon-fixture",
 		Kind:      config.KindGlobal,
 		Transport: config.TransportNativeHTTP,
 		Command:   "uvx",
@@ -40,6 +41,130 @@ func serenaLikeManifest() *config.ServerManifest {
 			{Client: "qwen-cli", Daemon: "claude", URLPath: "/mcp"},
 		},
 		WeeklyRefresh: true,
+	}
+}
+
+func serenaManifest() *config.ServerManifest {
+	m := genericMultiDaemonManifest()
+	m.Name = "serena"
+	return m
+}
+
+func TestBuildPlanWithOpts_SerenaInstallWritePlaneUsesRouterURL(t *testing.T) {
+	m := serenaManifest()
+	wantURL := SerenaRouterClientURL(9125)
+
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true, GUIPort: 9125})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(p.ClientUpdates) == 0 {
+		t.Fatal("ClientUpdates empty; want serena client writes through the router URL")
+	}
+	for _, u := range p.ClientUpdates {
+		if u.URL != wantURL {
+			t.Fatalf("client %s URL = %q, want %q", u.Client, u.URL, wantURL)
+		}
+		if strings.Contains(u.URL, ":9121") {
+			t.Fatalf("client %s URL contains legacy 9121 port: %q", u.Client, u.URL)
+		}
+		if u.Client == "antigravity" && u.RelayURL != wantURL {
+			t.Fatalf("antigravity RelayURL = %q, want %q", u.RelayURL, wantURL)
+		}
+	}
+}
+
+func TestBuildPlanWithOpts_SerenaInstallWritePlaneSkipsWhenGUIPortUnknown(t *testing.T) {
+	m := serenaManifest()
+
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true, GUIPort: 0})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(p.ClientUpdates) != 0 {
+		t.Fatalf("ClientUpdates = %+v, want no serena client writes without a live GUI port", p.ClientUpdates)
+	}
+	if len(p.Notices) != 1 {
+		t.Fatalf("Notices = %v, want one serena deferred notice", p.Notices)
+	}
+	if !strings.Contains(p.Notices[0], "serena client entry deferred") {
+		t.Fatalf("notice = %q, want serena deferred text", p.Notices[0])
+	}
+}
+
+func TestBuildPlanWithOpts_NonSerenaIgnoresGUIPort(t *testing.T) {
+	withoutPort := genericMultiDaemonManifest()
+	withPort := genericMultiDaemonManifest()
+
+	p0, err := BuildPlanWithOpts(withoutPort, BuildPlanOpts{IncludeAllClients: true, GUIPort: 0})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts(GUIPort 0): %v", err)
+	}
+	p9125, err := BuildPlanWithOpts(withPort, BuildPlanOpts{IncludeAllClients: true, GUIPort: 9125})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts(GUIPort 9125): %v", err)
+	}
+	if len(p0.ClientUpdates) != len(p9125.ClientUpdates) {
+		t.Fatalf("ClientUpdates len with GUIPort 0 = %d, with 9125 = %d", len(p0.ClientUpdates), len(p9125.ClientUpdates))
+	}
+	for i := range p0.ClientUpdates {
+		if p0.ClientUpdates[i].URL != p9125.ClientUpdates[i].URL {
+			t.Fatalf("ClientUpdates[%d].URL with GUIPort 0 = %q, with 9125 = %q", i, p0.ClientUpdates[i].URL, p9125.ClientUpdates[i].URL)
+		}
+		if p9125.ClientUpdates[i].URL == SerenaRouterClientURL(9125) {
+			t.Fatalf("non-serena client %s leaked serena router URL %q", p9125.ClientUpdates[i].Client, p9125.ClientUpdates[i].URL)
+		}
+	}
+}
+
+func TestBuildPlanWithOpts_SerenaRouterEntryNotRevertedToLegacyURL(t *testing.T) {
+	m := serenaManifest()
+	existingRouterURL := SerenaRouterClientURL(9125)
+
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"claude-code"}, GUIPort: 9125})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(p.ClientUpdates) != 1 {
+		t.Fatalf("ClientUpdates = %+v, want one claude-code update", p.ClientUpdates)
+	}
+	if got := p.ClientUpdates[0].URL; got != existingRouterURL {
+		t.Fatalf("planned URL = %q, want existing router URL %q", got, existingRouterURL)
+	}
+	if strings.Contains(p.ClientUpdates[0].URL, ":9121") {
+		t.Fatalf("planned URL reverted to legacy 9121 form: %q", p.ClientUpdates[0].URL)
+	}
+}
+
+func TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice(t *testing.T) {
+	m := serenaManifest()
+	wantURL := SerenaRouterClientURL(9125)
+
+	withPort, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"claude-code"}, GUIPort: 9125})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts(GUIPort): %v", err)
+	}
+	var withPortOut bytes.Buffer
+	if err := printPlanTo(&withPortOut, withPort); err != nil {
+		t.Fatalf("printPlanTo(GUIPort): %v", err)
+	}
+	if !strings.Contains(withPortOut.String(), wantURL) {
+		t.Fatalf("dry-run output missing serena router URL %q:\n%s", wantURL, withPortOut.String())
+	}
+	if strings.Contains(withPortOut.String(), ":9121") {
+		t.Fatalf("dry-run output contains legacy serena client port:\n%s", withPortOut.String())
+	}
+
+	withoutPort, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"claude-code"}, GUIPort: 0})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts(no GUIPort): %v", err)
+	}
+	var withoutPortOut bytes.Buffer
+	if err := printPlanTo(&withoutPortOut, withoutPort); err != nil {
+		t.Fatalf("printPlanTo(no GUIPort): %v", err)
+	}
+	if !strings.Contains(withoutPortOut.String(), "serena client entry deferred: live hub router not resolvable") {
+		t.Fatalf("dry-run output missing deferred notice:\n%s", withoutPortOut.String())
 	}
 }
 
@@ -71,8 +196,8 @@ func preparePreflightBinaryChecks(t *testing.T) {
 }
 
 func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
-	m := serenaLikeManifest()
-	p, err := BuildPlan(m, "")
+	m := genericMultiDaemonManifest()
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{GUIPort: 9125})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -111,8 +236,8 @@ func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 }
 
 func TestBuildPlan_AllClientsIncludesOptInClients(t *testing.T) {
-	m := serenaLikeManifest()
-	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true})
+	m := genericMultiDaemonManifest()
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true, GUIPort: 9125})
 	if err != nil {
 		t.Fatalf("BuildPlanWithOpts: %v", err)
 	}
@@ -131,8 +256,8 @@ func TestBuildPlan_AllClientsIncludesOptInClients(t *testing.T) {
 }
 
 func TestBuildPlan_ClientFilterOnlyIncludesRequestedClients(t *testing.T) {
-	m := serenaLikeManifest()
-	p, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"qwen-cli", "vscode"}})
+	m := genericMultiDaemonManifest()
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"qwen-cli", "vscode"}, GUIPort: 9125})
 	if err != nil {
 		t.Fatalf("BuildPlanWithOpts: %v", err)
 	}
@@ -155,8 +280,8 @@ func TestBuildPlan_ClientFilterOnlyIncludesRequestedClients(t *testing.T) {
 }
 
 func TestBuildPlan_SingleDaemonFilter_SkipsOthersAndWeeklyRefresh(t *testing.T) {
-	m := serenaLikeManifest()
-	p, err := BuildPlan(m, "codex")
+	m := genericMultiDaemonManifest()
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{DaemonFilter: "codex", GUIPort: 9125})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -180,10 +305,10 @@ func TestBuildPlan_SingleDaemonFilter_SkipsOthersAndWeeklyRefresh(t *testing.T) 
 }
 
 func TestBuildPlan_SharedDaemonFilter_IncludesAllReferencingBindings(t *testing.T) {
-	m := serenaLikeManifest()
+	m := genericMultiDaemonManifest()
 	// claude daemon is referenced by every non-Codex binding; all-clients mode
 	// preserves that relationship when explicitly requested.
-	p, err := BuildPlanWithOpts(m, BuildPlanOpts{DaemonFilter: "claude", IncludeAllClients: true})
+	p, err := BuildPlanWithOpts(m, BuildPlanOpts{DaemonFilter: "claude", IncludeAllClients: true, GUIPort: 9125})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -205,7 +330,7 @@ func TestBuildPlan_SharedDaemonFilter_IncludesAllReferencingBindings(t *testing.
 }
 
 func TestBuildPlan_UnknownDaemonFilter_Errors(t *testing.T) {
-	m := serenaLikeManifest()
+	m := genericMultiDaemonManifest()
 	_, err := BuildPlan(m, "does-not-exist")
 	if err == nil {
 		t.Fatal("expected error for unknown daemon filter, got nil")
@@ -216,7 +341,7 @@ func TestBuildPlan_UnknownDaemonFilter_Errors(t *testing.T) {
 }
 
 func TestBuildPlan_InvalidClientURLPath_Errors(t *testing.T) {
-	m := serenaLikeManifest()
+	m := genericMultiDaemonManifest()
 	m.ClientBindings[0].URLPath = "@evil.com/mcp"
 
 	_, err := BuildPlan(m, "")

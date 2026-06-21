@@ -69,6 +69,27 @@ func TestInstallHandler_OversizedBodyRejected(t *testing.T) {
 	}
 }
 
+func TestInstallHandler_ForwardsBoundGUIPort(t *testing.T) {
+	inst := &fakeInstaller{}
+	s := newInstallTestServer(inst)
+	s.port.Store(9125)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/install?name=serena", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%q", rec.Code, rec.Body.String())
+	}
+	if !inst.called || inst.seenName != "serena" {
+		t.Fatalf("installer saw name=%q called=%v, want serena/true", inst.seenName, inst.called)
+	}
+	if inst.seenGUIPort != 9125 {
+		t.Fatalf("installer saw guiPort=%d, want 9125", inst.seenGUIPort)
+	}
+}
+
 func TestUninstallHandler_RejectsNonDELETE(t *testing.T) {
 	u := &fakeUninstaller{}
 	s := newUninstallTestServer(u)
@@ -192,13 +213,15 @@ func TestUninstallHandler_BackendError_500Envelope(t *testing.T) {
 
 type fakeInstallBulk struct {
 	seenServers []string
+	seenGUIPort int
 	called      bool
 	results     []api.InstallResult
 }
 
-func (f *fakeInstallBulk) InstallAll(servers []string) []api.InstallResult {
+func (f *fakeInstallBulk) InstallAll(servers []string, guiPort int) []api.InstallResult {
 	f.called = true
 	f.seenServers = servers
+	f.seenGUIPort = guiPort
 	return f.results
 }
 
@@ -256,6 +279,7 @@ func TestInstallAllHandler_AllSucceed_200(t *testing.T) {
 		{Server: "time", Err: nil},
 	}}
 	s := newInstallAllTestServer(b)
+	s.port.Store(9125)
 	rec := postNoBody(t, s, "/api/install-all")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%q", rec.Code, rec.Body.String())
@@ -265,6 +289,9 @@ func TestInstallAllHandler_AllSucceed_200(t *testing.T) {
 	}
 	if b.seenServers != nil {
 		t.Errorf("no ?servers filter should forward nil, got %v", b.seenServers)
+	}
+	if b.seenGUIPort != 9125 {
+		t.Errorf("installBulk saw guiPort=%d, want 9125", b.seenGUIPort)
 	}
 	var body struct {
 		InstallResults []installResultDTO `json:"install_results"`

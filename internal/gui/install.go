@@ -16,7 +16,7 @@ import (
 // defaults: no daemon filter (install every daemon in the manifest),
 // DryRun=false, Writer=nil (falls back to os.Stderr inside api.Install).
 type installer interface {
-	Install(name string) error
+	Install(name string, guiPort int) error
 }
 
 // realInstaller is the production adapter for /api/install. Follows the
@@ -27,8 +27,8 @@ type installer interface {
 // everything declared in the manifest you just saved."
 type realInstaller struct{}
 
-func (realInstaller) Install(name string) error {
-	return api.NewAPI().Install(api.InstallOpts{Server: name})
+func (realInstaller) Install(name string, guiPort int) error {
+	return api.NewAPI().Install(api.InstallOpts{Server: name, GUIPort: guiPort})
 }
 
 // uninstaller is the narrow interface the DELETE /api/install/:server
@@ -57,7 +57,7 @@ func (realUninstaller) Uninstall(server string) (*api.UninstallReport, error) {
 // api.NewAPI(); the optional clients filter is left at install-all defaults
 // (all clients) — the GUI bulk-install affordance installs everything.
 type installBulkAPI interface {
-	InstallAll(servers []string) []api.InstallResult
+	InstallAll(servers []string, guiPort int) []api.InstallResult
 }
 
 // realInstallBulkAPI is the production adapter for POST /api/install-all.
@@ -68,14 +68,14 @@ type installBulkAPI interface {
 // path regardless of filter.
 type realInstallBulkAPI struct{}
 
-func (realInstallBulkAPI) InstallAll(servers []string) []api.InstallResult {
+func (realInstallBulkAPI) InstallAll(servers []string, guiPort int) []api.InstallResult {
 	a := api.NewAPI()
 	if len(servers) == 0 {
-		return a.InstallAllWithOpts(api.InstallAllOpts{})
+		return a.InstallAllWithOpts(api.InstallAllOpts{GUIPort: guiPort})
 	}
 	results := make([]api.InstallResult, 0, len(servers))
 	for _, name := range servers {
-		err := a.Install(api.InstallOpts{Server: name})
+		err := a.Install(api.InstallOpts{Server: name, GUIPort: guiPort})
 		results = append(results, api.InstallResult{Server: name, Err: err})
 	}
 	return results
@@ -153,7 +153,7 @@ func registerInstallRoutes(s *Server) {
 			writeAPIError(w, fmt.Errorf("name required"), http.StatusBadRequest, "BAD_REQUEST")
 			return
 		}
-		if err := s.installer.Install(name); err != nil {
+		if err := s.installer.Install(name, s.Port()); err != nil {
 			writeAPIError(w, err, http.StatusInternalServerError, "INSTALL_FAILED")
 			return
 		}
@@ -209,7 +209,7 @@ func registerInstallRoutes(s *Server) {
 			return
 		}
 		servers := parseServersFilter(r.URL.Query().Get("servers"))
-		results := s.installBulk.InstallAll(servers)
+		results := s.installBulk.InstallAll(servers, s.Port())
 		rows := make([]installResultDTO, 0, len(results))
 		anyFailed := false
 		for _, res := range results {

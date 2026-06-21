@@ -68,14 +68,16 @@ func (f *fakeDirectClientWriter) WriteDirect(entry *api.MarketplaceEntry, client
 }
 
 type fakeInstaller struct {
-	seenName string
-	called   bool
-	err      error
+	seenName    string
+	seenGUIPort int
+	called      bool
+	err         error
 }
 
-func (f *fakeInstaller) Install(name string) error {
+func (f *fakeInstaller) Install(name string, guiPort int) error {
 	f.called = true
 	f.seenName = name
+	f.seenGUIPort = guiPort
 	return f.err
 }
 
@@ -181,6 +183,7 @@ func TestMarketplaceInstall_HubNativeHTTPPicksPort(t *testing.T) {
 	creator := &fakeManifestCreator{}
 	installer := &fakeInstaller{}
 	s := newMarketplaceInstallTestServer(loader, picker, &fakeServerNamePresence{}, &fakeDirectClientWriter{}, creator, installer)
+	s.port.Store(9125)
 
 	rec := postInstall(t, s, `{"id":"serena","mode":"hub"}`, "same-origin")
 	if rec.Code != http.StatusCreated {
@@ -200,6 +203,9 @@ func TestMarketplaceInstall_HubNativeHTTPPicksPort(t *testing.T) {
 	}
 	if !installer.called || installer.seenName != "serena" {
 		t.Errorf("Install seenName=%q called=%v, want serena/true", installer.seenName, installer.called)
+	}
+	if installer.seenGUIPort != 9125 {
+		t.Errorf("Install guiPort=%d, want 9125", installer.seenGUIPort)
 	}
 }
 
