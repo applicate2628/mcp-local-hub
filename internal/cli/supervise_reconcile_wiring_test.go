@@ -199,6 +199,60 @@ func TestRunSupervise_NoIntentNoSpawn(t *testing.T) {
 	}
 }
 
+func TestRunSupervise_AsideExecutableRecoversCanonicalBinary(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	installDir := t.TempDir()
+	canonical := filepath.Join(installDir, "mcphub.exe")
+	aside := canonical + ".old-20250102T030405Z"
+	if err := os.WriteFile(aside, []byte("running-aside"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupExecutable := setSupervisorExecutableFnForTest(func() (string, error) {
+		return aside, nil
+	})
+	defer cleanupExecutable()
+
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(eventsPath); err == nil && strings.Contains(string(data), `"event":"reconcile-ready"`) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	exitCh <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervise exited with err: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	}
+
+	got, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatalf("canonical binary was not recovered from aside: %v", err)
+	}
+	if string(got) != "running-aside" {
+		t.Fatalf("recovered canonical content = %q, want running aside bytes", got)
+	}
+}
+
 func TestRunSupervise_MalformedDaemonIntentFatalBeforeReady(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)

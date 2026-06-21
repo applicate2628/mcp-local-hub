@@ -164,6 +164,36 @@ func TestRecoverMissingBinary_NoValidAsideReturnsError(t *testing.T) {
 	}
 }
 
+func TestCanonicalTargetFromAside_StripsGeneratedAsideSuffix(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, platformBinaryName())
+	aside := target + ".old-" + time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC).Format(renameAsideTimestampLayout)
+
+	got, ok := CanonicalTargetFromAside(aside)
+	if !ok {
+		t.Fatalf("CanonicalTargetFromAside(%q) ok=false, want true", aside)
+	}
+	if got != target {
+		t.Fatalf("CanonicalTargetFromAside(%q) = %q, want %q", aside, got, target)
+	}
+}
+
+func TestCanonicalTargetFromAside_RejectsNonGeneratedAside(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, platformBinaryName())
+	cases := []string{
+		target,
+		target + ".old-not-a-timestamp",
+		filepath.Join(dir, "other.exe.old-20250102T030405Z"),
+	}
+
+	for _, path := range cases {
+		if got, ok := CanonicalTargetFromAside(path); ok {
+			t.Fatalf("CanonicalTargetFromAside(%q) = (%q, true), want ok=false", path, got)
+		}
+	}
+}
+
 // TestSweepOldBinaries_RemovesAgedFiles plants a stale aside whose
 // suffix timestamp is 10 days in the past and verifies SweepOldBinaries removes
 // it while leaving the current binary intact.

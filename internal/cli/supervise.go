@@ -58,6 +58,14 @@ import (
 // reassign this var.
 var reaperFn = ReapStaleTransients
 
+var supervisorExecutableFn = os.Executable
+
+func setSupervisorExecutableFnForTest(fn func() (string, error)) func() {
+	prev := supervisorExecutableFn
+	supervisorExecutableFn = fn
+	return func() { supervisorExecutableFn = prev }
+}
+
 // errSpawnPreChild marks a SpawnFunc error that occurred BEFORE any
 // child process existed (cmd.Start / StartWithJob returned non-nil).
 // The supervisor controller uses errors.Is to distinguish this from
@@ -464,18 +472,22 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	if err != nil {
 		return fmt.Errorf("resolve supervisor state dir: %w", err)
 	}
-	exe, err := os.Executable()
+	exe, err := supervisorExecutableFn()
 	if err != nil {
 		return fmt.Errorf("resolve supervisor executable: %w", err)
 	}
+	canonicalExe := exe
+	if target, ok := api.CanonicalTargetFromAside(exe); ok {
+		canonicalExe = target
+	}
 	binaryRecovered := false
-	if _, err := os.Stat(exe); err != nil {
+	if _, err := os.Stat(canonicalExe); err != nil {
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("stat supervisor executable %q: %w", exe, err)
+			return fmt.Errorf("stat supervisor executable %q: %w", canonicalExe, err)
 		}
 		binaryRecovered = true
 	}
-	if err := recoverMissingBinaryFn(exe); err != nil {
+	if err := recoverMissingBinaryFn(canonicalExe); err != nil {
 		return fmt.Errorf("recover supervisor binary: %w", err)
 	}
 
@@ -525,11 +537,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			Source:   "lifecycle",
 			Event:    "binary-recovered-from-aside",
 			Body: map[string]any{
-				"path": exe,
+				"path": canonicalExe,
 			},
 		})
 	}
-	if exe == "" {
+	if canonicalExe == "" {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
@@ -539,7 +551,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			},
 		})
 	} else {
-		sweepDir := filepath.Dir(exe)
+		sweepDir := filepath.Dir(canonicalExe)
 		if err := sweepOldBinariesFn(sweepDir, func(path string, err error) {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",

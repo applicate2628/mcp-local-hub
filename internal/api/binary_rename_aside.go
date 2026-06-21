@@ -182,6 +182,20 @@ func RecoverMissingBinary(target string) error {
 	return nil
 }
 
+// CanonicalTargetFromAside returns the canonical install target for a generated
+// `<target>.old-<timestamp>` rename-aside path.
+func CanonicalTargetFromAside(path string) (string, bool) {
+	if _, ok := generatedRenameAsideTime(path); !ok {
+		return "", false
+	}
+	base := filepath.Base(path)
+	idx := strings.LastIndex(base, ".old-")
+	if idx <= 0 {
+		return "", false
+	}
+	return filepath.Join(filepath.Dir(path), base[:idx]), true
+}
+
 func generatedRenameAsideTime(path string) (time.Time, bool) {
 	base := filepath.Base(path)
 	for _, prefix := range []string{"mcphub.exe.old-", "mcphub.old-"} {
