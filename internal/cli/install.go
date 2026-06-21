@@ -209,7 +209,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// `mcphub binary` requirement reflects the just-bootstrapped state.
 			// Print blockers (with guided fixes) and STOP if any; print
 			// unset-optional-secret advisories and PROCEED to install.
-			rep, rerr := api.CheckServerReadinessByName(server)
+			rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{DaemonFilter: daemonFilter})
 			if rerr != nil {
 				return rerr
 			}
