@@ -128,23 +128,12 @@ var postRenameVerifyFailHook func() error
 // deterministically across platforms. Never set in production.
 var postRenameOpenFailHook func() error
 
-// secureWritePathBasedStringEntryCount and
-// secureWriteResolvedParentEntryCount are TEST-ONLY observation counters
-// proving the AF-1 closure (T5): the symlink-resolve relax lane must write
-// THROUGH a pinned parent handle (secureWriteThroughResolvedParentHandle ->
-// secureWriteClientConfigToResolvedParent) and must NOT re-walk the resolved
-// string through the path-based secureWriteClientConfigImpl.
-//
-// The path-based string entry (secureWriteClientConfigImpl, which does
-// filepath.Split + open-parent-by-path) increments the string counter; the
-// shared post-parent-open owner (secureWriteClientConfigToResolvedParent)
-// increments the resolved-parent counter. A symlink-lane write thus leaves
-// the string counter at 0 and the resolved-parent counter > 0; a regression
-// that reintroduced the string re-walk would bump the string counter.
-//
-// Plain ints (not atomic): the tests that read them run single-threaded.
-// Never read or reset in production — production never references them.
-var (
-	secureWritePathBasedStringEntryCount int
-	secureWriteResolvedParentEntryCount  int
-)
+// The AF-1 secure-write observation counters
+// (secureWritePathBasedStringEntryCount / secureWriteResolvedParentEntryCount)
+// and their observeStringEntry() / observeResolvedParentEntry() recorders live
+// behind the af1_counters build tag — secure_write_counters_aftag.go (the real
+// counters) and secure_write_counters_prod.go (empty no-op recorders compiled
+// into shipped binaries). The production secure-write lanes call the observe*
+// recorders, never an inline increment, so a shipped binary mutates NO shared
+// counter state on a write (the F3 data-race fix) and contains no counter
+// symbol (compile-out proof). See those two files for the full rationale.

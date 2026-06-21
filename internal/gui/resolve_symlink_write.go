@@ -14,11 +14,12 @@
 // structured JSON result. It is a two-phase contract gated by `confirm`:
 //
 //   - confirm=false (RESOLVE): resolve the client's symlinked config, PIN the
-//     resolved real target's parent, and return {pinnedRealPath, contentHash}
+//     full resolved real target path, and return {pinnedRealPath, contentHash}
 //     for the confirm modal. NO write.
 //   - confirm=true (WRITE): re-resolve server-side; refuse if the freshly-
-//     resolved parent != the operator-confirmed pinnedRealPath (the symlink
-//     was repointed between confirm and click — anti-TOCTOU); read the target's
+//     resolved full target != the operator-confirmed pinnedRealPath (the
+//     symlink was repointed between confirm and click — anti-TOCTOU, incl. a
+//     same-parent repoint); read the target's
 //     CURRENT raw bytes server-side (content is HOST-sourced, never browser-
 //     supplied); refuse if the content hash drifted from the one the operator
 //     saw (concurrent external edit); then perform a byte-exact round-trip
@@ -65,10 +66,11 @@ type resolveSymlinkWriteRequest struct {
 
 // ResolveSymlinkResult is the RESOLVE-phase (confirm=false) payload: what the
 // confirm modal renders. `OriginalPath` is the symlink the operator pointed
-// at; `ResolvedTarget` is the real file; `PinnedRealPath` is the parent
-// directory the operator consents to (the value to echo back in the WRITE
-// phase). `ContentHash` is the sha256 of the target's current bytes, echoed
-// back so the WRITE phase can refuse on a concurrent external edit.
+// at; `ResolvedTarget` is the real file; `PinnedRealPath` is the FULL resolved
+// target path the operator consents to (now equal to ResolvedTarget — shown ==
+// pinned; the value to echo back in the WRITE phase). `ContentHash` is the
+// sha256 of the target's current bytes, echoed back so the WRITE phase can
+// refuse on a concurrent external edit.
 type ResolveSymlinkResult struct {
 	Client         string `json:"client"`
 	OriginalPath   string `json:"original_path"`
@@ -91,8 +93,9 @@ type WriteSymlinkResult struct {
 // NOT_SYMLINK so the GUI refreshes its scan instead of offering a follow.
 var errSymlinkNotApplicable = errors.New("client config is not a follow-able symlink")
 
-// errSymlinkRepointed is returned when the freshly-resolved parent at WRITE
-// time does not match the operator-confirmed PinnedRealPath. Mapped to 409 /
+// errSymlinkRepointed is returned when the freshly-resolved full target at
+// WRITE time does not match the operator-confirmed PinnedRealPath (including a
+// repoint to a sibling file in the same parent). Mapped to 409 /
 // SYMLINK_REPOINTED.
 var errSymlinkRepointed = errors.New("symlink resolved target changed since confirm")
 
@@ -136,7 +139,7 @@ func (realSymlinkResolveWriter) Resolve(client string) (*ResolveSymlinkResult, e
 	if err != nil {
 		return nil, err
 	}
-	resolvedTarget, pinnedParent, isSymlink := api.ResolveClientConfigSymlink(path)
+	resolvedTarget, pinnedPath, isSymlink := api.ResolveClientConfigSymlink(path)
 	if !isSymlink {
 		return nil, fmt.Errorf("%w: %s", errSymlinkNotApplicable, path)
 	}
@@ -152,7 +155,7 @@ func (realSymlinkResolveWriter) Resolve(client string) (*ResolveSymlinkResult, e
 		Client:         client,
 		OriginalPath:   path,
 		ResolvedTarget: resolvedTarget,
-		PinnedRealPath: pinnedParent,
+		PinnedRealPath: pinnedPath,
 		ContentHash:    hashBytes(body),
 		IsSymlink:      true,
 	}, nil
@@ -169,13 +172,15 @@ func (realSymlinkResolveWriter) Write(client, pinnedRealPath, contentHash string
 		return nil, err
 	}
 	// Re-resolve at write time (defense in depth — the symlink could have been
-	// repointed between the confirm modal and this POST).
-	resolvedTarget, livePinnedParent, isSymlink := api.ResolveClientConfigSymlink(path)
+	// repointed between the confirm modal and this POST). The pin is the FULL
+	// resolved target path, so a same-parent repoint (link -> other.json in the
+	// SAME dir) is caught here too, not just a parent change.
+	resolvedTarget, livePinnedPath, isSymlink := api.ResolveClientConfigSymlink(path)
 	if !isSymlink {
 		return nil, fmt.Errorf("%w: %s", errSymlinkNotApplicable, path)
 	}
-	if filepath.Clean(pinnedRealPath) != livePinnedParent {
-		return nil, fmt.Errorf("%w: confirmed %q, now resolves to %q", errSymlinkRepointed, pinnedRealPath, livePinnedParent)
+	if filepath.Clean(pinnedRealPath) != livePinnedPath {
+		return nil, fmt.Errorf("%w: confirmed %q, now resolves to %q", errSymlinkRepointed, pinnedRealPath, livePinnedPath)
 	}
 	// Read the target's CURRENT raw bytes (HOST-sourced) — do NOT parse and
 	// re-marshal (that would silently reformat / drop comments / reorder keys).
@@ -191,7 +196,7 @@ func (realSymlinkResolveWriter) Write(client, pinnedRealPath, contentHash string
 	consent := api.ResolvedSymlinkConsent{
 		Client:             client,
 		OriginalPath:       path,
-		PinnedResolvedPath: livePinnedParent,
+		PinnedResolvedPath: livePinnedPath,
 	}
 	if werr := api.SecureWriteClientConfigWithConsent(consent, body); werr != nil {
 		return nil, fmt.Errorf("write %s via consent: %w", client, werr)

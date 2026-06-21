@@ -35,13 +35,13 @@ func TestPromptInteractiveSymlinkConsent_Answers(t *testing.T) {
 		var out bytes.Buffer
 		r := bufio.NewReader(strings.NewReader(c.in))
 		got := promptInteractiveSymlinkConsent(&out, r, "codex-cli",
-			"/home/u/.codex/config.toml", "/e/env/Agents/.codex")
+			"/home/u/.codex/config.toml", "/e/env/Agents/.codex/config.toml")
 		if got != c.want {
 			t.Errorf("input %q: got %v, want %v", c.in, got, c.want)
 		}
 		// Prompt must name client + symlink path + pinned target, and end [y/N].
 		s := out.String()
-		for _, frag := range []string{"codex-cli", "/home/u/.codex/config.toml", "/e/env/Agents/.codex", "[y/N]"} {
+		for _, frag := range []string{"codex-cli", "/home/u/.codex/config.toml", "/e/env/Agents/.codex/config.toml", "[y/N]"} {
 			if !strings.Contains(s, frag) {
 				t.Errorf("input %q: prompt %q missing %q", c.in, s, frag)
 			}
@@ -62,7 +62,7 @@ func TestPromptInteractiveSymlinkConsent_EmptyClientNoLeadingSpace(t *testing.T)
 	var out bytes.Buffer
 	r := bufio.NewReader(strings.NewReader("n\n"))
 	_ = promptInteractiveSymlinkConsent(&out, r, "",
-		"/home/u/.codex/config.toml", "/e/env/Agents/.codex")
+		"/home/u/.codex/config.toml", "/e/env/Agents/.codex/config.toml")
 	s := out.String()
 	if strings.HasPrefix(s, " ") {
 		t.Errorf("empty client produced a leading space: %q", s)

@@ -22,13 +22,13 @@ import (
 // into a hardened temp state dir via hubMcpStateTestHelper(t), and every
 // env var is set through t.Setenv so the real host posture is never touched.
 
-// resetA3EntryCounters zeroes the AF-1 observation counters
-// (secure_write_client_config.go) so a test reads a clean slate. The
-// counters are process-global plain ints; tests run single-threaded.
-func resetA3EntryCounters() {
-	secureWritePathBasedStringEntryCount = 0
-	secureWriteResolvedParentEntryCount = 0
-}
+// The AF-1 entry-count helpers (resetA3EntryCounters + the counters they
+// touch) live behind the af1_counters build tag in
+// secure_write_counters_aftag.go; the counter-asserting tests are in
+// client_write_init_a3_counters_test.go (same tag). The functional tests below
+// stay in the default build so the canonical
+// `go test -tags=test_state_path_env ./internal/api/` gate still exercises the
+// symlink threat model T1-T6 without the af1_counters tag.
 
 // skipIfNoSymlink skips on Windows (elevation) and creates real -> link,
 // returning the link path. The real file is seeded with `{}` 0600.
@@ -91,12 +91,12 @@ func TestA3_T2_StrictModeOverridesScopedConsent_Refused(t *testing.T) {
 	dir := hardenedTempDir(t)
 	real, link := a3SymlinkFixture(t, dir)
 
-	// Consent pinned to the (correct) resolved parent — but strict must
+	// Consent pinned to the (correct) full resolved target — but strict must
 	// still refuse before any follow.
 	consent := &ResolvedSymlinkConsent{
 		Client:             "claude-code",
 		OriginalPath:       link,
-		PinnedResolvedPath: filepath.Clean(filepath.Dir(real)),
+		PinnedResolvedPath: filepath.Clean(real),
 	}
 	err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), consent)
 	if err == nil {
@@ -143,11 +143,11 @@ func TestA3_T3_ScopedConsentPinMismatchAfterSwap_Refused(t *testing.T) {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	// Operator consented to P (the parent of realP).
+	// Operator consented to the full target realP (under parent P).
 	consent := &ResolvedSymlinkConsent{
 		Client:             "claude-code",
 		OriginalPath:       link,
-		PinnedResolvedPath: filepath.Clean(parentP),
+		PinnedResolvedPath: filepath.Clean(realP),
 	}
 
 	// Inject the swap: after the confirm-time resolve confirmed a symlink
@@ -181,6 +181,79 @@ func TestA3_T3_ScopedConsentPinMismatchAfterSwap_Refused(t *testing.T) {
 	}
 }
 
+// T7 — F2 same-parent repoint: consent pinned to the FULL path of realA.json;
+// the symlink is repointed to realB.json in the SAME parent P (different
+// basename) before the write-time re-resolve. The write MUST be REFUSED on
+// full-path mismatch and BOTH targets must be unmutated. This is the consent
+// BYPASS the parent-only pin allowed: a parent-only comparison would have
+// passed (same parent P), landing the privileged write on the unapproved
+// realB.json. It must FAIL pre-fix (proving the bypass) and PASS post-fix.
+func TestA3_T7_ScopedConsentSameParentRepoint_Refused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowClientConfigSymlinkEnv, "")
+	dir := hardenedTempDir(t)
+
+	// realA and realB live in the SAME parent P.
+	parentP := filepath.Join(dir, "P")
+	if err := os.Mkdir(parentP, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	realA := filepath.Join(parentP, "realA.json")
+	realB := filepath.Join(parentP, "realB.json")
+	if err := os.WriteFile(realA, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(realB, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(realA, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	// Operator consented to the FULL path of realA.json (parent P + realA.json).
+	consent := &ResolvedSymlinkConsent{
+		Client:             "claude-code",
+		OriginalPath:       link,
+		PinnedResolvedPath: filepath.Clean(realA),
+	}
+
+	// Inject the swap: repoint link -> realB.json in the SAME parent P after the
+	// confirm-time resolve but before the write-time re-resolve + pin-match.
+	swapped := false
+	afterResolveBeforePinHook = func() {
+		if swapped {
+			return
+		}
+		swapped = true
+		_ = os.Remove(link)
+		if err := os.Symlink(realB, link); err != nil {
+			t.Fatalf("T7: swap symlink to realB (same parent): %v", err)
+		}
+	}
+	t.Cleanup(func() { afterResolveBeforePinHook = nil })
+
+	err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), consent)
+	if err == nil {
+		t.Fatalf("T7: same-parent repoint to an UNAPPROVED file must REFUSE the write (full-path pin)")
+	}
+	if !bytesContainsStr(err.Error(), "does not match the operator-consented target") {
+		t.Errorf("T7: expected the pin-mismatch refusal, got %q", err.Error())
+	}
+	// NEITHER realA (the approved file) NOR realB (the swap target) may be
+	// written. Before the fix, realB.json received the bytes (the bypass).
+	if b, _ := os.ReadFile(realA); string(b) != "{}" {
+		t.Errorf("T7: approved target realA mutated: %q", b)
+	}
+	if b, _ := os.ReadFile(realB); string(b) != "{}" {
+		t.Errorf("T7: same-parent swap target realB was written — consent BYPASS not closed: %q", b)
+	}
+}
+
 // T4 — legit symlink to a regular file on ANOTHER directory tree (EXDEV
 // proxy) → write SUCCEEDS on the resolved location, original symlink intact,
 // audit event emitted. The temp file is created as a SIBLING of the resolved
@@ -207,7 +280,6 @@ func TestA3_T4_SymlinkToRegularFile_SucceedsOnResolvedTree_AuditEmitted(t *testi
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	resetA3EntryCounters()
 	if err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), nil); err != nil {
 		t.Fatalf("T4: legit symlink-to-regular-file write must SUCCEED: %v", err)
 	}
@@ -230,44 +302,9 @@ func TestA3_T4_SymlinkToRegularFile_SucceedsOnResolvedTree_AuditEmitted(t *testi
 	if !bytes.Contains(logBytes, []byte("client-write-symlink-resolved-via-optin")) {
 		t.Errorf("T4: env-opt-in audit event missing from hub-mcp.log: %s", logBytes)
 	}
-	// AF-1: the write went through the resolved-parent owner, NOT the
-	// path-based string re-walk.
-	if secureWritePathBasedStringEntryCount != 0 {
-		t.Errorf("T4: symlink lane re-walked a string (path-based entry count=%d, want 0)", secureWritePathBasedStringEntryCount)
-	}
-	if secureWriteResolvedParentEntryCount == 0 {
-		t.Errorf("T4: write did not go through the resolved-parent handle owner (count=0)")
-	}
-}
-
-// T5 — env-var lane post-migration uses the handle-pinned path: NO string
-// re-walk. This is the explicit AF-1 closure guard. After a symlink-lane
-// write, the path-based string entry counter MUST be 0 and the
-// resolved-parent counter MUST be > 0.
-func TestA3_T5_EnvVarLaneUsesHandlePinnedPath_NoStringReWalk(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation requires elevation on Windows")
-	}
-	t.Setenv(RequireSingleUserHomeEnv, "")
-	t.Setenv(AllowClientConfigSymlinkEnv, "1") // F2 env-var lane
-	dir := hardenedTempDir(t)
-	real, link := a3SymlinkFixture(t, dir)
-
-	resetA3EntryCounters()
-	if err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), nil); err != nil {
-		t.Fatalf("T5: env-var lane write must SUCCEED: %v", err)
-	}
-	if b, _ := os.ReadFile(real); string(b) != `{"v":1}` {
-		t.Errorf("T5: resolved target content = %q, want %q", b, `{"v":1}`)
-	}
-	if secureWritePathBasedStringEntryCount != 0 {
-		t.Errorf("T5 (AF-1 closure): env-var lane re-walked a resolved string "+
-			"(path-based string entry count=%d, want 0) — the TOCTOU re-walk is back",
-			secureWritePathBasedStringEntryCount)
-	}
-	if secureWriteResolvedParentEntryCount == 0 {
-		t.Errorf("T5: env-var lane did not go through the handle-pinned resolved-parent owner (count=0)")
-	}
+	// The AF-1 handle-pinned-path (no string re-walk) assertion for this lane
+	// lives in TestA3_T5_EnvVarLaneUsesHandlePinnedPath_NoStringReWalk under
+	// -tags=af1_counters (client_write_init_a3_counters_test.go).
 }
 
 // T6 — broadened resolved-target parent, NON-strict → write succeeds via the
@@ -303,7 +340,6 @@ func TestA3_T6_BroadenedResolvedParentNonStrict_SucceedsOwnerOnly_WarnEmitted(t 
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	resetA3EntryCounters()
 	if err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), nil); err != nil {
 		t.Fatalf("T6: non-strict broadened-parent symlink write must SUCCEED via relax lane: %v", err)
 	}
@@ -328,15 +364,14 @@ func TestA3_T6_BroadenedResolvedParentNonStrict_SucceedsOwnerOnly_WarnEmitted(t 
 	if !bytes.Contains(logBytes, []byte("client-write-unhardened-fallback")) {
 		t.Errorf("T6: unhardened-fallback warn event missing (relax lane did not fire): %s", logBytes)
 	}
-	// AF-1: even the relax retry stays on the handle-pinned path.
-	if secureWritePathBasedStringEntryCount != 0 {
-		t.Errorf("T6: relax retry re-walked a resolved string (count=%d, want 0)", secureWritePathBasedStringEntryCount)
-	}
+	// The AF-1 "even the relax retry stays on the handle-pinned path" counter
+	// assertion lives under -tags=af1_counters
+	// (client_write_init_a3_counters_test.go).
 }
 
 // TestA3_ScopedConsentPinMatch_Succeeds is the positive control for SEAM-B:
-// a scoped consent whose PinnedResolvedPath matches the actual resolved
-// parent (no swap) follows the symlink, writes through the handle-pinned
+// a scoped consent whose PinnedResolvedPath matches the actual resolved FULL
+// target (no swap) follows the symlink, writes through the handle-pinned
 // path, and emits the distinct scoped-consent audit event.
 func TestA3_ScopedConsentPinMatch_Succeeds(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -360,9 +395,8 @@ func TestA3_ScopedConsentPinMatch_Succeeds(t *testing.T) {
 	consent := &ResolvedSymlinkConsent{
 		Client:             "claude-code",
 		OriginalPath:       link,
-		PinnedResolvedPath: filepath.Clean(targetTree),
+		PinnedResolvedPath: filepath.Clean(real), // FULL resolved target path
 	}
-	resetA3EntryCounters()
 	if err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), consent); err != nil {
 		t.Fatalf("scoped-consent pin-match write must SUCCEED: %v", err)
 	}
@@ -380,9 +414,9 @@ func TestA3_ScopedConsentPinMatch_Succeeds(t *testing.T) {
 	if bytes.Contains(logBytes, []byte("client-write-symlink-resolved-via-optin")) {
 		t.Errorf("scoped-consent path wrongly emitted the env-opt-in audit event: %s", logBytes)
 	}
-	if secureWritePathBasedStringEntryCount != 0 {
-		t.Errorf("scoped-consent lane re-walked a string (count=%d, want 0)", secureWritePathBasedStringEntryCount)
-	}
+	// The AF-1 "scoped-consent lane stays on the handle-pinned path" counter
+	// assertion lives under -tags=af1_counters
+	// (client_write_init_a3_counters_test.go).
 }
 
 // bytesContainsStr is a tiny substring helper kept local to avoid importing

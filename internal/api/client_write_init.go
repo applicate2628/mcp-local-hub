@@ -315,14 +315,16 @@ const AllowClientConfigSymlinkEnv = "MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK"
 // replacement: the env var stays valid; a scoped consent is the second,
 // per-path input to the SAME follow-symlink predicate).
 //
-// PinnedResolvedPath is the resolved-PARENT directory the operator was
-// shown and consented to at confirm time (PR-2 GUI/CLI surfaces it; PR-1
-// only plumbs it). At write time the resolve re-runs and the
-// freshly-resolved parent MUST equal PinnedResolvedPath, else the write is
-// REFUSED — this is the swap-between-confirm-and-write guard: a co-resident
-// who repoints the symlink after the operator consented but before the
-// write lands cannot redirect the privileged write to a different target,
-// because the pin no longer matches.
+// PinnedResolvedPath is the full resolved TARGET path (parent + basename) the
+// operator approved at confirm time, not just the parent. At write time the
+// resolve re-runs and the freshly-resolved full target MUST equal
+// PinnedResolvedPath, else the write is REFUSED — this is the
+// swap-between-confirm-and-write guard: a co-resident who repoints the symlink
+// after the operator consented but before the write lands cannot redirect the
+// privileged write to a different target, because the pin no longer matches.
+// Pinning the FULL target (not just the parent) closes the same-parent-repoint
+// bypass: repointing /cfg/claude.json -> /cfg/other.json (SAME parent) before
+// the write is now caught, where a parent-only pin would have passed it.
 //
 // Client + OriginalPath are diagnostic/audit context only (which client's
 // config, the symlink path the operator pointed at); they are NOT part of
@@ -401,13 +403,15 @@ func secureWriteWithOperatorOptConsent(path string, contents []byte, consent *Re
 	// above — a consent-via-hook can NEVER bypass strict mode (PROTECTED:
 	// corp-managed hosts get symlink-attack hardening regardless of any
 	// per-write consent). On approval the port produces a fresh scoped
-	// ResolvedSymlinkConsent pinned to the JUST-resolved parent, then follows
-	// via the same handle-pinned, pin-verified secureWriteFollowingSymlink path
-	// as an explicit consent — the prompt only PRODUCES the consent; the
+	// ResolvedSymlinkConsent pinned to the JUST-resolved FULL target path, then
+	// follows via the same handle-pinned, pin-verified secureWriteFollowingSymlink
+	// path as an explicit consent — the prompt only PRODUCES the consent; the
 	// existing write-time re-resolve + pin guard still VERIFIES it.
 	if consent == nil && !followViaEnv && InteractiveSymlinkConsent != nil && !operatorRequiresSingleUserHome() {
-		if resolved, was := resolveSymlinkForSecureWrite(path); was {
-			pinnedParent := filepath.Clean(filepath.Dir(resolved))
+		// Pin via the SINGLE owner (ResolveClientConfigSymlink) so this site
+		// never independently re-derives the pin — the full resolved target
+		// path it returns is the same value the write-time guard recomputes.
+		if _, pinnedPath, was := ResolveClientConfigSymlink(path); was {
 			// Attribute the write to the client whose config path this is, so
 			// the prompt names the real client and the
 			// client-write-symlink-resolved-via-scoped-consent audit event logs
@@ -418,11 +422,11 @@ func secureWriteWithOperatorOptConsent(path string, contents []byte, consent *Re
 			// deriveClientNameForConfigPath for why the call path is too wide to
 			// thread a client param through.
 			client := deriveClientNameForConfigPath(path)
-			if InteractiveSymlinkConsent(client, path, pinnedParent) {
+			if InteractiveSymlinkConsent(client, path, pinnedPath) {
 				hookConsent := &ResolvedSymlinkConsent{
 					Client:             client,
 					OriginalPath:       path,
-					PinnedResolvedPath: pinnedParent,
+					PinnedResolvedPath: pinnedPath,
 				}
 				// Same test-only swap seam as the explicit-consent lane above
 				// so a swap between the interactive resolve and the write-time
@@ -490,7 +494,9 @@ func deriveClientNameForConfigPath(path string) string {
 // here (not trusting any earlier confirm-time resolve) so the pin-match
 // reflects the symlink's state at write time — that is the load-bearing
 // half of the swap-between-confirm-and-write guard. `consent` (when
-// non-nil) pins the resolved PARENT the operator approved. It tries the
+// non-nil) pins the resolved FULL TARGET path (parent + basename) the
+// operator approved, so a same-parent repoint to a sibling file is
+// refused. It tries the
 // hardened pipeline (parent gate ON) first; on ErrSecureWriteParentInsecure
 // with strict mode OFF it retries with the parent gate skipped, mirroring
 // secureWritePathBased's relax fallback.
@@ -505,15 +511,18 @@ func secureWriteFollowingSymlink(originalPath string, contents []byte, consent *
 	}
 
 	// SEAM-B swap-between-confirm-and-write guard: when a scoped consent is
-	// present, the write-time-resolved PARENT now MUST equal the parent the
-	// operator consented to. Refuse on mismatch BEFORE opening any handle or
-	// writing any byte.
+	// present, the write-time-resolved FULL TARGET path now MUST equal the full
+	// target the operator consented to. Comparing the full path (parent +
+	// basename), not just the parent, closes the same-parent-repoint bypass: a
+	// symlink approved pointing at /cfg/claude.json and repointed to
+	// /cfg/other.json (SAME parent) before the write no longer matches the pin.
+	// Refuse on mismatch BEFORE opening any handle or writing any byte.
 	if consent != nil {
-		resolvedParent := filepath.Clean(filepath.Dir(resolved))
-		pinnedParent := filepath.Clean(consent.PinnedResolvedPath)
-		if resolvedParent != pinnedParent {
-			return fmt.Errorf("secure write: symlink %s now resolves to a parent (%s) that does not match the operator-consented target (%s); refusing the write — the symlink may have been repointed after consent",
-				originalPath, resolvedParent, pinnedParent)
+		resolvedTarget := filepath.Clean(resolved)
+		pinnedTarget := filepath.Clean(consent.PinnedResolvedPath)
+		if resolvedTarget != pinnedTarget {
+			return fmt.Errorf("secure write: symlink %s now resolves to a target (%s) that does not match the operator-consented target (%s); refusing the write — the symlink may have been repointed after consent",
+				originalPath, resolvedTarget, pinnedTarget)
 		}
 	}
 
@@ -534,7 +543,7 @@ func secureWriteFollowingSymlink(originalPath string, contents []byte, consent *
 			"path":     originalPath,
 			"resolved": resolved,
 			"client":   consent.Client,
-			"reason":   "scoped operator consent (per-write; pinned-parent verified; write follows symlink target via pinned parent handle)",
+			"reason":   "scoped operator consent (per-write; pinned-full-target verified; write follows symlink target via pinned parent handle)",
 		}); logErr != nil {
 			_ = logErr
 		}

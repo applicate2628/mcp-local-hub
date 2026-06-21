@@ -350,7 +350,7 @@ func realSymlinkClient(t *testing.T) (client, realTarget string) {
 }
 
 // TestRealSymlinkResolveWriter_ResolveThenWrite drives the real adapter: the
-// RESOLVE phase pins the real target's parent + content hash, then the WRITE
+// RESOLVE phase pins the FULL real target path + content hash, then the WRITE
 // phase round-trips the SAME bytes through the consent pipeline. The original
 // symlink stays intact and the resolved target is unchanged content-wise.
 func TestRealSymlinkResolveWriter_ResolveThenWrite(t *testing.T) {
@@ -364,8 +364,13 @@ func TestRealSymlinkResolveWriter_ResolveThenWrite(t *testing.T) {
 	if !res.IsSymlink {
 		t.Fatalf("Resolve IsSymlink=false, want true")
 	}
-	if res.PinnedRealPath != filepath.Clean(filepath.Dir(realTarget)) {
-		t.Errorf("PinnedRealPath=%q, want %q", res.PinnedRealPath, filepath.Clean(filepath.Dir(realTarget)))
+	// The pin is the FULL resolved target path (parent + basename), equal to
+	// ResolvedTarget — shown == pinned.
+	if res.PinnedRealPath != filepath.Clean(realTarget) {
+		t.Errorf("PinnedRealPath=%q, want full target %q", res.PinnedRealPath, filepath.Clean(realTarget))
+	}
+	if res.PinnedRealPath != filepath.Clean(res.ResolvedTarget) {
+		t.Errorf("PinnedRealPath=%q != ResolvedTarget=%q (shown must equal pinned)", res.PinnedRealPath, res.ResolvedTarget)
 	}
 	// Hash must match the seeded content.
 	want := sha256.Sum256([]byte("# codex config\n"))
@@ -449,6 +454,59 @@ func TestRealSymlinkResolveWriter_Repointed_Refused(t *testing.T) {
 	// The swap target must be untouched.
 	if b, _ := os.ReadFile(other); string(b) != "# other\n" {
 		t.Errorf("repoint target written despite refusal: %q", b)
+	}
+}
+
+// TestRealSymlinkResolveWriter_SameParentRepointed_Refused is the F2 GUI-level
+// guard: the symlink is repointed to a DIFFERENT file in the SAME parent
+// directory after Resolve. Because the pin is now the FULL resolved target path
+// (not just the parent), the Write refuses with SYMLINK_REPOINTED — a
+// parent-only pin would have passed (same parent) and landed the write on the
+// unapproved file. The endpoint maps errSymlinkRepointed to 409.
+func TestRealSymlinkResolveWriter_SameParentRepointed_Refused(t *testing.T) {
+	client, realTarget := realSymlinkClient(t)
+	rw := realSymlinkResolveWriter{}
+	res, err := rw.Resolve(client)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	// Repoint the symlink to a SIBLING file in the SAME parent dir.
+	cfg := clients.AllClients()[client].ConfigPath()
+	sibling := filepath.Join(filepath.Dir(realTarget), "config-other.toml")
+	if err := os.WriteFile(sibling, []byte("# sibling\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(cfg)
+	if err := os.Symlink(sibling, cfg); err != nil {
+		t.Fatalf("repoint to sibling: %v", err)
+	}
+	_, err = rw.Write(client, res.PinnedRealPath, res.ContentHash)
+	if !errors.Is(err, errSymlinkRepointed) {
+		t.Fatalf("Write err=%v, want errSymlinkRepointed (same-parent repoint must be caught by the full-path pin)", err)
+	}
+	// The unapproved sibling target must be untouched (the consent BYPASS).
+	if b, _ := os.ReadFile(sibling); string(b) != "# sibling\n" {
+		t.Errorf("same-parent swap target written despite refusal — consent BYPASS not closed: %q", b)
+	}
+}
+
+// TestResolveSymlinkWrite_SameParentRepointMaps409 pins the HTTP mapping for the
+// F2 same-parent repoint: errSymlinkRepointed surfaces as 409 SYMLINK_REPOINTED
+// at the endpoint (the GUI then tells the operator to rescan + retry).
+func TestResolveSymlinkWrite_SameParentRepointMaps409(t *testing.T) {
+	fw := &fakeSymlinkResolveWriter{
+		writeErr: fmt.Errorf("%w: confirmed /cfg/claude.json, now resolves to /cfg/other.json", errSymlinkRepointed),
+	}
+	s := NewServer(Config{})
+	s.symlinkWriter = fw
+
+	rec := postResolveSymlink(t, s,
+		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/cfg/claude.json","content_hash":"abc123"}`, nil)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d, want 409", rec.Code)
+	}
+	if code := decodeCode(t, rec); code != "SYMLINK_REPOINTED" {
+		t.Errorf("code=%q, want SYMLINK_REPOINTED", code)
 	}
 }
 

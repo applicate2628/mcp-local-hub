@@ -124,7 +124,7 @@ const fileInformationClassRenameEx uint32 = 65
 // across the DACL tighten (ACL changes do not revoke existing
 // handles). Reusing the hardened pipeline closes that window.
 func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bool) error {
-	secureWritePathBasedStringEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
+	observeStringEntry() // AF-1 T5 observation; no-op (compiled out) in production.
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
 		parentDir = "."
@@ -173,7 +173,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 // post-rename DACL re-verify — still applies, so there is NO race window
 // between temp create and DACL apply and NO TOCTOU window on the parent.
 func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDirForDiag, base string, contents []byte, skipParentGate bool) error {
-	secureWriteResolvedParentEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
+	observeResolvedParentEntry() // AF-1 T5 observation; no-op (compiled out) in production.
 	if base == "" {
 		return fmt.Errorf("secure write: empty base name (parent %q)", parentDirForDiag)
 	}
