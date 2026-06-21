@@ -282,6 +282,29 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // has no *testing.T: we snapshot the prior values and reinstate them before
 // os.Exit so a parent harness env is left untouched.
 func TestMain(m *testing.M) {
+	// Env-dump helper fast-path. When the production spawn closure launches THIS
+	// test binary as a child (Command=os.Args[0]) to capture the composed
+	// cmd.Env, the child is gated ONLY by the sentinel env var — its argv may be
+	// ANY shape the descriptor under test carries (e.g. a serena-proxy-shaped
+	// `daemon serena-proxy …` argv, where a `-test.run` flag could not lead the
+	// argv without breaking serena detection). Short-circuiting here, BEFORE
+	// m.Run(), makes the child a pure env-dumper regardless of argv — it writes
+	// its own os.Environ() (the closure's composed cmd.Env) to the dump path and
+	// exits, never running the suite (so no recursion / full-suite re-run in the
+	// child). The sentinel is unset under a normal `go test` run, so this is a
+	// no-op there. Constants live in supervise_overlay_marker_spawn_test.go.
+	if os.Getenv(overlayMarkerHelperSentinelEnv) == "1" {
+		dumpPath := os.Getenv(overlayMarkerHelperDumpPathEnv)
+		if dumpPath == "" {
+			// No dump path means the closure dropped the inherited parent env
+			// entirely (the regression the nil-seed guards). Exit non-zero so the
+			// parent's spawn-side wait observes a failure rather than an empty dump.
+			os.Exit(3)
+		}
+		_ = os.WriteFile(dumpPath, []byte(strings.Join(os.Environ(), "\n")), 0o600)
+		os.Exit(0)
+	}
+
 	api.EnableSupervisorIPCTestPipeIsolation()
 
 	// stateDirFunc ships env-free in production (productionStateDir →

@@ -2935,6 +2935,21 @@ func appendSupervisorIntentChannel(cmdEnv []string, intentPath string) []string 
 	return append(cmdEnv, api.SupervisorIntentPathEnvVar+"="+intentPath)
 }
 
+// appendDaemonOverlayPathChannel returns cmdEnv with the
+// MCPHUB_DAEMON_ENV_OVERLAY_PATH control-channel var appended LAST so it wins
+// over any same-key entry the manifest/overlay merge may have produced (Go's
+// exec honors the last occurrence of a duplicate key). When cmdEnv is nil it
+// materializes os.Environ() first so the appended var survives while preserving
+// inherit-parent semantics. The overlay-file twin of appendSupervisorIntentChannel
+// (bot PR #403 r2). Pure (modulo os.Environ() when cmdEnv==nil) so the
+// clobber-immunity property is unit-testable without spawning.
+func appendDaemonOverlayPathChannel(cmdEnv []string, overlayPath string) []string {
+	if cmdEnv == nil {
+		cmdEnv = os.Environ()
+	}
+	return append(cmdEnv, daemonOverlayPathEnvVar+"="+overlayPath)
+}
+
 // resolveSpawnIntentChannelPath returns the supervisor-intent.json path the
 // spawn fn injects via MCPHUB_SUPERVISOR_INTENT_PATH for a serena-proxy child.
 //
@@ -2958,6 +2973,28 @@ func resolveSpawnIntentChannelPath(statePath string) (string, error) {
 		return filepath.Join(filepath.Dir(statePath), "supervisor-intent.json"), nil
 	}
 	return api.DefaultSupervisorIntentPath()
+}
+
+// resolveSpawnOverlayChannelPath returns the daemon-env-overrides.yaml path the
+// spawn fn injects via MCPHUB_DAEMON_ENV_OVERLAY_PATH for a serena-proxy child.
+// Like resolveSpawnIntentChannelPath it derives the path from the supervisor's
+// ALREADY-RESOLVED state dir (the dir of statePath) so the channel value is
+// byte-identical to the overlay file the supervisor itself reads — NOT a fresh
+// stateDirFunc()/HOME resolution that the manifest-redirected child env could
+// point at the wrong dir. statePath == "" (the makeProductionSpawnFn test/
+// manual wrapper) falls back to the operator's own state dir via stateDirFunc()
+// so the channel still names a real overlay file (matching the proxy's own
+// fallback when the channel is unset). Mirrors resolveSpawnIntentChannelPath
+// (bot PR #403 r2 — the overlay-file twin of the intent-path channel).
+func resolveSpawnOverlayChannelPath(statePath string) (string, error) {
+	if statePath != "" {
+		return filepath.Join(filepath.Dir(statePath), overlayBaseName), nil
+	}
+	stateDir, err := stateDirFunc()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, overlayBaseName), nil
 }
 
 // makeProductionSpawnFn is a thin compat wrapper that calls
@@ -3116,18 +3153,63 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
 			cmd.Env = merged
 		}
+		// cmd.Env stays nil only when manifest env AND overlay are both empty
+		// (mergeDaemonEnv returns nil → "child inherits os.Environ directly").
+		// Appending a control var to a nil cmd.Env would make it a 1-element env
+		// that REPLACES the inherited environment (Go exec treats a non-nil
+		// cmd.Env as the COMPLETE env), stripping PATH and everything else.
+		// Seed from os.Environ() first, mirroring injectOneAPIEnv's nil-guard
+		// in this same closure, so control vars are added WITHOUT dropping the
+		// inherited env.
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
+		// Inheritance-immunity (bot PR #403 r3 — whole-class fix). STRIP every
+		// mcphub-reserved overlay control var (APPLIED, KEYS, PATH) from the
+		// seeded cmd.Env BEFORE re-appending the TRUSTED ones for THIS spawn.
+		// The spawned wrapper TRUSTS each of these reserved vars in its own
+		// os.Environ() (the marker flips fatal→degrade; KEYS drives overlay-map
+		// reconstruction; PATH drives overlay-file resolution), so an inherited
+		// or spoofed value — a stale entry from a prior run, a hostile value in
+		// the supervisor's environment, or a NON-serena wrapper whose manifest
+		// seeded one — would be trusted by the child (spoofed KEYS → phantom
+		// overlay; spoofed PATH → overlay resolved from an attacker-chosen
+		// file). Neutralizing the whole class in ONE place (the single owner
+		// stripAllDaemonOverlayControlVars, driven by the canonical reserved
+		// list) subsumes the prior per-var no-row KEYS strip and means a future
+		// 4th control var only needs adding to that list, not a new strip site.
+		// The supervisor is the only legitimate writer; only the explicit
+		// re-appends below (and the serena-scoped PATH channel further down) put
+		// a TRUSTED value back.
+		cmd.Env = stripAllDaemonOverlayControlVars(cmd.Env)
+		// The APPLIED marker means "supervisor-spawned; overlay handled
+		// upstream" and is re-appended UNCONDITIONALLY for every supervised
+		// daemon — even a daemon with NO overlay row. The wrapper's
+		// daemonOverlayEnv keys its degrade-vs-fatal decision on this marker:
+		// with the marker present, a malformed/unreadable overlay file
+		// degrades gracefully (empty injected key set → nil overlay map →
+		// manifest-only env) instead of being FATAL. Gating the marker on
+		// overlayApplied left a no-row supervised daemon (e.g. a serena proxy
+		// or a global daemon with no overlay) taking the no-marker FATAL
+		// branch, bricking its launch when an UNRELATED overlay edit corrupts
+		// daemon-env-overrides.yaml.
+		cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
 		if overlayApplied {
-			cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
 			// Inject the applied overlay KEY SET alongside the APPLIED
-			// marker. The wrapper's marker-present reload-FAILURE path
-			// reconstructs the overlay map from these keys (reading each
-			// key's already-expanded value back from os.Environ) when the
-			// overlay file is unreadable, so a key present in BOTH the
-			// manifest and the cached overlay still resolves to the
-			// operator override instead of the manifest default in cfg.Env
-			// (closes Codex bot #268 daemon.go:380 P2). Keys are spelled as
-			// the overlay stored them; appendDaemonOverlayKeys strips any
-			// spoofed value first (same discipline as the APPLIED marker).
+			// marker — ONLY when an overlay row actually applied
+			// (appendDaemonOverlayKeys requires a non-empty key set;
+			// overlayKeySet returns nil for an empty overlay map). The
+			// wrapper's marker-present reload-FAILURE path reconstructs the
+			// overlay map from these keys (reading each key's already-expanded
+			// value back from os.Environ) when the overlay file is unreadable,
+			// so a key present in BOTH the manifest and the cached overlay
+			// still resolves to the operator override instead of the manifest
+			// default in cfg.Env (closes Codex bot #268 daemon.go:380 P2).
+			// Keys are spelled as the overlay stored them. The no-row case
+			// needs no `else` strip anymore: stripAllDaemonOverlayControlVars
+			// above already neutralized any inherited/spoofed KEYS, so a no-row
+			// child sees an empty (nil) injected key set and degrades to
+			// manifest-only env.
 			cmd.Env = appendDaemonOverlayKeys(cmd.Env, overlayKeySet(overlayEnv))
 		}
 
@@ -3234,6 +3316,32 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 					Body: map[string]any{
 						"err":      perr.Error(),
 						"fallback": "serena-proxy will resolve its intent path via DefaultSupervisorIntentPath (may be wrong under a child-overlaid HOME)",
+					},
+				})
+			}
+			// Overlay-file control channel (bot PR #403 r2 — the overlay-file
+			// twin of the intent-path channel just above). The serena-proxy
+			// resolves daemon-env-overrides.yaml via stateDirFunc() (HOME/XDG
+			// on POSIX), and the serena manifest env merged into THIS wrapper's
+			// cmd.Env may redirect HOME for the upstream serena data dir — so
+			// without this channel the proxy would look for the overlay under
+			// the child's redirected home, miss it, and silently drop the
+			// operator overlay. Inject the supervisor's already-resolved
+			// canonical overlay path so resolveDaemonOverlayPath reads it first.
+			// Same discipline as the intent channel: derived from the resolved
+			// statePath, appended LAST so the manifest/overlay merge can't
+			// clobber it, scoped to serena-proxy rows.
+			if overlayPath, perr := resolveSpawnOverlayChannelPath(statePath); perr == nil {
+				cmd.Env = appendDaemonOverlayPathChannel(cmd.Env, overlayPath)
+			} else if events != nil {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "warn",
+					Source:   "lifecycle",
+					Event:    "daemon-env-overlay-path-channel-unresolved",
+					TaskName: d.TaskName,
+					Body: map[string]any{
+						"err":      perr.Error(),
+						"fallback": "serena-proxy will resolve its overlay path via stateDirFunc (may be wrong under a child-overlaid HOME)",
 					},
 				})
 			}

@@ -456,7 +456,7 @@ func TestDaemonOverlayEnvDirectInvocationAppliesParentPathOnce(t *testing.T) {
 			t.Setenv("PATH", parentPath)
 			seedDaemonPathOverlay(t, stateDir, prefix+sep+"${parent_path}", nil)
 
-			env, err := daemonOverlayEnv("memory", "default")
+			env, err := daemonOverlayEnv(`\mcp-local-hub-memory-default`)
 			if err != nil {
 				t.Fatalf("daemonOverlayEnv: %v", err)
 			}
@@ -733,7 +733,7 @@ func TestDaemonOverlayEnvSupervisedReloadFailureIsNonFatal(t *testing.T) {
 	writeOversizeOverlayFile(t, stateDir)
 
 	// daemonOverlayEnv must NOT return an error on the marker path.
-	got, err := daemonOverlayEnv("memory", "default")
+	got, err := daemonOverlayEnv(`\mcp-local-hub-memory-default`)
 	if err != nil {
 		t.Fatalf("daemonOverlayEnv on supervised reload failure: want non-fatal degrade, got error: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestDaemonOverlayEnvDirectReloadFailureSurfacesError(t *testing.T) {
 
 	writeOversizeOverlayFile(t, stateDir)
 
-	_, err := daemonOverlayEnv("memory", "default")
+	_, err := daemonOverlayEnv(`\mcp-local-hub-memory-default`)
 	if err == nil {
 		t.Fatalf("daemonOverlayEnv direct invocation with unreadable overlay: want surfaced error, got nil")
 	}
@@ -820,7 +820,7 @@ func TestDaemonOverlayEnvSupervisedReloadFailureOverlayWinsOnOverlapKey(t *testi
 
 	// daemonOverlayEnv must NOT error on the marker path and must
 	// reconstruct the overlay map from the injected key set.
-	overlayMap, err := daemonOverlayEnv("memory", "default")
+	overlayMap, err := daemonOverlayEnv(`\mcp-local-hub-memory-default`)
 	if err != nil {
 		t.Fatalf("daemonOverlayEnv on supervised reload failure: want non-fatal degrade, got error: %v", err)
 	}
@@ -859,7 +859,7 @@ func TestDaemonOverlayEnvSupervisedReloadFailureNoInjectedKeysFallsBackToNil(t *
 	t.Setenv(daemonOverlayKeysEnvVar, "")
 	writeOversizeOverlayFile(t, stateDir)
 
-	got, err := daemonOverlayEnv("memory", "default")
+	got, err := daemonOverlayEnv(`\mcp-local-hub-memory-default`)
 	if err != nil {
 		t.Fatalf("daemonOverlayEnv: want non-fatal degrade, got error: %v", err)
 	}
@@ -1037,7 +1037,7 @@ func TestDaemonOverlayEnvKeepsLiteralValuesWhenParentPathExpansionFails(t *testi
 		t.Fatalf("seed overlay: %v", err)
 	}
 
-	env, err := daemonOverlayEnv("memory", "default")
+	env, err := daemonOverlayEnv(`\mcp-local-hub-memory-default`)
 	if err != nil {
 		t.Fatalf("daemonOverlayEnv: %v", err)
 	}
