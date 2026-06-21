@@ -478,7 +478,7 @@ function CatalogInstallGate({
   onCancel: () => void;
 }) {
   const [report, setReport] = useState<ReadinessReport | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Bump to re-fetch readiness after an inline secret is set (so the secret row
   // flips from advisory → satisfied and any vault blocker clears).
