@@ -1461,12 +1461,19 @@ func TestAggregateToolsListEmptyReasonAllMembersUnresolved(t *testing.T) {
 		GroupDeclaredMembers: map[string]int{scope: 1},
 	}
 	// Sole participant MOVED to a new port, no cached fresh session → the live
-	// filter drops it, so every declared member is unresolved.
+	// filter drops it, so every declared member is unresolved. The LIVE
+	// (published) snapshot carries the DECLARED member count too — production
+	// PublishResolverSnapshot always populates GroupDeclaredMembers for every
+	// known group BEFORE per-member resolution (hub_mcp_resolver.go:331), and
+	// the C3 discriminator now reads the count from this LIVE snapshot (not the
+	// init one), so omitting it here would be an unrealistic fixture that
+	// mislabels empty-group.
 	movedRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: newPortDaemon.port}
 	PublishResolverSnapshot(&ResolverSnapshot{
-		Gen:      2,
-		Bindings: map[string][]canonicalDaemonRef{scope: {movedRef}},
-		Groups:   map[string]bool{scope: true},
+		Gen:                  2,
+		Bindings:             map[string][]canonicalDaemonRef{scope: {movedRef}},
+		Groups:               map[string]bool{scope: true},
+		GroupDeclaredMembers: map[string]int{scope: 1},
 	})
 
 	sess := &hubSession{
@@ -1644,6 +1651,154 @@ func TestAggregateToolsListMixedHiddenAndCollisionNotAllToolsHidden(t *testing.T
 		t.Fatalf("mixed hidden+collision empty list wrongly labeled %q; body=%s", got, string(body))
 	} else if got != "" {
 		t.Fatalf("mixed hidden+collision empty list carried unexpected emptyReason=%q want absent; body=%s", got, string(body))
+	}
+}
+
+// TestAggregateToolsListFailedFanoutWithHiddenNotAllToolsHidden (Finding 1)
+// pins the corrected all-tools-hidden discriminator: when one daemon succeeds
+// with ONLY hidden tools WHILE another participant's tools/list FAILS, the
+// merged list is empty for TWO reasons (hidden + the failed participant), so
+// the response must NOT claim emptyReason="all-tools-hidden". The failed
+// participant is already explained via partialFailures. Before Finding 1, any
+// empty list with hiddenDropCount>0 && otherDropCount==0 was mislabeled
+// all-tools-hidden even when a participant init/list failure co-occurred.
+func TestAggregateToolsListFailedFanoutWithHiddenNotAllToolsHidden(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("hidden-plus-failure")
+	// daemon-a (server srv1) succeeds with ONLY a tool the group hides →
+	// hiddenDropCount>0, contributes no merged tool. daemon-b (server srv2)
+	// fails its tools/list (503) → a stage="tools/list" partialFailure. The
+	// merged list is empty, but the failed participant is a SECOND cause.
+	dA := newStubDaemon(t, "da-sid")
+	dB := newStubDaemon(t, "db-sid")
+	refA := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: dA.port}
+	refB := canonicalDaemonRef{Server: "srv2", Daemon: "daemon-b", Port: dB.port}
+
+	dA.onList = func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"hideme","description":"hidden"}]}}`))
+	}
+	dB.onList = func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable) // tools/list FAILS
+	}
+
+	snap := &ResolverSnapshot{
+		Gen:                  1,
+		Bindings:             map[string][]canonicalDaemonRef{scope: {refA, refB}},
+		Groups:               map[string]bool{scope: true},
+		GroupDeclaredMembers: map[string]int{scope: 2},
+		ToolsHidden:          map[string]map[string][]string{scope: {"srv1": {"hideme"}}},
+	}
+	PublishResolverSnapshot(snap)
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-hidden-plus-failure",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       snap, // same pointer → live filter is skipped, both fan out
+		IntendedParticipants: []canonicalDaemonRef{refA, refB},
+		InitSuccesses:        map[canonicalDaemonRef]string{refA: "da-sid", refB: "db-sid"},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{refA: "2025-11-25", refB: "2025-11-25"},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+
+	// Merged list is empty (srv1's only tool hidden; srv2's list failed).
+	if names := decodeToolsListNames(t, body); len(names) != 0 {
+		t.Fatalf("expected empty merged tools; names=%v body=%s", names, string(body))
+	}
+	// The failed participant is surfaced as a tools/list partialFailure.
+	pf := decodeToolsListPartialFailures(t, body)
+	foundListFailure := false
+	for _, f := range pf {
+		if f.Server == "srv2" && f.Stage == "tools/list" {
+			foundListFailure = true
+		}
+	}
+	if !foundListFailure {
+		t.Fatalf("expected a srv2 tools/list partialFailure explaining the degraded state; pf=%+v body=%s", pf, string(body))
+	}
+	// Because a participant FAILED, hiding is NOT the sole cause of emptiness →
+	// the discriminator must NOT over-claim all-tools-hidden.
+	if got := decodeToolsListEmptyReason(t, body); got == emptyReasonAllToolsHidden {
+		t.Fatalf("empty list with a failed fan-out wrongly labeled %q; body=%s", got, string(body))
+	} else if got != "" {
+		t.Fatalf("empty list with a failed fan-out carried unexpected emptyReason=%q want absent; body=%s", got, string(body))
+	}
+}
+
+// TestAggregateToolsListRepublishedEmptyGroupUsesLiveDeclaredCount (Finding 2)
+// pins that the empty-group discriminator reads the LIVE resolver snapshot's
+// declared-member count, NOT sess.SnapshotAtInit. A session opens against a
+// group that DECLARED one member; groups.yaml is then republished with the same
+// group as `servers: []` (live declared count 0, group still known, no
+// bindings). The sole declared member no longer resolves, so the response is an
+// empty-KNOWN success whose emptyReason must be "empty-group" (driven by the
+// live count), NOT the stale init count's "all-members-unresolved" — without
+// waiting for a client reinit.
+func TestAggregateToolsListRepublishedEmptyGroupUsesLiveDeclaredCount(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("republished-empty")
+	d1 := newStubDaemon(t, "d1-sid")
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: d1.port}
+
+	// At session open: the group DECLARED one member ("srv1") with a live
+	// binding. This is sess.SnapshotAtInit (the now-STALE source the bug read).
+	atInit := &ResolverSnapshot{
+		Gen:                  1,
+		Bindings:             map[string][]canonicalDaemonRef{scope: {ref}},
+		Groups:               map[string]bool{scope: true},
+		GroupDeclaredMembers: map[string]int{scope: 1},
+	}
+	// LIVE republish: groups.yaml now declares the group with `servers: []` —
+	// group still KNOWN, but ZERO declared members and NO bindings. Production
+	// PublishResolverSnapshot sets GroupDeclaredMembers[scope]=len(servers)=0.
+	live := &ResolverSnapshot{
+		Gen:                  2,
+		Bindings:             map[string][]canonicalDaemonRef{scope: nil},
+		Groups:               map[string]bool{scope: true},
+		GroupDeclaredMembers: map[string]int{scope: 0},
+	}
+	PublishResolverSnapshot(live)
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-republished-empty",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       atInit, // stale: declared count 1
+		IntendedParticipants: []canonicalDaemonRef{ref},
+		InitSuccesses:        map[canonicalDaemonRef]string{ref: "d1-sid"},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{ref: "2025-11-25"},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	assertEmptyKnownToolsList(t, body)
+	// LIVE declared count is 0 → empty-group. The STALE init count was 1, which
+	// would have mislabeled all-members-unresolved before Finding 2.
+	if got := decodeToolsListEmptyReason(t, body); got != emptyReasonEmptyGroup {
+		t.Fatalf("republished servers:[] group: emptyReason=%q want %q (live count, NOT stale init); body=%s",
+			got, emptyReasonEmptyGroup, string(body))
 	}
 }
 

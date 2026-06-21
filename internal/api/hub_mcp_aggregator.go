@@ -333,7 +333,12 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 		hiddenSnapshot = live
 	}
 	hiddenSet := buildHiddenToolSet(snapshotHiddenToolsForScope(hiddenSnapshot, sess.ScopeKey))
-	return assembleToolsListResponse(reqID, results, initFailures, sess, responseInstanceID, allowEmptyKnown, hiddenSet)
+	// hiddenSnapshot is the freshest published resolver snapshot (or `current`
+	// when no newer one exists); it also carries the LIVE per-group declared
+	// member count the empty-group discriminator reads, so a groups.yaml
+	// republished servers:[] after session open is labelled empty-group without
+	// a client reinit.
+	return assembleToolsListResponse(reqID, results, initFailures, sess, responseInstanceID, allowEmptyKnown, hiddenSet, hiddenSnapshot)
 }
 
 // filterToolsListSuccessesByLiveSnapshot reconciles the captured init successes
@@ -517,7 +522,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 // stage="tools/list" partialFailure row per colliding daemon. The
 // failure message names every daemon that claimed the key so
 // operators can resolve the duplicate at the manifest layer.
-func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string, allowEmptyKnown bool, hiddenSet hiddenToolSet) ([]byte, error) {
+func assembleToolsListResponse(reqID json.RawMessage, results []listResult, initFailures []DaemonFailure, sess *hubSession, instanceID string, allowEmptyKnown bool, hiddenSet hiddenToolSet, liveSnapshot *ResolverSnapshot) ([]byte, error) {
 	// codex bot r14 P2 closure on PR #157: fanOutToolsList appends
 	// results in goroutine-completion order, so identical inputs
 	// produced different mergedTools / partialFailures order across
@@ -702,6 +707,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		mergedTools = append(mergedTools, t.Body)
 		mergedRoutes[t.Exposed] = t.Ref
 	}
+	// Count NON-collision participant failures BEFORE collisionFailures are
+	// folded into listFailures below. An init failure or a genuine tools/list
+	// failure means a participant did not contribute its tools at all — a
+	// SECOND reason for an empty merged list beyond hiding. The C3
+	// all-tools-hidden label must be withheld when any such failure is present
+	// (it would mis-claim hiding as the SOLE cause). Collisions are excluded
+	// here: they are already gated by otherDropCount and explained via
+	// partialFailures collision rows.
+	participantFailureCount := len(initFailures) + len(listFailures)
 	listFailures = append(listFailures, collisionFailures...)
 
 	// Publish the route map to the session BEFORE returning so a
@@ -740,12 +754,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			// participant slice: a group that declares ghost members which map
 			// to no live binding has an empty IntendedParticipants yet is NOT an
 			// empty group — its members simply did not resolve. "empty-group"
-			// fires ONLY when the group declared zero members. The declared
-			// count is read from the session's init snapshot (the authoritative
-			// per-group declaration captured at session create); a nil map or
-			// missing key yields 0 → treated as zero-declared.
+			// fires ONLY when the group declares zero members. The declared
+			// count is read from the LIVE resolver snapshot (the same snapshot
+			// that drives this empty-known branch), NOT sess.SnapshotAtInit: a
+			// groups.yaml republished servers:[] after the session opened must
+			// label empty-group, not the stale init count's
+			// all-members-unresolved. A nil snapshot, nil map, or missing key
+			// yields 0 → treated as zero-declared.
 			reason := emptyReasonAllMembersUnresolved
-			if groupDeclaredMemberCount(sess) == 0 {
+			if groupDeclaredMemberCount(liveSnapshot, sess.ScopeKey) == 0 {
 				reason = emptyReasonEmptyGroup
 			}
 			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, reason) // mergedTools is empty → result.tools=[]
@@ -758,13 +775,18 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	// is claimed ONLY when the group's tools_hidden filter is the SOLE cause of
 	// emptiness: at least one tool was dropped by the filter (hiddenDropCount >
 	// 0) AND no tool was dropped for any OTHER reason (otherDropCount == 0, i.e.
-	// no collision or dedupe removal). When the cause is MIXED (some hidden,
-	// some collided/deduped) the label would over-claim, so the reason is left
-	// unset — the non-hidden removals are already explained via partialFailures
-	// (collision rows). A list emptied PURELY by collisions likewise carries no
-	// reason. A non-empty list carries no reason at all.
+	// no collision or dedupe removal) AND no participant FAILED
+	// (participantFailureCount == 0). When at least one daemon succeeds with
+	// only-hidden tools WHILE another participant's initialize or tools/list
+	// FAILED, the list is empty for TWO reasons (hidden + the failed
+	// participant), so the all-tools-hidden label would over-claim hiding as
+	// the SOLE cause — the partialFailures rows already explain the degraded
+	// state, so leave emptyReason unset. When the cause is MIXED with a
+	// collision/dedupe removal the label is likewise withheld; a list emptied
+	// PURELY by collisions carries no reason. A non-empty list carries no
+	// reason at all.
 	emptyReason := ""
-	if len(mergedTools) == 0 && hiddenDropCount > 0 && otherDropCount == 0 {
+	if len(mergedTools) == 0 && hiddenDropCount > 0 && otherDropCount == 0 && participantFailureCount == 0 {
 		emptyReason = emptyReasonAllToolsHidden
 	}
 	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, emptyReason)
@@ -1870,17 +1892,23 @@ const (
 )
 
 // groupDeclaredMemberCount returns how many member servers the session's
-// group scope key DECLARED in groups.yaml, read from the snapshot captured at
-// session init (the authoritative per-group declaration). It is the C3
-// emptyReason discriminator's "did this group declare any members" source —
-// distinct from the RESOLVED IntendedParticipants, so a group declaring only
-// ghost members reports a non-zero count even with zero resolved bindings. A
-// nil snapshot, nil map, or missing key yields 0 (treated as zero-declared).
-func groupDeclaredMemberCount(sess *hubSession) int {
-	if sess == nil || sess.SnapshotAtInit == nil {
+// group scope key DECLARES in groups.yaml, read from the LIVE resolver
+// snapshot (the current per-group declaration). It is the C3 emptyReason
+// discriminator's "did this group declare any members" source — distinct from
+// the RESOLVED IntendedParticipants, so a group declaring only ghost members
+// reports a non-zero count even with zero resolved bindings.
+//
+// The LIVE snapshot (not sess.SnapshotAtInit) is authoritative here because
+// the empty-known branch that consults this is itself driven by the CURRENT
+// resolver snapshot: a groups.yaml republished with the same group as
+// `servers: []` AFTER the session opened must label "empty-group", not the
+// stale init count's "all-members-unresolved". A nil snapshot, nil map, or
+// missing key yields 0 (treated as zero-declared).
+func groupDeclaredMemberCount(live *ResolverSnapshot, scopeKey string) int {
+	if live == nil {
 		return 0
 	}
-	return sess.SnapshotAtInit.GroupDeclaredMembers[sess.ScopeKey]
+	return live.GroupDeclaredMembers[scopeKey]
 }
 
 // buildToolsListResponse assembles a successful (≥1 daemon ok)
