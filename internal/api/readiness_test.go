@@ -560,3 +560,36 @@ func TestCheckServerReadiness_ReasonsDoNotLeakAbsolutePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckServerReadinessWithScope_SkipsUnselectedDaemonPortBlockers(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:    "demo",
+		Kind:    config.KindGlobal,
+		Command: "go",
+		Daemons: []config.DaemonSpec{
+			{Name: "alpha", Port: 51234},
+			{Name: "beta", Port: 0},
+		},
+	}
+
+	rep := CheckServerReadinessWithScope(m, AdmissionScope{DaemonFilter: "alpha"})
+
+	var sawAlphaPort bool
+	for _, r := range rep.Requirements {
+		if strings.Contains(r.Name, "alpha") {
+			sawAlphaPort = true
+		}
+		if strings.Contains(r.Name, "beta") || strings.Contains(r.Reason, "beta") {
+			t.Fatalf("scoped readiness reported unselected daemon beta blocker: %+v", r)
+		}
+	}
+	if !sawAlphaPort {
+		t.Fatalf("scoped readiness did not report the selected daemon alpha port: %+v", rep.Requirements)
+	}
+
+	for _, f := range AdmissionCheck(m, AdmissionScope{DaemonFilter: "alpha"}) {
+		if strings.Contains(f.Name, "beta") || strings.Contains(f.Reason, "beta") {
+			t.Fatalf("scoped admission reported unselected daemon beta blocker: %+v", f)
+		}
+	}
+}
