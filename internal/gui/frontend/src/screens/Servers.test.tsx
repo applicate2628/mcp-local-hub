@@ -1108,3 +1108,221 @@ describe("ServersScreen — matrix table a11y semantics (G15)", () => {
     expect(rowHeaders.length).toBeGreaterThan(0);
   });
 });
+
+// A3 PR-2 — "Resolve symlink → write to real target" affordance on a
+// config-error-symlink cell. A client whose config is a symlink renders the
+// cell disabled with a symlink tooltip; the affordance is the explicit
+// per-config ENABLE. Clicking opens a confirm modal that shows the PINNED real
+// path; confirming POSTs the two-phase resolve→write and rescans.
+describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  // A scan with the memory server present and codex-cli's config a symlink
+  // (top-level client_config_presence "error-symlink", codex-cli NOT in the
+  // server's client_presence → routing maps the cell to config-error-symlink).
+  function scanSymlink(): ScanResult {
+    return {
+      at: "2026-06-21T00:00:00Z",
+      entries: [
+        {
+          name: "memory",
+          manifest_exists: true,
+          can_migrate: true,
+          client_presence: {},
+        },
+      ],
+      client_config_presence: {
+        "codex-cli": "error-symlink",
+      } as ScanResult["client_config_presence"],
+    };
+  }
+
+  it("renders the Resolve symlink button on a config-error-symlink cell", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanSymlink()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-codex-cli")).toBeTruthy();
+    });
+    const btn = screen.getByTestId("resolve-symlink-codex-cli") as HTMLButtonElement;
+    expect(btn.textContent).toContain("Resolve symlink");
+  });
+
+  it("clicking opens a confirm modal showing the PINNED real path", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanSymlink()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/resolve-symlink-and-write": () =>
+          jsonResponse(200, {
+            client: "codex-cli",
+            original_path: "/home/u/.codex/config.toml",
+            resolved_target: "/e/env/Agents/.codex/config.toml",
+            pinned_real_path: "/e/env/Agents/.codex",
+            content_hash: "deadbeef",
+            is_symlink: true,
+          }),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeTruthy();
+    });
+    const pinned = screen.getByTestId("resolve-symlink-pinned-codex-cli");
+    // The modal renders the resolved real target so the operator sees exactly
+    // what they consent to.
+    expect(pinned.textContent).toBe("/e/env/Agents/.codex/config.toml");
+  });
+
+  it("confirming the modal POSTs the write with the pinned path + hash and rescans", async () => {
+    let scanCount = 0;
+    const bodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCount += 1;
+          // After a successful resolve-write the cell flips to ok.
+          return jsonResponse(200, scanCount === 1 ? scanSymlink() : scanWith({ "codex-cli": "ok" }));
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/resolve-symlink-and-write": (init) => {
+          const body = JSON.parse((init?.body as string) ?? "{}");
+          bodies.push(init?.body as string);
+          if (body.confirm) {
+            return jsonResponse(200, {
+              client: "codex-cli",
+              original_path: "/home/u/.codex/config.toml",
+              written_path: "/e/env/Agents/.codex/config.toml",
+              written: true,
+            });
+          }
+          return jsonResponse(200, {
+            client: "codex-cli",
+            original_path: "/home/u/.codex/config.toml",
+            resolved_target: "/e/env/Agents/.codex/config.toml",
+            pinned_real_path: "/e/env/Agents/.codex",
+            content_hash: "deadbeef",
+            is_symlink: true,
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-confirm-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-confirm-codex-cli"));
+
+    // The WRITE phase POST must carry confirm:true + the pinned path + hash the
+    // RESOLVE phase returned (the operator-confirmed pin).
+    await waitFor(() => {
+      const writeBody = bodies.map((b) => JSON.parse(b)).find((b) => b.confirm === true);
+      expect(writeBody).toEqual({
+        client: "codex-cli",
+        confirm: true,
+        pinned_real_path: "/e/env/Agents/.codex",
+        content_hash: "deadbeef",
+      });
+    });
+    // A rescan fired after the successful write.
+    await waitFor(() => {
+      expect(scanCount).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("cancel closes the modal without a write POST", async () => {
+    const bodies: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanSymlink()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/resolve-symlink-and-write": (init) => {
+          bodies.push(init?.body as string);
+          return jsonResponse(200, {
+            client: "codex-cli",
+            original_path: "/home/u/.codex/config.toml",
+            resolved_target: "/e/env/Agents/.codex/config.toml",
+            pinned_real_path: "/e/env/Agents/.codex",
+            content_hash: "deadbeef",
+            is_symlink: true,
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-cancel-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-cancel-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeNull();
+    });
+    // Only the RESOLVE phase fired; no confirm:true write was sent.
+    expect(bodies.map((b) => JSON.parse(b)).some((b) => b.confirm === true)).toBe(false);
+  });
+
+  it("surfaces a WRITE_REFUSED error (e.g. strict mode) without rescanning away the cell", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanSymlink()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/resolve-symlink-and-write": (init) => {
+          const body = JSON.parse((init?.body as string) ?? "{}");
+          if (body.confirm) {
+            return jsonResponse(500, {
+              error:
+                "write codex-cli via consent: secure write: strict mode is active (via MCPHUB_REQUIRE_SINGLE_USER_HOME=1)",
+              code: "WRITE_REFUSED",
+            });
+          }
+          return jsonResponse(200, {
+            client: "codex-cli",
+            original_path: "/home/u/.codex/config.toml",
+            resolved_target: "/e/env/Agents/.codex/config.toml",
+            pinned_real_path: "/e/env/Agents/.codex",
+            content_hash: "deadbeef",
+            is_symlink: true,
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-confirm-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-confirm-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-error-codex-cli")).toBeTruthy();
+    });
+    const errEl = screen.getByTestId("resolve-symlink-error-codex-cli");
+    expect(errEl.textContent).toContain("WRITE_REFUSED");
+    expect(errEl.textContent).toContain("MCPHUB_REQUIRE_SINGLE_USER_HOME");
+  });
+});

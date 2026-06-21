@@ -27,30 +27,41 @@ Agreed direction (operator, 2026-06-19):
 
 ## Children (areas — each becomes a work-item)
 
-1. (active) **readiness-core** — per-server readiness-check (launcher + runtime
-   + required secrets + port) → actionable diagnostics; wire into install
-   preflight so a missing dep yields a guided "here's the exact fix" instead of
-   a bare `%v` / downstream 502. The DETECT substrate for everything else.
-2. **env-secrets-onboarding** — surface manifest-declared env/secret
-   requirements at install ("этот сервер нужен secret X — задай сейчас");
-   link to Secrets screen. Manifests ALREADY declare env (wolfram →
-   `secret:wolfram_app_id`), so this is surfacing + guiding, not new schema.
-3. **symlink-client-config** — detect a symlinked client config (codex
-   config.toml → OneDrive), resolve the real target safely OR prompt "это
-   symlink на X, писать?" — instead of the current cross-device / refuse-symlink
-   cryptic failure.
-4. **serena-AND-lsp-out-of-box** — both serena (dynamic-pool, no separate
-   fragile `migrate serena legacy-to-dynamic-pool`) AND mcp-language-server
-   (per-workspace lazy-proxy) "just work" per-workspace out of the box, no
-   manual setup. Fix the serena client-config revert
-   (bugs/2026-06-19-serena-client-revert). Operator (2026-06-19):
-   "language-server тоже из коробки как и serena".
-5. **trusted-folders-ux** — explicit workspace-trust prompt (VS Code style)
-   for LSP/serena roots (`lsp-trusted-roots.json`), visible + persisted, instead
-   of the opaque current gate with no add-UX.
+1. (DONE) **readiness-core** — per-server readiness-check (launcher + runtime
+   + required secrets + port) → actionable diagnostics. #377 built the DETECT
+   substrate (`AdmissionCheck`/`CheckServerReadiness`); the install-preflight
+   surfacing was completed by area 2 (the `Preflight` Fix field was being
+   thrown away). DONE 2026-06-21.
+2. (DONE) **env-secrets-onboarding** — surface manifest-declared env/secret
+   requirements at install. Done as the install-readiness SURFACING layer:
+   CLI (#407 — typed `AdmissionError` carries the Fix; blockers hard-stop,
+   optional-secret advisories proceed; `--check`) + GUI (#408 — Catalog
+   pre-install readiness panel: blockers disable Install + show Fix, optional
+   secrets set inline via the reused AddSecretModal + `?key=` deep-link). DONE 2026-06-21.
+3. (IN PROGRESS) **symlink-client-config** — PR-1 (#409, DONE) closed a LIVE
+   TOCTOU in the shipping `MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK` lane (resolve-to-
+   string-then-re-walk → handle-pinned resolve-and-write). PR-2 (consent UX —
+   GUI resolve-symlink-and-write endpoint + Servers confirm affordance + CLI
+   `[y/N]` default-N) in review. Operator decisions: Supplement consent model +
+   CLI default-N + explicit GUI enable + accept-disclose the relax residual.
+4. (MOSTLY DONE) **serena-AND-lsp-out-of-box** — serena auto-introduces
+   dynamic-pool on first `/serena/mcp` call (no manual migrate on the happy
+   path); client-revert (#400), idle-stop + stale-session races (#386), and the
+   env overlay (#403) all fixed. RESIDUE: the shipped serena manifest is still
+   `unified-intermediate` on disk, so a crash/legacy path still needs manual
+   `migrate serena legacy-to-dynamic-pool` — the router-native manifest is a
+   PROPOSED decision (`decisions/2026-06-21-serena-router-client-url-single-owner.md`).
+5. (NEXT — premise corrected 2026-06-21) **trusted-folders-ux** — the original
+   "opaque gate with no add-UX" premise is STALE: a full trusted-roots GUI panel
+   (`SectionTrustedRoots.tsx`), a `mcphub setup --trusted-root` flag, auto-bless
+   on `mcphub register`, and `/api/lsp/trusted-roots` GET/POST/DELETE already
+   exist. The REAL remaining gaps are narrower: (a) a first-touch interactive
+   "do you trust this folder?" prompt, (b) a standalone `mcphub trust` verb,
+   (c) extend trust-gating to serena roots (currently LSP-only).
 6. **per-project-gui** — GUI surface to SEE which MCPs are active per project
    AND toggle them, across all three project models; keep the global Servers
-   matrix. The biggest new feature.
+   matrix. The biggest new feature; Model B (project-local `.mcp.json`) must be
+   built from zero. Last.
 
 ## Sequencing (areas equal in importance; this is a build order, not a priority)
 

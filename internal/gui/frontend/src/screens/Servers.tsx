@@ -5,6 +5,9 @@ import {
   InitClientConfigError,
   listWorkspaces,
   postLspRegister,
+  resolveClientSymlink,
+  writeClientSymlink,
+  type ResolveSymlinkResult,
   type WorkspaceEntryDTO,
   type WorkspacePair,
 } from "../api";
@@ -996,6 +999,7 @@ export function ServersScreen() {
               }
               hoverScope={hoverScope}
               onOpenDrawer={() => setDrawerServer(server.name)}
+              onSymlinkResolved={() => setReloadToken((n) => n + 1)}
               applying={applying}
             />
           ))}
@@ -1097,9 +1101,12 @@ function ServerRowView(props: {
   // Opens the per-row detail drawer (manifest preview + lifetime stats +
   // Stop/Restart). Parent owns the open flag.
   onOpenDrawer: () => void;
+  // A3 PR-2: a config-error-symlink cell's "Resolve symlink" write succeeded;
+  // the parent rescans so the cell re-classifies to "ok".
+  onSymlinkResolved: () => void;
   applying: boolean;
 }) {
-  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, onRowToggleHover, hoverScope, onOpenDrawer, applying } = props;
+  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, onRowToggleHover, hoverScope, onOpenDrawer, onSymlinkResolved, applying } = props;
   // Row-toggle affordance state: a cell is "checked" if a pending dirty
   // edit says so, else the scan baseline (via-hub). rowInteractive uses the
   // same cellInteractive gate as the per-cell checkbox + the column toggle,
@@ -1188,6 +1195,7 @@ function ServerRowView(props: {
               (hoverScope.kind === "row" && hoverScope.key === server.name))
           }
           onToggle={onToggle}
+          onSymlinkResolved={onSymlinkResolved}
           applying={applying}
         />
       ))}
@@ -1206,9 +1214,120 @@ function ServerRowView(props: {
   );
 }
 
+// SymlinkResolveAffordance is the A3 PR-2 "Resolve symlink → write to real
+// target" cell affordance for a `config-error-symlink` cell. It is fully
+// self-contained: it owns its busy/modal/error state and drives the two-phase
+// POST (resolve → confirm → write) itself. On a successful write it calls
+// `onResolved` so the parent rescans (the cell then re-classifies to "ok").
+//
+// The confirm modal shows the PINNED real path the symlink resolves to — that
+// is the path the operator consents to, and the server re-verifies the same
+// pin at write time (a swap between confirm and write is refused). Strict mode
+// surfaces a WRITE_REFUSED with the canonical hint instead of following.
+function SymlinkResolveAffordance(props: {
+  client: string;
+  onResolved: () => void;
+}) {
+  const { client, onResolved } = props;
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<ResolveSymlinkResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function openConfirm() {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await resolveClientSymlink(client);
+      setPending(res);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmWrite() {
+    if (!pending || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await writeClientSymlink(client, pending.pinned_real_path, pending.content_hash);
+      setPending(null);
+      onResolved();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span class="symlink-resolve-affordance">
+      <button
+        type="button"
+        class="symlink-resolve-btn"
+        data-testid={`resolve-symlink-${client}`}
+        disabled={busy}
+        title={`This ${client} config is a symlink. Resolve it and write to the real target (per-config, no restart).`}
+        onClick={openConfirm}
+      >
+        Resolve symlink
+      </button>
+      {err && (
+        <span class="symlink-resolve-error" role="alert" data-testid={`resolve-symlink-error-${client}`}>
+          {err}
+        </span>
+      )}
+      {pending && (
+        <div
+          class="modal-backdrop symlink-resolve-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm symlink resolution"
+          data-testid={`resolve-symlink-modal-${client}`}
+        >
+          <div class="modal-card">
+            <h3>Resolve {client} config symlink</h3>
+            <p>
+              This config is a symlink. Its real target is{" "}
+              <code data-testid={`resolve-symlink-pinned-${client}`}>{pending.resolved_target}</code>.
+            </p>
+            <p>
+              mcphub will write to that target (re-stamping it with hardened
+              owner-only permissions). Write there?
+            </p>
+            <div class="modal-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-testid={`resolve-symlink-cancel-${client}`}
+                disabled={busy}
+                onClick={() => setPending(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn-primary"
+                data-testid={`resolve-symlink-confirm-${client}`}
+                disabled={busy}
+                onClick={confirmWrite}
+              >
+                Write to real target
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
 function CellView(props: {
   server: ServerRow;
   client: string;
+  onSymlinkResolved?: () => void;
   lastOutcome?: Outcome;
   // Pending dirty direction for THIS cell (from the parent's dirty map).
   // When present it overrides the scan baseline for the visual checkbox:
@@ -1227,7 +1346,7 @@ function CellView(props: {
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   applying: boolean;
 }) {
-  const { server, client, lastOutcome, pendingDirection, inHoverScope, onToggle, applying } = props;
+  const { server, client, onSymlinkResolved, lastOutcome, pendingDirection, inHoverScope, onToggle, applying } = props;
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
@@ -1370,6 +1489,13 @@ function CellView(props: {
         >
           legacy
         </span>
+      )}
+      {/* A3 PR-2: the explicit per-config symlink-follow ENABLE the operator
+          asked for. The cell is disabled (the symlinked config refuses writes
+          by default), so the affordance is the way to opt in without setting
+          the global env var + restarting. */}
+      {routing === "config-error-symlink" && onSymlinkResolved && (
+        <SymlinkResolveAffordance client={client} onResolved={onSymlinkResolved} />
       )}
     </td>
   );

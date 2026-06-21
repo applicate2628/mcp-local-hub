@@ -269,6 +269,94 @@ export async function postInitClientConfig(client: string): Promise<InitClientCo
 }
 
 // ───────────────────────────────────────────────────────────────────
+// A3 PR-2 — guided symlink-consent write. POST /api/resolve-symlink-and-write
+// drives the Servers matrix "Resolve symlink → write to real target"
+// affordance on a `config-error-symlink` cell. Two phases gated by `confirm`:
+//   - resolveClientSymlink (confirm=false): resolve + pin the real target,
+//     returns {resolvedTarget, pinnedRealPath, contentHash} for the modal.
+//   - writeClientSymlink (confirm=true): carries the pinned path + hash back,
+//     performs the consent write through the PR-1 entry. The pin the operator
+//     SAW is re-verified server-side (a swap is caught), so the round-trip is
+//     safe across the modal.
+// On a non-symlink / strict-mode / repoint / drift the backend returns a typed
+// {error, code} envelope (NOT_SYMLINK / WRITE_REFUSED / SYMLINK_REPOINTED /
+// CONFIG_CHANGED), surfaced via SymlinkWriteError.code.
+// ───────────────────────────────────────────────────────────────────
+
+export interface ResolveSymlinkResult {
+  client: string;
+  original_path: string;
+  resolved_target: string;
+  pinned_real_path: string;
+  content_hash: string;
+  is_symlink: boolean;
+}
+
+export interface WriteSymlinkResult {
+  client: string;
+  original_path: string;
+  written_path: string;
+  written: boolean;
+}
+
+export class SymlinkWriteError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "SymlinkWriteError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+async function postResolveSymlink<T>(body: Record<string, unknown>): Promise<T> {
+  const resp = await fetch("/api/resolve-symlink-and-write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (resp.ok) {
+    return (await resp.json()) as T;
+  }
+  let parsed: { error?: string; code?: string } | null = null;
+  try {
+    parsed = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const message = parsed?.error ?? resp.statusText ?? "unknown";
+  const code = parsed?.code ?? `HTTP_${resp.status}`;
+  throw new SymlinkWriteError(
+    `/api/resolve-symlink-and-write [${code}]: ${message}`,
+    code,
+    resp.status,
+  );
+}
+
+// resolveClientSymlink runs the RESOLVE phase: it does NOT write. The returned
+// pinned_real_path + content_hash must be echoed back into writeClientSymlink
+// on operator confirm.
+export async function resolveClientSymlink(client: string): Promise<ResolveSymlinkResult> {
+  return postResolveSymlink<ResolveSymlinkResult>({ client, confirm: false });
+}
+
+// writeClientSymlink runs the WRITE phase with the pinned path + hash the
+// operator confirmed. The server re-verifies the pin before writing.
+export async function writeClientSymlink(
+  client: string,
+  pinnedRealPath: string,
+  contentHash: string,
+): Promise<WriteSymlinkResult> {
+  return postResolveSymlink<WriteSymlinkResult>({
+    client,
+    confirm: true,
+    pinned_real_path: pinnedRealPath,
+    content_hash: contentHash,
+  });
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Servers-matrix revamp (Task 4.3) — daemon env overlay + discovery
 // refresh + respawn + workspace list. Thin wrappers around the v0.5.x
 // /api/daemon/env, /api/discovery/refresh, /api/daemon/respawn, and

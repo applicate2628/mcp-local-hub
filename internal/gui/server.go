@@ -546,6 +546,7 @@ type Server struct {
 	backupActions            backupActionsAPI
 	cleanup                  cleanupAPI
 	clientInit               clientInitializer
+	symlinkWriter            symlinkResolveWriter
 	lspRegistrar             lspRegistrar
 	groups                   groupsAPI
 
@@ -797,6 +798,7 @@ func NewServer(cfg Config) *Server {
 	s.backupActions = realBackupActionsAPI{}
 	s.cleanup = realCleanupAPI{}
 	s.clientInit = realClientInitializer{}
+	s.symlinkWriter = realSymlinkResolveWriter{}
 	s.lspRegistrar = realLSPRegistrar{}
 	s.groups = realGroupsAPI{}
 	registerPingRoutes(s)
@@ -828,6 +830,7 @@ func NewServer(cfg Config) *Server {
 	registerCleanupRoutes(s)
 	registerForceKillRoutes(s)
 	registerInitClientConfigRoutes(s)
+	registerResolveSymlinkWriteRoutes(s) // A3 PR-2: guided symlink-consent write
 	registerDaemonEnvRoutes(s)
 	registerWorkspacesRoutes(s)
 	registerLSPRegisterRoutes(s)
