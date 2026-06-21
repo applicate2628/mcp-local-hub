@@ -49,6 +49,12 @@ func copyFileExclusiveFsync(srcPath, dstPath string) error {
 	if err != nil {
 		return fmt.Errorf("stat restore aside %q: %w", srcPath, err)
 	}
+	// Remove any stale restore temp left by a crash/power-loss in a PRIOR restore
+	// (after this temp was created but before its atomic rename to target), so the
+	// O_EXCL create below is retryable on the next cold start. Safe: the temp is
+	// disposable, and recovery runs under the supervisor singleton lock (no
+	// concurrent writer can be racing this temp name).
+	_ = os.Remove(dstPath)
 	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o700)
 	if err != nil {
 		return fmt.Errorf("create restore target %q: %w", dstPath, err)
