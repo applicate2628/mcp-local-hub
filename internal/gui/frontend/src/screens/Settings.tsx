@@ -118,7 +118,7 @@ export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScree
       <div class="settings-screen error">
         <h1>Settings</h1>
         <p class="error-banner">Could not load settings: {(snapshot.error as Error).message}</p>
-        <button type="button" onClick={() => void snapshot.refresh()}>Retry</button>
+        <button type="button" class="btn" onClick={() => void snapshot.refresh()}>Retry</button>
       </div>
     );
   }

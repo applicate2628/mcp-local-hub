@@ -127,7 +127,7 @@ export function CapabilitiesScreen() {
           <h1>Capabilities</h1>
           <div class="capabilities-meta">
             <button
-              class="capabilities-refresh-btn"
+              class="capabilities-refresh-btn btn"
               data-testid="capabilities-refresh-btn"
               onClick={onRefresh}
               disabled={refreshing}
@@ -226,7 +226,7 @@ export function CapabilitiesScreen() {
             </span>
           )}
           <button
-            class="capabilities-refresh-btn"
+            class="capabilities-refresh-btn btn"
             data-testid="capabilities-refresh-btn"
             onClick={onRefresh}
             disabled={refreshing}
