@@ -58,6 +58,13 @@ func TestReadStateFileInodeAnchored_FileModeWriteBroadenedDefaultRejects(t *test
 	}
 }
 
+func TestStateFileReadRemediationPointsToRunbookWithoutShellCommand(t *testing.T) {
+	path := filepath.Join("/tmp", "mcp hub", "$state", "it's`bad`", "secrets.age")
+
+	got := stateFileReadRemediation(path)
+	assertStateFileRunbookPointer(t, got, path, "")
+}
+
 func TestReadStateFileInodeAnchored_ENOTDIRPreserved(t *testing.T) {
 	dir := hardenedTempDir(t)
 	notDir := filepath.Join(dir, "not-a-dir")

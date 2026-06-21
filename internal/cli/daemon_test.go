@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/api/daemon_env_overlay"
 	"mcp-local-hub/internal/secrets"
@@ -262,6 +263,40 @@ func TestDaemonCmd_RunFailure_AppendsToLog(t *testing.T) {
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("log missing %q; got:\n%s", want, content)
+		}
+	}
+}
+
+func TestDaemonSecretVaultFatalError_DaclOutsideAllowlistSurfacesRemediation(t *testing.T) {
+	keyPath := `C:\Users\tester\AppData\Local\mcp-local-hub\.age-key`
+	vaultPath := `C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age`
+	offendingSID := "S-1-5-21-111-222-333-513"
+	cause := fmt.Errorf("vault exists but unreadable: read vault: file %s not single-user safe: %w", vaultPath, &api.DACLAllowlistViolation{SID: offendingSID, Mask: 0x9})
+
+	err := daemonSecretVaultFatalError("wolfram", "default", keyPath, vaultPath, cause)
+	if err == nil {
+		t.Fatal("daemonSecretVaultFatalError returned nil")
+	}
+	if !errors.Is(err, api.ErrDaclOutsideAllowlist) {
+		t.Fatalf("daemon fatal error = %v, want ErrDaclOutsideAllowlist in chain", err)
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"daemon wolfram/default:",
+		"Remediate:",
+		vaultPath,
+		"offending SID " + offendingSID,
+		"runbook",
+		`"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"`,
+		"vault exists but unreadable",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("daemon fatal error missing %q: %v", want, err)
+		}
+	}
+	for _, forbidden := range []string{keyPath, "run icacls", `icacls "`, "/inheritance:r", "/remove:g", "/grant:r", "chmod 600", "&&"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("daemon fatal remediation must point to the runbook, not embed %q: %v", forbidden, err)
 		}
 	}
 }

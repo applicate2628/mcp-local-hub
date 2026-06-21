@@ -1286,6 +1286,49 @@ from having parent-dir write rights, so the race is unreachable.
 
 ## Stuck-instance recovery
 
+### Secret daemons exit 1 / quarantine on sandbox-broadened `%LOCALAPPDATA%`
+
+Symptom: secret-using daemons such as `wolfram` or `paper-search`
+exit 1 quickly and may quarantine with an error like:
+`daemon <server>/<daemon>: vault state-file DACL refused for <path>.
+offending SID <SID>. Remediate: tighten this file's DACL to owner-only
+(your account + SYSTEM + Administrators); see the "secret daemons exit 1
+on a sandbox-broadened %LOCALAPPDATA%" runbook in CLAUDE.md for the exact
+icacls / chmod command. Cause: vault exists but unreadable: read identity:
+file <path>\.age-key not single-user safe: hub-mcp state file DACL grants
+read to a SID outside {current-user, LocalSystem, BuiltinAdministrators}:
+SID <SID> grants access ...`.
+
+Cause: `.age-key` or `secrets.age` inherited a non-owner ACE from a
+broadened profile/state root, commonly `Wave\CodexSandboxUsers` or an
+orphan SID with Modify rights. The read hardening must fail closed here:
+a swapped `.age-key` is an attacker-substituted X25519 identity.
+
+Fix the refused file named in the error. On Windows PowerShell 5.1, run
+these as two separate commands for that file:
+
+```powershell
+icacls "<path>" /inheritance:r
+icacls "<path>" /grant:r "*<your-SID>:F" "*S-1-5-18:F" "*S-1-5-32-544:F" /remove:g "*<the-OBSERVED-offending-SID-from-the-error>"
+```
+
+Substitute the exact `<path>` and observed offending SID printed by the
+daemon error. Use SID literals, including the leading `*`, because they
+are locale-proof; display names such as `SYSTEM` or `Administrators` can
+vary by language. If the other vault file fails next, repeat the same two
+commands for that file and its observed SID.
+
+POSIX equivalent on Linux/macOS:
+
+```bash
+chmod 600 '<path>'
+```
+
+`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` additionally makes broadened
+parent directories fail hard. Unsetting it can allow the default
+parent-dir relax on solo-dev hosts, but it does not bypass a broadened
+secret-bearing state file; repair the file DACL/mode.
+
 If `mcphub gui` exits with the structured "Cannot acquire mcphub gui
 single-instance lock" block, run `mcphub gui --force` for the
 diagnostic — it also opens the lock folder in your file manager so

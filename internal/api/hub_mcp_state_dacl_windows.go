@@ -293,7 +293,7 @@ func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32)
 		sid := sidFromAce(ace)
 		if !sidInAllowlist(sid, allowlist) {
 			name := sidString(sid)
-			return fmt.Errorf("%w: SID %s grants access (mask=0x%08x)", ErrDaclOutsideAllowlist, name, mapped&significantBits)
+			return &DACLAllowlistViolation{SID: name, Mask: mapped & significantBits}
 		}
 	}
 	return nil

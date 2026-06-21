@@ -134,9 +134,11 @@ See also: install, logs, restart, status.`,
 			// when this manifest actually uses secret refs — a secretless
 			// server must not be bricked by a corrupt vault it never touches
 			// (Codex #377 r5). A truly-absent vault → nil, secret refs optional.
-			vault, verr := secrets.OpenVaultOptional(defaultKeyPath(), defaultVaultPath())
+			keyPath := defaultKeyPath()
+			vaultPath := defaultVaultPath()
+			vault, verr := secrets.OpenVaultOptional(keyPath, vaultPath)
 			if verr != nil && secrets.HasSecretRef(m.Env) {
-				return fmt.Errorf("daemon %s/%s: %w", server, daemonName, verr)
+				return daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath, verr)
 			}
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
 			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
@@ -358,6 +360,30 @@ See also: install, logs, restart, status.`,
 	// Hidden — supervisor-intent.json descriptors point here.
 	c.AddCommand(newDaemonSerenaProxyCmd())
 	return c
+}
+
+func daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath string, err error) error {
+	if errors.Is(err, api.ErrDaclOutsideAllowlist) {
+		details := api.StateFileDACLRemediationDetailsFor(daemonVaultDACLRefusedPath(keyPath, vaultPath, err), err)
+		sidText := ""
+		if details.OffendingSID != "" {
+			sidText = fmt.Sprintf(" offending SID %s.", details.OffendingSID)
+		}
+		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused for %s.%s Remediate: %s Cause: %w",
+			server, daemonName, details.Path, sidText, api.StateFileDACLRunbookPointer, err)
+	}
+	return fmt.Errorf("daemon %s/%s: %w", server, daemonName, err)
+}
+
+func daemonVaultDACLRefusedPath(keyPath, vaultPath string, err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, vaultPath) {
+		return vaultPath
+	}
+	if strings.Contains(msg, keyPath) {
+		return keyPath
+	}
+	return keyPath
 }
 
 // daemonEnvWithOverlay returns the resolved child env map AND the list of

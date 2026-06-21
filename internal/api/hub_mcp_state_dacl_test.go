@@ -9,6 +9,64 @@ import (
 	"testing"
 )
 
+func TestStateFileDACLRemediationDetailsNamesPathAndObservedSID(t *testing.T) {
+	path := `C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age`
+	err := &DACLAllowlistViolation{SID: "*S-1-5-21-111-222-333-513", Mask: 0x9}
+
+	got := StateFileDACLRemediationDetailsFor(path, err)
+	if got.Path != path {
+		t.Fatalf("remediation details path = %q, want %q", got.Path, path)
+	}
+	if got.OffendingSID != "S-1-5-21-111-222-333-513" {
+		t.Fatalf("remediation details offending SID = %q", got.OffendingSID)
+	}
+}
+
+func TestStateFileDACLRemediationDetailsWithoutObservedSIDStillNamesPath(t *testing.T) {
+	path := `C:\Users\tester\AppData\Local\mcp-local-hub\.age-key`
+
+	got := StateFileDACLRemediationDetailsFor(path, ErrDaclOutsideAllowlist)
+	if got.Path != path {
+		t.Fatalf("remediation details path = %q, want %q", got.Path, path)
+	}
+	if got.OffendingSID != "" {
+		t.Fatalf("remediation details offending SID = %q, want empty when no observed SID is available", got.OffendingSID)
+	}
+}
+
+func assertStateFileRunbookPointer(t *testing.T, got, path, offendingSID string) {
+	t.Helper()
+	for _, want := range []string{
+		"Remediate:",
+		path,
+		"runbook",
+		`"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"`,
+		"tighten this file's DACL to owner-only",
+		"your account + SYSTEM + Administrators",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("state-file remediation missing %q: %s", want, got)
+		}
+	}
+	if offendingSID != "" && !strings.Contains(got, "offending SID "+offendingSID) {
+		t.Fatalf("state-file remediation missing offending SID %q: %s", offendingSID, got)
+	}
+	for _, forbidden := range []string{
+		"run icacls",
+		`icacls "`,
+		"chmod 600",
+		"chown ",
+		"&&",
+		"/inheritance:r",
+		"/remove:g",
+		"/grant:r",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("state-file remediation must point to the runbook, not embed %q: %s", forbidden, got)
+		}
+	}
+}
+
 // TestReadStateFileInodeAnchored_WriteBroadenedParent_DefaultMode pins
 // the v0.4.6 inode-anchored-read invariant: a parent directory whose
 // mode grants group/world WRITE permission no longer blocks the read
@@ -121,6 +179,30 @@ func TestReadStateFileInodeAnchored_FileReadBroadenedDefaultModeRefusesSecretSta
 		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
 	} else if !errors.Is(err, ErrTooLoose) {
 		t.Fatalf("secret read-broadened error = %v, want ErrTooLoose", err)
+	} else {
+		got := err.Error()
+		assertStateFileRunbookPointer(t, got, secret, "")
+	}
+
+	secretWrite := filepath.Join(dir, "secrets.age")
+	if err := os.WriteFile(secretWrite, []byte(`age-encrypted-placeholder`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(secretWrite, 0o622); err != nil {
+		t.Fatalf("chmod write-broadened secret: %v", err)
+	}
+	if info, err := os.Stat(secretWrite); err != nil {
+		t.Fatalf("stat write-broadened secret: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o622 {
+		t.Fatalf("write-broadened secret mode = %04o, want 0622", got)
+	}
+	if _, err := readStateFileInodeAnchored(secretWrite); err == nil {
+		t.Fatalf("default mode must refuse write-broadened secret-bearing state file")
+	} else if !errors.Is(err, ErrTooLoose) {
+		t.Fatalf("secret write-broadened error = %v, want ErrTooLoose", err)
+	} else {
+		got := err.Error()
+		assertStateFileRunbookPointer(t, got, secretWrite, "")
 	}
 }
 

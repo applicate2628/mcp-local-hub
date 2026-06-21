@@ -6,7 +6,15 @@
 
 package api
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+const StateFileDACLRunbookTitle = "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"
+
+const StateFileDACLRunbookPointer = `tighten this file's DACL to owner-only (your account + SYSTEM + Administrators); see the "` + StateFileDACLRunbookTitle + `" runbook in CLAUDE.md for the exact icacls / chmod command.`
 
 // ErrIrregularFile is returned when the path is a symlink, junction,
 // or other irregular filesystem object that we refuse to trust.
@@ -28,3 +36,42 @@ var ErrTooLoose = errors.New("hub-mcp state file mode is group/world accessible"
 // Common cause: Group-Policy-managed paths with corporate management
 // or Domain Users inherited ACEs. See spec §"Enterprise stance".
 var ErrDaclOutsideAllowlist = errors.New("hub-mcp state file DACL grants read to a SID outside {current-user, LocalSystem, BuiltinAdministrators}")
+
+// DACLAllowlistViolation preserves the offending SID from the Windows DACL
+// verifier while keeping ErrDaclOutsideAllowlist in the error chain.
+type DACLAllowlistViolation struct {
+	SID  string
+	Mask uint32
+}
+
+func (e *DACLAllowlistViolation) Error() string {
+	return fmt.Sprintf("%s: SID %s grants access (mask=0x%08x)", ErrDaclOutsideAllowlist, e.SID, e.Mask)
+}
+
+func (e *DACLAllowlistViolation) Unwrap() error {
+	return ErrDaclOutsideAllowlist
+}
+
+type StateFileDACLRemediationDetails struct {
+	Path         string
+	OffendingSID string
+}
+
+func StateFileDACLRemediationDetailsFor(path string, cause error) StateFileDACLRemediationDetails {
+	return StateFileDACLRemediationDetails{
+		Path:         path,
+		OffendingSID: stateFileDACLOffendingSID(cause),
+	}
+}
+
+func stateFileDACLOffendingSID(cause error) string {
+	var violation *DACLAllowlistViolation
+	if !errors.As(cause, &violation) || violation == nil {
+		return ""
+	}
+	sid := strings.TrimSpace(strings.TrimPrefix(violation.SID, "*"))
+	if sid == "" || sid == "<nil>" || sid == "<unresolved-sid>" {
+		return ""
+	}
+	return sid
+}

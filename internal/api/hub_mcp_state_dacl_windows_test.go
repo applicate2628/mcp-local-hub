@@ -115,6 +115,32 @@ func TestReadStateFileInodeAnchoredAcceptsAllowlistOnly(t *testing.T) {
 	}
 }
 
+func applyDirDACLWithInheritOnlyAuthUsersReadACE(t *testing.T, dir string) {
+	t.Helper()
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	authUsersSID, err := windows.StringToSid("S-1-5-11")
+	if err != nil {
+		t.Fatalf("Authenticated Users sid: %v", err)
+	}
+	entries := []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		{
+			AccessPermissions: windows.GENERIC_READ,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.OBJECT_INHERIT_ACE | windows.INHERIT_ONLY_ACE,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(authUsersSID),
+			},
+		},
+	}
+	applyProtectedDACLFromEntries(t, dir, entries)
+}
+
 // applyAllowlistOnlyDACL applies an allowlist-conforming PROTECTED
 // DACL to target via SetNamedSecurityInfo. Used by the parent-DACL
 // reject test below to ensure the FILE's own DACL is conforming, so
@@ -274,6 +300,8 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *test
 	if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("err = %v, want ErrDaclOutsideAllowlist", err)
 	}
+	got := err.Error()
+	assertStateFileRunbookPointer(t, got, target, "S-1-5-11")
 }
 
 func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretState(t *testing.T) {
@@ -302,6 +330,9 @@ func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretSta
 		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
 	} else if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("secret read-broadened error = %v, want ErrDaclOutsideAllowlist", err)
+	} else {
+		got := err.Error()
+		assertStateFileRunbookPointer(t, got, secret, "S-1-5-11")
 	}
 }
 
