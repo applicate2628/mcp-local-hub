@@ -11,8 +11,9 @@ import (
 
 // workspace_prune_sweeper.go — Phase 1 of the workspace-daemon auto-prune
 // feature: an in-GUI sweep that auto-removes daemons whose workspace is
-// STRUCTURALLY dead — an ephemeral `.claude/worktrees/agent-*` worktree, or a
-// deleted directory — so the per-workspace serena+LSP daemon set stops growing
+// STRUCTURALLY dead — an ephemeral `.claude/worktrees/agent-*` worktree, a
+// deleted directory, or a leftover git linked worktree whose admin dir is gone
+// (dead-worktree) — so the per-workspace serena+LSP daemon set stops growing
 // without bound. Mirrors the serena idle sweeper (serena_idle_sweeper.go): a
 // per-tick, error-tolerant, cancellable pass driven by runWorkspacePruneTicker
 // in the gui-command wiring.
@@ -117,13 +118,33 @@ func defaultPruneIdleThreshold() time.Duration {
 	return time.Duration(h) * time.Hour
 }
 
+// pruneDeadWorktreesFn reports whether the dead-git-worktree structural signal
+// is enabled (the GUI-settable daemons.prune_dead_worktrees gate, default
+// "true"). Read each tick so a toggle takes effect within ~60s. Fail-SAFE: a
+// settings-read failure returns false (never run the dead-worktree signal when
+// the gate is unreadable) — symmetric with pruneEnabledFn's posture. Test seam.
+var pruneDeadWorktreesFn = defaultPruneDeadWorktrees
+
+func defaultPruneDeadWorktrees() bool {
+	vals, err := api.NewAPI().SettingsList()
+	if err != nil {
+		return false // fail-safe: do not run the signal on a settings-read failure
+	}
+	v, ok := vals[api.PruneDeadWorktreesSettingKey]
+	if !ok {
+		return true // not persisted → the registry Default ("true") applies
+	}
+	return v == "true"
+}
+
 // SweepPruneWorkspaces auto-prunes structurally-dead workspace daemons:
-// agent-worktree rows immediately, deleted-directory rows after 2 consecutive
-// ENOENT ticks (the in-memory pruneEnoentTicks grace absorbs a transient
-// unmount). It skips any workspace with an in-flight serena forward. Returns the
-// number of workspaces pruned this tick; a no-op when the gate is off, deps are
-// unwired, or there are no workspace rows. ctx/now are accepted for symmetry
-// with the idle sweeper and the Phase-3 idle predicate (unused in Phase 1).
+// agent-worktree rows immediately; deleted-directory AND dead-git-worktree rows
+// after 2 consecutive ENOENT ticks (the in-memory pruneEnoentTicks grace, shared
+// by both, absorbs a transient unmount). It skips any workspace with an
+// in-flight serena forward. Returns the number of workspaces pruned this tick; a
+// no-op when the gate is off, deps are unwired, or there are no workspace rows.
+// ctx/now are accepted for symmetry with the idle sweeper and the Phase-3 idle
+// predicate.
 func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 	if s == nil {
 		return 0
@@ -137,6 +158,10 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 	}
 
 	idleThreshold := pruneIdleThresholdFn()
+	// Read the dead-worktree gate ONCE per tick (mirrors idleThreshold) and thread
+	// the resolved bool through ClassifyOpts so the SINGLE owner decides; the
+	// sweeper never re-implements the predicate.
+	pruneDeadWorktrees := pruneDeadWorktreesFn != nil && pruneDeadWorktreesFn()
 
 	// One candidate per workspace PATH (a workspace carries a serena row + N LSP
 	// rows). Track the serena key (for the in-flight guard) and the MOST-RECENT
@@ -176,9 +201,10 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 		// deleted-dir verdict on a single observation and the sweeper layers the
 		// grace on top before acting.
 		orphanReason, isOrphan := api.ClassifyWorkspaceOrphan(path, api.ClassifyOpts{
-			IdleThreshold:   idleThreshold,
-			LastToolsCallAt: c.lastActivity,
-			Now:             now,
+			PruneDeadWorktrees: pruneDeadWorktrees,
+			IdleThreshold:      idleThreshold,
+			LastToolsCallAt:    c.lastActivity,
+			Now:                now,
 		})
 		if !isOrphan {
 			// Healthy, present, non-worktree → reset any stale ENOENT count.
@@ -188,10 +214,13 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 			continue
 		}
 		reason := string(orphanReason)
-		if orphanReason == api.OrphanReasonDeletedDir {
+		if orphanReason == api.OrphanReasonDeletedDir || orphanReason == api.OrphanReasonDeadWorktree {
 			// Layer the 2-consecutive-ENOENT-tick grace over the owner's
-			// single-observation deleted-dir verdict (absorbs a transient
-			// unmount). agent-worktree and idle prune immediately.
+			// single-observation verdict (absorbs a transient unmount). SHARED
+			// between deleted-dir (the workspace dir vanished) and dead-worktree
+			// (the worktree admin dir vanished) for symmetry — a momentarily
+			// unreadable admin dir on a slow mount must not prune on the first
+			// tick. agent-worktree and idle prune immediately.
 			s.pruneEnoentMu.Lock()
 			s.pruneEnoentTicks[path]++
 			n := s.pruneEnoentTicks[path]

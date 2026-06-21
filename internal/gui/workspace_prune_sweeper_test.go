@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -101,6 +102,73 @@ func TestSweepPruneWorkspaces(t *testing.T) {
 		}
 		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
 			t.Fatalf("gate off must be a no-op, got %d", n)
+		}
+	})
+}
+
+// TestSweepPruneWorkspaces_DeadWorktree asserts the sweeper prunes a leftover
+// git linked worktree whose directory still exists but whose git admin dir is
+// gone — but only after the 2-consecutive-ENOENT-tick grace (shared with
+// deleted-dir). A single tick must NOT prune. It also asserts the gate (off)
+// suppresses the signal.
+func TestSweepPruneWorkspaces_DeadWorktree(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+
+	origEnabled, origRows, origBegin, origEnd, origAction, origDead :=
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneDeadWorktreesFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneDeadWorktreesFn =
+			origEnabled, origRows, origBegin, origEnd, origAction, origDead
+	})
+
+	var pruned []string
+	pruneEnabledFn = func() bool { return true }
+	pruneBeginFn = func(*Server, string) bool { return true }
+	pruneEndFn = func(*Server, string) {}
+	pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+		pruned = append(pruned, path)
+		return &api.PruneReport{Workspace: path}, nil
+	}
+
+	// Build a real dead-worktree fixture: a dir that exists, with a `.git` FILE
+	// pointing at an admin dir that does NOT exist.
+	deadWT := t.TempDir()
+	deadAdmin := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "gone") // never created
+	if err := os.WriteFile(filepath.Join(deadWT, ".git"), []byte("gitdir: "+deadAdmin+"\n"), 0o600); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+
+	t.Run("gate on: pruned only after 2 ticks", func(t *testing.T) {
+		pruned = nil
+		pruneDeadWorktreesFn = func() bool { return true }
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(deadWT, "kdead", "go")}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("tick 1 must NOT prune (2-tick grace shared with deleted-dir), got %d", n)
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 1 {
+			t.Fatalf("tick 2 must prune the dead worktree, got %d", n)
+		}
+		if len(pruned) != 1 || pruned[0] != deadWT {
+			t.Fatalf("want dead worktree pruned, got %v", pruned)
+		}
+	})
+
+	t.Run("gate off: never pruned", func(t *testing.T) {
+		pruned = nil
+		pruneDeadWorktreesFn = func() bool { return false }
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(deadWT, "kdead2", "go")}
+		}
+		// Two ticks — neither must prune while the gate is off.
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("gate off tick 1 must not prune, got %d", n)
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("gate off tick 2 must not prune, got %d (%v)", n, pruned)
 		}
 	})
 }
