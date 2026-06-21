@@ -1286,6 +1286,41 @@ from having parent-dir write rights, so the race is unreachable.
 
 ## Stuck-instance recovery
 
+### Secret daemons exit 1 / quarantine on sandbox-broadened `%LOCALAPPDATA%`
+
+Symptom: secret-using daemons such as `wolfram` or `paper-search`
+exit 1 quickly and may quarantine with an error like:
+`daemon <server>/<daemon>: vault state-file DACL refused. Remediate:
+run icacls "<path>" /inheritance:r /grant:r "%USERNAME%:F" "SYSTEM:F"
+"Administrators:F" ... Cause: vault exists but unreadable: read
+identity: file <path>\.age-key not single-user safe: hub-mcp state
+file DACL grants read to a SID outside {current-user, LocalSystem,
+BuiltinAdministrators}`.
+
+Cause: `.age-key` or `secrets.age` inherited a non-owner ACE from a
+broadened profile/state root, commonly `Wave\CodexSandboxUsers` or an
+orphan SID with Modify rights. The read hardening must fail closed here:
+a swapped `.age-key` is an attacker-substituted X25519 identity.
+
+Fix the refused file named in the error, usually both vault files:
+
+```powershell
+icacls "$env:LOCALAPPDATA\mcp-local-hub\.age-key" /inheritance:r /grant:r "${env:USERNAME}:F" "SYSTEM:F" "Administrators:F"
+icacls "$env:LOCALAPPDATA\mcp-local-hub\secrets.age" /inheritance:r /grant:r "${env:USERNAME}:F" "SYSTEM:F" "Administrators:F"
+```
+
+POSIX equivalent:
+
+```bash
+chmod 600 "$XDG_STATE_HOME/mcp-local-hub/.age-key" "$XDG_STATE_HOME/mcp-local-hub/secrets.age"
+chown "$USER" "$XDG_STATE_HOME/mcp-local-hub/.age-key" "$XDG_STATE_HOME/mcp-local-hub/secrets.age"
+```
+
+`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` additionally makes broadened
+parent directories fail hard. Unsetting it can allow the default
+parent-dir relax on solo-dev hosts, but it does not bypass a broadened
+secret-bearing state file; repair the file DACL/mode.
+
 If `mcphub gui` exits with the structured "Cannot acquire mcphub gui
 single-instance lock" block, run `mcphub gui --force` for the
 diagnostic — it also opens the lock folder in your file manager so

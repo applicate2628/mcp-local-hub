@@ -121,6 +121,30 @@ func TestReadStateFileInodeAnchored_FileReadBroadenedDefaultModeRefusesSecretSta
 		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
 	} else if !errors.Is(err, ErrTooLoose) {
 		t.Fatalf("secret read-broadened error = %v, want ErrTooLoose", err)
+	} else {
+		got := err.Error()
+		for _, want := range []string{"Remediate:", "chmod 600", secret} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("secret read-broadened error missing %q: %v", want, err)
+			}
+		}
+	}
+
+	secretWrite := filepath.Join(dir, "secrets.age")
+	if err := os.WriteFile(secretWrite, []byte(`age-encrypted-placeholder`), 0o622); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readStateFileInodeAnchored(secretWrite); err == nil {
+		t.Fatalf("default mode must refuse write-broadened secret-bearing state file")
+	} else if !errors.Is(err, ErrTooLoose) {
+		t.Fatalf("secret write-broadened error = %v, want ErrTooLoose", err)
+	} else {
+		got := err.Error()
+		for _, want := range []string{"Remediate:", "chmod 600", secretWrite} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("secret write-broadened error missing %q: %v", want, err)
+			}
+		}
 	}
 }
 

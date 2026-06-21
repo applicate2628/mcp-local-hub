@@ -134,9 +134,11 @@ See also: install, logs, restart, status.`,
 			// when this manifest actually uses secret refs — a secretless
 			// server must not be bricked by a corrupt vault it never touches
 			// (Codex #377 r5). A truly-absent vault → nil, secret refs optional.
-			vault, verr := secrets.OpenVaultOptional(defaultKeyPath(), defaultVaultPath())
+			keyPath := defaultKeyPath()
+			vaultPath := defaultVaultPath()
+			vault, verr := secrets.OpenVaultOptional(keyPath, vaultPath)
 			if verr != nil && secrets.HasSecretRef(m.Env) {
-				return fmt.Errorf("daemon %s/%s: %w", server, daemonName, verr)
+				return daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath, verr)
 			}
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
 			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
@@ -358,6 +360,13 @@ See also: install, logs, restart, status.`,
 	// Hidden — supervisor-intent.json descriptors point here.
 	c.AddCommand(newDaemonSerenaProxyCmd())
 	return c
+}
+
+func daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath string, err error) error {
+	if errors.Is(err, api.ErrDaclOutsideAllowlist) {
+		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused. Remediate: run icacls \"%s\" /inheritance:r /grant:r \"%%USERNAME%%:F\" \"SYSTEM:F\" \"Administrators:F\" and repeat for \"%s\" if that is the refused file; this drops inherited non-owner ACEs from the default vault files. Cause: %w", server, daemonName, keyPath, vaultPath, err)
+	}
+	return fmt.Errorf("daemon %s/%s: %w", server, daemonName, err)
 }
 
 // daemonEnvWithOverlay returns the resolved child env map AND the list of

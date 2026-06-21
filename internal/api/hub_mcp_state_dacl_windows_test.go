@@ -274,6 +274,12 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *test
 	if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("err = %v, want ErrDaclOutsideAllowlist", err)
 	}
+	got := err.Error()
+	for _, want := range []string{"Remediate:", "icacls", target} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("write-broadened DACL error missing %q: %v", want, err)
+		}
+	}
 }
 
 func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretState(t *testing.T) {
@@ -302,6 +308,13 @@ func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretSta
 		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
 	} else if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("secret read-broadened error = %v, want ErrDaclOutsideAllowlist", err)
+	} else {
+		got := err.Error()
+		for _, want := range []string{"Remediate:", "icacls", secret} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("secret read-broadened DACL error missing %q: %v", want, err)
+			}
+		}
 	}
 }
 

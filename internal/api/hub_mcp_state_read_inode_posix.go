@@ -136,14 +136,14 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		return nil, fmt.Errorf("%w: path=%s uid=%d (need current uid %d)", ErrWrongOwner, path, st.Uid, os.Getuid())
 	}
 	if mode&0o022 != 0 {
-		return nil, fmt.Errorf("%w: path=%s mode=%04o grants group/world write", ErrTooLoose, path, mode)
+		return nil, fmt.Errorf("%w: path=%s mode=%04o grants group/world write.%s", ErrTooLoose, path, mode, stateFileReadRemediation(path))
 	}
 	if mode&0o055 != 0 {
 		if requiresStrict() {
-			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world", ErrTooLoose, path, mode)
+			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world.%s", ErrTooLoose, path, mode, stateFileReadRemediation(path))
 		}
 		if isSecretBearingStateFilePath(path) {
-			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world on secret-bearing state file", ErrTooLoose, path, mode)
+			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world on secret-bearing state file.%s", ErrTooLoose, path, mode, stateFileReadRemediation(path))
 		}
 		if auditFallbacks {
 			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
@@ -182,4 +182,8 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		buf = []byte{}
 	}
 	return buf, nil
+}
+
+func stateFileReadRemediation(path string) string {
+	return fmt.Sprintf(" Remediate: chmod 600 \"%s\" && chown $USER \"%s\" (and tighten the parent dir).", path, path)
 }

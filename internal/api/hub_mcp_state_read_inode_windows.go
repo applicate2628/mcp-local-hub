@@ -195,10 +195,10 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, err
 		}
 		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
-			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable", path, wrErr)
+			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable.%s", path, wrErr, stateFileReadRemediation(path))
 		}
 		if isSecretBearingStateFilePath(path) {
-			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing", path, err)
+			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing.%s", path, err, stateFileReadRemediation(path))
 		}
 		if auditFallbacks {
 			reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
@@ -265,4 +265,8 @@ func windowsAnchoredReadErrIsNotExist(err error) bool {
 		}
 	}
 	return false
+}
+
+func stateFileReadRemediation(path string) string {
+	return fmt.Sprintf(" Remediate: run icacls \"%s\" /inheritance:r /grant:r \"%%USERNAME%%:F\" \"SYSTEM:F\" \"Administrators:F\" to drop the inherited non-owner ACE (this host's %%LOCALAPPDATA%% was broadened, e.g. by a sandbox/installer).", path)
 }
