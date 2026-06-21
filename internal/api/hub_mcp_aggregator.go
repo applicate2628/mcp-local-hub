@@ -639,6 +639,23 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	seenExposed := make(map[string]bool)
 	listFailures := make([]DaemonFailure, 0)
 	listSuccessCount := 0
+	// hiddenDropCount counts tools dropped SOLELY because the group's
+	// tools_hidden filter hides them — used by the C3 emptyReason
+	// discriminator to tell an all-tools-hidden empty list apart from an
+	// all-members-unresolved one (additive observability; does not affect
+	// the merged tool set). Tools dropped by collision/dedupe are NOT
+	// counted: a collision is a config defect surfaced via partialFailures,
+	// not an operator-intended hide.
+	hiddenDropCount := 0
+	// otherDropCount counts tools dropped for a reason OTHER than the group's
+	// tools_hidden filter — a namespace collision or an intra/cross-daemon
+	// duplicate (dedupe). The C3 emptyReason discriminator requires this to be
+	// zero before claiming "all-tools-hidden": hiding is the SOLE cause of an
+	// empty list only when no tool was also removed by collision or dedupe.
+	// When the cause is MIXED, the non-hidden removals are already explained by
+	// partialFailures (collisions) and the response carries no all-tools-hidden
+	// label. Additive observability; does not affect the merged tool set.
+	otherDropCount := 0
 	for _, r := range results {
 		if r.err != nil {
 			listFailures = append(listFailures, DaemonFailure{
@@ -652,9 +669,11 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		listSuccessCount++
 		for _, t := range r.tools {
 			if collisions[t.Exposed] {
+				otherDropCount++
 				continue
 			}
 			if seenExposed[t.Exposed] {
+				otherDropCount++
 				continue
 			}
 			// Per-tool hide: drop a tool the group hides for its server.
@@ -664,6 +683,7 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			// mergedRoutes below, so a later tools/call for it returns
 			// the existing -32601 (the dispatch path is untouched).
 			if hiddenSet.hides(t.Ref.Server, t.Ref.RawName) {
+				hiddenDropCount++
 				continue
 			}
 			seenExposed[t.Exposed] = true
@@ -713,13 +733,41 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// all-failed envelope). So a non-group scope with no known live
 		// snapshot entry keeps the -32000 envelope.
 		if allowEmptyKnown || (len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix)) {
-			sess.RouteMap.Store(&mergedRoutes)                                         // empty map — no tools to route
-			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID) // mergedTools is empty → result.tools=[]
+			sess.RouteMap.Store(&mergedRoutes) // empty map — no tools to route
+			// C3 emptyReason: zero DECLARED members vs members-declared-but-
+			// none-resolved. The discriminator is the group's DECLARED member
+			// count (the authored groups.yaml `servers` list), NOT the RESOLVED
+			// participant slice: a group that declares ghost members which map
+			// to no live binding has an empty IntendedParticipants yet is NOT an
+			// empty group — its members simply did not resolve. "empty-group"
+			// fires ONLY when the group declared zero members. The declared
+			// count is read from the session's init snapshot (the authoritative
+			// per-group declaration captured at session create); a nil map or
+			// missing key yields 0 → treated as zero-declared.
+			reason := emptyReasonAllMembersUnresolved
+			if groupDeclaredMemberCount(sess) == 0 {
+				reason = emptyReasonEmptyGroup
+			}
+			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, reason) // mergedTools is empty → result.tools=[]
 		}
 		return buildAllFailedToolsListResponse(reqID, allFailures, instanceID)
 	}
 	sess.RouteMap.Store(&mergedRoutes)
-	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID)
+	// C3 emptyReason on the success path: members resolved AND ≥1 tools/list
+	// succeeded, but the merged list is empty — name WHY. "all-tools-hidden"
+	// is claimed ONLY when the group's tools_hidden filter is the SOLE cause of
+	// emptiness: at least one tool was dropped by the filter (hiddenDropCount >
+	// 0) AND no tool was dropped for any OTHER reason (otherDropCount == 0, i.e.
+	// no collision or dedupe removal). When the cause is MIXED (some hidden,
+	// some collided/deduped) the label would over-claim, so the reason is left
+	// unset — the non-hidden removals are already explained via partialFailures
+	// (collision rows). A list emptied PURELY by collisions likewise carries no
+	// reason. A non-empty list carries no reason at all.
+	emptyReason := ""
+	if len(mergedTools) == 0 && hiddenDropCount > 0 && otherDropCount == 0 {
+		emptyReason = emptyReasonAllToolsHidden
+	}
+	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, emptyReason)
 }
 
 // resolvedCallTarget is the output of route lookup + resolver
@@ -1799,18 +1847,62 @@ func buildSyntheticInitResult(reqID json.RawMessage, protoVer string) ([]byte, e
 	return json.Marshal(body)
 }
 
+// emptyReason enum (C3): a stable discriminator placed on
+// _meta.mcphub.emptyReason ONLY when a tools/list response carries an
+// EMPTY tool set, so the three distinct causes of an empty group view do
+// not collapse to the same silent empty envelope. Values:
+//
+//   - emptyReasonEmptyGroup           — the group declares NO members.
+//   - emptyReasonAllMembersUnresolved — members are declared but NONE
+//     resolved to a live daemon binding in the current snapshot.
+//   - emptyReasonAllToolsHidden       — members resolved and tools/list
+//     succeeded, but EVERY tool is hidden by the group's tools_hidden
+//     filter.
+//
+// Additive observability: the field is absent on a NON-empty response and
+// absent when the empty list has no determinable operator-intended cause
+// (e.g. emptied purely by a namespace collision, which partialFailures
+// already explains). It never changes routing/auth or the tool set.
+const (
+	emptyReasonEmptyGroup           = "empty-group"
+	emptyReasonAllMembersUnresolved = "all-members-unresolved"
+	emptyReasonAllToolsHidden       = "all-tools-hidden"
+)
+
+// groupDeclaredMemberCount returns how many member servers the session's
+// group scope key DECLARED in groups.yaml, read from the snapshot captured at
+// session init (the authoritative per-group declaration). It is the C3
+// emptyReason discriminator's "did this group declare any members" source —
+// distinct from the RESOLVED IntendedParticipants, so a group declaring only
+// ghost members reports a non-zero count even with zero resolved bindings. A
+// nil snapshot, nil map, or missing key yields 0 (treated as zero-declared).
+func groupDeclaredMemberCount(sess *hubSession) int {
+	if sess == nil || sess.SnapshotAtInit == nil {
+		return 0
+	}
+	return sess.SnapshotAtInit.GroupDeclaredMembers[sess.ScopeKey]
+}
+
 // buildToolsListResponse assembles a successful (≥1 daemon ok)
 // tools/list response with the merged tool list and partialFailures.
-func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure, instanceID string) ([]byte, error) {
-	meta := map[string]any{
-		"mcphub": map[string]any{
-			"partialFailures": failuresOrEmpty(failures),
-			"instance_id":     instanceID,
-		},
+//
+// emptyReason (C3) is a diagnostic discriminator added to _meta.mcphub
+// ONLY when the merged tool set is empty AND a reason was determined; it
+// is omitted on a non-empty response or an empty one with no determinable
+// cause. The existing partialFailures/instance_id fields are unchanged.
+func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure, instanceID, emptyReason string) ([]byte, error) {
+	mcphub := map[string]any{
+		"partialFailures": failuresOrEmpty(failures),
+		"instance_id":     instanceID,
+	}
+	// Only annotate the EMPTY case, and only when a cause was determined.
+	// A non-empty list never carries emptyReason.
+	if len(tools) == 0 && emptyReason != "" {
+		mcphub["emptyReason"] = emptyReason
 	}
 	result := map[string]any{
 		"tools": tools,
-		"_meta": meta,
+		"_meta": map[string]any{"mcphub": mcphub},
 	}
 	envelope := map[string]any{
 		"jsonrpc": "2.0",

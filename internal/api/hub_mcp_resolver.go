@@ -109,6 +109,22 @@ type ResolverSnapshot struct {
 	// build never allocates it, and a nil map's lookup is false → no group
 	// is ever "known" on a host with no groups.yaml).
 	Groups map[string]bool
+
+	// GroupDeclaredMembers records, per declared group scope key
+	// ("g:<group>"), the COUNT of member servers the group DECLARES in
+	// groups.yaml (len(Group.Servers)), independent of whether those
+	// members currently resolve to any live binding. It is the authoritative
+	// "did this group declare any members" source the C3 emptyReason
+	// discriminator reads so it can tell a group that declared ZERO members
+	// ("empty-group") apart from a group that declared members which all
+	// failed to resolve ("all-members-unresolved"). A group naming only
+	// ghost/per-session/unresolved servers therefore still has a non-zero
+	// count here even though its Bindings (and a session's resolved
+	// IntendedParticipants) are empty.
+	//
+	// nil when there are no groups (same additive-by-omission posture as
+	// Groups; a nil map's lookup yields 0 → treated as zero-declared).
+	GroupDeclaredMembers map[string]int
 }
 
 // Package-level atomic pointer to the currently-published snapshot.
@@ -302,6 +318,17 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 			snap.Groups = make(map[string]bool)
 		}
 		snap.Groups[scopeKey] = true
+		// Record the DECLARED member count (len of the authored servers list)
+		// alongside the known-group bit, BEFORE any per-member skip below, so
+		// the C3 emptyReason discriminator can distinguish a group that
+		// declared no members from one whose declared members all failed to
+		// resolve. Counts the authored list verbatim — a ghost / per-session /
+		// missing-manifest member still counts as DECLARED here (it is the
+		// resolution, not the declaration, that drops it).
+		if snap.GroupDeclaredMembers == nil {
+			snap.GroupDeclaredMembers = make(map[string]int)
+		}
+		snap.GroupDeclaredMembers[scopeKey] = len(g.Servers)
 		for _, server := range g.Servers {
 			// R4-1 (bot R4): a per-session server (scan.go marks it
 			// CanMigrate=false — it MUST stay 1-per-local-client, never folded
@@ -318,10 +345,22 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 				continue
 			}
 			sd, ok := byServer[server]
-			if !ok {
-				// Group names a server with no live manifest/daemon —
-				// skip (validation warning surfaced in the GUI in a
-				// later phase; never a hub-start fault here).
+			// A member is UNRESOLVED in two distinct ways, both of which
+			// contribute zero bindings to the group: (a) no manifest at all
+			// (byServer miss), or (b) a manifest that EXISTS but declares no
+			// daemons (byServer hit with an empty refs slice). byServer is keyed
+			// for EVERY manifest, so a zero-daemon member lands in the hit branch
+			// and would never reach the miss branch — without this it would be
+			// dropped silently with no warn. Emit the SAME structured warn for
+			// both (mirroring the per-session-skip warn above) so an operator can
+			// SEE why a group is missing a member's tools rather than the member
+			// vanishing from the /g/ view. Additive observability only — the skip
+			// behavior (defensive continue) is unchanged.
+			if !ok || len(sd.refs) == 0 {
+				_ = LogHubMcpEvent("warn", "group-member-unresolved", map[string]any{
+					"group":  g.Name,
+					"server": server,
+				})
 				continue
 			}
 			for _, ref := range sd.refs {
