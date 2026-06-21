@@ -46,6 +46,29 @@ func TestPromptInteractiveSymlinkConsent_Answers(t *testing.T) {
 				t.Errorf("input %q: prompt %q missing %q", c.in, s, frag)
 			}
 		}
+		// F2: the client name LEADS the line — no stray leading space from an
+		// empty client subject.
+		if !strings.HasPrefix(s, "codex-cli config ") {
+			t.Errorf("input %q: prompt must lead with the client name, got %q", c.in, s)
+		}
+	}
+}
+
+// TestPromptInteractiveSymlinkConsent_EmptyClientNoLeadingSpace pins F2's
+// defensive fallback: if the destination could not be attributed to a known
+// client (derived client == ""), the line falls back to a generic "Client"
+// subject and STILL has no stray leading space — never " config /path ...".
+func TestPromptInteractiveSymlinkConsent_EmptyClientNoLeadingSpace(t *testing.T) {
+	var out bytes.Buffer
+	r := bufio.NewReader(strings.NewReader("n\n"))
+	_ = promptInteractiveSymlinkConsent(&out, r, "",
+		"/home/u/.codex/config.toml", "/e/env/Agents/.codex")
+	s := out.String()
+	if strings.HasPrefix(s, " ") {
+		t.Errorf("empty client produced a leading space: %q", s)
+	}
+	if !strings.HasPrefix(s, "Client config ") {
+		t.Errorf("empty client must fall back to a generic \"Client\" subject, got %q", s)
 	}
 }
 

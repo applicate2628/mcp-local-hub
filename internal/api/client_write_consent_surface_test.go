@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"mcp-local-hub/internal/clients"
 )
 
 // A3 PR-2 — the cross-package EXPOSURE surface: the exported facade
@@ -299,5 +302,77 @@ func TestInteractiveSymlinkConsent_NilDefault_RefusesSymlink(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(real); string(b) != "{}" {
 		t.Errorf("target mutated despite default refusal: %q", b)
+	}
+}
+
+// TestInteractiveSymlinkConsent_ProductionLane_SuppliesClient is the F1
+// attribution guard: the PRODUCTION interactive lane (the only input is
+// (path, contents) — no client param) must DERIVE the client name from the
+// destination path against the adapter catalog and supply it BOTH to the
+// prompt port AND into the scoped consent, so the
+// client-write-symlink-resolved-via-scoped-consent audit event logs a
+// non-empty "client". Before the fix the lane passed "" everywhere and the
+// audit could not attribute which client's config was symlink-followed.
+//
+// The catalog is injected via the clientCatalogForDerivation seam so the test
+// drives the real derivation lane without depending on the host's real client
+// config paths: the seeded symlink IS the fake adapter's ConfigPath().
+func TestInteractiveSymlinkConsent_ProductionLane_SuppliesClient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowClientConfigSymlinkEnv, "") // the interactive port is the only follow input
+	logDir := hubMcpStateTestHelper(t)
+	dir := hardenedTempDir(t)
+	real, link := a3SymlinkFixture(t, dir)
+
+	// Inject a catalog whose single adapter claims the seeded symlink as its
+	// config path, so deriveClientNameForConfigPath(link) resolves to its name.
+	prevCatalog := clientCatalogForDerivation
+	clientCatalogForDerivation = func() map[string]clients.Client {
+		return map[string]clients.Client{
+			"codex-cli": &lspRouterFakeClient{
+				name:      "codex-cli",
+				path:      link,
+				entries:   map[string]clients.MCPEntry{},
+				snapshots: map[string]map[string]clients.MCPEntry{},
+			},
+		}
+	}
+	t.Cleanup(func() { clientCatalogForDerivation = prevCatalog })
+
+	var gotClient string
+	prev := InteractiveSymlinkConsent
+	InteractiveSymlinkConsent = func(client, originalPath, pinnedParent string) bool {
+		gotClient = client
+		return true
+	}
+	t.Cleanup(func() { InteractiveSymlinkConsent = prev })
+
+	if err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), nil); err != nil {
+		t.Fatalf("approving interactive port must follow + SUCCEED: %v", err)
+	}
+	// The PROMPT received the derived client (so the CLI line names it, not "").
+	if gotClient != "codex-cli" {
+		t.Errorf("interactive port got client=%q, want %q (production lane must DERIVE + supply it)", gotClient, "codex-cli")
+	}
+	if b, _ := os.ReadFile(real); string(b) != `{"v":1}` {
+		t.Errorf("resolved target content = %q, want %q", b, `{"v":1}`)
+	}
+	// The AUDIT consent carried the derived client: the scoped-consent event
+	// logs "client":"codex-cli" rather than the old empty "client":"".
+	logBytes, rerr := os.ReadFile(filepath.Join(logDir, "hub-mcp.log"))
+	if rerr != nil {
+		t.Fatalf("read hub-mcp.log: %v", rerr)
+	}
+	if !bytes.Contains(logBytes, []byte("client-write-symlink-resolved-via-scoped-consent")) {
+		t.Fatalf("scoped-consent audit event missing: %s", logBytes)
+	}
+	if !bytes.Contains(logBytes, []byte(`"client":"codex-cli"`)) {
+		t.Errorf("audit event did not attribute the client (want \"client\":\"codex-cli\"): %s", logBytes)
+	}
+	if bytes.Contains(logBytes, []byte(`"client":""`)) {
+		t.Errorf("audit event logged an EMPTY client — F1 attribution not fixed: %s", logBytes)
 	}
 }

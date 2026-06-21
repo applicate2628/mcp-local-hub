@@ -408,8 +408,19 @@ func secureWriteWithOperatorOptConsent(path string, contents []byte, consent *Re
 	if consent == nil && !followViaEnv && InteractiveSymlinkConsent != nil && !operatorRequiresSingleUserHome() {
 		if resolved, was := resolveSymlinkForSecureWrite(path); was {
 			pinnedParent := filepath.Clean(filepath.Dir(resolved))
-			if InteractiveSymlinkConsent("", path, pinnedParent) {
+			// Attribute the write to the client whose config path this is, so
+			// the prompt names the real client and the
+			// client-write-symlink-resolved-via-scoped-consent audit event logs
+			// a non-empty "client" (the GUI lane already sets it via
+			// resolve_symlink_write.go; this is the CLI/production parity). The
+			// hook receives only (path, contents) so the name is DERIVED from
+			// the destination path against the adapter catalog — see
+			// deriveClientNameForConfigPath for why the call path is too wide to
+			// thread a client param through.
+			client := deriveClientNameForConfigPath(path)
+			if InteractiveSymlinkConsent(client, path, pinnedParent) {
 				hookConsent := &ResolvedSymlinkConsent{
+					Client:             client,
 					OriginalPath:       path,
 					PinnedResolvedPath: pinnedParent,
 				}
@@ -438,6 +449,41 @@ func secureWriteWithOperatorOptConsent(path string, contents []byte, consent *Re
 // re-resolve, engineering a deterministic TOCTOU window for the
 // scoped-consent pin-mismatch guard (T3).
 var afterResolveBeforePinHook func()
+
+// clientCatalogForDerivation supplies the {name -> adapter} catalog
+// deriveClientNameForConfigPath matches a write destination against. It
+// defaults to clients.AllClients (the SINGLE owner of the name->adapter
+// mapping); a test overrides it to inject a hermetic adapter whose
+// ConfigPath() is the test's temp symlink, so the production derivation lane
+// can be exercised without depending on the host's real client config paths.
+// Production callers never set it.
+var clientCatalogForDerivation = clients.AllClients
+
+// deriveClientNameForConfigPath reverse-maps a client-config destination path
+// to the client name that owns it, by matching against each adapter's
+// ConfigPath(). Returns "" when no adapter claims the path (an unknown or
+// non-client destination — the audit then records an empty client rather than
+// a wrong one).
+//
+// Why DERIVE instead of THREAD the name down: the only input the
+// clients.WriteConfigFile hook receives is (path, contents); the client name
+// is not in scope there. Threading a client param would change the
+// clients.WriteConfigFile function-pointer signature plus every adapter write
+// call site (15+ across internal/clients), a wide shared-seam change for an
+// audit-attribution fix. The adapter's ConfigPath() is already the single
+// owner of the name->path mapping (clients.ConfigPathForName resolves the same
+// way), so a reverse lookup here reuses that owner without widening the seam.
+// Paths are compared after filepath.Clean so separator/relativity differences
+// do not cause a spurious miss.
+func deriveClientNameForConfigPath(path string) string {
+	want := filepath.Clean(path)
+	for name, adapter := range clientCatalogForDerivation() {
+		if filepath.Clean(adapter.ConfigPath()) == want {
+			return name
+		}
+	}
+	return ""
+}
 
 // secureWriteFollowingSymlink performs the handle-pinned write to a
 // resolved symlink target at `originalPath`. It RE-RESOLVES the symlink

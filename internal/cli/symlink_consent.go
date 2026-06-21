@@ -59,9 +59,17 @@ func installInteractiveSymlinkConsent(out io.Writer, in *os.File) (restore func(
 // the operator so they consent to a concrete location, not an abstract
 // "follow".
 func promptInteractiveSymlinkConsent(out io.Writer, in *bufio.Reader, client, originalPath, pinnedParent string) bool {
+	// Lead with the client name when known; fall back to a generic "Client"
+	// when the destination could not be attributed to a known adapter, so the
+	// line never opens with a stray leading space (F2). The client name is the
+	// load-bearing first token an operator reads.
+	subject := client
+	if subject == "" {
+		subject = "Client"
+	}
 	fmt.Fprintf(out,
 		"%s config %s is a symlink -> real target directory is %s. Write there? [y/N] ",
-		client, originalPath, pinnedParent)
+		subject, originalPath, pinnedParent)
 	line, err := in.ReadString('\n')
 	if err != nil && err != io.EOF {
 		// A read fault is treated as a refusal — never follow on an ambiguous

@@ -134,6 +134,28 @@ func TestResolveSymlinkWrite_WriteRequiresPinnedPath(t *testing.T) {
 	}
 }
 
+// TestResolveSymlinkWrite_WriteRequiresContentHash pins the 400 when confirm=true
+// has pinned_real_path but OMITS content_hash (F4 defense-in-depth): the
+// concurrent-edit drift token is mandatory, so a hand-crafted request cannot
+// drop it to skip the drift guard. The handler must NOT reach Write.
+func TestResolveSymlinkWrite_WriteRequiresContentHash(t *testing.T) {
+	fw := &fakeSymlinkResolveWriter{}
+	s := NewServer(Config{})
+	s.symlinkWriter = fw
+
+	rec := postResolveSymlink(t, s,
+		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/e/env/Agents/.codex"}`, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400; body=%q", rec.Code, rec.Body.String())
+	}
+	if code := decodeCode(t, rec); code != "BAD_REQUEST" {
+		t.Errorf("code=%q, want BAD_REQUEST", code)
+	}
+	if fw.writeClient != "" {
+		t.Errorf("Write was reached despite missing content_hash")
+	}
+}
+
 // TestResolveSymlinkWrite_NotSymlinkMaps412 pins the NOT_SYMLINK 412 mapping
 // (the GUI refreshes its scan instead of offering a follow).
 func TestResolveSymlinkWrite_NotSymlinkMaps412(t *testing.T) {
@@ -161,7 +183,7 @@ func TestResolveSymlinkWrite_RepointedMaps409(t *testing.T) {
 	s.symlinkWriter = fw
 
 	rec := postResolveSymlink(t, s,
-		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/x"}`, nil)
+		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/x","content_hash":"abc123"}`, nil)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status=%d, want 409", rec.Code)
 	}
@@ -179,7 +201,7 @@ func TestResolveSymlinkWrite_ConfigChangedMaps409(t *testing.T) {
 	s.symlinkWriter = fw
 
 	rec := postResolveSymlink(t, s,
-		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/x"}`, nil)
+		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/x","content_hash":"abc123"}`, nil)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status=%d, want 409", rec.Code)
 	}
@@ -216,7 +238,7 @@ func TestResolveSymlinkWrite_StrictRefusalMaps500(t *testing.T) {
 	s.symlinkWriter = fw
 
 	rec := postResolveSymlink(t, s,
-		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/x"}`, nil)
+		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/x","content_hash":"abc123"}`, nil)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d, want 500", rec.Code)
 	}

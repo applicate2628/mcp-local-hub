@@ -239,6 +239,16 @@ func registerResolveSymlinkWriteRoutes(s *Server) {
 			writeAPIError(w, errors.New("pinned_real_path is required to confirm the write"), http.StatusBadRequest, "BAD_REQUEST")
 			return
 		}
+		// content_hash is mandatory too (defense-in-depth): it is the
+		// concurrent-edit drift token the operator saw in the confirm modal.
+		// The GUI always sends it; requiring it here stops a hand-crafted
+		// request from OMITTING it to skip the drift guard in Write(). PR-1's
+		// pin re-verify is the real security boundary, so this is belt-and-
+		// suspenders, not the fence.
+		if req.ContentHash == "" {
+			writeAPIError(w, errors.New("content_hash is required to confirm the write"), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
 		res, err := s.symlinkWriter.Write(req.Client, req.PinnedRealPath, req.ContentHash)
 		if err != nil {
 			writeResolveSymlinkError(w, err)
