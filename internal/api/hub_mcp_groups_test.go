@@ -140,6 +140,78 @@ func TestGroups_DuplicateNameRejected(t *testing.T) {
 	}
 }
 
+// TestGroups_DuplicateNameCaseInsensitiveOnParse pins C5-case: two groups whose
+// names differ ONLY in case ("Frontend" vs "frontend") case-fold onto the same
+// uniqueness key, so the parse/Load path rejects them. The error wording makes
+// the case-insensitivity explicit.
+func TestGroups_DuplicateNameCaseInsensitiveOnParse(t *testing.T) {
+	raw := []byte("version: 1\ngroups:\n  - name: Frontend\n    servers: [memory]\n  - name: frontend\n    servers: [time]\n")
+	_, err := parseGroupsConfig(raw)
+	if err == nil {
+		t.Fatal("parseGroupsConfig accepted \"Frontend\" + \"frontend\" — case-insensitive uniqueness must reject")
+	}
+	if !strings.Contains(err.Error(), "case-insensitive") {
+		t.Fatalf("duplicate-name error %q should mention case-insensitivity", err.Error())
+	}
+}
+
+// TestGroups_DuplicateNameCaseInsensitiveOnWrite pins C5-case at the create/add
+// (write) dedup site: creating "frontend" when "Frontend" is already present is
+// rejected before any bytes hit disk, and nothing is persisted.
+func TestGroups_DuplicateNameCaseInsensitiveOnWrite(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	collide := GroupsConfig{Version: 1, Groups: []Group{
+		{Name: "Frontend", Servers: []string{"memory"}},
+		{Name: "frontend", Servers: []string{"time"}},
+	}}
+	err := WriteGroups(collide)
+	if err == nil {
+		t.Fatal("WriteGroups persisted \"Frontend\" + \"frontend\" — case-insensitive uniqueness must reject")
+	}
+	if !strings.Contains(err.Error(), "case-insensitive") {
+		t.Fatalf("write-path duplicate-name error %q should mention case-insensitivity", err.Error())
+	}
+	// Nothing should have been written: a subsequent load is still empty.
+	cfg, err := LoadGroups()
+	if err != nil {
+		t.Fatalf("LoadGroups after rejected write: %v", err)
+	}
+	if len(cfg.Groups) != 0 {
+		t.Fatalf("rejected WriteGroups still wrote groups.yaml: %+v", cfg.Groups)
+	}
+}
+
+// TestGroups_NonCollidingNamesAccepted pins the happy path: distinct names are
+// accepted, AND the operator's chosen CASING is preserved verbatim in the
+// stored Name (the uniqueness comparison case-folds; the stored value does
+// NOT). A round-trip through write → load keeps "Frontend" as "Frontend".
+func TestGroups_NonCollidingNamesAccepted(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	cfg := GroupsConfig{Version: 1, Groups: []Group{
+		{Name: "Frontend", Servers: []string{"memory"}},
+		{Name: "backend", Servers: []string{"time"}},
+	}}
+	if err := WriteGroups(cfg); err != nil {
+		t.Fatalf("WriteGroups rejected two non-colliding names %+v: %v", cfg.Groups, err)
+	}
+	got, err := LoadGroups()
+	if err != nil {
+		t.Fatalf("LoadGroups: %v", err)
+	}
+	if len(got.Groups) != 2 {
+		t.Fatalf("expected 2 groups after round-trip, got %d: %+v", len(got.Groups), got.Groups)
+	}
+	// Stored casing preserved: "Frontend" must NOT be normalized to "frontend".
+	if got.Groups[0].Name != "Frontend" {
+		t.Fatalf("stored name lost its casing: got %q, want %q (uniqueness case-folds, storage does not)", got.Groups[0].Name, "Frontend")
+	}
+	if got.Groups[1].Name != "backend" {
+		t.Fatalf("stored name changed: got %q, want %q", got.Groups[1].Name, "backend")
+	}
+}
+
 func TestGroups_UnknownYAMLFieldRejected(t *testing.T) {
 	// KnownFields(true): a typo'd field surfaces rather than silently
 	// dropping config.

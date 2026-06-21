@@ -377,10 +377,17 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 	// POSTs can't lost-update (each reading the same baseline, the later write
 	// clobbering the earlier). The callback edits the loaded set in place;
 	// create-or-update deletes nothing (empty deleted-set).
+	//
+	// Match-to-replace is CASE-INSENSITIVE (C5-case): group-name uniqueness is
+	// case-folded in the api layer, so a POST of "frontend" when "Frontend"
+	// already exists UPDATES that one group in place (adopting the new casing)
+	// rather than appending a second row the write-path uniqueness owner would
+	// then reject as a confusing 500. This keeps create-or-update consistent
+	// with the case-insensitive uniqueness invariant.
 	if err := s.groups.ReadModifyWriteGroups(func(cfg *api.GroupsConfig) ([]string, error) {
 		replaced := false
 		for i := range cfg.Groups {
-			if cfg.Groups[i].Name == name {
+			if strings.EqualFold(cfg.Groups[i].Name, name) {
 				cfg.Groups[i] = updated
 				replaced = true
 				break

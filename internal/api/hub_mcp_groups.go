@@ -194,6 +194,34 @@ func ValidateGroupName(name string) error {
 	return validateGroupName(name)
 }
 
+// checkGroupNamesUnique is the SINGLE OWNER of the group-name uniqueness
+// invariant (C5-case). Uniqueness is CASE-INSENSITIVE: "Frontend" and
+// "frontend" are the same group as far as authoring is concerned, so a
+// second row whose name case-folds onto an earlier one is rejected. The
+// FIRST collision is returned (groups[i] indexed so the parse path can
+// prefix "group[i]:"). Both dedup sites — the parse/Load path
+// (parseGroupsConfig) and the create/write path (writeGroupsLocked) —
+// route through THIS helper so the rule lives in one place and can never
+// drift between the two.
+//
+// Only the COMPARISON case-folds (strings.ToLower); the operator's chosen
+// CASING is preserved verbatim in the stored Name (this helper does not
+// mutate cfg). Routing — the /g/<group>/mcp path, the "g:<name>" scope
+// key, and the token lookup — stays case-SENSITIVE on the stored casing;
+// case-insensitive uniqueness guarantees the operator's exact name is the
+// only one that exists, so the exact name they created always resolves.
+func checkGroupNamesUnique(groups []Group) (idx int, err error) {
+	seen := make(map[string]int, len(groups))
+	for i := range groups {
+		key := strings.ToLower(groups[i].Name)
+		if prior, dup := seen[key]; dup {
+			return i, fmt.Errorf("duplicate group name %q (case-insensitive: collides with %q)", groups[i].Name, groups[prior].Name)
+		}
+		seen[key] = i
+	}
+	return -1, nil
+}
+
 // parseGroupsConfig decodes + validates groups.yaml bytes. Unknown YAML
 // keys are rejected (KnownFields(true)) so a typo'd field surfaces rather
 // than silently dropping config. Every group name is validated; the FIRST
@@ -224,16 +252,15 @@ func parseGroupsConfig(raw []byte) (GroupsConfig, error) {
 	if cfg.Version != 0 && cfg.Version != 1 {
 		return GroupsConfig{}, fmt.Errorf("groups.yaml: unsupported version %d (this binary supports version 1; upgrade mcphub to read a newer groups.yaml)", cfg.Version)
 	}
-	seen := make(map[string]bool, len(cfg.Groups))
 	for i := range cfg.Groups {
-		name := cfg.Groups[i].Name
-		if err := validateGroupName(name); err != nil {
+		if err := validateGroupName(cfg.Groups[i].Name); err != nil {
 			return GroupsConfig{}, fmt.Errorf("groups.yaml group[%d]: %w", i, err)
 		}
-		if seen[name] {
-			return GroupsConfig{}, fmt.Errorf("groups.yaml: duplicate group name %q", name)
-		}
-		seen[name] = true
+	}
+	// Case-insensitive uniqueness via the single owner (C5-case); a row whose
+	// name case-folds onto an earlier one is rejected.
+	if i, err := checkGroupNamesUnique(cfg.Groups); err != nil {
+		return GroupsConfig{}, fmt.Errorf("groups.yaml group[%d]: %w", i, err)
 	}
 	return cfg, nil
 }
@@ -301,16 +328,15 @@ func writeGroupsLocked(cfg GroupsConfig) error {
 	if cfg.Version == 0 {
 		cfg.Version = 1
 	}
-	seen := make(map[string]bool, len(cfg.Groups))
 	for i := range cfg.Groups {
-		name := cfg.Groups[i].Name
-		if err := validateGroupName(name); err != nil {
+		if err := validateGroupName(cfg.Groups[i].Name); err != nil {
 			return fmt.Errorf("group[%d]: %w", i, err)
 		}
-		if seen[name] {
-			return fmt.Errorf("duplicate group name %q", name)
-		}
-		seen[name] = true
+	}
+	// Case-insensitive uniqueness via the single owner (C5-case): the same
+	// rule the parse path applies, so the two can never drift.
+	if i, err := checkGroupNamesUnique(cfg.Groups); err != nil {
+		return fmt.Errorf("group[%d]: %w", i, err)
 	}
 	payload, err := yaml.Marshal(cfg)
 	if err != nil {

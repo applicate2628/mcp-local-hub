@@ -280,6 +280,37 @@ func TestGroups_PostDuplicateUpdatesInPlace(t *testing.T) {
 	}
 }
 
+// TestGroups_PostCaseInsensitiveUpdatesInPlace pins C5-case at the GUI upsert
+// (create/add) boundary: POSTing "frontend" when a group "Frontend" already
+// exists must UPDATE that one group in place (case-insensitive match), adopting
+// the new casing — NOT append a second row that the api-layer uniqueness owner
+// would then reject as a confusing 500.
+func TestGroups_PostCaseInsensitiveUpdatesInPlace(t *testing.T) {
+	g := &fakeGroupsAPI{
+		available: []string{"memory", "time"},
+		cfg: api.GroupsConfig{Version: 1, Groups: []api.Group{
+			{Name: "Frontend", Servers: []string{"memory"}},
+		}},
+	}
+	s := groupsTestServer(t, g)
+	rec := doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{
+		"name": "frontend", "servers": []string{"time"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q, want 200", rec.Code, rec.Body.String())
+	}
+	if n := len(g.lastWrite.Groups); n != 1 {
+		t.Fatalf("case-insensitive upsert produced %d groups, want 1 (in-place update, no dup row): %+v", n, g.lastWrite.Groups)
+	}
+	// The in-place replace adopts the POSTed casing + server set.
+	if got := g.lastWrite.Groups[0].Name; got != "frontend" {
+		t.Fatalf("in-place update kept old casing %q, want the POSTed %q", got, "frontend")
+	}
+	if got := g.lastWrite.Groups[0].Servers; len(got) != 1 || got[0] != "time" {
+		t.Fatalf("case-insensitive upsert did not replace servers: %+v", got)
+	}
+}
+
 func TestGroups_PostLargeManifestClassBodySucceeds(t *testing.T) {
 	const serverCount = 1800
 	available := make([]string, 0, serverCount)
