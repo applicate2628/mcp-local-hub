@@ -25,13 +25,29 @@ it?" — without re-opening the TOCTOU.
 ### 1. Handle-pin requirement (the AF-1 closure)
 
 When a symlink is followed, the write MUST resolve-to-HANDLE then
-write-through-the-held-handle. The resolved target's PARENT directory is
-opened exactly ONCE (`openDirHandleNoReparse` on Windows; `unix.Open` with
-`O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` on POSIX), frozen at open, and the shared
-hardened owner (`secureWriteClientConfigToResolvedParent`) runs against that
-held handle/fd. No `filepath.Split` of a resolved string and no second
-path-based open after resolve. A post-open symlink/parent swap cannot redirect
-the write because there is no second path-walk to race.
+write-through-the-held-handle. The resolved target's PARENT directory is opened
+by a component-by-component O_NOFOLLOW descent from the resolved target's VOLUME
+ROOT (`openDirHandleNoReparse` on Windows / `unix.Open(O_DIRECTORY|O_NOFOLLOW)`
+on POSIX for the volume-root anchor, then the shared `openExistingRealDirAt`
+step per component), and the shared hardened owner
+(`secureWriteClientConfigToResolvedParent`) runs against the final held
+handle/fd. No `filepath.Split` of a resolved string and no path-based open of
+the whole parent string after resolve.
+
+> **F1 correction (PR-B, 2026-06-21).** The original wording here said the
+> parent was opened "**exactly ONCE** … frozen at open … a post-open
+> symlink/parent swap cannot redirect the write because there is no second
+> path-walk to race." That was OVER-CLAIMING for an INTERMEDIATE-component swap:
+> a single path-based open of the whole parent string (PR-A's shape) applies
+> O_NOFOLLOW only to the FINAL component — the kernel / object manager re-walks
+> every intermediate, so an intermediate dir swapped to a symlink between
+> resolve and that open still redirected the write. PR-B (F1) replaces the
+> single open with the component-by-component descent above (volume-root anchor;
+> NO path-containment refusal — the resolved target is out-of-home by design;
+> the only property is "no intermediate component is followed through a swap").
+> Regression guard: `TestF1_IntermediateComponentSwap_Refused` (POSIX,
+> deterministic via the `resolvedParentDescendStepHook` injection seam) +
+> `TestF1_DecomposeResolvedParentWindows`.
 
 The hardened post-parent-open sequence is a SINGLE OWNER
 (`secureWriteClientConfigToResolvedParent`) reused by both the path-based

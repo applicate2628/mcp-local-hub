@@ -30,36 +30,51 @@ import (
 // write-through for the symlink-resolve relax lane (env-var F2 and scoped
 // consent). It is the AF-1 fix: instead of returning a resolved path STRING
 // for SecureWriteClientConfig to re-walk (filepath.Split + re-open the
-// parent BY PATH), it OPENS the resolved target's parent directory ONCE
-// (openDirHandleNoReparse — frozen at open) and runs the shared hardened
-// owner (secureWriteClientConfigToResolvedParent) against that held handle.
-// A co-resident who swaps the symlink, or any intermediate component,
-// BETWEEN resolve and this open cannot redirect the privileged write
-// because the parent handle is pinned — there is no second path-based open
-// for the swap to race.
+// parent BY PATH), it descends to the resolved target's parent
+// COMPONENT-BY-COMPONENT, refusing reparse-follow at every step, anchored at
+// the VOLUME ROOT of the resolved target, and runs the shared hardened owner
+// (secureWriteClientConfigToResolvedParent) against the final held handle.
+//
+// AF-1 F1 — why component-by-component (not one path-based open of the whole
+// parent string): FILE_FLAG_OPEN_REPARSE_POINT on a single open of the full
+// parent path protects ONLY the final component; the object manager re-walks
+// every INTERMEDIATE component at open time, so an intermediate dir swapped
+// to a junction/symlink between resolve and this open would redirect the
+// handle. Opening one real component at a time relative to the previously-
+// held handle, refusing reparse-follow each step, never follows a swapped
+// intermediate.
+//
+// Trust anchor = the volume root of the RESOLVED target, NOT %USERPROFILE%.
+// The resolved target is frequently OUTSIDE home by design (the motivating
+// case ~/.codex/config.toml → E:\env\Agents\.codex\config.toml). The anchor
+// is the drive root (filepath.VolumeName -> "C:" -> "C:\") or, for a UNC
+// path, the share root (\\server\share). There is NO path-containment
+// refusal: the operator already consented to THIS resolved target, the chain
+// already exists (nothing is created), and the ONLY property delivered is
+// "no intermediate component is followed through a swap."
 //
 // resolvedTarget MUST already be the fully-resolved final disk path (from
 // resolveSymlinkFinalPath). It returns the resolved-parent directory path
-// that was actually opened (filepath.Dir of resolvedTarget, cleaned) so the
-// caller can pin-match it against a scoped consent's PinnedResolvedPath
-// (SEAM-B swap-between-confirm-and-write guard).
+// (filepath.Dir of resolvedTarget, cleaned) so the caller can pin-match it
+// against a scoped consent's PinnedResolvedPath (SEAM-B
+// swap-between-confirm-and-write guard).
 //
 // skipParentGate threads through to the shared owner exactly as the
 // path-based lane (the symlink relax lane is itself a relax-on-broadened
 // posture; the per-file restrictive DACL is the load-bearing boundary).
 func secureWriteThroughResolvedParentHandle(resolvedTarget string, contents []byte, skipParentGate bool) (string, error) {
 	parentDir, base := filepath.Split(resolvedTarget)
-	if parentDir == "" {
-		parentDir = "."
-	}
 	if base == "" {
 		return "", fmt.Errorf("secure write: empty base name in resolved target %q", resolvedTarget)
 	}
+	if parentDir == "" {
+		parentDir = "."
+	}
 	parentDir = filepath.Clean(parentDir)
 
-	dirHandle, err := openDirHandleNoReparse(parentDir)
+	dirHandle, err := openResolvedParentByComponentDescentWindows(resolvedTarget)
 	if err != nil {
-		return parentDir, fmt.Errorf("secure write: open resolved parent %s: %w", parentDir, err)
+		return parentDir, err
 	}
 	defer windows.CloseHandle(dirHandle)
 
@@ -67,6 +82,88 @@ func secureWriteThroughResolvedParentHandle(resolvedTarget string, contents []by
 		return parentDir, err
 	}
 	return parentDir, nil
+}
+
+// openResolvedParentByComponentDescentWindows opens the PARENT directory of
+// `resolvedTarget` by descending from the resolved target's volume root
+// (drive root "C:\" or UNC share root \\server\share) component-by-component,
+// refusing reparse-follow at every step via openExistingRealDirAt (the step
+// shared with G17's mkdirOrVerifyRealDirWindows). The returned handle is the
+// caller's pinned parent; the caller owns its close.
+//
+// The base name is dropped — only the intermediate directory components are
+// descended; the final component is published by the shared owner's
+// handle-relative atomic rename, not opened here.
+func openResolvedParentByComponentDescentWindows(resolvedTarget string) (windows.Handle, error) {
+	cleaned := filepath.Clean(resolvedTarget)
+
+	vol, dirComponents, err := decomposeResolvedParentWindows(cleaned)
+	if err != nil {
+		return windows.InvalidHandle, fmt.Errorf("secure write: decompose resolved target %q: %w", resolvedTarget, err)
+	}
+
+	// Volume-root anchor: the drive root "C:\" or the UNC share root
+	// "\\server\share". openDirHandleNoReparse opens with
+	// FILE_FLAG_OPEN_REPARSE_POINT (so a reparse-point root would be opened
+	// as the link itself rather than followed); a drive/share root is never
+	// itself a reparse point.
+	anchorPath := vol + `\`
+	anchorHandle, err := openDirHandleNoReparse(anchorPath)
+	if err != nil {
+		return windows.InvalidHandle, fmt.Errorf("secure write: open volume-root anchor %s: %w", anchorPath, err)
+	}
+
+	curHandle := anchorHandle
+	for _, comp := range dirComponents {
+		nextHandle, openErr := openExistingRealDirAt(curHandle, comp)
+		_ = windows.CloseHandle(curHandle)
+		if openErr != nil {
+			return windows.InvalidHandle, fmt.Errorf(
+				"secure write: refuse to descend through reparse point / non-directory at component %q of resolved target %s: %w",
+				comp, resolvedTarget, openErr,
+			)
+		}
+		curHandle = nextHandle
+		// Test-only injection seam: fires AFTER opening this component and
+		// BEFORE opening the next. nil in production. (Windows symlink
+		// creation needs elevation, so the swap test runs on POSIX; this
+		// seam is here for symmetry and for any future elevated test.)
+		if resolvedParentDescendStepHook != nil {
+			resolvedParentDescendStepHook(comp)
+		}
+	}
+	return curHandle, nil
+}
+
+// decomposeResolvedParentWindows splits a cleaned absolute Windows path into
+// its volume name (drive "C:" or UNC share "\\server\share") and the list of
+// INTERMEDIATE directory components between the volume root and the final
+// base name (the base is dropped). Used by the AF-1 F1 component-by-component
+// descent. Unit-tested directly (no symlink elevation needed for the
+// decomposition logic).
+func decomposeResolvedParentWindows(cleaned string) (vol string, dirComponents []string, err error) {
+	vol = filepath.VolumeName(cleaned)
+	if vol == "" {
+		return "", nil, fmt.Errorf("path %q has no volume name (not an absolute drive/UNC path)", cleaned)
+	}
+	// Everything after the volume name; strip a single leading separator so
+	// the split yields clean component names.
+	rest := strings.TrimPrefix(cleaned, vol)
+	rest = strings.TrimPrefix(rest, `\`)
+	rest = strings.TrimPrefix(rest, `/`)
+	if rest == "" {
+		// The resolved target was the volume root itself with no base —
+		// pathological for a file write; the caller's empty-base check
+		// already rejects it, but guard here too.
+		return vol, nil, nil
+	}
+	parts := strings.FieldsFunc(rest, func(r rune) bool { return r == '\\' || r == '/' })
+	if len(parts) == 0 {
+		return vol, nil, nil
+	}
+	// Drop the final component (the base name); descend only its ancestors.
+	dirComponents = parts[:len(parts)-1]
+	return vol, dirComponents, nil
 }
 
 // resolveSymlinkFinalPath opens path through any reparse points

@@ -158,7 +158,10 @@ func mkdirOrOpenRealDirAt(dirFd int, comp, fullPath string) (int, error) {
 	// Open the component fd-relative with O_NOFOLLOW so a symlink at
 	// this slot (whether pre-existing or race-planted between mkdirat
 	// EEXIST and here) is refused, and O_DIRECTORY so a non-dir fails.
-	fd, openErr := unix.Openat(dirFd, comp, unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	// openExistingRealDirAt is the SHARED descent step (also used by the
+	// AF-1 F1 resolved-symlink-target walk in
+	// client_write_resolve_posix.go); the open semantics are identical.
+	fd, openErr := openExistingRealDirAt(dirFd, comp)
 	if openErr != nil {
 		if mkErr == nil {
 			// We created it but cannot re-open as a real dir — anomalous
@@ -183,4 +186,25 @@ func mkdirOrOpenRealDirAt(dirFd int, comp, fullPath string) (int, error) {
 		}
 	}
 	return fd, nil
+}
+
+// openExistingRealDirAt opens an EXISTING real directory `comp`
+// relative to the already-held `dirFd`, O_NOFOLLOW so a symlink at the
+// slot is refused at the kernel (ELOOP) and O_DIRECTORY so a non-dir
+// fails (ENOTDIR). It is the single per-component descent step shared by
+//
+//   - mkdirOrOpenRealDirAt (G17 parent-create — after its mkdirat), and
+//   - secureWriteThroughResolvedParentHandle's volume-root descent (the
+//     AF-1 F1 fix in client_write_resolve_posix.go), which walks an
+//     already-existing resolved chain and creates nothing.
+//
+// It does NOT mkdir, fchmod, or DACL/mode-verify — it ONLY opens an
+// existing component refusing symlink-follow, so the descent never walks
+// through a swapped intermediate. Holding the returned fd as the anchor
+// for the next component is what closes the intermediate-component
+// re-walk TOCTOU (O_NOFOLLOW on a single path-based open of the whole
+// parent string protects only the FINAL component; the kernel re-walks
+// every intermediate at open time).
+func openExistingRealDirAt(dirFd int, comp string) (int, error) {
+	return unix.Openat(dirFd, comp, unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 }

@@ -139,12 +139,33 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 		if !isAlreadyExistsErr(err) {
 			return windows.InvalidHandle, fmt.Errorf("secure mkparent: ntcreate dir %s: %w", full, err)
 		}
-		h, err = ntOpenDirRelative(parentHandle, name, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL)
+		// Existing component: open it relative to the held parent handle
+		// (FILE_OPEN_REPARSE_POINT) and refuse a reparse point / non-dir
+		// via the SHARED descent step (also used by the AF-1 F1
+		// resolved-symlink-target walk in client_write_resolve_windows.go).
+		h, err = openExistingRealDirAt(parentHandle, name)
 		if err != nil {
-			return windows.InvalidHandle, fmt.Errorf("secure mkparent: relative open %s: %w", full, err)
+			return windows.InvalidHandle, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, err)
 		}
+		closeOnErr := true
+		defer func() {
+			if closeOnErr {
+				_ = windows.CloseHandle(h)
+			}
+		}()
+		if verifyDACL {
+			if verr := verifyWindowsDACLFromHandle(h); verr != nil {
+				return windows.InvalidHandle, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
+			}
+		}
+		closeOnErr = false
+		return h, nil
 	}
 
+	// Freshly created via FILE_CREATE: it is a real directory by
+	// construction (FILE_DIRECTORY_FILE), so re-assert the reparse/non-dir
+	// refusal (defends against a hostile swap in the create window) and
+	// verify the DACL if requested.
 	closeOnErr := true
 	defer func() {
 		if closeOnErr {
@@ -161,6 +182,41 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 		}
 	}
 	closeOnErr = false
+	return h, nil
+}
+
+// openExistingRealDirAt opens an EXISTING real directory `name` relative to
+// the already-held `parentHandle` (FILE_OPEN_REPARSE_POINT so a reparse
+// point at the slot is opened as the link itself, then REFUSED, never
+// followed), verifies it is a real directory (not a reparse point / file),
+// and returns the open handle. It is the single per-component descent step
+// shared by
+//
+//   - mkdirOrVerifyRealDirWindows (G17 parent-create — its EEXIST branch), and
+//   - secureWriteThroughResolvedParentHandle's volume-root descent (the
+//     AF-1 F1 fix in client_write_resolve_windows.go), which walks an
+//     already-existing resolved chain and creates nothing.
+//
+// It does NOT create, set a DACL, or DACL-verify — it ONLY opens an existing
+// component refusing reparse-follow, so the descent never walks through a
+// swapped intermediate. Holding the returned handle as the anchor for the
+// next component is what closes the intermediate-component re-walk TOCTOU
+// (FILE_FLAG_OPEN_REPARSE_POINT on a single path-based open of the whole
+// parent string protects only the FINAL component; the object manager
+// re-walks every intermediate at open time). On error the (possibly opened)
+// handle is closed before returning.
+func openExistingRealDirAt(parentHandle windows.Handle, name string) (windows.Handle, error) {
+	if !singleWindowsPathComponent(name) {
+		return windows.InvalidHandle, fmt.Errorf("invalid path component %q", name)
+	}
+	h, err := ntOpenDirRelative(parentHandle, name, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	if rerr := refuseReparsePointHandle(h); rerr != nil {
+		_ = windows.CloseHandle(h)
+		return windows.InvalidHandle, rerr
+	}
 	return h, nil
 }
 
