@@ -115,17 +115,27 @@ export const WAVE2_CLIENTS = [
 export const ALL_CLIENTS = [...CORE_CLIENTS, ...WAVE2_CLIENTS] as const;
 
 // DETECTED_PRESENCE_STATES are the client_config_presence values that mean
-// "this client exists on the host in some inspectable form" — the config
-// file is present ("ok"), present-but-unwritable ("error"/"error-symlink"),
-// or absent-but-its-parent-directory-exists ("missing-init-possible" /
-// "missing-init-blocked-symlink"). The only non-detected state is plain
-// "missing" (neither file nor parent dir) or absence from the map entirely.
+// "this client exists on the host in some inspectable form, OR is securely
+// initializable from the GUI" — the config file is present ("ok"),
+// present-but-unwritable ("error"/"error-symlink"), absent-but-its-parent-
+// directory-exists ("missing-init-possible"/"missing-init-blocked-symlink"),
+// or absent-with-an-absent-but-creatable parent under the user home
+// ("missing-init-creatable", G17). The only non-detected state is plain
+// "missing" (refused/uncreatable) or absence from the map entirely.
+//
+// "missing-init-creatable" MUST be included: it is the very state G17 added
+// so a wave-2 client on a CLEAN install (config dir absent but securely
+// creatable) gets a column and its per-column Initialize button. Omitting it
+// classified such a client "not detected" → no column → no Initialize button,
+// re-manifesting the exact "Initialize not available on a clean install"
+// symptom G17 fixed.
 const DETECTED_PRESENCE_STATES = new Set([
   "ok",
   "error",
   "error-symlink",
   "missing-init-possible",
   "missing-init-blocked-symlink",
+  "missing-init-creatable",
 ]);
 
 // visibleClients returns the ordered list of client columns the matrix

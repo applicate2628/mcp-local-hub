@@ -54,10 +54,14 @@ func init() {
 // fall back to a parent-gate-skipped variant if strict mode is OFF
 // and the gate rejected on a single-user-but-broadened parent dir.
 //
-// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME enabled) keeps the
-// parent-dir gate enforced — the /api/init-client-config endpoint
-// short-circuits strict-mode operators BEFORE this function runs,
-// so the strict refusal here is defense-in-depth for any future
+// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME, or the persisted
+// supervisor-intent.json strict_mode bit, enabled) keeps the
+// parent-dir gate enforced. This wrapper IS the strict enforcement
+// point for the GUI Init affordance: the /api/init-client-config
+// endpoint does NOT short-circuit strict-mode operators (that
+// pre-check was REMOVED in the PR #208 codex-r1 F1 closure — see
+// internal/gui/init_client_config.go), so the strict refusal returned
+// here is what surfaces as INIT_FAILED. It also covers any future
 // non-GUI caller of clients.CreateConfigFileIfMissing.
 //
 // Deep-sec PR #208 Lane C #1 closure.

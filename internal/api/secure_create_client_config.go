@@ -31,17 +31,25 @@
 // tmpfs ACL isn't a concern).
 //
 // Strict mode interaction (PR #208 deep-sec Lane C #2 closure):
-// when MCPHUB_REQUIRE_SINGLE_USER_HOME enables strict mode, the
+// when MCPHUB_REQUIRE_SINGLE_USER_HOME (or the persisted
+// supervisor-intent.json strict_mode bit) enables strict mode, the
 // parent-dir DACL/mode gate is enforced; a broadened parent returns
-// ErrSecureWriteParentInsecure which the cross-package wrapper in
-// client_write_init.go would normally relax via the
-// secureWriteWithOperatorOpt fallback. For the init helper the
-// /api/init-client-config endpoint short-circuits earlier: the
-// strict refusal there blocks the call before reaching this
-// function. This function is therefore reached only in default-
-// relax mode, but it STILL refuses on `ErrSecureWriteParentInsecure`
-// so a future caller cannot accidentally use it as a strict-mode
-// bypass.
+// ErrSecureWriteParentInsecure.
+//
+// The strict gate for the GUI Init affordance is enforced by the
+// CROSS-PACKAGE WRAPPER, NOT by an endpoint short-circuit. The
+// /api/init-client-config endpoint does NOT pre-check strict mode (the
+// short-circuit was REMOVED in the PR #208 codex-r1 F1 closure — see
+// internal/gui/init_client_config.go). Instead this function's
+// ErrSecureWriteParentInsecure flows up through the
+// secureCreateClientConfigIfMissingWithOperatorOpt wrapper in
+// client_write_init.go, which returns the strict error in strict mode
+// (mapped to INIT_FAILED) and relaxes (parent gate skipped) otherwise.
+// So this function IS reached in strict mode, and it refuses on
+// `ErrSecureWriteParentInsecure` regardless — that refusal is the
+// load-bearing strict enforcement (and also blocks any future caller
+// from using it as a strict-mode bypass), not a redundant defense
+// behind a non-existent short-circuit.
 package api
 
 // SecureCreateClientConfigIfMissing is the exported entry point.
