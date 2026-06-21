@@ -1,5 +1,6 @@
 // internal/gui/frontend/src/screens/Secrets.tsx
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import type { RouterState } from "../hooks/useRouter";
 import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
 import { secretsInit, restartSecret } from "../lib/secrets-api";
 import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef, APIError } from "../lib/secrets-api";
@@ -19,8 +20,17 @@ const MCPHUB_EDIT_CMD = "mcphub secrets edit";
 // DELETE on /api/secrets/init both 405. Disable those actions and nudge
 // the user toward CLI cleanup.
 
-export function SecretsScreen() {
+export function SecretsScreen({ route }: { route?: RouterState }) {
   const snap = useSecretsSnapshot();
+
+  // Catalog "Open Secrets" deep-link (epic area 2): #/secrets?key=<vault-key>
+  // pre-opens the Add-secret modal with that key. Parse it once per route.query
+  // change. SECRET_NAME_RE-validation is the modal's job; here we only normalize
+  // an empty/absent key to undefined so the views below never auto-open on "".
+  const prefillKey = (() => {
+    const raw = new URLSearchParams(route?.query ?? "").get("key")?.trim();
+    return raw ? raw : undefined;
+  })();
 
   if (snap.status === "loading") {
     return (
@@ -46,8 +56,12 @@ export function SecretsScreen() {
       <h1>Secrets</h1>
       <EditVaultBanner />
       {state === "missing" && <NotInitView refresh={snap.refresh} />}
-      {state === "ok" && env.secrets.length === 0 && <InitEmptyView refresh={snap.refresh} />}
-      {state === "ok" && env.secrets.length > 0 && <InitKeyedView env={env} refresh={snap.refresh} />}
+      {state === "ok" && env.secrets.length === 0 && (
+        <InitEmptyView refresh={snap.refresh} prefillKey={prefillKey} />
+      )}
+      {state === "ok" && env.secrets.length > 0 && (
+        <InitKeyedView env={env} refresh={snap.refresh} prefillKey={prefillKey} />
+      )}
       {(state === "decrypt_failed" || state === "corrupt") && <BrokenView env={env} />}
       <ManifestErrorsBanner env={env} />
     </section>
@@ -136,22 +150,45 @@ function NotInitView(props: { refresh: () => Promise<void> }) {
   );
 }
 
-function InitEmptyView(props: { refresh: () => Promise<void> }) {
+function InitEmptyView(props: { refresh: () => Promise<void>; prefillKey?: string }) {
   const [open, setOpen] = useState(false);
+  const [prefill, setPrefill] = useState<string | undefined>(undefined);
+  // Catalog "Open Secrets" deep-link (epic area 2): when arriving with
+  // ?key=<vault-key>, auto-open the Add-secret modal pre-filled with that key.
+  // Re-fires when the deep-link key changes (a second navigation with a new key).
+  useEffect(() => {
+    if (props.prefillKey) {
+      setPrefill(props.prefillKey);
+      setOpen(true);
+    }
+  }, [props.prefillKey]);
   return (
     <>
       <div class="empty-state">
         <p>No secrets yet.</p>
-        <button type="button" onClick={() => setOpen(true)}>Add secret</button>
+        <button type="button" onClick={() => { setPrefill(undefined); setOpen(true); }}>Add secret</button>
       </div>
-      <AddSecretModal open={open} onClose={() => setOpen(false)} onSaved={() => props.refresh()} />
+      {/* key on the prefill so opening with a deep-link key remounts the modal
+          with that name captured at first render (AddSecretModal seeds its name
+          field from prefillName via useState — keying makes the prefill land
+          deterministically even when the open transition fires after mount). */}
+      <AddSecretModal key={prefill ?? "new"} open={open} prefillName={prefill} onClose={() => setOpen(false)} onSaved={() => props.refresh()} />
     </>
   );
 }
 
-function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<void> }) {
+function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<void>; prefillKey?: string }) {
   const [addOpen, setAddOpen] = useState(false);
   const [prefill, setPrefill] = useState<string | undefined>(undefined);
+  // Catalog "Open Secrets" deep-link (epic area 2): when arriving with
+  // ?key=<vault-key>, auto-open the Add-secret modal pre-filled with that key.
+  // Re-fires when the deep-link key changes.
+  useEffect(() => {
+    if (props.prefillKey) {
+      setPrefill(props.prefillKey);
+      setAddOpen(true);
+    }
+  }, [props.prefillKey]);
   // Codex Task-7 quality review F3 (V1 limitation): if user opens
   // Rotate for key B before dismissing the post-A banner, bannerName
   // is overwritten and A's pending restart prompt is silently lost.
@@ -260,7 +297,10 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           </tbody>
         </table>
       </div>
-      <AddSecretModal open={addOpen} prefillName={prefill} onClose={() => setAddOpen(false)} onSaved={() => props.refresh()} />
+      {/* key on the prefill so each distinct prefill (deep-link ?key=, the
+          per-row "Add this secret", or the plain "Add secret") mounts the modal
+          with that name captured at first render via AddSecretModal's useState. */}
+      <AddSecretModal key={prefill ?? "new"} open={addOpen} prefillName={prefill} onClose={() => setAddOpen(false)} onSaved={() => props.refresh()} />
 
       {rotateName && (
         <RotateSecretModal

@@ -268,7 +268,10 @@ export function App() {
       body = <AddServerScreen mode="edit" route={route} onDirtyChange={setAddServerDirty} />;
       break;
     case "secrets":
-      body = <SecretsScreen />;
+      // route carries ?key=<vault-key> for the Catalog "Open Secrets" deep-link
+      // (epic area 2): Secrets reads it and auto-opens the Add-secret modal
+      // pre-filled with that key. Additive read; no schema change.
+      body = <SecretsScreen route={route} />;
       break;
     case "dashboard":
       body = <DashboardScreen />;
