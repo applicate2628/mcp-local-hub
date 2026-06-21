@@ -40,3 +40,5 @@ marker, so the stop-then-invalidate is atomic w.r.t. a concurrent wake.
 Sibling race: [[2026-06-20-serena-idle-stop-races-inflight-forward]] (the idle-stop vs
 in-flight-forward half). Best fixed together (one shared per-workspace stop/forward gate
 resolves both).
+
+_Closed 2026-06-21: done-by-tonight — #386 unconditional invalidate under the per-workspace stop-gate._

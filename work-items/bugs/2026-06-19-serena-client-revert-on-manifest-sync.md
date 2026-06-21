@@ -1,5 +1,5 @@
 ---
-status: active
+status: mostly-resolved
 severity: P1
 date: 2026-06-19
 slug: serena-client-revert-on-manifest-sync
@@ -26,3 +26,5 @@ Make the serena manifest router-native and delete the legacy/dynamic split.
 - GUI: Graphical user interface.
 - MCP: Model Context Protocol.
 - URL: Uniform Resource Locator.
+
+_2026-06-21: immediate install/manifest-sync revert to dead 9121/mcp FIXED by #400 (BuildPlanWithOpts consults SerenaRouterClientURL on the install write plane). Verified live: serena on http://127.0.0.1:9125/serena/mcp after redeploy to 43e7619a. Strategic follow-up (router-native manifest) tracked in work-items/decisions/2026-06-21-serena-router-client-url-single-owner.md._
