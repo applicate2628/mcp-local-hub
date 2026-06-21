@@ -309,6 +309,10 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	}
 	initFailures := make([]DaemonFailure, len(sess.InitFailures))
 	copy(initFailures, sess.InitFailures)
+	responseInstanceID := instanceID
+	if sess.InstanceID != "" {
+		responseInstanceID = sess.InstanceID
+	}
 	sess.mu.Unlock()
 
 	allowEmptyKnown := false
@@ -320,8 +324,16 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 	}
 
 	results := fanOutToolsList(ctx, successes)
-	hiddenSet := buildHiddenToolSet(snapshotHiddenToolsForScope(current, sess.ScopeKey))
-	return assembleToolsListResponse(reqID, results, initFailures, sess, instanceID, allowEmptyKnown, hiddenSet)
+	// Re-read only the visibility filter from the latest published resolver
+	// snapshot. The fan-out bindings above stay from the captured inputs, but a
+	// tools_hidden republish only narrows what enters result.tools and RouteMap;
+	// it never routes a tool to a daemon that was not already queried.
+	hiddenSnapshot := current
+	if live := LoadResolverSnapshot(); live != nil {
+		hiddenSnapshot = live
+	}
+	hiddenSet := buildHiddenToolSet(snapshotHiddenToolsForScope(hiddenSnapshot, sess.ScopeKey))
+	return assembleToolsListResponse(reqID, results, initFailures, sess, responseInstanceID, allowEmptyKnown, hiddenSet)
 }
 
 // filterToolsListSuccessesByLiveSnapshot reconciles the captured init successes
