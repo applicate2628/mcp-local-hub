@@ -27,6 +27,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -253,6 +254,40 @@ func TestSuperviseCommand_RefusesSecondInstance(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("first supervise did not exit on test-exit during cleanup")
+	}
+}
+
+// TestSuperviseCommand_LockLoserSkipsOldBinarySweep pins the singleton ordering
+// invariant: only the supervisor.lock winner may sweep old binary asides. A loser
+// must fail at lock acquisition before invoking the sweep hook.
+func TestSuperviseCommand_LockLoserSkipsOldBinarySweep(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	lockPath := filepath.Join(tmpHome, "supervisor.lock")
+	lk, err := api.AcquireSupervisorLock(lockPath)
+	if err != nil {
+		t.Fatalf("pre-acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+
+	var sweepCalls atomic.Int32
+	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+		sweepCalls.Add(1)
+		return nil
+	})
+	defer cleanupSweep()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected supervise lock loser to fail, got nil error")
+	}
+	if got := sweepCalls.Load(); got != 0 {
+		t.Fatalf("lock loser called SweepOldBinaries %d time(s), want 0", got)
 	}
 }
 
@@ -774,10 +809,9 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
-	cleanupReaper := setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+	defer setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
 		return ReaperResult{}, nil
-	})
-	defer cleanupReaper()
+	})()
 
 	sweepCalled := make(chan string, 1)
 	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
@@ -819,6 +853,67 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	}
+}
+
+func TestSuperviseCommand_SkipsOldBinarySweepWhenExecutableUnavailable(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	defer setSupervisorExecutableFnForTest(func() (string, error) {
+		return "", errors.New("executable unavailable")
+	})()
+
+	cleanupReaper := setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+		return ReaperResult{}, nil
+	})
+	defer cleanupReaper()
+
+	var sweepCalls atomic.Int32
+	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+		sweepCalls.Add(1)
+		return nil
+	})
+	defer cleanupSweep()
+
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("supervise exited before startup after executable lookup failure: %v", err)
+		default:
+		}
+		if data, err := os.ReadFile(eventsPath); err == nil && strings.Contains(string(data), `"event":"supervisor-start"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("supervise did not reach startup after executable lookup failure")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	exitCh <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervise exited with err after executable lookup failure: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	}
+	if got := sweepCalls.Load(); got != 0 {
+		t.Fatalf("SweepOldBinaries calls = %d, want 0 when executable lookup fails", got)
 	}
 }
 

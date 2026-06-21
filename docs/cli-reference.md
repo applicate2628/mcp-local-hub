@@ -32,6 +32,81 @@ For install / per-client behaviour / troubleshooting see
 | `mcphub manifest list` | List every manifest under `servers/*/manifest.yaml` |
 | `mcphub manifest show <name>` | Print a manifest's contents |
 
+## Supervisor lifecycle
+
+| Command | Short | Long |
+|---|---|---|
+| `mcphub migrate-legacy [--dry-run\|--yes\|--json]` | Detect + migrate disabled mcp-language-server entries into managed registry | Scan every installed MCP client config (Codex + Claude Code) for |
+| | | disabled entries whose command is mcp-language-server. For each unique |
+| | | workspace, emit one 'mcphub register' — which allocates ports, creates |
+| | | scheduler tasks, and writes new client entries for ALL manifest |
+| | | languages — and THEN delete the original disabled entries. |
+| | | Lazy-mode note: one 'register' call covers every manifest language at |
+| | | once, so migration dedupes the detected rows by workspace and emits |
+| | | exactly one register per unique workspace (not one per language). |
+| | | Interactive by default: prompts per workspace. --yes skips every prompt. |
+| | | --dry-run prints the plan without changing any state. |
+| | | Examples: |
+| | | mcphub migrate-legacy --dry-run    # preview |
+| | | mcphub migrate-legacy              # interactive |
+| | | mcphub migrate-legacy --yes        # non-interactive |
+| | | See also: register, workspaces. |
+| `mcphub autostart {enable\|disable\|status} [--strict-mode]` | Manage supervisor autostart at logon | mcphub autostart installs (or removes) an OS-native shim for the |
+| | | current platform. |
+| | | - Windows managed: Task Scheduler entry `\mcp-local-hub-supervisor` |
+| | | with a LogonTrigger; it runs `mcphub gui [--strict-mode]` at |
+| | | current-user sign-in. |
+| | | - Linux managed: systemd user service |
+| | | `~/.config/systemd/user/mcphub-supervisor.service`; it runs |
+| | | `mcphub supervise [--strict-mode]` via `systemctl --user enable --now`. |
+| | | - macOS managed: LaunchAgent plist |
+| | | `~/Library/LaunchAgents/com.applicate2628.mcphub-supervisor.plist`; |
+| | | it runs `mcphub supervise [--strict-mode]` via `launchctl bootstrap`. |
+| | | - Linux/macOS unmanaged: no autostart backend; run `mcphub supervise` |
+| | | manually or enable the managed backend. |
+| | | `status` prints one of: absent, enabled-running, enabled-stopped, drifted, |
+| | | stale-residue. Drifted means the on-disk shim's args or binary path |
+| | | disagree with what `mcphub autostart enable [--strict-mode]` would |
+| | | write today; re-run `mcphub autostart enable` to reconcile. |
+| `mcphub strict-mode {enable\|disable\|--recover}` | Atomically toggle supervisor strict-mode (intent + autostart shim) | mcphub strict-mode mutates the supervisor's strict-mode policy by |
+| | | writing supervisor-intent.json AND the autostart shim's argv in a |
+| | | single atomic operation. If either write fails, the other is reverted |
+| | | so the two resources never drift. |
+| | | enable     — set strict_mode=true; shim launches with --strict-mode. |
+| | | disable    — set strict_mode=false; shim launches without the flag. |
+| | | --recover  — read the breadcrumb left by a torn previous run and |
+| | | reconcile both resources interactively. |
+| | | Exit codes: |
+| | | 9   STRICT_MODE_BUSY          — migration.lock or --once.lock held by |
+| | | another holder; wait and retry. |
+| | | 10  STRICT_MODE_REVERT_FAILED — both shim write AND intent revert |
+| | | failed; breadcrumb written to |
+| | | <state-dir>/strict-mode-mutation-incomplete.json |
+| | | and operator must run --recover. |
+
+## Exit codes
+
+`cmd/mcphub` exits 0 on success. On ordinary command errors it prints
+`error: ...` and exits 1. The table below is the complete set of mcphub-owned
+typed exit codes that the main binary preserves from command code.
+
+| Code | Meaning |
+|---|---|
+| 0 | success |
+| 1 | generic |
+| 2 | `mcphub gui --force` diagnostic-only path: printed stale-instance details; no kill attempted |
+| 3 | `mcphub gui --force --kill`: race lost or recorded PID already gone |
+| | `mcphub gui --reset-port`: refused because another GUI is running |
+| 4 | `mcphub gui --force --kill`: pidport malformed/unrecoverable or kill attempt failed |
+| 6 | Non-interactive shell requires `--yes`: `mcphub gui --force --kill`, `mcphub gui --reset-port`, `mcphub hub-mcp regenerate-token --client <name>`, or `mcphub hub-mcp regenerate-instance-id` |
+| 7 | `mcphub gui --force --kill`: identity gate refused to kill the recorded PID |
+| 8 | setup-state-path-rejected |
+| | `mcphub gui --reset-port`: refused while hub-aggregate clients are gate-ON |
+| 9 | STRICT_MODE_BUSY |
+| 10 | STRICT_MODE_REVERT_FAILED |
+| 11 | setup elevated override audit required but failed |
+| 12 | setup supervisor-liveness task install failed |
+
 ## Logs, backups, recovery
 
 | Command | What it does |

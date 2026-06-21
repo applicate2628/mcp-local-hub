@@ -58,6 +58,14 @@ import (
 // reassign this var.
 var reaperFn = ReapStaleTransients
 
+var supervisorExecutableFn = os.Executable
+
+func setSupervisorExecutableFnForTest(fn func() (string, error)) func() {
+	prev := supervisorExecutableFn
+	supervisorExecutableFn = fn
+	return func() { supervisorExecutableFn = prev }
+}
+
 // errSpawnPreChild marks a SpawnFunc error that occurred BEFORE any
 // child process existed (cmd.Start / StartWithJob returned non-nil).
 // The supervisor controller uses errors.Is to distinguish this from
@@ -464,12 +472,13 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	if err != nil {
 		return fmt.Errorf("resolve supervisor state dir: %w", err)
 	}
+	exe, executableLookupErr := supervisorExecutableFn()
 
 	// Acquire singleton lock — fails fast if another supervisor holds
 	// it. The lock+sidecar is the FIRST resource taken so concurrent
-	// supervisors never race to open the audit log or bind the IPC
-	// listener (both produce noisy "already in use" errors that mask
-	// the real "another supervisor is running" condition).
+	// supervisors never race to sweep old binary asides, open the audit log,
+	// or bind the IPC listener (the latter two produce noisy "already in use"
+	// errors that mask the real "another supervisor is running" condition).
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	lk, err := api.AcquireSupervisorLock(lockPath)
 	if err != nil {
@@ -505,13 +514,22 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			"state_dir":             stateDir,
 		},
 	})
-	if exe, err := os.Executable(); err != nil {
+	if executableLookupErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
 			Event:    "old-binary-sweep-failed",
 			Body: map[string]any{
-				"err": err.Error(),
+				"err": executableLookupErr.Error(),
+			},
+		})
+	} else if exe == "" {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "old-binary-sweep-failed",
+			Body: map[string]any{
+				"err": "empty supervisor executable path",
 			},
 		})
 	} else {

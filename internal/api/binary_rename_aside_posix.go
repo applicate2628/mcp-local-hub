@@ -11,10 +11,9 @@
 // rename, only on opening the still-running binary for write.
 //
 // We still create the `.old-<ts>` aside file (instead of a direct
-// rename-over) so SweepOldBinaries has consistent state to clean up
-// regardless of platform. This keeps operator forensics uniform —
+// rename-over) so SweepOldBinaries has consistent state to clean up:
 // "the prior installed binary is at <install-dir>/mcphub.old-<ts>"
-// holds on all OSes until the 7-day sweep removes it.
+// holds until the 7-day sweep removes it.
 
 package api
 

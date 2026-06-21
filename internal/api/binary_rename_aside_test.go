@@ -97,6 +97,13 @@ func TestSweepOldBinaries_RemovesAgedFiles(t *testing.T) {
 	}
 }
 
+func platformBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "mcphub.exe"
+	}
+	return "mcphub"
+}
+
 // TestSweepOldBinaries_KeepsRecentFiles verifies that aside files whose suffix
 // timestamp is within the 7-day retention window are NOT removed.
 func TestSweepOldBinaries_KeepsRecentFiles(t *testing.T) {

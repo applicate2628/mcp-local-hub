@@ -53,6 +53,9 @@ const renameAsideMaxKeep = 5
 // Returns a non-nil error only if filepath.Glob itself fails (a
 // programming error in the pattern, not a runtime condition). Optional warn
 // callbacks receive per-file remove failures; those failures remain non-fatal.
+//
+// Binary crash auto-recovery is deferred; see
+// work-items/backlog/2026-06-21-binary-crash-recovery-deferred.md.
 func SweepOldBinaries(dir string, warn ...func(string, error)) error {
 	patterns := []string{
 		filepath.Join(dir, "mcphub.exe.old-*"),
@@ -117,8 +120,17 @@ func generatedRenameAsideTime(path string) (time.Time, bool) {
 			continue
 		}
 		suffix := strings.TrimPrefix(base, prefix)
-		ts, err := time.Parse(renameAsideTimestampLayout, suffix)
-		return ts, err == nil
+		return parseRenameAsideTimestamp(suffix)
+	}
+	return time.Time{}, false
+}
+
+func parseRenameAsideTimestamp(suffix string) (time.Time, bool) {
+	for _, layout := range []string{renameAsideTimestampLayout, time.RFC3339Nano, time.RFC3339} {
+		ts, err := time.Parse(layout, suffix)
+		if err == nil {
+			return ts, true
+		}
 	}
 	return time.Time{}, false
 }
