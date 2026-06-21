@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { fetchOrThrow, installMarketplaceEntry, refreshMarketplace } from "../api";
-import type { MarketplaceInstallResult } from "../api";
+import {
+  fetchOrThrow,
+  getServerReadiness,
+  installMarketplaceEntry,
+  refreshMarketplace,
+} from "../api";
+import type { MarketplaceInstallResult, ReadinessReport } from "../api";
 import { CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
 import { InfoTip } from "../components/InfoTip";
+import { ReadinessPanel, readinessBlockerCount } from "../components/ReadinessPanel";
+import { AddSecretModal } from "../components/AddSecretModal";
 import type { DaemonStatus } from "../types";
 
 // Mirrors catalogEntry in internal/gui/manifest.go — one row of the GET
@@ -105,6 +112,12 @@ export function CatalogScreen() {
   // The name awaiting uninstall confirmation (a confirm gate in front of
   // the DESTRUCTIVE DELETE). null = no confirm prompt open.
   const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null);
+  // The shipped-server row whose pre-install readiness gate is open (epic
+  // install-and-it-works, area 2). null = no gate open. Clicking Install opens
+  // the gate (GET /api/server/readiness) so blockers/optional-secret prompts
+  // surface BEFORE the POST /api/install, instead of failing later as a cryptic
+  // HTTP-502 at the client. The actual POST runs from the gate's Confirm button.
+  const [readinessGate, setReadinessGate] = useState<string | null>(null);
   // Client-side search filter over shipped-server name + description. The
   // backend is not involved — purely a render-time narrowing.
   const [query, setQuery] = useState("");
@@ -185,6 +198,8 @@ export function CatalogScreen() {
       if (resp.status === 204) {
         if (!mountedRef.current) return;
         setInstallStates((prev) => ({ ...prev, [name]: { phase: "installed" } }));
+        // Close the pre-install readiness gate (if it was open for this row).
+        setReadinessGate((g) => (g === name ? null : g));
         // Re-fetch /api/status so the server flips into the installed set
         // authoritatively (and survives a navigate-away + return).
         setReloadToken((n) => n + 1);
@@ -390,12 +405,23 @@ export function CatalogScreen() {
                       class="btn btn-secondary"
                       data-testid={`catalog-install-${name}`}
                       disabled={state.phase === "installing"}
-                      onClick={() => installServer(name)}
+                      // Open the pre-install readiness gate instead of POSTing
+                      // immediately (epic area 2). The gate's Confirm button runs
+                      // the actual installServer() POST once blockers are clear.
+                      onClick={() => setReadinessGate(name)}
                     >
                       {state.phase === "installing" ? "Installing…" : "Install"}
                     </button>
                   )}
                 </div>
+                {!installed && readinessGate === name && (
+                  <CatalogInstallGate
+                    name={name}
+                    installing={state.phase === "installing"}
+                    onConfirmInstall={() => installServer(name)}
+                    onCancel={() => setReadinessGate(null)}
+                  />
+                )}
                 {state.phase === "error" && (
                   <p class="error" data-testid={`catalog-error-${name}`}>
                     {state.message}
@@ -418,6 +444,165 @@ export function CatalogScreen() {
         onRefreshed={setMarketplace}
       />
     </section>
+  );
+}
+
+// CatalogInstallGate is the pre-install readiness panel for ONE shipped catalog
+// row (epic install-and-it-works, area 2 — env-secrets-onboarding). On mount it
+// GETs /api/server/readiness?server=<name> and renders the shared ReadinessPanel
+// so the operator sees exactly what blocks (or merely advises) the install
+// BEFORE the POST, instead of a later cryptic HTTP-502 at the client:
+//
+//   • Blockers (non-optional unmet) → shown with their guided Fix; the Confirm
+//     Install button stays DISABLED until they are resolved (honest UX — these
+//     would fail the install).
+//   • Optional unmet secrets → each offers "Set <key>" (opens AddSecretModal,
+//     the SINGLE owner of POST /api/secrets, pre-filled with the key) and an
+//     "Open Secrets" deep-link (#/secrets?key=<key>). The operator may set it
+//     and install, OR skip and install without it (non-blocking — the server
+//     runs without the env var and reports its own missing-key if it needs it).
+//
+// It consumes the readiness endpoint READ-ONLY and never mutates the install
+// path; the actual POST runs in the parent's installServer() via onConfirmInstall.
+function CatalogInstallGate({
+  name,
+  installing,
+  onConfirmInstall,
+  onCancel,
+}: {
+  name: string;
+  // True while the parent's POST /api/install is in flight for this row, so the
+  // gate disables its own buttons (mirrors the parent button's "Installing…").
+  installing: boolean;
+  onConfirmInstall: () => void;
+  onCancel: () => void;
+}) {
+  const [report, setReport] = useState<ReadinessReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Bump to re-fetch readiness after an inline secret is set (so the secret row
+  // flips from advisory → satisfied and any vault blocker clears).
+  const [reloadToken, setReloadToken] = useState(0);
+  // The vault key whose AddSecretModal is open (pre-filled), or null. Reusing
+  // AddSecretModal keeps "set a secret" a single owner — no new POST handler.
+  const [secretModalKey, setSecretModalKey] = useState<string | null>(null);
+  // mountedRef guards post-await setState against the navigate-away race.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getServerReadiness(name)
+      .then((rep) => {
+        if (cancelled) return;
+        setReport(rep);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // A readiness fetch failure must not strand the operator: surface the
+        // error in the panel but still allow install (the gate is advisory; the
+        // backend install preflight remains the authoritative gate).
+        setReport(null);
+        setError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [name, reloadToken]);
+
+  // Blocker count drives the Confirm-Install disable on the SAME predicate the
+  // panel renders (readinessBlockerCount is the single owner). While the report
+  // is still loading we have no verdict yet, so Confirm is disabled then too.
+  const blockers = readinessBlockerCount(report);
+  // A fetch error means we could not verify readiness — do NOT block install on
+  // it (the backend preflight is authoritative); only real blockers disable.
+  const confirmDisabled = installing || loading || blockers > 0;
+
+  return (
+    <div class="catalog-install-gate" data-testid={`catalog-readiness-gate-${name}`}>
+      <ReadinessPanel
+        report={report}
+        loading={loading}
+        error={error}
+        // Catalog does not use the inline-write-via-parent-save model; the
+        // secret-action render below composes AddSecretModal + the deep-link
+        // instead. inlineSecrets/onInlineSecretChange are inert here.
+        inlineSecrets={{}}
+        onInlineSecretChange={() => {}}
+        inputsDisabled={installing}
+        renderSecretAction={(key) => (
+          <div class="readiness-secret-actions" data-testid={`catalog-secret-actions-${key}`}>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-testid={`catalog-secret-set-${key}`}
+              disabled={installing}
+              onClick={() => setSecretModalKey(key)}
+            >
+              Set {key}
+            </button>
+            <a
+              class="readiness-secret-deeplink"
+              href={`#/secrets?key=${encodeURIComponent(key)}`}
+              data-testid={`catalog-secret-open-secrets-${key}`}
+            >
+              Open Secrets
+            </a>
+          </div>
+        )}
+      />
+      <div class="catalog-install-gate-actions">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          data-testid={`catalog-install-confirm-${name}`}
+          disabled={confirmDisabled}
+          onClick={onConfirmInstall}
+        >
+          {installing
+            ? "Installing…"
+            : blockers > 0
+              ? `Fix ${blockers} blocker${blockers === 1 ? "" : "s"} to install`
+              : "Install"}
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          data-testid={`catalog-install-cancel-${name}`}
+          disabled={installing}
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      </div>
+
+      {/* AddSecretModal — the single owner of POST /api/secrets — pre-filled
+          with the key the operator chose to set inline. On save we re-fetch
+          readiness so the just-set secret flips the row from advisory →
+          satisfied (and clears any vault blocker). */}
+      <AddSecretModal
+        // key on the chosen key so the modal mounts with that name captured at
+        // first render (AddSecretModal seeds its name field from prefillName via
+        // useState) — deterministic prefill regardless of open-transition timing.
+        key={secretModalKey ?? "closed"}
+        open={secretModalKey !== null}
+        prefillName={secretModalKey ?? undefined}
+        onClose={() => setSecretModalKey(null)}
+        onSaved={() => {
+          if (mountedRef.current) setReloadToken((n) => n + 1);
+        }}
+      />
+    </div>
   );
 }
 

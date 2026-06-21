@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/preact";
-import { ReadinessPanel } from "./ReadinessPanel";
+import { ReadinessPanel, readinessBlockerCount } from "./ReadinessPanel";
 import type { ReadinessReport } from "../api";
 
 beforeEach(() => {
@@ -108,5 +108,75 @@ describe("ReadinessPanel", () => {
     );
     expect(screen.queryByTestId("readiness-secret-input-bad-key")).toBeNull();
     expect(screen.getByText("use the secret picker")).toBeTruthy();
+  });
+
+  // ── Catalog secret-action affordance (epic area 2) ───────────────────────
+  // When renderSecretAction is supplied, it REPLACES the inline password input
+  // for an inlineable unset optional secret — the Catalog flow composes
+  // AddSecretModal + an "Open Secrets" deep-link instead of the inline write.
+
+  it("renders renderSecretAction in place of the inline input for an inlineable secret", () => {
+    const rep = report(
+      [{ name: "secret: OPENAI_API_KEY", ok: false, optional: true, reason: "not set" }],
+      true,
+    );
+    render(
+      <ReadinessPanel
+        report={rep}
+        loading={false}
+        error={null}
+        inlineSecrets={{}}
+        onInlineSecretChange={noop}
+        renderSecretAction={(key) => <button data-testid={`set-${key}`}>Set {key}</button>}
+      />,
+    );
+    // The caller affordance renders; the inline password input does NOT.
+    expect(screen.getByTestId("set-OPENAI_API_KEY")).toBeTruthy();
+    expect(screen.queryByTestId("readiness-secret-input-OPENAI_API_KEY")).toBeNull();
+  });
+
+  it("does NOT call renderSecretAction for a blocking (non-optional) secret", () => {
+    const renderSecretAction = vi.fn(() => null);
+    const rep = report(
+      [{ name: "secret: REQUIRED_TOKEN", ok: false, optional: false, fix: "Set the secret" }],
+      false,
+    );
+    render(
+      <ReadinessPanel
+        report={rep}
+        loading={false}
+        error={null}
+        inlineSecrets={{}}
+        onInlineSecretChange={noop}
+        renderSecretAction={renderSecretAction}
+      />,
+    );
+    // A blocker is never "inlineable", so the affordance is not invoked and the
+    // guided Fix shows instead.
+    expect(renderSecretAction).not.toHaveBeenCalled();
+    expect(screen.getByText("Set the secret")).toBeTruthy();
+  });
+
+  // ── readinessBlockerCount helper (single owner of the disable predicate) ──
+
+  it("readinessBlockerCount counts only non-optional unmet requirements", () => {
+    expect(readinessBlockerCount(null)).toBe(0);
+    expect(
+      readinessBlockerCount(
+        report([
+          { name: "launcher: Node.js", ok: true },
+          { name: "secret: OPTIONAL_KEY", ok: false, optional: true }, // advisory, not a blocker
+        ]),
+      ),
+    ).toBe(0);
+    expect(
+      readinessBlockerCount(
+        report([
+          { name: "binary: gdb", ok: false, optional: false }, // blocker
+          { name: "secret: OPTIONAL_KEY", ok: false, optional: true }, // advisory
+          { name: "mcphub binary", ok: false }, // blocker (optional undefined → false)
+        ]),
+      ),
+    ).toBe(2);
   });
 });

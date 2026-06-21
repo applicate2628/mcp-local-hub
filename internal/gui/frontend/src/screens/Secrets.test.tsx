@@ -120,3 +120,68 @@ describe("SecretsScreen — `mcphub secrets edit` instructional CTA", () => {
     expect(urls.some((u) => u.includes("edit"))).toBe(false);
   });
 });
+
+// ── SEAM-D: Catalog "Open Secrets" deep-link (#/secrets?key=<key>) ──────────
+// The Catalog readiness gate links each unset optional secret to
+// #/secrets?key=<key>. SecretsScreen reads route.query and auto-opens the
+// Add-secret modal pre-filled with that key.
+describe("SecretsScreen — ?key= deep-link prefill (epic area 2)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  const okEmptyVault: SecretsEnvelope = {
+    vault_state: "ok",
+    secrets: [],
+    manifest_errors: [],
+  };
+
+  function route(query: string) {
+    return { screen: "secrets", query };
+  }
+
+  it("auto-opens AddSecretModal pre-filled with the ?key= value (empty vault)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/secrets": () => jsonResponse(200, okEmptyVault),
+        // InitEmptyView fetches /api/status (running-daemon counts) on some paths;
+        // tolerate it so the router guard never throws "unexpected fetch".
+        "/api/status": () => jsonResponse(200, []),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<SecretsScreen route={route("key=WOLFRAM_APP_ID")} />);
+
+    // The deep-link toggles the modal open with the key seeded as the name. The
+    // modal remounts (keyed on the prefill) so the prefilled name lands
+    // asynchronously — wait for the OPEN modal carrying the prefilled value.
+    await waitFor(() => {
+      const m = screen.getByTestId("add-secret-modal") as HTMLDialogElement;
+      expect(m.open).toBe(true);
+      const nameInput = m.querySelector('input[type="text"]') as HTMLInputElement;
+      expect(nameInput.value).toBe("WOLFRAM_APP_ID");
+      // The prefilled name is locked (the deep-link names the exact key).
+      expect(nameInput.disabled).toBe(true);
+    });
+  });
+
+  it("does NOT auto-open the modal when there is no ?key=", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/secrets": () => jsonResponse(200, okEmptyVault),
+        "/api/status": () => jsonResponse(200, []),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<SecretsScreen route={route("")} />);
+    // Wait for the empty-state to settle, then assert the modal is not open.
+    await screen.findByText("No secrets yet.");
+    const modal = screen.queryByTestId("add-secret-modal");
+    // happy-dom: a closed <dialog> has no `open` attribute.
+    expect(modal && (modal as HTMLDialogElement).open).toBeFalsy();
+  });
+});

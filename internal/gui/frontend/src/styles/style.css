@@ -2290,3 +2290,29 @@ nav a,
   border-radius: 0.3rem;
   font-size: 0.85em;
 }
+
+/* Catalog pre-install readiness gate (epic install-and-it-works, area 2).
+   The per-row panel that opens under a shipped catalog card's Install button. */
+.catalog-install-gate {
+  margin-top: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface-2, rgba(0, 0, 0, 0.02));
+}
+.catalog-install-gate-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+/* The "Set <key>" + "Open Secrets" affordance that replaces the inline input
+   in the Catalog flow (composes AddSecretModal + the #/secrets?key= deep-link). */
+.readiness-secret-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.readiness-secret-deeplink {
+  font-size: 0.85em;
+}

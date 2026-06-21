@@ -1,3 +1,4 @@
+import type { VNode } from "preact";
 import type { ReadinessReport, ReadinessRequirement } from "../api";
 import { SECRET_NAME_RE, isReservedName } from "../lib/reserved-names";
 
@@ -9,10 +10,30 @@ export function secretKeyOf(req: ReadinessRequirement): string {
   return "";
 }
 
+// isBlocker is the SINGLE source of truth for the "this requirement blocks
+// install" predicate — mirroring the backend `!OK && !Optional` rule (a
+// non-optional unmet requirement; an unmet optional is advisory). Both the
+// panel's blocker count and a caller gating its Install button must read THIS,
+// never re-derive the predicate, so the GUI gate can never drift from what the
+// panel renders.
+function isBlocker(req: ReadinessRequirement): boolean {
+  return !req.ok && !req.optional;
+}
+
+// readinessBlockerCount returns how many requirements block install. A caller
+// (e.g. the Catalog pre-install flow) disables its Install button while this is
+// > 0 — the honest "you cannot install yet" UX — on the same predicate the
+// panel's badge uses. Null report → 0 (nothing checked yet does not block; the
+// caller gates on loading separately).
+export function readinessBlockerCount(report: ReadinessReport | null): number {
+  if (!report) return 0;
+  return report.requirements.filter(isBlocker).length;
+}
+
 // rank orders requirements: blockers first, then unmet advisories (the inline
 // secret prompts), then satisfied requirements.
 function rank(req: ReadinessRequirement): number {
-  if (!req.ok && !req.optional) return 0;
+  if (isBlocker(req)) return 0;
   if (!req.ok && req.optional) return 1;
   return 2;
 }
@@ -37,6 +58,15 @@ export interface ReadinessPanelProps {
   // would be silently dropped or clobbered — disable input until the save settles
   // (Codex #378 r6).
   inputsDisabled?: boolean;
+  // renderSecretAction, when provided, REPLACES the inline password input for an
+  // inlineable unset optional `secret:` requirement with caller-supplied
+  // affordances. This is the seam the Catalog pre-install flow (epic area 2)
+  // uses to offer "Set <key>" (open AddSecretModal — the single owner of POST
+  // /api/secrets) + "Open Secrets" (deep-link) INSTEAD of the AddServer
+  // inline-write-via-parent-save model — without forking a second panel.
+  // AddServer never passes it, so its inline-input behavior is unchanged
+  // (inlineSecrets / onInlineSecretChange stay the persist path there).
+  renderSecretAction?: (key: string, req: ReadinessRequirement) => VNode | null;
 }
 
 // ReadinessPanel renders the install-readiness report as actionable rows so the
@@ -45,8 +75,16 @@ export interface ReadinessPanelProps {
 // an INLINE field to set the value right here at install (epic install-and-it-
 // works, area 1).
 export function ReadinessPanel(props: ReadinessPanelProps) {
-  const { report, loading, error, inlineSecrets, onInlineSecretChange, readOnly, inputsDisabled } =
-    props;
+  const {
+    report,
+    loading,
+    error,
+    inlineSecrets,
+    onInlineSecretChange,
+    readOnly,
+    inputsDisabled,
+    renderSecretAction,
+  } = props;
 
   if (loading && !report) {
     return (
@@ -66,7 +104,7 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
   if (!report) return null;
 
   const reqs = [...report.requirements].sort((a, b) => rank(a) - rank(b));
-  const blockers = reqs.filter((r) => !r.ok && !r.optional).length;
+  const blockers = reqs.filter(isBlocker).length;
   // When the vault itself is unreadable (decrypt-failed / corrupt), the "secrets
   // vault" requirement is not ok. An inline write then CANNOT succeed: the save
   // path calls secretsInit() for any non-ok vault and init refuses pre-existing
@@ -118,7 +156,12 @@ export function ReadinessPanel(props: ReadinessPanelProps) {
               <div class="readiness-row-body">
                 <span class="readiness-row-name">{req.name}</span>
                 {req.reason ? <span class="readiness-row-reason">{req.reason}</span> : null}
-                {inlineable ? (
+                {inlineable && renderSecretAction ? (
+                  // Catalog pre-install flow (epic area 2): the caller supplies
+                  // the affordance — "Set <key>" (AddSecretModal) + "Open Secrets"
+                  // deep-link — instead of the inline-write input below.
+                  renderSecretAction(key, req)
+                ) : inlineable ? (
                   <label class="readiness-secret-inline">
                     <span class="readiness-secret-inline-label">Set {key} now:</span>
                     <input

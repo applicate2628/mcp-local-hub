@@ -69,6 +69,14 @@ function mpEntry(
 // "unexpected fetch" guard on the component's /api/marketplace load.
 const emptyMarketplace = () => jsonResponse(200, { entries: [] });
 
+// A "ready" GET /api/server/readiness body — no requirements, ready=true. The
+// install gate (epic area 2) opens on Install click and fetches this BEFORE the
+// POST. Shipped-server install tests that don't care about readiness use this so
+// the gate's Confirm button is immediately enabled.
+function readyReadiness(server: string) {
+  return jsonResponse(200, { server, ready: true, requirements: [] });
+}
+
 describe("CatalogScreen", () => {
   beforeEach(() => {
     cleanup();
@@ -159,6 +167,8 @@ describe("CatalogScreen", () => {
                 { server: "time", daemon: "default", port: 9131, state: "Running" } as DaemonStatus,
               ]);
         },
+        // Install gate opens on click and fetches readiness BEFORE the POST.
+        "/api/server/readiness": () => readyReadiness("time"),
         "/api/install": (init) => {
           // The URL prefix matched; capture nothing from init (the name is
           // on the query string), record the call, and return 204.
@@ -172,8 +182,13 @@ describe("CatalogScreen", () => {
     const fetchSpy = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
 
     render(<CatalogScreen />);
+    // Click Install → opens the readiness gate (does NOT POST yet).
     const installBtn = await screen.findByTestId("catalog-install-time");
     fireEvent.click(installBtn);
+    // Confirm inside the gate runs the actual POST /api/install.
+    const confirmBtn = await screen.findByTestId("catalog-install-confirm-time");
+    await waitFor(() => expect((confirmBtn as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(confirmBtn);
 
     // The installed badge appears once the POST returns 204.
     await waitFor(() => {
@@ -193,6 +208,7 @@ describe("CatalogScreen", () => {
       fetchRouter({
         "/api/catalog": () => jsonResponse(200, { catalog: [entry("time")] }),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/server/readiness": () => readyReadiness("time"),
         "/api/install": () =>
           jsonResponse(500, { error: "supervisor unavailable", code: "INSTALL_FAILED" }),
         "/api/marketplace": emptyMarketplace,
@@ -202,6 +218,10 @@ describe("CatalogScreen", () => {
     render(<CatalogScreen />);
     const installBtn = (await screen.findByTestId("catalog-install-time")) as HTMLButtonElement;
     fireEvent.click(installBtn);
+    // Confirm inside the gate runs the POST that fails.
+    const confirmBtn = await screen.findByTestId("catalog-install-confirm-time");
+    await waitFor(() => expect((confirmBtn as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(confirmBtn);
 
     await waitFor(() => {
       expect(screen.queryByTestId("catalog-error-time")).toBeTruthy();
@@ -213,6 +233,185 @@ describe("CatalogScreen", () => {
     const retryBtn = screen.getByTestId("catalog-install-time") as HTMLButtonElement;
     expect(retryBtn.textContent).toBe("Install");
     expect(retryBtn.disabled).toBe(false);
+  });
+
+  // ── SEAM-C: pre-install readiness gate (epic install-and-it-works, area 2) ──
+
+  it("opens the readiness gate on Install click (does NOT POST /api/install yet)", async () => {
+    const installCalls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("time")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/server/readiness": () => readyReadiness("time"),
+        "/api/install": () => {
+          installCalls.push("POST");
+          return noContentResponse();
+        },
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-install-time"));
+
+    // The gate (with its readiness panel + Confirm/Cancel) renders…
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-readiness-gate-time")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("catalog-install-confirm-time")).toBeTruthy();
+    // …and NO install POST has fired yet (only the readiness GET).
+    expect(installCalls).toEqual([]);
+  });
+
+  it("disables Confirm install while a blocker is present (honest UX)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("gdb-mcp")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/server/readiness": () =>
+          jsonResponse(200, {
+            server: "gdb-mcp",
+            ready: false,
+            requirements: [
+              { name: "binary: gdb", ok: false, optional: false, reason: "not found", fix: "Install gdb" },
+            ],
+          }),
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-install-gdb-mcp"));
+
+    const confirm = (await screen.findByTestId(
+      "catalog-install-confirm-gdb-mcp",
+    )) as HTMLButtonElement;
+    // Blocker present → Confirm disabled, blocker count + guided Fix shown.
+    await waitFor(() => expect(confirm.disabled).toBe(true));
+    expect(confirm.textContent).toContain("blocker");
+    expect(screen.getByText("Install gdb")).toBeTruthy();
+  });
+
+  it("renders the Set-secret + Open-Secrets affordance for an unset optional secret and enables Install", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("wolfram")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/server/readiness": () =>
+          jsonResponse(200, {
+            server: "wolfram",
+            // Optional secret unset → ready stays true (advisory, non-blocking).
+            ready: true,
+            requirements: [
+              { name: "secret: WOLFRAM_APP_ID", ok: false, optional: true, reason: "not set", fix: "Enter it" },
+            ],
+          }),
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-install-wolfram"));
+
+    // The "Set <key>" button + the "Open Secrets" deep-link both render.
+    const setBtn = await screen.findByTestId("catalog-secret-set-WOLFRAM_APP_ID");
+    expect(setBtn).toBeTruthy();
+    const openLink = screen.getByTestId(
+      "catalog-secret-open-secrets-WOLFRAM_APP_ID",
+    ) as HTMLAnchorElement;
+    expect(openLink.getAttribute("href")).toBe("#/secrets?key=WOLFRAM_APP_ID");
+    // The inline password input (AddServer model) is NOT used in the Catalog flow.
+    expect(screen.queryByTestId("readiness-secret-input-WOLFRAM_APP_ID")).toBeNull();
+    // An optional unset secret is advisory → Confirm install is ENABLED.
+    const confirm = screen.getByTestId("catalog-install-confirm-wolfram") as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    expect(confirm.textContent).toBe("Install");
+  });
+
+  it("opens AddSecretModal pre-filled when Set <key> is clicked and re-checks readiness on save", async () => {
+    let readinessCalls = 0;
+    let secretAdded = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("wolfram")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/server/readiness": () => {
+          readinessCalls += 1;
+          // After the secret is added, the second readiness fetch reports it set.
+          return jsonResponse(200, {
+            server: "wolfram",
+            ready: true,
+            requirements: [
+              {
+                name: "secret: WOLFRAM_APP_ID",
+                ok: secretAdded,
+                optional: true,
+                reason: secretAdded ? undefined : "not set",
+              },
+            ],
+          });
+        },
+        // AddSecretModal POSTs here (201 = created). Reuse — no new handler.
+        "/api/secrets": (init) => {
+          if ((init?.method ?? "GET") === "POST") {
+            secretAdded = true;
+            return new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } });
+          }
+          return jsonResponse(200, { vault_state: "ok", secrets: [], manifest_errors: [] });
+        },
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-install-wolfram"));
+
+    fireEvent.click(await screen.findByTestId("catalog-secret-set-WOLFRAM_APP_ID"));
+    // AddSecretModal opens pre-filled with the key (name input disabled + valued).
+    // The modal remounts keyed on the chosen key, so the prefill lands async.
+    await waitFor(() => {
+      const m = screen.getByTestId("add-secret-modal") as HTMLDialogElement;
+      const ni = m.querySelector('input[type="text"]') as HTMLInputElement;
+      expect(ni.value).toBe("WOLFRAM_APP_ID");
+      expect(ni.disabled).toBe(true);
+    });
+
+    const beforeSaveCalls = readinessCalls;
+    const modal = screen.getByTestId("add-secret-modal");
+    const valueInput = modal.querySelector('input[type="password"]') as HTMLInputElement;
+    fireEvent.input(valueInput, { target: { value: "the-app-id" } });
+    fireEvent.submit(modal.querySelector("form")!);
+
+    // After save the gate re-fetches readiness (so the row flips to satisfied).
+    await waitFor(() => expect(readinessCalls).toBeGreaterThan(beforeSaveCalls));
+  });
+
+  it("Cancel closes the readiness gate without installing", async () => {
+    const installCalls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("time")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/server/readiness": () => readyReadiness("time"),
+        "/api/install": () => {
+          installCalls.push("POST");
+          return noContentResponse();
+        },
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-install-time"));
+    fireEvent.click(await screen.findByTestId("catalog-install-cancel-time"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-readiness-gate-time")).toBeNull();
+    });
+    // The plain Install button is back; no POST fired.
+    expect(screen.queryByTestId("catalog-install-time")).toBeTruthy();
+    expect(installCalls).toEqual([]);
   });
 
   it("renders the empty-state when /api/catalog returns an empty list", async () => {
