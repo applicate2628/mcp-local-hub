@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -35,6 +36,22 @@ var pruneEnabledFn = defaultPruneEnabled
 // (*api.API).PruneWorkspace(path, "all")). Test seam.
 var pruneActionFn = func(s *Server, path string) (*api.PruneReport, error) {
 	return s.api.PruneWorkspace(path, "all")
+}
+
+// pruneClearDefaultFn clears the default-workspace marker when a just-pruned
+// workspace (canonical path) was the persisted default. It runs after a
+// successful prune that removed a serena row so a stale default cannot outlive
+// the workspace it pointed at — the SAME api.ClearDefaultWorkspaceIfMatches
+// owner the CLI `workspace unregister --backend serena|all` and `workspace
+// prune` call. Best-effort: a marker-clear failure is logged, never fatal to
+// the sweep. Test seam (the production form resolves the state dir from the
+// registry path so the marker stays co-located with workspaces.yaml).
+var pruneClearDefaultFn = func(canonical string) error {
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		return err
+	}
+	return api.ClearDefaultWorkspaceIfMatches(filepath.Dir(regPath), canonical)
 }
 
 func defaultPruneEnabled() bool {
@@ -151,11 +168,30 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 
 	pruned := 0
 	for path, c := range byPath {
-		var reason string
-		switch {
-		case api.IsAgentWorktreePath(path):
-			reason = "agent-worktree" // ephemeral by design → immediate.
-		case api.WorkspaceDirDeleted(path):
+		// Classify through the SINGLE owner (api.ClassifyWorkspaceOrphan) so the
+		// agent-worktree / deleted-dir / idle predicate has ONE home shared with
+		// the `mcphub workspace prune` command. The 2-consecutive-ENOENT-tick
+		// grace below is the sweeper's own stateful concern (per-sweeper-instance
+		// pruneEnoentTicks), NOT the pure predicate's — the owner returns the
+		// deleted-dir verdict on a single observation and the sweeper layers the
+		// grace on top before acting.
+		orphanReason, isOrphan := api.ClassifyWorkspaceOrphan(path, api.ClassifyOpts{
+			IdleThreshold:   idleThreshold,
+			LastToolsCallAt: c.lastActivity,
+			Now:             now,
+		})
+		if !isOrphan {
+			// Healthy, present, non-worktree → reset any stale ENOENT count.
+			s.pruneEnoentMu.Lock()
+			delete(s.pruneEnoentTicks, path)
+			s.pruneEnoentMu.Unlock()
+			continue
+		}
+		reason := string(orphanReason)
+		if orphanReason == api.OrphanReasonDeletedDir {
+			// Layer the 2-consecutive-ENOENT-tick grace over the owner's
+			// single-observation deleted-dir verdict (absorbs a transient
+			// unmount). agent-worktree and idle prune immediately.
 			s.pruneEnoentMu.Lock()
 			s.pruneEnoentTicks[path]++
 			n := s.pruneEnoentTicks[path]
@@ -163,18 +199,6 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 			if n < 2 {
 				continue // wait for a confirming second ENOENT tick.
 			}
-			reason = "deleted-dir"
-		case idleThreshold > 0 && !c.lastActivity.IsZero() && now.Sub(c.lastActivity) > idleThreshold:
-			// Phase 3 idle-prune: most-recent activity older than the threshold.
-			// NEVER on a zero timestamp (no activity signal → require structural
-			// evidence, not wall-clock-since-register).
-			reason = "idle"
-		default:
-			// Healthy, present, non-worktree → reset any stale ENOENT count.
-			s.pruneEnoentMu.Lock()
-			delete(s.pruneEnoentTicks, path)
-			s.pruneEnoentMu.Unlock()
-			continue
 		}
 
 		if c.serenaKey != "" && !pruneBeginFn(s, c.serenaKey) {
@@ -196,6 +220,24 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 			continue
 		}
 		pruned++
+		// If this prune removed the serena row the default marker pointed at,
+		// clear the marker so a stale default cannot route to a workspace that no
+		// longer has a live registration (the gap the manual `workspace
+		// unregister` already closes; the sweeper previously did not). Best-effort
+		// — a clear failure is logged, never fatal to the sweep. Use report.Workspace
+		// (the prune owner's canonical form) so it compares equal to the marker's
+		// stored canonical path even if `path` arrived in a non-canonical shape.
+		if report != nil && report.SerenaRemoved > 0 && pruneClearDefaultFn != nil {
+			markerPath := report.Workspace
+			if markerPath == "" {
+				markerPath = path
+			}
+			if cerr := pruneClearDefaultFn(markerPath); cerr != nil {
+				_ = api.LogHubMcpEvent("warn", "workspace-prune-default-clear-failed", map[string]any{
+					"workspace": markerPath, "reason": reason, "err": cerr.Error(),
+				})
+			}
+		}
 		body := map[string]any{"workspace": path, "reason": reason}
 		if report != nil {
 			body["lsp_removed"] = len(report.LSPRemoved)

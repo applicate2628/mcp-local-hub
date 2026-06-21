@@ -40,7 +40,13 @@ import (
 // that records the operator-selected default serena workspace by its
 // canonical path. Absent file = no default. Empty file = no default.
 // Phase F (no-path-args routing) consumes this.
-const defaultWorkspaceFilename = "default-workspace.txt"
+//
+// The marker read/write/clear logic is owned by internal/api
+// (api.DefaultWorkspaceFilename + the api.*DefaultWorkspace* helpers) so the
+// GUI auto-prune sweeper — which cannot import internal/cli — shares ONE owner.
+// This constant aliases the api owner's name so the existing CLI call sites and
+// tests keep compiling against the cli-package identifier.
+const defaultWorkspaceFilename = api.DefaultWorkspaceFilename
 
 // loadSerenaManifestForCLI is the test-injectable manifest loader. The
 // production form goes through the embed-first manifest pipeline
@@ -137,6 +143,7 @@ Subcommands:
   unregister    Remove a workspace from the registry
   list          List registered serena workspaces
   set-default   Mark a workspace as default for no-path-args routing
+  prune         Bulk-remove registry rows for orphaned (dead) workspaces
 `,
 	}
 	c.AddCommand(newWorkspaceRegisterCmd())
@@ -144,6 +151,7 @@ Subcommands:
 	c.AddCommand(newWorkspaceListCmd())
 	c.AddCommand(newWorkspaceSetDefaultCmd())
 	c.AddCommand(newWorkspaceBootstrapCmd())
+	c.AddCommand(newWorkspacePruneCmd())
 	return c
 }
 
@@ -946,44 +954,21 @@ func readSerenaProjectLanguages(canonical string) ([]string, error) {
 // default-workspace.txt sidecar marker
 // ------------------------------------------------------------------
 
-// writeDefaultWorkspace persists the canonical default workspace path
-// (or an empty string to clear). Atomic rename so a crash mid-write
-// cannot leave a truncated file.
+// writeDefaultWorkspace / readDefaultWorkspace / clearDefaultIfMatches are thin
+// CLI-package wrappers over the single api owner (api.*DefaultWorkspace*). They
+// exist only so the existing CLI call sites and tests keep their
+// cli-package-local identifiers; the implementation lives in
+// internal/api/default_workspace_marker.go (shared with the GUI sweeper).
 func writeDefaultWorkspace(stateDir, canonical string) error {
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return err
-	}
-	path := filepath.Join(stateDir, defaultWorkspaceFilename)
-	return api.WriteStateFileBytesAtomic(path, []byte(canonical))
+	return api.WriteDefaultWorkspace(stateDir, canonical)
 }
 
-// readDefaultWorkspace returns the persisted default workspace path, or
-// the empty string when the marker file is absent or empty.
 func readDefaultWorkspace(stateDir string) (string, error) {
-	path := filepath.Join(stateDir, defaultWorkspaceFilename)
-	data, err := api.ReadStateFileInodeAnchored(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
+	return api.ReadDefaultWorkspace(stateDir)
 }
 
-// clearDefaultIfMatches removes the marker when its stored value equals
-// canonical. Returns nil if the marker is absent OR points elsewhere.
-// Side effect during `workspace unregister --backend serena|all` so a
-// stale default cannot survive the workspace it pointed at.
 func clearDefaultIfMatches(stateDir, canonical string) error {
-	got, err := readDefaultWorkspace(stateDir)
-	if err != nil {
-		return err
-	}
-	if got != canonical {
-		return nil
-	}
-	return writeDefaultWorkspace(stateDir, "")
+	return api.ClearDefaultWorkspaceIfMatches(stateDir, canonical)
 }
 
 // ------------------------------------------------------------------
