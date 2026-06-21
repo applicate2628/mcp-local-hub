@@ -257,11 +257,10 @@ func TestSuperviseCommand_RefusesSecondInstance(t *testing.T) {
 	}
 }
 
-// TestSuperviseCommand_LockLoserSkipsBinaryRecovery pins the singleton ordering
-// invariant for rename-aside crash recovery: only the supervisor.lock winner may
-// touch the binary or sweep old asides. A loser must fail at lock acquisition
-// before invoking either recovery hook.
-func TestSuperviseCommand_LockLoserSkipsBinaryRecovery(t *testing.T) {
+// TestSuperviseCommand_LockLoserSkipsOldBinarySweep pins the singleton ordering
+// invariant: only the supervisor.lock winner may sweep old binary asides. A loser
+// must fail at lock acquisition before invoking the sweep hook.
+func TestSuperviseCommand_LockLoserSkipsOldBinarySweep(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
@@ -271,13 +270,6 @@ func TestSuperviseCommand_LockLoserSkipsBinaryRecovery(t *testing.T) {
 		t.Fatalf("pre-acquire supervisor lock: %v", err)
 	}
 	defer lk.Release()
-
-	var recoverCalls atomic.Int32
-	cleanupRecover := setRecoverMissingBinaryFnForTest(func(target string) error {
-		recoverCalls.Add(1)
-		return nil
-	})
-	defer cleanupRecover()
 
 	var sweepCalls atomic.Int32
 	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
@@ -293,9 +285,6 @@ func TestSuperviseCommand_LockLoserSkipsBinaryRecovery(t *testing.T) {
 
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected supervise lock loser to fail, got nil error")
-	}
-	if got := recoverCalls.Load(); got != 0 {
-		t.Fatalf("lock loser called RecoverMissingBinary %d time(s), want 0", got)
 	}
 	if got := sweepCalls.Load(); got != 0 {
 		t.Fatalf("lock loser called SweepOldBinaries %d time(s), want 0", got)
@@ -831,13 +820,6 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 	})
 	defer cleanupSweep()
 
-	recoverCalled := make(chan string, 1)
-	cleanupRecover := setRecoverMissingBinaryFnForTest(func(target string) error {
-		recoverCalled <- target
-		return nil
-	})
-	defer cleanupRecover()
-
 	exitCh := make(chan struct{}, 1)
 	cleanupExit := setSuperviseTestExitCh(exitCh)
 	defer cleanupExit()
@@ -853,15 +835,6 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 		t.Fatalf("resolve test executable: %v", err)
 	}
 	wantDir := filepath.Dir(exe)
-
-	select {
-	case gotTarget := <-recoverCalled:
-		if gotTarget != exe {
-			t.Fatalf("recover target = %s, want executable %s", gotTarget, exe)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("runSupervise did not call RecoverMissingBinary on startup")
-	}
 
 	select {
 	case gotDir := <-sweepCalled:
@@ -883,7 +856,7 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 	}
 }
 
-func TestSuperviseCommand_SkipsBinaryRecoveryWhenExecutableUnavailable(t *testing.T) {
+func TestSuperviseCommand_SkipsOldBinarySweepWhenExecutableUnavailable(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
@@ -895,13 +868,6 @@ func TestSuperviseCommand_SkipsBinaryRecoveryWhenExecutableUnavailable(t *testin
 		return ReaperResult{}, nil
 	})
 	defer cleanupReaper()
-
-	var recoverCalls atomic.Int32
-	cleanupRecover := setRecoverMissingBinaryFnForTest(func(target string) error {
-		recoverCalls.Add(1)
-		return nil
-	})
-	defer cleanupRecover()
 
 	var sweepCalls atomic.Int32
 	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
@@ -945,9 +911,6 @@ func TestSuperviseCommand_SkipsBinaryRecoveryWhenExecutableUnavailable(t *testin
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("supervise did not exit on test-exit signal within 3s")
-	}
-	if got := recoverCalls.Load(); got != 0 {
-		t.Fatalf("RecoverMissingBinary calls = %d, want 0 when executable lookup fails", got)
 	}
 	if got := sweepCalls.Load(); got != 0 {
 		t.Fatalf("SweepOldBinaries calls = %d, want 0 when executable lookup fails", got)

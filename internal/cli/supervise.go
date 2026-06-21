@@ -473,40 +473,18 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		return fmt.Errorf("resolve supervisor state dir: %w", err)
 	}
 	exe, executableLookupErr := supervisorExecutableFn()
-	canonicalExe := exe
-	if executableLookupErr == nil {
-		if target, ok := api.CanonicalTargetFromAside(exe); ok {
-			canonicalExe = target
-		}
-	} else {
-		canonicalExe = ""
-	}
 
 	// Acquire singleton lock — fails fast if another supervisor holds
 	// it. The lock+sidecar is the FIRST resource taken so concurrent
-	// supervisors never race to recover/sweep the binary, open the audit
-	// log, or bind the IPC listener (the latter two produce noisy
-	// "already in use" errors that mask the real "another supervisor is
-	// running" condition).
+	// supervisors never race to sweep old binary asides, open the audit log,
+	// or bind the IPC listener (the latter two produce noisy "already in use"
+	// errors that mask the real "another supervisor is running" condition).
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	lk, err := api.AcquireSupervisorLock(lockPath)
 	if err != nil {
 		return fmt.Errorf("acquire supervisor.lock: %w", err)
 	}
 	defer lk.Release()
-
-	binaryRecovered := false
-	if canonicalExe != "" {
-		if _, err := os.Stat(canonicalExe); err != nil {
-			if !os.IsNotExist(err) {
-				return fmt.Errorf("stat supervisor executable %q: %w", canonicalExe, err)
-			}
-			binaryRecovered = true
-		}
-		if err := recoverMissingBinaryFn(canonicalExe); err != nil {
-			return fmt.Errorf("recover supervisor binary: %w", err)
-		}
-	}
 
 	// Open audit log. The log handle is process-lifetime; per-Emit
 	// flock+mutex serialization happens inside the helper. Close is a
@@ -536,27 +514,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			"state_dir":             stateDir,
 		},
 	})
-	if binaryRecovered {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "info",
-			Source:   "lifecycle",
-			Event:    "binary-recovered-from-aside",
-			Body: map[string]any{
-				"path": canonicalExe,
-			},
-		})
-	}
 	if executableLookupErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
-			Event:    "binary-recovery-skipped",
+			Event:    "old-binary-sweep-failed",
 			Body: map[string]any{
 				"err": executableLookupErr.Error(),
 			},
 		})
-	}
-	if canonicalExe == "" {
+	} else if exe == "" {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
@@ -566,7 +533,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			},
 		})
 	} else {
-		sweepDir := filepath.Dir(canonicalExe)
+		sweepDir := filepath.Dir(exe)
 		if err := sweepOldBinariesFn(sweepDir, func(path string, err error) {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
