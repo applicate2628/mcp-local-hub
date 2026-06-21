@@ -87,9 +87,32 @@ func secureWriteThroughResolvedParentHandle(resolvedTarget string, contents []by
 // openResolvedParentByComponentDescentWindows opens the PARENT directory of
 // `resolvedTarget` by descending from the resolved target's volume root
 // (drive root "C:\" or UNC share root \\server\share) component-by-component,
-// refusing reparse-follow at every step via openExistingRealDirAt (the step
-// shared with G17's mkdirOrVerifyRealDirWindows). The returned handle is the
-// caller's pinned parent; the caller owns its close.
+// refusing reparse-follow at every step. The returned handle is the caller's
+// pinned parent; the caller owns its close.
+//
+// Per-component open posture (Finding 1 — TRAVERSE-gating ancestors, the
+// Windows analog of the POSIX O_PATH search-only split):
+//   - The ROOT ANCHOR + INTERMEDIATE ancestors are opened TRAVERSE-ONLY
+//     (openTraverseOnlyDirHandleNoReparse / openTraverseOnlyDirAt:
+//     FILE_TRAVERSE|FILE_READ_ATTRIBUTES, NO FILE_LIST_DIRECTORY) so a
+//     consented symlink on a UNC share — or under an ancestor that grants
+//     TRAVERSE but denies directory LISTING — is reachable. Ordinary Windows
+//     path traversal and the old full-parent open only ever needed TRAVERSE on
+//     ancestors. FILE_OPEN_REPARSE_POINT + refuseReparsePointHandle still
+//     REFUSE a swapped-junction/symlink or non-dir intermediate, so the F1
+//     TOCTOU closure is unchanged.
+//   - The FINAL parent (the directory that receives the temp-create + rename)
+//     is opened with the NORMAL full handle (openExistingRealDirAt:
+//     FILE_LIST_DIRECTORY|FILE_READ_ATTRIBUTES|READ_CONTROL), exactly as
+//     before, because the shared write owner runs the parent-dir DACL gate
+//     (GetSecurityInfo, when not skipped) and the handle-relative write ops
+//     against this handle. Only the ANCESTORS above it ever needed the
+//     traverse-only relaxation.
+//
+// This deliberately does NOT touch openExistingRealDirAt, openDirHandleNoReparse,
+// or G17's mkdirOrVerifyRealDirWindows — G17's read-fd DACL-verify path is
+// unchanged; the traverse-only opens are SEPARATE helpers (like the POSIX
+// openSearchOnlyDirAt split).
 //
 // The base name is dropped — only the intermediate directory components are
 // descended; the final component is published by the shared owner's
@@ -103,19 +126,50 @@ func openResolvedParentByComponentDescentWindows(resolvedTarget string) (windows
 	}
 
 	// Volume-root anchor: the drive root "C:\" or the UNC share root
-	// "\\server\share". openDirHandleNoReparse opens with
-	// FILE_FLAG_OPEN_REPARSE_POINT (so a reparse-point root would be opened
-	// as the link itself rather than followed); a drive/share root is never
-	// itself a reparse point.
+	// "\\server\share". When at least one intermediate component follows, the
+	// anchor is TRAVERSED THROUGH to reach a deeper final parent, so it is
+	// opened TRAVERSE-ONLY (openTraverseOnlyDirHandleNoReparse:
+	// FILE_TRAVERSE|FILE_READ_ATTRIBUTES, NO FILE_LIST_DIRECTORY) — ordinary
+	// absolute traversal + the old full-parent open only needed TRAVERSE on the
+	// root (Finding 1). When there is NO intermediate component (the
+	// pathological "file directly under the volume root" case), the anchor IS
+	// the final parent and must carry the FULL access the shared write owner's
+	// DACL gate + handle-relative write ops require, so it is opened with
+	// openDirHandleNoReparse (LIST|READ_CONTROL) exactly as the pre-Finding-1
+	// code did — no regression for that case. Both open with
+	// FILE_FLAG_OPEN_REPARSE_POINT (a drive/share root is never itself a
+	// reparse point, but the flag keeps the no-follow posture uniform).
 	anchorPath := vol + `\`
-	anchorHandle, err := openDirHandleNoReparse(anchorPath)
+	// Identify the LAST directory component — the final parent — so it (and
+	// only it) is opened with the normal full handle; every ancestor above it
+	// is opened traverse-only. (decomposeResolvedParentWindows already drops
+	// empty components via FieldsFunc, so the last index is the final parent.)
+	finalParentIdx := len(dirComponents) - 1
+
+	var anchorHandle windows.Handle
+	if finalParentIdx < 0 {
+		// No intermediate: the volume root is itself the final parent.
+		anchorHandle, err = openDirHandleNoReparse(anchorPath)
+	} else {
+		anchorHandle, err = openTraverseOnlyDirHandleNoReparse(anchorPath)
+	}
 	if err != nil {
 		return windows.InvalidHandle, fmt.Errorf("secure write: open volume-root anchor %s: %w", anchorPath, err)
 	}
 
 	curHandle := anchorHandle
-	for _, comp := range dirComponents {
-		nextHandle, openErr := openExistingRealDirAt(curHandle, comp)
+	for i, comp := range dirComponents {
+		var nextHandle windows.Handle
+		var openErr error
+		if i == finalParentIdx {
+			// Final parent: normal full open (DACL gate verify + write ops).
+			nextHandle, openErr = openExistingRealDirAt(curHandle, comp)
+		} else {
+			// Intermediate ancestor: traverse-only (descend an ancestor that
+			// grants TRAVERSE but denies LIST); the reparse refusal still
+			// fires.
+			nextHandle, openErr = openTraverseOnlyDirAt(curHandle, comp)
+		}
 		_ = windows.CloseHandle(curHandle)
 		if openErr != nil {
 			return windows.InvalidHandle, fmt.Errorf(

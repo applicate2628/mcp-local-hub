@@ -220,6 +220,57 @@ func openExistingRealDirAt(parentHandle windows.Handle, name string) (windows.Ha
 	return h, nil
 }
 
+// openTraverseOnlyDirAt opens an EXISTING real directory `name` relative to
+// the already-held `parentHandle` TRAVERSE-ONLY for the resolved-symlink
+// intermediate-ancestor descent (Finding 1 — the Windows analog of the POSIX
+// openSearchOnlyDirAt / O_PATH split). It is the Windows mirror of
+// openExistingRealDirAt with one difference: it requests
+// FILE_TRAVERSE|FILE_READ_ATTRIBUTES (the minimal access to descend one
+// O_NOFOLLOW-relative component and read the reparse/dir attributes) WITHOUT
+// FILE_LIST_DIRECTORY, so a consented symlink on a UNC share — or under an
+// ancestor that grants TRAVERSE but denies directory LISTING — is still
+// reachable. Ordinary Windows path traversal and the old full-parent open
+// only ever needed TRAVERSE on ancestors.
+//
+// The reparse-point refusal is PRESERVED: ntOpenDirRelative opens with
+// FILE_OPEN_REPARSE_POINT (so a swapped intermediate junction/symlink is
+// opened as the link itself, never followed) and refuseReparsePointHandle
+// then REFUSES it via GetFileInformationByHandle (which needs the retained
+// FILE_READ_ATTRIBUTES). The F1 intermediate-swap TOCTOU closure is therefore
+// unchanged; only the LIST requirement on ancestors is dropped.
+//
+// It is SEPARATE from openExistingRealDirAt by design: G17's
+// mkdirOrVerifyRealDirWindows DACL-verify (verifyWindowsDACLFromHandle ->
+// GetSecurityInfo) needs the full LIST/READ_CONTROL handle, so that shared
+// step keeps openExistingRealDirAt UNCHANGED; only this resolved-symlink walk
+// drops the LIST requirement on ancestors. The FINAL parent of the descent
+// still uses openExistingRealDirAt (the normal full open).
+func openTraverseOnlyDirAt(parentHandle windows.Handle, name string) (windows.Handle, error) {
+	if !singleWindowsPathComponent(name) {
+		return windows.InvalidHandle, fmt.Errorf("invalid path component %q", name)
+	}
+	h, err := ntOpenDirRelative(parentHandle, name, traverseOnlyDirAccess)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	if rerr := refuseReparsePointHandle(h); rerr != nil {
+		_ = windows.CloseHandle(h)
+		return windows.InvalidHandle, rerr
+	}
+	return h, nil
+}
+
+// traverseOnlyDirAccess is the minimal NtCreateFile desired-access mask for a
+// traverse-only intermediate-ancestor open in the resolved-symlink descent:
+// FILE_TRAVERSE (right to resolve a path component THROUGH the directory) plus
+// FILE_READ_ATTRIBUTES (required by GetFileInformationByHandle in
+// refuseReparsePointHandle to read the reparse/directory attribute bits).
+// FILE_LIST_DIRECTORY (the right to ENUMERATE the directory) is deliberately
+// EXCLUDED — the descent never lists, so requiring it would reject a
+// traverse-but-no-list ancestor (e.g. on a UNC share). ntOpenDirRelative adds
+// SYNCHRONIZE itself.
+const traverseOnlyDirAccess = windows.FILE_TRAVERSE | windows.FILE_READ_ATTRIBUTES
+
 func ntOpenDirRelative(parentHandle windows.Handle, name string, desiredAccess uint32) (windows.Handle, error) {
 	return ntCreateRelative(
 		parentHandle,

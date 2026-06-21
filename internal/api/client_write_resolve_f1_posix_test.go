@@ -262,6 +262,15 @@ func TestF1_ExecuteOnlyAncestor_Succeeds(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Finding 2 search-only (O_PATH) ancestor traversal is a Linux capability; darwin keeps the preview-tier read-gate fallback")
 	}
+	// Root (UID 0) bypasses POSIX directory READ permission checks
+	// (DAC_READ_SEARCH), so chmod 0111 does NOT make the ancestor unreadable
+	// to root — the sanity check below (os.ReadDir must EACCES) would itself
+	// fail before the secure-write path is exercised, turning a real test into
+	// a false failure. Skip when euid==0; the path is still exercised as a
+	// non-root user (CI runs the api package unprivileged).
+	if os.Geteuid() == 0 {
+		t.Skip("execute-only ancestor is unenforceable as root (UID 0 bypasses POSIX directory READ checks); run as non-root to exercise the search-only descent")
+	}
 	t.Setenv(RequireSingleUserHomeEnv, "")
 	t.Setenv(AllowClientConfigSymlinkEnv, "1")
 	_ = hubMcpStateTestHelper(t)

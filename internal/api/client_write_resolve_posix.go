@@ -94,13 +94,16 @@ func secureWriteThroughResolvedParentHandle(resolvedTarget string, contents []by
 // component-by-component, O_NOFOLLOW at every step. The returned fd is the
 // caller's pinned parent; the caller owns its close.
 //
-// Per-component open posture (Finding 2 — read-gating ancestors):
-//   - INTERMEDIATE ancestors are opened SEARCH-ONLY (openSearchOnlyDirAt:
-//     O_PATH on Linux, O_RDONLY preview-fallback on darwin) so an execute-only
-//     ancestor (0711/0111) is traversable without directory READ permission —
-//     ordinary path traversal and the old single parent open only ever needed
-//     SEARCH/EXECUTE. O_NOFOLLOW|O_DIRECTORY still refuse a swapped-symlink or
-//     non-dir intermediate, so the F1 TOCTOU closure is unchanged.
+// Per-component open posture (Finding 2 + Finding 3 — read-gating ancestors):
+//   - The ROOT ANCHOR ("/") and INTERMEDIATE ancestors are opened SEARCH-ONLY
+//     (searchOnlyDirOpenFlags / openSearchOnlyDirAt: O_PATH on Linux, O_RDONLY
+//     preview-fallback on darwin) so an execute-only ancestor (0711/0111) — or
+//     an execute-only "/" (Finding 3) — is traversable without directory READ
+//     permission; ordinary path traversal and the old single parent open only
+//     ever needed SEARCH/EXECUTE. O_NOFOLLOW|O_DIRECTORY still refuse a
+//     swapped-symlink or non-dir intermediate, so the F1 TOCTOU closure is
+//     unchanged. (When "/" is itself the final parent — the pathological "file
+//     directly under /" case — it falls back to the normal read fd; see below.)
 //   - The FINAL parent (the directory that receives the temp-create + rename)
 //     is opened with the NORMAL read fd (openExistingRealDirAt), exactly as
 //     before, because the shared write owner runs the parent-dir mode/uid gate
@@ -120,14 +123,6 @@ func openResolvedParentByComponentDescentPosix(resolvedTarget string) (int, erro
 	cleaned := filepath.Clean(resolvedTarget)
 	if !filepath.IsAbs(cleaned) {
 		return -1, fmt.Errorf("secure write: resolved target %q is not absolute; cannot descend from volume root", resolvedTarget)
-	}
-
-	// Volume root anchor. On POSIX the volume name is empty and the root is
-	// "/". Open it O_NOFOLLOW|O_DIRECTORY — the root is never a symlink, but
-	// the flags keep the descent uniform.
-	anchorFd, err := unix.Open("/", unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return -1, fmt.Errorf("secure write: open volume-root anchor /: %w", err)
 	}
 
 	// Drop the leading "/" and split into components. The LAST component is
@@ -150,6 +145,31 @@ func openResolvedParentByComponentDescentPosix(resolvedTarget string) (int, erro
 			continue
 		}
 		finalParentIdx = i
+	}
+
+	// Volume root anchor. On POSIX the volume name is empty and the root is
+	// "/". O_NOFOLLOW|O_DIRECTORY keep the descent uniform (the root is never
+	// a symlink). Open posture (Finding 3): when at least one intermediate
+	// component follows, "/" is TRAVERSED THROUGH to reach a deeper final
+	// parent, so it is opened SEARCH-ONLY (searchOnlyDirOpenFlags / O_PATH on
+	// Linux) — ordinary absolute traversal + the old single parent open only
+	// needed SEARCH on "/", so an execute-only root no longer reintroduces a
+	// READ requirement before the O_PATH intermediate walk. When there is NO
+	// intermediate component (the pathological "file directly under /" case),
+	// "/" IS the final parent and must carry the normal read fd the shared
+	// write owner's gate + *at write ops require, so it is opened O_RDONLY
+	// exactly as the pre-Finding-3 code did — no regression for that case.
+	var anchorFd int
+	var err error
+	if finalParentIdx < 0 {
+		// No intermediate: "/" is itself the final parent (read fd).
+		anchorFd, err = unix.Open("/", unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	} else {
+		// "/" is an intermediate ancestor: search-only.
+		anchorFd, err = unix.Open("/", searchOnlyDirOpenFlags(), 0)
+	}
+	if err != nil {
+		return -1, fmt.Errorf("secure write: open volume-root anchor /: %w", err)
 	}
 
 	curFd := anchorFd
