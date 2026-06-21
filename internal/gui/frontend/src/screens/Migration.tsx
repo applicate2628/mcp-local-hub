@@ -357,7 +357,7 @@ function ManagedByHubGroup(props: {
             >Edit manifest</a>
             <button
               type="button"
-              class="demigrate"
+              class="demigrate btn"
               data-action="demigrate"
               disabled={props.actionBusy != null}
               onClick={() => props.onDemigrate(e.name)}
@@ -409,7 +409,7 @@ function ReadyToMigrateGroup(props: {
       </ul>
       <button
         type="button"
-        class="migrate-selected"
+        class="migrate-selected btn btn-primary"
         data-action="migrate-selected"
         disabled={selectedInGroup === 0 || props.migrateBusy}
         onClick={props.onMigrateSelected}
@@ -457,7 +457,7 @@ function UnmanagedExternalGroup(props: {
               <span class="badge badge-unknown">Unknown stdio</span>
               <button
                 type="button"
-                class="create-manifest"
+                class="create-manifest btn"
                 data-action="create-manifest"
                 onClick={() => {
                   const client = firstClientFor(e);
@@ -471,7 +471,7 @@ function UnmanagedExternalGroup(props: {
               </button>
               <button
                 type="button"
-                class="dismiss danger"
+                class="dismiss btn btn-danger"
                 data-action="dismiss"
                 onClick={() => props.onDismiss(e)}
               >
@@ -494,7 +494,7 @@ function UnmanagedExternalGroup(props: {
               </span>
               <button
                 type="button"
-                class="dismiss danger"
+                class="dismiss btn btn-danger"
                 data-action="dismiss"
                 onClick={() => props.onDismiss(e)}
               >

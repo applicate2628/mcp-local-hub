@@ -368,7 +368,7 @@ export function CatalogScreen() {
                         <>
                           <button
                             type="button"
-                            class="btn btn-danger danger"
+                            class="btn btn-danger"
                             data-testid={`catalog-uninstall-confirm-${name}`}
                             disabled={unstate.phase === "uninstalling"}
                             onClick={() => uninstallServer(name)}
@@ -390,7 +390,7 @@ export function CatalogScreen() {
                       ) : (
                         <button
                           type="button"
-                          class="btn btn-danger danger"
+                          class="btn btn-danger"
                           data-testid={`catalog-uninstall-${name}`}
                           disabled={unstate.phase === "uninstalling"}
                           onClick={() => setConfirmUninstall(name)}
@@ -742,6 +742,7 @@ function MarketplaceSection({
         <h2>Marketplace</h2>
         <button
           type="button"
+          class="btn"
           data-testid="catalog-marketplace-refresh"
           disabled={refreshState.phase === "refreshing"}
           onClick={() => runRefresh()}
