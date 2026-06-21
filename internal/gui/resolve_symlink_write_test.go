@@ -20,14 +20,14 @@ import (
 )
 
 type fakeSymlinkResolveWriter struct {
-	resolveCalled  string
-	writeClient    string
-	writePinned    string
-	writeHash      string
-	resolveResult  *ResolveSymlinkResult
-	resolveErr     error
-	writeResult    *WriteSymlinkResult
-	writeErr       error
+	resolveCalled string
+	writeClient   string
+	writePinned   string
+	writeHash     string
+	resolveResult *ResolveSymlinkResult
+	resolveErr    error
+	writeResult   *WriteSymlinkResult
+	writeErr      error
 }
 
 func (f *fakeSymlinkResolveWriter) Resolve(client string) (*ResolveSymlinkResult, error) {
@@ -419,6 +419,42 @@ func TestRealSymlinkResolveWriter_ContentDrift_Refused(t *testing.T) {
 	// The external edit must be preserved (no clobber).
 	if b, _ := os.ReadFile(realTarget); string(b) != "# edited externally\n" {
 		t.Errorf("external edit clobbered: %q", b)
+	}
+}
+
+// TestRealSymlinkResolveWriter_NonRegularTarget_Refused pins the DoS guard:
+// the GUI consent endpoint must reject a symlink target that is not a regular
+// file before attempting to read it.
+func TestRealSymlinkResolveWriter_NonRegularTarget_Refused(t *testing.T) {
+	client, realTarget := realSymlinkClient(t)
+	if err := os.Remove(realTarget); err != nil {
+		t.Fatalf("remove seeded target: %v", err)
+	}
+	if err := os.Mkdir(realTarget, 0o700); err != nil {
+		t.Fatalf("replace target with directory: %v", err)
+	}
+
+	rw := realSymlinkResolveWriter{}
+	_, err := rw.Resolve(client)
+	if !errors.Is(err, errSymlinkNotApplicable) {
+		t.Fatalf("Resolve err=%v, want errSymlinkNotApplicable", err)
+	}
+}
+
+// TestRealSymlinkResolveWriter_OversizedTarget_Refused pins the bounded-read
+// guard: even regular-file config targets are capped before hashing/round-trip
+// writing so a huge symlink target cannot exhaust GUI memory.
+func TestRealSymlinkResolveWriter_OversizedTarget_Refused(t *testing.T) {
+	client, realTarget := realSymlinkClient(t)
+	oversized := bytes.Repeat([]byte("A"), int(maxResolvedSymlinkConfigBytes)+1)
+	if err := os.WriteFile(realTarget, oversized, 0o600); err != nil {
+		t.Fatalf("write oversized target: %v", err)
+	}
+
+	rw := realSymlinkResolveWriter{}
+	_, err := rw.Resolve(client)
+	if !errors.Is(err, errSymlinkNotApplicable) {
+		t.Fatalf("Resolve err=%v, want errSymlinkNotApplicable", err)
 	}
 }
 

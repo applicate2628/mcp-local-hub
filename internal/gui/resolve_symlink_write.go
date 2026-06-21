@@ -45,6 +45,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -113,11 +114,54 @@ type symlinkResolveWriter interface {
 
 type realSymlinkResolveWriter struct{}
 
+const maxResolvedSymlinkConfigBytes = maxControlBodyBytes
+
 // hashBytes returns the lowercase-hex sha256 of b — the content-drift token
 // shared between the RESOLVE and WRITE phases.
 func hashBytes(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// readResolvedSymlinkTargetBytes reads a resolved client-config target only
+// after verifying that it is a regular file and small enough for the GUI
+// consent flow. This endpoint is reachable by local callers, so it must not
+// blindly os.ReadFile arbitrary symlink targets such as FIFOs, devices, or
+// very large files.
+func readResolvedSymlinkTargetBytes(resolvedTarget string) ([]byte, error) {
+	info, err := os.Stat(resolvedTarget)
+	if err != nil {
+		return nil, fmt.Errorf("stat resolved target %s: %w", resolvedTarget, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("resolved target %s is not a regular file", resolvedTarget)
+	}
+	if info.Size() > maxResolvedSymlinkConfigBytes {
+		return nil, fmt.Errorf("resolved target %s is too large (%d bytes > %d bytes)", resolvedTarget, info.Size(), maxResolvedSymlinkConfigBytes)
+	}
+
+	f, err := os.Open(resolvedTarget)
+	if err != nil {
+		return nil, fmt.Errorf("open resolved target %s: %w", resolvedTarget, err)
+	}
+	defer f.Close()
+
+	liveInfo, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat opened resolved target %s: %w", resolvedTarget, err)
+	}
+	if !liveInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("opened resolved target %s is not a regular file", resolvedTarget)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(f, maxResolvedSymlinkConfigBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read resolved target %s: %w", resolvedTarget, err)
+	}
+	if int64(len(body)) > maxResolvedSymlinkConfigBytes {
+		return nil, fmt.Errorf("resolved target %s is too large (> %d bytes)", resolvedTarget, maxResolvedSymlinkConfigBytes)
+	}
+	return body, nil
 }
 
 // lookupClientConfigPath validates the client against the adapter catalog and
@@ -147,7 +191,7 @@ func (realSymlinkResolveWriter) Resolve(client string) (*ResolveSymlinkResult, e
 	// content-drift token shown to the operator. The browser never supplies
 	// content. A read failure here means the symlink is dangling or the target
 	// is unreadable — treat as not-applicable so the GUI rescans.
-	body, rerr := os.ReadFile(resolvedTarget)
+	body, rerr := readResolvedSymlinkTargetBytes(resolvedTarget)
 	if rerr != nil {
 		return nil, fmt.Errorf("%w: resolved target %s unreadable: %v", errSymlinkNotApplicable, resolvedTarget, rerr)
 	}
@@ -184,7 +228,7 @@ func (realSymlinkResolveWriter) Write(client, pinnedRealPath, contentHash string
 	}
 	// Read the target's CURRENT raw bytes (HOST-sourced) — do NOT parse and
 	// re-marshal (that would silently reformat / drop comments / reorder keys).
-	body, rerr := os.ReadFile(resolvedTarget)
+	body, rerr := readResolvedSymlinkTargetBytes(resolvedTarget)
 	if rerr != nil {
 		return nil, fmt.Errorf("%w: resolved target %s unreadable: %v", errSymlinkNotApplicable, resolvedTarget, rerr)
 	}
