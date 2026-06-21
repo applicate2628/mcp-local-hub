@@ -177,3 +177,140 @@ func TestF1_OutOfHomeSymlink_Succeeds(t *testing.T) {
 		t.Errorf("F1: resolved file mode = %o, want 0600 (owner-only)", mode)
 	}
 }
+
+// TestF1_RelativeSymlink_Succeeds is the Finding 1 regression guard. A
+// client-config symlink reached by a RELATIVE write destination, whose target
+// is ALSO relative (link.json -> real.json in the same directory), must still
+// write through the component descent.
+//
+// Pre-fix, resolveSymlinkFinalPath returned filepath.EvalSymlinks(path)
+// directly. When the input path is relative (the symlink is referenced by a
+// relative destination), EvalSymlinks of a relative-target symlink returns a
+// RELATIVE path, which the volume-root descent then rejected (`!filepath.IsAbs`
+// → "is not absolute; cannot descend from volume root"), regressing the
+// shipping opt-in/consent symlink path (the old single-open opened "." as the
+// parent). The fix absolutizes the input before EvalSymlinks (the single
+// resolveSymlinkFinalPath owner), so the resolved path is absolute again and
+// BOTH the descent AND the PR-A full-target pin see the same absolutized path.
+// FAILS pre-fix.
+//
+// The write destination is passed RELATIVE (bare "link.json") from inside the
+// link's directory — that is the input shape that makes EvalSymlinks return a
+// relative path. An absolute destination already yields an absolute resolved
+// path on POSIX (the link's own dir is absolute), so the regression is only
+// reachable via a relative input.
+func TestF1_RelativeSymlink_Succeeds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowClientConfigSymlinkEnv, "1") // env opt-in (F2 lane)
+	_ = hubMcpStateTestHelper(t)
+
+	// real.json and link.json live in the SAME hardened dir; the symlink
+	// target is the BARE basename "real.json" (a relative target).
+	dir := hardenedTempDir(t)
+	real := filepath.Join(dir, "real.json")
+	if err := os.WriteFile(real, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed real: %v", err)
+	}
+	link := filepath.Join(dir, "link.json")
+	// RELATIVE target: "real.json", NOT the absolute path.
+	if err := os.Symlink("real.json", link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	// Drive the write with a RELATIVE destination ("link.json") from inside
+	// the link's directory, so resolveSymlinkFinalPath receives a relative
+	// input and (pre-fix) resolves to a relative path the descent rejects.
+	// Restore CWD on exit; these tests are not parallel.
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir into link dir: %v", err)
+	}
+
+	if err := secureWriteWithOperatorOptConsent("link.json", []byte(`{"v":1}`), nil); err != nil {
+		t.Fatalf("F1: relative-input relative-target symlink write must SUCCEED via the component descent: %v", err)
+	}
+	if b, _ := os.ReadFile(real); string(b) != `{"v":1}` {
+		t.Errorf("F1: relative-symlink resolved target content = %q, want %q", b, `{"v":1}`)
+	}
+	if info, err := os.Stat(real); err != nil {
+		t.Fatalf("F1: stat resolved target: %v", err)
+	} else if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("F1: resolved file mode = %o, want 0600 (owner-only)", mode)
+	}
+}
+
+// TestF1_ExecuteOnlyAncestor_Succeeds is the Finding 2 regression guard. A
+// resolved target below an EXECUTE-ONLY ancestor (0111 — no directory READ)
+// with a writable final parent must still write: ordinary path traversal and
+// the old single parent open only ever needed SEARCH/EXECUTE on ancestors.
+//
+// Pre-fix, the descent opened every intermediate with O_RDONLY
+// (openExistingRealDirAt), requiring directory READ, so an execute-only
+// ancestor failed EACCES BEFORE the final parent opened, breaking legitimate
+// opted-in symlink configs. The fix opens intermediate ancestors search-only
+// (O_PATH on Linux), keeping the final parent on the normal read fd. FAILS
+// pre-fix on Linux (on darwin, the preview-tier read-gate fallback would still
+// EACCES, so the assertion is Linux-scoped).
+func TestF1_ExecuteOnlyAncestor_Succeeds(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Finding 2 search-only (O_PATH) ancestor traversal is a Linux capability; darwin keeps the preview-tier read-gate fallback")
+	}
+	t.Setenv(RequireSingleUserHomeEnv, "")
+	t.Setenv(AllowClientConfigSymlinkEnv, "1")
+	_ = hubMcpStateTestHelper(t)
+
+	// Chain: <root>/exec-only/leaf/real.json. `leaf` (the FINAL parent) is
+	// writable 0700; `exec-only` (an INTERMEDIATE ancestor) is execute-only
+	// 0111 — traversable but NOT readable. A read-gating descent EACCESes
+	// here before reaching `leaf`.
+	root := hardenedTempDir(t)
+	execOnly := filepath.Join(root, "exec-only")
+	leaf := filepath.Join(execOnly, "leaf")
+	if err := os.MkdirAll(leaf, 0o700); err != nil {
+		t.Fatalf("mkdir exec-only/leaf: %v", err)
+	}
+	real := filepath.Join(leaf, "real.json")
+	if err := os.WriteFile(real, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("seed real: %v", err)
+	}
+
+	linkTree := hardenedTempDir(t)
+	link := filepath.Join(linkTree, "link.json")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	// Clamp the ancestor to execute-only (0111) AFTER seeding so the seed
+	// writes above succeeded. Restore to 0700 in cleanup so t.TempDir's
+	// RemoveAll can descend (it needs write+execute on the dir to unlink
+	// children).
+	if err := os.Chmod(execOnly, 0o111); err != nil {
+		t.Fatalf("chmod exec-only to 0111: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(execOnly, 0o700) })
+
+	// Sanity: prove the ancestor is genuinely NOT readable (so the test
+	// would actually EACCES on a read-gating descent — not a no-op).
+	if _, err := os.ReadDir(execOnly); err == nil {
+		t.Fatalf("test wiring: exec-only ancestor is still readable; the read-gate regression would not be exercised")
+	}
+
+	if err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), nil); err != nil {
+		t.Fatalf("F1/Finding-2: write below an execute-only ancestor must SUCCEED via search-only descent: %v", err)
+	}
+	if b, _ := os.ReadFile(real); string(b) != `{"v":1}` {
+		t.Errorf("F1/Finding-2: resolved target content = %q, want %q", b, `{"v":1}`)
+	}
+	if info, err := os.Stat(real); err != nil {
+		t.Fatalf("F1/Finding-2: stat resolved target: %v", err)
+	} else if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("F1/Finding-2: resolved file mode = %o, want 0600 (owner-only)", mode)
+	}
+}

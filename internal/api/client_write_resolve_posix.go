@@ -15,7 +15,24 @@ import (
 )
 
 func resolveSymlinkFinalPath(path string) (string, error) {
-	return filepath.EvalSymlinks(path)
+	// Absolutize the INPUT before EvalSymlinks. A relative client-config
+	// symlink (link.json -> real.json in the same dir) resolves to a RELATIVE
+	// target when the input is relative, and even an absolute input that points
+	// at a relative-target symlink yields an absolute result only because the
+	// link's own directory is absolute. Anchoring on an absolute input
+	// guarantees an ABSOLUTE resolved path so (a) the volume-root component
+	// descent (openResolvedParentByComponentDescentPosix) can anchor at "/" and
+	// (b) the PR-A full-target pin — derived and re-verified through this SAME
+	// owner (resolveSymlinkForSecureWrite -> resolveSymlinkFinalPath at both
+	// confirm time and write time) — stays byte-consistent (no
+	// relative-vs-absolute mismatch can break the pin or the same-parent-repoint
+	// guard). The Windows leg already returns an absolute path
+	// (GetFinalPathNameByHandle), so this only changes the POSIX relative case.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve symlink: absolutize %q: %w", path, err)
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 // secureWriteThroughResolvedParentHandle is the POSIX handle-pinned
@@ -74,14 +91,31 @@ func secureWriteThroughResolvedParentHandle(resolvedTarget string, contents []by
 
 // openResolvedParentByComponentDescentPosix opens the PARENT directory of
 // `resolvedTarget` by descending from the volume root ("/" on POSIX)
-// component-by-component, O_NOFOLLOW at every step via openExistingRealDirAt
-// (the step shared with G17's mkdirOrOpenRealDirAt). The returned fd is the
+// component-by-component, O_NOFOLLOW at every step. The returned fd is the
 // caller's pinned parent; the caller owns its close.
 //
-// resolvedTarget must be absolute (EvalSymlinks returns an absolute path).
-// The base name is dropped — only the intermediate directory components are
-// descended; the final component is published by the shared owner's
-// handle-relative atomic rename, not opened here.
+// Per-component open posture (Finding 2 — read-gating ancestors):
+//   - INTERMEDIATE ancestors are opened SEARCH-ONLY (openSearchOnlyDirAt:
+//     O_PATH on Linux, O_RDONLY preview-fallback on darwin) so an execute-only
+//     ancestor (0711/0111) is traversable without directory READ permission —
+//     ordinary path traversal and the old single parent open only ever needed
+//     SEARCH/EXECUTE. O_NOFOLLOW|O_DIRECTORY still refuse a swapped-symlink or
+//     non-dir intermediate, so the F1 TOCTOU closure is unchanged.
+//   - The FINAL parent (the directory that receives the temp-create + rename)
+//     is opened with the NORMAL read fd (openExistingRealDirAt), exactly as
+//     before, because the shared write owner runs the parent-dir mode/uid gate
+//     (when not skipped) and the *at write ops against this fd. The final
+//     parent is the operator's own config directory and is read-traversable;
+//     only the ANCESTORS above it ever needed the search-only relaxation.
+//
+// This deliberately does NOT touch openExistingRealDirAt or G17's
+// mkdirOrOpenRealDirAt — G17's read-fd DACL/mode-verify path is unchanged.
+//
+// resolvedTarget must be absolute (resolveSymlinkFinalPath now absolutizes the
+// input before EvalSymlinks, so a relative-target symlink still yields an
+// absolute resolved path). The base name is dropped — only the directory
+// components are descended; the final filename is published by the shared
+// owner's handle-relative atomic rename, not opened here.
 func openResolvedParentByComponentDescentPosix(resolvedTarget string) (int, error) {
 	cleaned := filepath.Clean(resolvedTarget)
 	if !filepath.IsAbs(cleaned) {
@@ -105,12 +139,34 @@ func openResolvedParentByComponentDescentPosix(resolvedTarget string) (int, erro
 	// parts[len-1] is the base name; descend parts[:len-1].
 	dirComponents := parts[:len(parts)-1]
 
-	curFd := anchorFd
-	for _, comp := range dirComponents {
+	// Identify the LAST non-empty directory component — the final parent —
+	// so it (and only it) is opened with the normal read fd. Computing the
+	// index over the cleaned components (rather than assuming dirComponents
+	// has no trailing empties) keeps the "final parent gets the read fd"
+	// rule correct even on a defensive empty/"." entry.
+	finalParentIdx := -1
+	for i, comp := range dirComponents {
 		if comp == "" || comp == "." {
 			continue
 		}
-		nextFd, openErr := openExistingRealDirAt(curFd, comp)
+		finalParentIdx = i
+	}
+
+	curFd := anchorFd
+	for i, comp := range dirComponents {
+		if comp == "" || comp == "." {
+			continue
+		}
+		var nextFd int
+		var openErr error
+		if i == finalParentIdx {
+			// Final parent: normal read fd (gate verify + *at write ops).
+			nextFd, openErr = openExistingRealDirAt(curFd, comp)
+		} else {
+			// Intermediate ancestor: search-only (traverse an execute-only
+			// dir without READ); O_NOFOLLOW still refuses a swapped symlink.
+			nextFd, openErr = openSearchOnlyDirAt(curFd, comp)
+		}
 		_ = unix.Close(curFd)
 		if openErr != nil {
 			return -1, fmt.Errorf(
@@ -128,4 +184,20 @@ func openResolvedParentByComponentDescentPosix(resolvedTarget string) (int, erro
 		}
 	}
 	return curFd, nil
+}
+
+// openSearchOnlyDirAt opens an EXISTING real directory `comp` relative to the
+// already-held `dirFd` SEARCH-ONLY (no directory READ requirement) for the
+// resolved-symlink intermediate-ancestor descent. On Linux this uses O_PATH
+// (the fd is valid as the dirfd for the next openat/renameat); on darwin it
+// falls back to the read-fd flags (preview-tier read-gate). O_NOFOLLOW refuses
+// a symlink at the slot (ELOOP) and O_DIRECTORY refuses a non-dir (ENOTDIR),
+// so the F1 intermediate-swap TOCTOU closure is identical to the read-fd step.
+//
+// It is SEPARATE from openExistingRealDirAt by design: G17's
+// mkdirOrOpenRealDirAt needs the normal read fd for its DACL/mode verify, so
+// that shared step is left UNCHANGED; only this resolved-symlink walk drops
+// the READ requirement on ancestors.
+func openSearchOnlyDirAt(dirFd int, comp string) (int, error) {
+	return unix.Openat(dirFd, comp, searchOnlyDirOpenFlags(), 0)
 }
