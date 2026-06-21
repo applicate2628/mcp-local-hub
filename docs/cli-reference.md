@@ -51,12 +51,19 @@ For install / per-client behaviour / troubleshooting see
 | | | mcphub migrate-legacy              # interactive |
 | | | mcphub migrate-legacy --yes        # non-interactive |
 | | | See also: register, workspaces. |
-| `mcphub autostart {enable\|disable\|status} [--strict-mode]` | Manage supervisor autostart at logon | mcphub autostart installs (or removes) an OS-native shim that |
-| | | re-runs `mcphub gui [--strict-mode]` whenever the current user |
-| | | signs in. |
-| | | - Windows: Task Scheduler entry  \mcp-local-hub-supervisor |
-| | | - Linux:   systemd-user unit     ~/.config/systemd/user/mcphub-supervisor.service |
-| | | - macOS:   LaunchAgent plist     ~/Library/LaunchAgents/com.applicate2628.mcphub-supervisor.plist |
+| `mcphub autostart {enable\|disable\|status} [--strict-mode]` | Manage supervisor autostart at logon | mcphub autostart installs (or removes) an OS-native shim for the |
+| | | current platform. |
+| | | - Windows managed: Task Scheduler entry `\mcp-local-hub-supervisor` |
+| | | with a LogonTrigger; it runs `mcphub gui [--strict-mode]` at |
+| | | current-user sign-in. |
+| | | - Linux managed: systemd user service |
+| | | `~/.config/systemd/user/mcphub-supervisor.service`; it runs |
+| | | `mcphub supervise [--strict-mode]` via `systemctl --user enable --now`. |
+| | | - macOS managed: LaunchAgent plist |
+| | | `~/Library/LaunchAgents/com.applicate2628.mcphub-supervisor.plist`; |
+| | | it runs `mcphub supervise [--strict-mode]` via `launchctl bootstrap`. |
+| | | - Linux/macOS unmanaged: no autostart backend; run `mcphub supervise` |
+| | | manually or enable the managed backend. |
 | | | `status` prints one of: absent, enabled-running, enabled-stopped, drifted, |
 | | | stale-residue. Drifted means the on-disk shim's args or binary path |
 | | | disagree with what `mcphub autostart enable [--strict-mode]` would |
@@ -79,13 +86,26 @@ For install / per-client behaviour / troubleshooting see
 
 ## Exit codes
 
+`cmd/mcphub` exits 0 on success. On ordinary command errors it prints
+`error: ...` and exits 1. The table below is the complete set of mcphub-owned
+typed exit codes that the main binary preserves from command code.
+
 | Code | Meaning |
 |---|---|
 | 0 | success |
 | 1 | generic |
+| 2 | `mcphub gui --force` diagnostic-only path: printed stale-instance details; no kill attempted |
+| 3 | `mcphub gui --force --kill`: race lost or recorded PID already gone |
+| | `mcphub gui --reset-port`: refused because another GUI is running |
+| 4 | `mcphub gui --force --kill`: pidport malformed/unrecoverable or kill attempt failed |
+| 6 | `mcphub gui --force --kill` or `mcphub gui --reset-port`: non-interactive shell requires `--yes` |
+| 7 | `mcphub gui --force --kill`: identity gate refused to kill the recorded PID |
 | 8 | setup-state-path-rejected |
+| | `mcphub gui --reset-port`: refused while hub-aggregate clients are gate-ON |
 | 9 | STRICT_MODE_BUSY |
 | 10 | STRICT_MODE_REVERT_FAILED |
+| 11 | setup elevated override audit required but failed |
+| 12 | setup supervisor-liveness task install failed |
 
 ## Logs, backups, recovery
 

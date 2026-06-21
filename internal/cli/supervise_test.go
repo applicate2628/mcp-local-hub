@@ -256,6 +256,51 @@ func TestSuperviseCommand_RefusesSecondInstance(t *testing.T) {
 	}
 }
 
+// TestSuperviseCommand_LockLoserSkipsBinaryRecovery pins the singleton ordering
+// invariant for rename-aside crash recovery: only the supervisor.lock winner may
+// touch the binary or sweep old asides. A loser must fail at lock acquisition
+// before invoking either recovery hook.
+func TestSuperviseCommand_LockLoserSkipsBinaryRecovery(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	lockPath := filepath.Join(tmpHome, "supervisor.lock")
+	lk, err := api.AcquireSupervisorLock(lockPath)
+	if err != nil {
+		t.Fatalf("pre-acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+
+	var recoverCalls atomic.Int32
+	cleanupRecover := setRecoverMissingBinaryFnForTest(func(target string) error {
+		recoverCalls.Add(1)
+		return nil
+	})
+	defer cleanupRecover()
+
+	var sweepCalls atomic.Int32
+	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+		sweepCalls.Add(1)
+		return nil
+	})
+	defer cleanupSweep()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected supervise lock loser to fail, got nil error")
+	}
+	if got := recoverCalls.Load(); got != 0 {
+		t.Fatalf("lock loser called RecoverMissingBinary %d time(s), want 0", got)
+	}
+	if got := sweepCalls.Load(); got != 0 {
+		t.Fatalf("lock loser called SweepOldBinaries %d time(s), want 0", got)
+	}
+}
+
 // TestSuperviseCommand_StatusIPC_ReconcileReady verifies the Task 6.2
 // contract: a `status` IPC request returns reconcile_ready=true after
 // the supervisor has read its intent files AND scheduled the first

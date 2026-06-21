@@ -480,6 +480,20 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	if target, ok := api.CanonicalTargetFromAside(exe); ok {
 		canonicalExe = target
 	}
+
+	// Acquire singleton lock — fails fast if another supervisor holds
+	// it. The lock+sidecar is the FIRST resource taken so concurrent
+	// supervisors never race to recover/sweep the binary, open the audit
+	// log, or bind the IPC listener (the latter two produce noisy
+	// "already in use" errors that mask the real "another supervisor is
+	// running" condition).
+	lockPath := filepath.Join(stateDir, "supervisor.lock")
+	lk, err := api.AcquireSupervisorLock(lockPath)
+	if err != nil {
+		return fmt.Errorf("acquire supervisor.lock: %w", err)
+	}
+	defer lk.Release()
+
 	binaryRecovered := false
 	if _, err := os.Stat(canonicalExe); err != nil {
 		if !os.IsNotExist(err) {
@@ -490,18 +504,6 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	if err := recoverMissingBinaryFn(canonicalExe); err != nil {
 		return fmt.Errorf("recover supervisor binary: %w", err)
 	}
-
-	// Acquire singleton lock — fails fast if another supervisor holds
-	// it. The lock+sidecar is the FIRST resource taken so concurrent
-	// supervisors never race to open the audit log or bind the IPC
-	// listener (both produce noisy "already in use" errors that mask
-	// the real "another supervisor is running" condition).
-	lockPath := filepath.Join(stateDir, "supervisor.lock")
-	lk, err := api.AcquireSupervisorLock(lockPath)
-	if err != nil {
-		return fmt.Errorf("acquire supervisor.lock: %w", err)
-	}
-	defer lk.Release()
 
 	// Open audit log. The log handle is process-lifetime; per-Emit
 	// flock+mutex serialization happens inside the helper. Close is a
