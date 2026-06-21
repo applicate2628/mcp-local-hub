@@ -1291,11 +1291,11 @@ from having parent-dir write rights, so the race is unreachable.
 Symptom: secret-using daemons such as `wolfram` or `paper-search`
 exit 1 quickly and may quarantine with an error like:
 `daemon <server>/<daemon>: vault state-file DACL refused. Remediate:
-run icacls "<path>" /inheritance:r /grant:r "%USERNAME%:F" "SYSTEM:F"
-"Administrators:F" ... Cause: vault exists but unreadable: read
-identity: file <path>\.age-key not single-user safe: hub-mcp state
-file DACL grants read to a SID outside {current-user, LocalSystem,
-BuiltinAdministrators}`.
+run icacls "<path>" /inheritance:r /remove:g "*S-1-1-0" "*S-1-5-11"
+"*S-1-5-32-545" /grant:r "<current-user>:F" "SYSTEM:F" "Administrators:F"
+... Cause: vault exists but unreadable: read identity: file <path>\.age-key
+not single-user safe: hub-mcp state file DACL grants read to a SID outside
+{current-user, LocalSystem, BuiltinAdministrators}`.
 
 Cause: `.age-key` or `secrets.age` inherited a non-owner ACE from a
 broadened profile/state root, commonly `Wave\CodexSandboxUsers` or an
@@ -1305,15 +1305,17 @@ a swapped `.age-key` is an attacker-substituted X25519 identity.
 Fix the refused file named in the error, usually both vault files:
 
 ```powershell
-icacls "$env:LOCALAPPDATA\mcp-local-hub\.age-key" /inheritance:r /grant:r "${env:USERNAME}:F" "SYSTEM:F" "Administrators:F"
-icacls "$env:LOCALAPPDATA\mcp-local-hub\secrets.age" /inheritance:r /grant:r "${env:USERNAME}:F" "SYSTEM:F" "Administrators:F"
+$owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+icacls "$env:LOCALAPPDATA\mcp-local-hub\.age-key" /inheritance:r /remove:g "*S-1-1-0" "*S-1-5-11" "*S-1-5-32-545" /grant:r "${owner}:F" "SYSTEM:F" "Administrators:F"
+icacls "$env:LOCALAPPDATA\mcp-local-hub\secrets.age" /inheritance:r /remove:g "*S-1-1-0" "*S-1-5-11" "*S-1-5-32-545" /grant:r "${owner}:F" "SYSTEM:F" "Administrators:F"
 ```
 
-POSIX equivalent:
+POSIX equivalent on Linux:
 
 ```bash
-chmod 600 "$XDG_STATE_HOME/mcp-local-hub/.age-key" "$XDG_STATE_HOME/mcp-local-hub/secrets.age"
-chown "$USER" "$XDG_STATE_HOME/mcp-local-hub/.age-key" "$XDG_STATE_HOME/mcp-local-hub/secrets.age"
+data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/mcp-local-hub"
+chmod 600 "$data_dir/.age-key" "$data_dir/secrets.age"
+chown "$USER" "$data_dir/.age-key" "$data_dir/secrets.age"
 ```
 
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` additionally makes broadened

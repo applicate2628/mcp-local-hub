@@ -9,6 +9,33 @@ import (
 	"testing"
 )
 
+func TestStateFileDACLRemediationCommandRemovesObservedSID(t *testing.T) {
+	path := `C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age`
+	err := &DACLAllowlistViolation{SID: "S-1-5-21-111-222-333-513", Mask: 0x9}
+
+	got := StateFileDACLRemediationCommand(path, `EXAMPLE\tester`, err)
+	for _, want := range []string{
+		`icacls "C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age"`,
+		"/inheritance:r",
+		"/remove:g",
+		`"*S-1-1-0"`,
+		`"*S-1-5-11"`,
+		`"*S-1-5-32-545"`,
+		`"*S-1-5-21-111-222-333-513"`,
+		"/grant:r",
+		`"EXAMPLE\tester:F"`,
+		`"SYSTEM:F"`,
+		`"Administrators:F"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("remediation command missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "%USERNAME%") {
+		t.Fatalf("remediation command must not use cmd-only username placeholder: %s", got)
+	}
+}
+
 // TestReadStateFileInodeAnchored_WriteBroadenedParent_DefaultMode pins
 // the v0.4.6 inode-anchored-read invariant: a parent directory whose
 // mode grants group/world WRITE permission no longer blocks the read
@@ -131,8 +158,16 @@ func TestReadStateFileInodeAnchored_FileReadBroadenedDefaultModeRefusesSecretSta
 	}
 
 	secretWrite := filepath.Join(dir, "secrets.age")
-	if err := os.WriteFile(secretWrite, []byte(`age-encrypted-placeholder`), 0o622); err != nil {
+	if err := os.WriteFile(secretWrite, []byte(`age-encrypted-placeholder`), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.Chmod(secretWrite, 0o622); err != nil {
+		t.Fatalf("chmod write-broadened secret: %v", err)
+	}
+	if info, err := os.Stat(secretWrite); err != nil {
+		t.Fatalf("stat write-broadened secret: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o622 {
+		t.Fatalf("write-broadened secret mode = %04o, want 0622", got)
 	}
 	if _, err := readStateFileInodeAnchored(secretWrite); err == nil {
 		t.Fatalf("default mode must refuse write-broadened secret-bearing state file")

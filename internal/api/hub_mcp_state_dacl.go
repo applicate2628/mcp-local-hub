@@ -6,7 +6,11 @@
 
 package api
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // ErrIrregularFile is returned when the path is a symlink, junction,
 // or other irregular filesystem object that we refuse to trust.
@@ -28,3 +32,71 @@ var ErrTooLoose = errors.New("hub-mcp state file mode is group/world accessible"
 // Common cause: Group-Policy-managed paths with corporate management
 // or Domain Users inherited ACEs. See spec §"Enterprise stance".
 var ErrDaclOutsideAllowlist = errors.New("hub-mcp state file DACL grants read to a SID outside {current-user, LocalSystem, BuiltinAdministrators}")
+
+// DACLAllowlistViolation preserves the offending SID from the Windows DACL
+// verifier while keeping ErrDaclOutsideAllowlist in the error chain.
+type DACLAllowlistViolation struct {
+	SID  string
+	Mask uint32
+}
+
+func (e *DACLAllowlistViolation) Error() string {
+	return fmt.Sprintf("%s: SID %s grants access (mask=0x%08x)", ErrDaclOutsideAllowlist, e.SID, e.Mask)
+}
+
+func (e *DACLAllowlistViolation) Unwrap() error {
+	return ErrDaclOutsideAllowlist
+}
+
+// StateFileDACLRemediationCommand builds the Windows icacls command used by
+// state-file read failures. The command disables inheritance, strips common
+// broadening grant ACEs plus the observed offending SID, then replaces the
+// allowlist principals' explicit grants.
+func StateFileDACLRemediationCommand(path, ownerPrincipal string, cause error) string {
+	ownerPrincipal = strings.TrimSpace(ownerPrincipal)
+	if ownerPrincipal == "" {
+		ownerPrincipal = "%USERNAME%"
+	}
+	removeArgs := stateFileDACLRemoveGrantArgs(cause)
+	return fmt.Sprintf("icacls %s /inheritance:r /remove:g %s /grant:r %s %s %s",
+		quoteICACLSArg(path),
+		strings.Join(removeArgs, " "),
+		quoteICACLSGrant(ownerPrincipal),
+		quoteICACLSGrant("SYSTEM"),
+		quoteICACLSGrant("Administrators"))
+}
+
+func stateFileDACLRemoveGrantArgs(cause error) []string {
+	sids := []string{
+		"S-1-1-0",      // Everyone
+		"S-1-5-11",     // Authenticated Users
+		"S-1-5-32-545", // Builtin Users
+	}
+	var violation *DACLAllowlistViolation
+	if errors.As(cause, &violation) && violation.SID != "" {
+		sids = append(sids, violation.SID)
+	}
+
+	seen := make(map[string]struct{}, len(sids))
+	args := make([]string, 0, len(sids))
+	for _, sid := range sids {
+		sid = strings.TrimSpace(strings.TrimPrefix(sid, "*"))
+		if sid == "" || sid == "<nil>" || sid == "<unresolved-sid>" {
+			continue
+		}
+		if _, ok := seen[sid]; ok {
+			continue
+		}
+		seen[sid] = struct{}{}
+		args = append(args, quoteICACLSArg("*"+sid))
+	}
+	return args
+}
+
+func quoteICACLSGrant(principal string) string {
+	return quoteICACLSArg(principal + ":F")
+}
+
+func quoteICACLSArg(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}

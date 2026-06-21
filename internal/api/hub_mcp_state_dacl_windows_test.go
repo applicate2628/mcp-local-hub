@@ -275,7 +275,7 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *test
 		t.Fatalf("err = %v, want ErrDaclOutsideAllowlist", err)
 	}
 	got := err.Error()
-	for _, want := range []string{"Remediate:", "icacls", target} {
+	for _, want := range []string{"Remediate:", "icacls", target, "/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("write-broadened DACL error missing %q: %v", want, err)
 		}
@@ -310,7 +310,7 @@ func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretSta
 		t.Fatalf("secret read-broadened error = %v, want ErrDaclOutsideAllowlist", err)
 	} else {
 		got := err.Error()
-		for _, want := range []string{"Remediate:", "icacls", secret} {
+		for _, want := range []string{"Remediate:", "icacls", secret, "/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("secret read-broadened DACL error missing %q: %v", want, err)
 			}

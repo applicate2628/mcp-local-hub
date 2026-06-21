@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -44,6 +45,20 @@ func TestWriteLaunchFailure_AppendsTimestampedLine(t *testing.T) {
 			t.Errorf("log missing %q; got: %q", want, got)
 		}
 	}
+}
+
+func currentUsernameForDaemonRemediationTest(t *testing.T) string {
+	t.Helper()
+	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
+		return strings.TrimSpace(u.Username)
+	}
+	for _, key := range []string{"USERNAME", "USER"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	t.Fatal("no current username available for daemon remediation test")
+	return ""
 }
 
 // TestWriteLaunchFailure_AppendsToExistingLog confirms a second call
@@ -290,6 +305,17 @@ func TestDaemonSecretVaultFatalError_DaclOutsideAllowlistSurfacesRemediation(t *
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("daemon fatal error missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(got, "%USERNAME%") || strings.Contains(got, "$env:USERNAME") {
+		t.Fatalf("daemon fatal remediation must bake a literal owner principal, got: %v", err)
+	}
+	if wantOwner := currentUsernameForDaemonRemediationTest(t); !strings.Contains(got, wantOwner+":F") {
+		t.Fatalf("daemon fatal remediation missing literal owner grant %q: %v", wantOwner+":F", err)
+	}
+	for _, want := range []string{"/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("daemon fatal remediation missing %q: %v", want, err)
 		}
 	}
 }

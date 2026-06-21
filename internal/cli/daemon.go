@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -364,9 +365,24 @@ See also: install, logs, restart, status.`,
 
 func daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath string, err error) error {
 	if errors.Is(err, api.ErrDaclOutsideAllowlist) {
-		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused. Remediate: run icacls \"%s\" /inheritance:r /grant:r \"%%USERNAME%%:F\" \"SYSTEM:F\" \"Administrators:F\" and repeat for \"%s\" if that is the refused file; this drops inherited non-owner ACEs from the default vault files. Cause: %w", server, daemonName, keyPath, vaultPath, err)
+		owner := currentICACLSOwnerPrincipal()
+		keyCommand := api.StateFileDACLRemediationCommand(keyPath, owner, err)
+		vaultCommand := api.StateFileDACLRemediationCommand(vaultPath, owner, err)
+		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused. Remediate: run %s; if the refused file is %q, run %s. These commands disable inheritance, remove common/observed non-owner grant ACEs, and leave only the current user, SYSTEM, and Administrators with full control. Cause: %w", server, daemonName, keyCommand, vaultPath, vaultCommand, err)
 	}
 	return fmt.Errorf("daemon %s/%s: %w", server, daemonName, err)
+}
+
+func currentICACLSOwnerPrincipal() string {
+	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
+		return strings.TrimSpace(u.Username)
+	}
+	for _, key := range []string{"USERNAME", "USER"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return "%USERNAME%"
 }
 
 // daemonEnvWithOverlay returns the resolved child env map AND the list of
