@@ -27,6 +27,19 @@ import (
 // so the only residual (an in-flight LSP-only call against a workspace with no
 // serena row) at worst drops one short LSP request the client retries.
 
+// pruneEnoentEntry is the per-path value of Server.pruneEnoentTicks: the orphan
+// REASON last observed on the path plus the count of CONSECUTIVE ticks that saw
+// the SAME reason. Keying the grace window by (path, reason) — resetting the
+// count to 1 whenever the reason flips between ticks — keeps a deleted-dir tick
+// followed by a dead-worktree tick from prematurely reaching the 2-tick
+// threshold: only the SAME signal observed on two consecutive ticks prunes
+// (Finding 2). agent-worktree and idle never populate this map (they prune with
+// no grace window).
+type pruneEnoentEntry struct {
+	reason string
+	count  int
+}
+
 // pruneEnabledFn reports whether auto-prune is enabled (the GUI-settable
 // daemons.auto_prune_workspaces gate, default "true"). Read each tick so a
 // toggle takes effect within ~60s. Fail-safe: a settings-read failure returns
@@ -139,12 +152,14 @@ func defaultPruneDeadWorktrees() bool {
 
 // SweepPruneWorkspaces auto-prunes structurally-dead workspace daemons:
 // agent-worktree rows immediately; deleted-directory AND dead-git-worktree rows
-// after 2 consecutive ENOENT ticks (the in-memory pruneEnoentTicks grace, shared
-// by both, absorbs a transient unmount). It skips any workspace with an
-// in-flight serena forward. Returns the number of workspaces pruned this tick; a
-// no-op when the gate is off, deps are unwired, or there are no workspace rows.
-// ctx/now are accepted for symmetry with the idle sweeper and the Phase-3 idle
-// predicate.
+// after 2 consecutive SAME-reason ENOENT ticks (the in-memory pruneEnoentTicks
+// grace, keyed by (path, reason) so a reason flip between ticks resets the
+// window — absorbs a transient unmount without letting a deleted-dir tick plus a
+// dead-worktree tick prune across reasons; Finding 2). It skips any workspace
+// with an in-flight serena forward. Returns the number of workspaces pruned this
+// tick; a no-op when the gate is off, deps are unwired, or there are no workspace
+// rows. ctx/now are accepted for symmetry with the idle sweeper and the Phase-3
+// idle predicate.
 func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 	if s == nil {
 		return 0
@@ -216,17 +231,29 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 		reason := string(orphanReason)
 		if orphanReason == api.OrphanReasonDeletedDir || orphanReason == api.OrphanReasonDeadWorktree {
 			// Layer the 2-consecutive-ENOENT-tick grace over the owner's
-			// single-observation verdict (absorbs a transient unmount). SHARED
-			// between deleted-dir (the workspace dir vanished) and dead-worktree
-			// (the worktree admin dir vanished) for symmetry — a momentarily
-			// unreadable admin dir on a slow mount must not prune on the first
-			// tick. agent-worktree and idle prune immediately.
+			// single-observation verdict (absorbs a transient unmount). Applies to
+			// BOTH deleted-dir (the workspace dir vanished) and dead-worktree (the
+			// worktree admin dir vanished) — a momentarily unreadable admin dir on a
+			// slow mount must not prune on the first tick. The grace is keyed by
+			// (path, reason): if the reason FLIPS between ticks (deleted-dir then
+			// dead-worktree, or vice versa) the count RESETS to 1 so only the SAME
+			// signal observed on two CONSECUTIVE ticks prunes (Finding 2) — a path
+			// that is transient-deleted-dir-ENOENT once and transient-dead-worktree-
+			// ENOENT once never reaches the threshold. agent-worktree and idle prune
+			// immediately (they never enter this block).
 			s.pruneEnoentMu.Lock()
-			s.pruneEnoentTicks[path]++
-			n := s.pruneEnoentTicks[path]
+			e := s.pruneEnoentTicks[path]
+			if e.reason == reason {
+				e.count++
+			} else {
+				e.reason = reason
+				e.count = 1 // reason flipped (or first observation) → restart the window.
+			}
+			s.pruneEnoentTicks[path] = e
+			n := e.count
 			s.pruneEnoentMu.Unlock()
 			if n < 2 {
-				continue // wait for a confirming second ENOENT tick.
+				continue // wait for a confirming second SAME-reason tick.
 			}
 		}
 

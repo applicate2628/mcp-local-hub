@@ -116,22 +116,30 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 //     it is a normal repo root → LIVE → false (stop the walk). A non-git tree
 //     with no `.git` anywhere up to the volume root → false;
 //  3. the pointer's `gitdir: <path>` (relative paths resolved against the
-//     worktree-root dir that holds the pointer) names an admin directory that is
-//     ABSENT via os.IsNotExist-ONLY, AND an admin-dir ANCESTOR (the PARENT
-//     `.git/worktrees/`, or — when the LAST worktree was removed and git cleaned
-//     the empty `worktrees/` — the GRANDPARENT repo `.git/`) is still present
-//     (distinguishing "worktree removed" from "whole admin root unmounted" — see
-//     isAdminDirGenuinelyDeleted). Any OTHER stat error on the admin dir
-//     (permission, transient I/O, an offline/removable mount) returns FALSE — it
-//     inherits the EXACT false-positive-safe discipline of WorkspaceDirDeleted: a
-//     transient or ambiguous error must NEVER read as "dead".
+//     worktree-root dir that holds the pointer) names a WORKTREE admin directory
+//     (its immediate parent dir is `worktrees`, i.e. `<repo>/.git/worktrees/<name>`
+//     — a `<repo>/.git/modules/<name>` submodule path is rejected here, see
+//     isWorktreeAdminPath / Finding 1) that is ABSENT via os.IsNotExist-ONLY, AND
+//     an admin-dir ANCESTOR (the PARENT `.git/worktrees/`, or — when the LAST
+//     worktree was removed and git cleaned the empty `worktrees/` — the
+//     GRANDPARENT repo `.git/`) is still present (distinguishing "worktree
+//     removed" from "whole admin root unmounted" — see isAdminDirGenuinelyDeleted).
+//     Any OTHER stat error on the admin dir (permission, transient I/O, an
+//     offline/removable mount) returns FALSE — it inherits the EXACT
+//     false-positive-safe discipline of WorkspaceDirDeleted: a transient or
+//     ambiguous error must NEVER read as "dead".
 //
 // SUBMODULE SAFETY: a git submodule ALSO stores a `.git` FILE, pointing at
-// `<superproject>/.git/modules/<name>`. A LIVE submodule's admin dir is present,
-// so condition 3 fails and it is correctly never matched. A submodule whose
-// superproject sits on an OFFLINE mount yields a NON-ENOENT stat error on the
-// admin dir (or an ENOENT whose PARENT is also gone), so condition 3 returns
-// false (not pruned). No submodule special-casing is needed beyond that guard.
+// `<superproject>/.git/modules/<name>`. THREE layers keep a submodule from ever
+// being pruned: (a) a LIVE submodule's admin dir is present, so the availability
+// discriminator returns false; (b) a submodule on an OFFLINE mount yields a
+// NON-ENOENT stat error on the admin dir (or an ENOENT whose PARENT is also
+// gone), so the discriminator returns false; (c) condition 3a
+// (isWorktreeAdminPath) requires the admin path's parent dir to be `worktrees` —
+// a `modules/<name>` submodule path fails it outright, so an ONLINE submodule
+// whose admin LEAF is merely absent (parent `.git/modules/` still present, e.g.
+// before `git submodule update --init`) is never misread as a removed worktree.
+// Layer (c) is the Finding-1 fix; layers (a)/(b) are the prior offline guard.
 //
 // Exported so the GUI prune sweeper (internal/gui) can classify rows.
 func IsDeadGitWorktreePath(canonicalPath string) bool {
@@ -165,7 +173,38 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 		// Unreadable/unparsable/cross-OS `.git` pointer → ambiguous, never prune.
 		return false
 	}
+	// Condition 3a (Finding 1): the parsed admin path must be a WORKTREE admin
+	// path (`<repo>/.git/worktrees/<name>`), NOT a submodule admin path
+	// (`<repo>/.git/modules/<name>`). A regular-file `.git` is written by BOTH a
+	// linked worktree AND a submodule; only the worktree case is a candidate for
+	// the dead-worktree signal. A submodule whose admin leaf is absent (e.g.
+	// before `git submodule update --init`) but whose `.git/modules/` parent still
+	// exists would otherwise satisfy isAdminDirGenuinelyDeleted's sibling-present
+	// branch and prune a LIVE submodule workspace. Requiring the admin path's
+	// immediate parent dir basename to be `worktrees` excludes `modules/<name>`
+	// (and any other non-worktree pointer) → never prune. This composes with the
+	// submodule-on-offline guard (a NON-ENOENT stat → false): that handles the
+	// offline mount; this handles the online-but-missing-leaf submodule.
+	if !isWorktreeAdminPath(adminDir) {
+		return false
+	}
 	return isAdminDirGenuinelyDeleted(adminDir)
+}
+
+// isWorktreeAdminPath reports whether adminDir is a git WORKTREE admin path —
+// i.e. its immediate parent directory is named `worktrees` (the canonical
+// `<repo>/.git/worktrees/<name>` shape git writes for a linked worktree). A
+// submodule pointer resolves to `<repo>/.git/modules/<name>` (parent `modules`)
+// and a bare/other pointer to something else; both return false so only a
+// genuine linked-worktree admin path can ever reach the dead-worktree
+// availability discriminator. adminDir is already filepath.Clean-ed by
+// parseGitWorktreePointer, so filepath.Base(filepath.Dir(adminDir)) is the
+// immediate parent basename with no trailing-separator ambiguity.
+func isWorktreeAdminPath(adminDir string) bool {
+	if adminDir == "" {
+		return false
+	}
+	return filepath.Base(filepath.Dir(adminDir)) == "worktrees"
 }
 
 // findNearestGitPointer walks UP from dir through its ancestors and returns the
@@ -302,8 +341,9 @@ func isAdminDirGenuinelyDeleted(adminDir string) bool {
 // line. A relative pointer is resolved against workspaceDir (git writes a
 // relative pointer for a worktree created with `--relative-paths`, and an
 // absolute one otherwise). It returns ok=false on any read error, a missing
-// `gitdir:` line, an empty target, OR a FOREIGN-ABSOLUTE target (Finding 3) —
-// every such case makes the caller treat the path as NOT a dead worktree
+// `gitdir:` line, an empty target, a FOREIGN-ABSOLUTE target (Finding 3, r2), OR
+// a FOREIGN-RELATIVE target (a Windows relative gitdir seen on POSIX — Finding 3,
+// r5) — every such case makes the caller treat the path as NOT a dead worktree
 // (ambiguous → safe).
 //
 // FOREIGN-ABSOLUTE (cross-OS) gitdir handling: a worktree created by
@@ -317,6 +357,17 @@ func isAdminDirGenuinelyDeleted(adminDir string) bool {
 // AMBIGUOUS (ok=false): the worktree was created on the other OS and we cannot
 // reliably resolve its admin dir → never prune. A NATIVE absolute path (IsAbs
 // true) and a NATIVE relative path (joined against workspaceDir) keep working.
+//
+// FOREIGN-RELATIVE (cross-OS) gitdir handling (Finding 3, r5): the foreign reject
+// above only catches ABSOLUTE cross-OS pointers. A Windows worktree created with
+// `--relative-paths` writes a backslash RELATIVE gitdir like
+// `..\main\.git\worktrees\live` — not absolute, so it slips past the
+// foreign-absolute reject. On POSIX a backslash is an ordinary filename byte, so
+// joining it under the workspace fabricates a single one-backslash filename whose
+// Stat is ENOENT and whose parent is the LIVE workspace → false-positive prune of
+// a cross-OS worktree. isForeignRelativePath rejects such a target (ambiguous).
+// On Windows both `\` and `/` are native relative separators, so nothing relative
+// is foreign there.
 func parseGitWorktreePointer(gitPath, workspaceDir string) (adminDir string, ok bool) {
 	data, err := os.ReadFile(gitPath)
 	if err != nil {
@@ -340,6 +391,17 @@ func parseGitWorktreePointer(gitPath, workspaceDir string) (adminDir string, ok 
 			// would (Windows drive-letter/UNC seen on POSIX, or a POSIX `/...`
 			// seen on Windows). Cross-OS worktree → cannot resolve safely →
 			// ambiguous, never prune.
+			return "", false
+		}
+		if isForeignRelativePath(target) {
+			// A RELATIVE target authored on the OTHER OS (Finding 3): a Windows
+			// relative gitdir like `..\main\.git\worktrees\live` is not absolute,
+			// so it skips the foreign-absolute reject above, yet on POSIX its
+			// backslashes are ordinary filename bytes — joining it under the
+			// workspace yields a single synthetic one-backslash filename whose
+			// Stat is ENOENT and whose filepath.Dir is the (existing) workspace,
+			// fabricating a "dead admin dir" against a LIVE cross-OS worktree.
+			// Reject it as ambiguous → never prune.
 			return "", false
 		}
 		// Genuinely native-relative → resolve against the pointer's dir.
@@ -381,6 +443,29 @@ func isForeignAbsolutePath(target string) bool {
 		return true
 	}
 	return false
+}
+
+// isForeignRelativePath reports whether a RELATIVE target (filepath.IsAbs and
+// isForeignAbsolutePath both already returned false) was authored on the OTHER
+// OS and so must NOT be relative-joined under the workspace (Finding 3).
+// Callers use this to REJECT (treat as ambiguous), never to resolve.
+//
+//   - On non-Windows (POSIX/WSL): a target containing a BACKSLASH is a Windows
+//     relative path (`..\main\.git\worktrees\live`). On POSIX a backslash is an
+//     ordinary filename byte, so joining it would fabricate a single
+//     one-backslash filename → synthetic ENOENT → false-positive prune. Reject.
+//   - On Windows: a relative target is native — a backslash is the native
+//     separator and a forward slash is ALSO a valid Windows separator — so
+//     nothing relative is "foreign" there. Return false (resolve normally).
+//
+// A target with NEITHER separator (a bare `name`) is never foreign on either OS.
+func isForeignRelativePath(target string) bool {
+	if runtime.GOOS == "windows" {
+		// On Windows both `\` and `/` are native relative separators.
+		return false
+	}
+	// Non-Windows: a backslash means a Windows relative path → foreign.
+	return strings.ContainsRune(target, '\\')
 }
 
 // WorkspaceOrphanReason names WHY a registered workspace classifies as an

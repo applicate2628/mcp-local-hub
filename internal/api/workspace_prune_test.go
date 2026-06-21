@@ -433,3 +433,132 @@ func TestIsDeadGitWorktreePath_ForeignGitdirEndToEnd(t *testing.T) {
 		t.Fatalf("IsDeadGitWorktreePath(%q) = true for a foreign-absolute gitdir; must be false (cross-OS ambiguous, never prune)", wt)
 	}
 }
+
+// TestIsDeadGitWorktreePath_Submodule covers Finding 1: a git SUBMODULE also
+// stores a regular-file `.git`, but its gitdir resolves to
+// `<repo>/.git/modules/<name>` (parent dir `modules`), NOT a worktree admin path
+// (`<repo>/.git/worktrees/<name>`, parent dir `worktrees`). An ONLINE submodule
+// whose admin LEAF is merely absent (e.g. before `git submodule update --init`)
+// — `.git/modules/` present, the `<name>` leaf gone — must NOT be pruned: it is
+// a live submodule, not a removed worktree. A real removed worktree with the
+// identical missing-leaf/present-parent shape under `worktrees/` IS still pruned.
+func TestIsDeadGitWorktreePath_Submodule(t *testing.T) {
+	// --- SUBMODULE (online, leaf absent): gitdir → <repo>/.git/modules/<name>;
+	// the `.git/modules/` parent exists, only the `<name>` leaf is gone. Without
+	// the isWorktreeAdminPath guard this would satisfy the sibling-present DEAD
+	// branch; the guard rejects the `modules` parent → NOT pruned. ---
+	subWT := t.TempDir()
+	subModulesParent := filepath.Join(t.TempDir(), "super", ".git", "modules")
+	if err := os.MkdirAll(subModulesParent, 0o755); err != nil {
+		t.Fatalf("mkdir submodule modules parent: %v", err)
+	}
+	subAdmin := filepath.Join(subModulesParent, "sub") // leaf never created
+	writeGitFile(t, subWT, subAdmin)
+
+	// --- REAL WORKTREE (removed, identical missing-leaf shape but under
+	// worktrees/): gitdir → <repo>/.git/worktrees/<name>; parent present, leaf
+	// gone → genuinely DEAD → pruned. Proves the guard rejects ONLY the submodule
+	// shape, not the structurally-analogous worktree shape. ---
+	wtWS := t.TempDir()
+	wtParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(wtParent, 0o755); err != nil {
+		t.Fatalf("mkdir worktrees parent: %v", err)
+	}
+	wtAdmin := filepath.Join(wtParent, "gone") // leaf never created
+	writeGitFile(t, wtWS, wtAdmin)
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"online submodule (modules/<name> leaf absent, parent present) → NOT pruned", subWT, false},
+		{"real removed worktree (worktrees/<name> leaf absent, parent present) → pruned", wtWS, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsDeadGitWorktreePath(c.path); got != c.want {
+				t.Fatalf("IsDeadGitWorktreePath(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIsWorktreeAdminPath unit-tests the Finding-1 worktrees-path discriminator
+// directly: only an admin path whose immediate parent dir is `worktrees` is a
+// worktree admin path; a `modules/<name>` submodule path (or anything else) is
+// not.
+func TestIsWorktreeAdminPath(t *testing.T) {
+	cases := []struct {
+		name     string
+		adminDir string
+		want     bool
+	}{
+		{"worktree admin path", filepath.Join("repo", ".git", "worktrees", "feat"), true},
+		{"submodule admin path", filepath.Join("repo", ".git", "modules", "sub"), false},
+		{"bare .git child (no worktrees parent)", filepath.Join("repo", ".git", "HEAD"), false},
+		{"deep worktree admin path", filepath.Join("x", "y", ".git", "worktrees", "w"), true},
+		{"empty", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isWorktreeAdminPath(c.adminDir); got != c.want {
+				t.Fatalf("isWorktreeAdminPath(%q) = %v, want %v", c.adminDir, got, c.want)
+			}
+		})
+	}
+}
+
+// TestParseGitWorktreePointer_ForeignRelativeGitdir covers Finding 3 (r5): a
+// RELATIVE gitdir containing a FOREIGN path separator (a Windows relative path
+// like `..\main\.git\worktrees\x` seen on POSIX) must be rejected as ambiguous
+// (ok=false) — it is not absolute (so the foreign-absolute reject misses it) yet
+// joining it under the workspace on POSIX fabricates a one-backslash filename. A
+// NATIVE relative path (`../main/.git/worktrees/x`) still resolves normally on
+// every OS.
+func TestParseGitWorktreePointer_ForeignRelativeGitdir(t *testing.T) {
+	ws := t.TempDir()
+
+	t.Run("foreign-relative (backslash) on POSIX → rejected", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("a backslash relative path is NATIVE on Windows, not foreign")
+		}
+		gitPath := filepath.Join(t.TempDir(), ".git")
+		if err := os.WriteFile(gitPath, []byte(`gitdir: ..\main\.git\worktrees\x`+"\n"), 0o600); err != nil {
+			t.Fatalf("write .git: %v", err)
+		}
+		if admin, ok := parseGitWorktreePointer(gitPath, ws); ok {
+			t.Fatalf("parseGitWorktreePointer(foreign-relative) ok=true (admin=%q); want false (cross-OS relative, never resolve)", admin)
+		}
+	})
+
+	t.Run("native-relative (forward slash) resolves normally", func(t *testing.T) {
+		target := filepath.Join("..", "main", ".git", "worktrees", "x") // native separators
+		gitPath := filepath.Join(t.TempDir(), ".git")
+		if err := os.WriteFile(gitPath, []byte("gitdir: "+target+"\n"), 0o600); err != nil {
+			t.Fatalf("write .git: %v", err)
+		}
+		admin, ok := parseGitWorktreePointer(gitPath, ws)
+		if !ok {
+			t.Fatalf("parseGitWorktreePointer(native-relative %q) ok=false; want true", target)
+		}
+		if want := filepath.Clean(filepath.Join(ws, target)); admin != want {
+			t.Fatalf("parseGitWorktreePointer(native-relative) admin = %q, want %q", admin, want)
+		}
+	})
+}
+
+// TestIsDeadGitWorktreePath_ForeignRelativeGitdirEndToEnd covers Finding 3 (r5)
+// at the predicate level: a LIVE workspace whose `.git` holds a foreign-relative
+// gitdir must NOT be pruned. POSIX-only — a backslash relative path is native on
+// Windows.
+func TestIsDeadGitWorktreePath_ForeignRelativeGitdirEndToEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a backslash relative gitdir is NATIVE on Windows, not foreign")
+	}
+	wt := t.TempDir()
+	writeGitFile(t, wt, `..\main\.git\worktrees\live`)
+	if IsDeadGitWorktreePath(wt) {
+		t.Fatalf("IsDeadGitWorktreePath(%q) = true for a foreign-relative gitdir; must be false (cross-OS ambiguous, never prune)", wt)
+	}
+}
