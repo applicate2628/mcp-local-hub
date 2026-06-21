@@ -15,6 +15,45 @@
 // atomically at the kernel, and mkdirat fails with EEXIST if the name
 // already exists (so a race-planted entry cannot be silently adopted —
 // the re-stat then classifies it).
+//
+// INTENTIONAL POSIX/Windows DIVERGENCE (by design — do NOT "fix" by
+// adding per-prefix verification here):
+//
+// In strict mode the POSIX leg DACL/mode-gates the HOME ANCHOR only
+// (verifyPosixParentDirFromFd on anchorFd below). It does NOT re-verify
+// the mode of each EXISTING intermediate prefix it descends through:
+// mkdirOrOpenRealDirAt re-opens an existing component with O_NOFOLLOW
+// (a symlink/non-dir is still refused) but does not fchmod-check its
+// mode. The Windows leg, by contrast, DACL-verifies EVERY existing
+// prefix handle before it becomes the RootDirectory for the next
+// component (see TestSecureCreateClientConfigParentDir_WindowsStrict-
+// RefusesBroadenedExistingPrefix).
+//
+// Why this is SAFE on POSIX and NOT a missing check:
+//
+//   - The security boundary is the CREATED directory's own 0700 mode.
+//     Every directory THIS function creates is mkdirat(0700) +
+//     fchmod(0700), so it denies group/world regardless of a loose
+//     ancestor. A broadened EXISTING intermediate (e.g. ~/.config at
+//     0755) does not weaken the owner-only stub directory created
+//     beneath it — POSIX permission checks are per-inode, not inherited
+//     like a Windows DACL, so a loose ancestor grants no access to a
+//     0700 child.
+//   - An existing intermediate under $HOME that an attacker could have
+//     broadened is already INSIDE the user's home trust boundary. A
+//     co-resident principal who can chmod a directory under another
+//     user's $HOME has already breached that home; the per-prefix mode
+//     check would not be the control that stops them. (The robust
+//     control for a genuinely-untrusted multi-tenant $HOME is
+//     MCPHUB_REQUIRE_SINGLE_USER_HOME on the anchor, which IS enforced.)
+//   - Windows has no per-inode owner-only equivalent: a child folder
+//     inherits the parent DACL unless PROTECTED_DACL is set at create
+//     AND no broadening ACE was inherited beforehand, so the parent's
+//     ACL genuinely matters there — hence Windows verifies every prefix.
+//     The asymmetry mirrors the OS security models, it is not an
+//     accidental gap. (Behavior locked by
+//     TestSecureCreateClientConfigParentDir_PosixStrictAllowsBroadened-
+//     ExistingPrefix.)
 
 package api
 
@@ -100,6 +139,15 @@ func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate boo
 // A pre-existing symlink / reparse-point / non-directory at `comp` is
 // REFUSED — the open with O_NOFOLLOW fails (ELOOP/ENOTDIR) and the error
 // is surfaced; the walk never follows it.
+//
+// DELIBERATELY no per-prefix DACL/mode re-verification for an EXISTING
+// directory (the mkErr==EEXIST branch only re-opens O_NOFOLLOW; it does
+// not fchmod-check the existing mode). This is the intentional
+// POSIX/Windows divergence documented in this file's package doc: on
+// POSIX the created 0700 child is the boundary, so a broadened existing
+// ancestor under $HOME does not weaken it. Do NOT add a strict per-prefix
+// mode check here to "match Windows" — see the package doc for why the
+// asymmetry mirrors the two OS security models.
 //
 // `fullPath` is only used for diagnostics.
 func mkdirOrOpenRealDirAt(dirFd int, comp, fullPath string) (int, error) {

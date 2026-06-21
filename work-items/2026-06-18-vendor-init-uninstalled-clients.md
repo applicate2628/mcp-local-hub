@@ -1,7 +1,11 @@
 # Finding: vendor Initialize unavailable for not-yet-installed clients on a clean install
 
 Date: 2026-06-18 (user: "инициализация не везде доступна при чистой установке")
-Status: design — implement as a security-reviewed lane (codex/security review loop)
+Status: RESOLVED (2026-06-21) — secure-parent-create stack shipped, then the F1/F2/F3 follow-up
+(branch fix/g17-followups) closed the wave-2 visibility merge-blocker + stale security comments + POSIX
+divergence doc. Commission: security-reviewer PASS + sonnet + opus, all APPROVE. The 5-step design below was
+implemented; F1 (DETECTED_PRESENCE_STATES omitted missing-init-creatable → wave-2 clients got no Initialize
+button) was the gap that made it not actually work for the opt-in client set until the follow-up.
 Epic: 2026-06-17-gui-quality-initiative
 
 ## Symptom (user-confirmed)

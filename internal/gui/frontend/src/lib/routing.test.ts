@@ -486,6 +486,21 @@ describe("visibleClients (detection-gated wave-2 columns)", () => {
     expect(cols).toContain("windsurf");
   });
 
+  // F1 (G17 wave-2 regression): on a CLEAN install a wave-2 client whose
+  // config dir is absent-but-securely-creatable classifies
+  // "missing-init-creatable". That state MUST be treated as detected so the
+  // column (and its per-column Initialize button) appears — otherwise G17's
+  // whole point ("инициализация не везде доступна при чистой установке") is
+  // silently broken for the wave-2 set. Pre-fix DETECTED_PRESENCE_STATES
+  // omitted "missing-init-creatable" and this column was hidden.
+  it("shows a wave-2 client whose parent dir is absent-but-creatable ('missing-init-creatable')", () => {
+    const cols = visibleClients(scan({ kiro: "missing-init-creatable" }));
+    expect(cols).toContain("kiro");
+    // An undetected sibling stays hidden — proves it's the state, not a
+    // blanket "show everything" change.
+    expect(cols).not.toContain("zed");
+  });
+
   it("shows a wave-2 client in an error state (config present but unreadable)", () => {
     const cols = visibleClients(scan({ hermes: "error", openclaw: "error-symlink" }));
     expect(cols).toContain("hermes");
