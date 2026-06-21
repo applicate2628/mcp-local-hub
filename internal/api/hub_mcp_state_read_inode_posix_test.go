@@ -59,20 +59,11 @@ func TestReadStateFileInodeAnchored_FileModeWriteBroadenedDefaultRejects(t *test
 	}
 }
 
-func TestStateFileReadRemediationSingleQuotesShellMetacharacterPath(t *testing.T) {
+func TestStateFileReadRemediationPointsToRunbookWithoutShellCommand(t *testing.T) {
 	path := filepath.Join("/tmp", "mcp hub", "$state", "it's`bad`", "secrets.age")
-	quoted := "'/tmp/mcp hub/$state/it'\\''s`bad`/secrets.age'"
 
 	got := stateFileReadRemediation(path)
-	if !strings.Contains(got, "chmod 600 "+quoted) {
-		t.Fatalf("remediation must single-quote chmod path; got %q, want path %q", got, quoted)
-	}
-	if !strings.Contains(got, "chown $USER "+quoted) {
-		t.Fatalf("remediation must single-quote chown path; got %q, want path %q", got, quoted)
-	}
-	if strings.Contains(got, `"`+path+`"`) {
-		t.Fatalf("remediation must not double-quote shell-expanded path: %q", got)
-	}
+	assertStateFileRunbookPointer(t, got, path, "")
 }
 
 func TestReadStateFileInodeAnchored_ENOTDIRPreserved(t *testing.T) {

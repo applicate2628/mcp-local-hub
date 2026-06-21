@@ -188,13 +188,3 @@ func currentUserSIDString() (string, error) {
 	}
 	return s, nil
 }
-
-// CurrentUserICACLSSidLiteral returns the current process token's user SID in
-// the *S-1-... literal form accepted by icacls /grant and /remove.
-func CurrentUserICACLSSidLiteral() (string, error) {
-	sid, err := currentUserSIDString()
-	if err != nil {
-		return "", err
-	}
-	return "*" + sid, nil
-}

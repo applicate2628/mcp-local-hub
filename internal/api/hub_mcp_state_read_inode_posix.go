@@ -16,7 +16,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -186,10 +185,5 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 }
 
 func stateFileReadRemediation(path string) string {
-	quotedPath := quotePOSIXShellArg(path)
-	return fmt.Sprintf(" Remediate: chmod 600 %s && chown $USER %s (and tighten the parent dir).", quotedPath, quotedPath)
-}
-
-func quotePOSIXShellArg(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	return fmt.Sprintf(" Remediate: file %s is not owner-only. %s", path, StateFileDACLRunbookPointer)
 }

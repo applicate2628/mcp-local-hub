@@ -268,9 +268,11 @@ func windowsAnchoredReadErrIsNotExist(err error) bool {
 }
 
 func stateFileReadRemediation(path string, cause error) string {
-	ownerPrincipal := "%USERNAME%"
-	if sid, err := CurrentUserICACLSSidLiteral(); err == nil {
-		ownerPrincipal = sid
+	details := StateFileDACLRemediationDetailsFor(path, cause)
+	sidText := ""
+	if details.OffendingSID != "" {
+		sidText = fmt.Sprintf(" offending SID %s.", details.OffendingSID)
 	}
-	return fmt.Sprintf(" Remediate: run %s to reset explicit ACEs, disable inheritance, remove common/observed non-owner grant ACEs, and leave only the current user, SYSTEM, and Administrators with full control.", StateFileDACLRemediationCommand(path, ownerPrincipal, cause))
+	return fmt.Sprintf(" Remediate: file %s failed the owner-only DACL allowlist.%s %s",
+		details.Path, sidText, StateFileDACLRunbookPointer)
 }

@@ -9,63 +9,61 @@ import (
 	"testing"
 )
 
-func TestStateFileDACLRemediationCommandRemovesObservedSID(t *testing.T) {
+func TestStateFileDACLRemediationDetailsNamesPathAndObservedSID(t *testing.T) {
 	path := `C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age`
-	ownerSID := "S-1-5-21-111-222-333-1001"
-	err := &DACLAllowlistViolation{SID: "S-1-5-21-111-222-333-513", Mask: 0x9}
+	err := &DACLAllowlistViolation{SID: "*S-1-5-21-111-222-333-513", Mask: 0x9}
 
-	got := StateFileDACLRemediationCommand(path, ownerSID, err)
-	for _, want := range []string{
-		`icacls "C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age"`,
-		"/reset",
-		"/inheritance:r",
-		"/remove:g",
-		`"*S-1-1-0"`,
-		`"*S-1-5-11"`,
-		`"*S-1-5-32-545"`,
-		`"*S-1-5-21-111-222-333-513"`,
-		"/grant:r",
-		`"*S-1-5-21-111-222-333-1001:F"`,
-		`"*S-1-5-18:F"`,
-		`"*S-1-5-32-544:F"`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("remediation command missing %q: %s", want, got)
-		}
+	got := StateFileDACLRemediationDetailsFor(path, err)
+	if got.Path != path {
+		t.Fatalf("remediation details path = %q, want %q", got.Path, path)
 	}
-	if strings.Contains(got, "%USERNAME%") {
-		t.Fatalf("remediation command must not use cmd-only username placeholder: %s", got)
-	}
-	for _, localizedName := range []string{"SYSTEM", "Administrators"} {
-		if strings.Contains(got, localizedName) {
-			t.Fatalf("remediation command must use SID literals, not localized account name %q: %s", localizedName, got)
-		}
+	if got.OffendingSID != "S-1-5-21-111-222-333-513" {
+		t.Fatalf("remediation details offending SID = %q", got.OffendingSID)
 	}
 }
 
-func TestStateFileDACLRemediationCommandWithoutObservedSIDStillRemovesBroadeningSIDs(t *testing.T) {
+func TestStateFileDACLRemediationDetailsWithoutObservedSIDStillNamesPath(t *testing.T) {
 	path := `C:\Users\tester\AppData\Local\mcp-local-hub\.age-key`
-	ownerSID := "*S-1-5-21-111-222-333-1001"
 
-	got := StateFileDACLRemediationCommand(path, ownerSID, ErrDaclOutsideAllowlist)
+	got := StateFileDACLRemediationDetailsFor(path, ErrDaclOutsideAllowlist)
+	if got.Path != path {
+		t.Fatalf("remediation details path = %q, want %q", got.Path, path)
+	}
+	if got.OffendingSID != "" {
+		t.Fatalf("remediation details offending SID = %q, want empty when no observed SID is available", got.OffendingSID)
+	}
+}
+
+func assertStateFileRunbookPointer(t *testing.T, got, path, offendingSID string) {
+	t.Helper()
 	for _, want := range []string{
-		"/reset",
-		"/inheritance:r",
-		"/remove:g",
-		`"*S-1-1-0"`,
-		`"*S-1-5-11"`,
-		`"*S-1-5-32-545"`,
-		"/grant:r",
-		`"*S-1-5-21-111-222-333-1001:F"`,
-		`"*S-1-5-18:F"`,
-		`"*S-1-5-32-544:F"`,
+		"Remediate:",
+		path,
+		"runbook",
+		`"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"`,
+		"tighten this file's DACL to owner-only",
+		"your account + SYSTEM + Administrators",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("remediation command without observed SID missing %q: %s", want, got)
+			t.Fatalf("state-file remediation missing %q: %s", want, got)
 		}
 	}
-	if strings.Contains(got, `""`) || strings.Contains(got, " /remove:g  /grant:r ") {
-		t.Fatalf("remediation command must not leave an empty remove list: %s", got)
+	if offendingSID != "" && !strings.Contains(got, "offending SID "+offendingSID) {
+		t.Fatalf("state-file remediation missing offending SID %q: %s", offendingSID, got)
+	}
+	for _, forbidden := range []string{
+		"run icacls",
+		`icacls "`,
+		"chmod 600",
+		"chown ",
+		"&&",
+		"/inheritance:r",
+		"/remove:g",
+		"/grant:r",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("state-file remediation must point to the runbook, not embed %q: %s", forbidden, got)
+		}
 	}
 }
 
@@ -183,11 +181,7 @@ func TestReadStateFileInodeAnchored_FileReadBroadenedDefaultModeRefusesSecretSta
 		t.Fatalf("secret read-broadened error = %v, want ErrTooLoose", err)
 	} else {
 		got := err.Error()
-		for _, want := range []string{"Remediate:", "chmod 600", secret} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("secret read-broadened error missing %q: %v", want, err)
-			}
-		}
+		assertStateFileRunbookPointer(t, got, secret, "")
 	}
 
 	secretWrite := filepath.Join(dir, "secrets.age")
@@ -208,11 +202,7 @@ func TestReadStateFileInodeAnchored_FileReadBroadenedDefaultModeRefusesSecretSta
 		t.Fatalf("secret write-broadened error = %v, want ErrTooLoose", err)
 	} else {
 		got := err.Error()
-		for _, want := range []string{"Remediate:", "chmod 600", secretWrite} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("secret write-broadened error missing %q: %v", want, err)
-			}
-		}
+		assertStateFileRunbookPointer(t, got, secretWrite, "")
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -45,20 +44,6 @@ func TestWriteLaunchFailure_AppendsTimestampedLine(t *testing.T) {
 			t.Errorf("log missing %q; got: %q", want, got)
 		}
 	}
-}
-
-func currentUsernameForDaemonRemediationTest(t *testing.T) string {
-	t.Helper()
-	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
-		return strings.TrimSpace(u.Username)
-	}
-	for _, key := range []string{"USERNAME", "USER"} {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
-	}
-	t.Fatal("no current username available for daemon remediation test")
-	return ""
 }
 
 // TestWriteLaunchFailure_AppendsToExistingLog confirms a second call
@@ -285,7 +270,8 @@ func TestDaemonCmd_RunFailure_AppendsToLog(t *testing.T) {
 func TestDaemonSecretVaultFatalError_DaclOutsideAllowlistSurfacesRemediation(t *testing.T) {
 	keyPath := `C:\Users\tester\AppData\Local\mcp-local-hub\.age-key`
 	vaultPath := `C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age`
-	cause := fmt.Errorf("vault exists but unreadable: read identity: file %s not single-user safe: %w", keyPath, api.ErrDaclOutsideAllowlist)
+	offendingSID := "S-1-5-21-111-222-333-513"
+	cause := fmt.Errorf("vault exists but unreadable: read vault: file %s not single-user safe: %w", vaultPath, &api.DACLAllowlistViolation{SID: offendingSID, Mask: 0x9})
 
 	err := daemonSecretVaultFatalError("wolfram", "default", keyPath, vaultPath, cause)
 	if err == nil {
@@ -298,36 +284,19 @@ func TestDaemonSecretVaultFatalError_DaclOutsideAllowlistSurfacesRemediation(t *
 	for _, want := range []string{
 		"daemon wolfram/default:",
 		"Remediate:",
-		"icacls",
-		keyPath,
 		vaultPath,
+		"offending SID " + offendingSID,
+		"runbook",
+		`"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"`,
 		"vault exists but unreadable",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("daemon fatal error missing %q: %v", want, err)
 		}
 	}
-	if strings.Contains(got, "%USERNAME%") || strings.Contains(got, "$env:USERNAME") {
-		t.Fatalf("daemon fatal remediation must bake a literal owner principal, got: %v", err)
-	}
-	if runtime.GOOS == "windows" {
-		if !strings.Contains(got, `"*S-1-5-`) {
-			t.Fatalf("daemon fatal remediation must grant the owner by SID literal on Windows, got: %v", err)
-		}
-		if wantOwner := currentUsernameForDaemonRemediationTest(t); strings.Contains(got, wantOwner+":F") {
-			t.Fatalf("daemon fatal remediation must not grant the owner by display name %q on Windows: %v", wantOwner, err)
-		}
-	} else if wantOwner := currentUsernameForDaemonRemediationTest(t); !strings.Contains(got, wantOwner+":F") {
-		t.Fatalf("daemon fatal remediation missing literal owner grant %q: %v", wantOwner+":F", err)
-	}
-	for _, want := range []string{"/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r", `"*S-1-5-18:F"`, `"*S-1-5-32-544:F"`} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("daemon fatal remediation missing %q: %v", want, err)
-		}
-	}
-	for _, localizedName := range []string{`"SYSTEM:F"`, `"Administrators:F"`} {
-		if strings.Contains(got, localizedName) {
-			t.Fatalf("daemon fatal remediation must use SID literals, not localized account name %q: %v", localizedName, err)
+	for _, forbidden := range []string{keyPath, "run icacls", `icacls "`, "/inheritance:r", "/remove:g", "/grant:r", "chmod 600", "&&"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("daemon fatal remediation must point to the runbook, not embed %q: %v", forbidden, err)
 		}
 	}
 }

@@ -12,10 +12,9 @@ import (
 	"strings"
 )
 
-const (
-	icaclsSystemSIDLiteral         = "*S-1-5-18"
-	icaclsAdministratorsSIDLiteral = "*S-1-5-32-544"
-)
+const StateFileDACLRunbookTitle = "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"
+
+const StateFileDACLRunbookPointer = `tighten this file's DACL to owner-only (your account + SYSTEM + Administrators); see the "` + StateFileDACLRunbookTitle + `" runbook in CLAUDE.md for the exact icacls / chmod command.`
 
 // ErrIrregularFile is returned when the path is a symlink, junction,
 // or other irregular filesystem object that we refuse to trust.
@@ -53,66 +52,26 @@ func (e *DACLAllowlistViolation) Unwrap() error {
 	return ErrDaclOutsideAllowlist
 }
 
-// StateFileDACLRemediationCommand builds the Windows icacls command used by
-// state-file read failures. The command resets explicit ACEs, disables
-// inheritance, strips common broadening grant ACEs plus the observed offending
-// SID, then replaces the allowlist principals' explicit grants.
-func StateFileDACLRemediationCommand(path, ownerPrincipal string, cause error) string {
-	ownerPrincipal = strings.TrimSpace(ownerPrincipal)
-	if ownerPrincipal == "" {
-		ownerPrincipal = "%USERNAME%"
-	}
-	removeArgs := stateFileDACLRemoveGrantArgs(cause)
-	pathArg := quoteICACLSArg(path)
-	return fmt.Sprintf("icacls %s /reset && icacls %s /inheritance:r /remove:g %s /grant:r %s %s %s",
-		pathArg,
-		pathArg,
-		strings.Join(removeArgs, " "),
-		quoteICACLSGrant(ownerPrincipal),
-		quoteICACLSGrant(icaclsSystemSIDLiteral),
-		quoteICACLSGrant(icaclsAdministratorsSIDLiteral))
+type StateFileDACLRemediationDetails struct {
+	Path         string
+	OffendingSID string
 }
 
-func stateFileDACLRemoveGrantArgs(cause error) []string {
-	sids := []string{
-		"S-1-1-0",      // Everyone
-		"S-1-5-11",     // Authenticated Users
-		"S-1-5-32-545", // Builtin Users
+func StateFileDACLRemediationDetailsFor(path string, cause error) StateFileDACLRemediationDetails {
+	return StateFileDACLRemediationDetails{
+		Path:         path,
+		OffendingSID: stateFileDACLOffendingSID(cause),
 	}
+}
+
+func stateFileDACLOffendingSID(cause error) string {
 	var violation *DACLAllowlistViolation
-	if errors.As(cause, &violation) && violation.SID != "" {
-		sids = append(sids, violation.SID)
+	if !errors.As(cause, &violation) || violation == nil {
+		return ""
 	}
-
-	seen := make(map[string]struct{}, len(sids))
-	args := make([]string, 0, len(sids))
-	for _, sid := range sids {
-		sid = strings.TrimSpace(strings.TrimPrefix(sid, "*"))
-		if sid == "" || sid == "<nil>" || sid == "<unresolved-sid>" {
-			continue
-		}
-		if _, ok := seen[sid]; ok {
-			continue
-		}
-		seen[sid] = struct{}{}
-		args = append(args, quoteICACLSArg("*"+sid))
+	sid := strings.TrimSpace(strings.TrimPrefix(violation.SID, "*"))
+	if sid == "" || sid == "<nil>" || sid == "<unresolved-sid>" {
+		return ""
 	}
-	return args
-}
-
-func quoteICACLSGrant(principal string) string {
-	return quoteICACLSArg(icaclsSIDLiteral(principal) + ":F")
-}
-
-func quoteICACLSArg(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
-}
-
-func icaclsSIDLiteral(principal string) string {
-	principal = strings.TrimSpace(principal)
-	sid := strings.TrimPrefix(principal, "*")
-	if strings.HasPrefix(strings.ToUpper(sid), "S-") {
-		return "*" + sid
-	}
-	return principal
+	return sid
 }

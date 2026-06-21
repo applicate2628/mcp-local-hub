@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -365,27 +364,26 @@ See also: install, logs, restart, status.`,
 
 func daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath string, err error) error {
 	if errors.Is(err, api.ErrDaclOutsideAllowlist) {
-		owner := currentICACLSOwnerPrincipal()
-		keyCommand := api.StateFileDACLRemediationCommand(keyPath, owner, err)
-		vaultCommand := api.StateFileDACLRemediationCommand(vaultPath, owner, err)
-		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused. Remediate: run %s; if the refused file is %q, run %s. These commands reset explicit ACEs, disable inheritance, remove common/observed non-owner grant ACEs, and leave only the current user, SYSTEM, and Administrators with full control. Cause: %w", server, daemonName, keyCommand, vaultPath, vaultCommand, err)
+		details := api.StateFileDACLRemediationDetailsFor(daemonVaultDACLRefusedPath(keyPath, vaultPath, err), err)
+		sidText := ""
+		if details.OffendingSID != "" {
+			sidText = fmt.Sprintf(" offending SID %s.", details.OffendingSID)
+		}
+		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused for %s.%s Remediate: %s Cause: %w",
+			server, daemonName, details.Path, sidText, api.StateFileDACLRunbookPointer, err)
 	}
 	return fmt.Errorf("daemon %s/%s: %w", server, daemonName, err)
 }
 
-func currentICACLSOwnerPrincipal() string {
-	if sid, err := api.CurrentUserICACLSSidLiteral(); err == nil && strings.TrimSpace(sid) != "" {
-		return strings.TrimSpace(sid)
+func daemonVaultDACLRefusedPath(keyPath, vaultPath string, err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, vaultPath) {
+		return vaultPath
 	}
-	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
-		return strings.TrimSpace(u.Username)
+	if strings.Contains(msg, keyPath) {
+		return keyPath
 	}
-	for _, key := range []string{"USERNAME", "USER"} {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
-	}
-	return "%USERNAME%"
+	return keyPath
 }
 
 // daemonEnvWithOverlay returns the resolved child env map AND the list of

@@ -13,7 +13,6 @@ package api
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -116,62 +115,6 @@ func TestReadStateFileInodeAnchoredAcceptsAllowlistOnly(t *testing.T) {
 	}
 }
 
-func TestStateFileDACLRemediationCommandNoObservedSIDRewritesArbitraryExplicitGrant(t *testing.T) {
-	dir := hardenedTempDir(t)
-	target := filepath.Join(dir, "secret file.age")
-	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	currentSID, err := currentUserSID()
-	if err != nil {
-		t.Fatalf("currentUserSID: %v", err)
-	}
-	guestsSID, err := windows.StringToSid("S-1-5-32-546")
-	if err != nil {
-		t.Fatalf("Guests sid: %v", err)
-	}
-	entries := []windows.EXPLICIT_ACCESS{
-		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
-		explicitAccessAllow(guestsSID, windows.TRUSTEE_IS_GROUP, windows.GENERIC_READ),
-	}
-	applyProtectedDACLFromEntries(t, target, entries)
-
-	command := StateFileDACLRemediationCommand(target, "*"+currentSID.String(), ErrDaclOutsideAllowlist)
-	runDACLRemediationCommandForTest(t, dir, command)
-	if _, err := readStateFileInodeAnchored(target); err != nil {
-		t.Fatalf("remediation command did not rewrite arbitrary explicit grant; command: %s; err: %v", command, err)
-	}
-}
-
-func TestStateFileDACLRemediationCommandNoObservedSIDStripsInheritedBroadeningGrant(t *testing.T) {
-	parent := filepath.Join(t.TempDir(), "inherit-parent")
-	if err := os.Mkdir(parent, 0700); err != nil {
-		t.Fatal(err)
-	}
-	applyDirDACLWithInheritOnlyAuthUsersReadACE(t, parent)
-
-	target := filepath.Join(parent, hubMcpTokensFileLeaf)
-	if err := os.WriteFile(target, []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	currentSID, err := currentUserSID()
-	if err != nil {
-		t.Fatalf("currentUserSID: %v", err)
-	}
-	if _, err := readStateFileInodeAnchored(target); err == nil {
-		t.Fatal("inherited broadening grant should fail before remediation")
-	} else if !errors.Is(err, ErrDaclOutsideAllowlist) {
-		t.Fatalf("pre-remediation err = %v, want ErrDaclOutsideAllowlist", err)
-	}
-
-	command := StateFileDACLRemediationCommand(target, "*"+currentSID.String(), ErrDaclOutsideAllowlist)
-	runDACLRemediationCommandForTest(t, parent, command)
-	if _, err := readStateFileInodeAnchored(target); err != nil {
-		t.Fatalf("remediation command did not strip inherited broadening grant; command: %s; err: %v", command, err)
-	}
-}
-
 func applyDirDACLWithInheritOnlyAuthUsersReadACE(t *testing.T, dir string) {
 	t.Helper()
 	currentSID, err := currentUserSID()
@@ -196,18 +139,6 @@ func applyDirDACLWithInheritOnlyAuthUsersReadACE(t *testing.T, dir string) {
 		},
 	}
 	applyProtectedDACLFromEntries(t, dir, entries)
-}
-
-func runDACLRemediationCommandForTest(t *testing.T, dir, command string) {
-	t.Helper()
-	script := filepath.Join(dir, "remediate.cmd")
-	if err := os.WriteFile(script, []byte("@echo off\r\n"+command+"\r\n"), 0600); err != nil {
-		t.Fatalf("write remediation script: %v", err)
-	}
-	output, err := exec.Command("cmd.exe", "/C", script).CombinedOutput()
-	if err != nil {
-		t.Fatalf("remediation command failed: %v\ncommand: %s\noutput:\n%s", err, command, output)
-	}
 }
 
 // applyAllowlistOnlyDACL applies an allowlist-conforming PROTECTED
@@ -370,11 +301,7 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *test
 		t.Fatalf("err = %v, want ErrDaclOutsideAllowlist", err)
 	}
 	got := err.Error()
-	for _, want := range []string{"Remediate:", "icacls", target, "/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("write-broadened DACL error missing %q: %v", want, err)
-		}
-	}
+	assertStateFileRunbookPointer(t, got, target, "S-1-5-11")
 }
 
 func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretState(t *testing.T) {
@@ -405,11 +332,7 @@ func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretSta
 		t.Fatalf("secret read-broadened error = %v, want ErrDaclOutsideAllowlist", err)
 	} else {
 		got := err.Error()
-		for _, want := range []string{"Remediate:", "icacls", secret, "/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r"} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("secret read-broadened DACL error missing %q: %v", want, err)
-			}
-		}
+		assertStateFileRunbookPointer(t, got, secret, "S-1-5-11")
 	}
 }
 

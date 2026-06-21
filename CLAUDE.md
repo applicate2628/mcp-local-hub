@@ -1290,32 +1290,38 @@ from having parent-dir write rights, so the race is unreachable.
 
 Symptom: secret-using daemons such as `wolfram` or `paper-search`
 exit 1 quickly and may quarantine with an error like:
-`daemon <server>/<daemon>: vault state-file DACL refused. Remediate:
-run icacls "<path>" /inheritance:r /remove:g "*S-1-1-0" "*S-1-5-11"
-"*S-1-5-32-545" /grant:r "<current-user>:F" "SYSTEM:F" "Administrators:F"
-... Cause: vault exists but unreadable: read identity: file <path>\.age-key
-not single-user safe: hub-mcp state file DACL grants read to a SID outside
-{current-user, LocalSystem, BuiltinAdministrators}`.
+`daemon <server>/<daemon>: vault state-file DACL refused for <path>.
+offending SID <SID>. Remediate: tighten this file's DACL to owner-only
+(your account + SYSTEM + Administrators); see the "secret daemons exit 1
+on a sandbox-broadened %LOCALAPPDATA%" runbook in CLAUDE.md for the exact
+icacls / chmod command. Cause: vault exists but unreadable: read identity:
+file <path>\.age-key not single-user safe: hub-mcp state file DACL grants
+read to a SID outside {current-user, LocalSystem, BuiltinAdministrators}:
+SID <SID> grants access ...`.
 
 Cause: `.age-key` or `secrets.age` inherited a non-owner ACE from a
 broadened profile/state root, commonly `Wave\CodexSandboxUsers` or an
 orphan SID with Modify rights. The read hardening must fail closed here:
 a swapped `.age-key` is an attacker-substituted X25519 identity.
 
-Fix the refused file named in the error, usually both vault files:
+Fix the refused file named in the error. On Windows PowerShell 5.1, run
+these as two separate commands for that file:
 
 ```powershell
-$owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-icacls "$env:LOCALAPPDATA\mcp-local-hub\.age-key" /inheritance:r /remove:g "*S-1-1-0" "*S-1-5-11" "*S-1-5-32-545" /grant:r "${owner}:F" "SYSTEM:F" "Administrators:F"
-icacls "$env:LOCALAPPDATA\mcp-local-hub\secrets.age" /inheritance:r /remove:g "*S-1-1-0" "*S-1-5-11" "*S-1-5-32-545" /grant:r "${owner}:F" "SYSTEM:F" "Administrators:F"
+icacls "<path>" /inheritance:r
+icacls "<path>" /grant:r "*<your-SID>:F" "*S-1-5-18:F" "*S-1-5-32-544:F" /remove:g "*<the-OBSERVED-offending-SID-from-the-error>"
 ```
 
-POSIX equivalent on Linux:
+Substitute the exact `<path>` and observed offending SID printed by the
+daemon error. Use SID literals, including the leading `*`, because they
+are locale-proof; display names such as `SYSTEM` or `Administrators` can
+vary by language. If the other vault file fails next, repeat the same two
+commands for that file and its observed SID.
+
+POSIX equivalent on Linux/macOS:
 
 ```bash
-data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/mcp-local-hub"
-chmod 600 "$data_dir/.age-key" "$data_dir/secrets.age"
-chown "$USER" "$data_dir/.age-key" "$data_dir/secrets.age"
+chmod 600 '<path>'
 ```
 
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` additionally makes broadened
