@@ -93,12 +93,18 @@ export const CORE_CLIENTS = [
   "antigravity",
 ] as const;
 
-// WAVE2_CLIENTS are the eight opt-in adapters added in PR #306. With 15
-// total clients an always-visible matrix would be unusably wide, so these
-// are DETECTION-GATED: a wave-2 column appears only when that client is
+// WAVE2_CLIENTS are the opt-in adapters (PR #306 added the original eight;
+// mimocode joined later as an OpenCode fork, placed next to opencode). With
+// this many total clients an always-visible matrix would be unusably wide, so
+// these are DETECTION-GATED: a wave-2 column appears only when that client is
 // actually present on the host (its config file or parent directory was
 // detected, or it already has a server entry). An uninstalled niche client
 // adds no column. See visibleClients() for the gating rule.
+//
+// Single owner: this list is the GUI client superset. visibleClients() (the
+// Servers matrix columns), KNOWN_CLIENTS in AddServer.tsx (the manifest
+// binding editor rows), and WAVE2_ORDER in BackupsList.tsx all derive from
+// it, so adding a client here lights it up across every GUI surface at once.
 export const WAVE2_CLIENTS = [
   "zed",
   "kiro",
@@ -106,6 +112,9 @@ export const WAVE2_CLIENTS = [
   "cline",
   "kilocode",
   "opencode",
+  // mimocode is an OpenCode fork (same `mcp` config shape); the backend
+  // registry places it next to opencode, so the GUI order matches.
+  "mimocode",
   "hermes",
   "openclaw",
 ] as const;

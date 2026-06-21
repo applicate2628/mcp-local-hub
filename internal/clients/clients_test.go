@@ -328,8 +328,8 @@ func TestDefaultInstallClientsExcludeOptInHeavyClients(t *testing.T) {
 	}
 	for _, optIn := range []string{
 		"gemini-cli", "antigravity", "qwen-cli", "vscode",
-		// Wave 2: all 8 new clients are opt-in too.
-		"zed", "kiro", "windsurf", "cline", "kilocode", "opencode", "hermes", "openclaw",
+		// Wave 2: all opt-in too (mimocode is an opencode fork added alongside).
+		"zed", "kiro", "windsurf", "cline", "kilocode", "opencode", "mimocode", "hermes", "openclaw",
 	} {
 		if excluded[optIn] {
 			t.Fatalf("opt-in client %q must not be default", optIn)
@@ -344,8 +344,8 @@ func TestSupportedClientNamesIncludesNewClients(t *testing.T) {
 	}
 	for _, want := range []string{
 		"claude-code", "codex-cli", "gemini-cli", "antigravity", "cursor", "vscode", "qwen-cli",
-		// Wave 2: the 8 new clients must also be enumerated.
-		"zed", "kiro", "windsurf", "cline", "kilocode", "opencode", "hermes", "openclaw",
+		// Wave 2: all must be enumerated (mimocode is an opencode fork added alongside).
+		"zed", "kiro", "windsurf", "cline", "kilocode", "opencode", "mimocode", "hermes", "openclaw",
 	} {
 		if !got[want] {
 			t.Fatalf("supported client %q missing from %v", want, SupportedClientNames())

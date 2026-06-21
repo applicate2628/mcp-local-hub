@@ -385,11 +385,19 @@ func TestMimoCode_FindStdioLanguageServerEntries(t *testing.T) {
 	}
 }
 
-// TestMimoCode_DefaultConfigPath asserts the XDG-style ~/.config/mimocode
-// global path resolution, including the XDG_CONFIG_HOME override, and that it
-// does NOT switch to a Windows %APPDATA% / macOS ~/Library convention.
+// TestMimoCode_DefaultConfigPath asserts the global path resolution precedence
+// (MIMOCODE_HOME/config → XDG_CONFIG_HOME/mimocode → ~/.config/mimocode), that
+// it does NOT switch to a Windows %APPDATA% / macOS ~/Library convention, and
+// that an existing mimocode.jsonc is preferred over mimocode.json (because
+// MiMoCode merges .jsonc OVER .json at load time — see defaultMimoCodeConfigPath
+// doc; sources verified against the MiMoCode config-overrides docs 2026-06).
 func TestMimoCode_DefaultConfigPath(t *testing.T) {
+	// Isolate from any ambient env on the host running the tests.
+	t.Setenv("MIMOCODE_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
 	t.Run("default ~/.config/mimocode", func(t *testing.T) {
+		t.Setenv("MIMOCODE_HOME", "")
 		t.Setenv("XDG_CONFIG_HOME", "")
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
 		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
@@ -398,6 +406,7 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 		}
 	})
 	t.Run("XDG_CONFIG_HOME override", func(t *testing.T) {
+		t.Setenv("MIMOCODE_HOME", "")
 		xdg := filepath.Join("custom", "xdg")
 		t.Setenv("XDG_CONFIG_HOME", xdg)
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
@@ -406,8 +415,117 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("defaultMimoCodeConfigPath = %q, want %q", got, want)
 		}
 	})
+	t.Run("MIMOCODE_HOME wins over XDG, config/ subdir", func(t *testing.T) {
+		// Absolute MIMOCODE_HOME → $MIMOCODE_HOME/config/mimocode.json,
+		// taking precedence over XDG and home. Use an absolute temp dir so the
+		// absolute-path gate (filepath.IsAbs) accepts it on every OS.
+		mh := t.TempDir()
+		t.Setenv("MIMOCODE_HOME", mh)
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join("custom", "xdg"))
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(mh, "config", "mimocode.json")
+		if got != want {
+			t.Errorf("defaultMimoCodeConfigPath = %q, want %q", got, want)
+		}
+	})
+	t.Run("relative MIMOCODE_HOME is ignored (docs require absolute)", func(t *testing.T) {
+		t.Setenv("MIMOCODE_HOME", filepath.Join("not", "absolute"))
+		t.Setenv("XDG_CONFIG_HOME", "")
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
+		if got != want {
+			t.Errorf("relative MIMOCODE_HOME should be ignored; got %q, want %q", got, want)
+		}
+	})
+	t.Run("existing mimocode.jsonc is preferred over mimocode.json", func(t *testing.T) {
+		// Point XDG at a real temp dir and seed a mimocode.jsonc there: the
+		// resolver must target the .jsonc (the file MiMoCode actually honors).
+		xdg := t.TempDir()
+		t.Setenv("MIMOCODE_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		dir := filepath.Join(xdg, "mimocode")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		jsoncPath := filepath.Join(dir, "mimocode.jsonc")
+		if err := os.WriteFile(jsoncPath, []byte("{\n  // comment\n  \"mcp\": {}\n}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		if got != jsoncPath {
+			t.Errorf("with an existing mimocode.jsonc present, defaultMimoCodeConfigPath = %q, want %q", got, jsoncPath)
+		}
+	})
+	t.Run("no mimocode.jsonc falls back to mimocode.json", func(t *testing.T) {
+		xdg := t.TempDir()
+		t.Setenv("MIMOCODE_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(xdg, "mimocode", "mimocode.json")
+		if got != want {
+			t.Errorf("with no .jsonc present, defaultMimoCodeConfigPath = %q, want %q", got, want)
+		}
+	})
+	t.Setenv("MIMOCODE_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	if !strings.HasSuffix(defaultMimoCodeConfigPath("/home/u"), "mimocode.json") {
 		t.Errorf("path must end in mimocode.json")
+	}
+}
+
+// TestMimoCode_JSONC_ReadAddRemovePreservesComments pins MiMoCode's JSONC
+// tolerance end-to-end: a hand-edited config with line/block comments, an
+// unrelated `$schema` key, and a trailing comma must read, AddEntry, and
+// RemoveEntry without dropping comments or unrelated keys. MiMoCode's resolved
+// file can be `mimocode.jsonc` (the path owner prefers it), so this is a
+// first-class path, not an edge case. Mirrors TestJSONC_OpenCode_*.
+func TestMimoCode_JSONC_ReadAddRemovePreservesComments(t *testing.T) {
+	const fixture = `{
+  // hand-written header (mimocode supports a .jsonc variant)
+  /* block note */
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "keep-me": {"type": "remote", "url": "https://api.example.com/mcp", "enabled": true},
+  },
+}`
+	o := newMimoCodeForTest(t, fixture)
+
+	// Read tolerates comments + trailing comma.
+	e, err := o.GetEntry("keep-me")
+	if err != nil || e == nil || e.URL != "https://api.example.com/mcp" {
+		t.Fatalf("GetEntry on JSONC mimocode config = %+v, err=%v", e, err)
+	}
+
+	// AddEntry preserves the comment-bearing file's unrelated keys.
+	if err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://localhost:9121/mcp"}); err != nil {
+		t.Fatalf("AddEntry on JSONC mimocode config: %v", err)
+	}
+	raw, _ := os.ReadFile(o.path)
+	if !strings.Contains(string(raw), "hand-written header") {
+		t.Errorf("AddEntry dropped the operator's comment: %s", raw)
+	}
+	m, err := parseJSONCBytes(raw)
+	if err != nil {
+		t.Fatalf("re-parse after AddEntry: %v", err)
+	}
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if _, ok := servers["serena"]; !ok {
+		t.Errorf("serena entry not added: %v", servers)
+	}
+	if _, ok := servers["keep-me"]; !ok {
+		t.Errorf("pre-existing keep-me entry dropped: %v", servers)
+	}
+	if got, _ := m["$schema"].(string); got != "https://opencode.ai/config.json" {
+		t.Errorf("$schema = %q, want the original unrelated key value preserved", got)
+	}
+
+	// RemoveEntry keeps comments + unrelated keys.
+	if err := o.RemoveEntry("keep-me"); err != nil {
+		t.Fatalf("RemoveEntry on JSONC mimocode config: %v", err)
+	}
+	raw2, _ := os.ReadFile(o.path)
+	if !strings.Contains(string(raw2), "hand-written header") {
+		t.Errorf("RemoveEntry dropped the operator's comment: %s", raw2)
 	}
 }
 

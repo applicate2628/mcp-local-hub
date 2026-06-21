@@ -45,9 +45,9 @@ const TRANSPORT_OPTIONS = [
 // may bind. It is the single source of truth shared with the Servers matrix /
 // scan routing (internal/gui/frontend/src/lib/routing.ts ALL_CLIENTS) and the
 // backend registry (internal/clients SupportedClientNames). The binding editor
-// exposes ALL of them — the original seven CORE_CLIENTS plus the eight opt-in
+// exposes ALL of them — the original seven CORE_CLIENTS plus the opt-in
 // WAVE2_CLIENTS — so a new manifest can target zed/kiro/windsurf/cline/
-// kilocode/opencode/hermes/openclaw. The opt-in distinction is preserved in the
+// kilocode/opencode/mimocode/hermes/openclaw. The opt-in distinction is preserved in the
 // <select> UI via a separate "opt-in clients" optgroup (see BindingsList), but
 // every client is selectable.
 const KNOWN_CLIENTS = ALL_CLIENTS;
@@ -1754,7 +1754,7 @@ function LanguagesSubsection(props: {
 }
 
 // BindingsMatrix renders a client × daemon matrix for servers with 4+ daemons.
-// Rows = KNOWN_CLIENTS (all 15: CORE_CLIENTS + opt-in WAVE2_CLIENTS, the
+// Rows = KNOWN_CLIENTS (all 16: CORE_CLIENTS + opt-in WAVE2_CLIENTS, the
 // latter flagged with an "(opt-in)" tag), columns = daemons. Each cell holds a checkbox; when
 // checked, an inline url_path text input appears in the cell. Toggling a
 // checkbox adds or removes the corresponding BindingFormEntry via onToggle.

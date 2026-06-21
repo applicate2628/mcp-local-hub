@@ -660,11 +660,11 @@ describe("ServersScreen — manual column visibility", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
     render(<ServersScreen />);
     const btn = await screen.findByTestId("matrix-columns-button");
-    // Bare host: 7 core clients visible out of 15 total.
-    expect(btn.textContent).toContain("Clients (7/15)");
+    // Bare host: 7 core clients visible out of 16 total.
+    expect(btn.textContent).toContain("Clients (7/16)");
   });
 
-  it("opens the popover with all 15 client checkboxes on click", async () => {
+  it("opens the popover with all 16 client checkboxes on click", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
     render(<ServersScreen />);
     const btn = await screen.findByTestId("matrix-columns-button");
@@ -673,8 +673,8 @@ describe("ServersScreen — manual column visibility", () => {
     expect(screen.queryByTestId("matrix-columns-popover")).toBeTruthy();
     // aria-expanded reflects state.
     expect(btn.getAttribute("aria-expanded")).toBe("true");
-    // A toggle exists for every known client (7 core + 8 wave-2 = 15).
-    for (const c of ["claude-code", "zed", "hermes", "openclaw"]) {
+    // A toggle exists for every known client (7 core + 9 wave-2 = 16).
+    for (const c of ["claude-code", "zed", "mimocode", "hermes", "openclaw"]) {
       expect(screen.queryByTestId(`matrix-columns-toggle-${c}`)).toBeTruthy();
     }
   });
@@ -695,8 +695,8 @@ describe("ServersScreen — manual column visibility", () => {
     await waitFor(() => {
       expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(false);
     });
-    // Count drops to 6/15.
-    expect(btn.textContent).toContain("Clients (6/15)");
+    // Count drops to 6/16.
+    expect(btn.textContent).toContain("Clients (6/16)");
     // Persisted to localStorage under the documented key.
     const stored = JSON.parse(
       localStorage.getItem("mcphub.servers.column-visibility") ?? "{}",

@@ -15,12 +15,30 @@ import (
 // its JSON config, with the IDENTICAL local/remote entry shapes. Two config
 // scopes exist:
 //
-//   - Global: ~/.config/mimocode/mimocode.json (also accepts a `.jsonc`
-//     variant). On every OS MiMoCode resolves the global config from
-//     ~/.config/mimocode/ — like OpenCode it does NOT follow the Windows
-//     %APPDATA% / macOS ~/Library convention (the user's real Windows
-//     install is at C:\Users\<user>\.config\mimocode\, confirmed 2026-06).
+//   - Global: the global config DIRECTORY is $MIMOCODE_HOME/config/ when
+//     MIMOCODE_HOME is set (absolute path required), else
+//     $XDG_CONFIG_HOME/mimocode/, else ~/.config/mimocode/. On every OS
+//     MiMoCode resolves the default global config from ~/.config/mimocode/ —
+//     like OpenCode it does NOT follow the Windows %APPDATA% / macOS
+//     ~/Library convention (the user's real Windows install is at
+//     C:\Users\<user>\.config\mimocode\, confirmed 2026-06).
 //   - Project: .mimocode/mimocode.json in the repository root.
+//
+// Within the global directory MiMoCode reads `config.json` / `mimocode.json`
+// / `mimocode.jsonc`, merged in that order with `mimocode.jsonc` taking
+// FINAL precedence (later overrides earlier). So if the operator already
+// keeps a `mimocode.jsonc`, an entry written into a separate `mimocode.json`
+// would be silently overridden by the `.jsonc` at load time. To make the hub
+// write win, this adapter targets an existing `mimocode.jsonc` when one is
+// present, and otherwise falls back to `mimocode.json` (the file it creates
+// on a fresh host). These two divergences from the OpenCode adapter
+// (MIMOCODE_HOME + the .jsonc preference) come straight from MiMoCode's own
+// config docs — OpenCode's docs leave both under-specified, but MiMoCode's
+// fork documents them explicitly, so the verified MiMoCode behavior governs.
+// (Sources verified 2026-06: https://mimo.xiaomi.com/mimocode/config-overrides
+// — "$MIMOCODE_HOME/config/" global dir, MIMOCODE_HOME must be absolute; the
+// global directory "accepts config.json / mimocode.json / mimocode.jsonc,
+// merged in that order".)
 //
 // The hub writes the GLOBAL file so a single per-user hub entry is visible
 // in every project, matching every other adapter's user-scoped posture (and
@@ -72,17 +90,52 @@ func NewMimoCode() (Client, error) {
 	return newLockingClient(&mimoCodeClient{path: defaultMimoCodeConfigPath(home)}), nil
 }
 
-// defaultMimoCodeConfigPath returns the global MiMoCode config path.
-// MiMoCode (an OpenCode fork) uses the XDG-style ~/.config/mimocode/
-// location on every OS (Windows included — it does not switch to %APPDATA%).
-// XDG_CONFIG_HOME is honored when set, mirroring defaultOpenCodeConfigPath.
+// defaultMimoCodeConfigPath returns the global MiMoCode config-file path.
+// It first resolves the global config DIRECTORY (MIMOCODE_HOME/config →
+// XDG_CONFIG_HOME/mimocode → ~/.config/mimocode), then picks the file within
+// it, preferring an existing `mimocode.jsonc` over `mimocode.json` because
+// MiMoCode merges `.jsonc` over `.json` at load time (see NewMimoCode doc).
+//
+// Resolving the `.jsonc`-vs-`.json` choice HERE (the single path owner) — not
+// only in AddEntry — is load-bearing: scan, probe, backup, and write all read
+// the path through ConfigPath(), so they must agree on which file holds the
+// hub entry. The choice is a pure function of (env, on-disk state) at
+// construction time, which keeps ConfigPath() stable for the lifetime of the
+// adapter instance (the file does not move under it mid-run).
 func defaultMimoCodeConfigPath(home string) string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "mimocode", "mimocode.json")
+	dir := mimoCodeGlobalConfigDir(home)
+	return mimoCodePreferredConfigFile(dir)
+}
+
+// mimoCodeGlobalConfigDir resolves the global config directory in MiMoCode's
+// documented precedence order: MIMOCODE_HOME/config (absolute-path required;
+// a relative value is ignored, mirroring the docs' "must be an absolute
+// path") → XDG_CONFIG_HOME/mimocode → ~/.config/mimocode. The path is
+// OS-independent by design — MiMoCode uses ~/.config/mimocode/ on every OS,
+// not %APPDATA% / ~/Library.
+func mimoCodeGlobalConfigDir(home string) string {
+	if mh := os.Getenv("MIMOCODE_HOME"); mh != "" && filepath.IsAbs(mh) {
+		return filepath.Join(mh, "config")
 	}
-	// Path is OS-independent by design — MiMoCode uses ~/.config/mimocode/
-	// on every OS, not %APPDATA% / ~/Library (see NewMimoCode doc).
-	return filepath.Join(home, ".config", "mimocode", "mimocode.json")
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "mimocode")
+	}
+	return filepath.Join(home, ".config", "mimocode")
+}
+
+// mimoCodePreferredConfigFile picks the config file inside dir, preferring an
+// existing `mimocode.jsonc` (which MiMoCode merges OVER `mimocode.json`) so a
+// hub write lands in the file MiMoCode actually honors. When no `.jsonc`
+// exists it returns the `.json` path — the file the adapter seeds on a fresh
+// host and the one every existing test/fixture expects. A stat error other
+// than not-exist (e.g. a permission failure) is treated as "no .jsonc" so
+// resolution never fails closed on a transient probe error.
+func mimoCodePreferredConfigFile(dir string) string {
+	jsoncPath := filepath.Join(dir, "mimocode.jsonc")
+	if fi, err := os.Stat(jsoncPath); err == nil && fi.Mode().IsRegular() {
+		return jsoncPath
+	}
+	return filepath.Join(dir, "mimocode.json")
 }
 
 // mimoCodeClient is a standalone adapter (NOT an embedding of jsonMCPClient)

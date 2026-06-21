@@ -28,7 +28,7 @@ describe("BackupsList", () => {
     await findAllByText(/claude-code/);
     // Each client has its own <details><summary>. The fixture only carries
     // claude-code backups, so only the seven always-on CORE_CLIENTS render —
-    // the eight opt-in wave-2 clients are detection-gated and add no empty
+    // the opt-in wave-2 clients are detection-gated and add no empty
     // group when they have no backups on disk.
     const summaries = document.querySelectorAll(".backups-client-group summary");
     expect(summaries.length).toBe(7);

@@ -62,6 +62,7 @@ type ScanOpts struct {
 	ClineConfigPath    string
 	KiloCodeConfigPath string
 	OpenCodeConfigPath string
+	MimoCodeConfigPath string
 	HermesConfigPath   string
 	OpenClawConfigPath string
 
@@ -93,6 +94,7 @@ func (o ScanOpts) legacyNamedConfigPathSet() map[string]string {
 		"cline":       o.ClineConfigPath,
 		"kilocode":    o.KiloCodeConfigPath,
 		"opencode":    o.OpenCodeConfigPath,
+		"mimocode":    o.MimoCodeConfigPath,
 		"hermes":      o.HermesConfigPath,
 		"openclaw":    o.OpenClawConfigPath,
 	}
@@ -494,6 +496,9 @@ func clientScanners() map[string]struct {
 		"cline":    {scanCline, "cline"},
 		"kilocode": {scanKiloCode, "kilocode"},
 		"opencode": {scanOpenCode, "opencode"},
+		// mimocode is an OpenCode fork sharing the top-level `mcp` config
+		// shape — scanMimoCode mirrors scanOpenCode under the mimocode id.
+		"mimocode": {scanMimoCode, "mimocode"},
 		"hermes":   {scanHermes, "hermes"},
 		"openclaw": {scanOpenClaw, "openclaw"},
 		// TIER-1 skills-CLI clients. These all use the canonical
@@ -1222,6 +1227,41 @@ func scanOpenCode(entries map[string]*ScanEntry, path string) error {
 			entries[name] = e
 		}
 		e.ClientPresence["opencode"] = shapeURLOrCommandEntry(raw)
+	}
+	return nil
+}
+
+// scanMimoCode reads MiMoCode's config. MiMoCode is an OpenCode fork and uses
+// the IDENTICAL top-level `mcp` map with `{"type":"remote","url":...}` hub
+// entries, so the read mirrors scanOpenCode and reuses the same url/command
+// shaper to recognise the loopback hub binding. The one deliberate difference
+// from scanOpenCode: MiMoCode's resolved config file can be `mimocode.jsonc`
+// (the adapter's path owner prefers an existing `.jsonc` — see
+// clients.defaultMimoCodeConfigPath), and operators hand-edit it with
+// comments, so the JSONC preprocessor is applied before unmarshalling. A
+// comment-free `.json` parses byte-identically through the preprocessor, so
+// this is behaviour-preserving for the plain-JSON case.
+func scanMimoCode(entries map[string]*ScanEntry, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var cfg struct {
+		MCP map[string]map[string]any `json:"mcp"`
+	}
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
+		return err
+	}
+	for name, raw := range cfg.MCP {
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["mimocode"] = shapeURLOrCommandEntry(raw)
 	}
 	return nil
 }

@@ -485,6 +485,73 @@ func TestScanCoversWave2Clients(t *testing.T) {
 	}
 }
 
+// TestScanCoversMimoCode is the scan-pipeline counterpart of the mimocode
+// adapter wiring (Finding 1): the clientScanners() registry must have a
+// mimocode entry so ScanFrom records ClientPresence["mimocode"] for an
+// installed mimo config. MiMoCode is an OpenCode fork sharing the top-level
+// `mcp` map, so the hub binding shape is identical to opencode's. The second
+// sub-case exercises the JSONC tolerance the mimo scanner adds (the resolved
+// file can be mimocode.jsonc with comments).
+func TestScanCoversMimoCode(t *testing.T) {
+	manifestFixture := func(dir string) string {
+		manifestDir := filepath.Join(dir, "servers")
+		_ = os.MkdirAll(filepath.Join(manifestDir, "memory"), 0755)
+		_ = os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+			[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+		return manifestDir
+	}
+	memEntryFor := func(t *testing.T, res *ScanResult) *ScanEntry {
+		t.Helper()
+		for i := range res.Entries {
+			if res.Entries[i].Name == "memory" {
+				return &res.Entries[i]
+			}
+		}
+		t.Fatal("no memory entry found")
+		return nil
+	}
+
+	t.Run("plain json mimocode.json hub binding -> via-hub", func(t *testing.T) {
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.json")
+		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		mem := memEntryFor(t, res)
+		if got := mem.ClientPresence["mimocode"].Transport; got != "http" {
+			t.Errorf("mimocode.Transport: got %q, want http", got)
+		}
+		if got := mem.ClientPresence["mimocode"].Endpoint; got != "http://localhost:9123/mcp" {
+			t.Errorf("mimocode.Endpoint: got %q, want the loopback hub URL", got)
+		}
+		if mem.Status != "via-hub" {
+			t.Errorf("memory Status with a mimocode hub binding: got %q, want via-hub", mem.Status)
+		}
+	})
+
+	t.Run("jsonc with a comment parses (scanner tolerates JSONC)", func(t *testing.T) {
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.jsonc")
+		_ = os.WriteFile(mimoPath, []byte("{\n  // operator comment\n  \"mcp\": {\n    \"memory\": {\"type\":\"remote\",\"url\":\"http://localhost:9123/mcp\",\"enabled\":true}\n  }\n}\n"), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		mem := memEntryFor(t, res)
+		if got := mem.ClientPresence["mimocode"].Endpoint; got != "http://localhost:9123/mcp" {
+			t.Errorf("mimocode (jsonc).Endpoint: got %q, want the loopback hub URL", got)
+		}
+	})
+}
+
 // TestProbeClientConfigPresence_Wave2Clients confirms the eight wave-2
 // clients participate in the per-client presence probe the Servers matrix
 // uses to gate column visibility + the Initialize affordance. Mirrors

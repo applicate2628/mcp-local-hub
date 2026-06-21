@@ -24,8 +24,8 @@ export type BackupsListProps = {
 
 // CLIENT_ORDER seeds the always-visible group order. The seven CORE_CLIENTS
 // render unconditionally (stable group set, even with zero backups) — same
-// always-on posture the Servers matrix gives core columns. The eight opt-in
-// WAVE2_CLIENTS (zed/kiro/windsurf/cline/kilocode/opencode/hermes/openclaw)
+// always-on posture the Servers matrix gives core columns. The opt-in
+// WAVE2_CLIENTS (zed/kiro/windsurf/cline/kilocode/opencode/mimocode/hermes/openclaw)
 // are DETECTION-GATED: a wave-2 group appears only when that client actually
 // has backups on disk (see the grouping pass below), so an operator who never
 // installed a niche client sees no empty group for it. The shared client-list
@@ -187,7 +187,7 @@ export function BackupsList({
     // Seed the seven CORE_CLIENTS unconditionally so the core group set is
     // stable even on a host with no backups for some of them.
     for (const c of CLIENT_ORDER) m.set(c, []);
-    // Detection-gate the eight opt-in WAVE2_CLIENTS: pre-seed a wave-2 group
+    // Detection-gate the opt-in WAVE2_CLIENTS: pre-seed a wave-2 group
     // ONLY when that client actually has at least one backup row, and do so in
     // the canonical WAVE2_ORDER (the data-driven insertion order below is not
     // deterministic across /api/backups responses). A wave-2 client with zero
