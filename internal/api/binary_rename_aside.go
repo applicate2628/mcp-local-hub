@@ -148,7 +148,7 @@ func RecoverMissingBinary(target string) error {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil || info.IsDir() {
+		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
 		candidates = append(candidates, candidate{

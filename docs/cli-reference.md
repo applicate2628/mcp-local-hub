@@ -98,7 +98,7 @@ typed exit codes that the main binary preserves from command code.
 | 3 | `mcphub gui --force --kill`: race lost or recorded PID already gone |
 | | `mcphub gui --reset-port`: refused because another GUI is running |
 | 4 | `mcphub gui --force --kill`: pidport malformed/unrecoverable or kill attempt failed |
-| 6 | `mcphub gui --force --kill` or `mcphub gui --reset-port`: non-interactive shell requires `--yes` |
+| 6 | Non-interactive shell requires `--yes`: `mcphub gui --force --kill`, `mcphub gui --reset-port`, `mcphub hub-mcp regenerate-token --client <name>`, or `mcphub hub-mcp regenerate-instance-id` |
 | 7 | `mcphub gui --force --kill`: identity gate refused to kill the recorded PID |
 | 8 | setup-state-path-rejected |
 | | `mcphub gui --reset-port`: refused while hub-aggregate clients are gate-ON |

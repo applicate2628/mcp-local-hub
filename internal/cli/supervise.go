@@ -472,13 +472,14 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	if err != nil {
 		return fmt.Errorf("resolve supervisor state dir: %w", err)
 	}
-	exe, err := supervisorExecutableFn()
-	if err != nil {
-		return fmt.Errorf("resolve supervisor executable: %w", err)
-	}
+	exe, executableLookupErr := supervisorExecutableFn()
 	canonicalExe := exe
-	if target, ok := api.CanonicalTargetFromAside(exe); ok {
-		canonicalExe = target
+	if executableLookupErr == nil {
+		if target, ok := api.CanonicalTargetFromAside(exe); ok {
+			canonicalExe = target
+		}
+	} else {
+		canonicalExe = ""
 	}
 
 	// Acquire singleton lock — fails fast if another supervisor holds
@@ -495,14 +496,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	defer lk.Release()
 
 	binaryRecovered := false
-	if _, err := os.Stat(canonicalExe); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("stat supervisor executable %q: %w", canonicalExe, err)
+	if canonicalExe != "" {
+		if _, err := os.Stat(canonicalExe); err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("stat supervisor executable %q: %w", canonicalExe, err)
+			}
+			binaryRecovered = true
 		}
-		binaryRecovered = true
-	}
-	if err := recoverMissingBinaryFn(canonicalExe); err != nil {
-		return fmt.Errorf("recover supervisor binary: %w", err)
+		if err := recoverMissingBinaryFn(canonicalExe); err != nil {
+			return fmt.Errorf("recover supervisor binary: %w", err)
+		}
 	}
 
 	// Open audit log. The log handle is process-lifetime; per-Emit
@@ -540,6 +543,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			Event:    "binary-recovered-from-aside",
 			Body: map[string]any{
 				"path": canonicalExe,
+			},
+		})
+	}
+	if executableLookupErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "binary-recovery-skipped",
+			Body: map[string]any{
+				"err": executableLookupErr.Error(),
 			},
 		})
 	}

@@ -1,55 +1,31 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
-type restoreMissingBinaryAsideOps struct {
-	link   func(string, string) error
-	rename func(string, string) error
-	remove func(string) error
-}
-
-func restoreMissingBinaryAsideWithOps(aside, target string, ops restoreMissingBinaryAsideOps) error {
-	if ops.link == nil {
-		ops.link = os.Link
-	}
-	if ops.rename == nil {
-		ops.rename = os.Rename
-	}
-	if ops.remove == nil {
-		ops.remove = os.Remove
-	}
-
-	if err := ops.link(aside, target); err == nil {
-		// The target is now restored (hard-linked to the aside's inode). Removing
-		// the consumed aside is BEST-EFFORT: a failure here leaves a harmless
-		// .old-<ts> (same inode, swept later by SweepOldBinaries) and must NOT
-		// fail the restore.
-		_ = ops.remove(aside)
-		return nil
-	} else if !isRestoreFallbackError(err) {
-		return err
-	}
-
+func restoreMissingBinaryAside(aside, target string) error {
+	temp := target + ".restore-tmp"
 	if err := ensureRestoreTargetAbsent(target); err != nil {
 		return err
 	}
-	if err := ops.rename(aside, target); err == nil {
-		return nil
-	} else if !isRestoreFallbackError(err) {
+	if err := copyFileExclusiveFsync(aside, temp); err != nil {
+		_ = os.Remove(temp)
 		return err
 	}
-
-	if err := copyFileExclusiveFsync(aside, target); err != nil {
+	if err := ensureRestoreTargetAbsent(target); err != nil {
+		_ = os.Remove(temp)
 		return err
 	}
-	_ = ops.remove(aside)
+	if err := os.Rename(temp, target); err != nil {
+		_ = os.Remove(temp)
+		return fmt.Errorf("rename restore temp %q to target %q: %w", temp, target, err)
+	}
+	syncDirBestEffort(filepath.Dir(target))
+	_ = os.Remove(aside)
 	return nil
 }
 
@@ -60,14 +36,6 @@ func ensureRestoreTargetAbsent(target string) error {
 		return fmt.Errorf("stat restore target %q: %w", target, err)
 	}
 	return nil
-}
-
-func isRestoreFallbackError(err error) bool {
-	return errors.Is(err, syscall.EXDEV) ||
-		errors.Is(err, syscall.EOPNOTSUPP) ||
-		errors.Is(err, syscall.ENOTSUP) ||
-		errors.Is(err, syscall.ENOSYS) ||
-		errors.Is(err, syscall.EPERM)
 }
 
 func copyFileExclusiveFsync(srcPath, dstPath string) error {
@@ -81,7 +49,7 @@ func copyFileExclusiveFsync(srcPath, dstPath string) error {
 	if err != nil {
 		return fmt.Errorf("stat restore aside %q: %w", srcPath, err)
 	}
-	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o700)
 	if err != nil {
 		return fmt.Errorf("create restore target %q: %w", dstPath, err)
 	}
@@ -96,6 +64,10 @@ func copyFileExclusiveFsync(srcPath, dstPath string) error {
 		_ = dst.Close()
 		return fmt.Errorf("copy restore aside %q to %q: %w", srcPath, dstPath, err)
 	}
+	if err := dst.Chmod(info.Mode().Perm()); err != nil {
+		_ = dst.Close()
+		return fmt.Errorf("chmod restore target %q: %w", dstPath, err)
+	}
 	if err := dst.Sync(); err != nil {
 		_ = dst.Close()
 		return fmt.Errorf("fsync restore target %q: %w", dstPath, err)
@@ -104,7 +76,6 @@ func copyFileExclusiveFsync(srcPath, dstPath string) error {
 		return fmt.Errorf("close restore target %q: %w", dstPath, err)
 	}
 	cleanupDst = false
-	syncDirBestEffort(filepath.Dir(dstPath))
 	return nil
 }
 

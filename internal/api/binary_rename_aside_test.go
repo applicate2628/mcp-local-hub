@@ -164,6 +164,38 @@ func TestRecoverMissingBinary_NoValidAsideReturnsError(t *testing.T) {
 	}
 }
 
+func TestRecoverMissingBinary_SkipsNonRegularAside(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, platformBinaryName())
+	now := time.Now().UTC()
+	regularAside := target + ".old-" + now.Add(-time.Minute).Format(renameAsideTimestampLayout)
+	if err := os.WriteFile(regularAside, []byte("regular-aside"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPayload := filepath.Join(dir, "symlink-payload")
+	if err := os.WriteFile(symlinkPayload, []byte("symlink-aside"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	symlinkAside := target + ".old-" + now.Format(renameAsideTimestampLayout)
+	if err := os.Symlink(symlinkPayload, symlinkAside); err != nil {
+		t.Skip(err)
+	}
+
+	if err := RecoverMissingBinary(target); err != nil {
+		t.Fatalf("recover missing binary: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read recovered target: %v", err)
+	}
+	if string(got) != "regular-aside" {
+		t.Fatalf("recovered content = %q, want regular aside content", got)
+	}
+	if _, err := os.Lstat(symlinkAside); err != nil {
+		t.Fatalf("non-regular aside should remain skipped: %v", err)
+	}
+}
+
 func TestCanonicalTargetFromAside_StripsGeneratedAsideSuffix(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, platformBinaryName())

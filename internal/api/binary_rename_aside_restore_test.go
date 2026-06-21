@@ -3,123 +3,57 @@ package api
 import (
 	"os"
 	"path/filepath"
-	"syscall"
+	"runtime"
 	"testing"
 )
 
-func TestRestoreMissingBinaryAside_FallsBackWhenHardLinkCrossDevice(t *testing.T) {
+func TestRestoreMissingBinaryAside_CopiesRunningAsideContent(t *testing.T) {
 	dir := t.TempDir()
 	aside := filepath.Join(dir, platformBinaryName()+".old-20250102T030405Z")
 	target := filepath.Join(dir, platformBinaryName())
-	if err := os.WriteFile(aside, []byte("aside-binary"), 0o700); err != nil {
+	want := []byte("aside-binary\nnon-empty\n")
+	if err := os.WriteFile(aside, want, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
-	var linkCalls int
-	var renameCalls int
-	ops := restoreMissingBinaryAsideOps{
-		link: func(oldname, newname string) error {
-			linkCalls++
-			return errRestoreCrossDeviceForTest
-		},
-		rename: func(oldname, newname string) error {
-			renameCalls++
-			return os.Rename(oldname, newname)
-		},
-		remove: os.Remove,
+	runningAside, err := os.OpenFile(aside, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open running aside: %v", err)
 	}
+	defer runningAside.Close()
 
-	if err := restoreMissingBinaryAsideWithOps(aside, target, ops); err != nil {
+	if err := restoreMissingBinaryAside(aside, target); err != nil {
 		t.Fatalf("restore missing binary aside: %v", err)
 	}
-	if linkCalls != 1 {
-		t.Fatalf("link calls = %d, want 1", linkCalls)
-	}
-	if renameCalls != 1 {
-		t.Fatalf("rename calls = %d, want 1", renameCalls)
-	}
+
 	got, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("read target: %v", err)
 	}
-	if string(got) != "aside-binary" {
-		t.Fatalf("target content = %q, want aside-binary", got)
+	if string(got) != string(want) {
+		t.Fatalf("target content = %q, want %q", got, want)
 	}
-	if _, err := os.Stat(aside); !os.IsNotExist(err) {
-		t.Fatalf("aside should be consumed by rename fallback: %v", err)
-	}
-}
-
-func TestRestoreMissingBinaryAside_CopyFallbackWhenRenameCrossDevice(t *testing.T) {
-	dir := t.TempDir()
-	aside := filepath.Join(dir, platformBinaryName()+".old-20250102T030405Z")
-	target := filepath.Join(dir, platformBinaryName())
-	if err := os.WriteFile(aside, []byte("aside-binary"), 0o700); err != nil {
-		t.Fatal(err)
+	if info, err := os.Stat(target); err != nil {
+		t.Fatalf("stat target: %v", err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("target mode = %v, want owner executable bit preserved", info.Mode().Perm())
 	}
 
-	ops := restoreMissingBinaryAsideOps{
-		link: func(oldname, newname string) error {
-			return errRestoreCrossDeviceForTest
-		},
-		rename: func(oldname, newname string) error {
-			return errRestoreCrossDeviceForTest
-		},
-		remove: os.Remove,
+	if _, err := runningAside.WriteAt([]byte("mutated"), 0); err != nil {
+		t.Fatalf("mutate still-open aside handle: %v", err)
 	}
-
-	if err := restoreMissingBinaryAsideWithOps(aside, target, ops); err != nil {
-		t.Fatalf("restore missing binary aside: %v", err)
+	if err := runningAside.Sync(); err != nil {
+		t.Fatalf("sync mutated aside handle: %v", err)
 	}
-	got, err := os.ReadFile(target)
+	gotAfterMutation, err := os.ReadFile(target)
 	if err != nil {
-		t.Fatalf("read target: %v", err)
+		t.Fatalf("read target after aside mutation: %v", err)
 	}
-	if string(got) != "aside-binary" {
-		t.Fatalf("target content = %q, want aside-binary", got)
-	}
-	if _, err := os.Stat(aside); !os.IsNotExist(err) {
-		t.Fatalf("aside should be removed after copy fallback: %v", err)
-	}
-}
-
-func TestRestoreMissingBinaryAside_CopyFallbackDoesNotClobberPresentTarget(t *testing.T) {
-	dir := t.TempDir()
-	aside := filepath.Join(dir, platformBinaryName()+".old-20250102T030405Z")
-	target := filepath.Join(dir, platformBinaryName())
-	if err := os.WriteFile(aside, []byte("aside-binary"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, []byte("present-target"), 0o700); err != nil {
-		t.Fatal(err)
+	if string(gotAfterMutation) != string(want) {
+		t.Fatalf("target aliases running aside after restore: got %q, want original %q", gotAfterMutation, want)
 	}
 
-	ops := restoreMissingBinaryAsideOps{
-		link: func(oldname, newname string) error {
-			return errRestoreCrossDeviceForTest
-		},
-		rename: func(oldname, newname string) error {
-			return errRestoreCrossDeviceForTest
-		},
-		remove: os.Remove,
+	if _, err := os.Stat(target + ".restore-tmp"); !os.IsNotExist(err) {
+		t.Fatalf("restore temp should not remain: %v", err)
 	}
-
-	if err := restoreMissingBinaryAsideWithOps(aside, target, ops); err == nil {
-		t.Fatal("restore unexpectedly succeeded with present target")
-	}
-	got, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("read target: %v", err)
-	}
-	if string(got) != "present-target" {
-		t.Fatalf("target was clobbered: got %q", got)
-	}
-	if _, err := os.Stat(aside); err != nil {
-		t.Fatalf("aside should remain after failed no-clobber copy: %v", err)
-	}
-}
-
-var errRestoreCrossDeviceForTest = &os.LinkError{
-	Op:  "link",
-	Err: syscall.EXDEV,
 }

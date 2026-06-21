@@ -27,6 +27,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -819,10 +820,9 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
 
-	cleanupReaper := setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+	defer setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
 		return ReaperResult{}, nil
-	})
-	defer cleanupReaper()
+	})()
 
 	sweepCalled := make(chan string, 1)
 	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
@@ -880,6 +880,77 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	}
+}
+
+func TestSuperviseCommand_SkipsBinaryRecoveryWhenExecutableUnavailable(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	defer setSupervisorExecutableFnForTest(func() (string, error) {
+		return "", errors.New("executable unavailable")
+	})()
+
+	cleanupReaper := setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+		return ReaperResult{}, nil
+	})
+	defer cleanupReaper()
+
+	var recoverCalls atomic.Int32
+	cleanupRecover := setRecoverMissingBinaryFnForTest(func(target string) error {
+		recoverCalls.Add(1)
+		return nil
+	})
+	defer cleanupRecover()
+
+	var sweepCalls atomic.Int32
+	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+		sweepCalls.Add(1)
+		return nil
+	})
+	defer cleanupSweep()
+
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("supervise exited before startup after executable lookup failure: %v", err)
+		default:
+		}
+		if data, err := os.ReadFile(eventsPath); err == nil && strings.Contains(string(data), `"event":"supervisor-start"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("supervise did not reach startup after executable lookup failure")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	exitCh <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervise exited with err after executable lookup failure: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	}
+	if got := recoverCalls.Load(); got != 0 {
+		t.Fatalf("RecoverMissingBinary calls = %d, want 0 when executable lookup fails", got)
+	}
+	if got := sweepCalls.Load(); got != 0 {
+		t.Fatalf("SweepOldBinaries calls = %d, want 0 when executable lookup fails", got)
 	}
 }
 
