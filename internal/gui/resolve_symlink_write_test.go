@@ -20,14 +20,14 @@ import (
 )
 
 type fakeSymlinkResolveWriter struct {
-	resolveCalled  string
-	writeClient    string
-	writePinned    string
-	writeHash      string
-	resolveResult  *ResolveSymlinkResult
-	resolveErr     error
-	writeResult    *WriteSymlinkResult
-	writeErr       error
+	resolveCalled string
+	writeClient   string
+	writePinned   string
+	writeHash     string
+	resolveResult *ResolveSymlinkResult
+	resolveErr    error
+	writeResult   *WriteSymlinkResult
+	writeErr      error
 }
 
 func (f *fakeSymlinkResolveWriter) Resolve(client string) (*ResolveSymlinkResult, error) {
@@ -419,6 +419,86 @@ func TestRealSymlinkResolveWriter_ContentDrift_Refused(t *testing.T) {
 	// The external edit must be preserved (no clobber).
 	if b, _ := os.ReadFile(realTarget); string(b) != "# edited externally\n" {
 		t.Errorf("external edit clobbered: %q", b)
+	}
+}
+
+// TestRealSymlinkResolveWriter_NonRegularTarget_Refused pins the DoS guard:
+// the GUI consent endpoint must reject a symlink target that is not a regular
+// file before attempting to read it.
+func TestRealSymlinkResolveWriter_NonRegularTarget_Refused(t *testing.T) {
+	client, realTarget := realSymlinkClient(t)
+	if err := os.Remove(realTarget); err != nil {
+		t.Fatalf("remove seeded target: %v", err)
+	}
+	if err := os.Mkdir(realTarget, 0o700); err != nil {
+		t.Fatalf("replace target with directory: %v", err)
+	}
+
+	rw := realSymlinkResolveWriter{}
+	_, err := rw.Resolve(client)
+	if !errors.Is(err, errSymlinkNotApplicable) {
+		t.Fatalf("Resolve err=%v, want errSymlinkNotApplicable", err)
+	}
+}
+
+// TestRealSymlinkResolveWriter_OversizedTarget_Refused pins the bounded-read
+// guard: even regular-file config targets are capped before hashing/round-trip
+// writing so a huge symlink target cannot exhaust GUI memory.
+func TestRealSymlinkResolveWriter_OversizedTarget_Refused(t *testing.T) {
+	client, realTarget := realSymlinkClient(t)
+	oversized := bytes.Repeat([]byte("A"), int(maxResolvedSymlinkConfigBytes)+1)
+	if err := os.WriteFile(realTarget, oversized, 0o600); err != nil {
+		t.Fatalf("write oversized target: %v", err)
+	}
+
+	rw := realSymlinkResolveWriter{}
+	_, err := rw.Resolve(client)
+	if !errors.Is(err, errSymlinkNotApplicable) {
+		t.Fatalf("Resolve err=%v, want errSymlinkNotApplicable", err)
+	}
+}
+
+// TestRealSymlinkResolveWriter_LargeValidConfig_RoundTrips is the Finding-1
+// regression guard: a legitimate client config larger than the 64 KiB POST
+// control-body cap (maxControlBodyBytes) but within the dedicated config cap
+// (maxResolvedSymlinkConfigBytes, 4 MiB) must Resolve AND round-trip WRITE
+// successfully. Under the old cap reuse (maxResolvedSymlinkConfigBytes ==
+// maxControlBodyBytes) this would have been wrongly rejected as
+// errSymlinkNotApplicable. The seeded body is deliberately >64 KiB to FAIL on
+// the regressed cap.
+func TestRealSymlinkResolveWriter_LargeValidConfig_RoundTrips(t *testing.T) {
+	if maxResolvedSymlinkConfigBytes <= maxControlBodyBytes {
+		t.Fatalf("config cap (%d) must exceed control-body cap (%d) — Finding 1 regression",
+			maxResolvedSymlinkConfigBytes, maxControlBodyBytes)
+	}
+	client, realTarget := realSymlinkClient(t)
+	// A realistic large config: a TOML-ish body comfortably above 64 KiB but
+	// well under 4 MiB — the size of a client config with many MCP entries.
+	large := append([]byte("# codex config\n"), bytes.Repeat([]byte("x"), int(maxControlBodyBytes)+4096)...)
+	if int64(len(large)) <= maxControlBodyBytes {
+		t.Fatalf("test body len=%d must exceed maxControlBodyBytes=%d", len(large), maxControlBodyBytes)
+	}
+	if int64(len(large)) > maxResolvedSymlinkConfigBytes {
+		t.Fatalf("test body len=%d must stay within maxResolvedSymlinkConfigBytes=%d", len(large), maxResolvedSymlinkConfigBytes)
+	}
+	if err := os.WriteFile(realTarget, large, 0o600); err != nil {
+		t.Fatalf("write large valid target: %v", err)
+	}
+
+	rw := realSymlinkResolveWriter{}
+	res, err := rw.Resolve(client)
+	if err != nil {
+		t.Fatalf("Resolve of a >64KiB valid config failed (Finding 1 regression): %v", err)
+	}
+	wres, err := rw.Write(client, res.PinnedRealPath, res.ContentHash)
+	if err != nil {
+		t.Fatalf("Write of a >64KiB valid config failed (Finding 1 regression): %v", err)
+	}
+	if !wres.Written {
+		t.Errorf("Written=false for a large valid config, want true")
+	}
+	if b, _ := os.ReadFile(realTarget); !bytes.Equal(b, large) {
+		t.Errorf("round-trip changed a large config: got %d bytes, want %d", len(b), len(large))
 	}
 }
 
