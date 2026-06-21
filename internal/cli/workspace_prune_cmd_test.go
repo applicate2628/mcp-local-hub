@@ -4,6 +4,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +76,32 @@ func runWorkspacePruneCmd(t *testing.T, stdin string, args ...string) (string, e
 	}
 	err := c.Execute()
 	return buf.String(), err
+}
+
+// runWorkspacePruneCmdSplit executes `workspace prune` with args, capturing
+// STDOUT and STDERR into SEPARATE buffers (unlike runWorkspacePruneCmd, which
+// merges them). Needed by the --json tests, which must prove STDOUT is a pure
+// machine-readable JSON payload with the prompt/table/notes on STDERR. stdin is
+// piped as a non-*os.File reader; pass a non-nil isTerminal to stub an
+// interactive terminal (the prompt path is otherwise unreachable from a test
+// because inputIsTerminal returns false for non-*os.File readers).
+func runWorkspacePruneCmdSplit(t *testing.T, stdin string, isTerminal func() bool, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	if isTerminal != nil {
+		prev := pruneInputIsTerminal
+		pruneInputIsTerminal = func(io.Reader) bool { return isTerminal() }
+		t.Cleanup(func() { pruneInputIsTerminal = prev })
+	}
+	c := newWorkspaceCmd()
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	c.SetOut(outBuf)
+	c.SetErr(errBuf)
+	c.SilenceUsage = true
+	c.SetArgs(append([]string{"prune"}, args...))
+	c.SetIn(strings.NewReader(stdin)) // non-*os.File reader
+	err = c.Execute()
+	return outBuf.String(), errBuf.String(), err
 }
 
 // countSerenaRows returns the number of serena rows currently in the registry.
@@ -333,5 +361,197 @@ func TestWorkspacePrune_DefaultMarkerClearedOnPrune(t *testing.T) {
 	}
 	if cleared != "" {
 		t.Errorf("default marker should be cleared after pruning the default workspace; got %q", cleared)
+	}
+}
+
+// TestWorkspacePrune_BackendNoOpNotCountedAsPruned (Finding 1) seeds a
+// serena-ONLY deleted-dir orphan and prunes it with --backend lsp. The lsp
+// backend has nothing to remove (the row is serena, not LSP), so PruneWorkspace
+// returns an existence-tolerant zero-removal report. The command MUST NOT count
+// it as pruned: the totals/exit reflect zero actual teardown, the candidate is
+// surfaced as skipped, and the serena row remains (correct — --backend lsp does
+// not touch serena rows).
+func TestWorkspacePrune_BackendNoOpNotCountedAsPruned(t *testing.T) {
+	withStateDir(t)
+	gone := canonicalForCleanup(t, filepath.Join(t.TempDir(), "no-such", "ws"))
+	seedSerenaRow(t, gone) // serena-only row, no LSP rows
+
+	out, err := runWorkspacePruneCmd(t, "", "--backend", "lsp", "--yes")
+	if err != nil {
+		t.Fatalf("prune --backend lsp --yes: %v\noutput: %s", err, out)
+	}
+	// The zero-removal candidate must report 0 pruned, 0 LSP, 0 serena.
+	if !strings.Contains(out, "Pruned 0 workspace(s) (0 LSP rows, 0 serena rows)") {
+		t.Errorf("a serena-only workspace pruned with --backend lsp must report 0 pruned / 0 rows; got:\n%s", out)
+	}
+	// And it must be surfaced as a skip, not silently dropped.
+	if !strings.Contains(out, "skipped") {
+		t.Errorf("the existence-tolerant no-op should be surfaced as skipped; got:\n%s", out)
+	}
+	// The serena row must remain — --backend lsp does not touch it.
+	if n := countSerenaRows(t); n != 1 {
+		t.Errorf("--backend lsp must NOT remove the serena row; got %d remaining, want 1", n)
+	}
+}
+
+// TestWorkspacePrune_BackendNoOpJSONOmitsCandidate (Finding 1, --json variant)
+// asserts the --json payload for a serena-only workspace pruned with
+// --backend lsp is an EMPTY array (the zero-removal no-op is not a pruned row),
+// and STDOUT stays clean JSON.
+func TestWorkspacePrune_BackendNoOpJSONOmitsCandidate(t *testing.T) {
+	withStateDir(t)
+	gone := canonicalForCleanup(t, filepath.Join(t.TempDir(), "no-such", "ws"))
+	seedSerenaRow(t, gone)
+
+	stdout, _, err := runWorkspacePruneCmdSplit(t, "", nil, "--backend", "lsp", "--yes", "--json")
+	if err != nil {
+		t.Fatalf("prune --backend lsp --yes --json: %v\nstdout: %s", err, stdout)
+	}
+	var arr []prunePlanReport
+	if uerr := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &arr); uerr != nil {
+		t.Fatalf("stdout is not a valid JSON array: %v\nstdout: %s", uerr, stdout)
+	}
+	if len(arr) != 0 {
+		t.Errorf("a zero-removal no-op must NOT appear in the JSON pruned list; got %d elements:\n%s", len(arr), stdout)
+	}
+	if n := countSerenaRows(t); n != 1 {
+		t.Errorf("--backend lsp must NOT remove the serena row; got %d, want 1", n)
+	}
+}
+
+// TestWorkspacePrune_PartialReportRecordedOnError (Finding 2) injects a
+// PruneWorkspace partial-failure: the report carries LSP rows that WERE torn
+// down ALONGSIDE an error from a later (serena) phase. The command MUST still
+// record + display the partial removal (the LSP rows + the totals) AND surface
+// the error, rather than dropping the report and claiming nothing was removed.
+func TestWorkspacePrune_PartialReportRecordedOnError(t *testing.T) {
+	withStateDir(t)
+	gone := canonicalForCleanup(t, filepath.Join(t.TempDir(), "no-such", "ws"))
+	seedSerenaRow(t, gone) // an orphan so there is a candidate to apply against
+
+	// Stub the shared teardown owner to mimic a phase failure AFTER the LSP phase
+	// mutated state (e.g. --backend all removed LSP rows, then the serena
+	// supervisor-intent teardown errored): a non-nil report with LSPRemoved
+	// populated returned ALONGSIDE the error.
+	prev := pruneWorkspaceFn
+	pruneWorkspaceFn = func(workspacePath, backend string) (*api.PruneReport, error) {
+		return &api.PruneReport{
+			Workspace:    workspacePath,
+			WorkspaceKey: api.WorkspaceKey(workspacePath),
+			Backend:      backend,
+			LSPRemoved:   []string{"go", "python"},
+		}, errors.New("paired serena supervisor teardown for workspace: reconcile failed")
+	}
+	t.Cleanup(func() { pruneWorkspaceFn = prev })
+
+	stdout, stderr, err := runWorkspacePruneCmdSplit(t, "", nil, "--backend", "all", "--yes")
+	if err != nil {
+		// The command returns nil (bulk best-effort) — the error is a per-candidate
+		// warning, not a fatal command error.
+		t.Fatalf("prune should not fail the whole command on a per-candidate error: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	// The partial LSP removal must be reflected in the totals on STDOUT.
+	if !strings.Contains(stdout, "Pruned 1 workspace(s) (2 LSP rows, 0 serena rows)") {
+		t.Errorf("partial removal (2 LSP rows) must appear in the totals; got stdout:\n%s", stdout)
+	}
+	// The phase error must still be surfaced as a warning on STDERR.
+	if !strings.Contains(stderr, "failed") || !strings.Contains(stderr, "reconcile failed") {
+		t.Errorf("the phase error must be surfaced; got stderr:\n%s", stderr)
+	}
+}
+
+// TestWorkspacePrune_PartialReportRecordedOnError_JSON (Finding 2, --json
+// variant) asserts the injected partial report appears in the --json payload on
+// STDOUT (so a scripted consumer sees the LSP rows that were actually removed),
+// with the error warning isolated to STDERR.
+func TestWorkspacePrune_PartialReportRecordedOnError_JSON(t *testing.T) {
+	withStateDir(t)
+	gone := canonicalForCleanup(t, filepath.Join(t.TempDir(), "no-such", "ws"))
+	seedSerenaRow(t, gone)
+
+	prev := pruneWorkspaceFn
+	pruneWorkspaceFn = func(workspacePath, backend string) (*api.PruneReport, error) {
+		return &api.PruneReport{
+			Workspace:    workspacePath,
+			WorkspaceKey: api.WorkspaceKey(workspacePath),
+			Backend:      backend,
+			LSPRemoved:   []string{"go"},
+		}, errors.New("serena teardown errored")
+	}
+	t.Cleanup(func() { pruneWorkspaceFn = prev })
+
+	stdout, stderr, err := runWorkspacePruneCmdSplit(t, "", nil, "--backend", "all", "--yes", "--json")
+	if err != nil {
+		t.Fatalf("prune --json should not fail the whole command: %v\nstdout: %s", err, stdout)
+	}
+	var arr []prunePlanReport
+	if uerr := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &arr); uerr != nil {
+		t.Fatalf("stdout is not valid JSON: %v\nstdout: %s", uerr, stdout)
+	}
+	if len(arr) != 1 {
+		t.Fatalf("partial report must be present in the JSON payload; got %d elements:\n%s", len(arr), stdout)
+	}
+	if len(arr[0].LSPRemoved) != 1 || arr[0].LSPRemoved[0] != "go" {
+		t.Errorf("JSON must carry the partially-removed LSP rows; got %#v", arr[0].LSPRemoved)
+	}
+	if !strings.Contains(stderr, "serena teardown errored") {
+		t.Errorf("the error must be surfaced on stderr; got:\n%s", stderr)
+	}
+}
+
+// TestWorkspacePrune_InteractiveJSONPromptToStderr (Finding 3) drives the
+// interactive --json prompt path (stubbed terminal, no --yes) with a "n"
+// response. STDOUT must be a clean, parseable JSON array (the candidate table +
+// "[y/N]" prompt + abort note all routed to STDERR), so a scripted --json
+// consumer still parses STDOUT even when a prompt fired.
+func TestWorkspacePrune_InteractiveJSONPromptToStderr(t *testing.T) {
+	withStateDir(t)
+	gone := canonicalForCleanup(t, filepath.Join(t.TempDir(), "no-such", "ws"))
+	seedSerenaRow(t, gone)
+
+	// "n" → abort; the abort branch under --json emits an empty JSON array.
+	stdout, stderr, err := runWorkspacePruneCmdSplit(t, "n\n", func() bool { return true }, "--json")
+	if err != nil {
+		t.Fatalf("interactive --json prompt (answer n) should not error: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	// STDOUT must be pure JSON — nothing else.
+	var arr []prunePlanReport
+	if uerr := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &arr); uerr != nil {
+		t.Fatalf("STDOUT must be clean parseable JSON (prompt/table must go to stderr); got stdout:\n%s\n(unmarshal err: %v)", stdout, uerr)
+	}
+	// The prompt + table must have gone to STDERR, not STDOUT.
+	if strings.Contains(stdout, "[y/N]") || strings.Contains(stdout, "WORKSPACE") {
+		t.Errorf("the prompt/candidate table leaked into STDOUT; got:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "[y/N]") {
+		t.Errorf("the prompt should be on STDERR under --json; got stderr:\n%s", stderr)
+	}
+	// The row must remain — the operator answered "n".
+	if n := countSerenaRows(t); n != 1 {
+		t.Errorf("aborted prune must NOT remove rows; got %d, want 1", n)
+	}
+}
+
+// TestWorkspacePrune_DryRunJSONCleanStdout (Finding 3 corollary) confirms the
+// --dry-run --json path still emits clean JSON to STDOUT with nothing else (no
+// prompt is ever shown on the dry-run path).
+func TestWorkspacePrune_DryRunJSONCleanStdout(t *testing.T) {
+	withStateDir(t)
+	gone := canonicalForCleanup(t, filepath.Join(t.TempDir(), "no-such", "ws"))
+	seedSerenaRow(t, gone)
+
+	stdout, stderr, err := runWorkspacePruneCmdSplit(t, "", nil, "--dry-run", "--json")
+	if err != nil {
+		t.Fatalf("--dry-run --json: %v\nstdout: %s", err, stdout)
+	}
+	var arr []prunePlanReport
+	if uerr := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &arr); uerr != nil {
+		t.Fatalf("--dry-run --json STDOUT must be clean JSON; got stdout:\n%s\n(err: %v)", stdout, uerr)
+	}
+	if len(arr) != 1 {
+		t.Fatalf("dry-run --json should list the 1 candidate; got %d:\n%s", len(arr), stdout)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Errorf("--dry-run --json should emit nothing on STDERR; got:\n%s", stderr)
 	}
 }

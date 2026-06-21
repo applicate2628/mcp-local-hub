@@ -39,6 +39,23 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+// pruneWorkspaceFn is the teardown seam the apply loop calls for each candidate.
+// It defaults to the production shared owner (api.PruneWorkspace) and is a
+// package var ONLY so a test can inject a partial-failure (LSP rows removed,
+// serena teardown errors) to exercise the partial-report-on-error path. Never
+// reassigned in production.
+var pruneWorkspaceFn = func(workspacePath, backend string) (*api.PruneReport, error) {
+	return api.NewAPI().PruneWorkspace(workspacePath, backend)
+}
+
+// pruneInputIsTerminal is the interactive-shell seam the confirmation gate uses.
+// It defaults to the shared inputIsTerminal probe and is a package var ONLY so a
+// test can stub an interactive terminal (inputIsTerminal returns false for the
+// non-*os.File readers tests pipe as stdin, so without this seam the
+// prompt-pollutes-stdout path is unreachable from a test). Never reassigned in
+// production.
+var pruneInputIsTerminal = inputIsTerminal
+
 // pruneCandidate is one workspace the prune command classified as an orphan.
 type pruneCandidate struct {
 	path      string                    // canonical workspace path (registry form)
@@ -170,30 +187,61 @@ func runWorkspacePrune(cmd *cobra.Command, opts workspacePruneOpts) error {
 	// 4. Confirmation gate. --yes skips it. Without --yes: a non-interactive
 	//    shell REFUSES (mirrors `gui --force --kill`); an interactive shell
 	//    prints the candidate table and prompts.
+	//
+	//    Under --json, the prompt + candidate table go to STDERR so STDOUT stays
+	//    a pure machine-readable JSON payload (the prompt text would otherwise
+	//    prefix the JSON and break a scripted consumer). The non-interactive
+	//    refusal already writes to stderr + returns a non-zero error, so its
+	//    stdout stays clean regardless. NB: cobra's OutOrStderr() returns the
+	//    OUT writer when one is set (it falls back to os.Stderr only when no out
+	//    writer is wired), so the real error stream is ErrOrStderr() — use that
+	//    for everything that must stay off STDOUT under --json.
 	if !opts.yes {
-		if !inputIsTerminal(cmd.InOrStdin()) {
-			fmt.Fprintln(cmd.OutOrStderr(),
+		if !pruneInputIsTerminal(cmd.InOrStdin()) {
+			fmt.Fprintln(cmd.ErrOrStderr(),
 				"non-interactive shell — pass --yes to confirm teardown, or --dry-run to preview")
 			return fmt.Errorf("workspace prune refused: non-interactive shell without --yes or --dry-run")
 		}
-		printPruneCandidateTable(cmd.OutOrStdout(), candidates)
-		fmt.Fprintf(cmd.OutOrStdout(), "\nTear down %d orphan workspace(s) [y/N]: ", len(candidates))
+		promptW := cmd.OutOrStdout()
+		if opts.jsonOut {
+			promptW = cmd.ErrOrStderr()
+		}
+		printPruneCandidateTable(promptW, candidates)
+		fmt.Fprintf(promptW, "\nTear down %d orphan workspace(s) [y/N]: ", len(candidates))
 		if !readYesNo(cmd.InOrStdin()) {
+			// Aborted: no teardown ran. Under --json the abort note goes to
+			// stderr and STDOUT gets an empty JSON array so a scripted consumer
+			// still parses valid JSON (nothing was removed).
+			if opts.jsonOut {
+				fmt.Fprintln(cmd.ErrOrStderr(), "Aborted; nothing removed.")
+				return json.NewEncoder(cmd.OutOrStdout()).Encode([]prunePlanReport{})
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "Aborted; nothing removed.")
 			return nil
 		}
 	}
 
-	// 5. Apply: tear down each orphan through the SHARED owner, accumulate the
-	//    reports, clear a stale default marker, and emit the result.
-	reports, totalLSP, totalSerena := applyWorkspacePrune(cmd, stateDir, candidates, opts.backend)
+	// 5. Apply: tear down each orphan through the SHARED owner, accumulate ONLY
+	//    the reports that actually removed rows, clear a stale default marker,
+	//    and emit the result. Existence-tolerant no-ops (a candidate with no rows
+	//    for the requested backend) are counted as "skipped", not "pruned".
+	reports, totalLSP, totalSerena, skipped := applyWorkspacePrune(cmd, stateDir, candidates, opts.backend)
 
 	if opts.jsonOut {
+		// Guarantee a JSON array (never `null`) when every candidate was an
+		// existence-tolerant no-op, so a scripted consumer always parses an array.
+		if reports == nil {
+			reports = []prunePlanReport{}
+		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(reports)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Pruned %d workspace(s) (%d LSP rows, %d serena rows)\n",
 		len(reports), totalLSP, totalSerena)
+	if skipped > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"Skipped %d workspace(s) — no %s rows to remove.\n", skipped, opts.backend)
+	}
 	return nil
 }
 
@@ -255,24 +303,39 @@ func classifyWorkspacePruneCandidates(idle time.Duration) ([]pruneCandidate, err
 	return out, nil
 }
 
-// applyWorkspacePrune tears down each candidate through api.PruneWorkspace,
-// clears the default marker when the pruned workspace was the persisted
-// default, and returns the per-candidate {report, reason} list plus the LSP /
-// serena row totals. A teardown error on one candidate is reported as a warning
-// and does NOT abort the remaining candidates (bulk best-effort).
-func applyWorkspacePrune(cmd *cobra.Command, stateDir string, candidates []pruneCandidate, backend string) (reports []prunePlanReport, totalLSP, totalSerena int) {
-	for _, cand := range candidates {
-		report, perr := api.NewAPI().PruneWorkspace(cand.path, backend)
-		if perr != nil {
-			fmt.Fprintf(cmd.OutOrStderr(),
-				"warning: prune %s (%s) failed: %v\n", cand.path, cand.reason, perr)
-			continue
-		}
-		if report == nil {
-			continue
-		}
+// pruneReportRemovedRows reports whether a PruneReport actually tore down any
+// rows. A report with neither LSP rows nor serena rows removed is an
+// existence-tolerant no-op (e.g. a serena-only workspace pruned with
+// --backend lsp): the backend simply had nothing to remove. Such a report must
+// NOT be counted as a pruned workspace nor presented as a success row.
+func pruneReportRemovedRows(r *api.PruneReport) bool {
+	return r != nil && (len(r.LSPRemoved) > 0 || r.SerenaRemoved > 0)
+}
+
+// applyWorkspacePrune tears down each candidate through the shared owner
+// (pruneWorkspaceFn → api.PruneWorkspace), clears the default marker when a
+// removed serena row was the persisted default, and returns the per-candidate
+// {report, reason} list (only candidates that ACTUALLY removed rows) plus the
+// LSP / serena row totals and the count of existence-tolerant no-op skips.
+//
+// Two correctness rules drive the accounting:
+//   - A zero-removal report is a no-op (Finding 1): it is surfaced as "skipped"
+//     and NOT counted toward the pruned total — the totals/exit reflect ACTUAL
+//     teardown, not existence-tolerant no-ops.
+//   - On a teardown error the report can still be non-nil with rows already torn
+//     down (Finding 2): if it removed rows, the PARTIAL removal is recorded +
+//     displayed (and the default marker cleared) BEFORE the error is surfaced,
+//     so the operator sees what actually changed instead of "nothing removed".
+//
+// A teardown error on one candidate is reported as a warning and does NOT abort
+// the remaining candidates (bulk best-effort).
+func applyWorkspacePrune(cmd *cobra.Command, stateDir string, candidates []pruneCandidate, backend string) (reports []prunePlanReport, totalLSP, totalSerena, skipped int) {
+	// record appends a row-removing report to the result, accumulates the
+	// totals, surfaces its warnings, and clears a stale default marker when the
+	// removed serena row was the persisted default.
+	record := func(cand pruneCandidate, report *api.PruneReport) {
 		for _, warn := range report.Warnings {
-			fmt.Fprintf(cmd.OutOrStderr(), "warning: %s\n", warn)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warn)
 		}
 		// Clear a stale default marker when this prune removed the serena row the
 		// marker pointed at — the SAME api owner the GUI sweeper now uses.
@@ -282,7 +345,7 @@ func applyWorkspacePrune(cmd *cobra.Command, stateDir string, candidates []prune
 				markerPath = cand.path
 			}
 			if cerr := api.ClearDefaultWorkspaceIfMatches(stateDir, markerPath); cerr != nil {
-				fmt.Fprintf(cmd.OutOrStderr(),
+				fmt.Fprintf(cmd.ErrOrStderr(),
 					"warning: clear default marker for %s failed: %v\n", markerPath, cerr)
 			}
 		}
@@ -290,7 +353,32 @@ func applyWorkspacePrune(cmd *cobra.Command, stateDir string, candidates []prune
 		totalSerena += report.SerenaRemoved
 		reports = append(reports, prunePlanReport{PruneReport: *report, Reason: cand.reason})
 	}
-	return reports, totalLSP, totalSerena
+
+	for _, cand := range candidates {
+		report, perr := pruneWorkspaceFn(cand.path, backend)
+		if perr != nil {
+			// Finding 2: a phase-failure after an earlier phase mutated state
+			// returns a non-nil report carrying the rows that WERE torn down.
+			// Record + display that partial removal so the totals/output reflect
+			// the real state change, THEN surface the error as a warning.
+			if pruneReportRemovedRows(report) {
+				record(cand, report)
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"warning: prune %s (%s) failed: %v\n", cand.path, cand.reason, perr)
+			continue
+		}
+		// Finding 1: an existence-tolerant no-op (zero rows removed) must NOT be
+		// counted as pruned. Surface it as a skip and continue.
+		if !pruneReportRemovedRows(report) {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"skipped %s (%s): no %s rows to remove\n", cand.path, cand.reason, backend)
+			skipped++
+			continue
+		}
+		record(cand, report)
+	}
+	return reports, totalLSP, totalSerena, skipped
 }
 
 // emitPruneDryRunJSON writes the candidate list as a JSON array of
