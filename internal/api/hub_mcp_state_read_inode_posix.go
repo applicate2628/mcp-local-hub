@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -185,5 +186,10 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 }
 
 func stateFileReadRemediation(path string) string {
-	return fmt.Sprintf(" Remediate: chmod 600 \"%s\" && chown $USER \"%s\" (and tighten the parent dir).", path, path)
+	quotedPath := quotePOSIXShellArg(path)
+	return fmt.Sprintf(" Remediate: chmod 600 %s && chown $USER %s (and tighten the parent dir).", quotedPath, quotedPath)
+}
+
+func quotePOSIXShellArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

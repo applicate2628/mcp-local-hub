@@ -12,6 +12,11 @@ import (
 	"strings"
 )
 
+const (
+	icaclsSystemSIDLiteral         = "*S-1-5-18"
+	icaclsAdministratorsSIDLiteral = "*S-1-5-32-544"
+)
+
 // ErrIrregularFile is returned when the path is a symlink, junction,
 // or other irregular filesystem object that we refuse to trust.
 var ErrIrregularFile = errors.New("hub-mcp state file is a symlink or irregular")
@@ -49,21 +54,23 @@ func (e *DACLAllowlistViolation) Unwrap() error {
 }
 
 // StateFileDACLRemediationCommand builds the Windows icacls command used by
-// state-file read failures. The command disables inheritance, strips common
-// broadening grant ACEs plus the observed offending SID, then replaces the
-// allowlist principals' explicit grants.
+// state-file read failures. The command resets explicit ACEs, disables
+// inheritance, strips common broadening grant ACEs plus the observed offending
+// SID, then replaces the allowlist principals' explicit grants.
 func StateFileDACLRemediationCommand(path, ownerPrincipal string, cause error) string {
 	ownerPrincipal = strings.TrimSpace(ownerPrincipal)
 	if ownerPrincipal == "" {
 		ownerPrincipal = "%USERNAME%"
 	}
 	removeArgs := stateFileDACLRemoveGrantArgs(cause)
-	return fmt.Sprintf("icacls %s /inheritance:r /remove:g %s /grant:r %s %s %s",
-		quoteICACLSArg(path),
+	pathArg := quoteICACLSArg(path)
+	return fmt.Sprintf("icacls %s /reset && icacls %s /inheritance:r /remove:g %s /grant:r %s %s %s",
+		pathArg,
+		pathArg,
 		strings.Join(removeArgs, " "),
 		quoteICACLSGrant(ownerPrincipal),
-		quoteICACLSGrant("SYSTEM"),
-		quoteICACLSGrant("Administrators"))
+		quoteICACLSGrant(icaclsSystemSIDLiteral),
+		quoteICACLSGrant(icaclsAdministratorsSIDLiteral))
 }
 
 func stateFileDACLRemoveGrantArgs(cause error) []string {
@@ -94,9 +101,18 @@ func stateFileDACLRemoveGrantArgs(cause error) []string {
 }
 
 func quoteICACLSGrant(principal string) string {
-	return quoteICACLSArg(principal + ":F")
+	return quoteICACLSArg(icaclsSIDLiteral(principal) + ":F")
 }
 
 func quoteICACLSArg(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
+func icaclsSIDLiteral(principal string) string {
+	principal = strings.TrimSpace(principal)
+	sid := strings.TrimPrefix(principal, "*")
+	if strings.HasPrefix(strings.ToUpper(sid), "S-") {
+		return "*" + sid
+	}
+	return principal
 }

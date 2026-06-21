@@ -310,12 +310,24 @@ func TestDaemonSecretVaultFatalError_DaclOutsideAllowlistSurfacesRemediation(t *
 	if strings.Contains(got, "%USERNAME%") || strings.Contains(got, "$env:USERNAME") {
 		t.Fatalf("daemon fatal remediation must bake a literal owner principal, got: %v", err)
 	}
-	if wantOwner := currentUsernameForDaemonRemediationTest(t); !strings.Contains(got, wantOwner+":F") {
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(got, `"*S-1-5-`) {
+			t.Fatalf("daemon fatal remediation must grant the owner by SID literal on Windows, got: %v", err)
+		}
+		if wantOwner := currentUsernameForDaemonRemediationTest(t); strings.Contains(got, wantOwner+":F") {
+			t.Fatalf("daemon fatal remediation must not grant the owner by display name %q on Windows: %v", wantOwner, err)
+		}
+	} else if wantOwner := currentUsernameForDaemonRemediationTest(t); !strings.Contains(got, wantOwner+":F") {
 		t.Fatalf("daemon fatal remediation missing literal owner grant %q: %v", wantOwner+":F", err)
 	}
-	for _, want := range []string{"/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r"} {
+	for _, want := range []string{"/inheritance:r", "/remove:g", `"*S-1-5-11"`, "/grant:r", `"*S-1-5-18:F"`, `"*S-1-5-32-544:F"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("daemon fatal remediation missing %q: %v", want, err)
+		}
+	}
+	for _, localizedName := range []string{`"SYSTEM:F"`, `"Administrators:F"`} {
+		if strings.Contains(got, localizedName) {
+			t.Fatalf("daemon fatal remediation must use SID literals, not localized account name %q: %v", localizedName, err)
 		}
 	}
 }

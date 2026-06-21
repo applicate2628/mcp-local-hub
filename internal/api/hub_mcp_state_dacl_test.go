@@ -11,11 +11,13 @@ import (
 
 func TestStateFileDACLRemediationCommandRemovesObservedSID(t *testing.T) {
 	path := `C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age`
+	ownerSID := "S-1-5-21-111-222-333-1001"
 	err := &DACLAllowlistViolation{SID: "S-1-5-21-111-222-333-513", Mask: 0x9}
 
-	got := StateFileDACLRemediationCommand(path, `EXAMPLE\tester`, err)
+	got := StateFileDACLRemediationCommand(path, ownerSID, err)
 	for _, want := range []string{
 		`icacls "C:\Users\tester\AppData\Local\mcp-local-hub\secrets.age"`,
+		"/reset",
 		"/inheritance:r",
 		"/remove:g",
 		`"*S-1-1-0"`,
@@ -23,9 +25,9 @@ func TestStateFileDACLRemediationCommandRemovesObservedSID(t *testing.T) {
 		`"*S-1-5-32-545"`,
 		`"*S-1-5-21-111-222-333-513"`,
 		"/grant:r",
-		`"EXAMPLE\tester:F"`,
-		`"SYSTEM:F"`,
-		`"Administrators:F"`,
+		`"*S-1-5-21-111-222-333-1001:F"`,
+		`"*S-1-5-18:F"`,
+		`"*S-1-5-32-544:F"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("remediation command missing %q: %s", want, got)
@@ -33,6 +35,37 @@ func TestStateFileDACLRemediationCommandRemovesObservedSID(t *testing.T) {
 	}
 	if strings.Contains(got, "%USERNAME%") {
 		t.Fatalf("remediation command must not use cmd-only username placeholder: %s", got)
+	}
+	for _, localizedName := range []string{"SYSTEM", "Administrators"} {
+		if strings.Contains(got, localizedName) {
+			t.Fatalf("remediation command must use SID literals, not localized account name %q: %s", localizedName, got)
+		}
+	}
+}
+
+func TestStateFileDACLRemediationCommandWithoutObservedSIDStillRemovesBroadeningSIDs(t *testing.T) {
+	path := `C:\Users\tester\AppData\Local\mcp-local-hub\.age-key`
+	ownerSID := "*S-1-5-21-111-222-333-1001"
+
+	got := StateFileDACLRemediationCommand(path, ownerSID, ErrDaclOutsideAllowlist)
+	for _, want := range []string{
+		"/reset",
+		"/inheritance:r",
+		"/remove:g",
+		`"*S-1-1-0"`,
+		`"*S-1-5-11"`,
+		`"*S-1-5-32-545"`,
+		"/grant:r",
+		`"*S-1-5-21-111-222-333-1001:F"`,
+		`"*S-1-5-18:F"`,
+		`"*S-1-5-32-544:F"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("remediation command without observed SID missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, `""`) || strings.Contains(got, " /remove:g  /grant:r ") {
+		t.Fatalf("remediation command must not leave an empty remove list: %s", got)
 	}
 }
 

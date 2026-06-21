@@ -368,12 +368,15 @@ func daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath string, 
 		owner := currentICACLSOwnerPrincipal()
 		keyCommand := api.StateFileDACLRemediationCommand(keyPath, owner, err)
 		vaultCommand := api.StateFileDACLRemediationCommand(vaultPath, owner, err)
-		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused. Remediate: run %s; if the refused file is %q, run %s. These commands disable inheritance, remove common/observed non-owner grant ACEs, and leave only the current user, SYSTEM, and Administrators with full control. Cause: %w", server, daemonName, keyCommand, vaultPath, vaultCommand, err)
+		return fmt.Errorf("daemon %s/%s: vault state-file DACL refused. Remediate: run %s; if the refused file is %q, run %s. These commands reset explicit ACEs, disable inheritance, remove common/observed non-owner grant ACEs, and leave only the current user, SYSTEM, and Administrators with full control. Cause: %w", server, daemonName, keyCommand, vaultPath, vaultCommand, err)
 	}
 	return fmt.Errorf("daemon %s/%s: %w", server, daemonName, err)
 }
 
 func currentICACLSOwnerPrincipal() string {
+	if sid, err := api.CurrentUserICACLSSidLiteral(); err == nil && strings.TrimSpace(sid) != "" {
+		return strings.TrimSpace(sid)
+	}
 	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
 		return strings.TrimSpace(u.Username)
 	}

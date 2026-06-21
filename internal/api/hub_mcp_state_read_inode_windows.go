@@ -269,8 +269,8 @@ func windowsAnchoredReadErrIsNotExist(err error) bool {
 
 func stateFileReadRemediation(path string, cause error) string {
 	ownerPrincipal := "%USERNAME%"
-	if sid, err := currentUserSIDString(); err == nil {
-		ownerPrincipal = "*" + sid
+	if sid, err := CurrentUserICACLSSidLiteral(); err == nil {
+		ownerPrincipal = sid
 	}
-	return fmt.Sprintf(" Remediate: run %s to disable inheritance, remove common/observed non-owner grant ACEs, and leave only the current user, SYSTEM, and Administrators with full control.", StateFileDACLRemediationCommand(path, ownerPrincipal, cause))
+	return fmt.Sprintf(" Remediate: run %s to reset explicit ACEs, disable inheritance, remove common/observed non-owner grant ACEs, and leave only the current user, SYSTEM, and Administrators with full control.", StateFileDACLRemediationCommand(path, ownerPrincipal, cause))
 }
