@@ -32,6 +32,61 @@ For install / per-client behaviour / troubleshooting see
 | `mcphub manifest list` | List every manifest under `servers/*/manifest.yaml` |
 | `mcphub manifest show <name>` | Print a manifest's contents |
 
+## Supervisor lifecycle
+
+| Command | Short | Long |
+|---|---|---|
+| `mcphub migrate-legacy [--dry-run\|--yes\|--json]` | Detect + migrate disabled mcp-language-server entries into managed registry | Scan every installed MCP client config (Codex + Claude Code) for |
+| | | disabled entries whose command is mcp-language-server. For each unique |
+| | | workspace, emit one 'mcphub register' — which allocates ports, creates |
+| | | scheduler tasks, and writes new client entries for ALL manifest |
+| | | languages — and THEN delete the original disabled entries. |
+| | | Lazy-mode note: one 'register' call covers every manifest language at |
+| | | once, so migration dedupes the detected rows by workspace and emits |
+| | | exactly one register per unique workspace (not one per language). |
+| | | Interactive by default: prompts per workspace. --yes skips every prompt. |
+| | | --dry-run prints the plan without changing any state. |
+| | | Examples: |
+| | | mcphub migrate-legacy --dry-run    # preview |
+| | | mcphub migrate-legacy              # interactive |
+| | | mcphub migrate-legacy --yes        # non-interactive |
+| | | See also: register, workspaces. |
+| `mcphub autostart {enable\|disable\|status} [--strict-mode]` | Manage supervisor autostart at logon | mcphub autostart installs (or removes) an OS-native shim that |
+| | | re-runs `mcphub gui [--strict-mode]` whenever the current user |
+| | | signs in. |
+| | | - Windows: Task Scheduler entry  \mcp-local-hub-supervisor |
+| | | - Linux:   systemd-user unit     ~/.config/systemd/user/mcphub-supervisor.service |
+| | | - macOS:   LaunchAgent plist     ~/Library/LaunchAgents/com.applicate2628.mcphub-supervisor.plist |
+| | | `status` prints one of: absent, enabled-running, enabled-stopped, drifted, |
+| | | stale-residue. Drifted means the on-disk shim's args or binary path |
+| | | disagree with what `mcphub autostart enable [--strict-mode]` would |
+| | | write today; re-run `mcphub autostart enable` to reconcile. |
+| `mcphub strict-mode {enable\|disable\|--recover}` | Atomically toggle supervisor strict-mode (intent + autostart shim) | mcphub strict-mode mutates the supervisor's strict-mode policy by |
+| | | writing supervisor-intent.json AND the autostart shim's argv in a |
+| | | single atomic operation. If either write fails, the other is reverted |
+| | | so the two resources never drift. |
+| | | enable     — set strict_mode=true; shim launches with --strict-mode. |
+| | | disable    — set strict_mode=false; shim launches without the flag. |
+| | | --recover  — read the breadcrumb left by a torn previous run and |
+| | | reconcile both resources interactively. |
+| | | Exit codes: |
+| | | 9   STRICT_MODE_BUSY          — migration.lock or --once.lock held by |
+| | | another holder; wait and retry. |
+| | | 10  STRICT_MODE_REVERT_FAILED — both shim write AND intent revert |
+| | | failed; breadcrumb written to |
+| | | <state-dir>/strict-mode-mutation-incomplete.json |
+| | | and operator must run --recover. |
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | success |
+| 1 | generic |
+| 8 | setup-state-path-rejected |
+| 9 | STRICT_MODE_BUSY |
+| 10 | STRICT_MODE_REVERT_FAILED |
+
 ## Logs, backups, recovery
 
 | Command | What it does |

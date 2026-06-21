@@ -464,6 +464,20 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	if err != nil {
 		return fmt.Errorf("resolve supervisor state dir: %w", err)
 	}
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve supervisor executable: %w", err)
+	}
+	binaryRecovered := false
+	if _, err := os.Stat(exe); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat supervisor executable %q: %w", exe, err)
+		}
+		binaryRecovered = true
+	}
+	if err := recoverMissingBinaryFn(exe); err != nil {
+		return fmt.Errorf("recover supervisor binary: %w", err)
+	}
 
 	// Acquire singleton lock — fails fast if another supervisor holds
 	// it. The lock+sidecar is the FIRST resource taken so concurrent
@@ -505,13 +519,23 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			"state_dir":             stateDir,
 		},
 	})
-	if exe, err := os.Executable(); err != nil {
+	if binaryRecovered {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "info",
+			Source:   "lifecycle",
+			Event:    "binary-recovered-from-aside",
+			Body: map[string]any{
+				"path": exe,
+			},
+		})
+	}
+	if exe == "" {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
 			Event:    "old-binary-sweep-failed",
 			Body: map[string]any{
-				"err": err.Error(),
+				"err": "empty supervisor executable path",
 			},
 		})
 	} else {

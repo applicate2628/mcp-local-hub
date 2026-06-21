@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 
 	"mcp-local-hub/internal/api"
 )
@@ -51,7 +52,6 @@ import (
 type SupervisorIPCListener struct {
 	listener  net.Listener
 	pipePath  string
-	sddl      string // SDDL applied to ListenPipe — exposed via SecurityDescriptorSDDL.
 	pid       int
 	startedAt string
 }
@@ -83,7 +83,6 @@ func NewSupervisorIPCListener(pipePath string, ownerOpt ...api.SupervisorLockOwn
 	return &SupervisorIPCListener{
 		listener:  listener,
 		pipePath:  pipePath,
-		sddl:      sddl,
 		pid:       owner.PID,
 		startedAt: owner.StartedAt,
 	}, nil
@@ -131,23 +130,67 @@ func (l *SupervisorIPCListener) Addr() net.Addr {
 	return l.listener.Addr()
 }
 
-// SecurityDescriptorSDDL returns the SDDL string that was passed to
-// winio.ListenPipe. This is the post-ListenPipe DACL smoke surface
-// the spec calls out at §"Q11 v12 closure F4: go-winio pinned +
-// smoke test".
-//
-// Scope (Task 5.1 simple variant): the returned text is the SDDL
-// the listener *requested* and that go-winio applied via
-// SddlToSecurityDescriptor before NtCreateNamedPipeFile. It is
-// sufficient for the spec's mask-check (does the allowlist exclude
-// BA? does it include GRGW?) but does NOT independently query the
-// effective DACL on the live pipe handle. Full handle-introspection
-// smoke (windows.GetSecurityInfo on the listener's pipe handle)
-// requires unexported state from *winio.PipeListener and is deferred
-// to a follow-up patch; go-winio's correct application of the SDDL
-// is upstream's responsibility and is covered by their test suite.
+// SecurityDescriptorSDDL returns the live pipe handle's effective security
+// descriptor in SDDL form. This is the post-ListenPipe DACL smoke surface the
+// spec calls out at §"Q11 v12 closure F4: go-winio pinned + smoke test".
 func (l *SupervisorIPCListener) SecurityDescriptorSDDL() (string, error) {
-	return l.sddl, nil
+	serverConn, clientConn, err := l.openSecurityProbePipe()
+	if err != nil {
+		return "", err
+	}
+	defer serverConn.Close()
+	defer clientConn.Close()
+	fdConn, ok := serverConn.(interface{ Fd() uintptr })
+	if !ok {
+		return "", fmt.Errorf("security probe pipe %T does not expose Fd", serverConn)
+	}
+	handle := windows.Handle(fdConn.Fd())
+	sd, err := windows.GetSecurityInfo(handle, windows.SE_KERNEL_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return "", fmt.Errorf("GetSecurityInfo pipe handle: %w", err)
+	}
+	if sd == nil {
+		return "", fmt.Errorf("GetSecurityInfo pipe handle returned nil security descriptor")
+	}
+	sddl := sd.String()
+	if sddl == "" {
+		return "", fmt.Errorf("convert live pipe security descriptor to SDDL")
+	}
+	return sddl, nil
+}
+
+func (l *SupervisorIPCListener) openSecurityProbePipe() (net.Conn, net.Conn, error) {
+	if l == nil || l.listener == nil {
+		return nil, nil, fmt.Errorf("supervisor IPC listener is nil")
+	}
+	type acceptResult struct {
+		conn net.Conn
+		err  error
+	}
+	acceptCh := make(chan acceptResult, 1)
+	go func() {
+		conn, err := l.listener.Accept()
+		acceptCh <- acceptResult{conn: conn, err: err}
+	}()
+
+	timeout := 2 * time.Second
+	clientConn, err := winio.DialPipe(l.pipePath, &timeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial security probe pipe: %w", err)
+	}
+
+	select {
+	case res := <-acceptCh:
+		if res.err != nil {
+			_ = clientConn.Close()
+			return nil, nil, fmt.Errorf("accept security probe pipe: %w", res.err)
+		}
+		return res.conn, clientConn, nil
+	case <-time.After(timeout):
+		_ = clientConn.Close()
+		return nil, nil, fmt.Errorf("accept security probe pipe timed out")
+	}
 }
 
 // winioDialPipe is a thin wrapper used by tests so they don't have

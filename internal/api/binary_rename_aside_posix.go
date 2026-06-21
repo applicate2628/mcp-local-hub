@@ -50,3 +50,13 @@ func RenameAsideReplace(target, newSrc string) error {
 	}
 	return nil
 }
+
+func restoreMissingBinaryAside(aside, target string) error {
+	if err := os.Link(aside, target); err != nil {
+		return err
+	}
+	if err := os.Remove(aside); err != nil {
+		return fmt.Errorf("remove restored aside %q: %w", aside, err)
+	}
+	return nil
+}

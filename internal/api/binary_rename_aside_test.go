@@ -60,6 +60,105 @@ func TestRenameAside_TwoStepReplace(t *testing.T) {
 	}
 }
 
+func TestRecoverMissingBinary_RestoresNewestAside(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, platformBinaryName())
+
+	now := time.Now().UTC()
+	olderSuffixNewerMtime := target + ".old-" + now.Add(-2*time.Hour).Format(renameAsideTimestampLayout)
+	newerSuffixOlderMtime := target + ".old-" + now.Add(-time.Hour).Format(renameAsideTimestampLayout)
+	if err := os.WriteFile(olderSuffixNewerMtime, []byte("newest-by-mtime"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newerSuffixOlderMtime, []byte("newer-suffix"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(olderSuffixNewerMtime, now, now); err != nil {
+		t.Fatal(err)
+	}
+	olderMtime := now.Add(-time.Minute)
+	if err := os.Chtimes(newerSuffixOlderMtime, olderMtime, olderMtime); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RecoverMissingBinary(target); err != nil {
+		t.Fatalf("recover missing binary: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read recovered target: %v", err)
+	}
+	if string(got) != "newest-by-mtime" {
+		t.Fatalf("recovered content = %q, want newest mtime aside", got)
+	}
+	if _, err := os.Stat(olderSuffixNewerMtime); !os.IsNotExist(err) {
+		t.Fatalf("restored aside still exists after recovery: %v", err)
+	}
+	if _, err := os.Stat(newerSuffixOlderMtime); err != nil {
+		t.Fatalf("non-selected aside should remain: %v", err)
+	}
+}
+
+func TestRecoverMissingBinary_DoesNotClobberExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, platformBinaryName())
+	if err := os.WriteFile(target, []byte("current"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	aside := target + ".old-" + time.Now().UTC().Format(renameAsideTimestampLayout)
+	if err := os.WriteFile(aside, []byte("aside"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RecoverMissingBinary(target); err != nil {
+		t.Fatalf("recover existing target should no-op: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(got) != "current" {
+		t.Fatalf("target was clobbered: got %q", got)
+	}
+	if _, err := os.Stat(aside); err != nil {
+		t.Fatalf("aside should remain after no-op: %v", err)
+	}
+}
+
+func TestRecoverMissingBinary_RefusesNewOnly(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, platformBinaryName())
+	newOnly := target + ".new"
+	if err := os.WriteFile(newOnly, []byte("unverified"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RecoverMissingBinary(target); err == nil {
+		t.Fatal("RecoverMissingBinary succeeded with only an unverified .new file")
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target should remain missing: %v", err)
+	}
+	if _, err := os.Stat(newOnly); err != nil {
+		t.Fatalf(".new file should not be promoted or removed: %v", err)
+	}
+}
+
+func TestRecoverMissingBinary_NoValidAsideReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, platformBinaryName())
+	if err := os.WriteFile(target+".old-not-a-timestamp", []byte("invalid"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RecoverMissingBinary(target); err == nil {
+		t.Fatal("RecoverMissingBinary succeeded without a valid .old timestamp aside")
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target should remain missing: %v", err)
+	}
+}
+
 // TestSweepOldBinaries_RemovesAgedFiles plants a stale aside whose
 // suffix timestamp is 10 days in the past and verifies SweepOldBinaries removes
 // it while leaving the current binary intact.
@@ -95,6 +194,13 @@ func TestSweepOldBinaries_RemovesAgedFiles(t *testing.T) {
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("current binary swept: %v", err)
 	}
+}
+
+func platformBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "mcphub.exe"
+	}
+	return "mcphub"
 }
 
 // TestSweepOldBinaries_KeepsRecentFiles verifies that aside files whose suffix

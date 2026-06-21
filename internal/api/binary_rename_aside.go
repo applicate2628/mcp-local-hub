@@ -18,6 +18,7 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -110,6 +111,70 @@ func SweepOldBinaries(dir string, warn ...func(string, error)) error {
 	return nil
 }
 
+// RecoverMissingBinary restores target from the newest valid
+// `<target>.old-<timestamp>` aside when a crash/power loss happened after the
+// rename-aside step moved target out of the way but before `<target>.new` was
+// promoted. Existing targets are never overwritten, and staged `.new` files are
+// intentionally ignored because they have not completed the upgrade pipeline.
+func RecoverMissingBinary(target string) error {
+	if target == "" {
+		return fmt.Errorf("recover missing binary: empty target")
+	}
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat target %q: %w", target, err)
+	}
+
+	dir := filepath.Dir(target)
+	basePrefix := filepath.Base(target) + ".old-"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("scan rename-aside directory %q: %w", dir, err)
+	}
+	type candidate struct {
+		path       string
+		mtime      time.Time
+		suffixTime time.Time
+	}
+	var candidates []candidate
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, basePrefix) {
+			continue
+		}
+		suffixTime, ok := parseRenameAsideTimestamp(strings.TrimPrefix(name, basePrefix))
+		if !ok {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.IsDir() {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			path:       filepath.Join(dir, name),
+			mtime:      info.ModTime(),
+			suffixTime: suffixTime,
+		})
+	}
+	if len(candidates) == 0 {
+		return fmt.Errorf("recover missing binary %q: target is missing and no valid %s<timestamp> aside exists", target, basePrefix)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if !candidates[i].mtime.Equal(candidates[j].mtime) {
+			return candidates[i].mtime.After(candidates[j].mtime)
+		}
+		if !candidates[i].suffixTime.Equal(candidates[j].suffixTime) {
+			return candidates[i].suffixTime.After(candidates[j].suffixTime)
+		}
+		return candidates[i].path > candidates[j].path
+	})
+	if err := restoreMissingBinaryAside(candidates[0].path, target); err != nil {
+		return fmt.Errorf("restore missing binary from aside (%s → %s): %w", candidates[0].path, target, err)
+	}
+	return nil
+}
+
 func generatedRenameAsideTime(path string) (time.Time, bool) {
 	base := filepath.Base(path)
 	for _, prefix := range []string{"mcphub.exe.old-", "mcphub.old-"} {
@@ -117,8 +182,17 @@ func generatedRenameAsideTime(path string) (time.Time, bool) {
 			continue
 		}
 		suffix := strings.TrimPrefix(base, prefix)
-		ts, err := time.Parse(renameAsideTimestampLayout, suffix)
-		return ts, err == nil
+		return parseRenameAsideTimestamp(suffix)
+	}
+	return time.Time{}, false
+}
+
+func parseRenameAsideTimestamp(suffix string) (time.Time, bool) {
+	for _, layout := range []string{renameAsideTimestampLayout, time.RFC3339Nano, time.RFC3339} {
+		ts, err := time.Parse(layout, suffix)
+		if err == nil {
+			return ts, true
+		}
 	}
 	return time.Time{}, false
 }

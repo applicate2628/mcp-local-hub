@@ -786,6 +786,13 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 	})
 	defer cleanupSweep()
 
+	recoverCalled := make(chan string, 1)
+	cleanupRecover := setRecoverMissingBinaryFnForTest(func(target string) error {
+		recoverCalled <- target
+		return nil
+	})
+	defer cleanupRecover()
+
 	exitCh := make(chan struct{}, 1)
 	cleanupExit := setSuperviseTestExitCh(exitCh)
 	defer cleanupExit()
@@ -801,6 +808,15 @@ func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
 		t.Fatalf("resolve test executable: %v", err)
 	}
 	wantDir := filepath.Dir(exe)
+
+	select {
+	case gotTarget := <-recoverCalled:
+		if gotTarget != exe {
+			t.Fatalf("recover target = %s, want executable %s", gotTarget, exe)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSupervise did not call RecoverMissingBinary on startup")
+	}
 
 	select {
 	case gotDir := <-sweepCalled:

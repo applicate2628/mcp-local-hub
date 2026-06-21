@@ -82,3 +82,15 @@ func RenameAsideReplace(target, newSrc string) error {
 	}
 	return nil
 }
+
+func restoreMissingBinaryAside(aside, target string) error {
+	asideW, err := windows.UTF16PtrFromString(aside)
+	if err != nil {
+		return fmt.Errorf("utf16 aside: %w", err)
+	}
+	targetW, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		return fmt.Errorf("utf16 target: %w", err)
+	}
+	return windows.MoveFileEx(asideW, targetW, 0)
+}
