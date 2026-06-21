@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -1200,11 +1202,13 @@ func resolveInstallGUIPort() int {
 	if err != nil {
 		return 0
 	}
-	_, port, err := gui.ReadPidport(pidportPath)
-	if err != nil || port <= 0 {
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+	v := gui.Probe(ctx, pidportPath)
+	if v.Class != gui.VerdictHealthy || v.Port <= 0 {
 		return 0
 	}
-	return port
+	return v.Port
 }
 
 func upgradeInstallServer(server string, w io.Writer) error {

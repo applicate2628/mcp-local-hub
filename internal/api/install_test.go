@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -165,6 +166,48 @@ func TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice(t *testing.T) {
 	}
 	if !strings.Contains(withoutPortOut.String(), "serena client entry deferred: live hub router not resolvable") {
 		t.Fatalf("dry-run output missing deferred notice:\n%s", withoutPortOut.String())
+	}
+}
+
+func deferredSerenaNoticePlan() (*config.ServerManifest, *Plan) {
+	m := &config.ServerManifest{
+		Name:      serenaEntryName,
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+	}
+	p := &Plan{
+		Server:      m.Name,
+		FullInstall: false,
+		Notices:     []string{"serena client entry deferred: live hub router not resolvable"},
+	}
+	return m, p
+}
+
+func TestInstallPlan_SerenaRealInstallSurfacesDeferredNotice(t *testing.T) {
+	preparePreflightBinaryChecks(t)
+	m, p := deferredSerenaNoticePlan()
+
+	var out bytes.Buffer
+	if err := NewAPI().installPlan(context.Background(), m, p, installPlanOpts{Writer: &out, DryRun: false}); err != nil {
+		t.Fatalf("installPlan(real): %v", err)
+	}
+	if !strings.Contains(out.String(), "serena client entry deferred: live hub router not resolvable") {
+		t.Fatalf("real install output missing deferred notice:\n%s", out.String())
+	}
+	if n := strings.Count(out.String(), "serena client entry deferred"); n != 1 {
+		t.Fatalf("deferred notice printed %d times on real install, want exactly 1:\n%s", n, out.String())
+	}
+}
+
+func TestInstallPlan_SerenaDryRunDoesNotDoublePrintDeferredNotice(t *testing.T) {
+	m, p := deferredSerenaNoticePlan()
+
+	var out bytes.Buffer
+	if err := NewAPI().installPlan(context.Background(), m, p, installPlanOpts{Writer: &out, DryRun: true}); err != nil {
+		t.Fatalf("installPlan(dry-run): %v", err)
+	}
+	if n := strings.Count(out.String(), "serena client entry deferred"); n != 1 {
+		t.Fatalf("deferred notice printed %d times on dry-run, want exactly 1:\n%s", n, out.String())
 	}
 }
 

@@ -2410,6 +2410,9 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 	// Pass B / needsScheduler conditions keeps the client-config block + the
 	// intermediate supervisor-intent write inside the SAME rollback scope.
 	createTasks := !skipTasks
+	for _, notice := range p.Notices {
+		fmt.Fprintf(w, "  notice: %s\n", notice)
+	}
 	// Acquire the scheduler only when there is real scheduler work: tasks to
 	// create, an obsolete-task prune to run, or a Pass B start. A
 	// workspace-scoped InstallParsedManifest (zero SchedulerTasks,
