@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -118,25 +117,28 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 			resolver := secrets.NewResolver(vault, nil)
 			// Best-effort: a skipped optional `secret:` ref is omitted (spawn
 			// proceeds) rather than fatal; $VAR/file: refs stay fatal. The
-			// omitted keys are passed as UnsetEnv so the host removes them from
-			// the child's inherited os.Environ() — truly absent, not
+			// omitted keys become UnsetEnv so the host removes them from the
+			// child's inherited os.Environ() — truly absent, not
 			// present-but-empty, and no ambient-parent inheritance (Codex #377).
-			env, omittedSecrets, err := resolver.ResolveMapBestEffort(spec.EnvRefs)
+			resolved, omittedSecrets, err := resolver.ResolveMapBestEffort(spec.EnvRefs)
 			if err != nil {
 				return err
 			}
-			unsetEnv := make([]string, 0, len(omittedSecrets))
-			for k, ref := range omittedSecrets {
-				unsetEnv = append(unsetEnv, k)
-				// Operator-visible diagnostic PARITY with the global daemon
-				// path (daemonEnvWithOverlay): warn per skipped optional secret
-				// so a silently-unset key on the serena workspace daemon is not
-				// invisible (Codex #377 merge-gate P3 #1). NOTE: the serena path
-				// does not yet apply a per-daemon env overlay (tracked bug
-				// serena-proxy-ignores-env-overlay); when it does, this warning
-				// must become overlay-aware like daemonEnvWithOverlay.
-				fmt.Fprintf(os.Stderr, "mcphub %s daemon (workspace %s): env %q (%s) is not set — spawning without it; set it via `mcphub secrets` if this server needs it.\n",
-					serverFlag, wsKey, k, ref)
+			// Merge the operator env overlay onto the resolved env via the SAME
+			// task-name-keyed owner the global daemon path uses
+			// (mergeResolvedDaemonEnvWithOverlay). This fixes
+			// serena-proxy-ignores-env-overlay: the supervisor already applied
+			// this overlay row (overlay-wins) to THIS wrapper's os.Environ()
+			// before spawning us, but the wrapper previously populated the child
+			// env from ResolveMapBestEffort ALONE — silently dropping operator
+			// overrides and letting an EnvRefs overlap key clobber the overlay.
+			// The overlay is keyed by the descriptor's AUTHORITATIVE --task-name
+			// (taskNameFlag, workspace-keyed), NEVER reconstructed from
+			// server/wsKey. The shared owner also emits the per-skipped-secret
+			// warning (overlay-aware: a key the overlay supplies is not warned).
+			env, unsetEnv, err := mergeResolvedDaemonEnvWithOverlay(taskNameFlag, resolved, omittedSecrets)
+			if err != nil {
+				return err
 			}
 
 			// Final child argv: the spec's fully-materialized ChildArgs

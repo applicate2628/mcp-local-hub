@@ -241,7 +241,7 @@ func TestDaemonOverlayEnvLoadsExpandedOperatorRow(t *testing.T) {
 		t.Fatalf("seed overlay: %v", err)
 	}
 
-	got, err := daemonOverlayEnv("memory", "default")
+	got, err := daemonOverlayEnv(`\mcp-local-hub-memory-default`)
 	if err != nil {
 		t.Fatalf("daemonOverlayEnv: %v", err)
 	}

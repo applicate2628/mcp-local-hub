@@ -404,24 +404,53 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 	if err != nil {
 		return nil, nil, err
 	}
-	overlayEnv, err := daemonOverlayEnv(server, daemonName)
+	// A global daemon's canonical supervisor-intent task name is
+	// `\mcp-local-hub-<server>-<daemon>`. Derive it here so the shared
+	// overlay-merge owner stays the single source of the load/merge/unset
+	// logic; the serena proxy reaches the same owner with ITS workspace-keyed
+	// task name (daemon_serena.go), never reconstructing one from server/daemon.
+	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
+	return mergeResolvedDaemonEnvWithOverlay(taskName, env, omitted)
+}
+
+// mergeResolvedDaemonEnvWithOverlay is the task-name-keyed overlay-merge owner
+// shared by the global daemon path (daemonEnvWithOverlay) and the serena
+// per-workspace proxy (daemon_serena.go). Given an ALREADY-RESOLVED env map and
+// the omitted-optional-secret map from ResolveMapBestEffort, it:
+//
+//  1. Loads + expands the operator overlay row for taskName.
+//  2. Merges it over the resolved env (overlay WINS — mergeDaemonEnvMaps).
+//  3. Computes the UNSET list (omitted optional secrets the overlay did NOT
+//     supply) and warns once per genuinely-missing key.
+//
+// Returns the merged child env map and the list of keys to UNSET in the child
+// (so the host strips them from the inherited os.Environ() — truly absent, not
+// present-but-empty, no ambient-parent inheritance — Codex #377).
+//
+// Centralizing this here fixes serena-proxy-ignores-env-overlay: before, the
+// serena proxy populated the child env from ResolveMapBestEffort ONLY and
+// never merged the operator overlay the supervisor had already applied to the
+// wrapper, so an operator override (e.g. SERENA_LOG_LEVEL) was silently
+// dropped and an EnvRefs overlap key clobbered the overlay value.
+func mergeResolvedDaemonEnvWithOverlay(taskName string, resolvedEnv, omittedSecrets map[string]string) (map[string]string, []string, error) {
+	overlayEnv, err := daemonOverlayEnv(taskName)
 	if err != nil {
 		return nil, nil, err
 	}
-	merged := mergeDaemonEnvMaps(env, overlayEnv)
+	merged := mergeDaemonEnvMaps(resolvedEnv, overlayEnv)
 	// Warn + UNSET only for optional secrets the per-daemon overlay did NOT
 	// supply. An omitted `secret:` ref whose key the overlay provides is NOT
 	// actually missing: warning "spawning without it" would be false, and
 	// adding it to UnsetEnv would be misleading (the merged env carries it).
 	// Compute the warning AFTER the overlay merge (Codex #377 merge-gate P3).
-	unset := make([]string, 0, len(omitted))
-	for k, ref := range omitted {
+	unset := make([]string, 0, len(omittedSecrets))
+	for k, ref := range omittedSecrets {
 		if _, ok := merged[k]; ok {
 			continue
 		}
 		unset = append(unset, k)
-		fmt.Fprintf(os.Stderr, "mcphub daemon %s/%s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
-			server, daemonName, k, ref)
+		fmt.Fprintf(os.Stderr, "mcphub daemon %s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
+			taskName, k, ref)
 	}
 	return merged, unset, nil
 }
@@ -442,12 +471,18 @@ func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
 	return out
 }
 
-func daemonOverlayEnv(server, daemonName string) (map[string]string, error) {
+// daemonOverlayEnv loads + expands the operator env overlay row for the
+// daemon identified by its CANONICAL supervisor-intent taskName (e.g.
+// `\mcp-local-hub-<server>-<daemon>` for a global daemon, or
+// `\mcp-local-hub-serena-<wskey>` for a serena per-workspace proxy). The
+// caller supplies the authoritative task name; this owner never reconstructs
+// it from server/daemon so a serena proxy (whose task name is workspace-keyed,
+// not server-daemon-keyed) loads its own overlay row instead of a phantom one.
+func daemonOverlayEnv(taskName string) (map[string]string, error) {
 	stateDir, err := stateDirFunc()
 	if err != nil {
 		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
 	}
-	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
 	supervisorApplied := daemonOverlayAlreadyApplied(os.Environ())
 	ov, err := daemon_env_overlay.Load(filepath.Join(stateDir, overlayBaseName))
 	if err != nil {
