@@ -39,6 +39,7 @@ func newInstallCmdReal() *cobra.Command {
 	var allClients bool
 	var reconcileHubMode bool
 	var upgrade bool
+	var check bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -131,6 +132,24 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				}
 				return runReconcileHubMode(cmd, dryRun)
 			}
+			// --check: read-only readiness probe. Print the report (blockers +
+			// optional advisories) for --server and exit 0 WITHOUT installing,
+			// bootstrapping, or mutating anything. Handled BEFORE the bootstrap
+			// block so a pure diagnostic never copies the binary or prompts.
+			if check {
+				if server == "" {
+					return fmt.Errorf("--check requires --server")
+				}
+				if all || daemonFilter != "" {
+					return fmt.Errorf("--check is mutually exclusive with --all/--daemon")
+				}
+				rep, rerr := api.CheckServerReadinessByName(server)
+				if rerr != nil {
+					return rerr
+				}
+				renderReadinessReport(cmd.OutOrStdout(), rep)
+				return nil
+			}
 			// If mcphub is not on PATH, try to bootstrap before we hit
 			// the API's preflight check. Three-tier fallback:
 			//   1. ~/.local/bin already on PATH — silently copy there
@@ -184,6 +203,19 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			if server == "" {
 				return fmt.Errorf("--server is required")
 			}
+			// Readiness report — surface the already-built actionable findings
+			// BEFORE the install mutates anything (the --check-only branch ran
+			// earlier, pre-bootstrap). This runs AFTER bootstrap so the
+			// `mcphub binary` requirement reflects the just-bootstrapped state.
+			// Print blockers (with guided fixes) and STOP if any; print
+			// unset-optional-secret advisories and PROCEED to install.
+			rep, rerr := api.CheckServerReadinessByName(server)
+			if rerr != nil {
+				return rerr
+			}
+			if blocked := renderReadinessReport(cmd.OutOrStdout(), rep); blocked {
+				return fmt.Errorf("%s is not ready to install — fix the blocker(s) above (or run `mcphub install --server %s --check` to re-print them)", server, server)
+			}
 			include, err := parseInstallClientsFlag(clientsFlag, allClients)
 			if err != nil {
 				return err
@@ -215,7 +247,77 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			"stop every mcp-local-hub-* daemon, copy this binary over the canonical path, "+
 			"then restart every daemon from the new binary. Refuses when run from the canonical "+
 			"path (run from your build directory, e.g. './mcphub install --upgrade' after 'go build').")
+	c.Flags().BoolVar(&check, "check", false,
+		"print the readiness report for --server (missing dependencies/launchers as blockers, "+
+			"unset optional secrets as advisories) and exit WITHOUT installing or mutating anything")
 	return c
+}
+
+// renderReadinessReport prints a server's readiness report to w and reports
+// whether any BLOCKING requirement (non-optional + not OK) is present.
+//
+// Surfacing contract (install-and-it-works Area 2, Phase 1):
+//   - BLOCKERS (non-optional unmet) print with their guided Fix; the caller
+//     hard-stops the install when blocked is true.
+//   - OPTIONAL unmet (e.g. an unset `secret:` ref) print as a NON-BLOCKING
+//     advisory and the install PROCEEDS. The Optional flag is the single owner
+//     of "does this block" — this render never flips an optional requirement
+//     into a blocker (the SECRETS-OPTIONAL invariant).
+//
+// Security: Reason/Fix are rendered VERBATIM. They are already path-redacted at
+// the source (CheckServerReadiness builds them via redactErrorDetail / basename
+// normalization), and a `secret:` requirement names only the KEY, never a value
+// — so the render must not re-derive or reformat them in a way that bypasses
+// that redaction.
+func renderReadinessReport(w io.Writer, rep *api.ReadinessReport) (blocked bool) {
+	if rep == nil {
+		return false
+	}
+	var blockers, advisories []api.ReadinessRequirement
+	for _, r := range rep.Requirements {
+		if r.OK {
+			continue
+		}
+		if r.Optional {
+			advisories = append(advisories, r)
+		} else {
+			blockers = append(blockers, r)
+		}
+	}
+
+	if len(blockers) > 0 {
+		fmt.Fprintf(w, "%s is not ready to install — %d blocker(s):\n", rep.Server, len(blockers))
+		for _, r := range blockers {
+			fmt.Fprintf(w, "  ✗ %s", r.Name)
+			if r.Reason != "" {
+				fmt.Fprintf(w, ": %s", r.Reason)
+			}
+			fmt.Fprintln(w)
+			if r.Fix != "" {
+				fmt.Fprintf(w, "      Fix: %s\n", r.Fix)
+			}
+		}
+	}
+
+	if len(advisories) > 0 {
+		fmt.Fprintf(w, "%s — %d optional item(s) not set (install will proceed without them):\n", rep.Server, len(advisories))
+		for _, r := range advisories {
+			fmt.Fprintf(w, "  ℹ %s", r.Name)
+			if r.Reason != "" {
+				fmt.Fprintf(w, ": %s", r.Reason)
+			}
+			fmt.Fprintln(w)
+			if r.Fix != "" {
+				fmt.Fprintf(w, "      %s\n", r.Fix)
+			}
+		}
+	}
+
+	if len(blockers) == 0 && len(advisories) == 0 {
+		fmt.Fprintf(w, "%s is ready to install.\n", rep.Server)
+	}
+
+	return len(blockers) > 0
 }
 
 // runReconcileHubMode reads the current gate state from

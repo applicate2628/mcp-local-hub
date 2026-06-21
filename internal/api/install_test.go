@@ -615,6 +615,43 @@ func TestPreflight_UnknownCommand(t *testing.T) {
 	}
 }
 
+// TestPreflight_MissingLauncherErrorCarriesFix verifies SEAM-B: a blocking
+// preflight finding now returns a typed *AdmissionError whose Fix is the
+// actionable guided fix (not just the cryptic Reason). The Reason is preserved
+// as the Error() prefix so existing substring-asserting callers still pass.
+func TestPreflight_MissingLauncherErrorCarriesFix(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:    "missing-launcher",
+		Command: "this-binary-definitely-does-not-exist-mcp-local-hub",
+		Daemons: []config.DaemonSpec{{Name: "x", Port: 1}},
+	}
+	err := Preflight(m, "x")
+	if err == nil {
+		t.Fatal("Preflight must block on a missing launcher")
+	}
+	var ae *AdmissionError
+	if !errors.As(err, &ae) {
+		t.Fatalf("Preflight error is %T, want *AdmissionError", err)
+	}
+	if ae.Fix == "" {
+		t.Fatalf("AdmissionError.Fix is empty; want the actionable guided fix; err=%v", err)
+	}
+	// LauncherGuidance owns the fix wording for the generic/unknown launcher;
+	// assert the typed Fix matches that single owner.
+	_, wantFix := LauncherGuidance(m.Command)
+	if ae.Fix != wantFix {
+		t.Fatalf("AdmissionError.Fix = %q, want %q", ae.Fix, wantFix)
+	}
+	// Error() must still carry BOTH the Reason (legacy substring callers) and
+	// the appended Fix (the new actionable surface).
+	if !strings.Contains(err.Error(), "not found on PATH") {
+		t.Fatalf("Error() lost the Reason substring; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), wantFix) {
+		t.Fatalf("Error() did not append the Fix; got: %v", err)
+	}
+}
+
 // TestInstallAllInstallsEverything spawns a tempdir with two fake manifests
 // and asserts Install is invoked for each (dry-run mode so no scheduler/
 // client writes). Verifies InstallAllFrom returns one result per manifest.

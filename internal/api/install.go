@@ -1787,7 +1787,11 @@ func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, e
 func Preflight(m *config.ServerManifest, daemonFilter string) error {
 	for _, finding := range AdmissionCheck(m, scopeForPreflight(daemonFilter)) {
 		if !finding.Optional {
-			return errors.New(finding.Reason)
+			// SEAM-B: carry the actionable Fix (not just Reason) so the CLI
+			// install render can surface a guided fix. Error() keeps Reason as
+			// its prefix, so callers asserting on a Reason substring still pass.
+			// The gate decision (!finding.Optional) is UNCHANGED.
+			return admissionErrorFromFinding(finding)
 		}
 	}
 	return nil
