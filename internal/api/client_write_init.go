@@ -346,16 +346,19 @@ func secureWriteWithOperatorOpt(path string, contents []byte) error {
 	return secureWriteWithOperatorOptConsent(path, contents, nil)
 }
 
-// secureWriteWithOperatorOptConsent is the consent-aware writer. The two
-// inputs to the ONE follow-symlink predicate are:
+// secureWriteWithOperatorOptConsent is the consent-aware writer. The inputs to
+// the ONE follow-symlink predicate are:
 //
-//   - the AllowClientConfigSymlinkEnv env-var opt-in (F2), and
-//   - a present, matching ResolvedSymlinkConsent (SEAM-B).
+//   - the AllowClientConfigSymlinkEnv env-var opt-in (F2),
+//   - a present, matching ResolvedSymlinkConsent (SEAM-B), and
+//   - an approving InteractiveSymlinkConsent injected port (A3 PR-2 design B;
+//     nil in production, set by the CLI for interactive install/reconcile).
 //
-// Either alone is sufficient to follow a symlink; strict mode
+// Any one alone is sufficient to follow a symlink; strict mode
 // (MCPHUB_REQUIRE_SINGLE_USER_HOME=1, checked inside
-// OperatorAllowsClientConfigSymlink AND re-checked here for the consent
-// path) overrides BOTH and refuses symlink-follow unconditionally.
+// OperatorAllowsClientConfigSymlink AND re-checked here for BOTH the scoped
+// consent path and the interactive-port path) overrides ALL of them and
+// refuses symlink-follow unconditionally.
 //
 // AF-1 closure: when a symlink is followed, the write goes through the
 // HANDLE-PINNED secureWriteThroughResolvedParentHandle (resolve → open the
@@ -389,6 +392,41 @@ func secureWriteWithOperatorOptConsent(path string, contents []byte, consent *Re
 			return secureWriteFollowingSymlink(path, contents, consent, followViaEnv)
 		}
 	}
+
+	// A3 PR-2 interactive-consent port (design B): when NO explicit consent
+	// and NO env opt-in followed above, an injected InteractiveSymlinkConsent
+	// port (set by the CLI for interactive install/reconcile, nil in
+	// production) is consulted for a symlinked destination. The gate is the
+	// SAME !operatorRequiresSingleUserHome() invariant as followViaConsent
+	// above — a consent-via-hook can NEVER bypass strict mode (PROTECTED:
+	// corp-managed hosts get symlink-attack hardening regardless of any
+	// per-write consent). On approval the port produces a fresh scoped
+	// ResolvedSymlinkConsent pinned to the JUST-resolved parent, then follows
+	// via the same handle-pinned, pin-verified secureWriteFollowingSymlink path
+	// as an explicit consent — the prompt only PRODUCES the consent; the
+	// existing write-time re-resolve + pin guard still VERIFIES it.
+	if consent == nil && !followViaEnv && InteractiveSymlinkConsent != nil && !operatorRequiresSingleUserHome() {
+		if resolved, was := resolveSymlinkForSecureWrite(path); was {
+			pinnedParent := filepath.Clean(filepath.Dir(resolved))
+			if InteractiveSymlinkConsent("", path, pinnedParent) {
+				hookConsent := &ResolvedSymlinkConsent{
+					OriginalPath:       path,
+					PinnedResolvedPath: pinnedParent,
+				}
+				// Same test-only swap seam as the explicit-consent lane above
+				// so a swap between the interactive resolve and the write-time
+				// re-resolve is still caught by the pin guard.
+				if afterResolveBeforePinHook != nil {
+					afterResolveBeforePinHook()
+				}
+				return secureWriteFollowingSymlink(path, contents, hookConsent, false)
+			}
+			// Operator declined at the prompt: fall through to the standard
+			// path-based pipeline, where the pre-existing-symlink refusal is
+			// the documented default. No silent follow.
+		}
+	}
+
 	// Non-symlink path (or symlink-follow not consented): the standard
 	// path-based hardened pipeline with the env/legacy relax fallback.
 	return secureWritePathBased(path, contents)

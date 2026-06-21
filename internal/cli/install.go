@@ -77,6 +77,16 @@ Prerequisites:
 
 See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A3 PR-2: in an INTERACTIVE terminal, a client-config write that
+			// hits a SYMLINKED destination prompts the operator [y/N] (default
+			// N) before following the symlink to its resolved target. The port
+			// is consulted at the single client-config write choke point inside
+			// package api and covers BOTH the install write branches below and
+			// the --reconcile-hub-mode reconciler. Non-interactive runs install
+			// nothing → the existing refusal stands (automation never
+			// redirected). The restore defer clears the process-level port.
+			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
+
 			// Bug-bash A7 minimal closure (#4): --upgrade is the
 			// one-shot binary replacement entry point. Pre-A7 the
 			// operator had to stop daemons, run `mcphub setup` to
