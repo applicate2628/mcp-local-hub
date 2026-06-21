@@ -20,10 +20,54 @@ package api
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows"
 )
+
+// secureWriteThroughResolvedParentHandle is the Windows handle-pinned
+// write-through for the symlink-resolve relax lane (env-var F2 and scoped
+// consent). It is the AF-1 fix: instead of returning a resolved path STRING
+// for SecureWriteClientConfig to re-walk (filepath.Split + re-open the
+// parent BY PATH), it OPENS the resolved target's parent directory ONCE
+// (openDirHandleNoReparse — frozen at open) and runs the shared hardened
+// owner (secureWriteClientConfigToResolvedParent) against that held handle.
+// A co-resident who swaps the symlink, or any intermediate component,
+// BETWEEN resolve and this open cannot redirect the privileged write
+// because the parent handle is pinned — there is no second path-based open
+// for the swap to race.
+//
+// resolvedTarget MUST already be the fully-resolved final disk path (from
+// resolveSymlinkFinalPath). It returns the resolved-parent directory path
+// that was actually opened (filepath.Dir of resolvedTarget, cleaned) so the
+// caller can pin-match it against a scoped consent's PinnedResolvedPath
+// (SEAM-B swap-between-confirm-and-write guard).
+//
+// skipParentGate threads through to the shared owner exactly as the
+// path-based lane (the symlink relax lane is itself a relax-on-broadened
+// posture; the per-file restrictive DACL is the load-bearing boundary).
+func secureWriteThroughResolvedParentHandle(resolvedTarget string, contents []byte, skipParentGate bool) (string, error) {
+	parentDir, base := filepath.Split(resolvedTarget)
+	if parentDir == "" {
+		parentDir = "."
+	}
+	if base == "" {
+		return "", fmt.Errorf("secure write: empty base name in resolved target %q", resolvedTarget)
+	}
+	parentDir = filepath.Clean(parentDir)
+
+	dirHandle, err := openDirHandleNoReparse(parentDir)
+	if err != nil {
+		return parentDir, fmt.Errorf("secure write: open resolved parent %s: %w", parentDir, err)
+	}
+	defer windows.CloseHandle(dirHandle)
+
+	if err := secureWriteClientConfigToResolvedParent(dirHandle, parentDir, base, contents, skipParentGate); err != nil {
+		return parentDir, err
+	}
+	return parentDir, nil
+}
 
 // resolveSymlinkFinalPath opens path through any reparse points
 // (CreateFile WITHOUT FILE_FLAG_OPEN_REPARSE_POINT) and returns the

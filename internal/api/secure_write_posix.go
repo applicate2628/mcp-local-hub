@@ -49,6 +49,7 @@ import (
 // + atomic renameat + post-rename verify (steps 4-11) all still
 // apply, so the dirfd-anchored TOCTOU guarantees are preserved.
 func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bool) error {
+	secureWritePathBasedStringEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
 		parentDir = "."
@@ -65,6 +66,38 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	}
 	defer unix.Close(dirFd)
 
+	// Steps 2-11 run against the held parent fd. The shared owner
+	// (secureWriteClientConfigToResolvedParent) does NOT close dirFd —
+	// this caller owns it via the defer above.
+	return secureWriteClientConfigToResolvedParent(dirFd, parentDir, base, contents, skipParentGate)
+}
+
+// secureWriteClientConfigToResolvedParent runs the hardened post-parent-open
+// sequence (steps 2-11) against a CALLER-OPENED parent directory fd. It is
+// the SINGLE OWNER of those steps: the path-based
+// secureWriteClientConfigImpl opens the parent by path and delegates here,
+// and the symlink-resolve-to-handle lane
+// (secureWriteThroughResolvedParentHandle) opens the resolved target's
+// parent with O_DIRECTORY|O_NOFOLLOW and delegates here too — so neither
+// path re-walks a string after the parent fd is frozen (AF-1 closure: no
+// filepath.Split of a resolved string, no second path-based open).
+//
+// CONTRACT: dirFd MUST stay open for the duration of this call and is NOT
+// closed here — the caller owns the fd's lifetime. parentDirForDiag is the
+// human-readable parent path used only in the
+// ErrSecureWriteParentInsecure / target diagnostics; it is NEVER re-opened.
+//
+// When skipParentGate=true the parent-dir mode/uid verify (step 2) is
+// SKIPPED (relax lane). The per-file mode 0600 (O_CREAT mode + Fchmod) is
+// still the load-bearing boundary; the dirfd-relative create + atomic
+// renameat + post-rename verify all still apply, so the dirfd-anchored
+// TOCTOU guarantees are preserved.
+func secureWriteClientConfigToResolvedParent(dirFd int, parentDirForDiag, base string, contents []byte, skipParentGate bool) error {
+	secureWriteResolvedParentEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
+	if base == "" {
+		return fmt.Errorf("secure write: empty base name (parent %q)", parentDirForDiag)
+	}
+
 	// 2. Parent DACL verify reduces to owner-uid + non-loose mode
 	// on POSIX. The per-user trust boundary covers ancestor chain.
 	// Wrap with ErrSecureWriteParentInsecure so the cross-package
@@ -76,7 +109,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	// the new file regardless of how loose the parent dir mode is.
 	if !skipParentGate {
 		if err := verifyPosixParentDirFromFd(dirFd); err != nil {
-			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDir, err)
+			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDirForDiag, err)
 		}
 	}
 
@@ -86,7 +119,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	// receive the write. Refuse outright so the caller is forced to
 	// clean up the symlink first.
 	if err := refusePreexistingSymlink(dirFd, base); err != nil {
-		return fmt.Errorf("secure write: target %s: %w", path, err)
+		return fmt.Errorf("secure write: target %s: %w", filepath.Join(parentDirForDiag, base), err)
 	}
 
 	// 3. Unpredictable temp name to defeat slot-squat races.
