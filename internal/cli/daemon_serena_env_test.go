@@ -179,3 +179,68 @@ func TestSerenaProxyEnvWrongKeyFormatDoesNotMatch(t *testing.T) {
 		t.Fatalf("merged SERENA_DOCKER = %q, want resolved value %q", got, "0")
 	}
 }
+
+// TestNoRowSupervisedDaemonSurvivesMalformedOverlay is the PR #403 bot-edge
+// end-to-end brick guard. A supervised daemon with NO overlay row (marker
+// present, but the supervisor injected an EMPTY overlay key set because this
+// daemon had no overlay) must NOT fail its launch when an UNRELATED operator
+// edit corrupts daemon-env-overrides.yaml. Before the fix the supervisor
+// appended the APPLIED marker only inside `if overlayApplied`, so a no-row
+// daemon got no marker; the wrapper's daemonOverlayEnv then took the no-marker
+// FATAL branch on a malformed/unreadable overlay file. The fix appends the
+// marker UNCONDITIONALLY for every supervised daemon, so a no-row daemon lands
+// in the marker-present degrade path (empty injected key set → nil overlay
+// map → manifest-only env), which returns no error.
+//
+// Both a global-shape task name and a serena-proxy-shape task name are
+// exercised: the launch path is the SAME mergeResolvedDaemonEnvWithOverlay
+// owner for both (they differ only in the task-name string, exactly as the
+// supervisor descriptors differ only in Command/Args). This mirrors
+// TestDaemonOverlayEnvSupervisedReloadFailureNoInjectedKeysFallsBackToNil one
+// level up, at the full env-resolution entry both daemon kinds use.
+func TestNoRowSupervisedDaemonSurvivesMalformedOverlay(t *testing.T) {
+	tests := []struct {
+		name     string
+		taskName string
+	}{
+		{
+			name:     "global-shape",
+			taskName: `\mcp-local-hub-memory-default`,
+		},
+		{
+			name:     "serena-proxy-shape",
+			taskName: api.SerenaTaskNameForWorkspace(`D:\dev\no-row-workspace`),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+			// Supervisor-spawned: marker present. No overlay key set was
+			// injected (this daemon had no overlay row), so the degrade
+			// reconstructs an EMPTY overlay map and returns nil,nil.
+			t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+			t.Setenv(daemonOverlayKeysEnvVar, "")
+
+			// An UNRELATED operator edit left the overlay file malformed
+			// (oversize → non-retryable Load error). reuse writeOversizeOverlayFile.
+			writeOversizeOverlayFile(t, stateDir)
+
+			// The resolved EnvRefs the launcher passes in (manifest-only env).
+			resolved := map[string]string{
+				"SERENA_DOCKER": "0",
+			}
+			merged, unset, err := mergeResolvedDaemonEnvWithOverlay(tt.taskName, resolved, nil)
+			if err != nil {
+				t.Fatalf("mergeResolvedDaemonEnvWithOverlay on no-row daemon with malformed overlay: want non-fatal (daemon would still launch), got error: %v", err)
+			}
+			// The manifest env survives untouched (overlay merge is a no-op).
+			if got := merged["SERENA_DOCKER"]; got != "0" {
+				t.Fatalf("merged SERENA_DOCKER = %q, want resolved value %q (manifest-only env on degrade)", got, "0")
+			}
+			if len(unset) != 0 {
+				t.Fatalf("unset = %v, want empty (no omitted secrets)", unset)
+			}
+		})
+	}
+}

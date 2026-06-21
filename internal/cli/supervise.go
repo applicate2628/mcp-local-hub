@@ -3116,8 +3116,33 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
 			cmd.Env = merged
 		}
+		// The APPLIED marker means "supervisor-spawned; overlay handled
+		// upstream" and is appended UNCONDITIONALLY for every supervised
+		// daemon — even a daemon with NO overlay row. The wrapper's
+		// daemonOverlayEnv keys its degrade-vs-fatal decision on this marker:
+		// with the marker present, a malformed/unreadable overlay file
+		// degrades gracefully (empty injected key set → nil overlay map →
+		// manifest-only env) instead of being FATAL. Gating the marker on
+		// overlayApplied left a no-row supervised daemon (e.g. a serena proxy
+		// or a global daemon with no overlay) taking the no-marker FATAL
+		// branch, bricking its launch when an UNRELATED overlay edit corrupts
+		// daemon-env-overrides.yaml. The KEYS injection below stays gated on
+		// overlayApplied because appendDaemonOverlayKeys requires a non-empty
+		// key set (overlayKeySet returns nil for an empty overlay map).
+		//
+		// cmd.Env stays nil only when manifest env AND overlay are both empty
+		// (mergeDaemonEnv returns nil → "child inherits os.Environ directly").
+		// Appending the marker to a nil cmd.Env would make it a 1-element env
+		// that REPLACES the inherited environment (Go exec treats a non-nil
+		// cmd.Env as the COMPLETE env), stripping PATH and everything else.
+		// Seed from os.Environ() first, mirroring injectOneAPIEnv's nil-guard
+		// in this same closure, so the marker is added WITHOUT dropping the
+		// inherited env.
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
+		cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
 		if overlayApplied {
-			cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
 			// Inject the applied overlay KEY SET alongside the APPLIED
 			// marker. The wrapper's marker-present reload-FAILURE path
 			// reconstructs the overlay map from these keys (reading each
