@@ -452,6 +452,43 @@ func TestExtractManifestFromClient_MimoCode(t *testing.T) {
 	}
 }
 
+// TestExtractManifestFromClient_MimoCode_EnvironmentField pins Finding 3: a
+// canonical MiMoCode LOCAL entry stores env vars under `environment` (NOT
+// `env`). The extract normalization must translate `environment` → `env` so the
+// drafted manifest carries the server's env vars; without it the env was
+// silently DROPPED and the manifest failed at run time.
+func TestExtractManifestFromClient_MimoCode_EnvironmentField(t *testing.T) {
+	tmp := t.TempDir()
+	mimoPath := filepath.Join(tmp, "mimocode.json")
+	// `environment` is MiMoCode's documented local-entry env field; no `env`.
+	if err := os.WriteFile(mimoPath, []byte(
+		`{"mcp":{"memory":{"type":"local","command":["npx","-y","@modelcontextprotocol/server-memory"],"environment":{"API_KEY":"abc","DEBUG":"1"}}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewAPI()
+	yaml, err := a.ExtractManifestFromClient("mimocode", "memory", ScanOpts{
+		MimoCodeConfigPath: mimoPath,
+		ManifestDir:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ExtractManifestFromClient: %v", err)
+	}
+	m, err := config.ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate: %v\n%s", err, yaml)
+	}
+	if m.Env["API_KEY"] != "abc" {
+		t.Errorf("Env[API_KEY] = %q, want abc (environment->env translation)", m.Env["API_KEY"])
+	}
+	if m.Env["DEBUG"] != "1" {
+		t.Errorf("Env[DEBUG] = %q, want 1 (environment->env translation)", m.Env["DEBUG"])
+	}
+}
+
 // TestExtractManifestFromClient_MimoCode_JSONC confirms the extractor tolerates
 // comments / trailing commas in a hand-edited mimocode.jsonc, same as the scan
 // path.

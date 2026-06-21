@@ -356,6 +356,23 @@ describe("perClientRouting with client_config_presence", () => {
     expect(r["claude-code"]).toBe("via-hub");
   });
 
+  // Finding 4 (mimocode): a present-but-DISABLED (enabled:false) entry is
+  // recorded as an "absent" transport in client_presence. The FIRST pass must
+  // win and tag it "not-installed" (unchecked + DISABLED, not a migrate
+  // candidate) — the SECOND pass must NOT promote it to "available" off
+  // config_presence:"ok", which would let Apply CLOBBER the disabled user
+  // entry. This is the routing half of the scan-side absent-presence fix.
+  it("absent presence + config 'ok' stays not-installed, never available (Finding 4 clobber-protection)", () => {
+    const r = perClientRouting(
+      { mimocode: { transport: "absent" } },
+      { mimocode: "ok" },
+      true,
+      "memory",
+    );
+    expect(r["mimocode"]).toBe("not-installed");
+    expect(r["mimocode"]).not.toBe("available");
+  });
+
   it("fills every known client column even with empty client_presence", () => {
     const r = perClientRouting({}, {});
     for (const c of [

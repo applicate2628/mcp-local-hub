@@ -158,6 +158,125 @@ func TestMimoCode_GetEntry_RoundTrips(t *testing.T) {
 	}
 }
 
+// TestMimoCode_GetEntry_LocalEntryCarriesRaw_RoundTripPreservesIt pins Finding
+// 5: a user's LOCAL entry (command ARRAY, `environment`, NO url) must survive
+// the install/register snapshot-rollback (GetEntry → AddEntry(*priorEntry))
+// UNCHANGED. Pre-fix GetEntry returned an MCPEntry with empty URL, and the
+// rollback's AddEntry rewrote the local entry as a broken
+// `{"type":"remote","url":"","enabled":true}` REMOTE entry — corruption.
+// GetEntry now carries the verbatim shape in MCPEntry.Raw and AddEntry writes
+// Raw back unchanged, so the round-trip is faithful.
+func TestMimoCode_GetEntry_LocalEntryCarriesRaw_RoundTripPreservesIt(t *testing.T) {
+	o := newMimoCodeForTest(t, `{
+  "mcp": {
+    "memory": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"],
+      "environment": {"API_KEY": "secret"},
+      "enabled": true
+    }
+  }
+}`)
+	prior, err := o.GetEntry("memory")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if prior == nil {
+		t.Fatal("GetEntry returned nil for a present local entry")
+	}
+	// A local entry has no url; the lean URL representation cannot carry it, so
+	// the raw shape must be present for faithful restore.
+	if prior.URL != "" {
+		t.Errorf("local entry URL = %q, want empty (no url field)", prior.URL)
+	}
+	if prior.Raw == nil {
+		t.Fatal("local entry must carry its verbatim shape in MCPEntry.Raw")
+	}
+	if prior.Raw["type"] != "local" {
+		t.Errorf("Raw[type] = %v, want local", prior.Raw["type"])
+	}
+
+	// Simulate the install-rollback round-trip: clobber the entry (as a failed
+	// install would), then restore the prior snapshot via AddEntry.
+	if err := o.AddEntry(MCPEntry{Name: "memory", URL: "http://localhost:9123/mcp"}); err != nil {
+		t.Fatalf("AddEntry (simulated install): %v", err)
+	}
+	if err := o.AddEntry(*prior); err != nil {
+		t.Fatalf("AddEntry (rollback restore): %v", err)
+	}
+
+	// The restored entry must be the ORIGINAL local shape, not a remote url:"" entry.
+	restored, err := o.GetEntry("memory")
+	if err != nil {
+		t.Fatalf("GetEntry after restore: %v", err)
+	}
+	if restored == nil || restored.Raw == nil {
+		t.Fatal("restored local entry lost its raw shape")
+	}
+	if restored.Raw["type"] != "local" {
+		t.Errorf("restored Raw[type] = %v, want local (rollback must NOT rewrite it as remote)", restored.Raw["type"])
+	}
+	if _, hasURL := restored.Raw["url"]; hasURL {
+		t.Errorf("restored local entry must NOT have a url field; got %v", restored.Raw["url"])
+	}
+	cmd, ok := restored.Raw["command"].([]any)
+	if !ok || len(cmd) != 3 || cmd[0] != "npx" {
+		t.Errorf("restored command array corrupted: %v", restored.Raw["command"])
+	}
+	env, ok := restored.Raw["environment"].(map[string]any)
+	if !ok || env["API_KEY"] != "secret" {
+		t.Errorf("restored environment lost: %v", restored.Raw["environment"])
+	}
+}
+
+// TestMimoCode_DeepMergeRead pins Finding 1 at the adapter level: GetEntry reads
+// the DEEP-MERGED view across the accepted global layers, so a server defined
+// only in config.json is visible even when the highest-precedence file
+// (mimocode.jsonc) holds only unrelated settings, and a later layer overrides an
+// earlier one per server name.
+func TestMimoCode_DeepMergeRead(t *testing.T) {
+	t.Setenv("MIMOCODE_CONFIG", "")
+	t.Setenv("MIMOCODE_CONFIG_DIR", "")
+	t.Setenv("MIMOCODE_HOME", "")
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	dir := filepath.Join(xdg, "mimocode")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// config.json holds memory (stale) AND a unique server `legacy`.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9999/STALE","enabled":true},"legacy":{"type":"remote","url":"http://localhost:9100/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// mimocode.jsonc (top layer) overrides memory's URL and adds only settings.
+	jsoncPath := filepath.Join(dir, "mimocode.jsonc")
+	if err := os.WriteFile(jsoncPath,
+		[]byte("{\n  // top layer\n  \"theme\": \"dark\",\n  \"mcp\": {\"memory\": {\"type\":\"remote\",\"url\":\"http://localhost:9123/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	home, _ := os.UserHomeDir()
+	o := &mimoCodeClient{path: jsoncPath, home: home}
+
+	// `legacy` lives only in config.json — it must be visible.
+	leg, err := o.GetEntry("legacy")
+	if err != nil {
+		t.Fatalf("GetEntry(legacy): %v", err)
+	}
+	if leg == nil || leg.URL != "http://localhost:9100/mcp" {
+		t.Errorf("config.json-only server must be visible via deep-merge; got %+v", leg)
+	}
+	// `memory` is overridden by the top layer (later wins).
+	mem, err := o.GetEntry("memory")
+	if err != nil {
+		t.Fatalf("GetEntry(memory): %v", err)
+	}
+	if mem == nil || mem.URL != "http://localhost:9123/mcp" {
+		t.Errorf("later layer must override per server name; got %+v", mem)
+	}
+}
+
 // TestMimoCode_RemoveEntry confirms removal is scoped and idempotent.
 func TestMimoCode_RemoveEntry(t *testing.T) {
 	o := newMimoCodeForTest(t, `{"mcp":{"serena":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true},"other":{"type":"remote","url":"http://x/mcp","enabled":true}}}`)
@@ -581,20 +700,42 @@ func TestMimoCode_ConfigEnvOverrides(t *testing.T) {
 		}
 	})
 
-	t.Run("MIMOCODE_CONFIG_DIR (absolute) replaces the dir, keeps file preference", func(t *testing.T) {
+	t.Run("MIMOCODE_CONFIG_DIR (absolute) replaces the dir, keeps mimocode.json(c) preference", func(t *testing.T) {
 		t.Setenv("MIMOCODE_CONFIG", "")
 		cd := t.TempDir()
 		t.Setenv("MIMOCODE_CONFIG_DIR", cd)
 		// MIMOCODE_HOME present but lower precedence — CONFIG_DIR must win.
 		t.Setenv("MIMOCODE_HOME", t.TempDir())
-		// Seed only config.json in the custom dir → resolver picks it.
+		// Seed mimocode.json in the custom dir → resolver picks it.
+		if err := os.WriteFile(filepath.Join(cd, "mimocode.json"), []byte(`{"mcp":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(cd, "mimocode.json")
+		if got != want {
+			t.Errorf("MIMOCODE_CONFIG_DIR override: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("config.json is NOT selected under MIMOCODE_CONFIG_DIR (global-dir-only layer — Finding 2)", func(t *testing.T) {
+		// Docs (https://mimo.xiaomi.com/mimocode/config-overrides): "`.mimocode/`
+		// and MIMOCODE_CONFIG_DIR likewise use mimocode.json(c)" — config.json is
+		// a GLOBAL-default-dir-only layer MiMo does NOT load from a custom dir. A
+		// custom dir holding ONLY config.json must therefore resolve to a fresh
+		// mimocode.json (the file the adapter creates + MiMo will actually load),
+		// NOT the config.json (which MiMo would ignore).
+		t.Setenv("MIMOCODE_CONFIG", "")
+		cd := t.TempDir()
+		t.Setenv("MIMOCODE_CONFIG_DIR", cd)
+		t.Setenv("MIMOCODE_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
 		if err := os.WriteFile(filepath.Join(cd, "config.json"), []byte(`{"mcp":{}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(cd, "config.json")
+		want := filepath.Join(cd, "mimocode.json")
 		if got != want {
-			t.Errorf("MIMOCODE_CONFIG_DIR override: got %q, want %q", got, want)
+			t.Errorf("config.json under a custom CONFIG_DIR must be ignored; got %q, want %q", got, want)
 		}
 	})
 
