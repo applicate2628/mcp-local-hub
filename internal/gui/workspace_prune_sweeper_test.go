@@ -133,7 +133,16 @@ func TestSweepPruneWorkspaces_DeadWorktree(t *testing.T) {
 	// Build a real dead-worktree fixture: a dir that exists, with a `.git` FILE
 	// pointing at an admin dir that does NOT exist.
 	deadWT := t.TempDir()
-	deadAdmin := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "gone") // never created
+	// Realistic `git worktree remove` shape: the admin PARENT (.git/worktrees)
+	// exists, only the <name> leaf is gone — so isAdminDirGenuinelyDeleted (r3)
+	// reads it as a genuinely removed worktree, not an unavailable/offline admin
+	// root. Without the parent dir, the r3 grandparent guard treats the whole
+	// chain as offline and refuses to prune (the P1 bot fixture finding).
+	deadAdminParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(deadAdminParent, 0o700); err != nil {
+		t.Fatalf("mkdir admin parent: %v", err)
+	}
+	deadAdmin := filepath.Join(deadAdminParent, "gone") // leaf never created
 	if err := os.WriteFile(filepath.Join(deadWT, ".git"), []byte("gitdir: "+deadAdmin+"\n"), 0o600); err != nil {
 		t.Fatalf("write .git file: %v", err)
 	}
