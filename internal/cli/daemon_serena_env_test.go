@@ -180,6 +180,95 @@ func TestSerenaProxyEnvWrongKeyFormatDoesNotMatch(t *testing.T) {
 	}
 }
 
+// TestSerenaProxyOverlayPathChannelImmuneToRedirectedStateDir is the PR #403 r2
+// finding-2 guard: the serena-proxy resolves the operator overlay file via
+// stateDirFunc() (HOME/XDG on POSIX), and the supervisor merges the serena
+// manifest env (which MAY redirect HOME for the upstream serena data dir) into
+// the proxy WRAPPER's environment. Without the MCPHUB_DAEMON_ENV_OVERLAY_PATH
+// control channel the proxy would resolve daemon-env-overrides.yaml against the
+// child's redirected home, miss it, and silently drop the operator overlay.
+//
+// This test simulates the redirect: stateDirFunc() (via MCPHUB_STATE_DIR_OVERRIDE,
+// the test seam) points at an EMPTY dir with NO overlay, while the channel var
+// points at the REAL overlay file in a separate dir. The overlay value must
+// still reach the merged env — proving daemonOverlayEnv reads the CHANNEL path,
+// not the (redirected) state dir.
+func TestSerenaProxyOverlayPathChannelImmuneToRedirectedStateDir(t *testing.T) {
+	const canonicalWS = `D:\dev\overlay-channel-workspace`
+	taskName := api.SerenaTaskNameForWorkspace(canonicalWS)
+
+	const operatorValue = "operator-overlay-value"
+
+	// realStateDir holds the genuine overlay file the supervisor resolved.
+	realStateDir := apitest.HardenedTempDir(t)
+	seedSerenaOverlay(t, realStateDir, taskName, map[string]string{
+		"SERENA_LOG_LEVEL": operatorValue,
+	})
+	realOverlayPath := filepath.Join(realStateDir, overlayBaseName)
+
+	// redirectedStateDir is what stateDirFunc() would resolve to under a
+	// manifest-redirected HOME — an EMPTY dir with NO overlay file. If
+	// daemonOverlayEnv resolved against THIS (the bug), it would find no row
+	// and the operator override would be lost.
+	redirectedStateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", redirectedStateDir)
+
+	// The supervisor-applied marker + the supervisor-injected overlay-path
+	// channel (the fix). The supervisor already merged the overlay value into
+	// os.Environ() before spawning the proxy, so the supervised-applied read
+	// path (overlayValuesFromEnv) needs the literal value present too.
+	t.Setenv(daemonOverlayAppliedEnvVar, daemonOverlayAppliedEnvValue)
+	t.Setenv(daemonOverlayPathEnvVar, realOverlayPath)
+	t.Setenv("SERENA_LOG_LEVEL", operatorValue)
+
+	resolved := map[string]string{
+		"SERENA_DOCKER": "0",
+	}
+	merged, _, err := mergeResolvedDaemonEnvWithOverlay(taskName, resolved, nil)
+	if err != nil {
+		t.Fatalf("mergeResolvedDaemonEnvWithOverlay: %v", err)
+	}
+	// The operator overlay value REACHES the merged env, proving the overlay
+	// was loaded from the CHANNEL path (realStateDir) and NOT the redirected
+	// state dir (which has no overlay file).
+	if got := merged["SERENA_LOG_LEVEL"]; got != operatorValue {
+		t.Fatalf("merged SERENA_LOG_LEVEL = %q, want operator overlay value %q — daemonOverlayEnv resolved against the redirected state dir instead of the MCPHUB_DAEMON_ENV_OVERLAY_PATH channel (finding-2 regressed)", got, operatorValue)
+	}
+	if got := merged["SERENA_DOCKER"]; got != "0" {
+		t.Fatalf("merged SERENA_DOCKER = %q, want resolved value %q", got, "0")
+	}
+}
+
+// TestResolveDaemonOverlayPathPrefersChannel is the pure-helper guard for the
+// finding-2 channel resolver: an explicit MCPHUB_DAEMON_ENV_OVERLAY_PATH wins
+// over the HOME/XDG state dir; an unset channel falls back to the state dir.
+func TestResolveDaemonOverlayPathPrefersChannel(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+
+	// (a) Channel set → it wins verbatim, regardless of the state dir.
+	const channelPath = `D:\some\other\place\daemon-env-overrides.yaml`
+	t.Setenv(daemonOverlayPathEnvVar, channelPath)
+	got, err := resolveDaemonOverlayPath()
+	if err != nil {
+		t.Fatalf("resolveDaemonOverlayPath with channel set: %v", err)
+	}
+	if got != channelPath {
+		t.Fatalf("resolveDaemonOverlayPath = %q, want channel value %q", got, channelPath)
+	}
+
+	// (b) Channel unset → fall back to <stateDir>/daemon-env-overrides.yaml.
+	t.Setenv(daemonOverlayPathEnvVar, "")
+	got, err = resolveDaemonOverlayPath()
+	if err != nil {
+		t.Fatalf("resolveDaemonOverlayPath with channel unset: %v", err)
+	}
+	want := filepath.Join(stateDir, overlayBaseName)
+	if got != want {
+		t.Fatalf("resolveDaemonOverlayPath fallback = %q, want %q", got, want)
+	}
+}
+
 // TestNoRowSupervisedDaemonSurvivesMalformedOverlay is the PR #403 bot-edge
 // end-to-end brick guard. A supervised daemon with NO overlay row (marker
 // present, but the supervisor injected an EMPTY overlay key set because this

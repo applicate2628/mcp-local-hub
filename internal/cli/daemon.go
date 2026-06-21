@@ -38,6 +38,25 @@ const (
 	// parent/merged env and re-appended with the trusted value so no
 	// manifest/overlay row can spoof the key set.
 	daemonOverlayKeysEnvVar = "MCPHUB_DAEMON_ENV_OVERLAY_KEYS"
+	// daemonOverlayPathEnvVar is the dedicated mcphub-internal env var the
+	// supervisor sets when spawning a descriptor whose launcher resolves the
+	// operator env overlay file (daemon-env-overrides.yaml) and whose own
+	// process env may redirect HOME / XDG_*_HOME. The supervisor merges the
+	// serena manifest env (d.Env = clone of m.Env) into the serena-proxy
+	// WRAPPER's cmd.Env, so a manifest that redirects HOME for the upstream
+	// serena data dir also redirects the WRAPPER's HOME — and daemonOverlayEnv
+	// resolves the overlay file via stateDirFunc() (HOME/XDG-based) on POSIX.
+	// Without this channel the proxy would look for daemon-env-overrides.yaml
+	// under the child's redirected home, miss it, and silently lose the
+	// operator overlay (the clobber the serena-proxy-env-overlay fix closes).
+	// The supervisor resolves the canonical overlay path ONCE (against its own
+	// resolved state dir) and injects it here, AFTER the manifest/overlay env
+	// merge so the child env cannot clobber it. daemonOverlayEnv reads it first
+	// (resolveDaemonOverlayPath); an unset var falls back to the HOME/XDG state
+	// dir, the correct behavior for a direct `mcphub daemon` invocation. This
+	// is the overlay-file twin of MCPHUB_SUPERVISOR_INTENT_PATH (bot PR #403
+	// r2; the same HOME-redirect immunity the intent-path channel already has).
+	daemonOverlayPathEnvVar = "MCPHUB_DAEMON_ENV_OVERLAY_PATH"
 	// daemonOverlayKeysSep is the join delimiter for daemonOverlayKeysEnvVar.
 	// It must be valid INSIDE an environment-variable VALUE: a NUL byte is
 	// NOT — the OS env block is NUL-terminated, so a NUL embedded in
@@ -471,6 +490,37 @@ func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
 	return out
 }
 
+// resolveDaemonOverlayPath returns the operator env overlay file
+// (daemon-env-overrides.yaml) path daemonOverlayEnv reads. It prefers the
+// dedicated MCPHUB_DAEMON_ENV_OVERLAY_PATH control channel the supervisor
+// injects (immune to the manifest/child env), falling back to the HOME/XDG
+// state dir via stateDirFunc() when the var is unset.
+//
+// The channel exists because the serena-proxy WRAPPER process inherits the
+// serena manifest env (the supervisor merges d.Env = clone of m.Env into the
+// wrapper's cmd.Env). A manifest that redirects HOME / XDG_*_HOME for the
+// upstream serena data dir therefore also redirects the WRAPPER's HOME, and on
+// POSIX stateDirFunc() honors HOME/XDG — so without the channel the proxy would
+// resolve daemon-env-overrides.yaml against the child's redirected home, miss
+// it, and silently drop the operator overlay. This is the overlay-file twin of
+// api.ResolveSupervisorIntentPathForProxy (bot PR #403 r2). The canonical
+// shipped serena manifest does NOT redirect HOME (env: PYTHONUNBUFFERED only),
+// so no shipped workspace hits the gap today — but the channel makes the load
+// HOME-redirect-immune for any future manifest that does.
+//
+// An unset channel + direct `mcphub daemon` invocation resolves the overlay
+// against the operator's own state dir, exactly as before.
+func resolveDaemonOverlayPath() (string, error) {
+	if p := os.Getenv(daemonOverlayPathEnvVar); p != "" {
+		return p, nil
+	}
+	stateDir, err := stateDirFunc()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, overlayBaseName), nil
+}
+
 // daemonOverlayEnv loads + expands the operator env overlay row for the
 // daemon identified by its CANONICAL supervisor-intent taskName (e.g.
 // `\mcp-local-hub-<server>-<daemon>` for a global daemon, or
@@ -479,12 +529,12 @@ func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
 // it from server/daemon so a serena proxy (whose task name is workspace-keyed,
 // not server-daemon-keyed) loads its own overlay row instead of a phantom one.
 func daemonOverlayEnv(taskName string) (map[string]string, error) {
-	stateDir, err := stateDirFunc()
+	overlayPath, err := resolveDaemonOverlayPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
 	}
 	supervisorApplied := daemonOverlayAlreadyApplied(os.Environ())
-	ov, err := daemon_env_overlay.Load(filepath.Join(stateDir, overlayBaseName))
+	ov, err := daemon_env_overlay.Load(overlayPath)
 	if err != nil {
 		// Supervisor-spawned wrapper (marker present): the supervisor
 		// already loaded + expanded this same overlay row and merged the
@@ -712,6 +762,33 @@ func appendDaemonOverlayKeys(env []string, keys []string) []string {
 		out = append(out, kv)
 	}
 	return append(out, daemonOverlayKeysEnvVar+"="+strings.Join(keys, daemonOverlayKeysSep))
+}
+
+// stripDaemonOverlayKeys returns env with every daemonOverlayKeysEnvVar entry
+// removed. The supervisor calls it on a NO-ROW spawn (overlayApplied==false):
+// the daemon has no overlay key set to inject, but the supervisor still appends
+// the APPLIED marker unconditionally. With the marker present, the child's
+// daemonOverlayEnv treats an unreadable overlay file by RECONSTRUCTING the
+// overlay map from daemonOverlayKeysEnvVar (daemonOverlayKeysFromEnv →
+// overlayMapFromInjectedKeys). If that var were left at whatever value the
+// supervisor INHERITED from its own os.Environ() (a stale entry from a prior
+// run, or a spoofed entry an attacker planted in the supervisor's environment),
+// the child would reconstruct + apply UNRELATED env keys as if they were a
+// trusted operator overlay instead of falling back to manifest-only env. The
+// supervisor is the only legitimate writer of this reserved key, so a no-row
+// spawn must NEUTRALIZE it: strip every inherited entry so the child sees no
+// injected key set and degrades to manifest-only env. Mirrors the
+// strip-then-append discipline of appendDaemonOverlayKeys, minus the append.
+func stripDaemonOverlayKeys(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if ok && strings.EqualFold(k, daemonOverlayKeysEnvVar) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 func daemonOverlayMarkerValue(env []string) string {

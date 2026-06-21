@@ -153,6 +153,97 @@ func TestProductionSpawnFn_NoOverlayRowStillEmitsAppliedMarker(t *testing.T) {
 	}
 }
 
+// TestProductionSpawnFn_NoOverlayRowNeutralizesInheritedKeys is the PR #403
+// r2 security-edge regression guard. Now that the APPLIED marker is set for
+// EVERY supervised daemon (the unconditional-marker fix above), a NO-ROW spawn
+// whose supervisor os.Environ() carries a STALE / SPOOFED
+// MCPHUB_DAEMON_ENV_OVERLAY_KEYS would let the spawned child's marker-present
+// reload-failure branch reconstruct + apply UNRELATED env keys from
+// os.Environ() instead of falling back to manifest-only env. The fix strips
+// the reserved keys var in the no-row branch so the child sees no injected
+// key set.
+//
+// This drives the REAL production spawn closure with a no-overlay-row global
+// descriptor whose PARENT os.Environ() carries a stale keys value, then asserts
+// the closure's composed cmd.Env CLEARED it (absent OR empty — either way the
+// child's daemonOverlayKeysFromEnv returns nil → no reconstruction).
+//
+// STATE-SAFE: HardenedTempDir + MCPHUB_STATE_DIR_OVERRIDE redirect the state
+// dir; no overlay file is seeded → overlayApplied stays false → the no-row
+// branch runs.
+func TestProductionSpawnFn_NoOverlayRowNeutralizesInheritedKeys(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+	t.Setenv(daemonOverlayAppliedEnvVar, "")
+	// A STALE / SPOOFED keys value in the supervisor's inherited environment.
+	// Without the strip, the closure would carry this verbatim into the
+	// no-row child's cmd.Env (the marker is set), and the child would
+	// reconstruct STALE_SPOOFED_KEY as a trusted overlay key.
+	t.Setenv(daemonOverlayKeysEnvVar, "STALE_SPOOFED_KEY")
+	// Seed a value for that key too, so a leaked reconstruction would
+	// actually surface a (wrong) overlay value rather than an empty one.
+	t.Setenv("STALE_SPOOFED_KEY", "attacker-value")
+
+	dumpPath := filepath.Join(tmpHome, "child-env-dump.txt")
+	t.Setenv(overlayMarkerHelperSentinelEnv, "1")
+	t.Setenv(overlayMarkerHelperDumpPathEnv, dumpPath)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	crashCh := make(chan crashEvent, 8)
+	shutdown := make(chan struct{})
+	spawnFn := makeProductionSpawnFnWithStatePath(
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+	)
+
+	descriptor := api.SupervisorDaemon{
+		TaskName: reconcileWiringTestTaskName,
+		Server:   "memory",
+		Daemon:   "default",
+		Command:  os.Args[0],
+		Args:     []string{"-test.run=^TestSpawnEnvDumpHelper$"},
+	}
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("spawn fn failed on env-dump helper: %v", err)
+	}
+
+	var body []byte
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, rerr := os.ReadFile(dumpPath); rerr == nil && len(b) > 0 {
+			body = b
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(body) == 0 {
+		t.Fatalf("env-dump child never wrote %s within 20s", dumpPath)
+	}
+	childEnv := strings.Split(string(body), "\n")
+
+	// (a) The marker is present (unconditional-marker fix) — so the child WOULD
+	// take the reconstruction branch on an unreadable overlay file.
+	if got, ok := envValueFromDump(childEnv, daemonOverlayAppliedEnvVar); !ok || got != daemonOverlayAppliedEnvValue {
+		t.Fatalf("child %s = %q (present=%v), want %q", daemonOverlayAppliedEnvVar, got, ok, daemonOverlayAppliedEnvValue)
+	}
+	// (b) THE FIX: the inherited keys var is CLEARED in the composed cmd.Env.
+	// daemonOverlayKeysFromEnv treats an absent OR empty value as nil → no
+	// reconstruction. Assert via the SAME reader the child uses so the test
+	// proves the exact behavior the child depends on.
+	if keys := daemonOverlayKeysFromEnv(childEnv); len(keys) != 0 {
+		t.Fatalf("child %s reconstructs %v from a no-row spawn; want empty — the supervisor must strip the inherited/spoofed key set in the no-row branch", daemonOverlayKeysEnvVar, keys)
+	}
+	// (c) The inherited parent env (PATH) is still preserved.
+	if _, ok := envValueFromDump(childEnv, "PATH"); !ok {
+		t.Fatalf("child env has no PATH — the strip must not drop the rest of the inherited env")
+	}
+}
+
 // envValueFromDump returns the value of key from a newline-split child env
 // dump. Matching is case-insensitive on Windows (PATH/Path) and exact on
 // POSIX, mirroring mergeDaemonEnv's PATH-family normalizer. The last matching
