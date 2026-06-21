@@ -277,6 +277,39 @@ func TestAggregateInitializePopulatesSuccessesAndFailures(t *testing.T) {
 	}
 }
 
+func TestAggregateInitializeDeletesSessionWhenInitializedNotificationFails(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	d1.onNotify = func(w http.ResponseWriter, r *http.Request, body []byte) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	sess := sessionWithParticipants(d1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	if len(sess.InitSuccesses) != 0 {
+		t.Fatalf("expected initialized-notification failure to skip InitSuccesses, got %+v", sess.InitSuccesses)
+	}
+	if len(sess.InitFailures) != 1 {
+		t.Fatalf("InitFailures=%d want 1: %+v", len(sess.InitFailures), sess.InitFailures)
+	}
+	if got := sess.InitFailures[0].Stage; got != "initialize" {
+		t.Fatalf("InitFailures[0].Stage=%q want initialize", got)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if d1.deleteCount.Load() > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("initialized-notification failure did not DELETE orphan daemon session; deleteCount=%d", d1.deleteCount.Load())
+}
+
 func TestAggregateToolsListMergesAndNamespaces(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	d2 := newStubDaemon(t, "d2-sid")
@@ -1299,7 +1332,7 @@ func TestAggregateToolsListLiveEmptiedClientReturnsAllFailed(t *testing.T) {
 	}
 }
 
-func TestAggregateToolsListUsesOneResolverSnapshotForHiddenTools(t *testing.T) {
+func TestAggregateToolsListUsesLiveResolverSnapshotForHiddenTools(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
 
@@ -1310,15 +1343,15 @@ func TestAggregateToolsListUsesOneResolverSnapshotForHiddenTools(t *testing.T) {
 	initial := &ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
-		ToolsHidden: map[string]map[string][]string{
-			scope: {"srv1": {"read"}},
-		},
-		Groups: map[string]bool{scope: true},
+		Groups:   map[string]bool{scope: true},
 	}
 	republished := &ResolverSnapshot{
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
-		Groups:   map[string]bool{scope: true},
+		ToolsHidden: map[string]map[string][]string{
+			scope: {"srv1": {"read"}},
+		},
+		Groups: map[string]bool{scope: true},
 	}
 	PublishResolverSnapshot(initial)
 
@@ -1349,12 +1382,12 @@ func TestAggregateToolsListUsesOneResolverSnapshotForHiddenTools(t *testing.T) {
 		t.Fatalf("AggregateToolsList: %v", err)
 	}
 	if names := decodeToolsListNames(t, body); len(names) != 0 {
-		t.Fatalf("tools/list used a later resolver snapshot for hidden tools; names=%v body=%s", names, string(body))
+		t.Fatalf("freshly hidden tool leaked into tools/list; names=%v body=%s", names, string(body))
 	}
 	if rm := sess.RouteMap.Load(); rm == nil {
 		t.Fatalf("RouteMap not published")
 	} else if len(*rm) != 0 {
-		t.Fatalf("hidden tool leaked into RouteMap after resolver republish: %+v", *rm)
+		t.Fatalf("freshly hidden tool leaked into RouteMap after resolver republish: %+v", *rm)
 	}
 }
 

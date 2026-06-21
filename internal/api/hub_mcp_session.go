@@ -128,6 +128,7 @@ type DaemonFailure struct {
 type hubSession struct {
 	ClientSessionID      string
 	ScopeKey             string
+	InstanceID           string // hub instance id admitted at initialize; used for stable response metadata
 	ProtocolVersion      string // version requested at hub-side initialize (used for daemons that don't return a negotiated version)
 	SnapshotAtInit       *ResolverSnapshot
 	IntendedParticipants []canonicalDaemonRef
@@ -150,7 +151,7 @@ type hubSession struct {
 	InitAt           time.Time
 	LastUsedAt       time.Time
 	deleteStarted    bool
-	mu               sync.Mutex // protects LastUsedAt + lifecycle + InitSuccesses + DaemonProtoVer + deleteStarted
+	mu               sync.Mutex // protects LastUsedAt + lifecycle + InstanceID + InitSuccesses + DaemonProtoVer + deleteStarted
 	// reinitGroup coalesces concurrent hot-swap (a) self-heal re-initializations
 	// of the SAME live daemon binding (keyed Server\x00Daemon\x00Port) into ONE
 	// initialize, so a mass daemon restart that fails many in-flight tools/call

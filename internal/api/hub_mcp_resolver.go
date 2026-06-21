@@ -84,10 +84,12 @@ type ResolverSnapshot struct {
 	//
 	// CRITICAL invariant: only GROUP scope keys ever appear here. A bare
 	// client scope key has NO entry → nil filter → ZERO filtering, so the
-	// /clients/ route stays byte-identical (the fence). Carried on the SAME
-	// immutable snapshot as Bindings so a session captures a CONSISTENT
-	// (bindings, filter) pair in one atomic pointer load — never a torn
-	// read where the bindings are new but the filter is stale.
+	// /clients/ route stays byte-identical (the fence). Bindings are captured
+	// from an immutable snapshot for session fan-out, while tools/list and
+	// tools/call may overlay the currently-published ToolsHidden filter. That
+	// live filter is allowed to narrow visibility only: it drops tools from
+	// result.tools / RouteMap or rejects a call, but never routes to a daemon
+	// absent from the captured binding path.
 	//
 	// nil when there are no groups (the groups-free build never allocates
 	// it), preserving additive-by-omission.

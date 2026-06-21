@@ -109,8 +109,9 @@ func (h *HubMcpHandler) SetEndpoint(ep HubEndpoint) {
 }
 
 // currentInstanceID returns the published endpoint's InstanceID, or
-// "" if SetEndpoint has not yet been called. Used by gate 5 and response
-// metadata that must reflect the already-authenticated cached endpoint.
+// "" if SetEndpoint has not yet been called. Used by gate 5 and to seed
+// initialize-time session metadata; tools/list responses read the session
+// cached InstanceID so metadata does not depend on a later endpoint read.
 func (h *HubMcpHandler) currentInstanceID() string {
 	p := h.instanceEndpoint.Load()
 	if p == nil {
@@ -620,6 +621,9 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 		writeJSONRPCErrorStatus(w, reqID, http.StatusInternalServerError, -32603, "internal error: "+err.Error(), nil)
 		return
 	}
+	sess.mu.Lock()
+	sess.InstanceID = r.Header.Get("X-Mcphub-Instance-Id")
+	sess.mu.Unlock()
 
 	// Populate IntendedParticipants from the snapshot's bindings for
 	// this scope key. AggregateInitialize fans out to every binding.

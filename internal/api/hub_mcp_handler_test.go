@@ -648,6 +648,59 @@ func TestHandlerPingEchoes(t *testing.T) {
 	}
 }
 
+func TestHandlerToolsListUsesSessionCachedInstanceID(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	d1 := newStubDaemon(t, "d1-sid")
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port}
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{"claude-code": {ref}},
+	})
+
+	h := newTestHandler(t)
+	initBody := []byte(`{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocolVersion":"2025-11-25"}}`)
+	initReq := authedRequest(t, http.MethodPost, "/clients/claude-code/mcp", initBody)
+	initW := httptest.NewRecorder()
+	h.ServeHTTP(initW, initReq)
+	if initW.Code != http.StatusOK {
+		t.Fatalf("initialize: got %d, want 200; body=%s", initW.Code, initW.Body.String())
+	}
+	sid := initW.Header().Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatal("initialize did not return Mcp-Session-Id")
+	}
+
+	h.SetEndpoint(HubEndpoint{InstanceID: fakeInstanceID, Port: 9120})
+	listBody := []byte(`{"jsonrpc":"2.0","id":"list-1","method":"tools/list"}`)
+	listReq := authedRequest(t, http.MethodPost, "/clients/claude-code/mcp", listBody)
+	listReq.Header.Set("X-Mcphub-Instance-Id", fakeInstanceID)
+	listReq.Header.Set("Mcp-Session-Id", sid)
+	listReq.Header.Set("MCP-Protocol-Version", "2025-11-25")
+	listW := httptest.NewRecorder()
+	h.ServeHTTP(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("tools/list: got %d, want 200; body=%s", listW.Code, listW.Body.String())
+	}
+
+	var env struct {
+		Result struct {
+			Meta struct {
+				Mcphub struct {
+					InstanceID string `json:"instance_id"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(listW.Body.Bytes(), &env); err != nil {
+		t.Fatalf("parse tools/list body: %v / body=%s", err, listW.Body.String())
+	}
+	if env.Result.Meta.Mcphub.InstanceID != realInstanceID {
+		t.Fatalf("tools/list instance_id=%q want initialized session instance_id %q", env.Result.Meta.Mcphub.InstanceID, realInstanceID)
+	}
+}
+
 // TestHandlerInvalidJSONRPCEnvelopeReturns400 — a body missing the
 // "jsonrpc":"2.0" field returns 400 with -32600.
 func TestHandlerInvalidJSONRPCEnvelopeReturns400(t *testing.T) {
