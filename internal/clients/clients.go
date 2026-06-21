@@ -675,6 +675,11 @@ func clientRegistry() []clientDescriptor {
 		{name: "cline", factory: NewCline},
 		{name: "kilocode", factory: NewKiloCode},
 		{name: "opencode", factory: NewOpenCode},
+		// mimocode is a FORK of opencode and reuses opencode's MCP config
+		// shape verbatim (top-level `mcp` object, type:local/remote); only the
+		// config path differs (~/.config/mimocode/mimocode.json). Placed next
+		// to opencode so the relationship is visible in the registry order.
+		{name: "mimocode", factory: NewMimoCode},
 		{name: "hermes", factory: NewHermes},
 		{name: "openclaw", factory: NewOpenClaw},
 		// agent-skills vendor reconciliation (2026-06-17): 4 more opt-in clients
