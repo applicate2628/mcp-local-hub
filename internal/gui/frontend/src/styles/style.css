@@ -214,10 +214,96 @@ a:visited {
   font-size: 14px;
 }
 
+/* ============================================================
+ * Base element resets (Phase 1 — @layer base)
+ * ------------------------------------------------------------
+ * Tailwind Preflight is intentionally omitted (see the file
+ * header), so there is no base reset for raw <button> / native
+ * form controls. Historically every classless <button> and every
+ * native <select>/<input>/<textarea> fell back to the browser
+ * default chrome (the ~51 unmigrated buttons + the WorkspaceSelector
+ * native select). These two rules fill exactly that gap.
+ *
+ * CRITICAL — these live in @layer base ON PURPOSE. Every existing
+ * styled rule in this file is UNLAYERED, and per the CSS cascade
+ * an unlayered declaration always beats a layered one regardless
+ * of selector specificity. So every `.btn*`, `section[data-section]
+ * button`, `menu button`, `.matrix-col-init-btn`, `.field-ctl`,
+ * `.logs-filter`, `.secret-picker-*`, `.linklike`, `.env-drawer-*`,
+ * and per-screen rule OUTRANKS these base resets — nothing that is
+ * already styled changes. ONLY genuinely classless/unstyled controls
+ * pick up this baseline, and no control can ever render fully
+ * browser-default again.
+ * ============================================================ */
+@layer base {
+  /* A classless <button> renders as the SECONDARY/outline .btn look,
+     built from the SAME tokens as `.btn` (density-keyed padding,
+     --border, --sidebar-bg, --text, 4px radius) with the same
+     :hover / :disabled / :focus-visible states. */
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--gap-xs);
+    padding: var(--button-padding-y) var(--button-padding-x);
+    border: 1px solid var(--border);
+    background: var(--sidebar-bg);
+    color: var(--text);
+    border-radius: 4px;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color .12s ease, border-color .12s ease,
+                color .12s ease, opacity .12s ease;
+  }
+  button:hover:not(:disabled) {
+    border-color: var(--link);
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transition: opacity .12s ease;
+  }
+  button:focus-visible {
+    outline: 2px solid var(--focus, #0969da);
+    outline-offset: 2px;
+  }
+
+  /* Native text controls render as the `.field-ctl` primitive
+     (1px --border, 8px radius, --bg surface, density-keyed input
+     padding). Fixes the WorkspaceSelector native <select> + any
+     future raw control. The bespoke controls (.field-ctl,
+     .secret-picker-input, .logs-filter, .catalog-search input)
+     are all unlayered and still win. */
+  select,
+  input[type="text"],
+  input[type="number"],
+  input[type="search"],
+  textarea {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    padding: var(--input-padding-y) var(--input-padding-x);
+    font: inherit;
+    font-size: 14px;
+  }
+}
+
 *, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-/* Default sidebar layout (data-layout="sidebar" or unset). */
-#app { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
+/* Scroll ownership (Phase 2): the shell never scrolls — `main`
+   (#screen-root) is the SOLE scroll container. overflow:hidden on
+   html/body/#app removes the second (body) scroll region; the
+   minmax(0,1fr) content track + min-width/min-height:0 below stop a
+   non-shrinkable child from blowing the column past the viewport,
+   which was the source of the horizontal scrollbar. */
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+/* Default sidebar layout (data-layout="sidebar" or unset).
+   A grid `1fr` track has an implicit min-width:min-content, so a wide,
+   non-shrinkable child (a fixed-width control, a long unbroken string)
+   forces the column wider than the viewport. minmax(0,1fr) lets the
+   track shrink below its content, keeping overflow inside `main`. */
+#app { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 100%; overflow: hidden; min-height: 0; }
 .sidebar { background: var(--sidebar-bg); border-right: 1px solid var(--border); padding: var(--card-padding); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: var(--section-gap); }
 /* Decorative inline hub-mark next to the product name. currentColor +
@@ -229,13 +315,16 @@ nav { display: flex; flex-direction: column; gap: 4px; }
 nav a { color: var(--text); text-decoration: none; padding: var(--cell-padding-y) var(--cell-padding-x); border-radius: 6px; }
 nav a:hover { background: var(--border); }
 nav a.active { background: var(--border); font-weight: 500; }
-main { padding: var(--screen-padding); overflow: auto; }
+/* The sole scroll sink. min-width/min-height:0 let it shrink inside the
+   grid cell instead of pushing the #app column past the viewport. */
+main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height: 0; }
 
 /* Top-tabs layout (data-layout="tabs"). Spec §5 line 241: horizontal
    tabs across the top instead of left rail. Brand sits inline so the
    user keeps app identity without sacrificing vertical space. */
 :root[data-layout="tabs"] #app {
-  grid-template-columns: 1fr;
+  /* minmax(0,1fr): same content-track shrink fix as the sidebar layout. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr;
 }
 :root[data-layout="tabs"] .topbar {
@@ -602,7 +691,10 @@ main { padding: var(--screen-padding); overflow: auto; }
 .screen.migration .server-name { flex: 1 1 auto; font-family: var(--font-mono); }
 .screen.migration .action-error { color: var(--danger, #cf222e); }
 .screen.migration button[disabled] { opacity: 0.5; cursor: not-allowed; }
-.screen.migration button.danger:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+/* (Migration buttons now carry the unified `.btn` design-system classes —
+   Migrate selected = `.btn.btn-primary`, Dismiss = `.btn.btn-danger`, the
+   neutral actions = `.btn`. The former `.screen.migration button.danger`
+   color/border rule was removed when Dismiss migrated to `btn btn-danger`.) */
 /* group-heading: keeps the section h2 and its ⓘ InfoTip on one baseline-
    aligned row (matches the Settings header convention). */
 .screen.migration .group-heading { display: flex; align-items: center; gap: 0.375rem; margin: 0 0 0.5rem; }
@@ -639,6 +731,11 @@ main { padding: var(--screen-padding); overflow: auto; }
   cursor: pointer;
   display: flex;
   align-items: center;
+  /* Explicit flex-start: the @layer base `button{}` reset sets
+     justify-content:center, which would center this full-width flex header
+     (chevron + label jump to the middle). text-align:left alone does NOT
+     govern flex main-axis placement, so the override must be justify-content. */
+  justify-content: flex-start;
   gap: var(--gap-xs);
   font: inherit;
   color: var(--text);
@@ -864,10 +961,10 @@ main { padding: var(--screen-padding); overflow: auto; }
   border-bottom: 1px solid var(--border);
 }
 
-/* Destructive action (Delete) reads as danger — mirrors the
-   .catalog-card-actions / .card-actions danger pattern. Scoped to the
-   secrets table so it never bleeds into the neutral Rotate/Add buttons. */
-.secrets-table button.danger:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+/* (The Delete button's destructive styling now comes from the unified
+   `.btn.btn-danger` design-system variant — the former
+   `.secrets-table button.danger` rule was removed when Delete migrated to
+   `class="btn btn-danger"`.) */
 
 .empty-state {
   margin: var(--section-margin) 0;
@@ -1530,6 +1627,19 @@ menu button[disabled] {
 @media (prefers-reduced-motion: reduce) {
   .infotip-pop { animation: none; }
 }
+/* The ⓘ help trigger is a fixed 15×15 pill drawn entirely from its own
+   Tailwind utilities (h-[15px] w-[15px] rounded-full border). The @layer base
+   `button{}` reset leaks its density-keyed PADDING onto it — with box-sizing
+   :border-box that padding eats into the 15px box and clips/expands the glyph.
+   This unlayered rule reasserts padding:0 + the fixed size so the trigger
+   stays exactly 15×15 regardless of the base reset. (The Settings
+   `section[data-section] button:not(.infotip-trigger)` rule already excludes
+   it, but the GLOBAL base reset does not — this covers every InfoTip use.) */
+.infotip-trigger {
+  padding: 0;
+  width: 15px;
+  height: 15px;
+}
 /* Settings redesign — a shadcn-style control primitive. Unlayered (beats the
    per-context element rules) so the redesigned Settings inputs/selects share
    one resting look; the existing global `input:focus-visible` outline still
@@ -1547,6 +1657,16 @@ menu button[disabled] {
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* Scroll fix (Phase 2): inside a settings card, the fixed-width controls
+   (`.field-ctl w-64` / `w-56` / `w-20`, i.e. Tailwind 16/14/5rem widths)
+   sit in `justify-between` rows. On a narrow window those fixed widths
+   push the card — and the whole content track — wider than the viewport,
+   producing horizontal overflow. Capping them at the available width lets
+   them shrink instead of widening the card. The cards use the
+   `[data-section]` anchor; `.settings-section` covers the legacy
+   FieldRenderer body too. */
+[data-section] .field-ctl,
+.settings-section .field-ctl { max-width: 100%; }
 /* Settings content width cap — keeps label↔control proximate and line length
    readable instead of stretching edge-to-edge on a wide window. Applies to all
    sections (the redesign and the not-yet-redesigned ones both read better). */
@@ -1873,7 +1993,9 @@ section[data-section] button.btn-danger:not(:disabled):hover {
   font-size: 0.95rem;
 }
 .workspace-selector-label { display: inline-flex; align-items: center; gap: 0.5rem; }
-.workspace-selector-label select { padding: 0.125rem 0.25rem; }
+/* (The native <select> now carries the canonical `.field-ctl` control
+   primitive — the former `.workspace-selector-label select { padding }`
+   one-off was removed so the dropdown matches every other form control.) */
 .workspace-selector-path {
   font-family: ui-monospace, monospace; color: var(--text-muted); font-size: 0.875rem;
   overflow: hidden; text-overflow: ellipsis; max-width: 50ch; white-space: nowrap;
@@ -1910,7 +2032,7 @@ section[data-section] button.btn-danger:not(:disabled):hover {
 }
 
 .env-drawer {
-  border: 1px solid #bbb; background: #fafafa; padding: 0.75rem;
+  border: 1px solid var(--border); background: var(--sidebar-bg); padding: 0.75rem;
   margin: 1rem 0; border-radius: 4px; max-width: 720px;
 }
 .env-drawer-header {
@@ -1919,10 +2041,10 @@ section[data-section] button.btn-danger:not(:disabled):hover {
 }
 .env-drawer-close {
   background: none; border: none; font-size: 1.25rem; cursor: pointer;
-  color: #888; padding: 0 0.25rem;
+  color: var(--text-muted); padding: 0 0.25rem;
 }
-.env-drawer-close:hover { color: #000; }
-.env-drawer-task { font-size: 0.875rem; color: #555; margin-bottom: 0.5rem; }
+.env-drawer-close:hover { color: var(--text); }
+.env-drawer-task { font-size: 0.875rem; color: var(--text-muted); margin-bottom: 0.5rem; }
 .env-drawer-field { display: block; margin: 0.5rem 0; }
 .env-drawer-field > span { display: block; font-weight: 500; margin-bottom: 0.25rem; }
 .env-drawer-field textarea {
@@ -1930,8 +2052,13 @@ section[data-section] button.btn-danger:not(:disabled):hover {
   padding: 0.25rem;
 }
 .env-drawer-warning {
-  background: #fff3cd; color: #664d03; padding: 0.5rem;
-  border: 1px solid #ffe69c; border-radius: 4px; margin: 0.5rem 0;
+  /* Theme-aware caution box (was hardcoded #fff3cd/#664d03/#ffe69c, which
+     stayed light-yellow on the dark theme). color-mix tints the live
+     --warning accent over the page surface so it reads in both themes. */
+  background: color-mix(in srgb, var(--warning, #bf8700) 12%, var(--bg));
+  color: var(--text); padding: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--warning, #bf8700) 45%, var(--border));
+  border-radius: 4px; margin: 0.5rem 0;
   font-size: 0.875rem;
 }
 .env-drawer-actions {
@@ -1939,8 +2066,8 @@ section[data-section] button.btn-danger:not(:disabled):hover {
   margin: 0.5rem 0;
 }
 .env-drawer-force { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.875rem; }
-.env-drawer .info { color: #1b5e20; margin-top: 0.5rem; }
-.env-drawer .error { color: #b71c1c; margin-top: 0.5rem; }
+.env-drawer .info { color: var(--success); margin-top: 0.5rem; }
+.env-drawer .error { color: var(--danger); margin-top: 0.5rem; }
 
 /* Per-row "Details" trigger that opens the Flowbite ServerRowDrawer. A
    small unobtrusive text button next to the server-name edit link. */
@@ -2075,7 +2202,8 @@ nav a,
      own narrow flow (its nav wraps), so scope these to the default
      shell by NOT matching when data-layout="tabs". */
   :root:not([data-layout="tabs"]) #app {
-    grid-template-columns: 1fr;
+    /* minmax(0,1fr): same content-track shrink fix as desktop. */
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 1fr;
   }
   :root:not([data-layout="tabs"]) .sidebar {

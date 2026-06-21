@@ -45,7 +45,7 @@ export function SecretsScreen({ route }: { route?: RouterState }) {
       <section class="secrets-screen">
         <h1>Secrets</h1>
         <p class="error">Failed to load: {snap.error.message}</p>
-        <button type="button" onClick={() => void snap.refresh()}>Retry</button>
+        <button type="button" class="btn" onClick={() => void snap.refresh()}>Retry</button>
       </section>
     );
   }
@@ -82,6 +82,7 @@ function EditVaultBanner() {
       <code>{MCPHUB_EDIT_CMD}</code>
       <button
         type="button"
+        class="btn"
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(MCPHUB_EDIT_CMD);
@@ -115,6 +116,7 @@ function NotInitView(props: { refresh: () => Promise<void> }) {
       </p>
       <button
         type="button"
+        class="btn btn-primary"
         disabled={working}
         onClick={async () => {
           setWorking(true);
@@ -166,7 +168,7 @@ function InitEmptyView(props: { refresh: () => Promise<void>; prefillKey?: strin
     <>
       <div class="empty-state">
         <p>No secrets yet.</p>
-        <button type="button" onClick={() => { setPrefill(undefined); setOpen(true); }}>Add secret</button>
+        <button type="button" class="btn btn-primary" onClick={() => { setPrefill(undefined); setOpen(true); }}>Add secret</button>
       </div>
       {/* key on the prefill so opening with a deep-link key remounts the modal
           with that name captured at first render (AddSecretModal seeds its name
@@ -274,7 +276,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
   return (
     <div class="secrets-table">
       <div class="card">
-        <button type="button" onClick={() => { setPrefill(undefined); setAddOpen(true); }}>Add secret</button>
+        <button type="button" class="btn btn-primary" onClick={() => { setPrefill(undefined); setAddOpen(true); }}>Add secret</button>
         <table>
           <thead>
             <tr>
@@ -332,7 +334,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           return (
             <div class="banner banner-warn" data-testid="rotate-cta-status-unknown" role="status">
               <p>Vault updated for <code>{bannerName}</code>. Daemon status is unavailable; restart any running daemons that use this secret from the Servers screen.</p>
-              <button type="button" onClick={dismissBanner}>Dismiss</button>
+              <button type="button" class="btn" onClick={dismissBanner}>Dismiss</button>
             </div>
           );
         }
@@ -342,7 +344,7 @@ function InitKeyedView(props: { env: SecretsEnvelope; refresh: () => Promise<voi
           return (
             <div class="banner banner-success" data-testid="rotate-cta-zero-running" role="status">
               <p>Vault updated for <code>{bannerName}</code>. No running daemons need restart.</p>
-              <button type="button" onClick={dismissBanner}>Dismiss</button>
+              <button type="button" class="btn" onClick={dismissBanner}>Dismiss</button>
             </div>
           );
         }
@@ -412,6 +414,7 @@ function SecretRowComponent(props: {
       <td>
         <button
           type="button"
+          class="btn"
           disabled={actionsDisabled}
           title={reservedTitle}
           onClick={() => props.onRotate(props.row.name)}
@@ -420,7 +423,7 @@ function SecretRowComponent(props: {
         </button>
         <button
           type="button"
-          class="danger"
+          class="btn btn-danger"
           disabled={actionsDisabled}
           title={reservedTitle}
           onClick={() => props.onDelete(props.row.name)}

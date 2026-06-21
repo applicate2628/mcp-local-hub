@@ -145,6 +145,41 @@ default and the narrow rules are purely additive overrides. The desktop
 layout is never altered by this contract — at `> 768px` not one of these
 rules applies.
 
+## Scroll-ownership invariant (single scroll container)
+
+The shell chrome NEVER scrolls. `html`, `body`, and `#app` carry
+`overflow: hidden`, and the content track is a `minmax(0, 1fr)` grid
+column with `min-width: 0` (and `#app` / `main` carry `min-height: 0`).
+**`#screen-root` (the `<main>` element) is the ONLY scroll container on
+every screen and at every breakpoint** — it owns `overflow: auto`. This
+holds for all three layouts (sidebar, tabs, narrow): each one's `#app`
+grid uses `minmax(0, 1fr)` for the content track so a non-shrinkable
+child (a fixed-width control, a long unbroken token) can never blow the
+column past the viewport.
+
+Why `minmax(0, 1fr)` (not bare `1fr`): a grid `1fr` track has an
+implicit `min-width: min-content`, so a wide child forces the track —
+and the whole page — wider than the viewport, producing BOTH a
+horizontal scrollbar AND a second (body) vertical scrollbar. `minmax(0,
+1fr)` lets the track shrink below its content; the overflow then stays
+inside `#screen-root`. Settings is the worst offender (fixed-width
+`.field-ctl w-64` / `w-56` / `w-20` controls in `justify-between` rows),
+so `[data-section] .field-ctl` / `.settings-section .field-ctl` are also
+capped at `max-width: 100%` to shrink instead of widening the card.
+
+The ONLY permitted secondary scrollers are these bounded-height widget
+panes (each has its own `max-height` + `overflow`, scoped to its widget,
+and never participates in page layout overflow):
+
+- `#logs-body` (`max-height: 70vh; overflow: auto`) — the log viewport.
+- `.add-server-preview pre` (`overflow: auto`) — the YAML preview block.
+- `.secret-picker-dropdown` (`overflow-y: auto`) — the secret-picker
+  combobox listbox.
+
+Any new scroll container is a contract change: it must be a bounded-height
+widget pane (not the page), justified here, and must not let the
+horizontal/vertical page overflow escape `#screen-root`.
+
 ## Sidebar → top bar (CSS-only, layout setting preserved)
 
 Below the narrow breakpoint the `#app` grid switches from
