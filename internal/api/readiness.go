@@ -357,7 +357,14 @@ func entryScriptCheckTargets(m *config.ServerManifest) []entryScript {
 // rendering layer on top: launcher/runtime guidance, per-key secret prompts,
 // port detail rows, and install-plan explanations for the GUI.
 func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
-	rep := &ReadinessReport{Server: m.Name, Ready: !containsNonOptional(AdmissionCheck(m, AdmissionScope{}))}
+	return CheckServerReadinessWithScope(m, AdmissionScope{})
+}
+
+// CheckServerReadinessWithScope runs readiness checks for the install scope.
+// A daemon-filtered install must not be blocked by sibling daemons that the
+// actual install path will skip during Preflight and planning.
+func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScope) *ReadinessReport {
+	rep := &ReadinessReport{Server: m.Name, Ready: !containsNonOptional(AdmissionCheck(m, scope))}
 	add := func(r ReadinessRequirement) {
 		if !r.OK && !r.Optional {
 			rep.Ready = false
@@ -424,6 +431,15 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// (when known + absolute) rather than skipping or statting it against this
 	// process's cwd (Codex #377 r9). Skip flag-shaped args (python -m, --flag).
 	for _, c := range entryScriptCheckTargets(m) {
+		// A daemon-scoped install (scope.DaemonFilter set) skips sibling
+		// daemons — Preflight / BuildPlanWithOpts(DaemonFilter) never stat a
+		// sibling's entry script, so readiness must not block on one either
+		// (bot review readiness.go:366). c.daemon=="" is the cwd-independent
+		// ABSOLUTE target that applies to EVERY daemon (entryScriptCheckTargets
+		// leaves it unfiltered, see the daemon "" comment) — never skip it.
+		if scope.DaemonFilter != "" && c.daemon != "" && c.daemon != scope.DaemonFilter {
+			continue
+		}
 		if !c.resolvable {
 			// Relative entry script + non-absolute daemon cwd: known-tolerated
 			// non-convergence — the launch cwd is unknowable here. Surface as an
@@ -578,6 +594,9 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	// the pool allocator's portAvailable, so a bound-but-not-listening port is
 	// not reported free (Codex #377 r15/r16).
 	for _, d := range m.Daemons {
+		if scope.DaemonFilter != "" && d.Name != scope.DaemonFilter {
+			continue
+		}
 		// A kind=companion daemon binds NO mcphub MCP port (Port==0 is valid — it
 		// listens on its own port directly). Skip the fixed-port requirement so the
 		// companion is not reported Ready=false for an out-of-range port that
@@ -776,7 +795,13 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	if eff, cerr := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); cerr == nil && len(eff) > 0 {
 		clientScope = eff
 	}
-	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope}); err != nil {
+	// Scope the dry-run to the SAME daemon the real install targets. A
+	// daemon-filtered install (scope.DaemonFilter set) only validates the
+	// chosen daemon's bindings; a sibling's invalid url_path / unknown-daemon
+	// binding must not block readiness when BuildPlanWithOpts(DaemonFilter)
+	// would skip it (bot review readiness.go:366). Empty filter = full install
+	// = validate every daemon, unchanged from the global path.
+	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope, DaemonFilter: scope.DaemonFilter}); err != nil {
 		add(ReadinessRequirement{
 			Name: "install plan",
 			OK:   false,
@@ -812,6 +837,12 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 // when the manifest cannot be resolved or parsed (an unknown server name); a
 // resolvable manifest always yields a report (possibly Ready=false).
 func CheckServerReadinessByName(name string) (*ReadinessReport, error) {
+	return CheckServerReadinessByNameWithScope(name, AdmissionScope{})
+}
+
+// CheckServerReadinessByNameWithScope resolves a server manifest and runs a
+// scope-aware readiness report for partial installs.
+func CheckServerReadinessByNameWithScope(name string, scope AdmissionScope) (*ReadinessReport, error) {
 	data, err := loadManifestYAMLEmbedFirst(name)
 	if err != nil {
 		return nil, fmt.Errorf("resolve manifest %q: %w", name, err)
@@ -820,7 +851,7 @@ func CheckServerReadinessByName(name string) (*ReadinessReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse manifest %q: %w", name, err)
 	}
-	return CheckServerReadiness(m), nil
+	return CheckServerReadinessWithScope(m, scope), nil
 }
 
 // AllServerReadiness resolves every embedded/installed server manifest and
