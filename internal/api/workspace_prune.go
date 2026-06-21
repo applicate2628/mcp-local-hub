@@ -117,13 +117,14 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 //     with no `.git` anywhere up to the volume root → false;
 //  3. the pointer's `gitdir: <path>` (relative paths resolved against the
 //     worktree-root dir that holds the pointer) names an admin directory that is
-//     ABSENT via os.IsNotExist-ONLY, AND the admin dir's PARENT chain is still
-//     present (distinguishing "worktree removed" from "whole admin root
-//     unmounted" — see isAdminDirGenuinelyDeleted). Any OTHER stat error on the
-//     admin dir (permission, transient I/O, an offline/removable mount) returns
-//     FALSE — it inherits the EXACT false-positive-safe discipline of
-//     WorkspaceDirDeleted: a transient or ambiguous error must NEVER read as
-//     "dead".
+//     ABSENT via os.IsNotExist-ONLY, AND an admin-dir ANCESTOR (the PARENT
+//     `.git/worktrees/`, or — when the LAST worktree was removed and git cleaned
+//     the empty `worktrees/` — the GRANDPARENT repo `.git/`) is still present
+//     (distinguishing "worktree removed" from "whole admin root unmounted" — see
+//     isAdminDirGenuinelyDeleted). Any OTHER stat error on the admin dir
+//     (permission, transient I/O, an offline/removable mount) returns FALSE — it
+//     inherits the EXACT false-positive-safe discipline of WorkspaceDirDeleted: a
+//     transient or ambiguous error must NEVER read as "dead".
 //
 // SUBMODULE SAFETY: a git submodule ALSO stores a `.git` FILE, pointing at
 // `<superproject>/.git/modules/<name>`. A LIVE submodule's admin dir is present,
@@ -220,20 +221,36 @@ func findNearestGitPointer(dir string) (gitPath, pointerDir string, ok bool) {
 // is GENUINELY deleted (a `git worktree remove` outcome) rather than merely
 // UNAVAILABLE because its whole admin ROOT is offline/unmounted (Finding 2).
 //
-// A `git worktree remove` deletes ONLY the `worktrees/<name>` subdir, leaving
-// the parent `.git/worktrees/` (or, for the main-repo layout, the main repo's
-// `.git`) present. So:
+// A `git worktree remove` deletes the `worktrees/<name>` subdir. When OTHER
+// worktrees remain it leaves the parent `.git/worktrees/` present; when it
+// removes the LAST/only worktree, git ALSO deletes the now-empty
+// `.git/worktrees/` directory — so the parent alone cannot distinguish
+// "last worktree removed" (repo online) from "mount offline" (whole repo gone).
+// The GRANDPARENT — the main repo's `.git/` (= filepath.Dir of `.git/worktrees/`)
+// — is the discriminator: present means the repo/mount is online and the empty
+// `worktrees/` was cleaned, absent means the whole admin root is gone. So,
+// walking up the gitdir chain (`.git/worktrees/<name>` → `.git/worktrees/`
+// → `.git/`):
 //
 //   - adminDir Stat succeeds → admin dir present → LIVE worktree → false.
 //   - adminDir Stat is a NON-ENOENT error (permission, transient I/O, offline
 //     mount) → ambiguous → false (inherit WorkspaceDirDeleted's discipline).
-//   - adminDir Stat is ENOENT → the worktree subdir is gone, BUT only treat it
-//     as DEAD when adminDir's immediate PARENT still EXISTS. If the parent is
-//     ALSO absent/inaccessible, the whole admin root (mount/repo) is gone — that
-//     is an unmounted-root ambiguity, NOT a removed worktree → false.
+//   - adminDir Stat is ENOENT → the worktree subdir is gone. Refine via the
+//     ancestor chain:
+//       1. PARENT `.git/worktrees/` EXISTS (Stat ok) → a worktree was removed and
+//          siblings remain → DEAD.
+//       2. PARENT is ENOENT but GRANDPARENT `.git/` EXISTS (Stat ok) → the LAST
+//          worktree was removed and git cleaned the empty `worktrees/`; the
+//          repo/mount is present → DEAD (the last-worktree case Finding-2's
+//          parent-only check missed).
+//       3. PARENT non-ENOENT error, OR grandparent ENOENT / non-ENOENT error, OR
+//          a degenerate root with no parent/grandparent to corroborate against →
+//          the admin ROOT is gone/unavailable → ambiguous → false.
 //
-// The parent-exists check cleanly separates "worktree removed" (parent
-// `.git/worktrees/` survives) from "mount offline" (parent also vanished).
+// os.IsNotExist-ONLY at every level: any NON-ENOENT stat error (permission,
+// transient I/O, offline mount) is ambiguous and returns false. The grandparent
+// `.git/` presence is what separates "last worktree removed" (repo online) from
+// "mount offline" (repo absent) WITHOUT weakening the offline-mount protection.
 func isAdminDirGenuinelyDeleted(adminDir string) bool {
 	if _, err := os.Stat(adminDir); err == nil {
 		// Admin dir present → live worktree (or live submodule) → not dead.
@@ -242,21 +259,41 @@ func isAdminDirGenuinelyDeleted(adminDir string) bool {
 		// Non-ENOENT (permission, transient I/O, offline mount) → ambiguous.
 		return false
 	}
-	// adminDir is ENOENT. Confirm its PARENT is present before declaring DEAD —
+	// adminDir is ENOENT. Confirm an ancestor is present before declaring DEAD —
 	// otherwise the whole admin root may merely be unmounted (Finding 2).
 	parent := filepath.Dir(adminDir)
 	if parent == adminDir {
-		// Degenerate: adminDir is itself a root. No parent to corroborate against
-		// → treat as ambiguous (never prune).
+		// Degenerate: adminDir is itself a root. No ancestor to corroborate
+		// against → treat as ambiguous (never prune).
 		return false
 	}
-	if _, err := os.Stat(parent); err != nil {
-		// Parent absent OR inaccessible (ENOENT, permission, offline mount) → the
-		// admin ROOT is gone/unavailable, not just the worktree subdir → ambiguous.
+	if _, err := os.Stat(parent); err == nil {
+		// Parent `.git/worktrees/` present but the `<name>` subdir is ENOENT →
+		// a worktree was removed while siblings remain → genuinely DEAD.
+		return true
+	} else if !os.IsNotExist(err) {
+		// Parent inaccessible (permission, transient I/O, offline mount) →
+		// ambiguous → never prune.
 		return false
 	}
-	// Parent present (e.g. `.git/worktrees/` survives) but the `<name>` subdir
-	// is ENOENT → genuinely a removed worktree → DEAD.
+	// Parent is ALSO ENOENT. This is EITHER the last/only worktree removed (git
+	// cleaned the now-empty `.git/worktrees/`, so the repo's `.git/` survives) OR
+	// the whole admin root unmounted (everything gone). The GRANDPARENT `.git/`
+	// is the discriminator.
+	grandparent := filepath.Dir(parent)
+	if grandparent == parent {
+		// Degenerate: parent is itself a root. No grandparent to corroborate
+		// against → ambiguous (never prune).
+		return false
+	}
+	if _, err := os.Stat(grandparent); err != nil {
+		// Grandparent `.git/` absent OR inaccessible (ENOENT, permission, offline
+		// mount) → the whole admin root is gone/unavailable → ambiguous.
+		return false
+	}
+	// Grandparent `.git/` present → the repo/mount is online and the empty
+	// `.git/worktrees/` was cleaned because the LAST worktree was removed →
+	// genuinely a removed worktree → DEAD.
 	return true
 }
 

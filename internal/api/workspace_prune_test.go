@@ -243,19 +243,22 @@ func TestIsDeadGitWorktreePath_SubdirWorkspace(t *testing.T) {
 
 // TestIsDeadGitWorktreePath_UnavailableMount covers Finding 2: an admin dir that
 // is ENOENT because its whole admin ROOT is gone/unmounted must NOT be pruned;
-// only when the parent `worktrees/` survives but the `<name>` leaf is gone is it
-// genuinely a removed worktree.
+// only when an admin-dir ancestor (parent `worktrees/`, or the grandparent repo
+// `.git/` after a last-worktree removal) survives is it genuinely a removed
+// worktree. The grandparent `.git/` is the discriminator between "last worktree
+// removed" (repo online) and "mount offline" (repo gone).
 func TestIsDeadGitWorktreePath_UnavailableMount(t *testing.T) {
-	// --- UNAVAILABLE ROOT: the admin dir's PARENT is also ENOENT (simulate an
-	// unmounted root — the whole `<mount>/main/.git/worktrees` chain is absent).
-	// → ambiguous → NOT pruned. ---
+	// --- UNAVAILABLE ROOT: the admin dir's PARENT *and* GRANDPARENT are also
+	// ENOENT (simulate an unmounted root — the whole `<mount>/main/.git/...`
+	// chain is absent). → ambiguous → NOT pruned. ---
 	unmountedWT := t.TempDir()
-	// Point at a path whose parent chain is entirely absent.
+	// Point at a path whose parent chain is entirely absent (`no-such-mount` is
+	// never created, so `.git/worktrees/`, `.git/`, and `main/` are all ENOENT).
 	unmountedAdmin := filepath.Join(t.TempDir(), "no-such-mount", "main", ".git", "worktrees", "name")
 	writeGitFile(t, unmountedWT, unmountedAdmin)
 
-	// --- GENUINE REMOVAL: the parent `.git/worktrees/` EXISTS, only the `<name>`
-	// subdir is gone → genuinely a removed worktree → pruned. ---
+	// --- GENUINE REMOVAL (siblings remain): the parent `.git/worktrees/` EXISTS,
+	// only the `<name>` subdir is gone → genuinely a removed worktree → pruned. ---
 	removedWT := t.TempDir()
 	removedParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
 	if err := os.MkdirAll(removedParent, 0o755); err != nil {
@@ -263,18 +266,84 @@ func TestIsDeadGitWorktreePath_UnavailableMount(t *testing.T) {
 	}
 	writeGitFile(t, removedWT, filepath.Join(removedParent, "gone")) // leaf never created
 
+	// --- LAST/ONLY WORKTREE REMOVED: git deleted the now-empty `.git/worktrees/`
+	// directory too, so the admin dir AND its parent `worktrees/` are BOTH ENOENT,
+	// but the repo's `.git/` (the GRANDPARENT) survives → repo online, worktree
+	// genuinely removed → pruned. This is the last-worktree case the parent-only
+	// check missed (verified live: `git worktree remove` of the only worktree
+	// removes `.git/worktrees/` while `.git/` remains). ---
+	lastWT := t.TempDir()
+	// Create only the repo `.git/` dir; leave `.git/worktrees/` (and its `<name>`
+	// leaf) absent — exactly the on-disk shape after a last-worktree removal.
+	lastRepoGit := filepath.Join(t.TempDir(), "main", ".git")
+	if err := os.MkdirAll(lastRepoGit, 0o755); err != nil {
+		t.Fatalf("mkdir last-worktree repo .git: %v", err)
+	}
+	// adminDir = <repo>/.git/worktrees/<name>; parent = <repo>/.git/worktrees
+	// (ENOENT); grandparent = <repo>/.git (present).
+	writeGitFile(t, lastWT, filepath.Join(lastRepoGit, "worktrees", "only"))
+
 	cases := []struct {
 		name string
 		path string
 		want bool
 	}{
-		{"unavailable admin ROOT (parent also ENOENT) → NOT pruned", unmountedWT, false},
+		{"unavailable admin ROOT (parent + grandparent also ENOENT) → NOT pruned", unmountedWT, false},
 		{"genuine worktree removal (parent worktrees/ exists, leaf gone) → pruned", removedWT, true},
+		{"last worktree removed (parent worktrees/ gone, grandparent .git/ exists) → pruned", lastWT, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := IsDeadGitWorktreePath(c.path); got != c.want {
 				t.Fatalf("IsDeadGitWorktreePath(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIsAdminDirGenuinelyDeleted_LastWorktreeVsOfflineMount unit-tests the
+// availability discriminator directly (below the IsDeadGitWorktreePath wrapper)
+// so the parent/grandparent walk-up logic is covered in isolation against the
+// realistic `.git/worktrees/<name>` shape.
+func TestIsAdminDirGenuinelyDeleted_LastWorktreeVsOfflineMount(t *testing.T) {
+	// Last-worktree: `.git/` exists, `.git/worktrees/` and its leaf both ENOENT.
+	lastRepoGit := filepath.Join(t.TempDir(), "main", ".git")
+	if err := os.MkdirAll(lastRepoGit, 0o755); err != nil {
+		t.Fatalf("mkdir last-worktree .git: %v", err)
+	}
+	lastAdmin := filepath.Join(lastRepoGit, "worktrees", "only") // worktrees/ + leaf absent
+
+	// Offline-mount: nothing on the chain exists (`.git/`, `worktrees/`, leaf all
+	// ENOENT under a never-created mount root).
+	offlineAdmin := filepath.Join(t.TempDir(), "no-mount", "main", ".git", "worktrees", "name")
+
+	// Siblings-remain: `.git/worktrees/` exists, only the leaf is gone.
+	siblingParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(siblingParent, 0o755); err != nil {
+		t.Fatalf("mkdir siblings parent: %v", err)
+	}
+	siblingAdmin := filepath.Join(siblingParent, "gone")
+
+	// Live: admin dir present.
+	liveAdmin := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "live")
+	if err := os.MkdirAll(liveAdmin, 0o755); err != nil {
+		t.Fatalf("mkdir live admin: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		adminDir string
+		want     bool
+	}{
+		{"live admin dir present → not dead", liveAdmin, false},
+		{"siblings remain (parent worktrees/ present, leaf gone) → dead", siblingAdmin, true},
+		{"last worktree removed (parent gone, grandparent .git/ present) → dead", lastAdmin, true},
+		{"offline mount (parent + grandparent both absent) → ambiguous, not dead", offlineAdmin, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isAdminDirGenuinelyDeleted(c.adminDir); got != c.want {
+				t.Fatalf("isAdminDirGenuinelyDeleted(%q) = %v, want %v", c.adminDir, got, c.want)
 			}
 		})
 	}
