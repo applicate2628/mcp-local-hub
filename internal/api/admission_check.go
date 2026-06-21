@@ -19,6 +19,37 @@ type AdmissionFinding struct {
 	Optional bool
 }
 
+// AdmissionError carries the first BLOCKING admission finding as a typed error
+// so callers (the CLI install render) can surface the actionable Fix instead of
+// only the cryptic Reason. Error() preserves the bare Reason as its prefix so
+// existing callers that match on a Reason substring keep working; the guided
+// Fix is appended on its own line when present. The richer Fix/ID fields stay
+// available to callers that type-assert *AdmissionError.
+//
+// SEAM-B (install-and-it-works Area 2): the GATE DECISION — which findings block
+// — is unchanged (still keyed on AdmissionFinding.Optional in Preflight); only
+// the error VALUE returned for a blocking finding is now structured.
+type AdmissionError struct {
+	ID     string
+	Reason string
+	Fix    string
+}
+
+func (e *AdmissionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Fix == "" {
+		return e.Reason
+	}
+	return e.Reason + "\n  Fix: " + e.Fix
+}
+
+// admissionErrorFromFinding builds the typed error for a single blocking finding.
+func admissionErrorFromFinding(f AdmissionFinding) *AdmissionError {
+	return &AdmissionError{ID: f.ID, Reason: f.Reason, Fix: f.Fix}
+}
+
 type AdmissionScope struct {
 	DaemonFilter string
 }
