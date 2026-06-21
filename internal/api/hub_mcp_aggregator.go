@@ -647,6 +647,15 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	// counted: a collision is a config defect surfaced via partialFailures,
 	// not an operator-intended hide.
 	hiddenDropCount := 0
+	// otherDropCount counts tools dropped for a reason OTHER than the group's
+	// tools_hidden filter — a namespace collision or an intra/cross-daemon
+	// duplicate (dedupe). The C3 emptyReason discriminator requires this to be
+	// zero before claiming "all-tools-hidden": hiding is the SOLE cause of an
+	// empty list only when no tool was also removed by collision or dedupe.
+	// When the cause is MIXED, the non-hidden removals are already explained by
+	// partialFailures (collisions) and the response carries no all-tools-hidden
+	// label. Additive observability; does not affect the merged tool set.
+	otherDropCount := 0
 	for _, r := range results {
 		if r.err != nil {
 			listFailures = append(listFailures, DaemonFailure{
@@ -660,9 +669,11 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		listSuccessCount++
 		for _, t := range r.tools {
 			if collisions[t.Exposed] {
+				otherDropCount++
 				continue
 			}
 			if seenExposed[t.Exposed] {
+				otherDropCount++
 				continue
 			}
 			// Per-tool hide: drop a tool the group hides for its server.
@@ -723,12 +734,18 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// snapshot entry keeps the -32000 envelope.
 		if allowEmptyKnown || (len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix)) {
 			sess.RouteMap.Store(&mergedRoutes) // empty map — no tools to route
-			// C3 emptyReason: zero declared members vs members-declared-but-
-			// none-resolved. A group with NO IntendedParticipants declared no
-			// members; otherwise the members were filtered out as unresolved
-			// (none mapped to a live binding in the current snapshot).
+			// C3 emptyReason: zero DECLARED members vs members-declared-but-
+			// none-resolved. The discriminator is the group's DECLARED member
+			// count (the authored groups.yaml `servers` list), NOT the RESOLVED
+			// participant slice: a group that declares ghost members which map
+			// to no live binding has an empty IntendedParticipants yet is NOT an
+			// empty group — its members simply did not resolve. "empty-group"
+			// fires ONLY when the group declared zero members. The declared
+			// count is read from the session's init snapshot (the authoritative
+			// per-group declaration captured at session create); a nil map or
+			// missing key yields 0 → treated as zero-declared.
 			reason := emptyReasonAllMembersUnresolved
-			if len(sess.IntendedParticipants) == 0 {
+			if groupDeclaredMemberCount(sess) == 0 {
 				reason = emptyReasonEmptyGroup
 			}
 			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, reason) // mergedTools is empty → result.tools=[]
@@ -737,13 +754,17 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	}
 	sess.RouteMap.Store(&mergedRoutes)
 	// C3 emptyReason on the success path: members resolved AND ≥1 tools/list
-	// succeeded, but the merged list is empty — name WHY. The only
-	// operator-intended emptier here is the group's tools_hidden filter
-	// (hiddenDropCount > 0). A list emptied purely by collisions is left
-	// without a reason (the collision rows already explain it via
-	// partialFailures). A non-empty list carries no reason at all.
+	// succeeded, but the merged list is empty — name WHY. "all-tools-hidden"
+	// is claimed ONLY when the group's tools_hidden filter is the SOLE cause of
+	// emptiness: at least one tool was dropped by the filter (hiddenDropCount >
+	// 0) AND no tool was dropped for any OTHER reason (otherDropCount == 0, i.e.
+	// no collision or dedupe removal). When the cause is MIXED (some hidden,
+	// some collided/deduped) the label would over-claim, so the reason is left
+	// unset — the non-hidden removals are already explained via partialFailures
+	// (collision rows). A list emptied PURELY by collisions likewise carries no
+	// reason. A non-empty list carries no reason at all.
 	emptyReason := ""
-	if len(mergedTools) == 0 && hiddenDropCount > 0 {
+	if len(mergedTools) == 0 && hiddenDropCount > 0 && otherDropCount == 0 {
 		emptyReason = emptyReasonAllToolsHidden
 	}
 	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, emptyReason)
@@ -1847,6 +1868,20 @@ const (
 	emptyReasonAllMembersUnresolved = "all-members-unresolved"
 	emptyReasonAllToolsHidden       = "all-tools-hidden"
 )
+
+// groupDeclaredMemberCount returns how many member servers the session's
+// group scope key DECLARED in groups.yaml, read from the snapshot captured at
+// session init (the authoritative per-group declaration). It is the C3
+// emptyReason discriminator's "did this group declare any members" source —
+// distinct from the RESOLVED IntendedParticipants, so a group declaring only
+// ghost members reports a non-zero count even with zero resolved bindings. A
+// nil snapshot, nil map, or missing key yields 0 (treated as zero-declared).
+func groupDeclaredMemberCount(sess *hubSession) int {
+	if sess == nil || sess.SnapshotAtInit == nil {
+		return 0
+	}
+	return sess.SnapshotAtInit.GroupDeclaredMembers[sess.ScopeKey]
+}
 
 // buildToolsListResponse assembles a successful (≥1 daemon ok)
 // tools/list response with the merged tool list and partialFailures.

@@ -320,3 +320,61 @@ func TestGroupMemberUnresolvedEmitsWarn(t *testing.T) {
 		t.Fatalf("group-member-unresolved missing group/server fields; log=%s", logBytes)
 	}
 }
+
+// TestGroupMemberManifestPresentNoDaemonsEmitsWarn (Fix 3) pins the second
+// unresolved-member shape: a member whose manifest EXISTS but declares ZERO
+// daemons. byServer is keyed for every manifest, so this member lands in the
+// byServer-HIT branch with an empty refs slice — it contributes no binding yet
+// would never reach the byServer-miss warn. The builder must emit the SAME
+// group-member-unresolved warn for it (additive observability; the defensive
+// continue is unchanged) so the member is not silently dropped.
+func TestGroupMemberManifestPresentNoDaemonsEmitsWarn(t *testing.T) {
+	resetResolverForTest(t)
+	stateDir := hubMcpStateTestHelper(t)
+
+	// "hollow" has a manifest but ZERO daemons → byServer HIT, empty refs →
+	// must still warn. "memory" resolves normally and binds, proving the skip
+	// is surgical.
+	manifests := []config.ServerManifest{
+		{
+			Name:    "hollow",
+			Kind:    "global",
+			Daemons: nil, // manifest exists, no daemons
+		},
+		{
+			Name: "memory",
+			Kind: "global",
+			Daemons: []config.DaemonSpec{
+				{Name: "claude-code", Port: 9601},
+			},
+		},
+	}
+	groups := []Group{{Name: "hollowed", Servers: []string{"hollow", "memory"}}}
+	snap := BuildResolverSnapshotFromManifestsAndGroups(manifests, groups)
+
+	// Behavior unchanged: only the resolvable member binds; the group remains
+	// DECLARED, and its DECLARED member count counts BOTH authored members.
+	if refs := snap.Bindings[GroupScopeKey("hollowed")]; len(refs) != 1 || refs[0].Server != "memory" {
+		t.Fatalf("g:hollowed should bind only 'memory', got %+v", refs)
+	}
+	if !snap.Groups[GroupScopeKey("hollowed")] {
+		t.Fatal("g:hollowed must remain DECLARED (known) despite the daemon-less 'hollow' member")
+	}
+	if got := snap.GroupDeclaredMembers[GroupScopeKey("hollowed")]; got != 2 {
+		t.Fatalf("declared member count=%d want 2 (hollow+memory); both are DECLARED regardless of resolution", got)
+	}
+
+	logBytes, rerr := os.ReadFile(filepath.Join(stateDir, "hub-mcp.log"))
+	if rerr != nil {
+		t.Fatalf("read hub-mcp.log: %v", rerr)
+	}
+	if !bytes.Contains(logBytes, []byte(`"event":"group-member-unresolved"`)) {
+		t.Fatalf("group-member-unresolved warn not emitted for daemon-less member; log=%s", logBytes)
+	}
+	if !bytes.Contains(logBytes, []byte(`"level":"warn"`)) {
+		t.Fatalf("group-member-unresolved event not at warn severity; log=%s", logBytes)
+	}
+	if !bytes.Contains(logBytes, []byte(`"group":"hollowed"`)) || !bytes.Contains(logBytes, []byte(`"server":"hollow"`)) {
+		t.Fatalf("group-member-unresolved missing group/server fields for daemon-less member; log=%s", logBytes)
+	}
+}
