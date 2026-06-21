@@ -67,6 +67,22 @@ const (
 	daemonOverlayKeysSep = ","
 )
 
+// reservedDaemonOverlayControlVars is the CANONICAL single-source list of every
+// mcphub-reserved overlay control variable the supervisor injects at spawn time
+// and the spawned wrapper TRUSTS in os.Environ() (APPLIED marker, KEYS set,
+// PATH channel). It is the one owner of "which env vars are supervisor-only
+// control plane"; stripAllDaemonOverlayControlVars drives off it so the
+// strip-then-reappend discipline can never diverge per-var, and a future 4th
+// control var only needs to be added HERE (plus its trusted re-append site),
+// not at a new strip site. The constants above stay the source of truth for the
+// names; this slice just enumerates them in one place. See
+// stripAllDaemonOverlayControlVars for why the inherited values are untrusted.
+var reservedDaemonOverlayControlVars = []string{
+	daemonOverlayAppliedEnvVar,
+	daemonOverlayKeysEnvVar,
+	daemonOverlayPathEnvVar,
+}
+
 func newDaemonCmdReal() *cobra.Command {
 	var server, daemonName string
 	c := &cobra.Command{
@@ -764,31 +780,62 @@ func appendDaemonOverlayKeys(env []string, keys []string) []string {
 	return append(out, daemonOverlayKeysEnvVar+"="+strings.Join(keys, daemonOverlayKeysSep))
 }
 
-// stripDaemonOverlayKeys returns env with every daemonOverlayKeysEnvVar entry
-// removed. The supervisor calls it on a NO-ROW spawn (overlayApplied==false):
-// the daemon has no overlay key set to inject, but the supervisor still appends
-// the APPLIED marker unconditionally. With the marker present, the child's
-// daemonOverlayEnv treats an unreadable overlay file by RECONSTRUCTING the
-// overlay map from daemonOverlayKeysEnvVar (daemonOverlayKeysFromEnv →
-// overlayMapFromInjectedKeys). If that var were left at whatever value the
-// supervisor INHERITED from its own os.Environ() (a stale entry from a prior
-// run, or a spoofed entry an attacker planted in the supervisor's environment),
-// the child would reconstruct + apply UNRELATED env keys as if they were a
-// trusted operator overlay instead of falling back to manifest-only env. The
-// supervisor is the only legitimate writer of this reserved key, so a no-row
-// spawn must NEUTRALIZE it: strip every inherited entry so the child sees no
-// injected key set and degrades to manifest-only env. Mirrors the
-// strip-then-append discipline of appendDaemonOverlayKeys, minus the append.
-func stripDaemonOverlayKeys(env []string) []string {
+// stripAllDaemonOverlayControlVars returns env with EVERY mcphub-reserved
+// overlay control variable (reservedDaemonOverlayControlVars: the APPLIED
+// marker, the KEYS set, AND the PATH channel) removed. It is the single
+// inheritance-immunity owner the spawn closure calls ONCE — after seeding
+// cmd.Env from os.Environ()/the manifest+overlay merge and BEFORE appending
+// any TRUSTED control var — so no inherited or spoofed control var can ever
+// survive into a wrapper's environment.
+//
+// Why every one of these is untrusted on inherit. The spawned wrapper TRUSTS
+// each reserved var in its own os.Environ():
+//   - APPLIED → daemonOverlayEnv treats the marker as "supervisor handled the
+//     overlay upstream", switching an unreadable overlay file from FATAL to a
+//     graceful degrade (and into the KEYS-reconstruction path).
+//   - KEYS → on that unreadable-file path the wrapper RECONSTRUCTS the overlay
+//     map from this set (daemonOverlayKeysFromEnv → overlayMapFromInjectedKeys),
+//     applying each named key's os.Environ() value as a trusted overlay value.
+//   - PATH → resolveDaemonOverlayPath reads it FIRST, resolving
+//     daemon-env-overrides.yaml from this path instead of the HOME/XDG state dir.
+//
+// If ANY of these were left at whatever value the supervisor INHERITED from its
+// own os.Environ() — a stale entry from a prior run, or a spoofed entry an
+// attacker planted in the supervisor's environment, or a value a NON-serena
+// wrapper's manifest seeded — the child would trust it: spoofed KEYS injects
+// unrelated env as a phantom overlay; a spoofed PATH resolves the overlay from
+// an attacker-chosen file. The supervisor is the ONLY legitimate writer of
+// these reserved vars, so the spawn closure NEUTRALIZES all of them in one
+// place, then re-appends exactly the TRUSTED vars for THIS spawn (APPLIED
+// unconditionally; KEYS only when an overlay row applied; PATH only for a
+// serena-proxy descriptor). This generalizes the prior per-var no-row KEYS
+// strip into the whole-class fix (bot PR #403 r3 — the _PATH inheritance twin
+// of the r2 _KEYS strip). Mirrors the strip-then-append discipline of
+// appendDaemonOverlayKeys / appendDaemonOverlayAppliedMarker, minus the append.
+func stripAllDaemonOverlayControlVars(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		k, _, ok := strings.Cut(kv, "=")
-		if ok && strings.EqualFold(k, daemonOverlayKeysEnvVar) {
+		if ok && isReservedDaemonOverlayControlVar(k) {
 			continue
 		}
 		out = append(out, kv)
 	}
 	return out
+}
+
+// isReservedDaemonOverlayControlVar reports whether key (an env-var NAME) is one
+// of the supervisor-reserved overlay control vars. Case-insensitive on Windows
+// (env keys are case-folded there) and exact on POSIX, matching the rest of the
+// env helpers in this file. Driven off the canonical
+// reservedDaemonOverlayControlVars list so the set never diverges.
+func isReservedDaemonOverlayControlVar(key string) bool {
+	for _, reserved := range reservedDaemonOverlayControlVars {
+		if strings.EqualFold(key, reserved) {
+			return true
+		}
+	}
+	return false
 }
 
 func daemonOverlayMarkerValue(env []string) string {

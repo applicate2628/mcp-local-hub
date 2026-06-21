@@ -3153,8 +3153,37 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		if merged := mergeDaemonEnv(os.Environ(), d.Env, overlayEnv); merged != nil {
 			cmd.Env = merged
 		}
+		// cmd.Env stays nil only when manifest env AND overlay are both empty
+		// (mergeDaemonEnv returns nil → "child inherits os.Environ directly").
+		// Appending a control var to a nil cmd.Env would make it a 1-element env
+		// that REPLACES the inherited environment (Go exec treats a non-nil
+		// cmd.Env as the COMPLETE env), stripping PATH and everything else.
+		// Seed from os.Environ() first, mirroring injectOneAPIEnv's nil-guard
+		// in this same closure, so control vars are added WITHOUT dropping the
+		// inherited env.
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
+		// Inheritance-immunity (bot PR #403 r3 — whole-class fix). STRIP every
+		// mcphub-reserved overlay control var (APPLIED, KEYS, PATH) from the
+		// seeded cmd.Env BEFORE re-appending the TRUSTED ones for THIS spawn.
+		// The spawned wrapper TRUSTS each of these reserved vars in its own
+		// os.Environ() (the marker flips fatal→degrade; KEYS drives overlay-map
+		// reconstruction; PATH drives overlay-file resolution), so an inherited
+		// or spoofed value — a stale entry from a prior run, a hostile value in
+		// the supervisor's environment, or a NON-serena wrapper whose manifest
+		// seeded one — would be trusted by the child (spoofed KEYS → phantom
+		// overlay; spoofed PATH → overlay resolved from an attacker-chosen
+		// file). Neutralizing the whole class in ONE place (the single owner
+		// stripAllDaemonOverlayControlVars, driven by the canonical reserved
+		// list) subsumes the prior per-var no-row KEYS strip and means a future
+		// 4th control var only needs adding to that list, not a new strip site.
+		// The supervisor is the only legitimate writer; only the explicit
+		// re-appends below (and the serena-scoped PATH channel further down) put
+		// a TRUSTED value back.
+		cmd.Env = stripAllDaemonOverlayControlVars(cmd.Env)
 		// The APPLIED marker means "supervisor-spawned; overlay handled
-		// upstream" and is appended UNCONDITIONALLY for every supervised
+		// upstream" and is re-appended UNCONDITIONALLY for every supervised
 		// daemon — even a daemon with NO overlay row. The wrapper's
 		// daemonOverlayEnv keys its degrade-vs-fatal decision on this marker:
 		// with the marker present, a malformed/unreadable overlay file
@@ -3163,49 +3192,25 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// overlayApplied left a no-row supervised daemon (e.g. a serena proxy
 		// or a global daemon with no overlay) taking the no-marker FATAL
 		// branch, bricking its launch when an UNRELATED overlay edit corrupts
-		// daemon-env-overrides.yaml. The KEYS injection below stays gated on
-		// overlayApplied because appendDaemonOverlayKeys requires a non-empty
-		// key set (overlayKeySet returns nil for an empty overlay map).
-		//
-		// cmd.Env stays nil only when manifest env AND overlay are both empty
-		// (mergeDaemonEnv returns nil → "child inherits os.Environ directly").
-		// Appending the marker to a nil cmd.Env would make it a 1-element env
-		// that REPLACES the inherited environment (Go exec treats a non-nil
-		// cmd.Env as the COMPLETE env), stripping PATH and everything else.
-		// Seed from os.Environ() first, mirroring injectOneAPIEnv's nil-guard
-		// in this same closure, so the marker is added WITHOUT dropping the
-		// inherited env.
-		if cmd.Env == nil {
-			cmd.Env = os.Environ()
-		}
+		// daemon-env-overrides.yaml.
 		cmd.Env = appendDaemonOverlayAppliedMarker(cmd.Env)
 		if overlayApplied {
 			// Inject the applied overlay KEY SET alongside the APPLIED
-			// marker. The wrapper's marker-present reload-FAILURE path
-			// reconstructs the overlay map from these keys (reading each
-			// key's already-expanded value back from os.Environ) when the
-			// overlay file is unreadable, so a key present in BOTH the
-			// manifest and the cached overlay still resolves to the
-			// operator override instead of the manifest default in cfg.Env
-			// (closes Codex bot #268 daemon.go:380 P2). Keys are spelled as
-			// the overlay stored them; appendDaemonOverlayKeys strips any
-			// spoofed value first (same discipline as the APPLIED marker).
+			// marker — ONLY when an overlay row actually applied
+			// (appendDaemonOverlayKeys requires a non-empty key set;
+			// overlayKeySet returns nil for an empty overlay map). The
+			// wrapper's marker-present reload-FAILURE path reconstructs the
+			// overlay map from these keys (reading each key's already-expanded
+			// value back from os.Environ) when the overlay file is unreadable,
+			// so a key present in BOTH the manifest and the cached overlay
+			// still resolves to the operator override instead of the manifest
+			// default in cfg.Env (closes Codex bot #268 daemon.go:380 P2).
+			// Keys are spelled as the overlay stored them. The no-row case
+			// needs no `else` strip anymore: stripAllDaemonOverlayControlVars
+			// above already neutralized any inherited/spoofed KEYS, so a no-row
+			// child sees an empty (nil) injected key set and degrades to
+			// manifest-only env.
 			cmd.Env = appendDaemonOverlayKeys(cmd.Env, overlayKeySet(overlayEnv))
-		} else {
-			// No-row spawn: there is NO overlay key set to inject, but the
-			// APPLIED marker above is set unconditionally — so the child's
-			// daemonOverlayEnv reconstructs the overlay map from
-			// MCPHUB_DAEMON_ENV_OVERLAY_KEYS on an unreadable overlay file.
-			// We must NOT leave that reserved key at whatever value the
-			// supervisor inherited from its own os.Environ(): a stale entry
-			// from a prior run — or a spoofed entry planted in the
-			// supervisor's environment — would otherwise let the child
-			// reconstruct + apply UNRELATED env keys as a trusted overlay
-			// instead of falling back to manifest-only env. Strip every
-			// inherited entry so the child sees an empty (nil) injected key
-			// set. The supervisor is the only legitimate writer of this key
-			// (bot PR #403 r2 follow-up to the unconditional-marker fix).
-			cmd.Env = stripDaemonOverlayKeys(cmd.Env)
 		}
 
 		// Intel oneAPI PATH injection (operator-CRITICAL: MKL-linked inferior

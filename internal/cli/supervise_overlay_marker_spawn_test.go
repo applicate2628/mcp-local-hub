@@ -244,6 +244,205 @@ func TestProductionSpawnFn_NoOverlayRowNeutralizesInheritedKeys(t *testing.T) {
 	}
 }
 
+// TestProductionSpawnFn_NoOverlayRowImmuneToInheritedOverlayControlVars is the
+// PR #403 r3 whole-class inheritance-immunity guard. The r3 fix added a THIRD
+// reserved overlay control var (MCPHUB_DAEMON_ENV_OVERLAY_PATH) the spawned
+// wrapper TRUSTS in its os.Environ() (resolveDaemonOverlayPath reads it FIRST to
+// locate daemon-env-overrides.yaml). Stripping each reserved var individually
+// (KEYS in r2, then PATH) is whack-a-mole; the general fix strips the WHOLE
+// class (stripAllDaemonOverlayControlVars over the canonical
+// reservedDaemonOverlayControlVars list) before re-appending only the trusted
+// vars THIS spawn injects.
+//
+// This drives the REAL production spawn closure with a NON-serena, no-overlay-row
+// global descriptor whose PARENT os.Environ() carries a STALE/SPOOFED
+// MCPHUB_DAEMON_ENV_OVERLAY_PATH=/spoofed AND MCPHUB_DAEMON_ENV_OVERLAY_KEYS=SPOOF.
+// It asserts the closure's composed cmd.Env carries NEITHER stale value — only
+// the unconditional APPLIED marker. A non-serena daemon never gets a trusted
+// PATH channel (that append is serena-scoped), so the only correct outcome is
+// "_PATH absent/empty".
+//
+// FALSIFICATION: removing the stripAllDaemonOverlayControlVars call makes the
+// inherited /spoofed _PATH (and SPOOF _KEYS) survive into cmd.Env → this test
+// goes red. (A no-row spawn re-appends neither KEYS nor PATH, so without the
+// strip the inherited values leak verbatim.)
+//
+// STATE-SAFE: HardenedTempDir + MCPHUB_STATE_DIR_OVERRIDE redirect the state
+// dir; no overlay file is seeded → overlayApplied stays false → the no-row path
+// runs.
+func TestProductionSpawnFn_NoOverlayRowImmuneToInheritedOverlayControlVars(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+	t.Setenv(daemonOverlayAppliedEnvVar, "")
+	// STALE/SPOOFED control vars in the supervisor's inherited environment.
+	// Without the whole-class strip, the no-row closure would carry these
+	// verbatim into the child's cmd.Env (the marker is unconditionally set),
+	// and the child would resolve its overlay file from /spoofed and reconstruct
+	// SPOOF as a trusted overlay key.
+	t.Setenv(daemonOverlayPathEnvVar, "/spoofed/daemon-env-overrides.yaml")
+	t.Setenv(daemonOverlayKeysEnvVar, "SPOOF")
+	t.Setenv("SPOOF", "attacker-value")
+
+	dumpPath := filepath.Join(tmpHome, "child-env-dump.txt")
+	t.Setenv(overlayMarkerHelperSentinelEnv, "1")
+	t.Setenv(overlayMarkerHelperDumpPathEnv, dumpPath)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	crashCh := make(chan crashEvent, 8)
+	shutdown := make(chan struct{})
+	spawnFn := makeProductionSpawnFnWithStatePath(
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+	)
+
+	// Global-shape (NON-serena) descriptor, NO d.Env, NO overlay row.
+	descriptor := api.SupervisorDaemon{
+		TaskName: reconcileWiringTestTaskName,
+		Server:   "memory",
+		Daemon:   "default",
+		Command:  os.Args[0],
+		Args:     []string{"-test.run=^TestSpawnEnvDumpHelper$"},
+	}
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("spawn fn failed on env-dump helper: %v", err)
+	}
+
+	childEnv := waitForEnvDump(t, dumpPath)
+
+	// (a) The APPLIED marker IS present (unconditional — the only trusted
+	// control var a no-row, non-serena daemon gets).
+	if got, ok := envValueFromDump(childEnv, daemonOverlayAppliedEnvVar); !ok || got != daemonOverlayAppliedEnvValue {
+		t.Fatalf("child %s = %q (present=%v), want %q", daemonOverlayAppliedEnvVar, got, ok, daemonOverlayAppliedEnvValue)
+	}
+	// (b) THE FIX: the inherited _PATH channel is NEUTRALIZED. A non-serena
+	// daemon never gets a trusted PATH channel, so any value here is the leaked
+	// inherited spoof. resolveDaemonOverlayPath treats absent OR empty as "fall
+	// back to the state dir", so either is safe; a non-empty /spoofed value is
+	// the bug.
+	if got, ok := envValueFromDump(childEnv, daemonOverlayPathEnvVar); ok && got != "" {
+		t.Fatalf("child %s = %q present, want neutralized — a NON-serena no-row spawn must strip the inherited/spoofed overlay-path channel", daemonOverlayPathEnvVar, got)
+	}
+	// (c) The inherited _KEYS set is ALSO neutralized (the r2 property, now
+	// subsumed by the whole-class strip). Assert via the SAME reader the child
+	// uses.
+	if keys := daemonOverlayKeysFromEnv(childEnv); len(keys) != 0 {
+		t.Fatalf("child %s reconstructs %v from a no-row spawn; want empty — the whole-class strip must neutralize the inherited/spoofed key set too", daemonOverlayKeysEnvVar, keys)
+	}
+	// (d) The inherited parent env (PATH) is still preserved (the strip must not
+	// drop the rest of the env).
+	if _, ok := envValueFromDump(childEnv, "PATH"); !ok {
+		t.Fatalf("child env has no PATH — the whole-class strip must not drop the rest of the inherited env")
+	}
+}
+
+// TestProductionSpawnFn_SerenaProxyTrustedOverlayPathBeatsInheritedSpoof is the
+// PR #403 r3 trusted-injection guard. The whole-class strip
+// (stripAllDaemonOverlayControlVars) removes the inherited _PATH; the
+// serena-scoped channel append (resolveSpawnOverlayChannelPath →
+// appendDaemonOverlayPathChannel) then re-injects the SUPERVISOR's resolved
+// overlay path. So a serena-proxy descriptor whose parent env carries a STALE
+// inherited _PATH must end up with the TRUSTED supervisor path in cmd.Env, not
+// the inherited spoof.
+//
+// This drives the REAL production spawn closure with a serena-proxy-shaped
+// descriptor (Args[0..1] = `daemon serena-proxy`, so isSerenaProxyDescriptor is
+// true) launching the env-dump child via os.Args[0]. The child is gated by the
+// sentinel env (TestMain fast-path), so its serena-shaped argv does not need a
+// leading -test.run flag. With a non-empty statePath the trusted overlay path is
+// the deterministic sibling of statePath.
+//
+// STATE-SAFE: HardenedTempDir for the state dir; statePath is a path INSIDE it.
+func TestProductionSpawnFn_SerenaProxyTrustedOverlayPathBeatsInheritedSpoof(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+	t.Setenv(daemonOverlayAppliedEnvVar, "")
+	// A STALE inherited overlay-path channel in the supervisor's environment.
+	// The trusted serena channel append must WIN over this.
+	t.Setenv(daemonOverlayPathEnvVar, "/spoofed/daemon-env-overrides.yaml")
+
+	dumpPath := filepath.Join(tmpHome, "child-env-dump.txt")
+	t.Setenv(overlayMarkerHelperSentinelEnv, "1")
+	t.Setenv(overlayMarkerHelperDumpPathEnv, dumpPath)
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	// statePath is a real path inside tmpHome; the trusted overlay path is its
+	// sibling daemon-env-overrides.yaml (resolveSpawnOverlayChannelPath with a
+	// non-empty statePath). The file need not exist — the channel only NAMES it.
+	statePath := filepath.Join(tmpHome, "supervisor-state.json")
+	wantTrustedPath := filepath.Join(tmpHome, overlayBaseName)
+
+	crashCh := make(chan crashEvent, 8)
+	shutdown := make(chan struct{})
+	spawnFn := makeProductionSpawnFnWithStatePath(
+		events, NewDaemonRuntimeTracker(), statePath, nil, "", crashCh, shutdown, nil, false,
+	)
+
+	// Serena-proxy-shaped descriptor: Args[0..1] = `daemon serena-proxy` so
+	// isSerenaProxyDescriptor(d) is true and the closure injects the trusted
+	// overlay-path channel. Command=os.Args[0] launches the env-dump child (the
+	// TestMain sentinel fast-path dumps regardless of the serena-shaped argv).
+	descriptor := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-serena-deadbeef`,
+		Server:   "serena",
+		Daemon:   "deadbeef",
+		Command:  os.Args[0],
+		Args:     []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\alpha`, "--port", "9121", "--task-name", `\mcp-local-hub-serena-deadbeef`},
+	}
+	if !isSerenaProxyDescriptor(descriptor) {
+		t.Fatalf("test fixture is not recognized as a serena-proxy descriptor; the trusted-channel append would not fire")
+	}
+	if err := spawnFn(descriptor); err != nil {
+		t.Fatalf("spawn fn failed on serena env-dump helper: %v", err)
+	}
+
+	childEnv := waitForEnvDump(t, dumpPath)
+
+	// THE FIX: the trusted supervisor overlay path WON over the inherited spoof.
+	// resolveDaemonOverlayPath reads the LAST duplicate (Go exec semantics), and
+	// the strip-then-trusted-append leaves exactly one entry — the trusted one.
+	got, ok := envValueFromDump(childEnv, daemonOverlayPathEnvVar)
+	if !ok {
+		t.Fatalf("child env has no %s — the serena channel append must inject the trusted overlay path", daemonOverlayPathEnvVar)
+	}
+	if got != wantTrustedPath {
+		t.Fatalf("child %s = %q, want trusted supervisor path %q (NOT the inherited /spoofed value)", daemonOverlayPathEnvVar, got, wantTrustedPath)
+	}
+	if strings.Contains(got, "spoofed") {
+		t.Fatalf("child %s = %q still carries the inherited spoof; the strip-before-trusted-append failed", daemonOverlayPathEnvVar, got)
+	}
+}
+
+// waitForEnvDump blocks until the env-dump child writes path (then exits) and
+// returns its newline-split contents, or fails the test after 20s. Shared by
+// the env-dump-driven spawn closure tests.
+func waitForEnvDump(t *testing.T, path string) []string {
+	t.Helper()
+	var body []byte
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, rerr := os.ReadFile(path); rerr == nil && len(b) > 0 {
+			body = b
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(body) == 0 {
+		t.Fatalf("env-dump child never wrote %s within 20s", path)
+	}
+	return strings.Split(string(body), "\n")
+}
+
 // envValueFromDump returns the value of key from a newline-split child env
 // dump. Matching is case-insensitive on Windows (PATH/Path) and exact on
 // POSIX, mirroring mergeDaemonEnv's PATH-family normalizer. The last matching
