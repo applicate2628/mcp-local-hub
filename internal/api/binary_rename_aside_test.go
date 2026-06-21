@@ -60,7 +60,12 @@ func TestRenameAside_TwoStepReplace(t *testing.T) {
 	}
 }
 
-func TestRecoverMissingBinary_RestoresNewestAside(t *testing.T) {
+// TestRecoverMissingBinary_RestoresNewestSuffixAside proves recovery selects the
+// NEWEST-SUFFIX aside (the last binary moved aside = the one live just before the
+// interrupted swap), not the newest-mtime one. The two asides DIVERGE on purpose:
+// olderSuffixNewerMtime has the older suffix but a newer mtime; newerSuffixOlderMtime
+// has the newer suffix but an older mtime. The suffix timestamp (the aside moment) wins.
+func TestRecoverMissingBinary_RestoresNewestSuffixAside(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, platformBinaryName())
 
@@ -88,13 +93,13 @@ func TestRecoverMissingBinary_RestoresNewestAside(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read recovered target: %v", err)
 	}
-	if string(got) != "newest-by-mtime" {
-		t.Fatalf("recovered content = %q, want newest mtime aside", got)
+	if string(got) != "newer-suffix" {
+		t.Fatalf("recovered content = %q, want the newest-SUFFIX aside (the last binary moved aside)", got)
 	}
-	if _, err := os.Stat(olderSuffixNewerMtime); !os.IsNotExist(err) {
-		t.Fatalf("restored aside still exists after recovery: %v", err)
+	if _, err := os.Stat(newerSuffixOlderMtime); !os.IsNotExist(err) {
+		t.Fatalf("restored (newest-suffix) aside still exists after recovery: %v", err)
 	}
-	if _, err := os.Stat(newerSuffixOlderMtime); err != nil {
+	if _, err := os.Stat(olderSuffixNewerMtime); err != nil {
 		t.Fatalf("non-selected aside should remain: %v", err)
 	}
 }

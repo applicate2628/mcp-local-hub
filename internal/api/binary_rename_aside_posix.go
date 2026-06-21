@@ -55,8 +55,12 @@ func restoreMissingBinaryAside(aside, target string) error {
 	if err := os.Link(aside, target); err != nil {
 		return err
 	}
-	if err := os.Remove(aside); err != nil {
-		return fmt.Errorf("remove restored aside %q: %w", aside, err)
-	}
+	// The target is now restored (hard-linked to the aside's inode). Removing the
+	// consumed aside is BEST-EFFORT: a failure here leaves a harmless leftover
+	// .old-<ts> (same inode, swept later by SweepOldBinaries) and must NOT fail
+	// the restore — this is fatal at the runSupervise startup call site, and the
+	// binary is already present, so aborting startup over a stale-name cleanup
+	// would brick a successful recovery.
+	_ = os.Remove(aside)
 	return nil
 }

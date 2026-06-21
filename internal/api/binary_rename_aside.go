@@ -160,12 +160,19 @@ func RecoverMissingBinary(target string) error {
 	if len(candidates) == 0 {
 		return fmt.Errorf("recover missing binary %q: target is missing and no valid %s<timestamp> aside exists", target, basePrefix)
 	}
+	// Rank by the encoded suffix timestamp FIRST (mtime is only the tiebreaker):
+	// the suffix encodes the rename-aside MOMENT (monotonic across upgrades), so
+	// the newest suffix is the binary that was live just before the interrupted
+	// swap — exactly what crash-recovery must restore. mtime is the binary's
+	// build/install time, which can be non-monotonic vs the aside moment (e.g.
+	// rollback-then-reupgrade). This also aligns the recovery-selection authority
+	// with SweepOldBinaries, which ages purely by the suffix timestamp.
 	sort.Slice(candidates, func(i, j int) bool {
-		if !candidates[i].mtime.Equal(candidates[j].mtime) {
-			return candidates[i].mtime.After(candidates[j].mtime)
-		}
 		if !candidates[i].suffixTime.Equal(candidates[j].suffixTime) {
 			return candidates[i].suffixTime.After(candidates[j].suffixTime)
+		}
+		if !candidates[i].mtime.Equal(candidates[j].mtime) {
+			return candidates[i].mtime.After(candidates[j].mtime)
 		}
 		return candidates[i].path > candidates[j].path
 	})
