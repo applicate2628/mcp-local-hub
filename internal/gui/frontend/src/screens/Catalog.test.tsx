@@ -23,7 +23,7 @@ function noContentResponse(): Response {
 
 // fetchRouter dispatches each fetch call to the matching response based
 // on the request URL prefix (same helper shape as Servers.test.tsx).
-function fetchRouter(routes: Record<string, (init?: RequestInit) => Response>) {
+function fetchRouter(routes: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     for (const prefix of Object.keys(routes)) {
@@ -262,6 +262,40 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-install-confirm-time")).toBeTruthy();
     // …and NO install POST has fired yet (only the readiness GET).
     expect(installCalls).toEqual([]);
+  });
+
+
+  it("keeps Confirm install disabled until readiness completes", async () => {
+    let resolveReadiness!: (response: Response) => void;
+    const readinessPending = new Promise<Response>((resolve) => {
+      resolveReadiness = resolve;
+    });
+    const installCalls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("time")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/server/readiness": () => readinessPending,
+        "/api/install": () => {
+          installCalls.push("POST");
+          return noContentResponse();
+        },
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-install-time"));
+
+    const confirm = (await screen.findByTestId(
+      "catalog-install-confirm-time",
+    )) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(installCalls).toEqual([]);
+
+    resolveReadiness(readyReadiness("time"));
+    await waitFor(() => expect(confirm.disabled).toBe(false));
   });
 
   it("disables Confirm install while a blocker is present (honest UX)", async () => {
