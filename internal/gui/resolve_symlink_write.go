@@ -93,8 +93,9 @@ type WriteSymlinkResult struct {
 // NOT_SYMLINK so the GUI refreshes its scan instead of offering a follow.
 var errSymlinkNotApplicable = errors.New("client config is not a follow-able symlink")
 
-// errSymlinkRepointed is returned when the freshly-resolved parent at WRITE
-// time does not match the operator-confirmed PinnedRealPath. Mapped to 409 /
+// errSymlinkRepointed is returned when the freshly-resolved full target at
+// WRITE time does not match the operator-confirmed PinnedRealPath (including a
+// repoint to a sibling file in the same parent). Mapped to 409 /
 // SYMLINK_REPOINTED.
 var errSymlinkRepointed = errors.New("symlink resolved target changed since confirm")
 

@@ -494,7 +494,9 @@ func deriveClientNameForConfigPath(path string) string {
 // here (not trusting any earlier confirm-time resolve) so the pin-match
 // reflects the symlink's state at write time — that is the load-bearing
 // half of the swap-between-confirm-and-write guard. `consent` (when
-// non-nil) pins the resolved PARENT the operator approved. It tries the
+// non-nil) pins the resolved FULL TARGET path (parent + basename) the
+// operator approved, so a same-parent repoint to a sibling file is
+// refused. It tries the
 // hardened pipeline (parent gate ON) first; on ErrSecureWriteParentInsecure
 // with strict mode OFF it retries with the parent gate skipped, mirroring
 // secureWritePathBased's relax fallback.
@@ -541,7 +543,7 @@ func secureWriteFollowingSymlink(originalPath string, contents []byte, consent *
 			"path":     originalPath,
 			"resolved": resolved,
 			"client":   consent.Client,
-			"reason":   "scoped operator consent (per-write; pinned-parent verified; write follows symlink target via pinned parent handle)",
+			"reason":   "scoped operator consent (per-write; pinned-full-target verified; write follows symlink target via pinned parent handle)",
 		}); logErr != nil {
 			_ = logErr
 		}

@@ -10,7 +10,7 @@
 //     over the unexported resolveSymlinkForSecureWrite.
 //   - SecureWriteClientConfigWithConsent: the WRITE half (perform the
 //     consent write through the EXISTING consent-aware entry, so the
-//     write-time re-resolve + pinned-parent guard
+//     write-time re-resolve + pinned full-target guard
 //     (secureWriteFollowingSymlink) and the strict-mode override apply
 //     unchanged).
 //   - InteractiveSymlinkConsent: a nil-by-default, injected-from-above
@@ -70,12 +70,14 @@ func ResolveClientConfigSymlink(path string) (resolvedTarget, pinnedPath string,
 
 // SecureWriteClientConfigWithConsent performs the scoped-consent client-config
 // write through the EXISTING consent-aware choke point
-// (secureWriteWithOperatorOptConsent). The write-time re-resolve + pinned-parent
-// guard and the strict-mode override (followViaConsent gate) apply unchanged:
+// (secureWriteWithOperatorOptConsent). The write-time re-resolve + pinned
+// full-target guard and the strict-mode override (followViaConsent gate) apply
+// unchanged:
 //
 //   - If the symlink was repointed between the operator's confirm and this
-//     write, the freshly-resolved parent will not equal
-//     consent.PinnedResolvedPath and the write is REFUSED.
+//     write (including to a sibling file in the SAME parent), the
+//     freshly-resolved full target will not equal consent.PinnedResolvedPath
+//     and the write is REFUSED.
 //   - If strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1, or the persisted
 //     supervisor-intent.json strict_mode bit) is active, the consent is
 //     ignored and the symlink-follow is refused unconditionally.
