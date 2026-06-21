@@ -1,5 +1,5 @@
 ---
-status: fixed-pending-review
+status: resolved
 severity: P2
 date: 2026-06-19
 slug: serena-client-revert
@@ -52,3 +52,7 @@ writers and the follow-up to make the serena manifest router-native.
 - GUI: Graphical user interface.
 - HTTP: Hypertext Transfer Protocol.
 - URL: Uniform Resource Locator.
+
+## Resolution (2026-06-21)
+
+FIXED by #400 (install-write-plane single-owner wiring): BuildPlanWithOpts now consults SerenaRouterClientURL (the /serena/mcp router single owner) for serena, with a live-GUI-port liveness gate, so install/manifest-sync no longer reverts serena to the dead 9121/mcp. Verified live after redeploy: serena on http://127.0.0.1:9125/serena/mcp, 42 MCP healthy. Duplicate record 2026-06-19-serena-client-revert-on-manifest-sync.md (mostly-resolved via #401) describes the same defect.
