@@ -25,20 +25,34 @@ import (
 //   - Project: .mimocode/mimocode.json in the repository root.
 //
 // Within the global directory MiMoCode reads `config.json` / `mimocode.json`
-// / `mimocode.jsonc`, merged in that order with `mimocode.jsonc` taking
-// FINAL precedence (later overrides earlier). So if the operator already
-// keeps a `mimocode.jsonc`, an entry written into a separate `mimocode.json`
-// would be silently overridden by the `.jsonc` at load time. To make the hub
-// write win, this adapter targets an existing `mimocode.jsonc` when one is
-// present, and otherwise falls back to `mimocode.json` (the file it creates
-// on a fresh host). These two divergences from the OpenCode adapter
-// (MIMOCODE_HOME + the .jsonc preference) come straight from MiMoCode's own
-// config docs — OpenCode's docs leave both under-specified, but MiMoCode's
-// fork documents them explicitly, so the verified MiMoCode behavior governs.
-// (Sources verified 2026-06: https://mimo.xiaomi.com/mimocode/config-overrides
-// — "$MIMOCODE_HOME/config/" global dir, MIMOCODE_HOME must be absolute; the
-// global directory "accepts config.json / mimocode.json / mimocode.jsonc,
-// merged in that order".)
+// / `mimocode.jsonc`, "merged in that order (later overrides earlier)", so
+// `mimocode.jsonc` takes FINAL precedence, then `mimocode.json`, then
+// `config.json`. So if the operator already keeps a `mimocode.jsonc`, an entry
+// written into a separate `mimocode.json` would be silently overridden by the
+// `.jsonc` at load time. To make the hub write win AND so scan/backup read the
+// file that actually holds the entries, this adapter targets the
+// HIGHEST-precedence EXISTING file (`mimocode.jsonc` > `mimocode.json` >
+// `config.json`) and otherwise falls back to `mimocode.json` (the file it
+// creates on a fresh host). `config.json` is in the set because an install
+// whose MCP entries live solely there would otherwise be invisible to
+// scan/backup and a migrate would write without a backup.
+//
+// Config LOCATION is further overridable by two documented env vars, honored
+// AHEAD of the MIMOCODE_HOME/XDG/default fallback: MIMOCODE_CONFIG names a
+// custom config FILE (highest precedence; bypasses all file probing) and
+// MIMOCODE_CONFIG_DIR names a custom config DIR. Full documented precedence:
+// MIMOCODE_CONFIG > MIMOCODE_CONFIG_DIR > MIMOCODE_HOME > XDG_CONFIG_HOME >
+// default ~/.config/mimocode/ (see defaultMimoCodeConfigPath /
+// mimoCodeGlobalConfigDir). These divergences from the OpenCode adapter
+// (MIMOCODE_CONFIG/_DIR/_HOME env vars + the multi-file preference) come
+// straight from MiMoCode's own config docs — OpenCode's docs leave them
+// under-specified, but MiMoCode's fork documents them explicitly, so the
+// verified MiMoCode behavior governs. (Sources verified 2026-06:
+// https://mimo.xiaomi.com/mimocode/config-overrides — "$MIMOCODE_HOME/config/"
+// global dir, MIMOCODE_HOME must be absolute; the global directory accepts
+// "config.json / mimocode.json / mimocode.jsonc, merged in that order (later
+// overrides earlier)"; MIMOCODE_CONFIG / MIMOCODE_CONFIG_DIR location
+// overrides.)
 //
 // The hub writes the GLOBAL file so a single per-user hub entry is visible
 // in every project, matching every other adapter's user-scoped posture (and
@@ -91,29 +105,47 @@ func NewMimoCode() (Client, error) {
 }
 
 // defaultMimoCodeConfigPath returns the global MiMoCode config-file path.
-// It first resolves the global config DIRECTORY (MIMOCODE_HOME/config →
-// XDG_CONFIG_HOME/mimocode → ~/.config/mimocode), then picks the file within
-// it, preferring an existing `mimocode.jsonc` over `mimocode.json` because
-// MiMoCode merges `.jsonc` over `.json` at load time (see NewMimoCode doc).
 //
-// Resolving the `.jsonc`-vs-`.json` choice HERE (the single path owner) — not
-// only in AddEntry — is load-bearing: scan, probe, backup, and write all read
-// the path through ConfigPath(), so they must agree on which file holds the
-// hub entry. The choice is a pure function of (env, on-disk state) at
-// construction time, which keeps ConfigPath() stable for the lifetime of the
-// adapter instance (the file does not move under it mid-run).
+// It first honors the two explicit config-location env vars MiMoCode
+// documents (MIMOCODE_CONFIG → a custom config FILE; MIMOCODE_CONFIG_DIR → a
+// custom config DIR), AHEAD of the MIMOCODE_HOME/XDG/default directory
+// fallback (the documented precedence is MIMOCODE_CONFIG > MIMOCODE_CONFIG_DIR
+// > MIMOCODE_HOME > XDG_CONFIG_HOME > default ~/.config/mimocode/; sources:
+// https://mimo.xiaomi.com/mimocode/config-overrides). When MIMOCODE_CONFIG
+// points at an absolute file, that file IS the config and no dir/file probing
+// happens. Otherwise it resolves the global config DIRECTORY then picks the
+// file within it (see mimoCodePreferredConfigFile).
+//
+// Resolving the env + file choice HERE (the single path owner) — not in
+// AddEntry — is load-bearing: scan, probe, backup, and write all read the path
+// through ConfigPath(), so they must agree on which file holds the hub entry.
+// The choice is a pure function of (env, on-disk state) at construction time,
+// which keeps ConfigPath() stable for the lifetime of the adapter instance
+// (the file does not move under it mid-run).
 func defaultMimoCodeConfigPath(home string) string {
+	// MIMOCODE_CONFIG names a config FILE directly and is the highest-precedence
+	// location override. Like MIMOCODE_HOME it must be absolute (a relative value
+	// is ignored so resolution never depends on the process cwd). When set, the
+	// named file is the config — no .jsonc/.json/config.json probing applies.
+	if mc := os.Getenv("MIMOCODE_CONFIG"); mc != "" && filepath.IsAbs(mc) {
+		return mc
+	}
 	dir := mimoCodeGlobalConfigDir(home)
 	return mimoCodePreferredConfigFile(dir)
 }
 
 // mimoCodeGlobalConfigDir resolves the global config directory in MiMoCode's
-// documented precedence order: MIMOCODE_HOME/config (absolute-path required;
-// a relative value is ignored, mirroring the docs' "must be an absolute
-// path") → XDG_CONFIG_HOME/mimocode → ~/.config/mimocode. The path is
-// OS-independent by design — MiMoCode uses ~/.config/mimocode/ on every OS,
-// not %APPDATA% / ~/Library.
+// documented precedence order: MIMOCODE_CONFIG_DIR (absolute-path required) →
+// MIMOCODE_HOME/config (absolute-path required; a relative value is ignored,
+// mirroring the docs' "must be an absolute path") → XDG_CONFIG_HOME/mimocode →
+// ~/.config/mimocode. The MIMOCODE_CONFIG (file) override is handled one level
+// up in defaultMimoCodeConfigPath because it bypasses dir resolution entirely.
+// The path is OS-independent by design — MiMoCode uses ~/.config/mimocode/ on
+// every OS, not %APPDATA% / ~/Library.
 func mimoCodeGlobalConfigDir(home string) string {
+	if cd := os.Getenv("MIMOCODE_CONFIG_DIR"); cd != "" && filepath.IsAbs(cd) {
+		return cd
+	}
 	if mh := os.Getenv("MIMOCODE_HOME"); mh != "" && filepath.IsAbs(mh) {
 		return filepath.Join(mh, "config")
 	}
@@ -123,17 +155,29 @@ func mimoCodeGlobalConfigDir(home string) string {
 	return filepath.Join(home, ".config", "mimocode")
 }
 
-// mimoCodePreferredConfigFile picks the config file inside dir, preferring an
-// existing `mimocode.jsonc` (which MiMoCode merges OVER `mimocode.json`) so a
-// hub write lands in the file MiMoCode actually honors. When no `.jsonc`
-// exists it returns the `.json` path — the file the adapter seeds on a fresh
+// mimoCodePreferredConfigFile picks the config file inside dir following
+// MiMoCode's documented merge order. MiMoCode reads `config.json`,
+// `mimocode.json`, and `mimocode.jsonc` "merged in that order (later overrides
+// earlier)", so `mimocode.jsonc` has the FINAL say, then `mimocode.json`, then
+// `config.json`. The hub write must land in whichever of those the operator
+// already keeps so its entry survives the merge AND so scan/backup read the
+// file that actually holds the entries — picking ONLY `.jsonc`-vs-`.json`
+// (the prior behavior) missed an install whose MCP entries live solely in
+// `config.json`, so scan/backup skipped them and a migrate wrote without a
+// backup.
+//
+// Resolution: return the HIGHEST-precedence EXISTING file
+// (`mimocode.jsonc` > `mimocode.json` > `config.json`); if none exists, fall
+// back to creating `mimocode.json` — the file the adapter seeds on a fresh
 // host and the one every existing test/fixture expects. A stat error other
-// than not-exist (e.g. a permission failure) is treated as "no .jsonc" so
-// resolution never fails closed on a transient probe error.
+// than not-exist (e.g. a permission failure) is treated as "absent" for that
+// candidate so resolution never fails closed on a transient probe error.
 func mimoCodePreferredConfigFile(dir string) string {
-	jsoncPath := filepath.Join(dir, "mimocode.jsonc")
-	if fi, err := os.Stat(jsoncPath); err == nil && fi.Mode().IsRegular() {
-		return jsoncPath
+	for _, name := range []string{"mimocode.jsonc", "mimocode.json", "config.json"} {
+		p := filepath.Join(dir, name)
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return p
+		}
 	}
 	return filepath.Join(dir, "mimocode.json")
 }

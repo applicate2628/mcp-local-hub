@@ -473,6 +473,145 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 	}
 }
 
+// TestMimoCode_ConfigFilePrecedence pins the documented global-file merge
+// order (config.json < mimocode.json < mimocode.jsonc, "merged in that order,
+// later overrides earlier"): the path owner targets the HIGHEST-precedence
+// EXISTING file so the hub write wins the merge and scan/backup read the file
+// that actually holds entries. Crucially it covers `config.json` — an install
+// whose MCP entries live solely there used to be invisible to scan/backup
+// (Findings 1+4). Env is isolated so an ambient MIMOCODE_* on the host running
+// the tests cannot leak in.
+func TestMimoCode_ConfigFilePrecedence(t *testing.T) {
+	t.Setenv("MIMOCODE_CONFIG", "")
+	t.Setenv("MIMOCODE_CONFIG_DIR", "")
+	t.Setenv("MIMOCODE_HOME", "")
+
+	seed := func(t *testing.T, dir string, names ...string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range names {
+			if err := os.WriteFile(filepath.Join(dir, n), []byte(`{"mcp":{}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	t.Run("config.json only is selected (not silently skipped)", func(t *testing.T) {
+		xdg := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		dir := filepath.Join(xdg, "mimocode")
+		seed(t, dir, "config.json")
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(dir, "config.json")
+		if got != want {
+			t.Errorf("config.json-only install: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("mimocode.json wins over config.json", func(t *testing.T) {
+		xdg := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		dir := filepath.Join(xdg, "mimocode")
+		seed(t, dir, "config.json", "mimocode.json")
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(dir, "mimocode.json")
+		if got != want {
+			t.Errorf("mimocode.json+config.json: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("mimocode.jsonc wins over both", func(t *testing.T) {
+		xdg := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		dir := filepath.Join(xdg, "mimocode")
+		seed(t, dir, "config.json", "mimocode.json", "mimocode.jsonc")
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(dir, "mimocode.jsonc")
+		if got != want {
+			t.Errorf("all three present: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nothing present falls back to mimocode.json", func(t *testing.T) {
+		xdg := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(xdg, "mimocode", "mimocode.json")
+		if got != want {
+			t.Errorf("empty dir: got %q, want %q", got, want)
+		}
+	})
+}
+
+// TestMimoCode_ConfigEnvOverrides pins the documented env precedence
+// MIMOCODE_CONFIG (file) > MIMOCODE_CONFIG_DIR (dir) > MIMOCODE_HOME > XDG >
+// default (Finding 2). MIMOCODE_CONFIG points straight at a file and bypasses
+// all file probing; MIMOCODE_CONFIG_DIR replaces the directory but keeps the
+// in-dir file preference. Relative values are ignored (absolute-path
+// requirement mirrors MIMOCODE_HOME).
+func TestMimoCode_ConfigEnvOverrides(t *testing.T) {
+	t.Setenv("MIMOCODE_CONFIG", "")
+	t.Setenv("MIMOCODE_CONFIG_DIR", "")
+	t.Setenv("MIMOCODE_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	t.Run("MIMOCODE_CONFIG (absolute file) is used verbatim, no probing", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "custom.jsonc")
+		t.Setenv("MIMOCODE_CONFIG", f)
+		// Even with MIMOCODE_HOME + XDG set, the direct file override wins.
+		t.Setenv("MIMOCODE_HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		if got != f {
+			t.Errorf("MIMOCODE_CONFIG override: got %q, want %q", got, f)
+		}
+	})
+
+	t.Run("relative MIMOCODE_CONFIG is ignored", func(t *testing.T) {
+		t.Setenv("MIMOCODE_CONFIG", filepath.Join("not", "absolute", "x.json"))
+		t.Setenv("MIMOCODE_CONFIG_DIR", "")
+		t.Setenv("MIMOCODE_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
+		if got != want {
+			t.Errorf("relative MIMOCODE_CONFIG should be ignored: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("MIMOCODE_CONFIG_DIR (absolute) replaces the dir, keeps file preference", func(t *testing.T) {
+		t.Setenv("MIMOCODE_CONFIG", "")
+		cd := t.TempDir()
+		t.Setenv("MIMOCODE_CONFIG_DIR", cd)
+		// MIMOCODE_HOME present but lower precedence — CONFIG_DIR must win.
+		t.Setenv("MIMOCODE_HOME", t.TempDir())
+		// Seed only config.json in the custom dir → resolver picks it.
+		if err := os.WriteFile(filepath.Join(cd, "config.json"), []byte(`{"mcp":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(cd, "config.json")
+		if got != want {
+			t.Errorf("MIMOCODE_CONFIG_DIR override: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("relative MIMOCODE_CONFIG_DIR is ignored (falls to MIMOCODE_HOME)", func(t *testing.T) {
+		t.Setenv("MIMOCODE_CONFIG", "")
+		t.Setenv("MIMOCODE_CONFIG_DIR", filepath.Join("rel", "dir"))
+		mh := t.TempDir()
+		t.Setenv("MIMOCODE_HOME", mh)
+		t.Setenv("XDG_CONFIG_HOME", "")
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(mh, "config", "mimocode.json")
+		if got != want {
+			t.Errorf("relative MIMOCODE_CONFIG_DIR should fall through to MIMOCODE_HOME: got %q, want %q", got, want)
+		}
+	})
+}
+
 // TestMimoCode_JSONC_ReadAddRemovePreservesComments pins MiMoCode's JSONC
 // tolerance end-to-end: a hand-edited config with line/block comments, an
 // unrelated `$schema` key, and a trailing comma must read, AddEntry, and

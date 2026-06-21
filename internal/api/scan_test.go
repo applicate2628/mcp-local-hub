@@ -550,6 +550,77 @@ func TestScanCoversMimoCode(t *testing.T) {
 			t.Errorf("mimocode (jsonc).Endpoint: got %q, want the loopback hub URL", got)
 		}
 	})
+
+	t.Run("local command ARRAY shapes a real stdio endpoint (Finding 3)", func(t *testing.T) {
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.json")
+		// MiMoCode local entry: command as an ARRAY, no separate args, no url.
+		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"local","command":["npx","-y","@modelcontextprotocol/server-memory"]}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		mem := memEntryFor(t, res)
+		ce := mem.ClientPresence["mimocode"]
+		if ce.Transport != "stdio" {
+			t.Errorf("local entry Transport: got %q, want stdio", ce.Transport)
+		}
+		if ce.Endpoint != "npx -y @modelcontextprotocol/server-memory" {
+			t.Errorf("local entry Endpoint: got %q, want the joined command array (not empty 'Unknown stdio')", ce.Endpoint)
+		}
+		// A local stdio mimo entry for a known-manifest server is a migrate
+		// candidate, not via-hub and not the empty-endpoint row it produced before.
+		if mem.Status != "can-migrate" {
+			t.Errorf("local stdio entry Status: got %q, want can-migrate", mem.Status)
+		}
+	})
+
+	t.Run("enabled:false entry is absent, not shown connected (Finding 6)", func(t *testing.T) {
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.json")
+		// A disabled hub entry must NOT surface as via-hub/connected.
+		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":false}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		mem := memEntryFor(t, res)
+		if _, present := mem.ClientPresence["mimocode"]; present {
+			t.Errorf("enabled:false entry must not record mimocode presence; got %+v", mem.ClientPresence["mimocode"])
+		}
+		// With no client presence at all, the manifest-only row is not-installed
+		// (NOT via-hub) — the disabled entry contributes nothing.
+		if mem.Status == "via-hub" {
+			t.Errorf("enabled:false entry must not classify via-hub; got Status=%q", mem.Status)
+		}
+	})
+
+	t.Run("enabled:true (and absent enabled) still records presence", func(t *testing.T) {
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.json")
+		// enabled omitted entirely → treated as on (absence != disabled).
+		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp"}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		mem := memEntryFor(t, res)
+		if _, present := mem.ClientPresence["mimocode"]; !present {
+			t.Error("entry with absent `enabled` must still record mimocode presence")
+		}
+		if mem.Status != "via-hub" {
+			t.Errorf("enabled-absent hub entry Status: got %q, want via-hub", mem.Status)
+		}
+	})
 }
 
 // TestProbeClientConfigPresence_Wave2Clients confirms the eight wave-2

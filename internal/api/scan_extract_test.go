@@ -405,3 +405,101 @@ func TestRenderDraftManifestYAML_EscapesUntrustedFields(t *testing.T) {
 		t.Fatalf("env key/value changed: %#v", m.Env)
 	}
 }
+
+// TestExtractManifestFromClient_MimoCode covers Finding 5: a mimocode stdio
+// entry surfaced in Discovery (from-client=mimocode) must extract to a valid
+// draft manifest. MiMoCode (OpenCode format) stores the launch command as an
+// ARRAY with no separate `args`, so the extractor must split the array head
+// into `command` and the tail into base_args. The config is JSONC-tolerant
+// (comments / .jsonc), matching the scan read path.
+func TestExtractManifestFromClient_MimoCode(t *testing.T) {
+	tmp := t.TempDir()
+	mimoPath := filepath.Join(tmp, "mimocode.json")
+	if err := os.WriteFile(mimoPath, []byte(
+		`{"mcp":{"memory":{"type":"local","command":["npx","-y","@modelcontextprotocol/server-memory"],"env":{"DEBUG":"1"}}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewAPI()
+	yaml, err := a.ExtractManifestFromClient("mimocode", "memory", ScanOpts{
+		MimoCodeConfigPath: mimoPath,
+		ManifestDir:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ExtractManifestFromClient: %v", err)
+	}
+	m, err := config.ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate: %v\n%s", err, yaml)
+	}
+	if m.Command != "npx" {
+		t.Errorf("Command = %q, want npx (array head)", m.Command)
+	}
+	wantArgs := []string{"-y", "@modelcontextprotocol/server-memory"}
+	if len(m.BaseArgs) != len(wantArgs) {
+		t.Fatalf("BaseArgs = %#v, want %#v (array tail)", m.BaseArgs, wantArgs)
+	}
+	for i := range wantArgs {
+		if m.BaseArgs[i] != wantArgs[i] {
+			t.Errorf("BaseArgs[%d] = %q, want %q", i, m.BaseArgs[i], wantArgs[i])
+		}
+	}
+	if m.Env["DEBUG"] != "1" {
+		t.Errorf("Env[DEBUG] = %q, want 1", m.Env["DEBUG"])
+	}
+}
+
+// TestExtractManifestFromClient_MimoCode_JSONC confirms the extractor tolerates
+// comments / trailing commas in a hand-edited mimocode.jsonc, same as the scan
+// path.
+func TestExtractManifestFromClient_MimoCode_JSONC(t *testing.T) {
+	tmp := t.TempDir()
+	mimoPath := filepath.Join(tmp, "mimocode.jsonc")
+	if err := os.WriteFile(mimoPath, []byte(
+		"{\n  // operator note\n  \"mcp\": {\n    \"memory\": {\"type\":\"local\",\"command\":[\"uvx\",\"mcp-server-fetch\"],},\n  },\n}\n"),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewAPI()
+	yaml, err := a.ExtractManifestFromClient("mimocode", "memory", ScanOpts{
+		MimoCodeConfigPath: mimoPath,
+		ManifestDir:        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ExtractManifestFromClient: %v", err)
+	}
+	m, err := config.ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+	}
+	if m.Command != "uvx" {
+		t.Errorf("Command = %q, want uvx", m.Command)
+	}
+}
+
+// TestExtractManifestFromClient_MimoCode_RemoteRejected confirms a hub-managed /
+// remote (url-only, no command) mimo entry is rejected with the standard
+// no-command guidance rather than producing an empty-command manifest.
+func TestExtractManifestFromClient_MimoCode_RemoteRejected(t *testing.T) {
+	tmp := t.TempDir()
+	mimoPath := filepath.Join(tmp, "mimocode.json")
+	if err := os.WriteFile(mimoPath, []byte(
+		`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`),
+		0600); err != nil {
+		t.Fatal(err)
+	}
+	a := NewAPI()
+	_, err := a.ExtractManifestFromClient("mimocode", "memory", ScanOpts{
+		MimoCodeConfigPath: mimoPath,
+		ManifestDir:        t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected an error extracting a remote/url-only mimo entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "no `command`") {
+		t.Errorf("error = %q, want the no-command guidance", err.Error())
+	}
+}
