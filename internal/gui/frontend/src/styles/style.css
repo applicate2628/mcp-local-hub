@@ -731,6 +731,11 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   cursor: pointer;
   display: flex;
   align-items: center;
+  /* Explicit flex-start: the @layer base `button{}` reset sets
+     justify-content:center, which would center this full-width flex header
+     (chevron + label jump to the middle). text-align:left alone does NOT
+     govern flex main-axis placement, so the override must be justify-content. */
+  justify-content: flex-start;
   gap: var(--gap-xs);
   font: inherit;
   color: var(--text);
@@ -1621,6 +1626,19 @@ menu button[disabled] {
 }
 @media (prefers-reduced-motion: reduce) {
   .infotip-pop { animation: none; }
+}
+/* The ⓘ help trigger is a fixed 15×15 pill drawn entirely from its own
+   Tailwind utilities (h-[15px] w-[15px] rounded-full border). The @layer base
+   `button{}` reset leaks its density-keyed PADDING onto it — with box-sizing
+   :border-box that padding eats into the 15px box and clips/expands the glyph.
+   This unlayered rule reasserts padding:0 + the fixed size so the trigger
+   stays exactly 15×15 regardless of the base reset. (The Settings
+   `section[data-section] button:not(.infotip-trigger)` rule already excludes
+   it, but the GLOBAL base reset does not — this covers every InfoTip use.) */
+.infotip-trigger {
+  padding: 0;
+  width: 15px;
+  height: 15px;
 }
 /* Settings redesign — a shadcn-style control primitive. Unlayered (beats the
    per-context element rules) so the redesigned Settings inputs/selects share
