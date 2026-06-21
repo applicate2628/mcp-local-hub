@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // AutoPruneWorkspacesSettingKey is the GUI-settable bool that gates the in-GUI
@@ -72,4 +73,87 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 		return os.IsNotExist(err)
 	}
 	return false
+}
+
+// WorkspaceOrphanReason names WHY a registered workspace classifies as an
+// orphan eligible for auto-prune. The three values mirror the three SHIPPED
+// detection signals; the type makes the reason a typed value the sweeper logs
+// and the `mcphub workspace prune` command surfaces, instead of a bare string
+// duplicated across call sites.
+type WorkspaceOrphanReason string
+
+const (
+	// OrphanReasonAgentWorktree — the workspace lives inside an ephemeral
+	// `.claude/worktrees/agent-*` worktree (IsAgentWorktreePath). Highest
+	// priority: ephemeral by design, pruned with no grace window.
+	OrphanReasonAgentWorktree WorkspaceOrphanReason = "agent-worktree"
+	// OrphanReasonDeletedDir — the workspace directory is DEFINITIVELY gone
+	// (WorkspaceDirDeleted, os.IsNotExist-only). ClassifyWorkspaceOrphan returns
+	// this on a single ENOENT observation; the GUI sweeper still layers its own
+	// 2-consecutive-tick grace on top before acting (the grace is stateful
+	// per-sweeper-instance and stays in the sweeper, NOT here).
+	OrphanReasonDeletedDir WorkspaceOrphanReason = "deleted-dir"
+	// OrphanReasonIdle — the workspace exists and is not an agent worktree, but
+	// its most-recent activity (LastToolsCallAt) is older than the idle
+	// threshold. Only fires when opts.IdleThreshold > 0 AND LastToolsCallAt is
+	// non-zero (a zero timestamp = no activity signal → never idle-pruned).
+	OrphanReasonIdle WorkspaceOrphanReason = "idle"
+)
+
+// ClassifyOpts carries the per-workspace inputs ClassifyWorkspaceOrphan needs
+// beyond the path itself: the idle threshold for THIS run, the workspace's
+// most-recent activity timestamp, and the wall-clock "now" the idle comparison
+// is anchored against.
+type ClassifyOpts struct {
+	// IdleThreshold enables the idle signal when > 0. Zero (or negative)
+	// disables idle classification — only the two structural signals run.
+	IdleThreshold time.Duration
+	// LastToolsCallAt is the most-recent activity timestamp across the
+	// workspace's rows. A zero value means "no activity signal observed" and
+	// NEVER idle-prunes (require structural evidence, not wall-clock-since-
+	// register).
+	LastToolsCallAt time.Time
+	// Now anchors the idle comparison. The caller supplies it (the sweeper's
+	// tick time, or time.Now() for the CLI) so classification stays
+	// deterministic and testable. A zero Now disables the idle signal (no
+	// meaningful comparison is possible).
+	Now time.Time
+}
+
+// ClassifyWorkspaceOrphan is the SINGLE owner of the orphan-classification
+// predicate for the workspace-daemon auto-prune feature. It evaluates the three
+// SHIPPED detection signals against ONE workspace path in a fixed priority
+// order and returns the matching reason plus true, or ("", false) when the
+// workspace is healthy.
+//
+// Priority (highest first — identical to the order the GUI sweeper's inlined
+// switch used before this extraction):
+//  1. agent-worktree (IsAgentWorktreePath) — ephemeral by design.
+//  2. deleted-dir (WorkspaceDirDeleted) — directory definitively gone. This is
+//     the SINGLE-OBSERVATION verdict; the GUI sweeper still applies its
+//     2-consecutive-ENOENT-tick grace before acting (the grace is stateful
+//     per-sweeper-instance and is NOT this pure predicate's concern).
+//  3. idle (opts.IdleThreshold > 0 && LastToolsCallAt non-zero &&
+//     Now.Sub(LastToolsCallAt) > IdleThreshold) — present, non-worktree, but
+//     stale.
+//
+// path is the CANONICAL workspace path (the registry stores the
+// EvalSymlinks-resolved, drive-lowercased form), the same form both structural
+// predicates already rely on. Pure: no fleet, no IPC, no registry — it only
+// stats the path (via the two existing predicates) and compares timestamps, so
+// it is unit-testable with table cases.
+func ClassifyWorkspaceOrphan(path string, opts ClassifyOpts) (WorkspaceOrphanReason, bool) {
+	switch {
+	case IsAgentWorktreePath(path):
+		return OrphanReasonAgentWorktree, true
+	case WorkspaceDirDeleted(path):
+		return OrphanReasonDeletedDir, true
+	case opts.IdleThreshold > 0 &&
+		!opts.LastToolsCallAt.IsZero() &&
+		!opts.Now.IsZero() &&
+		opts.Now.Sub(opts.LastToolsCallAt) > opts.IdleThreshold:
+		return OrphanReasonIdle, true
+	default:
+		return "", false
+	}
 }

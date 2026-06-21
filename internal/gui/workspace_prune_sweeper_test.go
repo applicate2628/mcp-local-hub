@@ -177,6 +177,69 @@ func TestSweepPruneWorkspaces_Idle(t *testing.T) {
 	})
 }
 
+// TestSweepPruneWorkspaces_ClearsDefaultMarker asserts the sweeper invokes the
+// default-marker-clear hook for a pruned workspace whose prune removed a serena
+// row (the gap PR-1 closes: the sweeper previously never cleared a stale
+// default). It also asserts the hook is NOT called when the prune removed only
+// LSP rows (no serena row → the default marker, which only ever points at a
+// serena workspace, is untouched).
+func TestSweepPruneWorkspaces_ClearsDefaultMarker(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+
+	origEnabled, origRows, origBegin, origEnd, origAction, origClear :=
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneClearDefaultFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneClearDefaultFn =
+			origEnabled, origRows, origBegin, origEnd, origAction, origClear
+	})
+
+	pruneEnabledFn = func() bool { return true }
+	pruneBeginFn = func(*Server, string) bool { return true }
+	pruneEndFn = func(*Server, string) {}
+
+	var cleared []string
+	pruneClearDefaultFn = func(canonical string) error {
+		cleared = append(cleared, canonical)
+		return nil
+	}
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+
+	t.Run("serena removal clears default marker", func(t *testing.T) {
+		cleared = nil
+		agentPath := "d:/dev/x/.claude/worktrees/agent-def/sub"
+		pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+			return &api.PruneReport{Workspace: path, SerenaRemoved: 1}, nil
+		}
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(agentPath, "kdef", api.SerenaLanguageSentinel)}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 1 {
+			t.Fatalf("want 1 pruned, got %d", n)
+		}
+		if len(cleared) != 1 || cleared[0] != agentPath {
+			t.Fatalf("want default-clear for %q, got %v", agentPath, cleared)
+		}
+	})
+
+	t.Run("lsp-only removal does not clear default marker", func(t *testing.T) {
+		cleared = nil
+		agentPath := "d:/dev/x/.claude/worktrees/agent-lsp/sub"
+		pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+			return &api.PruneReport{Workspace: path, LSPRemoved: []string{"go"}, SerenaRemoved: 0}, nil
+		}
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(agentPath, "klsp", "go")}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 1 {
+			t.Fatalf("want 1 pruned, got %d", n)
+		}
+		if len(cleared) != 0 {
+			t.Fatalf("LSP-only prune must NOT clear the default marker, got %v", cleared)
+		}
+	})
+}
+
 func TestSweepPruneWorkspaces_InFlightForwardSkipsPruneAction(t *testing.T) {
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
 
@@ -213,10 +276,14 @@ func TestSweepPruneWorkspaces_InFlightForwardSkipsPruneAction(t *testing.T) {
 func TestSweepPruneWorkspaces_ForwardEnteringDuringPruneWaitsForGate(t *testing.T) {
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
 
-	origEnabled, origRows, origBegin, origEnd, origAction := pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn
+	origEnabled, origRows, origBegin, origEnd, origAction, origClear := pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneClearDefaultFn
 	t.Cleanup(func() {
-		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn = origEnabled, origRows, origBegin, origEnd, origAction
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneClearDefaultFn = origEnabled, origRows, origBegin, origEnd, origAction, origClear
 	})
+	// The action returns SerenaRemoved:1, which would trigger the default-marker
+	// clear hook; stub it to a hermetic no-op so this concurrency test never
+	// reads/writes the live default-workspace marker.
+	pruneClearDefaultFn = func(string) error { return nil }
 
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	path := "d:/dev/x/.claude/worktrees/agent-prune-claim/sub"
