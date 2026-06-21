@@ -639,6 +639,14 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 	seenExposed := make(map[string]bool)
 	listFailures := make([]DaemonFailure, 0)
 	listSuccessCount := 0
+	// hiddenDropCount counts tools dropped SOLELY because the group's
+	// tools_hidden filter hides them — used by the C3 emptyReason
+	// discriminator to tell an all-tools-hidden empty list apart from an
+	// all-members-unresolved one (additive observability; does not affect
+	// the merged tool set). Tools dropped by collision/dedupe are NOT
+	// counted: a collision is a config defect surfaced via partialFailures,
+	// not an operator-intended hide.
+	hiddenDropCount := 0
 	for _, r := range results {
 		if r.err != nil {
 			listFailures = append(listFailures, DaemonFailure{
@@ -664,6 +672,7 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 			// mergedRoutes below, so a later tools/call for it returns
 			// the existing -32601 (the dispatch path is untouched).
 			if hiddenSet.hides(t.Ref.Server, t.Ref.RawName) {
+				hiddenDropCount++
 				continue
 			}
 			seenExposed[t.Exposed] = true
@@ -713,13 +722,31 @@ func assembleToolsListResponse(reqID json.RawMessage, results []listResult, init
 		// all-failed envelope). So a non-group scope with no known live
 		// snapshot entry keeps the -32000 envelope.
 		if allowEmptyKnown || (len(sess.IntendedParticipants) == 0 && strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix)) {
-			sess.RouteMap.Store(&mergedRoutes)                                         // empty map — no tools to route
-			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID) // mergedTools is empty → result.tools=[]
+			sess.RouteMap.Store(&mergedRoutes) // empty map — no tools to route
+			// C3 emptyReason: zero declared members vs members-declared-but-
+			// none-resolved. A group with NO IntendedParticipants declared no
+			// members; otherwise the members were filtered out as unresolved
+			// (none mapped to a live binding in the current snapshot).
+			reason := emptyReasonAllMembersUnresolved
+			if len(sess.IntendedParticipants) == 0 {
+				reason = emptyReasonEmptyGroup
+			}
+			return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, reason) // mergedTools is empty → result.tools=[]
 		}
 		return buildAllFailedToolsListResponse(reqID, allFailures, instanceID)
 	}
 	sess.RouteMap.Store(&mergedRoutes)
-	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID)
+	// C3 emptyReason on the success path: members resolved AND ≥1 tools/list
+	// succeeded, but the merged list is empty — name WHY. The only
+	// operator-intended emptier here is the group's tools_hidden filter
+	// (hiddenDropCount > 0). A list emptied purely by collisions is left
+	// without a reason (the collision rows already explain it via
+	// partialFailures). A non-empty list carries no reason at all.
+	emptyReason := ""
+	if len(mergedTools) == 0 && hiddenDropCount > 0 {
+		emptyReason = emptyReasonAllToolsHidden
+	}
+	return buildToolsListResponse(reqID, mergedTools, allFailures, instanceID, emptyReason)
 }
 
 // resolvedCallTarget is the output of route lookup + resolver
@@ -1799,18 +1826,48 @@ func buildSyntheticInitResult(reqID json.RawMessage, protoVer string) ([]byte, e
 	return json.Marshal(body)
 }
 
+// emptyReason enum (C3): a stable discriminator placed on
+// _meta.mcphub.emptyReason ONLY when a tools/list response carries an
+// EMPTY tool set, so the three distinct causes of an empty group view do
+// not collapse to the same silent empty envelope. Values:
+//
+//   - emptyReasonEmptyGroup           — the group declares NO members.
+//   - emptyReasonAllMembersUnresolved — members are declared but NONE
+//     resolved to a live daemon binding in the current snapshot.
+//   - emptyReasonAllToolsHidden       — members resolved and tools/list
+//     succeeded, but EVERY tool is hidden by the group's tools_hidden
+//     filter.
+//
+// Additive observability: the field is absent on a NON-empty response and
+// absent when the empty list has no determinable operator-intended cause
+// (e.g. emptied purely by a namespace collision, which partialFailures
+// already explains). It never changes routing/auth or the tool set.
+const (
+	emptyReasonEmptyGroup           = "empty-group"
+	emptyReasonAllMembersUnresolved = "all-members-unresolved"
+	emptyReasonAllToolsHidden       = "all-tools-hidden"
+)
+
 // buildToolsListResponse assembles a successful (≥1 daemon ok)
 // tools/list response with the merged tool list and partialFailures.
-func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure, instanceID string) ([]byte, error) {
-	meta := map[string]any{
-		"mcphub": map[string]any{
-			"partialFailures": failuresOrEmpty(failures),
-			"instance_id":     instanceID,
-		},
+//
+// emptyReason (C3) is a diagnostic discriminator added to _meta.mcphub
+// ONLY when the merged tool set is empty AND a reason was determined; it
+// is omitted on a non-empty response or an empty one with no determinable
+// cause. The existing partialFailures/instance_id fields are unchanged.
+func buildToolsListResponse(reqID json.RawMessage, tools []json.RawMessage, failures []DaemonFailure, instanceID, emptyReason string) ([]byte, error) {
+	mcphub := map[string]any{
+		"partialFailures": failuresOrEmpty(failures),
+		"instance_id":     instanceID,
+	}
+	// Only annotate the EMPTY case, and only when a cause was determined.
+	// A non-empty list never carries emptyReason.
+	if len(tools) == 0 && emptyReason != "" {
+		mcphub["emptyReason"] = emptyReason
 	}
 	result := map[string]any{
 		"tools": tools,
-		"_meta": meta,
+		"_meta": map[string]any{"mcphub": mcphub},
 	}
 	envelope := map[string]any{
 		"jsonrpc": "2.0",

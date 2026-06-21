@@ -1389,6 +1389,126 @@ func TestAggregateToolsListUsesLiveResolverSnapshotForHiddenTools(t *testing.T) 
 	} else if len(*rm) != 0 {
 		t.Fatalf("freshly hidden tool leaked into RouteMap after resolver republish: %+v", *rm)
 	}
+	// C3: members resolved + tools/list succeeded but EVERY tool is hidden →
+	// emptyReason = all-tools-hidden.
+	if got := decodeToolsListEmptyReason(t, body); got != emptyReasonAllToolsHidden {
+		t.Fatalf("emptyReason=%q want %q; body=%s", got, emptyReasonAllToolsHidden, string(body))
+	}
+}
+
+// TestAggregateToolsListEmptyReasonEmptyGroup (C3) pins the FIRST empty-group
+// cause discriminator: a declared group with NO members (zero
+// IntendedParticipants) returns an empty-KNOWN success carrying
+// emptyReason="empty-group".
+func TestAggregateToolsListEmptyReasonEmptyGroup(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("declared-empty")
+	// Group is KNOWN to the snapshot but binds no daemons (no members).
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:    1,
+		Groups: map[string]bool{scope: true},
+	})
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-empty-group",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		IntendedParticipants: nil, // no members declared
+		InitSuccesses:        map[canonicalDaemonRef]string{},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	assertEmptyKnownToolsList(t, body)
+	if got := decodeToolsListEmptyReason(t, body); got != emptyReasonEmptyGroup {
+		t.Fatalf("emptyReason=%q want %q; body=%s", got, emptyReasonEmptyGroup, string(body))
+	}
+}
+
+// TestAggregateToolsListEmptyReasonAllMembersUnresolved (C3) pins the SECOND
+// empty-group cause: members were declared (IntendedParticipants non-empty)
+// but NONE resolve to a live binding in the current snapshot (the sole member
+// moved to a new port with no cached session → dropped). The empty-KNOWN
+// success carries emptyReason="all-members-unresolved".
+func TestAggregateToolsListEmptyReasonAllMembersUnresolved(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	scope := GroupScopeKey("all-unresolved")
+	oldDaemon := newStubDaemon(t, "old-sid")
+	newPortDaemon := newStubDaemon(t, "fresh-sid") // moved-to port; never contacted
+
+	ref := canonicalDaemonRef{Server: "srv1", Daemon: "daemon-a", Port: oldDaemon.port}
+	atInit := &ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
+		Groups:   map[string]bool{scope: true},
+	}
+	// Sole participant MOVED to a new port, no cached fresh session → the live
+	// filter drops it, so every declared member is unresolved.
+	movedRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: newPortDaemon.port}
+	PublishResolverSnapshot(&ResolverSnapshot{
+		Gen:      2,
+		Bindings: map[string][]canonicalDaemonRef{scope: {movedRef}},
+		Groups:   map[string]bool{scope: true},
+	})
+
+	sess := &hubSession{
+		ClientSessionID:      "client-sid-all-unresolved",
+		ScopeKey:             scope,
+		ProtocolVersion:      "2025-11-25",
+		SnapshotAtInit:       atInit,
+		IntendedParticipants: []canonicalDaemonRef{ref},
+		InitSuccesses:        map[canonicalDaemonRef]string{ref: "old-sid"},
+		DaemonProtoVer:       map[canonicalDaemonRef]string{ref: "2025-11-25"},
+		InFlightRequests:     map[requestIDKey]inflightEntry{},
+		InitAt:               time.Now(),
+		LastUsedAt:           time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	assertEmptyKnownToolsList(t, body)
+	if got := decodeToolsListEmptyReason(t, body); got != emptyReasonAllMembersUnresolved {
+		t.Fatalf("emptyReason=%q want %q; body=%s", got, emptyReasonAllMembersUnresolved, string(body))
+	}
+}
+
+// TestAggregateToolsListNonEmptyHasNoEmptyReason (C3 negative) pins the
+// invariant that a NON-empty tools/list response carries NO emptyReason —
+// the discriminator is strictly an empty-list annotation.
+func TestAggregateToolsListNonEmptyHasNoEmptyReason(t *testing.T) {
+	d1 := newStubDaemon(t, "d1-sid")
+	sess := sessionWithParticipants(d1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
+		t.Fatalf("AggregateInitialize: %v", err)
+	}
+	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
+	if err != nil {
+		t.Fatalf("AggregateToolsList: %v", err)
+	}
+	if names := decodeToolsListNames(t, body); len(names) == 0 {
+		t.Fatalf("expected a non-empty tools/list; body=%s", string(body))
+	}
+	if got := decodeToolsListEmptyReason(t, body); got != "" {
+		t.Fatalf("non-empty tools/list carried emptyReason=%q want absent; body=%s", got, string(body))
+	}
 }
 
 // TestAggregateToolsCallMovedNoCachedSessionReturnsMinus32601 pins the OPTION B'
@@ -3386,6 +3506,37 @@ func decodeToolsListPartialFailures(t *testing.T, body []byte) []DaemonFailure {
 		t.Fatalf("expected tools/list result, got body=%s", string(body))
 	}
 	return env.Result.Meta.Mcphub.PartialFailures
+}
+
+// decodeToolsListEmptyReason returns the C3 _meta.mcphub.emptyReason
+// discriminator from a tools/list SUCCESS envelope. Empty string means the
+// field was absent (the expected state on a non-empty response or an empty
+// one with no determinable cause).
+func decodeToolsListEmptyReason(t *testing.T, body []byte) string {
+	t.Helper()
+	var env struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result *struct {
+			Meta struct {
+				Mcphub struct {
+					EmptyReason string `json:"emptyReason"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("parse tools/list envelope: %v body=%s", err, string(body))
+	}
+	if env.Error != nil {
+		t.Fatalf("expected tools/list result envelope, got error code=%d message=%q body=%s", env.Error.Code, env.Error.Message, string(body))
+	}
+	if env.Result == nil {
+		t.Fatalf("expected tools/list result, got body=%s", string(body))
+	}
+	return env.Result.Meta.Mcphub.EmptyReason
 }
 
 // waitForCount polls an atomic counter until it reaches want or a bounded

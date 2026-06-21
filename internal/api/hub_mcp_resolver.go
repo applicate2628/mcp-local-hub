@@ -321,7 +321,16 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 			if !ok {
 				// Group names a server with no live manifest/daemon —
 				// skip (validation warning surfaced in the GUI in a
-				// later phase; never a hub-start fault here).
+				// later phase; never a hub-start fault here). Emit a
+				// structured warn (mirroring the per-session-skip warn
+				// above) so an operator can SEE why a group is missing a
+				// member's tools rather than the member silently vanishing
+				// from the /g/ view. Additive observability only — the skip
+				// behavior (defensive continue) is unchanged.
+				_ = LogHubMcpEvent("warn", "group-member-unresolved", map[string]any{
+					"group":  g.Name,
+					"server": server,
+				})
 				continue
 			}
 			for _, ref := range sd.refs {
