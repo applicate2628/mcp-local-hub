@@ -114,7 +114,19 @@ type symlinkResolveWriter interface {
 
 type realSymlinkResolveWriter struct{}
 
-const maxResolvedSymlinkConfigBytes = maxControlBodyBytes
+// maxResolvedSymlinkConfigBytes caps the on-disk client config the GUI consent
+// flow reads/round-trips. It is DELIBERATELY larger than maxControlBodyBytes
+// (the 64 KiB POST control-body cap): a control body is a small key/value, but
+// a real client config (claude.json / mcp.json / codex config.toml) can hold
+// many MCP server entries plus unrelated client settings and legitimately
+// exceed 64 KiB — the normal clients adapters (clients.readRawConfig) read
+// these with no limit at all. Reusing the 64 KiB control cap here wrongly
+// rejected valid large configs as not-a-follow-able-symlink. 4 MiB is the
+// codebase's standard "generous local body" scale (serena_router.go,
+// lsp_router.go, hub_mcp_aggregator.go, daemon/http_host.go all use 4 << 20),
+// keeping a DoS guard against a hostile/huge symlink target while admitting any
+// realistic client config.
+const maxResolvedSymlinkConfigBytes int64 = 4 << 20 // 4 MiB
 
 // hashBytes returns the lowercase-hex sha256 of b — the content-drift token
 // shared between the RESOLVE and WRITE phases.
@@ -140,12 +152,20 @@ func readResolvedSymlinkTargetBytes(resolvedTarget string) ([]byte, error) {
 		return nil, fmt.Errorf("resolved target %s is too large (%d bytes > %d bytes)", resolvedTarget, info.Size(), maxResolvedSymlinkConfigBytes)
 	}
 
-	f, err := os.Open(resolvedTarget)
+	// Open with platform-specific flags: POSIX adds O_NONBLOCK so a target
+	// swapped to a FIFO in the os.Stat -> open window returns immediately
+	// instead of BLOCKING the handler goroutine waiting for a writer. The
+	// post-open fstat IsRegular re-check below then refuses the swapped FIFO.
+	f, err := os.OpenFile(resolvedTarget, resolveTargetOpenFlags(), 0)
 	if err != nil {
 		return nil, fmt.Errorf("open resolved target %s: %w", resolvedTarget, err)
 	}
 	defer f.Close()
 
+	// fstat the OPEN handle (not the path) so a FIFO/dir/device swapped in
+	// after the leading os.Stat is caught here, before any read. This is the
+	// authoritative non-regular refusal: it operates on the very fd we will
+	// read, closing the stat->open TOCTOU.
 	liveInfo, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat opened resolved target %s: %w", resolvedTarget, err)

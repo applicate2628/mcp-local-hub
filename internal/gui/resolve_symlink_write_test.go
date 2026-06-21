@@ -458,6 +458,50 @@ func TestRealSymlinkResolveWriter_OversizedTarget_Refused(t *testing.T) {
 	}
 }
 
+// TestRealSymlinkResolveWriter_LargeValidConfig_RoundTrips is the Finding-1
+// regression guard: a legitimate client config larger than the 64 KiB POST
+// control-body cap (maxControlBodyBytes) but within the dedicated config cap
+// (maxResolvedSymlinkConfigBytes, 4 MiB) must Resolve AND round-trip WRITE
+// successfully. Under the old cap reuse (maxResolvedSymlinkConfigBytes ==
+// maxControlBodyBytes) this would have been wrongly rejected as
+// errSymlinkNotApplicable. The seeded body is deliberately >64 KiB to FAIL on
+// the regressed cap.
+func TestRealSymlinkResolveWriter_LargeValidConfig_RoundTrips(t *testing.T) {
+	if maxResolvedSymlinkConfigBytes <= maxControlBodyBytes {
+		t.Fatalf("config cap (%d) must exceed control-body cap (%d) — Finding 1 regression",
+			maxResolvedSymlinkConfigBytes, maxControlBodyBytes)
+	}
+	client, realTarget := realSymlinkClient(t)
+	// A realistic large config: a TOML-ish body comfortably above 64 KiB but
+	// well under 4 MiB — the size of a client config with many MCP entries.
+	large := append([]byte("# codex config\n"), bytes.Repeat([]byte("x"), int(maxControlBodyBytes)+4096)...)
+	if int64(len(large)) <= maxControlBodyBytes {
+		t.Fatalf("test body len=%d must exceed maxControlBodyBytes=%d", len(large), maxControlBodyBytes)
+	}
+	if int64(len(large)) > maxResolvedSymlinkConfigBytes {
+		t.Fatalf("test body len=%d must stay within maxResolvedSymlinkConfigBytes=%d", len(large), maxResolvedSymlinkConfigBytes)
+	}
+	if err := os.WriteFile(realTarget, large, 0o600); err != nil {
+		t.Fatalf("write large valid target: %v", err)
+	}
+
+	rw := realSymlinkResolveWriter{}
+	res, err := rw.Resolve(client)
+	if err != nil {
+		t.Fatalf("Resolve of a >64KiB valid config failed (Finding 1 regression): %v", err)
+	}
+	wres, err := rw.Write(client, res.PinnedRealPath, res.ContentHash)
+	if err != nil {
+		t.Fatalf("Write of a >64KiB valid config failed (Finding 1 regression): %v", err)
+	}
+	if !wres.Written {
+		t.Errorf("Written=false for a large valid config, want true")
+	}
+	if b, _ := os.ReadFile(realTarget); !bytes.Equal(b, large) {
+		t.Errorf("round-trip changed a large config: got %d bytes, want %d", len(b), len(large))
+	}
+}
+
 // TestRealSymlinkResolveWriter_Repointed_Refused pins the anti-TOCTOU pin
 // check: the symlink is repointed to a different parent after Resolve, and the
 // Write refuses with SYMLINK_REPOINTED before any byte is written.
