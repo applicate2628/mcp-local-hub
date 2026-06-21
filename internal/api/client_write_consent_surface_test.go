@@ -21,14 +21,17 @@ import (
 // Symlink-bearing cases run POSIX-only (Windows symlink creation needs
 // elevation); the cross-platform code path is identical and exercised here.
 // Reuses a3SymlinkFixture / hardenedTempDir / hubMcpStateTestHelper /
-// bytesContainsStr / resetA3EntryCounters from client_write_init_a3_toctou_test.go.
+// bytesContainsStr from client_write_init_a3_toctou_test.go. The AF-1
+// entry-count assertions for these facades live under -tags=af1_counters in
+// client_write_init_a3_counters_test.go.
 
 // TestResolveClientConfigSymlink_PinMatchesWriteTimeGuard pins the
-// single-owner property: the pinnedParent the RESOLVE facade returns is
-// byte-identical to filepath.Clean(filepath.Dir(resolvedTarget)) — the exact
-// value the write-time guard (secureWriteFollowingSymlink) recomputes and
-// compares. A drift between the two would silently break the
-// "operator-saw-pin == verified-pin" invariant.
+// single-owner property: the pinnedPath the RESOLVE facade returns is
+// byte-identical to filepath.Clean(resolved) — the FULL resolved target path,
+// the exact value the write-time guard (secureWriteFollowingSymlink) recomputes
+// and compares. It also equals resolvedTarget (shown == pinned). A drift
+// between the two would silently break the "operator-saw-pin == verified-pin"
+// invariant.
 func TestResolveClientConfigSymlink_PinMatchesWriteTimeGuard(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevation on Windows")
@@ -36,19 +39,17 @@ func TestResolveClientConfigSymlink_PinMatchesWriteTimeGuard(t *testing.T) {
 	dir := hardenedTempDir(t)
 	real, link := a3SymlinkFixture(t, dir)
 
-	resolvedTarget, pinnedParent, isSymlink := ResolveClientConfigSymlink(link)
+	resolvedTarget, pinnedPath, isSymlink := ResolveClientConfigSymlink(link)
 	if !isSymlink {
 		t.Fatalf("ResolveClientConfigSymlink(%q) reported isSymlink=false; want true", link)
 	}
-	// The write-time guard compares filepath.Clean(filepath.Dir(resolved));
-	// the facade must produce that exact value.
-	wantPin := filepath.Clean(filepath.Dir(resolvedTarget))
-	if pinnedParent != wantPin {
-		t.Errorf("pinnedParent=%q, want %q (must match write-time guard derivation)", pinnedParent, wantPin)
+	// The pin is the FULL resolved target path — equal to resolvedTarget
+	// (shown == pinned) and to the seeded real file (cleaned).
+	if pinnedPath != resolvedTarget {
+		t.Errorf("pinnedPath=%q, want resolvedTarget=%q (shown == pinned)", pinnedPath, resolvedTarget)
 	}
-	// And the resolved target's parent IS the seeded real file's parent.
-	if pinnedParent != filepath.Clean(filepath.Dir(real)) {
-		t.Errorf("pinnedParent=%q, want parent of real target %q", pinnedParent, filepath.Clean(filepath.Dir(real)))
+	if pinnedPath != filepath.Clean(real) {
+		t.Errorf("pinnedPath=%q, want full resolved target %q", pinnedPath, filepath.Clean(real))
 	}
 }
 
@@ -61,12 +62,12 @@ func TestResolveClientConfigSymlink_RegularFile(t *testing.T) {
 	if err := os.WriteFile(regular, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resolvedTarget, pinnedParent, isSymlink := ResolveClientConfigSymlink(regular)
+	resolvedTarget, pinnedPath, isSymlink := ResolveClientConfigSymlink(regular)
 	if isSymlink {
 		t.Errorf("regular file reported isSymlink=true")
 	}
-	if pinnedParent != "" {
-		t.Errorf("regular file pinnedParent=%q, want empty", pinnedParent)
+	if pinnedPath != "" {
+		t.Errorf("regular file pinnedPath=%q, want empty", pinnedPath)
 	}
 	if resolvedTarget != regular {
 		t.Errorf("regular file resolvedTarget=%q, want %q (echoed unchanged)", resolvedTarget, regular)
@@ -88,26 +89,24 @@ func TestSecureWriteClientConfigWithConsent_PinMatch_Succeeds(t *testing.T) {
 	dir := hardenedTempDir(t)
 	real, link := a3SymlinkFixture(t, dir)
 
-	_, pinnedParent, isSymlink := ResolveClientConfigSymlink(link)
+	_, pinnedPath, isSymlink := ResolveClientConfigSymlink(link)
 	if !isSymlink {
 		t.Fatalf("expected %q to resolve as a symlink", link)
 	}
 	consent := ResolvedSymlinkConsent{
 		Client:             "claude-code",
 		OriginalPath:       link,
-		PinnedResolvedPath: pinnedParent,
+		PinnedResolvedPath: pinnedPath,
 	}
-	resetA3EntryCounters()
 	if err := SecureWriteClientConfigWithConsent(consent, []byte(`{"v":1}`)); err != nil {
 		t.Fatalf("WithConsent pin-match write must SUCCEED: %v", err)
 	}
 	if b, _ := os.ReadFile(real); string(b) != `{"v":1}` {
 		t.Errorf("resolved target content = %q, want %q", b, `{"v":1}`)
 	}
-	// Handle-pinned path, no string re-walk (AF-1).
-	if secureWritePathBasedStringEntryCount != 0 {
-		t.Errorf("WithConsent re-walked a string (count=%d, want 0)", secureWritePathBasedStringEntryCount)
-	}
+	// The AF-1 handle-pinned-path (no string re-walk) counter assertion for the
+	// WithConsent facade lives under -tags=af1_counters
+	// (client_write_init_a3_counters_test.go).
 }
 
 // TestSecureWriteClientConfigWithConsent_SwapMismatch_Refused proves the WRITE
@@ -141,9 +140,9 @@ func TestSecureWriteClientConfigWithConsent_SwapMismatch_Refused(t *testing.T) {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	// Operator resolved + consented to P.
-	_, pinnedParent, _ := ResolveClientConfigSymlink(link)
-	consent := ResolvedSymlinkConsent{OriginalPath: link, PinnedResolvedPath: pinnedParent}
+	// Operator resolved + consented to the full target under P.
+	_, pinnedPath, _ := ResolveClientConfigSymlink(link)
+	consent := ResolvedSymlinkConsent{OriginalPath: link, PinnedResolvedPath: pinnedPath}
 
 	swapped := false
 	afterResolveBeforePinHook = func() {
@@ -173,8 +172,8 @@ func TestSecureWriteClientConfigWithConsent_SwapMismatch_Refused(t *testing.T) {
 // TestInteractiveSymlinkConsent_Approve_Follows pins design B: with NO env
 // opt-in and NO scoped consent, an approving injected port follows the symlink
 // via a freshly-built pinned consent, writes through the handle-pinned path,
-// and the port receives the resolved pinnedParent (so the CLI prompt can show
-// it).
+// and the port receives the FULL resolved target path (so the CLI prompt can
+// show the real file the operator approves).
 func TestInteractiveSymlinkConsent_Approve_Follows(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevation on Windows")
@@ -185,17 +184,16 @@ func TestInteractiveSymlinkConsent_Approve_Follows(t *testing.T) {
 	dir := hardenedTempDir(t)
 	real, link := a3SymlinkFixture(t, dir)
 
-	wantPin := filepath.Clean(filepath.Dir(real))
+	wantPin := filepath.Clean(real) // FULL resolved target path
 	var gotOriginal, gotPin string
 	prev := InteractiveSymlinkConsent
-	InteractiveSymlinkConsent = func(client, originalPath, pinnedParent string) bool {
+	InteractiveSymlinkConsent = func(client, originalPath, pinnedPath string) bool {
 		gotOriginal = originalPath
-		gotPin = pinnedParent
+		gotPin = pinnedPath
 		return true
 	}
 	t.Cleanup(func() { InteractiveSymlinkConsent = prev })
 
-	resetA3EntryCounters()
 	if err := secureWriteWithOperatorOptConsent(link, []byte(`{"v":1}`), nil); err != nil {
 		t.Fatalf("approving interactive port must follow + SUCCEED: %v", err)
 	}
@@ -203,14 +201,14 @@ func TestInteractiveSymlinkConsent_Approve_Follows(t *testing.T) {
 		t.Errorf("port saw originalPath=%q, want %q", gotOriginal, link)
 	}
 	if gotPin != wantPin {
-		t.Errorf("port saw pinnedParent=%q, want %q (the value the CLI shows the operator)", gotPin, wantPin)
+		t.Errorf("port saw pinnedPath=%q, want %q (the full target the CLI shows the operator)", gotPin, wantPin)
 	}
 	if b, _ := os.ReadFile(real); string(b) != `{"v":1}` {
 		t.Errorf("resolved target content = %q, want %q", b, `{"v":1}`)
 	}
-	if secureWritePathBasedStringEntryCount != 0 {
-		t.Errorf("interactive-port lane re-walked a string (count=%d, want 0)", secureWritePathBasedStringEntryCount)
-	}
+	// The AF-1 handle-pinned-path (no string re-walk) counter assertion for the
+	// interactive-port lane lives under -tags=af1_counters
+	// (client_write_init_a3_counters_test.go).
 }
 
 // TestInteractiveSymlinkConsent_Decline_Refused: a declining port does NOT
@@ -228,7 +226,7 @@ func TestInteractiveSymlinkConsent_Decline_Refused(t *testing.T) {
 
 	called := false
 	prev := InteractiveSymlinkConsent
-	InteractiveSymlinkConsent = func(client, originalPath, pinnedParent string) bool {
+	InteractiveSymlinkConsent = func(client, originalPath, pinnedPath string) bool {
 		called = true
 		return false // operator declined
 	}
@@ -265,7 +263,7 @@ func TestInteractiveSymlinkConsent_StrictMode_NeverConsultedAndRefused(t *testin
 	real, link := a3SymlinkFixture(t, dir)
 
 	prev := InteractiveSymlinkConsent
-	InteractiveSymlinkConsent = func(client, originalPath, pinnedParent string) bool {
+	InteractiveSymlinkConsent = func(client, originalPath, pinnedPath string) bool {
 		t.Fatalf("interactive port MUST NOT be consulted under strict mode (port reached for %q)", originalPath)
 		return true
 	}
@@ -344,7 +342,7 @@ func TestInteractiveSymlinkConsent_ProductionLane_SuppliesClient(t *testing.T) {
 
 	var gotClient string
 	prev := InteractiveSymlinkConsent
-	InteractiveSymlinkConsent = func(client, originalPath, pinnedParent string) bool {
+	InteractiveSymlinkConsent = func(client, originalPath, pinnedPath string) bool {
 		gotClient = client
 		return true
 	}

@@ -49,7 +49,7 @@ import (
 // + atomic renameat + post-rename verify (steps 4-11) all still
 // apply, so the dirfd-anchored TOCTOU guarantees are preserved.
 func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bool) error {
-	secureWritePathBasedStringEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
+	observeStringEntry() // AF-1 T5 observation; no-op (compiled out) in production.
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
 		parentDir = "."
@@ -93,7 +93,7 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 // renameat + post-rename verify all still apply, so the dirfd-anchored
 // TOCTOU guarantees are preserved.
 func secureWriteClientConfigToResolvedParent(dirFd int, parentDirForDiag, base string, contents []byte, skipParentGate bool) error {
-	secureWriteResolvedParentEntryCount++ // TEST-ONLY observation (AF-1 T5); inert in production.
+	observeResolvedParentEntry() // AF-1 T5 observation; no-op (compiled out) in production.
 	if base == "" {
 		return fmt.Errorf("secure write: empty base name (parent %q)", parentDirForDiag)
 	}
