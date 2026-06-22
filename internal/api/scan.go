@@ -697,6 +697,26 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			presence["mimocode"] = "error"
 		}
 	}
+	// MALFORMED INLINE CONTENT guard (bot PR #420 r17 finding B2). The inline
+	// tri-state is checked in the absent-state promotion block above ONLY when the
+	// write target is absent (isPromotableAbsentPresenceState). But when a FILE
+	// layer (the write-target mimocode.json, or a lower config.json) already made
+	// the client present ("ok"), that block is skipped — so a malformed
+	// MIMOCODE_CONFIG_CONTENT inline layer was NOT converted to "error". scanMimoCode
+	// would then run (scanIfReadable gates on "ok"), call MimoCodeMergedConfig, hit
+	// the inline PARSE error, and abort the ENTIRE multi-client scan with
+	// `mimocode: ...`. So downgrade an otherwise-"ok" mimocode presence to the
+	// per-client config-error "error" state when the inline content is present but
+	// UNPARSEABLE — REGARDLESS of whether a file layer made the client present. This
+	// mirrors the non-regular-layer guard above: convert a whole-scan-aborting merge
+	// fault into a loud per-client config-error cell that SKIPS scanMimoCode. Only an
+	// "ok" verdict is downgraded; an absent/missing verdict is left untouched (no
+	// scanMimoCode runs there), and an already-"error" verdict is unchanged.
+	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] == "ok" {
+		if state, _ := clients.MimoCodeInlineContentState(mp); state == "error" {
+			presence["mimocode"] = "error"
+		}
+	}
 	scanIfReadable := func(name string) bool {
 		// "ok" is the only state for which an adapter read is
 		// guaranteed to find a regular file. "missing" /

@@ -30,6 +30,41 @@ func newLockingCursorForTest(t *testing.T, initial string) (Client, string) {
 	return c, path
 }
 
+// TestConfigLock_SecureParentCreateRunsEvenWhenParentExists pins bot PR #420
+// r17 finding P2a: withConfigLock must call SecureCreateParentDir
+// UNCONDITIONALLY before flock.New — NOT only when the parent dir is absent. The
+// earlier IsNotExist-guarded form skipped the secure descent when the parent dir
+// already existed, so an existing SYMLINKED / reparse-point parent was never
+// refused: flock.New would create the lock file THROUGH it. Here the parent dir
+// already exists (the test seed writes the config file, creating the dir), yet
+// the secure creator MUST still be invoked on the mutating path.
+func TestConfigLock_SecureParentCreateRunsEvenWhenParentExists(t *testing.T) {
+	// The seed already created the parent dir (it wrote mcp.json into it).
+	c, path := newLockingCursorForTest(t, `{"mcpServers":{}}`)
+	parent := filepath.Dir(path)
+	if _, err := os.Stat(parent); err != nil {
+		t.Fatalf("precondition: parent dir must already exist: %v", err)
+	}
+
+	prev := SecureCreateParentDir
+	t.Cleanup(func() { SecureCreateParentDir = prev })
+	var calledWith string
+	SecureCreateParentDir = func(dir string) error {
+		calledWith = dir
+		return prev(dir) // delegate to the real (test fallback) so the flow proceeds
+	}
+
+	if err := c.AddEntry(MCPEntry{Name: "a", URL: "http://localhost:9121/mcp"}); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	if calledWith == "" {
+		t.Fatal("SecureCreateParentDir must be invoked even when the parent dir already exists (P2a) — it was not")
+	}
+	if filepath.Clean(calledWith) != filepath.Clean(parent) {
+		t.Errorf("SecureCreateParentDir called with %q, want the write-target parent %q", calledWith, parent)
+	}
+}
+
 // TestConfigLock_ConcurrentAddRemoveBackup_NeverTearsFile hammers a single
 // client config file with concurrent AddEntry / RemoveEntry / Backup calls
 // from two goroutines. After the storm the file must ALWAYS be a complete,

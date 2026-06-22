@@ -575,6 +575,10 @@ func isolateMimoCodeScanEnv(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	t.Setenv(clients.MimoCodeDisableClaudeImportEnv, "1")
+	// Redirect the managed config dir (bot PR #420 r17 finding P1b) to a
+	// non-existent temp path so any AddEntry/RemoveEntry shadow walk reached from a
+	// scan/migration test never reads the real system managed dir.
+	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(t.TempDir(), "no-managed-config-dir"))
 }
 
 // TestScanMimoCode_Faithful exercises the three source-accurate scan behaviors

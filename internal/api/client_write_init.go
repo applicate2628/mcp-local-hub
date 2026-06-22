@@ -139,11 +139,11 @@ func SecureCreateClientConfigParentDirWithOperatorOpt(configPath string) error {
 // directory of a client-config WRITE TARGET for the shared withConfigLock
 // chokepoint (internal/clients/config_lock.go), applying the SAME
 // operator-opt-in policy as the file create: try the hardened pipeline
-// (nearest-existing-ancestor DACL/mode gate ENFORCED) first; on
-// ErrSecureWriteParentInsecure, return the strict error when strict mode is
-// active, else re-run with the anchor gate bypassed and log a warn event.
-// Created directories are owner-only and the symlink / reparse-point refusals
-// apply on BOTH lanes.
+// (the strict-mode DACL/mode gate ENFORCED on the deepest existing prefix)
+// first; on ErrSecureWriteParentInsecure, return the strict error when strict
+// mode is active, else re-run with the parent-dir gate bypassed and log a warn
+// event. Created directories are owner-only and the symlink / reparse-point
+// refusals apply on BOTH lanes.
 //
 // DIFFERENCE from SecureCreateClientConfigParentDirWithOperatorOpt (the G17
 // Init-button parent creator): that creator REFUSES any path outside the user
@@ -155,10 +155,14 @@ func SecureCreateClientConfigParentDirWithOperatorOpt(configPath string) error {
 // resolveMimoCodeGlobalDir). A home-bounded creator wired here would convert
 // the bot PR #420 finding 1 P1 into an install-breaking regression for
 // outside-home targets. The LOAD-BEARING security property — refuse a
-// symlink/reparse-point component, create each real component fresh owner-only,
-// descend fd/handle-relative (TOCTOU-safe) — is preserved; only the
-// home-containment BLAST-RADIUS bound is dropped, anchoring instead at the
-// nearest existing ancestor. (bot PR #420 finding 1.)
+// symlink/reparse-point component on EVERY component, create each real component
+// fresh owner-only, descend fd/handle-relative from the VOLUME ROOT (TOCTOU-safe)
+// — is preserved; only the home-containment BLAST-RADIUS bound is dropped. The
+// descent runs from the volume root (NOT the nearest existing ancestor — an
+// absolute-path anchor re-open followed an intermediate symlink, the F1 residual),
+// and the strict-mode DACL gate verifies only the DEEPEST EXISTING PREFIX (not
+// every system-owned ancestor like C:\Users — bot PR #420 r17 finding B1), exactly
+// as the POSIX leg does. (bot PR #420 finding 1 + F1 + r17 B1.)
 //
 // `dir` is the parent directory itself (filepath.Dir(configPath) at the call
 // site), so this creates `dir` and any missing ancestors, not dir's parent.
@@ -174,10 +178,10 @@ func SecureCreateParentDirForConfigLock(dir string) error {
 		return fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for config-lock parent creation (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 			err, RequireSingleUserHomeEnv)
 	}
-	// Default-relax lane: nearest-ancestor gate rejected but operator did not opt
-	// into strict mode. Re-run with the anchor gate skipped; created dirs stay
-	// owner-only (mode 0700 / allowlist DACL) and the symlink / reparse-point
-	// refusals still apply.
+	// Default-relax lane: the deepest-existing-prefix DACL gate rejected but the
+	// operator did not opt into strict mode. Re-run with the parent-dir gate
+	// skipped; created dirs stay owner-only (mode 0700 / allowlist DACL) and the
+	// per-component symlink / reparse-point refusals still apply.
 	if logErr := LogHubMcpEvent("warn", "client-write-unhardened-fallback", map[string]any{
 		"path":   dir,
 		"reason": "default-relax-on-solo-host (config-lock-parent-dir)",

@@ -26,6 +26,14 @@ func isolateMimoCodeEnv(t *testing.T) {
 	// ambient input the MIMOCODE_* clears above do not cover). A claude-import
 	// test re-enables it explicitly via mimoCodeEnableClaudeImportForTest below.
 	t.Setenv(MimoCodeDisableClaudeImportEnv, "1")
+	// Redirect the MANAGED config dir (bot PR #420 r17 finding P1b) to a
+	// non-existent temp path so the AddEntry/RemoveEntry shadow walk never reads
+	// the real system managed dir (/etc/opencode | %ProgramData%\opencode |
+	// /Library/Application Support/opencode) during a test. The existsSync gate
+	// in mimoCodeManagedConfigDirShadows treats the missing dir as "no shadow". A
+	// managed-shadow test sets MIMOCODE_TEST_MANAGED_CONFIG_DIR explicitly to a
+	// seeded dir, overriding this.
+	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(t.TempDir(), "no-managed-config-dir"))
 }
 
 // mimoCodeEnableClaudeImportForTest re-enables the ~/.claude.json import (cleared

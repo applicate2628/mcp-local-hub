@@ -36,14 +36,17 @@ import (
 //     ctx for the <dir>/.claude.json sibling — a documented narrowing of
 //     config.ts:889, justified because the hub has no project directory concept).
 //   - Read-only MANAGED layers — DETECT-AND-FAIL-LOUD ONLY, NEVER merged into the
-//     writable path and NEVER written. macOS Managed Preferences (MDM) is the one
-//     implemented here: on macOS, if the managed plist defines the server being
+//     writable path and NEVER written. If the managed layer defines the server being
 //     installed, AddEntry returns a typed loud error rather than reporting a
-//     successful write to mimocode.json (MiMoCode would keep resolving the MDM
-//     entry — a silent false success). The not-yet-implemented managed layers (org
-//     account, remote well-known, managed config dir) follow the SAME
-//     detect-and-fail-loud principle when added; their absence here is a scoped
-//     deferral, not a contract gap.
+//     successful write to mimocode.json (MiMoCode would keep resolving the managed
+//     entry — a silent false success). TWO managed layers are detected (bot PR #420
+//     r17 finding P1b): macOS Managed Preferences (MDM, via mimoCodeReadManagedPrefs)
+//     AND the managed config dir (%ProgramData%\opencode | /Library/Application
+//     Support/opencode | /etc/opencode, via mimoCodeManagedConfigDirShadows;
+//     basename "opencode", inherited from upstream). The org-account config and the
+//     remote well-known config remain documented un-detectable limitations: detecting
+//     them would need MiMoCode's private auth state and a per-operation network call
+//     the hub deliberately does not make — see mimoCodeHigherLayerDefining's doc.
 //
 // This three-bucket split is the agreed PR #420 scope: read/merge the writable
 // layers + the home ~/.claude.json import; detect-and-fail-loud the managed
@@ -100,11 +103,17 @@ import (
 // mimocode.jsonc, MIMOCODE_CONFIG file, overlay, inline content) is never
 // mutated and re-emerges via the merge after the hub's entry is removed; a
 // same-named server in a HIGHER layer is refused at AddEntry by the shadow guard
-// (it would otherwise win the merge and silently mask the hub entry). The
-// project-root / cross-DIR `.mimocode` overlay (project + home) is a documented
-// LIMITATION shared with the OpenCode adapter — this adapter targets the
-// resolved global dir plus the MIMOCODE_CONFIG file, the MIMOCODE_CONFIG_DIR
-// overlay, and MIMOCODE_CONFIG_CONTENT inline only.
+// (it would otherwise win the merge and silently mask the hub entry), and
+// RemoveEntry fails loud when a higher layer still retains the server after the
+// write-target delete (bot PR #420 r17 finding B4). The HOME ~/.mimocode dir IS
+// now detected by the shadow guard (resolvable from home alone — bot PR #420 r17
+// finding P1a). The PROJECT-root / project `.mimocode` overlay remains a documented
+// LIMITATION: the single-target hub adapter has no project/worktree context and the
+// shadowing project depends on the directory the operator later runs MiMoCode from
+// — see mimoCodeHigherLayerDefining's doc. This adapter targets the resolved global
+// dir plus the MIMOCODE_CONFIG file, the MIMOCODE_CONFIG_DIR overlay,
+// MIMOCODE_CONFIG_CONTENT inline, and the home ~/.mimocode dir; the managed config
+// dir + MDM are detect-and-fail-loud.
 //
 // Transport choice — HTTP-direct (NOT relay-stdio). Like OpenCode, MiMoCode
 // supports remote MCP servers natively over Streamable HTTP. A remote entry
@@ -160,6 +169,9 @@ import (
 // absence of a `command` key, which holds for MiMoCode's remote entry shape,
 // so demigrate/rollback recognize a hub-managed MiMoCode entry.
 func NewMimoCode() (Client, error) {
+	// home anchors the GLOBAL config-dir / write-target resolution. It uses
+	// os.UserHomeDir() to match MiMoCode's xdg-basedir ~/.config fallback, which
+	// resolves ~ via os.homedir() (NOT $HOME-first). This is unchanged by B6.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -173,12 +185,20 @@ func NewMimoCode() (Client, error) {
 		// #420 finding 5). The matrix renders the failed client as not-installed.
 		return nil, err
 	}
+	// claudeHome anchors the ~/.claude.json import AND the home ~/.mimocode shadow
+	// layer. It uses the MiMoCode Global.Path.home resolution (HOME || USERPROFILE
+	// || os.homedir() — mimoCodeClaudeImportHome), NOT os.UserHomeDir(), so a
+	// Windows host where HOME != USERPROFILE reads the SAME ~/.claude.json MiMoCode
+	// imports (bot PR #420 r17 finding B6). A resolution failure here is non-fatal:
+	// claudeHome stays "" → no import / no home-.mimocode shadow, never an error
+	// that fails the whole client construction.
+	claudeHome, _ := mimoCodeClaudeImportHome()
 	return newLockingClient(&mimoCodeClient{
 		path:          r.writeTarget,
 		configFile:    r.configFile,
 		overlayDir:    r.overlayDir,
 		inlineContent: r.inlineContent,
-		claudeHome:    home,
+		claudeHome:    claudeHome,
 	}), nil
 }
 
@@ -512,6 +532,35 @@ func mimoCodeHomeDir() (string, error) {
 	return v, nil
 }
 
+// mimoCodeClaudeImportHome resolves the OS home dir the ~/.claude.json import
+// (and the home ~/.mimocode shadow layer) anchors on, FAITHFULLY to MiMoCode's
+// Global.Path.home (global.ts:13-15 / 68):
+//
+//	process.env.HOME || process.env.USERPROFILE || os.homedir()
+//
+// This is the SINGLE owner of the claude-import home so both the live client
+// (NewMimoCode) and the scan side (mimoCodeClientForScanPath) read the SAME
+// ~/.claude.json MiMoCode itself would import (bot PR #420 r17 finding B6). It
+// MUST NOT use os.UserHomeDir() directly: on Windows os.UserHomeDir() returns
+// %USERPROFILE%, but MiMoCode prefers $HOME first. On a Git-Bash / MSYS host
+// where HOME != USERPROFILE, os.UserHomeDir() would read %USERPROFILE%\.claude.json
+// while MiMoCode reads $HOME\.claude.json → claude-import-only servers vanish from
+// the matrix and the re-emergence checks miss them.
+//
+// On POSIX os.UserHomeDir() already returns $HOME first, so the explicit HOME ->
+// USERPROFILE -> os.UserHomeDir() chain is a no-op refinement there and a
+// behavior fix only on Windows; keeping it uniform avoids an OS-specific branch.
+// Returns ("", err) only when none of the three resolve.
+func mimoCodeClaudeImportHome() (string, error) {
+	if h := os.Getenv("HOME"); h != "" {
+		return h, nil
+	}
+	if u := os.Getenv("USERPROFILE"); u != "" {
+		return u, nil
+	}
+	return os.UserHomeDir()
+}
+
 // defaultMimoCodeConfigPath returns the WRITE-target path for the resolved
 // config surface (the single file every WRITE + DELETE touches). Thin wrapper
 // over resolveMimoCodeConfig kept for the config-path test surface and any
@@ -753,12 +802,12 @@ func (o *mimoCodeClient) Restore(backupPath string) error {
 //     overlayDir empty, so this branch is doubly state-safe.)
 //   - Known global layer name (the live NewMimoCode write target, basename
 //     mimocode.json): return, lowest→highest —
-//       1. config.json + mimocode.json + mimocode.jsonc in o.path's own dir
-//          (the global getGlobal() layers, .jsonc winning);
-//       2. configFile (MIMOCODE_CONFIG), when set, ABOVE the global layers
-//          (bot PR #420 finding 1 — it merges on top, NOT a replacement);
-//       3. when overlayDir (MIMOCODE_CONFIG_DIR) is set, its mimocode.json +
-//          mimocode.jsonc appended LAST so the overlay wins per key.
+//     1. config.json + mimocode.json + mimocode.jsonc in o.path's own dir
+//     (the global getGlobal() layers, .jsonc winning);
+//     2. configFile (MIMOCODE_CONFIG), when set, ABOVE the global layers
+//     (bot PR #420 finding 1 — it merges on top, NOT a replacement);
+//     3. when overlayDir (MIMOCODE_CONFIG_DIR) is set, its mimocode.json +
+//     mimocode.jsonc appended LAST so the overlay wins per key.
 //
 // It never recomputes a directory from env/home beyond the configFile /
 // overlayDir already captured at construction; it stays inside dir(o.path) plus
@@ -864,16 +913,75 @@ func (e *ErrMimoCodeInlineContentShadowsServer) Error() string {
 // the hub's write target that defines mcp.<name>. Kind is "" when nothing
 // shadows; "inline" for the MIMOCODE_CONFIG_CONTENT layer (File is ""); "file"
 // for any file layer (File names it, Label describes it); "managed" for the
-// macOS Managed Preferences (MDM) layer (PlistFile names the plist).
+// macOS Managed Preferences (MDM) layer (PlistFile names the plist);
+// "managed-config-dir" for the cross-platform admin/system-deployed managed
+// config DIR layer (%ProgramData%\opencode | /Library/Application Support/opencode
+// | /etc/opencode) — File names the offending managed file (bot PR #420 r18
+// MEDIUM finding). The MDM and managed-config-dir kinds are DISTINCT because their
+// remediation surfaces differ: MDM points the operator at a Managed Preferences
+// PROFILE (macOS-only, plist), the managed config dir points at an actual editable
+// FILE present on every OS — conflating them told a Windows/Linux operator to
+// remove a non-existent MDM profile and omitted the real file path.
 type mimoCodeShadowSource struct {
-	Kind  string // "", "inline", "file", or "managed"
-	Label string // human label for the "file" kind
-	File  string // file path for the "file" kind
+	Kind  string // "", "inline", "file", "managed", or "managed-config-dir"
+	Label string // human label for the "file" / "managed-config-dir" kind
+	File  string // file path for the "file" / "managed-config-dir" kind
 
-	// PlistFile is the plist path for the "managed" kind. Separate from File so
-	// the managed branch can carry the MDM plist source without conflating it
-	// with the operator-editable "file" layers.
+	// PlistFile is the plist path for the "managed" (macOS MDM) kind. Separate
+	// from File so the managed branch can carry the MDM plist source without
+	// conflating it with the operator-editable "file" / "managed-config-dir"
+	// layers.
 	PlistFile string
+}
+
+// ErrMimoCodeHigherLayerRetainsServer is returned by RemoveEntry when, AFTER
+// deleting mcp.<Server> from the write target, the name STILL re-resolves from a
+// HIGHER layer the hub cannot remove (the MDM/managed layer, the
+// MIMOCODE_CONFIG_CONTENT inline string, the MIMOCODE_CONFIG_DIR overlay, the
+// MIMOCODE_CONFIG file, or the global mimocode.jsonc) (bot PR #420 r17 finding
+// B4). RemoveEntry deletes only the write target (deleteMember touches o.path
+// alone); a hub entry whose effective definition lives in a higher layer would
+// otherwise have the delete report success while MiMoCode keeps loading the
+// higher-layer value — a silent false success that makes a demigrate / uncheck
+// look done while the server stays live. The hub must not edit the operator's /
+// MDM's higher layer, so RemoveEntry fails loud: the operator removes the entry
+// in the shadowing layer named here. NOTE: re-emergence from a layer BELOW the
+// write target (config.json) or the ~/.claude.json import is the INTENDED
+// rollback behavior (the operator's prior re-emerges) and is NOT an error — only
+// a HIGHER (winning) layer triggers this.
+type ErrMimoCodeHigherLayerRetainsServer struct {
+	Server      string
+	WriteTarget string
+	Source      mimoCodeShadowSource // the higher layer that still defines the server
+}
+
+func (e *ErrMimoCodeHigherLayerRetainsServer) Error() string {
+	where := "a higher MiMoCode config layer"
+	switch e.Source.Kind {
+	case "managed":
+		where = "the macOS Managed Preferences (MDM) layer"
+		if e.Source.PlistFile != "" {
+			where = fmt.Sprintf("the macOS Managed Preferences (MDM) layer %q", e.Source.PlistFile)
+		}
+	case "managed-config-dir":
+		// The cross-platform managed config DIR layer (bot PR #420 r18 MEDIUM
+		// finding): name the actual editable file, NOT an MDM profile (which does
+		// not exist on Windows/Linux).
+		where = "the managed config dir"
+		if e.Source.File != "" {
+			where = fmt.Sprintf("the managed config dir (%s)", e.Source.File)
+		}
+	case "inline":
+		where = "the MIMOCODE_CONFIG_CONTENT inline config"
+	case "file":
+		if e.Source.File != "" {
+			where = fmt.Sprintf("%s (%s)", e.Source.Label, e.Source.File)
+		} else if e.Source.Label != "" {
+			where = e.Source.Label
+		}
+	}
+	return fmt.Sprintf("mimocode: removed server %q from the hub write target %q, but it is still defined in %s, which MiMoCode merges on top and wins — the entry remains active; remove mcp.%s from that layer to fully unregister it",
+		e.Server, e.WriteTarget, where, e.Server)
 }
 
 // mimoCodeManagedPrefsReader, when non-nil (tests only), replaces the production
@@ -906,6 +1014,33 @@ func (e *ErrMimoCodeManagedShadowsServer) Error() string {
 		where = fmt.Sprintf("the macOS Managed Preferences (MDM) layer %q", e.PlistFile)
 	}
 	return fmt.Sprintf("mimocode: server %q is already defined in %s, which MiMoCode merges on top of the hub's write target %q and wins — the hub entry would have no effect and the hub cannot write a managed (MDM-deployed) layer; remove mcp.%s from the managed configuration profile, then retry",
+		e.Server, where, e.WriteTarget, e.Server)
+}
+
+// ErrMimoCodeManagedConfigDirShadowsServer is returned by AddEntry when the
+// cross-platform MANAGED CONFIG DIR layer (%ProgramData%\opencode |
+// /Library/Application Support/opencode | /etc/opencode) already defines
+// mcp.<Server>. DISTINCT from the macOS MDM error (bot PR #420 r18 MEDIUM
+// finding): the offending source here is an actual editable FILE present on every
+// OS — NOT an MDM Managed-Preferences profile (which exists only on macOS). The
+// earlier code shared Kind:"managed" with the MDM path, so on Windows/Linux a
+// managed-config-dir shadow told the operator to "remove mcp.X from the managed
+// configuration profile" (a profile that does not exist there) and never named
+// the real file. This error names the actual File the operator must edit. It is
+// a read-only admin/system-deployed layer (config.ts:868-874), so the hub cannot
+// write it — the operator edits the named file directly.
+type ErrMimoCodeManagedConfigDirShadowsServer struct {
+	Server      string
+	WriteTarget string
+	File        string // the managed config-dir file that defines the server
+}
+
+func (e *ErrMimoCodeManagedConfigDirShadowsServer) Error() string {
+	where := "the managed config dir"
+	if e.File != "" {
+		where = fmt.Sprintf("the managed config dir file %q", e.File)
+	}
+	return fmt.Sprintf("mimocode: server %q is already defined in %s, which MiMoCode merges on top of the hub's write target %q and wins — the hub entry would have no effect and the hub cannot write an admin/system-deployed managed layer; remove mcp.%s from that file, then retry",
 		e.Server, where, e.WriteTarget, e.Server)
 }
 
@@ -978,8 +1113,129 @@ func mimoCodeReadManagedPrefs(name string) (mimoCodeShadowSource, error) {
 		if err != nil {
 			continue // unparseable converted JSON — warn-skip, treat as no shadow
 		}
-		if mimoCodeMapDefines(m, name) {
+		// SHADOW-AWARE (bot PR #420 r17 finding B5): an enabled-only:true managed
+		// override is not a shadow either — only a disabling/full-redefinition value
+		// overrides the hub write.
+		if mimoCodeMapShadows(m, name) {
 			return mimoCodeShadowSource{Kind: "managed", Label: "macOS Managed Preferences", PlistFile: plist}, nil
+		}
+	}
+	return mimoCodeShadowSource{}, nil
+}
+
+// mimoCodeManagedConfigDir resolves MiMoCode's MANAGED config DIRECTORY faithfully
+// to ConfigManaged.managedConfigDir (managed.ts:23-36, bot PR #420 r17 finding
+// P1b). It is a read-only system/admin-deployed layer MiMoCode merges ABOVE the
+// hub's write target (config.ts:868-874), below only the macOS MDM plist. Order:
+//
+//   - MIMOCODE_TEST_MANAGED_CONFIG_DIR (test override) wins when set (managed.ts:35).
+//   - win32  → %ProgramData%\opencode (default C:\ProgramData\opencode).
+//   - darwin → /Library/Application Support/opencode.
+//   - other  → /etc/opencode.
+//
+// NOTE the directory basename is "opencode", NOT "mimocode" — inherited verbatim
+// from the OpenCode upstream (same as the MDM plist DOMAIN "ai.opencode.managed"
+// already handled above). Do NOT "correct" it to mimocode.
+func mimoCodeManagedConfigDir() string {
+	if d := os.Getenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR"); d != "" {
+		return d
+	}
+	switch runtime.GOOS {
+	case "windows":
+		programData := os.Getenv("ProgramData")
+		if programData == "" {
+			programData = `C:\ProgramData`
+		}
+		return filepath.Join(programData, "opencode")
+	case "darwin":
+		return "/Library/Application Support/opencode"
+	default:
+		return "/etc/opencode"
+	}
+}
+
+// mimoCodeManagedConfigDirShadows is the DETECT-ONLY reader for the managed config
+// dir layer (bot PR #420 r17 finding P1b). It reports whether mimocode.json or
+// mimocode.jsonc in mimoCodeManagedConfigDir() defines a mcp.<name> VALUE that
+// SHADOWS the write target (mimoCodeMapShadows — shadow-aware per B5). It NEVER
+// writes the managed layer; it only detects so AddEntry/RemoveEntry can fail loud.
+//
+// PARSE-ERROR POSTURE — WARN-SKIP, matching the MDM plist precedent (bot PR #420
+// finding 3): an unparseable managed file on a corporate host must NOT make every
+// hub install on that host fail loud for a server the managed layer may not even
+// define. A managed shadow is raised ONLY by a SUCCESSFULLY-PARSED managed config
+// that actually defines the server. A missing dir / missing file is "no shadow".
+// (config.ts:869 existsSync gates the dir; mimocode.json then mimocode.jsonc are
+// both merged, .jsonc last = higher within the dir, so it is checked first here.)
+func mimoCodeManagedConfigDirShadows(name string) mimoCodeShadowSource {
+	dir := mimoCodeManagedConfigDir()
+	if dir == "" {
+		return mimoCodeShadowSource{}
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return mimoCodeShadowSource{} // absent / not a dir — no shadow (existsSync gate)
+	}
+	// Highest-within-dir first: mimocode.jsonc wins over mimocode.json.
+	for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
+		f := filepath.Join(dir, mimoCodeOverlayLayerNames[i])
+		data, err := readRawConfig(f)
+		if err != nil {
+			continue // unreadable managed file — warn-skip, treat as no shadow (MDM precedent)
+		}
+		if len(data) == 0 {
+			continue
+		}
+		m, err := parseJSONCBytes(data)
+		if err != nil {
+			continue // unparseable managed file — warn-skip, treat as no shadow
+		}
+		if mimoCodeMapShadows(m, name) {
+			// DISTINCT kind from the macOS MDM plist (bot PR #420 r18 MEDIUM
+			// finding): this is an editable managed FILE present on every OS, NOT an
+			// MDM profile. File carries the actual offending path so AddEntry /
+			// RemoveEntry / scan messages name the real file the operator edits.
+			return mimoCodeShadowSource{Kind: "managed-config-dir", Label: "managed config dir", File: f}
+		}
+	}
+	return mimoCodeShadowSource{}
+}
+
+// mimoCodeHomeMimocodeDirShadows is the DETECT reader for the HOME ~/.mimocode
+// directory layer (bot PR #420 r17 finding P1a). MiMoCode's ConfigPaths.directories
+// (paths.ts:36-40) unconditionally loads $HOME/.mimocode/{mimocode.json,
+// mimocode.jsonc} in the per-directory loop, which runs ABOVE the global write
+// target and the MIMOCODE_CONFIG file (config.ts:760, 773-783) — so a same-named
+// entry there shadows the hub write. UNLIKE the project .mimocode dirs (which need
+// project/worktree context the single-target hub adapter lacks — see the doc on
+// mimoCodeHigherLayerDefining), the HOME .mimocode dir is resolvable from home
+// alone (Global.Path.home = HOME || USERPROFILE || os.homedir() = claudeHome), so
+// it IS detected. Shadow-aware (mimoCodeMapShadows, B5). A parse error on a present
+// file propagates (a malformed home overlay must not be silently treated as "no
+// shadow"); a missing dir / missing file is "no shadow".
+//
+// State-safe: o.claudeHome is "" for direct/test construction and under the scan
+// test barrier (MIMOCODE_DISABLE_CLAUDE_CODE_MCP set), so this never reads the
+// developer's real ~/.mimocode there — the SAME gate the ~/.claude.json import uses.
+func (o *mimoCodeClient) mimoCodeHomeMimocodeDirShadows(name string) (mimoCodeShadowSource, error) {
+	if o.claudeHome == "" {
+		return mimoCodeShadowSource{}, nil
+	}
+	dir := filepath.Join(o.claudeHome, ".mimocode")
+	// Highest-within-dir first: mimocode.jsonc wins over mimocode.json.
+	for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
+		f := filepath.Join(dir, mimoCodeOverlayLayerNames[i])
+		// Skip a file physically identical to the write target (defensive — the home
+		// .mimocode dir is normally distinct from the global config dir, but a
+		// symlink / case variant could collide); editing o.path is what takes effect.
+		if mimoCodePathsSamePhysical(f, o.path) {
+			continue
+		}
+		shadows, err := mimoCodeFileShadows(f, name)
+		if err != nil {
+			return mimoCodeShadowSource{}, err
+		}
+		if shadows {
+			return mimoCodeShadowSource{Kind: "file", Label: "home .mimocode dir", File: f}, nil
 		}
 	}
 	return mimoCodeShadowSource{}, nil
@@ -988,21 +1244,62 @@ func mimoCodeReadManagedPrefs(name string) (mimoCodeShadowSource, error) {
 // mimoCodeHigherLayerDefining walks every READ layer ABOVE the hub's global
 // write target (mimocode.json) from HIGHEST precedence DOWN and returns the
 // FIRST that defines mcp.<name> — i.e. the layer that actually wins the merge,
-// the one the operator must edit to un-shadow. Order (highest→lowest):
+// the one the operator must edit to un-shadow. Order (highest→lowest), matching
+// the verified config.ts merge precedence:
 //
 //  1. macOS Managed Preferences (MDM) — read-only, "override everything"
+//     1b. managed config dir (%ProgramData%\opencode | /Library/Application Support/
+//     opencode | /etc/opencode) — read-only admin/system layer (config.ts:868-874)
 //  2. MIMOCODE_CONFIG_CONTENT inline string
 //  3. MIMOCODE_CONFIG_DIR overlay: mimocode.jsonc then mimocode.json
+//     3b. HOME ~/.mimocode dir: mimocode.jsonc then mimocode.json (config.ts:773-783)
 //  4. MIMOCODE_CONFIG file
 //  5. global higher layer mimocode.jsonc (sibling of the write target)
+//
+// SHADOW-AWARE (bot PR #420 r17 finding B5): a layer "shadows" only when its
+// mcp.<name> VALUE actually overrides the write target — a FULL redefinition or a
+// DISABLING (enabled:false) overlay (mimoCodeValueShadowsWriteTarget). An
+// enabled-only:TRUE overlay is NOT a shadow (it overlays just the flag; the lower
+// write-target content still supplies the url/command, so the hub write IS
+// effective).
 //
 // config.json and the write-target mimocode.json itself are BELOW the write
 // target / are the write target, so they cannot shadow and are not checked. It
 // reads ONLY the explicit configFile / overlayDir / inlineContent captured at
-// construction plus the write target's own dir (state-safe — never recomputes a
-// dir from env/home). A parse error on a present layer propagates (a malformed
-// higher layer must not be silently treated as "no shadow" — that would
-// re-introduce the silent-false-success this guards).
+// construction, the write target's own dir, the home ~/.mimocode dir (via the
+// state-safe claudeHome), and the managed config dir (state-safe — never recomputes
+// a project dir from env/home). A parse error on a present operator-editable layer
+// propagates (a malformed higher layer must not be silently treated as "no shadow"
+// — that would re-introduce the silent-false-success this guards); the read-only
+// managed layers (MDM plist, managed config dir) warn-skip an unparseable file
+// instead (finding 3 precedent — a broken corporate managed file must not fail
+// every install on the host).
+//
+// DOCUMENTED UN-DETECTABLE SHADOW LAYERS (bot PR #420 r17 findings P1a + P1b).
+// MiMoCode loads two more layer classes ABOVE the hub write target that the
+// single-target hub adapter CANNOT check, so it does NOT claim to and the
+// limitation is documented (not silently treated as "no shadow"):
+//
+//   - PROJECT layers — project-root mimocode.json(c) found walking up from a run
+//     directory to its worktree (config.ts:750-754, paths.ts:12-23) and project
+//     `.mimocode/` dirs (config.ts:773-783, paths.ts:25-43). The hub adapter has NO
+//     project/worktree context (it is a single-target GLOBAL writer invoked from
+//     CLI install/register and the GUI migrate/demigrate routes, none of which carry
+//     a project directory), and which project shadows depends on the directory the
+//     operator later runs MiMoCode from — an unbounded set. So a project-layer shadow
+//     is genuinely un-decidable here. (The HOME ~/.mimocode dir, step 3b, IS
+//     resolvable from home alone and therefore IS detected — distinct from project
+//     dirs.)
+//   - ORG-ACCOUNT config — fetched from <account.url>/api/config when MiMoCode has an
+//     active account with an organization (config.ts:832-866). Detecting it would
+//     require MiMoCode's private auth/account state (no hub access) AND a per-operation
+//     authenticated NETWORK call the hub deliberately does not make. It is itself
+//     best-effort upstream (catch-and-continue on fetch failure).
+//
+// If a hub-registered server does not appear in MiMoCode under a given project or an
+// org-managed profile, the operator checks that project's mimocode.json(c) / .mimocode
+// dir, or the org console config, for a same-named mcp.<server> override. This is a
+// documented limitation, NOT a silent success.
 //
 // The ~/.claude.json MCP import is deliberately NOT a shadow source here, even
 // though config.ts merges it ABOVE everything (887-890): it is SKIP-IF-NAME-EXISTS
@@ -1020,13 +1317,25 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 	} else if src.Kind != "" {
 		return src, nil
 	}
-	// 2. Inline content.
+	// 1b. Managed config dir (bot PR #420 r17 finding P1b) — a read-only
+	// system/admin-deployed layer MiMoCode merges directly BELOW the MDM plist and
+	// ABOVE everything the hub checks (config.ts:868-874). Detect-only; warn-skip on
+	// an unparseable managed file (MDM precedent). %ProgramData%\opencode (win),
+	// /Library/Application Support/opencode (darwin), /etc/opencode (linux), or
+	// MIMOCODE_TEST_MANAGED_CONFIG_DIR.
+	if src := mimoCodeManagedConfigDirShadows(name); src.Kind != "" {
+		return src, nil
+	}
+	// 2. Inline content. SHADOW-AWARE (bot PR #420 r17 finding B5): an
+	// enabled-only:true overlay is NOT a shadow (it overlays the flag and lets the
+	// lower write-target content win), so use mimoCodeInlineShadows, not bare
+	// name-presence.
 	if o.inlineContent != "" {
-		defined, err := mimoCodeInlineDefines(o.inlineContent, name)
+		shadows, err := mimoCodeInlineShadows(o.inlineContent, name)
 		if err != nil {
 			return mimoCodeShadowSource{}, err
 		}
-		if defined {
+		if shadows {
 			return mimoCodeShadowSource{Kind: "inline"}, nil
 		}
 	}
@@ -1043,14 +1352,23 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 			if mimoCodePathsSamePhysical(f, o.path) {
 				continue
 			}
-			defined, err := mimoCodeFileDefines(f, name)
+			shadows, err := mimoCodeFileShadows(f, name)
 			if err != nil {
 				return mimoCodeShadowSource{}, err
 			}
-			if defined {
+			if shadows {
 				return mimoCodeShadowSource{Kind: "file", Label: "MIMOCODE_CONFIG_DIR overlay", File: f}, nil
 			}
 		}
+	}
+	// 3b. HOME ~/.mimocode dir (bot PR #420 r17 finding P1a) — loaded in the same
+	// per-directory loop as the MIMOCODE_CONFIG_DIR overlay (config.ts:773-783), so
+	// it shares that precedence band (above the MIMOCODE_CONFIG file). Resolvable
+	// from home alone (the project .mimocode dirs are NOT — see the doc); shadow-aware.
+	if src, err := o.mimoCodeHomeMimocodeDirShadows(name); err != nil {
+		return mimoCodeShadowSource{}, err
+	} else if src.Kind != "" {
+		return src, nil
 	}
 	// 4. MIMOCODE_CONFIG file — but NOT when it points at the write target itself
 	// (bot PR #420). When MIMOCODE_CONFIG resolves to o.path (e.g. set to the
@@ -1062,22 +1380,22 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 	// mimoCodePathsSamePhysical) so a symlinked / case-variant / "./x/.."-spelled
 	// configFile does not slip past a plain Clean compare.
 	if o.configFile != "" && !mimoCodePathsSamePhysical(o.configFile, o.path) {
-		defined, err := mimoCodeFileDefines(o.configFile, name)
+		shadows, err := mimoCodeFileShadows(o.configFile, name)
 		if err != nil {
 			return mimoCodeShadowSource{}, err
 		}
-		if defined {
+		if shadows {
 			return mimoCodeShadowSource{Kind: "file", Label: "MIMOCODE_CONFIG file", File: o.configFile}, nil
 		}
 	}
 	// 5. global higher layer mimocode.jsonc (sibling of the write target).
 	jsonc := filepath.Join(filepath.Dir(o.path), "mimocode.jsonc")
 	if !mimoCodePathsSamePhysical(jsonc, o.path) { // never treat the write target itself as a shadow
-		defined, err := mimoCodeFileDefines(jsonc, name)
+		shadows, err := mimoCodeFileShadows(jsonc, name)
 		if err != nil {
 			return mimoCodeShadowSource{}, err
 		}
-		if defined {
+		if shadows {
 			return mimoCodeShadowSource{Kind: "file", Label: "global higher layer", File: jsonc}, nil
 		}
 	}
@@ -1280,9 +1598,9 @@ const mimoCodeDisableClaudeImportEnv = MimoCodeDisableClaudeImportEnv
 
 // claudeJSONPath returns the ~/.claude.json path the import reads, or "" when no
 // claudeHome was captured (direct/test construction → state-safe no import).
-// MiMoCode anchors this on the OS home (config.ts:888 `Global.Path.home` =
-// process.env.HOME || USERPROFILE), NOT MIMOCODE_HOME, so claudeHome holds the
-// OS home dir.
+// MiMoCode anchors this on Global.Path.home (config.ts:888 = process.env.HOME ||
+// USERPROFILE || os.homedir()), NOT MIMOCODE_HOME, so claudeHome holds that home
+// dir as resolved by mimoCodeClaudeImportHome (HOME-first, the B6 fix).
 func (o *mimoCodeClient) claudeJSONPath() string {
 	if o.claudeHome == "" {
 		return ""
@@ -1695,6 +2013,94 @@ func mimoCodeIsEnabledOnlyOverride(entry map[string]any) bool {
 	return true
 }
 
+// mimoCodeValueShadowsWriteTarget reports whether a higher-layer mcp.<name>
+// VALUE actually SHADOWS (overrides the resolved server identity of) the hub's
+// lower write-target entry — the precise predicate the AddEntry shadow guard
+// needs (bot PR #420 r17 finding B5). Bare name-presence (mimoCodeMapDefines) is
+// NOT the right test: MiMoCode merges an enabled-ONLY higher override by OVERLAYING
+// just `enabled` onto the lower full entry (mimoCodeMergeMCPEntry /
+// mimoCodeDeepMerge), so the lower write-target entry STILL supplies the
+// type/command/url — the hub's write IS effective. Only two higher-layer shapes
+// truly shadow:
+//
+//   - a DISABLING enabled-only override (enabled:false) — it overlays enabled:false
+//     onto the hub's entry, so the server merges to disabled and the hub's write
+//     has no effect (the operator must remove/flip the higher override); AND
+//   - a FULL redefinition carrying any of type/command/url — it REPLACES the
+//     entry wholesale (replace-by-name), so the hub's write is fully overridden.
+//
+// An enabled-only override with enabled:TRUE (or any enabled-only shape that is
+// not the disabling form) does NOT shadow: it just re-affirms/overlays the flag
+// while the lower write-target content wins. A non-map value (a malformed
+// scalar/array at mcp.<name>) is treated as a FULL redefinition (it replaces the
+// entry and is not an enabled-only overlay) → shadows, fail-loud (the operator
+// has an un-mergeable higher value the hub cannot reconcile).
+func mimoCodeValueShadowsWriteTarget(value any) bool {
+	entry, ok := value.(map[string]any)
+	if !ok {
+		// Non-object higher value (scalar / array / null). It is not an
+		// enabled-only overlay, so the merge replaces the write target wholesale →
+		// the hub write would have no effect → shadow.
+		return true
+	}
+	if mimoCodeIsEnabledOnlyOverride(entry) {
+		// Enabled-only overlay: shadows ONLY when it disables (enabled:false). An
+		// enabled:true overlay overlays the flag and lets the lower write-target
+		// content win, so the hub write is effective — NOT a shadow.
+		enabled, _ := entry["enabled"].(bool) // bool by mimoCodeIsEnabledOnlyOverride's gate
+		return !enabled
+	}
+	// Full redefinition (carries type/command/url, or any non-enabled-only shape):
+	// replace-by-name → the hub write is overridden → shadow.
+	return true
+}
+
+// mimoCodeFileShadows reports whether the JSONC file at path defines a mcp.<name>
+// VALUE that SHADOWS the hub write target (mimoCodeValueShadowsWriteTarget). This
+// is the shadow-walk variant of mimoCodeFileDefines (which tests bare name
+// presence): the same read+parse, but the shape-aware shadow verdict (bot PR #420
+// r17 finding B5). A missing/empty file → false; a parse error on present bytes
+// propagates.
+func mimoCodeFileShadows(path, name string) (bool, error) {
+	data, err := readRawConfig(path)
+	if err != nil {
+		return false, err
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	m, err := parseJSONCBytes(data)
+	if err != nil {
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return mimoCodeMapShadows(m, name), nil
+}
+
+// mimoCodeInlineShadows is the inline-string analog of mimoCodeFileShadows for
+// the MIMOCODE_CONFIG_CONTENT layer. A parse error propagates.
+func mimoCodeInlineShadows(content, name string) (bool, error) {
+	m, err := parseJSONCBytes([]byte(content))
+	if err != nil {
+		return false, fmt.Errorf("parse MIMOCODE_CONFIG_CONTENT: %w", err)
+	}
+	return mimoCodeMapShadows(m, name), nil
+}
+
+// mimoCodeMapShadows reports whether a parsed config map carries a mcp.<name>
+// value that SHADOWS the hub write target — name present AND its value shadows
+// (mimoCodeValueShadowsWriteTarget). An absent name does not shadow.
+func mimoCodeMapShadows(m map[string]any, name string) bool {
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		return false
+	}
+	value, present := servers[name]
+	if !present {
+		return false
+	}
+	return mimoCodeValueShadowsWriteTarget(value)
+}
+
 // readJSON returns the deep-merged view across the resolved READ layer files.
 // Used by GetEntry / AllStdioEntries / FindStdioLanguageServerEntries.
 func (o *mimoCodeClient) readJSON() (map[string]any, error) {
@@ -1756,22 +2162,31 @@ func MimoCodeReadLayerPaths(path string) []string {
 // scan side uses this to surface a PER-CLIENT config-error presence (and skip
 // scanMimoCode) instead, so a bad mimo layer can never take the whole scan down.
 //
-// os.Lstat (NOT Stat) so a SYMLINK layer is classified as non-regular here
-// rather than followed — consistent with the readRawConfig failure a symlinked
-// or non-regular layer would produce. A stat error other than IsNotExist
-// (permission, I/O fault) on an existing layer is ALSO a fault (returns that
-// path, true): the merged read would fail on it identically.
+// os.Stat (FOLLOW symlinks — NOT Lstat) so this fault classifier matches the
+// actual reader EXACTLY (bot PR #420 r17 finding B3). The merged read goes
+// through readRawConfig → os.ReadFile, which FOLLOWS a symlink to its target,
+// so a layer that is a symlink RESOLVING TO A REGULAR FILE reads fine and is NOT
+// a fault — Lstat wrongly classified it as non-regular, downgraded the client to
+// config-error, and made valid servers vanish from the matrix. The hub never
+// writes these layers, so a symlinked-to-regular layer is a legitimate operator
+// setup. A layer is a fault ONLY when it FAILS to resolve to a regular file:
+//   - os.Stat IsNotExist (absent file OR a DANGLING symlink whose target is
+//     missing) → skip; readRawConfig returns (nil, nil) there too — not a fault.
+//   - os.Stat other error (permission, I/O fault, symlink → directory which
+//     surfaces as "is a directory") → fault; readRawConfig would fail identically.
+//   - os.Stat success but !IsRegular (a real directory / FIFO / device, or a
+//     symlink resolving to one) → fault; readRawConfig would fail reading it.
 func MimoCodeNonRegularActiveLayer(path string) (string, bool) {
 	for _, f := range MimoCodeReadLayerPaths(path) {
-		st, err := os.Lstat(f)
+		st, err := os.Stat(f)
 		if err != nil {
 			if os.IsNotExist(err) {
-				continue // absent layer — skipped in the merge, not a fault
+				continue // absent file or dangling symlink — readRawConfig returns nil,nil; not a fault
 			}
 			return f, true // unreadable existing layer — merged read would fail
 		}
 		if !st.Mode().IsRegular() {
-			return f, true // directory / FIFO / device / symlink — merged read would fail
+			return f, true // directory / FIFO / device (or a symlink to one) — merged read would fail
 		}
 	}
 	return "", false
@@ -1881,29 +2296,33 @@ func MimoCodeHasClaudeImport(path string) bool {
 // Single owner of the scan-side path→resolution mapping so the merged-read and the
 // layer-path probe never diverge.
 //
-// claudeHome is the OS home dir (os.UserHomeDir → $HOME / $USERPROFILE), matching
-// MiMoCode's Global.Path.home (config.ts:888); it lets the scan side see the same
-// ~/.claude.json-imported servers the adapter does (bot PR #420 finding 3). A
-// home-resolution failure is non-fatal here (claudeHome stays "" → no import), so
-// a scan still works on a host with no resolvable home.
+// claudeHome is the home dir resolved by mimoCodeClaudeImportHome (HOME ||
+// USERPROFILE || os.homedir()), matching MiMoCode's Global.Path.home
+// (config.ts:888); it lets the scan side see the same ~/.claude.json-imported
+// servers the adapter does (bot PR #420 finding 3, r17 finding B6 — HOME-first on
+// Windows). A home-resolution failure is non-fatal here (claudeHome stays "" → no
+// import), so a scan still works on a host with no resolvable home.
 func mimoCodeClientForScanPath(path string) *mimoCodeClient {
 	if !mimoCodeIsGlobalLayerName(filepath.Base(path)) {
 		// Explicit/temp override — state-safe single-file, no env-resolved layers.
 		return &mimoCodeClient{path: path}
 	}
 	// State-safety: the ~/.claude.json import reads $HOME / $USERPROFILE via
-	// os.UserHomeDir(), an ambient input the MIMOCODE_* env isolation does NOT
-	// clear. Gate the home resolution on the SAME flag that disables the import in
-	// production (MIMOCODE_DISABLE_CLAUDE_CODE_MCP): when it is set, claudeHome
+	// mimoCodeClaudeImportHome, an ambient input the MIMOCODE_* env isolation does
+	// NOT clear. Gate the home resolution on the SAME flag that disables the import
+	// in production (MIMOCODE_DISABLE_CLAUDE_CODE_MCP): when it is set, claudeHome
 	// stays "" → no import. isolateMimoCodeEnv sets this flag truthy by default, so
 	// a scan/merge through a global-layer-named TEMP path under the standard test
 	// barrier never reaches the developer's real ~/.claude.json. Production
-	// (flag unset) resolves the OS home exactly as before — claudeImportEntries
-	// re-checks the same flag, so behavior for real operators is unchanged. A
-	// home-resolution failure is non-fatal (claudeHome stays "" → no import).
+	// (flag unset) resolves the home as Global.Path.home (HOME || USERPROFILE ||
+	// os.homedir()) — the SAME ~/.claude.json MiMoCode imports, so the scan sees
+	// the same servers on a Windows HOME != USERPROFILE host (bot PR #420 r17
+	// finding B6). claudeImportEntries re-checks the same flag, so behavior for
+	// real operators is unchanged. A home-resolution failure is non-fatal
+	// (claudeHome stays "" → no import).
 	claudeHome := ""
 	if os.Getenv(mimoCodeDisableClaudeImportEnv) == "" {
-		claudeHome, _ = os.UserHomeDir()
+		claudeHome, _ = mimoCodeClaudeImportHome()
 	}
 	return &mimoCodeClient{
 		path:          path,
@@ -1977,6 +2396,16 @@ func (o *mimoCodeClient) AddEntry(entry MCPEntry) error {
 			WriteTarget: o.path,
 			PlistFile:   shadow.PlistFile,
 		}
+	} else if shadow.Kind == "managed-config-dir" {
+		// Cross-platform managed config DIR (bot PR #420 r18 MEDIUM finding) — an
+		// editable admin/system-deployed FILE, read-only to the hub. DISTINCT from
+		// the MDM error so a Windows/Linux operator sees the real file path, not a
+		// "remove your MDM profile" message for a profile that does not exist there.
+		return &ErrMimoCodeManagedConfigDirShadowsServer{
+			Server:      entry.Name,
+			WriteTarget: o.path,
+			File:        shadow.File,
+		}
 	} else if shadow.Kind == "inline" {
 		return &ErrMimoCodeInlineContentShadowsServer{Server: entry.Name, WriteTarget: o.path}
 	} else if shadow.Kind == "file" {
@@ -2003,8 +2432,53 @@ func (o *mimoCodeClient) AddEntry(entry MCPEntry) error {
 }
 
 func (o *mimoCodeClient) RemoveEntry(name string) error {
+	// Snapshot whether the write target itself physically held mcp.<name> BEFORE
+	// the delete (bot PR #420 r17 finding B4). The higher-layer-retention guard
+	// below must fire ONLY when the hub actually removed a write-target value the
+	// caller believed it owned — not when the delete was a no-op against a name the
+	// hub never wrote to the write target (e.g. AddEntry was shadow-refused, so the
+	// install never wrote it, and a later rollback RemoveEntry must stay a clean
+	// no-op rather than fail on the operator's pre-existing higher-layer entry).
+	_, hadOwnValue, ownErr := mimoCodeFileEntryValue(o.path, name)
+	if ownErr != nil {
+		return ownErr
+	}
 	// Comment-preserving delete on the top write layer only; absence is a no-op.
-	return o.deleteMember(name)
+	if err := o.deleteMember(name); err != nil {
+		return err
+	}
+	if !hadOwnValue {
+		// No-op delete: the write target never defined the name, so the hub removed
+		// nothing of its own. Any higher-layer definition is the operator's, not a
+		// false-success of the hub's removal — return cleanly (idempotent).
+		return nil
+	}
+	// Higher-layer-retention guard (bot PR #420 r17 finding B4). deleteMember
+	// touched only the write target (o.path). If the server is ALSO defined in a
+	// HIGHER layer the hub cannot remove (MDM/managed, inline, overlay,
+	// MIMOCODE_CONFIG, or global mimocode.jsonc), MiMoCode merges that layer on top
+	// and keeps loading the server — so the delete "succeeded" yet the entry stays
+	// live (a demigrate / uncheck-via-hub would falsely report success). Fail loud
+	// naming the shadowing layer the operator must edit. A re-emergence from a layer
+	// BELOW the write target (config.json) or from the ~/.claude.json import is the
+	// INTENDED rollback behavior (the operator's prior re-emerges) and is excluded
+	// by mimoCodeHigherLayerDefining, so only a winning higher layer triggers this.
+	//
+	// Shadow-aware (post-B5): an enabled-only:true overlay does NOT count (it is not
+	// a winning server-defining layer once the write target is gone), so an operator
+	// with only such an overlay can still cleanly remove.
+	shadow, err := o.mimoCodeHigherLayerDefining(name)
+	if err != nil {
+		return err
+	}
+	if shadow.Kind != "" {
+		return &ErrMimoCodeHigherLayerRetainsServer{
+			Server:      name,
+			WriteTarget: o.path,
+			Source:      shadow,
+		}
+	}
+	return nil
 }
 
 // mimoCodeHubRemoteShapeKeys are the ONLY keys the hub's AddEntry remote-HTTP
@@ -2094,6 +2568,15 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 //   - HIGHER layers (MDM, inline, MIMOCODE_CONFIG_DIR overlay, MIMOCODE_CONFIG
 //     file, global mimocode.jsonc) → mimoCodeHigherLayerDefining(name). It already
 //     excludes the write target and the claude import, exactly what is needed here.
+//     Post-B5 (bot PR #420 r17) this check is SHADOW-aware: it returns a hit when a
+//     higher layer re-emerges an EFFECTIVE server — a full entry OR a DISABLING
+//     (enabled:false) overlay — and a MISS for an enabled-only:TRUE overlay (a bare
+//     {enabled:true} stub is not a server: with the write target gone it leaves no
+//     loadable command/url, so the destructive cleanup did clear the effective
+//     entry). This is the CORRECT re-resolution semantics: a disabled FULL entry
+//     ({type,url,enabled:false}) still has type/url → it is a full redefinition →
+//     it shadows → it counts (see "DISABLED ENTRIES COUNT" below); only the
+//     content-less enabled-only:true stub is (rightly) excluded.
 //   - The config.json layer strictly BELOW the write target → mimoCodeFileDefines.
 //     A name present ONLY there re-emerges after the write-target removal, so it
 //     must count.
@@ -2110,15 +2593,19 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 //     RemoveEntry did not clear the name, so name presence in the converted import
 //     — not its shape — is the right test.
 //
-// DISABLED ENTRIES COUNT. The membership primitives test raw name presence and do
-// NOT drop enabled:false (unlike the matcher path, which drops disabled before
-// shape-matching). That asymmetry is intentional and correct: the question is "is
-// mcp.<name> still PRESENT in the merged map after removal", not "is it still an
-// active stdio-LSP". A disabled definition in another layer still leaves the key
-// present (the deep-merge keeps it), so the destructive removal did not clear the
-// name → decline. Declining is the conservative side (the operator resolves the
-// ambiguous cross-layer entry manually); reporting-and-deleting on the false
-// belief that the name is gone is the bug this guards.
+// DISABLED ENTRIES COUNT. A disabled FULL entry ({type/command/url, enabled:false})
+// in another layer still re-emerges a server-shaped key (just disabled), so it
+// counts → decline. The config.json-below and claude-import checks test raw name
+// presence (mimoCodeFileDefines / claudeImportEntries) and do NOT drop enabled:false,
+// and the higher-layer shadow check counts a disabled FULL entry (full redefinition).
+// The ONE shape that does NOT count is a content-less enabled-only:TRUE overlay in a
+// higher layer (post-B5): a bare {enabled:true} with no command/url is not a server,
+// so after the write-target removal nothing loadable re-emerges from it — the
+// destructive removal genuinely cleared the effective entry. The question is "does
+// mcp.<name> re-emerge an EFFECTIVE entry after removal", not "is it still an active
+// stdio-LSP". Declining is the conservative side (the operator resolves the
+// ambiguous cross-layer entry manually); reporting-and-deleting on the false belief
+// that the name is gone is the bug this guards.
 //
 // State-safe: in the explicit/temp single-file mode mimoCodeHigherLayerDefining
 // reads only the explicit configFile/overlayDir/inline captured at construction
