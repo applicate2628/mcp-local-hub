@@ -857,7 +857,7 @@ func TestMimoCode_ExplicitPath_NoSiblingMerge(t *testing.T) {
 	if err := os.WriteFile(explicit, []byte(`{"mcp":{"chosen":{"type":"remote","url":"http://chosen/mcp","enabled":true}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	layers := mimoCodeReadLayerFiles(explicit, "")
+	layers := mimoCodeReadLayerFiles(explicit, "", false)
 	if len(layers) != 1 || layers[0] != explicit {
 		t.Fatalf("explicit override must resolve to exactly [%q], got %v", explicit, layers)
 	}
@@ -1097,4 +1097,213 @@ func TestMimoCode_NoWindowsAppDataConvention(t *testing.T) {
 	if !strings.HasSuffix(got, filepath.Join(".config", "mimocode", "mimocode.json")) {
 		t.Errorf("path must end in .config/mimocode/mimocode.json on %s, got %q", runtime.GOOS, got)
 	}
+}
+
+// TestMimoCode_FileOverride_KnownLayerName pins bot PR #420 finding 1: a
+// MIMOCODE_CONFIG file-override whose basename is a KNOWN global layer name
+// (mimocode.json/.jsonc/config.json) must still be single-file — the read path
+// consults the fileOverride FLAG threaded from resolveMimoCodeConfig, NOT the
+// basename. Pre-fix the basename heuristic re-inferred override-OFF for such a
+// file and merged siblings + the overlay, breaking the verbatim-single-file
+// contract.
+func TestMimoCode_FileOverride_KnownLayerName(t *testing.T) {
+	for _, base := range []string{"mimocode.json", "mimocode.jsonc", "config.json"} {
+		t.Run(base, func(t *testing.T) {
+			isolateMimoCodeEnv(t)
+			dir := t.TempDir()
+			overlay := t.TempDir()
+			// The pinned override file is named like a global layer.
+			pinned := filepath.Join(dir, base)
+			if err := os.WriteFile(pinned,
+				[]byte(`{"mcp":{"chosen":{"type":"remote","url":"http://chosen/mcp","enabled":true}}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// A genuine SIBLING global layer in the same dir that must NOT be merged.
+			sibling := filepath.Join(dir, "mimocode.jsonc")
+			if base != "mimocode.jsonc" {
+				if err := os.WriteFile(sibling,
+					[]byte(`{"mcp":{"sibling":{"type":"remote","url":"http://sibling/mcp","enabled":true}}}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// An overlay entry that must NOT be read in file-override mode.
+			if err := os.WriteFile(filepath.Join(overlay, "mimocode.json"),
+				[]byte(`{"mcp":{"overlay":{"type":"remote","url":"http://overlay/mcp","enabled":true}}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("MIMOCODE_CONFIG", pinned)
+			t.Setenv("MIMOCODE_CONFIG_DIR", overlay)
+
+			r := resolveMimoCodeConfig(filepath.Join("home", "u"))
+			if !r.fileOverride || r.writeTarget != pinned || r.overlayDir != "" {
+				t.Fatalf("resolution wrong: %+v (want fileOverride=true, writeTarget=%q, overlay empty)", r, pinned)
+			}
+			o := &mimoCodeClient{path: r.writeTarget, overlayDir: r.overlayDir, fileOverride: r.fileOverride}
+
+			// Authoritative single-file read set even though basename is a layer name.
+			if layers := o.readLayerFiles(); len(layers) != 1 || layers[0] != pinned {
+				t.Fatalf("file-override read set must be exactly the pinned file, got %v", layers)
+			}
+			if e, _ := o.GetEntry("chosen"); e == nil {
+				t.Error("the pinned file's own entry must be visible")
+			}
+			if base != "mimocode.jsonc" {
+				if e, _ := o.GetEntry("sibling"); e != nil {
+					t.Errorf("sibling layer must NOT be merged in file-override mode (basename=%s): %+v", base, e)
+				}
+			}
+			if e, _ := o.GetEntry("overlay"); e != nil {
+				t.Errorf("overlay must NOT be read in file-override mode (basename=%s): %+v", base, e)
+			}
+		})
+	}
+}
+
+// TestMimoCode_FindStdioLanguageServerEntries_SkipsDisabled pins bot PR #420
+// finding 3: a disabled (enabled:false) mcp-language-server entry must NOT be
+// reported by the LSP-cleanup scan — MiMoCode never spawns it, so
+// `language-server cleanup` must not remove it. An active entry alongside it is
+// still found (proving the filter is per-entry, not all-or-nothing).
+func TestMimoCode_FindStdioLanguageServerEntries_SkipsDisabled(t *testing.T) {
+	o := newMimoCodeForTest(t, `{
+  "mcp": {
+    "go-ls": {"type": "local", "command": ["mcp-language-server", "--lsp", "go"], "enabled": true},
+    "rust-ls-off": {"type": "local", "command": ["mcp-language-server", "--lsp", "rust"], "enabled": false}
+  }
+}`)
+	ls, err := o.FindStdioLanguageServerEntries()
+	if err != nil {
+		t.Fatalf("FindStdioLanguageServerEntries: %v", err)
+	}
+	names := map[string]bool{}
+	for _, e := range ls {
+		names[e.Name] = true
+	}
+	if !names["go-ls"] {
+		t.Errorf("active LSP entry must still be found: got %v", names)
+	}
+	if names["rust-ls-off"] {
+		t.Errorf("disabled (enabled:false) LSP entry must NOT be reported for cleanup: got %v", names)
+	}
+}
+
+// TestMimoCode_DisabledURLEntry_RollbackStaysDisabled pins bot PR #420 finding
+// 5: a pre-existing URL entry with enabled:false must round-trip through
+// GetEntry → AddEntry(*prior) WITHOUT being re-enabled. GetEntry carries the
+// verbatim entry in Raw (URL left empty) so the rollback writes it back
+// byte-shaped (enabled:false preserved), instead of the normal install path
+// hardcoding enabled:true.
+func TestMimoCode_DisabledURLEntry_RollbackStaysDisabled(t *testing.T) {
+	o := newMimoCodeForTest(t, `{"mcp":{"disabled-remote":{"type":"remote","url":"https://api.example.com/mcp","enabled":false}}}`)
+
+	prior, err := o.GetEntry("disabled-remote")
+	if err != nil || prior == nil {
+		t.Fatalf("GetEntry: prior=%+v err=%v", prior, err)
+	}
+	// A disabled URL entry must be carried via Raw (URL left empty) so AddEntry
+	// writes it verbatim rather than re-projecting it to enabled:true.
+	if prior.Raw == nil {
+		t.Fatalf("disabled URL entry must carry Raw for verbatim rollback, got %+v", prior)
+	}
+	// Simulate the install-rollback restore.
+	if err := o.AddEntry(*prior); err != nil {
+		t.Fatalf("AddEntry(*prior): %v", err)
+	}
+	raw, _ := os.ReadFile(o.path)
+	m, err := parseJSONCBytes(raw)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	ent, _ := servers["disabled-remote"].(map[string]any)
+	if ent == nil {
+		t.Fatalf("entry missing after rollback: %s", raw)
+	}
+	if enabled, _ := ent["enabled"].(bool); enabled {
+		t.Errorf("rollback RE-ENABLED a disabled URL entry: enabled=%v, raw=%s", ent["enabled"], raw)
+	}
+	if got, _ := ent["url"].(string); got != "https://api.example.com/mcp" {
+		t.Errorf("url not preserved through rollback: got %q", got)
+	}
+	// An ENABLED URL entry still takes the lean {URL} path (Raw nil) — polarity unchanged.
+	o2 := newMimoCodeForTest(t, `{"mcp":{"on-remote":{"type":"remote","url":"https://api.example.com/mcp","enabled":true}}}`)
+	if e, _ := o2.GetEntry("on-remote"); e == nil || e.Raw != nil || e.URL != "https://api.example.com/mcp" {
+		t.Errorf("enabled URL entry must stay on the lean {URL} path with Raw nil: %+v", e)
+	}
+}
+
+// TestMimoCode_OverlayShadow_AddEntryRefuses pins bot PR #420 finding 7: when the
+// MIMOCODE_CONFIG_DIR overlay already defines mcp.<server>, the hub write to the
+// lower-precedence global target would be shadowed (overlay wins the merge). The
+// adapter REFUSES the write with ErrMimoCodeOverlayShadowsServer rather than
+// silently reporting success — and touches neither the global target nor the
+// operator-owned overlay file.
+func TestMimoCode_OverlayShadow_AddEntryRefuses(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	globalDir := t.TempDir()
+	overlayDir := t.TempDir()
+	globalPath := filepath.Join(globalDir, "mimocode.json")
+	if err := os.WriteFile(globalPath, []byte(`{"mcp":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The overlay (in its top .jsonc layer) already defines `serena`.
+	overlayFile := filepath.Join(overlayDir, "mimocode.jsonc")
+	overlayBytes := []byte(`{"mcp":{"serena":{"type":"remote","url":"http://overlay-serena/mcp","enabled":true}}}`)
+	if err := os.WriteFile(overlayFile, overlayBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: globalPath, overlayDir: overlayDir}
+
+	globalBefore, _ := os.ReadFile(globalPath)
+	err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://localhost:9121/mcp"})
+	var shadowErr *ErrMimoCodeOverlayShadowsServer
+	if !errors.As(err, &shadowErr) {
+		t.Fatalf("AddEntry over a shadowing overlay must return ErrMimoCodeOverlayShadowsServer, got %v", err)
+	}
+	if shadowErr.OverlayFile != overlayFile {
+		t.Errorf("error must name the shadowing overlay file: got %q, want %q", shadowErr.OverlayFile, overlayFile)
+	}
+	// Neither the global target nor the operator-owned overlay was written.
+	if after, _ := os.ReadFile(globalPath); string(after) != string(globalBefore) {
+		t.Errorf("refused AddEntry must NOT write the global target: before=%s after=%s", globalBefore, after)
+	}
+	if after, _ := os.ReadFile(overlayFile); string(after) != string(overlayBytes) {
+		t.Errorf("refused AddEntry must NOT touch the operator-owned overlay file")
+	}
+}
+
+// TestMimoCode_OverlayNonShadow_AddEntryWrites confirms the finding-7 guard does
+// NOT false-refuse: when the overlay defines a DIFFERENT server (or is absent),
+// AddEntry writes the global target normally. Also pins the common no-overlay
+// path (overlayDir == "") as byte-coherent (writes succeed).
+func TestMimoCode_OverlayNonShadow_AddEntryWrites(t *testing.T) {
+	t.Run("overlay defines a different server", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		globalDir := t.TempDir()
+		overlayDir := t.TempDir()
+		globalPath := filepath.Join(globalDir, "mimocode.json")
+		if err := os.WriteFile(globalPath, []byte(`{"mcp":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(overlayDir, "mimocode.json"),
+			[]byte(`{"mcp":{"other":{"type":"remote","url":"http://other/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: globalPath, overlayDir: overlayDir}
+		if err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://localhost:9121/mcp"}); err != nil {
+			t.Fatalf("AddEntry must succeed when the overlay does not shadow the server: %v", err)
+		}
+		if e, _ := o.GetEntry("serena"); e == nil || e.URL != "http://localhost:9121/mcp" {
+			t.Errorf("serena entry not written to the global target: %+v", e)
+		}
+	})
+	t.Run("no overlay (common path) writes normally", func(t *testing.T) {
+		o := newMimoCodeForTest(t, `{"mcp":{}}`)
+		if err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://localhost:9121/mcp"}); err != nil {
+			t.Fatalf("AddEntry on the common no-overlay path: %v", err)
+		}
+		if e, _ := o.GetEntry("serena"); e == nil || e.URL != "http://localhost:9121/mcp" {
+			t.Errorf("serena entry not written on the no-overlay path: %+v", e)
+		}
+	})
 }

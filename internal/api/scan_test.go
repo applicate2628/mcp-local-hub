@@ -1872,3 +1872,168 @@ func TestScanRecognizesCoexistenceAnomaly_MultiWorkspaceDeterministic(t *testing
 		}
 	}
 }
+
+// TestScanMimoCode_PresenceFromLowerLayerWhenWriteTargetAbsent pins bot PR #420
+// finding 2: when the registered scan path (the WRITE target — mimocode.json) is
+// ABSENT but a lower config.json layer (or an overlay layer) defines servers,
+// the scan must STILL run scanMimoCode so the operator's real entries appear.
+// Pre-fix the presence probe stat'd only the absent write target → "missing" →
+// the scanIfReadable gate skipped scanMimoCode → entries vanished.
+func TestScanMimoCode_PresenceFromLowerLayerWhenWriteTargetAbsent(t *testing.T) {
+	manifestFixture := func(dir string) string {
+		manifestDir := filepath.Join(dir, "servers")
+		_ = os.MkdirAll(filepath.Join(manifestDir, "memory"), 0755)
+		_ = os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+			[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+		return manifestDir
+	}
+	memEntry := func(t *testing.T, res *ScanResult) *ScanEntry {
+		t.Helper()
+		for i := range res.Entries {
+			if res.Entries[i].Name == "memory" {
+				return &res.Entries[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("server only in lower config.json layer (write target absent)", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		// memory lives ONLY in the lowest config.json layer; mimocode.json (the
+		// registered write/scan target) does NOT exist.
+		_ = os.WriteFile(filepath.Join(tmp, "config.json"),
+			[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0600)
+		mimoPath := filepath.Join(tmp, "mimocode.json") // intentionally absent on disk
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got != "ok" {
+			t.Errorf("mimocode presence with a lower-layer-only config.json: got %q, want ok", got)
+		}
+		mem := memEntry(t, res)
+		if mem == nil {
+			t.Fatal("config.json-layer memory entry vanished from scan when mimocode.json write target is absent")
+		}
+		if got := mem.ClientPresence["mimocode"].Transport; got != "http" {
+			t.Errorf("lower-layer memory Transport: got %q, want http", got)
+		}
+	})
+
+	t.Run("server only in MIMOCODE_CONFIG_DIR overlay (write target absent)", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		overlay := t.TempDir()
+		// memory lives ONLY in the overlay; the global dir has no layer files at all.
+		_ = os.WriteFile(filepath.Join(overlay, "mimocode.json"),
+			[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0600)
+		t.Setenv("MIMOCODE_CONFIG_DIR", overlay)
+		mimoPath := filepath.Join(tmp, "mimocode.json") // absent
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got != "ok" {
+			t.Errorf("mimocode presence with an overlay-only definition: got %q, want ok", got)
+		}
+		mem := memEntry(t, res)
+		if mem == nil {
+			t.Fatal("overlay-only memory entry vanished from scan when the write target is absent")
+		}
+	})
+}
+
+// TestShapeMimoCodeEntry_NormalizesLSPArgsFromCommandArray pins bot PR #420
+// finding 6 at the unit level: a non-canonical mimo mcp-language-server entry
+// keeps its LSP tokens in the `command` ARRAY (["mcp-language-server","--lsp",
+// "go"]); shapeMimoCodeEntry must produce a Raw whose `args` carry those tokens
+// so the LSP args-reverse-lookup (extractLSPLanguageFromArgs) identifies the
+// language.
+func TestShapeMimoCodeEntry_NormalizesLSPArgsFromCommandArray(t *testing.T) {
+	// `--lsp <BINARY>` (gopls), reverse-mapped to "go" by lspCommandToLanguage.
+	ce := shapeMimoCodeEntry(map[string]any{
+		"type":    "local",
+		"command": []any{"mcp-language-server", "--lsp", "gopls"},
+		"enabled": true,
+	})
+	if ce.Transport != "stdio" || ce.Endpoint != "mcp-language-server" {
+		t.Fatalf("shaper: got transport=%q endpoint=%q, want stdio/mcp-language-server", ce.Transport, ce.Endpoint)
+	}
+	if got := extractLSPLanguageFromArgs(ce.Raw); got != "go" {
+		t.Errorf("normalized Raw must let the LSP arg-reverse-lookup find go (from --lsp gopls): got %q (Raw[args]=%v)", got, ce.Raw["args"])
+	}
+	// A separate args array is preserved AFTER the command-array tail.
+	ce2 := shapeMimoCodeEntry(map[string]any{
+		"type":    "local",
+		"command": []any{"mcp-language-server"},
+		"args":    []any{"--lsp", "rust-analyzer"},
+		"enabled": true,
+	})
+	if got := extractLSPLanguageFromArgs(ce2.Raw); got != "rust" {
+		t.Errorf("command-array + separate args: got %q, want rust (from --lsp rust-analyzer; Raw[args]=%v)", got, ce2.Raw["args"])
+	}
+}
+
+// TestScanMimoCode_NonCanonicalLSPRecognized pins finding 6 end-to-end: a mimo
+// LOCAL mcp-language-server entry whose NAME does not follow the canonical
+// mcp-language-server-<lang> shape is still recognized as a direct-stdio LSP
+// legacy via the `--lsp` reverse-lookup over the command array. It collapses
+// into the hub row's LegacyConflict when a same-(client,lang) hub row exists.
+func TestScanMimoCode_NonCanonicalLSPRecognized(t *testing.T) {
+	isolateMimoCodeScanEnv(t)
+	tmp := t.TempDir()
+	seedLSPRegistry(t, tmp, []WorkspaceEntry{{
+		WorkspaceKey:  "aa11bb22",
+		WorkspacePath: filepath.Join(tmp, "proj"),
+		Language:      "go",
+		Backend:       "mcp-language-server",
+		Port:          9301,
+		TaskName:      "mcp-local-hub-lsp-aa11bb22-go",
+		ClientEntries: map[string]string{"mimocode": "mcp-language-server-go"},
+	}})
+	mimoPath := filepath.Join(tmp, "mimocode.json")
+	// One canonical hub row + one NON-canonically-named local LSP entry whose
+	// language only the command-array `--lsp gopls` reveals (gopls → go via
+	// lspCommandToLanguage).
+	_ = os.WriteFile(mimoPath, []byte(`{"mcp":{
+  "mcp-language-server-go": {"type":"remote","url":"http://localhost:9301/mcp","enabled":true},
+  "my-go-langserver": {"type":"local","command":["mcp-language-server","--lsp","gopls","--workspace","/proj"],"enabled":true}
+}}`), 0600)
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(manifestDir, 0755)
+
+	a := NewAPI()
+	res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	var hub *ScanEntry
+	for i := range res.Entries {
+		if res.Entries[i].Name == "my-go-langserver" {
+			t.Errorf("non-canonical LSP row should be collapsed into the hub row's LegacyConflict, not stand alone: %v", res.Entries[i].ClientPresence)
+		}
+		if res.Entries[i].Name == "mcp-language-server-go" {
+			hub = &res.Entries[i]
+		}
+	}
+	if hub == nil {
+		t.Fatal("hub row mcp-language-server-go missing")
+	}
+	if hub.LegacyConflict == nil {
+		t.Fatalf("non-canonical mimo LSP entry not recognized: hub LegacyConflict is nil (the --lsp go in the command array was not reverse-looked-up)")
+	}
+	leg, ok := hub.LegacyConflict["mimocode"]
+	if !ok {
+		t.Fatalf("LegacyConflict[mimocode] missing; keys=%v", keysOfLegacyConflict(hub.LegacyConflict))
+	}
+	if leg.Transport != "stdio" {
+		t.Errorf("LegacyConflict[mimocode].Transport: got %q, want stdio", leg.Transport)
+	}
+}

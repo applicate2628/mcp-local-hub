@@ -487,3 +487,58 @@ func TestExtractManifestFromClient_MimoCode_RemoteRejected(t *testing.T) {
 		t.Errorf("error should explain the HTTP-only/no-command situation: %v", err)
 	}
 }
+
+// TestExtractManifestFromClient_MimoCode_CommandArrayPlusArgs pins bot PR #420
+// finding 4: a MiMoCode local entry with BOTH a `command` ARRAY and a SEPARATE
+// `args` array must extract the full command line — the command-array tail
+// followed by the entry's own args. Pre-fix the extract kept only the command
+// tail and dropped `args`, so the generated manifest started the wrong command.
+func TestExtractManifestFromClient_MimoCode_CommandArrayPlusArgs(t *testing.T) {
+	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
+		t.Setenv(k, "")
+	}
+	tmp := t.TempDir()
+	mimoPath := filepath.Join(tmp, "mimocode.json")
+	// command:["mcp-language-server","--workspace","/w"] AND args:["--lsp","go"].
+	cfg := `{
+  "mcp": {
+    "go-ls": {
+      "type": "local",
+      "command": ["mcp-language-server", "--workspace", "/w"],
+      "args": ["--lsp", "go"],
+      "enabled": true
+    }
+  }
+}`
+	if err := os.WriteFile(mimoPath, []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(manifestDir, 0755)
+
+	a := NewAPI()
+	yaml, err := a.ExtractManifestFromClient("mimocode", "go-ls", ScanOpts{
+		MimoCodeConfigPath: mimoPath,
+		ManifestDir:        manifestDir,
+	})
+	if err != nil {
+		t.Fatalf("ExtractManifestFromClient(mimocode): %v", err)
+	}
+	m, err := config.ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+	}
+	if m.Command != "mcp-language-server" {
+		t.Errorf("Command = %q, want mcp-language-server (first command-array element)", m.Command)
+	}
+	// Tail of the command array, then the separate args array, in order.
+	want := []string{"--workspace", "/w", "--lsp", "go"}
+	if len(m.BaseArgs) != len(want) {
+		t.Fatalf("BaseArgs = %v, want %v (command-array tail ++ separate args)", m.BaseArgs, want)
+	}
+	for i := range want {
+		if m.BaseArgs[i] != want[i] {
+			t.Fatalf("BaseArgs = %v, want %v (the separate `args` must be appended after the command tail)", m.BaseArgs, want)
+		}
+	}
+}

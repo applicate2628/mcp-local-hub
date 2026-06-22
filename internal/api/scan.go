@@ -559,6 +559,24 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
 	presence := probeClientConfigPresence(opts)
 	paths := opts.effectiveConfigPaths()
+	// MiMoCode multi-layer presence (bot PR #420 finding 2): the generic probe
+	// above stats ONLY the registered scan path (mimocode's WRITE target —
+	// mimocode.json/.jsonc). MiMoCode deep-merges lower layers (config.json) and
+	// the MIMOCODE_CONFIG_DIR overlay, so a profile whose servers live ONLY in a
+	// lower/overlay layer (write target absent) would probe "missing" → the
+	// scanIfReadable gate would SKIP scanMimoCode → the operator's real entries
+	// vanish from the matrix. Promote presence to "ok" when ANY resolved read
+	// layer exists as a regular file (so the row is both scanned and shown). Only
+	// upgrade a not-ok state; never downgrade an "ok"/"error"/symlink verdict the
+	// generic probe already produced for the write target itself.
+	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] != "ok" {
+		for _, lf := range clients.MimoCodeReadLayerPaths(mp) {
+			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
+				presence["mimocode"] = "ok"
+				break
+			}
+		}
+	}
 	scanIfReadable := func(name string) bool {
 		// "ok" is the only state for which an adapter read is
 		// guaranteed to find a regular file. "missing" /
@@ -1288,6 +1306,17 @@ func scanMimoCode(entries map[string]*ScanEntry, path string) error {
 //     extract can recover command+args. A string `command` is also accepted
 //     (defensive). The shaper never delegates the array case to the shared
 //     string-only shapeURLOrCommandEntry.
+//
+// For the command-ARRAY case the stored Raw is NORMALIZED (bot PR #420 finding
+// 6): MiMoCode keeps LSP tokens (`--lsp go`) in the `command` ARRAY, but the
+// downstream LSP classifier (classifyLSPEntries / extractLSPLanguageFromArgs)
+// reads them from `Raw["args"]`. Without normalization a non-canonical mimo
+// mcp-language-server entry (whose name does not follow the canonical shape)
+// could not be identified as a direct LSP legacy/conflict. The normalized Raw
+// carries `args` = command-array tail ++ entry's own `args` (mirroring the
+// adapter's mimoCodeNormalizeCommandArrays) so the args-reverse-lookup finds
+// `--lsp <bin>` (and the gopls `mcp` arg). extract does NOT consume this Raw (it
+// re-reads MimoCodeMergedConfig directly), so normalizing here is safe.
 func shapeMimoCodeEntry(raw map[string]any) ClientEntry {
 	if enabled, present := raw["enabled"]; present {
 		if b, ok := enabled.(bool); ok && !b {
@@ -1298,9 +1327,10 @@ func shapeMimoCodeEntry(raw map[string]any) ClientEntry {
 		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
 	}
 	// Local stdio: MiMoCode stores `command` as an ARRAY. Surface the executable
-	// (first element) as the endpoint; the full argv stays in Raw for extract.
-	if cmd, _ := mimoCodeCommandArray(raw); cmd != "" {
-		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	// (first element) as the endpoint; the normalized argv goes in Raw so the LSP
+	// args-reverse-lookup sees the `--lsp`/`mcp` tokens the command array carries.
+	if cmd, tail := mimoCodeCommandArray(raw); cmd != "" {
+		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: mimoCodeRawWithNormalizedArgs(raw, tail)}
 	}
 	// Defensive: a string command (non-canonical but harmless) still classifies
 	// as stdio with that command as the endpoint.
@@ -1308,6 +1338,30 @@ func shapeMimoCodeEntry(raw map[string]any) ClientEntry {
 		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
 	}
 	return ClientEntry{Transport: "absent", Raw: raw}
+}
+
+// mimoCodeRawWithNormalizedArgs returns a shallow copy of a MiMoCode local
+// entry's raw map with `args` rewritten to (command-array tail ++ entry's own
+// `args`) so the LSP classifier's args-reverse-lookup (which reads Raw["args"])
+// finds the `--lsp <bin>` / `mcp` tokens MiMoCode stores in the `command` ARRAY.
+// The original map is not mutated; `command` is left as the original array (no
+// downstream consumer of this scan-side Raw reads it — extract re-reads the
+// adapter merge directly). Mirrors the adapter's mimoCodeNormalizeCommandArrays
+// (tail PREPENDED to existing args).
+func mimoCodeRawWithNormalizedArgs(raw map[string]any, cmdTail []string) map[string]any {
+	out := make(map[string]any, len(raw)+1)
+	for k, v := range raw {
+		out[k] = v
+	}
+	merged := make([]any, 0, len(cmdTail))
+	for _, a := range cmdTail {
+		merged = append(merged, a)
+	}
+	if existing, ok := raw["args"].([]any); ok {
+		merged = append(merged, existing...)
+	}
+	out["args"] = merged
+	return out
 }
 
 // mimoCodeCommandArray reads a MiMoCode local entry's `command` ARRAY
@@ -1908,6 +1962,19 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 			// which classifies a string `command` and rejects HTTP-only entries
 			// with actionable demigrate guidance.
 			break
+		}
+		// A MiMoCode entry may carry a SEPARATE `args` array alongside the
+		// `command` array (e.g. command:["mcp-language-server"], args:["--lsp",
+		// "go"]). The command-array tail above drops it, so append it after the
+		// tail — matching the adapter's mimoCodeNormalizeCommandArrays
+		// (command-array tail PREPENDED to the entry's own args), so the
+		// generated manifest starts the full command line (bot PR #420 finding 4).
+		if extraArgs, ok := raw["args"].([]any); ok {
+			for _, v := range extraArgs {
+				if s, ok := v.(string); ok {
+					args = append(args, s)
+				}
+			}
 		}
 		envMap := map[string]string{}
 		if envAny, ok := raw["environment"].(map[string]any); ok {
