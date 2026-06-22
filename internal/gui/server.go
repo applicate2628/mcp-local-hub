@@ -724,18 +724,23 @@ type Server struct {
 	// has not reached the upstream POST yet.
 	serenaStopGate serenaWorkspaceStopGate
 
-	// pruneEnoentMu guards pruneEnoentTicks: WorkspaceKey -> number of
-	// CONSECUTIVE prune-sweep ticks that observed the workspace directory as
-	// definitively gone (ENOENT). The workspace-daemon auto-prune sweeper
-	// (workspace_prune_sweeper.go) prunes a deleted-dir registration only after
-	// it crosses the 2-consecutive-tick threshold, absorbing a transient
-	// unmount; the counter resets to 0 (entry pruned) the moment the directory
-	// reappears or the row is removed. In-memory only — NOT persisted (Phase 1
-	// adds no new persisted state); a GUI restart resets the counters, which is
-	// safe (a still-deleted dir simply re-accrues two ticks before pruning).
-	// Agent-worktree hits do NOT use this counter (they prune immediately).
+	// pruneEnoentMu guards pruneEnoentTicks: workspace path -> the orphan REASON
+	// last observed on this path plus the number of CONSECUTIVE prune-sweep ticks
+	// that observed the SAME reason. The workspace-daemon auto-prune sweeper
+	// (workspace_prune_sweeper.go) prunes a deleted-dir OR dead-worktree
+	// registration only after it crosses the 2-consecutive-SAME-reason-tick
+	// threshold, absorbing a transient unmount; the entry is dropped (counter
+	// reset) the moment the workspace becomes healthy, the row is removed, or the
+	// prune fires. The reason is tracked alongside the count so a path that flips
+	// signal between ticks (deleted-dir on tick 1, dead-worktree on tick 2)
+	// RESETS to 1 — only the SAME signal observed on two consecutive ticks prunes,
+	// so neither grace window is defeated by a reason flip (Finding 2). In-memory
+	// only — NOT persisted (Phase 1 adds no new persisted state); a GUI restart
+	// resets the counters, which is safe (a still-dead path simply re-accrues two
+	// ticks before pruning). Agent-worktree and idle hits do NOT use this counter
+	// (they prune immediately).
 	pruneEnoentMu    sync.Mutex
-	pruneEnoentTicks map[string]int
+	pruneEnoentTicks map[string]pruneEnoentEntry
 
 	// LSP router dependencies for /lsp/<language>/mcp. This route is
 	// intentionally separate from the Serena router because LSP workspace
@@ -755,7 +760,7 @@ func NewServer(cfg Config) *Server {
 		hubRestartCh:             make(chan struct{}, 1),
 		serenaBackendLossTrigger: make(chan struct{}, 1),
 		guiProcessStart:          time.Now(),
-		pruneEnoentTicks:         map[string]int{},
+		pruneEnoentTicks:         map[string]pruneEnoentEntry{},
 	}
 	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
 	// Long-lived shared *API handle. Phase G2 (/api/health) places the

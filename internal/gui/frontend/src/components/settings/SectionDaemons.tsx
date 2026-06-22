@@ -50,6 +50,7 @@ const SCHEDULE_KEY = "daemons.weekly_schedule";
 const RETRY_KEY = "daemons.retry_policy";
 const KNOB_KEY = "daemons.weekly_refresh_default";
 const AUTO_PRUNE_KEY = "daemons.auto_prune_workspaces";
+const PRUNE_DEAD_WT_KEY = "daemons.prune_dead_worktrees";
 const PRUNE_IDLE_KEY = "daemons.prune_idle_hours";
 
 export function SectionDaemons({
@@ -77,18 +78,21 @@ export function SectionDaemons({
   const retry = snapshot.data.settings.find((s) => s.key === RETRY_KEY) as ConfigSettingDTO | undefined;
   const knob = snapshot.data.settings.find((s) => s.key === KNOB_KEY) as ConfigSettingDTO | undefined;
   const autoPrune = snapshot.data.settings.find((s) => s.key === AUTO_PRUNE_KEY) as ConfigSettingDTO | undefined;
+  const pruneDeadWt = snapshot.data.settings.find((s) => s.key === PRUNE_DEAD_WT_KEY) as ConfigSettingDTO | undefined;
   const pruneIdle = snapshot.data.settings.find((s) => s.key === PRUNE_IDLE_KEY) as ConfigSettingDTO | undefined;
 
   const persistedSched = sched?.value ?? sched?.default ?? "";
   const persistedRetry = retry?.value ?? retry?.default ?? "";
   const persistedKnob = (knob?.value ?? knob?.default ?? "false") === "true";
   const persistedAutoPrune = (autoPrune?.value ?? autoPrune?.default ?? "true") === "true";
+  const persistedPruneDeadWt = (pruneDeadWt?.value ?? pruneDeadWt?.default ?? "true") === "true";
   const persistedPruneIdle = pruneIdle?.value ?? pruneIdle?.default ?? "0";
 
   const [schedValue, setSchedValue] = useState<string>(persistedSched);
   const [retryValue, setRetryValue] = useState<string>(persistedRetry);
   const [knobValue, setKnobValue] = useState<boolean>(persistedKnob);
   const [autoPruneValue, setAutoPruneValue] = useState<boolean>(persistedAutoPrune);
+  const [pruneDeadWtValue, setPruneDeadWtValue] = useState<boolean>(persistedPruneDeadWt);
   const [pruneIdleValue, setPruneIdleValue] = useState<string>(persistedPruneIdle);
   const [tableDirty, setTableDirty] = useState(false);
   const [tableDeltas, setTableDeltas] = useState<MembershipDelta[]>([]);
@@ -108,14 +112,16 @@ export function SectionDaemons({
   useEffect(() => { setRetryValue(persistedRetry); }, [persistedRetry]);
   useEffect(() => { setKnobValue(persistedKnob); }, [persistedKnob]);
   useEffect(() => { setAutoPruneValue(persistedAutoPrune); }, [persistedAutoPrune]);
+  useEffect(() => { setPruneDeadWtValue(persistedPruneDeadWt); }, [persistedPruneDeadWt]);
   useEffect(() => { setPruneIdleValue(persistedPruneIdle); }, [persistedPruneIdle]);
 
   const schedDirty = schedValue !== persistedSched;
   const retryDirty = retryValue !== persistedRetry;
   const knobDirty = knobValue !== persistedKnob;
   const autoPruneDirty = autoPruneValue !== persistedAutoPrune;
+  const pruneDeadWtDirty = pruneDeadWtValue !== persistedPruneDeadWt;
   const pruneIdleDirty = pruneIdleValue !== persistedPruneIdle;
-  const sectionDirty = schedDirty || retryDirty || knobDirty || autoPruneDirty || pruneIdleDirty || tableDirty;
+  const sectionDirty = schedDirty || retryDirty || knobDirty || autoPruneDirty || pruneDeadWtDirty || pruneIdleDirty || tableDirty;
   const dirty = sectionDirty || envDirty;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
@@ -127,6 +133,7 @@ export function SectionDaemons({
     setRetryValue(persistedRetry);
     setKnobValue(persistedKnob);
     setAutoPruneValue(persistedAutoPrune);
+    setPruneDeadWtValue(persistedPruneDeadWt);
     setPruneIdleValue(persistedPruneIdle);
     setBanner(null);
     setSchedError(null);
@@ -167,6 +174,14 @@ export function SectionDaemons({
         op1Failure = `${humanKey(AUTO_PRUNE_KEY)}: ${errReason(e)}`;
       }
     }
+    if (op1Failure === null && pruneDeadWtDirty) {
+      try {
+        await putSetting(PRUNE_DEAD_WT_KEY, pruneDeadWtValue ? "true" : "false");
+        committed.push(humanKey(PRUNE_DEAD_WT_KEY));
+      } catch (e: any) {
+        op1Failure = `${humanKey(PRUNE_DEAD_WT_KEY)}: ${errReason(e)}`;
+      }
+    }
     if (op1Failure === null && retryDirty) {
       try {
         await putSetting(RETRY_KEY, retryValue);
@@ -187,6 +202,7 @@ export function SectionDaemons({
       // Whatever didn't commit stays dirty.
       if (knobDirty && !committed.includes(humanKey(KNOB_KEY))) stillDirty.push(humanKey(KNOB_KEY));
       if (autoPruneDirty && !committed.includes(humanKey(AUTO_PRUNE_KEY))) stillDirty.push(humanKey(AUTO_PRUNE_KEY));
+      if (pruneDeadWtDirty && !committed.includes(humanKey(PRUNE_DEAD_WT_KEY))) stillDirty.push(humanKey(PRUNE_DEAD_WT_KEY));
       if (retryDirty && !committed.includes(humanKey(RETRY_KEY))) stillDirty.push(humanKey(RETRY_KEY));
       if (pruneIdleDirty && !committed.includes(humanKey(PRUNE_IDLE_KEY))) stillDirty.push(humanKey(PRUNE_IDLE_KEY));
       if (schedDirty) stillDirty.push("schedule");
@@ -377,6 +393,22 @@ export function SectionDaemons({
           </div>
 
           <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
+            <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-prune-dead-worktrees">
+              Auto-prune dead git worktrees
+              {pruneDeadWt?.help ? <InfoTip text={pruneDeadWt.help} /> : null}
+            </label>
+            <input
+              id="daemons-prune-dead-worktrees"
+              type="checkbox"
+              class="h-4 w-4 accent-app-accent"
+              checked={pruneDeadWtValue}
+              disabled={busy}
+              onChange={(e) => setPruneDeadWtValue((e.target as HTMLInputElement).checked)}
+              data-testid="daemons-prune-dead-worktrees-checkbox"
+            />
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
             <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="daemons-prune-idle-hours">
               Auto-prune idle workspaces after
               {pruneIdle?.help ? <InfoTip text={pruneIdle.help} /> : null}
@@ -444,6 +476,8 @@ function humanKey(key: string): string {
       return "weekly refresh default";
     case AUTO_PRUNE_KEY:
       return "auto-prune workspaces";
+    case PRUNE_DEAD_WT_KEY:
+      return "prune dead worktrees";
     case PRUNE_IDLE_KEY:
       return "idle-prune hours";
     case RETRY_KEY:

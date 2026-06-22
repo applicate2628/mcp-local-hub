@@ -17,6 +17,8 @@ const env: SettingsEnvelope = {
       default: "exponential", value: "exponential", enum: ["none","linear","exponential"], deferred: false, help: "" },
     { key: "daemons.auto_prune_workspaces", section: "daemons", type: "bool",
       default: "true", value: "true", deferred: false, help: "auto-prune help" },
+    { key: "daemons.prune_dead_worktrees", section: "daemons", type: "bool",
+      default: "true", value: "true", deferred: false, help: "dead-worktree help" },
     { key: "daemons.prune_idle_hours", section: "daemons", type: "int",
       default: "0", value: "0", min: 0, max: 8760, deferred: false, help: "idle help" },
   ],
@@ -115,6 +117,56 @@ describe("SectionDaemons (editable, A4-b PR #1 / Task 11)", () => {
     expect(saveBtn.disabled).toBe(true);
     fireEvent.click(toggle);
     await waitFor(() => expect(saveBtn.disabled).toBe(false));
+  });
+
+  it("renders the dead-worktree toggle (checked by default) and Save enables on toggle", async () => {
+    // PR-2: the daemons.prune_dead_worktrees gate controls the dead-git-worktree
+    // structural orphan signal (a leftover worktree dir whose git admin dir is
+    // gone). The toggle defaults checked (registry default "true").
+    const { findByTestId } = render(<SectionDaemons snapshot={snap()} />);
+    const toggle = (await findByTestId("daemons-prune-dead-worktrees-checkbox")) as HTMLInputElement;
+    expect(toggle).toBeTruthy();
+    expect(toggle.checked).toBe(true);
+    const saveBtn = (await findByTestId("daemons-save")) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(saveBtn.disabled).toBe(false));
+  });
+
+  it("Save round-trips the dead-worktree toggle to PUT /api/settings/daemons.prune_dead_worktrees", async () => {
+    // Capture the PUT to the dead-worktree key and assert the wire body carries
+    // the toggled value ("false"). Mock the PUT path with a header-bearing
+    // JSON response so settings-api's jsonOrThrow resolves cleanly.
+    let putKey: string | null = null;
+    let putBody: string | null = null;
+    mockFetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/daemon/env")) return jsonResponse(defaultDaemonEnvResponse);
+      if (url.includes("/api/daemons/weekly-refresh-membership")) return jsonResponse({ rows: [] });
+      if (url.includes("/api/settings/") && init?.method === "PUT") {
+        putKey = decodeURIComponent(url.split("/api/settings/")[1] ?? "");
+        putBody = typeof init?.body === "string" ? init.body : null;
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: (h: string) => (h.toLowerCase() === "content-type" ? "application/json" : null) },
+          json: async () => ({}),
+        } as unknown as Response;
+      }
+      return jsonResponse({});
+    });
+
+    const refresh = vi.fn(async () => {});
+    const { findByTestId } = render(<SectionDaemons snapshot={snap(refresh)} />);
+    const toggle = (await findByTestId("daemons-prune-dead-worktrees-checkbox")) as HTMLInputElement;
+    fireEvent.click(toggle); // true → false
+    const saveBtn = (await findByTestId("daemons-save")) as HTMLButtonElement;
+    await waitFor(() => expect(saveBtn.disabled).toBe(false));
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => expect(putKey).toBe("daemons.prune_dead_worktrees"));
+    expect(putBody).toBe(JSON.stringify({ value: "false" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
   it("Save button enables after changing the retry policy select", async () => {

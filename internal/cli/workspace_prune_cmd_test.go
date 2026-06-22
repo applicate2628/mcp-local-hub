@@ -555,3 +555,113 @@ func TestWorkspacePrune_DryRunJSONCleanStdout(t *testing.T) {
 		t.Errorf("--dry-run --json should emit nothing on STDERR; got:\n%s", stderr)
 	}
 }
+
+// TestWorkspacePrune_HelpMentionsDeadWorktreeInGateOnSet covers Finding 3 (r6):
+// the `--idle` help paragraph previously said that without --idle only
+// agent-worktree and deleted-dir run, but a bare/dry-run prune ALSO considers
+// dead-worktree when daemons.prune_dead_worktrees is on (the default). The help
+// text must enumerate dead-worktree alongside the other structural signals so it
+// matches the implementation.
+func TestWorkspacePrune_HelpMentionsDeadWorktreeInGateOnSet(t *testing.T) {
+	long := newWorkspacePruneCmd().Long
+	idleIdx := strings.Index(long, "--idle <dur>")
+	if idleIdx < 0 {
+		t.Fatalf("prune help is missing the --idle paragraph:\n%s", long)
+	}
+	// The --idle paragraph runs to the next flag bullet (--backend).
+	para := long[idleIdx:]
+	if end := strings.Index(para, "--backend"); end >= 0 {
+		para = para[:end]
+	}
+	if !strings.Contains(para, "dead-worktree") {
+		t.Fatalf("--idle help paragraph must mention dead-worktree (it is part of the gate-on structural set); got:\n%s", para)
+	}
+	if !strings.Contains(para, "prune_dead_worktrees") {
+		t.Fatalf("--idle help paragraph should name the daemons.prune_dead_worktrees gate; got:\n%s", para)
+	}
+}
+
+// redirectSettingsPath points api.SettingsPath() at a hermetic temp dir on every
+// GOOS (Windows resolves via %LOCALAPPDATA%, Linux/macOS via $XDG_DATA_HOME, with
+// HOME/USERPROFILE backstopped) so the test NEVER reads or writes the live
+// gui-preferences.yaml. It returns the resolved settings-file path.
+func redirectSettingsPath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", dir)  // Windows
+	t.Setenv("XDG_DATA_HOME", dir) // Linux/macOS
+	t.Setenv("HOME", dir)          // POSIX home backstop
+	t.Setenv("USERPROFILE", dir)   // Windows home backstop
+	p := api.SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	return p
+}
+
+// seedSetting persists key=value at the redirected SettingsPath() THROUGH the
+// hardened state-file writer (SettingsSetIn → WriteStateFileBytesAtomic), so the
+// resulting gui-preferences.yaml carries the owner-only DACL the READ gate
+// requires — a raw os.WriteFile on a corp/CI Windows t.TempDir() inherits an
+// Authenticated-Users ACE that the state-file READ gate hard-rejects (it refuses
+// any non-allowlisted SID granted WRITE/DAC/DELETE, regardless of relax env), so
+// SettingsList would then fail with a DACL error instead of returning the value.
+func seedSetting(t *testing.T, p, key, value string) {
+	t.Helper()
+	if err := api.NewAPI().SettingsSetIn(p, key, value); err != nil {
+		t.Fatalf("SettingsSetIn(%s=%s): %v", key, value, err)
+	}
+}
+
+// TestPruneDeadWorktreesEnabled_FailClosed covers Finding 2: the CLI's
+// dead-worktree-gate resolution must FAIL CLOSED, exactly matching the GUI
+// sweeper's defaultPruneDeadWorktrees. The dead-worktree prune is DESTRUCTIVE,
+// so a settings-read error (malformed gui-preferences.yaml) MUST resolve the
+// gate to false (signal disabled) — never enable it. A successful read of an
+// ABSENT key applies the registry Default ("true"); a successful read of an
+// explicit value is honored.
+func TestPruneDeadWorktreesEnabled_FailClosed(t *testing.T) {
+	t.Run("malformed settings file → read error → gate FALSE (fail closed)", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		// First create an owner-only file via the hardened writer, then overwrite
+		// its CONTENT in place with malformed YAML. The in-place truncating write
+		// preserves the owner-only DACL the writer installed, so SettingsList
+		// reaches the YAML parse and fails THERE (the read error under test), not
+		// at the file-DACL gate. A YAML SEQUENCE cannot unmarshal into the
+		// map[string]string the reader expects → yaml.Unmarshal errors.
+		seedSetting(t, p, api.PruneDeadWorktreesSettingKey, "true")
+		if err := os.WriteFile(p, []byte("- not: a map\n- still: not\n"), 0o600); err != nil {
+			t.Fatalf("overwrite with malformed settings: %v", err)
+		}
+		// Sanity-check the precondition: SettingsList genuinely errors here.
+		if _, err := api.NewAPI().SettingsList(); err == nil {
+			t.Fatalf("precondition: expected SettingsList to error on malformed YAML, got nil")
+		}
+		if pruneDeadWorktreesEnabled() {
+			t.Fatalf("pruneDeadWorktreesEnabled() = true on a settings-read error; want false (fail closed — the destructive dead-worktree prune must NOT enable on an unreadable gate)")
+		}
+	})
+
+	t.Run("absent settings file → registry default applies → gate TRUE", func(t *testing.T) {
+		redirectSettingsPath(t) // no file written → SettingsList succeeds, key unset
+		if !pruneDeadWorktreesEnabled() {
+			t.Fatalf("pruneDeadWorktreesEnabled() = false with no persisted value; want true (registry Default \"true\" applies on a successful read of an unset key)")
+		}
+	})
+
+	t.Run("explicit false persisted → gate FALSE", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		seedSetting(t, p, api.PruneDeadWorktreesSettingKey, "false")
+		if pruneDeadWorktreesEnabled() {
+			t.Fatalf("pruneDeadWorktreesEnabled() = true with the gate persisted \"false\"; want false (honor the operator's disable)")
+		}
+	})
+
+	t.Run("explicit true persisted → gate TRUE", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		seedSetting(t, p, api.PruneDeadWorktreesSettingKey, "true")
+		if !pruneDeadWorktreesEnabled() {
+			t.Fatalf("pruneDeadWorktreesEnabled() = false with the gate persisted \"true\"; want true")
+		}
+	})
+}

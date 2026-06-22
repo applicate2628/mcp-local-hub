@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -101,6 +102,178 @@ func TestSweepPruneWorkspaces(t *testing.T) {
 		}
 		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
 			t.Fatalf("gate off must be a no-op, got %d", n)
+		}
+	})
+}
+
+// TestSweepPruneWorkspaces_DeadWorktree asserts the sweeper prunes a leftover
+// git linked worktree whose directory still exists but whose git admin dir is
+// gone — but only after the 2-consecutive-ENOENT-tick grace (shared with
+// deleted-dir). A single tick must NOT prune. It also asserts the gate (off)
+// suppresses the signal.
+func TestSweepPruneWorkspaces_DeadWorktree(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+
+	origEnabled, origRows, origBegin, origEnd, origAction, origDead :=
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneDeadWorktreesFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneDeadWorktreesFn =
+			origEnabled, origRows, origBegin, origEnd, origAction, origDead
+	})
+
+	var pruned []string
+	pruneEnabledFn = func() bool { return true }
+	pruneBeginFn = func(*Server, string) bool { return true }
+	pruneEndFn = func(*Server, string) {}
+	pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+		pruned = append(pruned, path)
+		return &api.PruneReport{Workspace: path}, nil
+	}
+
+	// Build a real dead-worktree fixture: a dir that exists, with a `.git` FILE
+	// pointing at an admin dir that does NOT exist.
+	deadWT := t.TempDir()
+	// Realistic `git worktree remove` shape: the admin PARENT (.git/worktrees)
+	// exists, only the <name> leaf is gone — so isAdminDirGenuinelyDeleted (r3)
+	// reads it as a genuinely removed worktree, not an unavailable/offline admin
+	// root. Without the parent dir, the r3 grandparent guard treats the whole
+	// chain as offline and refuses to prune (the P1 bot fixture finding).
+	deadAdminParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(deadAdminParent, 0o700); err != nil {
+		t.Fatalf("mkdir admin parent: %v", err)
+	}
+	deadAdmin := filepath.Join(deadAdminParent, "gone") // leaf never created
+	if err := os.WriteFile(filepath.Join(deadWT, ".git"), []byte("gitdir: "+deadAdmin+"\n"), 0o600); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+
+	t.Run("gate on: pruned only after 2 ticks", func(t *testing.T) {
+		pruned = nil
+		pruneDeadWorktreesFn = func() bool { return true }
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(deadWT, "kdead", "go")}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("tick 1 must NOT prune (2-tick grace shared with deleted-dir), got %d", n)
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 1 {
+			t.Fatalf("tick 2 must prune the dead worktree, got %d", n)
+		}
+		if len(pruned) != 1 || pruned[0] != deadWT {
+			t.Fatalf("want dead worktree pruned, got %v", pruned)
+		}
+	})
+
+	t.Run("gate off: never pruned", func(t *testing.T) {
+		pruned = nil
+		pruneDeadWorktreesFn = func() bool { return false }
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(deadWT, "kdead2", "go")}
+		}
+		// Two ticks — neither must prune while the gate is off.
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("gate off tick 1 must not prune, got %d", n)
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("gate off tick 2 must not prune, got %d (%v)", n, pruned)
+		}
+	})
+}
+
+// makeDeadWorktreeFixture creates a LIVE directory at wsDir holding a `.git`
+// FILE that points at a removed-worktree admin dir (realistic `git worktree
+// remove` shape: the `.git/worktrees/` parent exists, the `<name>` leaf is gone)
+// so IsDeadGitWorktreePath classifies wsDir as a dead-worktree orphan.
+func makeDeadWorktreeFixture(t *testing.T, wsDir string) {
+	t.Helper()
+	if err := os.MkdirAll(wsDir, 0o700); err != nil {
+		t.Fatalf("mkdir dead-worktree ws: %v", err)
+	}
+	adminParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(adminParent, 0o700); err != nil {
+		t.Fatalf("mkdir admin parent: %v", err)
+	}
+	admin := filepath.Join(adminParent, "gone") // leaf never created → genuinely removed
+	if err := os.WriteFile(filepath.Join(wsDir, ".git"), []byte("gitdir: "+admin+"\n"), 0o600); err != nil {
+		t.Fatalf("write .git: %v", err)
+	}
+}
+
+// TestSweepPruneWorkspaces_GraceReasonFlip covers Finding 2: the 2-consecutive-
+// tick ENOENT grace is keyed by (path, reason), not path alone. A path that is
+// deleted-dir-ENOENT on tick 1 and dead-worktree-ENOENT on tick 2 must NOT prune
+// (the reason flipped → the window restarts at 1); only the SAME reason observed
+// on two consecutive ticks prunes. Driven with real on-disk state transitions so
+// it exercises the real api.ClassifyWorkspaceOrphan path end-to-end.
+func TestSweepPruneWorkspaces_GraceReasonFlip(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+
+	origEnabled, origRows, origBegin, origEnd, origAction, origDead :=
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneDeadWorktreesFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneDeadWorktreesFn =
+			origEnabled, origRows, origBegin, origEnd, origAction, origDead
+	})
+
+	var pruned []string
+	pruneEnabledFn = func() bool { return true }
+	pruneBeginFn = func(*Server, string) bool { return true }
+	pruneEndFn = func(*Server, string) {}
+	pruneDeadWorktreesFn = func() bool { return true }
+	pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+		pruned = append(pruned, path)
+		return &api.PruneReport{Workspace: path}, nil
+	}
+
+	t.Run("reason flip (deleted-dir then dead-worktree) does NOT prune", func(t *testing.T) {
+		pruned = nil
+		// wsPath starts ABSENT (deleted-dir). It lives under a tmp parent that DOES
+		// exist so we can materialize it between ticks; the path itself is gone.
+		parent := t.TempDir()
+		wsPath := filepath.Join(parent, "ws")
+		s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(wsPath, "kflip", "go")}
+		}
+
+		// Tick 1: wsPath absent → deleted-dir, count=1 → no prune.
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("tick 1 (deleted-dir, count 1) must not prune, got %d", n)
+		}
+		// Flip the reason: materialize wsPath as a LIVE dead-worktree dir.
+		makeDeadWorktreeFixture(t, wsPath)
+		// Tick 2: now dead-worktree → reason flipped from deleted-dir → count RESETS
+		// to 1 → must NOT prune. (Pre-Finding-2 this would be count 2 and prune.)
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("tick 2 (reason flip → window reset to 1) must NOT prune, got %d (%v)", n, pruned)
+		}
+		// Tick 3: still dead-worktree (SAME reason as tick 2) → count=2 → prunes.
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 1 {
+			t.Fatalf("tick 3 (same reason twice) must prune, got %d", n)
+		}
+		if len(pruned) != 1 || pruned[0] != wsPath {
+			t.Fatalf("want %q pruned once on tick 3, got %v", wsPath, pruned)
+		}
+	})
+
+	t.Run("same reason twice (dead-worktree) prunes on tick 2", func(t *testing.T) {
+		pruned = nil
+		wsPath := filepath.Join(t.TempDir(), "ws-same")
+		makeDeadWorktreeFixture(t, wsPath)
+		s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(wsPath, "ksame", "go")}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("tick 1 (dead-worktree, count 1) must not prune, got %d", n)
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 1 {
+			t.Fatalf("tick 2 (same reason twice) must prune, got %d", n)
+		}
+		if len(pruned) != 1 || pruned[0] != wsPath {
+			t.Fatalf("want %q pruned on tick 2, got %v", wsPath, pruned)
 		}
 	})
 }
@@ -350,4 +523,71 @@ func TestSweepPruneWorkspaces_ForwardEnteringDuringPruneWaitsForGate(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("serena forward did not finish after prune teardown completed")
 	}
+}
+
+// redirectSettingsPath points api.SettingsPath() at a hermetic temp dir on every
+// GOOS so the test never reads or writes the live gui-preferences.yaml.
+func redirectSettingsPath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", dir)  // Windows
+	t.Setenv("XDG_DATA_HOME", dir) // Linux/macOS
+	t.Setenv("HOME", dir)          // POSIX home backstop
+	t.Setenv("USERPROFILE", dir)   // Windows home backstop
+	p := api.SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	return p
+}
+
+// seedSetting persists key=value at the redirected SettingsPath() THROUGH the
+// hardened state-file writer so the resulting file carries the owner-only DACL
+// the READ gate requires (a raw os.WriteFile on a corp/CI Windows t.TempDir()
+// inherits an Authenticated-Users ACE the read gate hard-rejects).
+func seedSetting(t *testing.T, p, key, value string) {
+	t.Helper()
+	if err := api.NewAPI().SettingsSetIn(p, key, value); err != nil {
+		t.Fatalf("SettingsSetIn(%s=%s): %v", key, value, err)
+	}
+}
+
+// TestDefaultPruneDeadWorktrees_FailClosed locks in the GUI sweeper's fail-SAFE
+// posture (Finding 2 parity): a settings-read error resolves the destructive
+// dead-worktree gate to FALSE; an absent key applies the registry Default
+// ("true"); an explicit value is honored. This is the canonical posture the CLI's
+// pruneDeadWorktreesEnabled MUST mirror exactly.
+func TestDefaultPruneDeadWorktrees_FailClosed(t *testing.T) {
+	t.Run("malformed settings file → read error → gate FALSE (fail safe)", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		// Create an owner-only file via the hardened writer, then overwrite its
+		// content in place with malformed YAML (the truncating write preserves the
+		// DACL), so SettingsList fails at YAML parse — the read error under test —
+		// not at the file-DACL gate.
+		seedSetting(t, p, api.PruneDeadWorktreesSettingKey, "true")
+		if err := os.WriteFile(p, []byte("- not: a map\n- still: not\n"), 0o600); err != nil {
+			t.Fatalf("overwrite with malformed settings: %v", err)
+		}
+		if _, err := api.NewAPI().SettingsList(); err == nil {
+			t.Fatalf("precondition: expected SettingsList to error on malformed YAML, got nil")
+		}
+		if defaultPruneDeadWorktrees() {
+			t.Fatalf("defaultPruneDeadWorktrees() = true on a settings-read error; want false (fail safe)")
+		}
+	})
+
+	t.Run("absent settings file → registry default applies → gate TRUE", func(t *testing.T) {
+		redirectSettingsPath(t)
+		if !defaultPruneDeadWorktrees() {
+			t.Fatalf("defaultPruneDeadWorktrees() = false with no persisted value; want true (registry Default)")
+		}
+	})
+
+	t.Run("explicit false persisted → gate FALSE", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		seedSetting(t, p, api.PruneDeadWorktreesSettingKey, "false")
+		if defaultPruneDeadWorktrees() {
+			t.Fatalf("defaultPruneDeadWorktrees() = true with the gate persisted \"false\"; want false")
+		}
+	})
 }

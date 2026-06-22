@@ -148,6 +148,23 @@ var SettingsRegistry = []SettingDef{
 		// open (non-destructive); gated by auto_prune_workspaces; skips a
 		// workspace mid serena call. Read each sweep tick (~60s); no restart.
 		Help: "Also auto-remove a workspace daemon idle (no serena/LSP activity) for more than this many HOURS (0 = off). Re-registers on next open. Takes effect within ~60s; no restart."},
+	{Key: "daemons.prune_dead_worktrees", Section: "daemons", Type: TypeBool,
+		Default: "true",
+		// Dead-git-worktree structural signal (PR-2). The 60s in-GUI prune sweeper
+		// reads this each tick: when enabled it auto-removes serena + per-LSP
+		// daemon rows for a workspace that is a LEFTOVER git linked worktree —
+		// its directory still exists, but the git admin dir it points at
+		// (<main-repo>/.git/worktrees/<name>) has been deleted, so the worktree is
+		// structurally dead. This is the REAL leftover-worktree case that slips
+		// through both the agent-worktree path check and the deleted-dir check.
+		// Pruned after 2 consecutive ENOENT ticks (shared with deleted-dir to
+		// absorb a transient unmount); false-positive-safe by construction
+		// (os.IsNotExist-only on the admin dir, regular-.git-file required, any
+		// other stat error → not pruned). A pruned workspace re-registers on next
+		// open (non-destructive). Default on, consistent with deleted-dir. "false"
+		// disables only this signal. Takes effect on the next sweep tick (~60s) —
+		// no restart.
+		Help: "Auto-remove daemon registrations for leftover git worktrees whose directory still exists but whose git admin directory is gone. A pruned workspace re-registers on next open. Takes effect within ~60s; no restart."},
 	{Key: "daemons.retry_policy", Section: "daemons", Type: TypeEnum,
 		Default: "exponential", Enum: []string{"none", "linear", "exponential"},
 		// A4-b PR #2 runtime applier shipped: the watchdog --once

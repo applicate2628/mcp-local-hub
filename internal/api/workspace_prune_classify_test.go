@@ -1,6 +1,7 @@
 package api
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,6 +14,21 @@ func TestClassifyWorkspaceOrphan(t *testing.T) {
 	live := t.TempDir() // an existing directory (not an agent worktree)
 	deleted := filepath.Join(t.TempDir(), "no-such", "ws")
 	agent := "d:/dev/x/.claude/worktrees/agent-abc/sub"
+
+	// deadWT: an existing dir that is a leftover git linked worktree whose admin
+	// dir is gone → IsDeadGitWorktreePath true (gated by opts.PruneDeadWorktrees).
+	// REALISTIC `git worktree remove` shape: the parent `.git/worktrees/` dir
+	// survives; only the `<name>` leaf is gone (the Finding-2 parent-exists guard
+	// requires the parent present before treating ENOENT as a genuine removal).
+	deadWT := t.TempDir()
+	deadWorktreesParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(deadWorktreesParent, 0o755); err != nil {
+		t.Fatalf("mkdir dead worktrees parent: %v", err)
+	}
+	deadAdmin := filepath.Join(deadWorktreesParent, "gone") // parent exists; leaf never created
+	if err := os.WriteFile(filepath.Join(deadWT, ".git"), []byte("gitdir: "+deadAdmin+"\n"), 0o600); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
 
 	now := time.Now()
 
@@ -36,6 +52,20 @@ func TestClassifyWorkspaceOrphan(t *testing.T) {
 			opts:       ClassifyOpts{Now: now},
 			wantReason: OrphanReasonDeletedDir,
 			wantOrphan: true,
+		},
+		{
+			name:       "dead worktree, gate ON → dead-worktree",
+			path:       deadWT,
+			opts:       ClassifyOpts{PruneDeadWorktrees: true, Now: now},
+			wantReason: OrphanReasonDeadWorktree,
+			wantOrphan: true,
+		},
+		{
+			name:       "dead worktree, gate OFF → healthy (signal disabled)",
+			path:       deadWT,
+			opts:       ClassifyOpts{PruneDeadWorktrees: false, Now: now},
+			wantReason: "",
+			wantOrphan: false,
 		},
 		{
 			name:       "live dir, no idle threshold → healthy",
@@ -108,6 +138,32 @@ func TestClassifyWorkspaceOrphan(t *testing.T) {
 				Now:             now,
 			},
 			wantReason: OrphanReasonDeletedDir,
+			wantOrphan: true,
+		},
+		{
+			// A deleted dir with the dead-worktree gate ON still classifies as
+			// deleted-dir: WorkspaceDirDeleted (ENOENT) fires before the
+			// dead-worktree case, and IsDeadGitWorktreePath requires the dir to
+			// still exist, so the two are mutually exclusive — deleted-dir wins.
+			name: "deleted dir wins over dead-worktree (priority + mutual exclusion)",
+			path: deleted,
+			opts: ClassifyOpts{
+				PruneDeadWorktrees: true,
+				Now:                now,
+			},
+			wantReason: OrphanReasonDeletedDir,
+			wantOrphan: true,
+		},
+		{
+			name: "dead worktree wins over idle (priority)",
+			path: deadWT,
+			opts: ClassifyOpts{
+				PruneDeadWorktrees: true,
+				IdleThreshold:      48 * time.Hour,
+				LastToolsCallAt:    now.Add(-72 * time.Hour),
+				Now:                now,
+			},
+			wantReason: OrphanReasonDeadWorktree,
 			wantOrphan: true,
 		},
 		{

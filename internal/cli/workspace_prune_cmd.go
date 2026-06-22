@@ -15,7 +15,9 @@
 //     guidance (mirrors the `gui --force --kill` non-interactive posture).
 //   - --idle <dur>: add the idle signal to THIS run (opts.IdleThreshold = dur)
 //     WITHOUT touching the persisted daemons.prune_idle_hours setting. Absent →
-//     structural orphans only (agent-worktree + deleted-dir).
+//     structural orphans only (agent-worktree, deleted-dir, dead-worktree).
+//     The dead-worktree signal honors the persisted daemons.prune_dead_worktrees
+//     gate (default on), the same gate the GUI sweeper reads.
 //   - --json: emit an array of {PruneReport, reason} (dry-run emits the
 //     candidate list with empty teardown counts).
 //
@@ -88,11 +90,14 @@ func newWorkspacePruneCmd() *cobra.Command {
 		Long: `Classify every registered workspace and tear down the orphans — the
 manual, bulk counterpart to the in-GUI auto-prune sweeper.
 
-A workspace is an orphan when ANY of the three shipped signals fire
+A workspace is an orphan when ANY of the four shipped signals fire
 (highest priority first):
   - agent-worktree: it lives inside an ephemeral .claude/worktrees/agent-*
                     worktree.
   - deleted-dir:    its directory is definitively gone (ENOENT).
+  - dead-worktree:  it is a leftover git linked worktree whose directory
+                    still exists but whose git admin dir is gone (gated by
+                    the daemons.prune_dead_worktrees setting, default on).
   - idle:           (only with --idle) its most-recent activity is older
                     than the given duration.
 
@@ -103,7 +108,9 @@ Behavior:
                 shell unless --dry-run is also passed).
   --idle <dur>  Add the idle signal to THIS run (e.g. 48h) without changing
                 the persisted daemons.prune_idle_hours setting. Without it,
-                only the structural signals (agent-worktree, deleted-dir) run.
+                only the structural signals run: agent-worktree, deleted-dir,
+                and — when daemons.prune_dead_worktrees is on (default) —
+                dead-worktree.
   --backend     Teardown scope per orphan: all (default) | lsp | serena.
   --json        Machine-readable array of {PruneReport, reason}.
 
@@ -245,6 +252,29 @@ func runWorkspacePrune(cmd *cobra.Command, opts workspacePruneOpts) error {
 	return nil
 }
 
+// pruneDeadWorktreesEnabled resolves the persisted daemons.prune_dead_worktrees
+// gate (default "true") so the manual command honors the SAME gate the GUI
+// sweeper reads each tick — the dead-worktree structural signal is on unless the
+// operator turned it off in Settings. It FAILS CLOSED, exactly mirroring the GUI
+// sweeper's defaultPruneDeadWorktrees: a settings-read error (gui-preferences.yaml
+// unreadable/malformed) resolves the gate to FALSE (signal DISABLED). The
+// dead-worktree prune is DESTRUCTIVE; a gate-read failure must NOT enable it
+// (otherwise `mcphub workspace prune --yes` could classify+prune dead-worktree
+// rows even when the operator turned the gate OFF). A genuinely-absent key still
+// applies the registry Default ("true") — that is a SUCCESSFUL read of an
+// unset value, not a read failure.
+func pruneDeadWorktreesEnabled() bool {
+	vals, err := api.NewAPI().SettingsList()
+	if err != nil {
+		return false // fail-safe: do not run the destructive signal on a read failure
+	}
+	v, ok := vals[api.PruneDeadWorktreesSettingKey]
+	if !ok {
+		return true // not persisted → the registry Default ("true") applies
+	}
+	return v == "true"
+}
+
 // classifyWorkspacePruneCandidates reads the full registry under a brief lock,
 // groups rows by workspace path (tracking LSP-row count, serena presence, and
 // most-recent activity), and returns the orphans in deterministic path order.
@@ -255,6 +285,10 @@ func classifyWorkspacePruneCandidates(idle time.Duration) ([]pruneCandidate, err
 	if err != nil {
 		return nil, err
 	}
+
+	// Resolve the dead-worktree gate ONCE for this run (mirrors the sweeper's
+	// once-per-tick read) and thread it into every ClassifyOpts below.
+	pruneDeadWorktrees := pruneDeadWorktreesEnabled()
 
 	type agg struct {
 		lspRows      int
@@ -285,9 +319,10 @@ func classifyWorkspacePruneCandidates(idle time.Duration) ([]pruneCandidate, err
 	var out []pruneCandidate
 	for path, a := range byPath {
 		reason, isOrphan := api.ClassifyWorkspaceOrphan(path, api.ClassifyOpts{
-			IdleThreshold:   idle,
-			LastToolsCallAt: a.lastActivity,
-			Now:             now,
+			PruneDeadWorktrees: pruneDeadWorktrees,
+			IdleThreshold:      idle,
+			LastToolsCallAt:    a.lastActivity,
+			Now:                now,
 		})
 		if !isOrphan {
 			continue
