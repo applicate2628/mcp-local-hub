@@ -554,6 +554,203 @@ func TestScanCoversMimoCode(t *testing.T) {
 	})
 }
 
+// isolateMimoCodeScanEnv clears MiMoCode config-resolution env vars so a scan
+// test never lets an inherited MIMOCODE_*/XDG_CONFIG_HOME redirect the in-dir
+// layer resolver toward the developer's real ~/.config/mimocode. All paths in
+// these tests are explicit temp files; this is belt-and-suspenders since an
+// explicit non-layer-named path already bypasses dir recomputation.
+func isolateMimoCodeScanEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
+		t.Setenv(k, "")
+	}
+}
+
+// TestScanMimoCode_Faithful exercises the three source-accurate scan behaviors
+// the generic OpenCode scan path lacks: JSONC decode, local command-array
+// parsing, and enabled:false → absent presence. State-safe: temp file named
+// mimocode.jsonc/.json so the in-dir layer resolver stays inside the temp dir.
+func TestScanMimoCode_Faithful(t *testing.T) {
+	manifestFixture := func(dir string) string {
+		manifestDir := filepath.Join(dir, "servers")
+		_ = os.MkdirAll(filepath.Join(manifestDir, "memory"), 0755)
+		_ = os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+			[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+		return manifestDir
+	}
+	entryFor := func(t *testing.T, res *ScanResult, name string) *ScanEntry {
+		t.Helper()
+		for i := range res.Entries {
+			if res.Entries[i].Name == name {
+				return &res.Entries[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("JSONC mimocode.jsonc decodes (comments + trailing comma)", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.jsonc")
+		_ = os.WriteFile(mimoPath, []byte("{\n  // operator comment\n  \"mcp\": {\n    \"memory\": {\"type\":\"remote\",\"url\":\"http://localhost:9123/mcp\",\"enabled\":true},\n  },\n}\n"), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan on commented .jsonc must not fail: %v", err)
+		}
+		mem := entryFor(t, res, "memory")
+		if mem == nil {
+			t.Fatal("memory entry missing from a commented mimocode.jsonc scan")
+		}
+		if got := mem.ClientPresence["mimocode"].Transport; got != "http" {
+			t.Errorf("mimocode.Transport from .jsonc: got %q, want http", got)
+		}
+	})
+
+	t.Run("local command array surfaces the executable as endpoint", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.json")
+		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"localsrv":{"type":"local","command":["npx","-y","some-mcp"],"enabled":true}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		ent := entryFor(t, res, "localsrv")
+		if ent == nil {
+			t.Fatal("localsrv entry missing")
+		}
+		ce := ent.ClientPresence["mimocode"]
+		if ce.Transport != "stdio" {
+			t.Errorf("local array command Transport: got %q, want stdio", ce.Transport)
+		}
+		if ce.Endpoint != "npx" {
+			t.Errorf("local array command Endpoint: got %q, want the executable 'npx' (NOT empty 'Unknown stdio')", ce.Endpoint)
+		}
+	})
+
+	t.Run("enabled:false → absent presence (clobber-protection)", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		mimoPath := filepath.Join(tmp, "mimocode.json")
+		// A DISABLED hub entry must NOT classify as active http/via-hub.
+		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":false}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		mem := entryFor(t, res, "memory")
+		if mem == nil {
+			t.Fatal("memory entry missing")
+		}
+		if got := mem.ClientPresence["mimocode"].Transport; got != "absent" {
+			t.Errorf("disabled (enabled:false) entry Transport: got %q, want absent", got)
+		}
+		if mem.Status == "via-hub" {
+			t.Errorf("a disabled hub entry must NOT classify via-hub: got %q", mem.Status)
+		}
+	})
+}
+
+// TestShapeMimoCodeEntry_Unit pins the shaper's classification directly.
+func TestShapeMimoCodeEntry_Unit(t *testing.T) {
+	cases := []struct {
+		name      string
+		raw       map[string]any
+		transport string
+		endpoint  string
+	}{
+		{
+			name:      "remote http",
+			raw:       map[string]any{"type": "remote", "url": "http://localhost:9121/mcp", "enabled": true},
+			transport: "http", endpoint: "http://localhost:9121/mcp",
+		},
+		{
+			name:      "local command array",
+			raw:       map[string]any{"type": "local", "command": []any{"uvx", "serena"}, "enabled": true},
+			transport: "stdio", endpoint: "uvx",
+		},
+		{
+			name:      "local string command (defensive)",
+			raw:       map[string]any{"type": "local", "command": "uvx", "enabled": true},
+			transport: "stdio", endpoint: "uvx",
+		},
+		{
+			name:      "disabled remote → absent",
+			raw:       map[string]any{"type": "remote", "url": "http://localhost:9121/mcp", "enabled": false},
+			transport: "absent", endpoint: "",
+		},
+		{
+			name:      "disabled local → absent",
+			raw:       map[string]any{"type": "local", "command": []any{"uvx", "serena"}, "enabled": false},
+			transport: "absent", endpoint: "",
+		},
+		{
+			name:      "missing enabled defaults active (http)",
+			raw:       map[string]any{"type": "remote", "url": "http://localhost:9123/mcp"},
+			transport: "http", endpoint: "http://localhost:9123/mcp",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := shapeMimoCodeEntry(c.raw)
+			if got.Transport != c.transport {
+				t.Errorf("Transport = %q, want %q", got.Transport, c.transport)
+			}
+			if got.Endpoint != c.endpoint {
+				t.Errorf("Endpoint = %q, want %q", got.Endpoint, c.endpoint)
+			}
+		})
+	}
+}
+
+// TestScanMimoCode_InDirLayerMerge confirms ScanFrom sees an entry that lives
+// only in the lower mimocode.json layer when a higher mimocode.jsonc exists
+// (the scan reuses the adapter's merged read). State-safe: both files are in a
+// temp dir, the scan path is the top layer.
+func TestScanMimoCode_InDirLayerMerge(t *testing.T) {
+	isolateMimoCodeScanEnv(t)
+	tmp := t.TempDir()
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(filepath.Join(manifestDir, "memory"), 0755)
+	_ = os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+		[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+
+	jsonPath := filepath.Join(tmp, "mimocode.json")
+	jsoncPath := filepath.Join(tmp, "mimocode.jsonc")
+	// memory lives in the LOWER .json layer; the .jsonc has only unrelated keys.
+	_ = os.WriteFile(jsonPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0600)
+	_ = os.WriteFile(jsoncPath, []byte("{\n  // top layer, unrelated\n  \"theme\": \"dark\"\n}\n"), 0600)
+
+	a := NewAPI()
+	// Scan path is the top layer (.jsonc) — the merge must still surface the
+	// lower-layer .json memory entry.
+	res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: jsoncPath, ManifestDir: manifestDir})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	var mem *ScanEntry
+	for i := range res.Entries {
+		if res.Entries[i].Name == "memory" {
+			mem = &res.Entries[i]
+		}
+	}
+	if mem == nil {
+		t.Fatal("lower-layer mimocode.json memory entry invisible to scan merge")
+	}
+	if got := mem.ClientPresence["mimocode"].Transport; got != "http" {
+		t.Errorf("merged-layer Transport: got %q, want http", got)
+	}
+}
+
 // TestProbeClientConfigPresence_Wave2Clients confirms the eight wave-2
 // clients participate in the per-client presence probe the Servers matrix
 // uses to gate column visibility + the Initialize affordance. Mirrors

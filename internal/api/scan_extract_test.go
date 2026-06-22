@@ -405,3 +405,85 @@ func TestRenderDraftManifestYAML_EscapesUntrustedFields(t *testing.T) {
 		t.Fatalf("env key/value changed: %#v", m.Env)
 	}
 }
+
+// TestExtractManifestFromClient_MimoCode_LocalArrayAndEnvironment pins the
+// MiMoCode extract case (spec #5): a local entry's `command` ARRAY translates
+// to command + base_args, and its `environment` map (NOT the JSON family's
+// `env`) translates to manifest env. Verifies a real ParseManifest round-trip.
+func TestExtractManifestFromClient_MimoCode_LocalArrayAndEnvironment(t *testing.T) {
+	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
+		t.Setenv(k, "")
+	}
+	tmp := t.TempDir()
+	// Use a known layer file name so the adapter merged read resolves it
+	// (state-safe: temp dir, no real ~/.config/mimocode).
+	mimoPath := filepath.Join(tmp, "mimocode.json")
+	cfg := `{
+  "mcp": {
+    "fetch": {
+      "type": "local",
+      "command": ["uvx", "mcp-server-fetch"],
+      "environment": {"FETCH_TOKEN": "secret-x"},
+      "enabled": true
+    }
+  }
+}`
+	if err := os.WriteFile(mimoPath, []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(manifestDir, 0755)
+
+	a := NewAPI()
+	yaml, err := a.ExtractManifestFromClient("mimocode", "fetch", ScanOpts{
+		MimoCodeConfigPath: mimoPath,
+		ManifestDir:        manifestDir,
+	})
+	if err != nil {
+		t.Fatalf("ExtractManifestFromClient(mimocode): %v", err)
+	}
+	if !strings.Contains(yaml, "command: uvx") {
+		t.Errorf("command array first element not extracted as command: %s", yaml)
+	}
+	m, err := config.ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+	}
+	if m.Command != "uvx" {
+		t.Errorf("Command = %q, want uvx (first array element)", m.Command)
+	}
+	if len(m.BaseArgs) != 1 || m.BaseArgs[0] != "mcp-server-fetch" {
+		t.Errorf("BaseArgs = %v, want [mcp-server-fetch] (rest of the command array)", m.BaseArgs)
+	}
+	if m.Env["FETCH_TOKEN"] != "secret-x" {
+		t.Errorf("env not translated from `environment`: %#v", m.Env)
+	}
+}
+
+// TestExtractManifestFromClient_MimoCode_RemoteRejected confirms a remote/hub
+// MiMoCode entry (no local command array) is rejected via the shared tail's
+// HTTP-only guidance rather than producing an empty-command manifest.
+func TestExtractManifestFromClient_MimoCode_RemoteRejected(t *testing.T) {
+	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
+		t.Setenv(k, "")
+	}
+	tmp := t.TempDir()
+	mimoPath := filepath.Join(tmp, "mimocode.json")
+	if err := os.WriteFile(mimoPath, []byte(`{"mcp":{"serena":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(manifestDir, 0755)
+
+	a := NewAPI()
+	_, err := a.ExtractManifestFromClient("mimocode", "serena", ScanOpts{
+		MimoCodeConfigPath: mimoPath,
+		ManifestDir:        manifestDir,
+	})
+	if err == nil {
+		t.Fatal("expected an error extracting from a remote/hub mimocode entry")
+	}
+	if !strings.Contains(err.Error(), "HTTP-only") && !strings.Contains(err.Error(), "no `command`") {
+		t.Errorf("error should explain the HTTP-only/no-command situation: %v", err)
+	}
+}

@@ -1231,34 +1231,104 @@ func scanOpenCode(entries map[string]*ScanEntry, path string) error {
 	return nil
 }
 
-// scanMimoCode reads MiMoCode's config. MiMoCode is an OpenCode fork and uses
-// the IDENTICAL top-level `mcp` map with `{"type":"remote","url":...}` hub
-// entries, so scanMimoCode mirrors scanOpenCode exactly under the mimocode id.
-// The url key is the standard `url`, so the generic url/command shaper
-// recognises the loopback hub entry.
+// scanMimoCode reads MiMoCode's config FAITHFULLY (MiMoCode is an OpenCode
+// fork using the top-level `mcp` map, but its config has three behaviors the
+// generic OpenCode scan path does not handle):
+//
+//   - JSONC: the resolved config can be a commented/trailing-comma
+//     `mimocode.jsonc` (the path resolver explicitly PREFERS it), which raw
+//     encoding/json rejects with a scan-failing 500. Decode via the adapter's
+//     JSONC-tolerant merged read (clients.MimoCodeMergedConfig).
+//   - In-dir layer merge: mimocode.json + mimocode.jsonc in the resolved dir
+//     are deep-merged (.jsonc wins) so a server defined in either layer is
+//     visible. clients.MimoCodeMergedConfig is the single owner of that merge
+//     (also used by the adapter's read path), and it honors explicit override
+//     paths (a temp/test path is read verbatim, never recomputing the dir).
+//   - Local command arrays + `enabled` flag: handled by shapeMimoCodeEntry.
+//
+// The merged map is decoded into the `mcp` section; each entry is shaped by
+// shapeMimoCodeEntry (NOT the generic shapeURLOrCommandEntry, which only reads
+// a string `command` and ignores `enabled:false`).
 func scanMimoCode(entries map[string]*ScanEntry, path string) error {
-	data, err := os.ReadFile(path)
+	merged, err := clients.MimoCodeMergedConfig(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+		return err
+	}
+	servers, _ := merged["mcp"].(map[string]any)
+	for name, rawAny := range servers {
+		raw, ok := rawAny.(map[string]any)
+		if !ok {
+			continue
 		}
-		return err
-	}
-	var cfg struct {
-		MCP map[string]map[string]any `json:"mcp"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return err
-	}
-	for name, raw := range cfg.MCP {
 		e := entries[name]
 		if e == nil {
 			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
 			entries[name] = e
 		}
-		e.ClientPresence["mimocode"] = shapeURLOrCommandEntry(raw)
+		e.ClientPresence["mimocode"] = shapeMimoCodeEntry(raw)
 	}
 	return nil
+}
+
+// shapeMimoCodeEntry classifies a MiMoCode `mcp` entry FAITHFULLY:
+//
+//   - enabled:false → an ABSENT presence (Transport "absent"). MiMoCode uses
+//     `enabled` (default true) as the active flag; a disabled entry is one
+//     MiMoCode will NOT load. Recording it as active http/stdio would let the
+//     matrix show a disabled hub entry as connected `via-hub`, or a disabled
+//     local entry as a migrate candidate, and let Apply re-enable/clobber a
+//     server the operator intentionally disabled. The frontend's routing
+//     treats an "absent" transport as not-installed/disabled and never
+//     promotes it to "available" off config_presence:"ok" (routing.ts Finding
+//     4 clobber-protection). A missing/true `enabled` is active.
+//   - remote (`url`) → http (classify() then tags a loopback url as via-hub).
+//   - local (`command` ARRAY ["npx","-y",...]) → stdio with the real command
+//     in Endpoint (first array element) and the full argv preserved in Raw, so
+//     Discovery shows the executable instead of an empty "Unknown stdio" and
+//     extract can recover command+args. A string `command` is also accepted
+//     (defensive). The shaper never delegates the array case to the shared
+//     string-only shapeURLOrCommandEntry.
+func shapeMimoCodeEntry(raw map[string]any) ClientEntry {
+	if enabled, present := raw["enabled"]; present {
+		if b, ok := enabled.(bool); ok && !b {
+			return ClientEntry{Transport: "absent", Raw: raw}
+		}
+	}
+	if url, ok := raw["url"].(string); ok && url != "" {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	// Local stdio: MiMoCode stores `command` as an ARRAY. Surface the executable
+	// (first element) as the endpoint; the full argv stays in Raw for extract.
+	if cmd, _ := mimoCodeCommandArray(raw); cmd != "" {
+		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	}
+	// Defensive: a string command (non-canonical but harmless) still classifies
+	// as stdio with that command as the endpoint.
+	if cmd, ok := raw["command"].(string); ok && cmd != "" {
+		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	}
+	return ClientEntry{Transport: "absent", Raw: raw}
+}
+
+// mimoCodeCommandArray reads a MiMoCode local entry's `command` ARRAY
+// (["npx","-y","pkg"]) and splits it into (executable, args). Returns ("", nil)
+// when `command` is absent or not an array (a string command is handled by the
+// caller). Non-string array elements are skipped.
+func mimoCodeCommandArray(raw map[string]any) (string, []string) {
+	arr, ok := raw["command"].([]any)
+	if !ok || len(arr) == 0 {
+		return "", nil
+	}
+	var parts []string
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return parts[0], parts[1:]
 }
 
 // scanHermes reads Hermes' ~/.hermes/config.yaml. Its MCP map lives under the
@@ -1804,6 +1874,54 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 				}
 			}
 		}
+
+	case "mimocode":
+		if opts.MimoCodeConfigPath == "" {
+			return "", fmt.Errorf("MimoCodeConfigPath empty")
+		}
+		// MiMoCode's config is JSONC and split across mimocode.json +
+		// mimocode.jsonc layers; reuse the adapter's merged read so a commented
+		// .jsonc and a split-layer local entry are both visible. The explicit
+		// path is honored verbatim (never recomputes the real ~/.config/mimocode
+		// dir) by the same layer resolver the scan/adapter use.
+		merged, err := clients.MimoCodeMergedConfig(opts.MimoCodeConfigPath)
+		if err != nil {
+			return "", err
+		}
+		servers, _ := merged["mcp"].(map[string]any)
+		if servers != nil {
+			raw, _ = servers[serverName].(map[string]any)
+		}
+		if raw == nil {
+			return "", fmt.Errorf("server %q not found in client %q config", serverName, client)
+		}
+		// MiMoCode local entries use a `command` ARRAY (["npx","-y",...]) and
+		// store env under `environment` (NOT `env`). Translate both here and
+		// render directly — the generic string-`command`/`env` tail below does
+		// NOT understand either, so a fall-through would drop the env vars and
+		// emit an empty command. A remote/HTTP entry (no command array) is
+		// rejected with the same demigrate guidance as the shared tail.
+		cmd, args := mimoCodeCommandArray(raw)
+		if cmd == "" {
+			// No usable local command array — either a remote/hub entry or a
+			// (non-canonical) string command. Fall through to the shared tail,
+			// which classifies a string `command` and rejects HTTP-only entries
+			// with actionable demigrate guidance.
+			break
+		}
+		envMap := map[string]string{}
+		if envAny, ok := raw["environment"].(map[string]any); ok {
+			for k, v := range envAny {
+				if s, ok := v.(string); ok {
+					envMap[k] = s
+				}
+			}
+		}
+		port, err := pickNextFreePort(opts.ManifestDir)
+		if err != nil {
+			return "", err
+		}
+		return renderDraftManifestYAML(serverName, cmd, args, envMap, port), nil
 
 	default:
 		return "", fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)

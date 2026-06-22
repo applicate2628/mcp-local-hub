@@ -5,12 +5,26 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+// isolateMimoCodeEnv clears every MiMoCode config-resolution env var for the
+// duration of a test so no inherited MIMOCODE_*/XDG_CONFIG_HOME from the
+// developer's shell leaks in. t.Setenv restores them at test end. State-safety:
+// the adapter must NEVER read or write the developer's real
+// ~/.config/mimocode — every test uses t.TempDir paths and isolates env.
+func isolateMimoCodeEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
+		t.Setenv(k, "")
+	}
+}
+
 func newMimoCodeForTest(t *testing.T, initial string) *mimoCodeClient {
 	t.Helper()
+	isolateMimoCodeEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mimocode.json")
 	if err := os.WriteFile(path, []byte(initial), 0600); err != nil {
@@ -158,6 +172,31 @@ func TestMimoCode_GetEntry_RoundTrips(t *testing.T) {
 	}
 }
 
+// TestMimoCode_GetEntry_LocalEntryReturnsNil pins the rollback-safety contract
+// (spec #4 / bot PR #420 r4+r5): a LOCAL entry (type:"local", a `command`
+// array, NO url) is NOT representable by the lean MCPEntry. GetEntry must
+// return (nil, nil) for it so the install/register rollback snapshot/restore
+// SKIPS it rather than rewriting it into a broken {type:remote, url:""} entry.
+func TestMimoCode_GetEntry_LocalEntryReturnsNil(t *testing.T) {
+	o := newMimoCodeForTest(t, `{
+  "mcp": {
+    "local-srv": {
+      "type": "local",
+      "command": ["npx", "-y", "some-mcp"],
+      "environment": {"API_KEY": "x"},
+      "enabled": true
+    }
+  }
+}`)
+	e, err := o.GetEntry("local-srv")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if e != nil {
+		t.Fatalf("GetEntry on a URL-less local entry = %+v, want nil (rollback must skip, not corrupt to url:\"\")", e)
+	}
+}
+
 // TestMimoCode_RemoveEntry confirms removal is scoped and idempotent.
 func TestMimoCode_RemoveEntry(t *testing.T) {
 	o := newMimoCodeForTest(t, `{"mcp":{"serena":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true},"other":{"type":"remote","url":"http://x/mcp","enabled":true}}}`)
@@ -179,6 +218,7 @@ func TestMimoCode_RemoveEntry(t *testing.T) {
 // TestMimoCode_InitEmpty_SeedsMCPStub verifies the empty stub uses the `mcp`
 // key and is idempotent on second call.
 func TestMimoCode_InitEmpty_SeedsMCPStub(t *testing.T) {
+	isolateMimoCodeEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mimocode.json")
 	o := &mimoCodeClient{path: path}
@@ -212,6 +252,7 @@ func TestMimoCode_InitEmpty_SeedsMCPStub(t *testing.T) {
 // the live entry being removed; a backup with a pre-hub entry restores it.
 func TestMimoCode_RestoreEntryFromBackup_RestoresOrRemovesPerBackup(t *testing.T) {
 	t.Run("backup lacks entry -> live entry removed", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
 		dir := t.TempDir()
 		path := filepath.Join(dir, "mimocode.json")
 		if err := os.WriteFile(path, []byte(
@@ -239,6 +280,7 @@ func TestMimoCode_RestoreEntryFromBackup_RestoresOrRemovesPerBackup(t *testing.T
 	})
 
 	t.Run("backup has pre-hub entry -> restored verbatim", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
 		dir := t.TempDir()
 		path := filepath.Join(dir, "mimocode.json")
 		if err := os.WriteFile(path, []byte(
@@ -270,6 +312,7 @@ func TestMimoCode_RestoreEntryFromBackup_RestoresOrRemovesPerBackup(t *testing.T
 // loopback URL with no command) is refused with
 // ErrBackupEntryAlreadyMigrated, while the rollback variant bypasses it.
 func TestMimoCode_RestoreEntryFromBackup_RefusesHubBackupEntry(t *testing.T) {
+	isolateMimoCodeEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mimocode.json")
 	if err := os.WriteFile(path, []byte(
@@ -296,6 +339,7 @@ func TestMimoCode_RestoreEntryFromBackup_RefusesHubBackupEntry(t *testing.T) {
 // TestMimoCode_BackupContainsEntry_And_HubManaged exercises the two backup
 // predicates over present-pre-hub, present-hub, and absent cases.
 func TestMimoCode_BackupContainsEntry_And_HubManaged(t *testing.T) {
+	isolateMimoCodeEnv(t)
 	dir := t.TempDir()
 	o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
 
@@ -385,24 +429,25 @@ func TestMimoCode_FindStdioLanguageServerEntries(t *testing.T) {
 	}
 }
 
-// TestMimoCode_DefaultConfigPath asserts the global path resolution
-// (XDG_CONFIG_HOME/mimocode → ~/.config/mimocode), that it does NOT switch to a
-// Windows %APPDATA% / macOS ~/Library convention, and that an existing
-// mimocode.jsonc is preferred over mimocode.json (MiMoCode reads both, so a hub
-// entry written into a separate .json while a .jsonc exists could be ignored).
-// Mirrors the OpenCode adapter's resolution (mimo is a fork); the only
-// divergence is the .jsonc preference.
+// TestMimoCode_DefaultConfigPath asserts the global path resolution, the
+// MiMoCode env precedence (MIMOCODE_CONFIG > MIMOCODE_CONFIG_DIR >
+// MIMOCODE_HOME > XDG_CONFIG_HOME > ~/.config/mimocode), that relative env
+// values are IGNORED, that it does NOT switch to a Windows %APPDATA% / macOS
+// ~/Library convention, and that an existing mimocode.jsonc is preferred over
+// mimocode.json. Faithful to paths.ts + global.ts (mimo is an OpenCode fork);
+// the only divergences are the .jsonc preference and the env chain.
 func TestMimoCode_DefaultConfigPath(t *testing.T) {
 	t.Run("default ~/.config/mimocode", func(t *testing.T) {
-		t.Setenv("XDG_CONFIG_HOME", "")
+		isolateMimoCodeEnv(t)
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
 		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
 		if got != want {
 			t.Errorf("defaultMimoCodeConfigPath = %q, want %q", got, want)
 		}
 	})
-	t.Run("XDG_CONFIG_HOME override", func(t *testing.T) {
-		xdg := filepath.Join("custom", "xdg")
+	t.Run("absolute XDG_CONFIG_HOME override", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		xdg := t.TempDir() // t.TempDir is absolute
 		t.Setenv("XDG_CONFIG_HOME", xdg)
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
 		want := filepath.Join(xdg, "mimocode", "mimocode.json")
@@ -410,7 +455,61 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("defaultMimoCodeConfigPath = %q, want %q", got, want)
 		}
 	})
+	t.Run("relative XDG_CONFIG_HOME is IGNORED", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		// A relative XDG value is ignored (XDG spec + global.ts posture) →
+		// falls back to ~/.config/mimocode, never the relative dir.
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join("rel", "xdg"))
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
+		if got != want {
+			t.Errorf("relative XDG_CONFIG_HOME should be ignored: got %q, want %q", got, want)
+		}
+	})
+	t.Run("MIMOCODE_HOME override (absolute → /config)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		mh := t.TempDir()
+		t.Setenv("MIMOCODE_HOME", mh)
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(mh, "config", "mimocode.json")
+		if got != want {
+			t.Errorf("MIMOCODE_HOME resolution = %q, want %q", got, want)
+		}
+	})
+	t.Run("MIMOCODE_CONFIG_DIR override (absolute DIR, verbatim)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		cd := t.TempDir()
+		t.Setenv("MIMOCODE_CONFIG_DIR", cd)
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(cd, "mimocode.json")
+		if got != want {
+			t.Errorf("MIMOCODE_CONFIG_DIR resolution = %q, want %q", got, want)
+		}
+	})
+	t.Run("MIMOCODE_CONFIG (absolute FILE) used verbatim, bypasses dir probing", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		f := filepath.Join(t.TempDir(), "my-custom.json")
+		t.Setenv("MIMOCODE_CONFIG", f)
+		// Even with CONFIG_DIR also set, the FILE override wins.
+		t.Setenv("MIMOCODE_CONFIG_DIR", t.TempDir())
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		if got != f {
+			t.Errorf("MIMOCODE_CONFIG should be used verbatim: got %q, want %q", got, f)
+		}
+	})
+	t.Run("precedence: CONFIG > CONFIG_DIR > HOME > XDG", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		cfg := filepath.Join(t.TempDir(), "winner.json")
+		t.Setenv("MIMOCODE_CONFIG", cfg)
+		t.Setenv("MIMOCODE_CONFIG_DIR", t.TempDir())
+		t.Setenv("MIMOCODE_HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		if got := defaultMimoCodeConfigPath(filepath.Join("home", "u")); got != cfg {
+			t.Errorf("MIMOCODE_CONFIG must win the precedence chain: got %q", got)
+		}
+	})
 	t.Run("existing mimocode.jsonc is preferred over mimocode.json", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
 		xdg := t.TempDir()
 		t.Setenv("XDG_CONFIG_HOME", xdg)
 		dir := filepath.Join(xdg, "mimocode")
@@ -427,6 +526,7 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 		}
 	})
 	t.Run("no mimocode.jsonc falls back to mimocode.json", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
 		xdg := t.TempDir()
 		t.Setenv("XDG_CONFIG_HOME", xdg)
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
@@ -435,9 +535,161 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("with no .jsonc present, defaultMimoCodeConfigPath = %q, want %q", got, want)
 		}
 	})
-	t.Setenv("XDG_CONFIG_HOME", "")
-	if !strings.HasSuffix(defaultMimoCodeConfigPath("/home/u"), "mimocode.json") {
-		t.Errorf("path must end in mimocode.json")
+	t.Run("no config.json layer (only mimocode.json/.jsonc)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		xdg := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		dir := filepath.Join(xdg, "mimocode")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// A lone config.json must NOT be selected — paths.ts loads only
+		// ${name}.{json,jsonc}.
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"mcp":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(dir, "mimocode.json")
+		if got != want {
+			t.Errorf("config.json must not be a selected layer: got %q, want %q", got, want)
+		}
+	})
+}
+
+// TestMimoCode_InDirLayerMerge pins the in-dir two-file deep merge (spec #7):
+// an entry in mimocode.json is visible when mimocode.jsonc also exists (and
+// vice versa), and on a same-key conflict the .jsonc layer wins.
+func TestMimoCode_InDirLayerMerge(t *testing.T) {
+	t.Run("entry in .json visible when .jsonc exists", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		jsonPath := filepath.Join(dir, "mimocode.json")
+		jsoncPath := filepath.Join(dir, "mimocode.jsonc")
+		if err := os.WriteFile(jsonPath, []byte(`{"mcp":{"only-json":{"type":"remote","url":"http://localhost:9001/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// .jsonc exists but carries an UNRELATED setting (no mcp entry).
+		if err := os.WriteFile(jsoncPath, []byte("{\n  // jsonc layer\n  \"theme\": \"dark\"\n}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Write target is the .jsonc (top layer), but the read must still see
+		// the lower-layer .json entry.
+		o := &mimoCodeClient{path: jsoncPath}
+		e, err := o.GetEntry("only-json")
+		if err != nil {
+			t.Fatalf("GetEntry: %v", err)
+		}
+		if e == nil || e.URL != "http://localhost:9001/mcp" {
+			t.Errorf("lower-layer .json entry not visible through merged read: %+v", e)
+		}
+	})
+	t.Run("entry in .jsonc visible when .json exists", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		jsonPath := filepath.Join(dir, "mimocode.json")
+		jsoncPath := filepath.Join(dir, "mimocode.jsonc")
+		if err := os.WriteFile(jsonPath, []byte(`{"theme":"light"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(jsoncPath, []byte("{\n  // jsonc layer\n  \"mcp\": {\"only-jsonc\": {\"type\":\"remote\",\"url\":\"http://localhost:9002/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: jsoncPath}
+		e, err := o.GetEntry("only-jsonc")
+		if err != nil {
+			t.Fatalf("GetEntry: %v", err)
+		}
+		if e == nil || e.URL != "http://localhost:9002/mcp" {
+			t.Errorf(".jsonc-layer entry not visible through merged read: %+v", e)
+		}
+	})
+	t.Run(".jsonc wins on same-key conflict", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		jsonPath := filepath.Join(dir, "mimocode.json")
+		jsoncPath := filepath.Join(dir, "mimocode.jsonc")
+		if err := os.WriteFile(jsonPath, []byte(`{"mcp":{"serena":{"type":"remote","url":"http://json-layer/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(jsoncPath, []byte("{\n  \"mcp\": {\"serena\": {\"type\":\"remote\",\"url\":\"http://jsonc-layer/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: jsoncPath}
+		e, err := o.GetEntry("serena")
+		if err != nil {
+			t.Fatalf("GetEntry: %v", err)
+		}
+		if e == nil || e.URL != "http://jsonc-layer/mcp" {
+			t.Errorf("on conflict the .jsonc layer must win: %+v", e)
+		}
+	})
+}
+
+// TestMimoCode_RemoveEntry_ClearsBothLayers pins that RemoveEntry deletes the
+// entry from BOTH layer files (spec #7 / bot PR #420 r4): a lower-layer entry
+// must not be left active when only the top layer is patched.
+func TestMimoCode_RemoveEntry_ClearsBothLayers(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "mimocode.json")
+	jsoncPath := filepath.Join(dir, "mimocode.jsonc")
+	// Same-named entry present in BOTH layers.
+	if err := os.WriteFile(jsonPath, []byte(`{"mcp":{"serena":{"type":"remote","url":"http://json-layer/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(jsoncPath, []byte("{\n  \"mcp\": {\"serena\": {\"type\":\"remote\",\"url\":\"http://jsonc-layer/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: jsoncPath}
+	if err := o.RemoveEntry("serena"); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+	// After remove, the merged read must show NO serena (cleared from both).
+	if e, _ := o.GetEntry("serena"); e != nil {
+		t.Errorf("serena still visible after RemoveEntry — a layer was left active: %+v", e)
+	}
+	// Verify each on-disk layer no longer carries serena.
+	for _, p := range []string{jsonPath, jsoncPath} {
+		data, _ := os.ReadFile(p)
+		m, err := parseJSONCBytes(data)
+		if err != nil {
+			t.Fatalf("parse %s: %v", p, err)
+		}
+		servers, _ := m[mimoCodeMCPKey].(map[string]any)
+		if _, present := servers["serena"]; present {
+			t.Errorf("serena still present in layer %s after RemoveEntry", filepath.Base(p))
+		}
+	}
+}
+
+// TestMimoCode_ExplicitPath_NoSiblingMerge pins the explicit-path honoring
+// (spec #6 / bot PR #420 r4): when the adapter path is an EXPLICIT override
+// whose basename is NOT a known layer file name, the layer resolver returns
+// just that file and never pulls in sibling mimocode.json/.jsonc — so a
+// temp/test scan never reaches the real ~/.config/mimocode.
+func TestMimoCode_ExplicitPath_NoSiblingMerge(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	// A sibling mimocode.json that MUST be ignored when the explicit path is a
+	// differently-named file.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.json"), []byte(`{"mcp":{"sibling":{"type":"remote","url":"http://sibling/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	explicit := filepath.Join(dir, "explicit-override.json")
+	if err := os.WriteFile(explicit, []byte(`{"mcp":{"chosen":{"type":"remote","url":"http://chosen/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	layers := mimoCodeLayerFiles(explicit)
+	if len(layers) != 1 || layers[0] != explicit {
+		t.Fatalf("explicit override must resolve to exactly [%q], got %v", explicit, layers)
+	}
+	o := &mimoCodeClient{path: explicit}
+	// The chosen file's entry is visible; the sibling's is NOT.
+	if e, _ := o.GetEntry("chosen"); e == nil {
+		t.Error("explicit file's own entry should be visible")
+	}
+	if e, _ := o.GetEntry("sibling"); e != nil {
+		t.Errorf("sibling mimocode.json entry must NOT be merged for an explicit path: %+v", e)
 	}
 }
 
@@ -448,6 +700,7 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 // file can be `mimocode.jsonc` (the path owner prefers it), so this is a
 // first-class path, not an edge case.
 func TestMimoCode_JSONC_ReadAddRemovePreservesComments(t *testing.T) {
+	isolateMimoCodeEnv(t)
 	const fixture = `{
   // hand-written header (mimocode supports a .jsonc variant)
   /* block note */
@@ -456,7 +709,14 @@ func TestMimoCode_JSONC_ReadAddRemovePreservesComments(t *testing.T) {
     "keep-me": {"type": "remote", "url": "https://api.example.com/mcp", "enabled": true},
   },
 }`
-	o := newMimoCodeForTest(t, fixture)
+	// Use a real mimocode.jsonc so the layer resolver treats it as a known
+	// layer (single file in an otherwise-empty dir).
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mimocode.jsonc")
+	if err := os.WriteFile(path, []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: path}
 
 	// Read tolerates comments + trailing comma.
 	e, err := o.GetEntry("keep-me")
@@ -514,5 +774,16 @@ func TestMimoCode_RegisteredInSupportedClients(t *testing.T) {
 	}
 	if _, ok := AllClients()["mimocode"]; !ok {
 		t.Fatal("mimocode missing from AllClients()")
+	}
+}
+
+// TestMimoCode_NoWindowsAppDataConvention guards that the path resolver stays
+// on the XDG ~/.config/mimocode location on every OS (it never switches to a
+// Windows %APPDATA% / macOS ~/Library convention — mimo is XDG-only).
+func TestMimoCode_NoWindowsAppDataConvention(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+	if !strings.HasSuffix(got, filepath.Join(".config", "mimocode", "mimocode.json")) {
+		t.Errorf("path must end in .config/mimocode/mimocode.json on %s, got %q", runtime.GOOS, got)
 	}
 }
