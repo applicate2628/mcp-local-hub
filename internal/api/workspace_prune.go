@@ -122,13 +122,17 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 //
 //  1. the workspace directory STILL EXISTS (a definitive ENOENT on the dir is
 //     the deleted-dir case, owned by WorkspaceDirDeleted — NOT here);
-//  2. walking UP from the workspace dir through its ancestors, the NEAREST
-//     `.git` found is a REGULAR FILE (the worktree pointer). The walk handles a
-//     SUBDIR workspace inside a linked worktree (a monorepo package, or an
-//     LSP/.serena marker root) whose `.git` pointer lives at the worktree ROOT
-//     (an ancestor), not the subdir itself. If the nearest `.git` is a DIRECTORY
-//     it is a normal repo root → LIVE → false (stop the walk). A non-git tree
-//     with no `.git` anywhere up to the volume root → false;
+//  2. walking UP from the workspace dir through its ancestors, a `.git` found is
+//     a REGULAR FILE (a worktree/submodule pointer). The walk handles a SUBDIR
+//     workspace inside a linked worktree (a monorepo package, or an LSP/.serena
+//     marker root) whose `.git` pointer lives at the worktree ROOT (an ancestor),
+//     not the subdir itself. If a `.git` is a DIRECTORY it is a normal repo root
+//     → LIVE → false (stop the walk). A non-git tree with no `.git` anywhere up to
+//     the volume root → false. When the NEAREST regular-file pointer resolves to a
+//     SUBMODULE admin path (a submodule registered as the workspace, sitting INSIDE
+//     a linked worktree), the walk CONTINUES past it to find the OUTER worktree's
+//     own `.git` pointer (Finding 2) — a submodule pointer is the ONE outcome the
+//     walk climbs past; any ambiguous/unparsable pointer stops it false;
 //  3. the pointer's `gitdir: <path>` (relative paths resolved against the
 //     worktree-root dir that holds the pointer) names a WORKTREE admin directory
 //     of the canonical `<common-git-dir>/worktrees/<name>` shape — its immediate
@@ -155,15 +159,22 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 // NON-ENOENT stat error on the admin dir (or an ENOENT whose PARENT is also
 // gone), so the discriminator returns false; (c) condition 3a
 // (isWorktreeAdminPath) requires the admin path to be a WORKTREE admin path
-// (immediate parent dir `worktrees` AND no INTERIOR `modules` store segment after
-// the first git-common-dir segment) — a `modules/<name>` submodule path fails the
-// parent check, a submodule under a worktrees-named dir
-// (`.git/modules/.../worktrees/foo`) carries an interior `modules`, and a
-// submodule INSIDE a worktree (`.git/worktrees/<wt>/modules/<sub>...`) also
-// carries an interior `modules` — all rejected, so an ONLINE submodule whose
-// admin LEAF is merely absent (parent dir still present, e.g. before
-// `git submodule update --init`) is never misread as a removed worktree. Layer
-// (c) is the Finding-1/Finding-3 fix; layers (a)/(b) are the prior offline guard.
+// (immediate parent dir `worktrees` AND no INTERIOR `modules` store segment) — a
+// `modules/<name>` submodule path fails the parent check, a submodule under a
+// worktrees-named dir (`.git/modules/.../worktrees/foo`) carries an interior
+// `modules`, a submodule INSIDE a worktree (`.git/worktrees/<wt>/modules/<sub>...`)
+// also carries an interior `modules`, and a BOUNDARY-LESS bare-repo submodule
+// store (no `.git`/`*.git` segment, `<bare>/worktrees/<wt>/modules/deps/worktrees/foo`)
+// is caught by the front-scan — all classified submodule paths. A submodule path
+// is NOT a terminal reject: the walk CLIMBS PAST it (Finding 2) to look for an
+// OUTER worktree pointer. For a plain submodule in a regular repo the next climb
+// hits the superproject's `.git` DIRECTORY → stop the walk → false; for a
+// submodule INSIDE a linked worktree the next climb finds the worktree-root `.git`
+// pointer and fires ONLY when that OUTER worktree admin is genuinely deleted. So an
+// ONLINE submodule whose admin LEAF is merely absent (parent dir still present,
+// e.g. before `git submodule update --init`) is never misread as a removed
+// worktree. Layer (c) is the Finding-1/Finding-2/Finding-3 fix; layers (a)/(b) are
+// the prior offline guard.
 //
 // Exported so the GUI prune sweeper (internal/gui) can classify rows.
 func IsDeadGitWorktreePath(canonicalPath string) bool {
@@ -179,43 +190,68 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 		return false
 	}
 
-	// Condition 2: walk UP from the workspace dir to the NEAREST `.git`. A subdir
+	// Condition 2+3: walk UP from the workspace dir to the NEAREST `.git`. A subdir
 	// workspace inside a linked worktree keeps its `.git` pointer at the worktree
 	// ROOT (an ancestor), so probing only `<dir>/.git` would miss it (Finding 1).
-	gitPath, pointerDir, ok := findNearestGitPointer(dir)
-	if !ok {
-		// No regular-file `.git` pointer found before hitting a normal-repo `.git`
-		// directory or the volume root → not a (dead) linked worktree.
-		return false
+	//
+	// Finding 2 (this round): the nearest regular-file `.git` may be a SUBMODULE
+	// pointer rather than a worktree pointer — a SUBMODULE registered as the
+	// workspace sits INSIDE a linked worktree, so its own `.git` points at the
+	// submodule store (`<repo>/.git/worktrees/<wt>/modules/<sub>`), which
+	// isWorktreeAdminPath REJECTS (interior `modules`). The OUTER worktree's own
+	// `.git` pointer (the genuine worktree admin) lives at an ANCESTOR. So when the
+	// nearest pointer resolves to a submodule admin path we do NOT stop — we
+	// CONTINUE the ancestor walk (re-invoking from the parent of the dir that held
+	// the just-rejected pointer) to find an OUTER worktree's `.git` pointer. The
+	// continue fires on EXACTLY ONE outcome: a successfully-parsed, positively-
+	// classified submodule-admin pointer. Every other non-accept outcome STOPS
+	// false (a git DIRECTORY, the volume root, an ambiguous Lstat, an
+	// unparsable/foreign/oversized pointer): climbing past an UNCLASSIFIABLE
+	// pointer could prune a workspace under a live git pointer, so ambiguity always
+	// stops. (Architect-adjudicated decision table; see isWorktreeAdminPath.)
+	start := dir
+	for {
+		gitPath, pointerDir, ok := findNearestGitPointer(start)
+		if !ok {
+			// No regular-file `.git` pointer before a normal-repo `.git` DIRECTORY,
+			// an ambiguous Lstat, or the volume root → not a (dead) linked worktree.
+			return false
+		}
+		// Parse the `gitdir:` pointer (relative paths resolved against the dir that
+		// HOLDS the pointer — the worktree/submodule root — not the subdir workspace).
+		adminDir, ok := parseGitWorktreePointer(gitPath, pointerDir)
+		if !ok {
+			// Unreadable/unparsable/cross-OS/oversized `.git` pointer found mid-walk
+			// → ambiguous, never prune (do NOT climb past an unclassifiable pointer).
+			return false
+		}
+		// The parsed admin path must be a WORKTREE admin path
+		// (`<common-git-dir>/worktrees/<name>`), NOT a submodule admin path
+		// (`<git-dir>/...modules/<sub>...`). A regular-file `.git` is written by BOTH
+		// a linked worktree AND a submodule; only the worktree case is a candidate
+		// for the dead-worktree signal. isWorktreeAdminPath requires the admin
+		// path's immediate parent basename to be `worktrees` AND no INTERIOR
+		// `modules` store segment (see its doc) — accepting normal, bare-repo, and
+		// worktree-from-bare admin paths while excluding every submodule store.
+		if isWorktreeAdminPath(adminDir) {
+			// Genuine worktree admin pointer → this is the classification target.
+			// A submodule whose admin leaf is absent (e.g. before
+			// `git submodule update --init`) but whose `.git/modules/` parent still
+			// exists never reaches here (its admin path is rejected above), so it
+			// can never satisfy isAdminDirGenuinelyDeleted's sibling-present branch.
+			return isAdminDirGenuinelyDeleted(adminDir)
+		}
+		// SUBMODULE admin pointer → the genuine OUTER worktree pointer (if any) is an
+		// ANCESTOR. Continue the walk from the PARENT of pointerDir so the next walk
+		// starts strictly ABOVE the just-rejected pointer and cannot re-find it. A
+		// fixpoint at the root stops the loop (belt-and-suspenders: findNearestGitPointer
+		// also terminates at the volume root).
+		next := filepath.Dir(pointerDir)
+		if next == pointerDir {
+			return false
+		}
+		start = next
 	}
-
-	// Condition 3: parse the `gitdir:` pointer (relative paths resolved against
-	// the dir that HOLDS the pointer — the worktree root — not the subdir
-	// workspace) and confirm the admin dir is GENUINELY deleted.
-	adminDir, ok := parseGitWorktreePointer(gitPath, pointerDir)
-	if !ok {
-		// Unreadable/unparsable/cross-OS `.git` pointer → ambiguous, never prune.
-		return false
-	}
-	// Condition 3a (Finding 1): the parsed admin path must be a WORKTREE admin
-	// path (`<common-git-dir>/worktrees/<name>`), NOT a submodule admin path
-	// (`<git-dir>/modules/<sub>...`). A regular-file `.git` is written by BOTH a
-	// linked worktree AND a submodule; only the worktree case is a candidate for
-	// the dead-worktree signal. A submodule whose admin leaf is absent (e.g.
-	// before `git submodule update --init`) but whose `.git/modules/` parent still
-	// exists would otherwise satisfy isAdminDirGenuinelyDeleted's sibling-present
-	// branch and prune a LIVE submodule workspace. isWorktreeAdminPath requires
-	// the admin path's immediate parent basename to be `worktrees` AND no
-	// `modules` segment immediately after a git-common-dir segment (git's
-	// submodule-store position) — accepting normal, bare-repo, and
-	// worktree-from-bare admin paths while excluding `<git-dir>/modules/...` (and
-	// any other non-worktree pointer) → never prune. This composes with the
-	// submodule-on-offline guard (a NON-ENOENT stat → false): that handles the
-	// offline mount; this handles the online-but-missing-leaf submodule.
-	if !isWorktreeAdminPath(adminDir) {
-		return false
-	}
-	return isAdminDirGenuinelyDeleted(adminDir)
 }
 
 // isWorktreeAdminPath reports whether adminDir is a git WORKTREE admin path —
@@ -235,7 +271,13 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 // normal and bare cases). The worktree store, `<git-dir>/worktrees/`, never has
 // a `modules` STORE segment in its admin path. So the discriminator is: the
 // admin path's immediate PARENT basename is `worktrees` AND, scanning AFTER the
-// FIRST git-common-dir segment, no INTERIOR `modules` segment appears.
+// FIRST git-common-dir segment, no INTERIOR `modules` segment appears. When NO
+// git-common-dir segment is found at all (a BARE repo whose common dir name does
+// not end in `.git`, e.g. `git init --bare myrepo`), the interior-`modules` scan
+// runs from the FRONT instead (Finding 1, this round) so a boundary-less
+// submodule store like `<bare>/worktrees/<wt>/modules/deps/worktrees/foo` is
+// still rejected — returning true unconditionally there would mis-prune a LIVE
+// submodule workspace.
 //
 // "INTERIOR" is the load-bearing refinement (Finding 3, this round): a `modules`
 // segment is git's submodule-store marker ONLY when it has a CHILD
@@ -269,7 +311,10 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 //     BEFORE the first git-common-dir segment, so the after-the-boundary scan
 //     never sees it (architect adjudication, prior round),
 //   - a worktree literally NAMED `modules` (`<repo>/.git/worktrees/modules`): the
-//     `modules` is the LEAF, not interior → accepted (Finding 3 carve-out).
+//     `modules` is the LEAF, not interior → accepted (Finding 3 carve-out),
+//   - a BARE repo whose common dir name does NOT end in `.git`
+//     (`<bare>/worktrees/<wt>`, no git-common-dir segment, no interior modules):
+//     the front-scan finds no interior `modules` → accepted (Finding 1, this round).
 //
 //   REJECTS (submodule shapes — a live submodule must never be pruned):
 //   - the ordinary submodule pointer `<repo>/.git/modules/<name>`,
@@ -281,12 +326,22 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 //   - the Finding-3 shape, a submodule INSIDE a linked worktree:
 //     `<repo>/.git/worktrees/<wt>/modules/<sub>...` and its own worktree
 //     `<repo>/.git/worktrees/<wt>/modules/<sub>/worktrees/foo` (interior
-//     `modules` after the first `.git` → rejected).
+//     `modules` after the first `.git` → rejected),
+//   - the Finding-1 (this round) BOUNDARY-LESS shape, a submodule under a BARE
+//     repo whose common dir name does NOT end in `.git` (no git-common-dir segment
+//     at all): `<bare>/worktrees/<wt>/modules/deps/worktrees/foo` (immediate parent
+//     `worktrees`, no `.git`/`*.git` segment). The front-scan finds the interior
+//     `modules` and rejects it — a parent-only OR a return-true-when-firstGit<0
+//     check would have ACCEPTED it and mis-pruned a LIVE submodule workspace.
 //
-// Anchoring on the FIRST git-common-dir segment is correct: the submodule-in-a-
-// worktree admin path carries only the OUTER `.git` (no inner literal `.git`
-// segment), and the user-dir-named-`modules` accept case REQUIRES the scan window
-// to start past the user-path `modules` — both satisfied by "first".
+// Anchoring on the FIRST git-common-dir segment is correct WHEN ONE EXISTS: the
+// submodule-in-a-worktree admin path carries only the OUTER `.git` (no inner
+// literal `.git` segment), and the user-dir-named-`modules` accept case REQUIRES
+// the scan window to start past the user-path `modules` — both satisfied by
+// "first". When NO git-common-dir segment exists (the boundary-less bare-repo
+// case), the scan starts at the FRONT so an interior submodule-store `modules` is
+// still caught; a boundary-less NORMAL bare-repo worktree (`<bare>/worktrees/<wt>`)
+// has no interior `modules` → accepted.
 //
 // Any bare/other pointer (parent not `worktrees`) also returns false, so only a
 // genuine linked-worktree admin path can reach the dead-worktree availability
@@ -318,13 +373,24 @@ func isWorktreeAdminPath(adminDir string) bool {
 			break
 		}
 	}
-	if firstGit < 0 {
-		// Parent basename is already proved `worktrees`; with no git-common-dir
-		// segment, no submodule store marker is reachable → genuine worktree.
-		return true
+	// Finding 1 (this round): when NO git-common-dir boundary is found
+	// (firstGit < 0) the interior-`modules` scan must STILL run. A BARE repo whose
+	// common dir name does NOT end in `.git` (e.g. `git init --bare myrepo`, or a
+	// clone without the suffix) leaves firstGit == -1, yet a submodule store still
+	// nests an interior `modules` segment — e.g. a submodule under such a bare
+	// worktree, `<bare>/worktrees/<wt>/modules/deps/worktrees/foo`. Returning true
+	// unconditionally here would ACCEPT that boundary-less submodule store and
+	// mis-prune a LIVE submodule workspace. So scan from the FRONT (start = 0) when
+	// there is no boundary; otherwise scan AFTER the first git-common-dir segment
+	// (start = firstGit + 1) so a user dir named `modules` ABOVE the git dir is
+	// skipped. The LEAF exclusion (j < lastIdx) is preserved in BOTH windows so a
+	// worktree literally NAMED `modules` directly under `worktrees` stays accepted.
+	scanStart := 0
+	if firstGit >= 0 {
+		scanStart = firstGit + 1
 	}
 	lastIdx := len(comps) - 1
-	for j := firstGit + 1; j < lastIdx; j++ { // j < lastIdx ⇒ interior only (has a child)
+	for j := scanStart; j < lastIdx; j++ { // j < lastIdx ⇒ interior only (has a child)
 		if comps[j] == "modules" {
 			return false
 		}
