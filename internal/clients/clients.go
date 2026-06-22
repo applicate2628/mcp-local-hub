@@ -45,6 +45,26 @@ type MCPEntry struct {
 	// Empty preserves the legacy --server/--daemon behavior for every
 	// existing caller.
 	RelayURL string
+
+	// Raw, when non-nil, carries an adapter's verbatim on-disk entry value
+	// (the parsed JSON/TOML map under the server's name) so an entry shape the
+	// lean MCPEntry CANNOT represent — currently only MiMoCode's LOCAL entry
+	// (type:"local", `command` as an ARRAY, env under `environment`) — survives
+	// a GetEntry → AddEntry rollback round-trip byte-identical instead of being
+	// projected onto a lossy {URL,Headers} shape (which would rewrite the
+	// operator's local entry as a broken `url:""` remote) or skipped entirely
+	// (which makes the install rollback's nil-prior else-branch RemoveEntry
+	// DELETE the operator's original entry).
+	//
+	// CONTRACT: Raw is ADDITIVE and defaults nil. The hub's normal install path
+	// (install.go / register.go) builds MCPEntry WITHOUT Raw, so every adapter
+	// that ignores Raw (all of them except MiMoCode) is byte-unchanged. Only the
+	// MiMoCode adapter reads it: GetEntry sets Raw (and leaves URL empty) for a
+	// url-less local entry; AddEntry, when Raw != nil, writes Raw verbatim and
+	// IGNORES URL/Headers (Raw wins). For a URL entry MiMoCode leaves Raw nil and
+	// returns {URL,Headers} as before, so the normal hub-install/restore polarity
+	// is unchanged. No other adapter populates or consumes Raw.
+	Raw map[string]any
 }
 
 // Client is the OS-/format-abstracted interface for a single MCP client config file.

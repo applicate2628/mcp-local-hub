@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 
 	"github.com/spf13/cobra"
 )
@@ -221,11 +222,20 @@ func newManifestExtractCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// mimocode's config path is resolved through the adapter (the SAME
+			// resolver the GUI extract path uses via guiClientConfigPath →
+			// clients.ConfigPathForName), so `mcphub manifest extract --client
+			// mimocode` populates MimoCodeConfigPath instead of failing the
+			// scan's "MimoCodeConfigPath empty" guard. An unknown/unconstructable
+			// client resolves to "" (extract then surfaces its own
+			// not-supported / empty-path error), so this never panics.
+			mimoCodePath, _ := clients.ConfigPathForName("mimocode")
 			yaml, err := a.ExtractManifestFromClient(clientFlag, args[0], api.ScanOpts{
 				ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
 				CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
 				GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
 				AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+				MimoCodeConfigPath:    mimoCodePath,
 				ManifestDir:           scanManifestDir(),
 			})
 			if err != nil {

@@ -172,12 +172,14 @@ func TestMimoCode_GetEntry_RoundTrips(t *testing.T) {
 	}
 }
 
-// TestMimoCode_GetEntry_LocalEntryReturnsNil pins the rollback-safety contract
-// (spec #4 / bot PR #420 r4+r5): a LOCAL entry (type:"local", a `command`
-// array, NO url) is NOT representable by the lean MCPEntry. GetEntry must
-// return (nil, nil) for it so the install/register rollback snapshot/restore
-// SKIPS it rather than rewriting it into a broken {type:remote, url:""} entry.
-func TestMimoCode_GetEntry_LocalEntryReturnsNil(t *testing.T) {
+// TestMimoCode_GetEntry_LocalEntryCarriesRaw pins the rollback-safety contract
+// (spec #5 / bot PR #420): a LOCAL entry (type:"local", a `command` ARRAY, NO
+// url) is NOT representable by the lean URL/Headers MCPEntry. GetEntry must NOT
+// return nil (which would make the install rollback's nil-prior else-branch
+// RemoveEntry DELETE the operator's original) and must NOT project it onto a
+// broken {type:remote, url:""} entry. Instead it carries the verbatim entry map
+// in MCPEntry.Raw (URL left empty) so AddEntry(*prior) restores it byte-exact.
+func TestMimoCode_GetEntry_LocalEntryCarriesRaw(t *testing.T) {
 	o := newMimoCodeForTest(t, `{
   "mcp": {
     "local-srv": {
@@ -192,8 +194,83 @@ func TestMimoCode_GetEntry_LocalEntryReturnsNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetEntry: %v", err)
 	}
-	if e != nil {
-		t.Fatalf("GetEntry on a URL-less local entry = %+v, want nil (rollback must skip, not corrupt to url:\"\")", e)
+	if e == nil {
+		t.Fatal("GetEntry on a local entry returned nil — rollback nil-prior would DELETE the operator's original")
+	}
+	if e.URL != "" {
+		t.Errorf("local entry URL = %q, want empty (Raw carries the value)", e.URL)
+	}
+	if e.Raw == nil {
+		t.Fatal("local entry MCPEntry.Raw is nil — rollback cannot restore it")
+	}
+	if e.Raw["type"] != "local" {
+		t.Errorf("Raw['type'] = %v, want local (verbatim entry preserved)", e.Raw["type"])
+	}
+	if _, ok := e.Raw["command"].([]any); !ok {
+		t.Errorf("Raw['command'] should preserve the array shape: %#v", e.Raw["command"])
+	}
+}
+
+// TestMimoCode_LocalEntry_RollbackRoundTrip pins the END-TO-END data-safety of
+// the local-entry rollback (spec #5 / VERDICT A regression): a GetEntry →
+// AddEntry(*prior) cycle (exactly what install.go:2607-2616 runs on rollback)
+// restores the operator's local command-array entry byte-identical. Without the
+// Raw field, the prior is nil → rollback RemoveEntry → the operator's entry is
+// gone (data loss); with Raw, AddEntry writes the raw map verbatim.
+func TestMimoCode_LocalEntry_RollbackRoundTrip(t *testing.T) {
+	const original = `{
+  "mcp": {
+    "local-srv": {
+      "type": "local",
+      "command": ["npx", "-y", "some-mcp", "--flag"],
+      "environment": {"API_KEY": "x"},
+      "enabled": true
+    }
+  }
+}`
+	o := newMimoCodeForTest(t, original)
+
+	// 1. Snapshot the prior (rollback step 1).
+	prior, err := o.GetEntry("local-srv")
+	if err != nil || prior == nil {
+		t.Fatalf("GetEntry prior = %+v, err=%v; want non-nil", prior, err)
+	}
+
+	// 2. Hub install overwrites it with a remote-http entry.
+	if err := o.AddEntry(MCPEntry{Name: "local-srv", URL: "http://localhost:9121/mcp"}); err != nil {
+		t.Fatalf("AddEntry (install): %v", err)
+	}
+
+	// 3. Rollback restores the prior verbatim (Raw wins; URL/Headers ignored).
+	if err := o.AddEntry(*prior); err != nil {
+		t.Fatalf("AddEntry(*prior) (rollback): %v", err)
+	}
+
+	// The restored entry must be the operator's local command-array form again,
+	// not a {type:remote,url:""} corruption and not deleted.
+	raw, _ := os.ReadFile(o.path)
+	m, err := parseJSONCBytes(raw)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	servers := m[mimoCodeMCPKey].(map[string]any)
+	restored, ok := servers["local-srv"].(map[string]any)
+	if !ok {
+		t.Fatalf("local-srv missing after rollback (deleted = data loss): %v", servers)
+	}
+	if restored["type"] != "local" {
+		t.Errorf("restored type = %v, want local", restored["type"])
+	}
+	cmd, ok := restored["command"].([]any)
+	if !ok || len(cmd) != 4 || cmd[0] != "npx" {
+		t.Errorf("restored command array not preserved: %#v", restored["command"])
+	}
+	if _, has := restored["url"]; has {
+		t.Errorf("restored entry has a url field — local entry was corrupted to remote: %v", restored)
+	}
+	env, ok := restored["environment"].(map[string]any)
+	if !ok || env["API_KEY"] != "x" {
+		t.Errorf("restored environment not preserved: %#v", restored["environment"])
 	}
 }
 
@@ -476,14 +553,20 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("MIMOCODE_HOME resolution = %q, want %q", got, want)
 		}
 	})
-	t.Run("MIMOCODE_CONFIG_DIR override (absolute DIR, verbatim)", func(t *testing.T) {
+	t.Run("MIMOCODE_CONFIG_DIR is an OVERLAY: write target stays in the GLOBAL dir", func(t *testing.T) {
+		// Spec #3: MIMOCODE_CONFIG_DIR is an ADDITIONAL overlay dir merged ON TOP
+		// of the global dir (config.ts appends it to `directories`), NOT a
+		// replacement. The hub WRITES the canonical per-user global file (which
+		// MiMoCode still loads); the overlay only contributes to READS. So the
+		// write target must resolve into the GLOBAL dir, not the custom dir.
 		isolateMimoCodeEnv(t)
-		cd := t.TempDir()
-		t.Setenv("MIMOCODE_CONFIG_DIR", cd)
+		xdg := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", xdg) // global dir = $XDG/mimocode
+		t.Setenv("MIMOCODE_CONFIG_DIR", t.TempDir())
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(cd, "mimocode.json")
+		want := filepath.Join(xdg, "mimocode", "mimocode.json")
 		if got != want {
-			t.Errorf("MIMOCODE_CONFIG_DIR resolution = %q, want %q", got, want)
+			t.Errorf("with MIMOCODE_CONFIG_DIR set, write target must stay in the global dir: got %q, want %q", got, want)
 		}
 	})
 	t.Run("MIMOCODE_CONFIG (absolute FILE) used verbatim, bypasses dir probing", func(t *testing.T) {
@@ -497,7 +580,8 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("MIMOCODE_CONFIG should be used verbatim: got %q, want %q", got, f)
 		}
 	})
-	t.Run("precedence: CONFIG > CONFIG_DIR > HOME > XDG", func(t *testing.T) {
+	t.Run("write-target precedence: CONFIG (file) > HOME > XDG; CONFIG_DIR is an overlay, not a write target", func(t *testing.T) {
+		// CONFIG (file-override) wins the write target absolutely.
 		isolateMimoCodeEnv(t)
 		cfg := filepath.Join(t.TempDir(), "winner.json")
 		t.Setenv("MIMOCODE_CONFIG", cfg)
@@ -505,7 +589,19 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 		t.Setenv("MIMOCODE_HOME", t.TempDir())
 		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 		if got := defaultMimoCodeConfigPath(filepath.Join("home", "u")); got != cfg {
-			t.Errorf("MIMOCODE_CONFIG must win the precedence chain: got %q", got)
+			t.Errorf("MIMOCODE_CONFIG (file) must win the write-target precedence chain: got %q", got)
+		}
+	})
+	t.Run("without CONFIG: HOME > XDG for the global write dir; CONFIG_DIR does not change it", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		mh := t.TempDir()
+		t.Setenv("MIMOCODE_HOME", mh)
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // lower precedence than HOME
+		t.Setenv("MIMOCODE_CONFIG_DIR", t.TempDir())
+		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
+		want := filepath.Join(mh, "config", "mimocode.json")
+		if got != want {
+			t.Errorf("MIMOCODE_HOME must win the global dir over XDG (CONFIG_DIR is overlay-only): got %q, want %q", got, want)
 		}
 	})
 	t.Run("existing mimocode.jsonc is preferred over mimocode.json", func(t *testing.T) {
@@ -535,7 +631,11 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("with no .jsonc present, defaultMimoCodeConfigPath = %q, want %q", got, want)
 		}
 	})
-	t.Run("no config.json layer (only mimocode.json/.jsonc)", func(t *testing.T) {
+	t.Run("config.json is never a WRITE target (only mimocode.json/.jsonc)", func(t *testing.T) {
+		// Spec #1: config.json IS a real READ merge layer, but it is a legacy
+		// migration sink that the hub never WRITES — the write target stays
+		// mimocode.jsonc (preferred when present) else mimocode.json. A lone
+		// config.json must therefore NOT become the write target.
 		isolateMimoCodeEnv(t)
 		xdg := t.TempDir()
 		t.Setenv("XDG_CONFIG_HOME", xdg)
@@ -543,15 +643,82 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		// A lone config.json must NOT be selected — paths.ts loads only
-		// ${name}.{json,jsonc}.
 		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"mcp":{}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
 		want := filepath.Join(dir, "mimocode.json")
 		if got != want {
-			t.Errorf("config.json must not be a selected layer: got %q, want %q", got, want)
+			t.Errorf("config.json must not be the write target: got %q, want %q", got, want)
+		}
+	})
+}
+
+// TestMimoCode_ConfigJSONIsRealReadLayer pins spec #1: config.json is a real,
+// LOWEST-precedence READ merge layer (config.ts `loadGlobal` merges config.json
+// → mimocode.json → mimocode.jsonc). A server defined ONLY in config.json must
+// be visible through the merged read; on a same-key conflict mimocode.json /
+// mimocode.jsonc (higher layers) win.
+func TestMimoCode_ConfigJSONIsRealReadLayer(t *testing.T) {
+	t.Run("entry in config.json visible via merge", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"),
+			[]byte(`{"mcp":{"from-config":{"type":"remote","url":"http://localhost:9009/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Write target is mimocode.json (top of write), but the read must surface
+		// the config.json-layer entry.
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		e, err := o.GetEntry("from-config")
+		if err != nil {
+			t.Fatalf("GetEntry: %v", err)
+		}
+		if e == nil || e.URL != "http://localhost:9009/mcp" {
+			t.Errorf("config.json-layer entry not visible through merged read: %+v", e)
+		}
+	})
+	t.Run("precedence config.json < mimocode.json < mimocode.jsonc", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		// Same key in all three layers; the .jsonc value must win.
+		if err := os.WriteFile(filepath.Join(dir, "config.json"),
+			[]byte(`{"mcp":{"srv":{"type":"remote","url":"http://config-json/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "mimocode.json"),
+			[]byte(`{"mcp":{"srv":{"type":"remote","url":"http://mimocode-json/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"),
+			[]byte("{\n  \"mcp\": {\"srv\": {\"type\":\"remote\",\"url\":\"http://mimocode-jsonc/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.jsonc")}
+		e, err := o.GetEntry("srv")
+		if err != nil {
+			t.Fatalf("GetEntry: %v", err)
+		}
+		if e == nil || e.URL != "http://mimocode-jsonc/mcp" {
+			t.Errorf("layer precedence wrong: want .jsonc to win, got %+v", e)
+		}
+	})
+	t.Run("config.json-only entry survives a mimocode.json that lacks it", func(t *testing.T) {
+		// The lowest layer's entry must NOT be shadowed away when a higher layer
+		// merely carries an unrelated setting (deep-merge by key, not replace).
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"),
+			[]byte(`{"mcp":{"low":{"type":"remote","url":"http://low/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "mimocode.json"),
+			[]byte(`{"theme":"dark"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		if e, _ := o.GetEntry("low"); e == nil || e.URL != "http://low/mcp" {
+			t.Errorf("config.json entry shadowed by an unrelated higher layer: %+v", e)
 		}
 	})
 }
@@ -625,40 +792,51 @@ func TestMimoCode_InDirLayerMerge(t *testing.T) {
 	})
 }
 
-// TestMimoCode_RemoveEntry_ClearsBothLayers pins that RemoveEntry deletes the
-// entry from BOTH layer files (spec #7 / bot PR #420 r4): a lower-layer entry
-// must not be left active when only the top layer is patched.
-func TestMimoCode_RemoveEntry_ClearsBothLayers(t *testing.T) {
+// TestMimoCode_RemoveEntry_TopLayerOnly_PreservesLowerOriginal pins the P1
+// data-safety rule (spec #4 / VERDICT B1): RemoveEntry deletes ONLY from the
+// top WRITE layer (o.path). A lower-layer (config.json / mimocode.json) entry of
+// the same name is the OPERATOR's original — the hub physically cannot have
+// written there (setMember only touches o.path) — so deleting it would destroy
+// operator data the hub never owned. Removing only the top hub entry lets the
+// merge REVEAL the operator's lower-layer original again, which is exactly the
+// restore-to-prior-state the rollback/demigrate contract provides.
+func TestMimoCode_RemoveEntry_TopLayerOnly_PreservesLowerOriginal(t *testing.T) {
 	isolateMimoCodeEnv(t)
 	dir := t.TempDir()
-	jsonPath := filepath.Join(dir, "mimocode.json")
+	configJSON := filepath.Join(dir, "config.json")
 	jsoncPath := filepath.Join(dir, "mimocode.jsonc")
-	// Same-named entry present in BOTH layers.
-	if err := os.WriteFile(jsonPath, []byte(`{"mcp":{"serena":{"type":"remote","url":"http://json-layer/mcp","enabled":true}}}`), 0o600); err != nil {
+	// The OPERATOR's own server lives in the LOWER config.json layer; the hub's
+	// entry of the same name was written into the TOP mimocode.jsonc layer.
+	if err := os.WriteFile(configJSON, []byte(`{"mcp":{"serena":{"type":"remote","url":"http://operator-original/mcp","enabled":true}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(jsoncPath, []byte("{\n  \"mcp\": {\"serena\": {\"type\":\"remote\",\"url\":\"http://jsonc-layer/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
+	if err := os.WriteFile(jsoncPath, []byte("{\n  \"mcp\": {\"serena\": {\"type\":\"remote\",\"url\":\"http://localhost:9121/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	o := &mimoCodeClient{path: jsoncPath}
 	if err := o.RemoveEntry("serena"); err != nil {
 		t.Fatalf("RemoveEntry: %v", err)
 	}
-	// After remove, the merged read must show NO serena (cleared from both).
-	if e, _ := o.GetEntry("serena"); e != nil {
-		t.Errorf("serena still visible after RemoveEntry — a layer was left active: %+v", e)
+	// The operator's lower-layer original MUST survive on disk untouched.
+	lowData, _ := os.ReadFile(configJSON)
+	lowM, err := parseJSONCBytes(lowData)
+	if err != nil {
+		t.Fatalf("parse config.json: %v", err)
 	}
-	// Verify each on-disk layer no longer carries serena.
-	for _, p := range []string{jsonPath, jsoncPath} {
-		data, _ := os.ReadFile(p)
-		m, err := parseJSONCBytes(data)
-		if err != nil {
-			t.Fatalf("parse %s: %v", p, err)
-		}
-		servers, _ := m[mimoCodeMCPKey].(map[string]any)
-		if _, present := servers["serena"]; present {
-			t.Errorf("serena still present in layer %s after RemoveEntry", filepath.Base(p))
-		}
+	lowServers, _ := lowM[mimoCodeMCPKey].(map[string]any)
+	if _, present := lowServers["serena"]; !present {
+		t.Fatal("DATA LOSS: operator's lower-layer config.json serena was deleted by RemoveEntry")
+	}
+	// The hub's top-layer entry MUST be gone from mimocode.jsonc.
+	topData, _ := os.ReadFile(jsoncPath)
+	topM, _ := parseJSONCBytes(topData)
+	topServers, _ := topM[mimoCodeMCPKey].(map[string]any)
+	if _, present := topServers["serena"]; present {
+		t.Error("hub's top-layer serena entry should have been removed")
+	}
+	// And the merged read now surfaces the operator's original (restored view).
+	if e, _ := o.GetEntry("serena"); e == nil || e.URL != "http://operator-original/mcp" {
+		t.Errorf("merged read should reveal the operator's lower-layer original after removal: %+v", e)
 	}
 }
 
@@ -679,7 +857,7 @@ func TestMimoCode_ExplicitPath_NoSiblingMerge(t *testing.T) {
 	if err := os.WriteFile(explicit, []byte(`{"mcp":{"chosen":{"type":"remote","url":"http://chosen/mcp","enabled":true}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	layers := mimoCodeLayerFiles(explicit)
+	layers := mimoCodeReadLayerFiles(explicit, "")
 	if len(layers) != 1 || layers[0] != explicit {
 		t.Fatalf("explicit override must resolve to exactly [%q], got %v", explicit, layers)
 	}
@@ -690,6 +868,139 @@ func TestMimoCode_ExplicitPath_NoSiblingMerge(t *testing.T) {
 	}
 	if e, _ := o.GetEntry("sibling"); e != nil {
 		t.Errorf("sibling mimocode.json entry must NOT be merged for an explicit path: %+v", e)
+	}
+	// Delete-side: RemoveEntry on an explicit path touches ONLY that file; the
+	// sibling mimocode.json is never opened/mutated.
+	siblingBefore, _ := os.ReadFile(filepath.Join(dir, "mimocode.json"))
+	if err := o.RemoveEntry("chosen"); err != nil {
+		t.Fatalf("RemoveEntry on explicit path: %v", err)
+	}
+	siblingAfter, _ := os.ReadFile(filepath.Join(dir, "mimocode.json"))
+	if string(siblingBefore) != string(siblingAfter) {
+		t.Errorf("explicit-path RemoveEntry mutated the sibling mimocode.json (state-safety breach)")
+	}
+}
+
+// TestMimoCode_ConfigDirOverlay_MergesGlobalPlusCustom pins spec #3:
+// MIMOCODE_CONFIG_DIR is an ADDITIONAL overlay read ON TOP of the global dir
+// (NOT a replacement). Global-dir entries stay visible, the overlay's entries
+// are merged in, and on a same-key conflict the overlay (higher precedence)
+// wins. The construction mirrors NewMimoCode (write target in the global dir,
+// overlayDir = the custom dir).
+func TestMimoCode_ConfigDirOverlay_MergesGlobalPlusCustom(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	globalDir := t.TempDir()
+	overlayDir := t.TempDir()
+	// Global dir: an operator server only the global layer defines.
+	if err := os.WriteFile(filepath.Join(globalDir, "mimocode.json"),
+		[]byte(`{"mcp":{"global-only":{"type":"remote","url":"http://global/mcp","enabled":true},"shared":{"type":"remote","url":"http://global-shared/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Overlay dir: a custom-only server + a conflicting `shared` the overlay wins.
+	if err := os.WriteFile(filepath.Join(overlayDir, "mimocode.json"),
+		[]byte(`{"mcp":{"overlay-only":{"type":"remote","url":"http://overlay/mcp","enabled":true},"shared":{"type":"remote","url":"http://overlay-shared/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: filepath.Join(globalDir, "mimocode.json"), overlayDir: overlayDir}
+
+	// Global-only entry still visible (overlay did not REPLACE the global dir).
+	if e, _ := o.GetEntry("global-only"); e == nil || e.URL != "http://global/mcp" {
+		t.Errorf("global-dir entry must stay visible under an overlay: %+v", e)
+	}
+	// Overlay-only entry is merged in.
+	if e, _ := o.GetEntry("overlay-only"); e == nil || e.URL != "http://overlay/mcp" {
+		t.Errorf("overlay-dir entry not merged: %+v", e)
+	}
+	// On conflict the overlay (higher precedence) wins.
+	if e, _ := o.GetEntry("shared"); e == nil || e.URL != "http://overlay-shared/mcp" {
+		t.Errorf("on a same-key conflict the MIMOCODE_CONFIG_DIR overlay must win: %+v", e)
+	}
+}
+
+// TestMimoCode_FileOverride_NoSiblingOrOverlay pins spec #2: MIMOCODE_CONFIG
+// points at a single FILE used verbatim — the read set, the write target, and
+// the delete target are ALL that one file. Even with MIMOCODE_CONFIG_DIR also
+// set and a sibling mimocode.json next to it, neither is read or mutated.
+func TestMimoCode_FileOverride_NoSiblingOrOverlay(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	overlay := t.TempDir()
+	customFile := filepath.Join(dir, "my-custom.json")
+	if err := os.WriteFile(customFile,
+		[]byte(`{"mcp":{"chosen":{"type":"remote","url":"http://chosen/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A sibling mimocode.json AND an overlay entry that must both be ignored.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.json"),
+		[]byte(`{"mcp":{"sibling":{"type":"remote","url":"http://sibling/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overlay, "mimocode.json"),
+		[]byte(`{"mcp":{"overlay":{"type":"remote","url":"http://overlay/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MIMOCODE_CONFIG", customFile)
+	t.Setenv("MIMOCODE_CONFIG_DIR", overlay)
+
+	// NewMimoCode-equivalent resolution: file-override → write target = the file,
+	// overlay ignored.
+	r := resolveMimoCodeConfig(filepath.Join("home", "u"))
+	if !r.fileOverride || r.writeTarget != customFile || r.overlayDir != "" {
+		t.Fatalf("file-override resolution wrong: %+v (want writeTarget=%q, overlay empty)", r, customFile)
+	}
+	o := &mimoCodeClient{path: r.writeTarget, overlayDir: r.overlayDir}
+	// Read set is exactly the one file.
+	if layers := o.readLayerFiles(); len(layers) != 1 || layers[0] != customFile {
+		t.Fatalf("file-override read set must be exactly the one file, got %v", layers)
+	}
+	if e, _ := o.GetEntry("chosen"); e == nil {
+		t.Error("the pinned file's own entry must be visible")
+	}
+	if e, _ := o.GetEntry("sibling"); e != nil {
+		t.Errorf("sibling mimocode.json must NOT be read in file-override mode: %+v", e)
+	}
+	if e, _ := o.GetEntry("overlay"); e != nil {
+		t.Errorf("MIMOCODE_CONFIG_DIR overlay must NOT be read in file-override mode: %+v", e)
+	}
+	// Write/delete touch only the pinned file; sibling untouched.
+	siblingBefore, _ := os.ReadFile(filepath.Join(dir, "mimocode.json"))
+	if err := o.AddEntry(MCPEntry{Name: "added", URL: "http://localhost:9121/mcp"}); err != nil {
+		t.Fatalf("AddEntry in file-override mode: %v", err)
+	}
+	siblingAfter, _ := os.ReadFile(filepath.Join(dir, "mimocode.json"))
+	if string(siblingBefore) != string(siblingAfter) {
+		t.Error("file-override AddEntry mutated the sibling mimocode.json")
+	}
+}
+
+// TestMimoCode_FindStdioLanguageServerEntries_CommandArray pins spec #7: a
+// MiMoCode LOCAL mcp-language-server entry stores `command` as an ARRAY
+// (["mcp-language-server","--lsp","go"]). The LSP scan must normalize the array
+// before delegating to the shared string-keyed matcher, so the entry is found.
+// A string-command form (already covered elsewhere) still works.
+func TestMimoCode_FindStdioLanguageServerEntries_CommandArray(t *testing.T) {
+	o := newMimoCodeForTest(t, `{
+  "mcp": {
+    "serena": {"type": "remote", "url": "http://localhost:9121/mcp", "enabled": true},
+    "go-ls": {"type": "local", "command": ["mcp-language-server", "--lsp", "go"], "enabled": true},
+    "rust-ls": {"type": "local", "command": ["mcp-language-server"], "args": ["--lsp=rust"], "enabled": true}
+  }
+}`)
+	ls, err := o.FindStdioLanguageServerEntries()
+	if err != nil {
+		t.Fatalf("FindStdioLanguageServerEntries: %v", err)
+	}
+	got := map[string]string{}
+	for _, e := range ls {
+		got[e.Name] = e.Language
+	}
+	if got["go-ls"] != "go" {
+		t.Errorf("array-command LSP entry not found: command-array --lsp go missed, got %v", got)
+	}
+	// The two-array-element form (array command + separate args array, --lsp=rust)
+	// must also resolve, proving array-args are prepended to existing args.
+	if got["rust-ls"] != "rust" {
+		t.Errorf("array-command + args-array LSP entry not found: got %v", got)
 	}
 }
 
