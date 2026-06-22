@@ -131,11 +131,13 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 //     with no `.git` anywhere up to the volume root → false;
 //  3. the pointer's `gitdir: <path>` (relative paths resolved against the
 //     worktree-root dir that holds the pointer) names a WORKTREE admin directory
-//     of the canonical `<repo>/.git/worktrees/<name>` shape — its immediate
-//     parent dir is `worktrees` AND that dir's own parent is `.git` (so a
-//     `<repo>/.git/modules/<name>` submodule path AND a submodule under a
-//     worktrees-named dir, `<repo>/.git/modules/.../worktrees/foo`, are BOTH
-//     rejected here, see isWorktreeAdminPath / Finding 1) that is ABSENT via
+//     of the canonical `<common-git-dir>/worktrees/<name>` shape — its immediate
+//     parent dir is `worktrees` AND no INTERIOR `modules` store segment appears
+//     after the first git-common-dir segment (so a `<repo>/.git/modules/<name>`
+//     submodule path, a submodule under a worktrees-named dir
+//     `<repo>/.git/modules/.../worktrees/foo`, AND a submodule INSIDE a worktree
+//     `<repo>/.git/worktrees/<wt>/modules/<sub>...` are ALL rejected here, see
+//     isWorktreeAdminPath / Findings 1+3) that is ABSENT via
 //     os.IsNotExist-ONLY, AND
 //     an admin-dir ANCESTOR (the PARENT `.git/worktrees/`, or — when the LAST
 //     worktree was removed and git cleaned the empty `worktrees/` — the
@@ -152,15 +154,16 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 // discriminator returns false; (b) a submodule on an OFFLINE mount yields a
 // NON-ENOENT stat error on the admin dir (or an ENOENT whose PARENT is also
 // gone), so the discriminator returns false; (c) condition 3a
-// (isWorktreeAdminPath) requires the admin path to be the FULL
-// `<repo>/.git/worktrees/<name>` shape (parent dir `worktrees` AND grandparent
-// `.git`) — a `modules/<name>` submodule path fails the parent check, and a
-// submodule under a worktrees-named dir (`.git/modules/.../worktrees/foo`,
-// parent `worktrees` but grandparent NOT `.git`) fails the grandparent check, so
-// an ONLINE submodule whose admin LEAF is merely absent (parent dir still
-// present, e.g. before `git submodule update --init`) is never misread as a
-// removed worktree. Layer (c) is the Finding-1 fix; layers (a)/(b) are the prior
-// offline guard.
+// (isWorktreeAdminPath) requires the admin path to be a WORKTREE admin path
+// (immediate parent dir `worktrees` AND no INTERIOR `modules` store segment after
+// the first git-common-dir segment) — a `modules/<name>` submodule path fails the
+// parent check, a submodule under a worktrees-named dir
+// (`.git/modules/.../worktrees/foo`) carries an interior `modules`, and a
+// submodule INSIDE a worktree (`.git/worktrees/<wt>/modules/<sub>...`) also
+// carries an interior `modules` — all rejected, so an ONLINE submodule whose
+// admin LEAF is merely absent (parent dir still present, e.g. before
+// `git submodule update --init`) is never misread as a removed worktree. Layer
+// (c) is the Finding-1/Finding-3 fix; layers (a)/(b) are the prior offline guard.
 //
 // Exported so the GUI prune sweeper (internal/gui) can classify rows.
 func IsDeadGitWorktreePath(canonicalPath string) bool {
@@ -224,45 +227,66 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 //   - SUBMODULE: `<git-dir>/modules/<sub>[/.../worktrees/<name>]`
 //
 // The `modules` path component is git's OWN internal layout marker for the
-// submodule store, and it sits IMMEDIATELY AFTER the git common-dir segment:
-// git stores a submodule's admin dir at `<git-dir>/modules/<sub-path>` (the
-// sub-path may be multi-segment for a nested submodule, e.g.
-// `<git-dir>/modules/libs/mysub`). The worktree store, `<git-dir>/worktrees/`,
-// never has a `modules` segment in that position. So the discriminator is: the
-// admin path's immediate PARENT basename is `worktrees` AND no `modules` segment
-// appears immediately after a git-common-dir segment (a `.git` or `*.git`
-// basename — `.git` itself satisfies the `*.git` suffix, so one predicate covers
-// both the normal and bare cases).
+// submodule store: git stores a submodule's admin dir at
+// `<git-dir>/modules/<sub-path>` (the sub-path may be multi-segment for a nested
+// submodule, e.g. `<git-dir>/modules/libs/mysub`), and that `modules` segment
+// always appears AFTER the git common-dir segment (a `.git` or `*.git` basename
+// — `.git` itself satisfies the `*.git` suffix, so one predicate covers both the
+// normal and bare cases). The worktree store, `<git-dir>/worktrees/`, never has
+// a `modules` STORE segment in its admin path. So the discriminator is: the
+// admin path's immediate PARENT basename is `worktrees` AND, scanning AFTER the
+// FIRST git-common-dir segment, no INTERIOR `modules` segment appears.
 //
-// Why NOT the earlier grandparent==`.git` check (Finding 1, this round): that
-// check assumed the common git dir is always literally named `.git`. It is not.
-// A worktree created from a BARE repo has a common git dir named e.g. `main.git`
-// (`git worktree add` writes `gitdir: .../main.git/worktrees/<name>`), so its
-// grandparent basename is `main.git`, NOT `.git`, and the grandparent check
-// WRONGLY rejected every bare-repo worktree — the dead-worktree signal never
-// fired for them (false-negative; orphan rows accumulated). The positional
-// `modules` rule instead ACCEPTS all worktree shapes — normal (`.git/worktrees/`),
-// bare (`main.git/worktrees/`), and worktree-from-bare — while still REJECTING:
+// "INTERIOR" is the load-bearing refinement (Finding 3, this round): a `modules`
+// segment is git's submodule-store marker ONLY when it has a CHILD
+// (`modules/<sub>...`). A worktree literally NAMED `modules` (created by
+// `git worktree add ./modules`) stores its admin dir at
+// `<repo>/.git/worktrees/modules` — there `modules` is the LEAF directly under
+// `worktrees`, a worktree NAME, not a store marker. Treating only interior
+// `modules` as the marker accepts that legitimate worktree while still rejecting
+// every real submodule store (which always nests a sub-path under `modules`).
 //
-//   - the ordinary submodule pointer `<repo>/.git/modules/<name>` (`modules`
-//     directly under `.git`),
-//   - a nested submodule `<repo>/.git/modules/libs/<name>`, and
-//   - the Finding-1 r6 trap, a submodule checked out under a directory literally
-//     named `worktrees`: git stores its admin dir at
-//     `<repo>/.git/modules/deps/worktrees/foo` — immediate parent `worktrees`
-//     (so a parent-only check would wrongly ACCEPT it) but `modules` sits
-//     directly under `.git`, so the positional rule rejects it.
+// Why ANYWHERE-AFTER-THE-FIRST-git-dir and not the earlier
+// IMMEDIATELY-AFTER positional check (Finding 3, this round): a submodule INSIDE
+// a LINKED WORKTREE stores its admin under
+// `<repo>/.git/worktrees/<wt>/modules/<sub>...` — there `modules` is preceded by
+// the worktree NAME `<wt>`, NOT a git-common-dir segment, so an
+// immediately-after-a-git-dir check MISSED it and a live submodule-in-a-worktree
+// (admin leaf absent, parent present) was mis-pruned as a dead worktree.
+// Scanning for an interior `modules` ANYWHERE after the first git-common-dir
+// segment catches it (and the deeper `.git/worktrees/<wt>/modules/<sub>/worktrees/foo`
+// shape too) while preserving every prior accept/reject:
 //
-// Why POSITIONAL and not "modules anywhere" (architect adjudication, this round):
-// a worktree whose owning repo merely LIVES under a user directory literally
-// named `modules` (e.g. `/home/user/modules/proj/.git/worktrees/wt`) has a
-// `modules` segment in its USER-path ancestry, ABOVE the git-common-dir. A
-// "modules anywhere" rule would wrongly reject it — the same orphan-row
-// false-negative Finding 1 targets, just a different trigger. Anchoring `modules`
-// to the segment-after-a-git-dir position (git's actual submodule-store contract)
-// accepts that worktree while rejecting every real submodule shape, and adds no
-// false-POSITIVE surface (the reject set is identical to "modules anywhere" for
-// every git-produced submodule path).
+//   ACCEPTS (worktree shapes — must fire the dead-worktree signal):
+//   - normal `<repo>/.git/worktrees/<name>` (after the first `.git`: only
+//     `worktrees/<name>`, no interior modules),
+//   - bare-repo `<repo>/main.git/worktrees/<name>` (the common git dir is e.g.
+//     `main.git`, not literally `.git`; `*.git` suffix still matches it — the
+//     earlier grandparent==`.git` check WRONGLY rejected every bare-repo
+//     worktree, Finding 1),
+//   - a worktree whose owning repo merely LIVES under a user dir literally named
+//     `modules` (`/home/user/modules/proj/.git/worktrees/wt`): that `modules` is
+//     BEFORE the first git-common-dir segment, so the after-the-boundary scan
+//     never sees it (architect adjudication, prior round),
+//   - a worktree literally NAMED `modules` (`<repo>/.git/worktrees/modules`): the
+//     `modules` is the LEAF, not interior → accepted (Finding 3 carve-out).
+//
+//   REJECTS (submodule shapes — a live submodule must never be pruned):
+//   - the ordinary submodule pointer `<repo>/.git/modules/<name>`,
+//   - a nested submodule `<repo>/.git/modules/libs/<name>`,
+//   - the r6 trap, a submodule under a dir literally named `worktrees`:
+//     `<repo>/.git/modules/deps/worktrees/foo` (immediate parent `worktrees`, so
+//     a parent-only check would ACCEPT it, but interior `modules` after `.git`
+//     rejects it),
+//   - the Finding-3 shape, a submodule INSIDE a linked worktree:
+//     `<repo>/.git/worktrees/<wt>/modules/<sub>...` and its own worktree
+//     `<repo>/.git/worktrees/<wt>/modules/<sub>/worktrees/foo` (interior
+//     `modules` after the first `.git` → rejected).
+//
+// Anchoring on the FIRST git-common-dir segment is correct: the submodule-in-a-
+// worktree admin path carries only the OUTER `.git` (no inner literal `.git`
+// segment), and the user-dir-named-`modules` accept case REQUIRES the scan window
+// to start past the user-path `modules` — both satisfied by "first".
 //
 // Any bare/other pointer (parent not `worktrees`) also returns false, so only a
 // genuine linked-worktree admin path can reach the dead-worktree availability
@@ -278,15 +302,30 @@ func isWorktreeAdminPath(adminDir string) bool {
 	if filepath.Base(worktreesDir) != "worktrees" {
 		return false
 	}
-	// Reject a `modules` segment ONLY where git's submodule store actually puts
-	// it — immediately after a git-common-dir segment (`.git` or `*.git`). A
-	// `modules` segment elsewhere (a user dir named `modules` above the git dir)
-	// is not git's marker and must not reject a genuine worktree. adminDir is
-	// filepath.Clean-ed, so each separator-bounded segment is a real path
-	// component (no empty/`.` segments to skip).
+	// Reject an INTERIOR `modules` segment (one with a child) appearing anywhere
+	// AFTER the first git-common-dir segment (`.git` or `*.git`) — that is git's
+	// submodule-store marker (`<git-dir>/...modules/<sub>...`). A `modules`
+	// segment BEFORE the first git-common-dir (a user dir named `modules` above
+	// the git dir) is not git's marker; a LEAF `modules` directly under
+	// `worktrees` is a worktree NAME, not a store marker — neither rejects a
+	// genuine worktree. adminDir is filepath.Clean-ed, so each separator-bounded
+	// segment is a real path component (no empty/`.` segments to skip).
 	comps := strings.Split(adminDir, string(filepath.Separator))
+	firstGit := -1
 	for i, comp := range comps {
-		if comp == "modules" && i > 0 && isGitCommonDirSegment(comps[i-1]) {
+		if isGitCommonDirSegment(comp) {
+			firstGit = i
+			break
+		}
+	}
+	if firstGit < 0 {
+		// Parent basename is already proved `worktrees`; with no git-common-dir
+		// segment, no submodule store marker is reachable → genuine worktree.
+		return true
+	}
+	lastIdx := len(comps) - 1
+	for j := firstGit + 1; j < lastIdx; j++ { // j < lastIdx ⇒ interior only (has a child)
+		if comps[j] == "modules" {
 			return false
 		}
 	}

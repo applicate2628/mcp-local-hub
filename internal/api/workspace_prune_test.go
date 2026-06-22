@@ -2,8 +2,10 @@ package api
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -484,15 +486,18 @@ func TestIsDeadGitWorktreePath_Submodule(t *testing.T) {
 	}
 }
 
-// TestIsWorktreeAdminPath unit-tests the Finding-1 worktrees-path discriminator
-// directly: a worktree admin path has immediate parent `worktrees` AND no
-// `modules` segment immediately after a git-common-dir segment (`.git`/`*.git`).
+// TestIsWorktreeAdminPath unit-tests the worktrees-path discriminator directly: a
+// worktree admin path has immediate parent `worktrees` AND no INTERIOR `modules`
+// store segment after the first git-common-dir segment (`.git`/`*.git`).
 // That ACCEPTS the normal-repo (`<repo>/.git/worktrees/<name>`), bare-repo
-// (`<repo>/main.git/worktrees/<name>`), and user-dir-named-`modules`
-// (`.../modules/proj/.git/worktrees/<name>`, `modules` ABOVE the git dir) shapes,
-// while REJECTING a `<git-dir>/modules/<name>` submodule path (flat or nested) and
-// a submodule under a worktrees-named dir (`.git/modules/.../worktrees/foo` —
-// parent `worktrees` but `modules` sits directly under `.git`, the r6 trap).
+// (`<repo>/main.git/worktrees/<name>`), user-dir-named-`modules`
+// (`.../modules/proj/.git/worktrees/<name>`, `modules` ABOVE the git dir), and
+// worktree-NAMED-`modules` (`<repo>/.git/worktrees/modules`, `modules` is the LEAF)
+// shapes, while REJECTING a `<git-dir>/modules/<name>` submodule path (flat or
+// nested), a submodule under a worktrees-named dir (`.git/modules/.../worktrees/foo`,
+// the r6 trap), and a submodule INSIDE a linked worktree
+// (`.git/worktrees/<wt>/modules/<sub>...` — interior `modules` after the first
+// `.git`, the Finding-3 shape the immediately-after positional check missed).
 func TestIsWorktreeAdminPath(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -525,12 +530,38 @@ func TestIsWorktreeAdminPath(t *testing.T) {
 		// Nested submodule: git stores it at `<git-dir>/modules/<sub-path>` with a
 		// multi-segment sub-path; `modules` still sits directly under `.git` → rejected.
 		{"nested submodule admin path (modules/libs/mysub under .git)", filepath.Join("super", ".git", "modules", "libs", "mysub"), false},
-		// Architect adjudication (this round): a worktree whose owning repo merely
+		// Architect adjudication (prior round): a worktree whose owning repo merely
 		// LIVES under a user dir literally named `modules` (the `modules` segment is
-		// ABOVE the git common dir, not immediately after it) must be ACCEPTED — the
-		// "modules anywhere" rule would wrongly reject it (the same orphan-row
-		// false-negative Finding 1 targets). The positional rule accepts it.
+		// ABOVE the git common dir, BEFORE the first git-common-dir segment) must be
+		// ACCEPTED — the "modules anywhere" rule would wrongly reject it (the same
+		// orphan-row false-negative Finding 1 targets). Anchoring the scan on the
+		// FIRST git-common-dir segment skips this `modules` → accepted.
 		{"worktree under a user dir named modules (modules above .git)", filepath.Join("home", "user", "modules", "proj", ".git", "worktrees", "wt"), true},
+		// Finding 3 (this round): a submodule INSIDE a linked worktree stores its
+		// admin dir at `<repo>/.git/worktrees/<wt>/modules/<sub>` — `modules` is
+		// preceded by the worktree NAME `<wt>`, NOT a git-common-dir segment, so the
+		// earlier immediately-after-a-git-dir positional check MISSED it and a live
+		// submodule-in-a-worktree was mis-pruned as a dead worktree. The interior-
+		// `modules`-after-first-git-common-dir rule rejects it. (Verified real-git
+		// shape: `git worktree add` + `git submodule update --init` →
+		// `gitdir: ../../main/.git/worktrees/wt/modules/sub`.)
+		{"submodule inside a linked worktree (modules after worktree name)", filepath.Join("main", ".git", "worktrees", "wt", "modules", "sub"), false},
+		// Finding 3 (deeper): the OWN worktree of a submodule-in-a-worktree →
+		// `<repo>/.git/worktrees/<wt>/modules/<sub>/worktrees/<subwt>` — immediate
+		// parent `worktrees` (parent gate passes), but an interior `modules` sits
+		// after the first `.git` → rejected. (Verified real-git shape:
+		// `gitdir: .../main/.git/worktrees/wt/modules/sub/worktrees/sub-wt`.)
+		{"worktree of a submodule-in-a-worktree (interior modules, parent worktrees)", filepath.Join("main", ".git", "worktrees", "wt", "modules", "sub", "worktrees", "sub-wt"), false},
+		// Finding 3 carve-out (false-negative guard): a worktree literally NAMED
+		// `modules` (`git worktree add ./modules`) stores its admin dir at
+		// `<repo>/.git/worktrees/modules` — `modules` is the LEAF directly under
+		// `worktrees`, a worktree NAME not a submodule store marker. A naive
+		// "modules anywhere after .git" rule would WRONGLY reject it (orphan-row
+		// false-negative); the INTERIOR-only rule (modules must have a child)
+		// ACCEPTS it. (Verified real-git shape: `git worktree add ./modules` →
+		// `gitdir: .../main/.git/worktrees/modules`.) Without this case a future
+		// "simplify to modules-anywhere" refactor silently reintroduces the regression.
+		{"worktree literally named modules (modules is the leaf under worktrees)", filepath.Join("main", ".git", "worktrees", "modules"), true},
 		{"empty", "", false},
 	}
 	for _, c := range cases {
@@ -604,18 +635,19 @@ func TestIsDeadGitWorktreePath_BareRepoWorktree(t *testing.T) {
 // (r6) end-to-end: a SUBMODULE checked out under a directory literally named
 // `worktrees` makes git store its admin dir at
 // `<super>/.git/modules/deps/worktrees/foo`, whose immediate PARENT is also
-// `worktrees`. The prior immediate-parent-only guard would ACCEPT it, so a
-// missing submodule admin LEAF (parent `worktrees/` present, e.g. before
+// `worktrees`. The immediate-parent-only guard would ACCEPT it, so a missing
+// submodule admin LEAF (parent `worktrees/` present, e.g. before
 // `git submodule update --init`) would be mis-pruned as a dead worktree. The
-// full-shape guard (parent `worktrees` AND grandparent `.git`) rejects it
-// because its grandparent is the submodule path component (`deps`), not `.git`.
-// A genuine `<repo>/.git/worktrees/<name>` (grandparent `.git`) with the
-// identical missing-leaf/present-parent shape IS still pruned.
+// interior-`modules`-after-first-git-common-dir guard rejects it because an
+// interior `modules` sits after the first `.git`. A genuine
+// `<repo>/.git/worktrees/<name>` (no interior `modules`) with the identical
+// missing-leaf/present-parent shape IS still pruned.
 func TestIsDeadGitWorktreePath_SubmoduleUnderWorktreesNamedDir(t *testing.T) {
 	// --- SUBMODULE under a dir NAMED `worktrees`: gitdir →
 	// <super>/.git/modules/deps/worktrees/foo; the `.git/modules/deps/worktrees/`
 	// parent exists, only the `foo` leaf is gone. Immediate parent is `worktrees`
-	// (the Finding-1 trap), but grandparent is `deps` → rejected → NOT pruned. ---
+	// (the Finding-1 trap), but an interior `modules` sits after `.git` → rejected
+	// → NOT pruned. ---
 	subWT := t.TempDir()
 	subParent := filepath.Join(t.TempDir(), "super", ".git", "modules", "deps", "worktrees")
 	if err := os.MkdirAll(subParent, 0o755); err != nil {
@@ -624,9 +656,9 @@ func TestIsDeadGitWorktreePath_SubmoduleUnderWorktreesNamedDir(t *testing.T) {
 	subAdmin := filepath.Join(subParent, "foo") // leaf never created
 	writeGitFile(t, subWT, subAdmin)
 
-	// --- GENUINE removed worktree (grandparent `.git`): identical missing-leaf
+	// --- GENUINE removed worktree (no interior `modules`): identical missing-leaf
 	// shape but under `<repo>/.git/worktrees/` → genuinely DEAD → pruned. Proves
-	// the grandparent==`.git` check rejects ONLY the submodule-under-worktrees
+	// the interior-`modules` check rejects ONLY the submodule-under-worktrees
 	// shape, not the structurally-analogous real worktree shape. ---
 	wtWS := t.TempDir()
 	wtParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
@@ -650,6 +682,183 @@ func TestIsDeadGitWorktreePath_SubmoduleUnderWorktreesNamedDir(t *testing.T) {
 				t.Fatalf("IsDeadGitWorktreePath(%q) = %v, want %v", c.path, got, c.want)
 			}
 		})
+	}
+}
+
+// TestIsDeadGitWorktreePath_SubmoduleInsideWorktree covers Finding 3 (this round)
+// end-to-end: a SUBMODULE checked out INSIDE a linked WORKTREE makes git store
+// its admin dir at `<repo>/.git/worktrees/<wt>/modules/<sub>` — `modules` is
+// preceded by the worktree NAME `<wt>`, NOT a git-common-dir segment, so the
+// earlier immediately-after-a-git-dir positional check MISSED it: a missing
+// submodule admin LEAF (parent `modules/` present, e.g. before
+// `git submodule update --init`) was mis-pruned as a dead worktree. The
+// interior-`modules`-after-first-git-common-dir guard rejects it. A genuine
+// `<repo>/.git/worktrees/<name>` (no interior `modules`) with the identical
+// missing-leaf/present-parent shape IS still pruned.
+//
+// The submodule-in-worktree admin shape is the verified real-git layout (see
+// TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit below for the
+// git-driven proof); this table-form variant pins the discriminator without a
+// git binary so it runs everywhere (incl. CI hosts without git).
+func TestIsDeadGitWorktreePath_SubmoduleInsideWorktree(t *testing.T) {
+	// --- SUBMODULE inside a linked worktree (online, leaf absent): gitdir →
+	// <repo>/.git/worktrees/wt/modules/sub; the `.../modules/` parent exists, only
+	// the `sub` leaf is gone. Immediate parent is `modules` here, but even the
+	// worktree-of-a-submodule-in-a-worktree shape below (immediate parent
+	// `worktrees`) is rejected by the interior-`modules` rule. ---
+	subWT := t.TempDir()
+	subModulesParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "wt", "modules")
+	if err := os.MkdirAll(subModulesParent, 0o755); err != nil {
+		t.Fatalf("mkdir submodule-in-worktree modules parent: %v", err)
+	}
+	subAdmin := filepath.Join(subModulesParent, "sub") // leaf never created
+	writeGitFile(t, subWT, subAdmin)
+
+	// --- WORKTREE of a submodule-in-a-worktree (online, leaf absent): gitdir →
+	// <repo>/.git/worktrees/wt/modules/sub/worktrees/sub-wt; the `.../worktrees/`
+	// parent exists, only the `sub-wt` leaf is gone. Immediate parent is
+	// `worktrees` (so the parent gate passes — this is exactly the shape the bot
+	// finding names), but an interior `modules` sits after the first `.git` →
+	// rejected → NOT pruned. ---
+	subWtWT := t.TempDir()
+	subWtParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "wt", "modules", "sub", "worktrees")
+	if err := os.MkdirAll(subWtParent, 0o755); err != nil {
+		t.Fatalf("mkdir worktree-of-submodule-in-worktree parent: %v", err)
+	}
+	subWtAdmin := filepath.Join(subWtParent, "sub-wt") // leaf never created
+	writeGitFile(t, subWtWT, subWtAdmin)
+
+	// --- GENUINE removed worktree (no interior `modules`): identical missing-leaf
+	// shape under `<repo>/.git/worktrees/` → genuinely DEAD → pruned. Proves the
+	// interior-`modules` check rejects ONLY the submodule-in-worktree shapes, not
+	// the structurally-analogous real worktree shape. ---
+	wtWS := t.TempDir()
+	wtParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(wtParent, 0o755); err != nil {
+		t.Fatalf("mkdir worktrees parent: %v", err)
+	}
+	wtAdmin := filepath.Join(wtParent, "gone") // leaf never created
+	writeGitFile(t, wtWS, wtAdmin)
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"submodule inside a worktree (.git/worktrees/<wt>/modules/<sub> leaf absent) → NOT pruned", subWT, false},
+		{"worktree of a submodule-in-a-worktree (parent worktrees, interior modules) leaf absent → NOT pruned", subWtWT, false},
+		{"genuine removed worktree (.git/worktrees/<name> leaf absent) → pruned", wtWS, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsDeadGitWorktreePath(c.path); got != c.want {
+				t.Fatalf("IsDeadGitWorktreePath(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit drives a REAL git
+// binary to construct the submodule-in-a-linked-worktree admin shape (Finding 3),
+// then asserts that an online submodule-in-a-worktree whose admin LEAF is removed
+// is NOT pruned. This is the git-driven proof that the synthetic admin path used
+// by TestIsDeadGitWorktreePath_SubmoduleInsideWorktree above matches git's actual
+// layout: `git submodule update --init` inside a linked worktree writes the
+// submodule's `.git` pointer to `<repo>/.git/worktrees/<wt>/modules/<sub>`.
+// Skipped when git is unavailable so the synthetic table-form test still covers
+// the discriminator on hosts without a git binary.
+func TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH; synthetic TestIsDeadGitWorktreePath_SubmoduleInsideWorktree covers the discriminator")
+	}
+
+	root := t.TempDir()
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(gitBin, args...)
+		cmd.Dir = dir
+		// Deterministic identity + allow file:// submodule transport (git ≥2.38
+		// blocks it by default). Keep ambient-input control: no reliance on the
+		// host's global git config for these.
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=protocol.file.allow", "GIT_CONFIG_VALUE_0=always",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s (in %s): %v\n%s", strings.Join(args, " "), dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// Submodule origin: a one-commit repo to add as a submodule.
+	subOrigin := filepath.Join(root, "sub-origin")
+	runGit(root, "init", "-q", subOrigin)
+	if err := os.WriteFile(filepath.Join(subOrigin, "f.txt"), []byte("hi\n"), 0o600); err != nil {
+		t.Fatalf("write sub-origin file: %v", err)
+	}
+	runGit(subOrigin, "add", ".")
+	runGit(subOrigin, "commit", "-qm", "init")
+
+	// Superproject with the submodule added and committed.
+	main := filepath.Join(root, "main")
+	runGit(root, "init", "-q", main)
+	if err := os.WriteFile(filepath.Join(main, "m.txt"), []byte("main\n"), 0o600); err != nil {
+		t.Fatalf("write main file: %v", err)
+	}
+	runGit(main, "add", ".")
+	runGit(main, "commit", "-qm", "init")
+	runGit(main, "submodule", "add", "-q", subOrigin, "sub")
+	runGit(main, "commit", "-qm", "add sub")
+
+	// Linked worktree of the superproject, with the submodule initialized inside
+	// it. git writes the submodule admin under
+	// <main>/.git/worktrees/<wt>/modules/sub.
+	wt := filepath.Join(root, "wt")
+	runGit(main, "worktree", "add", "-q", wt)
+	runGit(wt, "submodule", "update", "--init")
+
+	// Resolve the submodule WORKSPACE dir inside the worktree and confirm git
+	// produced the expected admin shape before exercising the discriminator.
+	subWorkspace := filepath.Join(wt, "sub")
+	gitPtr, ptrErr := os.ReadFile(filepath.Join(subWorkspace, ".git"))
+	if ptrErr != nil {
+		t.Fatalf("read submodule-in-worktree .git pointer: %v", ptrErr)
+	}
+	if !strings.Contains(string(gitPtr), filepath.ToSlash(filepath.Join("worktrees", "wt", "modules", "sub"))) &&
+		!strings.Contains(string(gitPtr), "worktrees/wt/modules/sub") {
+		t.Fatalf("unexpected submodule-in-worktree .git pointer (Finding-3 shape changed?): %q", string(gitPtr))
+	}
+
+	// LIVE submodule-in-a-worktree (admin leaf present) → never pruned.
+	if IsDeadGitWorktreePath(subWorkspace) {
+		t.Fatalf("live submodule-in-a-worktree mis-classified as dead: %s", subWorkspace)
+	}
+
+	// Remove ONLY the submodule's admin leaf (simulate the online-but-leaf-absent
+	// state, e.g. a partially-cleaned submodule) while the parent `modules/` dir
+	// remains — the exact missing-leaf/present-parent shape that, WITHOUT the
+	// interior-`modules` guard, satisfies the sibling-present DEAD branch. The
+	// submodule workspace dir itself stays present (Condition 1 still passes), so
+	// the only thing standing between it and a wrongful prune is the
+	// isWorktreeAdminPath rejection.
+	adminLeaf := filepath.Join(main, ".git", "worktrees", "wt", "modules", "sub")
+	if _, statErr := os.Stat(adminLeaf); statErr != nil {
+		t.Fatalf("expected submodule admin leaf to exist before removal: %v", statErr)
+	}
+	if rmErr := os.RemoveAll(adminLeaf); rmErr != nil {
+		t.Fatalf("remove submodule admin leaf: %v", rmErr)
+	}
+	// Parent `.../modules/` must still exist (present-parent half of the shape).
+	if _, statErr := os.Stat(filepath.Dir(adminLeaf)); statErr != nil {
+		t.Fatalf("expected submodule modules parent to remain after leaf removal: %v", statErr)
+	}
+
+	if IsDeadGitWorktreePath(subWorkspace) {
+		t.Fatalf("submodule-in-a-worktree with absent admin leaf mis-pruned as dead worktree: %s", subWorkspace)
 	}
 }
 
