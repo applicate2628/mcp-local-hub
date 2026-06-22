@@ -296,7 +296,17 @@ func (a *API) registerOneLanguageSupervised(
 			continue
 		}
 		entryName := entryNameByClient[b.Client]
-		priorEntry, _ := client.GetEntry(entryName)
+		// Snapshot the prior entry; a GetEntry error MUST abort before the
+		// AddEntry below (bot PR #420 finding 1, data-loss). A multi-layer
+		// adapter (mimocode) can confirm a write-target prior yet still fail
+		// reading a malformed lower layer, returning (nil, err); dropping the
+		// error would let AddEntry overwrite and the nil-prior rollback branch
+		// DELETE the operator's entry. The caller runs the accumulated
+		// *rollback on this returned error, so no local runRollback is needed.
+		priorEntry, err := client.GetEntry(entryName)
+		if err != nil {
+			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
+		}
 		urlPath := b.URLPath
 		if urlPath == "" {
 			urlPath = "/mcp"

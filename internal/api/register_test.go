@@ -116,6 +116,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 		allStdioEntries: map[string]map[string]clients.StdioEntry{},
 		backupKeepCalls: map[string]int{},
 		exists:          map[string]bool{},
+		failGetEntry:    map[string]bool{},
 	}
 	// Pre-populate the default HTTP clients so Exists() returns true in tests.
 	for _, n := range []string{"claude-code", "codex-cli", "cursor"} {
@@ -540,6 +541,79 @@ func TestRegister_RollbackRestoresPriorRegistryEntryOnReRegister(t *testing.T) {
 	}
 	if after.Port != before.Port {
 		t.Errorf("rollback did not preserve prior port: before=%d after=%d", before.Port, after.Port)
+	}
+}
+
+// TestRegister_GetEntrySnapshotErrorAbortsWithoutDeletingPrior pins bot PR #420
+// finding 1 (HIGH, data-loss): when the prior-entry snapshot GetEntry returns an
+// error (a multi-layer adapter like mimocode can confirm a write-target prior yet
+// fail reading a malformed lower layer, returning (nil, err)), the register MUST
+// abort BEFORE BackupKeep/AddEntry and MUST NOT delete the operator's prior
+// entry. Before this fix the error was dropped → prior treated as nil → AddEntry
+// overwrote → the nil-prior rollback branch RemoveEntry-d and DELETED the entry.
+func TestRegister_GetEntrySnapshotErrorAbortsWithoutDeletingPrior(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	origKill := killByPortFn
+	defer func() { killByPortFn = origKill }()
+	killByPortFn = func(port int, _ time.Duration) error { return nil }
+	ws := t.TempDir()
+	m := nineLanguageManifest()
+	a := mustNewAPI(t)
+	// First register succeeds and seeds a prior entry on every client.
+	if _, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	priorBefore := countEntries(h.fakeClients)
+	if priorBefore == 0 {
+		t.Fatal("first register seeded no client entries")
+	}
+	// Snapshot the per-client entry maps so we can assert NONE were deleted /
+	// corrupted across the aborted-and-rolled-back register.
+	entriesBefore := map[string]map[string]string{}
+	for c, m := range h.fakeClients.entries {
+		cp := map[string]string{}
+		for k, v := range m {
+			cp[k] = v
+		}
+		entriesBefore[c] = cp
+	}
+	// BackupKeep on the failing client must NOT run — its snapshot aborts before
+	// the backup. (Order-independent: codex-cli's own loop iteration aborts at
+	// the GetEntry guard, before reaching its BackupKeep.)
+	codexBackupBefore := h.fakeClients.backupKeepCalls["codex-cli"]
+
+	// Force the prior-entry snapshot to error on codex-cli for the next register.
+	h.fakeClients.failGetEntry["codex-cli"] = true
+	_, err := a.registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("expected register to abort on the GetEntry snapshot error")
+	}
+
+	// DATA-LOSS GUARD: the operator's prior entries must ALL survive. The failing
+	// client's snapshot aborts before AddEntry (no overwrite), and any client
+	// whose AddEntry ran earlier in the loop is restored by the rollback — so the
+	// net entry data must be byte-identical to before. Crucially, NO entry is
+	// deleted by a nil-prior RemoveEntry branch (the pre-fix data-loss path).
+	for c, want := range entriesBefore {
+		for name, url := range want {
+			got, ok := h.fakeClients.entries[c][name]
+			if !ok {
+				t.Errorf("prior entry %s/%s DELETED by rollback after a GetEntry snapshot error (data loss)", c, name)
+				continue
+			}
+			if got != url {
+				t.Errorf("prior entry %s/%s overwritten/not-restored: got %q want %q", c, name, got, url)
+			}
+		}
+	}
+	if n := countEntries(h.fakeClients); n != priorBefore {
+		t.Errorf("client entry count changed across the aborted register: before=%d after=%d", priorBefore, n)
+	}
+	// The failing client's snapshot error aborts BEFORE its BackupKeep.
+	if h.fakeClients.backupKeepCalls["codex-cli"] != codexBackupBefore {
+		t.Errorf("BackupKeep ran on codex-cli after its GetEntry snapshot error: before=%d after=%d",
+			codexBackupBefore, h.fakeClients.backupKeepCalls["codex-cli"])
 	}
 }
 
@@ -3386,7 +3460,8 @@ type fakeClientsMap struct {
 	backupKeepCalls   map[string]int
 	exists            map[string]bool
 	addEntryCount     int
-	failAddEntryCalls int // the Nth AddEntry (1-based) fails
+	failAddEntryCalls int             // the Nth AddEntry (1-based) fails
+	failGetEntry      map[string]bool // client-name -> GetEntry returns an error (finding 1)
 }
 
 type fakeClient struct {
@@ -3416,6 +3491,13 @@ func (c *fakeClient) RemoveEntry(name string) error {
 	return nil
 }
 func (c *fakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
+	// Finding 1 regression seam: simulate a multi-layer adapter (mimocode)
+	// that confirms a write-target prior yet errors reading a malformed lower
+	// layer, returning (nil, err). The register/install snapshot loops must
+	// propagate this error and abort BEFORE AddEntry, never delete the prior.
+	if c.parent.failGetEntry != nil && c.parent.failGetEntry[c.name] {
+		return nil, fmt.Errorf("fake client %s: induced GetEntry failure (malformed lower layer)", c.name)
+	}
 	url, ok := c.parent.entries[c.name][name]
 	if !ok {
 		return nil, nil

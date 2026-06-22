@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
@@ -207,6 +208,20 @@ func newManifestDeleteCmd() *cobra.Command {
 	return c
 }
 
+// manifestExtractSupportedClients is the SINGLE OWNER of the source clients
+// `mcphub manifest extract --client` wires a config path for (the
+// claude/codex/gemini/antigravity/mimocode subset of ExtractManifestFromClient
+// whose ScanOpts paths this command actually populates below). Both the
+// required-client error and the --client flag help render from it so the two
+// can't drift again (bot PR #420 finding 6 — mimocode was missing from both).
+var manifestExtractSupportedClients = []string{"claude-code", "codex-cli", "gemini-cli", "antigravity", "mimocode"}
+
+// manifestExtractClientsHelp renders the supported-client list as a
+// pipe-separated string for the error message and flag help.
+func manifestExtractClientsHelp() string {
+	return strings.Join(manifestExtractSupportedClients, " | ")
+}
+
 func newManifestExtractCmd() *cobra.Command {
 	var clientFlag string
 	c := &cobra.Command{
@@ -215,7 +230,7 @@ func newManifestExtractCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clientFlag == "" {
-				return fmt.Errorf("--client is required (claude-code | codex-cli | gemini-cli | antigravity)")
+				return fmt.Errorf("--client is required (%s)", manifestExtractClientsHelp())
 			}
 			a := api.NewAPI()
 			home, err := os.UserHomeDir()
@@ -245,6 +260,6 @@ func newManifestExtractCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&clientFlag, "client", "", "source client (claude-code | codex-cli | gemini-cli | antigravity)")
+	c.Flags().StringVar(&clientFlag, "client", "", "source client ("+manifestExtractClientsHelp()+")")
 	return c
 }

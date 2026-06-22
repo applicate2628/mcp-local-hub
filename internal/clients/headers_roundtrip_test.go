@@ -64,6 +64,17 @@ func TestRemoteHTTPHeaders_RoundTrip(t *testing.T) {
 		{"vscode", func(t *testing.T) Client {
 			return &vscodeClient{path: mkJSON(t, "mcp.json")}
 		}},
+		{"mimocode", func(t *testing.T) Client {
+			// State-safe single-file construction: only `path` is set
+			// (configFile/overlayDir/inlineContent empty), so readLayerFiles
+			// operates within the temp dir and never reaches the real
+			// ~/.config/mimocode or any MIMOCODE_* env-resolved layer. The
+			// temp dir has no sibling config.json/mimocode.jsonc, so the merge
+			// is effectively single-file. mimocode is HTTP-native (bot PR #420
+			// finding 5): AddEntry writes type:remote url+headers, GetEntry
+			// round-trips them.
+			return &mimoCodeClient{path: mkJSON(t, "mimocode.json")}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

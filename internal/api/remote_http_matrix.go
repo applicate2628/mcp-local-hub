@@ -28,6 +28,13 @@ var remoteHTTPCapableClients = []string{
 	"codex-cli",
 	"cursor",
 	"gemini-cli",
+	// mimocode is HTTP-native (a fork of OpenCode): AddEntry writes a
+	// type:remote entry with url+headers and GetEntry round-trips them
+	// (verified — internal/clients/mimocode.go AddEntry + GetEntry), so a
+	// transport=remote-http binding for client:mimocode is on the matrix.
+	// Header round-trip is pinned in
+	// internal/clients/headers_roundtrip_test.go (bot PR #420 finding 5).
+	"mimocode",
 	"qwen-cli",
 	"vscode",
 }

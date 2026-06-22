@@ -1815,6 +1815,161 @@ func TestMimoCode_RelativeConfigEnv_ResolvedFromCwd(t *testing.T) {
 // still Backup() and RemoveEntry() against mimocode.json — the file that holds
 // the managed entry — NOT float to mimocode.jsonc and miss it. The write target
 // is fixed at the global seed, so this holds by construction.
+// TestMimoCode_DeepMerge_McpEntryReplaceByName pins bot PR #420 finding 2: a
+// server NAME redefined across layers takes its VALUE wholesale from the highest
+// defining layer (replace-by-name), NOT field-merged into a stdio+remote hybrid.
+// A lower-layer LOCAL entry {command:[...]} + a higher-layer REMOTE entry {url}
+// for the SAME name must yield ONLY the remote shape (url present, command
+// absent) so consumers never misread a migrated remote as still-stdio.
+func TestMimoCode_DeepMerge_McpEntryReplaceByName(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	// config.json (lower): srv is a LOCAL stdio entry with an array command.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"mcp":{"srv":{"type":"local","command":["gopls","mcp"],"enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// mimocode.json (higher write target): srv REDEFINED as a REMOTE entry.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.json"),
+		[]byte(`{"mcp":{"srv":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+	merged, err := o.readMergedLayers()
+	if err != nil {
+		t.Fatalf("readMergedLayers: %v", err)
+	}
+	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	entry, _ := servers["srv"].(map[string]any)
+	if entry == nil {
+		t.Fatalf("srv missing from merged view: %+v", merged)
+	}
+	// The higher REMOTE value wins ENTIRELY: url present, AND the lower layer's
+	// `command` must NOT leak in (no hybrid).
+	if entry["url"] != "http://localhost:9121/mcp" {
+		t.Errorf("higher remote value did not win: %+v", entry)
+	}
+	if _, hasCmd := entry["command"]; hasCmd {
+		t.Errorf("lower-layer `command` leaked into the merged remote entry (field-merge hybrid): %+v", entry)
+	}
+	if entry["type"] != "remote" {
+		t.Errorf("type not replaced to remote: %+v", entry)
+	}
+}
+
+// TestMimoCode_DeepMerge_UnionsNamesAndNonMcpKeys confirms the finding-2 fix does
+// NOT regress: entry NAMES still union across layers (a server only in a lower
+// layer survives), and NON-mcp top-level keys still deep-merge.
+func TestMimoCode_DeepMerge_UnionsNamesAndNonMcpKeys(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	// config.json (lower): a server ONLY here + a nested non-mcp object.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"mcp":{"low-only":{"type":"remote","url":"http://low/mcp","enabled":true}},"settings":{"a":1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// mimocode.json (higher): a DIFFERENT server + a different key in `settings`.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.json"),
+		[]byte(`{"mcp":{"high-only":{"type":"remote","url":"http://high/mcp","enabled":true}},"settings":{"b":2}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+	merged, err := o.readMergedLayers()
+	if err != nil {
+		t.Fatalf("readMergedLayers: %v", err)
+	}
+	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	if _, ok := servers["low-only"].(map[string]any); !ok {
+		t.Errorf("entry-name union broken: lower-layer-only server vanished: %+v", servers)
+	}
+	if _, ok := servers["high-only"].(map[string]any); !ok {
+		t.Errorf("higher-layer server missing: %+v", servers)
+	}
+	// Non-mcp `settings` object must still DEEP-MERGE (both a and b present).
+	st, _ := merged["settings"].(map[string]any)
+	if st == nil || st["a"] == nil || st["b"] == nil {
+		t.Errorf("non-mcp top-level key did not deep-merge: %+v", merged["settings"])
+	}
+}
+
+// TestMimoCode_AllStdioEntries_ArrayCommand pins bot PR #420 finding 3:
+// AllStdioEntries normalizes a mimo array-`command` local entry before the
+// shared collectStdioEntries (which reads a STRING command), so a mimo local
+// stdio entry IS surfaced for kill-pattern derivation / direct-LSP scans.
+func TestMimoCode_AllStdioEntries_ArrayCommand(t *testing.T) {
+	o := newMimoCodeForTest(t, `{
+  "mcp": {
+    "serena": {"type": "remote", "url": "http://localhost:9121/mcp", "enabled": true},
+    "go-ls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true},
+    "disabled-ls": {"type": "local", "command": ["mcp-language-server", "--lsp", "rust"], "enabled": false}
+  }
+}`)
+	stdio, err := o.AllStdioEntries()
+	if err != nil {
+		t.Fatalf("AllStdioEntries: %v", err)
+	}
+	got := map[string]string{}
+	for _, e := range stdio {
+		got[e.Name] = e.Command
+	}
+	if got["go-ls"] != "gopls" {
+		t.Errorf("array-command local entry not surfaced (command normalization missing): %v", stdio)
+	}
+	// The remote entry (no command) is skipped; the disabled entry is skipped by
+	// collectStdioEntries' enabled:false handling.
+	if _, ok := got["serena"]; ok {
+		t.Errorf("remote entry must not surface as stdio: %v", stdio)
+	}
+	if _, ok := got["disabled-ls"]; ok {
+		t.Errorf("disabled local entry must not surface as stdio: %v", stdio)
+	}
+}
+
+// TestMimoCode_FindStdioLanguageServer_WriteTargetOnly pins bot PR #420 finding
+// 4: the destructive direct-LSP cleanup (which calls RemoveEntry on each match,
+// and RemoveEntry deletes from the write target ONLY) must report only entries
+// the write target actually defines. An mcp-language-server entry living ONLY in
+// a lower (config.json) or higher (mimocode.jsonc) layer is the operator's, not
+// deletable by RemoveEntry, so it must NOT be reported (no false-success delete).
+func TestMimoCode_FindStdioLanguageServer_WriteTargetOnly(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	// Lower layer (config.json): an mcp-language-server entry the hub never wrote.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"),
+		[]byte(`{"mcp":{"low-ls":{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Higher layer (mimocode.jsonc): another mcp-language-server entry, also not
+	// in the write target.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"),
+		[]byte("{\n  \"mcp\": {\"high-ls\": {\"type\":\"local\",\"command\":[\"mcp-language-server\",\"--lsp\",\"rust\"],\"enabled\":true}}\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Write target (mimocode.json): an mcp-language-server entry the hub COULD delete.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.json"),
+		[]byte(`{"mcp":{"wt-ls":{"type":"local","command":["mcp-language-server","--lsp","python"],"enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+	ls, err := o.FindStdioLanguageServerEntries()
+	if err != nil {
+		t.Fatalf("FindStdioLanguageServerEntries: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range ls {
+		got[e.Name] = true
+	}
+	if !got["wt-ls"] {
+		t.Errorf("write-target LSP entry must be reported (RemoveEntry can delete it): %v", ls)
+	}
+	if got["low-ls"] {
+		t.Errorf("lower-layer (config.json) LSP entry must NOT be reported — RemoveEntry cannot delete it (false-success): %v", ls)
+	}
+	if got["high-ls"] {
+		t.Errorf("higher-layer (mimocode.jsonc) LSP entry must NOT be reported — RemoveEntry cannot delete it (false-success): %v", ls)
+	}
+}
+
 func TestMimoCode_WriteTargetStable_DemigrateHitsActualLayer(t *testing.T) {
 	isolateMimoCodeEnv(t)
 	dir := t.TempDir()

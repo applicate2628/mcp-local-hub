@@ -738,15 +738,44 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 
 // mimoCodeDeepMerge recursively merges src over dst (src wins per key) and
 // returns dst. Nested objects are merged key-by-key; every other value
-// (including arrays and scalars) is replaced wholesale by src's. This mirrors
-// MiMoCode's `mergeDeep` (remeda) layer semantics — remeda's mergeDeep merges
-// objects by key and REPLACES arrays/scalars (the lone exception in config.ts
-// is the `instructions` array, irrelevant to the keyed `mcp` server map) — so a
-// server defined in a lower layer survives when a higher layer carries only
-// unrelated settings, while a same-named server in a higher layer wins. Kept
-// LOCAL to the mimocode adapter (no shared-type change).
+// (including arrays and scalars) is replaced wholesale by src's. This mostly
+// mirrors MiMoCode's `mergeDeep` (remeda) layer semantics — remeda's mergeDeep
+// merges objects by key and REPLACES arrays/scalars (the lone config.ts
+// exception is the `instructions` array) — so a server defined in a lower layer
+// survives when a higher layer carries only unrelated settings.
+//
+// DELIBERATE DIVERGENCE for the `mcp` key (bot PR #420 finding 2). remeda's
+// mergeDeep field-merges same-named NESTED objects, so a server NAME redefined
+// across layers — a lower-layer LOCAL entry {type:local, command:[...]} plus a
+// higher-layer REMOTE entry {type:remote, url:...} for the SAME name — would
+// field-merge into a HYBRID carrying BOTH `command` AND `url`. That hybrid is
+// unclassifiable: a hub mcp entry is EITHER stdio OR remote, never both, and the
+// consumers split-brain on it (FindStdioLanguageServerEntries reads it as stdio
+// while shapeMimoCodeEntry reads it as remote). So this adapter REPLACES each
+// `mcp` entry VALUE by name: the entry NAMES still union across layers, but each
+// name's VALUE is taken wholesale from the HIGHEST layer that defines it (no
+// recursion into the entry object). Every OTHER top-level key still deep-merges.
+// In practice a server is defined in exactly ONE layer, so this changes behavior
+// only on the redefine-across-layers edge. Kept LOCAL to the mimocode adapter
+// (no shared-type change).
 func mimoCodeDeepMerge(dst, src map[string]any) map[string]any {
 	for k, sv := range src {
+		// `mcp` entry VALUES are replace-by-name, not field-merged (see the
+		// divergence note above). Union the entry NAMES across layers, but take
+		// each name's VALUE wholesale from the later (higher) layer.
+		if k == mimoCodeMCPKey {
+			if svMap, ok := sv.(map[string]any); ok {
+				if dvMap, ok := dst[k].(map[string]any); ok {
+					for name, entry := range svMap {
+						dvMap[name] = entry // later layer's entry value wins entirely
+					}
+					continue
+				}
+			}
+			// dst has no `mcp` map yet (or src's `mcp` is not a map): fall through
+			// to the wholesale assignment below — the first layer to define `mcp`
+			// seeds it; a later non-map src replaces it, mirroring replace-scalar.
+		}
 		if svMap, ok := sv.(map[string]any); ok {
 			if dvMap, ok := dst[k].(map[string]any); ok {
 				dst[k] = mimoCodeDeepMerge(dvMap, svMap)
@@ -1157,20 +1186,35 @@ func (o *mimoCodeClient) restoreEntryFromBackup(backupPath, name string, allowHu
 // `mcp` key. The hub writes only HTTP-direct ("type":"remote") entries, which
 // have no string `command` field and so are correctly skipped by
 // collectStdioEntries. Operator-authored local ("type":"local") entries store
-// `command` as an ARRAY (["npx","-y",...]) rather than a string;
-// collectStdioEntries reads `command` as a string and therefore does not
-// surface them — an accepted limitation of the shared cross-format cleanup
-// scan (these helpers are best-effort stdio-leak detection, and the hub never
-// writes the local shape). The Discovery/extract path DOES parse the array
-// (see scanMimoCode + ExtractManifestFromClient), and the LSP scan below
-// normalizes the array before delegating.
+// `command` as an ARRAY (["npx","-y",...] / ["gopls","mcp"]) rather than a
+// string; the shared collectStdioEntries reads `command` as a STRING and would
+// miss them. mimoCodeNormalizeCommandArrays rewrites each array `command` into
+// the (command-string, prepended-args) shape collectStdioEntries understands —
+// the SAME normalization FindStdioLanguageServerEntries applies — so a mimo
+// array-command stdio entry IS surfaced (bot PR #420 finding 3). Without it the
+// orphan-process kill-pattern derivation (patternsFromClientStdio) and the gopls
+// direct-LSP scan never see a mimo local entry.
+//
+// Normalization is orthogonal to layer scoping: it only fixes the array read
+// shape, so the FULL merged view (across every layer) is preserved — the
+// non-destructive kill-pattern consumer must still see lower-layer entries, an
+// orphan process spawned from a lower-layer entry is a real orphan.
+//
+// KNOWN LIMITATION (gopls direct-LSP destructive path): the gopls cleanup at
+// register.go consumes this merged view then RemoveEntry-s a match, but
+// RemoveEntry deletes from the write target ONLY. A gopls direct entry living in
+// a NON-write-target layer would log a false success and re-emerge via merge —
+// the same class as finding 4 (filed as an adjacent finding) but on the shared
+// AllStdioEntries/gopls path, which cannot be write-target-scoped mimo-locally
+// without touching a shared surface. The write-target restriction is applied in
+// FindStdioLanguageServerEntries (mcp-language-server cleanup) only.
 func (o *mimoCodeClient) AllStdioEntries() ([]StdioEntry, error) {
 	m, err := o.readJSON()
 	if err != nil {
 		return nil, err
 	}
 	servers, _ := m[mimoCodeMCPKey].(map[string]any)
-	return collectStdioEntries(servers), nil
+	return collectStdioEntries(mimoCodeNormalizeCommandArrays(servers)), nil
 }
 
 // FindStdioLanguageServerEntries scans the merged `mcp` for stdio entries
@@ -1198,7 +1242,30 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 		return nil, err
 	}
 	servers, _ := m[mimoCodeMCPKey].(map[string]any)
-	return findLanguageServerStdioInMap(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))), nil
+	matched := findLanguageServerStdioInMap(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers)))
+	// Write-target restriction (bot PR #420 finding 4). The ONLY consumers of
+	// this method are DESTRUCTIVE — the post-register direct-LSP cleanup
+	// (register.go) and `mcphub language-server cleanup` (cli/language_server.go)
+	// both call RemoveEntry on each returned entry. RemoveEntry → deleteMember
+	// deletes from the write target (o.path = mimocode.json) ONLY. An
+	// mcp-language-server entry living in a LOWER layer (config.json) or a HIGHER
+	// layer (mimocode.jsonc / MIMOCODE_CONFIG / overlay / inline) would be
+	// "removed" with a logged success yet re-emerge via the merge — leaving the
+	// LSP entry active. So report only entries the write target actually defines
+	// (the only ones RemoveEntry can delete); an other-layer entry is the
+	// operator's, never hub-managed, and the hub must not claim to have removed
+	// it. mimoCodeFileDefines(o.path, name) is the write-target membership test.
+	out := matched[:0]
+	for _, e := range matched {
+		defined, err := mimoCodeFileDefines(o.path, e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if defined {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 // mimoCodeDropDisabled returns a shallow copy of servers with every entry whose
