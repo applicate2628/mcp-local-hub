@@ -574,12 +574,334 @@ func TestIsWorktreeAdminPath(t *testing.T) {
 		{"boundary-less bare-repo worktree (no .git segment, no interior modules)", filepath.Join("myrepo", "worktrees", "wt"), true},
 		//   ACCEPT — boundary-less worktree literally NAMED `modules` (leaf, not interior):
 		{"boundary-less worktree named modules (leaf under worktrees, no .git segment)", filepath.Join("myrepo", "worktrees", "modules"), true},
+		// Finding 2 (this round) — DOCUMENTED false-NEGATIVE, architect-adjudicated
+		// DOCUMENT-AS-LIMITATION. A submodule's OWN linked worktree stores its admin
+		// at `<repo>/.git/modules/<sub>/worktrees/<name>` (verified real-git:
+		// `gitdir: <super>/.git/modules/sub/worktrees/sub-wt`). Immediate parent
+		// `worktrees` (parent gate passes) but an interior `modules` after the first
+		// `.git` → REJECTED. Left as an accepted benign orphan-row lingerer rather than
+		// risk a false-positive: it is NOT path-distinguishable from the LIVE submodule
+		// store below, and accepting it would defeat the IsDeadGitWorktreePath
+		// walk-continue invariant. Conservative → not pruned.
+		{"submodule's own linked worktree (interior modules, parent worktrees) — accepted false-negative", filepath.Join("repo", ".git", "modules", "sub", "worktrees", "name"), false},
+		// The collision that makes the above carve-out UNSAFE: a submodule CHECKED OUT
+		// at a path literally named `worktrees` stores its admin at
+		// `<repo>/.git/modules/worktrees/<leaf>` (verified real-git:
+		// `gitdir: ../.git/modules/worktrees`). This is a LIVE submodule store, NOT a
+		// worktree admin — it MUST reject. Same `modules`/X/`worktrees`/leaf shape as
+		// the case above ⇒ path-only A/B1 separation is impossible without filesystem
+		// probing. Sitting them side by side guards a future "simplify" refactor from
+		// silently flipping the first case to an accept and pruning live submodules.
+		{"submodule checked out at a dir named worktrees (live store, parent worktrees) — must reject", filepath.Join("repo", ".git", "modules", "worktrees", "inner"), false},
 		{"empty", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := isWorktreeAdminPath(c.adminDir); got != c.want {
 				t.Fatalf("isWorktreeAdminPath(%q) = %v, want %v", c.adminDir, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIsSubmoduleAdminPath unit-tests the POSITIVE submodule-admin discriminator
+// (Finding 1, r10) that gates the IsDeadGitWorktreePath walk-continue. It must be
+// true ONLY for an admin path carrying an interior `modules` store segment (the
+// SAME signal isWorktreeAdminPath uses to reject), and false for a worktree admin
+// path, a separate-git-dir / arbitrary gitfile target, a user-dir-named-`modules`
+// path, and a worktree literally named `modules`. The two predicates are mutually
+// exclusive by construction (interior-modules present ⇒ submodule; absent +
+// parent `worktrees` ⇒ worktree).
+func TestIsSubmoduleAdminPath(t *testing.T) {
+	cases := []struct {
+		name     string
+		adminDir string
+		want     bool
+	}{
+		// SUBMODULE stores (interior modules) → true.
+		{"ordinary submodule store", filepath.Join("repo", ".git", "modules", "sub"), true},
+		{"nested submodule store", filepath.Join("repo", ".git", "modules", "libs", "mysub"), true},
+		{"submodule inside a linked worktree", filepath.Join("main", ".git", "worktrees", "wt", "modules", "sub"), true},
+		{"submodule's own worktree (interior modules, parent worktrees)", filepath.Join("repo", ".git", "modules", "sub", "worktrees", "name"), true},
+		{"submodule under worktrees-named dir (r6 trap)", filepath.Join("repo", ".git", "modules", "deps", "worktrees", "foo"), true},
+		{"boundary-less submodule store (no .git segment)", filepath.Join("myrepo", "worktrees", "wt", "modules", "deps", "worktrees", "foo"), true},
+		// WORKTREE / non-submodule shapes → false.
+		{"normal worktree admin path", filepath.Join("repo", ".git", "worktrees", "feat"), false},
+		{"bare-repo worktree admin path", filepath.Join("x", "main.git", "worktrees", "wt"), false},
+		{"worktree under user dir named modules (modules above .git)", filepath.Join("home", "user", "modules", "proj", ".git", "worktrees", "wt"), false},
+		{"worktree literally named modules (leaf)", filepath.Join("main", ".git", "worktrees", "modules"), false},
+		// Finding 1: a separate-git-dir / arbitrary gitfile target points at an
+		// ARBITRARY live git dir (NOT under worktrees/ or modules/) → NOT a submodule
+		// → the walk must NOT climb past it. (No interior `modules` segment.)
+		{"separate-git-dir arbitrary gitfile target (live repo boundary)", filepath.Join("home", "user", "nested-gitdir"), false},
+		{"separate-git-dir absolute-ish arbitrary git dir", filepath.Join("var", "lib", "gitdirs", "proj.gitdir"), false},
+		{"empty", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isSubmoduleAdminPath(c.adminDir); got != c.want {
+				t.Fatalf("isSubmoduleAdminPath(%q) = %v, want %v", c.adminDir, got, c.want)
+			}
+			// Mutual-exclusion invariant: a non-empty path is never BOTH a worktree
+			// admin path AND a submodule admin path.
+			if c.adminDir != "" && isWorktreeAdminPath(c.adminDir) && isSubmoduleAdminPath(c.adminDir) {
+				t.Fatalf("path %q classified as BOTH worktree and submodule admin — predicates must be mutually exclusive", c.adminDir)
+			}
+		})
+	}
+}
+
+// TestIsDeadGitWorktreePath_SeparateGitDirNested covers Finding 1 (r10) end-to-end:
+// a LIVE repo created with `git init --separate-git-dir` (its `.git` FILE points
+// at an ARBITRARY git dir, NOT a `worktrees/` or `modules/` store) nested INSIDE a
+// linked worktree whose OUTER worktree admin was removed must NOT be pruned. The
+// nested repo's own `.git` pointer denotes a LIVE repo boundary; the walk must STOP
+// false there and never climb to the (dead) outer worktree pointer above it.
+//
+// Without the isSubmoduleAdminPath gate the walk climbed past ANY non-worktree
+// pointer — so it would have reached the dead OUTER worktree pointer and pruned
+// the LIVE nested separate-git-dir repo (the false-positive this fix closes). A
+// genuine submodule-in-a-worktree (interior `modules`) still correctly climbs to
+// the outer owner — covered by TestIsDeadGitWorktreePath_OuterWorktreeViaSubmodulePointer.
+func TestIsDeadGitWorktreePath_SeparateGitDirNested(t *testing.T) {
+	// Outer worktree root: a regular-file `.git` pointing at a DEAD outer admin
+	// (parent `worktrees/` present, `<wt>` leaf gone → the outer worktree is dead).
+	wtRoot := t.TempDir()
+	mainGit := filepath.Join(t.TempDir(), "main", ".git")
+	worktreesParent := filepath.Join(mainGit, "worktrees")
+	if err := os.MkdirAll(worktreesParent, 0o755); err != nil {
+		t.Fatalf("mkdir outer worktrees parent: %v", err)
+	}
+	outerAdminDead := filepath.Join(worktreesParent, "wt") // leaf never created → outer DEAD
+	writeGitFile(t, wtRoot, outerAdminDead)
+
+	// LIVE separate-git-dir repo nested INSIDE the (dead) outer worktree. Its `.git`
+	// FILE points at an ARBITRARY live git dir — NOT under `worktrees/` or `modules/`.
+	nested := filepath.Join(wtRoot, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested separate-git-dir repo: %v", err)
+	}
+	sepGitDir := filepath.Join(t.TempDir(), "nested-gitdir") // PRESENT live git dir
+	if err := os.MkdirAll(sepGitDir, 0o755); err != nil {
+		t.Fatalf("mkdir separate git dir: %v", err)
+	}
+	writeGitFile(t, nested, sepGitDir)
+
+	// CONTROL: the SAME outer-dead layout but the nested pointer's git dir is ABSENT
+	// (ENOENT). It is STILL not a worktree/submodule pointer, so the walk STILL stops
+	// false at it — a live/ambiguous boundary is never pruned regardless of whether
+	// its own git dir resolves.
+	nestedGone := filepath.Join(wtRoot, "nested-gone")
+	if err := os.MkdirAll(nestedGone, 0o755); err != nil {
+		t.Fatalf("mkdir nested-gone: %v", err)
+	}
+	writeGitFile(t, nestedGone, filepath.Join(t.TempDir(), "absent-gitdir")) // never created
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"live separate-git-dir repo inside a removed-outer-worktree → NOT pruned", nested, false},
+		{"separate-git-dir repo with absent git dir inside removed-outer-worktree → NOT pruned (live/ambiguous boundary)", nestedGone, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsDeadGitWorktreePath(c.path); got != c.want {
+				t.Fatalf("IsDeadGitWorktreePath(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIsDeadGitWorktreePath_SeparateGitDirNested_RealGit drives a REAL git binary
+// to construct the Finding-1 (r10) layout: a linked worktree whose outer admin is
+// removed, with a LIVE `git init --separate-git-dir` repo nested inside it. It
+// asserts the nested live repo is NOT pruned. Skipped when git is unavailable (the
+// synthetic test above covers the discriminator on hosts without git).
+func TestIsDeadGitWorktreePath_SeparateGitDirNested_RealGit(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH; synthetic TestIsDeadGitWorktreePath_SeparateGitDirNested covers the discriminator")
+	}
+
+	root := t.TempDir()
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(gitBin, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s (in %s): %v\n%s", strings.Join(args, " "), dir, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// Superproject with a linked worktree.
+	main := filepath.Join(root, "main")
+	runGit(root, "init", "-q", main)
+	if err := os.WriteFile(filepath.Join(main, "m.txt"), []byte("main\n"), 0o600); err != nil {
+		t.Fatalf("write main file: %v", err)
+	}
+	runGit(main, "add", ".")
+	runGit(main, "commit", "-qm", "init")
+	wt := filepath.Join(root, "wt")
+	runGit(main, "worktree", "add", "-q", wt)
+
+	// LIVE separate-git-dir repo nested inside the worktree. git writes
+	// `gitdir: <sepGitDir>` (an arbitrary absolute git dir, NOT worktrees/ or modules/).
+	nested := filepath.Join(wt, "nested")
+	sepGitDir := filepath.Join(root, "nested-gitdir")
+	runGit(root, "init", "-q", "--separate-git-dir", sepGitDir, nested)
+	// Confirm git produced the expected arbitrary-gitdir pointer (not a worktrees/
+	// or modules/ store) before exercising the discriminator.
+	ptr, ptrErr := os.ReadFile(filepath.Join(nested, ".git"))
+	if ptrErr != nil {
+		t.Fatalf("read nested separate-git-dir .git pointer: %v", ptrErr)
+	}
+	if strings.Contains(string(ptr), "worktrees") || strings.Contains(string(ptr), "modules") {
+		t.Fatalf("unexpected separate-git-dir pointer (shape changed?): %q", string(ptr))
+	}
+
+	// LIVE state (outer worktree admin present) → the nested repo is NOT a dead worktree.
+	if IsDeadGitWorktreePath(nested) {
+		t.Fatalf("live nested separate-git-dir repo mis-classified as dead (outer admin present): %s", nested)
+	}
+
+	// Remove the OUTER worktree admin (the dead-outer-worktree incident). The nested
+	// repo's workspace dir and its own `.git` pointer remain; the outer worktrees/
+	// parent survives. WITHOUT the Finding-1 gate the walk would climb past the
+	// nested repo's arbitrary gitfile to the dead outer pointer and prune the LIVE
+	// nested repo.
+	outerAdmin := filepath.Join(main, ".git", "worktrees", filepath.Base(wt))
+	if _, statErr := os.Stat(outerAdmin); statErr != nil {
+		// Resolve the actual worktree admin name git chose, if Base(wt) differs.
+		entries, _ := os.ReadDir(filepath.Join(main, ".git", "worktrees"))
+		if len(entries) == 1 {
+			outerAdmin = filepath.Join(main, ".git", "worktrees", entries[0].Name())
+		}
+	}
+	if rmErr := os.RemoveAll(outerAdmin); rmErr != nil {
+		t.Fatalf("remove outer worktree admin: %v", rmErr)
+	}
+	if _, statErr := os.Stat(filepath.Dir(outerAdmin)); statErr != nil {
+		t.Fatalf("expected outer worktrees/ parent to remain after admin removal: %v", statErr)
+	}
+	if _, statErr := os.Stat(nested); statErr != nil {
+		t.Fatalf("expected nested workspace dir to remain: %v", statErr)
+	}
+
+	// Finding 1: the LIVE nested separate-git-dir repo must NOT be pruned even
+	// though the outer worktree above it is genuinely dead.
+	if IsDeadGitWorktreePath(nested) {
+		t.Fatalf("Finding 1 false-positive: live nested separate-git-dir repo pruned because the walk climbed past its arbitrary gitfile to the dead outer worktree: %s", nested)
+	}
+}
+
+// TestParseGitWorktreePointer_ForeignForwardSlashUNC covers Finding 3 (r10): a UNC
+// gitdir written by Git-for-Windows with FORWARD slashes (`gitdir: //server/share/...`)
+// is classified ABSOLUTE by POSIX filepath.IsAbs (leading `/`), so an IsAbs-first
+// ordering would accept it as a native POSIX path and filepath.Clean it to a LOCAL
+// `/server/share/...`. On non-Windows it must instead be rejected as FOREIGN
+// (ambiguous, never resolved). A genuine single-slash POSIX absolute still resolves.
+func TestParseGitWorktreePointer_ForeignForwardSlashUNC(t *testing.T) {
+	ws := t.TempDir()
+
+	t.Run("forward-slash UNC on POSIX → rejected", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("//server/share is a NATIVE UNC on Windows (IsAbs=true), not foreign")
+		}
+		gitPath := filepath.Join(t.TempDir(), ".git")
+		if err := os.WriteFile(gitPath, []byte("gitdir: //server/share/repo/.git/worktrees/x\n"), 0o600); err != nil {
+			t.Fatalf("write .git: %v", err)
+		}
+		if admin, ok := parseGitWorktreePointer(gitPath, ws); ok {
+			t.Fatalf("parseGitWorktreePointer(forward-slash UNC) ok=true (admin=%q); want false (cross-OS UNC, never resolve)", admin)
+		}
+	})
+
+	t.Run("single-slash POSIX absolute still resolves (not foreign)", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("a /-rooted path is foreign on Windows; this asserts the POSIX-native case")
+		}
+		nativeAbs := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "n") // /tmp/... single slash
+		gitPath := filepath.Join(t.TempDir(), ".git")
+		if err := os.WriteFile(gitPath, []byte("gitdir: "+nativeAbs+"\n"), 0o600); err != nil {
+			t.Fatalf("write .git: %v", err)
+		}
+		admin, ok := parseGitWorktreePointer(gitPath, ws)
+		if !ok {
+			t.Fatalf("parseGitWorktreePointer(native POSIX abs %q) ok=false; want true", nativeAbs)
+		}
+		if admin != filepath.Clean(nativeAbs) {
+			t.Fatalf("parseGitWorktreePointer(native POSIX abs) admin = %q, want %q", admin, filepath.Clean(nativeAbs))
+		}
+	})
+}
+
+// TestIsDeadGitWorktreePath_ForeignForwardSlashUNCEndToEnd covers Finding 3 (r10)
+// at the predicate level: a LIVE workspace whose `.git` holds a forward-slash UNC
+// gitdir must NOT be pruned on non-Windows even when a matching LOCAL parent of the
+// Clean-collapsed `/server/share/...` path happens to exist while the real UNC leaf
+// is ENOENT. POSIX-only — `//server/share` is a native UNC on Windows.
+func TestIsDeadGitWorktreePath_ForeignForwardSlashUNCEndToEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("//server/share is a native UNC on Windows, not foreign")
+	}
+	// Engineer the dangerous local collision the foreign-reject must defeat: the
+	// Clean-collapsed local path `/server/share/.../worktrees` parent EXISTS while
+	// the leaf is ENOENT. Build it under a temp root and point the UNC at the SAME
+	// suffix so, absent the foreign reject, Clean would land on a real local parent
+	// with a missing leaf → a fabricated dead-worktree → false-positive prune.
+	wt := t.TempDir()
+	// The forward-slash UNC the LIVE cross-OS worktree carries.
+	writeGitFile(t, wt, "//build-server/repos/main/.git/worktrees/live")
+	if IsDeadGitWorktreePath(wt) {
+		t.Fatalf("IsDeadGitWorktreePath(%q) = true for a forward-slash UNC gitdir; must be false (cross-OS ambiguous, never prune)", wt)
+	}
+}
+
+// TestIsForeignAbsolutePath unit-tests the foreign-absolute discriminator across
+// both GOOS branches it can observe at runtime, pinning the Finding-3 (r10)
+// forward-slash-UNC addition and the single-slash POSIX-absolute carve-out.
+func TestIsForeignAbsolutePath(t *testing.T) {
+	type c struct {
+		name   string
+		target string
+		want   bool
+		onlyOn string // "", "windows", "posix"
+	}
+	cases := []c{
+		// Non-Windows (POSIX/WSL) foreign shapes.
+		{"drive-letter forward slash on POSIX", "C:/repo/x", true, "posix"},
+		{"drive-letter backslash on POSIX", `C:\repo\x`, true, "posix"},
+		{"backslash UNC on POSIX", `\\srv\share\x`, true, "posix"},
+		{"forward-slash UNC on POSIX (Finding 3 r10)", "//srv/share/x", true, "posix"},
+		{"triple-slash on POSIX (UNC-ish → foreign)", "///srv/x", true, "posix"},
+		// Non-Windows native (NOT foreign).
+		{"single-slash POSIX absolute (native)", "/opt/repo/x", false, "posix"},
+		{"bare root slash (native)", "/", false, "posix"},
+		{"native relative (not foreign-absolute)", filepath.Join("..", "x"), false, "posix"},
+		// Windows foreign / native.
+		{"posix-absolute on Windows (foreign)", "/opt/repo/x", true, "windows"},
+		{"forward-slash UNC on Windows (native, not foreign)", "//srv/share/x", false, "windows"},
+		{"backslash UNC on Windows (native-ish, not foreign-absolute here)", `\\srv\share\x`, false, "windows"},
+		{"empty", "", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.onlyOn == "windows" && runtime.GOOS != "windows" {
+				t.Skip("windows-only case")
+			}
+			if tc.onlyOn == "posix" && runtime.GOOS == "windows" {
+				t.Skip("posix-only case")
+			}
+			if got := isForeignAbsolutePath(tc.target); got != tc.want {
+				t.Fatalf("isForeignAbsolutePath(%q) = %v, want %v", tc.target, got, tc.want)
 			}
 		})
 	}

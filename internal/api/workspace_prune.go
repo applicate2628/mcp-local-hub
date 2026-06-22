@@ -115,6 +115,16 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 // check (its path is not under `.claude/worktrees/agent-`) AND the deleted-dir
 // check (the directory still exists).
 //
+// SAFETY POSTURE — THIS PREDICATE GATES A DEFAULT-ON DESTRUCTIVE AUTO-PRUNE.
+// NEVER prune a LIVE workspace: a FALSE-POSITIVE here is unacceptable (it tears
+// down a live registration of a real working directory). Missing a genuinely
+// dead worktree in an EXOTIC git layout (a FALSE-NEGATIVE) is ACCEPTABLE and
+// documented — the orphan row just lingers (benign). Therefore every classifier
+// in this file resolves an AMBIGUOUS path to false (do not prune): any non-ENOENT
+// stat error, any cross-OS / unparsable / oversized pointer, and any non-worktree
+// pointer that is not a positively-identified submodule store all return false.
+// When in doubt, do NOT prune.
+//
 // It returns true ONLY when ALL of the following hold — conservative by
 // construction so a live repo, a live worktree, a live submodule, an unmounted
 // admin root, a cross-OS pointer, or any ambiguous-error stat can NEVER be
@@ -241,6 +251,20 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 			// can never satisfy isAdminDirGenuinelyDeleted's sibling-present branch.
 			return isAdminDirGenuinelyDeleted(adminDir)
 		}
+		// Not a worktree admin pointer. The walk may climb PAST it to find an OUTER
+		// worktree pointer ONLY when the pointer is a POSITIVELY-IDENTIFIED SUBMODULE
+		// admin path (Finding 1, r10) — that is the only shape for which the genuine
+		// outer worktree IS an ancestor (a submodule registered inside a linked
+		// worktree). Any OTHER non-worktree pointer denotes a LIVE/ambiguous repo
+		// boundary — most importantly a `git --separate-git-dir` / arbitrary gitfile
+		// whose `gitdir:` points at an ARBITRARY live git dir (NOT under `worktrees/`
+		// or `modules/`). Climbing PAST such a live nested repo's own pointer could
+		// surface an unrelated ancestor worktree pointer and PRUNE the LIVE nested
+		// repo. So a non-submodule, non-worktree pointer STOPS the walk false (never
+		// prune a live/ambiguous boundary).
+		if !isSubmoduleAdminPath(adminDir) {
+			return false
+		}
 		// SUBMODULE admin pointer → the genuine OUTER worktree pointer (if any) is an
 		// ANCESTOR. Continue the walk from the PARENT of pointerDir so the next walk
 		// starts strictly ABOVE the just-rejected pointer and cannot re-find it. A
@@ -332,7 +356,23 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 //     at all): `<bare>/worktrees/<wt>/modules/deps/worktrees/foo` (immediate parent
 //     `worktrees`, no `.git`/`*.git` segment). The front-scan finds the interior
 //     `modules` and rejects it — a parent-only OR a return-true-when-firstGit<0
-//     check would have ACCEPTED it and mis-pruned a LIVE submodule workspace.
+//     check would have ACCEPTED it and mis-pruned a LIVE submodule workspace,
+//   - a submodule's OWN linked worktree `<repo>/.git/modules/<sub>/worktrees/<name>`
+//     (verified real-git: `gitdir: <super>/.git/modules/sub/worktrees/sub-wt`).
+//     Immediate parent is `worktrees` (parent gate passes) but an interior `modules`
+//     after the first `.git` → REJECTED. This is a DELIBERATE, ACCEPTED
+//     false-NEGATIVE (Finding 2, architect-adjudicated DOCUMENT-AS-LIMITATION): a
+//     dead worktree-of-a-submodule lingers as a benign orphan row rather than risk
+//     a false-positive. Two reasons it must stay rejected: (1) NOT path-distinguishable
+//     from a LIVE submodule CHECKED OUT at a dir literally named `worktrees`
+//     (`<repo>/.git/modules/worktrees/<leaf>`, verified real-git
+//     `gitdir: ../.git/modules/worktrees`) without filesystem probing — `worktrees`
+//     is simultaneously git's store-dir name, a legal submodule checkout path, and a
+//     legal worktree name; (2) accepting it would DEFEAT the IsDeadGitWorktreePath
+//     walk-continue invariant (the walk relies on submodule-admin pointers being
+//     rejected so it CLIMBS PAST them to the OUTER worktree owner — terminating on an
+//     inner submodule worktree whose liveness is independent of the workspace's true
+//     owner could prune a LIVE workspace one level up). Ambiguous → do not prune.
 //
 // Anchoring on the FIRST git-common-dir segment is correct WHEN ONE EXISTS: the
 // submodule-in-a-worktree admin path carries only the OUTER `.git` (no inner
@@ -357,14 +397,76 @@ func isWorktreeAdminPath(adminDir string) bool {
 	if filepath.Base(worktreesDir) != "worktrees" {
 		return false
 	}
-	// Reject an INTERIOR `modules` segment (one with a child) appearing anywhere
-	// AFTER the first git-common-dir segment (`.git` or `*.git`) — that is git's
-	// submodule-store marker (`<git-dir>/...modules/<sub>...`). A `modules`
-	// segment BEFORE the first git-common-dir (a user dir named `modules` above
-	// the git dir) is not git's marker; a LEAF `modules` directly under
-	// `worktrees` is a worktree NAME, not a store marker — neither rejects a
-	// genuine worktree. adminDir is filepath.Clean-ed, so each separator-bounded
-	// segment is a real path component (no empty/`.` segments to skip).
+	// Reject an INTERIOR `modules` store segment — git's submodule-store marker
+	// (`<git-dir>/...modules/<sub>...`). hasInteriorModulesStoreSegment is the
+	// single owner of that detection (also consulted by isSubmoduleAdminPath for the
+	// walk-continue decision, Finding 1 r10). A genuine worktree admin path
+	// (normal, bare-repo, worktree-from-bare, worktree-named-`modules`,
+	// worktree-under-a-user-dir-named-`modules`) carries NO interior modules store
+	// segment → accepted; every submodule store carries one → rejected.
+	return !hasInteriorModulesStoreSegment(adminDir)
+}
+
+// isSubmoduleAdminPath reports whether adminDir POSITIVELY identifies a git
+// SUBMODULE store admin path — one carrying an interior `modules` store segment
+// (`<git-dir>/...modules/<sub>...`). It is the inverse-intent companion of
+// isWorktreeAdminPath and the load-bearing discriminator for the
+// IsDeadGitWorktreePath walk-continue (Finding 1, r10).
+//
+// WHY a POSITIVE submodule test, not "anything isWorktreeAdminPath rejected":
+// the walk in IsDeadGitWorktreePath climbs PAST a rejected pointer ONLY to find an
+// OUTER worktree pointer above a submodule. The ONLY shape for which climbing-past
+// is correct is a submodule-admin pointer (the genuine outer worktree IS an
+// ancestor of a submodule registered inside a linked worktree). Every OTHER
+// non-worktree pointer — most importantly a `git --separate-git-dir` / arbitrary
+// gitfile whose `gitdir:` points at an ARBITRARY live git dir (NOT under
+// `worktrees/` or `modules/`) — denotes a LIVE repo boundary, and climbing past it
+// could surface an unrelated ancestor worktree pointer and PRUNE that live nested
+// repo (Finding 1 false-positive). So the walk must climb ONLY on a positively-
+// identified submodule-admin path and STOP (return false, do not prune) on any
+// other non-worktree pointer. A path that is neither a worktree admin path nor a
+// submodule admin path is treated as a LIVE/ambiguous repo boundary.
+//
+// Both predicates are mutually exclusive by the parent-`worktrees` gate plus the
+// interior-`modules` test: isWorktreeAdminPath requires parent == `worktrees` AND
+// no interior modules; isSubmoduleAdminPath requires an interior modules. A
+// `modules/<sub>/worktrees/<name>` (submodule's-own-worktree) has BOTH a
+// `worktrees` parent AND interior modules, so isWorktreeAdminPath rejects it and
+// isSubmoduleAdminPath accepts it — the walk continues climbing past it to the
+// outer owner, which is the conservative, documented behavior (see Finding 2).
+func isSubmoduleAdminPath(adminDir string) bool {
+	if adminDir == "" {
+		return false
+	}
+	return hasInteriorModulesStoreSegment(adminDir)
+}
+
+// hasInteriorModulesStoreSegment reports whether a filepath.Clean-ed git admin
+// path carries an INTERIOR `modules` segment (a `modules` component with a child)
+// that sits AFTER the first git-common-dir segment (`.git` or `*.git`), or — when
+// the path has NO git-common-dir segment at all — anywhere from the FRONT. That
+// interior `modules` is git's submodule-store marker (`<git-dir>/...modules/<sub>...`).
+// It is the SINGLE OWNER of the interior-modules-store detection, consumed by
+// isWorktreeAdminPath (reject when present) and isSubmoduleAdminPath (accept when
+// present), so the two predicates can never drift.
+//
+// Boundaries (each verified by a TestIsWorktreeAdminPath case):
+//   - A `modules` segment BEFORE the first git-common-dir (a USER dir literally
+//     named `modules` above the git dir, `/home/user/modules/proj/.git/...`) is
+//     NOT git's marker → not counted. Anchoring the scan on the first
+//     git-common-dir segment skips it.
+//   - A LEAF `modules` (one with NO child, e.g. a worktree literally NAMED
+//     `modules` directly under `worktrees`: `<repo>/.git/worktrees/modules`) is a
+//     worktree NAME, not a store marker → not counted (the `j < lastIdx`
+//     interior-only bound).
+//   - When NO git-common-dir segment exists (a BARE repo whose common dir name
+//     does not end in `.git`, e.g. `git init --bare myrepo`), the scan runs from
+//     the FRONT so a boundary-less submodule store
+//     (`<bare>/worktrees/<wt>/modules/deps/worktrees/foo`) is still detected.
+//
+// adminDir is filepath.Clean-ed by parseGitWorktreePointer, so each
+// separator-bounded segment is a real path component (no empty/`.` segments).
+func hasInteriorModulesStoreSegment(adminDir string) bool {
 	comps := strings.Split(adminDir, string(filepath.Separator))
 	firstGit := -1
 	for i, comp := range comps {
@@ -373,18 +475,6 @@ func isWorktreeAdminPath(adminDir string) bool {
 			break
 		}
 	}
-	// Finding 1 (this round): when NO git-common-dir boundary is found
-	// (firstGit < 0) the interior-`modules` scan must STILL run. A BARE repo whose
-	// common dir name does NOT end in `.git` (e.g. `git init --bare myrepo`, or a
-	// clone without the suffix) leaves firstGit == -1, yet a submodule store still
-	// nests an interior `modules` segment — e.g. a submodule under such a bare
-	// worktree, `<bare>/worktrees/<wt>/modules/deps/worktrees/foo`. Returning true
-	// unconditionally here would ACCEPT that boundary-less submodule store and
-	// mis-prune a LIVE submodule workspace. So scan from the FRONT (start = 0) when
-	// there is no boundary; otherwise scan AFTER the first git-common-dir segment
-	// (start = firstGit + 1) so a user dir named `modules` ABOVE the git dir is
-	// skipped. The LEAF exclusion (j < lastIdx) is preserved in BOTH windows so a
-	// worktree literally NAMED `modules` directly under `worktrees` stays accepted.
 	scanStart := 0
 	if firstGit >= 0 {
 		scanStart = firstGit + 1
@@ -392,10 +482,10 @@ func isWorktreeAdminPath(adminDir string) bool {
 	lastIdx := len(comps) - 1
 	for j := scanStart; j < lastIdx; j++ { // j < lastIdx ⇒ interior only (has a child)
 		if comps[j] == "modules" {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // isGitCommonDirSegment reports whether a cleaned path segment is a git
@@ -584,16 +674,30 @@ func parseGitWorktreePointer(gitPath, workspaceDir string) (adminDir string, ok 
 		if target == "" {
 			return "", false
 		}
-		if filepath.IsAbs(target) {
-			// Native absolute (drive-letter/UNC on Windows, `/...` on POSIX).
-			return filepath.Clean(target), true
-		}
+		// FOREIGN reject runs BEFORE the native-absolute acceptance (Finding 3, r10).
+		// A forward-slash UNC pointer authored by Git-for-Windows (`gitdir:
+		// //server/share/...`) is classified ABSOLUTE by POSIX filepath.IsAbs (a
+		// leading `/`), so an `IsAbs`-first ordering would ACCEPT it as a native
+		// POSIX path, filepath.Clean it to a LOCAL `/server/share/...`, and — if any
+		// matching local parent exists while the real UNC leaf is offline — stat the
+		// local leaf ENOENT and PRUNE the LIVE UNC worktree. isForeignAbsolutePath
+		// now detects that `//`-prefixed forward-slash UNC on non-Windows, so the
+		// foreign reject must be consulted FIRST. The drive-letter (`C:/...`) and
+		// backslash-UNC (`\\...`) cases are IsAbs=false on POSIX and were already
+		// caught here; only the forward-slash-UNC case needed the reordering because
+		// it is the sole foreign-absolute shape POSIX IsAbs mistakes for native.
 		if isForeignAbsolutePath(target) {
-			// A path the CURRENT OS does not consider absolute but the OTHER OS
-			// would (Windows drive-letter/UNC seen on POSIX, or a POSIX `/...`
+			// A path the CURRENT OS does not consider NATIVELY absolute but the OTHER
+			// OS would (Windows drive-letter/UNC seen on POSIX, or a POSIX `/...`
 			// seen on Windows). Cross-OS worktree → cannot resolve safely →
 			// ambiguous, never prune.
 			return "", false
+		}
+		if filepath.IsAbs(target) {
+			// Native absolute (drive-letter/UNC on Windows, single-slash `/...` on
+			// POSIX). The foreign-UNC `//...` case was already rejected above, so a
+			// path reaching here is genuinely native-absolute.
+			return filepath.Clean(target), true
 		}
 		if isForeignRelativePath(target) {
 			// A RELATIVE target authored on the OTHER OS (Finding 3): a Windows
@@ -660,26 +764,44 @@ func readGitPointerFile(gitPath string) ([]byte, bool) {
 	return data, true
 }
 
-// isForeignAbsolutePath reports whether target is absolute on the OTHER OS but
-// not the current one — i.e. filepath.IsAbs(target) already returned false on
-// THIS GOOS, yet the path is clearly an absolute path authored on the opposite
-// platform. Callers use this to REJECT (treat as ambiguous), never to resolve.
+// isForeignAbsolutePath reports whether target is absolute on the OTHER OS, OR is
+// a UNC network root authored on Windows — a path that the current OS cannot
+// resolve to a real local admin directory. Callers use this to REJECT (treat as
+// ambiguous), never to resolve.
 //
-//   - On non-Windows (POSIX/WSL): a Windows drive-letter root (`C:\` or `C:/`)
-//     or a UNC root (`\\server\share`).
+//   - On non-Windows (POSIX/WSL): a Windows drive-letter root (`C:\` or `C:/`),
+//     a backslash-UNC root (`\\server\share`), OR a forward-slash-UNC root
+//     (`//server/share`). The drive-letter and backslash-UNC shapes are
+//     filepath.IsAbs=FALSE on POSIX, so the caller's IsAbs-first ordering used to
+//     skip past them harmlessly; this function caught them. The forward-slash-UNC
+//     shape is the Finding-3 (r10) addition: Git-for-Windows writes a UNC gitdir
+//     with FORWARD slashes (`gitdir: //server/share/...`), and POSIX
+//     filepath.IsAbs classifies a leading `/` as ABSOLUTE — so `//server/share`
+//     is IsAbs=TRUE on POSIX and would be mistaken for a native single-slash
+//     absolute path. A `//` (two-or-more leading forward slashes) prefix is never
+//     a genuine native POSIX gitdir (git writes single-slash `/...`); it is always
+//     a Windows-authored UNC. Detecting it here (and consulting this reject BEFORE
+//     the native-IsAbs acceptance in parseGitWorktreePointer) keeps a LIVE UNC
+//     worktree from being mis-resolved to a local `/server/share/...` and pruned.
+//     A SINGLE leading slash (`/foo`) is a real POSIX absolute → NOT foreign.
 //   - On Windows: a POSIX-absolute root (`/foo`). Note `\foo` is intentionally
 //     NOT treated as foreign on Windows — it is a native (drive-relative) path
 //     that Windows IsAbs already classifies as relative, and git never emits it
-//     as a gitdir.
+//     as a gitdir. A native Windows UNC (`\\server\share` or `//server/share`) is
+//     already filepath.IsAbs=TRUE on Windows and resolves natively, so it must NOT
+//     be treated as foreign there.
 func isForeignAbsolutePath(target string) bool {
 	if target == "" {
 		return false
 	}
 	if runtime.GOOS == "windows" {
 		// POSIX-absolute `/...` seen on Windows (but not `\...`, which is a
-		// native Windows drive-relative path, nor `\\...` UNC which Windows
-		// IsAbs already accepts as absolute).
-		return target[0] == '/'
+		// native Windows drive-relative path, nor `\\...` / `//...` UNC which
+		// Windows IsAbs already accepts as absolute and resolves natively). A UNC
+		// uses two leading separators; a single leading `/` is the foreign
+		// POSIX-absolute shape.
+		return len(target) >= 1 && target[0] == '/' &&
+			!(len(target) >= 2 && (target[1] == '/' || target[1] == '\\'))
 	}
 	// Non-Windows: Windows drive-letter root `^[A-Za-z]:[\\/]`.
 	if len(target) >= 3 &&
@@ -688,8 +810,14 @@ func isForeignAbsolutePath(target string) bool {
 		(target[2] == '\\' || target[2] == '/') {
 		return true
 	}
-	// Non-Windows: UNC root `^\\` (two leading backslashes).
-	if len(target) >= 2 && target[0] == '\\' && target[1] == '\\' {
+	// Non-Windows: UNC root with two-or-more leading separators — either backslash
+	// (`\\server\share`, IsAbs=false on POSIX) or forward-slash
+	// (`//server/share`, the Finding-3 r10 case that POSIX IsAbs mistakes for a
+	// native single-slash absolute). A SINGLE leading `/` is a real POSIX absolute
+	// → not foreign; only a DOUBLE leading separator is the foreign UNC shape.
+	if len(target) >= 2 &&
+		(target[0] == '\\' || target[0] == '/') &&
+		(target[1] == '\\' || target[1] == '/') {
 		return true
 	}
 	return false
