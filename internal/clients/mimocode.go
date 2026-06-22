@@ -162,11 +162,13 @@ var mimoCodeOverlayLayerNames = []string{"mimocode.json", "mimocode.jsonc"}
 //     touches (o.path). It is ALWAYS mimocode.json in the resolved global dir
 //     (the deterministic seed); it does NOT float to mimocode.jsonc when that
 //     exists, so a backup/demigrate always hits the exact file the hub wrote.
-//   - configFile — the MIMOCODE_CONFIG absolute FILE, a READ LAYER merged ABOVE
-//     the global layers (NOT a replacement — bot PR #420 finding 1). "" when
-//     unset / relative. The hub never WRITES it (operator-owned).
-//   - overlayDir — the MIMOCODE_CONFIG_DIR absolute overlay DIR whose
-//     mimocode.json/.jsonc merge above configFile. "" when unset / relative.
+//   - configFile — the MIMOCODE_CONFIG FILE, a READ LAYER merged ABOVE the
+//     global layers (NOT a replacement — bot PR #420 finding 1). Absolute, with a
+//     relative value resolved from the process cwd (bot PR #420 finding 3). ""
+//     when unset. The hub never WRITES it (operator-owned).
+//   - overlayDir — the MIMOCODE_CONFIG_DIR overlay DIR whose mimocode.json/.jsonc
+//     merge above configFile. Absolute, with a relative value resolved from the
+//     process cwd (bot PR #420 finding 3). "" when unset.
 //   - inlineContent — the MIMOCODE_CONFIG_CONTENT raw JSONC STRING merged as the
 //     TOP layer (highest in-scope precedence — bot PR #420 finding 4). "" when
 //     unset. It is content, not a path, so it threads into the merge separately
@@ -187,20 +189,25 @@ type mimoCodeResolution struct {
 //     exists (bot PR #420 finding 5: a floating write target makes a later
 //     backup/demigrate miss the layer the hub actually wrote). config.json is
 //     never a write target (a read-only legacy migration sink).
-//   - MIMOCODE_CONFIG (absolute FILE) is a READ LAYER merged ABOVE the global
-//     layers (bot PR #420 finding 1). MiMoCode merges it ON TOP of getGlobal()
-//     — `if (Flag.MIMOCODE_CONFIG) merge(loadFile(Flag.MIMOCODE_CONFIG))` runs
-//     AFTER `merge(getGlobal())` — it is NOT a replacement. The hub never
-//     WRITES it (operator-owned); it only contributes to READS + shadow checks.
-//   - MIMOCODE_CONFIG_DIR (absolute DIR) is the overlay read ABOVE configFile
-//     (config.ts's per-directory loop runs after the MIMOCODE_CONFIG merge);
-//     custom wins per key. It does NOT become the write target.
+//   - MIMOCODE_CONFIG (a FILE, absolute or cwd-relative — bot PR #420 finding 3)
+//     is a READ LAYER merged ABOVE the global layers (bot PR #420 finding 1).
+//     MiMoCode merges it ON TOP of getGlobal() — `if (Flag.MIMOCODE_CONFIG)
+//     merge(loadFile(Flag.MIMOCODE_CONFIG))` runs AFTER `merge(getGlobal())` — it
+//     is NOT a replacement. The hub never WRITES it (operator-owned); it only
+//     contributes to READS + shadow checks.
+//   - MIMOCODE_CONFIG_DIR (a DIR, absolute or cwd-relative — bot PR #420 finding
+//     3) is the overlay read ABOVE configFile (config.ts's per-directory loop runs
+//     after the MIMOCODE_CONFIG merge); custom wins per key. It does NOT become
+//     the write target.
 //   - MIMOCODE_CONFIG_CONTENT is an INLINE JSONC config string merged as the
 //     TOP layer (config.ts merges `process.env.MIMOCODE_CONFIG_CONTENT` last of
 //     the in-scope sources — bot PR #420 finding 4). It is content, not a path,
 //     so it is carried as a raw string.
 //
-// Relative env values are IGNORED for the PATH vars (global.ts rejects a
+// Relative env values: MIMOCODE_CONFIG and MIMOCODE_CONFIG_DIR are resolved
+// from the process cwd (bot PR #420 finding 3 — MiMoCode treats them as ordinary
+// path strings and resolves a relative value from cwd, so the hub must too).
+// MIMOCODE_HOME and XDG_CONFIG_HOME stay absolute-only (global.ts rejects a
 // relative MIMOCODE_HOME outright and the XDG spec ignores a relative
 // XDG_CONFIG_HOME). MIMOCODE_CONFIG_CONTENT is read raw (it is content, not a
 // path).
@@ -208,8 +215,8 @@ func resolveMimoCodeConfig(home string) mimoCodeResolution {
 	globalDir := resolveMimoCodeGlobalDir(home)
 	return mimoCodeResolution{
 		writeTarget:   mimoCodeWriteTargetInDir(globalDir),
-		configFile:    absoluteEnv("MIMOCODE_CONFIG"),
-		overlayDir:    absoluteEnv("MIMOCODE_CONFIG_DIR"),
+		configFile:    cwdResolvedEnv("MIMOCODE_CONFIG"),
+		overlayDir:    cwdResolvedEnv("MIMOCODE_CONFIG_DIR"),
 		inlineContent: os.Getenv("MIMOCODE_CONFIG_CONTENT"),
 	}
 }
@@ -247,9 +254,11 @@ func mimoCodeWriteTargetInDir(dir string) string {
 //	  > XDG_CONFIG_HOME  (absolute DIR → $XDG_CONFIG_HOME/mimocode)
 //	  > ~/.config/mimocode
 //
-// (MIMOCODE_CONFIG — the absolute FILE override — and MIMOCODE_CONFIG_DIR — the
-// overlay — are handled one level up in resolveMimoCodeConfig; neither replaces
-// the global dir.) Relative env values are IGNORED.
+// (MIMOCODE_CONFIG — the FILE override — and MIMOCODE_CONFIG_DIR — the overlay —
+// are handled one level up in resolveMimoCodeConfig; neither replaces the global
+// dir, and both accept a cwd-relative value per bot PR #420 finding 3.) For the
+// global-dir vars resolved HERE (MIMOCODE_HOME, XDG_CONFIG_HOME) a relative value
+// is IGNORED.
 func resolveMimoCodeGlobalDir(home string) string {
 	if h := absoluteEnv("MIMOCODE_HOME"); h != "" {
 		return filepath.Join(h, "config")
@@ -280,6 +289,35 @@ func absoluteEnv(name string) string {
 	return v
 }
 
+// cwdResolvedEnv reads env var `name` and resolves it to an ABSOLUTE path,
+// joining a RELATIVE value against the process cwd (bot PR #420 finding 3).
+// MiMoCode treats MIMOCODE_CONFIG / MIMOCODE_CONFIG_DIR as ordinary path strings
+// and resolves a relative value from the process cwd, so the hub must too —
+// absoluteEnv silently DROPPED relative values (MIMOCODE_CONFIG=custom.json,
+// MIMOCODE_CONFIG_DIR=.mimocode), making the hub ignore an active overlay and
+// miss servers + same-name shadows. An absolute value is returned cleaned and
+// unchanged. Unset → "". A relative value that filepath.Abs cannot resolve
+// (cwd unreadable — vanishingly rare) is dropped ("") rather than guessed.
+//
+// This is ONLY for MIMOCODE_CONFIG / MIMOCODE_CONFIG_DIR. MIMOCODE_HOME and
+// XDG_CONFIG_HOME stay absolute-only (absoluteEnv): MiMoCode's global.ts rejects
+// a relative MIMOCODE_HOME outright and the XDG spec ignores a relative
+// XDG_CONFIG_HOME, so resolving those from cwd would diverge from the runtime.
+func cwdResolvedEnv(name string) string {
+	v := os.Getenv(name)
+	if v == "" {
+		return ""
+	}
+	if filepath.IsAbs(v) {
+		return filepath.Clean(v)
+	}
+	abs, err := filepath.Abs(v)
+	if err != nil {
+		return ""
+	}
+	return abs
+}
+
 // mimoCodeClient is a standalone adapter (NOT an embedding of jsonMCPClient)
 // because MiMoCode uses the top-level `mcp` key rather than the JSON family's
 // `mcpServers`, AND a distinct entry shape (`type:"remote"` + `enabled:true`
@@ -303,11 +341,12 @@ func absoluteEnv(name string) string {
 // override) with no env-resolved sources — the state-safe default that never
 // reaches the developer's real ~/.config/mimocode.
 //
-//   - configFile (MIMOCODE_CONFIG) — an absolute FILE read as a LAYER ABOVE the
-//     global dir layers (bot PR #420 finding 1). It is NOT a replacement: the
-//     global layers stay in the read set. The hub never writes it.
-//   - overlayDir (MIMOCODE_CONFIG_DIR) — an absolute DIR whose
-//     mimocode.json/.jsonc merge ABOVE configFile.
+//   - configFile (MIMOCODE_CONFIG) — a FILE (absolute or cwd-relative — bot PR
+//     #420 finding 3) read as a LAYER ABOVE the global dir layers (bot PR #420
+//     finding 1). It is NOT a replacement: the global layers stay in the read
+//     set. The hub never writes it.
+//   - overlayDir (MIMOCODE_CONFIG_DIR) — a DIR (absolute or cwd-relative — bot PR
+//     #420 finding 3) whose mimocode.json/.jsonc merge ABOVE configFile.
 //   - inlineContent (MIMOCODE_CONFIG_CONTENT) — a raw JSONC STRING merged as the
 //     TOP read layer (bot PR #420 finding 4). It is content, not a path, so it
 //     is parsed and merged after the file layers in readMergedLayers.
@@ -569,8 +608,14 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 			}
 		}
 	}
-	// 3. MIMOCODE_CONFIG file.
-	if o.configFile != "" {
+	// 3. MIMOCODE_CONFIG file — but NOT when it points at the write target itself
+	// (bot PR #420). When MIMOCODE_CONFIG == o.path (e.g. set to the global
+	// mimocode.json the hub already writes), it is the SAME file the write lands
+	// in, not a higher layer that would shadow it — editing o.path is exactly what
+	// takes effect, so an existing entry must not be refused as a shadow. A
+	// genuine MIMOCODE_CONFIG at a DIFFERENT path still shadows. Compare cleaned
+	// paths so a "./x/../mimocode.json"-style spelling does not slip past.
+	if o.configFile != "" && filepath.Clean(o.configFile) != filepath.Clean(o.path) {
 		defined, err := mimoCodeFileDefines(o.configFile, name)
 		if err != nil {
 			return mimoCodeShadowSource{}, err
@@ -737,6 +782,32 @@ func MimoCodeReadLayerPaths(path string) []string {
 	return mimoCodeClientForScanPath(path).readLayerFiles()
 }
 
+// MimoCodeHasInlineContent reports whether the scan-supplied config path resolves
+// to a PARSEABLE MIMOCODE_CONFIG_CONTENT inline layer. Exported so
+// internal/api/scan.go can promote MiMoCode's config PRESENCE for an INLINE-ONLY
+// profile — one whose ONLY mimo config layer is MIMOCODE_CONFIG_CONTENT (no
+// stat-able file on disk; bot PR #420 finding 1). MimoCodeReadLayerPaths yields
+// only FILE paths, so an inline-only host has no presence file to stat and would
+// never promote to "ok" — yet MimoCodeMergedConfig WOULD parse the inline layer
+// and surface its servers. This helper closes that gap by reporting inline
+// presence directly.
+//
+// It uses the SAME env-resolution gate as MimoCodeReadLayerPaths /
+// MimoCodeMergedConfig: the inline env is honored ONLY when path is a known
+// global layer name (a temp/test override path stays state-safe single-file and
+// never reads MIMOCODE_CONFIG_CONTENT). "Parseable" is required so a malformed
+// inline string does NOT promote presence — scanMimoCode would surface that as a
+// loud parse error on the merged read, mirroring a present-but-malformed FILE
+// layer; promoting it to "ok" would be no different from the file-layer path.
+func MimoCodeHasInlineContent(path string) bool {
+	content := mimoCodeClientForScanPath(path).inlineContent
+	if content == "" {
+		return false
+	}
+	_, err := parseJSONCBytes([]byte(content))
+	return err == nil
+}
+
 // mimoCodeClientForScanPath builds the read-only client a scan/extract entry
 // point uses for a supplied config path, resolving the MIMOCODE_CONFIG file, the
 // MIMOCODE_CONFIG_DIR overlay, and the MIMOCODE_CONFIG_CONTENT inline content
@@ -751,8 +822,8 @@ func mimoCodeClientForScanPath(path string) *mimoCodeClient {
 	}
 	return &mimoCodeClient{
 		path:          path,
-		configFile:    absoluteEnv("MIMOCODE_CONFIG"),
-		overlayDir:    absoluteEnv("MIMOCODE_CONFIG_DIR"),
+		configFile:    cwdResolvedEnv("MIMOCODE_CONFIG"),
+		overlayDir:    cwdResolvedEnv("MIMOCODE_CONFIG_DIR"),
 		inlineContent: os.Getenv("MIMOCODE_CONFIG_CONTENT"),
 	}
 }

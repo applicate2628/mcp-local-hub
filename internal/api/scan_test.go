@@ -1999,6 +1999,57 @@ func TestScanMimoCode_PresenceFromLowerLayerWhenWriteTargetAbsent(t *testing.T) 
 			t.Fatal("overlay-only memory entry vanished from scan when the write target is absent")
 		}
 	})
+
+	t.Run("server only in MIMOCODE_CONFIG_CONTENT inline layer (no file on disk)", func(t *testing.T) {
+		// bot PR #420 finding 1: a profile whose ONLY mimo config layer is the
+		// INLINE MIMOCODE_CONFIG_CONTENT has NO file to stat — the file-only
+		// presence promotion never fires — yet MimoCodeMergedConfig parses the
+		// inline layer. The scan must promote presence to "ok" on the parseable
+		// inline content so scanMimoCode runs and the inline servers appear.
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		// NO config file is written anywhere; the only definition is inline.
+		t.Setenv("MIMOCODE_CONFIG_CONTENT",
+			`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`)
+		mimoPath := filepath.Join(tmp, "mimocode.json") // a global-layer name, absent on disk
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got != "ok" {
+			t.Errorf("mimocode presence with an inline-only MIMOCODE_CONFIG_CONTENT: got %q, want ok", got)
+		}
+		mem := memEntry(t, res)
+		if mem == nil {
+			t.Fatal("inline-only memory entry vanished from scan (presence not promoted for MIMOCODE_CONFIG_CONTENT)")
+		}
+		if got := mem.ClientPresence["mimocode"].Transport; got != "http" {
+			t.Errorf("inline-layer memory Transport: got %q, want http", got)
+		}
+	})
+
+	t.Run("malformed MIMOCODE_CONFIG_CONTENT does NOT promote presence", func(t *testing.T) {
+		// A non-parseable inline string is not a valid layer; presence must stay
+		// missing (it mirrors a present-but-malformed FILE layer: the merged read
+		// would surface a parse error rather than green-then-fail).
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		t.Setenv("MIMOCODE_CONFIG_CONTENT", `{ this is not json `)
+		mimoPath := filepath.Join(tmp, "mimocode.json") // absent on disk
+		manifestDir := manifestFixture(tmp)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got == "ok" {
+			t.Errorf("malformed inline content must NOT promote presence to ok: got %q", got)
+		}
+	})
 }
 
 // TestShapeMimoCodeEntry_NormalizesLSPArgsFromCommandArray pins bot PR #420

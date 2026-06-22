@@ -603,12 +603,22 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	// hardened write fails against the bad write target. So the promotion is
 	// gated on isMissingPresenceState — it upgrades only the absent states
 	// (missing / missing-init-*), never an error/error-symlink/ok verdict.
+	//
+	// INLINE-ONLY PROFILES (bot PR #420 finding 1): MimoCodeReadLayerPaths yields
+	// only FILE paths, so a profile whose ONLY mimo config layer is
+	// MIMOCODE_CONFIG_CONTENT (inline, no file on disk) has nothing to stat and
+	// would never promote — yet MimoCodeMergedConfig parses that inline layer and
+	// surfaces its servers. So promote on a parseable inline layer too, not just a
+	// stat-able file. Either signal upgrades the absent state to "ok".
 	if mp := paths["mimocode"]; mp != "" && isMissingPresenceState(presence["mimocode"]) {
 		for _, lf := range clients.MimoCodeReadLayerPaths(mp) {
 			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
 				presence["mimocode"] = "ok"
 				break
 			}
+		}
+		if presence["mimocode"] != "ok" && clients.MimoCodeHasInlineContent(mp) {
+			presence["mimocode"] = "ok"
 		}
 	}
 	scanIfReadable := func(name string) bool {

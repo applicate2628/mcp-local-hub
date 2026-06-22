@@ -1491,6 +1491,165 @@ func TestMimoCode_RemoteExtraFields_RollbackRoundTrip(t *testing.T) {
 	}
 }
 
+// TestMimoCode_ConfigEqualsWriteTarget_NotAShadow pins bot PR #420 (finding 2):
+// when MIMOCODE_CONFIG points at the SAME file as the global write target
+// (o.path), it is the SAME file the write lands in, not a higher layer — editing
+// o.path is exactly what takes effect, so re-installing/updating a server already
+// present in that file must SUCCEED, not be refused as a shadow. A genuine
+// MIMOCODE_CONFIG at a DIFFERENT path still shadows.
+func TestMimoCode_ConfigEqualsWriteTarget_NotAShadow(t *testing.T) {
+	t.Run("MIMOCODE_CONFIG == write target: re-install of an existing entry succeeds", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		globalPath := filepath.Join(dir, "mimocode.json")
+		// The write target ALREADY contains `serena` (an updated/re-installed entry).
+		if err := os.WriteFile(globalPath,
+			[]byte(`{"mcp":{"serena":{"type":"remote","url":"http://old/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// MIMOCODE_CONFIG resolves to the SAME file as the write target.
+		o := &mimoCodeClient{path: globalPath, configFile: globalPath}
+		if err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://new/mcp"}); err != nil {
+			t.Fatalf("re-install when MIMOCODE_CONFIG == write target must succeed, got shadow refusal: %v", err)
+		}
+		if e, _ := o.GetEntry("serena"); e == nil || e.URL != "http://new/mcp" {
+			t.Errorf("the entry must be updated in place on the write target: %+v", e)
+		}
+	})
+
+	t.Run("MIMOCODE_CONFIG == write target via a non-clean spelling is still not a shadow", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		globalPath := filepath.Join(dir, "mimocode.json")
+		if err := os.WriteFile(globalPath,
+			[]byte(`{"mcp":{"serena":{"type":"remote","url":"http://old/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Same file, spelled with a redundant ./x/.. segment — filepath.Clean must
+		// collapse it so the equality holds and the write is not refused.
+		spelled := filepath.Join(dir, "x", "..", "mimocode.json")
+		o := &mimoCodeClient{path: globalPath, configFile: spelled}
+		if err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://new/mcp"}); err != nil {
+			t.Fatalf("a non-clean spelling of the write target must not be a shadow, got: %v", err)
+		}
+	})
+
+	t.Run("MIMOCODE_CONFIG at a DIFFERENT path still shadows", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		globalPath := filepath.Join(dir, "mimocode.json")
+		if err := os.WriteFile(globalPath, []byte(`{"mcp":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		configFile := filepath.Join(t.TempDir(), "custom.json")
+		if err := os.WriteFile(configFile,
+			[]byte(`{"mcp":{"serena":{"type":"remote","url":"http://config/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: globalPath, configFile: configFile}
+		err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://localhost:9121/mcp"})
+		var shadowErr *ErrMimoCodeOverlayShadowsServer
+		if !errors.As(err, &shadowErr) {
+			t.Fatalf("a different-path MIMOCODE_CONFIG must still shadow, got %v", err)
+		}
+		if shadowErr.SourceFile != configFile {
+			t.Errorf("error must name the different-path MIMOCODE_CONFIG file: got %q want %q", shadowErr.SourceFile, configFile)
+		}
+	})
+}
+
+// TestMimoCode_RelativeConfigEnv_ResolvedFromCwd pins bot PR #420 (finding 3):
+// MiMoCode resolves a RELATIVE MIMOCODE_CONFIG / MIMOCODE_CONFIG_DIR from the
+// process cwd, so the hub must too (absoluteEnv used to silently DROP relative
+// values, ignoring an active overlay). MIMOCODE_HOME stays absolute-only.
+// State-safe: t.Chdir into a temp dir, all paths under t.TempDir.
+func TestMimoCode_RelativeConfigEnv_ResolvedFromCwd(t *testing.T) {
+	t.Run("relative MIMOCODE_CONFIG resolves from cwd (overlay active)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		cwd := t.TempDir()
+		t.Chdir(cwd)
+		// A relative MIMOCODE_CONFIG file sitting in the cwd.
+		if err := os.WriteFile(filepath.Join(cwd, "custom.json"),
+			[]byte(`{"mcp":{"cfg-srv":{"type":"remote","url":"http://cfg/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("MIMOCODE_CONFIG", "custom.json") // RELATIVE
+
+		got := cwdResolvedEnv("MIMOCODE_CONFIG")
+		want := filepath.Join(cwd, "custom.json")
+		if got != want {
+			t.Fatalf("relative MIMOCODE_CONFIG must resolve from cwd: got %q want %q", got, want)
+		}
+		// And the resolved layer is actually read: build the scan client for a
+		// global-layer path and confirm the overlay server is merged in.
+		globalDir := t.TempDir()
+		globalPath := filepath.Join(globalDir, "mimocode.json")
+		if err := os.WriteFile(globalPath, []byte(`{"mcp":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		merged, err := MimoCodeMergedConfig(globalPath)
+		if err != nil {
+			t.Fatalf("MimoCodeMergedConfig: %v", err)
+		}
+		servers, _ := merged["mcp"].(map[string]any)
+		if _, ok := servers["cfg-srv"]; !ok {
+			t.Errorf("a relative MIMOCODE_CONFIG overlay must be active (server merged): %v", servers)
+		}
+	})
+
+	t.Run("relative MIMOCODE_CONFIG_DIR resolves from cwd (overlay active)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		cwd := t.TempDir()
+		t.Chdir(cwd)
+		// A relative overlay DIR under the cwd, with its own mimocode.json layer.
+		if err := os.Mkdir(filepath.Join(cwd, ".mimocode"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cwd, ".mimocode", "mimocode.json"),
+			[]byte(`{"mcp":{"ovl-srv":{"type":"remote","url":"http://ovl/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("MIMOCODE_CONFIG_DIR", ".mimocode") // RELATIVE
+
+		got := cwdResolvedEnv("MIMOCODE_CONFIG_DIR")
+		want := filepath.Join(cwd, ".mimocode")
+		if got != want {
+			t.Fatalf("relative MIMOCODE_CONFIG_DIR must resolve from cwd: got %q want %q", got, want)
+		}
+		globalDir := t.TempDir()
+		globalPath := filepath.Join(globalDir, "mimocode.json")
+		if err := os.WriteFile(globalPath, []byte(`{"mcp":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		merged, err := MimoCodeMergedConfig(globalPath)
+		if err != nil {
+			t.Fatalf("MimoCodeMergedConfig: %v", err)
+		}
+		servers, _ := merged["mcp"].(map[string]any)
+		if _, ok := servers["ovl-srv"]; !ok {
+			t.Errorf("a relative MIMOCODE_CONFIG_DIR overlay must be active (server merged): %v", servers)
+		}
+	})
+
+	t.Run("absolute MIMOCODE_CONFIG is returned cleaned, unchanged", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		abs := filepath.Join(t.TempDir(), "x", "..", "custom.json")
+		t.Setenv("MIMOCODE_CONFIG", abs)
+		if got, want := cwdResolvedEnv("MIMOCODE_CONFIG"), filepath.Clean(abs); got != want {
+			t.Errorf("absolute MIMOCODE_CONFIG must be returned cleaned: got %q want %q", got, want)
+		}
+	})
+
+	t.Run("MIMOCODE_HOME stays absolute-only (relative ignored)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		t.Chdir(t.TempDir())
+		t.Setenv("MIMOCODE_HOME", "rel-home") // RELATIVE — must be ignored
+		if got := absoluteEnv("MIMOCODE_HOME"); got != "" {
+			t.Errorf("relative MIMOCODE_HOME must be ignored (absolute-only): got %q", got)
+		}
+	})
+}
+
 // TestMimoCode_WriteTargetStable_DemigrateHitsActualLayer pins bot PR #420
 // finding 5: an install that wrote the hub entry to mimocode.json (the only file
 // at install time), followed by the operator LATER creating mimocode.jsonc, must
