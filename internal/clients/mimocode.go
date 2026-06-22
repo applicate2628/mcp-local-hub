@@ -806,30 +806,36 @@ func (o *mimoCodeClient) Restore(backupPath string) error {
 //     (the global getGlobal() layers, .jsonc winning);
 //     2. configFile (MIMOCODE_CONFIG), when set, ABOVE the global layers
 //     (bot PR #420 finding 1 — it merges on top, NOT a replacement);
-//     3. when overlayDir (MIMOCODE_CONFIG_DIR) is set, its mimocode.json +
+//     3. the HOME ~/.mimocode dir's mimocode.json + mimocode.jsonc, when
+//     claudeHome is set, ABOVE the MIMOCODE_CONFIG file (config.ts:773-783,
+//     step 3b — same precedence band the shadow walk uses; bot PR #420 r18 P2);
+//     4. when overlayDir (MIMOCODE_CONFIG_DIR) is set, its mimocode.json +
 //     mimocode.jsonc appended LAST so the overlay wins per key.
 //
 // It never recomputes a directory from env/home beyond the configFile /
-// overlayDir already captured at construction; it stays inside dir(o.path) plus
-// those explicit paths.
+// overlayDir captured at construction and the home ~/.mimocode dir gated on
+// claudeHome (the SAME state-safe gate the home-shadow read and the
+// ~/.claude.json import use — claudeHome is "" for direct/test construction and
+// under the scan test barrier, so a temp/test read never reaches the real home);
+// it stays inside dir(o.path) plus those explicit paths.
 func (o *mimoCodeClient) readLayerFiles() []string {
-	return mimoCodeReadLayerFiles(o.path, o.configFile, o.overlayDir)
+	return mimoCodeReadLayerFiles(o.path, o.configFile, o.overlayDir, o.claudeHome)
 }
 
 // mimoCodeReadLayerFiles is the pure resolver behind
 // (*mimoCodeClient).readLayerFiles. See that method's doc for the rules. The
 // basename heuristic is the state-safe single-file collapse for direct
 // (scan/extract/test) construction whose path is not a known global layer name.
-func mimoCodeReadLayerFiles(path, configFile, overlayDir string) []string {
+func mimoCodeReadLayerFiles(path, configFile, overlayDir, claudeHome string) []string {
 	base := filepath.Base(path)
 	if !mimoCodeIsGlobalLayerName(base) {
 		// Explicit override (temp/test path, basename not a global layer name):
 		// operate only on the supplied file; do NOT recompute the dir, pull
-		// siblings, the MIMOCODE_CONFIG file, or the overlay.
+		// siblings, the MIMOCODE_CONFIG file, the home .mimocode dir, or the overlay.
 		return []string{path}
 	}
 	dir := filepath.Dir(path)
-	files := make([]string, 0, len(mimoCodeGlobalLayerNames)+1+len(mimoCodeOverlayLayerNames))
+	files := make([]string, 0, len(mimoCodeGlobalLayerNames)+1+2*len(mimoCodeOverlayLayerNames))
 	for _, n := range mimoCodeGlobalLayerNames {
 		files = append(files, filepath.Join(dir, n))
 	}
@@ -837,7 +843,21 @@ func mimoCodeReadLayerFiles(path, configFile, overlayDir string) []string {
 	if configFile != "" {
 		files = append(files, configFile)
 	}
-	// MIMOCODE_CONFIG_DIR overlay: ABOVE the MIMOCODE_CONFIG file.
+	// HOME ~/.mimocode dir (config.ts:773-783, step 3b): merged ABOVE the
+	// MIMOCODE_CONFIG file and BELOW the MIMOCODE_CONFIG_DIR overlay — the same
+	// precedence band the shadow walk gives it (mimoCodeHomeMimocodeDirShadows). Read
+	// AND shadow-detected consistently now (bot PR #420 r18 P2): before this, the
+	// home layer was shadow-refused on AddEntry yet invisible to readMergedLayers /
+	// GetEntry / scan, so a server living ONLY in ~/.mimocode was hidden from the
+	// matrix and read-membership while AddEntry refused the same name. Gated on
+	// claudeHome (state-safe: "" for direct/test and under the scan barrier).
+	if claudeHome != "" {
+		homeDir := filepath.Join(claudeHome, ".mimocode")
+		for _, n := range mimoCodeOverlayLayerNames {
+			files = append(files, filepath.Join(homeDir, n))
+		}
+	}
+	// MIMOCODE_CONFIG_DIR overlay: ABOVE the home .mimocode dir.
 	if overlayDir != "" {
 		for _, n := range mimoCodeOverlayLayerNames {
 			files = append(files, filepath.Join(overlayDir, n))
@@ -2471,14 +2491,81 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 	if err != nil {
 		return err
 	}
-	if shadow.Kind != "" {
-		return &ErrMimoCodeHigherLayerRetainsServer{
-			Server:      name,
-			WriteTarget: o.path,
-			Source:      shadow,
-		}
+	if shadow.Kind == "" {
+		return nil
 	}
-	return nil
+	// DISABLE-ONLY OVERLAY is NOT a retained ACTIVE server (bot PR #420 r18 P3).
+	// mimoCodeHigherLayerDefining reuses the AddEntry shadow predicate, which counts
+	// a DISABLING ({enabled:false}) enabled-only overlay as a shadow — correct for
+	// AddEntry (the overlay would disable the hub's write). But for THIS post-removal
+	// retain question it over-fires: once the write target's real entry is deleted, a
+	// bare {enabled:false} stub (no type/command/url) has nothing left to merge onto
+	// and MiMoCode loads NOTHING, so the active hub entry WAS successfully removed —
+	// failing loud here would falsely report a demigrate/unregister failure. So when
+	// the shadowing layer's OWN value is a content-less enabled-only override, the
+	// removal succeeded; return cleanly. Any ACTIVE definition — a full redefinition
+	// carrying type/command/url, INCLUDING a disabled-FULL {type,url,enabled:false}
+	// (which still re-emerges a server-shaped key; consistent with the "DISABLED
+	// ENTRIES COUNT" semantic in mimoCodeNameReResolvesAfterWriteTargetRemoval), or a
+	// non-map scalar — still fails loud naming the layer the operator must edit.
+	disableOnly, err := o.mimoCodeShadowIsDisableOnlyOverride(shadow, name)
+	if err != nil {
+		return err
+	}
+	if disableOnly {
+		return nil
+	}
+	return &ErrMimoCodeHigherLayerRetainsServer{
+		Server:      name,
+		WriteTarget: o.path,
+		Source:      shadow,
+	}
+}
+
+// mimoCodeShadowIsDisableOnlyOverride reports whether the SHADOWING layer named by
+// `shadow` defines mcp.<name> as a content-less enabled-only override (a bare
+// {enabled:<bool>} with no type/command/url — mimoCodeIsEnabledOnlyOverride). Used
+// by RemoveEntry's B4 retain check to distinguish a disable-only overlay (which
+// retains NO active server once the write target is gone → removal succeeded) from
+// a full redefinition (which re-emerges a live server → fail loud). It re-reads the
+// SAME single layer the shadow source already identified — never a merged read, so
+// the below-layer / claude-import re-emergence semantics (intended rollback
+// success) are provably untouched. mimoCodeHigherLayerDefining already excluded the
+// enabled-only:TRUE overlay upstream (it never returns a shadow for it), so in
+// practice this returns true only for the disable-only ({enabled:false}) stub.
+//
+// The macOS Managed Preferences (MDM) "managed" kind is treated as NOT disable-only
+// (returns false → keeps failing loud): the MDM plist value lives behind the
+// plutil-converted read seam and is read-only admin/system policy on darwin only;
+// surfacing even a disable-only MDM stub to the operator (who must edit the MDM
+// profile regardless) is safe and avoids duplicating the plist read path. The
+// realistic disable-only demigrate case is an operator-editable file layer.
+func (o *mimoCodeClient) mimoCodeShadowIsDisableOnlyOverride(shadow mimoCodeShadowSource, name string) (bool, error) {
+	switch shadow.Kind {
+	case "file", "managed-config-dir":
+		// The shadow's File is the offending layer file; read ITS own value only.
+		v, ok, err := mimoCodeFileEntryValue(shadow.File, name)
+		if err != nil || !ok {
+			return false, err
+		}
+		return mimoCodeIsEnabledOnlyOverride(v), nil
+	case "inline":
+		// The MIMOCODE_CONFIG_CONTENT inline string is the shadowing layer.
+		m, err := parseJSONCBytes([]byte(o.inlineContent))
+		if err != nil {
+			return false, fmt.Errorf("parse MIMOCODE_CONFIG_CONTENT: %w", err)
+		}
+		servers, _ := m[mimoCodeMCPKey].(map[string]any)
+		v, ok := servers[name].(map[string]any)
+		if !ok {
+			return false, nil
+		}
+		return mimoCodeIsEnabledOnlyOverride(v), nil
+	default:
+		// "managed" (MDM) or any unexpected kind: not classified as disable-only —
+		// keep the conservative fail-loud.
+		return false, nil
+	}
 }
 
 // mimoCodeHubRemoteShapeKeys are the ONLY keys the hub's AddEntry remote-HTTP
@@ -2759,18 +2846,26 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	if ownOK && higher.Kind == "" {
 		effRaw = ownRaw
 	}
-	// Disabled verdict (bot PR #420 finding 5), computed ONCE against effRaw (the
-	// write-target's own value when resident) so it matches the physical entry
-	// regardless of which shape branch the projection takes below. Stamped on
-	// EVERY return branch so a disabled entry is flagged whether it is a bare
-	// {enabled:false} stub (url-less branch), a disabled remote (url branch), or a
-	// disabled extra-fields remote. The gating consumer (api.GatedOnClients)
-	// excludes a disabled `mcphub-hub` aggregate from gate-ON detection: the client
-	// never loads a disabled aggregate, so a `--reset-port` would orphan nothing —
-	// blocking the reset on it is a false positive. Read-membership / rollback
-	// callers ignore the flag and still see the non-nil entry. Mirrors the scan
-	// path (shapeMimoCodeEntry classifies enabled:false as Transport "absent").
-	disabled := mimoCodeEntryDisabled(effRaw)
+	// Disabled verdict (bot PR #420 finding 5; r18 P2). Computed from the MERGED
+	// view (`raw`), NOT effRaw — the two answer DIFFERENT questions. effRaw is the
+	// write-target's OWN physical value, snapshotted ONLY to keep the rollback Raw
+	// from copying a lower/higher layer's command/url up (the no-copy-up invariant).
+	// Disabled, by contrast, feeds api.GatedOnClients, which must reflect whether
+	// MiMoCode actually LOADS the server — i.e. the merged-EFFECTIVE `enabled`. The
+	// merge overlays an enabled-only:TRUE higher override onto the write target
+	// (mimoCodeMergeMCPEntry), so a write target carrying {enabled:false} under a
+	// {"enabled":true} overlay merges to enabled:true and IS loaded — yet effRaw
+	// (=ownRaw, since B5 returns higher.Kind=="" for an enabled-only:true overlay,
+	// so the effRaw=ownRaw branch above fires) still reads enabled:false. Computing
+	// Disabled from effRaw there would stamp Disabled:true on a LIVE `mcphub-hub`
+	// aggregate, making GatedOnClients skip it so `mcphub gui --reset-port` could
+	// orphan its URL — the exact footgun the Disabled flag exists to prevent. So
+	// take Disabled from `raw` (merged-effective). The Raw/url SHAPE branches below
+	// still use effRaw (no-copy-up unchanged); only this scalar reflects the merge.
+	// A disabling higher overlay (enabled:false) over an enabled write target merges
+	// `raw` to enabled:false → Disabled:true, also correct. Mirrors the scan path
+	// (shapeMimoCodeEntry classifies enabled:false as Transport "absent").
+	disabled := mimoCodeEntryDisabled(raw)
 	url, _ := effRaw["url"].(string)
 	if url == "" {
 		// URL-less local entry (or a url-less remote) — not representable as a
@@ -2912,13 +3007,28 @@ func (o *mimoCodeClient) restoreEntryFromBackup(backupPath, name string, allowHu
 // AllStdioEntries/gopls path, which cannot be write-target-scoped mimo-locally
 // without touching a shared surface. The write-target restriction is applied in
 // FindStdioLanguageServerEntries (mcp-language-server cleanup) only.
+//
+// enabled:false entries are dropped FIRST (bot PR #420 r18 P3): MiMoCode uses
+// `enabled` (default true) as the active flag and never spawns a disabled entry,
+// so neither consumer of this method should treat a disabled entry as live. The
+// post-register gopls-mcp cleanup (register.go) backs up + RemoveEntry-s every
+// matching stdio entry — deleting a user-authored DISABLED `gopls mcp` entry the
+// operator deliberately turned off (and MiMoCode would not load) is wrong; and
+// the orphan-process kill-pattern derivation (cleanup.go) need not derive a
+// pattern for a server MiMoCode never spawns. This mirrors
+// FindStdioLanguageServerEntries' and the scan path's disabled handling
+// (shapeMimoCodeEntry classifies enabled:false as absent), keeping the cleanup
+// view consistent with what MiMoCode actually loads. Disabled-drop is orthogonal
+// to layer scoping (it only removes inert entries): the full merged view across
+// layers is otherwise preserved, so a real lower-layer orphan source is still
+// surfaced.
 func (o *mimoCodeClient) AllStdioEntries() ([]StdioEntry, error) {
 	m, err := o.readJSON()
 	if err != nil {
 		return nil, err
 	}
 	servers, _ := m[mimoCodeMCPKey].(map[string]any)
-	return collectStdioEntries(mimoCodeNormalizeCommandArrays(servers)), nil
+	return collectStdioEntries(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))), nil
 }
 
 // FindStdioLanguageServerEntries scans the merged `mcp` for stdio entries

@@ -1052,7 +1052,7 @@ func TestMimoCode_ExplicitPath_NoSiblingMerge(t *testing.T) {
 	if err := os.WriteFile(explicit, []byte(`{"mcp":{"chosen":{"type":"remote","url":"http://chosen/mcp","enabled":true}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	layers := mimoCodeReadLayerFiles(explicit, "", "")
+	layers := mimoCodeReadLayerFiles(explicit, "", "", "")
 	if len(layers) != 1 || layers[0] != explicit {
 		t.Fatalf("explicit override must resolve to exactly [%q], got %v", explicit, layers)
 	}

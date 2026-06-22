@@ -58,6 +58,15 @@ import (
 func TestMain(m *testing.M) {
 	EnableSupervisorIPCTestPipeIsolation()
 
+	// Default-disable the MiMoCode ~/.claude.json import + home-.mimocode read
+	// (clients.MimoCodeDisableClaudeImportEnv) for the whole api package, so no
+	// api test that runs a mimo scan/shadow walk without redirecting HOME ever
+	// reads the developer's REAL ~/.claude.json / ~/.mimocode. The B6 resolver is
+	// HOME||USERPROFILE, and not every cleanup/scan test overrides HOME, so this
+	// is the single-owner state-safety default; the import-specific tests opt back
+	// in with t.Setenv(MimoCodeDisableClaudeImportEnv, "") + a temp HOME.
+	os.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
+
 	tmp, err := os.MkdirTemp("", "mcphub-api-test-state-*")
 	if err != nil {
 		panic("internal/api TestMain: create global test-state temp dir: " + err.Error())
