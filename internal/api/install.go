@@ -2618,7 +2618,16 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 		entryName := m.Name
 		savedPrior := priorEntry
 		rollback = append(rollback, func() {
-			if savedPrior != nil {
+			// A non-nil prior from a multi-layer adapter (mimocode) MAY be sourced
+			// from a layer the hub never writes — config.json strictly BELOW the
+			// write target, or the ~/.claude.json import. Copying THAT up into the
+			// write target would shadow the operator's lower/import layer forever
+			// and, for the import, leak its credentials into the hub file (bot PR
+			// #420 finding 1). For such a prior take the REMOVE branch: drop the
+			// hub's write-target key and let the lower/import layer re-emerge via
+			// the merge. The zero value (every other adapter, and an at/above
+			// mimo prior) keeps the copy-up path.
+			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
 				if err := clientRef.AddEntry(*savedPrior); err == nil {
 					fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", entryName, u.Client)
 					return

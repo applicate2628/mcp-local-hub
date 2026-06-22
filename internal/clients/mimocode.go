@@ -310,22 +310,31 @@ func mimoCodeWriteTargetInDir(dir string) string {
 // a higher layer that shadows — editing o.path is exactly what takes effect — so
 // AddEntry must NOT refuse an existing entry there as a shadow on re-install.
 //
-// It degrades safely across the three failure modes a plain filepath.Clean
-// compare misses:
+// It degrades safely across the failure modes a plain filepath.Clean compare
+// misses:
 //  1. os.SameFile(stat(a), stat(b)) when BOTH exist — the kernel's own identity,
 //     so a symlink / hardlink / bind alias to the write target is caught for free
 //     and OS-correctly (no manual case handling needed when both files exist).
-//  2. EvalSymlinks both then case-aware compare — covers a symlink whose target
-//     spells the write target differently, when SameFile is unavailable.
-//  3. case-aware filepath.Clean compare of the raw inputs — covers the common
-//     re-install case where the overlay file does NOT yet exist (EvalSymlinks and
-//     Stat both error on a missing path), so a redundant `./x/..` spelling or a
-//     case-variant of the write target is still recognized.
+//  2. EvalSymlinks both then SameFile (the resolved targets both exist) —
+//     authoritative; covers a symlink whose target spells the write target
+//     differently, when a raw Stat in branch 1 missed it.
+//  3. exact filepath.Clean compare of the raw inputs — covers the common
+//     re-install case where the overlay file does NOT yet exist (Stat and
+//     EvalSymlinks both error on a missing path), so a redundant `./x/..`
+//     spelling of the write target is still recognized.
+//  4. case-FOLDED Clean compare — ONLY when the paths differ purely by case AND a
+//     PROBE of the actual directory proves the volume is case-insensitive.
 //
-// Case sensitivity: only the fallback branches (2,3) fold, and only on
-// case-insensitive filesystems (Windows/macOS) — folding on Linux ext4 would
-// wrongly equate Foo and foo. os.SameFile (branch 1) is OS-correct without
-// folding.
+// Case sensitivity (bot PR #420 finding 4). GOOS is NOT a reliable
+// case-sensitivity proxy: NTFS supports per-directory case sensitivity
+// (Win10 1803+) and APFS can be formatted case-sensitive, so a blanket
+// "fold on windows/darwin" would over-exempt — wrongly treating Foo and foo
+// as the SAME physical file and SUPPRESSING a real shadow. So the case-FOLD
+// branch (4) fires only after mimoCodeDirCaseInsensitive PROBES the relevant
+// existing directory and confirms case-insensitivity. When the probe is
+// inconclusive (neither directory exists, the probe errors) the function is
+// CONSERVATIVE: it does NOT exempt, so a genuine shadow still fires. os.SameFile
+// (branches 1,2) is always OS-correct without any folding.
 func mimoCodePathsSamePhysical(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -336,27 +345,103 @@ func mimoCodePathsSamePhysical(a, b string) bool {
 			return os.SameFile(sa, sb)
 		}
 	}
-	// 2. Resolve symlinks then case-aware compare (best-effort; either side may
-	// fail to resolve when the path does not exist, which falls to branch 3).
+	// 2. Resolve symlinks then authoritative SameFile (both resolved targets
+	// exist — EvalSymlinks errors on a missing path, so success means present).
 	if ra, err := filepath.EvalSymlinks(a); err == nil {
 		if rb, err := filepath.EvalSymlinks(b); err == nil {
-			return mimoCodePathEqualFold(filepath.Clean(ra), filepath.Clean(rb))
+			if sa, err := os.Stat(ra); err == nil {
+				if sb, err := os.Stat(rb); err == nil {
+					return os.SameFile(sa, sb)
+				}
+			}
+			// Both resolved but a Stat raced/failed: fall through to the
+			// exact/probe compare on the resolved spellings.
+			a, b = ra, rb
 		}
 	}
-	// 3. Literal case-aware Clean compare (non-existent overlay file — the common
-	// re-install case where the file is not yet created).
-	return mimoCodePathEqualFold(filepath.Clean(a), filepath.Clean(b))
+	// 3. Exact Clean compare (handles a redundant `./x/..` spelling and the
+	// common non-existent-overlay re-install case without any case assumption).
+	ca, cb := filepath.Clean(a), filepath.Clean(b)
+	if ca == cb {
+		return true
+	}
+	// 4. The cleaned paths differ. They may differ purely by case (the same
+	// physical file on a case-insensitive volume) OR be genuinely distinct files
+	// on a case-sensitive volume. Fold ONLY when they differ purely by case AND a
+	// probe of the actual directory proves case-insensitivity; otherwise do NOT
+	// exempt (conservative — a genuine shadow fires).
+	if !strings.EqualFold(ca, cb) {
+		return false // differ by more than case → genuinely distinct
+	}
+	return mimoCodeCaseFoldedPathsSamePhysical(ca, cb)
 }
 
-// mimoCodePathEqualFold compares two cleaned paths, folding case ONLY on
-// case-insensitive filesystems (Windows / macOS). On a case-sensitive FS
-// (Linux) it compares exactly, so distinct case-variant filenames are not
-// wrongly equated.
-func mimoCodePathEqualFold(a, b string) bool {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		return strings.EqualFold(a, b)
+// mimoCodeCaseFoldedPathsSamePhysical reports whether two cleaned paths that
+// differ ONLY by case name the same physical file, by PROBING the actual case
+// behavior of the relevant directory rather than assuming it from GOOS (bot PR
+// #420 finding 4). It returns true only when the probe positively confirms the
+// volume is case-insensitive; an inconclusive probe returns false (conservative
+// — do NOT exempt, so a genuine shadow still fires).
+func mimoCodeCaseFoldedPathsSamePhysical(a, b string) bool {
+	// Probe the parent dir of whichever path exists. If the dirs themselves are
+	// case variants of each other, the dir's own existence resolves it; prefer a
+	// dir that actually exists on disk as the probe anchor.
+	for _, dir := range []string{filepath.Dir(a), filepath.Dir(b)} {
+		if ci, ok := mimoCodeDirCaseInsensitive(dir); ok {
+			return ci
+		}
 	}
-	return a == b
+	return false // probe inconclusive → conservative: do not exempt
+}
+
+// mimoCodeDirCaseInsensitive probes whether dir lives on a case-insensitive
+// volume by stat-ing an existing entry under a case-flipped basename and asking
+// the kernel (os.SameFile) whether the flipped spelling resolves to the SAME
+// file. Returns (result, true) when the probe was conclusive and (false, false)
+// when it could not run (dir missing, empty, no case-flippable entry, stat
+// error). Non-mutating: it never creates or writes anything.
+func mimoCodeDirCaseInsensitive(dir string) (caseInsensitive bool, ok bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		flipped := mimoCodeFlipASCIICase(name)
+		if flipped == name {
+			continue // no ASCII letter to flip — try the next entry
+		}
+		orig, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		alt, err := os.Stat(filepath.Join(dir, flipped))
+		if err != nil {
+			// The flipped spelling does not resolve → case-SENSITIVE (the only
+			// reason an existing entry's case-flip would not stat). Conclusive.
+			return false, true
+		}
+		// The flipped spelling resolved: case-insensitive iff it is the SAME file.
+		return os.SameFile(orig, alt), true
+	}
+	return false, false // no case-flippable entry to probe → inconclusive
+}
+
+// mimoCodeFlipASCIICase returns s with the case of its first ASCII letter
+// flipped (the rest unchanged) — enough to make a distinct case-variant spelling
+// for the case-sensitivity probe. A string with no ASCII letter returns s
+// unchanged (the probe caller then skips it).
+func mimoCodeFlipASCIICase(s string) string {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' {
+			return s[:i] + string(c-('a'-'A')) + s[i+1:]
+		}
+		if c >= 'A' && c <= 'Z' {
+			return s[:i] + string(c+('a'-'A')) + s[i+1:]
+		}
+	}
+	return s
 }
 
 // resolveMimoCodeGlobalDir resolves the GLOBAL config DIRECTORY honoring
@@ -819,8 +904,12 @@ func (e *ErrMimoCodeManagedShadowsServer) Error() string {
 //     macOS host, so no new Go dependency), parsed with the shared JSONC helper,
 //     and tested for mcp.<name>. The FIRST plist that defines it wins (per-user
 //     plist takes precedence over the system plist, matching managed.ts's path
-//     order). A `plutil`/parse failure on a present plist propagates (a malformed
-//     managed layer must not be silently read as "no shadow").
+//     order). A `plutil`/parse failure on a present plist is WARNING-SKIP — it
+//     `continue`s to the next plist and is treated as "no managed shadow" (bot PR
+//     #420 finding 3, managed.ts:58-62 nothrow+continue). detect-fail-loud is
+//     preserved ONLY for the real case: a SUCCESSFULLY-PARSED managed config that
+//     actually defines the server. An unparseable plist cannot be PROVEN to define
+//     the server, so it must not block every install on the host.
 //
 // The plist directory honors MIMOCODE_TEST_MANAGED_CONFIG_DIR-style isolation
 // only indirectly: the primary test seam is mimoCodeManagedPrefsReader (the
@@ -852,13 +941,23 @@ func mimoCodeReadManagedPrefs(name string) (mimoCodeShadowSource, error) {
 		if _, err := os.Stat(plist); err != nil {
 			continue // not present — skip (managed.ts:56 existsSync gate)
 		}
+		// plutil/parse failures are WARNING-SKIP, not fatal (bot PR #420 finding 3,
+		// managed.ts:58-62). Upstream runs plutil with nothrow and `continue`s to
+		// the next plist on a non-zero exit; it never aborts. A managed shadow is
+		// raised ONLY by a SUCCESSFULLY-PARSED managed config that actually defines
+		// the server — so an unparseable plist is treated as "no managed shadow"
+		// (it cannot be PROVEN to define the server), preserving detect-fail-loud
+		// only for the real, proven case. Without this, a host whose MDM plist
+		// merely happens to be unconvertible (an unrelated managed profile, a
+		// plutil quirk) would have EVERY hub install on that host fail loud with a
+		// managed-shadow error for a server the managed layer never defined.
 		out, err := exec.Command("plutil", "-convert", "json", "-o", "-", plist).Output()
 		if err != nil {
-			return mimoCodeShadowSource{}, fmt.Errorf("mimocode: convert managed preferences plist %q: %w", plist, err)
+			continue // plutil convert failed — warn-skip, treat as no shadow
 		}
 		m, err := parseJSONCBytes(out)
 		if err != nil {
-			return mimoCodeShadowSource{}, fmt.Errorf("mimocode: parse managed preferences plist %q: %w", plist, err)
+			continue // unparseable converted JSON — warn-skip, treat as no shadow
 		}
 		if mimoCodeMapDefines(m, name) {
 			return mimoCodeShadowSource{Kind: "managed", Label: "macOS Managed Preferences", PlistFile: plist}, nil
@@ -1099,8 +1198,12 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 	// above (an explicit mimo entry always wins). Read-only: the hub never writes
 	// .claude.json. Empty / no-op when MIMOCODE_DISABLE_CLAUDE_CODE_MCP is set, in
 	// the state-safe single-file mode (claudeHome ""), or when ~/.claude.json
-	// defines no importable mcpServers. A parse error on a present ~/.claude.json
-	// propagates (bot PR #420 finding 3).
+	// defines no importable mcpServers. A read/parse FAILURE on a present
+	// ~/.claude.json is SWALLOWED (best-effort import — bot PR #420 finding 2): it
+	// imports nothing and the rest of the merged config still loads. The returned
+	// error here is therefore effectively always nil today, but the signature is
+	// kept for symmetry with the other merge steps and so a future hard-failure
+	// import mode stays a one-line change.
 	if err := o.mergeClaudeImport(merged); err != nil {
 		return nil, err
 	}
@@ -1142,9 +1245,10 @@ func (o *mimoCodeClient) claudeJSONPath() string {
 //   - claudeHome is empty (direct/test construction — state-safe), OR
 //   - ~/.claude.json is absent / has no mcpServers object.
 //
-// A parse error on a PRESENT ~/.claude.json propagates (a malformed claude config
-// must not be silently dropped — that would re-introduce a silent-wrong-merge).
-// Read-only: never writes .claude.json.
+// A read/parse FAILURE on a PRESENT ~/.claude.json is SWALLOWED by
+// claudeImportEntries (best-effort import — bot PR #420 finding 2): a malformed
+// claude.json imports nothing and never aborts the merged read. Read-only: never
+// writes .claude.json.
 func (o *mimoCodeClient) mergeClaudeImport(merged map[string]any) error {
 	imported, err := o.claudeImportEntries()
 	if err != nil {
@@ -1174,8 +1278,17 @@ func (o *mimoCodeClient) mergeClaudeImport(merged map[string]any) error {
 // mimoCodeDefinedAtOrAboveWriteTarget (shadow membership) consume it.
 //
 // Returns an empty map (nil) when the import is disabled, claudeHome is empty,
-// the file is absent, or it has no convertible mcpServers. A parse error on a
-// present ~/.claude.json propagates. Read-only.
+// the file is absent, or it has no convertible mcpServers. Read-only.
+//
+// BEST-EFFORT (bot PR #420 finding 2). A read or parse FAILURE on a present
+// ~/.claude.json is SWALLOWED — it imports NO entries and returns (nil, nil)
+// instead of propagating — so a malformed claude.json never aborts the whole
+// merged config read; the rest of the MiMoCode config still loads. This mirrors
+// upstream readClaudeConfig (config.ts:675-686), which catches the JSON.parse
+// failure, log.warn-s, and returns undefined → mergeClaudeMcp (config.ts:689-690)
+// `if (!isRecord(data)) return` skips the import. The ~/.claude.json import is a
+// pure compatibility convenience the hub never writes, so a defect there must not
+// take the operator's real MiMoCode config down with it.
 func (o *mimoCodeClient) claudeImportEntries() (map[string]any, error) {
 	if o.claudeHome == "" {
 		return nil, nil
@@ -1186,14 +1299,18 @@ func (o *mimoCodeClient) claudeImportEntries() (map[string]any, error) {
 	path := o.claudeJSONPath()
 	data, err := readRawConfig(path)
 	if err != nil {
-		return nil, err
+		// A present-but-unreadable ~/.claude.json (permission, IO) is swallowed —
+		// the import is best-effort and must not abort the merged read.
+		return nil, nil
 	}
 	if len(data) == 0 {
 		return nil, nil
 	}
 	m, err := parseJSONCBytes(data)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		// Malformed JSON in ~/.claude.json — warning-skip, matching upstream's
+		// catch-and-continue. Import NO entries; the rest of the config loads.
+		return nil, nil
 	}
 	claudeServers, _ := m["mcpServers"].(map[string]any)
 	if len(claudeServers) == 0 {
@@ -1229,9 +1346,11 @@ var (
 //     from `args` (must be a string array). environment from `environment` or
 //     `env`. enabled = !(disabled==true) && !(enabled==false) → defaults true.
 //   - {url:string} (+ no type or a remote type) → {type:"remote", url, enabled,
-//     headers?, timeout?}. (oauth is preserved verbatim if present — the hub's
-//     classifiers ignore unknown remote keys, and GetEntry already snapshots an
-//     extra-field remote via Raw, so carrying oauth keeps the projection faithful.)
+//     headers?, oauth?, timeout?}. oauth is converted via mimoCodeOAuth, faithful
+//     to mcp.ts:83-93: oauth:false is PRESERVED+emitted; an oauth object is
+//     FILTERED to the upstream-accepted string keys (clientId/clientSecret/scope/
+//     redirectUri) and emitted only if at least one is present; any other oauth
+//     value (or an object with no accepted key) is OMITTED (bot PR #420 finding 5).
 //
 // The produced shape is the SAME normalized shape the rest of the merge emits, so
 // every downstream consumer (shapeMimoCodeEntry, GetEntry, the LSP classifier)
@@ -1304,8 +1423,8 @@ func mimoCodeFromClaude(raw any) (map[string]any, bool) {
 		if headers := mimoCodeStringRecord(input["headers"]); headers != nil {
 			entry["headers"] = headers
 		}
-		if oauth, ok := input["oauth"].(map[string]any); ok {
-			entry["oauth"] = oauth
+		if oauthVal, present := mimoCodeOAuth(input["oauth"]); present {
+			entry["oauth"] = oauthVal
 		}
 		if hasTimeout {
 			entry["timeout"] = timeout
@@ -1319,6 +1438,50 @@ func mimoCodeFromClaude(raw any) (map[string]any, bool) {
 	// Unsupported type, or neither command nor url — skip (mcp.ts:151-157).
 	return nil, false
 }
+
+// mimoCodeOAuth converts a ~/.claude.json mcpServers entry's `oauth` value into
+// MiMoCode's accepted oauth shape, faithful to mcp.ts:83-93 `oauth()` (bot PR
+// #420 finding 5). It returns (value, true) when the field should be EMITTED and
+// (nil, false) when it should be OMITTED:
+//
+//   - oauth === false → (false, true). The literal `false` is PRESERVED and
+//     emitted (a deliberate "disable OAuth" signal). The prior adapter dropped it
+//     because it only kept a map value.
+//   - oauth is NOT an object (string/number/null/absent) → (nil, false), omitted
+//     (upstream `!isRecord(input)` → undefined).
+//   - oauth is an object → FILTERED to ONLY the upstream-accepted string fields
+//     clientId / clientSecret / scope / redirectUri (each kept only when its value
+//     is a string). If at least one matched → (filtered, true); if NONE matched →
+//     (nil, false), omitted (upstream `Object.keys(result).length > 0 ? result :
+//     undefined`). Arbitrary unknown object keys are DROPPED (the prior adapter
+//     copied them verbatim).
+func mimoCodeOAuth(v any) (any, bool) {
+	if b, isBool := v.(bool); isBool {
+		if !b {
+			return false, true // oauth:false is preserved + emitted
+		}
+		return nil, false // oauth:true is not a record → omitted
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, false // not an object → omitted
+	}
+	out := map[string]any{}
+	for _, k := range mimoCodeOAuthStringKeys {
+		if s, ok := m[k].(string); ok {
+			out[k] = s
+		}
+	}
+	if len(out) == 0 {
+		return nil, false // no accepted field present → omitted
+	}
+	return out, true
+}
+
+// mimoCodeOAuthStringKeys is the upstream-accepted oauth object field set
+// (mcp.ts:86-91): only these string-valued keys survive the fromClaude oauth
+// projection. Any other key in a claude.json oauth object is dropped.
+var mimoCodeOAuthStringKeys = []string{"clientId", "clientSecret", "scope", "redirectUri"}
 
 // mimoCodeStringRecord coerces a value into a map[string]any of string→string,
 // faithful to mcp.ts:72-78 stringRecord: when the value is NOT a map it returns
@@ -1730,8 +1893,10 @@ var mimoCodeHubRemoteShapeKeys = map[string]bool{
 // deliberately EXCLUDES the ONLY layer strictly BELOW the write target,
 // config.json in the write-target dir: a name present ONLY there is an operator
 // entry the hub never wrote (setMember/deleteMember touch o.path alone — see
-// deleteMember's doc), so for the install/register rollback it must behave as "no
-// prior" — see GetEntry's lower-layer guard (bot PR #420 finding 1).
+// deleteMember's doc). GetEntry uses this verdict to STAMP SourceBelowWriteTarget
+// (false here = at/above = copy-up-OK; true = below/import = remove-not-copy-up on
+// rollback) rather than to suppress the entry, so read-membership still sees a
+// below-only name — see GetEntry's source-layer split (bot PR #420 finding 1).
 //
 // State-safe: in the explicit/temp single-file mode (basename not a global layer
 // name) readLayerFiles returns only [o.path] (the write target), so the loop
@@ -1798,35 +1963,54 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 //     drop oauth/timeout. Carrying Raw makes the rollback restore the verbatim
 //     shape (Raw wins in AddEntry).
 //
-// LOWER-LAYER-ONLY guard (bot PR #420 finding 1). GetEntry reads the MERGED view,
-// so a same-named server defined ONLY in the config.json layer BELOW the write
-// target would project as a non-nil prior. The install/register rollback then
-// runs AddEntry(*prior), writing that operator entry UP into the write target
-// (mimocode.json) — which SHADOWS the operator's config.json forever (the
-// write-target copy now wins the merge) instead of just removing the hub's entry
-// and letting config.json re-emerge. The hub physically only ever writes the
-// write target (setMember/deleteMember touch o.path alone), so a name present
-// only in config.json is an operator entry the hub never wrote and never
-// clobbered: the correct rollback is the nil-prior branch (RemoveEntry the hub's
-// write-target key). So a name defined ONLY below the write target is reported as
-// ABSENT → (nil, nil). A prior IN the write target (the only layer the hub's
-// write could clobber) or — moot at rollback, since AddEntry shadow-refuses the
-// install before any write — in a HIGHER layer is a real restore candidate and is
-// projected normally.
+// SOURCE-LAYER SPLIT (bot PR #420 finding 1; r14 read-vs-rollback split).
+// GetEntry reads the MERGED view, so a same-named server defined ONLY in the
+// config.json layer BELOW the write target — or ONLY in the ~/.claude.json
+// mcpServers import (also never hub-written) — projects as a non-nil entry. Two
+// callers consume that entry through the generic Client interface:
 //
-// A missing entry returns (nil, nil).
+//   - READ-MEMBERSHIP (discovery / idempotency / hub-gate / lsp-router /
+//     demigrate / serena-reconcile): they need a non-nil entry so the hub SEES
+//     the server as present. Returning (nil, nil) for a below/import-only name —
+//     as the prior self-review did — BREAKS that membership read.
+//   - ROLLBACK RESTORE-UP (install.go / register.go): on a downstream failure it
+//     runs AddEntry(*prior) to restore the prior UP into the write target. For a
+//     below/import-sourced prior that copy-up is WRONG: it SHADOWS the operator's
+//     config.json / ~/.claude.json forever (the write-target copy now wins the
+//     merge) and, for an import prior, LEAKS the claude.json credentials into
+//     mimocode.json. The hub physically only ever writes the write target
+//     (setMember/deleteMember touch o.path alone), so a name present only below
+//     or in the import is an operator entry the hub never wrote and never
+//     clobbered: the correct rollback is RemoveEntry the hub's write-target key,
+//     letting the lower/import layer re-emerge.
+//
+// To satisfy BOTH, GetEntry RETURNS the projected entry (read-membership) but
+// STAMPS SourceBelowWriteTarget = !mimoCodeDefinedAtOrAboveWriteTarget(name):
+// true for a below/import-only name, false for a name in the write target or a
+// HIGHER layer (a real, hub-clobberable restore candidate — moot at rollback
+// since AddEntry shadow-refuses the install before any write). The 2 rollback
+// sites route a SourceBelowWriteTarget prior to RemoveEntry instead of AddEntry,
+// preserving the no-credential-copy-up security invariant. Every OTHER GetEntry
+// caller ignores the field; no other adapter sets it.
+//
+// A genuinely missing entry returns (nil, nil).
 func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
-	// Lower-layer-only guard (bot PR #420 finding 1): a name defined ONLY in the
-	// config.json layer below the write target is an operator entry the hub never
-	// wrote; report it ABSENT so the rollback removes the hub's write-target key
-	// (config.json re-emerges) rather than copying the lower entry up.
+	// Source-layer verdict (bot PR #420 finding 1, r14 read-vs-rollback split).
+	// atOrAbove=true ⇒ the name lives in the write target or a layer ABOVE it (a
+	// real restore candidate the rollback may copy UP). atOrAbove=false ⇒ it lives
+	// ONLY in config.json (below) or the ~/.claude.json import — never hub-written;
+	// read-membership must still SEE it (return a non-nil entry), but the rollback
+	// must REMOVE the hub key, not copy this entry up (no credential copy-up). So
+	// instead of early-returning (nil,nil) for a below/import-only name (which broke
+	// read membership), GetEntry now projects the merged entry and stamps
+	// SourceBelowWriteTarget=true so the install/register rollback takes the
+	// remove-not-copy-up branch. The ERROR still aborts (r12/r13 data-loss guard):
+	// a malformed lower layer returns (nil, err), never (nil, nil).
 	atOrAbove, err := o.mimoCodeDefinedAtOrAboveWriteTarget(name)
 	if err != nil {
 		return nil, err
 	}
-	if !atOrAbove {
-		return nil, nil
-	}
+	below := !atOrAbove
 	m, err := o.readJSON()
 	if err != nil {
 		return nil, err
@@ -1844,7 +2028,7 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 		// URL-less local entry (or a url-less remote) — not representable as a
 		// URL MCPEntry. Carry the verbatim value in Raw so rollback restores it
 		// exactly rather than deleting it or corrupting it to {type:remote,url:""}.
-		return &MCPEntry{Name: name, Raw: raw}, nil
+		return &MCPEntry{Name: name, Raw: raw, SourceBelowWriteTarget: below}, nil
 	}
 	// A DISABLED URL entry (enabled:false) is also not faithfully representable
 	// as a {URL,Headers} MCPEntry: AddEntry's normal install path hardcodes
@@ -1854,7 +2038,7 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	// (Raw wins in AddEntry), preserving enabled:false.
 	if enabled, present := raw["enabled"]; present {
 		if b, ok := enabled.(bool); ok && !b {
-			return &MCPEntry{Name: name, Raw: raw}, nil
+			return &MCPEntry{Name: name, Raw: raw, SourceBelowWriteTarget: below}, nil
 		}
 	}
 	// A user-authored remote entry carrying EXTRA fields beyond the hub-written
@@ -1867,9 +2051,9 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	// on the lean {URL,Headers} path (Raw nil) so the normal hub-install/restore
 	// polarity and every existing URL round-trip are unchanged.
 	if mimoCodeRemoteHasExtraFields(raw) {
-		return &MCPEntry{Name: name, Raw: raw}, nil
+		return &MCPEntry{Name: name, Raw: raw, SourceBelowWriteTarget: below}, nil
 	}
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}, nil
+	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers"), SourceBelowWriteTarget: below}, nil
 }
 
 // mimoCodeRemoteHasExtraFields reports whether a remote entry map carries any

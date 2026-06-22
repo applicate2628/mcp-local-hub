@@ -65,6 +65,26 @@ type MCPEntry struct {
 	// returns {URL,Headers} as before, so the normal hub-install/restore polarity
 	// is unchanged. No other adapter populates or consumes Raw.
 	Raw map[string]any
+
+	// SourceBelowWriteTarget, when true, marks that this entry was projected by a
+	// MULTI-LAYER adapter (currently only MiMoCode) from a layer the hub never
+	// writes and never clobbered — i.e. STRICTLY BELOW the write target
+	// (config.json) or the ~/.claude.json mcpServers IMPORT (skip-if-name-exists,
+	// also never hub-written). It exists so GetEntry can report read-membership
+	// (return a NON-nil entry so discovery/idempotency callers see the server as
+	// present) while still telling the install/register ROLLBACK path NOT to copy
+	// this entry UP into the hub's write target — which for an import-sourced prior
+	// would leak ~/.claude.json credentials into mimocode.json and shadow the
+	// operator's import forever (bot PR #420 r14 finding 1).
+	//
+	// CONTRACT: SourceBelowWriteTarget is ADDITIVE and defaults FALSE =
+	// "writable at/above the write target ⇒ copy-up on rollback is correct" — the
+	// historical behavior of EVERY adapter. Only MiMoCode's GetEntry sets it true;
+	// every other adapter leaves it zero, so their rollback polarity
+	// (AddEntry(*prior) when prior != nil) is byte-unchanged. The 2 rollback sites
+	// (install.go, register.go) are the ONLY consumers; the read-membership
+	// GetEntry callers ignore it.
+	SourceBelowWriteTarget bool
 }
 
 // Client is the OS-/format-abstracted interface for a single MCP client config file.

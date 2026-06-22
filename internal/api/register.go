@@ -811,7 +811,12 @@ func (a *API) registerOneLanguage(
 		capturedName := entryName
 		capturedClientName := b.Client
 		*rollback = append(*rollback, func() {
-			if savedPrior != nil {
+			// See install.go rollback: a mimo prior sourced BELOW the write target
+			// (config.json) or from the ~/.claude.json import must NOT be copied up
+			// (permanent shadow + import-credential leak — bot PR #420 finding 1).
+			// Take REMOVE for those; the zero value (every other adapter / an
+			// at-or-above mimo prior) copies up.
+			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
 				_ = clientRef.AddEntry(*savedPrior)
 				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
 				return

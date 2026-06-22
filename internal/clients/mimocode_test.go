@@ -865,9 +865,8 @@ func TestMimoCode_RemoveEntry_TopLayerOnly_PreservesLowerOriginal(t *testing.T) 
 		t.Error("hub's top-layer serena entry should have been removed")
 	}
 	// And the merged read now surfaces the operator's original (restored view).
-	// Probe readMergedLayers directly: after removal the entry lives ONLY in the
-	// lower config.json layer, which GetEntry deliberately suppresses (finding 1)
-	// so a rollback never copies it up; the MERGE still reveals it.
+	// After removal the entry lives ONLY in the lower config.json layer; the MERGE
+	// still reveals it.
 	merged, err := o.readMergedLayers()
 	if err != nil {
 		t.Fatalf("readMergedLayers: %v", err)
@@ -877,23 +876,30 @@ func TestMimoCode_RemoveEntry_TopLayerOnly_PreservesLowerOriginal(t *testing.T) 
 	if mergedEntry == nil || mergedEntry["url"] != "http://operator-original/mcp" {
 		t.Errorf("merged read should reveal the operator's lower-layer original after removal: %+v", merged)
 	}
-	// And GetEntry now reports it ABSENT (the rollback-safety guard): a same-named
-	// server living ONLY below the write target must NOT be returned as a prior the
-	// rollback would AddEntry(*prior) up into the write target.
-	if e, _ := o.GetEntry("serena"); e != nil {
-		t.Errorf("GetEntry must suppress a config.json-only entry (rollback safety), got %+v", e)
+	// GetEntry RETURNS the config.json-only entry for read-membership (bot PR #420
+	// r14 read-vs-rollback split) but STAMPS SourceBelowWriteTarget=true so the
+	// rollback path takes remove-not-copy-up. (The prior revision wrongly suppressed
+	// it to nil, which broke discovery/idempotency membership reads.)
+	e, _ := o.GetEntry("serena")
+	if e == nil || e.URL != "http://operator-original/mcp" {
+		t.Errorf("GetEntry must RETURN a config.json-only entry for read-membership, got %+v", e)
+	}
+	if e != nil && !e.SourceBelowWriteTarget {
+		t.Errorf("a config.json-only entry must carry SourceBelowWriteTarget=true (remove-not-copy-up on rollback), got %+v", e)
 	}
 }
 
 // TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp pins bot PR
-// #420 finding 1: when the prior entry the install/register rollback snapshots
-// lives ONLY in the config.json layer BELOW the write target, GetEntry must
-// report it ABSENT (nil) so the rollback takes the nil-prior branch (RemoveEntry
-// the hub's write-target key) — NOT AddEntry(*prior), which would copy the
-// operator's lower-layer entry UP into the write target (mimocode.json) and
-// SHADOW their config.json forever. This test drives the EXACT rollback contract
-// from install.go:2573 / register.go:786 (snapshot prior → AddEntry hub entry →
-// on failure: prior==nil ? RemoveEntry : AddEntry(*prior)).
+// #420 finding 1 (r14 read-vs-rollback split): when the prior entry the
+// install/register rollback snapshots lives ONLY in the config.json layer BELOW
+// the write target, GetEntry now RETURNS it (non-nil, read-membership) but STAMPS
+// SourceBelowWriteTarget=true. The rollback condition
+// (`savedPrior != nil && !savedPrior.SourceBelowWriteTarget` at install.go /
+// register.go) then routes such a prior to RemoveEntry the hub's write-target key
+// — NOT AddEntry(*prior), which would copy the operator's lower-layer entry UP
+// into the write target (mimocode.json) and SHADOW their config.json forever.
+// This test drives the EXACT rollback contract (snapshot prior → AddEntry hub
+// entry → on failure: copy-up only when prior != nil AND not below-sourced).
 func TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp(t *testing.T) {
 	isolateMimoCodeEnv(t)
 	dir := t.TempDir()
@@ -908,13 +914,17 @@ func TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp(t *testing.
 	o := &mimoCodeClient{path: writeTarget}
 
 	// 1. Rollback snapshots the prior BEFORE the hub write. A config.json-only
-	//    prior must read as ABSENT so the rollback removes (not copies up).
+	//    prior reads as NON-nil (read-membership) but carries
+	//    SourceBelowWriteTarget=true so the rollback removes (not copies up).
 	priorEntry, err := o.GetEntry("serena")
 	if err != nil {
 		t.Fatalf("GetEntry: %v", err)
 	}
-	if priorEntry != nil {
-		t.Fatalf("config.json-only prior must read ABSENT for rollback safety, got %+v", priorEntry)
+	if priorEntry == nil || priorEntry.URL != "http://operator-original/mcp" {
+		t.Fatalf("config.json-only prior must read NON-nil for read-membership, got %+v", priorEntry)
+	}
+	if !priorEntry.SourceBelowWriteTarget {
+		t.Fatalf("config.json-only prior must carry SourceBelowWriteTarget=true, got %+v", priorEntry)
 	}
 
 	// 2. The hub installs its own entry into the write target (mimocode.json).
@@ -922,10 +932,12 @@ func TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp(t *testing.
 		t.Fatalf("AddEntry: %v", err)
 	}
 
-	// 3. Downstream install failure → rollback. With priorEntry == nil the
-	//    rollback closure (install.go:2607 / register.go:802) calls RemoveEntry.
-	if priorEntry != nil {
-		t.Fatal("unreachable: prior was nil")
+	// 3. Downstream install failure → rollback. The install.go/register.go rollback
+	//    closure copies up ONLY when the prior is non-nil AND not below-sourced;
+	//    a below-sourced prior falls through to RemoveEntry.
+	copyUp := priorEntry != nil && !priorEntry.SourceBelowWriteTarget
+	if copyUp {
+		t.Fatal("a config.json-only (below-sourced) prior must NOT take the copy-up branch")
 	}
 	if err := o.RemoveEntry("serena"); err != nil {
 		t.Fatalf("rollback RemoveEntry: %v", err)
