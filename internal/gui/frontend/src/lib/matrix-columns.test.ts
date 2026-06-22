@@ -28,7 +28,9 @@ function scan(presence: Record<string, string>): ScanResult {
     ...NON_CORE_CLIENTS,
     ...Object.keys(presence),
   ]) {
-    caps[c] = { scannable: true, remote_http_capable: false };
+    // These tests gate on `scannable` only; direct_installable / remote_http_capable
+    // are irrelevant here, so default both to false.
+    caps[c] = { scannable: true, direct_installable: false, remote_http_capable: false };
   }
   return {
     at: "",
@@ -172,7 +174,7 @@ describe("effectiveVisibleClients", () => {
       // A referenced client necessarily came from a scanner (only a scannable
       // client can produce an entry), so it is scannable in the capability map.
       client_capabilities: {
-        "future-client-xyz": { scannable: true, remote_http_capable: false },
+        "future-client-xyz": { scannable: true, direct_installable: false, remote_http_capable: false },
       },
     } as ScanResult;
     const cols = effectiveVisibleClients(s, {});

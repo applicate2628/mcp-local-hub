@@ -288,12 +288,17 @@ type ScanResult struct {
 	//                           (copilot-cli/amazon-q/openhands/aider) can
 	//                           never have its cell reconciled after a
 	//                           migrate, so it gets no enabled column.
-	//   - remote_http_capable — the client adapter accepts a
-	//                           transport=remote-http (URL-native) binding.
-	//                           The Catalog direct-install flow offers ONLY
-	//                           these clients; a relay-stdio adapter rejects
-	//                           a URL-only entry at AddEntry, so a direct
-	//                           install would deterministically fail.
+	//   - direct_installable  — the adapter's AddEntry accepts a URL-only entry
+	//                           (!IsRelayStdio). The Catalog direct-install flow
+	//                           offers ONLY these clients; a relay-stdio adapter
+	//                           rejects a URL-only entry, so a direct install
+	//                           would deterministically fail. Broader than
+	//                           remote_http_capable — it includes URL-native
+	//                           non-core adapters (hermes/openclaw/opencode).
+	//   - remote_http_capable — the client adapter is on the NARROW remote-http
+	//                           manifest/header matrix (the 6 legacy clients);
+	//                           used by the remote-http install plan + draft
+	//                           surfaces, NOT the direct-install client choices.
 	//
 	// See client_capabilities.go (ClientCapabilities()) for the owner.
 	ClientCapabilities map[string]ClientCapability `json:"client_capabilities,omitempty"`

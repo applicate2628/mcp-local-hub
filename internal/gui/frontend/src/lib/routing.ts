@@ -262,7 +262,7 @@ export function orderClientsForColumns(ids: Iterable<string>): string[] {
 // set, so visibleClients() falls back to the conservative core-only matrix
 // rather than guessing — never an overflow, and the drift test pins that the
 // frontend's static client universe matches the backend's scannable set.
-function scannableClients(scan: ScanResult | null | undefined): Set<string> {
+export function scannableClients(scan: ScanResult | null | undefined): Set<string> {
   const out = new Set<string>();
   for (const [c, cap] of Object.entries(scan?.client_capabilities ?? {})) {
     if (cap?.scannable) out.add(c);
@@ -270,31 +270,14 @@ function scannableClients(scan: ScanResult | null | undefined): Set<string> {
   return out;
 }
 
-// remoteHTTPCapableClients derives, from a backend capability map (the
-// scan's client_capabilities or the /api/client-capabilities body), the
-// ordered list of client ids that accept a transport=remote-http (URL-native)
-// binding. The Catalog DIRECT-install flow writes a remote URL straight into
-// each chosen client config; a relay-stdio adapter (aider/pi/pochi/zencoder/…)
-// rejects a URL-only entry at AddEntry, so a direct install into it would
-// deterministically fail. Offering ONLY these clients keeps the direct-mode
-// multiselect in lockstep with the backend remoteHTTPCapableClients owner
-// (api.isRemoteHTTPCapableClient) with no hard-coded mirror to drift.
-//
-// Ordered by the canonical column order (CORE first, then registry order)
-// for a stable multiselect. An empty/absent map yields an empty list — the
-// caller renders no direct-install choices rather than guessing.
-export function remoteHTTPCapableClients(
-  capabilities: Record<string, ClientCapability> | null | undefined,
-): string[] {
-  const ids: string[] = [];
-  for (const [c, cap] of Object.entries(capabilities ?? {})) {
-    if (cap?.remote_http_capable) ids.push(c);
-  }
-  // Canonical order: core-before-non-core, then registry order, then
-  // alphabetical extras — but UNLIKE orderClientsForColumns this returns ONLY
-  // the input ids (it never force-includes every core client, since not every
-  // core client is URL-native and the direct multiselect must offer exactly
-  // the remote-http-capable set).
+// orderCapabilityClients sorts a list of capability-derived client ids into the
+// canonical multiselect order: core-before-non-core, then registry order, then
+// alphabetical extras. UNLIKE orderClientsForColumns it returns ONLY the input
+// ids (it never force-includes every core client) — a capability set must offer
+// exactly the clients that hold the capability, not the always-shown core set.
+// Shared by directInstallableClients + remoteHTTPCapableClients so the two
+// capability multiselects order identically.
+function orderCapabilityClients(ids: string[]): string[] {
   return ids.sort((a, b) => {
     const ca = CORE_CLIENT_SET.has(a);
     const cb = CORE_CLIENT_SET.has(b);
@@ -306,6 +289,52 @@ export function remoteHTTPCapableClients(
     if (ib !== undefined) return 1;
     return a.localeCompare(b); // both unknown → alphabetical
   });
+}
+
+// directInstallableClients derives, from a backend capability map (the scan's
+// client_capabilities or the /api/client-capabilities body), the ordered list
+// of client ids the Catalog DIRECT-install flow may offer. Direct install
+// writes a URL-only MCP entry straight into each chosen client config via the
+// adapter's AddEntry; a relay-stdio adapter (aider/antigravity/pi/pochi/zed/
+// zencoder) rejects a URL-only entry, so a direct install into it would
+// deterministically fail. The backend's `direct_installable` flag is exactly
+// !IsRelayStdio (the real "AddEntry accepts URL-only" predicate), so this is
+// the correct owner for the direct-install multiselect — BROADER than
+// remote_http_capable, which is the narrow 6-client remote-http header matrix.
+// Using direct_installable surfaces URL-native non-core adapters (hermes,
+// openclaw, opencode) that were wrongly hidden when the multiselect keyed on
+// remote_http_capable.
+//
+// Ordered by the canonical multiselect order. An empty/absent map yields an
+// empty list — the caller renders no direct-install choices rather than guessing.
+export function directInstallableClients(
+  capabilities: Record<string, ClientCapability> | null | undefined,
+): string[] {
+  const ids: string[] = [];
+  for (const [c, cap] of Object.entries(capabilities ?? {})) {
+    if (cap?.direct_installable) ids.push(c);
+  }
+  return orderCapabilityClients(ids);
+}
+
+// remoteHTTPCapableClients derives, from a backend capability map, the ordered
+// list of client ids on the NARROW remote-http manifest/header matrix (the 6
+// legacy clients that serialize + round-trip a transport=remote-http binding
+// WITH Headers). This is the owner for the remote-http install plan + draft
+// surfaces — NOT the Catalog direct-install client choices, which use the
+// broader directInstallableClients (above) instead. Kept distinct so the two
+// surfaces can never drift into using each other's (different) client set.
+//
+// Ordered by the canonical multiselect order. An empty/absent map yields an
+// empty list.
+export function remoteHTTPCapableClients(
+  capabilities: Record<string, ClientCapability> | null | undefined,
+): string[] {
+  const ids: string[] = [];
+  for (const [c, cap] of Object.entries(capabilities ?? {})) {
+    if (cap?.remote_http_capable) ids.push(c);
+  }
+  return orderCapabilityClients(ids);
 }
 
 // visibleClients returns the ordered list of client columns the matrix
@@ -409,6 +438,20 @@ export function perClientRouting(
   // classify uses (IsLiveSerenaRouterURL). 0 (unknown / CLI scan) degrades to the
   // port-agnostic shape check so an early/CLI scan does not falsely flag staleness.
   guiPort: number = 0,
+  // The set of SCANNABLE client ids (backend clientScanners() parser, from
+  // scan.client_capabilities). Threaded so the second pass can refuse to mark
+  // an UNSCANNABLE client's "ok" config as an interactive "available" cell:
+  // /api/scan can never report that client's per-entry presence, so after a
+  // migrate the cell could never become "via-hub" or be demigrated — an
+  // unreconcilable trap. An unscannable client therefore stays disabled
+  // ("not-installed") even when its config file exists. When the set is empty/
+  // absent (older backend that omits client_capabilities) this gate is INERT —
+  // every client is treated as scannable so the legacy behavior (and every test
+  // that does not supply capabilities) is preserved; the conservative core-only
+  // column gate in visibleClients() already handles the missing-capability case
+  // at the column level. CORE clients are always scannable, so the common case
+  // is unaffected.
+  scannable: Set<string> | null = null,
 ): Record<string, Routing> {
   const routing: Record<string, Routing> = {};
   // First pass: signals from per-entry client_presence (existing entries).
@@ -466,10 +509,21 @@ export function perClientRouting(
   // playwright-as-per-session) with can_migrate=false; without the
   // gate, those rows got enabled checkboxes that hit deterministic
   // /api/migrate errors when clicked.
+  // isScannable: when no capability set was supplied (null/empty — older
+  // backend), the gate is inert (treat every client as scannable) so legacy
+  // behavior + capability-less tests are preserved. Otherwise a client must be
+  // a member to earn an interactive "available" cell.
+  const isScannable = (client: string): boolean =>
+    scannable === null || scannable.size === 0 || scannable.has(client);
   for (const client of routingClassificationClients(clientConfigPresence)) {
     if (client in routing) continue;
     const state = clientConfigPresence[client];
-    if (state === "ok" && canMigrate) {
+    if (state === "ok" && canMigrate && isScannable(client)) {
+      // An UNSCANNABLE client with an "ok" config does NOT reach here — it
+      // falls through to "not-installed" below (a disabled cell). Even when an
+      // operator force-shows that column via the Clients popover pref, the cell
+      // stays non-interactive: routing has no per-entry scan signal for it, so
+      // a migrate could never be reconciled/demigrated (Finding 2).
       routing[client] = "available";
     } else if (state === "error") {
       // v0.4.5 PR #208 deep-sec Lane B follow-up: a non-IsNotExist
@@ -521,6 +575,11 @@ export function perClientRouting(
 export function collectServers(scan: ScanResult | null | undefined): ServerRow[] {
   const entries = scan?.entries ?? [];
   const ccp = scan?.client_config_presence ?? {};
+  // Derive the scannable set once per scan (not per entry) and thread it into
+  // every row's routing so an unscannable client's "ok" config never renders an
+  // interactive "available" cell (Finding 2). When client_capabilities is
+  // absent the set is empty → the second-pass gate is inert (legacy behavior).
+  const scannable = scannableClients(scan);
   const out: ServerRow[] = entries.map((e) => ({
     name: e.name,
     routing: perClientRouting(
@@ -530,6 +589,7 @@ export function collectServers(scan: ScanResult | null | undefined): ServerRow[]
       e.name,
       e.daemon_ports ?? [],
       scan?.gui_port ?? 0,
+      scannable,
     ),
     manifested: e.manifest_exists === true,
     // Task 3.5: propagate the side-channel legacy_conflict map to its

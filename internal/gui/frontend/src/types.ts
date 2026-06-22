@@ -110,9 +110,16 @@ export interface ScanResult {
   //                           openhands/aider can never have its cell
   //                           reconciled after a migrate, so it gets no
   //                           enabled column).
-  //   - remote_http_capable — the adapter accepts a transport=remote-http
-  //                           (URL-native) binding; the Catalog direct-install
-  //                           flow offers ONLY these clients.
+  //   - direct_installable  — the adapter's AddEntry accepts a URL-only entry
+  //                           (it is NOT relay-stdio); the Catalog direct-install
+  //                           flow offers ONLY these clients. This is broader
+  //                           than remote_http_capable — it includes URL-native
+  //                           non-core adapters (hermes/openclaw/opencode) that
+  //                           are off the narrow remote-http header matrix.
+  //   - remote_http_capable — the adapter is on the NARROW remote-http
+  //                           manifest/header matrix (the 6 legacy clients);
+  //                           used by the remote-http install plan + draft
+  //                           surfaces, NOT the direct-install client choices.
   // Absent (older backend) → visibleClients() falls back to the conservative
   // "no non-core client is scannable" view (core-only matrix), never overflow.
   client_capabilities?: Record<string, ClientCapability>;
@@ -122,6 +129,12 @@ export interface ScanResult {
 // flags surfaced on the scan result and the /api/client-capabilities endpoint.
 export interface ClientCapability {
   scannable: boolean;
+  // direct_installable: the adapter's AddEntry accepts a URL-only entry (not
+  // relay-stdio) — the predicate the Catalog direct-install multiselect uses.
+  direct_installable: boolean;
+  // remote_http_capable: the narrow remote-http manifest/header matrix (6
+  // legacy clients) — the remote-http install plan + draft surfaces, NOT the
+  // direct-install client choices.
   remote_http_capable: boolean;
 }
 

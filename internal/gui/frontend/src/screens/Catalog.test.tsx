@@ -70,20 +70,23 @@ function mpEntry(
 const emptyMarketplace = () => jsonResponse(200, { entries: [] });
 
 // Default /api/client-capabilities route — the backend capability map the
-// Catalog fetches to derive the direct-install client choices. Mirrors the
-// production remoteHTTPCapableClients set (the 6 URL-native clients are
-// remote_http_capable; a relay-stdio adapter would be false). Direct-install
-// tests use this so the multiselect renders exactly the URL-native clients.
+// Catalog fetches to derive the direct-install client choices. The
+// direct-install multiselect now derives from `direct_installable`
+// (= !IsRelayStdio) — the real "AddEntry accepts a URL-only entry" predicate —
+// NOT remote_http_capable. The 6 URL-native clients are direct_installable
+// (they are not relay-stdio); a relay-stdio adapter is direct_installable:false.
+// Direct-install tests use this so the multiselect renders exactly the
+// URL-native clients.
 const urlNativeCapabilities = () =>
   jsonResponse(200, {
-    "claude-code": { scannable: true, remote_http_capable: true },
-    "codex-cli": { scannable: true, remote_http_capable: true },
-    cursor: { scannable: true, remote_http_capable: true },
-    "gemini-cli": { scannable: true, remote_http_capable: true },
-    "qwen-cli": { scannable: true, remote_http_capable: true },
-    vscode: { scannable: true, remote_http_capable: true },
+    "claude-code": { scannable: true, direct_installable: true, remote_http_capable: true },
+    "codex-cli": { scannable: true, direct_installable: true, remote_http_capable: true },
+    cursor: { scannable: true, direct_installable: true, remote_http_capable: true },
+    "gemini-cli": { scannable: true, direct_installable: true, remote_http_capable: true },
+    "qwen-cli": { scannable: true, direct_installable: true, remote_http_capable: true },
+    vscode: { scannable: true, direct_installable: true, remote_http_capable: true },
     // a relay-stdio client: NOT URL-native → not offered for direct install.
-    aider: { scannable: false, remote_http_capable: false },
+    aider: { scannable: false, direct_installable: false, remote_http_capable: false },
   });
 
 // A "ready" GET /api/server/readiness body — no requirements, ready=true. The
@@ -978,7 +981,7 @@ describe("CatalogScreen", () => {
     // clients including relay-stdio adapters (aider/zencoder/pi/pochi) whose
     // AddEntry rejects a URL-only entry, so a direct install into them
     // deterministically failed. The list now derives from the backend
-    // /api/client-capabilities remote_http_capable set.
+    // /api/client-capabilities direct_installable set (= !IsRelayStdio).
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),

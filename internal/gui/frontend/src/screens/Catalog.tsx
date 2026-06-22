@@ -6,7 +6,7 @@ import {
   refreshMarketplace,
 } from "../api";
 import type { MarketplaceInstallResult, ReadinessReport } from "../api";
-import { remoteHTTPCapableClients } from "../lib/routing";
+import { directInstallableClients } from "../lib/routing";
 import { InfoTip } from "../components/InfoTip";
 import { ReadinessPanel, readinessBlockerCount } from "../components/ReadinessPanel";
 import { AddSecretModal } from "../components/AddSecretModal";
@@ -107,11 +107,11 @@ export function CatalogScreen() {
   const [installedServers, setInstalledServers] = useState<Set<string>>(new Set());
   // Backend-derived per-client capability map (GET /api/client-capabilities).
   // The direct-install multiselect derives its URL-native client choices from
-  // this single owner so it can't drift behind the backend remote-http matrix.
-  // null until the (non-fatal) fetch resolves; a failure leaves it null and
-  // the direct-install panel simply offers no clients (honest — better than a
-  // hard-coded mirror that would offer relay-stdio clients that deterministically
-  // fail a direct install).
+  // this single owner (the `direct_installable` flag = !IsRelayStdio) so it
+  // can't drift behind the backend adapter registry. null until the (non-fatal)
+  // fetch resolves; a failure leaves it null and the direct-install panel simply
+  // offers no clients (honest — better than a hard-coded mirror that would offer
+  // relay-stdio clients that deterministically fail a direct install).
   const [clientCapabilities, setClientCapabilities] =
     useState<Record<string, ClientCapability> | null>(null);
   // Per-row install lifecycle. A row absent from the map is "idle".
@@ -309,10 +309,13 @@ export function CatalogScreen() {
   }, [catalog, query]);
 
   // The URL-native client set the direct-install multiselect may offer,
-  // derived from the backend capability map (single owner) — never a
-  // hard-coded mirror. Empty until /api/client-capabilities resolves.
+  // derived from the backend capability map's `direct_installable` flag
+  // (!IsRelayStdio — the real "AddEntry accepts a URL-only entry" predicate)
+  // — never a hard-coded mirror, and BROADER than the narrow remote-http
+  // header matrix so URL-native non-core clients (hermes/openclaw/opencode)
+  // are offered too. Empty until /api/client-capabilities resolves.
   const directClients = useMemo(
-    () => remoteHTTPCapableClients(clientCapabilities),
+    () => directInstallableClients(clientCapabilities),
     [clientCapabilities],
   );
 
@@ -674,7 +677,7 @@ function MarketplaceSection({
 }: {
   entries: MarketplaceEntry[];
   // The backend-derived URL-native client set the direct-install multiselect
-  // may offer (remoteHTTPCapableClients of the /api/client-capabilities map).
+  // may offer (directInstallableClients of the /api/client-capabilities map).
   // Empty until capabilities load; a relay-stdio client is never in it, so
   // direct install can't be attempted against a client that would reject it.
   directClients: string[];
@@ -838,7 +841,7 @@ function MarketplaceCard({
   installed: boolean;
   state: MarketplaceInstallState;
   // The backend-derived URL-native client set the direct-install multiselect
-  // renders (remoteHTTPCapableClients). A relay-stdio client is never present,
+  // renders (directInstallableClients). A relay-stdio client is never present,
   // so the operator can't pick a client a direct install would reject.
   directClients: string[];
   onInstall: (

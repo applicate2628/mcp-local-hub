@@ -47,14 +47,18 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function scanWith(presence: Record<string, string>, name = "memory"): ScanResult {
-  // visibleClients() now gates a non-core column on the SCANNABLE capability
-  // (a backend clientScanners() parser). Mark every presence key scannable so
-  // these tests exercise the file-present detection gate, not the scannable
-  // gate (that is unit-tested in routing.test.ts). The core clients are always
-  // shown regardless; marking them scannable keeps the map representative.
+  // visibleClients() gates an auto-detected non-core column on the SCANNABLE
+  // capability, and effectiveVisibleClients() additionally drops a PINNED
+  // (pref === true) non-core column unless that client is scannable. Mark the
+  // ENTIRE client registry scannable (not just the core set) so these tests
+  // exercise the file-present detection + pref gate, not the scannable gate
+  // (that is unit-tested in routing.test.ts) — and so a pinned non-core client
+  // (e.g. hermes/kiro) renders its column instead of being dropped by the
+  // scannable re-check. direct_installable / remote_http_capable are irrelevant
+  // to column visibility, so default both to false.
   const capabilities: NonNullable<ScanResult["client_capabilities"]> = {};
-  for (const c of [...CORE_CLIENTS, ...Object.keys(presence)]) {
-    capabilities[c] = { scannable: true, remote_http_capable: false };
+  for (const c of [...ALL_CLIENTS, ...Object.keys(presence)]) {
+    capabilities[c] = { scannable: true, direct_installable: false, remote_http_capable: false };
   }
   return {
     at: "2026-05-16T00:00:00Z",

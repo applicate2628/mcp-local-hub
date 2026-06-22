@@ -490,7 +490,9 @@ describe("visibleClients (scannable + file-present non-core columns)", () => {
   ): ScanResult["client_capabilities"] {
     const out: NonNullable<ScanResult["client_capabilities"]> = {};
     for (const id of ids) {
-      out[id] = { scannable: true, remote_http_capable: false };
+      // These visibility tests gate on `scannable` only; direct_installable /
+      // remote_http_capable are irrelevant here, so default both to false.
+      out[id] = { scannable: true, direct_installable: false, remote_http_capable: false };
     }
     return out;
   }
@@ -591,10 +593,13 @@ describe("visibleClients (scannable + file-present non-core columns)", () => {
     // cell could never be reconciled/demigrated after a migrate. Here 'aider'
     // is file-present but NOT in the scannable capability map, while 'zed' is
     // both scannable and file-present.
+    // This test gates on `scannable` only; direct_installable / remote_http_capable
+    // are irrelevant here, so default both to false.
     const caps: NonNullable<ScanResult["client_capabilities"]> = {};
-    for (const c of CORE_CLIENTS) caps[c] = { scannable: true, remote_http_capable: false };
-    caps.zed = { scannable: true, remote_http_capable: false };
-    caps.aider = { scannable: false, remote_http_capable: false };
+    for (const c of CORE_CLIENTS)
+      caps[c] = { scannable: true, direct_installable: false, remote_http_capable: false };
+    caps.zed = { scannable: true, direct_installable: false, remote_http_capable: false };
+    caps.aider = { scannable: false, direct_installable: false, remote_http_capable: false };
     const cols = visibleClients(
       scan({ zed: "ok", aider: "ok" }, [], caps),
     );
@@ -697,7 +702,10 @@ describe("remoteHTTPCapableClients", () => {
   ): Record<string, ClientCapability> {
     const out: Record<string, ClientCapability> = {};
     for (const [c, remote] of Object.entries(entries)) {
-      out[c] = { scannable: true, remote_http_capable: remote };
+      // Every remote-http-capable client is also direct_installable (URL-native);
+      // the relay-stdio false-cases are neither. Mirror `remote` into both so the
+      // fixture stays realistic (only remote_http_capable is under test here).
+      out[c] = { scannable: true, direct_installable: remote, remote_http_capable: remote };
     }
     return out;
   }
