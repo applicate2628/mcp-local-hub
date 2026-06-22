@@ -14,6 +14,7 @@
 package api
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -48,6 +49,19 @@ const PruneDeadWorktreesSettingKey = "daemons.prune_dead_worktrees"
 // `.git` regular file pointing at its admin directory under the main repo's
 // `.git/worktrees/<name>`.
 const gitWorktreePointerPrefix = "gitdir:"
+
+// maxGitPointerFileBytes caps how many bytes parseGitWorktreePointer reads from a
+// `.git` pointer FILE (Finding 2, r6). A real linked-worktree / submodule `.git`
+// holds a single `gitdir: <path>\n` line — a few hundred bytes at most. The file
+// lives under the (possibly attacker-controlled) workspace tree, so an unbounded
+// os.ReadFile on every GUI sweep / CLI prune tick would let a hostile or
+// corrupt multi-GB `.git` cause repeated memory spikes / stalls. The read is
+// bounded by io.LimitReader to this cap, and a result that hits the cap is
+// treated as AMBIGUOUS (ok=false → never prune) — a genuine pointer never
+// approaches it, so the cap can only ever reject a malformed/oversized file.
+// 64 KiB matches the maxSerenaProjectYMLBytes posture for the same class of
+// small, untrusted, under-workspace control files.
+const maxGitPointerFileBytes = 64 * 1024
 
 // agentWorktreeMarker is the path segment that identifies an ephemeral
 // agent worktree (e.g. ".claude/worktrees/agent-<id>"). Such worktrees are
@@ -117,9 +131,12 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 //     with no `.git` anywhere up to the volume root → false;
 //  3. the pointer's `gitdir: <path>` (relative paths resolved against the
 //     worktree-root dir that holds the pointer) names a WORKTREE admin directory
-//     (its immediate parent dir is `worktrees`, i.e. `<repo>/.git/worktrees/<name>`
-//     — a `<repo>/.git/modules/<name>` submodule path is rejected here, see
-//     isWorktreeAdminPath / Finding 1) that is ABSENT via os.IsNotExist-ONLY, AND
+//     of the canonical `<repo>/.git/worktrees/<name>` shape — its immediate
+//     parent dir is `worktrees` AND that dir's own parent is `.git` (so a
+//     `<repo>/.git/modules/<name>` submodule path AND a submodule under a
+//     worktrees-named dir, `<repo>/.git/modules/.../worktrees/foo`, are BOTH
+//     rejected here, see isWorktreeAdminPath / Finding 1) that is ABSENT via
+//     os.IsNotExist-ONLY, AND
 //     an admin-dir ANCESTOR (the PARENT `.git/worktrees/`, or — when the LAST
 //     worktree was removed and git cleaned the empty `worktrees/` — the
 //     GRANDPARENT repo `.git/`) is still present (distinguishing "worktree
@@ -135,11 +152,15 @@ func WorkspaceDirDeleted(canonicalPath string) bool {
 // discriminator returns false; (b) a submodule on an OFFLINE mount yields a
 // NON-ENOENT stat error on the admin dir (or an ENOENT whose PARENT is also
 // gone), so the discriminator returns false; (c) condition 3a
-// (isWorktreeAdminPath) requires the admin path's parent dir to be `worktrees` —
-// a `modules/<name>` submodule path fails it outright, so an ONLINE submodule
-// whose admin LEAF is merely absent (parent `.git/modules/` still present, e.g.
-// before `git submodule update --init`) is never misread as a removed worktree.
-// Layer (c) is the Finding-1 fix; layers (a)/(b) are the prior offline guard.
+// (isWorktreeAdminPath) requires the admin path to be the FULL
+// `<repo>/.git/worktrees/<name>` shape (parent dir `worktrees` AND grandparent
+// `.git`) — a `modules/<name>` submodule path fails the parent check, and a
+// submodule under a worktrees-named dir (`.git/modules/.../worktrees/foo`,
+// parent `worktrees` but grandparent NOT `.git`) fails the grandparent check, so
+// an ONLINE submodule whose admin LEAF is merely absent (parent dir still
+// present, e.g. before `git submodule update --init`) is never misread as a
+// removed worktree. Layer (c) is the Finding-1 fix; layers (a)/(b) are the prior
+// offline guard.
 //
 // Exported so the GUI prune sweeper (internal/gui) can classify rows.
 func IsDeadGitWorktreePath(canonicalPath string) bool {
@@ -192,19 +213,39 @@ func IsDeadGitWorktreePath(canonicalPath string) bool {
 }
 
 // isWorktreeAdminPath reports whether adminDir is a git WORKTREE admin path —
-// i.e. its immediate parent directory is named `worktrees` (the canonical
-// `<repo>/.git/worktrees/<name>` shape git writes for a linked worktree). A
-// submodule pointer resolves to `<repo>/.git/modules/<name>` (parent `modules`)
-// and a bare/other pointer to something else; both return false so only a
-// genuine linked-worktree admin path can ever reach the dead-worktree
-// availability discriminator. adminDir is already filepath.Clean-ed by
-// parseGitWorktreePointer, so filepath.Base(filepath.Dir(adminDir)) is the
-// immediate parent basename with no trailing-separator ambiguity.
+// i.e. the canonical `<repo>/.git/worktrees/<name>` shape git writes for a
+// linked worktree. The check validates the FULL `.git/worktrees/` shape, NOT
+// just the immediate parent basename: the admin path's immediate parent dir
+// must be `worktrees` AND that `worktrees` dir's OWN parent (adminDir's
+// grandparent) must be `.git`. Validating only the immediate parent is not
+// enough — a SUBMODULE checked out under a directory literally named
+// `worktrees` (e.g. `deps/worktrees/foo`) makes git store its admin dir at
+// `<repo>/.git/modules/deps/worktrees/foo`, whose immediate parent is ALSO
+// `worktrees`, so a parent-only check would wrongly ACCEPT it and a missing
+// submodule admin leaf would be mis-pruned as a dead worktree (Finding 1, r6).
+// Its grandparent is `deps` (the submodule path component), NOT `.git`, so the
+// grandparent==`.git` requirement rejects it: a `.git/modules/.../worktrees/foo`
+// path is never a worktree → never a dead-worktree candidate. A submodule
+// pointer of the ordinary shape `<repo>/.git/modules/<name>` (parent `modules`)
+// and any bare/other pointer also return false, so only a genuine
+// linked-worktree admin path can ever reach the dead-worktree availability
+// discriminator. adminDir is already filepath.Clean-ed by
+// parseGitWorktreePointer, so filepath.Base(filepath.Dir(...)) yields each
+// ancestor basename with no trailing-separator ambiguity.
 func isWorktreeAdminPath(adminDir string) bool {
 	if adminDir == "" {
 		return false
 	}
-	return filepath.Base(filepath.Dir(adminDir)) == "worktrees"
+	worktreesDir := filepath.Dir(adminDir) // the `worktrees` dir (admin parent)
+	if filepath.Base(worktreesDir) != "worktrees" {
+		return false
+	}
+	// The `worktrees` dir's own parent (adminDir's grandparent) must be `.git`.
+	// This is what separates a genuine `<repo>/.git/worktrees/<name>` (grandparent
+	// `.git`) from a submodule under a worktrees-named dir,
+	// `<repo>/.git/modules/.../worktrees/foo` (grandparent the submodule path
+	// component, e.g. `deps`).
+	return filepath.Base(filepath.Dir(worktreesDir)) == ".git"
 }
 
 // findNearestGitPointer walks UP from dir through its ancestors and returns the
@@ -276,15 +317,15 @@ func findNearestGitPointer(dir string) (gitPath, pointerDir string, ok bool) {
 //     mount) → ambiguous → false (inherit WorkspaceDirDeleted's discipline).
 //   - adminDir Stat is ENOENT → the worktree subdir is gone. Refine via the
 //     ancestor chain:
-//       1. PARENT `.git/worktrees/` EXISTS (Stat ok) → a worktree was removed and
-//          siblings remain → DEAD.
-//       2. PARENT is ENOENT but GRANDPARENT `.git/` EXISTS (Stat ok) → the LAST
-//          worktree was removed and git cleaned the empty `worktrees/`; the
-//          repo/mount is present → DEAD (the last-worktree case Finding-2's
-//          parent-only check missed).
-//       3. PARENT non-ENOENT error, OR grandparent ENOENT / non-ENOENT error, OR
-//          a degenerate root with no parent/grandparent to corroborate against →
-//          the admin ROOT is gone/unavailable → ambiguous → false.
+//     1. PARENT `.git/worktrees/` EXISTS (Stat ok) → a worktree was removed and
+//     siblings remain → DEAD.
+//     2. PARENT is ENOENT but GRANDPARENT `.git/` EXISTS (Stat ok) → the LAST
+//     worktree was removed and git cleaned the empty `worktrees/`; the
+//     repo/mount is present → DEAD (the last-worktree case Finding-2's
+//     parent-only check missed).
+//     3. PARENT non-ENOENT error, OR grandparent ENOENT / non-ENOENT error, OR
+//     a degenerate root with no parent/grandparent to corroborate against →
+//     the admin ROOT is gone/unavailable → ambiguous → false.
 //
 // os.IsNotExist-ONLY at every level: any NON-ENOENT stat error (permission,
 // transient I/O, offline mount) is ambiguous and returns false. The grandparent
@@ -336,15 +377,18 @@ func isAdminDirGenuinelyDeleted(adminDir string) bool {
 	return true
 }
 
-// parseGitWorktreePointer reads the `.git` FILE at gitPath and returns the
+// parseGitWorktreePointer reads the `.git` FILE at gitPath (via the SIZE-CAPPED
+// readGitPointerFile — Finding 2, r6: a regular-file Lstat check plus a
+// maxGitPointerFileBytes-bounded read, so a hostile/corrupt oversized `.git`
+// under the workspace can never trigger an unbounded read) and returns the
 // absolute path of the admin directory named by its single `gitdir: <path>`
 // line. A relative pointer is resolved against workspaceDir (git writes a
 // relative pointer for a worktree created with `--relative-paths`, and an
-// absolute one otherwise). It returns ok=false on any read error, a missing
-// `gitdir:` line, an empty target, a FOREIGN-ABSOLUTE target (Finding 3, r2), OR
-// a FOREIGN-RELATIVE target (a Windows relative gitdir seen on POSIX — Finding 3,
-// r5) — every such case makes the caller treat the path as NOT a dead worktree
-// (ambiguous → safe).
+// absolute one otherwise). It returns ok=false on any read error, a non-regular
+// or oversized `.git` file, a missing `gitdir:` line, an empty target, a
+// FOREIGN-ABSOLUTE target (Finding 3, r2), OR a FOREIGN-RELATIVE target (a
+// Windows relative gitdir seen on POSIX — Finding 3, r5) — every such case makes
+// the caller treat the path as NOT a dead worktree (ambiguous → safe).
 //
 // FOREIGN-ABSOLUTE (cross-OS) gitdir handling: a worktree created by
 // Git-for-Windows writes `gitdir: C:/...` (or a `\\srv\share` UNC); a worktree
@@ -369,8 +413,8 @@ func isAdminDirGenuinelyDeleted(adminDir string) bool {
 // On Windows both `\` and `/` are native relative separators, so nothing relative
 // is foreign there.
 func parseGitWorktreePointer(gitPath, workspaceDir string) (adminDir string, ok bool) {
-	data, err := os.ReadFile(gitPath)
-	if err != nil {
+	data, ok := readGitPointerFile(gitPath)
+	if !ok {
 		return "", false
 	}
 	for _, line := range strings.Split(string(data), "\n") {
@@ -408,6 +452,54 @@ func parseGitWorktreePointer(gitPath, workspaceDir string) (adminDir string, ok 
 		return filepath.Clean(filepath.Join(workspaceDir, target)), true
 	}
 	return "", false
+}
+
+// readGitPointerFile reads a `.git` pointer FILE with a SIZE CAP (Finding 2, r6).
+// It returns the file's bytes and ok=true only when the file is a regular file
+// whose size is at or under maxGitPointerFileBytes; otherwise it returns
+// ok=false so the caller treats the path as AMBIGUOUS and never prunes. The
+// bound matters because the `.git` file lives under the (possibly
+// attacker-controlled) workspace tree and is read on EVERY GUI sweep and CLI
+// prune/dry-run tick; an unbounded os.ReadFile of a hostile multi-GB file would
+// cause repeated memory spikes / stalls.
+//
+// The Lstat+IsRegular pre-check is preserved (a symlinked / FIFO / device `.git`
+// is refused, matching findNearestGitPointer's regular-file requirement). The
+// AUTHORITATIVE bound is the io.LimitReader(maxGitPointerFileBytes+1) read plus
+// the len-check below: it reads one byte past the cap and rejects a result that
+// exceeded it, so it is robust even if the file grew between the Lstat and the
+// open. A genuine `gitdir: <path>\n` pointer is a few hundred bytes and never
+// approaches the cap, so the cap can only ever reject a malformed/oversized
+// file, never a real worktree/submodule pointer.
+func readGitPointerFile(gitPath string) ([]byte, bool) {
+	fi, err := os.Lstat(gitPath)
+	if err != nil || !fi.Mode().IsRegular() {
+		return nil, false
+	}
+	// Cheap fast-path: reject an obviously-oversized file before opening. The
+	// authoritative bound is the LimitReader+len check below.
+	if fi.Size() > maxGitPointerFileBytes {
+		return nil, false
+	}
+	f, err := os.Open(gitPath)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	// Re-verify regular-file on the OPEN handle (close the Lstat→Open swap window)
+	// before the bounded read.
+	if openedFI, serr := f.Stat(); serr != nil || !openedFI.Mode().IsRegular() {
+		return nil, false
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxGitPointerFileBytes+1))
+	if err != nil {
+		return nil, false
+	}
+	if int64(len(data)) > maxGitPointerFileBytes {
+		// Oversized → ambiguous → never prune.
+		return nil, false
+	}
+	return data, true
 }
 
 // isForeignAbsolutePath reports whether target is absolute on the OTHER OS but

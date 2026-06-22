@@ -485,9 +485,11 @@ func TestIsDeadGitWorktreePath_Submodule(t *testing.T) {
 }
 
 // TestIsWorktreeAdminPath unit-tests the Finding-1 worktrees-path discriminator
-// directly: only an admin path whose immediate parent dir is `worktrees` is a
-// worktree admin path; a `modules/<name>` submodule path (or anything else) is
-// not.
+// directly: only an admin path of the FULL `<repo>/.git/worktrees/<name>` shape
+// (immediate parent `worktrees` AND grandparent `.git`) is a worktree admin
+// path. A `modules/<name>` submodule path, a submodule under a worktrees-named
+// dir (`.git/modules/.../worktrees/foo` — parent `worktrees` but grandparent NOT
+// `.git`, the Finding-1 r6 trap), or anything else is not.
 func TestIsWorktreeAdminPath(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -498,6 +500,14 @@ func TestIsWorktreeAdminPath(t *testing.T) {
 		{"submodule admin path", filepath.Join("repo", ".git", "modules", "sub"), false},
 		{"bare .git child (no worktrees parent)", filepath.Join("repo", ".git", "HEAD"), false},
 		{"deep worktree admin path", filepath.Join("x", "y", ".git", "worktrees", "w"), true},
+		// Finding 1 (r6): a submodule checked out under a directory literally named
+		// `worktrees` makes git store its admin dir at
+		// `<repo>/.git/modules/deps/worktrees/foo` — immediate parent `worktrees`
+		// (so the old parent-only check ACCEPTED it) but grandparent `deps`, NOT
+		// `.git`. The full-shape (grandparent==`.git`) check rejects it.
+		{"submodule under worktrees-named dir (parent worktrees, grandparent NOT .git)", filepath.Join("repo", ".git", "modules", "deps", "worktrees", "foo"), false},
+		// A genuine deep worktree still has grandparent `.git` → accepted.
+		{"worktree admin path with worktrees grandparent .git", filepath.Join("a", "b", "c", ".git", "worktrees", "feat"), true},
 		{"empty", "", false},
 	}
 	for _, c := range cases {
@@ -507,6 +517,118 @@ func TestIsWorktreeAdminPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIsDeadGitWorktreePath_SubmoduleUnderWorktreesNamedDir covers Finding 1
+// (r6) end-to-end: a SUBMODULE checked out under a directory literally named
+// `worktrees` makes git store its admin dir at
+// `<super>/.git/modules/deps/worktrees/foo`, whose immediate PARENT is also
+// `worktrees`. The prior immediate-parent-only guard would ACCEPT it, so a
+// missing submodule admin LEAF (parent `worktrees/` present, e.g. before
+// `git submodule update --init`) would be mis-pruned as a dead worktree. The
+// full-shape guard (parent `worktrees` AND grandparent `.git`) rejects it
+// because its grandparent is the submodule path component (`deps`), not `.git`.
+// A genuine `<repo>/.git/worktrees/<name>` (grandparent `.git`) with the
+// identical missing-leaf/present-parent shape IS still pruned.
+func TestIsDeadGitWorktreePath_SubmoduleUnderWorktreesNamedDir(t *testing.T) {
+	// --- SUBMODULE under a dir NAMED `worktrees`: gitdir →
+	// <super>/.git/modules/deps/worktrees/foo; the `.git/modules/deps/worktrees/`
+	// parent exists, only the `foo` leaf is gone. Immediate parent is `worktrees`
+	// (the Finding-1 trap), but grandparent is `deps` → rejected → NOT pruned. ---
+	subWT := t.TempDir()
+	subParent := filepath.Join(t.TempDir(), "super", ".git", "modules", "deps", "worktrees")
+	if err := os.MkdirAll(subParent, 0o755); err != nil {
+		t.Fatalf("mkdir submodule-under-worktrees parent: %v", err)
+	}
+	subAdmin := filepath.Join(subParent, "foo") // leaf never created
+	writeGitFile(t, subWT, subAdmin)
+
+	// --- GENUINE removed worktree (grandparent `.git`): identical missing-leaf
+	// shape but under `<repo>/.git/worktrees/` → genuinely DEAD → pruned. Proves
+	// the grandparent==`.git` check rejects ONLY the submodule-under-worktrees
+	// shape, not the structurally-analogous real worktree shape. ---
+	wtWS := t.TempDir()
+	wtParent := filepath.Join(t.TempDir(), "main", ".git", "worktrees")
+	if err := os.MkdirAll(wtParent, 0o755); err != nil {
+		t.Fatalf("mkdir worktrees parent: %v", err)
+	}
+	wtAdmin := filepath.Join(wtParent, "gone") // leaf never created
+	writeGitFile(t, wtWS, wtAdmin)
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"submodule under worktrees-named dir (.git/modules/.../worktrees/foo leaf absent) → NOT pruned", subWT, false},
+		{"genuine removed worktree (.git/worktrees/<name> leaf absent) → pruned", wtWS, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsDeadGitWorktreePath(c.path); got != c.want {
+				t.Fatalf("IsDeadGitWorktreePath(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestParseGitWorktreePointer_OversizedGitFile covers Finding 2 (r6): the `.git`
+// pointer read is SIZE-CAPPED (readGitPointerFile, maxGitPointerFileBytes). A
+// `.git` file larger than the cap is treated as AMBIGUOUS (ok=false) so it can
+// never trigger an unbounded read or be mis-resolved into a prune; a normal
+// small pointer resolves as before. The end-to-end IsDeadGitWorktreePath on an
+// oversized `.git` must be false (never prune the LIVE workspace).
+func TestParseGitWorktreePointer_OversizedGitFile(t *testing.T) {
+	ws := t.TempDir()
+
+	t.Run("oversized .git file → rejected (ambiguous)", func(t *testing.T) {
+		dir := t.TempDir()
+		gitPath := filepath.Join(dir, ".git")
+		// A valid gitdir line followed by padding that pushes the file past the cap.
+		body := "gitdir: " + filepath.Join("..", "main", ".git", "worktrees", "x") + "\n"
+		body += "# " + string(make([]byte, maxGitPointerFileBytes)) // > cap once combined
+		if err := os.WriteFile(gitPath, []byte(body), 0o600); err != nil {
+			t.Fatalf("write oversized .git: %v", err)
+		}
+		if int64(len(body)) <= maxGitPointerFileBytes {
+			t.Fatalf("test setup: body %d bytes is not over the %d cap", len(body), maxGitPointerFileBytes)
+		}
+		if admin, ok := parseGitWorktreePointer(gitPath, ws); ok {
+			t.Fatalf("parseGitWorktreePointer(oversized) ok=true (admin=%q); want false (over cap → ambiguous)", admin)
+		}
+	})
+
+	t.Run("normal small pointer (well under cap) resolves normally", func(t *testing.T) {
+		dir := t.TempDir()
+		gitPath := filepath.Join(dir, ".git")
+		target := filepath.Join("..", "main", ".git", "worktrees", "x")
+		if err := os.WriteFile(gitPath, []byte("gitdir: "+target+"\n"), 0o600); err != nil {
+			t.Fatalf("write small .git: %v", err)
+		}
+		admin, ok := parseGitWorktreePointer(gitPath, ws)
+		if !ok {
+			t.Fatalf("parseGitWorktreePointer(small pointer) ok=false; want true")
+		}
+		if want := filepath.Clean(filepath.Join(ws, target)); admin != want {
+			t.Fatalf("parseGitWorktreePointer(small pointer) admin = %q, want %q", admin, want)
+		}
+	})
+
+	t.Run("end-to-end: oversized .git at workspace root → IsDeadGitWorktreePath false", func(t *testing.T) {
+		wtWS := t.TempDir()
+		// Point at a genuinely-absent worktree admin dir so that, absent the cap,
+		// the classifier would otherwise have to resolve the pointer. The oversize
+		// makes the read ambiguous BEFORE any admin-dir stat → never prune.
+		missingAdmin := filepath.Join(t.TempDir(), "main", ".git", "worktrees", "gone")
+		body := "gitdir: " + missingAdmin + "\n"
+		body += "# " + string(make([]byte, maxGitPointerFileBytes))
+		if err := os.WriteFile(filepath.Join(wtWS, ".git"), []byte(body), 0o600); err != nil {
+			t.Fatalf("write oversized .git at ws root: %v", err)
+		}
+		if IsDeadGitWorktreePath(wtWS) {
+			t.Fatalf("IsDeadGitWorktreePath(%q) = true for an oversized .git pointer; must be false (ambiguous, never prune)", wtWS)
+		}
+	})
 }
 
 // TestParseGitWorktreePointer_ForeignRelativeGitdir covers Finding 3 (r5): a

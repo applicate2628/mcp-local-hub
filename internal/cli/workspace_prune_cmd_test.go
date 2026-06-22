@@ -555,3 +555,28 @@ func TestWorkspacePrune_DryRunJSONCleanStdout(t *testing.T) {
 		t.Errorf("--dry-run --json should emit nothing on STDERR; got:\n%s", stderr)
 	}
 }
+
+// TestWorkspacePrune_HelpMentionsDeadWorktreeInGateOnSet covers Finding 3 (r6):
+// the `--idle` help paragraph previously said that without --idle only
+// agent-worktree and deleted-dir run, but a bare/dry-run prune ALSO considers
+// dead-worktree when daemons.prune_dead_worktrees is on (the default). The help
+// text must enumerate dead-worktree alongside the other structural signals so it
+// matches the implementation.
+func TestWorkspacePrune_HelpMentionsDeadWorktreeInGateOnSet(t *testing.T) {
+	long := newWorkspacePruneCmd().Long
+	idleIdx := strings.Index(long, "--idle <dur>")
+	if idleIdx < 0 {
+		t.Fatalf("prune help is missing the --idle paragraph:\n%s", long)
+	}
+	// The --idle paragraph runs to the next flag bullet (--backend).
+	para := long[idleIdx:]
+	if end := strings.Index(para, "--backend"); end >= 0 {
+		para = para[:end]
+	}
+	if !strings.Contains(para, "dead-worktree") {
+		t.Fatalf("--idle help paragraph must mention dead-worktree (it is part of the gate-on structural set); got:\n%s", para)
+	}
+	if !strings.Contains(para, "prune_dead_worktrees") {
+		t.Fatalf("--idle help paragraph should name the daemons.prune_dead_worktrees gate; got:\n%s", para)
+	}
+}

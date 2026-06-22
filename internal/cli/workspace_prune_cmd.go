@@ -108,7 +108,9 @@ Behavior:
                 shell unless --dry-run is also passed).
   --idle <dur>  Add the idle signal to THIS run (e.g. 48h) without changing
                 the persisted daemons.prune_idle_hours setting. Without it,
-                only the structural signals (agent-worktree, deleted-dir) run.
+                only the structural signals run: agent-worktree, deleted-dir,
+                and — when daemons.prune_dead_worktrees is on (default) —
+                dead-worktree.
   --backend     Teardown scope per orphan: all (default) | lsp | serena.
   --json        Machine-readable array of {PruneReport, reason}.
 
