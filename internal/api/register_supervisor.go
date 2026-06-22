@@ -303,6 +303,11 @@ func (a *API) registerOneLanguageSupervised(
 		// error would let AddEntry overwrite and the nil-prior rollback branch
 		// DELETE the operator's entry. The caller runs the accumulated
 		// *rollback on this returned error, so no local runRollback is needed.
+		//
+		// Write-target parent-dir creation for an otherwise-active profile whose
+		// GLOBAL dir is absent (bot PR #420 finding 3, r15) is owned by the config
+		// lock chokepoint (clients.withConfigLock), NOT here — same single owner as
+		// the non-supervised register loop.
 		priorEntry, err := client.GetEntry(entryName)
 		if err != nil {
 			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)

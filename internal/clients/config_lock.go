@@ -53,6 +53,39 @@ func withConfigLock(configPath string, fn func() error) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Ensure the write-target parent dir exists BEFORE creating the advisory
+	// flock (bot PR #420 finding 3, r15). The flock file lives at
+	// "<configPath>.lock" INSIDE the write-target dir, so flock.New(...).Lock()
+	// fails outright when that dir is absent — BEFORE any mutating adapter method
+	// body (e.g. BackupKeep's own os.MkdirAll, mimocode.go) ever runs, leaving the
+	// adapter-internal create structurally unreachable through this wrapper. A
+	// MiMoCode profile active ONLY via a MIMOCODE_CONFIG_DIR overlay (or
+	// MIMOCODE_CONFIG / inline content) with the GLOBAL ~/.config/mimocode dir
+	// absent reports Exists()==true, so install / register / GUI Apply proceed to a
+	// mutating call here — and without this create they would fail at the lock and
+	// abort. This is the SINGLE owner of "the flock needs its parent dir to exist"
+	// on the WRITE side; the READ side already handles the same constraint in
+	// withConfigReadLock below.
+	//
+	// Guarded (IsNotExist only) so the common dir-exists case adds no syscall to
+	// the AddEntry/RemoveEntry hot path and is byte-identical to before. Runs under
+	// the per-path mutex already held above, so intra-process racers on a new path
+	// are serialized (MkdirAll is idempotent for the cross-process case). Mode
+	// 0o700 (NOT 0o755): this is a fresh mcphub-created config dir with no operator
+	// mode to preserve, and the secure-write parent-dir gate rejects group/world
+	// bits on POSIX — a 0o755 dir would make a subsequent strict-mode
+	// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) SecureWriteClientConfig reject the very
+	// dir just created. The FILE write itself stays hardened by the unchanged
+	// WriteConfigFile / SecureWriteClientConfig pipeline (handle-relative DACL/mode,
+	// atomic rename, symlink refusal); this governs only the parent dir.
+	if dir := filepath.Dir(configPath); dir != "" {
+		if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
+			if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
+				return fmt.Errorf("config lock %s: create parent dir: %w", configPath+".lock", mkErr)
+			}
+		}
+	}
+
 	lockPath := configPath + ".lock"
 	fl := flock.New(lockPath)
 	if err := fl.Lock(); err != nil {

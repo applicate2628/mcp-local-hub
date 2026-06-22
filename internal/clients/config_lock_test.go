@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -148,5 +149,49 @@ func TestConfigLock_FlockSerializesAcrossProcesses(t *testing.T) {
 	}
 	if err := b.Unlock(); err != nil {
 		t.Fatalf("handle B Unlock: %v", err)
+	}
+}
+
+// TestConfigLock_MutatingMethodCreatesMissingParentDir pins bot PR #420 r15
+// finding 3 at the single-owner level: a mutating method routed through
+// withConfigLock must create the write-target's MISSING parent dir before
+// acquiring the advisory flock (the lock file lives in that dir, so without the
+// create the lock acquisition itself fails). This covers install / register /
+// GUI Apply against an otherwise-active profile whose write-target dir does not
+// yet exist. Pinned on a generic adapter (cursor) so it asserts the chokepoint
+// behavior, not a mimocode specific.
+func TestConfigLock_MutatingMethodCreatesMissingParentDir(t *testing.T) {
+	parent := t.TempDir()
+	// The write target lives in a subdir that does NOT exist yet.
+	missingDir := filepath.Join(parent, "does-not-exist-yet")
+	path := filepath.Join(missingDir, "mcp.json")
+	if _, err := os.Stat(missingDir); !os.IsNotExist(err) {
+		t.Fatalf("precondition: %s must NOT exist (stat err=%v)", missingDir, err)
+	}
+
+	c := newLockingClient(&cursorClient{jsonMCPClient: &jsonMCPClient{
+		path:       path,
+		clientName: "cursor",
+		urlField:   "url",
+	}})
+
+	// A bare AddEntry through the locking decorator must create the missing parent
+	// dir (via withConfigLock) and write the file — NOT fail at the flock.
+	if err := c.AddEntry(MCPEntry{Name: "a", URL: "http://127.0.0.1:9999/mcp"}); err != nil {
+		t.Fatalf("AddEntry must create the missing parent dir and succeed, got: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("write-target file must be created in the previously-missing dir, stat err=%v", err)
+	}
+	// The created parent dir is owner-only (0o700) on POSIX so a subsequent strict
+	// secure-write gate would not reject it. (Mode bits are advisory on Windows.)
+	if runtime.GOOS != "windows" {
+		st, err := os.Stat(missingDir)
+		if err != nil {
+			t.Fatalf("stat created parent dir: %v", err)
+		}
+		if perm := st.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("created parent dir must be owner-only (0o700), got %o", perm)
+		}
 	}
 }

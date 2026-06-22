@@ -628,6 +628,17 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	// surfaces its servers. So promote on a parseable inline layer too, not just a
 	// stat-able file. Either signal upgrades the absent state to "ok".
 	//
+	// CLAUDE-IMPORT-ONLY PROFILES (bot PR #420 finding 1, r15): MimoCode also
+	// imports ~/.claude.json mcpServers into the effective `mcp` view (TOP layer,
+	// skip-if-name-exists, gated by MIMOCODE_DISABLE_CLAUDE_CODE_MCP). A profile
+	// whose ONLY active mimo MCP source is that import (no mimo config FILE layer,
+	// no inline content) has nothing to stat AND no inline string — both signals
+	// above miss it — yet MimoCodeMergedConfig WOULD import those servers. So
+	// promote on a parseable claude import too. MimoCodeHasClaudeImport reuses the
+	// SAME env-resolution + MIMOCODE_DISABLE_CLAUDE_CODE_MCP gate the read path
+	// uses, so the scan stays state-safe (the standard scan-test barrier sets the
+	// disable flag → no real ~/.claude.json read).
+	//
 	// MALFORMED INLINE-ONLY (bot PR #420 finding 4): a present-but-UNPARSEABLE
 	// MIMOCODE_CONFIG_CONTENT (no file layers) is an active-but-broken profile.
 	// Left as the default "missing"/absent verdict it would render the cell as
@@ -654,6 +665,15 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 				// Malformed inline-only profile → loud config-error cell, not absent.
 				presence["mimocode"] = "error"
 			}
+		}
+		// Claude-import-only profile (bot PR #420 finding 1, r15): no file layer and
+		// no inline content promoted it, but a parseable ~/.claude.json import yields
+		// servers MimoCodeMergedConfig would surface. Promote to "ok" so the row is
+		// scanned and shown. Re-check isPromotableAbsentPresenceState so a malformed
+		// inline that just set "error" above is NOT overridden (that fault must keep
+		// rendering the config-error cell).
+		if isPromotableAbsentPresenceState(presence["mimocode"]) && clients.MimoCodeHasClaudeImport(mp) {
+			presence["mimocode"] = "ok"
 		}
 	}
 	scanIfReadable := func(name string) bool {

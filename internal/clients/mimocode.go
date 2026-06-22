@@ -1741,6 +1741,41 @@ func MimoCodeInlineContentState(path string) (string, error) {
 	return mimoCodeInlineStateOK, nil
 }
 
+// MimoCodeHasClaudeImport reports whether the scan-supplied config path resolves
+// to a PARSEABLE ~/.claude.json mcpServers import that yields at least one
+// importable MiMoCode entry. Exported so internal/api/scan.go can promote
+// MiMoCode's config PRESENCE for a CLAUDE-IMPORT-ONLY profile — one whose ONLY
+// active mimo MCP source is the ~/.claude.json import (no mimo config file, no
+// inline layer; bot PR #420 finding 1, r15). MimoCodeReadLayerPaths yields only
+// FILE layers and MimoCodeInlineContentState only the inline string, so neither
+// promotes such a profile — yet MimoCodeMergedConfig WOULD import the claude
+// servers and surface them. Without this, scanIfReadable skips scanMimoCode and
+// the claude-imported servers vanish from the Servers matrix until the operator
+// creates a stub mimocode.json. This helper closes that gap, mirroring the
+// existing inline-content (MimoCodeHasInlineContent) promotion.
+//
+// It uses the SAME env-resolution gate as MimoCodeReadLayerPaths / the merged
+// read: the ~/.claude.json import is honored ONLY when path is a known global
+// layer name AND the MIMOCODE_DISABLE_CLAUDE_CODE_MCP flag is unset (a temp/test
+// override path keeps claudeHome "" → no import; the disable flag short-circuits
+// it). So a scan under the standard test barrier (isolateMimoCodeScanEnv sets the
+// disable flag) NEVER reads the developer's real ~/.claude.json — exactly the
+// same state-safe gate the read path uses. claudeImportEntries is the single
+// owner of the read + conversion (and swallows a malformed/unreadable claude.json
+// to zero entries — best-effort import), so a broken claude.json never promotes
+// to "ok" (it imports nothing) and never aborts the scan.
+func MimoCodeHasClaudeImport(path string) bool {
+	imported, err := mimoCodeClientForScanPath(path).claudeImportEntries()
+	if err != nil {
+		// claudeImportEntries is best-effort and never returns a non-nil error
+		// today (a malformed/unreadable claude.json is swallowed to nil,nil), but
+		// guard defensively: a future hard-failure import mode must not be read as
+		// "has import" → no promotion on error.
+		return false
+	}
+	return len(imported) > 0
+}
+
 // mimoCodeClientForScanPath builds the read-only client a scan/extract entry
 // point uses for a supplied config path, resolving the MIMOCODE_CONFIG file, the
 // MIMOCODE_CONFIG_DIR overlay, the MIMOCODE_CONFIG_CONTENT inline content, and the
@@ -1936,6 +1971,88 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 	// re-emerge via the merge), NOT as a restore candidate that GetEntry would copy
 	// UP into the write target (which would shadow the operator's claude.json entry
 	// forever — the same hazard the config.json exclusion above prevents).
+	return false, nil
+}
+
+// mimoCodeNameReResolvesAfterWriteTargetRemoval reports whether mcp.<name> would
+// STILL resolve in the merged read after a hypothetical RemoveEntry(name) from
+// the WRITE TARGET (mimocode.json = o.path) — i.e. whether ANY layer OTHER than
+// the write target defines the name. Because the merge is REPLACE-by-name (an mcp
+// entry never field-merges across layers; see readMergedLayers), the name
+// re-resolves iff some other layer still defines it after the write-target key is
+// gone.
+//
+// This is the "sole effective definition" predicate for the DESTRUCTIVE direct-LSP
+// cleanup (bot PR #420 r15 finding 2). FindStdioLanguageServerEntries' consumers
+// (register.go post-register cleanup, `mcphub language-server cleanup`) RemoveEntry
+// each returned name from the write target ONLY. If the SAME name is also defined
+// in another layer, the cleanup logs success yet the other layer re-emerges in the
+// merged read — the LSP entry stays active. So the cleanup must DECLINE (not
+// report) a name that re-resolves after removal: report only when the write target
+// is the SOLE definer.
+//
+// LAYER COVERAGE — the complement of the write target, composed from the existing
+// single-owner per-layer membership primitives (NO re-implementation of the merge):
+//
+//   - HIGHER layers (MDM, inline, MIMOCODE_CONFIG_DIR overlay, MIMOCODE_CONFIG
+//     file, global mimocode.jsonc) → mimoCodeHigherLayerDefining(name). It already
+//     excludes the write target and the claude import, exactly what is needed here.
+//   - The config.json layer strictly BELOW the write target → mimoCodeFileDefines.
+//     A name present ONLY there re-emerges after the write-target removal, so it
+//     must count.
+//   - The ~/.claude.json import → claudeImportEntries(). This is the CRITICAL
+//     asymmetry from the AddEntry shadow guard (mimoCodeHigherLayerDefining) and
+//     mimoCodeDefinedAtOrAboveWriteTarget, both of which correctly EXCLUDE the
+//     import: there the import can never shadow a name the hub is about to write /
+//     has written (skip-if-name-exists skips it while the write target defines it).
+//     HERE the sequence is reversed — the write target CURRENTLY defines the name
+//     (so the import is currently skipped), RemoveEntry deletes the write-target
+//     key, and on the next merged read skip-if-name-exists no longer fires → the
+//     import RE-EMERGES the entry. So the import IS a re-emergence source and MUST
+//     be checked. Any re-emerged shape (stdio-LSP or not) means the destructive
+//     RemoveEntry did not clear the name, so name presence in the converted import
+//     — not its shape — is the right test.
+//
+// DISABLED ENTRIES COUNT. The membership primitives test raw name presence and do
+// NOT drop enabled:false (unlike the matcher path, which drops disabled before
+// shape-matching). That asymmetry is intentional and correct: the question is "is
+// mcp.<name> still PRESENT in the merged map after removal", not "is it still an
+// active stdio-LSP". A disabled definition in another layer still leaves the key
+// present (the deep-merge keeps it), so the destructive removal did not clear the
+// name → decline. Declining is the conservative side (the operator resolves the
+// ambiguous cross-layer entry manually); reporting-and-deleting on the false
+// belief that the name is gone is the bug this guards.
+//
+// State-safe: in the explicit/temp single-file mode mimoCodeHigherLayerDefining
+// reads only the explicit configFile/overlayDir/inline captured at construction
+// (empty for a direct/test client), the config.json-below path sits in the temp
+// dir, and claudeImportEntries returns nil when claudeHome is "" — so it never
+// reaches the real ~/.config/mimocode or ~/.claude.json. A parse error on any
+// present layer propagates (a malformed layer must not be silently read as "does
+// not define" — that would re-introduce the silent-false-success this guards).
+func (o *mimoCodeClient) mimoCodeNameReResolvesAfterWriteTargetRemoval(name string) (bool, error) {
+	// HIGHER layers (MDM / inline / overlay / MIMOCODE_CONFIG / global jsonc).
+	if shadow, err := o.mimoCodeHigherLayerDefining(name); err != nil {
+		return false, err
+	} else if shadow.Kind != "" {
+		return true, nil
+	}
+	// config.json strictly BELOW the write target (in the write-target dir).
+	belowLayer := filepath.Join(filepath.Dir(o.path), "config.json")
+	if defined, err := mimoCodeFileDefines(belowLayer, name); err != nil {
+		return false, err
+	} else if defined {
+		return true, nil
+	}
+	// ~/.claude.json import — a re-emergence source HERE (skip-if-name-exists no
+	// longer skips once the write-target key is removed).
+	imported, err := o.claudeImportEntries()
+	if err != nil {
+		return false, err
+	}
+	if _, ok := imported[name]; ok {
+		return true, nil
+	}
 	return false, nil
 }
 
@@ -2210,15 +2327,42 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 	// a write-target stdio entry is self-contained when the write target is the
 	// highest definer; when a higher layer shadows it, declining is correct (the
 	// write-target value is not what MiMoCode loads).
+	//
+	// SOLE-EFFECTIVE-DEFINITION (bot PR #420 r15 finding 2). The write-target SHAPE
+	// gate above is necessary but NOT sufficient: even when the write target IS the
+	// stdio-LSP shape, RemoveEntry deletes mcp.<name> from the write target ONLY, so
+	// if the SAME name is ALSO defined in ANOTHER layer (config.json BELOW, a higher
+	// file/inline layer, or the ~/.claude.json import) that other layer RE-EMERGES
+	// in the merged read after removal — the destructive cleanup logs success yet
+	// the LSP entry stays active. So additionally DECLINE any name that would
+	// re-resolve after a hypothetical write-target removal: report only when the
+	// write target is the SOLE defining layer.
+	// mimoCodeNameReResolvesAfterWriteTargetRemoval owns that cross-layer predicate
+	// (composing the existing per-layer membership helpers; it does NOT fork the
+	// merge), and crucially COUNTS the ~/.claude.json import — opposite the AddEntry
+	// shadow guard's exclusion — because skip-if-name-exists stops skipping once the
+	// write-target key is gone.
 	out := matched[:0]
 	for _, e := range matched {
 		defined, err := mimoCodeFileDefinesStdioLSP(o.path, e.Name)
 		if err != nil {
 			return nil, err
 		}
-		if defined {
-			out = append(out, e)
+		if !defined {
+			continue
 		}
+		reResolves, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if reResolves {
+			// Another layer also defines this name → RemoveEntry from the write
+			// target would NOT clear it (the other layer re-emerges). Decline so the
+			// destructive cleanup does not falsely report a removable LSP entry the
+			// hub cannot fully remove.
+			continue
+		}
+		out = append(out, e)
 	}
 	return out, nil
 }

@@ -2107,6 +2107,74 @@ func TestScanMimoCode_PresenceFromLowerLayerWhenWriteTargetAbsent(t *testing.T) 
 			t.Errorf("malformed inline content must NOT promote presence to ok: got %q", got)
 		}
 	})
+
+	t.Run("server only via ~/.claude.json import (no mimo file/inline layer)", func(t *testing.T) {
+		// bot PR #420 finding 1 (r15): a profile whose ONLY active mimo MCP source is
+		// the ~/.claude.json import (no mimo config FILE layer, no inline content) has
+		// nothing to stat AND no inline string — the file/inline promotions both miss
+		// it — yet MimoCodeMergedConfig WOULD import those servers. The scan must
+		// promote presence to "ok" on a parseable claude import so scanMimoCode runs
+		// and the imported servers appear in the matrix.
+		isolateMimoCodeScanEnv(t)            // clears MIMOCODE_* and SETS the disable flag
+		t.Setenv(clients.MimoCodeDisableClaudeImportEnv, "") // re-enable the import for this test
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		// The global mimocode dir resolves under the redirected HOME but has NO mimo
+		// config files; the only mimo MCP source is the fixture ~/.claude.json.
+		globalDir := filepath.Join(home, ".config", "mimocode")
+		if err := os.MkdirAll(globalDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(filepath.Join(home, ".claude.json"),
+			[]byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp"}}}`), 0600)
+		mimoPath := filepath.Join(globalDir, "mimocode.json") // a global-layer name, absent on disk
+		manifestDir := manifestFixture(home)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got != "ok" {
+			t.Errorf("mimocode presence with a claude-import-only profile: got %q, want ok", got)
+		}
+		mem := memEntry(t, res)
+		if mem == nil {
+			t.Fatal("claude-imported memory entry vanished from scan (presence not promoted for the ~/.claude.json import)")
+		}
+		if got := mem.ClientPresence["mimocode"].Transport; got != "http" {
+			t.Errorf("claude-imported memory Transport: got %q, want http", got)
+		}
+	})
+
+	t.Run("claude import disabled -> NO promotion (state-safe gate)", func(t *testing.T) {
+		// With the disable flag set (the default scan-test posture) the import is
+		// suppressed, so a claude-import-only profile must NOT promote — proving the
+		// promotion honors the same gate the read path uses (and never reads the real
+		// ~/.claude.json).
+		isolateMimoCodeScanEnv(t) // disable flag SET
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		globalDir := filepath.Join(home, ".config", "mimocode")
+		if err := os.MkdirAll(globalDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(filepath.Join(home, ".claude.json"),
+			[]byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp"}}}`), 0600)
+		mimoPath := filepath.Join(globalDir, "mimocode.json")
+		manifestDir := manifestFixture(home)
+
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got == "ok" {
+			t.Errorf("with the import disabled a claude-import-only profile must NOT promote: got %q", got)
+		}
+	})
 }
 
 // TestShapeMimoCodeEntry_NormalizesLSPArgsFromCommandArray pins bot PR #420

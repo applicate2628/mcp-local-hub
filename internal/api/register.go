@@ -791,6 +791,12 @@ func (a *API) registerOneLanguage(
 		// DELETE the operator's entry. The caller (register.go runRollback at
 		// the registerOneLanguage call site) runs the accumulated *rollback on
 		// this returned error, so no local runRollback is needed here.
+		//
+		// Write-target parent-dir creation for an otherwise-active profile whose
+		// GLOBAL dir is absent (bot PR #420 finding 3, r15) is owned by the config
+		// lock chokepoint (clients.withConfigLock MkdirAll's the missing dir before
+		// the flock + AddEntry write), NOT here — that single owner covers install,
+		// register, and GUI Apply at once.
 		priorEntry, err := client.GetEntry(entryName)
 		if err != nil {
 			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
